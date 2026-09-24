@@ -117,7 +117,7 @@ export function EnvironmentEditor({
             <Field
               label="Value"
               htmlFor={`env-value-${index}`}
-              hint={row.generated ? "Generated here" : undefined}
+              hint={row.generated ? "Generated here" : row.note}
             >
               <InputGroup>
                 <InputGroupInput
@@ -128,7 +128,11 @@ export function EnvironmentEditor({
                   placeholder={row.example || "Enter a value"}
                   className="font-mono"
                   onChange={(event) =>
-                    update(index, { value: event.target.value, generated: undefined })
+                    update(index, {
+                      value: event.target.value,
+                      generated: undefined,
+                      note: undefined,
+                    })
                   }
                 />
                 <InputGroupAddon align="inline-end" className="gap-0 p-0">

@@ -4,10 +4,15 @@ import {
   checksForRuntime,
   defaultConfiguration,
   discoveredEnvironmentRows,
+  environmentRowsToSend,
   generateSecretValue,
   mergeDiscoveredRows,
+  persistentStorage,
+  projectVolumeName,
+  releaseStrategy,
   validateConfiguration,
   withPackageManagerRunner,
+  withPersistentVariables,
 } from "./deployment-defaults"
 
 const candidate = (overrides) => ({
@@ -374,5 +379,260 @@ describe("self-issued secrets", () => {
       fixed,
     )
     expect(other[0].value).toBe("")
+  })
+})
+
+describe("persistent state", () => {
+  const prisma = {
+    kind: "sqlite",
+    path: "/app/prisma/dev.db",
+    target: "/data",
+    variable: "DATABASE_URL",
+    value: "file:/data/dev.db",
+    source: "prisma/schema.prisma",
+    reason: "Prisma's SQLite datasource is read from DATABASE_URL",
+  }
+  const uploads = {
+    kind: "uploads",
+    path: "/app/uploads",
+    target: "/data/uploads",
+    variable: "UPLOAD_DIR",
+    value: "/data/uploads",
+    source: ".env.example",
+    reason: "uploaded files are written to the directory UPLOAD_DIR names",
+  }
+  const inImage = {
+    kind: "sqlite",
+    path: "/app/db.sqlite3",
+    source: "mysite/settings.py",
+    reason: "Django's database is a SQLite file",
+  }
+
+  test("a volume name is the project's slug, a hash of its exact name and what it holds", () => {
+    expect(projectVolumeName("My Blog", "/data")).toMatch(/^my-blog-[0-9a-f]{8}-data$/)
+    expect(projectVolumeName("my-blog", "/data")).not.toBe(projectVolumeName("My Blog", "/data"))
+    expect(projectVolumeName("my-blog", "/data")).toBe(projectVolumeName("my-blog", "/data"))
+    expect(projectVolumeName("", "/home/app/.aspnet/DataProtection-Keys")).toMatch(
+      /^app-[0-9a-f]{8}-dataprotection-keys$/,
+    )
+    expect(projectVolumeName("Ünïcode!!", "/")).toMatch(/^ncode-[0-9a-f]{8}-data$/)
+  })
+
+  test("one repository imported twice under the same name gets two volumes", () => {
+    const prod = projectVolumeName("blog", "/data", "draft-one")
+    const staging = projectVolumeName("blog", "/data", "draft-two")
+    expect(prod).toMatch(/^blog-[0-9a-f]{8}-data$/)
+    expect(staging).not.toBe(prod)
+    expect(projectVolumeName("blog", "/data", "draft-one")).toBe(prod)
+    const plan = (draftId) =>
+      defaultConfiguration(
+        "web",
+        candidate({ profile: "web", port: 3000, persistentPaths: [prisma] }),
+        undefined,
+        undefined,
+        "blog",
+        draftId,
+      )
+    expect(plan("draft-one").runtime.mounts[0].source).toBe(prod)
+    expect(plan("draft-one").dependencies[0].resourceId).toBe(prod)
+    expect(plan("draft-two").runtime.mounts[0].source).toBe(staging)
+    const game = (draftId) =>
+      defaultConfiguration("game", undefined, undefined, undefined, "survival", draftId).runtime
+        .mounts[0].source
+    expect(game("draft-one")).toMatch(/^survival-[0-9a-f]{8}-data$/)
+    expect(game("draft-one")).not.toBe(game("draft-two"))
+  })
+
+  test("each target gets one managed volume and a storage dependency saying why", () => {
+    const laravel = {
+      ...prisma,
+      path: "/app/database/database.sqlite",
+      target: "/app/storage",
+      reason: "Laravel's database is SQLite",
+    }
+    const files = { ...uploads, target: "/app/storage", reason: "uploads on the local disk" }
+    const { mounts, dependencies } = persistentStorage(
+      candidate({ persistentPaths: [laravel, files, inImage] }),
+      "shop",
+    )
+    expect(mounts).toEqual([
+      {
+        source: projectVolumeName("shop", "/app/storage"),
+        target: "/app/storage",
+        ownership: "managed",
+      },
+    ])
+    expect(dependencies).toEqual([
+      {
+        kind: "storage",
+        ownership: "managed",
+        resourceKind: "docker_volume",
+        resourceId: mounts[0].source,
+        config: { purpose: "Laravel's database is SQLite; uploads on the local disk", data: true },
+      },
+    ])
+    const twice = persistentStorage(
+      candidate({ persistentPaths: [prisma, { ...prisma, target: "/srv/data" }] }),
+      "shop",
+    )
+    expect(new Set(twice.mounts.map((mount) => mount.source)).size).toBe(2)
+  })
+
+  test("a detected state plan keeps its volume and releases stop-first", () => {
+    const plan = defaultConfiguration(
+      "web",
+      candidate({ profile: "web", port: 3000, persistentPaths: [prisma, uploads, inImage] }),
+      undefined,
+      undefined,
+      "notes",
+    )
+    expect(plan.runtime.mounts.map((mount) => mount.target)).toEqual(["/data", "/data/uploads"])
+    expect(plan.runtime.strategy).toBe("stop_first")
+    expect(plan.dependencies).toHaveLength(2)
+    // The values that move the state travel in the plan, to the runtime and
+    // release tasks only: the build has no volume to open a database on.
+    expect(plan.variables).toEqual([
+      {
+        name: "DATABASE_URL",
+        sensitivity: "plain",
+        scopes: ["runtime", "release_task"],
+        value: "file:/data/dev.db",
+      },
+      {
+        name: "UPLOAD_DIR",
+        sensitivity: "plain",
+        scopes: ["runtime", "release_task"],
+        value: "/data/uploads",
+      },
+    ])
+    const stateless = defaultConfiguration("web", candidate({ profile: "web", port: 3000 }))
+    expect(stateless.runtime.strategy).toBe("blue_green")
+    expect(stateless.runtime.mounts).toEqual([])
+    expect(stateless.dependencies).toEqual([])
+  })
+
+  test("a relocation replaces a bare declaration but never a reference or a generator", () => {
+    const withState = candidate({ persistentPaths: [prisma] })
+    expect(
+      withPersistentVariables(
+        [
+          {
+            name: "DATABASE_URL",
+            sensitivity: "secret",
+            scopes: ["runtime", "build"],
+            required: true,
+          },
+        ],
+        withState,
+      ),
+    ).toEqual([
+      {
+        name: "DATABASE_URL",
+        sensitivity: "plain",
+        scopes: ["runtime", "release_task"],
+        value: "file:/data/dev.db",
+      },
+    ])
+    const linked = [
+      {
+        name: "DATABASE_URL",
+        sensitivity: "secret",
+        scopes: ["runtime"],
+        reference: "${{database.3.url}}",
+      },
+    ]
+    expect(withPersistentVariables(linked, withState)).toEqual(linked)
+    expect(withPersistentVariables([], candidate({ persistentPaths: [inImage] }))).toEqual([])
+  })
+
+  test("a row still showing the plan's own value is not sent again", () => {
+    const variables = [
+      {
+        name: "DATABASE_URL",
+        sensitivity: "plain",
+        scopes: ["runtime", "release_task"],
+        value: "file:/data/dev.db",
+      },
+    ]
+    const shown = {
+      name: "DATABASE_URL",
+      value: "file:/data/dev.db",
+      detected: true,
+      note: "Keeps it on the volume at /data",
+    }
+    const typed = { name: "API_KEY", value: "typed" }
+    const empty = { name: "SMTP_HOST", value: "", detected: true }
+    expect(environmentRowsToSend([shown, typed, empty], variables)).toEqual([typed])
+    const changed = { ...shown, value: "file:/srv/mine.db", note: undefined }
+    expect(environmentRowsToSend([changed], variables)).toEqual([changed])
+    expect(environmentRowsToSend([shown], [])).toEqual([shown])
+  })
+
+  test("the strategy follows the profile and any writable mount", () => {
+    expect(releaseStrategy("web", [])).toBe("blue_green")
+    expect(releaseStrategy("static")).toBe("blue_green")
+    expect(releaseStrategy("worker", [])).toBe("stop_first")
+    expect(releaseStrategy("web", [{ source: "v", target: "/data", ownership: "managed" }])).toBe(
+      "stop_first",
+    )
+    expect(
+      releaseStrategy("web", [
+        { source: "v", target: "/etc/app", readOnly: true, ownership: "managed" },
+      ]),
+    ).toBe("blue_green")
+  })
+
+  test("a re-detection fills an empty row with the value that moves state onto its volume", () => {
+    const current = [
+      { name: "DATABASE_URL", value: "", source: ".env.example", detected: true },
+      { name: "API_KEY", value: "typed" },
+    ]
+    const merged = mergeDiscoveredRows(
+      current,
+      discoveredEnvironmentRows(candidate({ persistentPaths: [prisma] })),
+    )
+    expect(merged).toEqual([
+      {
+        name: "DATABASE_URL",
+        value: "file:/data/dev.db",
+        source: ".env.example",
+        detected: true,
+        note: "Keeps it on the volume at /data",
+      },
+      { name: "API_KEY", value: "typed" },
+    ])
+    const typed = [{ name: "DATABASE_URL", value: "file:/srv/mine.db" }]
+    expect(
+      mergeDiscoveredRows(
+        typed,
+        discoveredEnvironmentRows(candidate({ persistentPaths: [prisma] })),
+      ),
+    ).toBe(typed)
+  })
+
+  test("the variable that moves the state onto its volume arrives filled", () => {
+    const rows = discoveredEnvironmentRows(
+      candidate({
+        variables: [{ name: "DATABASE_URL", example: "file:./dev.db", sources: [".env.example"] }],
+        persistentPaths: [prisma, uploads, inImage],
+      }),
+    )
+    expect(rows).toEqual([
+      {
+        name: "DATABASE_URL",
+        value: "file:/data/dev.db",
+        example: "file:./dev.db",
+        source: ".env.example",
+        detected: true,
+        note: "Keeps it on the volume at /data",
+      },
+      {
+        name: "UPLOAD_DIR",
+        value: "/data/uploads",
+        source: ".env.example",
+        detected: true,
+        note: "Keeps it on the volume at /data/uploads",
+      },
+    ])
   })
 })

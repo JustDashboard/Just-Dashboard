@@ -26,6 +26,8 @@ type schemaTool struct {
 	Push          string
 	// applied reports whether a command already runs this tool's schema step.
 	applied func(string) bool
+	// advice is the remedy when the tool has no command a start can run.
+	advice string
 }
 
 // The dependency named for each tool is its command-line package, not its
@@ -154,9 +156,11 @@ func detectSchemaTool(dependencies map[string]string, paths []string) *detectedS
 }
 
 func schemaToolByName(name string) *schemaTool {
-	for index := range schemaTools {
-		if schemaTools[index].Name == name {
-			return &schemaTools[index]
+	for _, tools := range [][]schemaTool{schemaTools, runtimeSchemaTools} {
+		for index := range tools {
+			if tools[index].Name == name {
+				return &tools[index]
+			}
 		}
 	}
 	return nil

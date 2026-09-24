@@ -3327,6 +3327,26 @@ export type DeploymentNetworkVariable = {
   reason: string
 }
 
+/**
+ * State the application writes to its own filesystem, which a new release
+ * would start without. `target` is where a managed volume can stand without
+ * hiding code (absent when none can); `variable` and `value` move the state
+ * under it; a server database linked through `databaseVariable` replaces the
+ * file altogether, and `connectionVariable` set to any driver but sqlite
+ * takes the file out of use (Laravel's DB_CONNECTION).
+ */
+export type DeploymentDetectedPersistentPath = {
+  kind: "sqlite" | "uploads" | "storage" | "volume" | "keys"
+  path: string
+  target?: string
+  variable?: string
+  value?: string
+  databaseVariable?: string
+  connectionVariable?: string
+  source: string
+  reason: string
+}
+
 export type DeploymentDetectionCandidate = {
   dockerfile?: string
   goVersion?: string
@@ -3355,6 +3375,12 @@ export type DeploymentDetectionCandidate = {
   networkVariables?: DeploymentNetworkVariable[]
   variables?: DeploymentDetectedVariable[]
   databases?: DeploymentDetectedDatabase[]
+  persistentPaths?: DeploymentDetectedPersistentPath[]
+  /** Loads the project's seed data; `seedResets` says it clears tables first. */
+  seedCommand?: string
+  seedResets?: boolean
+  /** The schema step pushes the declared model instead of applying migrations. */
+  schemaPush?: boolean
   evidence: { path: string; reason: string }[]
   needsDecision: string[]
   readiness?: DeploymentDetectedReadiness

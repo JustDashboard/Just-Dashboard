@@ -23,7 +23,9 @@ import { blockingFindings, warningFindings } from "@/components/deploy/deploymen
 import {
   checksForRuntime,
   discoveredEnvironmentRows,
+  environmentRowsToSend,
   mergeDiscoveredRows,
+  releaseStrategy,
   validateConfiguration,
 } from "@/components/deploy/deployment-defaults"
 import { PlanWiring } from "@/components/deploy/new-project/plan-wiring"
@@ -135,7 +137,7 @@ export function Configure({
     () =>
       discoveredEnvironmentRows(flow.candidate).map((row) =>
         flow.draft.environmentKeys?.includes(row.name)
-          ? { ...row, value: "", generated: false }
+          ? { ...row, value: "", generated: false, note: undefined }
           : row,
       ),
     [flow.candidate, flow.draft.environmentKeys],
@@ -195,7 +197,9 @@ export function Configure({
     setEnvironment((current) => {
       const mine = current?.draftId === draftId ? current : null
       const found = discoveredEnvironmentRows(flow.candidate).map((row) =>
-        mine?.retainedKeys.includes(row.name) ? { ...row, value: "", generated: false } : row,
+        mine?.retainedKeys.includes(row.name)
+          ? { ...row, value: "", generated: false, note: undefined }
+          : row,
       )
       const rows = mine?.rows ?? discoveredEnvironmentRows(previous)
       return {
@@ -208,7 +212,7 @@ export function Configure({
   }, [flow.candidate, draftId, setEnvironment])
   const [branch, setBranch] = useState(flow.source.ref ?? "main")
   const [branchBusy, setBranchBusy] = useState(false)
-  const sentRows = envRows.filter((row) => row.name.trim() && (!row.detected || row.value))
+  const sentRows = environmentRowsToSend(envRows, flow.configuration.variables)
   const text = environmentText(sentRows, dotenv)
   const environmentNames = new Set([
     ...retainedKeys,
@@ -387,7 +391,6 @@ export function Configure({
     // readiness gate, for a web or static profile. Choosing one and leaving
     // the plan stop-first with nothing verifying it would answer half the
     // question the operator just answered.
-    const gated = profile === "web" || profile === "static"
     const checks = checksForRuntime(
       configuration.checks,
       profile,
@@ -412,8 +415,9 @@ export function Configure({
           ...configuration.runtime,
           internalPort,
           // Blue/green needs a candidate to stand beside the live one, which
-          // preflight refuses for anything but a web or static profile.
-          strategy: gated ? "blue_green" : "stop_first",
+          // preflight refuses for anything but a web or static profile, and
+          // for a plan whose volume two releases would write at once.
+          strategy: releaseStrategy(profile, configuration.runtime.mounts),
         },
       },
     })

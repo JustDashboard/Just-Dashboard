@@ -253,11 +253,132 @@ export function withPackageManagerRunner(command: string, manager?: NodePackageM
     .join(" && ")
 }
 
+/**
+ * The release strategy a profile and its storage allow. Candidate-first needs
+ * two containers side by side, which preflight refuses for anything but a web
+ * or static workload — and for any plan with a writable mount, because two
+ * releases would write the same data at once.
+ */
+export function releaseStrategy(
+  profile: WorkloadProfile,
+  mounts: DeploymentConfiguration["runtime"]["mounts"] = [],
+): DeploymentConfiguration["runtime"]["strategy"] {
+  const gated = profile === "web" || profile === "static"
+  return gated && !mounts.some((mount) => !mount.readOnly) ? "blue_green" : "stop_first"
+}
+
+/**
+ * A managed volume's name for this project: the name as a slug, a hash, and
+ * what the volume holds — the `<slug>-<hash>-<purpose>` shape a template's
+ * volumes already have. The hash covers the exact name and the draft the
+ * plan belongs to: two names that slug alike, and one repository imported
+ * twice under the name it arrives with, never share data. Preflight refuses a
+ * volume another project already manages all the same.
+ */
+export function projectVolumeName(projectName: string, target: string, draftId = "") {
+  const slug =
+    projectName
+      .toLowerCase()
+      .replace(/[\s_]+/g, "-")
+      .replace(/[^a-z0-9-]/g, "")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 40)
+      .replace(/-$/, "") || "app"
+  const purpose =
+    (target.split("/").filter(Boolean).pop() ?? "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "data"
+  return `${slug}-${fnv1a(draftId ? `${projectName}\u0000${draftId}` : projectName)}-${purpose}`
+}
+
+function fnv1a(value: string) {
+  let hash = 0x811c9dc5
+  for (const byte of new TextEncoder().encode(value)) {
+    hash = Math.imul(hash ^ byte, 0x01000193) >>> 0
+  }
+  return hash.toString(16).padStart(8, "0")
+}
+
+/**
+ * The volumes the state detection found needs: one managed volume per
+ * directory it can stand on, with a storage dependency that says what it
+ * holds, so Review names it and lifecycle knows the project owns it. State
+ * with no such directory gets no volume here; preflight names it instead.
+ */
+export function persistentStorage(
+  candidate: DeploymentDetectionCandidate | undefined,
+  projectName: string,
+  draftId = "",
+): Pick<DeploymentConfiguration["runtime"], "mounts"> &
+  Pick<DeploymentConfiguration, "dependencies"> {
+  const reasons = new Map<string, string[]>()
+  for (const entry of candidate?.persistentPaths ?? []) {
+    if (!entry.target) continue
+    reasons.set(entry.target, [...(reasons.get(entry.target) ?? []), entry.reason])
+  }
+  const mounts: NonNullable<DeploymentConfiguration["runtime"]["mounts"]> = []
+  const dependencies: DeploymentConfiguration["dependencies"] = []
+  const names = new Set<string>()
+  for (const [target, why] of reasons) {
+    let source = projectVolumeName(projectName, target, draftId)
+    for (let index = 2; names.has(source); index++)
+      source = `${projectVolumeName(projectName, target, draftId)}-${index}`
+    names.add(source)
+    mounts.push({ source, target, ownership: "managed" })
+    dependencies.push({
+      kind: "storage",
+      ownership: "managed",
+      resourceKind: "docker_volume",
+      resourceId: source,
+      config: { purpose: [...new Set(why)].join("; "), data: true },
+    })
+  }
+  return { mounts, dependencies }
+}
+
+/**
+ * The plan's declarations for the variables that move detected state onto
+ * its volume. The value is a path, not a secret, so it travels in the plan;
+ * and it reaches the runtime and release tasks only — the build has no volume
+ * mounted, and a build that opens the database there would fail where the
+ * committed default still works. A declaration the plan already makes for the
+ * same name is replaced, unless it is a reference or a generated secret.
+ */
+export function withPersistentVariables(
+  variables: DeploymentConfiguration["variables"],
+  candidate: DeploymentDetectionCandidate | undefined,
+): DeploymentConfiguration["variables"] {
+  const moved = new Map<string, string>()
+  for (const entry of candidate?.persistentPaths ?? []) {
+    if (entry.target && entry.variable && entry.value && !moved.has(entry.variable))
+      moved.set(entry.variable, entry.value)
+  }
+  const kept = variables.filter(
+    (variable) => !moved.has(variable.name) || variable.reference || variable.generate,
+  )
+  const declared = new Set(kept.map((variable) => variable.name))
+  return [
+    ...kept,
+    ...[...moved]
+      .filter(([name]) => !declared.has(name))
+      .map(([name, value]) => ({
+        name,
+        sensitivity: "plain" as const,
+        scopes: ["runtime", "release_task"],
+        value,
+      })),
+  ]
+}
+
 export function defaultConfiguration(
   profile: WorkloadProfile,
   candidate?: DeploymentDetectionCandidate,
   source?: DeploymentDraftSource,
   detection?: DeploymentDetection,
+  projectName?: string,
+  draftId?: string,
 ): DeploymentConfiguration {
   const game = profile === "game"
   const image = source?.image ?? (game ? "itzg/minecraft-server:java21" : "")
@@ -273,6 +394,19 @@ export function defaultConfiguration(
   // check built on a port nothing listens to.
   const port = packagedStatic ? 80 : (candidate?.port ?? (game ? 25565 : 0))
   const composeVariables = detection?.compose?.variables ?? []
+  const name = projectName || candidate?.name || "app"
+  const storage = persistentStorage(candidate, name, draftId)
+  // A world is one project's: a fixed name would hand the second server the
+  // first one's world, and preflight refuses a volume another project owns.
+  const mounts = game
+    ? [
+        {
+          source: projectVolumeName(name, "/data", draftId),
+          target: "/data",
+          ownership: "managed" as const,
+        },
+      ]
+    : storage.mounts
   return {
     build: {
       method,
@@ -294,34 +428,37 @@ export function defaultConfiguration(
       internalPort: port,
       hostPort: game ? 25565 : 0,
       bindAddress: "127.0.0.1",
-      strategy: profile === "web" || profile === "static" ? "blue_green" : "stop_first",
+      strategy: releaseStrategy(profile, mounts),
       privileged: false,
       hostNetwork: false,
       capabilities: [],
       devices: [],
-      mounts: game ? [{ source: "minecraft-data", target: "/data", ownership: "managed" }] : [],
+      mounts,
     },
-    variables: [
-      ...composeVariables.map((name) => ({
-        name,
-        sensitivity: "secret" as const,
-        scopes: ["runtime"],
-        required: true,
-        reference: "",
-      })),
-      // A blueprint that was accepted in the source step carries that consent
-      // into the plan. Asking for the same agreement twice is not twice as
-      // careful; it is one acceptance the operator can disagree with itself.
-      ...blueprintAcceptances(source).map((name) => ({
-        name: "EULA",
-        sensitivity: "plain" as const,
-        scopes: ["runtime"],
-        required: true,
-        reference: `\${{blueprint.${source?.blueprintId}-${name}-accepted}}`,
-      })),
-      ...networkVariables(candidate),
-    ],
-    dependencies: [],
+    variables: withPersistentVariables(
+      [
+        ...composeVariables.map((name) => ({
+          name,
+          sensitivity: "secret" as const,
+          scopes: ["runtime"],
+          required: true,
+          reference: "",
+        })),
+        // A blueprint that was accepted in the source step carries that consent
+        // into the plan. Asking for the same agreement twice is not twice as
+        // careful; it is one acceptance the operator can disagree with itself.
+        ...blueprintAcceptances(source).map((name) => ({
+          name: "EULA",
+          sensitivity: "plain" as const,
+          scopes: ["runtime"],
+          required: true,
+          reference: `\${{blueprint.${source?.blueprintId}-${name}-accepted}}`,
+        })),
+        ...networkVariables(candidate),
+      ],
+      candidate,
+    ),
+    dependencies: storage.dependencies,
     checks: defaultChecks(profile, port, candidate?.readiness),
     domains: [],
   }
@@ -463,6 +600,23 @@ export function discoveredEnvironmentRows(
       ...(generated ? { generated: true } : {}),
     }
   })
+  // State moved onto a planned volume through a variable the application
+  // reads: the plan declares the value that points the file there
+  // (`withPersistentVariables`), and the row shows it, filled.
+  for (const entry of candidate?.persistentPaths ?? []) {
+    if (!entry.target || !entry.variable || !entry.value) continue
+    const note = `Keeps it on the volume at ${entry.target}`
+    const index = rows.findIndex((row) => row.name === entry.variable)
+    if (index < 0)
+      rows.push({
+        name: entry.variable,
+        value: entry.value,
+        source: entry.source,
+        detected: true,
+        note,
+      })
+    else if (!rows[index].value) rows[index] = { ...rows[index], value: entry.value, note }
+  }
   return rows.length ? rows : [{ name: "", value: "" }]
 }
 
@@ -481,15 +635,45 @@ function unplannedVariables(candidate?: DeploymentDetectionCandidate) {
 }
 
 /**
+ * The rows the environment document carries: every named row with a value,
+ * and every row the operator added. A detected row still showing the value
+ * the plan itself declares adds nothing, and sent it would store a path as a
+ * secret with the typed rows' scopes instead of the declaration's.
+ */
+export function environmentRowsToSend(
+  rows: EnvironmentRow[],
+  variables: DeploymentConfiguration["variables"],
+) {
+  const declared = new Map(variables.map((variable) => [variable.name, variable.value]))
+  return rows.filter(
+    (row) =>
+      row.name.trim() &&
+      (!row.detected || row.value) &&
+      !(row.detected && row.value && declared.get(row.name) === row.value),
+  )
+}
+
+/**
  * Folds a re-detection's variables into rows the operator may already have
  * typed into: nothing typed is lost, and a name already present is not
- * listed twice. A lone blank row gives way to the detected ones.
+ * listed twice. A lone blank row gives way to the detected ones, and a row
+ * still empty takes a value the new detection filled in — the one that
+ * moves state onto a volume the plan now carries.
  */
 export function mergeDiscoveredRows(current: EnvironmentRow[], discovered: EnvironmentRow[]) {
   const names = new Set(current.map((row) => row.name).filter(Boolean))
   const additions = discovered.filter((row) => row.detected && !names.has(row.name))
-  if (!additions.length) return current
-  const kept = current.filter((row) => row.name || row.value)
+  const filled = new Map(
+    discovered.filter((row) => row.detected && row.note && row.value).map((row) => [row.name, row]),
+  )
+  const refills = current.some((row) => row.name && !row.value && filled.has(row.name))
+  if (!additions.length && !refills) return current
+  const kept = current
+    .filter((row) => row.name || row.value)
+    .map((row) => {
+      const found = !row.value ? filled.get(row.name) : undefined
+      return found ? { ...row, value: found.value, note: found.note } : row
+    })
   return [...kept, ...additions]
 }
 

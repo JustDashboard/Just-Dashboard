@@ -97,3 +97,33 @@ func TestImageDetectionSurvivesAnImageThisHostDoesNotHold(t *testing.T) {
 		t.Fatalf("port without local evidence = %d, want none", port)
 	}
 }
+
+// Docker gives every container a fresh anonymous volume for a path its image
+// declares, so an image plan that mounts nothing there starts empty on every
+// release. The declared paths become planned state; scratch space does not.
+func TestImageDetectionPlansTheVolumesTheImageDeclares(t *testing.T) {
+	analyzer := imageAnalyzer(t, &dockerx.ImageDetail{
+		ExposedPorts: []string{"5432/tcp"},
+		VolumePaths:  []string{"/var/lib/postgresql/data", "/tmp", "/var/run/postgresql"},
+	})
+	result, err := analyzer.Analyze(context.Background(), DraftSourceConfig{
+		Kind: SourceImage, Mode: SourceModeImageReference, Image: "postgres:16",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := result.Candidates[0].PersistentPaths
+	if len(paths) != 1 || paths[0].Kind != PersistentVolume || paths[0].Target != "/var/lib/postgresql/data" ||
+		!strings.Contains(paths[0].Reason, "declares VOLUME /var/lib/postgresql/data") {
+		t.Fatalf("image persistent paths = %+v", paths)
+	}
+
+	// An image this host has not pulled declares nothing yet.
+	absent := imageAnalyzer(t, nil)
+	result, err = absent.Analyze(context.Background(), DraftSourceConfig{
+		Kind: SourceImage, Mode: SourceModeImageReference, Image: "postgres:16",
+	})
+	if err != nil || len(result.Candidates[0].PersistentPaths) != 0 {
+		t.Fatalf("absent image persistent paths = %+v, %v", result.Candidates, err)
+	}
+}

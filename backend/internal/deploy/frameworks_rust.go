@@ -189,6 +189,8 @@ type rustRecipe struct {
 	// framework decides whether the image needs Rocket's address and its
 	// default start Rocket's port bridge.
 	framework string
+	// assets are the root-level files the service reads at runtime.
+	assets []string
 }
 
 func selectRustRecipe(root string, config BuildPlanConfig) (rustRecipe, error) {
@@ -254,23 +256,16 @@ func renderRustDockerfile(recipe rustRecipe, config BuildPlanConfig, bases []Res
 		"RUN " + installSecrets + "cargo fetch" + locked,
 		"RUN " + buildSecrets + build,
 		"RUN mkdir -p /out && test -f /src/target/release/" + recipe.binary + " && cp /src/target/release/" + recipe.binary + " /out/app || (echo 'Rust build must produce target/release/" + recipe.binary + "; configure the build command and binary together' >&2; exit 1)",
-		"FROM " + immutableImageReference(bases[1]),
-		"RUN adduser -D -u 10001 app",
-		"USER app",
-		"COPY --from=build /out/app /app",
 	}
+	start := config.StartCommand
+	var env []string
 	if recipe.framework == "rocket" {
-		lines = append(lines, rocketAddressEnv)
+		env = append(env, rocketAddressEnv)
+		if strings.TrimSpace(start) == "" {
+			start = rocketStart
+		}
 	}
-	switch {
-	case strings.TrimSpace(config.StartCommand) != "":
-		lines = append(lines, shellCMD(config.StartCommand))
-	case recipe.framework == "rocket":
-		lines = append(lines, shellCMD(rocketStart))
-	default:
-		lines = append(lines, `ENTRYPOINT ["/app"]`)
-	}
-	return lines, nil
+	return append(lines, compiledRuntimeLines(bases[1], recipe.assets, start, env...)...), nil
 }
 
 func joinRoot(root, name string) string {

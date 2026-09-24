@@ -26,12 +26,42 @@ var missingTablePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`no such table: ([A-Za-z0-9_.]+)`),                            // SQLite
 }
 
+// A schema step that pushes the declared model refuses a change that would
+// drop or rename data, or stops to ask about it, and the start command never
+// reaches the server.
+var schemaPushRefusedPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`Use the --accept-data-loss flag`),                         // prisma db push
+	regexp.MustCompile(`We found changes that cannot be executed`),                // prisma db push
+	regexp.MustCompile(`created or renamed from another (?:column|table)`),        // drizzle-kit push
+	regexp.MustCompile(`THIS ACTION WILL CAUSE DATA LOSS AND CANNOT BE REVERTED`), // drizzle-kit push
+	regexp.MustCompile(`Interactive prompts require a TTY terminal`),              // drizzle-kit push
+}
+
+// A SQLite file the container cannot open or write: its directory is missing
+// — a relocated path whose volume is gone — or not writable by the
+// container's user. SQLite words both as "unable to open database file".
+var sqliteReadOnlyPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`attempt to write a readonly database`),
+	regexp.MustCompile(`SQLITE_READONLY`),
+	regexp.MustCompile(`SQLITE_CANTOPEN|unable to open database file`),
+}
+
 func applicationOutputCause(containers []ContainerDiagnostics) *OutputCause {
 	for _, container := range containers {
 		for _, line := range container.Lines {
 			for _, pattern := range missingTablePatterns {
 				if match := pattern.FindStringSubmatch(line.Text); match != nil {
 					return &OutputCause{Code: "schema_missing", Table: match[1]}
+				}
+			}
+			for _, pattern := range schemaPushRefusedPatterns {
+				if pattern.MatchString(line.Text) {
+					return &OutputCause{Code: "schema_push_refused"}
+				}
+			}
+			for _, pattern := range sqliteReadOnlyPatterns {
+				if pattern.MatchString(line.Text) {
+					return &OutputCause{Code: "sqlite_not_writable"}
 				}
 			}
 		}
@@ -50,6 +80,10 @@ func (c *OutputCause) sentence() string {
 		return fmt.Sprintf("the application reports that table %s does not exist in its database, so the linked database has not received the application's schema; apply it before the application starts — for Prisma, `prisma migrate deploy`, or `prisma db push` when the project has no migrations", c.Table)
 	case "loopback_only":
 		return loopbackOnlySentence(c.Listener)
+	case "schema_push_refused":
+		return "the start command's schema push refused a change that would drop or rename data (or stopped to ask about it), so the server never started; commit migrations so the start applies them — `prisma migrate dev` then `prisma migrate deploy`, or `drizzle-kit generate` then `drizzle-kit migrate` — or apply the change to the database by hand"
+	case "sqlite_not_writable":
+		return "the application cannot open or write its SQLite database file: the directory holding it is missing or not writable by the container's user; keep the file in the image's data directory or on a volume mounted there, which that user owns"
 	}
 	return ""
 }

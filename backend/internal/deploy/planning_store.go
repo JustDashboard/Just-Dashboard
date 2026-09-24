@@ -825,6 +825,13 @@ func (s *PlanningStore) SavePreflight(
 	if err := validatePreflightFindings(result.Findings); err != nil {
 		return nil, err
 	}
+	// Which project owns a volume is the store's to say, so its refusal joins
+	// the findings here, where the caller's result shows it too.
+	owners, err := managedVolumeOwners(ctx, s.db, plannedManagedVolumes(canonicalConfiguration(*draft.Data.Configuration)))
+	if err != nil {
+		return nil, err
+	}
+	result.Findings = append(result.Findings, managedVolumeOwnerFindings(owners)...)
 	draft.CurrentStep = DraftPreflight
 	draft.Revision++
 	draft.Findings = append([]PreflightFinding(nil), result.Findings...)
@@ -955,6 +962,13 @@ func (s *PlanningStore) Commit(
 		return nil, err
 	}
 	defer tx.Rollback()
+	owners, err := managedVolumeOwners(ctx, tx, plannedManagedVolumes(canonicalConfiguration(*draft.Data.Configuration)))
+	if err != nil {
+		return nil, err
+	}
+	if err := errManagedVolumeOwned(owners); err != nil {
+		return nil, err
+	}
 	now := s.now().UTC()
 	repoPath := sourceRepositoryPath(s.managedRoot, draft)
 	branch := draft.Data.Source.Ref

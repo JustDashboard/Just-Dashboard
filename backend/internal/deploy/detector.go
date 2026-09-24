@@ -142,6 +142,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	denoEntryPaths := []string{}
 	scanner := newEnvScanner()
 	readiness := newReadinessScanner()
+	state := newStateScanner()
 	prismaProviders := map[string]string{}
 	network := newNetworkDetection(detectCtx, root)
 	skip := map[string]bool{
@@ -185,6 +186,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		}
 		name := strings.ToLower(entry.Name())
 		readiness.visit(path, filepath.ToSlash(rel))
+		state.observe(filepath.ToSlash(rel), name, path, entry)
 		// Presence is all a schema marker proves, so a repository with a
 		// thousand migrations records a handful of them. The bound is per
 		// name: migrations sort before the schema they belong to, and an
@@ -526,14 +528,19 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		}
 		rootPythonEntries := pythonEntriesUnderRoot(pythonEntries, root, pythonRoots)
 		candidates := candidatesForMarkers(marker, pathsUnderRoot(schemaPaths, root, packageRoots), rootPythonEntries)
-		refineServing(candidates, marker, readiness, root, allRoots)
-		network.apply(marker, candidates, rootPythonEntries, goRoots, jvmRoots)
 		variables := scanner.variables(root, allRoots)
 		databases := detectDatabases(marker, variables, prismaProviders)
 		for index := range candidates {
 			candidates[index].Variables = variables
 			candidates[index].Databases = databases
 		}
+		// State settles first: the schema step it chains into a start
+		// command is what readiness budgets a slow start for, and the start
+		// command it gives PocketBase is the one network reads a listener
+		// from.
+		applyStateDetection(marker, candidates, state.forRoot(root, allRoots), variables)
+		refineServing(candidates, marker, readiness, root, allRoots)
+		network.apply(marker, candidates, rootPythonEntries, goRoots, jvmRoots)
 		result.Candidates = append(result.Candidates, candidates...)
 	}
 	sort.Slice(result.Candidates, func(i, j int) bool {

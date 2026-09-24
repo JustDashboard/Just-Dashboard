@@ -23,7 +23,7 @@ var (
 	ErrArtifactRetained   = errors.New("deployment artifact is retained")
 )
 
-const AutomaticRecipeVersion = "just-dashboard-recipes-v2"
+const AutomaticRecipeVersion = "just-dashboard-recipes-v3"
 
 // The catalogue is deliberately small and reviewed. Tags are never written
 // into a release Dockerfile: the backend resolves each to a digest first.
@@ -459,6 +459,9 @@ type selectedRecipe struct {
 	dotnet        dotnetProject
 	deno          denoRecipe
 	php           phpRecipe
+	// runtimeAssets are the root-level files a compiled service reads at
+	// runtime, copied beside its binary (recipe_runtime_files.go).
+	runtimeAssets []string
 }
 
 func selectRecipe(root string, config BuildPlanConfig) (selectedRecipe, error) {
@@ -547,7 +550,7 @@ func selectRecipe(root string, config BuildPlanConfig) (selectedRecipe, error) {
 		if len(mains) == 1 {
 			main = mains[0]
 		}
-		return selectedRecipe{kind: "go", catalogueKey: "go", mainPackage: main, goVersion: goVersion}, nil
+		return selectedRecipe{kind: "go", catalogueKey: "go", mainPackage: main, goVersion: goVersion, runtimeAssets: compiledRuntimeAssets(root, ".go")}, nil
 	case "python":
 		files := map[string][]byte{}
 		for _, name := range []string{"requirements.txt", "pyproject.toml", "uv.lock", "poetry.lock"} {
@@ -584,6 +587,7 @@ func selectRecipe(root string, config BuildPlanConfig) (selectedRecipe, error) {
 		if err != nil {
 			return selectedRecipe{}, err
 		}
+		rust.assets = compiledRuntimeAssets(root, ".rs")
 		return selectedRecipe{kind: "rust", catalogueKey: "rust", rust: rust}, nil
 	case "java":
 		java, err := selectJavaRecipe(root)
@@ -596,6 +600,7 @@ func selectRecipe(root string, config BuildPlanConfig) (selectedRecipe, error) {
 		if err != nil {
 			return selectedRecipe{}, err
 		}
+		project.seeds = dotnetSQLiteSeeds(root, project)
 		return selectedRecipe{kind: "dotnet", catalogueKey: "dotnet", dotnet: project}, nil
 	case "deno":
 		deno, err := selectDenoRecipe(root, config)
@@ -701,13 +706,8 @@ func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases
 			command = "go build -trimpath -ldflags='-s -w' -o /out/app " + packagePath
 		}
 		lines = append(lines, "RUN "+buildSecrets+command,
-			`RUN test -f /out/app && test -x /out/app || (echo 'Go build command must write an executable to /out/app' >&2; exit 1)`,
-			"FROM "+immutableImageReference(bases[1]), "RUN adduser -D -u 10001 app", "USER app", "COPY --from=build /out/app /app")
-		if strings.TrimSpace(config.StartCommand) == "" {
-			lines = append(lines, `ENTRYPOINT ["/app"]`)
-		} else {
-			lines = append(lines, shellCMD(config.StartCommand))
-		}
+			`RUN test -f /out/app && test -x /out/app || (echo 'Go build command must write an executable to /out/app' >&2; exit 1)`)
+		lines = append(lines, compiledRuntimeLines(bases[1], recipe.runtimeAssets, config.StartCommand)...)
 	case "python":
 		base := immutableImageReference(bases[0])
 		lines = append(lines, "FROM "+base, "WORKDIR /app",
@@ -944,30 +944,40 @@ func writeGeneratedDockerfile(root, content string) error {
 }
 
 func readContainedRegular(root, relative string, limit int64) ([]byte, error) {
+	realPath, err := containedRegularPath(root, relative, limit)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(realPath)
+}
+
+// containedRegularPath is where a relative path lands when it is a bounded
+// regular file inside root, reached without leaving it through a symlink.
+func containedRegularPath(root, relative string, limit int64) (string, error) {
 	if !safeRelativePath(relative) {
-		return nil, fmt.Errorf("path escapes the build context")
+		return "", fmt.Errorf("path escapes the build context")
 	}
 	path := filepath.Join(root, filepath.Clean(relative))
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	realPath, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	rel, err := filepath.Rel(realRoot, realPath)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return nil, fmt.Errorf("path escapes the build context")
+		return "", fmt.Errorf("path escapes the build context")
 	}
 	info, err := os.Lstat(realPath)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() > limit {
-		return nil, fmt.Errorf("path is not a bounded regular file")
+		return "", fmt.Errorf("path is not a bounded regular file")
 	}
-	return os.ReadFile(realPath)
+	return realPath, nil
 }
 
 func validateCustomDockerfile(content []byte) error {

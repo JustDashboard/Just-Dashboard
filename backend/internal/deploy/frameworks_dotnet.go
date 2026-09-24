@@ -31,6 +31,9 @@ type dotnetProject struct {
 	// kestrel is where the project's appsettings make Kestrel listen, which
 	// the default start command moves onto PORT.
 	kestrel kestrelSettings
+	// seeds are the committed SQLite files copied into the data directory
+	// (recipe_runtime_files.go).
+	seeds []string
 }
 
 func parseDotnetProject(file string, content []byte) (dotnetProject, error) {
@@ -190,9 +193,17 @@ func renderDotnetDockerfile(project dotnetProject, config BuildPlanConfig, bases
 		"RUN test -f /out/" + project.assembly + ".dll || (echo '.NET publish must write /out/" + project.assembly + ".dll; configure the build command and project together' >&2; exit 1)",
 		"FROM " + immutableImageReference(bases[1]),
 		"WORKDIR /app",
-		"COPY --from=build /out /app",
-		"USER app",
+		// The application runs as the image's app user, so the directory it
+		// runs from — where a relative app.db lands — its data directory and
+		// the Data Protection key ring are made that user's. A volume mounted
+		// on one of them copies that ownership the first time it is used.
+		"RUN mkdir -p " + dotnetRuntimeDataDir + " " + dotnetDataProtectionAt + " && chown app:app /app " + dotnetRuntimeDataDir + " /home/app/.aspnet " + dotnetDataProtectionAt,
+		"COPY --from=build --chown=app:app /out /app",
 	}
+	for _, seed := range project.seeds {
+		lines = append(lines, "COPY --from=build --chown=app:app /src/"+seed+" "+dotnetRuntimeDataDir+"/"+path.Base(seed))
+	}
+	lines = append(lines, "USER app")
 	if project.web {
 		lines = append(lines, "ENV "+strings.Join(trustEnvironment(dotnetProxyTrust), " "))
 	}
