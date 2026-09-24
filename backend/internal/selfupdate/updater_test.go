@@ -183,6 +183,10 @@ func TestFastForwardOnACurrentCheckoutIsFine(t *testing.T) {
 // the one directory rather than set globally.
 func TestGitIsScopedToTheDirectoryItIsGiven(t *testing.T) {
 	_, checkout := installed(t)
+	// Read back only what the command set: a machine's own global or system
+	// safe.directory (CI images set "*") would otherwise answer for it.
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	out, err := gitOutput(context.Background(), checkout, "config", "--get-all", "safe.directory")
 	if err != nil {
 		t.Fatalf("git could not read back its own configuration: %v", err)
