@@ -13,7 +13,10 @@ function first(value: string | string[] | undefined) {
  * Advanced expanded and `?draft=` resumes a server draft into it; `?source=`
  * and the legacy `?profile=` preselect a tab; `?repo=` (with an optional `?ref=`)
  * arrives on the Git tab with that clone URL filled in, which is what a
- * "deploy to your server" link in a README points at.
+ * "deploy to your server" link in a README points at. `?template=` and
+ * `?image=` arrive on those tabs with that blueprint or image chosen, which is
+ * where detection sends the upstream repository of an application the
+ * catalogue already packages.
  */
 export default async function NewProjectPage({
   searchParams,
@@ -37,6 +40,8 @@ export default async function NewProjectPage({
         draftId={first(params.draft)}
         repo={first(params.repo)}
         repoRef={first(params.ref)}
+        template={first(params.template)}
+        image={first(params.image)}
       />
     </Suspense>
   )

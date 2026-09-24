@@ -305,6 +305,11 @@ export function landingStep(flow: ConfigureFlow, advanced = false): ConfigureSte
   if (
     (detection?.candidates?.length ?? 0) > 1 ||
     (candidate?.needsDecision?.length ?? 0) > 0 ||
+    // What the repository is, or a better way to run it, is this screen's
+    // to say: a library is not a plan to review, and a reviewed template of
+    // the same application is offered beside the source.
+    Boolean(candidate?.notDeployable) ||
+    (detection?.alternatives?.length ?? 0) > 0 ||
     Boolean(detection?.unavailable) ||
     !DEPLOYMENT_NAME.test(flow.name) ||
     // The name was asked about while the source was inspected, so a collision
@@ -587,10 +592,20 @@ export async function fetchHostnameSuggestion(name: string) {
 export async function inspectAndPrepare(
   name: string,
   profile: WorkloadProfile,
-  source: DeploymentDraftSource,
+  initialSource: DeploymentDraftSource,
   extra: { sourceLabel: string; githubRepo?: string; importPreview?: ImportPreview },
 ): Promise<ConfigureFlow> {
-  const result = await inspectSource(name, profile, source)
+  let source = initialSource
+  let result = await inspectSource(name, profile, source)
+  // A theme submodule on the repository's own host, or images the build root
+  // keeps in LFS, are part of what gets built: turning them on here is
+  // answering a question detection already answered, the way the Source
+  // section's switches would. A submodule on another host is still asked.
+  const clone = automaticCloneOptions(result.detection, result.candidate, source)
+  if (clone) {
+    source = { ...source, ...clone }
+    result = await reinspect(result.draft, profile, source)
+  }
   const hostname = await fetchHostnameSuggestion(name)
   const effectiveProfile = result.candidate?.profile ?? profile
   // HTTPS is offered by default because it is what anyone wants, but a
@@ -759,4 +774,69 @@ export function environmentText(rows: EnvironmentRow[], dotenv: string) {
   ]
     .filter(Boolean)
     .join("\n")
+}
+
+// ---------------------------------------------------------------------------
+// Repository shape
+// ---------------------------------------------------------------------------
+
+function underRoot(path: string, root: string) {
+  return !root || path === root || path.startsWith(`${root}/`)
+}
+
+/**
+ * The clone options detection has already answered for the chosen root: its
+ * submodules when every one it holds is on the repository's own host, and
+ * Git LFS when files under it are tracked by LFS. Nothing when the source
+ * already includes them, when a submodule needs access to another host, or
+ * when the source is not a Git checkout.
+ */
+export function automaticCloneOptions(
+  detection: DeploymentDetection | undefined,
+  candidate: DeploymentDetectionCandidate | undefined,
+  source: DeploymentDraftSource,
+): Pick<DeploymentDraftSource, "includeSubmodules" | "includeLfs"> | undefined {
+  if (!detection || (source.kind !== "git" && source.kind !== "local")) return undefined
+  const root = candidate?.root ?? ""
+  const requirements = detection.gitRequirements
+  const options: Pick<DeploymentDraftSource, "includeSubmodules" | "includeLfs"> = {}
+  const submodules = (requirements.submoduleList ?? []).filter(
+    (submodule) => underRoot(submodule.path, root) || underRoot(root, submodule.path),
+  )
+  if (
+    requirements.submodulesChecked &&
+    !source.includeSubmodules &&
+    submodules.length > 0 &&
+    submodules.every((submodule) => submodule.sameSource)
+  )
+    options.includeSubmodules = true
+  const lfsFiles = root
+    ? (requirements.lfsPaths ?? []).filter((path) => underRoot(path, root)).length
+    : (requirements.lfsFiles ?? 0)
+  if (requirements.lfsChecked && !source.includeLfs && lfsFiles > 0) options.includeLfs = true
+  return Object.keys(options).length ? options : undefined
+}
+
+const NOT_DEPLOYABLE: Record<string, string> = {
+  library: "a library",
+  cli: "a command-line tool",
+  "editor-extension": "an editor extension",
+  "browser-extension": "a browser extension",
+  "github-action": "a GitHub Action",
+  "desktop-app": "a desktop app",
+  "mobile-app": "a mobile app",
+  notebook: "notebooks",
+  "windows-only": "Windows-only",
+}
+
+/**
+ * What the candidate chooser says about a candidate beyond its confidence:
+ * that it is not a service, or why it ranks below the application.
+ */
+export function candidateStanding(candidate: DeploymentDetectionCandidate) {
+  if (candidate.notDeployable)
+    return `Not a service: ${NOT_DEPLOYABLE[candidate.notDeployable] ?? candidate.notDeployable}`
+  if (candidate.demotion) return candidate.demotion
+  if (candidate.recipeIssue && !candidate.recipe) return "No automatic recipe"
+  return undefined
 }

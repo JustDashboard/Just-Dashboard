@@ -391,11 +391,18 @@ export function discoveredEnvironmentRows(
   candidate?: DeploymentDetectionCandidate,
   random?: RandomBytes,
 ): EnvironmentRow[] {
+  // A render.yaml `generateValue` or an app.json `generator: "secret"` says
+  // the platform minted this value itself; the dashboard does the same.
+  const declaredGenerated = new Set(
+    (candidate?.platformManifests ?? []).flatMap((manifest) => manifest.generatedVariables ?? []),
+  )
   const rows = (candidate?.variables ?? []).map((variable): EnvironmentRow => {
     // Laravel cannot answer a single request without its application key,
     // and the key is nothing but 32 random bytes — so the row arrives with
     // one, the way `php artisan key:generate` would have written it.
-    const generated = candidate?.framework === "laravel" && variable.name === "APP_KEY"
+    const generated =
+      (candidate?.framework === "laravel" && variable.name === "APP_KEY") ||
+      declaredGenerated.has(variable.name)
     return {
       name: variable.name,
       value: generated ? generateSecretValue(variable.name, random) : "",

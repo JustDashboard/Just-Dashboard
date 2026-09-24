@@ -143,14 +143,25 @@ function asError(error: unknown) {
  * gave it: everything the server reviews is shown, on the shelves above, and
  * one "Use" inspects with whatever inputs are filled in.
  */
-export function SourceTemplate({ onInspected }: { onInspected: (flow: ConfigureFlow) => void }) {
+export function SourceTemplate({
+  onInspected,
+  initialTemplate,
+}: {
+  onInspected: (flow: ConfigureFlow) => void
+  /** A blueprint id from the address, chosen on arrival. */
+  initialTemplate?: string
+}) {
   const catalogue = usePoll(
     (signal) => get<BlueprintSummary[]>("/deploy/blueprints/", undefined, signal),
     0,
   )
   const [filter, setFilter] = useSessionState("deploy.new.template.filter", "")
   const [topic, setTopic] = useSessionState<TopicKey | "all">("deploy.new.template.topic", "all")
-  const [selectedId, setSelectedId] = useSessionState("deploy.new.template.selected", "")
+  const [selectedId, setSelectedId] = useSessionState(
+    "deploy.new.template.selected",
+    "",
+    initialTemplate,
+  )
   const [inputs, setInputs] = useSessionState<Record<string, string>>(
     `deploy.new.template.inputs.${selectedId}`,
     {},

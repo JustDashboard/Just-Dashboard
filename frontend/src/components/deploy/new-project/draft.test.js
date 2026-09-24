@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test"
 import { defaultConfiguration } from "../deployment-defaults"
 import {
+  automaticCloneOptions,
+  candidateStanding,
   configurationForSave,
   landingStep,
   mergeDetectedConfiguration,
@@ -255,4 +257,89 @@ test("persisting a flow excludes credentials from both live and server draft sna
     expect(JSON.stringify(flow)).toContain(secret)
   }
   expect(saved.configuration.domains[0].protection.username).toBe("reader")
+})
+
+/**
+ * The clone options detection has already answered. A theme submodule on the
+ * repository's own host and LFS files under the build root are turned on at
+ * inspection; a submodule elsewhere stays the operator's question.
+ */
+test("clone options detection answered are switched on for the chosen root", () => {
+  const git = { kind: "git", mode: "git_url" }
+  const requirements = (overrides) => ({
+    candidates: [],
+    gitRequirements: {
+      submodules: true,
+      lfs: true,
+      submodulesChecked: true,
+      lfsChecked: true,
+      submoduleList: [{ path: "themes/ananke", sameSource: true }],
+      lfsFiles: 2,
+      lfsPaths: ["site/images/a.png", "assets/b.bin"],
+      ...overrides,
+    },
+  })
+  expect(automaticCloneOptions(requirements(), candidate({ root: "" }), git)).toEqual({
+    includeSubmodules: true,
+    includeLfs: true,
+  })
+  expect(automaticCloneOptions(requirements(), candidate({ root: "site" }), git)).toEqual({
+    includeLfs: true,
+  })
+  expect(
+    automaticCloneOptions(
+      requirements({ submoduleList: [{ path: "vendor/x", sameSource: false }], lfsFiles: 0 }),
+      candidate({ root: "" }),
+      git,
+    ),
+  ).toBeUndefined()
+  expect(
+    automaticCloneOptions(requirements(), candidate({ root: "" }), {
+      ...git,
+      includeSubmodules: true,
+      includeLfs: true,
+    }),
+  ).toBeUndefined()
+  expect(
+    automaticCloneOptions(
+      requirements({ submodulesChecked: false, lfsChecked: false }),
+      candidate({ root: "" }),
+      git,
+    ),
+  ).toBeUndefined()
+  expect(
+    automaticCloneOptions(requirements(), candidate({ root: "" }), {
+      kind: "image",
+      mode: "image",
+    }),
+  ).toBeUndefined()
+})
+
+test("the candidate chooser says why a candidate is not the application", () => {
+  expect(candidateStanding(candidate({ notDeployable: "library" }))).toBe(
+    "Not a service: a library",
+  )
+  expect(candidateStanding(candidate({ demotion: "examples/basic is an example" }))).toBe(
+    "examples/basic is an example",
+  )
+  expect(candidateStanding(candidate({ recipeIssue: "Haskell has no automatic recipe" }))).toBe(
+    "No automatic recipe",
+  )
+  expect(candidateStanding(candidate({ recipe: "node" }))).toBeUndefined()
+})
+
+test("a source that is not a service, or has a template, opens on the project step", () => {
+  expect(landingStep(flowFor({ candidate: candidate({ notDeployable: "library" }) }))).toBe(
+    "project",
+  )
+  expect(
+    landingStep(
+      flowFor({
+        candidate: candidate(),
+        detection: {
+          alternatives: [{ kind: "template", ref: "n8n", label: "n8n", evidence: "reviewed" }],
+        },
+      }),
+    ),
+  ).toBe("project")
 })

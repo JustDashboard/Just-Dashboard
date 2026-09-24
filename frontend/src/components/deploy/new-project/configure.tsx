@@ -9,6 +9,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useMemoryState, useSessionState } from "@/lib/view-state"
 import type {
   DeploymentDraft,
+  DeploymentDraftSource,
   DeploymentPreflight,
   DeploymentPreflightFinding,
   WorkloadProfile,
@@ -333,15 +334,14 @@ export function Configure({
   // the environment lives in memory and the step in the session store, so a
   // reload used to land back on Review reading "3 values" with none to send.
 
-  const changeBranch = async (nextRef: string) => {
-    const ref = nextRef.trim()
-    setBranch(ref)
-    if (!ref || ref === flow.source.ref || mutating.current) return
+  // A branch or a clone option is part of the saved source, so changing one
+  // saves it again and detects again.
+  const resaveSource = async (nextSource: DeploymentDraftSource) => {
+    if (mutating.current) return
     mutating.current = true
     setBranchBusy(true)
     setFailure(undefined)
     try {
-      const nextSource = { ...flow.source, ref }
       const result = await reinspect(flow.draft, flow.profile, nextSource)
       const profile =
         flow.profile === flow.candidate?.profile
@@ -374,6 +374,17 @@ export function Configure({
       setBranchBusy(false)
     }
   }
+
+  const changeBranch = async (nextRef: string) => {
+    const ref = nextRef.trim()
+    setBranch(ref)
+    if (!ref || ref === flow.source.ref) return
+    await resaveSource({ ...flow.source, ref })
+  }
+
+  const changeCloneOptions = (
+    options: Pick<DeploymentDraftSource, "includeSubmodules" | "includeLfs">,
+  ) => void resaveSource({ ...flow.source, ...options })
 
   const changeProfile = (profile: WorkloadProfile) => {
     const internalPort =
@@ -782,6 +793,7 @@ export function Configure({
                 branchBusy={branchBusy}
                 branches={branches.data ?? []}
                 onChangeBranch={(ref) => void changeBranch(ref)}
+                onChangeCloneOptions={changeCloneOptions}
                 onEditBranch={setBranch}
                 onPickCandidate={(id) => void pickCandidate(id)}
                 busy={busy}

@@ -287,4 +287,21 @@ describe("self-issued secrets", () => {
     )
     expect(other[0].value).toBe("")
   })
+  test("a secret another platform's file generates arrives generated", () => {
+    const fixed = (length) => new Uint8Array(length).fill(2)
+    const rows = discoveredEnvironmentRows(
+      candidate({
+        variables: [
+          { name: "JWT_SECRET", sources: ["render.yaml"] },
+          { name: "STRIPE_KEY", sources: ["render.yaml"] },
+        ],
+        platformManifests: [
+          { file: "render.yaml", platform: "render", generatedVariables: ["JWT_SECRET"] },
+        ],
+      }),
+      fixed,
+    )
+    expect(rows[0]).toMatchObject({ name: "JWT_SECRET", value: "02".repeat(32), generated: true })
+    expect(rows[1].value).toBe("")
+  })
 })

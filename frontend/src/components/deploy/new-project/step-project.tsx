@@ -2,6 +2,7 @@
 
 import type {
   DeploymentBuildMethod,
+  DeploymentDraftSource,
   DeploymentRecipe,
   GitHubBranch,
   NodePackageManager,
@@ -31,6 +32,7 @@ import {
 import { withPackageManagerRunner } from "@/components/deploy/deployment-defaults"
 import type { WizardErrors } from "@/components/deploy/deployment-defaults"
 import { BuildExtras } from "@/components/deploy/new-project/configure-advanced"
+import { candidateStanding } from "@/components/deploy/new-project/draft"
 import type { ConfigureFlow, FlowUpdate } from "@/components/deploy/new-project/draft"
 import { SECTION_IDS } from "@/components/deploy/new-project/plan-sections"
 
@@ -66,6 +68,7 @@ export function StepProject({
   branches,
   onChangeBranch,
   onEditBranch,
+  onChangeCloneOptions,
   onPickCandidate,
   busy,
   nameTouched,
@@ -81,6 +84,10 @@ export function StepProject({
   branches: GitHubBranch[]
   onChangeBranch: (ref: string) => void
   onEditBranch: (ref: string) => void
+  /** Re-saves the source with submodules or LFS switched, and detects again. */
+  onChangeCloneOptions: (
+    options: Pick<DeploymentDraftSource, "includeSubmodules" | "includeLfs">,
+  ) => void
   onPickCandidate: (id: string) => void
   busy: string
   nameTouched: boolean
@@ -122,6 +129,19 @@ export function StepProject({
 
   const candidates = flow.detection?.candidates ?? []
   const ambiguous = candidates.length > 1
+  const requirements = flow.detection?.gitRequirements
+  const candidateRoot = flow.candidate?.root ?? ""
+  const inRoot = (path: string) =>
+    !candidateRoot || path === candidateRoot || path.startsWith(`${candidateRoot}/`)
+  const submodules = (requirements?.submoduleList ?? []).filter((submodule) =>
+    inRoot(submodule.path),
+  )
+  const lfsFiles = candidateRoot
+    ? (requirements?.lfsPaths ?? []).filter(inRoot).length
+    : (requirements?.lfsFiles ?? 0)
+  const alternative = flow.detection?.alternatives?.[0]
+  const setAside = flow.detection?.setAside ?? []
+  const processes = flow.candidate?.processes ?? []
 
   /**
    * What the build fold holds, said while it is shut.
@@ -231,6 +251,67 @@ export function StepProject({
             <FormFact label="Kind">{SOURCE_KIND_LABELS[flow.source.kind]}</FormFact>
           </FormFacts>
         )}
+        {/* Submodules and LFS objects are part of what gets built, so they
+            are switched here, beside the branch, rather than only on the
+            source picker the reader has already left. Detection turns them on
+            by itself when the build root needs them and nothing else does. */}
+        {isGitSource && (requirements?.submodules || requirements?.lfs) && (
+          <OptionList>
+            {requirements.submodules && (
+              <OptionRow
+                title="Clone the submodules listed in .gitmodules"
+                hint={
+                  submodules.length
+                    ? `${submodules.map((submodule) => submodule.path).join(", ")}${
+                        submodules.some((submodule) => !submodule.sameSource)
+                          ? " — one is on another host; the source's credential must reach it"
+                          : ""
+                      }`
+                    : "None of them is inside the directory this project builds."
+                }
+                checked={Boolean(flow.source.includeSubmodules)}
+                disabled={branchBusy}
+                onCheckedChange={(includeSubmodules) => onChangeCloneOptions({ includeSubmodules })}
+              />
+            )}
+            {requirements.lfs && (
+              <OptionRow
+                title="Download Git LFS objects, not their pointer files"
+                hint={
+                  lfsFiles > 0
+                    ? `${lfsFiles} file${lfsFiles === 1 ? "" : "s"} under the build root ${
+                        lfsFiles === 1 ? "is" : "are"
+                      } stored in LFS. The server needs git-lfs installed.`
+                    : "No file under the build root is stored in LFS."
+                }
+                checked={Boolean(flow.source.includeLfs)}
+                disabled={branchBusy}
+                onCheckedChange={(includeLfs) => onChangeCloneOptions({ includeLfs })}
+              />
+            )}
+          </OptionList>
+        )}
+        {alternative && (
+          <Notice
+            title={
+              alternative.kind === "template"
+                ? `${alternative.label} has a reviewed template`
+                : `The project publishes ${alternative.label}`
+            }
+          >
+            {alternative.evidence}. Building this repository runs its development tree instead.{" "}
+            {/* A full navigation, not a client route: the page takes its
+                source tab and selection from the address only on arrival. */}
+            <a
+              href={`/deploy/new?source=${alternative.kind === "template" ? "template" : "image"}&${
+                alternative.kind === "template" ? "template" : "image"
+              }=${encodeURIComponent(alternative.ref)}`}
+              className="rounded-sm underline underline-offset-2 focus-ring"
+            >
+              {alternative.kind === "template" ? "Deploy the template" : "Deploy the image"}
+            </a>
+          </Notice>
+        )}
         {flow.detection?.unavailable && (
           <Notice tone="warning" title="Some evidence is unavailable">
             {flow.detection.unavailable}
@@ -248,6 +329,40 @@ export function StepProject({
               ))}
             </ul>
           </Notice>
+        )}
+        {processes.length > 0 && (
+          <Disclosure quiet summary={`Other processes this source runs · ${processes.length}`}>
+            <ul className="space-y-1.5 text-hint">
+              {processes.map((process) => (
+                <li key={`${process.kind}-${process.name}`}>
+                  <span className="font-medium text-foreground">{process.name}</span>
+                  {process.command && (
+                    <>
+                      {" "}
+                      <code className="font-mono">{process.command}</code>
+                    </>
+                  )}
+                  {" — "}
+                  {process.reason}
+                </li>
+              ))}
+            </ul>
+            <p className="pt-2 text-hint">
+              A project runs one process. Each of these needs a project of its own from this
+              repository, with its command as the start command.
+            </p>
+          </Disclosure>
+        )}
+        {setAside.length > 0 && (
+          <Disclosure quiet summary={`Not offered · ${setAside.length}`}>
+            <ul className="space-y-1.5 text-hint">
+              {setAside.map((item) => (
+                <li key={`${item.kind}-${item.path}`}>
+                  <span className="font-mono">{item.path}</span> — {item.reason}
+                </li>
+              ))}
+            </ul>
+          </Disclosure>
         )}
         {flow.detection?.compose && (
           <div className="space-y-2 pt-1">
@@ -275,18 +390,27 @@ export function StepProject({
       {ambiguous && (
         <FormSection
           title="Choose the detected candidate"
-          hint="Multiple equally strong roots or build methods were found."
+          hint={
+            flow.detection?.selectedId
+              ? "The first is the one detection ranks as this repository's application."
+              : "Multiple equally strong roots or build methods were found."
+          }
         >
           <OptionList role="group" aria-label="Detected candidates">
             {candidates.map((item) => (
               <OptionRow
                 key={item.id}
                 title={item.name}
-                hint={`${humanize(item.confidence)} confidence · ${
-                  item.framework ? `${item.framework} via ` : ""
-                }${humanize(item.buildMethod)}${
-                  item.root && item.root !== "." ? ` in ${item.root}` : ""
-                }`}
+                hint={[
+                  `${humanize(item.confidence)} confidence · ${
+                    item.framework ? `${item.framework} via ` : ""
+                  }${humanize(item.buildMethod)}${
+                    item.root && item.root !== "." ? ` in ${item.root}` : ""
+                  }`,
+                  candidateStanding(item),
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
                 checked={item.id === flow.detection?.selectedId}
                 onCheckedChange={(checked) => checked && onPickCandidate(item.id)}
                 disabled={busy === "detect"}
