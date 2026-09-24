@@ -74,7 +74,7 @@ func readDeploymentSource(ctx context.Context, root string, plan deploymentPlan)
 	case BuildRecipe, BuildDockerfile, BuildStatic:
 		reading.dryRun = true
 		if err := dryRunBuild(ctx, root, plan.Configuration.Build, plan.BuildVariables); err != nil {
-			reading.refusal = checkoutRefusal{cause: err, text: strings.ReplaceAll(err.Error(), root, ".")}
+			reading.refusal = checkoutRefusalFor(err, root)
 		}
 	}
 	return reading

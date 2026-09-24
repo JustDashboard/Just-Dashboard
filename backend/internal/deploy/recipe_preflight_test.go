@@ -3,6 +3,8 @@ package deploy
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -230,5 +232,29 @@ func TestDraftPreflightNamesAMovedBranchAndAnEditedRoot(t *testing.T) {
 	findings = draftTreeFindings(t, root, build, unreachable)
 	if item := findingByCode(findings, "source_inspection_unavailable"); item == nil || item.Severity != PreflightUnavailable {
 		t.Fatalf("an unreadable commit was not said: %#v", findings)
+	}
+}
+
+// A checkout reached through a linked directory is opened by its resolved
+// path, and that path is taken out of a refusal as the root's own is.
+func TestRefusalTextLeavesNoHostPathOfALinkedCheckout(t *testing.T) {
+	actual := filepath.Join(t.TempDir(), "actual")
+	writeBuildFixture(t, actual, "apps/web/package.json", `{"name":"web"}`)
+	link := filepath.Join(t.TempDir(), "linked")
+	if err := os.Symlink(actual, link); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cause := errors.Join(ErrUnsupportedBuilder, errors.New("Dockerfile: lstat "+resolved+"/apps/web/Dockerfile: no such file"))
+	for _, text := range []string{checkoutRefusalFor(cause, link).Error(), recipeRefusalText(cause, link)} {
+		if strings.Contains(text, resolved) || strings.Contains(text, actual) || !strings.Contains(text, "./apps/web/Dockerfile") {
+			t.Fatalf("refusal text = %q", text)
+		}
+	}
+	if !errors.Is(checkoutRefusalFor(cause, link), ErrUnsupportedBuilder) {
+		t.Fatal("the refusal lost its cause")
 	}
 }

@@ -78,7 +78,9 @@ A variable is `required` only when it is read in a form that fails without a val
 SvelteKit's `$env/static/*`, Prisma's `env("X")` in a schema or `prisma.config.*`, and a pydantic
 `BaseSettings` field with no default (when the class sets no `env_prefix`). Preflight warns once per
 required name the plan does not set — no variable row, staged value, generated secret or database link
-— as `variable_detected_required_<name>`, naming the database to link when one is suggested for it, and
+— as `variable_detected_required_<name>` (a name too long for a 128-character code is cut and ends in a
+digest of the whole name, which the finding's `fieldId` carries), naming the database to link when one
+is suggested for it, and
 lists the optional remainder in one `variables_detected_unset` pass. They are warnings rather than
 decisions: a heuristic must not make a project uncreatable.
 

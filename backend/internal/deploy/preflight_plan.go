@@ -1,6 +1,8 @@
 package deploy
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"path"
 	"slices"
@@ -325,7 +327,7 @@ func detectedVariableFindings(candidate *DetectedCandidate, configured map[strin
 		if engine := databases[variable.Name]; engine != "" {
 			action = "Link a " + engine + " database under Databases, which sets " + variable.Name + ", or set it in Variables."
 		}
-		findings = append(findings, finding("variable_detected_required_"+strings.ToLower(variable.Name), PreflightWarning,
+		findings = append(findings, finding(variableFindingCode("variable_detected_required_", variable.Name), PreflightWarning,
 			"A variable the code requires has no value", variable.Name+" (read in "+source+")",
 			"The code reads it without a default, so the application stops at start without it.",
 			action, "deploy", "variables."+variable.Name))
@@ -341,6 +343,18 @@ func detectedVariableFindings(candidate *DetectedCandidate, configured map[strin
 			"", "deploy", "variables"))
 	}
 	return findings
+}
+
+// variableFindingCode is a finding code for one variable. A name can be
+// longer than a code may be, so a long one is cut and told apart by a digest
+// of the whole name; the full name travels in the finding's field id.
+func variableFindingCode(prefix, name string) string {
+	code := prefix + strings.ToLower(name)
+	if len(code) <= 128 {
+		return code
+	}
+	sum := sha256.Sum256([]byte(name))
+	return code[:128-13] + "_" + hex.EncodeToString(sum[:6])
 }
 
 func plural(count int) string {

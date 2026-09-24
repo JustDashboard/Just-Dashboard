@@ -197,6 +197,34 @@ func TestDetectedVariablesLeftUnsetAreNamedBeforeDeploy(t *testing.T) {
 	}
 }
 
+// A variable name may be as long as a finding code, so its code is cut and
+// told apart by a digest: the draft's preflight still saves, and two long
+// names sharing a prefix keep two codes.
+func TestLongVariableNamesKeepTheirFindingCodesWithinBounds(t *testing.T) {
+	prefix := "A" + strings.Repeat("B", 120)
+	first, second := prefix+"_FIRST", prefix+"_SECOND"
+	candidate := &DetectedCandidate{Variables: []DetectedVariable{
+		{Name: first, Sources: []string{"src/env.ts"}, Required: true},
+		{Name: second, Sources: []string{"src/env.ts"}, Required: true},
+	}}
+	findings := detectedVariableFindings(candidate, map[string]bool{})
+	if len(findings) != 2 || findings[0].Code == findings[1].Code {
+		t.Fatalf("findings = %#v", findings)
+	}
+	for _, item := range findings {
+		if len(item.Code) > 128 || !strings.HasPrefix(item.Code, "variable_detected_required_ab") ||
+			!strings.HasPrefix(item.FieldID, "variables."+prefix) {
+			t.Fatalf("finding = %#v", item)
+		}
+	}
+	if err := validatePreflightFindings(findings); err != nil {
+		t.Fatalf("a long variable name made the preflight unsaveable: %v", err)
+	}
+	if code := variableFindingCode("compose_variable_", "APP_TAG"); code != "compose_variable_app_tag" {
+		t.Fatalf("a short name's code changed: %q", code)
+	}
+}
+
 func TestEnvironmentDiscoveryMarksOnlyReadsThatFailWithoutAValue(t *testing.T) {
 	root := t.TempDir()
 	for path, content := range map[string]string{

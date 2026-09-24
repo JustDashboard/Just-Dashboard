@@ -652,7 +652,7 @@ func preflightFindings(
 		}
 		for _, variable := range detection.Compose.Variables {
 			if !configuredVariables[variable] {
-				findings = append(findings, finding("compose_variable_"+strings.ToLower(variable), PreflightDecision,
+				findings = append(findings, finding(variableFindingCode("compose_variable_", variable), PreflightDecision,
 					"Compose variable needs a scoped value", variable,
 					"Planning validation used an inert placeholder and did not inherit the dashboard environment.",
 					"Add the variable with build/runtime scope or revise the Compose source.", "deploy", "variables."+variable))

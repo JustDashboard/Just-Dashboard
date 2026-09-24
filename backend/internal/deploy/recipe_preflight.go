@@ -3,6 +3,8 @@ package deploy
 import (
 	"context"
 	"errors"
+	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -63,10 +65,7 @@ func dryRunBuild(ctx context.Context, sourceRoot string, build BuildPlanConfig, 
 // sentinel's prefix, without the host path of the inspected checkout, and
 // bounded like any other detection text.
 func recipeRefusalText(err error, root string) string {
-	text := strings.TrimPrefix(err.Error(), ErrUnsupportedBuilder.Error()+": ")
-	if root != "" {
-		text = strings.ReplaceAll(text, root, ".")
-	}
+	text := withoutCheckoutPath(strings.TrimPrefix(err.Error(), ErrUnsupportedBuilder.Error()+": "), root)
 	if len(text) > 500 {
 		text = text[:497] + "..."
 	}
@@ -74,6 +73,32 @@ func recipeRefusalText(err error, root string) string {
 		return "the recipe refuses this source (details withheld because they resemble credential material)"
 	}
 	return text
+}
+
+// withoutCheckoutPath takes the host path of an inspected checkout out of
+// text, as the checkout's root reads it and as its resolved path does: the
+// recipe opens a root directory through its resolved path, so a checkout
+// under a linked directory names the link's target in its errors.
+func withoutCheckoutPath(text, root string) string {
+	if root == "" {
+		return text
+	}
+	paths := []string{root}
+	if resolved, err := filepath.EvalSymlinks(root); err == nil && resolved != root {
+		paths = append(paths, resolved)
+	}
+	// The longer path first, so one that contains the other is not left
+	// half replaced.
+	sort.Slice(paths, func(i, j int) bool { return len(paths[i]) > len(paths[j]) })
+	for _, path := range paths {
+		text = strings.ReplaceAll(text, path, ".")
+	}
+	return text
+}
+
+// checkoutRefusalFor is a dry run's error as a finding may quote it.
+func checkoutRefusalFor(err error, root string) error {
+	return checkoutRefusal{cause: err, text: withoutCheckoutPath(err.Error(), root)}
 }
 
 // recipeRefusalField points a refusal at the setting that decides it, so the
@@ -234,7 +259,7 @@ func withDraftSourceChecks(
 		case BuildRecipe, BuildDockerfile, BuildStatic:
 			ran = true
 			if err := dryRunBuild(ctx, root, configuration.Build, nil); err != nil {
-				refusal = checkoutRefusal{cause: err, text: strings.ReplaceAll(err.Error(), root, ".")}
+				refusal = checkoutRefusalFor(err, root)
 			}
 		}
 		return nil
