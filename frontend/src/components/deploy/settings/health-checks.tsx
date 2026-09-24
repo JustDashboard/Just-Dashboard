@@ -117,7 +117,7 @@ function checkSummary(check: Check, port?: number) {
   switch (check.kind as CheckKind) {
     case "http": {
       const codes = config.acceptAnyAnswer
-        ? "any answer < 500"
+        ? "any answer < 500 but 400, 421"
         : config.expectedStatus?.length
           ? config.expectedStatus.join(", ")
           : "2xx"
@@ -363,7 +363,11 @@ function CheckEditor({
                 value={(config.expectedStatus ?? []).join(", ")}
                 readOnly={disabled}
                 className="font-mono"
-                placeholder={config.acceptAnyAnswer ? "any answer below 500" : "200, 204 · any 2xx"}
+                placeholder={
+                  config.acceptAnyAnswer
+                    ? "any answer below 500 but 400, 421"
+                    : "200, 204 · any 2xx"
+                }
                 onChange={(event) => {
                   const expectedStatus = event.target.value
                     .split(",")
@@ -378,6 +382,19 @@ function CheckEditor({
               />
             </Field>
           </FieldRow>
+          <OptionRow
+            title="Any answer counts"
+            hint="Anything below 500 except 400 and 421 passes, for an API with no page at this path. Off, only the statuses listed, or any 2xx, pass."
+            checked={Boolean(config.acceptAnyAnswer)}
+            disabled={disabled}
+            onCheckedChange={(acceptAnyAnswer) =>
+              updateConfig(
+                acceptAnyAnswer
+                  ? { acceptAnyAnswer: true, expectedStatus: [] }
+                  : { acceptAnyAnswer: undefined },
+              )
+            }
+          />
         </>
       )}
 

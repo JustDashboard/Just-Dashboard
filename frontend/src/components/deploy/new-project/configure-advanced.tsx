@@ -501,15 +501,7 @@ function CheckFields({
       </FieldRow>
       {check.kind === "http" && (
         <FieldRow columns={2}>
-          <Field
-            label="Path"
-            htmlFor={`${idPrefix}-path`}
-            hint={
-              config.acceptAnyAnswer
-                ? "Starts with /. Any answer below 500 counts."
-                : "Starts with /."
-            }
-          >
+          <Field label="Path" htmlFor={`${idPrefix}-path`} hint="Starts with /.">
             <Input
               id={`${idPrefix}-path`}
               value={String(config.path ?? "/")}
@@ -535,6 +527,20 @@ function CheckFields({
             />
           </Field>
         </FieldRow>
+      )}
+      {check.kind === "http" && (
+        <OptionRow
+          title="Any answer counts"
+          hint="Anything below 500 except 400 and 421 passes, for an API with no page at this path. Off, only a 2xx passes."
+          checked={Boolean(config.acceptAnyAnswer)}
+          onCheckedChange={(acceptAnyAnswer) =>
+            updateConfig(
+              acceptAnyAnswer
+                ? { acceptAnyAnswer: true, expectedStatus: undefined }
+                : { acceptAnyAnswer: undefined },
+            )
+          }
+        />
       )}
       {check.kind === "tcp" && (
         <FieldRow columns={2}>
