@@ -1665,9 +1665,9 @@ func TestCanonicalConfigurationOrdering(t *testing.T) {
 }
 
 // A Node project's detected commands have to name the package manager its
-// lockfile locks to. The recipe picks its base image from that same lockfile,
-// and oven/bun carries no npm: "npm run build" was a build that installed
-// cleanly and then died on `npm: not found`, with the configuration screen
+// lockfile locks to. The recipe provisions its toolchain from that same
+// lockfile, and a runner the image lacked was a build that installed cleanly
+// and then died on `<runner>: not found`, with the configuration screen
 // showing nothing wrong.
 func TestDetectedJavaScriptCommandsFollowTheLockfile(t *testing.T) {
 	manifest := `{"name":"site","scripts":{"build":"next build","start":"next start"},"dependencies":{"next":"16.2.10"}}`
@@ -1703,9 +1703,10 @@ func TestDetectedJavaScriptCommandsFollowTheLockfile(t *testing.T) {
 	}
 }
 
-// With no lockfile, or with several, the recipe refuses to build at all — so
-// the detected command only has to be the one that fails legibly rather than
-// the one that happens to match a package manager nobody pinned.
+// With several lockfiles nothing resolves until a package manager is
+// chosen, and the build refuses until then — so the detected command only
+// has to be the one that fails legibly rather than the one that happens to
+// match a package manager nobody pinned.
 func TestDetectedJavaScriptCommandsFallBackToNpm(t *testing.T) {
 	root := t.TempDir()
 	writePlanningFixture(t, filepath.Join(root, "package.json"),

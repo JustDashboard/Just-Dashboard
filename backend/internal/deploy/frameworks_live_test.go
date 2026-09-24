@@ -33,9 +33,12 @@ func TestLiveDetectedFrameworkBuildAndServing(t *testing.T) {
 	// served from its own image. Streamlit and Gradio are the two data-app
 	// shapes: a script the framework's own server runs, answering on the
 	// framework's port with the framework's own page.
+	// next-pnpm and express-yarn are the same kind of server installed by
+	// pnpm (a toolchain release the start command runs offline) and by
+	// Yarn 1 (its real frozen install), started through the manager.
 	for _, name := range []string{"vite", "next", "svelte-node", "svelte-static", "html", "containerfile", "go",
 		"astro", "nuxt", "react-router", "fastapi", "flask", "django", "rust", "java", "gradle", "dotnet", "deno", "laravel", "php",
-		"streamlit", "gradio"} {
+		"streamlit", "gradio", "next-pnpm", "express-yarn"} {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 			defer cancel()
@@ -178,7 +181,10 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 				name == "dotnet" && (candidate.Framework != "aspnet" || result.Prepared.Toolchain != "dotnet 10.0") ||
 				name == "deno" && candidate.Port != 8000 ||
 				name == "laravel" && (candidate.Framework != "laravel" || result.Prepared.Toolchain != "php 8.4") ||
-				name == "php" && candidate.Framework != "php" {
+				name == "php" && candidate.Framework != "php" ||
+				name == "next-pnpm" && (candidate.StartCommand != "pnpm run start" || result.Prepared.Toolchain != "pnpm 10.34.5 (lockfileVersion 9.0)") ||
+				name == "express-yarn" && (candidate.Framework != "express" || candidate.StartCommand != "yarn run start" ||
+					result.Prepared.Install != "yarn install --frozen-lockfile") {
 				t.Fatalf("catalogue defaults for %s: %+v / %+v", name, candidate, result.Prepared)
 			}
 			if strings.Contains(content, secret) {
