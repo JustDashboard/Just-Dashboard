@@ -56,6 +56,10 @@ type HostObservation struct {
 	Domains         []DomainObservation            `json:"domains"`
 	Firewall        FirewallObservation            `json:"firewall"`
 	Dependencies    []DependencyObservation        `json:"dependencies"`
+
+	// CPUFeatures are the instruction-set flags a database image may require
+	// (avx, atomics); nil when /proc/cpuinfo could not be read.
+	CPUFeatures []string `json:"cpuFeatures,omitempty"`
 }
 
 type DomainObservation struct {
@@ -93,6 +97,10 @@ type DependencyObservation struct {
 	Status   string `json:"status,omitempty"`
 	Detail   string `json:"detail,omitempty"`
 	DeepLink string `json:"deepLink,omitempty"`
+
+	// Extensions are the schema extensions a linked PostgreSQL server
+	// offers among those detection asks about; nil when it was not asked.
+	Extensions []string `json:"extensions,omitempty"`
 }
 
 type ObservationRequest struct {
@@ -343,6 +351,7 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 	}
 	observation.AvailableMemory = availableMemory()
 	observation.CPUCount = runtime.NumCPU()
+	observation.CPUFeatures = HostCPUFeatures()
 	diskRoot := o.volumeRoot
 	if diskRoot == "" {
 		diskRoot = "/"
@@ -912,6 +921,7 @@ func preflightFindings(
 			"Variable references resolve without cycles", fmt.Sprintf("%d masked variable(s)", len(configuration.Variables)),
 			"Only typed reference identities were inspected; secret leaves remain masked.", "", "deploy", "variables"))
 	}
+	findings = append(findings, environmentFindings(draft, configuration, observation)...)
 	if selected := selectedDetectionCandidate(detection); selected != nil && selected.SchemaTool != "" &&
 		configuration.Build.Method == BuildRecipe && hasDatabaseDependency(configuration.Dependencies) {
 		findings = append(findings, schemaStepFinding(selected, configuration.Build))

@@ -2,9 +2,7 @@ package deploy
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -432,11 +430,10 @@ func (s *PlanningStore) GenerateVariable(
 	revision int,
 	scopes []string,
 ) (*VariableMutationResult, error) {
-	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
+	generated, err := s.generatedVariableValue(ctx, environmentID, name)
+	if err != nil {
 		return nil, err
 	}
-	generated := base64.RawURLEncoding.EncodeToString(raw)
 	result, err := s.PutVariable(ctx, projectID, environmentID, name, actor, VariableWriteRequest{
 		Revision: revision, Value: &generated, Sensitivity: "secret", Scopes: scopes,
 	})
