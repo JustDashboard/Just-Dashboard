@@ -82,6 +82,13 @@ func TestAssetPipelinesBelongToTheirApplication(t *testing.T) {
 		len(selected.Processes) != 1 || selected.Processes[0].Command != "bundle exec sidekiq" {
 		t.Fatalf("rails with Dockerfile = %#v", withDockerfile.Candidates)
 	}
+	hanami := detectShapeFixture(t, map[string]string{
+		"Gemfile": "gem 'hanami', '~> 2.1'\ngem 'hanami-assets'\n", "config.ru": "run Hanami.app\n",
+		"package.json": `{"name":"assets","dependencies":{"hanami-assets":"2"}}`, "package-lock.json": "{}",
+	})
+	if len(hanami.Candidates) != 1 || hanami.Candidates[0].Framework != "hanami" {
+		t.Fatalf("hanami = %#v", hanami.Candidates)
+	}
 	cocoapods := detectShapeFixture(t, map[string]string{
 		"Gemfile": "gem 'cocoapods'\ngem 'fastlane'\n", "package.json": expressManifest, "package-lock.json": "{}",
 	})

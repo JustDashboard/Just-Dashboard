@@ -140,8 +140,9 @@ type shapeRoot struct {
 }
 
 const (
-	shapeMaxFilePaths = 60_000
-	shapeMaxSetAside  = 48
+	shapeMaxFilePaths  = 60_000
+	shapeMaxSetAside   = 48
+	shapeMaxCandidates = 64
 	// shapeMaxBytes bounds what repository-shape files may read, apart from
 	// detection's own byte limit: these files refine a plan and are never a
 	// reason to call a scan truncated.
@@ -549,10 +550,18 @@ func (s *repoShapeScan) shapeDetection(result *DetectionResult, context shapeCon
 			candidate.Evidence = candidate.Evidence[:128]
 		}
 	}
-	result.SetAside = append([]DetectionSetAside(nil), s.setAside...)
 	sort.SliceStable(result.Candidates, func(i, j int) bool {
 		return compareCandidateRank(result.Candidates[i], result.Candidates[j]) > 0
 	})
+	// A committed build output or a repository of fixtures can hold hundreds
+	// of roots; past the first few dozen, ranked, none is the application and
+	// a chooser of them is unreadable.
+	if dropped := len(result.Candidates) - shapeMaxCandidates; dropped > 0 {
+		result.Candidates = result.Candidates[:shapeMaxCandidates]
+		s.addSetAside(DetectionSetAside{Path: ".", Kind: "decoy",
+			Reason: fmt.Sprintf("%d lower-ranked candidates are not listed", dropped)})
+	}
+	result.SetAside = append([]DetectionSetAside(nil), s.setAside...)
 	result.SelectedID = rankedSelection(result.Candidates)
 }
 

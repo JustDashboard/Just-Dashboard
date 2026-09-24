@@ -462,3 +462,19 @@ func TestRepositoryShapeEvidenceIsValidated(t *testing.T) {
 		})
 	}
 }
+
+func TestHundredsOfRootsKeepTheBestRanked(t *testing.T) {
+	files := map[string]string{"package.json": nextManifest, "package-lock.json": "{}"}
+	for index := 0; index < 90; index++ {
+		files[fmt.Sprintf("fixtures/case%02d/go.mod", index)] = "module example.test/case\n\ngo 1.26\n"
+	}
+	result := detectShapeFixture(t, files)
+	if len(result.Candidates) != shapeMaxCandidates || result.Candidates[0].Root != "" || selectedOf(result) == nil ||
+		!strings.Contains(setAsideKind(result, "decoy").Reason, "27 lower-ranked candidates") {
+		t.Fatalf("candidates = %d, selected = %v, set aside = %#v", len(result.Candidates), selectedOf(result), result.SetAside)
+	}
+	result.Source.Kind = SourceGit
+	if err := validateDetectionResult(&DraftSourceConfig{Kind: SourceGit, Mode: SourceModeLocalCheckout}, result); err != nil {
+		t.Fatalf("bounded result refused: %v", err)
+	}
+}
