@@ -3248,6 +3248,8 @@ export type DeploymentDetectedVariable = {
   /** The example file's own value, when it had one and it was not credential-shaped. */
   example?: string
   sources: string[]
+  /** Read in a form that fails without a value: no default, a non-null assertion, a schema field. */
+  required?: boolean
 }
 
 /** A database engine detection found the source connecting to. */
@@ -3285,6 +3287,17 @@ export type DeploymentDetectionCandidate = {
   databases?: DeploymentDetectedDatabase[]
   evidence: { path: string; reason: string }[]
   needsDecision: string[]
+  /** go.mod's toolchain line and the .go-version pin, judged against the plan's Go version. */
+  goToolchain?: string
+  goVersionFile?: string
+  /** The module's buildable main packages ("." is the root) and the one detection chose. */
+  goMainPackages?: string[]
+  goPackage?: string
+  /** A Go module with no main package: nothing for the recipe to run. */
+  goLibrary?: boolean
+  /** The interpreter range pyproject declares, and the manifest the recipe installs from. */
+  pythonRequires?: string
+  pythonInstall?: "uv.lock" | "poetry.lock" | "requirements.txt" | "pyproject.toml"
 }
 
 export type DeploymentDetection = {
@@ -3426,6 +3439,8 @@ export type DeploymentConfiguration = {
      */
     framework?: string
     goVersion?: string
+    /** The main package a Go recipe builds, relative to the root directory; empty lets it choose. */
+    goPackage?: string
     pythonVersion?: string
     packageManager?: NodePackageManager
     rootDirectory?: string
@@ -3638,6 +3653,43 @@ export type DeploymentPreflightFinding = {
   owner?: string
   fieldId?: string
   deepLink?: string
+}
+
+/**
+ * POST /deploy/{id}/environments/{env}/check: preflight for the saved plan
+ * against the commit a deployment would build now — what analyze_plan runs
+ * before every build, asked before Deploy is pressed.
+ */
+export type DeploymentCheckResult = {
+  findings: DeploymentPreflightFinding[]
+  planRevision: number
+  sourceRevision?: string
+  checkedAt: string
+}
+
+/** One plan field whose saved value differs from what detection proposes now. */
+export type DeploymentDetectionChange = {
+  /** The plan field: `build.packageManager`, `runtime.internalPort`. */
+  field: string
+  label: string
+  saved: string
+  detected: string
+  /** What detection proposed when the plan was saved. */
+  previous?: string
+  /** Detection's answer moved since the plan was saved; false is an edit made on purpose. */
+  changed: boolean
+}
+
+/** Fresh detection of a project's source, compared with its saved plan (`.../detect`, a source change). */
+export type DeploymentDetectionProposal = {
+  /** The desired revision it was computed against — the guard an Apply saves with. */
+  revision: number
+  sourceRevision?: string
+  candidate?: DeploymentDetectionCandidate
+  changes: DeploymentDetectionChange[]
+  variables: DeploymentDetectedVariable[]
+  newVariables: string[]
+  databases: DeploymentDetectedDatabase[]
 }
 
 export type DeploymentDraft = {

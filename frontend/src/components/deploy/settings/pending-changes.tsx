@@ -16,6 +16,8 @@ import { Status } from "@/components/status-dot"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { useProject } from "@/components/deploy/project-context"
 import { ChangeTag, PENDING_KIND_PAGE, sourceProduct } from "@/components/deploy/vocabulary"
+import { DeployCheckList } from "@/components/deploy/deploy-check"
+import { attentionFindings } from "@/components/deploy/deploy-check-state"
 
 const SHOWN = 6
 
@@ -35,6 +37,10 @@ const SHOWN = 6
  *
  * `pageKinds` names the kinds the current page edits, so a change already on
  * screen is named rather than offered as a link back to where the reader is.
+ *
+ * Under the changes, what the advisory check found about deploying them —
+ * the first few, each opening its field — so a save that would stop the next
+ * deployment says so on the page it was made on, before Deploy is pressed.
  */
 export function PendingChanges({
   pending,
@@ -53,6 +59,7 @@ export function PendingChanges({
   const count = changes.length
   const activeRun = deployment.activeRun
   const goingLive = activeRun && activeRun.planRevision >= pending.desiredRevision
+  const attention = goingLive || !project.check ? [] : attentionFindings(project.check.findings)
   const changeList = (
     <ul className="flex w-full min-w-0 flex-row flex-wrap items-center gap-x-4 gap-y-1 sm:w-auto">
       {shown.map((change, index) => (
@@ -115,6 +122,12 @@ export function PendingChanges({
             {changeList}
           </Disclosure>
         ))}
+      {attention.length > 0 && (
+        <div className="w-full min-w-0 space-y-2">
+          <p className="text-body font-medium">Before you deploy</p>
+          <DeployCheckList projectId={project.projectId} findings={attention} limit={3} />
+        </div>
+      )}
     </section>
   )
 }
