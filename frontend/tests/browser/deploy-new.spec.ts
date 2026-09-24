@@ -1193,8 +1193,11 @@ test("pasting a Compose file surfaces its services, unsupported items and the ef
 
   await gotoStep(page, "project")
   await expect(page.getByRole("textbox", { name: "Project name" })).toBeVisible()
-  await expect(page.getByText("web", { exact: true })).toBeVisible()
-  await expect(page.getByText("worker", { exact: true })).toBeVisible()
+  const services = page.locator('[data-slot="tag"]')
+  await expect(services.filter({ hasText: /^web$/ })).toBeVisible()
+  await expect(services.filter({ hasText: /^worker$/ })).toBeVisible()
+  // With more than one service the operator picks the one readiness follows.
+  await expect(page.getByRole("combobox", { name: "Primary service" })).toHaveText("web")
   await expect(page.getByText("network mode host is not supported")).toBeVisible()
   await page.getByText("Effective Compose plan", { exact: true }).click()
   await expect(page.getByText("build: .")).toBeVisible()
@@ -1591,6 +1594,9 @@ test("a Laravel import arrives with its application key and address set up, and 
       domainTemplate: "{{scheme}}://{{hostname}}",
       value: "https://wesmokefish-a1b2c3.203-0-113-7.sslip.io",
     },
+    // The secret minted here was staged with the environment; the server
+    // records its declaration, never its value.
+    { name: "SESSION_SECRET", sensitivity: "secret", scopes: ["runtime", "build"] },
   ])
 })
 
