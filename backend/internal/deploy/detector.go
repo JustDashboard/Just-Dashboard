@@ -792,7 +792,8 @@ func packageCandidate(marker *detectedMarkers, schemaPaths []string) []DetectedC
 		manifest: manifest, files: files, framework: framework, procfileWeb: procfileWeb,
 		schema: detectSchemaTool(dependencies, schemaPaths),
 	}
-	if install.context != install.dir && facts.workspaceTurbo && manifest.Name != "" && nodeHasWorkspaceDependency(manifest) {
+	// The name becomes part of a command, so it has to be a package name.
+	if install.context != install.dir && facts.workspaceTurbo && nodePackageNameRE.MatchString(manifest.Name) && nodeHasWorkspaceDependency(manifest) {
 		inputs.turboFilter = manifest.Name
 	}
 	candidate.BuildCommand, candidate.StartCommand = inputs.commands(runner)

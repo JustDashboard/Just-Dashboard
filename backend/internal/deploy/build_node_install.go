@@ -844,7 +844,8 @@ func planNodeInstall(facts nodeInstallFacts, choice nodeInstallChoice) nodeInsta
 	for _, command := range []struct{ label, saved, runs string }{
 		{"Build command", choice.build, plan.build}, {"Start command", choice.start, plan.start},
 	} {
-		if command.saved != command.runs {
+		// The asset stage's command is the recipe's own, never a saved one.
+		if command.saved != command.runs && !choice.assets {
 			plan.notes = append(plan.notes, command.label+" runs with "+plan.manager+": `"+command.runs+"` (saved: `"+command.saved+"`)")
 		}
 	}

@@ -105,7 +105,8 @@ func TestPHPDetectionAndRecipe(t *testing.T) {
 			t.Fatalf("Dockerfile missing %q:\n%s", want, prepared.DockerfilePreview)
 		}
 	}
-	if prepared.Toolchain != "php 8.4 · assets: bun 1 (the newest 1.x image)" || len(prepared.BaseImages) != 4 {
+	if prepared.Toolchain != "php 8.4 · assets: bun 1 (the newest 1.x image)" || len(prepared.BaseImages) != 4 ||
+		slices.ContainsFunc(prepared.Notes, func(note string) bool { return strings.Contains(note, "runs with") }) {
 		t.Fatalf("prepared = %+v", prepared)
 	}
 	if strings.Contains(prepared.DockerfilePreview, "mbstring") {

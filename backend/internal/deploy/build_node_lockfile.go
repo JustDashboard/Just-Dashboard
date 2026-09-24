@@ -296,19 +296,22 @@ func (c *nodeLockComparison) reading(path, manager, format, version string) node
 func nodeStaleSentence(path string, missingTotal int, missing []string, extra, changed int) string {
 	parts := []string{}
 	if missingTotal > 0 {
-		noun := "dependencies"
-		if missingTotal == 1 {
-			noun = "dependency"
-		}
-		parts = append(parts, fmt.Sprintf("is missing %d %s (%s)", missingTotal, noun, nodeNameList(missing, missingTotal)))
+		parts = append(parts, fmt.Sprintf("is missing %s (%s)", nodeCount(missingTotal, "dependency", "dependencies"), nodeNameList(missing, missingTotal)))
 	}
 	if changed > 0 {
-		parts = append(parts, fmt.Sprintf("locks %d package.json range(s) that changed", changed))
+		parts = append(parts, fmt.Sprintf("does not satisfy %s package.json asks for now", nodeCount(changed, "range", "ranges")))
 	}
 	if extra > 0 {
-		parts = append(parts, fmt.Sprintf("still lists %d dependency(ies) package.json removed", extra))
+		parts = append(parts, fmt.Sprintf("still lists %s package.json no longer has", nodeCount(extra, "dependency", "dependencies")))
 	}
 	return path + " " + strings.Join(parts, "; ")
+}
+
+func nodeCount(count int, one, many string) string {
+	if count == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %s", count, many)
 }
 
 func nodeNameList(names []string, total int) string {
