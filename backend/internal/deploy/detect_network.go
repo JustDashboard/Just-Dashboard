@@ -917,9 +917,10 @@ func (n *networkDetection) deno(marker *detectedMarkers, c *DetectedCandidate) l
 func (n *networkDetection) dockerfile(marker *detectedMarkers, c *DetectedCandidate, code listenReport) {
 	in := listenInputs{useCode: true, code: code}
 	if c.Port == 0 {
-		if port := dockerfileEnvPort(marker.dockerfileContent); port > 0 {
+		dockerfile := marker.dockerfileFor(c)
+		if port := dockerfileEnvPort(dockerfile.content); port > 0 {
 			c.Port = port
-			c.Evidence = append(c.Evidence, DetectionEvidence{Path: marker.dockerfile, Reason: fmt.Sprintf("ENV PORT=%d", port)})
+			c.Evidence = append(c.Evidence, DetectionEvidence{Path: dockerfile.path, Reason: fmt.Sprintf("ENV PORT=%d", port)})
 		}
 	}
 	if c.Port == 0 {

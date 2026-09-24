@@ -236,9 +236,13 @@ func sqliteOnVolume(candidate *DetectedCandidate, configuration PlanConfiguratio
 // empty — or, seeded from a committed copy, only the first time — and a tool
 // whose schema step nothing runs creates no table.
 func sqliteSchemaStepFinding(candidate *DetectedCandidate, build BuildPlanConfig) PreflightFinding {
+	// A release task runs on the host or in a one-off container of the
+	// image, neither of which mounts the plan's volumes, so the schema it
+	// applies never reaches the database on one.
+	build.ReleaseTasks = nil
 	item := schemaStepFinding(candidate, build)
 	if item.Severity == PreflightPass {
-		item.Means = "The SQLite database on the volume receives the " + item.Measured + " schema from the start command, a release task or the application itself."
+		item.Means = "The SQLite database on the volume receives the " + item.Measured + " schema from the start command or the application itself."
 		return item
 	}
 	item.Title = "The SQLite database on the volume will not receive the application's schema"
@@ -260,8 +264,9 @@ func seedFinding(candidate *DetectedCandidate, configuration PlanConfiguration, 
 	if !fresh || seedStepRE.MatchString(configuration.Build.StartCommand) {
 		return nil
 	}
+	// A release task reaches a linked server, not a volume.
 	for _, task := range configuration.Build.ReleaseTasks {
-		if seedStepRE.MatchString(task.Command) {
+		if hasDatabaseDependency(configuration.Dependencies) && seedStepRE.MatchString(task.Command) {
 			return nil
 		}
 	}

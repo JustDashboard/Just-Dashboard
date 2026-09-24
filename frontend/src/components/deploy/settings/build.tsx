@@ -45,7 +45,9 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { useProject } from "@/components/deploy/project-context"
 import {
+  BROWSER_PREFIX,
   PYTHON_VERSION,
+  dockerfileStageHint,
   validateConfiguration,
   withPackageManagerRunner,
 } from "@/components/deploy/deployment-defaults"
@@ -121,6 +123,8 @@ const BUILD_FIELD_IDS: Record<string, string> = {
   "build.pythonVersion": "build-python-version",
   "build.spaFallback": "build-spa",
   "build.dockerfile": "build-dockerfile",
+  "build.target": "build-target",
+  "build.primaryService": "build-primary-service",
   "build.buildCommand": "build-command",
   "build.startCommand": "build-start",
   "build.outputDirectory": "build-output",
@@ -134,6 +138,8 @@ const FIELD_SECTION: Record<string, "build" | "commands" | "image"> = {
   "build-go-version": "build",
   "build-python-version": "build",
   "build-dockerfile": "build",
+  "build-target": "build",
+  "build-primary-service": "build",
   "build-root": "commands",
   "build-command": "commands",
   "build-start": "commands",
@@ -145,9 +151,6 @@ const FIELD_SECTION: Record<string, "build" | "commands" | "image"> = {
 /** The Go releases the recipe builds with, as `build_go.go`'s own pattern states them. */
 const GO_VERSION = /^1\.(25|26)(\.[0-9]{1,3})?$/
 const GO_ERROR = "Use Go 1.25 or 1.26, or leave empty to follow go.mod."
-
-/** Prefixes whose variables a front-end build inlines into the JavaScript it serves. */
-const BROWSER_PREFIX = /^(NEXT_PUBLIC_|VITE_|PUBLIC_|NUXT_PUBLIC_|REACT_APP_|EXPO_PUBLIC_)/
 
 type Builder = {
   key: string
@@ -420,7 +423,7 @@ function builderReading(
   const product = buildMethodProduct(build.method, { image })
   const detail =
     build.method === "dockerfile"
-      ? build.dockerfile || "Dockerfile"
+      ? `${build.dockerfile || "Dockerfile"}${build.target ? ` · stage ${build.target}` : ""}`
       : build.method === "static"
         ? "served by nginx"
         : build.method === "image"
@@ -603,6 +606,10 @@ function BuildForm({
       { ...configuration, build: next, variables: planVariables(configuration) },
       deployment.profile,
     )
+    if (errors.target) {
+      setFieldError({ id: "build-target", message: errors.target })
+      return
+    }
     const refusal = errors.buildMethod || errors.buildSecrets || errors.pythonVersion
     if (refusal) {
       setError(refusal)
@@ -696,6 +703,7 @@ function BuildForm({
       pythonVersion: undefined,
       packageManager: undefined,
       spaFallback: choice.method === "static" ? build.spaFallback : undefined,
+      target: choice.method === "dockerfile" ? build.target : undefined,
     })
   }
 
@@ -736,6 +744,8 @@ function BuildForm({
             "goVersion",
             "pythonVersion",
             "dockerfile",
+            "target",
+            "primaryService",
           ]),
           refused: refusedIn("build") || Boolean(error),
         })}
@@ -878,9 +888,53 @@ function BuildForm({
                 aria-invalid={Boolean(errorFor("build-dockerfile"))}
                 className="font-mono"
                 placeholder="Dockerfile"
-                onChange={(event) => setBuild({ ...build, dockerfile: event.target.value })}
+                // A stage belongs to the file it was read from; another file
+                // keeping it would fail with "not a stage".
+                onChange={(event) =>
+                  setBuild({ ...build, dockerfile: event.target.value, target: undefined })
+                }
               />
             </InputGroup>
+          </Field>
+        )}
+        {build.method === "compose" && (
+          <Field
+            label="Primary service"
+            htmlFor="build-primary-service"
+            hint="The service readiness and the release's container follow. Leave empty for the one detection chose: it builds or publishes a port, never a database."
+            error={errorFor("build-primary-service")}
+          >
+            <Input
+              id="build-primary-service"
+              value={build.primaryService ?? ""}
+              readOnly={!canEdit}
+              aria-invalid={Boolean(errorFor("build-primary-service"))}
+              className="font-mono"
+              placeholder="web"
+              onChange={(event) =>
+                setBuild({ ...build, primaryService: event.target.value.trim() || undefined })
+              }
+            />
+          </Field>
+        )}
+        {build.method === "dockerfile" && (
+          <Field
+            label="Stage"
+            htmlFor="build-target"
+            hint={dockerfileStageHint()}
+            error={errorFor("build-target")}
+          >
+            <Input
+              id="build-target"
+              value={build.target ?? ""}
+              readOnly={!canEdit}
+              aria-invalid={Boolean(errorFor("build-target"))}
+              className="font-mono"
+              placeholder="the last stage"
+              onChange={(event) =>
+                setBuild({ ...build, target: event.target.value.trim() || undefined })
+              }
+            />
           </Field>
         )}
       </SettingSection>
@@ -1346,6 +1400,7 @@ function ReleaseTasksForm({
         <ReleaseTasks
           tasks={tasks}
           variables={configuration.variables}
+          buildMethod={configuration.build.method}
           disabled={!canEdit}
           onChange={(next) => draft.set(next)}
           rowError={(index) => (rowError?.index === index ? rowError.message : undefined)}

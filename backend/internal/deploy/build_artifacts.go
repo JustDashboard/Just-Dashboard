@@ -67,6 +67,15 @@ type BuildInvocation struct {
 	NoCache    bool
 	Pull       bool
 	Secrets    []BuildSecretValue
+	// Target is the Dockerfile stage to build; BuildArgs reach buildx as
+	// `--build-arg NAME` with the value only in its process environment.
+	Target    string
+	BuildArgs []BuildArgValue
+}
+
+type BuildArgValue struct {
+	Name  string
+	Value string
 }
 
 type BuildSecretValue struct {
@@ -103,6 +112,11 @@ type PreparedBuild struct {
 	SecretBindings       []BuildSecretConfig      `json:"secretBindings,omitempty"`
 	SecretLayerGuarantee string                   `json:"secretLayerGuarantee"`
 	ComposeServices      []PreparedComposeService `json:"composeServices,omitempty"`
+
+	// Target and BuildArgNames are the stage and the build arguments (by
+	// name) a custom Dockerfile build receives (build_dockerfile_args.go).
+	Target        string   `json:"target,omitempty"`
+	BuildArgNames []string `json:"buildArgNames,omitempty"`
 }
 
 type PreparedComposeService struct {
@@ -124,6 +138,9 @@ type ResolvedComposeSnapshot struct {
 	SourceDigest string                   `json:"sourceDigest"`
 	Files        []string                 `json:"files"`
 	Services     []ResolvedComposeService `json:"services"`
+	// PrimaryService is the analysis's choice; a snapshot recorded before
+	// there was one leaves it empty and keeps its first service.
+	PrimaryService string `json:"primaryService,omitempty"`
 }
 
 type ResolvedComposeService struct {
@@ -228,6 +245,9 @@ func (b *ArtifactBuilder) Prepare(
 		if err := writeGeneratedDockerfile(root, content); err != nil {
 			return PreparedBuild{}, err
 		}
+		if err := writeRecipeDockerignore(root, recipe.kind); err != nil {
+			return PreparedBuild{}, err
+		}
 		prepared.Dockerfile = ".just-dashboard/Dockerfile"
 		prepared.DockerfilePreview = content
 		prepared.DockerfileDigest = digestText(content)
@@ -247,6 +267,9 @@ func (b *ArtifactBuilder) Prepare(
 		if err := writeGeneratedDockerfile(root, content); err != nil {
 			return PreparedBuild{}, err
 		}
+		if err := writeRecipeDockerignore(root, "static"); err != nil {
+			return PreparedBuild{}, err
+		}
 		prepared.Dockerfile = ".just-dashboard/Dockerfile"
 		prepared.DockerfilePreview = content
 		prepared.DockerfileDigest = digestText(content)
@@ -260,6 +283,10 @@ func (b *ArtifactBuilder) Prepare(
 			return PreparedBuild{}, fmt.Errorf("%w: Dockerfile: %v", ErrUnsupportedBuilder, err)
 		}
 		if err := validateCustomDockerfile(content); err != nil {
+			return PreparedBuild{}, err
+		}
+		prepared.Target, prepared.BuildArgNames, err = dockerfileBuildInputs(content, config.Target, buildVariableNames)
+		if err != nil {
 			return PreparedBuild{}, err
 		}
 		prepared.Dockerfile = filepath.ToSlash(filepath.Clean(dockerfile))
@@ -319,10 +346,14 @@ func (b *ArtifactBuilder) Build(
 			}
 			secrets = append(secrets, BuildSecretValue{ID: requested.Variable, Step: requested.Step, Value: value})
 		}
+		buildArgs, err := dockerfileBuildArgValues(prepared.BuildArgNames, variables)
+		if err != nil {
+			return result, err
+		}
 		image, err := b.backend.BuildImage(ctx, BuildInvocation{
 			ContextDir: root, Dockerfile: prepared.Dockerfile, Tag: tag,
 			Platform: prepared.TargetPlatform, NoCache: prepared.CachePolicy == "no_cache",
-			Pull: true, Secrets: secrets,
+			Pull: true, Secrets: secrets, Target: prepared.Target, BuildArgs: buildArgs,
 		}, redactBuildEmitter(variables, emit))
 		if err != nil {
 			return result, err
@@ -360,16 +391,26 @@ func (b *ArtifactBuilder) Build(
 		if compose == nil {
 			return result, fmt.Errorf("%w: Compose analysis is unavailable", ErrArtifactMissing)
 		}
+		primary, err := chosenComposePrimaryService(config, *compose)
+		if err != nil {
+			return result, err
+		}
 		resolved := &ResolvedComposeSnapshot{
 			SourceDigest: compose.Digest, Files: append([]string(nil), compose.Files...),
-			Services: []ResolvedComposeService{},
+			Services: []ResolvedComposeService{}, PrimaryService: primary,
 		}
 		for _, service := range compose.Services {
 			if service.BuildContext != "" {
 				if strings.Contains(service.BuildContext, "$") || strings.Contains(service.BuildDockerfile, "$") {
 					return result, fmt.Errorf("%w: Compose service %s uses a dynamic build path", ErrUnsupportedBuilder, service.Name)
 				}
-				contextRoot, err := containedSubdirectory(root, service.BuildContext)
+				// `build: .` is the most common Compose build of all, and "." is
+				// the project root itself, not a subdirectory to contain.
+				contextRelative := filepath.Clean(service.BuildContext)
+				if contextRelative == "." {
+					contextRelative = ""
+				}
+				contextRoot, err := containedSubdirectory(root, contextRelative)
 				if err != nil {
 					return result, fmt.Errorf("%w: Compose service %s build context: %v", ErrUnsupportedBuilder, service.Name, err)
 				}
@@ -385,14 +426,26 @@ func (b *ArtifactBuilder) Build(
 					return result, fmt.Errorf("Compose service %s: %w", service.Name, err)
 				}
 				serviceTag := composeServiceImageTag(tag, service.Name)
+				buildArgs, err := composeServiceBuildArgs(service, variables)
+				if err != nil {
+					return result, fmt.Errorf("%w: Compose service %s: %v", ErrUnsupportedBuilder, service.Name, err)
+				}
+				target, err := composeServiceTarget(service, variables)
+				if err != nil {
+					return result, fmt.Errorf("%w: Compose service %s: %v", ErrUnsupportedBuilder, service.Name, err)
+				}
 				servicePrepared := PreparedBuild{
 					Method: BuildDockerfile, Dockerfile: dockerfile, DockerfileDigest: digestBytes(content),
-					TargetPlatform: prepared.TargetPlatform, CachePolicy: prepared.CachePolicy,
+					TargetPlatform: prepared.TargetPlatform, CachePolicy: prepared.CachePolicy, Target: target,
+				}
+				for _, arg := range buildArgs {
+					servicePrepared.BuildArgNames = append(servicePrepared.BuildArgNames, arg.Name)
 				}
 				servicePrepared.BuildArgv = buildPreviewArgv(servicePrepared, serviceTag)
 				image, err := b.backend.BuildImage(ctx, BuildInvocation{
 					ContextDir: contextRoot, Dockerfile: dockerfile, Tag: serviceTag,
 					Platform: prepared.TargetPlatform, NoCache: prepared.CachePolicy == "no_cache", Pull: true,
+					Target: target, BuildArgs: buildArgs,
 				}, redactBuildEmitter(variables, emit))
 				if err != nil {
 					return result, fmt.Errorf("build Compose service %s: %w", service.Name, err)
@@ -772,18 +825,21 @@ func renderStaticDockerfile(config BuildPlanConfig, base ResolvedImage) (string,
 	return strings.Join(lines, "\n") + "\n", nil
 }
 
-// staticServerLines configures nginx for a site whose client owns its routes:
-// a path with no file behind it is answered with index.html so a deep link
-// into the application opens instead of 404ing. Without the fallback the
-// image keeps nginx's own default configuration, byte for byte.
+// staticServerLines configures nginx the way its own default does — port 80,
+// index.html — and refuses every dot-path except .well-known, so a stray
+// .git/, .env or .htaccess in the published directory is never served. A
+// site whose client owns its routes also answers a path with no file behind
+// it with index.html, so a deep link into the application opens instead of
+// 404ing.
 func staticServerLines(spaFallback bool) []string {
-	if !spaFallback {
-		return nil
-	}
 	conf := []string{
 		"server {", "    listen 80;", "    server_name _;", "    root /usr/share/nginx/html;",
-		"    index index.html;", "    location / {", "        try_files $uri $uri/ /index.html;", "    }", "}",
+		"    index index.html index.htm;", `    location ~ /\.(?!well-known/) {`, "        deny all;", "    }",
 	}
+	if spaFallback {
+		conf = append(conf, "    location / {", "        try_files $uri $uri/ /index.html;", "    }")
+	}
+	conf = append(conf, "}")
 	quoted := make([]string, 0, len(conf))
 	for _, line := range conf {
 		quoted = append(quoted, "'"+line+"'")
@@ -813,6 +869,12 @@ func buildPreviewArgv(prepared PreparedBuild, tag string) []string {
 	}
 	if prepared.CachePolicy == "no_cache" {
 		argv = append(argv, "--no-cache")
+	}
+	if prepared.Target != "" {
+		argv = append(argv, "--target", prepared.Target)
+	}
+	for _, name := range prepared.BuildArgNames {
+		argv = append(argv, "--build-arg", name)
 	}
 	for _, id := range prepared.SecretIDs {
 		argv = append(argv, "--secret", "id="+id+",env=<ephemeral>")
@@ -986,30 +1048,6 @@ func containedRegularPath(root, relative string, limit int64) (string, error) {
 		return "", fmt.Errorf("path is not a bounded regular file")
 	}
 	return realPath, nil
-}
-
-func validateCustomDockerfile(content []byte) error {
-	text := string(content)
-	if strings.Contains(strings.ToLower(text), "-----begin private key-----") || containsURLCredentials(text) {
-		return fmt.Errorf("%w: custom Dockerfile contains credential material", ErrUnsupportedBuilder)
-	}
-	for _, raw := range strings.Split(text, "\n") {
-		line := strings.TrimSpace(raw)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		instruction, rest, found := strings.Cut(line, " ")
-		if !found {
-			continue
-		}
-		switch strings.ToUpper(instruction) {
-		case "ENV", "ARG", "RUN", "CMD", "ENTRYPOINT":
-			if secretAssignmentRE.MatchString(" "+rest) || secretCommandFlagRE.MatchString(" "+rest) {
-				return fmt.Errorf("%w: custom Dockerfile may place credential material in image layers or argv", ErrUnsupportedBuilder)
-			}
-		}
-	}
-	return nil
 }
 
 func regularExists(root, relative string) bool {

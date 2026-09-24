@@ -383,7 +383,7 @@ func candidateStateLayout(candidate *DetectedCandidate, marker *detectedMarkers)
 			return stateLayout{workdir: "/app"}, true
 		}
 	case BuildDockerfile:
-		workdir, user := dockerfileFinalWorkdirUser(marker.dockerfileContent)
+		workdir, user := dockerfileFinalWorkdirUser(marker.dockerfileFor(candidate).content)
 		layout := stateLayout{workdir: workdir, root: user == "" || user == "root" || user == "0" || strings.HasPrefix(user, "0:") || strings.HasPrefix(user, "root:")}
 		if layout.root {
 			layout.dataDir = "/data"
@@ -466,9 +466,10 @@ func applyStateDetection(marker *detectedMarkers, candidates []DetectedCandidate
 		found = append(found, dotnetStatePaths(candidate, marker, view, layout)...)
 		found = append(found, elixirStatePaths(candidate, view, layout)...)
 		if candidate.BuildMethod == BuildDockerfile {
-			for _, volume := range detectedDockerfileVolumes(marker.dockerfileContent) {
+			dockerfile := marker.dockerfileFor(candidate)
+			for _, volume := range detectedDockerfileVolumes(dockerfile.content) {
 				found = append(found, DetectedPersistentPath{
-					Kind: PersistentVolume, Path: volume, Target: volume, Source: marker.dockerfile,
+					Kind: PersistentVolume, Path: volume, Target: volume, Source: dockerfile.path,
 					Reason: "the Dockerfile declares VOLUME " + volume,
 				})
 			}

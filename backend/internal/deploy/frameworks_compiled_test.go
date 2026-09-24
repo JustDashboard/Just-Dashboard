@@ -138,7 +138,7 @@ func TestJavaDetectionAndRecipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"FROM gradle:8-jdk21@sha256:", "chmod +x ./gradlew && ./gradlew --no-daemon -q build -x test", "ls build/libs/*.jar", "-e '-plain'", `"java -Xmx256m -jar /app/app.jar"`} {
+	for _, want := range []string{"FROM gradle:8-jdk21@sha256:", `sed -i 's/\r$//' ./gradlew && chmod +x ./gradlew && ./gradlew --no-daemon -q build -x test`, "ls build/libs/*.jar", "-e '-plain'", `"java -Xmx256m -jar /app/app.jar"`} {
 		if !strings.Contains(prepared.DockerfilePreview, want) {
 			t.Fatalf("Dockerfile missing %q:\n%s", want, prepared.DockerfilePreview)
 		}

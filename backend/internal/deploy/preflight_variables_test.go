@@ -314,6 +314,30 @@ func TestEnvironmentFindings(t *testing.T) {
 			want: map[string]PreflightSeverity{"migrations_not_run": PreflightWarning, "phoenix_host_unbound_phx_host": PreflightWarning},
 		},
 		{
+			// The Dockerfile reading made the overlay the release command,
+			// which release_command_unmapped answers instead.
+			name: "Phoenix migrations the release command runs",
+			candidate: DetectedCandidate{Name: "phoenix", BuildMethod: BuildDockerfile, Framework: "phoenix", ReleaseCommand: "bin/migrate",
+				EnvironmentNotes: []EnvironmentNote{{Code: "phoenix_migrate_overlay", Path: "rel/overlays/bin/migrate"}}},
+			absent: []string{"migrations_not_run"},
+		},
+		{
+			name: "a build-time read a repository Dockerfile does not declare",
+			candidate: DetectedCandidate{Name: "web", BuildMethod: BuildDockerfile, Variables: []DetectedVariable{
+				{Name: "DATABASE_URL", Sources: []string{"prisma.config.ts"}, Phase: "build", Required: true},
+			}},
+			staged: map[string]string{"DATABASE_URL": "${{database.4}}"},
+			want:   map[string]PreflightSeverity{"build_variable_unreachable_database_url": PreflightWarning},
+		},
+		{
+			// dockerfile_build_args and dockerfile_arg_not_passed answer it.
+			name: "a build-time read the Dockerfile declares with ARG",
+			candidate: DetectedCandidate{Name: "web", BuildMethod: BuildDockerfile, DockerfileArgs: []DockerfileArg{{Name: "NEXT_PUBLIC_API_URL", Consumed: true}},
+				Variables: []DetectedVariable{{Name: "NEXT_PUBLIC_API_URL", Sources: []string{"src/env.ts"}, Phase: "build", Required: true}}},
+			staged: map[string]string{"NEXT_PUBLIC_API_URL": "https://api.example.com"},
+			absent: []string{"build_variable_unreachable_next_public_api_url"},
+		},
+		{
 			name: "build scripts that fetch from localhost",
 			candidate: DetectedCandidate{Name: "web", BuildMethod: BuildRecipe, EnvironmentNotes: []EnvironmentNote{
 				{Code: "build_fetches_localhost", Detail: "prebuild script", Path: "package.json"},

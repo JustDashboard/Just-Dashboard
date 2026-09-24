@@ -178,6 +178,11 @@ func schemaStepConfigured(candidate *DetectedCandidate, build BuildPlanConfig) b
 		return true
 	}
 	for _, task := range build.ReleaseTasks {
+		// A host task that needs the application's toolchain cannot apply
+		// anything; counting it cleared the warning for a step that fails.
+		if _, unbuilt := releaseTaskNeedsApplication(task.Command); unbuilt && task.Runner != ReleaseTaskRunnerImage {
+			continue
+		}
 		if tool.applied(task.Command) {
 			return true
 		}

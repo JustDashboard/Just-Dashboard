@@ -2,8 +2,13 @@ import { describe, expect, test } from "bun:test"
 import {
   browserInlined,
   canGenerateSecret,
+  candidateBlocker,
   checksForRuntime,
+  composeSourceForCandidate,
+  connectedRepositoryRemote,
   defaultConfiguration,
+  defaultReleaseTaskRunner,
+  dockerfileStageHint,
   discoveredEnvironmentRows,
   environmentRowsToSend,
   generateSecretValue,
@@ -754,4 +759,184 @@ test("relinking keeps the connection shape the variable's reference asked for", 
   expect(withPreviousConnectionShape("postgres://db-7.jd.internal/app", "5.jdbc")).toBe(
     "postgres://db-7.jd.internal/app",
   )
+})
+
+describe("repository container definitions", () => {
+  test("a Dockerfile plan builds the stage detection chose", () => {
+    const plan = defaultConfiguration(
+      "web",
+      candidate({
+        buildMethod: "dockerfile",
+        dockerfile: "deploy/app.Dockerfile",
+        dockerfileTarget: "production",
+      }),
+    )
+    expect(plan.build.dockerfile).toBe("deploy/app.Dockerfile")
+    expect(plan.build.target).toBe("production")
+    const recipe = defaultConfiguration("web", candidate({ dockerfileTarget: "production" }))
+    expect(recipe.build.target).toBeUndefined()
+  })
+
+  test("a declared release command is planned in the release image", () => {
+    const plan = defaultConfiguration(
+      "web",
+      candidate({ buildMethod: "recipe", releaseCommand: "python manage.py migrate --noinput" }),
+    )
+    expect(plan.build.releaseTasks).toEqual([
+      {
+        name: "release",
+        command: "python manage.py migrate --noinput",
+        timeoutSeconds: 600,
+        env: [],
+        runner: "image",
+      },
+    ])
+    expect(validateConfiguration(plan, "web").releaseTasks).toBeUndefined()
+    expect(
+      defaultConfiguration("web", candidate({ buildMethod: "recipe" })).build.releaseTasks,
+    ).toEqual([])
+  })
+
+  test("an image task without an image to run in is refused before save", () => {
+    const plan = defaultConfiguration("worker", candidate({ buildMethod: "recipe" }))
+    plan.build.releaseTasks = [
+      { name: "migrate", command: "bin/migrate", timeoutSeconds: 60, env: [], runner: "image" },
+    ]
+    for (const method of ["none", "legacy_compose"]) {
+      plan.build.method = method
+      expect(validateConfiguration(plan, "worker").releaseTasks).toContain("release image")
+      expect(defaultReleaseTaskRunner(method)).toBeUndefined()
+    }
+    plan.build.method = "compose"
+    expect(validateConfiguration(plan, "worker").releaseTasks).toBeUndefined()
+    expect(defaultReleaseTaskRunner("dockerfile")).toBe("image")
+  })
+
+  test("a blank release task command is refused before save", () => {
+    const plan = defaultConfiguration("worker", candidate({ buildMethod: "recipe" }))
+    plan.build.releaseTasks = [{ name: "migrate", command: "  \n", timeoutSeconds: 60, env: [] }]
+    expect(validateConfiguration(plan, "worker").releaseTasks).toContain("command")
+  })
+
+  test("a Dockerfile stage is a stage name, and the hint names the ones detection read", () => {
+    const plan = defaultConfiguration("web", candidate({ buildMethod: "dockerfile" }))
+    plan.build.target = "prod --push"
+    expect(validateConfiguration(plan, "web").target).toContain("stage name")
+    plan.build.target = "runner"
+    expect(validateConfiguration(plan, "web").target).toBeUndefined()
+    expect(dockerfileStageHint(["deps", "runner"])).toBe(
+      "Leave empty to build the last stage. This Dockerfile's stages: deps, runner.",
+    )
+    expect(dockerfileStageHint()).toBe("Leave empty to build the last stage.")
+  })
+
+  test("a browser-public Compose variable is planned plain, so a build argument can carry it", () => {
+    const plan = defaultConfiguration(
+      "compose",
+      undefined,
+      { kind: "compose", mode: "compose_git" },
+      {
+        candidates: [],
+        compose: { variables: ["NEXT_PUBLIC_API_URL", "DATABASE_URL"] },
+      },
+    )
+    const sensitivity = Object.fromEntries(
+      plan.variables.map((variable) => [variable.name, variable.sensitivity]),
+    )
+    expect(sensitivity).toEqual({ NEXT_PUBLIC_API_URL: "plain", DATABASE_URL: "secret" })
+  })
+
+  test("the candidate list says what stops a candidate building", () => {
+    expect(
+      candidateBlocker(
+        candidate({
+          buildMethod: "dockerfile",
+          imageBuildIssues: [
+            { code: "dockerfile_dev_server", severity: "warning", detail: "starts a watcher" },
+            {
+              code: "dockerfile_copy_source_missing",
+              severity: "blocked",
+              detail: "line 3 COPY .env: not in the build context .",
+            },
+          ],
+        }),
+      ),
+    ).toBe("line 3 COPY .env: not in the build context .")
+    expect(candidateBlocker(candidate({ recipe: "node", packageManagers: ["bun", "npm"] }))).toBe(
+      "choose the package manager: bun, npm",
+    )
+    expect(candidateBlocker(candidate({ recipe: "node", packageManager: "bun" }))).toBeUndefined()
+  })
+
+  test("a repository's Compose file switches to a Compose source with the same checkout", () => {
+    const compose = candidate({
+      buildMethod: "compose",
+      profile: "compose",
+      evidence: [
+        { path: "docker-compose.yml", reason: "Compose configuration" },
+        { path: "docker-compose.yml", reason: "development services" },
+      ],
+    })
+    expect(
+      composeSourceForCandidate(
+        {
+          kind: "git",
+          mode: "git_url",
+          url: "https://example.com/o/r.git",
+          ref: "main",
+          subdirectory: "app",
+        },
+        compose,
+      ),
+    ).toEqual({
+      kind: "compose",
+      mode: "compose_git",
+      url: "https://example.com/o/r.git",
+      ref: "main",
+      credentialId: undefined,
+      subdirectory: "app",
+      includeSubmodules: undefined,
+      includeLfs: undefined,
+      composeFiles: [{ path: "docker-compose.yml", content: "", order: 0 }],
+    })
+    expect(composeSourceForCandidate({ kind: "git", mode: "git_url", url: "x" }, candidate())).toBe(
+      undefined,
+    )
+    // A connected repository keeps its credential and becomes the remote the
+    // backend would clone it from.
+    expect(
+      composeSourceForCandidate(
+        {
+          kind: "git",
+          mode: "connected_repository",
+          provider: "github",
+          repository: "o/r",
+          ref: "main",
+          credentialId: 7,
+        },
+        compose,
+      ),
+    ).toMatchObject({
+      mode: "compose_git",
+      url: "https://github.com/o/r.git",
+      credentialId: 7,
+      ref: "main",
+    })
+  })
+
+  test("a connected repository's remote is the one the backend clones", () => {
+    const connected = { kind: "git", mode: "connected_repository", repository: "team/app" }
+    expect(connectedRepositoryRemote({ ...connected, provider: "gitlab" })).toBe(
+      "https://gitlab.com/team/app.git",
+    )
+    expect(
+      connectedRepositoryRemote({
+        ...connected,
+        provider: "gitea",
+        providerBaseUrl: "https://git.example.com/",
+      }),
+    ).toBe("https://git.example.com/team/app.git")
+    expect(connectedRepositoryRemote({ ...connected, provider: "gitea" })).toBeUndefined()
+    expect(connectedRepositoryRemote({ kind: "git", mode: "git_url", url: "x" })).toBeUndefined()
+  })
 })

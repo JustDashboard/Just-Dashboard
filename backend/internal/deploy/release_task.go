@@ -18,6 +18,7 @@ type ReleaseTaskEvidence struct {
 	VariableNames []string `json:"variableNames"`
 	DurationMS    int64    `json:"durationMs"`
 	ExitCode      int      `json:"exitCode"`
+	Runner        string   `json:"runner,omitempty"`
 }
 
 func runStoredReleaseTask(
@@ -162,3 +163,7 @@ func (w *releaseTaskLineWriter) flush() {
 		w.emitPending()
 	}
 }
+
+// ReleaseTaskRunnerImage runs a release task in a throwaway container of
+// the release's own image (release_task_image.go).
+const ReleaseTaskRunnerImage = "image"

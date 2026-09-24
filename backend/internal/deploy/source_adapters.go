@@ -533,13 +533,17 @@ func (a *HostSourceAnalyzer) analyzeCompose(
 		Kind: SourceCompose, Digest: analysis.Digest, ComposeFiles: analysis.Files,
 		Services: serviceNames, CredentialID: source.CredentialID,
 	}
+	if projectDirectory != "" {
+		analyzeComposeTree(projectDirectory, &analysis)
+	}
 	needs := append([]string{}, analysis.Unsupported...)
 	needs = append(needs, analysis.Warnings...)
 	candidate := newDetectedCandidate("", BuildCompose, DetectedCandidate{
 		Name:    fmt.Sprintf("Compose stack (%d services)", len(serviceNames)),
 		Profile: ProfileCompose, Confidence: ConfidenceHigh,
-		Evidence:      []DetectionEvidence{{Path: strings.Join(analysis.Files, ", "), Reason: analysis.Digest}},
+		Evidence:      composeSourceEvidence(analysis),
 		NeedsDecision: needs,
+		Variables:     composeOptionalDetectedVariables(analysis),
 	})
 	result := DetectionResult{
 		Source: identity, Candidates: []DetectedCandidate{candidate}, SelectedID: candidate.ID,
@@ -552,7 +556,7 @@ func (a *HostSourceAnalyzer) analyzeCompose(
 		return result, nil
 	}
 	inputs := make([]dockerx.ComposeInput, 0, len(documents))
-	for _, document := range documents {
+	for _, document := range composeValidationDocuments(documents, analysis) {
 		inputs = append(inputs, dockerx.ComposeInput{Path: document.Path, Content: document.Content})
 	}
 	validation, err := a.docker.ValidateComposePlan(ctx, projectDirectory, inputs, analysis.Variables)
@@ -562,6 +566,7 @@ func (a *HostSourceAnalyzer) analyzeCompose(
 	if !validation.Valid {
 		return DetectionResult{}, fmt.Errorf("%w: %s", ErrInvalidCompose, validation.Error)
 	}
+	resolveComposeImagePlatforms(ctx, a.docker, &analysis)
 	return result, nil
 }
 
@@ -1318,6 +1323,9 @@ func configurationFromDetection(result DetectionResult) PlanConfiguration {
 		Method: selected.BuildMethod, RootDirectory: selected.Root,
 		BuildCommand: selected.BuildCommand, StartCommand: selected.StartCommand,
 		OutputDirectory: selected.OutputDirectory,
+	}
+	if selected.BuildMethod == BuildDockerfile {
+		configuration.Build.Dockerfile, configuration.Build.Target = selected.Dockerfile, selected.DockerfileTarget
 	}
 	configuration.Runtime.InternalPort = selected.Port
 	return configuration

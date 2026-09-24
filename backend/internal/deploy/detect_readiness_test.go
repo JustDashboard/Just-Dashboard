@@ -2,16 +2,25 @@ package deploy
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
+// detectFixture detects a checkout of the files, with scripts executable as
+// a repository commits them, and refuses a result that would not save.
 func detectFixture(t *testing.T, files map[string]string) DetectionResult {
 	t.Helper()
 	root := t.TempDir()
 	for path, content := range files {
 		writeBuildFixture(t, root, path, content)
+		if strings.HasSuffix(path, ".sh") || strings.HasPrefix(filepath.Base(path), "docker-entrypoint") ||
+			strings.HasPrefix(path, "bin/") {
+			if err := os.Chmod(filepath.Join(root, path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 	result, err := (Detector{}).DetectPath(context.Background(), root, SourceIdentity{})
 	if err != nil {
@@ -57,8 +66,8 @@ end
   config.hosts << "shop.example.com"
 end
 `
-	railsDockerfile = "FROM ruby:3.3-slim\nWORKDIR /rails\nCOPY . .\nEXPOSE 3000\nCMD [\"./bin/rails\", \"server\"]\n"
-	nodeLock        = `{}`
+	minimalRailsDockerfile = "FROM ruby:3.3-slim\nWORKDIR /rails\nCOPY . .\nEXPOSE 3000\nCMD [\"./bin/rails\", \"server\"]\n"
+	nodeLock               = `{}`
 )
 
 // Every stack's readiness as detection proposes it: the path, whether any
@@ -79,17 +88,17 @@ func TestDetectedReadinessFollowsWhatTheSourceDeclares(t *testing.T) {
 		nilResult bool
 	}{
 		{name: "rails 7.1 dockerfile uses /up", method: BuildDockerfile,
-			files: map[string]string{"Dockerfile": railsDockerfile, "config/routes.rb": railsRoutes, "config/environments/production.rb": rails71Production},
+			files: map[string]string{"Dockerfile": minimalRailsDockerfile, "config/routes.rb": railsRoutes, "config/environments/production.rb": rails71Production},
 			kind:  "http", path: "/up", source: readinessFromFramework, evidence: "Rails health route"},
 		{name: "rails docker-entrypoint prepares the database first", method: BuildDockerfile,
 			files: map[string]string{"Dockerfile": "FROM ruby:3.3-slim\nEXPOSE 80\nENTRYPOINT [\"/rails/bin/docker-entrypoint\"]\nCMD [\"./bin/thrust\", \"./bin/rails\", \"server\"]\n",
 				"config/routes.rb": railsRoutes},
 			kind: "http", path: "/up", source: readinessFromFramework, attempts: 40, interval: 3},
 		{name: "rails api without a health route answers anything", method: BuildDockerfile,
-			files: map[string]string{"Dockerfile": railsDockerfile, "config/application.rb": "module Api\n  class Application < Rails::Application\n    config.api_only = true\n  end\nend\n"},
+			files: map[string]string{"Dockerfile": minimalRailsDockerfile, "config/application.rb": "module Api\n  class Application < Rails::Application\n    config.api_only = true\n  end\nend\n"},
 			kind:  "http", path: "/", any: true, source: readinessFromConvention},
 		{name: "kamal healthcheck wins", method: BuildDockerfile,
-			files: map[string]string{"Dockerfile": railsDockerfile, "config/routes.rb": railsRoutes, "config/deploy.yml": "service: shop\nproxy:\n  ssl: true\n  healthcheck:\n    interval: 3\n    path: /healthz\n"},
+			files: map[string]string{"Dockerfile": minimalRailsDockerfile, "config/routes.rb": railsRoutes, "config/deploy.yml": "service: shop\nproxy:\n  ssl: true\n  healthcheck:\n    interval: 3\n    path: /healthz\n"},
 			kind:  "http", path: "/healthz", source: readinessFromPlatform, evidence: "Kamal"},
 		{name: "dockerfile HEALTHCHECK on the served port", method: BuildDockerfile,
 			files: map[string]string{"Dockerfile": "FROM node:22\nEXPOSE 8080\nHEALTHCHECK --interval=10s CMD curl -fsS http://localhost:8080/healthz || exit 1\nCMD [\"node\",\"server.js\"]\n"},
@@ -287,13 +296,13 @@ func TestDetectedReadinessFollowsWhatTheSourceDeclares(t *testing.T) {
 func TestDetectedReadinessReadsHostAndHTTPSSettings(t *testing.T) {
 	t.Parallel()
 	rails := fixtureCandidate(t, detectFixture(t, map[string]string{
-		"Dockerfile": railsDockerfile, "config/routes.rb": railsRoutes, "config/environments/production.rb": rails71Production,
+		"Dockerfile": minimalRailsDockerfile, "config/routes.rb": railsRoutes, "config/environments/production.rb": rails71Production,
 	}), BuildDockerfile).Readiness
 	if rails == nil || rails.HTTPSRedirect != "config.force_ssl in config/environments/production.rb" || rails.HTTPSRedirectIgnoresProxy {
 		t.Fatalf("rails 7.1 = %+v", rails)
 	}
 	rails8 := fixtureCandidate(t, detectFixture(t, map[string]string{
-		"Dockerfile": railsDockerfile, "config/routes.rb": railsRoutes, "config/environments/production.rb": rails8Production,
+		"Dockerfile": minimalRailsDockerfile, "config/routes.rb": railsRoutes, "config/environments/production.rb": rails8Production,
 	}), BuildDockerfile).Readiness
 	if rails8 == nil || rails8.HTTPSRedirect != "" || strings.Join(rails8.AllowedHosts, ",") != "shop.example.com" ||
 		rails8.AllowedHostsSource != "config.hosts in config/environments/production.rb" {

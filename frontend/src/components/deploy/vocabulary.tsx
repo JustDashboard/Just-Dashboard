@@ -1214,7 +1214,7 @@ export const LINK_STATUS: Record<
 export const RELEASE_GROUPS = [
   { label: "Source", keys: ["resolve_source", "acquire_source", "analyze_plan"] },
   { label: "Build", keys: ["prepare_context", "build_artifact"] },
-  { label: "Release", keys: ["render_runtime", "release_task", "backup_gate"] },
+  { label: "Release", keys: ["render_runtime", "backup_gate", "release_task"] },
   // Its own node rather than a detail of Release: a deployment publishing a
   // name for the first time spends real seconds here talking to a certificate
   // authority, and a progress line that reads "Release" throughout looks stuck.

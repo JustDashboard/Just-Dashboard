@@ -124,7 +124,10 @@ carries no licensing question at all.
   and Buildx release host. Changes to runtime resource limits or failed-gate diagnostics also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveRuntimeDiagnoserReadsExitedContainer -count=1 -v`,
   which starts a real container with limits, lets it exit non-zero and checks the captured state, output
-  and the limits the daemon applied.
+  and the limits the daemon applied. Changes to release tasks that run in the release image also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveReleaseTaskRunsInTheReleaseImage -count=1 -v`,
+  which builds a tiny image and runs tasks in it for their output, exit codes, timeout and cleanup,
+  including a container a stopped dashboard left under a task's name.
 - `python3 scripts/e2e-deployments.py` is the real-backend acceptance lane for deployments: it builds the
   backend, starts it on loopback with a fresh data directory, and drives the public API through a signed
   webhook channel, an nginx image deployment with resource limits, a busybox image that exits before it

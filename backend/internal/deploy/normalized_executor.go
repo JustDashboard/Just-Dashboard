@@ -400,7 +400,15 @@ func (e *NormalizedStepExecutor) prepareContext(
 		return normalizedStepFailure(err)
 	}
 	tag := releaseImageTag(execution.Run.EnvironmentID, execution.Run.ID)
-	prepared, err := e.builder.Prepare(ctx, buildRoot, plan.Build, execution.Run.Operation == OperationForceBuild, tag, buildVariableNames(buildVariables)...)
+	names := buildVariableNames(buildVariables)
+	if plan.Build.Method == BuildDockerfile {
+		// A custom Dockerfile never binds names as secrets; the names it is
+		// handed are the plain values it may receive as build arguments.
+		if names, err = e.plainBuildVariableNames(ctx, execution.Run); err != nil {
+			return normalizedStepFailure(err)
+		}
+	}
+	prepared, err := e.builder.Prepare(ctx, buildRoot, plan.Build, execution.Run.Operation == OperationForceBuild, tag, names...)
 	if err != nil {
 		cleaned, cleanupErr := source.Cleanup()
 		result := normalizedStepFailure(err)
@@ -427,6 +435,13 @@ func (e *NormalizedStepExecutor) buildArtifact(
 	buildVariables, err := e.variablesForScope(ctx, execution.Run.ID, execution.Run.EnvironmentID, "build")
 	if err != nil {
 		return normalizedStepFailure(err)
+	}
+	if plan.Build.Method == BuildCompose {
+		// A Compose build receives values only as the file's own build
+		// arguments (build_dockerfile_args.go).
+		if buildVariables, err = e.composeBuildValues(ctx, execution.Run, plan.BuildEvidence.Compose); err != nil {
+			return normalizedStepFailure(err)
+		}
 	}
 	registryAuth := ""
 	if plan.SourceKind == SourceImage || plan.SourceKind == SourceBlueprint {
@@ -540,22 +555,40 @@ func (e *NormalizedStepExecutor) runReleaseTasks(
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
+	image, imageRunner, err := e.releaseTaskImageRequest(ctx, execution, plan)
+	if err != nil {
+		_, _ = source.Cleanup()
+		return normalizedStepFailure(err)
+	}
 	evidence := []ReleaseTaskEvidence{}
 	var cleanupResults []any
-	for _, task := range plan.Build.ReleaseTasks {
+	for index, task := range plan.Build.ReleaseTasks {
 		if err := stepLog(execution, "status", "Running release task "+task.Name); err != nil {
 			return normalizedStepFailure(err)
 		}
-		taskEvidence, group, taskErr := runStoredReleaseTask(
-			ctx, source.Root, task, values,
-			func(line BuildLog) error { return stepLog(execution, line.Stream, line.Text) },
-		)
+		emit := func(line BuildLog) error { return stepLog(execution, line.Stream, line.Text) }
+		var taskEvidence ReleaseTaskEvidence
+		var taskErr error
+		if task.Runner == ReleaseTaskRunnerImage {
+			request := image
+			request.Task, request.Index = task, index
+			var container any
+			taskEvidence, container, taskErr = runImageReleaseTask(ctx, imageRunner, request, values, emit)
+			cleanupResults = append(cleanupResults, container)
+		} else {
+			var group any
+			taskEvidence, group, taskErr = runStoredReleaseTask(ctx, source.Root, task, values, emit)
+			cleanupResults = append(cleanupResults, group)
+		}
 		evidence = append(evidence, taskEvidence)
-		cleanupResults = append(cleanupResults, group)
 		if taskErr != nil {
 			cleaned, cleanupErr := source.Cleanup()
 			state := StepFailed
 			code := "release_task_failed"
+			if taskEvidence.ExitCode == 127 {
+				// `sh: npx: not found`: the program is not where the task ran.
+				code = "release_task_tool_missing"
+			}
 			if ctx.Err() != nil {
 				state, code = StepCancelled, "cancelled"
 			}

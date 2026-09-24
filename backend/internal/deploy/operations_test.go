@@ -35,9 +35,11 @@ func TestRuntimeServicesScopeAvailabilityAndSecretFreeProjection(t *testing.T) {
 	}
 	live := container("web", "7", "10")
 	live.Health, live.ComposeStack, live.ComposeSvc = "healthy", "jd-e7", "web"
+	task := container("jd-e7-run3-task1", "7", "11")
+	task.Labels[releaseTaskLabel] = "migrate"
 	owner := &runtimeObservationFake{items: []dockerx.Container{
 		live, container("candidate", "7", "11"), container("other", "8", "10"),
-		container("invalid", "7", "oops"),
+		container("invalid", "7", "oops"), task,
 	}}
 	result := ObserveRuntimeServices(t.Context(), owner, 7, 10)
 	if result.Status != "available" || result.ObservedAt.IsZero() || len(result.Services) != 2 {

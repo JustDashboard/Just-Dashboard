@@ -313,13 +313,14 @@ func scriptSegmentName(segment string) string {
 // settleDockerfileStart records a Dockerfile whose command detaches. The
 // Dockerfile is the operator's own, so nothing is rewritten.
 func settleDockerfileStart(candidate *DetectedCandidate, marker *detectedMarkers) {
-	command := dockerfileStartText(marker.dockerfileContent)
+	dockerfile := marker.dockerfileFor(candidate)
+	command := dockerfileStartText(dockerfile.content)
 	issue := classifyStartCommand(command)
 	if issue == nil {
 		return
 	}
 	candidate.StartDetaches = &DetectedStartDetach{
-		Command: boundedEvidence(command), Source: marker.dockerfile,
+		Command: boundedEvidence(command), Source: dockerfile.path,
 		Effect: issue.effect, Reason: issue.reason, Action: issue.action,
 	}
 }

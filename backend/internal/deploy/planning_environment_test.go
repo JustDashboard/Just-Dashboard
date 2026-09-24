@@ -55,9 +55,9 @@ func TestDraftEnvironmentIsSealedAndCommitsAtomicallyWithDeclaredScopes(t *testi
 	}
 	const secret = "unique-draft-secret-must-remain-sealed"
 	draft.Data.Configuration.Variables = append(draft.Data.Configuration.Variables, PlannedVariable{
-		Name: "PUBLIC_DEFAULT", Sensitivity: "plain", Scopes: []string{"runtime"}, Value: "public-default",
+		Name: "DECLARED_DEFAULT", Sensitivity: "plain", Scopes: []string{"runtime"}, Value: "public-default",
 	})
-	dotenv := "API_TOKEN=" + secret + "\nGENERATED=operator-override\nEXTRA=extra-secret\nPUBLIC_DEFAULT=private-override"
+	dotenv := "API_TOKEN=" + secret + "\nGENERATED=operator-override\nEXTRA=extra-secret\nDECLARED_DEFAULT=private-override\nNEXT_PUBLIC_API_URL=https://api.example.com"
 	draft, err := fixture.plans.Save(t.Context(), draft.ID, 41, false, DraftSaveRequest{
 		Revision: draft.Revision, Step: DraftConfiguration, Configuration: draft.Data.Configuration, Dotenv: &dotenv,
 	})
@@ -68,7 +68,7 @@ func TestDraftEnvironmentIsSealedAndCommitsAtomicallyWithDeclaredScopes(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(draft.EnvironmentKeys, []string{"API_TOKEN", "EXTRA", "GENERATED", "PUBLIC_DEFAULT"}) {
+	if !reflect.DeepEqual(draft.EnvironmentKeys, []string{"API_TOKEN", "DECLARED_DEFAULT", "EXTRA", "GENERATED", "NEXT_PUBLIC_API_URL"}) {
 		t.Fatalf("saved metadata = %#v", draft.EnvironmentKeys)
 	}
 	var data, sealed string
@@ -100,7 +100,7 @@ func TestDraftEnvironmentIsSealedAndCommitsAtomicallyWithDeclaredScopes(t *testi
 		{"API_TOKEN", secret, "runtime,release_task"},
 		{"GENERATED", "operator-override", "runtime"},
 		{"EXTRA", "extra-secret", "runtime,build"},
-		{"PUBLIC_DEFAULT", "private-override", "runtime"},
+		{"DECLARED_DEFAULT", "private-override", "runtime"},
 	} {
 		var stored, sensitivity, scopes string
 		if err := fixture.store.DB.QueryRow(`SELECT value_enc,sensitivity,scopes FROM deploy_variable_revisions WHERE environment_id=? AND key=?`, result.EnvironmentID, tc.name).Scan(&stored, &sensitivity, &scopes); err != nil {
@@ -111,8 +111,12 @@ func TestDraftEnvironmentIsSealedAndCommitsAtomicallyWithDeclaredScopes(t *testi
 			t.Fatalf("%s commit did not preserve its value, sensitivity and scopes: %v, %s, %s", tc.name, err, sensitivity, scopes)
 		}
 	}
+	var sensitivity string
+	if err := fixture.store.DB.QueryRow(`SELECT sensitivity FROM deploy_variable_revisions WHERE environment_id=? AND key=?`, result.EnvironmentID, "NEXT_PUBLIC_API_URL").Scan(&sensitivity); err != nil || sensitivity != "plain" {
+		t.Fatalf("a browser-public value was stored %q (%v); the page's JavaScript carries it by design", sensitivity, err)
+	}
 	replay, err := fixture.plans.Commit(t.Context(), draft.ID, 41, true, DraftCommitRequest{Revision: draft.Revision})
-	if err != nil || replay.Created || replay.ProjectID != result.ProjectID || planningTableCount(t, fixture.store, "deploy_variable_revisions") != 4 {
+	if err != nil || replay.Created || replay.ProjectID != result.ProjectID || planningTableCount(t, fixture.store, "deploy_variable_revisions") != 5 {
 		t.Fatalf("commit replay was not idempotent: %#v, %v", replay, err)
 	}
 }
@@ -120,10 +124,10 @@ func TestDraftEnvironmentIsSealedAndCommitsAtomicallyWithDeclaredScopes(t *testi
 func TestRemovingDraftOverridesRestoresDeclaredDefaultsAndGenerators(t *testing.T) {
 	fixture, draft := environmentDraft(t)
 	draft.Data.Configuration.Variables = append(draft.Data.Configuration.Variables,
-		PlannedVariable{Name: "PUBLIC_DEFAULT", Sensitivity: "plain", Scopes: []string{"runtime"}, Value: "public-default"},
+		PlannedVariable{Name: "DECLARED_DEFAULT", Sensitivity: "plain", Scopes: []string{"runtime"}, Value: "public-default"},
 		PlannedVariable{Name: "ALIAS", Sensitivity: "secret", Scopes: []string{"runtime"}, Reference: "${{variable.API_TOKEN}}"},
 	)
-	text := "API_TOKEN=retained-secret\nGENERATED=operator-override\nPUBLIC_DEFAULT=private-override\nALIAS=temporary-alias"
+	text := "API_TOKEN=retained-secret\nGENERATED=operator-override\nDECLARED_DEFAULT=private-override\nALIAS=temporary-alias"
 	draft, err := fixture.plans.Save(t.Context(), draft.ID, 41, false, DraftSaveRequest{
 		Revision: draft.Revision, Step: DraftConfiguration, Configuration: draft.Data.Configuration, Dotenv: &text,
 	})
@@ -153,7 +157,7 @@ func TestRemovingDraftOverridesRestoresDeclaredDefaultsAndGenerators(t *testing.
 	}
 	for _, tc := range []struct{ name, expected, sensitivity string }{
 		{"GENERATED", "", "secret"},
-		{"PUBLIC_DEFAULT", "public-default", "plain"},
+		{"DECLARED_DEFAULT", "public-default", "plain"},
 		{"ALIAS", "${{variable.API_TOKEN}}", "secret"},
 	} {
 		var sealed, sensitivity string
@@ -300,9 +304,9 @@ func TestDraftEmptyInputCannotBypassRequiredGenerationOrCommit(t *testing.T) {
 func TestDraftEmptyOverrideSurvivesReloadAndRetainWithoutGeneratingDefault(t *testing.T) {
 	fixture, draft := environmentDraft(t)
 	draft.Data.Configuration.Variables = append(draft.Data.Configuration.Variables, PlannedVariable{
-		Name: "PUBLIC_DEFAULT", Sensitivity: "plain", Scopes: []string{"runtime"}, Value: "public-default",
+		Name: "DECLARED_DEFAULT", Sensitivity: "plain", Scopes: []string{"runtime"}, Value: "public-default",
 	})
-	dotenv := "API_TOKEN=required-secret\nGENERATED=\nPUBLIC_DEFAULT="
+	dotenv := "API_TOKEN=required-secret\nGENERATED=\nDECLARED_DEFAULT="
 	draft, err := fixture.plans.Save(t.Context(), draft.ID, 41, false, DraftSaveRequest{
 		Revision: draft.Revision, Step: DraftConfiguration, Configuration: draft.Data.Configuration, Dotenv: &dotenv,
 	})
@@ -313,7 +317,7 @@ func TestDraftEmptyOverrideSurvivesReloadAndRetainWithoutGeneratingDefault(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(draft.EnvironmentKeys, []string{"API_TOKEN", "GENERATED", "PUBLIC_DEFAULT"}) {
+	if !reflect.DeepEqual(draft.EnvironmentKeys, []string{"API_TOKEN", "DECLARED_DEFAULT", "GENERATED"}) {
 		t.Fatalf("empty saved overrides omitted from reload metadata: %#v", draft.EnvironmentKeys)
 	}
 	blank := ""
@@ -333,7 +337,7 @@ func TestDraftEmptyOverrideSurvivesReloadAndRetainWithoutGeneratingDefault(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"GENERATED", "PUBLIC_DEFAULT"} {
+	for _, name := range []string{"GENERATED", "DECLARED_DEFAULT"} {
 		var sealed, sensitivity string
 		if err := fixture.store.DB.QueryRow(`SELECT value_enc,sensitivity FROM deploy_variable_revisions WHERE environment_id=? AND key=?`, result.EnvironmentID, name).Scan(&sealed, &sensitivity); err != nil {
 			t.Fatal(err)

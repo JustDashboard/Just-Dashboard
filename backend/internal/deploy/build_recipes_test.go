@@ -57,10 +57,11 @@ func TestRecipesRenderFrameworkEnvironmentsEntriesAndFallbacks(t *testing.T) {
 				"COPY --from=build /app/dist/ /usr/share/nginx/html/"},
 		},
 		{
-			name:   "multi-page site keeps nginx defaults",
+			name:   "multi-page site serves files as they are, never dot-paths",
 			files:  map[string]string{"package.json": `{"scripts":{"build":"astro build"},"dependencies":{"astro":"5"}}`, "package-lock.json": "{}"},
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "node", BuildCommand: "npm run build", OutputDirectory: "dist"},
-			absent: []string{"try_files", "default.conf"},
+			want:   []string{`'    location ~ /\.(?!well-known/) {' '        deny all;'`, "> /etc/nginx/conf.d/default.conf"},
+			absent: []string{"try_files"},
 		},
 		{
 			name:   "static files with the fallback",

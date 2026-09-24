@@ -791,7 +791,8 @@ func phpReadiness(candidate *DetectedCandidate, facts rootFacts) *DetectedReadin
 // declares, then as the recipe candidate for the same root would.
 func dockerfileReadiness(candidate *DetectedCandidate, marker *detectedMarkers, facts rootFacts, siblings []DetectedCandidate) *DetectedReadiness {
 	var readiness *DetectedReadiness
-	healthcheck := parseDockerfileHealthcheck(marker.dockerfileContent)
+	dockerfile := marker.dockerfileFor(candidate)
+	healthcheck := parseDockerfileHealthcheck(dockerfile.content)
 	if healthcheck != nil && !healthcheck.disabled {
 		readiness = healthcheck.readiness(candidate.Port)
 	}
@@ -829,7 +830,7 @@ func dockerfileReadiness(candidate *DetectedCandidate, marker *detectedMarkers, 
 	if len(marker.pythonFiles) > 0 {
 		addDjangoConcerns(readiness, facts)
 	}
-	applyReadinessBudget(readiness, candidate, marker, facts, dockerfileStartText(marker.dockerfileContent))
+	applyReadinessBudget(readiness, candidate, marker, facts, dockerfileStartText(dockerfile.content))
 	if healthcheck != nil && !healthcheck.disabled {
 		healthcheck.extendBudget(readiness)
 	}
@@ -861,7 +862,7 @@ func applyReadinessBudget(readiness *DetectedReadiness, candidate *DetectedCandi
 	}
 	// Rails' generated docker-entrypoint runs db:prepare before the server
 	// it is given, so its start migrates although the CMD does not say so.
-	railsEntrypoint := candidate.BuildMethod == BuildDockerfile && railsDockerEntrypoint(marker.dockerfileContent) &&
+	railsEntrypoint := candidate.BuildMethod == BuildDockerfile && railsDockerEntrypoint(marker.dockerfileFor(candidate).content) &&
 		(facts.has(factRailsForceSSL) || facts.has(factRailsAPIOnly) || len(facts.of(factDeclaredHealth)) > 0)
 	if candidate.SchemaCommand != "" || candidate.SchemaInStart || migrationStartRE.MatchString(start) || railsEntrypoint {
 		slow("the start command applies database migrations before the server listens", readinessSlowAttempts, readinessDefaultInterval)

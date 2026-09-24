@@ -307,10 +307,12 @@ func detectedVariableFindings(state environmentState) []PreflightFinding {
 				unbuilt = append(unbuilt, name)
 			}
 		}
-		if variable.Phase == "build" && state.method == BuildDockerfile && variable.Required && set {
+		// A name the Dockerfile declares with ARG is answered by
+		// dockerfile_build_args or dockerfile_arg_not_passed (preflight_image.go).
+		if variable.Phase == "build" && state.method == BuildDockerfile && variable.Required && set && !dockerfileDeclaresArg(state.candidate, name) {
 			findings = append(findings, finding("build_variable_unreachable_"+strings.ToLower(name), PreflightWarning,
 				name+" does not reach a Dockerfile build", "read at build time in "+variableReadIn(variable),
-				"Values are handed only to the dashboard's own recipes during a build; a repository Dockerfile builds without them.",
+				"A repository Dockerfile builds only with the plain, browser-public build variables it declares with ARG; this one it does not declare.",
 				"Declare it with ARG in the Dockerfile and a default, or build with an automatic recipe.", "deploy", variableField(name)))
 		}
 		if variable.LocalhostIn != "" && !set {
@@ -349,6 +351,15 @@ func detectedVariableFindings(state environmentState) []PreflightFinding {
 			"Set them, or confirm the path that reads them never runs here.", "deploy", "variables"))
 	}
 	return findings
+}
+
+func dockerfileDeclaresArg(candidate *DetectedCandidate, name string) bool {
+	for _, arg := range candidate.DockerfileArgs {
+		if arg.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func variableReadIn(variable DetectedVariable) string {
@@ -508,7 +519,10 @@ func frameworkFindings(state environmentState) []PreflightFinding {
 			break
 		}
 	}
-	if overlay := state.note("phoenix_migrate_overlay"); len(overlay) > 0 && state.method == BuildDockerfile {
+	// A Dockerfile reading that found the overlay made it the candidate's
+	// release command, which a release task in the image runs and
+	// release_command_unmapped asks for (preflight_image.go).
+	if overlay := state.note("phoenix_migrate_overlay"); len(overlay) > 0 && state.method == BuildDockerfile && state.candidate.ReleaseCommand == "" {
 		findings = append(findings, finding("migrations_not_run", PreflightWarning,
 			"Phoenix migrations are never run", overlay[0].Path+" exists and nothing calls it",
 			"The release image starts the server only, so the first query meets an empty database.",

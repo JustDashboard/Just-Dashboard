@@ -246,6 +246,22 @@ type DetectedCandidate struct {
 	// EnvironmentNotes are facts about the source's configuration that
 	// preflight turns into findings; see EnvironmentNote.
 	EnvironmentNotes []EnvironmentNote `json:"environmentNotes,omitempty"`
+	// The repository's own Dockerfile, read as data (detector_dockerfile.go):
+	// what its name, place or command says it was written for, the stage to
+	// build, its build arguments by name, and the platforms it pins.
+	DockerfileRole      string          `json:"dockerfileRole,omitempty"`
+	DockerfileTarget    string          `json:"dockerfileTarget,omitempty"`
+	DockerfileArgs      []DockerfileArg `json:"dockerfileArgs,omitempty"`
+	DockerfilePlatforms []string        `json:"dockerfilePlatforms,omitempty"`
+	// DockerfileStages are the named stages a configured target must be one of.
+	DockerfileStages []string `json:"dockerfileStages,omitempty"`
+	// ImageBuildIssues are what detection proved about how this candidate's
+	// image would build — a refused line, a missing COPY source, a script
+	// without its executable bit — so preflight says so before Deploy.
+	ImageBuildIssues []ImageBuildIssue `json:"imageBuildIssues,omitempty"`
+	// ReleaseCommand is the one-off command the repository declares must run
+	// before each release starts (Procfile release:, fly.toml, render.yaml).
+	ReleaseCommand string `json:"releaseCommand,omitempty"`
 }
 
 // EnvironmentNote is a fact detection read from the source's configuration
@@ -331,6 +347,9 @@ type DetectionResult struct {
 	TruncatedReason string              `json:"truncatedReason,omitempty"`
 	Unavailable     string              `json:"unavailable,omitempty"`
 	GitRequirements GitRequirements     `json:"gitRequirements"`
+
+	// SelectionReason says why SelectedID won, or why nothing did.
+	SelectionReason string `json:"selectionReason,omitempty"`
 }
 
 type GitRequirements struct {
@@ -362,6 +381,13 @@ type BuildPlanConfig struct {
 	// forward only while the build still describes that candidate, and it is
 	// left out of the plan's digest because it is a name, not a build input.
 	Framework string `json:"framework,omitempty"`
+	// Target is the Dockerfile stage to build, for a file whose last stage
+	// is a development one.
+	Target string `json:"target,omitempty"`
+	// PrimaryService is the Compose service the operator chose for readiness
+	// and the release's container identity; empty keeps the analysis's own
+	// choice (composePrimaryService).
+	PrimaryService string `json:"primaryService,omitempty"`
 }
 
 // BuildSecretConfig names a variable and the single reviewed recipe stage in
@@ -380,6 +406,10 @@ type ReleaseTaskConfig struct {
 	WorkingDirectory string   `json:"workingDirectory,omitempty"`
 	TimeoutSeconds   int      `json:"timeoutSeconds"`
 	Env              []string `json:"env"`
+	// Runner is where the command runs: "image" is one throwaway container
+	// of the release's own image, with the application's toolchain and
+	// variables; empty is the historical shell over the unbuilt checkout.
+	Runner string `json:"runner,omitempty"`
 }
 
 type RuntimePlanConfig struct {
@@ -1024,6 +1054,12 @@ func (c PlanConfiguration) Validate() error {
 	if c.Build.TargetPlatform != "" && !validPlatform(strings.ToLower(c.Build.TargetPlatform)) {
 		return fmt.Errorf("build target platform is malformed")
 	}
+	if c.Build.Target != "" && (c.Build.Method != BuildDockerfile || !dockerfileStageNameRE.MatchString(c.Build.Target)) {
+		return fmt.Errorf("a build target names one stage of a custom Dockerfile")
+	}
+	if c.Build.PrimaryService != "" && (c.Build.Method != BuildCompose || !validComposeServiceName(c.Build.PrimaryService)) {
+		return invalidField("build.primaryService", "a primary service names one service of a Compose stack")
+	}
 	for _, path := range []string{c.Build.RootDirectory, c.Build.Dockerfile, c.Build.OutputDirectory} {
 		if path != "" && !safeRelativePath(path) {
 			return fmt.Errorf("build paths must remain inside the source root")
@@ -1235,13 +1271,19 @@ func (c PlanConfiguration) Validate() error {
 	seenTasks := map[string]bool{}
 	for index, task := range c.Build.ReleaseTasks {
 		field := fmt.Sprintf("build.releaseTasks[%d]", index)
-		if !releaseTaskNameRE.MatchString(task.Name) || seenTasks[task.Name] || task.Command == "" ||
+		if !releaseTaskNameRE.MatchString(task.Name) || seenTasks[task.Name] || strings.TrimSpace(task.Command) == "" ||
 			len(task.Command) > 16<<10 || task.TimeoutSeconds < 1 || task.TimeoutSeconds > 3600 ||
 			(task.WorkingDirectory != "" && !safeRelativePath(task.WorkingDirectory)) || len(task.Env) > 64 {
 			return invalidField(field, "release task %q is invalid", task.Name)
 		}
 		if err := rejectPlanSecretLiteral("release task command", task.Command); err != nil {
 			return invalidField(field, "%v", err)
+		}
+		if task.Runner != "" && task.Runner != ReleaseTaskRunnerImage {
+			return invalidField(field, "release task %q runner must be image or the host shell", task.Name)
+		}
+		if task.Runner == ReleaseTaskRunnerImage && (c.Build.Method == BuildNone || c.Build.Method == BuildLegacyCompose) {
+			return invalidField(field, "release task %q runs in the release image, and this build produces none", task.Name)
 		}
 		if secretCommandFlagRE.MatchString(task.Command) {
 			return invalidField(field, "release task %q passes credential material through argv; use its scoped environment", task.Name)
@@ -1640,6 +1682,13 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 		if err := validateNetworkFacts(candidate); err != nil {
 			return err
 		}
+		if err := validateCandidateImageFacts(candidate); err != nil {
+			return err
+		}
+	}
+	if len(detection.SelectionReason) > 512 || strings.ContainsAny(detection.SelectionReason, "\x00\r\n") ||
+		rejectPlanSecretLiteral("selection reason", detection.SelectionReason) != nil {
+		return fmt.Errorf("%w: detection selection reason is malformed", ErrInvalidPlan)
 	}
 	if !selected {
 		return fmt.Errorf("%w: selected detection candidate does not exist", ErrInvalidPlan)
@@ -1689,7 +1738,7 @@ func validateComposeAnalysis(analysis ComposeAnalysis, identity SourceIdentity) 
 		}
 	}
 	sort.Strings(services)
-	if !equalStrings(services, identity.Services) {
+	if !equalStrings(services, identity.Services) || !validComposeBuildEvidence(analysis) {
 		return false
 	}
 	for _, variable := range analysis.Variables {
@@ -1774,6 +1823,14 @@ func sameSourceLocation(left, right DraftSourceConfig) bool {
 }
 
 func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
+	// A stage belongs to the Dockerfile it was detected in; switching the
+	// build method away must not leave a plan that validation refuses.
+	if c.Build.Method != BuildDockerfile {
+		c.Build.Target = ""
+	}
+	if c.Build.Method != BuildCompose {
+		c.Build.PrimaryService = ""
+	}
 	if c.Build.Secrets == nil {
 		c.Build.Secrets = []BuildSecretConfig{}
 	}

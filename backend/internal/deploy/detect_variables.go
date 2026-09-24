@@ -510,7 +510,7 @@ func readRootStack(marker *detectedMarkers, scanner *envScanner, candidates []De
 		}
 	}
 	stack.railsApp = railsAppRE.Match(own("config/application.rb"))
-	stack.swift = string(own("Package.swift"))
+	stack.swift = string(marker.packageSwift)
 	stack.dart = string(own("pubspec.yaml"))
 	return stack
 }
@@ -795,20 +795,24 @@ func localhostExamplePath(example string) string {
 }
 
 // describeDockerfileFramework names the framework of a repository's own
-// Dockerfile when its manifests are unambiguous, so preflight can ask for
-// the variables that framework needs, and gives Phoenix's release image the
-// port its runtime.exs defaults to when the Dockerfile exposes none.
+// Dockerfile when its manifests are unambiguous and the Dockerfile's own
+// reading (dockerfileFramework) did not, so preflight can ask for the
+// variables that framework needs, and gives Phoenix's release image the port
+// its runtime.exs defaults to when neither the Dockerfile nor the
+// configuration names one.
 func describeDockerfileFramework(stack rootStack, candidate *DetectedCandidate) {
-	if candidate.BuildMethod != BuildDockerfile || candidate.Framework != "" {
+	if candidate.BuildMethod != BuildDockerfile {
 		return
 	}
 	switch {
-	case stack.rails():
+	case candidate.Framework == "" && stack.rails():
 		candidate.Framework = "rails"
 		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: path.Join(stack.root, stack.manifestFor("SECRET_KEY_BASE")), Reason: "Rails application"})
-	case stack.phoenix():
-		candidate.Framework = "phoenix"
-		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: path.Join(stack.root, "mix.exs"), Reason: "Phoenix application"})
+	case (candidate.Framework == "" || candidate.Framework == "phoenix") && stack.phoenix():
+		if candidate.Framework == "" {
+			candidate.Framework = "phoenix"
+			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: path.Join(stack.root, "mix.exs"), Reason: "Phoenix application"})
+		}
 		if candidate.Port == 0 {
 			candidate.Port = 4000
 			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: path.Join(stack.root, "mix.exs"),

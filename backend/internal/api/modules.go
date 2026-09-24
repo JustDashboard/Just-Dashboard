@@ -95,6 +95,7 @@ type moduleSet struct {
 	deployGit        *deploy.GitWatcher
 	deployDatabases  *deploymentDatabaseNetworks
 	deployPreviews   *deploy.PreviewQuarantineController
+	deployRuntime    *deploy.DockerRuntimeOwner
 	// githubApp is the dashboard's own GitHub identity: one App, installed on
 	// the accounts whose repositories deploy here.
 	githubApp *githubapp.Service
@@ -219,6 +220,7 @@ func (s *Server) initModules() {
 	artifactBackend := deploy.NewDockerArtifactBackend(s.modules.docker)
 	s.modules.deployArtifacts = deploy.NewArtifactBuilder(artifactBackend)
 	runtimeOwner := deploy.NewDockerRuntimeOwner(s.modules.docker).WithNetworks(s.modules.deployDatabases)
+	s.modules.deployRuntime = runtimeOwner
 	s.modules.deployPreviews = deploy.NewPreviewQuarantineController(s.modules.deployRuns, runtimeOwner, s.modules.proxy,
 		func(ctx context.Context, environmentID int64, phase string, success bool) {
 			s.Audit.Record(ctx, audit.Entry{Actor: "system", Action: "deploy.preview.quarantine." + phase, Target: strconv.FormatInt(environmentID, 10), Success: success})

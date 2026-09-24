@@ -31,7 +31,8 @@ only renderer/executor/validation authority for their feature.
 - Deployment-selected paths use a dedicated `files.Service` scoped to `JD_DEPLOY_ROOTS`; Git, Docker,
   Compose and builder argv use `hostexec.CommandInDir`. The sole shell boundary remains an immutable,
   admin-authored stored release task (including migrated pre/post commands) with a resolved working
-  directory and explicit scoped environment.
+  directory and explicit scoped environment; a task with `runner: "image"` runs that command inside a
+  throwaway container of the release's own image rather than in the dashboard's shell.
 - Creation is a revisioned, owner-scoped server draft. `GET /deploy/drafts` (session) lists the caller's
   own uncommitted, unexpired drafts newest first — id, name from intent, a one-line source summary,
   `currentStep`, `updatedAt`, `expiresAt` — so the new-project page can offer to resume one instead of
@@ -85,8 +86,9 @@ only renderer/executor/validation authority for their feature.
   for no readiness gate), a Deno project (the port is `Deno.serve`'s own default) and a static site
   (a marker's root is the directory its files were found in, so the candidate's root *is* the one
   holding the `index.html`, which is what an empty output directory serves) record evidence instead;
-  a Dockerfile naming no port or several, an image this host holds no copy of, and a Compose file
-  spotted in a Git checkout but never parsed still owe one. Everything else that is open is carried by the plan
+  a Dockerfile naming no port or several, an image this host holds no copy of, and a Compose file in
+  a Git checkout that is a deployment of its own (it is read for its services' shape only, and built
+  only as a Compose source) still owe one. Everything else that is open is carried by the plan
   rather than by prose, which is what lets it open the screen that owns the field: an unset
   `internalPort` opens the runtime screen (and the port field seeds the readiness check a gated
   profile needs, the way choosing the type does); a required plan variable with no reference, value
@@ -287,7 +289,10 @@ only renderer/executor/validation authority for their feature.
   decides: `AUTH_TRUST_HOST`, `NEXTAUTH_URL` on a domain template, `HOST`). The form declares a set-up
   variable once: the classification's declaration first, then a network variable for a name it did not
   set up. The environment is described last for each root, after the state, readiness and network
-  passes, so its classification sees the ports and frameworks they settled. A Dockerfile candidate at a
+  passes, so its classification sees the ports and frameworks they settled. A repository's container
+  candidates go through the same passes beside the recipe candidates of their build context, each
+  reading its own Dockerfile only through the stage it builds (`attachBuiltDockerfiles`), so a
+  development stage after it never supplies the health check, volumes or command. A Dockerfile candidate at a
   Rails or Phoenix root is named that framework, and Phoenix's release image gets port 4000 when neither
   its `EXPOSE` nor its source names one. `validateDetectedEnvironment` bounds every added field like the
   rest of a saved detection. Preflight re-checks `listen` against the plan (`preflight_network.go`:
@@ -307,6 +312,19 @@ only renderer/executor/validation authority for their feature.
   because detection named the code that used to be there. It is left out of the plan's digest
   (`buildPlanDigest`, which every path that writes a build plan uses), so recording or dropping a
   name never shows as a pending build change. Projects created before it was kept have none.
+- A repository's own container definitions are candidates read as data, with the same bounds as the
+  rest of detection (the walk's file and byte limits, `os.Root` reads of the checkout that a symlink
+  cannot redirect). Dockerfile candidates carry `dockerfileRole`, `dockerfileTarget`, `dockerfileArgs`
+  (names and whether each has a default, is used in `FROM`, is consumed), `dockerfilePlatforms`,
+  `imageBuildIssues` (`{code, severity, line, subject, detail}`, text that names lines, paths and
+  variables but never a value) and `releaseCommand`; the result carries `selectionReason`. Selection
+  (`detect_ranking.go`) ranks by selectability, buildability, confidence and same-root intent instead
+  of confidence alone, and lists the winner first. Preflight's `imageBuildFindings`
+  (`preflight_image.go`) turns the evidence of the candidate the configuration still builds — same
+  method, root and Dockerfile — into one finding per code; a Dockerfile detection never read is the
+  warning `dockerfile_unchecked`. Compose sources gain build targets and arguments, optional variables,
+  env files, platform evidence and a primary service (`compose_build.go`). The contract is in
+  [the recipe guide](recipes.md#repository-dockerfiles-and-compose-files).
 - A detected Node service that declares a migration tool applies its schema before it serves. Detection
   records the tool (`schemaTool`), the command it chose (`schemaCommand`) and whether the package's own
   start script already runs it, and chains the step in front of the start command through the manager's
@@ -356,8 +374,18 @@ only renderer/executor/validation authority for their feature.
 - Normalized build execution uses the project-owned versioned recipe set or an explicit Dockerfile,
   static, immutable-image, or Compose adapter. Reviewed base tags are resolved before rendering and every
   generated `FROM` is digest-pinned. Build secrets are BuildKit environment-backed secret mounts and
-  never argv/build args; custom Dockerfiles with requested secrets or obvious embedded credentials fail
-  closed because their layer history cannot be guaranteed.
+  never argv/build args; custom Dockerfiles with requested secrets, or a secret-named literal in an
+  `ENV`/`ARG`, shell assignment, flag or heredoc (read over logical instructions, so a continuation line
+  cannot hide one and `SECRET_KEY_BASE_DUMMY=1` is not one), fail closed because their layer history
+  cannot be guaranteed — and detection runs the same check, so preflight says so before Deploy. A custom
+  Dockerfile build receives `--target` for its chosen stage and `--build-arg NAME` only for plain,
+  browser-public build variables it declares, with values in buildx's environment; a Compose service
+  build receives its own `target` and `args` the same way, interpolated from the plain runtime and build
+  variables only, and refuses an argument or target that reads a secret (`composeBuildArgValues`), so no
+  secret ever becomes a build argument or argv. A browser-public value typed into a new project is
+  stored plain (`suppliedVariableSensitivity`); every other typed value is stored secret. Recipe and static builds write a
+  generated `Dockerfile.dockerignore` beside the generated Dockerfile, so repository metadata and
+  dashboard files stay out of the image whatever the repository's own ignore file says.
   Recipe build scope now supplies values automatically, with explicit install-stage restrictions for
   package credentials. Serving defaults per framework, the Python install shapes and interpreter
   selection, the Rust, Java, .NET and Deno recipes, the single-page fallback and Go version/command
@@ -367,10 +395,28 @@ only renderer/executor/validation authority for their feature.
   exists for an empty set, digests are checked before variable decryption, and retry copies the original
   snapshots instead of observing later rotations. Release runtime snapshots store the actual secret-free
   JSON bytes and verified digest, not a pointer back to mutable desired configuration.
-- Release tasks are named, bounded shell gates over the immutable source workspace. Only variables
-  explicitly declared with `release_task` scope enter their environment; output is exact-value and
-  credential-pattern redacted before persistence. Interrupted tasks stop for operator review because
-  their side effects cannot be inferred safely.
+- Release tasks are named, bounded shell gates that run after the backup gate and before the candidate
+  starts (`DefaultStepKeys` puts `backup_gate` first, so a migration never changes a database whose
+  required backup is unverified). A task with `runner: "image"` — the default for new tasks and for a
+  release command detection read — runs once in a throwaway container of the candidate release's image
+  (a Compose release's primary service image) through the runtime owner (`release_task_image.go`,
+  `dockerx.RunToCompletion`): the runtime variables the release starts with plus the task's
+  `release_task`-scoped ones as container environment, on the project's database networks (and the
+  preview network for an isolated preview) or on the host's network when the release runs there, with
+  the release's resource limits, no ports, mounts or privileges, the image's entrypoint replaced by the
+  command, and the container removed however the task ends. The container carries
+  `io.just-dashboard.release-task`, so runtime observation leaves it out; `Server.Start` removes any a
+  previous process left before the engine resumes runs, a task removes a stale one of its own name
+  before it starts, and the step's cleanup records whether removal succeeded. A blank command is
+  refused by validation and, stored before that, fails the task instead of the executor. A Compose
+  release's image task runs outside the stack, which preflight names
+  (`release_task_outside_compose_stack`, blocked when the stack runs its own backing services). A task without a runner is the historical `/bin/sh` over the immutable source workspace in
+  the dashboard's container, which has none of an application's dependencies; preflight refuses one
+  that runs a tool only installed dependencies provide, or a program a PATH lookup in the dashboard
+  does not find (`release_task_tool_missing`, a lookup that executes nothing), and a failed task that
+  exits 127 reports the same code. Output is redacted of the task's own values and every secret
+  runtime value before persistence. Interrupted tasks stop for operator review because their side
+  effects cannot be inferred safely.
 - Artifact retention keeps the live release, five prior successful rollback releases, candidates, pins,
   retain-until windows, recent failed diagnostics, shared physical digests, and every environment under
   an active deployment lease. Cleanup reports the reason for every retained row and removes a mutable
@@ -383,7 +429,9 @@ only renderer/executor/validation authority for their feature.
 - Runtime activation consumes only an immutable release snapshot. Direct containers use the recorded
   config digest (or repository plus manifest digest); Compose uses an explicit stable project, the exact
   source file list, and a generated `0600` override that pins every service image with `pull_policy:
-  never`. Compose interpolation receives only the frozen runtime scope through a temporary `0600` env
+  never`. The release's container identity and readiness target is the primary service — the one the
+  operator chose (`build.primaryService`), else the analysis's, which builds or publishes a port and is
+  never a database — and a snapshot recorded before there was one keeps its first service. Compose interpolation receives only the frozen runtime scope through a temporary `0600` env
   file which is deleted on every exit path.
 - Archived projects keep their original display name in additive `archived_name` storage while the
   unique database name becomes an internal tombstone. Archiving and upgrading previously archived

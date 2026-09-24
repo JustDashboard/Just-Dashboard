@@ -20,9 +20,15 @@ import { humanize } from "@/components/deploy/vocabulary"
 import { MountRows } from "@/components/deploy/settings/mounts"
 import { imageProduct } from "@/components/product-logo"
 import { EmptyNote } from "@/components/state"
-import type { DeploymentConfiguration, DeploymentRestartPolicy } from "@/lib/types"
+import type {
+  DeploymentBuildMethod,
+  DeploymentConfiguration,
+  DeploymentRestartPolicy,
+} from "@/lib/types"
 import {
+  buildsReleaseImage,
   DEFAULT_REQUEST_BODY_LIMIT,
+  defaultReleaseTaskRunner,
   MAX_REQUEST_BODY_MB,
   type WizardErrors,
 } from "@/components/deploy/deployment-defaults"
@@ -425,6 +431,7 @@ export function BuildExtras({
         <ReleaseTaskEditor
           tasks={configuration.build.releaseTasks ?? []}
           variables={configuration.variables}
+          buildMethod={configuration.build.method}
           error={errors.releaseTasks}
           onChange={(releaseTasks) => updateBuild({ releaseTasks })}
         />
@@ -933,11 +940,13 @@ function BuildSecretEditor({
 function ReleaseTaskEditor({
   tasks,
   variables,
+  buildMethod,
   error,
   onChange,
 }: {
   tasks: ReleaseTask[]
   variables: Variable[]
+  buildMethod: DeploymentBuildMethod
   error?: string
   onChange: (tasks: ReleaseTask[]) => void
 }) {
@@ -990,6 +999,23 @@ function ReleaseTaskEditor({
                 rows={3}
                 className="font-mono sm:text-xs"
               />
+              <Label className="flex min-h-9 items-center gap-2 text-body">
+                <Checkbox
+                  checked={task.runner === "image"}
+                  disabled={!buildsReleaseImage(buildMethod)}
+                  onCheckedChange={(checked) =>
+                    update(index, { runner: checked ? "image" : undefined })
+                  }
+                />
+                {/* Unticked it runs in the dashboard's shell over the unbuilt
+                    source, where the application's dependencies are not. A
+                    Compose release's image runs outside the stack. */}
+                <span>
+                  {buildMethod === "compose"
+                    ? "Run in the primary service's image, outside the Compose stack"
+                    : "Run in the release image, with the application's variables"}
+                </span>
+              </Label>
               <div>
                 <p className="text-hint text-muted-foreground">Release task environment</p>
                 {releaseVariables.length === 0 ? (
@@ -1035,7 +1061,14 @@ function ReleaseTaskEditor({
         onClick={() =>
           onChange([
             ...tasks,
-            { name: "", command: "", workingDirectory: "", timeoutSeconds: 300, env: [] },
+            {
+              name: "",
+              command: "",
+              workingDirectory: "",
+              timeoutSeconds: 300,
+              env: [],
+              runner: defaultReleaseTaskRunner(buildMethod),
+            },
           ])
         }
       >

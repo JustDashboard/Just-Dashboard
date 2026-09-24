@@ -427,6 +427,9 @@ func (o *DockerRuntimeOwner) startCompose(
 		return StartedRuntime{}, err
 	}
 	primaryService := resolved.Services[0].Plan.Name
+	if resolved.PrimaryService != "" {
+		primaryService = resolved.PrimaryService
+	}
 	containers, err := o.client.ListContainersWithLabels(ctx, map[string]string{
 		"io.just-dashboard.managed":        "true",
 		"io.just-dashboard.environment-id": strconv.FormatInt(request.Release.EnvironmentID, 10),

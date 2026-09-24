@@ -21,7 +21,17 @@ BuildKit environment secret mount. Frozen run inputs supply the names at prepara
 build time; the bindings must agree. A variable's explicit `build.secrets` mapping to `install` limits
 it to dependency installation instead. Build settings expose this choice for each build-scoped value.
 Runtime and release-task scopes remain separate. Custom Dockerfiles do not gain automatic values or
-secret mappings; they retain their existing refusal of requested secrets.
+secret mappings; they retain their existing refusal of requested secrets. The one exception is a value
+the Dockerfile itself asks for and that is public by design: a **plain** build-scoped variable with a
+browser-public prefix (`NEXT_PUBLIC_`, `VITE_`, `PUBLIC_`, `NUXT_PUBLIC_`, `REACT_APP_`, `EXPO_PUBLIC_`)
+that the Dockerfile declares with `ARG` is passed as `--build-arg NAME`, the value only in buildx's
+process environment (`deploy/build_dockerfile_args.go`). A value typed into a new project's environment
+is stored secret, except one with a browser-public name that is not declared secret: the page's
+JavaScript carries it by design, and only a plain value can become a build argument. Preflight lists
+what is passed (`dockerfile_build_args`) and warns about every other declared argument that will be
+empty (`dockerfile_arg_not_passed`, naming a browser-public one marked secret); a secret, or a name that
+would replace the builder's own environment (`DOCKER_*`, `PATH`, …), never qualifies. A build argument
+stays in the image's history, which is why a secret is never one.
 
 Neither generated Dockerfiles nor command arguments contain variable values. Logs redact exact values.
 An ephemeral mount does not prevent application build code from intentionally copying a value into its
@@ -204,8 +214,8 @@ connection refused on loopback, by port — never the line it was read from.
 
 A `web:` process in a Heroku-style `Procfile` is the repository declaring how it is served, and outranks
 a start script and a framework default alike; it is only ever a server command, so a site framework's
-build is still served by nginx. `release:` processes are not run automatically; add one as a release
-task. A command that carries credential material is ignored. Its port and bind flags are read like any
+build is still served by nginx. A `release:` process is the candidate's release command
+([Release commands](#release-commands)). A command that carries credential material is ignored. Its port and bind flags are read like any
 start command's (next section): `--port 5000` makes 5000 the candidate's port, `-b 0.0.0.0:$PORT` follows
 PORT, and a gunicorn line with no `--bind` takes its bind from `gunicorn.conf.py` (or the `-c` file).
 
@@ -237,8 +247,9 @@ readiness timeout that named neither. Detection now reads, as bounded text and n
   `ListenLocalhost` in `Program.cs`.
 - **Configuration**: `server.port`/`server.address` (Spring, Helidon), `quarkus.http.port`,
   `micronaut.server.port` in `application.properties`/`.yml`, Ktor's `application.conf`, `Rocket.toml`,
-  `appsettings(.Production).json` Kestrel endpoints and `Urls`, `gunicorn.conf.py`, a Dockerfile's final
-  `ENV PORT=`/`ARG PORT=` when it has no single `EXPOSE`, and Phoenix's `config/runtime.exs` PORT default.
+  `appsettings(.Production).json` Kestrel endpoints and `Urls`, `gunicorn.conf.py`, the built Dockerfile
+  stage's `ENV PORT=`/`ARG PORT=` when it has no single `EXPOSE`, and Phoenix's `config/runtime.exs` PORT
+  default.
 
 A listen address is read only when it is one whole string literal, or an identifier assigned exactly
 one: `":" + port` names neither a port nor a host. A listen call whose address the scan cannot read —
@@ -330,6 +341,32 @@ argv, bounded output, only the parsed addresses kept; an image without `cat` rep
 candidate listening only on loopback gets the cause `loopback_only`, named in the failure message even
 when the application printed nothing.
 
+## Release commands
+
+The command a repository declares runs once before each release — a Procfile `release:` process,
+`fly.toml`'s `[deploy] release_command`, `render.yaml`'s `preDeployCommand` (when one service declares
+it), or a Phoenix release's `rel/overlays/bin/migrate` — is the candidate's `releaseCommand`. The form
+plans it as a release task named `release` that runs **in the release image** (`runner: "image"`): one
+throwaway container of the candidate release's image, with the runtime variables the release starts
+with plus the task's own `release_task`-scoped ones, on the project's database networks — or on the
+host's network when the release runs there — removed when it exits. A command with shell syntax runs
+through the image's `/bin/sh`; a plain one is executed directly, so an image without a shell still runs
+`bin/migrate`. Its container is labelled as a release task, so it never counts as one of the release's
+services; one a stopped dashboard left behind is removed when the dashboard starts and before the task
+runs again, and the run records whether removal succeeded. Without such a task preflight warns
+`release_command_unmapped`. A new task defaults to the release image whenever the build makes one (not
+for `none` or legacy Compose, which refuse it). A Compose release's image task runs the primary
+service's image on its own, outside the stack — not on its network and without the service's
+`environment:` entries — which preflight names as `release_task_outside_compose_stack`: blocked when the
+stack runs its own database or cache, a warning otherwise; a migration against the stack's own database
+belongs in the Compose file (a one-off service the application `depends_on` with
+`condition: service_completed_successfully`, or the service's command). A task with no runner is the historical shell over the unbuilt checkout in
+the dashboard's own container; preflight refuses one that runs a tool only installed dependencies
+provide (`prisma`, `knex`, `alembic`, anything under `node_modules/.bin` or `.venv`) or a program the
+dashboard does not have — in its own image that includes `npx`, `python` and `bundle` — as
+`release_task_tool_missing`, and a host task that runs the application's code no longer counts as the
+schema step.
+
 ## JavaScript and static output
 
 The lockfile selects npm, pnpm, Yarn or Bun. When lockfiles for more than one manager are committed,
@@ -338,7 +375,8 @@ recipe and preflight refuse rather than install from a lockfile the project may 
 manager must have its own lockfile. Plain HTML uses the selected source directory as
 its public root; its output directory is empty, not the source directory repeated a second time.
 Packaged static output always serves on nginx port 80, regardless of a repository's development/start
-script port. Quick setup and the wizard generate required HTTP readiness checks for that serving port.
+script port. nginx refuses every dot-path except `.well-known/` (`location ~ /\.(?!well-known/)`), so a
+stray `.git/`, `.env` or `.htaccess` in the published directory is never served. Quick setup and the wizard generate required HTTP readiness checks for that serving port.
 
 The catalogue in `deploy/frameworks_node.go` is ordered and the first match wins, so a meta-framework
 built on Vite is recognised before Vite itself — every one of them lists `vite`, and reading that alone
@@ -372,9 +410,9 @@ it a worker without one, and a start script beside such a library no longer make
 A site whose client owns its routes — Vite, Create React App, Vue CLI, Ember, Parcel and Angular
 detections — carries `build.spaFallback`, which makes nginx answer any path with no file behind it with
 `index.html`; multi-page generators (Astro, Gatsby, Docusaurus, VitePress, Eleventy, SvelteKit static)
-keep nginx's own configuration byte for byte. The switch is on the configure form and Build settings
-whenever there is static output, and is valid only with a static site or a recipe with an output
-directory.
+serve files as they are, with the dot-path rule and no fallback. The switch is on the configure form and
+Build settings whenever there is static output, and is valid only with a static site or a recipe with an
+output directory.
 
 A service whose manifest depends on a recognised migration tool starts by applying its schema: the
 detected start command becomes `<runner> <schema command> && <start>`, in front of a start script or a
@@ -393,11 +431,107 @@ readiness gate names it — `schema_push_refused`, from Prisma's `--accept-data-
 rename and data-loss prompts — rather than a bare timeout. The tool must be installed by the lockfile; the
 runtime stage copies the build's `node_modules`, so a devDependency is available to the start command.
 
-Detection preserves an actual Dockerfile/Containerfile filename relative to its build root. A single
-literal TCP `EXPOSE` in the final stage supplies the suggested port. Without one, the final stage's
-`ENV PORT=N`/`ARG PORT=N`, then what the source at that root says about its listener, then a Phoenix
-`config/runtime.exs` PORT default supply it; otherwise the port stays unset for the operator. A
-Dockerfile inherited base's unrecorded exposed port is not guessed.
+## Repository Dockerfiles and Compose files
+
+A repository's own container definitions are read as data, never built during detection
+(`deploy/dockerfile_parse.go`, `dockerfile_facts.go`, `detector_dockerfile.go`, `detector_compose.go`).
+The parser follows BuildKit: parser directives (`# escape=`), `\` continuations with comment lines
+inside them, and heredoc bodies.
+
+- **Names and places.** `Dockerfile`, `Containerfile`, and their variants (`Dockerfile.prod`,
+  `Dockerfile-dev`, `api.Dockerfile`, `Containerfile.worker`) are candidates, including under `build/`
+  (Go's `build/package/Dockerfile`) and `deploy/`. Dev-container and GitHub Action Dockerfiles, and
+  Compose files under `.devcontainer/`, are not. A name saying `prod`/`production`/`release` is a
+  production Dockerfile; one saying `dev`/`local`/`test`/`debug`/`ci` is a development one that is
+  listed but never chosen on its own; any other variant is medium confidence.
+- **Build context.** A Dockerfile is built from the directory a Compose service names for it, else the
+  nearest directory from its own up to the repository root that holds the paths its `COPY`/`ADD` lines
+  read — `docker/Dockerfile` written for `docker build -f docker/Dockerfile .` builds from the root — and
+  `build.dockerfile` is its path relative to that context.
+- **Stage and port.** When the last stage is `dev`/`development`/`test`/`debug`, the candidate builds
+  `production`/`prod`/`release`/`runner`/`runtime` (`build.target`, passed as `--target`; a Compose
+  service's own `target` wins). The stage is edited beside the Dockerfile path and cleared when the path
+  changes; detection records the file's stage names (`dockerfileStages`), and preflight refuses a stage
+  the file does not have (`dockerfile_target_missing`). The port is the one TCP `EXPOSE` of the built stage and the stages it
+  derives from, resolving `$PORT`/`${PORT}` through the file's own `ARG`/`ENV` defaults and setting aside
+  debugger and metrics ports (9229, 5005, 9464, 9090). Without one, the built stage's `ENV PORT=N`/`ARG
+  PORT=N`, then what the source at that context says about its listener, then a Phoenix
+  `config/runtime.exs` PORT default (else Phoenix's own 4000) supply it; otherwise it still asks. A base
+  image's unrecorded exposed port is not guessed.
+- **What the tree shows will fail** is read only from the stages the build runs — the target, the
+  stages it is built `FROM`, and those it copies or mounts from; BuildKit skips every other one — except
+  that every `FROM` must resolve, used or not. It is recorded as the candidate's `imageBuildIssues` and
+  becomes a preflight finding of the same code: `dockerfile_refused` (a secret-named `ENV`/`ARG`, shell assignment
+  or flag given a literal — not empty values, `$VAR` references, switches, numbers, the placeholder words
+  Rails and Django use, or `*_FILE` paths; `SECRET_KEY_BASE_DUMMY=1` builds), `dockerfile_copy_source_missing`,
+  `dockerfile_copy_ignored` (the context's `.dockerignore`, or `<Dockerfile>.dockerignore`, with BuildKit's
+  pattern rules), `dockerfile_arg_required` (an `ARG` without default in `FROM`, unless the expression
+  has its own, `${X:-d}`), `dockerfile_ssh_mount`,
+  `dockerfile_standalone_missing` (a Next.js Dockerfile copying `.next/standalone` without
+  `output: 'standalone'`), `dockerfile_dev_server` (warning), `script_crlf` and `script_not_executable`
+  (the file an exec-form `ENTRYPOINT`/`CMD` or `RUN ./x` executes, or a recipe's start script, committed
+  with Windows line endings or without its executable bit, unless the Dockerfile fixes it: a `chmod` of
+  it, a directory or a wildcard covering it, a separator after the operand included, or a `dos2unix` or
+  `sed` over it, a wildcard such as the Rails Windows template's `bin/*`, or its directory). A
+  `FROM --platform=` for another architecture is `foreign_architecture_build`, blocked when this host has
+  no binfmt emulator for it.
+- **Choosing.** Candidates for the same root — two ways to build one application — are ranked by
+  whether they may be chosen on their own, whether they build as detected (no blocking issue, no recipe
+  issue, no unresolved package manager), confidence, and intent: a production-named Dockerfile, then the
+  plain Dockerfile, then the recipe; a Dockerfile that runs a dev server, or declares no `ARG` for a
+  browser-public variable the source reads, ranks below the recipe. Different roots are different things,
+  so their best candidates compare only on whether they may be chosen and on confidence: a helper image
+  in `docker/db/` that builds does not beat the application whose recipe needs one decision. A Dockerfile
+  built on a database, cache or other backing image is low confidence. The winner is listed first with
+  the reason (`selectionReason`, the `detection_selected` finding's measured text); only a true tie leaves
+  the choice to the operator. A buildable Dockerfile beside a recipe blocked by competing lockfiles wins;
+  preflight names a skipped Dockerfile's problem as `dockerfile_not_selected`.
+- **Compose files in a repository** are classified before they become candidates. One that runs only
+  backing images (Postgres, MySQL, Redis, Mongo, Mailpit, MinIO, …) is not a candidate: its databases
+  become suggestions on the candidates beside it — unless the repository has nothing else to deploy, when
+  it is a low-confidence Compose candidate. One whose builds all come from paths the checkout lacks
+  (Laravel Sail's `vendor/laravel/sail/runtimes`) is a low-confidence development stack. Any other is a
+  Compose candidate that is chosen only when nothing else is there, because a Compose file in a Git
+  source is analysed only as a Compose source: preflight blocks it as `compose_analysis_missing`, and the
+  project step offers to re-read the same repository — a Git URL, a connected repository with its
+  credential, or a local checkout — as one.
+- **A Compose source** records each service's build `target` and `args`, `platform`, `env_file` entries,
+  and the platforms each image is published for (read from the registry four lookups at a time, under one
+  15-second budget). Build arguments and targets are resolved at build time with Compose's own
+  `${X:-default}` rules from the **plain** runtime and build variables together — Compose reads one
+  environment for the whole file, and the form plans a Compose file's variables for runtime — and passed
+  like Dockerfile build arguments. An argument or target that reads a secret is refused, at preflight
+  (`compose_build_arg_secret`) and at the build, because a build argument stays in the image's history;
+  one whose variable is planned only for release tasks is empty (`compose_build_arg_unscoped`, blocked
+  when the file marks it `${X:?}`). A
+  browser-public Compose variable is planned plain. Variables interpolated with a default are optional
+  rows with the default as the example, never required secrets. Preflight blocks a build context the
+  checkout lacks (`compose_build_context_missing`), a required `env_file` it lacks
+  (`compose_env_file_missing`), a refused service Dockerfile, and an image with no build for this host's
+  architecture (`compose_image_platform_missing`, whose action suggests pinning `platform:` when an
+  emulator is installed; a service pinned to a platform its image offers is left to the emulation
+  check). The primary service — the one readiness, the release's container and its image release tasks
+  follow — builds or publishes a port, prefers `web`, `app`, `frontend`, `server` or `api`, and is never a
+  database; the operator can choose another (`build.primaryService`), and preflight refuses one the stack
+  no longer has (`compose_primary_service_missing`). A pasted or uploaded Compose file arrives without
+  the files around it, so a service it builds is refused before Deploy (`compose_build_without_checkout`)
+  instead of failing to find its Dockerfile.
+- **Languages without a recipe.** A Vapor or Hummingbird `Package.swift` with no Dockerfile is a
+  low-confidence candidate whose `dockerfile_missing` finding says to commit the template's Dockerfile;
+  with one, the Dockerfile is chosen over the template's Compose file. `Environment.get("X")` reads are
+  listed as variables. Rails, Phoenix and Swift Dockerfiles carry their framework's name.
+
+## Build context
+
+Every recipe and static build writes `.just-dashboard/Dockerfile.dockerignore`, which BuildKit reads in
+place of the repository's own `.dockerignore` (`deploy/build_dockerignore.go`). It keeps the
+repository's rules except any that would leave out a file the recipe reads by name — a manifest,
+lockfile, framework configuration, Prisma schema — which is `dockerignore_drops_recipe_input`, a warning
+that the rule is set aside; then it excludes `**/node_modules`, `.dockerignore` and the dashboard's own
+files. The static, PHP, Node and Deno images, which are served or copied whole, also exclude `.git`;
+recipes whose toolchains stamp or version builds from Git (Go, Python's setuptools-scm, Maven's
+git-commit-id, SourceLink) keep it. A static site also excludes `.env` and `.env.*`. Committed `.env`
+files are otherwise left in: Next.js and Vite read public build values from them.
 
 ## Python
 
@@ -535,7 +669,7 @@ A binary whose `src/main.rs` or `src/bin` entry calls `dotenvy::dotenv()` with `
 
 A `pom.xml` builds with `maven:3-eclipse-temurin-<release>` (`mvn -q -B -DskipTests package`); a
 `build.gradle(.kts)` with `gradle:8-jdk<release>` (`./gradlew --no-daemon -q build -x test` through
-the committed wrapper, or the image's own Gradle). The one executable jar — not `-sources`, `-javadoc`,
+the committed wrapper, its Windows line endings stripped first, or the image's own Gradle). The one executable jar — not `-sources`, `-javadoc`,
 Spring Boot's `-plain` or a shade plugin's `original-` — becomes `/app/app.jar` on
 `eclipse-temurin:<release>-jre-alpine`, run by `java -jar` as an unprivileged user with
 `-XX:MaxRAMPercentage=75` so the heap follows the container's limit. The release comes from
@@ -575,8 +709,8 @@ EF Core migrations (a `Microsoft.EntityFrameworkCore.Design` or `.Tools` referen
 `*ModelSnapshot.cs`) are recorded as the `ef-core` schema tool. Source that calls `Database.Migrate()`,
 `MigrateAsync()` or `EnsureCreated()` applies them itself; otherwise a linked database, or a SQLite
 database moved onto a volume, raises `schema_step_missing`, whose action is to call `Database.Migrate()`
-at startup — the EF command-line tools and the design-time project are not in the runtime image, and a
-release task runs on the host.
+at startup — the EF command-line tools and the design-time project are not in the runtime image a
+release task runs in.
 
 A SQLite file an `appsettings` connection string names, committed to the repository, is copied into
 `/app/data` owned by `app`: Docker fills an empty named volume from the image the first time it is
@@ -612,6 +746,9 @@ or php-fpm pair — and the version comes from Composer's `php` constraint with 
 default, and a constraint the catalogue cannot satisfy (`^7.4`) is a `recipe_unsupported` finding.
 `ext-*` requirements install through `install-php-extensions` (built-ins such as `mbstring` are skipped;
 `pdo_mysql`, `pdo_pgsql` and `opcache` are always present, so a linked database works without asking).
+FrankenPHP does not read `.htaccess`, so one with access or rewrite rules is a `php_htaccess_ignored`
+warning, and a plain PHP application served from the repository root (`--root /app`) is a
+`php_docroot_is_repository_root` warning: dependencies, lockfiles and logs under it are reachable.
 Composer runs from the `composer:2` image with `--no-dev --optimize-autoloader`; a `package.json` whose
 build script names Vite, `laravel-vite-plugin` or Encore gets an asset stage on the manifest's own
 runtime whose `public/build` is copied in. Laravel's start runs `php artisan migrate --force` first;
@@ -792,7 +929,8 @@ the source needs. State that is kept passes as `persistent_state_kept`, and `bac
 asks for a backup. A linked server database in the variable a SQLite default falls back from takes the
 file out of use and raises nothing. SQLite moved onto a volume starts empty the way a new server database
 does, so the detected schema tool's step is checked for it too (`schema_step_missing`, titled for the
-volume). A container that cannot open or write its SQLite file — the directory is missing or not writable
+volume); only the start command or the application itself counts there, because a release task, on the
+host or in the release image, runs without the plan's volumes. A container that cannot open or write its SQLite file — the directory is missing or not writable
 by its user — fails its readiness gate with `sqlite_not_writable` named.
 
 Limits: an image's declared volumes are read only when the image is already on this host (the registry
@@ -809,11 +947,11 @@ Laravel's `DatabaseSeeder` when it does more than the skeleton's test user (`php
 --force`), a `db/seeds.rb` with code (`bin/rails db:seed`), and the fixtures a Django application commits
 in its `fixtures/` directories, outside any test directory (`python manage.py loaddata <names>`). When
 the plan links a database or keeps SQLite on a new volume, and neither the start command nor a release
-task seeds, preflight raises `seed_available` (a warning) naming the command to run once from the
-project's console after the first release. Only a first release does: a deployment that replaces a live
-runtime has a database that already holds whatever was seeded. It is never run automatically: a release
-task runs on the host, not in the application image, and a seed that clears tables must not run on every
-release.
+task seeds — a release task reaches a linked server, never a volume — preflight raises `seed_available` (a
+warning) naming the command to run once from the project's console after the first release. Only a
+first release does: a deployment that replaces a live runtime has a database that already holds whatever
+was seeded. It is never planned as a release task, which runs before every release, because a seed that
+clears tables must not run on every release.
 
 ## Verification
 
