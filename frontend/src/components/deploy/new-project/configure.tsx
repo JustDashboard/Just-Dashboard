@@ -24,6 +24,7 @@ import {
   checksForRuntime,
   discoveredEnvironmentRows,
   mergeDiscoveredRows,
+  releaseStrategy,
   validateConfiguration,
 } from "@/components/deploy/deployment-defaults"
 import { PlanWiring } from "@/components/deploy/new-project/plan-wiring"
@@ -387,7 +388,6 @@ export function Configure({
     // readiness gate, for a web or static profile. Choosing one and leaving
     // the plan stop-first with nothing verifying it would answer half the
     // question the operator just answered.
-    const gated = profile === "web" || profile === "static"
     const checks = checksForRuntime(configuration.checks, profile, internalPort)
     return onFlowChange({
       ...flow,
@@ -407,8 +407,9 @@ export function Configure({
           ...configuration.runtime,
           internalPort,
           // Blue/green needs a candidate to stand beside the live one, which
-          // preflight refuses for anything but a web or static profile.
-          strategy: gated ? "blue_green" : "stop_first",
+          // preflight refuses for anything but a web or static profile, and
+          // for a plan whose volume two releases would write at once.
+          strategy: releaseStrategy(profile, configuration.runtime.mounts),
         },
       },
     })

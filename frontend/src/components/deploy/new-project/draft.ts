@@ -399,7 +399,13 @@ function effectiveConfiguration(
   // A blueprint's plan is rendered by the server from the reviewed definition;
   // the browser only offers it for review, never recomputes it.
   if (source.mode === "blueprint" && draft.data.configuration) return draft.data.configuration
-  return defaultConfiguration(candidate?.profile ?? fallbackProfile, candidate, source, detection)
+  return defaultConfiguration(
+    candidate?.profile ?? fallbackProfile,
+    candidate,
+    source,
+    detection,
+    draft.data.intent?.name,
+  )
 }
 
 /** Match the saved plan so pruning an empty address never triggers another preflight. */
@@ -747,6 +753,8 @@ export type EnvironmentRow = {
   detected?: boolean
   /** The value was minted here rather than typed or copied from anywhere. */
   generated?: boolean
+  /** Why the value was filled in, said under it. */
+  note?: string
 }
 
 /** The typed rows and the pasted block, joined into one .env document. */

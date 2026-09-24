@@ -242,11 +242,94 @@ export function withPackageManagerRunner(command: string, manager?: NodePackageM
     .join(" && ")
 }
 
+/**
+ * The release strategy a profile and its storage allow. Candidate-first needs
+ * two containers side by side, which preflight refuses for anything but a web
+ * or static workload — and for any plan with a writable mount, because two
+ * releases would write the same data at once.
+ */
+export function releaseStrategy(
+  profile: WorkloadProfile,
+  mounts: DeploymentConfiguration["runtime"]["mounts"] = [],
+): DeploymentConfiguration["runtime"]["strategy"] {
+  const gated = profile === "web" || profile === "static"
+  return gated && !mounts.some((mount) => !mount.readOnly) ? "blue_green" : "stop_first"
+}
+
+/**
+ * A managed volume's name for this project: the name as a slug, a hash of
+ * the exact name so two names that slug alike never share data, and what the
+ * volume holds — the `<slug>-<hash>-<purpose>` shape a template's volumes
+ * already have.
+ */
+export function projectVolumeName(projectName: string, target: string) {
+  const slug =
+    projectName
+      .toLowerCase()
+      .replace(/[\s_]+/g, "-")
+      .replace(/[^a-z0-9-]/g, "")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 40)
+      .replace(/-$/, "") || "app"
+  const purpose =
+    (target.split("/").filter(Boolean).pop() ?? "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "data"
+  return `${slug}-${fnv1a(projectName)}-${purpose}`
+}
+
+function fnv1a(value: string) {
+  let hash = 0x811c9dc5
+  for (const byte of new TextEncoder().encode(value)) {
+    hash = Math.imul(hash ^ byte, 0x01000193) >>> 0
+  }
+  return hash.toString(16).padStart(8, "0")
+}
+
+/**
+ * The volumes the state detection found needs: one managed volume per
+ * directory it can stand on, with a storage dependency that says what it
+ * holds, so Review names it and lifecycle knows the project owns it. State
+ * with no such directory gets no volume here; preflight names it instead.
+ */
+export function persistentStorage(
+  candidate: DeploymentDetectionCandidate | undefined,
+  projectName: string,
+): Pick<DeploymentConfiguration["runtime"], "mounts"> &
+  Pick<DeploymentConfiguration, "dependencies"> {
+  const reasons = new Map<string, string[]>()
+  for (const entry of candidate?.persistentPaths ?? []) {
+    if (!entry.target) continue
+    reasons.set(entry.target, [...(reasons.get(entry.target) ?? []), entry.reason])
+  }
+  const mounts: NonNullable<DeploymentConfiguration["runtime"]["mounts"]> = []
+  const dependencies: DeploymentConfiguration["dependencies"] = []
+  const names = new Set<string>()
+  for (const [target, why] of reasons) {
+    let source = projectVolumeName(projectName, target)
+    for (let index = 2; names.has(source); index++)
+      source = `${projectVolumeName(projectName, target)}-${index}`
+    names.add(source)
+    mounts.push({ source, target, ownership: "managed" })
+    dependencies.push({
+      kind: "storage",
+      ownership: "managed",
+      resourceKind: "docker_volume",
+      resourceId: source,
+      config: { purpose: [...new Set(why)].join("; "), data: true },
+    })
+  }
+  return { mounts, dependencies }
+}
+
 export function defaultConfiguration(
   profile: WorkloadProfile,
   candidate?: DeploymentDetectionCandidate,
   source?: DeploymentDraftSource,
   detection?: DeploymentDetection,
+  projectName?: string,
 ): DeploymentConfiguration {
   const game = profile === "game"
   const image = source?.image ?? (game ? "itzg/minecraft-server:java21" : "")
@@ -262,6 +345,10 @@ export function defaultConfiguration(
   // check built on a port nothing listens to.
   const port = packagedStatic ? 80 : (candidate?.port ?? (game ? 25565 : 0))
   const composeVariables = detection?.compose?.variables ?? []
+  const storage = persistentStorage(candidate, projectName || candidate?.name || "app")
+  const mounts = game
+    ? [{ source: "minecraft-data", target: "/data", ownership: "managed" as const }]
+    : storage.mounts
   return {
     build: {
       method,
@@ -283,12 +370,12 @@ export function defaultConfiguration(
       internalPort: port,
       hostPort: game ? 25565 : 0,
       bindAddress: "127.0.0.1",
-      strategy: profile === "web" || profile === "static" ? "blue_green" : "stop_first",
+      strategy: releaseStrategy(profile, mounts),
       privileged: false,
       hostNetwork: false,
       capabilities: [],
       devices: [],
-      mounts: game ? [{ source: "minecraft-data", target: "/data", ownership: "managed" }] : [],
+      mounts,
     },
     variables: [
       ...composeVariables.map((name) => ({
@@ -309,7 +396,7 @@ export function defaultConfiguration(
         reference: `\${{blueprint.${source?.blueprintId}-${name}-accepted}}`,
       })),
     ],
-    dependencies: [],
+    dependencies: storage.dependencies,
     checks: defaultChecks(profile, port),
     domains: [],
   }
@@ -405,6 +492,22 @@ export function discoveredEnvironmentRows(
       ...(generated ? { generated: true } : {}),
     }
   })
+  // State moved onto a planned volume through a variable the application
+  // reads: the value is what points the file there, so it arrives filled.
+  for (const entry of candidate?.persistentPaths ?? []) {
+    if (!entry.target || !entry.variable || !entry.value) continue
+    const note = `Keeps it on the volume at ${entry.target}`
+    const index = rows.findIndex((row) => row.name === entry.variable)
+    if (index < 0)
+      rows.push({
+        name: entry.variable,
+        value: entry.value,
+        source: entry.source,
+        detected: true,
+        note,
+      })
+    else if (!rows[index].value) rows[index] = { ...rows[index], value: entry.value, note }
+  }
   return rows.length ? rows : [{ name: "", value: "" }]
 }
 

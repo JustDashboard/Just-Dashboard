@@ -6,6 +6,9 @@ import {
   discoveredEnvironmentRows,
   generateSecretValue,
   mergeDiscoveredRows,
+  persistentStorage,
+  projectVolumeName,
+  releaseStrategy,
   validateConfiguration,
   withPackageManagerRunner,
 } from "./deployment-defaults"
@@ -286,5 +289,134 @@ describe("self-issued secrets", () => {
       fixed,
     )
     expect(other[0].value).toBe("")
+  })
+})
+
+describe("persistent state", () => {
+  const prisma = {
+    kind: "sqlite",
+    path: "/app/prisma/dev.db",
+    target: "/data",
+    variable: "DATABASE_URL",
+    value: "file:/data/dev.db",
+    source: "prisma/schema.prisma",
+    reason: "Prisma's SQLite datasource is read from DATABASE_URL",
+  }
+  const uploads = {
+    kind: "uploads",
+    path: "/app/uploads",
+    target: "/data/uploads",
+    variable: "UPLOAD_DIR",
+    value: "/data/uploads",
+    source: ".env.example",
+    reason: "uploaded files are written to the directory UPLOAD_DIR names",
+  }
+  const inImage = {
+    kind: "sqlite",
+    path: "/app/db.sqlite3",
+    source: "mysite/settings.py",
+    reason: "Django's database is a SQLite file",
+  }
+
+  test("a volume name is the project's slug, a hash of its exact name and what it holds", () => {
+    expect(projectVolumeName("My Blog", "/data")).toMatch(/^my-blog-[0-9a-f]{8}-data$/)
+    expect(projectVolumeName("my-blog", "/data")).not.toBe(projectVolumeName("My Blog", "/data"))
+    expect(projectVolumeName("my-blog", "/data")).toBe(projectVolumeName("my-blog", "/data"))
+    expect(projectVolumeName("", "/home/app/.aspnet/DataProtection-Keys")).toMatch(
+      /^app-[0-9a-f]{8}-dataprotection-keys$/,
+    )
+    expect(projectVolumeName("Ünïcode!!", "/")).toMatch(/^ncode-[0-9a-f]{8}-data$/)
+  })
+
+  test("each target gets one managed volume and a storage dependency saying why", () => {
+    const laravel = {
+      ...prisma,
+      path: "/app/database/database.sqlite",
+      target: "/app/storage",
+      reason: "Laravel's database is SQLite",
+    }
+    const files = { ...uploads, target: "/app/storage", reason: "uploads on the local disk" }
+    const { mounts, dependencies } = persistentStorage(
+      candidate({ persistentPaths: [laravel, files, inImage] }),
+      "shop",
+    )
+    expect(mounts).toEqual([
+      {
+        source: projectVolumeName("shop", "/app/storage"),
+        target: "/app/storage",
+        ownership: "managed",
+      },
+    ])
+    expect(dependencies).toEqual([
+      {
+        kind: "storage",
+        ownership: "managed",
+        resourceKind: "docker_volume",
+        resourceId: mounts[0].source,
+        config: { purpose: "Laravel's database is SQLite; uploads on the local disk", data: true },
+      },
+    ])
+    const twice = persistentStorage(
+      candidate({ persistentPaths: [prisma, { ...prisma, target: "/srv/data" }] }),
+      "shop",
+    )
+    expect(new Set(twice.mounts.map((mount) => mount.source)).size).toBe(2)
+  })
+
+  test("a detected state plan keeps its volume and releases stop-first", () => {
+    const plan = defaultConfiguration(
+      "web",
+      candidate({ profile: "web", port: 3000, persistentPaths: [prisma, uploads, inImage] }),
+      undefined,
+      undefined,
+      "notes",
+    )
+    expect(plan.runtime.mounts.map((mount) => mount.target)).toEqual(["/data", "/data/uploads"])
+    expect(plan.runtime.strategy).toBe("stop_first")
+    expect(plan.dependencies).toHaveLength(2)
+    const stateless = defaultConfiguration("web", candidate({ profile: "web", port: 3000 }))
+    expect(stateless.runtime.strategy).toBe("blue_green")
+    expect(stateless.runtime.mounts).toEqual([])
+    expect(stateless.dependencies).toEqual([])
+  })
+
+  test("the strategy follows the profile and any writable mount", () => {
+    expect(releaseStrategy("web", [])).toBe("blue_green")
+    expect(releaseStrategy("static")).toBe("blue_green")
+    expect(releaseStrategy("worker", [])).toBe("stop_first")
+    expect(releaseStrategy("web", [{ source: "v", target: "/data", ownership: "managed" }])).toBe(
+      "stop_first",
+    )
+    expect(
+      releaseStrategy("web", [
+        { source: "v", target: "/etc/app", readOnly: true, ownership: "managed" },
+      ]),
+    ).toBe("blue_green")
+  })
+
+  test("the variable that moves the state onto its volume arrives filled", () => {
+    const rows = discoveredEnvironmentRows(
+      candidate({
+        variables: [{ name: "DATABASE_URL", example: "file:./dev.db", sources: [".env.example"] }],
+        persistentPaths: [prisma, uploads, inImage],
+      }),
+    )
+    expect(rows).toEqual([
+      {
+        name: "DATABASE_URL",
+        value: "file:/data/dev.db",
+        example: "file:./dev.db",
+        source: ".env.example",
+        detected: true,
+        note: "Keeps it on the volume at /data",
+      },
+      {
+        name: "UPLOAD_DIR",
+        value: "/data/uploads",
+        source: ".env.example",
+        detected: true,
+        note: "Keeps it on the volume at /data/uploads",
+      },
+    ])
   })
 })
