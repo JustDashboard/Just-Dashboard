@@ -185,17 +185,39 @@ func TestPreflightReportsProxyTrustAndTheBodyLimit(t *testing.T) {
 	if found := findingByCode(findings, "proxy_headers_trusted"); found == nil || found.Measured != "FORWARDED_ALLOW_IPS=*" {
 		t.Fatalf("trusted = %+v", found)
 	}
-	if found := findingByCode(findings, "request_body_limit"); found == nil || found.Measured != "64 MB (default)" || found.FieldID != "runtime.maxRequestBodyMb" {
+	// Zero means each proxy's own deployment default, which differs: nginx
+	// is given 64 MB, Caddy keeps having none.
+	if found := findingByCode(findings, "request_body_limit"); found == nil || found.Measured != "default (64 MB on nginx, no limit on Caddy)" ||
+		found.FieldID != "runtime.maxRequestBodyMb" || !strings.Contains(found.Means, "Caddy proxy sets no limit") {
 		t.Fatalf("body limit = %+v", found)
 	}
 	configuration.Runtime.MaxRequestBodyMB = 512
-	if found := findingByCode(networkFindings(networkDraft(python, ProfileWeb), configuration), "request_body_limit"); found == nil || found.Measured != "512 MB" {
+	if found := findingByCode(networkFindings(networkDraft(python, ProfileWeb), configuration), "request_body_limit"); found == nil ||
+		found.Measured != "512 MB" || found.Title != "Uploads up to 512 MB reach the application" {
 		t.Fatalf("explicit body limit = %+v", found)
 	}
-	configuration.Runtime.BindAddress = "0.0.0.0"
-	findings = networkFindings(networkDraft(python, ProfileWeb), configuration)
-	if found := findingByCode(findings, "forwarded_headers_untrusted"); found == nil || found.Severity != PreflightWarning || findingByCode(findings, "proxy_headers_trusted") != nil {
-		t.Fatalf("public bind = %+v", findings)
+	for _, public := range []struct {
+		runtime  func(*RuntimePlanConfig)
+		measured string
+	}{
+		{func(runtime *RuntimePlanConfig) { runtime.BindAddress = "0.0.0.0" }, "0.0.0.0"},
+		{func(runtime *RuntimePlanConfig) { runtime.HostNetwork = true }, "host network"},
+		{func(runtime *RuntimePlanConfig) {
+			runtime.Ports = []PublishedPort{{HostPort: 8000, ContainerPort: 8000}}
+		}, "port 8000 published on host port 8000 on every interface"},
+	} {
+		exposed := configuration
+		exposed.Runtime.Ports = nil
+		public.runtime(&exposed.Runtime)
+		findings = networkFindings(networkDraft(python, ProfileWeb), exposed)
+		if found := findingByCode(findings, "forwarded_headers_untrusted"); found == nil || found.Severity != PreflightWarning ||
+			found.Measured != public.measured || !strings.Contains(found.Means, "FORWARDED_ALLOW_IPS") || findingByCode(findings, "proxy_headers_trusted") != nil {
+			t.Fatalf("%s = %+v", public.measured, findings)
+		}
+	}
+	configuration.Runtime.Ports = []PublishedPort{{HostPort: 2222, ContainerPort: 22}}
+	if found := findingByCode(networkFindings(networkDraft(python, ProfileWeb), configuration), "proxy_headers_trusted"); found == nil {
+		t.Fatal("an unrelated published port gave up the proxy's trust")
 	}
 
 	auth := DetectedCandidate{Name: "web", BuildMethod: BuildRecipe, Recipe: "node", Framework: "nextjs", StartCommand: "npm run start",
@@ -209,6 +231,14 @@ func TestPreflightReportsProxyTrustAndTheBodyLimit(t *testing.T) {
 	if found := findingByCode(networkFindings(networkDraft(auth, ProfileWeb), configuration), "proxy_headers_trusted"); found == nil || found.Measured != "AUTH_TRUST_HOST" {
 		t.Fatalf("variable trust = %+v", found)
 	}
+	// The runtime withdraws only what the recipe image set; a variable the
+	// plan sets is still trusted, and the warning says so.
+	configuration.Runtime.BindAddress = "0.0.0.0"
+	if found := findingByCode(networkFindings(networkDraft(auth, ProfileWeb), configuration), "forwarded_headers_untrusted"); found == nil ||
+		!strings.Contains(found.Means, "AUTH_TRUST_HOST is still trusted") || !strings.Contains(found.Action, "Remove AUTH_TRUST_HOST") {
+		t.Fatalf("public bind with a trusted variable = %+v", found)
+	}
+	configuration.Runtime.BindAddress = "127.0.0.1"
 	configuration.Domains = nil
 	if findings := networkFindings(networkDraft(auth, ProfileWeb), configuration); findingByCode(findings, "request_body_limit") != nil || findingByCode(findings, "proxy_headers_trusted") != nil {
 		t.Fatalf("a plan with no route got route findings: %+v", findings)
@@ -227,8 +257,9 @@ func TestRequestBodyLimitIsValidated(t *testing.T) {
 			t.Fatalf("limit %d: %v", limit, err)
 		}
 	}
-	if (RuntimePlanConfig{}).EffectiveMaxRequestBodyMB() != 64 || (RuntimePlanConfig{MaxRequestBodyMB: 10}).EffectiveMaxRequestBodyMB() != 10 {
-		t.Fatal("effective limit")
+	if (RuntimePlanConfig{}).requestBodyLimitLabel() != "default (64 MB on nginx, no limit on Caddy)" ||
+		(RuntimePlanConfig{MaxRequestBodyMB: 10}).requestBodyLimitLabel() != "10 MB" {
+		t.Fatal("limit label")
 	}
 }
 
@@ -259,5 +290,88 @@ func TestPreflightKeepsCodeFactsWhenTheStartCommandChanges(t *testing.T) {
 	findings = networkFindings(networkDraft(rocket, ProfileWeb), networkConfiguration("rust", "/app --verbose", 8000))
 	if found := findingByCode(findings, "listen_loopback_moved"); found == nil {
 		t.Fatalf("custom Rocket start = %+v", findings)
+	}
+}
+
+func TestPreflightLoopbackIsCertainOnlyForTheCodeThatRuns(t *testing.T) {
+	t.Parallel()
+	candidate := DetectedCandidate{Name: "api", BuildMethod: BuildRecipe, Recipe: "node", StartCommand: "npm run start",
+		Listen: &DetectedListen{Loopback: "127.0.0.1", LoopbackFrom: "server.js:2 listen(4000, '127.0.0.1')", LoopbackCertain: true}}
+	for _, test := range []struct {
+		name          string
+		configuration PlanConfiguration
+		severity      PreflightSeverity
+	}{
+		{name: "the detected command", configuration: networkConfiguration("node", "npm run start", 4000), severity: PreflightBlocked},
+		{name: "the same script through another manager", configuration: networkConfiguration("node", "pnpm run start", 4000), severity: PreflightBlocked},
+		{name: "another command may run other code", configuration: networkConfiguration("node", "node dist/main.js", 4000), severity: PreflightWarning},
+		{
+			name:          "a Dockerfile runs its own CMD",
+			configuration: PlanConfiguration{Build: BuildPlanConfig{Method: BuildDockerfile}, Runtime: RuntimePlanConfig{InternalPort: 4000}},
+			severity:      PreflightWarning,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			found := findingByCode(networkFindings(networkDraft(candidate, ProfileWeb), test.configuration), "listen_loopback")
+			if found == nil || found.Severity != test.severity {
+				t.Fatalf("listen_loopback = %+v", found)
+			}
+			if test.severity == PreflightWarning && !strings.Contains(found.Means, "debug or admin endpoint") {
+				t.Fatalf("an uncertain loopback reads as certain: %+v", found)
+			}
+		})
+	}
+}
+
+func TestPreflightChecksThePublicURLNextAuthBuildsCallbacksFrom(t *testing.T) {
+	t.Parallel()
+	candidate := DetectedCandidate{Name: "web", BuildMethod: BuildRecipe, Recipe: "node", Framework: "nextjs", StartCommand: "npm run start",
+		NetworkVariables: []DetectedNetworkVariable{{Name: "NEXTAUTH_URL", DomainTemplate: "{{scheme}}://{{hostname}}", Reason: "next-auth 4.24.0 in package.json builds its callback URLs from NEXTAUTH_URL"}}}
+	domains := []PlannedDomain{{Hostname: "App.Example.test", HTTPS: true, Ownership: OwnershipManaged}}
+	variable := func(value string) []PlannedVariable {
+		return []PlannedVariable{{Name: "NEXTAUTH_URL", Sensitivity: "plain", Scopes: []string{"runtime"}, Value: value, DomainTemplate: "{{scheme}}://{{hostname}}"}}
+	}
+	for _, test := range []struct {
+		name        string
+		domains     []PlannedDomain
+		variables   []PlannedVariable
+		environment map[string]string
+		code        string
+		title       string
+		action      string
+	}{
+		{name: "filled from the domain", domains: domains, variables: variable("https://app.example.test")},
+		{name: "typed into the environment", environment: map[string]string{"NEXTAUTH_URL": "https://sso.example.test"}},
+		{name: "missing with no domain", code: "public_url_variable_missing", title: "NEXTAUTH_URL is not set", action: "Add a domain"},
+		{
+			name: "missing with a domain", domains: domains, code: "public_url_variable_missing",
+			title: "NEXTAUTH_URL is not set", action: "Set NEXTAUTH_URL=https://app.example.test.",
+		},
+		{name: "empty", variables: []PlannedVariable{{Name: "NEXTAUTH_URL", Sensitivity: "plain", Scopes: []string{"runtime"}, DomainTemplate: "{{scheme}}://{{hostname}}"}},
+			code: "public_url_variable_missing", title: "NEXTAUTH_URL is empty"},
+		{
+			name: "left on a domain the plan no longer routes", domains: domains, variables: variable("https://old.example.test/api/auth"),
+			code: "public_url_variable_stale", title: "NEXTAUTH_URL names old.example.test, not the primary domain",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			configuration := networkConfiguration("node", "npm run start", 3000)
+			configuration.Domains, configuration.Variables = test.domains, test.variables
+			draft := networkDraft(candidate, ProfileWeb)
+			draft.environment = test.environment
+			findings := networkFindings(draft, configuration)
+			for _, code := range []string{"public_url_variable_missing", "public_url_variable_stale"} {
+				found := findingByCode(findings, code)
+				if (found != nil) != (code == test.code) {
+					t.Fatalf("%s = %+v", code, found)
+				}
+				if found != nil && (found.Title != test.title || found.Severity != PreflightWarning || found.FieldID != "variables.NEXTAUTH_URL" ||
+					!strings.Contains(found.Action, test.action)) {
+					t.Fatalf("%s = %+v", code, found)
+				}
+			}
+		})
 	}
 }

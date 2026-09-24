@@ -317,7 +317,6 @@ func containerRuntimeEnvironment(plan RuntimePlanConfig, variables map[string]st
 	if _, explicit := variables["PORT"]; !explicit && plan.InternalPort > 0 && !plan.HostNetwork {
 		environment = append(environment, dockerx.EnvVar{Name: "PORT", Value: strconv.Itoa(plan.InternalPort)})
 	}
-	environment = append(environment, withdrawnProxyTrust(plan, variables)...)
 	return environment, names
 }
 
@@ -331,6 +330,7 @@ func (o *DockerRuntimeOwner) startContainer(
 	}
 	plan := request.Snapshot.Plan
 	environment, variableNames := containerRuntimeEnvironment(plan, request.RuntimeVariables)
+	environment = append(environment, withdrawnProxyTrust(request.Snapshot, request.RuntimeVariables)...)
 	mounts := make([]dockerx.MountSpec, 0, len(plan.Mounts))
 	for _, planned := range plan.Mounts {
 		kind := "volume"

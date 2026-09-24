@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -16,9 +17,10 @@ import (
 // refuses its own form posts and rate-limits everyone as one client. The
 // recipes switch each framework's trust on, because the proxy is the only
 // thing that reaches a container published on loopback, and the proxy
-// replaces whatever a client sent in those headers. A plan that publishes the
-// container on a public interface gives up that guarantee, so the runtime
-// switches trust back off for it — see proxyTrustWithdrawn.
+// replaces whatever a client sent in those headers. A release the proxy does
+// not front alone — no route, a public interface, host networking — gives up
+// that guarantee, so the runtime switches the recipe image's trust back off
+// for it; see withdrawnProxyTrust.
 
 // proxyTrustSetting is one environment setting a recipe writes so its
 // framework believes the proxy, with the value the runtime writes instead
@@ -35,7 +37,14 @@ var (
 		{"FORWARDED_ALLOW_IPS", "*", "127.0.0.1"},
 	}
 	sveltekitProxyTrust = []proxyTrustSetting{
-		{"PROTOCOL_HEADER", "x-forwarded-proto", ""}, {"HOST_HEADER", "x-forwarded-host", ""},
+		{"PROTOCOL_HEADER", "x-forwarded-proto", ""},
+		// adapter-node before 5.5 reads the host from whatever header this
+		// names, with no fallback: an empty name makes every origin
+		// https://undefined and refuses every form action. host is its own
+		// default.
+		{"HOST_HEADER", "x-forwarded-host", "host"},
+		// adapter-node's getClientAddress throws when this header is absent,
+		// so it is only safe where every request comes through the proxy.
 		{"ADDRESS_HEADER", "x-forwarded-for", ""}, {"XFF_DEPTH", "1", "1"},
 	}
 	dotnetProxyTrust = []proxyTrustSetting{{"ASPNETCORE_FORWARDEDHEADERS_ENABLED", "true", "false"}}
@@ -63,22 +72,56 @@ func recipeProxyTrust(recipe, framework string) []proxyTrustSetting {
 	return nil
 }
 
-// proxyTrustWithdrawn is every trust setting's withdrawn value, once per
-// name, for the runtime to write when a plan publishes on every interface.
-func proxyTrustWithdrawn() []proxyTrustSetting {
+// proxyTrustSettings is every setting any recipe writes, once per name, in
+// name order.
+func proxyTrustSettings() []proxyTrustSetting {
 	seen := map[string]bool{}
-	var withdrawn []proxyTrustSetting
-	for _, settings := range [][]proxyTrustSetting{pythonProxyTrust, sveltekitProxyTrust, dotnetProxyTrust, springProxyTrust, quarkusTrust} {
-		for _, setting := range settings {
-			if setting.withdrawn == setting.value || seen[setting.name] {
-				continue
+	var settings []proxyTrustSetting
+	for _, recipe := range [][]proxyTrustSetting{pythonProxyTrust, sveltekitProxyTrust, dotnetProxyTrust, springProxyTrust, quarkusTrust} {
+		for _, setting := range recipe {
+			if !seen[setting.name] {
+				seen[setting.name] = true
+				settings = append(settings, setting)
 			}
-			seen[setting.name] = true
-			withdrawn = append(withdrawn, setting)
 		}
 	}
-	sort.Slice(withdrawn, func(i, j int) bool { return withdrawn[i].name < withdrawn[j].name })
-	return withdrawn
+	sort.Slice(settings, func(i, j int) bool { return settings[i].name < settings[j].name })
+	return settings
+}
+
+// imageProxyTrust names the trust settings a recipe build's Dockerfile sets
+// in its final stage — the ones the runtime may withdraw. A repository's own
+// Dockerfile or a pulled image is never second-guessed: whatever it bakes in
+// is its author's decision, and the runtime writes nothing over it.
+func imageProxyTrust(prepared PreparedBuild) []string {
+	if prepared.Method != BuildRecipe {
+		return nil
+	}
+	trusted := map[string]string{}
+	for _, setting := range proxyTrustSettings() {
+		trusted[setting.name] = setting.value
+	}
+	set := map[string]bool{}
+	for _, raw := range strings.Split(prepared.DockerfilePreview, "\n") {
+		line := strings.TrimSpace(raw)
+		switch keyword, rest, _ := strings.Cut(line, " "); strings.ToUpper(keyword) {
+		case "FROM":
+			set = map[string]bool{}
+		case "ENV":
+			for _, field := range strings.Fields(rest) {
+				name, value, ok := strings.Cut(field, "=")
+				if ok && trusted[name] != "" && trusted[name] == strings.Trim(value, `"`) {
+					set[name] = true
+				}
+			}
+		}
+	}
+	names := make([]string, 0, len(set))
+	for name := range set {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func trustEnvironment(settings []proxyTrustSetting) []string {
@@ -174,25 +217,48 @@ func dotnetRuntimeStart(assembly string, bridge []string) string {
 	return strings.Join(append(append([]string{"ASPNETCORE_HTTP_PORTS=${PORT:-8080}"}, bridge...), "dotnet /app/"+assembly+".dll"), " ")
 }
 
-// publishesPublicly reports a routed port published on every interface: the
-// proxy is then not the only way in, so the forwarded headers a recipe
-// trusts could come from anyone. Host networking is left as it is — the
-// operator chose to hand the container the host's own interfaces, and its
-// environment has never been adjusted.
-func publishesPublicly(plan RuntimePlanConfig) bool {
-	return !plan.HostNetwork && (plan.BindAddress == "0.0.0.0" || plan.BindAddress == "::")
+// publicExposure says how the application's port is reachable without the
+// proxy — host networking, a public bind address, or an extra published port
+// that is the application's own on every interface — or "" when the proxy is
+// the only way in. Forwarded headers the application trusts could then come
+// from anyone.
+func publicExposure(plan RuntimePlanConfig) string {
+	switch {
+	case plan.HostNetwork:
+		return "host network"
+	case plan.BindAddress == "0.0.0.0" || plan.BindAddress == "::":
+		return plan.BindAddress
+	}
+	for _, published := range plan.Ports {
+		if published.ContainerPort == plan.InternalPort && published.effectiveProtocol() == "tcp" &&
+			(published.BindAddress == "" || published.BindAddress == "0.0.0.0" || published.BindAddress == "::") {
+			return fmt.Sprintf("port %d published on host port %d on every interface", published.ContainerPort, published.HostPort)
+		}
+	}
+	return ""
 }
 
-// withdrawnProxyTrust is the environment that switches every recipe's proxy
-// trust back off for a publicly published container. A variable the plan
-// sets itself always wins.
-func withdrawnProxyTrust(plan RuntimePlanConfig, variables map[string]string) []dockerx.EnvVar {
-	if !publishesPublicly(plan) {
+func publishesPublicly(plan RuntimePlanConfig) bool {
+	return publicExposure(plan) != ""
+}
+
+// withdrawnProxyTrust is the environment that switches the recipe image's
+// proxy trust back off when the proxy does not front the release alone:
+// with no route nothing adds the forwarded headers (and adapter-node's
+// ADDRESS_HEADER then throws on every request that asks for the client),
+// and with a public port anyone can forge them. A variable the plan sets
+// itself always wins.
+func withdrawnProxyTrust(snapshot runtimeReleaseSnapshot, variables map[string]string) []dockerx.EnvVar {
+	if len(snapshot.ProxyTrust) == 0 || (len(snapshot.Domains) > 0 && !publishesPublicly(snapshot.Plan)) {
 		return nil
 	}
+	baked := map[string]bool{}
+	for _, name := range snapshot.ProxyTrust {
+		baked[name] = true
+	}
 	var environment []dockerx.EnvVar
-	for _, setting := range proxyTrustWithdrawn() {
-		if _, explicit := variables[setting.name]; !explicit {
+	for _, setting := range proxyTrustSettings() {
+		if _, explicit := variables[setting.name]; baked[setting.name] && !explicit && setting.withdrawn != setting.value {
 			environment = append(environment, dockerx.EnvVar{Name: setting.name, Value: setting.withdrawn})
 		}
 	}
@@ -208,12 +274,13 @@ const (
 	MaxRequestBodyMB        = 10 << 10
 )
 
-// EffectiveMaxRequestBodyMB is the largest body the managed route is known to
-// let through: the plan's limit, else the default nginx enforces (Caddy
-// enforces none by default, so it lets at least as much through).
-func (c RuntimePlanConfig) EffectiveMaxRequestBodyMB() int {
+// requestBodyLimitLabel says what the managed route lets through. With no
+// limit in the plan that depends on the proxy: the host nginx driver writes
+// DefaultMaxRequestBodyMB, since its own default refused a phone photo, and
+// Caddy, which has no default limit, is left without one.
+func (c RuntimePlanConfig) requestBodyLimitLabel() string {
 	if c.MaxRequestBodyMB == 0 {
-		return DefaultMaxRequestBodyMB
+		return fmt.Sprintf("default (%d MB on nginx, no limit on Caddy)", DefaultMaxRequestBodyMB)
 	}
-	return c.MaxRequestBodyMB
+	return fmt.Sprintf("%d MB", c.MaxRequestBodyMB)
 }

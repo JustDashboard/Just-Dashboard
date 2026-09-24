@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 )
 
@@ -32,13 +33,16 @@ func networkFindings(draft *Draft, configuration PlanConfiguration) []PreflightF
 		}
 	}
 	findings = append(findings, proxyTrustFindings(draft, configuration, selected)...)
-	if len(configuration.Domains) > 0 {
-		measured := fmt.Sprintf("%d MB", runtime.EffectiveMaxRequestBodyMB())
-		if runtime.MaxRequestBodyMB == 0 {
-			measured += " (default)"
-		}
+	switch {
+	case len(configuration.Domains) == 0:
+	case runtime.MaxRequestBodyMB == 0:
 		findings = append(findings, finding("request_body_limit", PreflightPass,
-			"Uploads up to "+fmt.Sprintf("%d MB", runtime.EffectiveMaxRequestBodyMB())+" reach the application", measured,
+			"The proxy's default upload limit applies", runtime.requestBodyLimitLabel(),
+			fmt.Sprintf("The host nginx proxy answers a body over %d MB with 413 before the application sees it; the Caddy proxy sets no limit of its own.", DefaultMaxRequestBodyMB),
+			"", "proxy", "runtime.maxRequestBodyMb"))
+	default:
+		findings = append(findings, finding("request_body_limit", PreflightPass,
+			"Uploads up to "+runtime.requestBodyLimitLabel()+" reach the application", runtime.requestBodyLimitLabel(),
 			"The proxy answers a larger request with 413 before the application sees it.", "",
 			"proxy", "runtime.maxRequestBodyMb"))
 	}
@@ -82,7 +86,12 @@ func listenFindings(draft *Draft, configuration PlanConfiguration, selected *Det
 			listen.ReadsPort, listen.ReadsPortFrom = codeListen.ReadsPort, codeListen.ReadsPortFrom
 		}
 		if codeListen.Loopback != "" && !fromStartCommand(codeListen.LoopbackFrom) {
-			listen.Loopback, listen.LoopbackFrom, listen.LoopbackCertain = codeListen.Loopback, codeListen.LoopbackFrom, codeListen.LoopbackCertain
+			// The code was read for what the detected command runs; one that
+			// no longer runs the same package script may run other code, so
+			// its loopback is no longer certain — which is also how a
+			// detection the operator knows to be wrong stops blocking.
+			listen.Loopback, listen.LoopbackFrom = codeListen.Loopback, codeListen.LoopbackFrom
+			listen.LoopbackCertain = codeListen.LoopbackCertain && sameScript(build.StartCommand, selected.StartCommand)
 			listen.LoopbackVariable = codeListen.LoopbackVariable
 			if !strings.HasPrefix(codeListen.LoopbackRecipeFix, "Kestrel__") && !strings.HasPrefix(codeListen.LoopbackRecipeFix, "URLS=") {
 				listen.LoopbackRecipeFix = codeListen.LoopbackRecipeFix
@@ -102,6 +111,11 @@ func listenFindings(draft *Draft, configuration PlanConfiguration, selected *Det
 		case command.defaultPort > 0:
 			listen.Port, listen.PortFrom = command.defaultPort, command.tool+" default port"
 		}
+	}
+	if build.Method != selected.BuildMethod {
+		// The facts were read for another way of building it; a Dockerfile
+		// runs its own CMD, which may front the code rather than be it.
+		listen.LoopbackCertain = false
 	}
 	if listen.Loopback != "" {
 		fromCommand := fromStartCommand(listen.LoopbackFrom)
@@ -132,10 +146,13 @@ func listenFindings(draft *Draft, configuration PlanConfiguration, selected *Det
 			case fromCommand:
 				action = "Change the start command to bind 0.0.0.0 (for example --host 0.0.0.0)."
 			}
-			findings = append(findings, finding("listen_loopback", severity,
-				"The server listens on "+listen.Loopback+" inside its container", listen.LoopbackFrom,
-				"Only the container itself reaches "+listen.Loopback+"; the proxy and the readiness check connect from outside it, so every request is refused.",
-				action, "deploy", field))
+			title := "The server listens on " + listen.Loopback + " inside its container"
+			means := "Only the container itself reaches " + listen.Loopback + "; the proxy and the readiness check connect from outside it, so every request is refused."
+			if !listen.LoopbackCertain {
+				title = "A listener binds " + listen.Loopback + " inside its container"
+				means = "Only the container itself reaches " + listen.Loopback + ". If this is the server the proxy should reach, the proxy and the readiness check cannot connect to it; a debug or admin endpoint on loopback is fine."
+			}
+			findings = append(findings, finding("listen_loopback", severity, title, listen.LoopbackFrom, means, action, "deploy", field))
 		}
 	}
 	if listen.Unbridged != "" {
@@ -162,6 +179,20 @@ func listenFindings(draft *Draft, configuration PlanConfiguration, selected *Det
 	return findings
 }
 
+// sameScript reports two start commands that run the same package script,
+// as a package-manager switch rewrites `npm run start` into `bun run start`.
+func sameScript(command, detected string) bool {
+	script := func(command string) string {
+		segments := strings.Split(command, "&&")
+		if match := scriptRunRE.FindStringSubmatch(strings.TrimSpace(segments[len(segments)-1])); match != nil {
+			return match[1]
+		}
+		return ""
+	}
+	name := script(command)
+	return name != "" && name == script(detected)
+}
+
 // fromStartCommand reports a listen fact detection read from the detected
 // start command rather than from code or configuration.
 func fromStartCommand(from string) bool {
@@ -173,6 +204,10 @@ func fromStartCommand(from string) bool {
 // removed a variable detection proposed for it.
 func proxyTrustFindings(draft *Draft, configuration PlanConfiguration, selected *DetectedCandidate) []PreflightFinding {
 	findings := []PreflightFinding{}
+	values := draft.variableValues(configuration)
+	if selected != nil {
+		findings = append(findings, publicURLFindings(configuration, selected, values)...)
+	}
 	if len(configuration.Domains) == 0 {
 		return findings
 	}
@@ -180,24 +215,22 @@ func proxyTrustFindings(draft *Draft, configuration PlanConfiguration, selected 
 	if framework == "" && selected != nil {
 		framework = selected.Framework
 	}
-	var trusted []string
+	var recipeTrust, variableTrust []string
 	if configuration.Build.Method == BuildRecipe {
-		trusted = trustEnvironment(recipeProxyTrust(configuration.Build.Recipe, framework))
+		recipeTrust = trustEnvironment(recipeProxyTrust(configuration.Build.Recipe, framework))
 	}
-	values := draft.variableValues(configuration)
 	if selected != nil {
 		for _, variable := range selected.NetworkVariables {
-			if variable.Name == "HOST" {
+			if variable.Name == "HOST" || variable.DomainTemplate != "" {
 				continue
 			}
 			// Names only: a value typed into the environment is sealed with
 			// the draft, and a finding is no place to echo it.
-			if value, set := values[variable.Name]; set && value != "" {
-				trusted = append(trusted, variable.Name)
-				continue
-			}
-			_, set := values[variable.Name]
-			if !set && variable.DomainTemplate == "" {
+			value, set := values[variable.Name]
+			switch {
+			case set && value != "":
+				variableTrust = append(variableTrust, variable.Name)
+			case !set:
 				findings = append(findings, finding("proxy_trust_variable_missing", PreflightWarning,
 					variable.Name+" was proposed but is not in the plan", variable.Reason,
 					"Without it the application does not trust the host the proxy forwards, and refuses sign-in or form requests.",
@@ -205,17 +238,95 @@ func proxyTrustFindings(draft *Draft, configuration PlanConfiguration, selected 
 			}
 		}
 	}
+	trusted := append(append([]string{}, recipeTrust...), variableTrust...)
 	if len(trusted) == 0 {
 		return findings
 	}
-	if publishesPublicly(configuration.Runtime) {
+	if exposure := publicExposure(configuration.Runtime); exposure != "" {
+		means := "Anyone can reach the container without the proxy and forge X-Forwarded-*."
+		action := "Publish on 127.0.0.1, without host networking, so the proxy is the only way in."
+		if len(recipeTrust) > 0 {
+			means += " The runtime therefore switches the recipe's trust back off (" + strings.Join(trustNames(recipeTrust), ", ") +
+				"), and behind the proxy the application sees http:// and the proxy's address."
+		}
+		if len(variableTrust) > 0 {
+			means += " " + strings.Join(variableTrust, ", ") + " is still trusted, because the plan sets it."
+			action = "Remove " + strings.Join(variableTrust, ", ") + ", or publish on 127.0.0.1 so the proxy is the only way in."
+		}
 		findings = append(findings, finding("forwarded_headers_untrusted", PreflightWarning,
-			"Forwarded headers are not trusted while the port is public", configuration.Runtime.BindAddress,
-			"Anyone can reach the container without the proxy and forge X-Forwarded-*, so the runtime switches the recipe's trust back off; behind the proxy the application sees http:// and the proxy's address.",
-			"Publish on 127.0.0.1 so the proxy is the only way in.", "deploy", "runtime.bindAddress"))
+			"Forwarded headers are not safe to trust while the port is public", exposure, means, action, "deploy", "runtime.bindAddress"))
 		return findings
 	}
 	return append(findings, finding("proxy_headers_trusted", PreflightPass,
 		"The application trusts the proxy's forwarded headers", strings.Join(trusted, " "),
 		"Redirects, callback URLs and client addresses use the visitor's https URL and address, not the proxy's.", "", "deploy", "variables"))
+}
+
+func trustNames(settings []string) []string {
+	names := make([]string, 0, len(settings))
+	for _, setting := range settings {
+		name, _, _ := strings.Cut(setting, "=")
+		names = append(names, name)
+	}
+	return names
+}
+
+// publicURLFindings checks the public-URL variables detection proposed with
+// a domain template (next-auth 4's NEXTAUTH_URL): the form fills one from the
+// primary domain, and a plan with no domain, or one whose domain moved since,
+// is where it goes missing or stale. Only the host of a value is echoed.
+func publicURLFindings(configuration PlanConfiguration, selected *DetectedCandidate, values map[string]string) []PreflightFinding {
+	findings := []PreflightFinding{}
+	for _, variable := range selected.NetworkVariables {
+		if variable.DomainTemplate == "" {
+			continue
+		}
+		expected := ""
+		if len(configuration.Domains) > 0 {
+			expected = domainTemplateValue(variable.DomainTemplate, configuration.Domains[0])
+		}
+		action := "Add a domain, which fills it, or set " + variable.Name + " to the address visitors use."
+		if expected != "" {
+			action = "Set " + variable.Name + "=" + expected + "."
+		}
+		field := "variables." + variable.Name
+		value, set := values[variable.Name]
+		switch host := urlHost(value); {
+		case !set:
+			findings = append(findings, finding("public_url_variable_missing", PreflightWarning,
+				variable.Name+" is not set", variable.Reason,
+				"Without it the application builds its sign-in callback URLs for http://localhost:3000, which no visitor reaches.",
+				action, "deploy", field))
+		case value == "":
+			findings = append(findings, finding("public_url_variable_missing", PreflightWarning,
+				variable.Name+" is empty", variable.Reason,
+				"An empty value is not a URL: next-auth 4 fails every /api/auth request when it reads one.",
+				action, "deploy", field))
+		case expected != "" && host != "" && !strings.EqualFold(host, urlHost(expected)):
+			findings = append(findings, finding("public_url_variable_stale", PreflightWarning,
+				variable.Name+" names "+host+", not the primary domain", variable.Name+" host "+host,
+				"Sign-in callbacks are sent to "+host+" rather than "+urlHost(expected)+".",
+				action, "deploy", field))
+		}
+	}
+	return findings
+}
+
+// domainTemplateValue is what the form fills a domain template with.
+func domainTemplateValue(template string, domain PlannedDomain) string {
+	scheme := "http"
+	if domain.HTTPS {
+		scheme = "https"
+	}
+	hostname := strings.ToLower(strings.TrimSpace(domain.Hostname))
+	return strings.NewReplacer("{{hostname}}", hostname, "{{scheme}}", scheme).Replace(template)
+}
+
+// urlHost is the host of a URL value, or "" when it is not one.
+func urlHost(value string) string {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	return parsed.Hostname()
 }

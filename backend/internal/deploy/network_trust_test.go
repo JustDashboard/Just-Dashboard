@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
@@ -24,6 +23,8 @@ func TestRecipesBindEveryInterfaceAndTrustTheProxy(t *testing.T) {
 		want   []string
 		absent []string
 		once   []string
+		// trust is what the runtime may later withdraw from the image.
+		trust string
 	}{
 		{
 			name:   "every node server binds HOST",
@@ -44,6 +45,7 @@ func TestRecipesBindEveryInterfaceAndTrustTheProxy(t *testing.T) {
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "node", BuildCommand: "npm run build", StartCommand: "node build"},
 			want: []string{"ENV HOST=0.0.0.0", "ENV PROTOCOL_HEADER=x-forwarded-proto", "ENV HOST_HEADER=x-forwarded-host",
 				"ENV ADDRESS_HEADER=x-forwarded-for", "ENV XFF_DEPTH=1"},
+			trust: "ADDRESS_HEADER HOST_HEADER PROTOCOL_HEADER XFF_DEPTH",
 		},
 		{
 			name:   "static output gets no server environment",
@@ -57,6 +59,7 @@ func TestRecipesBindEveryInterfaceAndTrustTheProxy(t *testing.T) {
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "python", StartCommand: "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"},
 			want: []string{"ENV FORWARDED_ALLOW_IPS=* UVICORN_HOST=0.0.0.0 FLASK_RUN_HOST=0.0.0.0",
 				`CMD ["/bin/sh","-c","uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]`},
+			trust: "FORWARDED_ALLOW_IPS",
 		},
 		{
 			name:   "spring boot is bridged to PORT and trusts the proxy",
@@ -64,6 +67,7 @@ func TestRecipesBindEveryInterfaceAndTrustTheProxy(t *testing.T) {
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "java"},
 			want: []string{"ENV SERVER_FORWARD_HEADERS_STRATEGY=framework",
 				`CMD ["/bin/sh","-c","exec env SERVER_PORT=${PORT:-8080} java -jar /app/app.jar"]`},
+			trust: "SERVER_FORWARD_HEADERS_STRATEGY",
 		},
 		{
 			name:   "quarkus",
@@ -71,6 +75,7 @@ func TestRecipesBindEveryInterfaceAndTrustTheProxy(t *testing.T) {
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "java"},
 			want: []string{"ENV QUARKUS_HTTP_PROXY_PROXY_ADDRESS_FORWARDING=true QUARKUS_HTTP_PROXY_ALLOW_X_FORWARDED=true",
 				"exec env QUARKUS_HTTP_PORT=${PORT:-8080} java -jar /app/app.jar"},
+			trust: "QUARKUS_HTTP_PROXY_ALLOW_X_FORWARDED QUARKUS_HTTP_PROXY_PROXY_ADDRESS_FORWARDING",
 		},
 		{
 			name:   "micronaut",
@@ -91,6 +96,7 @@ func TestRecipesBindEveryInterfaceAndTrustTheProxy(t *testing.T) {
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "java", StartCommand: "java -Xmx256m -jar /app/app.jar"},
 			want:   []string{`CMD ["/bin/sh","-c","java -Xmx256m -jar /app/app.jar"]`, "ENV SERVER_FORWARD_HEADERS_STRATEGY=framework"},
 			absent: []string{"SERVER_PORT"},
+			trust:  "SERVER_FORWARD_HEADERS_STRATEGY",
 		},
 		{
 			name:   "asp.net trusts forwarded headers",
@@ -98,18 +104,21 @@ func TestRecipesBindEveryInterfaceAndTrustTheProxy(t *testing.T) {
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet"},
 			want: []string{"ENV ASPNETCORE_FORWARDEDHEADERS_ENABLED=true",
 				`CMD ["/bin/sh","-c","ASPNETCORE_HTTP_PORTS=${PORT:-8080} dotnet /app/api.dll"]`},
+			trust: "ASPNETCORE_FORWARDEDHEADERS_ENABLED",
 		},
 		{
 			name:   "one kestrel endpoint is bridged",
 			files:  map[string]string{"api.csproj": web, "appsettings.json": `{"Kestrel":{"Endpoints":{"Http":{"Url":"http://localhost:5000"}}}}`},
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet"},
 			want:   []string{`ASPNETCORE_HTTP_PORTS=${PORT:-8080} Kestrel__Endpoints__Http__Url=http://+:${PORT:-8080} dotnet /app/api.dll`},
+			trust:  "ASPNETCORE_FORWARDEDHEADERS_ENABLED",
 		},
 		{
 			name:   "urls are bridged",
 			files:  map[string]string{"api.csproj": web, "appsettings.Production.json": `{"Urls":"http://localhost:5000"}`},
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet"},
 			want:   []string{`ASPNETCORE_HTTP_PORTS=${PORT:-8080} URLS=http://+:${PORT:-8080} dotnet /app/api.dll`},
+			trust:  "ASPNETCORE_FORWARDEDHEADERS_ENABLED",
 		},
 		{
 			name:   "a console program is not given web settings",
@@ -164,6 +173,9 @@ func TestRecipesBindEveryInterfaceAndTrustTheProxy(t *testing.T) {
 					t.Fatalf("Dockerfile carries %q other than once:\n%s", once, prepared.DockerfilePreview)
 				}
 			}
+			if got := strings.Join(imageProxyTrust(prepared), " "); got != test.trust {
+				t.Fatalf("image trust = %q, want %q", got, test.trust)
+			}
 		})
 	}
 }
@@ -189,40 +201,81 @@ func TestKestrelBridgeMovesOneEndpointAndNamesSeveral(t *testing.T) {
 	}
 }
 
-func TestRuntimeWithdrawsProxyTrustFromAPublicContainer(t *testing.T) {
+func TestRuntimeWithdrawsTheImagesProxyTrustUnlessTheProxyAloneFrontsIt(t *testing.T) {
 	t.Parallel()
-	valueOf := func(environment []dockerx.EnvVar, name string) (string, bool) {
-		for _, variable := range environment {
-			if variable.Name == name {
-				return variable.Value, true
+	routed := []PlannedDomain{{Hostname: "app.example.test", HTTPS: true, Ownership: OwnershipManaged}}
+	svelte := []string{"ADDRESS_HEADER", "HOST_HEADER", "PROTOCOL_HEADER", "XFF_DEPTH"}
+	loopback := RuntimePlanConfig{InternalPort: 3000, BindAddress: "127.0.0.1"}
+	for _, test := range []struct {
+		name      string
+		snapshot  runtimeReleaseSnapshot
+		variables map[string]string
+		want      string
+	}{
+		{name: "routed on loopback keeps the trust", snapshot: runtimeReleaseSnapshot{Plan: loopback, Domains: routed, ProxyTrust: svelte}},
+		{
+			// adapter-node before 5.5 has no fallback from HOST_HEADER to Host:
+			// an empty value makes every origin https://undefined.
+			name:     "a public bind withdraws what the image set, HOST_HEADER to host",
+			snapshot: runtimeReleaseSnapshot{Plan: RuntimePlanConfig{InternalPort: 3000, BindAddress: "0.0.0.0"}, Domains: routed, ProxyTrust: svelte},
+			want:     "ADDRESS_HEADER= HOST_HEADER=host PROTOCOL_HEADER=",
+		},
+		{
+			name:      "a variable the plan sets wins",
+			snapshot:  runtimeReleaseSnapshot{Plan: RuntimePlanConfig{InternalPort: 3000, BindAddress: "::"}, Domains: routed, ProxyTrust: svelte},
+			variables: map[string]string{"ADDRESS_HEADER": "x-real-ip"},
+			want:      "HOST_HEADER=host PROTOCOL_HEADER=",
+		},
+		{
+			name:     "no route means no proxy adds the headers",
+			snapshot: runtimeReleaseSnapshot{Plan: loopback, ProxyTrust: []string{"FORWARDED_ALLOW_IPS"}},
+			want:     "FORWARDED_ALLOW_IPS=127.0.0.1",
+		},
+		{
+			name:     "host networking is public",
+			snapshot: runtimeReleaseSnapshot{Plan: RuntimePlanConfig{InternalPort: 8080, HostNetwork: true}, Domains: routed, ProxyTrust: []string{"ASPNETCORE_FORWARDEDHEADERS_ENABLED"}},
+			want:     "ASPNETCORE_FORWARDEDHEADERS_ENABLED=false",
+		},
+		{
+			name: "the application's port published again on every interface is public",
+			snapshot: runtimeReleaseSnapshot{Plan: RuntimePlanConfig{InternalPort: 8080, BindAddress: "127.0.0.1",
+				Ports: []PublishedPort{{HostPort: 8080, ContainerPort: 8080}}}, Domains: routed, ProxyTrust: []string{"SERVER_FORWARD_HEADERS_STRATEGY"}},
+			want: "SERVER_FORWARD_HEADERS_STRATEGY=none",
+		},
+		{
+			name: "another published port is not",
+			snapshot: runtimeReleaseSnapshot{Plan: RuntimePlanConfig{InternalPort: 8080, BindAddress: "127.0.0.1",
+				Ports: []PublishedPort{{HostPort: 2222, ContainerPort: 22}}}, Domains: routed, ProxyTrust: []string{"SERVER_FORWARD_HEADERS_STRATEGY"}},
+		},
+		{
+			// A repository's own Dockerfile, a pulled image or an adopted
+			// container records no trust, so nothing is written over what it
+			// bakes in.
+			name:     "a Dockerfile or image build is never touched",
+			snapshot: runtimeReleaseSnapshot{Plan: RuntimePlanConfig{InternalPort: 3000, BindAddress: "0.0.0.0"}, Domains: routed},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			var got []string
+			for _, variable := range withdrawnProxyTrust(test.snapshot, test.variables) {
+				got = append(got, variable.Name+"="+variable.Value)
 			}
-		}
-		return "", false
+			if strings.Join(got, " ") != test.want {
+				t.Fatalf("withdrawn = %q, want %q", strings.Join(got, " "), test.want)
+			}
+		})
 	}
-	environment, names := containerRuntimeEnvironment(RuntimePlanConfig{InternalPort: 8000, BindAddress: "0.0.0.0"}, map[string]string{"ADDRESS_HEADER": "x-real-ip"})
-	for name, want := range map[string]string{
-		"FORWARDED_ALLOW_IPS": "127.0.0.1", "ASPNETCORE_FORWARDEDHEADERS_ENABLED": "false", "SERVER_FORWARD_HEADERS_STRATEGY": "none",
-		"QUARKUS_HTTP_PROXY_PROXY_ADDRESS_FORWARDING": "false", "PROTOCOL_HEADER": "", "HOST_HEADER": "", "ADDRESS_HEADER": "x-real-ip",
-	} {
-		if got, ok := valueOf(environment, name); !ok || got != want {
-			t.Fatalf("%s = %q (%v), want %q: %+v", name, got, ok, want, environment)
-		}
+	// Withdrawal is the runtime's own environment, never a plan variable.
+	environment, names := containerRuntimeEnvironment(RuntimePlanConfig{InternalPort: 8000, BindAddress: "0.0.0.0"}, map[string]string{"APP": "x"})
+	if len(environment) != 2 || len(names) != 1 {
+		t.Fatalf("environment = %+v, names = %v", environment, names)
 	}
-	if _, ok := valueOf(environment, "XFF_DEPTH"); ok {
-		t.Fatalf("a setting whose value does not change was written: %+v", environment)
+	if imageProxyTrust(PreparedBuild{Method: BuildDockerfile, DockerfilePreview: "FROM x\nENV FORWARDED_ALLOW_IPS=*\n"}) != nil {
+		t.Fatal("a repository's own Dockerfile was read for trust to withdraw")
 	}
-	if len(names) != 1 || names[0] != "ADDRESS_HEADER" {
-		t.Fatalf("withdrawn settings reported as plan variables: %v", names)
-	}
-	for _, plan := range []RuntimePlanConfig{
-		{InternalPort: 8000, BindAddress: "127.0.0.1"},
-		{InternalPort: 8000},
-		{InternalPort: 8000, BindAddress: "0.0.0.0", HostNetwork: true},
-	} {
-		environment, _ := containerRuntimeEnvironment(plan, nil)
-		if _, ok := valueOf(environment, "FORWARDED_ALLOW_IPS"); ok {
-			t.Fatalf("%+v withdrew trust: %+v", plan, environment)
-		}
+	if got := imageProxyTrust(PreparedBuild{Method: BuildRecipe, DockerfilePreview: "FROM a AS build\nENV FORWARDED_ALLOW_IPS=*\nFROM b\nENV HOST=0.0.0.0\n"}); len(got) != 0 {
+		t.Fatalf("a build stage's environment counted as the image's: %v", got)
 	}
 }
 
