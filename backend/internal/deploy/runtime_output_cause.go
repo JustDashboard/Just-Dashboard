@@ -12,6 +12,10 @@ import (
 type OutputCause struct {
 	Code  string `json:"code"`
 	Table string `json:"table,omitempty"`
+	// Variable and Port name what an environment cause is about; see
+	// runtime_variable_cause.go.
+	Variable string `json:"variable,omitempty"`
+	Port     int    `json:"port,omitempty"`
 }
 
 // A freshly linked database is empty, and an application that queries it
@@ -32,6 +36,9 @@ func applicationOutputCause(containers []ContainerDiagnostics) *OutputCause {
 					return &OutputCause{Code: "schema_missing", Table: match[1]}
 				}
 			}
+			if cause := environmentOutputCause(line.Text); cause != nil {
+				return cause
+			}
 		}
 	}
 	return nil
@@ -45,7 +52,7 @@ func (c *OutputCause) sentence() string {
 	case "schema_missing":
 		return fmt.Sprintf("the application reports that table %s does not exist in its database, so the linked database has not received the application's schema; apply it before the application starts — for Prisma, `prisma migrate deploy`, or `prisma db push` when the project has no migrations", c.Table)
 	}
-	return ""
+	return c.environmentSentence()
 }
 
 // diagnosticsSuffix is what the candidate's own output adds to a failure
