@@ -360,8 +360,8 @@ only renderer/executor/validation authority for their feature.
   bounded command output, never response bodies, command output, URL credentials/queries or runtime
   variable values. Disabled, unavailable, warning, passed and failed remain distinct outcomes.
   An HTTP check against the candidate introduces itself as the proxy does when the release has a
-  domain — `Host`/`X-Forwarded-Host` the domain, `X-Forwarded-Proto` its scheme,
-  `X-Forwarded-For 127.0.0.1`, a browser's `Accept` — while connecting only to the candidate.
+  domain — `Host`/`X-Forwarded-Host` the first domain that is not a wildcard, `X-Forwarded-Proto` its
+  scheme, `X-Forwarded-For 127.0.0.1`, a browser's `Accept` — while connecting only to the candidate.
   Default HTTP checks require a final 2xx response and follow at most four redirects that stay on the
   candidate's address or name one of the release's own domains; the latter are re-asked of the
   candidate, never of the domain. Redirects elsewhere are never requested and fail with their origin

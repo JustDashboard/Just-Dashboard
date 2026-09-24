@@ -269,8 +269,8 @@ the one the source declares (`detect_readiness.go`), strongest first:
    `healthCheckPath`, `railway.json`/`railway.toml` `healthcheckPath`, Kamal's `proxy.healthcheck.path`.
 3. A health endpoint the framework declares, probed expecting a 2xx: Rails `get "up" =>
    "rails/health#show"`, Laravel's `health: '/up'`, Spring Boot Actuator (`/actuator/health`, under
-   `server.servlet.context-path` and `management.endpoints.web.base-path`; skipped when
-   `management.server.port` moves it), Quarkus SmallRye Health (`/q/health/ready`), Micronaut
+   `server.servlet.context-path` or `spring.webflux.base-path` and `management.endpoints.web.base-path`;
+   skipped when `management.server.port` moves it), Quarkus SmallRye Health (`/q/health/ready`), Micronaut
    management (`/health`), ASP.NET `MapHealthChecks("…")`, Strapi `/_health`, Medusa `/health`,
    Directus `/server/health`, Django's root URLconf (a health route, django-health-check's include, a
    view at `/`, else the admin login page), and file-routed health endpoints — Next.js
@@ -280,7 +280,8 @@ the one the source declares (`detect_readiness.go`), strongest first:
 4. A health route registered in code (`app.get('/healthz')`, `@app.get("/health")`, a NestJS
    `@Controller('health')` under a literal global prefix, `HandleFunc("/healthz")`, axum/actix/warp
    routes, `@GetMapping("/health")`, `MapGet("/health")`). A router can mount it under a prefix
-   detection cannot see, so it is probed accepting any answer.
+   detection cannot see, so it is probed accepting any answer; a JVM route is put under the context
+   path the configuration sets.
 5. The convention: a page framework (Next.js, Nuxt, SvelteKit, Astro, Remix, React Router, Angular SSR,
    Solid/TanStack Start, Streamlit, Gradio, Flask routing `/`, Laravel, Fresh, plain PHP) is asked for a
    2xx at `/`; everything else — Express/Fastify/Hono/Koa/Elysia/hapi and unknown Node servers, Nest,
@@ -288,17 +289,25 @@ the one the source declares (`detect_readiness.go`), strongest first:
    does a page framework whose authentication SDK (Clerk, Auth0, Kinde, WorkOS, Logto, Descope) sends an
    anonymous visitor to a sign-in page on the provider's site.
 
+JVM settings are read from the first document of `application.properties`/`application.yml` only (a
+later `---` or `#---` document is a profile the default run does not activate), and a `${NAME:default}`
+placeholder counts as its default. A placeholder with no default leaves the path unknown until deploy, so
+the check falls back to any answer rather than guessing a framework path the service may answer 404.
+
 "Any answer" is the check's `acceptAnyAnswer`: every status below 500 passes except 400 and 421, which
 are how host allowlists refuse a request, and a redirect is itself the answer. It proves the server
 serves without requiring a page at the path; preflight names it (`readiness_root_unverified`, a pass)
-with the remedy of a real health route.
+with the remedy of a real health route. Both check editors have an **Any answer counts** switch, so a
+detected any-answer check can be made strict once the application has a health route.
 
 The probe dials only the candidate, but when the release has a domain it introduces itself the way the
-proxy does: `Host` and `X-Forwarded-Host` are the domain and `X-Forwarded-Proto` its scheme, so Django's
+proxy does: `Host` and `X-Forwarded-Host` are the first concrete domain (a wildcard names no host a
+visitor sends, and Django refuses a `Host` with `*` in it) and `X-Forwarded-Proto` its scheme, so Django's
 `ALLOWED_HOSTS`, Rails' `force_ssl` and host authorization, and anything else that checks the request
 answer as they will for visitors. A redirect to the candidate's own address, or to one of the release's
-own domains (a locale prefix, a login page, the https form of the same URL), is followed on the candidate
-— at most four times; a redirect anywhere else is never requested and is reported with its origin.
+own domains (a locale prefix, a login page, the https form of the same URL, a name under a wildcard
+domain), is followed on the candidate — at most four times; a redirect anywhere else is never requested
+and is reported with its origin.
 
 Budgets follow the start: 20 attempts 3 s apart by default; 40 for a JVM service or a start command
 that applies migrations; 60 attempts 5 s apart for Wagtail's first migrations; 60 attempts 10 s apart
@@ -309,12 +318,16 @@ or in a lifespan/startup hook, with a model library among the dependencies). Pre
 `/root/.cache`), since the download is otherwise part of every release's container.
 
 Preflight also reads what the source says about how it answers: `readiness_host_allowlist` when a literal
-`ALLOWED_HOSTS` or `config.hosts` refuses a planned domain (or 127.0.0.1 without one),
+`ALLOWED_HOSTS` or `config.hosts` refuses a planned domain, or, without one, the loopback address the
+probe sends as `Host` (`127.0.0.1`, `[::1]` for an IPv6 bind; `localhost` does not match it);
 `readiness_redirects_to_https` when `config.force_ssl` without `config.assume_ssl`, or
 `SECURE_SSL_REDIRECT`, meets a plan with no HTTPS domain — or, for Django, runs without
 `SECURE_PROXY_SSL_HEADER`, which loops behind any proxy — and `readiness_path_unrouted` when a strict
 check asks for `/` of a Python application whose router serves nothing there. `readiness_path_detected`
-names the declared source the check came from.
+names the declared source the check came from. Django's settings are read from the module `wsgi.py` or
+`asgi.py` (else `manage.py`) names, falling back to the base module a split settings package imports
+(`base.py`, `common.py`, `settings.py`…); an empty `ALLOWED_HOSTS` under a literal `DEBUG = True` is
+Django's local names (`.localhost`, `127.0.0.1`, `[::1]`).
 
 **Workers.** A package that never listens is a worker: no port, no route, no readiness gate. Node:
 `discord.js`, `telegraf`, `grammy`, `node-telegram-bot-api`, `@slack/bolt` in socket mode,
@@ -326,13 +339,21 @@ root no web framework or `web:` process claimed: a `worker:` process, a root scr
 aiogram, Pyrogram, Telethon, Slack Bolt with `SocketModeHandler`, TwitchIO — and runs it (`python
 bot.py`), Celery (`celery -A <module> worker`), RQ (`rq worker --url "$REDIS_URL"`), Dramatiq and arq.
 A script that serves HTTP itself (`web.run_app`, `uvicorn.run`, a webhook server) is left as it was.
-Planned as web anyway, such a package gets `web_profile_without_listener`.
+"Nothing listens" is concluded only from a complete read: when the scanner's budget, a file over
+128 KiB or a truncated walk left one of the root's source files unread, a Node bot stays web and asks
+whether it serves HTTP, and a Python root keeps its previous plan. A worker is at most medium
+confidence, so a web application in another root of the same repository still wins the selection (two
+high candidates tie and ask the operator to choose). Planned as web anyway, such a package gets
+`web_profile_without_listener`.
 
 **Start commands.** A container lives as long as its main process, so a start command that backgrounds
 the server makes it exit. Detection rewrites the certain cases into their foreground form — `pm2 start`
 (with pm2 installed) into `<runner> pm2-runtime start …`, `forever start` into `forever …`, `gunicorn
 --daemon` without the flag, a lone command's trailing `&` removed — looking through the package script
-the start command runs. Anything else (`pm2` not installed, `nohup … > log &`, `uwsgi --daemonize`,
+the start command runs. A script whose body is rewritten no longer runs through the package manager, so
+the replacement starts with `<manager> run pre<name>` when the package has that hook (every manager the
+recipes install runs it, except a `packageManager`-pinned Yarn 2+); a body that reads `$npm_*`
+variables, which only the package manager sets, is left as it is and recorded instead. Anything else (`pm2` not installed, `nohup … > log &`, `uwsgi --daemonize`,
 `celery multi`, a detached `screen`/`tmux`) is `start_command_daemonizes`, blocked for a recipe and a
 warning for a Dockerfile's own `CMD`; `a & b` runs a second, unsupervised process and is
 `start_command_backgrounds` (one process per project: deploy the other as its own worker). When a
