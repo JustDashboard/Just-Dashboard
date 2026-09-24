@@ -414,6 +414,17 @@ func TestDetectionFindsTheStateAnApplicationKeeps(t *testing.T) {
 			},
 		},
 		{
+			name: "an asp.net image built by its own Dockerfile as the app user is only warned about",
+			files: map[string]string{
+				"Dockerfile":       "FROM mcr.microsoft.com/dotnet/aspnet:9.0\nWORKDIR /app\nCOPY out/ .\nUSER app\nENTRYPOINT [\"dotnet\", \"App.dll\"]\n",
+				"App.csproj":       `<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup><ItemGroup><PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.0" /></ItemGroup></Project>`,
+				"appsettings.json": `{"ConnectionStrings":{"Default":"Data Source=app.db"}}`,
+				"Program.cs":       "builder.Services.AddControllersWithViews();\n",
+			},
+			method: BuildDockerfile,
+			want:   []string{"sqlite /app/app.db -> ", "keys /home/app/.aspnet/DataProtection-Keys -> "},
+		},
+		{
 			name: "persisted data protection keys need no volume",
 			files: map[string]string{
 				"App.csproj": `<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>`,

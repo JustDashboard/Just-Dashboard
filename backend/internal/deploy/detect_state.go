@@ -1388,7 +1388,7 @@ var (
 )
 
 func dotnetStatePaths(candidate *DetectedCandidate, marker *detectedMarkers, view stateRoot, layout stateLayout) []DetectedPersistentPath {
-	if candidate.Recipe != "dotnet" || len(marker.csprojs) == 0 {
+	if (candidate.Recipe != "dotnet" && candidate.BuildMethod != BuildDockerfile) || len(marker.csprojs) == 0 {
 		return nil
 	}
 	var result []DetectedPersistentPath
@@ -1396,6 +1396,7 @@ func dotnetStatePaths(candidate *DetectedCandidate, marker *detectedMarkers, vie
 	for _, content := range marker.csprojs {
 		projects += string(content)
 	}
+	web := candidate.Framework == "aspnet" || (candidate.BuildMethod == BuildDockerfile && strings.Contains(projects, "Microsoft.NET.Sdk.Web"))
 	if dotnetSQLitePackageRE.MatchString(projects) {
 		for _, name := range []string{"appsettings.Production.json", "appsettings.json"} {
 			content, ok := view.contents[name]
@@ -1429,7 +1430,7 @@ func dotnetStatePaths(candidate *DetectedCandidate, marker *detectedMarkers, vie
 			break
 		}
 	}
-	if candidate.Framework == "aspnet" {
+	if web {
 		cookies, persisted, source := false, false, ""
 		for _, name := range view.sorted(func(name string) bool { return strings.HasSuffix(name, ".cs") }) {
 			content := view.contents[name]
@@ -1439,8 +1440,19 @@ func dotnetStatePaths(candidate *DetectedCandidate, marker *detectedMarkers, vie
 			persisted = persisted || dotnetPersistKeysRE.Match(content)
 		}
 		if cookies && !persisted {
+			// The recipe prepares the app user's key ring directory. An image
+			// built by its own Dockerfile keeps it in the running user's home,
+			// which only root can be given as a volume it does not have.
+			ring, target := dotnetDataProtectionAt, dotnetDataProtectionAt
+			if candidate.BuildMethod == BuildDockerfile {
+				ring, target = dotnetDataProtectionAt, ""
+				if layout.root {
+					ring = "/root/.aspnet/DataProtection-Keys"
+					target = ring
+				}
+			}
 			result = append(result, DetectedPersistentPath{
-				Kind: PersistentKeys, Path: dotnetDataProtectionAt, Target: dotnetDataProtectionAt, Source: source,
+				Kind: PersistentKeys, Path: ring, Target: target, Source: source,
 				Reason: "ASP.NET Core signs cookies and antiforgery tokens with a Data Protection key ring kept in the container",
 			})
 		}
