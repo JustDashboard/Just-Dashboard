@@ -321,6 +321,12 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 			return "", err
 		}
 	}
+	// Caddy sets no request-body limit of its own, so a route carries one
+	// only when the plan names it.
+	bodyDirective := ""
+	if route.MaxBodyMB > 0 {
+		bodyDirective = "  request_body {\n    max_size " + strconv.Itoa(route.MaxBodyMB) + "MB\n  }\n"
+	}
 	authDirective := ""
 	if len(route.BasicAuth) > 0 {
 		lines := make([]string, 0, len(route.BasicAuth))
@@ -332,7 +338,7 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstream string) (string, err
 		}
 		authDirective = "  basic_auth {\n" + strings.Join(lines, "\n") + "\n  }\n"
 	}
-	return "# Managed by Just Dashboard\n" + strings.Join(names, ", ") + " {\n" + tlsDirective + logDirective + authDirective + "  " + directive + "\n}\n", nil
+	return "# Managed by Just Dashboard\n" + strings.Join(names, ", ") + " {\n" + tlsDirective + logDirective + authDirective + bodyDirective + "  " + directive + "\n}\n", nil
 }
 
 // renderAccessLogDirective is the `log` block a managed route carries. One
