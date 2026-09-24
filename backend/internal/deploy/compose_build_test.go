@@ -335,6 +335,13 @@ func TestPreflightNamesComposeBuildArgumentsThatCannotBePassed(t *testing.T) {
 		!strings.Contains(unscoped.Measured, "BUILD_REVISION") {
 		t.Fatalf("unscoped build argument = %+v", findings)
 	}
+	required := ComposeAnalysis{Services: []ComposeServicePlan{{Name: "web", BuildContext: ".",
+		BuildArgs: []ComposeBuildArg{{Name: "DATABASE_URL", Value: "${DATABASE_URL:?needed to prerender}"}}}}}
+	if item, ok := findingByCode(composeBuildArgFindings(&required, PlanConfiguration{Variables: []PlannedVariable{
+		{Name: "DATABASE_URL", Sensitivity: "plain", Scopes: []string{"release_task"}},
+	}}), "compose_build_arg_unscoped"); !ok || item.Severity != PreflightBlocked {
+		t.Fatalf("a required build argument with no value = %+v", item)
+	}
 	if clean := composeBuildArgFindings(&analysis, PlanConfiguration{Variables: []PlannedVariable{
 		{Name: "API_URL", Sensitivity: "plain", Scopes: []string{"runtime"}},
 	}}); len(clean) != 0 {

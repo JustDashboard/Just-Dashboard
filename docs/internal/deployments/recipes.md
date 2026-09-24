@@ -221,7 +221,8 @@ inside them, and heredoc bodies.
   environment for the whole file, and the form plans a Compose file's variables for runtime — and passed
   like Dockerfile build arguments. An argument or target that reads a secret is refused, at preflight
   (`compose_build_arg_secret`) and at the build, because a build argument stays in the image's history;
-  one whose variable is planned only for release tasks is empty (`compose_build_arg_unscoped`). A
+  one whose variable is planned only for release tasks is empty (`compose_build_arg_unscoped`, blocked
+  when the file marks it `${X:?}`). A
   browser-public Compose variable is planned plain. Variables interpolated with a default are optional
   rows with the default as the example, never required secrets. Preflight blocks a build context the
   checkout lacks (`compose_build_context_missing`), a required `env_file` it lacks

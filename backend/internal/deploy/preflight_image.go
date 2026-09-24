@@ -430,7 +430,8 @@ func composeBuildArgFindings(compose *ComposeAnalysis, configuration PlanConfigu
 		planned[variable.Name] = variable
 	}
 	secret, unscoped := []string{}, []string{}
-	check := func(service, reader, name string) {
+	unscopedSeverity := PreflightWarning
+	check := func(service, reader, expression, name string) {
 		variable, declared := planned[name]
 		switch {
 		case !declared:
@@ -438,16 +439,20 @@ func composeBuildArgFindings(compose *ComposeAnalysis, configuration PlanConfigu
 			secret = append(secret, "service "+service+": "+reader+" reads "+name)
 		case !slicesContain(variable.Scopes, "runtime") && !slicesContain(variable.Scopes, "build"):
 			unscoped = append(unscoped, "service "+service+": "+reader+" reads "+name)
+			// `${X:?message}` is the file refusing to build without it.
+			if strings.Contains(expression, "${"+name+":?") || strings.Contains(expression, "${"+name+"?") {
+				unscopedSeverity = PreflightBlocked
+			}
 		}
 	}
 	for _, service := range compose.Services {
 		for _, arg := range service.BuildArgs {
 			for _, name := range composeArgVariableNames(arg) {
-				check(service.Name, "build argument "+arg.Name, name)
+				check(service.Name, "build argument "+arg.Name, arg.Value, name)
 			}
 		}
 		for _, name := range composeExpressionNames(service.BuildTarget) {
-			check(service.Name, "build target", name)
+			check(service.Name, "build target", service.BuildTarget, name)
 		}
 	}
 	findings := []PreflightFinding{}
@@ -459,9 +464,9 @@ func composeBuildArgFindings(compose *ComposeAnalysis, configuration PlanConfigu
 			"deploy", "variables"))
 	}
 	if len(unscoped) > 0 {
-		findings = append(findings, finding("compose_build_arg_unscoped", PreflightWarning,
+		findings = append(findings, finding("compose_build_arg_unscoped", unscopedSeverity,
 			"A Compose build argument will be empty", strings.Join(unscoped, "; "),
-			"Build arguments are interpolated from the runtime and build variables; this one is planned only for release tasks.",
+			"Build arguments are interpolated from the runtime and build variables; this one is planned only for release tasks, and one the file marks ${X:?} stops the build.",
 			"Give the variable runtime or build scope.", "deploy", "variables"))
 	}
 	return findings
