@@ -195,6 +195,20 @@ func composePrimaryService(services []ComposeServicePlan) string {
 	return services[0].Name
 }
 
+// chosenComposePrimaryService is the service a release follows: the one the
+// operator chose, when the stack still has it, else the analysis's.
+func chosenComposePrimaryService(config BuildPlanConfig, analysis ComposeAnalysis) (string, error) {
+	if config.PrimaryService == "" {
+		return analysis.PrimaryService, nil
+	}
+	for _, service := range analysis.Services {
+		if service.Name == config.PrimaryService {
+			return service.Name, nil
+		}
+	}
+	return "", fmt.Errorf("%w: primary service %s is not a service of the Compose stack", ErrUnsupportedBuilder, config.PrimaryService)
+}
+
 func validComposeBuildEvidence(analysis ComposeAnalysis) bool {
 	if len(analysis.OptionalVariables) > 256 {
 		return false

@@ -233,7 +233,7 @@ func dockerfileArgFindings(candidate DetectedCandidate, configuration PlanConfig
 	if len(unpassed) > 0 {
 		findings = append(findings, finding("dockerfile_arg_not_passed", PreflightWarning,
 			"A Dockerfile build argument will be empty", strings.Join(unpassed, "; "),
-			"Custom Dockerfiles receive build values only for plain NEXT_PUBLIC_, VITE_, PUBLIC_, NUXT_PUBLIC_ or REACT_APP_ variables they declare — the page's JavaScript carries those by design, so a value typed with such a name is kept plain; anything else is empty during the build.",
+			"Custom Dockerfiles receive build values only for plain NEXT_PUBLIC_, VITE_, PUBLIC_, NUXT_PUBLIC_, REACT_APP_ or EXPO_PUBLIC_ variables they declare — the page's JavaScript carries those by design, so a value typed with such a name is kept plain; anything else is empty during the build.",
 			"Give the ARG a default, make a browser-public variable plain and build-scoped, or build with the automatic recipe, which passes build values as BuildKit secrets.",
 			"deploy", "variables"))
 	}
@@ -372,11 +372,23 @@ func composeBuildFindings(detection *DetectionResult, configuration PlanConfigur
 				action, "docker", "source.compose"))
 		}
 	}
-	if detection.Compose.PrimaryService != "" {
+	primary, err := chosenComposePrimaryService(configuration.Build, *detection.Compose)
+	switch {
+	case err != nil:
+		findings = append(findings, finding("compose_primary_service_missing", PreflightBlocked,
+			"The chosen primary service is not in the Compose stack", configuration.Build.PrimaryService,
+			"Readiness and the release's container follow the primary service, and the stack has no service by that name.",
+			"Choose one of the stack's services, or clear the choice to use the detected one.", "docker", "configuration.build.primaryService"))
+	case primary != "" && configuration.Build.PrimaryService != "":
 		findings = append(findings, finding("compose_primary_service", PreflightPass,
-			"Readiness follows the Compose application service", detection.Compose.PrimaryService,
+			"Readiness follows the Compose service you chose", primary,
+			"The primary service is the release's container identity and readiness target.",
+			"", "docker", "configuration.build.primaryService"))
+	case primary != "":
+		findings = append(findings, finding("compose_primary_service", PreflightPass,
+			"Readiness follows the Compose application service", primary,
 			"The service that builds or publishes a port is the release's container identity and readiness target, never a database.",
-			"", "docker", "source.compose"))
+			"", "docker", "configuration.build.primaryService"))
 	}
 	return findings
 }

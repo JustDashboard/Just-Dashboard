@@ -341,3 +341,61 @@ func TestPreflightNamesComposeBuildArgumentsThatCannotBePassed(t *testing.T) {
 		t.Fatalf("a plain runtime variable = %+v", clean)
 	}
 }
+
+func TestOperatorChoosesTheComposePrimaryService(t *testing.T) {
+	t.Parallel()
+	analysis, err := analyzeComposeDocuments([]ComposeDocument{{Path: "compose.yml", Content: selfHostedCompose}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if primary, err := chosenComposePrimaryService(BuildPlanConfig{Method: BuildCompose}, analysis); err != nil || primary != "web" {
+		t.Fatalf("detected primary = %q, %v", primary, err)
+	}
+	if primary, err := chosenComposePrimaryService(BuildPlanConfig{Method: BuildCompose, PrimaryService: "db"}, analysis); err != nil || primary != "db" {
+		t.Fatalf("chosen primary = %q, %v", primary, err)
+	}
+	if _, err := chosenComposePrimaryService(BuildPlanConfig{Method: BuildCompose, PrimaryService: "api"}, analysis); !errors.Is(err, ErrUnsupportedBuilder) {
+		t.Fatalf("a primary service the stack lacks = %v", err)
+	}
+
+	root := t.TempDir()
+	writeBuildFixture(t, root, "Dockerfile", "FROM scratch AS production\n")
+	result, err := NewArtifactBuilder(&artifactBackendFake{}).Build(
+		context.Background(), root, "just-dashboard/release:1-2", BuildPlanConfig{Method: BuildCompose, PrimaryService: "db"},
+		PreparedBuild{Method: BuildCompose, CachePolicy: "reuse"}, map[string]string{"API_URL": "x"}, "",
+		SourceIdentity{Kind: SourceCompose}, &analysis, nil,
+	)
+	if err != nil || result.Compose.PrimaryService != "db" {
+		t.Fatalf("snapshot primary = %+v, %v", result.Compose, err)
+	}
+
+	configuration := PlanConfiguration{
+		Build:   BuildPlanConfig{Method: BuildCompose, PrimaryService: "web", Secrets: []BuildSecretConfig{}, ReleaseTasks: []ReleaseTaskConfig{}},
+		Runtime: RuntimePlanConfig{Strategy: StrategyStopFirst},
+	}
+	if err := configuration.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	configuration.Build.PrimaryService = "web; rm"
+	if err := configuration.Validate(); err == nil {
+		t.Fatal("a malformed primary service was accepted")
+	}
+	configuration.Build.Method, configuration.Build.PrimaryService = BuildDockerfile, "web"
+	if canonicalConfiguration(configuration).Build.PrimaryService != "" {
+		t.Fatal("a primary service outlived the switch away from Compose")
+	}
+
+	draft := &Draft{Data: DraftData{
+		Intent:    &DraftIntentConfig{Name: "stack", Profile: ProfileCompose},
+		Source:    &DraftSourceConfig{Kind: SourceCompose, Mode: SourceModeComposeGit},
+		Detection: &DetectionResult{Source: SourceIdentity{Kind: SourceCompose}, Compose: &analysis},
+	}}
+	findings := imageBuildFindings(draft, PlanConfiguration{Build: BuildPlanConfig{Method: BuildCompose, PrimaryService: "api"}}, HostObservation{})
+	if item, ok := findingByCode(findings, "compose_primary_service_missing"); !ok || item.Severity != PreflightBlocked {
+		t.Fatalf("a chosen service the stack lacks = %+v", findings)
+	}
+	findings = imageBuildFindings(draft, PlanConfiguration{Build: BuildPlanConfig{Method: BuildCompose, PrimaryService: "db"}}, HostObservation{})
+	if item, ok := findingByCode(findings, "compose_primary_service"); !ok || item.Measured != "db" {
+		t.Fatalf("a chosen primary service = %+v", findings)
+	}
+}

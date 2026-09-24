@@ -300,6 +300,10 @@ type BuildPlanConfig struct {
 	// Target is the Dockerfile stage to build, for a file whose last stage
 	// is a development one.
 	Target string `json:"target,omitempty"`
+	// PrimaryService is the Compose service the operator chose for readiness
+	// and the release's container identity; empty keeps the analysis's own
+	// choice (composePrimaryService).
+	PrimaryService string `json:"primaryService,omitempty"`
 }
 
 // BuildSecretConfig names a variable and the single reviewed recipe stage in
@@ -962,6 +966,9 @@ func (c PlanConfiguration) Validate() error {
 	}
 	if c.Build.Target != "" && (c.Build.Method != BuildDockerfile || !dockerfileStageNameRE.MatchString(c.Build.Target)) {
 		return fmt.Errorf("a build target names one stage of a custom Dockerfile")
+	}
+	if c.Build.PrimaryService != "" && (c.Build.Method != BuildCompose || !validComposeServiceName(c.Build.PrimaryService)) {
+		return invalidField("build.primaryService", "a primary service names one service of a Compose stack")
 	}
 	for _, path := range []string{c.Build.RootDirectory, c.Build.Dockerfile, c.Build.OutputDirectory} {
 		if path != "" && !safeRelativePath(path) {
@@ -1710,6 +1717,9 @@ func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 	// build method away must not leave a plan that validation refuses.
 	if c.Build.Method != BuildDockerfile {
 		c.Build.Target = ""
+	}
+	if c.Build.Method != BuildCompose {
+		c.Build.PrimaryService = ""
 	}
 	if c.Build.Secrets == nil {
 		c.Build.Secrets = []BuildSecretConfig{}

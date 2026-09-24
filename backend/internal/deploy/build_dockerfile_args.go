@@ -9,9 +9,8 @@ import (
 
 // Custom Dockerfiles keep the documented stance that they receive no
 // automatic build values, with one exception the Dockerfile itself asks for:
-// a browser-public variable (NEXT_PUBLIC_, VITE_, PUBLIC_, NUXT_PUBLIC_,
-// REACT_APP_) that the operator set as a plain build-scoped variable and the
-// Dockerfile declares with ARG. Such a value is compiled into public
+// a browser-public variable (publicBuildPrefixes) that the operator set as a
+// plain build-scoped variable and the Dockerfile declares with ARG. Such a value is compiled into public
 // JavaScript by design, so passing it is not disclosure; without it the
 // bundle silently ships an empty API URL. The executor hands Prepare only
 // plain build variable names for a Dockerfile build, so a secret never

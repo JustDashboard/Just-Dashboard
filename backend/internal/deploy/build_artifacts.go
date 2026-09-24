@@ -391,9 +391,13 @@ func (b *ArtifactBuilder) Build(
 		if compose == nil {
 			return result, fmt.Errorf("%w: Compose analysis is unavailable", ErrArtifactMissing)
 		}
+		primary, err := chosenComposePrimaryService(config, *compose)
+		if err != nil {
+			return result, err
+		}
 		resolved := &ResolvedComposeSnapshot{
 			SourceDigest: compose.Digest, Files: append([]string(nil), compose.Files...),
-			Services: []ResolvedComposeService{}, PrimaryService: compose.PrimaryService,
+			Services: []ResolvedComposeService{}, PrimaryService: primary,
 		}
 		for _, service := range compose.Services {
 			if service.BuildContext != "" {

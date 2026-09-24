@@ -26,7 +26,7 @@ type candidateScore struct {
 
 // publicBuildPrefixes name the variables a framework compiles into its
 // browser bundle, which only exist in the image if the build receives them.
-var publicBuildPrefixes = []string{"NEXT_PUBLIC_", "VITE_", "PUBLIC_", "NUXT_PUBLIC_", "REACT_APP_"}
+var publicBuildPrefixes = []string{"NEXT_PUBLIC_", "VITE_", "PUBLIC_", "NUXT_PUBLIC_", "REACT_APP_", "EXPO_PUBLIC_"}
 
 func publicBuildVariable(name string) bool {
 	for _, prefix := range publicBuildPrefixes {
