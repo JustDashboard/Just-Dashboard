@@ -53,7 +53,10 @@ restart cannot send the same message twice.
 The signed webhook body keeps its six historical fields (`event`, `runId`, `projectId`,
 `environmentId`, `state`, `sentAt`) and adds `projectName`, `environmentName`, `runNumber`,
 `operation`, `trigger`, `actor`, `sourceRef`, `sourceRevision`, `endpoint`, `terminalCode`,
-`terminalReason`, `durationSeconds` and `url`. Provider kinds render the same facts. `url` points
+`terminalReason`, `durationSeconds` and `url`. Provider kinds render the same facts; a failure whose
+terminal code is a named cause (a build, runtime, release-task or source cause rather than a code
+that only says where, such as `build_failed`) adds a Cause field with its title before the reason,
+which is the cause's sentence. A GitHub commit status, with room for a few words, carries the title. `url` points
 at the run page under the dashboard's own endpoint, read from the self-configuration report and
 cached for five minutes.
 
