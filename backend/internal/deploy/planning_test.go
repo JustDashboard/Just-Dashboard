@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1346,7 +1347,10 @@ type planningDockerFake struct {
 	imageDetail        *dockerx.ImageDetail
 	container          *dockerx.ContainerSpec
 	stacks             []dockerx.ComposeStack
-	registryAuth       string
+	// registryAuth is written by the Compose analysis' concurrent image
+	// lookups (resolveComposeImagePlatforms), so writes hold mu.
+	mu           sync.Mutex
+	registryAuth string
 }
 
 func (f *planningDockerFake) Ping(context.Context) dockerx.Availability {
@@ -1354,7 +1358,9 @@ func (f *planningDockerFake) Ping(context.Context) dockerx.Availability {
 }
 
 func (f *planningDockerFake) ResolveDistributionImage(_ context.Context, _ string, auth string) (*dockerx.DistributionImage, error) {
+	f.mu.Lock()
 	f.registryAuth = auth
+	f.mu.Unlock()
 	if f.image == nil {
 		return nil, errors.New("image missing")
 	}
