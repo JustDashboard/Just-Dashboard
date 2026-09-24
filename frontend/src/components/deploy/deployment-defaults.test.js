@@ -172,6 +172,32 @@ describe("catalogue defaults carried into the plan", () => {
       validateConfiguration({ ...plan, build: { ...plan.build, pythonVersion: "3.12" } }, "web"),
     ).not.toHaveProperty("pythonVersion")
   })
+  test("a recipe that runs a server is refused without its start command", () => {
+    const build = (overrides) => ({ method: "recipe", secrets: [], releaseTasks: [], ...overrides })
+    const refused = (overrides) =>
+      "startCommand" in
+      validateConfiguration(
+        {
+          build: build(overrides),
+          runtime: { strategy: "stop_first" },
+          variables: [],
+          dependencies: [],
+          checks: [],
+          domains: [],
+        },
+        "web",
+      )
+    expect(refused({ recipe: "python" })).toBe(true)
+    expect(refused({ recipe: "python", startCommand: "  " })).toBe(true)
+    expect(refused({ recipe: "python", startCommand: "gunicorn app:app" })).toBe(false)
+    expect(refused({ recipe: "deno" })).toBe(true)
+    expect(refused({ recipe: "php" })).toBe(true)
+    expect(refused({ recipe: "node" })).toBe(true)
+    expect(refused({ recipe: "node", outputDirectory: "dist" })).toBe(false)
+    expect(refused({ recipe: "rust" })).toBe(false)
+    expect(refused({ recipe: "go" })).toBe(false)
+    expect(refused({ method: "dockerfile" })).toBe(false)
+  })
 })
 
 describe("discovered environment rows", () => {

@@ -475,5 +475,29 @@ export function validateConfiguration(
   )
     errors.releaseTasks =
       "Release tasks need a name, command, 1–3600 second timeout, and Release task-scoped variables."
+  if (needsStartCommand(configuration.build))
+    errors.startCommand =
+      "Set the start command the image runs — or, for a static site, its output directory."
   return errors
+}
+
+/**
+ * Whether a recipe plan is missing the start command its recipe refuses to
+ * build without: Python, Deno and PHP always run one, and a JavaScript build
+ * runs one unless it has static output for nginx to serve. The screen that
+ * owns the field says so, rather than preflight four screens later or the
+ * build after Deploy.
+ */
+export function needsStartCommand(build: DeploymentConfiguration["build"]) {
+  if (build.method !== "recipe" || build.startCommand?.trim()) return false
+  switch (build.recipe) {
+    case "python":
+    case "deno":
+    case "php":
+      return true
+    case "node":
+      return !build.outputDirectory?.trim()
+    default:
+      return false
+  }
 }

@@ -150,7 +150,7 @@ export function DeployVersionDialog({
           if (caught instanceof ApiError && caught.code === "ref_not_found") throw caught
           return undefined
         })
-        if (result && needsConfirmation(result, confirmed)) {
+        if (Array.isArray(result?.findings) && needsConfirmation(result, confirmed)) {
           setChecked({ request, result })
           return
         }

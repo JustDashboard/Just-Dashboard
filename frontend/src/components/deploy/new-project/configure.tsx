@@ -525,7 +525,11 @@ export function Configure({
       )
         return "Set the output directory for your static website, such as dist or out."
       return (
-        errors.buildMethod ?? errors.pythonVersion ?? errors.buildSecrets ?? errors.releaseTasks
+        errors.buildMethod ??
+        errors.pythonVersion ??
+        errors.startCommand ??
+        errors.buildSecrets ??
+        errors.releaseTasks
       )
     }
     if (target === "runtime") {

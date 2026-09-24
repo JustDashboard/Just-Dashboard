@@ -143,7 +143,7 @@ export function useProjectStart(
             `/deploy/${summary.id}/environments/${summary.environmentId}/check`,
             {},
           )
-      if (result) {
+      if (Array.isArray(result?.findings)) {
         rememberDeploymentCheck(summary.environmentId, result)
         setAsking((current) => current && { ...current, result })
       }

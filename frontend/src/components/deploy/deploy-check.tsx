@@ -59,6 +59,7 @@ export function useDeploymentCheck({
         `/deploy/${projectId}/environments/${environmentId}/check`,
         {},
       )
+      if (!Array.isArray(result?.findings)) throw new Error("The check answered without findings")
       rememberDeploymentCheck(environmentId, result)
       if (mine === ticket.current) setState({ result, checking: false })
       return result

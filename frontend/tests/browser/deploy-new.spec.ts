@@ -667,7 +667,7 @@ test("resuming a duplicated draft shows its copied variable needing a value, and
   await mockNewProject(page)
   let revision = 5
   let configuration: Record<string, unknown> = {
-    build: { method: "recipe", recipe: "node" },
+    build: { method: "recipe", recipe: "node", startCommand: "node server.js" },
     runtime: { internalPort: 3000, hostPort: 0, bindAddress: "127.0.0.1", strategy: "blue_green" },
     variables: [
       { name: "DATABASE_URL", sensitivity: "secret", scopes: ["runtime"], required: true },
