@@ -3,6 +3,7 @@ package deploy
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -78,7 +79,9 @@ var envMissingSignatures = []buildSignature{
 	signature("", "python", "KeyError", `KeyError: '([A-Z][A-Z0-9_]{2,})'`).requiring(`environ`),
 	signature("", "rails", "secret_key_base", `Missing secret_key_base for`).naming("SECRET_KEY_BASE"),
 	signature("", "phoenix", "environment variable", `environment variable ([A-Z_][A-Z0-9_]*) is missing`),
-	signature("", "", "", `\b([A-Z][A-Z0-9]*_[A-Z0-9_]+|[A-Z]{3,}) (?:is not set|is not defined|must be set|is required|environment variable is (?:required|missing))\b|Missing (?:required )?(?:env(?:ironment)? )?variable:? "?([A-Z][A-Z0-9_]{2,})`),
+	// "X is not defined" is left out: that is JavaScript's ReferenceError for
+	// an identifier, not an environment variable.
+	signature("", "", "", `\b([A-Z][A-Z0-9]*_[A-Z0-9_]+|[A-Z]{3,}) (?:is not set|must be set|is required|environment variable is (?:required|missing))\b|Missing (?:required )?(?:env(?:ironment)? )?variable:? "?([A-Z][A-Z0-9_]{2,})`),
 }
 
 // runtimeSignatures are the candidate's own output after it failed its
@@ -178,16 +181,18 @@ func applicationOutputCause(containers []ContainerDiagnostics, context runtimeCa
 		}
 	}
 	if context.runtime.InternalPort > 0 && !context.compose && !context.runtime.HostNetwork {
+		// An application may print several listeners (a metrics port beside
+		// its own); only one that never names the planned port is a mismatch.
+		planned := strconv.Itoa(context.runtime.InternalPort)
+		var printed []string
 		for _, line := range lines {
-			match := listeningPortRE.FindStringSubmatch(line.text)
-			if match == nil {
-				continue
+			if match := listeningPortRE.FindStringSubmatch(line.text); match != nil {
+				printed = addFirstGroup(printed, match)
 			}
-			ports := addFirstGroup(nil, match)
-			if len(ports) == 1 && ports[0] != strconv.Itoa(context.runtime.InternalPort) {
-				return &OutputCause{Code: "runtime_port_mismatch", Subjects: ports,
-					Fix: &CauseFix{Kind: fixSetRuntime, Field: "runtime.internalPort", Value: ports[0]}}
-			}
+		}
+		if len(printed) > 0 && !slices.Contains(printed, planned) {
+			return &OutputCause{Code: "runtime_port_mismatch", Subjects: printed[:1],
+				Fix: &CauseFix{Kind: fixSetRuntime, Field: "runtime.internalPort", Value: printed[0]}}
 		}
 	}
 	for _, container := range containers {

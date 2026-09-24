@@ -240,11 +240,20 @@ func (c *buildOutputCollector) vertex(vertex int) *lineRing {
 	if len(c.vertices) >= openVertexLimit {
 		// A step that is still writing after this many others started is
 		// the least likely to be the failure; its lines stay in the stream.
+		evicted := false
 		for _, oldest := range c.order {
 			if c.vertices[oldest] != nil {
 				delete(c.vertices, oldest)
+				evicted = true
 				break
 			}
+		}
+		for other := range c.vertices {
+			if evicted {
+				break
+			}
+			delete(c.vertices, other)
+			evicted = true
 		}
 	}
 	ring := newLineRing(vertexRingLines, vertexRingBytes)

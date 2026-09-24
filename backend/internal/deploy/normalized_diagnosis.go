@@ -200,7 +200,7 @@ func candidateStartFailure(err error) (string, string) {
 			message = "port " + match[1] + " is already in use on this server by another process or container"
 		}
 		return "runtime_port_in_use", message + "; free it or publish another port"
-	case strings.Contains(text, "No such image") || strings.Contains(text, "No such image:"):
+	case strings.Contains(text, "No such image"):
 		return "image_missing", "the release's image is no longer on this server; deploy again to rebuild it"
 	case strings.Contains(text, "invalid mount") || strings.Contains(text, "bind source path does not exist") ||
 		strings.Contains(text, "mount denied") || strings.Contains(text, "invalid volume specification"):

@@ -191,6 +191,10 @@ func TestApplicationOutputCauseStaysSilentWithoutEvidence(t *testing.T) {
 			" * Running on all addresses (0.0.0.0)", " * Running on http://127.0.0.1:5000",
 		}},
 		"a cache the application connects to": {3000, []string{"Connected to redis server at localhost:6379"}},
+		"a metrics listener beside the application's own": {3000, []string{
+			"metrics server listening on port 9090", "Server listening on port 3000",
+		}},
+		"a JavaScript reference error": {3000, []string{"ReferenceError: API_URL is not defined"}},
 	} {
 		cause := applicationOutputCause([]ContainerDiagnostics{{State: "running", Lines: runtimeLines(test.lines...)}},
 			runtimeCauseContext{runtime: RuntimePlanConfig{InternalPort: test.port}})
