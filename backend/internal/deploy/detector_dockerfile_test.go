@@ -215,7 +215,6 @@ func TestDockerfileStaticBuildabilityIssues(t *testing.T) {
 		detail   string
 	}{
 		{"missing COPY source", map[string]string{"Dockerfile": "FROM node\nCOPY .env ./\n"}, "dockerfile_copy_source_missing", PreflightBlocked, "line 2 COPY .env: not in the build context ."},
-		{"missing glob", map[string]string{"Dockerfile": "FROM node\nCOPY *.csproj ./\n"}, "dockerfile_copy_source_missing", PreflightBlocked, "*.csproj"},
 		{"ignored COPY source", map[string]string{"Dockerfile": "FROM node\nCOPY dist/ ./\n", "dist/index.js": "", ".dockerignore": "node_modules\ndist\n"}, "dockerfile_copy_ignored", PreflightBlocked, "excluded by .dockerignore rule dist"},
 		{"Dockerfile-specific ignore file", map[string]string{"Dockerfile": "FROM node\nCOPY secret.txt ./\n", "secret.txt": "x", "Dockerfile.dockerignore": "*.txt\n"}, "dockerfile_copy_ignored", PreflightBlocked, "Dockerfile.dockerignore"},
 		{"argument in FROM without default", map[string]string{"Dockerfile": "ARG RUBY_VERSION\nFROM ruby:${RUBY_VERSION}-slim\n"}, "dockerfile_arg_required", PreflightBlocked, "RUBY_VERSION"},
@@ -392,3 +391,55 @@ func TestDetectionSurvivesRepositoryNamesShapedLikeCredentials(t *testing.T) {
 		t.Fatal("no candidates")
 	}
 }
+
+// The Dockerfile the Next.js repository ships (examples/with-docker), whose
+// lockfile wildcards match nothing but the one lockfile the project has.
+func TestOfficialNextDockerfileBuildsAsWritten(t *testing.T) {
+	result := detectFixture(t, map[string]string{
+		"package.json": nextManifest, "package-lock.json": "{}", "next.config.js": "module.exports = { output: 'standalone' }\n",
+		"public/favicon.ico": "",
+		"Dockerfile": `# syntax=docker.io/docker/dockerfile:1
+
+FROM node:18-alpine AS base
+
+# Install dependencies only when needed
+FROM base AS deps
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+
+# Install dependencies based on the preferred package manager
+COPY package.json yarn.lock* package-lock.json* pnpm-lock.yaml* .npmrc* ./
+RUN \
+  if [ -f yarn.lock ]; then yarn --frozen-lockfile; \
+  elif [ -f package-lock.json ]; then npm ci; \
+  elif [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm i --frozen-lockfile; \
+  else echo "Lockfile not found." && exit 1; \
+  fi
+
+FROM base AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN npm run build
+
+FROM base AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
+COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+USER nextjs
+EXPOSE 3000
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+CMD ["node", "server.js"]
+`,
+	})
+	selected := selectedFixtureCandidate(t, result)
+	if selected.BuildMethod != BuildDockerfile || len(selected.ImageBuildIssues) != 0 || selected.Port != 3000 {
+		t.Fatalf("official Next.js Dockerfile = %+v (%s)", selected, result.SelectionReason)
+	}
+}
+

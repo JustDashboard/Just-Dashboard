@@ -285,7 +285,7 @@ func chooseDockerfileContext(tree detectionTree, directory string, sources []doc
 	for current := directory; ; current = parentDirectory(current) {
 		present := 0
 		for _, source := range sources {
-			if source.Path != "." && tree.copySourceExists(current, source) {
+			if source.Path != "." && !source.Glob && tree.copySourceExists(current, source) {
 				present++
 			}
 		}
@@ -439,13 +439,19 @@ func dockerfileIssues(tree detectionTree, model dockerfileModel, content []byte,
 		if reported >= 4 {
 			break
 		}
+		// BuildKit accepts a wildcard that matches nothing (the official
+		// Next.js Dockerfile copies `yarn.lock*` beside `package-lock.json*`),
+		// so only a literal path can be missing.
+		if source.Glob {
+			continue
+		}
 		if !tree.copySourceExists(context, source) {
 			issues = append(issues, newImageBuildIssue("dockerfile_copy_source_missing", PreflightBlocked, source.Line, source.Path,
 				fmt.Sprintf("line %d %s %s: not in the build context %s", source.Line, source.Keyword, source.Path, rootLabel(context))))
 			reported++
 			continue
 		}
-		if source.Path == "." || source.Glob {
+		if source.Path == "." {
 			continue
 		}
 		if excluded, rule := dockerignoreExcludes(rules, source.Path); excluded {
