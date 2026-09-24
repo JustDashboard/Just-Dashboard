@@ -409,12 +409,19 @@ const (
 // headers only. Nested modules — directories with their own go.mod — are
 // separate modules and are left out, as the go command leaves them out.
 func scanGoModule(root string) (goModulePackages, error) {
+	// Files are opened through the root, so nothing the checkout links to
+	// outside it is read even if a file is swapped for a link mid-walk.
+	contained, err := os.OpenRoot(root)
+	if err != nil {
+		return goModulePackages{}, fmt.Errorf("%w: %v", ErrUnsupportedBuilder, err)
+	}
+	defer contained.Close()
 	facts := []goSourceFacts{}
 	nested := []string{}
 	files := 0
 	var read int64
 	errStop := errors.New("Go source scan exceeded its bound")
-	err := filepath.WalkDir(root, func(current string, entry os.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(root, func(current string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -444,7 +451,7 @@ func scanGoModule(root string) (goModulePackages, error) {
 		if files > goScanMaxFiles {
 			return errStop
 		}
-		content, err := readGoHeader(current)
+		content, err := readGoHeader(contained, rel)
 		if err != nil {
 			return err
 		}
@@ -463,8 +470,8 @@ func scanGoModule(root string) (goModulePackages, error) {
 	return collectGoModulePackages(facts, nested), nil
 }
 
-func readGoHeader(path string) ([]byte, error) {
-	file, err := os.Open(path)
+func readGoHeader(root *os.Root, rel string) ([]byte, error) {
+	file, err := root.Open(filepath.FromSlash(rel))
 	if err != nil {
 		return nil, err
 	}
