@@ -785,6 +785,35 @@ function underRoot(path: string, root: string) {
 }
 
 /**
+ * The declared submodules a build root needs: those inside it, and the one
+ * it is itself inside. Preflight judges them the same way.
+ */
+export function submodulesForRoot(
+  requirements: DeploymentDetection["gitRequirements"] | undefined,
+  root: string,
+) {
+  return (requirements?.submoduleList ?? []).filter(
+    (submodule) => underRoot(submodule.path, root) || underRoot(root, submodule.path),
+  )
+}
+
+/**
+ * How many LFS-tracked files a build root holds. The repository root's count
+ * is exact; a nested root is counted from the listed paths, and when the
+ * list was cut short the count is unknown rather than zero.
+ */
+export function lfsFilesForRoot(
+  requirements: DeploymentDetection["gitRequirements"] | undefined,
+  root: string,
+): number | undefined {
+  if (!root) return requirements?.lfsFiles ?? 0
+  const paths = requirements?.lfsPaths ?? []
+  const listed = paths.filter((path) => underRoot(path, root)).length
+  if (listed === 0 && (requirements?.lfsFiles ?? 0) > paths.length) return undefined
+  return listed
+}
+
+/**
  * The clone options detection has already answered for the chosen root: its
  * submodules when every one it holds is on the repository's own host, and
  * Git LFS when files under it are tracked by LFS. Nothing when the source
@@ -800,9 +829,7 @@ export function automaticCloneOptions(
   const root = candidate?.root ?? ""
   const requirements = detection.gitRequirements
   const options: Pick<DeploymentDraftSource, "includeSubmodules" | "includeLfs"> = {}
-  const submodules = (requirements.submoduleList ?? []).filter(
-    (submodule) => underRoot(submodule.path, root) || underRoot(root, submodule.path),
-  )
+  const submodules = submodulesForRoot(requirements, root)
   if (
     requirements.submodulesChecked &&
     !source.includeSubmodules &&
@@ -810,10 +837,8 @@ export function automaticCloneOptions(
     submodules.every((submodule) => submodule.sameSource)
   )
     options.includeSubmodules = true
-  const lfsFiles = root
-    ? (requirements.lfsPaths ?? []).filter((path) => underRoot(path, root)).length
-    : (requirements.lfsFiles ?? 0)
-  if (requirements.lfsChecked && !source.includeLfs && lfsFiles > 0) options.includeLfs = true
+  const lfsFiles = lfsFilesForRoot(requirements, root)
+  if (requirements.lfsChecked && !source.includeLfs && lfsFiles) options.includeLfs = true
   return Object.keys(options).length ? options : undefined
 }
 

@@ -32,7 +32,11 @@ import {
 import { withPackageManagerRunner } from "@/components/deploy/deployment-defaults"
 import type { WizardErrors } from "@/components/deploy/deployment-defaults"
 import { BuildExtras } from "@/components/deploy/new-project/configure-advanced"
-import { candidateStanding } from "@/components/deploy/new-project/draft"
+import {
+  candidateStanding,
+  lfsFilesForRoot,
+  submodulesForRoot,
+} from "@/components/deploy/new-project/draft"
 import type { ConfigureFlow, FlowUpdate } from "@/components/deploy/new-project/draft"
 import { SECTION_IDS } from "@/components/deploy/new-project/plan-sections"
 
@@ -131,14 +135,8 @@ export function StepProject({
   const ambiguous = candidates.length > 1
   const requirements = flow.detection?.gitRequirements
   const candidateRoot = flow.candidate?.root ?? ""
-  const inRoot = (path: string) =>
-    !candidateRoot || path === candidateRoot || path.startsWith(`${candidateRoot}/`)
-  const submodules = (requirements?.submoduleList ?? []).filter((submodule) =>
-    inRoot(submodule.path),
-  )
-  const lfsFiles = candidateRoot
-    ? (requirements?.lfsPaths ?? []).filter(inRoot).length
-    : (requirements?.lfsFiles ?? 0)
+  const submodules = submodulesForRoot(requirements, candidateRoot)
+  const lfsFiles = lfsFilesForRoot(requirements, candidateRoot)
   const alternative = flow.detection?.alternatives?.[0]
   const setAside = flow.detection?.setAside ?? []
   const processes = flow.candidate?.processes ?? []
@@ -278,11 +276,13 @@ export function StepProject({
               <OptionRow
                 title="Download Git LFS objects, not their pointer files"
                 hint={
-                  lfsFiles > 0
-                    ? `${lfsFiles} file${lfsFiles === 1 ? "" : "s"} under the build root ${
-                        lfsFiles === 1 ? "is" : "are"
-                      } stored in LFS. The server needs git-lfs installed.`
-                    : "No file under the build root is stored in LFS."
+                  lfsFiles === undefined
+                    ? `The repository keeps ${requirements.lfsFiles} files in LFS, more than detection lists; some may be under the build root. The server needs git-lfs installed.`
+                    : lfsFiles > 0
+                      ? `${lfsFiles} file${lfsFiles === 1 ? "" : "s"} under the build root ${
+                          lfsFiles === 1 ? "is" : "are"
+                        } stored in LFS. The server needs git-lfs installed.`
+                      : "No file under the build root is stored in LFS."
                 }
                 checked={Boolean(flow.source.includeLfs)}
                 disabled={branchBusy}
