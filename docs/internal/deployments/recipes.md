@@ -1,6 +1,6 @@
 # Automatic recipes and serving defaults
 
-`just-dashboard-recipes-v2` prepares immutable Dockerfiles using digest-pinned catalogue bases. Build
+`just-dashboard-recipes-v3` prepares immutable Dockerfiles using digest-pinned catalogue bases. Build
 commands execute inside the build container; source inspection never executes repository configuration
 on the host. Generated Dockerfiles use root-relative, exclusive writes so a checkout symlink cannot
 redirect output outside the build context. Detection ignores this generated directory.
@@ -52,7 +52,9 @@ provider, and from variable names and example URLs (`REDIS_URL`, `MONGODB_URI`, 
 engine quick setup can provision — `postgres`, `mysql`, `mariadb`, `redis`, `mongodb` — is offered as one
 button that opens the database sheet on that engine and the variable the connection belongs in
 (`DATABASE_URL` for a relational engine the dependencies name, or the documented name). SQLite names no
-engine.
+engine; a Python application whose SQLite default is only the fallback of a variable it reads
+(`dj-database-url`, `os.environ.get("DATABASE_URL", "sqlite:///…")`, a pydantic setting) is offered
+PostgreSQL on that variable, which takes the file out of use.
 
 ## Procfile
 
@@ -114,8 +116,13 @@ Sequelize CLI runs `sequelize-cli db:migrate`; MikroORM migrations run `mikro-or
 is recognised but needs an operator's command. A start script that already runs the tool is left as it
 is, and static output never gains a start command. Prisma's push refuses destructive changes without an
 explicit flag and Drizzle's stops to ask a question nobody can answer, so a schema that would lose data
-fails the start instead of dropping it. The tool must be installed by the lockfile; the runtime stage
-copies the build's `node_modules`, so a devDependency is available to the start command.
+fails the start instead of dropping it. That is why a push is never a pass: preflight raises
+`schema_push_unversioned` (a warning in place of `schema_step`, linked database or not) whenever the start
+command, a release task or the package's own start script pushes, with the command that commits
+migrations instead (`prisma migrate dev`, `drizzle-kit generate`). When a push does refuse, the failed
+readiness gate names it — `schema_push_refused`, from Prisma's `--accept-data-loss` message or Drizzle's
+rename and data-loss prompts — rather than a bare timeout. The tool must be installed by the lockfile; the
+runtime stage copies the build's `node_modules`, so a devDependency is available to the start command.
 
 Detection preserves an actual Dockerfile/Containerfile filename relative to its build root. A single
 literal TCP `EXPOSE` in the final stage supplies the suggested port; dynamic/multiple ports still need
@@ -153,7 +160,17 @@ or `examples/`), shallowest first:
 | Streamlit | `streamlit run <script> --server.port 8501 --server.address 0.0.0.0 --server.headless true` | 8501 |
 | Gradio | `python <script>` with `GRADIO_SERVER_NAME=0.0.0.0` in the image | 7860 |
 
-A framework whose application object is not in an entry file keeps the port and asks for the module. A
+A framework whose application object is not in an entry file keeps the port and asks for the module.
+
+Python migration tools are recognised the way the Node ones are, and share their preflight findings:
+Django (`python manage.py migrate --noinput`, already the default start's first step), Alembic
+(`alembic.ini` beside the manifest or one directory down, with the `alembic` dependency: `alembic upgrade
+head`, `-c <ini>` when it is not at the root), Flask-Migrate (`migrations/alembic.ini` with
+`flask-migrate`: `flask --app <module> db upgrade`) and Aerich (`[tool.aerich]`: `aerich upgrade`). The
+command is chained before a detected start; a `Procfile` web process is the repository's own and is not
+rewritten, so a linked database without the step raises `schema_step_missing` instead. A start command
+that runs a committed `prestart.sh` (or `scripts/prestart.sh`) which applies the migrations counts as the
+step. A
 Django project answers only the hosts its settings allow; `ALLOWED_HOSTS` read from the environment is
 listed like any other variable. A plain `main.py`/`app.py` is a low-confidence worker that asks whether
 it serves. The recipe refuses a plan with no start command, naming the frameworks detection proposes one
@@ -173,6 +190,16 @@ exactly as configured and must produce an executable there; this also allows cod
 explicit package choice for a repository with several mains. The historical detected `go build ./...`
 command still executes, followed by the default output-producing build for compatibility. A custom start
 command replaces the default `/app` entrypoint and runs inside the unprivileged runtime container.
+
+The runtime stage runs the binary at `/app` as the unprivileged `app` user from its own home,
+`/home/app`, so a relative path the service opens resolves somewhere it can write. The root-level files a
+service reads at runtime are copied there, owned by that user: `templates`, `views`, `static`, `public`,
+`assets`, `migrations`, `locales`, `i18n`, `config` and `config*.{yaml,yml,toml,json}` when they exist,
+plus the directory named by any literal path the sources hand to `LoadHTMLGlob`, `ParseGlob`,
+`http.Dir`, `Static`/`StaticFile`, `os.DirFS` or a `file://` migration source (read as text under a
+fixed budget; symlinks are never copied). `/home/app/data` is created and owned by `app`, so a volume
+mounted there starts writable. Rust uses the same stage, reading `ServeDir`, `ServeFile`, `Tera::new`,
+`NamedFile` and actix `Files` literals.
 
 This recipe uses `CGO_ENABLED=0`. Local non-test source importing `C`, unsupported source versions and
 explicit CGO-enabling commands produce actionable planning/preparation refusals. Dependencies needing
@@ -220,7 +247,15 @@ supported portable entry in `<TargetFrameworks>`; restore and publish explicitly
 framework. Platform-specific-only target lists require a Dockerfile. net8.0, net9.0
 and net10.0 are in the catalogue. Kestrel reads its port from `ASPNETCORE_HTTP_PORTS`, so the default
 start command bridges the `PORT` the runtime injects: `ASPNETCORE_HTTP_PORTS=${PORT:-8080} dotnet
-/app/<Assembly>.dll`. A web project listens on 8080; a console program asks whether it serves.
+/app/<Assembly>.dll`. A web project listens on 8080; a console program asks whether it serves. `/app`,
+`/app/data` and the Data Protection key ring `/home/app/.aspnet/DataProtection-Keys` belong to the `app`
+user, so a relative `app.db` and a volume on either directory are writable.
+
+EF Core migrations (a `Microsoft.EntityFrameworkCore.Design` or `.Tools` reference and a committed
+`*ModelSnapshot.cs`) are recorded as the `ef-core` schema tool. Source that calls `Database.Migrate()`,
+`MigrateAsync()` or `EnsureCreated()` applies them itself; otherwise a linked database raises
+`schema_step_missing`, whose action is to call `Database.Migrate()` at startup — the EF command-line
+tools and the design-time project are not in the runtime image, and a release task runs on the host.
 
 ## Deno
 
@@ -251,9 +286,80 @@ build script names Vite, `laravel-vite-plugin` or Encore gets an asset stage on 
 runtime whose `public/build` is copied in. Laravel's start runs `php artisan migrate --force` first;
 Symfony's runs `doctrine:migrations:migrate` when the migrations bundle is present. `storage/`,
 `bootstrap/cache` and `database/` are created writable so a first start on an empty volume works. The
+recipe links the public disk the way `php artisan storage:link` would (`public/storage` →
+`/app/storage/app/public`, unless the repository commits one), without booting the application in
+the build. The
 configure form mints `APP_KEY` for a Laravel import (`base64:` over 32 random bytes) and offers a
 **Generate** button on any variable whose name ends in `SECRET`, `KEY` or `SECRET_KEY_BASE`. Laravel's
 `.env.example` names its engine in `DB_CONNECTION`, which becomes a database suggestion on `DB_URL`.
+
+## Persistent state
+
+An application that writes to its own filesystem loses it when the next release replaces the container:
+a SQLite database starts empty, uploads disappear, a key ring is regenerated and signs everyone out.
+Detection (`deploy/detect_state.go`) reads, as bounded text and under its own budget, where that state
+lives, and records it on the candidate as `persistentPaths`: the kind (`sqlite`, `uploads`, `storage`,
+`volume`, `keys`), where it is written today, the directory a managed volume can stand on (`target`), and
+— when the location is read from a variable — the variable and the value that moves it there.
+
+A volume target never hides what the image ships. It is a directory the framework owns (Rails'
+`storage/`, Laravel's `storage/`, Strapi's `.tmp` and `public/uploads`), a conventional data directory
+(`data`, `uploads`, `media`, `instance`, `pb_data`, …) the repository fills with nothing but
+placeholders, a path a `VOLUME` declares, or the image's own data directory reached through a variable:
+`/data` for the recipes that run as root (Node, Python, PHP), `/home/app/data` for Go and Rust and
+`/app/data` for .NET, which those recipes create owned by their unprivileged user. An image built by its
+own Dockerfile as a non-root user is only given directories the repository commits, because a volume
+over a directory the image lacks is owned by root. A file that sits beside code (`/app/db.sqlite3`,
+Prisma's `prisma/dev.db`) gets no volume — mounting there would hide the code or the migrations — and is
+reported instead.
+
+| Source | State | Plan |
+| --- | --- | --- |
+| Prisma `provider = "sqlite"`, `url = env("X")` (or Prisma 7's `prisma.config`) | the database | volume at `/data`, `X=file:/data/<file>` |
+| `better-sqlite3`, `sqlite3`, `@libsql/client`, Payload's SQLite adapter, Drizzle's `sqlite`/`turso` dialect | a file named by a variable, or a literal in the source | volume and variable in the example's own shape (`file:` for libSQL); a literal only in its own directory |
+| Strapi | `.tmp/data.db`, `public/uploads` | volumes on both |
+| `multer` `dest`/`destination`, `UPLOAD_DIR`-style variables | uploads | the directory, or `/data/uploads` through the variable |
+| Django `django.db.backends.sqlite3`, `MEDIA_ROOT` | the database, media | the file's own directory when it has one; `NAME` or `MEDIA_ROOT` read from a variable moves to `/data` |
+| SQLAlchemy `sqlite:///…` (Flask-SQLAlchemy 3 resolves relative paths in `instance/`) | the database | its own directory, or a warning |
+| Laravel with `DB_CONNECTION=sqlite` (or none, from Laravel 11) | `database/database.sqlite`, sessions, cache, queue | volume at `/app/storage`, `DB_DATABASE=/app/storage/database.sqlite` when `config/database.php` reads it |
+| Laravel with Filament, Media Library or `FILESYSTEM_DISK=public` | uploads on the local disks | volume at `/app/storage` |
+| Statamic | `content/`, `users/` | reported: they are the repository's own files |
+| Rails `database.yml` production `sqlite3`, Active Storage `Disk` + `:local`, Kamal `volumes:` | `storage/` | volume at `<final WORKDIR>/storage` |
+| Go `modernc.org/sqlite`, `mattn/go-sqlite3`, … and Rust `rusqlite`, `sqlx`/`diesel` with SQLite | a file named by a variable, or a literal | `/home/app/data` through the variable (keeping `sqlite://`, `file:` and the query), a literal only under `data/` |
+| PocketBase | `pb_data` beside the binary | reported, with `serve --dir=/home/app/data` |
+| `Microsoft.EntityFrameworkCore.Sqlite` with an `appsettings.json` `Data Source=` | the database | `/app/data` through `ConnectionStrings__<name>` (only `Cache`, `Mode`, `Foreign Keys`, `Pooling` and `Default Timeout` options are kept) |
+| ASP.NET cookie auth, Identity, Razor Pages, MVC views, antiforgery or Blazor without `PersistKeysTo*` | the Data Protection key ring | volume at `/home/app/.aspnet/DataProtection-Keys` |
+| Dockerfile `VOLUME` (final stage, inherited from an earlier stage), a local image's declared volumes | the declared path | a volume on it |
+
+The configure form turns every target into a managed named volume (`<slug>-<hash>-<purpose>`, the shape a
+template's volumes have), with a storage dependency whose purpose Review shows, fills the moving
+variable's row (`Keeps it on the volume at …`), and releases stop-first, because preflight refuses
+candidate-first activation with a writable mount. A variable the operator changes or empties is read
+again by preflight, never echoed: it compares where the state would be written with the plan's writable
+mounts. State no mount keeps is a warning before deploy — `sqlite_ephemeral`, `uploads_ephemeral`,
+`persistent_path_unmounted`, `declared_volume_unmounted`, `dotnet_data_protection_ephemeral` — whose
+action is the volume and variable detection proposed, a server database through the variable a SQLite
+fallback is read from, or the change the source needs. State that is kept passes as
+`persistent_state_kept`, and `backup_policy_missing` then asks for a backup. A linked server database in
+the variable a SQLite default falls back from takes the file out of use and raises nothing. A container
+that cannot write its SQLite file fails its readiness gate with `sqlite_not_writable` named.
+
+Limits: an image's declared volumes are read only when the image is already on this host (the registry
+manifest does not carry its configuration), and a base image's own `VOLUME` behind a Dockerfile is not
+seen. Retired containers still keep their anonymous volumes, because one may hold the only copy of data a
+plan without a mount wrote.
+
+## Seed data
+
+A project that creates its first administrator or lookup rows in a seed records the command
+(`seedCommand`, and `seedResets` when the seed deletes or truncates first): Prisma's `prisma.seed` or
+Prisma 7's `migrations.seed` (`<runner> prisma db seed`), a `db:seed`, `seed` or `prisma:seed` script,
+Laravel's `DatabaseSeeder` when it does more than the skeleton's test user (`php artisan db:seed
+--force`), and a `db/seeds.rb` with code (`bin/rails db:seed`). When the plan links a database or keeps
+SQLite on a new volume, and neither the start command nor a release task seeds, preflight raises
+`seed_available` (a warning) naming the command to run once from the project's console after the first
+release. It is never run automatically: a release task runs on the host, not in the application image,
+and a seed that clears tables must not run on every release.
 
 ## Verification
 
@@ -270,4 +376,6 @@ metadata and saved image layers for private install credentials. The Go fixture 
 custom startup and the selected toolchain through its HTTP response. These local adapter journeys
 complement the production-build browser gate; they do not constitute public provider/DNS/TLS or clean-VM
 acceptance. The remaining catalogue entries are covered by rendered-Dockerfile and detection tests
-(`frameworks_*_test.go`, `build_recipes_test.go`).
+(`frameworks_*_test.go`, `build_recipes_test.go`). Persistent state, schema tools, seeds and their
+findings are table-tested per stack in `detect_state_test.go`, `detect_schema_test.go`,
+`preflight_state_test.go` and `recipe_runtime_files_test.go`.

@@ -283,10 +283,28 @@ only renderer/executor/validation authority for their feature.
   binary runner (`npx`/`bunx`/`pnpm exec`/`yarn`). Prisma and Drizzle deploy committed migrations and
   otherwise push the declared model; Knex, Sequelize and MikroORM run their migration command; TypeORM
   is recorded as a decision because its data source cannot be guessed. The rule set lives in
-  `deploy/schema_tools.go`. Preflight adds `schema_step_missing` (warning, on the start command) when a
-  database is linked and neither the start command, a release task nor the start script runs the tool,
-  and `schema_step` (pass) when one does; no linked database means no finding. Changing the package
-  manager rewrites the chained binary runner with the script runner.
+  `deploy/schema_tools.go`; the Python tools (Django, Alembic, Flask-Migrate, Aerich) and EF Core are in
+  `deploy/detect_schema.go` and share the same lookup. Preflight adds `schema_step_missing` (warning, on
+  the start command) when a database is linked and neither the start command, a release task nor the
+  start script runs the tool, and `schema_step` (pass) when one does; no linked database means no
+  finding. A step that pushes the declared model (`prisma db push`, `drizzle-kit push`, recorded as
+  `schemaPush` when the package's own start script does it) is `schema_push_unversioned` (warning)
+  instead of a pass, linked database or not, and a refused push is named `schema_push_refused` by the
+  failed gate's output classifier. Changing the package manager rewrites the chained binary runner with
+  the script runner.
+- Detection records the state an application writes to its own filesystem as `persistentPaths`
+  (`deploy/detect_state.go`, [the recipe guide](recipes.md#persistent-state)): SQLite files, upload
+  directories, framework storage, Dockerfile and image `VOLUME`s and ASP.NET's Data Protection key ring,
+  each with the directory a managed volume can stand on without hiding code and, when the location is
+  read from a variable, the value that moves it there. The walk hands every file to a state scanner with
+  its own budgets (configuration apart from source, so a large tree cannot crowd out the schema); it reads
+  text only. The configure form plans one managed named volume per target with a storage dependency,
+  fills the moving variable and releases stop-first; preflight (`deploy/preflight_state.go`) compares the
+  state with the plan's writable mounts and planned values — never echoing a value — and warns per kind
+  (`sqlite_ephemeral`, `uploads_ephemeral`, `persistent_path_unmounted`, `declared_volume_unmounted`,
+  `dotnet_data_protection_ephemeral`) or passes `persistent_state_kept`. Detection also records a seed
+  (`seedCommand`, `seedResets`); `seed_available` warns when a linked database or a new SQLite volume
+  would start without it.
 - Deployment preflight depends on a read-only observer: filesystem/proc capacity, listener inventory,
   Docker/Compose availability, proxy inventory and bounded DNS lookups. It cannot build, pull, start,
   stop, write proxy/firewall configuration, modify a checkout or enqueue a backup. The persisted exact

@@ -28,8 +28,9 @@ It manages exactly one machine. There is no fleet view, no agents to enrol, no c
 ## What it does
 
 - **Deploys from a repository, an image, a template or a Compose file.** Detection fills the
-  form in; every release is immutable, so rollback reactivates what ran before. Web services get
-  a health-gated cutover.
+  form in — down to a volume for the SQLite file, uploads or key ring an app would otherwise lose
+  on its next release; every release is immutable, so rollback reactivates what ran before. Web
+  services get a health-gated cutover.
 - **Databases you can hand out.** Eight engines browsed, queried and diagrammed from one place. A
   database started here gets a connection string, and one press opens it to the internet or
   closes it again.
