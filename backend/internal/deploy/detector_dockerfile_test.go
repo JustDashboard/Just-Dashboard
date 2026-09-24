@@ -381,3 +381,14 @@ func TestRecipeCandidatesCarryContextIssues(t *testing.T) {
 		t.Fatalf("PHP .htaccess = %+v", php.Candidates)
 	}
 }
+
+func TestDetectionSurvivesRepositoryNamesShapedLikeCredentials(t *testing.T) {
+	result := detectFixture(t, map[string]string{
+		"docker-compose.yml": "services:\n  cache:\n    image: registry.example.com/api_token=abc:1\n  web:\n    image: postgres:16\n",
+		"package.json":       nextManifest, "bun.lock": "{}",
+		"Dockerfile":         "FROM node:22\nARG API_TOKEN_PORT=3000\nEXPOSE ${API_TOKEN_PORT}\n",
+	})
+	if len(result.Candidates) == 0 {
+		t.Fatal("no candidates")
+	}
+}

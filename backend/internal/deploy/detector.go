@@ -571,6 +571,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		Submodules: gitModulesPath != "",
 		LFS:        lfsAttributesPath != "",
 	}
+	sanitizeDetectionEvidence(result.Candidates)
 	result.SelectedID, result.SelectionReason = rankCandidates(result.Candidates)
 	return result, nil
 }

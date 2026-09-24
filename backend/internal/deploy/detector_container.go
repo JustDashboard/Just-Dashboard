@@ -285,3 +285,35 @@ func renderPreDeployCommand(content []byte) string {
 	}
 	return found
 }
+
+// sanitizeDetectionEvidence keeps evidence from repository names inside what
+// validateDetectionResult accepts: a file or image named like an assignment,
+// or a path with a control character, must cost that one line of evidence
+// rather than make the whole detection unsavable.
+func sanitizeDetectionEvidence(candidates []DetectedCandidate) {
+	for index := range candidates {
+		kept := candidates[index].Evidence[:0]
+		for _, evidence := range candidates[index].Evidence {
+			if len(evidence.Path) > 4096 || strings.ContainsAny(evidence.Path, "\x00\r\n") {
+				continue
+			}
+			if len(evidence.Reason) > 512 || strings.ContainsAny(evidence.Reason, "\x00\r\n") ||
+				rejectPlanSecretLiteral("detection evidence", evidence.Reason) != nil {
+				evidence.Reason = "details withheld because they resemble credential material"
+			}
+			kept = append(kept, evidence)
+		}
+		if len(kept) > 128 {
+			kept = kept[:128]
+		}
+		candidates[index].Evidence = kept
+		databases := candidates[index].Databases[:0]
+		for _, database := range candidates[index].Databases {
+			if len(database.Evidence) <= 512 && !strings.ContainsAny(database.Evidence, "\x00\r\n") &&
+				rejectPlanSecretLiteral("detected database evidence", database.Evidence) == nil {
+				databases = append(databases, database)
+			}
+		}
+		candidates[index].Databases = databases
+	}
+}
