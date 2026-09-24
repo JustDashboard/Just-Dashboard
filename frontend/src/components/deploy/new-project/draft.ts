@@ -3,7 +3,9 @@ import { forgetMemoryState, forgetSessionState } from "@/lib/view-state"
 import {
   defaultConfiguration,
   discoveredEnvironmentRows,
+  rowNeedsOperator,
 } from "@/components/deploy/deployment-defaults"
+import { synchronizePrimaryDomain } from "@/components/deploy/new-project/domain-bindings"
 import { DEPLOYMENT_NAME } from "@/components/deploy/vocabulary"
 import type {
   DeploymentConfiguration,
@@ -13,6 +15,7 @@ import type {
   DeploymentDraftSource,
   DeploymentHostnameSuggestion,
   DeploymentPreflight,
+  DeploymentVariableSetup,
   WorkloadProfile,
 } from "@/lib/types"
 
@@ -328,7 +331,7 @@ export function landingStep(flow: ConfigureFlow, advanced = false): ConfigureSte
   // is the one thing nobody else can answer.
   if (
     declaredVariablesNeedReview(flow) ||
-    discoveredEnvironmentRows(candidate).some((row) => row.detected && !row.value)
+    discoveredEnvironmentRows(candidate).some(rowNeedsOperator)
   )
     return "variables"
   return "review"
@@ -409,6 +412,17 @@ export function configurationForSave(
   return {
     ...configuration,
     domains: configuration.domains.filter((domain) => domain.hostname.trim()),
+    // An address that follows the domain has nothing to follow until one is
+    // planned. Committed empty, it would be set to "" — which an application
+    // reads as a value, unlike an unset variable — so it waits in the form.
+    variables: configuration.variables.filter(
+      (variable) =>
+        !variable.domainTemplate ||
+        variable.value ||
+        variable.reference ||
+        variable.generate ||
+        variable.required,
+    ),
     checks: configuration.checks.map((check) =>
       check.phase === "readiness" && check.kind === "http"
         ? { ...check, config: { ...(check.config ?? {}), port: undefined } }
@@ -437,10 +451,10 @@ export function withSuggestedHostname(
     hostname.method === "none"
   )
     return configuration
-  return {
-    ...configuration,
-    domains: [{ hostname: hostname.hostname.toLowerCase(), https: true, ownership: "managed" }],
-  }
+  // The addresses detection bound to the domain follow it from the start.
+  return synchronizePrimaryDomain(configuration, [
+    { hostname: hostname.hostname.toLowerCase(), https: true, ownership: "managed" },
+  ])
 }
 
 /** Re-detection updates defaults; an explicit edit remains the operator's choice. */
@@ -747,6 +761,15 @@ export type EnvironmentRow = {
   detected?: boolean
   /** The value was minted here rather than typed or copied from anywhere. */
   generated?: boolean
+  /** How the plan answers the row when nothing is typed, and why (`DeploymentDetectedVariable.setup`). */
+  setup?: DeploymentVariableSetup
+  reason?: string
+  /** The application cannot start without it. */
+  required?: boolean
+  /** Compiled into the browser bundle, so its value is public. */
+  browser?: boolean
+  /** A committed file gives it a loopback value when nothing is set here. */
+  localhostIn?: string
 }
 
 /** The typed rows and the pasted block, joined into one .env document. */
@@ -759,4 +782,17 @@ export function environmentText(rows: EnvironmentRow[], dotenv: string) {
   ]
     .filter(Boolean)
     .join("\n")
+}
+
+/** The further database URLs a Rails 8 application reads, as references to the linked server. */
+export function railsDatabaseRows(
+  connectionId: number,
+  database: string | undefined,
+  names: string[] = [],
+): EnvironmentRow[] {
+  if (!database || !/^[A-Za-z0-9_]+$/.test(database)) return []
+  return names.map((name) => ({
+    name,
+    value: `\${{database.${connectionId}.url.${database}_${name.replace(/_DATABASE_URL$/, "").toLowerCase()}}}`,
+  }))
 }

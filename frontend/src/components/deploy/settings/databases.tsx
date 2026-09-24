@@ -254,10 +254,13 @@ function DatabasesBody({
 
   // Which variables carry this database. A typed reference is parsed by the
   // backend and reported beside the masked value, so this needs no reveal.
+  // A reference may ask for a connection shape or another database on the
+  // same server (`5.jdbc`, `5.url.app_cache`); it still reads connection 5.
   const variablesFor = (resourceId?: string): DeploymentVariable[] =>
     configuration.variables.filter(
       (variable) =>
-        variable.reference?.kind === "database" && variable.reference.target === resourceId,
+        variable.reference?.kind === "database" &&
+        variable.reference.target.split(".")[0] === resourceId,
     )
 
   const connect = async (connection: DbConnection, url: string, variable: string) => {
@@ -281,11 +284,16 @@ function DatabasesBody({
         `/deploy/${projectId}/environments/${environmentId}/configuration`,
         { ...configBase, dependencies: nextDependencies },
       )
+      // Relinking keeps the scopes the variable already had: a DATABASE_URL a
+      // build reads (a static env import, a prerendered page, Prisma's config)
+      // lost its build scope here and the next build failed. A new one reaches
+      // the build too, the way a database linked while creating the project does.
+      const existing = configuration.variables.find((entry) => entry.name === variable)
       await put(`/deploy/${projectId}/environments/${environmentId}/variables/${variable}`, {
         revision: updated.revision,
         value: url,
         sensitivity: "secret",
-        scopes: ["runtime"],
+        scopes: existing ? [...new Set([...existing.scopes, "runtime"])] : ["runtime", "build"],
       })
       links.refresh()
       refresh()

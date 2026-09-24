@@ -3248,13 +3248,60 @@ export type DeploymentDetectedVariable = {
   /** The example file's own value, when it had one and it was not credential-shaped. */
   example?: string
   sources: string[]
+  /**
+   * How the dashboard supplies the value when nothing is typed: a self-issued
+   * secret minted at commit, the planned domain, a harmless documented default,
+   * or a secret only the operator holds and has to paste.
+   */
+  setup?: DeploymentVariableSetup
+  /** The evidence behind `setup`, e.g. "Auth.js signs and encrypts sessions with it". */
+  setupReason?: string
+  generateLength?: number
+  generateFormat?: DeploymentGeneratedSecretFormat
+  domainTemplate?: string
+  defaultValue?: string
+  /** "build" when the value is read while the build runs. */
+  phase?: "build"
+  /** Compiled into the JavaScript every visitor downloads. */
+  browserInlined?: boolean
+  /** Read with no default where the application starts or builds. */
+  required?: boolean
+  /** Read with no default on a path that may not always run. */
+  requiredRead?: boolean
+  /** A committed file whose value for this name points at loopback. */
+  localhostIn?: string
 }
+
+export type DeploymentVariableSetup = "generate" | "domain" | "default" | "paste"
+
+export type DeploymentGeneratedSecretFormat = "" | "hex" | "base64" | "laravel" | "keylist"
 
 /** A database engine detection found the source connecting to. */
 export type DeploymentDetectedDatabase = {
   engine: string
   variable: string
   evidence: string
+  /** The connection shape the consumer parses when it is not a URL. */
+  format?: "jdbc" | "adonet" | "mysql2"
+  /** Postgres extensions the schema needs; the official image ships neither. */
+  extensions?: ("vector" | "postgis")[]
+  /** A driver that only speaks its hosted provider's protocol. */
+  hosted?:
+    | "neon-http"
+    | "neon-ws"
+    | "vercel-postgres"
+    | "planetscale-http"
+    | "prisma-accelerate"
+    | "upstash-rest"
+  /** Further databases on the same server the framework reads by name. */
+  alsoVariables?: string[]
+}
+
+/** A fact about the source's configuration that preflight answers. */
+export type DeploymentEnvironmentNote = {
+  code: string
+  detail?: string
+  path?: string
 }
 
 export type DeploymentDetectionCandidate = {
@@ -3283,6 +3330,9 @@ export type DeploymentDetectionCandidate = {
   unpinnedDependencies?: boolean
   variables?: DeploymentDetectedVariable[]
   databases?: DeploymentDetectedDatabase[]
+  /** Variable prefixes this root's framework compiles into browser code. */
+  browserPrefixes?: string[]
+  environmentNotes?: DeploymentEnvironmentNote[]
   evidence: { path: string; reason: string }[]
   needsDecision: string[]
 }
@@ -3481,6 +3531,8 @@ export type DeploymentConfiguration = {
     domainTemplate?: string
     // Length of a secret the server generates when the deployment is saved.
     generate?: number
+    /** The shape of that generated secret; empty is alphanumeric. */
+    generateFormat?: DeploymentGeneratedSecretFormat
   }[]
   dependencies: {
     kind: string

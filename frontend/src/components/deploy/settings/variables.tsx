@@ -19,6 +19,7 @@ import type {
   DeploymentEnvironmentConfiguration,
   DeploymentVariable,
 } from "@/lib/types"
+import { browserInlined, pointsAtLocalhost } from "@/components/deploy/deployment-defaults"
 import { InitialsMark } from "@/components/account/user-avatar"
 import { FileIcon } from "@/components/files/file-icon"
 import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
@@ -301,7 +302,9 @@ function VariablesBody({
   )
   const linkFor = (variable: DeploymentVariable) =>
     variable.reference?.kind === "database"
-      ? links.data?.find((link) => String(link.connectionId) === variable.reference?.target)
+      ? links.data?.find(
+          (link) => String(link.connectionId) === variable.reference?.target.split(".")[0],
+        )
       : undefined
   const productOf = (variable: DeploymentVariable) =>
     linkFor(variable)?.driver ?? variableProduct(variable.name)
@@ -322,6 +325,17 @@ function VariablesBody({
     setScopes((current) =>
       checked ? [...new Set([...current, scope])] : current.filter((item) => item !== scope),
     )
+
+  // A name the framework compiles into the bundle is build input and public:
+  // left at the runtime-only default it built as undefined, silently, while
+  // the server saw the value. Only an untouched default is moved.
+  const changeName = (next: string) => {
+    setName(next)
+    if (!editingName && browserInlined(next) && scopes.length === 1 && scopes[0] === "runtime") {
+      setScopes(["runtime", "build"])
+      setSensitivity("plain")
+    }
+  }
 
   const resetForm = () => {
     setName("")
@@ -634,13 +648,17 @@ function VariablesBody({
                   : undefined
               }
               hint={
-                exists ? `${name.trim()} exists — saving replaces its value and scopes.` : undefined
+                exists
+                  ? `${name.trim()} exists — saving replaces its value and scopes.`
+                  : browserInlined(name.trim())
+                    ? "Compiled into the browser bundle: public, and read while the build runs."
+                    : undefined
               }
             >
               <Input
                 id="variable-name"
                 value={name}
-                onChange={(event) => setName(event.target.value.toUpperCase())}
+                onChange={(event) => changeName(event.target.value.toUpperCase())}
                 autoComplete="off"
                 spellCheck={false}
                 className="font-mono"
@@ -655,11 +673,16 @@ function VariablesBody({
           label={reference ? "Typed reference" : "Value"}
           htmlFor="variable-value"
           hint={
-            reference
-              ? "Resolved when the release starts."
-              : editingName
-                ? "Enter the value again — the dashboard does not read it back."
-                : undefined
+            reference ? (
+              "Resolved when the release starts."
+            ) : pointsAtLocalhost(name.trim(), value) ? (
+              <span className="text-warning">
+                Points at localhost, which inside the container is the app itself. Link a database
+                or use a host the container can reach.
+              </span>
+            ) : editingName ? (
+              "Enter the value again — the dashboard does not read it back."
+            ) : undefined
           }
           error={valueError || undefined}
         >
@@ -1022,9 +1045,13 @@ function VariableRow({
 }) {
   const state = rotating ? (
     <Status tone="running" label="Rotating…" />
-  ) : (
-    variable.pending && <Status tone="warning" label={change ? `Pending · ${change}` : "Pending"} />
-  )
+  ) : variable.pending ? (
+    <Status tone="warning" label={change ? `Pending · ${change}` : "Pending"} />
+  ) : browserInlined(variable.name) && !variable.scopes.includes("build") ? (
+    // The bundle is compiled while the build runs; a runtime-only value is
+    // undefined in every visitor's browser however it is set here.
+    <Status tone="warning" label="Not in the build" />
+  ) : undefined
   // The state of the database a reference reads, where it is anything but
   // connected — a dot and its word (§4) under the name it describes, not a
   // bare dot in the value's line where it read as a separator. Connected is
@@ -1428,6 +1455,10 @@ function ImportSheet({
   const file = useRef<HTMLInputElement>(null)
 
   const reading = useMemo(() => readDotenv(dotenv), [dotenv])
+  const browserNames = Array.from(
+    dotenv.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/gm),
+    (match) => match[1],
+  ).filter((entry) => browserInlined(entry))
   const body = { revision: configuration.revision, dotenv, sensitivity, scopes }
   const key = JSON.stringify(body)
   const ready = open && dotenv.trim() !== "" && scopes.length > 0 && !reading.error
@@ -1658,6 +1689,13 @@ function ImportSheet({
         </FormSection>
         <FormSection title="Import as">
           <ValueType value={sensitivity} onChange={setSensitivity} />
+          {!scopes.includes("build") && browserNames.length > 0 && (
+            <FormNote tone="warning">
+              {browserNames.join(", ")} {browserNames.length === 1 ? "is" : "are"} compiled into the
+              browser bundle while the build runs; without Build{" "}
+              {browserNames.length === 1 ? "it builds" : "they build"} as undefined.
+            </FormNote>
+          )}
           <ScopeOptions
             scopes={scopes}
             onToggle={(scope, checked) =>

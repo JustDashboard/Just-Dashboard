@@ -50,6 +50,7 @@ export function DatabaseQuickDeploy({
   onStarted,
   onReset,
   initialEngine,
+  format,
 }: {
   target?: "host" | "container"
   canConnect?: boolean
@@ -59,6 +60,8 @@ export function DatabaseQuickDeploy({
   onConnect?: (connection: DbConnection, url: string) => void
   /** The engine detection found the source connecting to, preselected. */
   initialEngine?: string
+  /** The connection shape the application parses when it is not a URL. */
+  format?: "jdbc" | "adonet" | "mysql2"
 }) {
   const inSheet = useInSidePanel()
   const alive = useRef(true)
@@ -171,7 +174,7 @@ export function DatabaseQuickDeploy({
       reach(2)
       const address = await get<{ url: string; reference?: string }>(
         `/databases/${connection.id}/url`,
-        { target },
+        { target, format },
       )
       if (!alive.current) return
       setCreated({ connection, url: address.url, reference: address.reference })

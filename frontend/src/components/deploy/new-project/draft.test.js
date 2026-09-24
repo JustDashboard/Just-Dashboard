@@ -5,6 +5,7 @@ import {
   landingStep,
   mergeDetectedConfiguration,
   persistableFlow,
+  railsDatabaseRows,
   withSuggestedHostname,
 } from "./draft"
 
@@ -157,6 +158,76 @@ test("a variable the source was read as needing, with nothing in it, opens the v
     }),
   })
   expect(landingStep(flow)).toBe("variables")
+})
+
+test("variables detection answered itself do not stop the import on the variables screen", () => {
+  const flow = flowFor({
+    candidate: candidate({
+      port: 3000,
+      variables: [
+        {
+          name: "AUTH_SECRET",
+          sources: [".env.example"],
+          setup: "generate",
+          generateLength: 32,
+          generateFormat: "base64",
+        },
+        {
+          name: "AUTH_URL",
+          sources: [".env.example"],
+          setup: "domain",
+          domainTemplate: "{{scheme}}://{{hostname}}",
+        },
+      ],
+    }),
+  })
+  expect(landingStep(flow)).toBe("review")
+  const paste = flowFor({
+    candidate: candidate({
+      port: 3000,
+      variables: [
+        { name: "RAILS_MASTER_KEY", sources: ["config/credentials.yml.enc"], setup: "paste" },
+      ],
+    }),
+  })
+  expect(landingStep(paste)).toBe("variables")
+})
+
+test("an address that follows the domain takes the suggested hostname and waits without one", () => {
+  const configuration = defaultConfiguration(
+    "web",
+    candidate({
+      port: 3000,
+      variables: [
+        {
+          name: "AUTH_URL",
+          sources: [".env.example"],
+          setup: "domain",
+          domainTemplate: "{{scheme}}://{{hostname}}",
+        },
+      ],
+    }),
+  )
+  // Nothing to follow yet: committed empty it would be "", which an
+  // application reads as a value, so it waits in the form.
+  expect(configurationForSave(configuration).variables).toEqual([])
+  const hosted = withSuggestedHostname(
+    configuration,
+    "web",
+    { kind: "git" },
+    { hostname: "App.example.test", method: "sslip" },
+  )
+  expect(hosted.variables[0].value).toBe("https://app.example.test")
+  expect(configurationForSave(hosted).variables).toHaveLength(1)
+})
+
+test("Rails' further databases follow the link as their own database names", () => {
+  expect(railsDatabaseRows(7, "shop", ["CACHE_DATABASE_URL", "QUEUE_DATABASE_URL"])).toEqual([
+    { name: "CACHE_DATABASE_URL", value: "${{database.7.url.shop_cache}}" },
+    { name: "QUEUE_DATABASE_URL", value: "${{database.7.url.shop_queue}}" },
+  ])
+  expect(railsDatabaseRows(7, "", ["CACHE_DATABASE_URL"])).toEqual([])
+  expect(railsDatabaseRows(7, "a-b", ["CACHE_DATABASE_URL"])).toEqual([])
 })
 
 test("a worker publishes nothing, so an unset port is not a question", () => {
