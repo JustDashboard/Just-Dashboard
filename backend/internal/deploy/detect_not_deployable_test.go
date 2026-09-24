@@ -38,9 +38,6 @@ func TestShapesThatAreNotServicesAreNamed(t *testing.T) {
 		{"python library", map[string]string{
 			"pyproject.toml": "[project]\nname = \"lib\"\ndependencies = [\"requests>=2\"]\n\n[build-system]\nrequires = [\"hatchling\"]\n",
 		}, "", "library"},
-		{"python command-line tool", map[string]string{
-			"pyproject.toml": "[project]\nname = \"tool\"\ndependencies = [\"click>=8\"]\n\n[project.scripts]\ntool = \"tool.cli:main\"\n",
-		}, "", "cli"},
 		{"notebooks", map[string]string{
 			"requirements.txt": "pandas==2.2.0\n", "analysis.ipynb": "{}",
 		}, "", "notebook"},
@@ -91,6 +88,17 @@ func TestServicesAreNotMistakenForLibraries(t *testing.T) {
 		"rust binary":   {"Cargo.toml": "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\naxum = \"0.8\"\n", "src/main.rs": ""},
 		"flask app":     {"requirements.txt": "flask==3.1.0\n", "app.py": "from flask import Flask\napp = Flask(__name__)\n"},
 		"python script": {"requirements.txt": "requests==2.32.0\n", "main.py": "print(1)\n"},
+		"python bot packaged with a build backend": {
+			"pyproject.toml": "[project]\nname = \"bot\"\ndependencies = [\"discord.py\"]\n\n[build-system]\nrequires = [\"hatchling\"]\n",
+			"bot.py":         "import discord\n",
+		},
+		"python bot with a console script": {
+			"pyproject.toml": "[project]\nname = \"bot\"\n\n[project.scripts]\nbot = \"bot.main:run\"\n\n[build-system]\nrequires = [\"hatchling\"]\n",
+			"bot/main.py":    "",
+		},
+		"web app with an electron devDependency": {
+			"package.json": `{"name":"web","scripts":{"build":"vite build"},"devDependencies":{"vite":"6","electron":"33"}}`, "package-lock.json": "{}",
+		},
 		"capacitor web app": {
 			"package.json": `{"name":"hybrid","scripts":{"build":"vite build"},"dependencies":{"@capacitor/core":"6"},"devDependencies":{"vite":"6"}}`, "package-lock.json": "{}",
 		},

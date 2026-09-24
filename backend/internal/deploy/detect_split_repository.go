@@ -147,7 +147,9 @@ func (s *repoShapeScan) applySplitRepository(result *DetectionResult, context sh
 		pairable := []int{}
 		for _, candidateIndex := range servers {
 			server := result.Candidates[candidateIndex]
-			if underRoot(server.Root, frontend.Root) {
+			// A Dockerfile around the frontend may well build it; only a
+			// recipe server is known not to.
+			if underRoot(server.Root, frontend.Root) || (server.BuildMethod == BuildDockerfile && underRoot(frontend.Root, server.Root)) {
 				continue
 			}
 			pairable = append(pairable, candidateIndex)

@@ -126,7 +126,14 @@ func (s *repoShapeScan) applyServerless(result *DetectionResult, context shapeCo
 		}
 		groups := map[string][]string{}
 		for _, file := range s.functionFiles {
-			if !underRoot(file, candidate.Root) {
+			if !underRoot(file, candidate.Root) || ownedByNestedCandidate(file, candidate.Root, result.Candidates) {
+				continue
+			}
+			hostedElsewhere := false
+			for functionsRoot := range hosted {
+				hostedElsewhere = hostedElsewhere || underRoot(file, functionsRoot)
+			}
+			if hostedElsewhere {
 				continue
 			}
 			relative := strings.TrimPrefix(strings.TrimPrefix(file, candidate.Root), "/")

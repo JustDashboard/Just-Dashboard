@@ -47,14 +47,14 @@ func (p nodePackageShape) libraryFields() int {
 }
 
 var (
-	cargoLibTableRE      = regexp.MustCompile(`(?m)^\s*\[lib\]\s*$`)
-	dotnetWindowsOnlyRE  = regexp.MustCompile(`(?i)<TargetFrameworkVersion>\s*v[1-4]\.|<TargetFrameworks?>[^<]*-windows|<Use(WindowsForms|WPF)>\s*true`)
-	dotnetLibraryOnlyRE  = regexp.MustCompile(`builds a library, not a program`)
-	androidGradleRE      = regexp.MustCompile(`com\.android\.(application|library|tools\.build|dynamic-feature)|plugins\.android\.(application|library)|androidTarget\(`)
-	browserManifestRE    = regexp.MustCompile(`"manifest_version"\s*:`)
-	pyprojectScriptsRE   = regexp.MustCompile(`(?m)^\s*\[(project\.scripts|tool\.poetry\.scripts)\]\s*$`)
-	pyprojectLibraryRE   = regexp.MustCompile(`(?m)^\s*\[(project|tool\.poetry|build-system)\]\s*$`)
-	pythonNotebookServer = []string{"voila", "jupyter-server", "jupyterlab", "notebook", "panel", "mercury"}
+	cargoLibTableRE        = regexp.MustCompile(`(?m)^\s*\[lib\]\s*$`)
+	dotnetWindowsOnlyRE    = regexp.MustCompile(`(?i)<TargetFrameworkVersion>\s*v[1-4]\.|<TargetFrameworks?>[^<]*-windows|<Use(WindowsForms|WPF)>\s*true`)
+	dotnetLibraryOnlyRE    = regexp.MustCompile(`builds a library, not a program`)
+	androidGradleRE        = regexp.MustCompile(`com\.android\.(application|library|tools\.build|dynamic-feature)|plugins\.android\.(application|library)|androidTarget\(`)
+	browserManifestRE      = regexp.MustCompile(`"manifest_version"\s*:`)
+	pyprojectScriptsRE     = regexp.MustCompile(`(?m)^\s*\[(project\.scripts|tool\.poetry\.scripts)\]\s*$`)
+	pyprojectBuildSystemRE = regexp.MustCompile(`(?m)^\s*\[build-system\]\s*$`)
+	pythonNotebookServer   = []string{"voila", "jupyter-server", "jupyterlab", "notebook", "panel", "mercury"}
 )
 
 func (s *repoShapeScan) applyNotDeployable(result *DetectionResult, context shapeContext) {
@@ -136,16 +136,22 @@ func (s *repoShapeScan) applyNotDeployable(result *DetectionResult, context shap
 		}
 	}
 	// A desktop shell's frontend is a website only in the sense that it is
-	// HTML: its calls into the shell have nothing to answer them.
+	// HTML: its calls into the shell have nothing to answer them. It sits at
+	// the shell's root (Tauri) or in its frontend folder (Wails).
+	shellRoots := make([]string, 0, len(desktopRoots))
+	for root := range desktopRoots {
+		shellRoots = append(shellRoots, root)
+	}
+	sort.Strings(shellRoots)
 	for index := range result.Candidates {
 		candidate := &result.Candidates[index]
-		if candidate.NotDeployable != "" || candidate.DesktopShell != "" {
+		if candidate.NotDeployable != "" || candidate.DesktopShell != "" || candidate.Recipe != "node" {
 			continue
 		}
-		for root, shell := range desktopRoots {
-			if candidate.Root == root || underRoot(candidate.Root, root) || underRoot(root, candidate.Root) {
-				candidate.DesktopShell = shell
-				candidate.Demotion = "frontend of a " + frameworkDisplayName(shell) + " desktop application; its calls into the shell need the desktop app"
+		for _, root := range shellRoots {
+			if candidate.Root == root || candidate.Root == joinRoot(root, "frontend") || candidate.Root == joinRoot(root, "ui") {
+				candidate.DesktopShell = desktopRoots[root]
+				candidate.Demotion = "frontend of a " + frameworkDisplayName(desktopRoots[root]) + " desktop application; its calls into the shell need the desktop app"
 				break
 			}
 		}
@@ -189,7 +195,10 @@ func (s *repoShapeScan) classifyNodePackage(candidate *DetectedCandidate, marker
 	case manifest.has("wxt") || manifest.has("plasmo") || manifest.has("@crxjs/vite-plugin") || s.browserManifest(candidate.Root):
 		mark("browser-extension", "a browser extension (manifest_version, WXT, Plasmo or CRXJS)")
 		return
-	case manifest.has("electron") && !manifest.has("next") && !manifest.has("express"):
+	case manifest.has("electron") && (shape.Main != "" || strings.Contains(manifest.Scripts["start"], "electron") ||
+		strings.Contains(manifest.Scripts["dev"], "electron")):
+		// electron as a devDependency of a web app that also ships a desktop
+		// build is not this; a main process entry or an electron start is.
 		mark("desktop-app", "electron: an Electron desktop application")
 		return
 	case (manifest.has("react-native") || manifest.has("expo")) && !manifest.has("react-native-web"):
@@ -285,19 +294,37 @@ func (s *repoShapeScan) classifyPythonProject(candidate *DetectedCandidate, mark
 	}
 	pyproject := marker.pythonFiles["pyproject.toml"]
 	switch {
-	case s.notebooksUnder(candidate.Root) > 0:
+	case s.notebooksUnder(candidate.Root) > 0 && !s.topLevelPython(candidate.Root):
 		candidate.NotDeployable = "notebook"
 		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: rootLabelOf(candidate.Root),
 			Reason: "Jupyter notebooks and no application entry point: they run in a notebook server, not as a service"})
-	case pyprojectScriptsRE.Match(pyproject):
-		candidate.NotDeployable = "cli"
-		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(candidate.Root, "pyproject.toml"),
-			Reason: "pyproject declares console scripts and no web framework: a command-line tool"})
-	case pyprojectLibraryRE.Match(pyproject):
+	case pyprojectBuildSystemRE.Match(pyproject) && !pyprojectScriptsRE.Match(pyproject) && !s.topLevelPython(candidate.Root):
+		// A build backend with no console script and no script at the root
+		// is a package to install, not a program; console scripts are how
+		// bots and servers start too, so they stay the operator's question.
 		candidate.NotDeployable = "library"
 		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(candidate.Root, "pyproject.toml"),
-			Reason: "pyproject packages a library: no web framework and no application entry point"})
+			Reason: "pyproject packages a library: a build backend, no web framework and no script to run"})
 	}
+}
+
+// topLevelPython says whether a root holds a Python script of its own,
+// beyond packaging and test configuration.
+func (s *repoShapeScan) topLevelPython(root string) bool {
+	for file := range s.files {
+		if !strings.HasSuffix(file, ".py") || !underRoot(file, root) {
+			continue
+		}
+		relative := strings.TrimPrefix(strings.TrimPrefix(file, root), "/")
+		switch relative {
+		case "setup.py", "conftest.py", "noxfile.py", "fabfile.py", "docs/conf.py":
+			continue
+		}
+		if !strings.Contains(relative, "/") {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *repoShapeScan) notebooksUnder(root string) int {
