@@ -39,7 +39,7 @@ func addSkippedBuildDockerfiles(tree detectionTree, markers map[string]*detected
 // definitions make: one per Dockerfile, built from the context its COPY
 // lines or a Compose service name, and one per directory of Compose files
 // that is a deployment rather than a development stack.
-func containerCandidates(tree detectionTree, markers map[string]*detectedMarkers, roots []string) []DetectedCandidate {
+func containerCandidates(tree detectionTree, markers map[string]*detectedMarkers, roots []string) (candidates, backingOnly []DetectedCandidate) {
 	references := map[string]*composeBuildReference{}
 	for _, root := range roots {
 		marker := markers[root]
@@ -79,7 +79,9 @@ func containerCandidates(tree detectionTree, markers map[string]*detectedMarkers
 			}
 		}
 		if len(marker.compose) > 0 {
-			if candidate, ok := composeCandidate(tree, marker, marker.composeFiles); ok {
+			if candidate, backing := composeCandidate(tree, marker, marker.composeFiles); backing {
+				backingOnly = append(backingOnly, candidate)
+			} else {
 				result = append(result, candidate)
 			}
 		}
@@ -94,7 +96,7 @@ func containerCandidates(tree detectionTree, markers map[string]*detectedMarkers
 			unique = append(unique, candidate)
 		}
 	}
-	return unique
+	return unique, backingOnly
 }
 
 // annotateImageFacts adds what detection can prove about each candidate's

@@ -400,6 +400,12 @@ func dockerfileCandidate(tree detectionTree, dockerfile detectedDockerfile, refe
 	case role == DockerfileRoleProduction:
 		evidence = append(evidence, DetectionEvidence{Path: dockerfile.path, Reason: "named for production"})
 	}
+	// docker/db/Dockerfile — `FROM postgres` with an init script — customises
+	// a service the application uses; it is not the application.
+	if family, backing := composeImageFamily(model.baseImage(target)); backing {
+		candidate.Confidence = ConfidenceLow
+		evidence = append(evidence, DetectionEvidence{Path: dockerfile.path, Reason: "builds on " + family + ", a backing service's image, not an application"})
+	}
 	if role != DockerfileRoleDevelopment && strings.Contains(strings.ToLower(string(dockerfile.content)), "designed for production") {
 		candidate.DockerfileRole = DockerfileRoleProduction
 		evidence = append(evidence, DetectionEvidence{Path: dockerfile.path, Reason: "the file says it is designed for production"})

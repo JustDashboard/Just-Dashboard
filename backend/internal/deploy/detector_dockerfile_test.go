@@ -335,6 +335,17 @@ func TestDetectionReadsRepositoryComposeFiles(t *testing.T) {
 		t.Fatalf("a Compose-only repository = %+v", selected)
 	}
 
+	// A repository that is only a stack of backing services is still one the
+	// operator can deploy, as a Compose source.
+	databasesOnly := detectFixture(t, map[string]string{
+		"docker-compose.yml": "services:\n  db:\n    image: postgres:16\n  cache:\n    image: redis:7\n",
+		"README.md":          "# local databases\n",
+	})
+	if len(databasesOnly.Candidates) != 1 || databasesOnly.Candidates[0].BuildMethod != BuildCompose ||
+		databasesOnly.Candidates[0].Confidence != ConfidenceLow {
+		t.Fatalf("a backing-services-only repository = %+v", databasesOnly.Candidates)
+	}
+
 	swift := detectFixture(t, map[string]string{"Package.swift": `.package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "2.0.0")`})
 	if len(swift.Candidates) != 1 || swift.Candidates[0].Framework != "hummingbird" {
 		t.Fatalf("a Swift server package without a Dockerfile = %+v", swift.Candidates)

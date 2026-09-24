@@ -10,10 +10,10 @@ import (
 // Dockerfile and a recognised framework — the most ordinary shape there is —
 // stopped on "choose one" every time, and the form quietly filled itself
 // from whichever candidate sorted first (Compose, which cannot build from a
-// Git source). The score below compares, in order: whether the candidate can
-// be chosen on its own at all, whether it builds as detected, its
-// confidence, and — only between candidates at the same root — what the
-// repository says it intends.
+// Git source). Candidates for the same directory are compared on whether
+// each can be chosen on its own at all, whether it builds as detected, its
+// confidence, and what the repository says it intends; different
+// directories only on whether they can be chosen and their confidence.
 
 type candidateScore struct {
 	selectable bool
@@ -112,27 +112,51 @@ func dockerfileMissesPublicArg(candidate DetectedCandidate) string {
 	return ""
 }
 
-func (s candidateScore) outranks(other candidateScore, sameRoot bool) int {
-	compare := func(a, b bool) int {
-		switch {
-		case a && !b:
-			return 1
-		case b && !a:
-			return -1
-		}
-		return 0
-	}
-	if result := compare(s.selectable, other.selectable); result != 0 {
+// outranksAtRoot compares two candidates for the same directory: whether
+// each can be chosen on its own, whether it builds as detected, its
+// confidence, and what the repository says it intends. These are two ways to
+// build one application, so the one that builds wins.
+func (s candidateScore) outranksAtRoot(other candidateScore) int {
+	if result := compareFlags(s.selectable, other.selectable); result != 0 {
 		return result
 	}
-	if result := compare(s.buildable, other.buildable); result != 0 {
+	if result := compareFlags(s.buildable, other.buildable); result != 0 {
 		return result
 	}
-	if s.confidence != other.confidence {
-		return map[bool]int{true: 1, false: -1}[s.confidence > other.confidence]
+	if result := compareRanks(s.confidence, other.confidence); result != 0 {
+		return result
 	}
-	if sameRoot && s.preference != other.preference {
-		return map[bool]int{true: 1, false: -1}[s.preference > other.preference]
+	return compareRanks(s.preference, other.preference)
+}
+
+// outranksAcrossRoots compares the best candidates of two directories, which
+// are different things rather than two ways to build one: a helper image in
+// docker/db/ that builds is no better an answer than the application whose
+// recipe needs one decision, so only whether each can be chosen and how
+// strong its evidence is count, and anything closer is the operator's call.
+func (s candidateScore) outranksAcrossRoots(other candidateScore) int {
+	if result := compareFlags(s.selectable, other.selectable); result != 0 {
+		return result
+	}
+	return compareRanks(s.confidence, other.confidence)
+}
+
+func compareFlags(a, b bool) int {
+	switch {
+	case a && !b:
+		return 1
+	case b && !a:
+		return -1
+	}
+	return 0
+}
+
+func compareRanks(a, b int) int {
+	switch {
+	case a > b:
+		return 1
+	case a < b:
+		return -1
 	}
 	return 0
 }
@@ -140,29 +164,47 @@ func (s candidateScore) outranks(other candidateScore, sameRoot bool) int {
 // rankCandidates orders candidates best first — so a form that has to fall
 // back to the first one falls back to a strong one — and returns the
 // selected candidate with the reason it won, or no selection with the
-// reason nothing did.
+// reason nothing did. Each directory's candidates are ordered among
+// themselves, then directories by their best candidate, which keeps the
+// order a true ordering although the two comparisons differ.
 func rankCandidates(candidates []DetectedCandidate) (string, string) {
 	if len(candidates) == 0 {
 		return "", ""
 	}
 	only := len(candidates) == 1
 	scores := make(map[string]candidateScore, len(candidates))
+	byRoot := map[string][]DetectedCandidate{}
+	roots := []string{}
 	for _, candidate := range candidates {
 		scores[candidate.ID] = scoreCandidate(candidate, only)
+		if byRoot[candidate.Root] == nil {
+			roots = append(roots, candidate.Root)
+		}
+		byRoot[candidate.Root] = append(byRoot[candidate.Root], candidate)
 	}
-	sort.SliceStable(candidates, func(i, j int) bool {
-		left, right := candidates[i], candidates[j]
-		if order := scores[left.ID].outranks(scores[right.ID], left.Root == right.Root); order != 0 {
+	for _, root := range roots {
+		group := byRoot[root]
+		sort.SliceStable(group, func(i, j int) bool {
+			if order := scores[group[i].ID].outranksAtRoot(scores[group[j].ID]); order != 0 {
+				return order > 0
+			}
+			if group[i].BuildMethod != group[j].BuildMethod {
+				return group[i].BuildMethod < group[j].BuildMethod
+			}
+			return group[i].ID < group[j].ID
+		})
+	}
+	leader := func(root string) candidateScore { return scores[byRoot[root][0].ID] }
+	sort.SliceStable(roots, func(i, j int) bool {
+		if order := leader(roots[i]).outranksAcrossRoots(leader(roots[j])); order != 0 {
 			return order > 0
 		}
-		if left.Root != right.Root {
-			return left.Root < right.Root
-		}
-		if left.BuildMethod != right.BuildMethod {
-			return left.BuildMethod < right.BuildMethod
-		}
-		return left.ID < right.ID
+		return roots[i] < roots[j]
 	})
+	candidates = candidates[:0]
+	for _, root := range roots {
+		candidates = append(candidates, byRoot[root]...)
+	}
 	best := candidates[0]
 	bestScore := scores[best.ID]
 	if !bestScore.selectable {
@@ -172,9 +214,12 @@ func rankCandidates(candidates []DetectedCandidate) (string, string) {
 		return "", fmt.Sprintf("none of the %d candidates is chosen on its own: development Dockerfiles, or a Compose file that has to be deployed as a Compose source", len(candidates))
 	}
 	tied := []string{}
-	for _, candidate := range candidates[1:] {
-		if bestScore.outranks(scores[candidate.ID], candidate.Root == best.Root) == 0 {
-			tied = append(tied, candidateLabel(candidate))
+	if group := byRoot[best.Root]; len(group) > 1 && bestScore.outranksAtRoot(scores[group[1].ID]) == 0 {
+		tied = append(tied, candidateLabel(group[1]))
+	}
+	for _, root := range roots[1:] {
+		if bestScore.outranksAcrossRoots(leader(root)) == 0 {
+			tied = append(tied, candidateLabel(byRoot[root][0]))
 		}
 	}
 	if len(tied) > 0 {
@@ -185,19 +230,20 @@ func rankCandidates(candidates []DetectedCandidate) (string, string) {
 	}
 	runnerUp := candidates[1]
 	runnerScore := scores[runnerUp.ID]
+	sameRoot := runnerUp.Root == best.Root
 	reason := candidateLabel(best) + " over " + candidateLabel(runnerUp) + ": "
 	devServer, runnerStartsDevServer := dockerfileDevServerIssue(runnerUp)
 	switch {
 	case runnerStartsDevServer:
 		reason += "it starts a development server (" + devServer + ")"
-	case bestScore.selectable && !runnerScore.selectable:
+	case !runnerScore.selectable:
 		reason += candidateLabel(runnerUp) + " is written for development"
 		if runnerUp.BuildMethod == BuildCompose {
 			reason = candidateLabel(best) + " over " + candidateLabel(runnerUp) + ": " + runnerScore.blocker
 		}
-	case bestScore.buildable && !runnerScore.buildable:
+	case sameRoot && bestScore.buildable && !runnerScore.buildable:
 		reason += candidateLabel(runnerUp) + " cannot build as detected; " + runnerScore.blocker
-	case bestScore.confidence != runnerScore.confidence:
+	case bestScore.confidence != runnerScore.confidence || !sameRoot:
 		reason += "stronger evidence"
 	case best.BuildMethod == BuildDockerfile:
 		reason += "the repository's own Dockerfile builds it as written"

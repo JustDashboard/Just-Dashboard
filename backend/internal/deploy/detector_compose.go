@@ -206,8 +206,9 @@ func composeBackingDatabases(files []composeDetection) []DetectedDatabase {
 	return result
 }
 
-// composeCandidate is the Compose candidate a directory's files make, if
-// they make one at all.
+// composeCandidate is the Compose candidate a directory's files make, and
+// whether it only runs backing services — a candidate only when the
+// repository has nothing else to deploy.
 func composeCandidate(tree detectionTree, marker *detectedMarkers, files []composeDetection) (DetectedCandidate, bool) {
 	evidence := make([]DetectionEvidence, 0, len(marker.compose))
 	for _, composePath := range marker.compose {
@@ -222,11 +223,13 @@ func composeCandidate(tree detectionTree, marker *detectedMarkers, files []compo
 		kind, reason := classifyCompose(tree, files)
 		switch kind {
 		case composeKindInfrastructure:
-			return DetectedCandidate{}, false
+			candidate.Confidence = ConfidenceLow
+			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: files[0].path, Reason: reason + "; the repository has nothing else to deploy"})
+			return newDetectedCandidate(marker.root, BuildCompose, candidate), true
 		case composeKindDevelopment:
 			candidate.Confidence = ConfidenceLow
 			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: files[0].path, Reason: reason})
 		}
 	}
-	return newDetectedCandidate(marker.root, BuildCompose, candidate), true
+	return newDetectedCandidate(marker.root, BuildCompose, candidate), false
 }

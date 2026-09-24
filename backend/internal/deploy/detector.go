@@ -528,7 +528,13 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			pathsUnderRoot(schemaPaths, root, packageRoots), pythonEntriesUnderRoot(pythonEntries, root, pythonRoots))
 		result.Candidates = append(result.Candidates, candidates...)
 	}
-	result.Candidates = append(result.Candidates, containerCandidates(tree, markers, roots)...)
+	containers, backingOnly := containerCandidates(tree, markers, roots)
+	result.Candidates = append(result.Candidates, containers...)
+	// A Compose file of backing services is offered as databases beside an
+	// application; alone, it is what the operator may mean to deploy.
+	if len(result.Candidates) == 0 {
+		result.Candidates = append(result.Candidates, backingOnly...)
+	}
 	// A candidate's variables and databases are its build root's, and a
 	// Dockerfile's context can sit above the directory the file is in.
 	variablesByRoot := map[string][]DetectedVariable{}
