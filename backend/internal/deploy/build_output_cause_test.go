@@ -186,6 +186,22 @@ func buildCases() []buildCase {
 			want: BuildCause{Code: "build_database_unreachable", Phase: phaseBuild, Command: "npm run build", ExitCode: 1, Detail: "next", Subjects: []string{"/blog"}},
 		},
 		{
+			name: "build reaches for a linked database", command: "npm run build", exit: 1, build: nodeBuild,
+			lines: []string{"Error: getaddrinfo ENOTFOUND db-3.jd.internal", "    at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:120:26)"},
+			want:  BuildCause{Code: "build_database_unreachable", Phase: phaseBuild, Command: "npm run build", ExitCode: 1, Subjects: []string{"db-3.jd.internal"}},
+		},
+		{
+			name: "a dependency's install script", command: "npm ci", exit: 1, build: nodeBuild,
+			lines: []string{"npm error code 1", "npm error path /app/node_modules/@scope/native-addon", "npm error command failed", "npm error command sh -c node install.js"},
+			want:  BuildCause{Code: "build_install_script_failed", Phase: phaseInstall, Command: "npm ci", ExitCode: 1, Detail: "npm", Subjects: []string{"@scope/native-addon"}},
+		},
+		{
+			name: "a Yarn Berry build script", command: "corepack enable && yarn install --immutable", exit: 1, build: nodeBuild,
+			lines: []string{"➤ YN0009: │ sharp@npm:0.33.5 couldn't be built successfully (exit code 1, logs can be found here: /tmp/xfs-1/build.log)"},
+			want: BuildCause{Code: "build_install_script_failed", Phase: phaseInstall, Command: "corepack enable && yarn install --immutable", ExitCode: 1,
+				Detail: "yarn", Subjects: []string{"sharp"}},
+		},
+		{
 			name: "prerender throws", command: "npm run build", exit: 1, build: nodeBuild,
 			lines: []string{"Error occurred prerendering page \"/about\". Read more: https://nextjs.org/docs/messages/prerender-error", "TypeError: Cannot read properties of undefined"},
 			want:  BuildCause{Code: "build_prerender_failed", Phase: phaseBuild, Command: "npm run build", ExitCode: 1, Detail: "next", Subjects: []string{"/about"}},

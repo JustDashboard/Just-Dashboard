@@ -278,11 +278,12 @@ own lines are read before the whole stream's. What it names, with the remedy the
 | `build_runtime_version` | EBADENGINE, `ERR_PNPM_UNSUPPORTED_ENGINE`, Yarn/Next engine lines, Go `GOTOOLCHAIN=local`, rustc `or newer`, Maven release, Gradle class version, NETSDK1045, Composer `requires php`, pip `requires a different Python`, uv/Poetry Python requirement, Ruby/Elixir/Hugo versions | a Go or Python release the recipe offers |
 | `build_env_missing` | PrismaConfigEnvError, P1012, t3-env, SvelteKit `$env/static`, Astro, Rails `secret_key_base`, Phoenix, Django, `KeyError` on the environment | the variable, or its build scope (recipes only) |
 | `build_sqlx_offline` | sqlx `set DATABASE_URL to use query macros` / no cached data | `SQLX_OFFLINE=true` for the build |
-| `build_database_unreachable`, `build_prerender_failed` | Next prerender/collect-page-data errors, with or without a database error; `Can't reach database server`; Django `OperationalError` | — |
+| `build_database_unreachable`, `build_prerender_failed` | Next prerender/collect-page-data errors, with or without a database error; `Can't reach database server`; a `*.jd.internal` address that does not resolve (a linked database is reachable only on the project network, which a build is not on); Django `OperationalError` | — |
 | `build_prisma_client_missing` | `@prisma/client did not initialize yet` | `prisma generate` before the build command |
 | `build_platform_binary_missing` | rollup/esbuild/SWC/lightningcss/oxide/sharp Linux binaries missing | — |
 | `build_legacy_openssl` | `0308010C`, `ERR_OSSL_EVP_UNSUPPORTED` | `NODE_OPTIONS=--openssl-legacy-provider` |
 | `build_system_library_missing`, `build_native_toolchain_missing` | `pg_config`, `mysql_config`, pkg-config, `cannot find -l`, `*-sys` crates, headers, Prisma libssl, glibc on musl; `gyp ERR!`, a missing compiler, `Failed building wheel`, cgo, `linking with cc`, `protoc`, perl, NativeAOT's clang | — |
+| `build_install_script_failed` | npm `error path /app/node_modules/X` with `command failed`, Yarn `YN0009` | — |
 | `build_php_extension_missing` | `requires ext-X … it is missing from your system` | — |
 | `build_dependency_conflict`, `build_dependency_unavailable`, `build_dependency_local_path`, `build_dependency_advisory_blocked` | ERESOLVE, `ResolutionImpossible`, Composer/uv/Cargo/NuGet conflicts; ETARGET/E404, `No matching distribution`, NU1101, Maven artifacts, Go revisions, gems; conda `/croot/` paths; Composer advisories | — |
 | `build_registry_auth`, `build_registry_rate_limited`, `build_network` | E401/E403, `YN0041`, `terminal prompts disabled`; `toomanyrequests`; DNS, TLS and connection failures | — |

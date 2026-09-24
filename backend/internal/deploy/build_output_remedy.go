@@ -28,6 +28,7 @@ var causeTitles = map[string]string{
 	"build_legacy_openssl":               "Build tool needs legacy OpenSSL",
 	"build_system_library_missing":       "System library missing",
 	"build_native_toolchain_missing":     "Compiler toolchain missing",
+	"build_install_script_failed":        "Dependency install script failed",
 	"build_php_extension_missing":        "PHP extension missing",
 	"build_dependency_conflict":          "Dependency versions conflict",
 	"build_dependency_advisory_blocked":  "Dependency blocked by a security advisory",
@@ -482,6 +483,9 @@ func (c *BuildCause) explain() (string, string) {
 		return c.systemLibrary(subject)
 	case "build_native_toolchain_missing":
 		return c.nativeToolchain(subject)
+	case "build_install_script_failed":
+		return "the install script of " + orDefault(subject, "a dependency") + " failed",
+			"its error is in the build log above; a native package usually needs a prebuilt binary for Linux musl or a toolchain the image lacks"
 	case "build_php_extension_missing":
 		return "a locked package requires the PHP extension " + orDefault(subject, "it names") + ", which the image does not install",
 			"declare it in composer.json's `require` (for example `\"" + orDefault(subject, "ext-intl") + "\": \"*\"`) so the recipe installs it"

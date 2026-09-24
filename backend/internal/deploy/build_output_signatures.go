@@ -112,6 +112,9 @@ var buildSignatures = []buildSignature{
 	signature("build_database_unreachable", "next", "prerender", `Error occurred prerendering page "([^"]+)"|Failed to collect page data for (\S+)|Export encountered an error on ([^\s,:]+)`).
 		requiring(databaseErrorPattern),
 	signature("build_database_unreachable", "", "database server", "Can't reach database server at `([^`]+)`"),
+	// A linked database's address resolves only on the project's network,
+	// which a build is not attached to.
+	signature("build_database_unreachable", "", ".jd.internal", `getaddrinfo (?:ENOTFOUND|EAI_AGAIN) ([\w.-]+\.jd\.internal)`),
 	signature("build_database_unreachable", "django", "OperationalError", `OperationalError: (?:could not translate host name|connection to server at)`),
 	signature("build_prerender_failed", "next", "", `Error occurred prerendering page "([^"]+)"|Failed to collect page data for (\S+)|Export encountered an error on ([^\s,:]+)`),
 
@@ -143,6 +146,11 @@ var buildSignatures = []buildSignature{
 	signature("build_native_toolchain_missing", "", "protoc", "Could not find `(protoc)`"),
 	signature("build_native_toolchain_missing", "", "perl", `Can't locate [\w/]+\.pm in @INC|Command '(perl)' not found`).naming("perl"),
 	signature("build_native_toolchain_missing", "dotnet", "Platform linker", `Platform linker \('(\w+)'\) not found`),
+
+	// A dependency's own install script that failed for a reason of its own.
+	signature("build_install_script_failed", "npm", "node_modules", `npm error path /app/node_modules/((?:@[^/\s]+/)?[^/\s]+)`).
+		requiring(`npm error command failed`),
+	signature("build_install_script_failed", "yarn", "YN0009", "YN0009: .*?((?:@[^@\\s]+/)?[^@\\s│]+)@\\S+ couldn't be built successfully"),
 
 	// PHP extensions a locked package requires and the image lacks.
 	signature("build_php_extension_missing", "php", "it is missing from your system", `requires? (ext-[a-z0-9_]+) \S+ -> it is missing from your system`),
