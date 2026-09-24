@@ -969,30 +969,6 @@ func readContainedRegular(root, relative string, limit int64) ([]byte, error) {
 	return os.ReadFile(realPath)
 }
 
-func validateCustomDockerfile(content []byte) error {
-	text := string(content)
-	if strings.Contains(strings.ToLower(text), "-----begin private key-----") || containsURLCredentials(text) {
-		return fmt.Errorf("%w: custom Dockerfile contains credential material", ErrUnsupportedBuilder)
-	}
-	for _, raw := range strings.Split(text, "\n") {
-		line := strings.TrimSpace(raw)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		instruction, rest, found := strings.Cut(line, " ")
-		if !found {
-			continue
-		}
-		switch strings.ToUpper(instruction) {
-		case "ENV", "ARG", "RUN", "CMD", "ENTRYPOINT":
-			if secretAssignmentRE.MatchString(" "+rest) || secretCommandFlagRE.MatchString(" "+rest) {
-				return fmt.Errorf("%w: custom Dockerfile may place credential material in image layers or argv", ErrUnsupportedBuilder)
-			}
-		}
-	}
-	return nil
-}
-
 func regularExists(root, relative string) bool {
 	info, err := os.Lstat(filepath.Join(root, filepath.Clean(relative)))
 	return err == nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0
