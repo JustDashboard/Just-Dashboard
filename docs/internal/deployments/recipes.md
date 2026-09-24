@@ -1049,7 +1049,8 @@ domain), is followed on the candidate — at most four times; a redirect anywher
 and is reported with its origin.
 
 Budgets follow the start: 20 attempts 3 s apart by default; 40 for a JVM service or a start command
-that applies migrations; 60 attempts 5 s apart for Wagtail's first migrations; 60 attempts 10 s apart
+that applies migrations (a detected schema step counts only when the start runs it, not beside a
+Procfile's web process that leaves it to a release task); 60 attempts 5 s apart for Wagtail's first migrations; 60 attempts 10 s apart
 when a Python application loads a model while it starts (`from_pretrained(`, `pipeline(`,
 `SentenceTransformer(`, `whisper.load_model(`, `YOLO(` and the like at module level, under `__main__`,
 or in a lifespan/startup hook, with a model library among the dependencies). Preflight then warns

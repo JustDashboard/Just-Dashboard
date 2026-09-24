@@ -864,7 +864,11 @@ func applyReadinessBudget(readiness *DetectedReadiness, candidate *DetectedCandi
 	// it is given, so its start migrates although the CMD does not say so.
 	railsEntrypoint := candidate.BuildMethod == BuildDockerfile && railsDockerEntrypoint(marker.dockerfileFor(candidate).content) &&
 		(facts.has(factRailsForceSSL) || facts.has(factRailsAPIOnly) || len(facts.of(factDeclaredHealth)) > 0)
-	if candidate.SchemaCommand != "" || candidate.SchemaInStart || migrationStartRE.MatchString(start) || railsEntrypoint {
+	// A detected schema step counts only where this start runs it: a
+	// Procfile's web process keeps the command it declares and leaves the
+	// step to a release task (detect_schema.go).
+	if candidate.SchemaInStart || schemaStepConfigured(candidate, BuildPlanConfig{StartCommand: start}) ||
+		migrationStartRE.MatchString(start) || railsEntrypoint {
 		slow("the start command applies database migrations before the server listens", readinessSlowAttempts, readinessDefaultInterval)
 		if deps := readPythonDependencies(marker.pythonFiles); deps.has("wagtail") {
 			slow("Wagtail's first migrations take minutes before the server listens", readinessLongAttempts, 5)

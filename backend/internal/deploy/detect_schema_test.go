@@ -172,6 +172,23 @@ func TestChainedSchemaStepReachesReadinessAndNetwork(t *testing.T) {
 	}
 }
 
+// A Procfile's web process keeps its own command, so the schema step state
+// found is not in the start and readiness has no migration to wait for.
+func TestProcfileStartWithoutTheSchemaStepGetsNoMigrationBudget(t *testing.T) {
+	t.Parallel()
+	candidate := candidateFor(t, detectFixture(t, map[string]string{
+		"requirements.txt": "flask==3.1.0\nflask-migrate==4.0.7\ngunicorn==23.0.0\n", "app.py": "from flask import Flask\napp = Flask(__name__)\n",
+		"migrations/alembic.ini": "[alembic]\n", "migrations/versions/abc_init.py": "revision = 'abc'\n",
+		"Procfile": "web: gunicorn app:app --bind 0.0.0.0:$PORT\nrelease: flask db upgrade\n",
+	}), BuildRecipe, "python")
+	if candidate.StartCommand != "gunicorn app:app --bind 0.0.0.0:$PORT" || candidate.SchemaCommand == "" {
+		t.Fatalf("start = %q, schema command = %q", candidate.StartCommand, candidate.SchemaCommand)
+	}
+	if candidate.Readiness != nil && candidate.Readiness.SlowStart != "" {
+		t.Fatalf("readiness = %+v, want no migration budget for a start that does not migrate", candidate.Readiness)
+	}
+}
+
 func TestEFCoreSchemaStepMissingNamesTheStartupCall(t *testing.T) {
 	t.Parallel()
 	item := schemaStepFinding(&DetectedCandidate{SchemaTool: "ef-core"}, BuildPlanConfig{StartCommand: "dotnet /app/App.dll"})
