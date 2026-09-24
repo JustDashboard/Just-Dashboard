@@ -214,6 +214,15 @@ type DetectedCandidate struct {
 	Databases            []DetectedDatabase  `json:"databases,omitempty"`
 	Evidence             []DetectionEvidence `json:"evidence"`
 	NeedsDecision        []string            `json:"needsDecision"`
+
+	// PersistentPaths is state the application writes to its own filesystem
+	// (detect_state.go); SeedCommand loads its seed data, SeedResets says the
+	// seed clears tables first, and SchemaPush says the schema step pushes the
+	// declared model instead of applying committed migrations.
+	PersistentPaths []DetectedPersistentPath `json:"persistentPaths,omitempty"`
+	SeedCommand     string                   `json:"seedCommand,omitempty"`
+	SeedResets      bool                     `json:"seedResets,omitempty"`
+	SchemaPush      bool                     `json:"schemaPush,omitempty"`
 }
 
 // DetectedVariable is an environment variable the source reads, found in an
@@ -1482,7 +1491,11 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 			len(candidate.Evidence) > 128 || len(candidate.NeedsDecision) > 128 {
 			return fmt.Errorf("%w: detected candidate is malformed", ErrInvalidPlan)
 		}
-		for _, command := range []string{candidate.BuildCommand, candidate.StartCommand, candidate.RecipeIssue} {
+		if !validPersistentPaths(candidate.PersistentPaths) || len(candidate.SeedCommand) > 512 ||
+			strings.ContainsAny(candidate.SeedCommand, "\x00\r\n") {
+			return fmt.Errorf("%w: detected candidate state is malformed", ErrInvalidPlan)
+		}
+		for _, command := range []string{candidate.BuildCommand, candidate.StartCommand, candidate.RecipeIssue, candidate.SeedCommand} {
 			if rejectPlanSecretLiteral("detected command", command) != nil {
 				return fmt.Errorf("%w: detected candidate contains credential material", ErrInvalidPlan)
 			}

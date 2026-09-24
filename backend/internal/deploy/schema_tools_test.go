@@ -211,13 +211,26 @@ func TestPreflightWarnsWhenALinkedDatabaseGetsNoSchema(t *testing.T) {
 		}
 	}
 
+	draft.Data.Configuration.Build.StartCommand = "bunx prisma migrate deploy && bun run start"
+	result, err = PreflightDraft(context.Background(), draft, &preflightObserverFake{observation: observation}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findingSeverity(result.Findings, "schema_step") != PreflightPass || findingSeverity(result.Findings, "schema_step_missing") != "" ||
+		findingSeverity(result.Findings, "schema_push_unversioned") != "" {
+		t.Fatalf("configured schema step findings = %#v", result.Findings)
+	}
+
+	// A push is configured, but it is not a pass: the first deploy that drops
+	// a column stops the application from starting.
 	draft.Data.Configuration.Build.StartCommand = candidate.StartCommand
 	result, err = PreflightDraft(context.Background(), draft, &preflightObserverFake{observation: observation}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if findingSeverity(result.Findings, "schema_step") != PreflightPass || findingSeverity(result.Findings, "schema_step_missing") != "" {
-		t.Fatalf("configured schema step findings = %#v", result.Findings)
+	if findingSeverity(result.Findings, "schema_push_unversioned") != PreflightWarning || findingSeverity(result.Findings, "schema_step") != "" ||
+		findingSeverity(result.Findings, "schema_step_missing") != "" {
+		t.Fatalf("pushed schema step findings = %#v", result.Findings)
 	}
 
 	draft.Data.Configuration.Build.StartCommand = "bun run start"

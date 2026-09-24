@@ -913,9 +913,16 @@ func preflightFindings(
 			"Only typed reference identities were inspected; secret leaves remain masked.", "", "deploy", "variables"))
 	}
 	if selected := selectedDetectionCandidate(detection); selected != nil && selected.SchemaTool != "" &&
-		configuration.Build.Method == BuildRecipe && hasDatabaseDependency(configuration.Dependencies) {
-		findings = append(findings, schemaStepFinding(selected, configuration.Build))
+		configuration.Build.Method == BuildRecipe {
+		// A pushed schema is a warning whether or not the database is linked
+		// here; it takes the place of the step's pass.
+		if push := schemaPushFinding(selected, configuration.Build); push != nil {
+			findings = append(findings, *push)
+		} else if hasDatabaseDependency(configuration.Dependencies) {
+			findings = append(findings, schemaStepFinding(selected, configuration.Build))
+		}
 	}
+	findings = append(findings, stateFindings(selectedDetectionCandidate(detection), configuration, resolvedVariables)...)
 	if (draft.Data.Intent.Profile == ProfileWeb || draft.Data.Intent.Profile == ProfileStatic) && !hasReadinessCheck(configuration.Checks) {
 		findings = append(findings, finding("readiness_missing", PreflightDecision,
 			"Choose a readiness check", "", "Traffic must not move to an unverified candidate.",
@@ -1336,6 +1343,9 @@ func schemaStepFinding(candidate *DetectedCandidate, build BuildPlanConfig) Pref
 			"", "deploy", "build.startCommand")
 	}
 	action := "Choose how the " + label + " schema reaches the linked database before the application starts."
+	if tool := schemaToolByName(candidate.SchemaTool); tool != nil && tool.advice != "" {
+		action = tool.advice
+	}
 	if candidate.SchemaCommand != "" {
 		action = "Run " + candidate.SchemaCommand + " in the start command before the server starts, or apply the schema another way."
 	}

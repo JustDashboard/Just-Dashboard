@@ -412,6 +412,7 @@ func (a *HostSourceAnalyzer) analyzeImage(ctx context.Context, source DraftSourc
 	candidate := newDetectedCandidate("", BuildImage, DetectedCandidate{
 		Name: reference, Profile: ProfileImage, Confidence: ConfidenceHigh,
 		Port: port, Evidence: evidence, NeedsDecision: decisions,
+		PersistentPaths: imagePersistentPaths(reference, a.imageDeclaredVolumes(ctx, reference)),
 	})
 	return DetectionResult{Source: identity, Candidates: []DetectedCandidate{candidate}, SelectedID: candidate.ID}, nil
 }
