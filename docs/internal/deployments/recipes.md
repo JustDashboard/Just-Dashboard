@@ -70,12 +70,17 @@ Detection reads a checkout in two passes (`detect_walk.go`). The first lists dir
 to the depth bound and reads only the files whose names say what a directory is — the manifests above,
 Dockerfiles and Compose files, and the repository-shape files below — so ten thousand images under
 `assets/` or megabytes of generated Go under `api/` can no longer spend the bound before the root's
-`package.json` or `go.mod` is read. The second walks everything else. The file bound (10,000) counts
-files detection opens, not files the repository holds. Go source is read head-first (64 KiB, enough for
+`package.json` or `go.mod` is read. The second walks everything else, reusing the first pass's
+judgement of each directory, so a pruned directory is recorded once and never entered. The file bound
+(10,000) counts files detection opens, not files the repository holds. Go source is read head-first (64 KiB, enough for
 the package clause, the imports and the cgo check) under a budget of its own (3,000 files, 24 MiB), and
 files marked `// Code generated … DO NOT EDIT.` and `*.pb.go` are skipped; a module whose scan stopped
 early says so in its evidence. A manifest the depth bound kept detection from reading sets `truncated`,
-and every candidate found before a bound carries that as evidence. Editor, CI and tool directories
+and every candidate found before a bound carries that as evidence. A verdict drawn from a file the walk
+did not find — no `src/main.rs`, no main package, no script at a Python project's top, no `web/` in a
+Flutter app — is drawn only when the walk saw everything under that root: after a bound stopped it, or
+when the depth bound pruned a directory under the root, the candidate keeps its ordinary plan instead
+of being called a library. Editor, CI and tool directories
 (`.devcontainer`, `.github`, `.vscode`, `.idea`, caches and build outputs such as `.svelte-kit`,
 `.nuxt`, `coverage`) are never walked; a development container's Dockerfile is recorded as set aside,
 not offered. A directory holding `pyvenv.cfg` or `conda-meta/` is a committed virtualenv whatever it is
@@ -102,20 +107,28 @@ picked anyway):
 - a workspace root whose applications are its member packages;
 - an `index.html` root nested inside a code root outside the folders a framework serves
   (`static_candidate_nested` when selected);
+- a `package.json` that only runs tooling — no framework, server library, start script beyond a
+  static preview server, runtime library (a bot SDK, a database driver, a queue) or main file that
+  exists — when anything else is deployable: a root of prettier and husky used to win on depth over
+  the GitHub Pages site in `public/` or `site/`;
 - the frontend of a split repository's API, and a desktop shell's frontend (below).
 
 An `index.html` is not a site when it sits under `templates/`, `layouts/`, `_includes/`, `partials/`,
 `views/`, `themes/`, a coverage or test report, or when its first 4 KiB start with front matter or hold
 `{%`, `<?php` or `<%=` — a Flask or Jinja template used to become a site serving raw template source. An
 `index.html` nested inside another plain static root is a page of that site ("2 more pages under ."). One
-at or under a code root, in a folder the framework serves (`public/`, `static/`, `assets/`,
+at or under an application's root, in a folder the framework serves (`public/`, `static/`, `assets/`,
 `templates/`, `views/`, `wwwroot/`, `priv/`), is that application's static files and is set aside with
 evidence on the application — an Express API with `public/index.html` used to deploy the folder on nginx
-and not the API. A plain HTML site whose `package.json` only runs tooling (the Tailwind CLI, PostCSS,
-a formatter, a `live-server` or `http-server` preview) is a static site: with a build script it is
-"Static site with a build step", the Node recipe with output directory `.`, whose image serves the
-package root after the build without `node_modules`, the package manifests, the lockfiles or dotfiles;
-without one it is a plain static site.
+and not the API. A tooling-only `package.json` is no application and owns no static files. A plain HTML
+site whose `package.json` only runs tooling (the Tailwind CLI, PostCSS, a formatter, a `live-server` or
+`http-server` preview) is a static site: with a build script it is "Static site with a build step", the
+Node recipe with output directory `.`, whose image serves the package root after the build without
+`node_modules`, the package manifests, the lockfiles or dotfiles, and whose nested `index.html` files are
+its pages; without one it is a plain static site. `"main": "index.js"`, which `npm init` writes whether
+or not the file exists, counts only when the file is there. A bot or script with a landing page — a
+main file that exists, or a runtime library such as `discord.js` — stays the program it is, so its code
+and configuration are never served as files.
 
 A repository split into a frontend and an API (`detect_split_repository.go`) is one deployment when the
 server's own scripts build the frontend (`npm --prefix client run build`, `cd client`, `--workspace`,
@@ -131,20 +144,28 @@ Not a service (`notDeployable`, `detect_not_deployable.go`): a package that publ
 VS Code extension (`engines.vscode`), a browser extension (a `manifest_version` manifest, WXT, Plasmo,
 CRXJS), Electron and React Native or Expo apps without `react-native-web`, a GitHub Action
 (`action.yml`), a Python project with no framework and no entry point (`[project.scripts]` makes it a
-tool), a notebook-only root, a Rust library crate, a Windows-only .NET program (.NET Framework,
+tool; a package's `__main__.py`, a Procfile or Dockerfile, or a dependency only a program has — a
+Discord or Telegram SDK, Celery, RQ, APScheduler, a WSGI or ASGI server — makes it a program), a
+notebook-only root, a Rust library crate, a Windows-only .NET program (.NET Framework,
 `-windows`, WinForms, WPF), a Go module with no main package outside its examples, and a Wails or Tauri
 shell. Android modules (`com.android.*` in a Gradle script), a Flutter app's native folders and the
 functions directories Supabase, Netlify and Firebase host are set aside rather than offered. Preflight's
-`source_not_a_service` is blocked when every candidate is one, or when the selected one is and its
-start command is still detection's; with a start command of the operator's own it is a warning. A
+`source_not_a_service` is blocked when every candidate is one, or when the selected one is, while the
+plan is still detection's; a start command of the operator's own, or another build method (a Dockerfile,
+a static site), makes it a warning either way, because detection can be wrong about what a source is. A
 Tauri or Wails frontend is ranked down and warned (`desktop_frontend_only`): its calls into the shell
 have nothing to answer them in a browser. Expo with `react-native-web` builds its web target
 (`expo export --platform web` into `dist`, single-page fallback on); `expo.web.output: "server"` is a
 `recipe_unsupported` finding.
 
 Serverless and edge code (`detect_serverless.go`) is named rather than dropped: a Wrangler `main` is a
-Worker entry, which a container never runs (`edge_runtime_code_not_deployed`, blocked); a Vite app with
-`@cloudflare/vite-plugin` serves `dist/client`, where the plugin writes the client; and Vercel `api/`,
+Worker entry, which a container never runs. `edge_runtime_code_not_deployed` is blocked when the
+application has no server of its own — a static site, a Worker-only package, or a start command that
+runs the Worker entry itself — and a warning beside an application the recipe starts in Node. A `main`
+a framework's Cloudflare adapter writes (`.open-next/`, `dist/_worker.js`, `.svelte-kit/cloudflare/`,
+`.output/server/`) is evidence only: Next.js on OpenNext still builds and serves with `next start`. A
+Vite app with `@cloudflare/vite-plugin` serves `dist/client`, where the plugin writes the client; and
+Vercel `api/`,
 `netlify/functions` or Cloudflare Pages `functions/` beside a static site are listed by route in
 `serverless_functions_dropped`. The static server's single-page fallback is unchanged, so those routes
 answer with `index.html`.
@@ -170,17 +191,17 @@ candidate records the file, the facts and which it took (`platformManifests`):
 
 | Declared | Taken as |
 | --- | --- |
-| start command (`startCommand`, `[start] cmd`, `run_command`, fly `app` process, Space `app_file`) | the start command of a recipe candidate that did not take the Procfile's, unless it runs a package manager the lockfile does not build with; it answers the start-command decisions |
+| start command (`startCommand`, `[start] cmd`, `run_command`, fly `app` process, Space `app_file`) | the start command of a recipe candidate that did not take the Procfile's, unless it runs a package manager the lockfile does not build with, with the detected schema step kept in front of it unless it applies the schema itself; it answers the start-command decisions |
 | build command | the build command when detection had none, with its dependency installs (`npm ci`, `pip install`, `bundle install`, …) removed — the recipe installs from the lockfile |
 | port (`internal_port`, `http_port`, Kamal `proxy.app_port`, Space `app_port`) | the port when the start command came from the same file, or when nothing named one |
 | publish directory (`publish`, `outputDirectory`, `staticPublishPath`, `output_dir`, hosting `public`) and a rewrite of every path to `/index.html` | the output directory and the single-page fallback of a static candidate |
-| health check path | evidence, and `healthPath` for the readiness check |
+| health check path | evidence and `healthPath`; the readiness check does not use it yet |
 | `generateValue`, `generator: "secret"` | a variable the configure form generates |
 | secret env names, `sync: false`, `required` | a variable row that must be set |
 | accessories, add-ons, `fromDatabase`, `databases:` | a database suggestion on the declared variable |
 | worker, cron, Kamal roles, `[processes]` | [processes](#background-processes) |
 | release command (`release_command`, `preDeployCommand`, `PRE_DEPLOY` job) | a `release` process |
-| volumes and `[[mounts]]` | evidence and `volumes` |
+| volumes and `[[mounts]]` | evidence and `volumes`; no mount is created from them yet |
 | `Aptfile`, `aptPkgs` | `platform_system_packages_ignored` (warning) for a recipe build |
 | redirect rules other than the SPA rewrite | `static_redirects_unsupported` (warning) |
 
@@ -188,7 +209,11 @@ Values are never imported from these files: a secret is a name to fill in or gen
 become examples only when they are not shaped like a host, an address or a URL — `PHX_HOST` and a Kamal
 accessory's IP belong to the old host. Kamal's `env.clear` brings examples only for framework toggles
 (`SOLID_QUEUE_IN_PUMA`, `WEB_CONCURRENCY`, `JOB_CONCURRENCY`, `RAILS_LOG_LEVEL`, …). Every command passes
-the same credential screen as the rest of detection.
+the same credential screen as the rest of detection. The TOML reader gathers a multi-line string or
+array line by line and stops at 256 lines, so an unterminated value ends the document instead of being
+rescanned to its end, and these files are read only within detection's time bound. A fact the result's
+validation would refuse — a process named with a space, a path with a newline in it — is dropped before
+the result is saved, so one odd file costs that fact and never the import.
 
 ## Background processes
 
@@ -202,8 +227,12 @@ job, mailable, notification or listener implements `ShouldQueue` and `QUEUE_CONN
 `routes/console.php` or the console kernel schedules anything, and Reverb's WebSocket server; a Symfony
 Messenger consumer; Sidekiq, Solid Queue, GoodJob, Resque and Delayed Job for Ruby; a BullMQ worker file
 the start command does not run; and the workers, cron jobs and roles of the platform files above.
-Preflight raises `secondary_process_not_deployed_<name>` (warning) for each, unless the plan's start
-command is that process's own, which is the second project. Octane is recorded as an alternative start
+A process the Procfile declares replaces the framework's conventional one of the same kind (a Gemfile's
+Sidekiq beside `worker: bundle exec sidekiq` is one worker), two processes with the same command are
+one, and a Procfile command is held to the same 1,024-character bound and credential screen as a
+command from any other platform's file. Preflight raises `secondary_process_not_deployed_<name>`
+(warning) for each, unless the plan's start command is that process's own, which is the second
+project. Octane is recorded as an alternative start
 command, not a failure.
 
 ## Ecosystems without a recipe
@@ -218,6 +247,8 @@ Plumber, C/C++ (CMake, Meson), Elm, Hugo, MkDocs and a Flutter web app. A web fr
 manifest's dependencies makes it a web service on its conventional port. A Rails, Hanami or Phoenix
 application owns its `package.json` (and `assets/package.json`): that asset pipeline is set aside rather
 than offered as a Node service — a CocoaPods or fastlane Gemfile beside a React Native app owns nothing.
+A site generator (Hugo, MkDocs, Jekyll, Middleman, Elm) owns a tooling-only `package.json` at its root
+the same way: a Hugo site with a Tailwind build used to be only a Node worker asking for a start command.
 With a Dockerfile at the same root the Dockerfile is the candidate, and it takes the framework, the
 processes and the database drivers. Every other language is named only when nothing else at its root
 is a candidate, and C/C++ and MkDocs never inside another candidate's root, where they are that
@@ -228,8 +259,10 @@ its recipe lands.
 
 Detection parses `.gitmodules` and the LFS patterns of `.gitattributes` (`detect_git_extras.go`): each
 submodule's path and whether its URL is relative or on the repository's own host (`submoduleList`), and
-the files under the root that LFS tracks (`lfsFiles`, `lfsPaths`). Only what the build root holds
-matters. The configure screen turns submodules on when every one under the root is on the source's own
+the files under the root that LFS tracks (`lfsFiles`, `lfsPaths`, which lists at most 256). Only what
+the build root holds matters: a submodule inside it, or the one it lies inside. A nested root's LFS count
+comes from the listed paths; when the repository tracks more files than are listed, a count of zero is
+unknown, and preflight warns that LFS files may deploy as pointer files instead of passing. The configure screen turns submodules on when every one under the root is on the source's own
 host, and LFS when files under the root are tracked, and both switches sit in the Source section beside
 the branch. Preflight's `git_submodules` is a decision only for a submodule on another host, a warning
 when a same-host one is left off, and a pass when none is under the root; `git_lfs` warns that

@@ -297,7 +297,9 @@ only renderer/executor/validation authority for their feature.
   `serverlessCode` and `importCaseMismatches`; a result carries `setAside` (what was recognised and not
   offered, and why) and `alternatives` (a reviewed template or the project's published image), and
   `gitRequirements` lists each submodule and the LFS-tracked files. All of it is bounded and
-  credential-screened by `validateRepoShapeEvidence`, and preflight turns it into findings before Deploy
+  credential-screened by `validateRepoShapeEvidence` (anything it would refuse is dropped first by
+  `keepValidShape`, so one odd file never fails the import, and a verdict drawn from a file's absence
+  needs a walk that saw the whole root), and preflight turns it into findings before Deploy
   (`preflight_repo_shape.go`): `source_not_a_service`, `static_candidate_nested`,
   `selected_candidate_demoted`, `companion_service_not_deployed`, `desktop_frontend_only`,
   `secondary_process_not_deployed_<name>`, `release_process_not_run`, `edge_runtime_code_not_deployed`,
