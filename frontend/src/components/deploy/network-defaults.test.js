@@ -117,6 +117,29 @@ describe("variables the proxy decides", () => {
       "NEXTAUTH_URL",
     ])
   })
+
+  // Detection's own classification can set up the same names; the plan
+  // declares each once, in the classification's shape.
+  test("a variable detection set up is declared once", () => {
+    const classified = candidate({
+      networkVariables: auth.networkVariables,
+      variables: [
+        {
+          name: "NEXTAUTH_URL",
+          sources: ["package.json"],
+          setup: "domain",
+          setupReason: "NextAuth builds its callback URLs from it",
+          domainTemplate: "{{scheme}}://{{hostname}}/api/auth",
+        },
+      ],
+    })
+    const variables = defaultConfiguration("web", classified).variables
+    expect(variables.map((variable) => variable.name)).toEqual(["NEXTAUTH_URL", "AUTH_TRUST_HOST"])
+    expect(variables[0]).toMatchObject({
+      scopes: ["runtime", "build"],
+      domainTemplate: "{{scheme}}://{{hostname}}/api/auth",
+    })
+  })
 })
 
 describe("request body limit", () => {

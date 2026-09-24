@@ -239,6 +239,24 @@ type DetectedCandidate struct {
 	SeedCommand     string                   `json:"seedCommand,omitempty"`
 	SeedResets      bool                     `json:"seedResets,omitempty"`
 	SchemaPush      bool                     `json:"schemaPush,omitempty"`
+	// BrowserPrefixes are the variable prefixes this root's framework
+	// compiles into the JavaScript every visitor downloads (NEXT_PUBLIC_,
+	// VITE_, …), so a value under one is build input and public.
+	BrowserPrefixes []string `json:"browserPrefixes,omitempty"`
+	// EnvironmentNotes are facts about the source's configuration that
+	// preflight turns into findings; see EnvironmentNote.
+	EnvironmentNotes []EnvironmentNote `json:"environmentNotes,omitempty"`
+}
+
+// EnvironmentNote is a fact detection read from the source's configuration
+// that preflight answers before the first build: a committed Django secret
+// key, a .env file the process refuses to start without, an identity
+// provider whose callback allowlist must name the planned domain. Detail and
+// Path are evidence; a note never carries a variable's value.
+type EnvironmentNote struct {
+	Code   string `json:"code"`
+	Detail string `json:"detail,omitempty"`
+	Path   string `json:"path,omitempty"`
 }
 
 // DetectedVariable is an environment variable the source reads, found in an
@@ -249,6 +267,33 @@ type DetectedVariable struct {
 	Name    string   `json:"name"`
 	Example string   `json:"example,omitempty"`
 	Sources []string `json:"sources"`
+	// Setup is how the dashboard supplies the value when the operator types
+	// none: "generate" mints a self-issued secret at commit in
+	// GenerateFormat, "domain" binds it to the planned domain through
+	// DomainTemplate, "default" applies DefaultValue, a harmless documented
+	// setting, and "paste" marks a secret only the operator holds (Rails'
+	// master key) that must never be generated. SetupReason is the evidence.
+	Setup          string `json:"setup,omitempty"`
+	SetupReason    string `json:"setupReason,omitempty"`
+	GenerateLength int    `json:"generateLength,omitempty"`
+	GenerateFormat string `json:"generateFormat,omitempty"`
+	DomainTemplate string `json:"domainTemplate,omitempty"`
+	DefaultValue   string `json:"defaultValue,omitempty"`
+	// Phase "build" says the value is read while the build runs — a
+	// framework config file, a static env import, a browser prefix — so it
+	// needs build scope; empty means it is read at runtime.
+	Phase string `json:"phase,omitempty"`
+	// BrowserInlined says the framework compiles the value into client
+	// JavaScript, which makes it public whatever its sensitivity.
+	BrowserInlined bool `json:"browserInlined,omitempty"`
+	// Required is a read with no default at a position that runs as the
+	// application starts or builds; RequiredRead is the same form somewhere
+	// that may only run on one path, which is a warning rather than a gate.
+	Required     bool `json:"required,omitempty"`
+	RequiredRead bool `json:"requiredRead,omitempty"`
+	// LocalhostIn names a committed file whose value for this variable
+	// points at loopback, which inside the container is the app itself.
+	LocalhostIn string `json:"localhostIn,omitempty"`
 }
 
 // DetectedDatabase is a database engine the source's dependencies or example
@@ -258,6 +303,21 @@ type DetectedDatabase struct {
 	Engine   string `json:"engine"`
 	Variable string `json:"variable"`
 	Evidence string `json:"evidence"`
+	// Format is the connection string the consumer parses when it is not a
+	// URL: "jdbc" (Spring, Quarkus), "jdbc-mariadb" (the same over MariaDB
+	// Connector/J, which refuses jdbc:mysql://), "adonet" (.NET) or "mysql2"
+	// (Rails before 7.2, which has no mysql:// adapter alias).
+	Format string `json:"format,omitempty"`
+	// Extensions are the Postgres extensions the schema needs (vector,
+	// postgis); the official image ships neither.
+	Extensions []string `json:"extensions,omitempty"`
+	// Hosted names a driver that only speaks a provider's own protocol
+	// (neon-http, vercel-postgres, planetscale-http, prisma-accelerate,
+	// upstash-rest), which no database created here can answer.
+	Hosted string `json:"hosted,omitempty"`
+	// AlsoVariables are further databases on the same server the framework
+	// reads by name — Rails 8's CACHE_, QUEUE_ and CABLE_DATABASE_URL.
+	AlsoVariables []string `json:"alsoVariables,omitempty"`
 }
 
 type DetectionResult struct {
@@ -427,6 +487,9 @@ type PlannedVariable struct {
 	// instead of accepting a value. It is how a blueprint's declared secrets
 	// exist on this host without ever appearing in a plan or a request.
 	Generate int `json:"generate,omitempty"`
+	// GenerateFormat shapes the generated secret the way its framework
+	// reads it; see GeneratedSecretFormats. Empty is alphanumeric.
+	GenerateFormat string `json:"generateFormat,omitempty"`
 }
 
 // Bounds for generated secrets: long enough to be a real credential, short
@@ -1147,6 +1210,9 @@ func (c PlanConfiguration) Validate() error {
 				return invalidField(variable.Name, "generated length for %s must be between %d and %d", variable.Name, MinGeneratedSecretLength, MaxGeneratedSecretLength)
 			}
 		}
+		if variable.GenerateFormat != "" && (variable.Generate == 0 || !validGeneratedSecretFormat(variable.GenerateFormat)) {
+			return invalidField(variable.Name, "generated format for %s is invalid", variable.Name)
+		}
 	}
 	variableReferences := make(map[string]string, len(c.Variables))
 	for _, variable := range c.Variables {
@@ -1554,9 +1620,13 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 		for _, database := range candidate.Databases {
 			if !validDetectedDatabaseEngine(database.Engine) || ValidateEnvKey(database.Variable) != nil ||
 				len(database.Evidence) > 512 || strings.ContainsAny(database.Evidence, "\x00\r\n") ||
-				rejectPlanSecretLiteral("detected database evidence", database.Evidence) != nil {
+				rejectPlanSecretLiteral("detected database evidence", database.Evidence) != nil ||
+				validateDetectedDatabaseDetails(database) != nil {
 				return fmt.Errorf("%w: detected database is malformed", ErrInvalidPlan)
 			}
+		}
+		if err := validateDetectedEnvironment(candidate); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalidPlan, err)
 		}
 		for _, decision := range candidate.NeedsDecision {
 			if decision == "" || len(decision) > 512 || strings.ContainsAny(decision, "\x00\r\n") ||

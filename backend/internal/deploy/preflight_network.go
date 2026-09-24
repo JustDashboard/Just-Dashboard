@@ -278,7 +278,9 @@ func trustNames(settings []string) []string {
 func publicURLFindings(configuration PlanConfiguration, selected *DetectedCandidate, values map[string]string) []PreflightFinding {
 	findings := []PreflightFinding{}
 	for _, variable := range selected.NetworkVariables {
-		if variable.DomainTemplate == "" {
+		if variable.DomainTemplate == "" || detectedSetup(selected, variable.Name) == "domain" {
+			// A public URL the environment classification set up is answered
+			// by its own public_url_* findings (preflight_variables.go).
 			continue
 		}
 		expected := ""
@@ -310,6 +312,40 @@ func publicURLFindings(configuration PlanConfiguration, selected *DetectedCandid
 		}
 	}
 	return findings
+}
+
+// detectedSetup is how the environment classification supplies a detected
+// variable, or "" when it does not.
+func detectedSetup(candidate *DetectedCandidate, name string) string {
+	for _, variable := range candidate.Variables {
+		if variable.Name == name {
+			return variable.Setup
+		}
+	}
+	return ""
+}
+
+// withoutSupersededHostFindings drops the environment check's
+// host_variable_loopback_<name> for a variable a listen_loopback finding
+// already names: that finding knows whether the code falls back to loopback,
+// and how certainly, so one field is not reported twice.
+func withoutSupersededHostFindings(findings []PreflightFinding) []PreflightFinding {
+	named := map[string]bool{}
+	for _, item := range findings {
+		if item.Code == "listen_loopback" && strings.HasPrefix(item.FieldID, "variables.") {
+			named["host_variable_loopback_"+strings.ToLower(strings.TrimPrefix(item.FieldID, "variables."))] = true
+		}
+	}
+	if len(named) == 0 {
+		return findings
+	}
+	kept := findings[:0]
+	for _, item := range findings {
+		if !named[item.Code] {
+			kept = append(kept, item)
+		}
+	}
+	return kept
 }
 
 // domainTemplateValue is what the form fills a domain template with.

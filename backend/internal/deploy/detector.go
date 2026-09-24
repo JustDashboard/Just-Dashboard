@@ -201,6 +201,14 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 					if provider := prismaProvider(content); provider != "" {
 						prismaProviders[filepath.ToSlash(rel)] = provider
 					}
+					scanner.observeSchema(filepath.ToSlash(rel), content)
+				}
+			}
+			// The first few migrations are where a schema enables the
+			// extensions the database it runs on has to provide.
+			if name == "migration.sql" && schemaPathCounts[name] <= 4 && scanner.budget(64<<10) {
+				if content, _, err := readDetectionFile(path, 64<<10); err == nil {
+					scanner.observeSchema(filepath.ToSlash(rel), content)
 				}
 			}
 			return nil
@@ -208,7 +216,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		if envTemplateFile(name) {
 			if scanner.budget(64 << 10) {
 				if content, _, err := readDetectionFile(path, 64<<10); err == nil {
-					scanner.scanTemplate(filepath.ToSlash(rel), content, name == ".env")
+					scanner.scanTemplate(filepath.ToSlash(rel), content, envRealFile(name))
 				}
 			}
 			return nil
@@ -271,11 +279,11 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		}
 		if !interesting {
 			network.observeFile(path, filepath.ToSlash(rel), entry.Name())
-			if scanner.scannable(filepath.ToSlash(rel), name) {
+			if scanner.factFile(filepath.ToSlash(rel), name) || scanner.scannable(filepath.ToSlash(rel), name) {
 				// Application code is read under the scanner's own budget, apart
 				// from detection's limits: the names an application reads are a
 				// convenience for the form, never a reason to call a scan truncated.
-				if info, err := entry.Info(); err == nil && scanner.budget(info.Size()) {
+				if info, err := entry.Info(); err == nil && scanner.admit(filepath.ToSlash(rel), name, info.Size()) {
 					if content, _, err := readDetectionFile(path, envScanMaxFile); err == nil {
 						scanner.scanSource(filepath.ToSlash(rel), content)
 					}
@@ -537,10 +545,17 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		// State settles first: the schema step it chains into a start
 		// command is what readiness budgets a slow start for, and the start
 		// command it gives PocketBase is the one network reads a listener
-		// from.
+		// from. The environment is described last, against the ports and
+		// frameworks the others settled, and it replaces the root's
+		// databases, so the server database state offers in place of a
+		// SQLite default is added after it.
 		applyStateDetection(marker, candidates, state.forRoot(root, allRoots), variables)
 		refineServing(candidates, marker, readiness, root, allRoots)
 		network.apply(marker, candidates, rootPythonEntries, goRoots, jvmRoots)
+		describeRootEnvironment(marker, scanner, prismaProviders, candidates)
+		for index := range candidates {
+			pythonDatabaseSuggestions(&candidates[index])
+		}
 		result.Candidates = append(result.Candidates, candidates...)
 	}
 	sort.Slice(result.Candidates, func(i, j int) bool {

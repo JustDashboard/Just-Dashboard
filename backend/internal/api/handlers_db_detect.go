@@ -6,11 +6,13 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/portalloc"
@@ -719,6 +721,30 @@ var provisionTemplates = map[string]provisionTemplate{
 			}
 		},
 	},
+	// The same server with the extension a retrieval or geospatial schema
+	// creates on its first migration; the official image ships neither.
+	"pgvector": {
+		driver: dbx.DriverPostgres, label: "PostgreSQL 16 + pgvector", image: "pgvector/pgvector:pg16",
+		port: 5432, dataPath: "/var/lib/postgresql/data",
+		env: func(pw, db string) []dockerx.EnvVar {
+			return []dockerx.EnvVar{
+				{Name: "POSTGRES_USER", Value: "jd"},
+				{Name: "POSTGRES_PASSWORD", Value: pw},
+				{Name: "POSTGRES_DB", Value: db},
+			}
+		},
+	},
+	"postgis": {
+		driver: dbx.DriverPostgres, label: "PostgreSQL 16 + PostGIS", image: "postgis/postgis:16-3.5-alpine",
+		port: 5432, dataPath: "/var/lib/postgresql/data",
+		env: func(pw, db string) []dockerx.EnvVar {
+			return []dockerx.EnvVar{
+				{Name: "POSTGRES_USER", Value: "jd"},
+				{Name: "POSTGRES_PASSWORD", Value: pw},
+				{Name: "POSTGRES_DB", Value: db},
+			}
+		},
+	},
 	"mysql": {
 		driver: dbx.DriverMySQL, label: "MySQL 8", image: "mysql:8",
 		port: 3306, dataPath: "/var/lib/mysql",
@@ -775,7 +801,11 @@ func (s *Server) handleDBProvisionOptions(w http.ResponseWriter, r *http.Request
 	// Ordered, because a map is not, and a list of engines that reshuffles on
 	// every poll is unusable.
 	out := []provisionOption{}
-	for _, key := range []string{"postgres", "mysql", "mariadb", "redis", "mongodb"} {
+	for _, key := range []string{"postgres", "pgvector", "postgis", "mysql", "mariadb", "redis", "mongodb"} {
+		if key == "postgis" && !deploy.PostGISImageSupported(runtime.GOARCH) {
+			// Offered where it cannot run, it would fail only at the pull.
+			continue
+		}
 		t := provisionTemplates[key]
 		out = append(out, provisionOption{
 			Engine: key, Label: t.label, Image: t.image, Driver: string(t.driver),
@@ -837,6 +867,20 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	tmpl, ok := provisionTemplates[req.Engine]
 	if !ok {
 		return httpx.BadRequest("unknown engine %q", req.Engine)
+	}
+	if req.Engine == "postgis" && !deploy.PostGISImageSupported(runtime.GOARCH) {
+		return httpx.BadRequest("the PostGIS image is published for x86-64 only and this server is %s; run a PostGIS server yourself and connect it", runtime.GOARCH)
+	}
+	// MongoDB 5 and later die with an illegal instruction on a CPU without
+	// AVX (a Proxmox default CPU type) or ARMv8.2 atomics, and the linked
+	// application then restarts in a loop; saying so here is cheaper than a
+	// pull and a crash.
+	if req.Engine == "mongodb" {
+		if features := deploy.HostCPUFeatures(); features != nil {
+			if missing := deploy.MongoCPUUnsupported(runtime.GOARCH, features); missing != "" {
+				return httpx.BadRequest("MongoDB 7 cannot run on this server's CPU (%s); set the VM's CPU type to host, or run MongoDB 4.4 from the Docker page", missing)
+			}
+		}
 	}
 	exposure, hostIP, err := provisionBinding(req.Exposure)
 	if err != nil {

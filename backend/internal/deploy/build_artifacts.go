@@ -462,6 +462,10 @@ type selectedRecipe struct {
 	// runtimeAssets are the root-level files a compiled service reads at
 	// runtime, copied beside its binary (recipe_runtime_files.go).
 	runtimeAssets []string
+	// emptyDotenv creates an empty .env where a Go or Rust binary runs,
+	// because the source treats a missing .env as fatal; see
+	// dotenvFileRequired.
+	emptyDotenv bool
 }
 
 func selectRecipe(root string, config BuildPlanConfig) (selectedRecipe, error) {
@@ -550,7 +554,8 @@ func selectRecipe(root string, config BuildPlanConfig) (selectedRecipe, error) {
 		if len(mains) == 1 {
 			main = mains[0]
 		}
-		return selectedRecipe{kind: "go", catalogueKey: "go", mainPackage: main, goVersion: goVersion, runtimeAssets: compiledRuntimeAssets(root, ".go")}, nil
+		return selectedRecipe{kind: "go", catalogueKey: "go", mainPackage: main, goVersion: goVersion,
+			runtimeAssets: compiledRuntimeAssets(root, ".go"), emptyDotenv: dotenvFileRequired(root, "go")}, nil
 	case "python":
 		files := map[string][]byte{}
 		for _, name := range []string{"requirements.txt", "pyproject.toml", "uv.lock", "poetry.lock"} {
@@ -588,7 +593,7 @@ func selectRecipe(root string, config BuildPlanConfig) (selectedRecipe, error) {
 			return selectedRecipe{}, err
 		}
 		rust.assets = compiledRuntimeAssets(root, ".rs")
-		return selectedRecipe{kind: "rust", catalogueKey: "rust", rust: rust}, nil
+		return selectedRecipe{kind: "rust", catalogueKey: "rust", rust: rust, emptyDotenv: dotenvFileRequired(root, "rust")}, nil
 	case "java":
 		java, err := selectJavaRecipe(root)
 		if err != nil {
@@ -748,6 +753,9 @@ func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases
 		lines = append(lines, rendered...)
 	default:
 		return "", ErrUnsupportedBuilder
+	}
+	if recipe.emptyDotenv {
+		lines = withEmptyDotenv(lines)
 	}
 	return strings.Join(lines, "\n") + "\n", nil
 }

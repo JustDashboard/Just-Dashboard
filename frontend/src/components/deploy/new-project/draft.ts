@@ -2,10 +2,15 @@ import { del, get, post, put } from "@/lib/api"
 import { forgetMemoryState, forgetSessionState } from "@/lib/view-state"
 import {
   defaultConfiguration,
+  detectedVariableDeclarations,
   discoveredEnvironmentRows,
+  rowNeedsOperator,
 } from "@/components/deploy/deployment-defaults"
+import {
+  domainValue,
+  synchronizePrimaryDomain,
+} from "@/components/deploy/new-project/domain-bindings"
 import { DEPLOYMENT_NAME } from "@/components/deploy/vocabulary"
-import { synchronizePrimaryDomain } from "@/components/deploy/new-project/domain-bindings"
 import type {
   DeploymentConfiguration,
   DeploymentDetection,
@@ -14,6 +19,7 @@ import type {
   DeploymentDraftSource,
   DeploymentHostnameSuggestion,
   DeploymentPreflight,
+  DeploymentVariableSetup,
   WorkloadProfile,
 } from "@/lib/types"
 
@@ -329,7 +335,7 @@ export function landingStep(flow: ConfigureFlow, advanced = false): ConfigureSte
   // is the one thing nobody else can answer.
   if (
     declaredVariablesNeedReview(flow) ||
-    discoveredEnvironmentRows(candidate).some((row) => row.detected && !row.value)
+    discoveredEnvironmentRows(candidate).some(rowNeedsOperator)
   )
     return "variables"
   return "review"
@@ -410,14 +416,29 @@ function effectiveConfiguration(
   )
 }
 
+type PlannedVariable = DeploymentConfiguration["variables"][number]
+
 /**
- * Match the saved plan so pruning an empty address never triggers another preflight.
- *
- * A public URL detection made follow the primary domain (next-auth 4's
- * NEXTAUTH_URL) is empty until there is a domain, and an empty value is worse
- * than none: the runtime would inject `NEXTAUTH_URL=`, on which next-auth 4
- * fails every sign-in request. Preflight names the variable while it is
- * missing. A blueprint's variables are its reviewed definition's, kept as rendered.
+ * An address that follows the domain has nothing to follow until one is
+ * planned. Committed empty, it would be set to "" — which an application
+ * reads as a value, unlike an unset variable: the runtime would inject
+ * `NEXTAUTH_URL=`, on which next-auth 4 fails every sign-in request — so it
+ * waits in the form, and preflight names it while it is missing.
+ */
+function awaitsDomain(variable: PlannedVariable) {
+  return Boolean(
+    variable.domainTemplate &&
+    !variable.value &&
+    !variable.reference &&
+    !variable.generate &&
+    !variable.required,
+  )
+}
+
+/**
+ * Match the saved plan so pruning an empty address never triggers another
+ * preflight. A blueprint's variables are its reviewed definition's, kept as
+ * rendered.
  */
 export function configurationForSave(
   configuration: DeploymentConfiguration,
@@ -429,15 +450,38 @@ export function configurationForSave(
     domains: configuration.domains.filter((domain) => domain.hostname.trim()),
     variables: blueprint
       ? configuration.variables
-      : configuration.variables.filter(
-          (variable) =>
-            !variable.domainTemplate || variable.value || variable.reference || variable.generate,
-        ),
+      : configuration.variables.filter((variable) => !awaitsDomain(variable)),
     checks: configuration.checks.map((check) =>
       check.phase === "readiness" && check.kind === "http"
         ? { ...check, config: { ...(check.config ?? {}), port: undefined } }
         : check,
     ),
+  }
+}
+
+/**
+ * Puts the addresses `configurationForSave` held back into a plan the server
+ * handed back, bound to whatever domain it plans. The saved copy never has
+ * them, and without them a domain added after Review's automatic check has
+ * nothing to bind: AUTH_URL or ORIGIN would reach the release unset while
+ * its row still read "Follows the project's domain".
+ */
+export function withHeldDomainVariables(
+  configuration: DeploymentConfiguration,
+  held: PlannedVariable[],
+): DeploymentConfiguration {
+  const present = new Set(configuration.variables.map((variable) => variable.name))
+  const missing = held.filter((variable) => awaitsDomain(variable) && !present.has(variable.name))
+  if (!missing.length) return configuration
+  return {
+    ...configuration,
+    variables: [
+      ...configuration.variables,
+      ...missing.map((variable) => ({
+        ...variable,
+        value: domainValue(variable.domainTemplate ?? "", configuration.domains[0]),
+      })),
+    ],
   }
 }
 
@@ -461,8 +505,8 @@ export function withSuggestedHostname(
     hostname.method === "none"
   )
     return configuration
-  // Through the same binding a typed domain goes through, so a public URL
-  // that follows the primary domain is filled from the suggested one too.
+  // Through the same binding a typed domain goes through, so the addresses
+  // detection bound to the domain follow the suggested one from the start.
   return synchronizePrimaryDomain(configuration, [
     { hostname: hostname.hostname.toLowerCase(), https: true, ownership: "managed" },
   ])
@@ -703,6 +747,11 @@ export async function resumeFlow(draft: DeploymentDraft): Promise<ConfigureFlow>
   const hostname = await fetchHostnameSuggestion(intent.name)
   if (!draft.data.configuration)
     configuration = withSuggestedHostname(configuration, profile, source, hostname)
+  else if (source.kind !== "blueprint")
+    configuration = withHeldDomainVariables(
+      configuration,
+      detectedVariableDeclarations(candidate, profile),
+    )
   return {
     name: intent.name,
     // A saved configuration records the operator's profile choice; detection
@@ -774,6 +823,15 @@ export type EnvironmentRow = {
   generated?: boolean
   /** Why the value was filled in, said under it. */
   note?: string
+  /** How the plan answers the row when nothing is typed, and why (`DeploymentDetectedVariable.setup`). */
+  setup?: DeploymentVariableSetup
+  reason?: string
+  /** The application cannot start without it. */
+  required?: boolean
+  /** Compiled into the browser bundle, so its value is public. */
+  browser?: boolean
+  /** A committed file gives it a loopback value when nothing is set here. */
+  localhostIn?: string
 }
 
 /** The typed rows and the pasted block, joined into one .env document. */
@@ -786,4 +844,17 @@ export function environmentText(rows: EnvironmentRow[], dotenv: string) {
   ]
     .filter(Boolean)
     .join("\n")
+}
+
+/** The further database URLs a Rails 8 application reads, as references to the linked server. */
+export function railsDatabaseRows(
+  connectionId: number,
+  database: string | undefined,
+  names: string[] = [],
+): EnvironmentRow[] {
+  if (!database || !/^[A-Za-z0-9_]+$/.test(database)) return []
+  return names.map((name) => ({
+    name,
+    value: `\${{database.${connectionId}.url.${database}_${name.replace(/_DATABASE_URL$/, "").toLowerCase()}}}`,
+  }))
 }

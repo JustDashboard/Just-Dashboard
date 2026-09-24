@@ -768,6 +768,8 @@ const FRAMEWORK_LABELS: Record<string, string> = {
   laravel: "Laravel",
   symfony: "Symfony",
   slim: "Slim",
+  rails: "Rails",
+  phoenix: "Phoenix",
 }
 
 /** The Language select, in the order a reader expects to find their stack. */
@@ -815,10 +817,22 @@ export function frameworkLabel(value: string) {
 
 export const DATABASE_ENGINE_LABELS: Record<string, string> = {
   postgres: "PostgreSQL",
+  pgvector: "PostgreSQL + pgvector",
+  postgis: "PostgreSQL + PostGIS",
   mysql: "MySQL",
   mariadb: "MariaDB",
   redis: "Redis",
   mongodb: "MongoDB",
+}
+
+/** The hosted protocols a driver may speak instead of its engine's own. */
+export const HOSTED_DATABASE_LABELS: Record<string, string> = {
+  "neon-http": "Neon's HTTP protocol",
+  "neon-ws": "Neon's WebSocket protocol",
+  "vercel-postgres": "Vercel Postgres's pooled protocol",
+  "planetscale-http": "PlanetScale's HTTP protocol",
+  "prisma-accelerate": "Prisma Accelerate's prisma:// protocol",
+  "upstash-rest": "Upstash's REST protocol",
 }
 
 export function humanize(value: string) {

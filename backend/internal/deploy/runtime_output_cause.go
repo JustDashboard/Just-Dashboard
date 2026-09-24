@@ -14,6 +14,10 @@ type OutputCause struct {
 	Table string `json:"table,omitempty"`
 	// Listener is the loopback address a loopback_only candidate listens on.
 	Listener string `json:"listener,omitempty"`
+	// Variable and Port name what an environment cause is about; see
+	// runtime_variable_cause.go.
+	Variable string `json:"variable,omitempty"`
+	Port     int    `json:"port,omitempty"`
 }
 
 // A freshly linked database is empty, and an application that queries it
@@ -64,6 +68,9 @@ func applicationOutputCause(containers []ContainerDiagnostics) *OutputCause {
 					return &OutputCause{Code: "sqlite_not_writable"}
 				}
 			}
+			if cause := environmentOutputCause(line.Text); cause != nil {
+				return cause
+			}
 		}
 	}
 	return startCommandExitedCause(containers)
@@ -85,7 +92,7 @@ func (c *OutputCause) sentence() string {
 	case "sqlite_not_writable":
 		return "the application cannot open or write its SQLite database file: the directory holding it is missing or not writable by the container's user; keep the file in the image's data directory or on a volume mounted there, which that user owns"
 	}
-	return ""
+	return c.environmentSentence()
 }
 
 // diagnosticsSuffix is what the candidate's own output adds to a failure

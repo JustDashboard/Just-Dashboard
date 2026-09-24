@@ -4,7 +4,11 @@ import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { Database, Eye, EyeOff, Copy, Warning } from "@/components/icons"
 import { errorMessage, get, post } from "@/lib/api"
-import type { DbConnection, DbProvisionOption } from "@/lib/types"
+import type {
+  DbConnection,
+  DbProvisionOption,
+  DeploymentDatabaseConnectionFormat,
+} from "@/lib/types"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { ErrorState, Notice, Spinner } from "@/components/state"
 import { ChoiceGrid, EngineCard, driverKind } from "@/components/choice-card"
@@ -50,6 +54,7 @@ export function DatabaseQuickDeploy({
   onStarted,
   onReset,
   initialEngine,
+  format,
 }: {
   target?: "host" | "container"
   canConnect?: boolean
@@ -59,6 +64,8 @@ export function DatabaseQuickDeploy({
   onConnect?: (connection: DbConnection, url: string) => void
   /** The engine detection found the source connecting to, preselected. */
   initialEngine?: string
+  /** The connection shape the application parses when it is not a URL. */
+  format?: DeploymentDatabaseConnectionFormat
 }) {
   const inSheet = useInSidePanel()
   const alive = useRef(true)
@@ -171,7 +178,7 @@ export function DatabaseQuickDeploy({
       reach(2)
       const address = await get<{ url: string; reference?: string }>(
         `/databases/${connection.id}/url`,
-        { target },
+        { target, format },
       )
       if (!alive.current) return
       setCreated({ connection, url: address.url, reference: address.reference })

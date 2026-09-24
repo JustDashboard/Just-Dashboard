@@ -59,6 +59,10 @@ type HostObservation struct {
 	// ReplacesRuntime says a live release is being replaced, so the data a
 	// plan keeps already exists; only a first release starts it empty.
 	ReplacesRuntime bool `json:"replacesRuntime,omitempty"`
+
+	// CPUFeatures are the instruction-set flags a database image may require
+	// (avx, atomics); nil when /proc/cpuinfo could not be read.
+	CPUFeatures []string `json:"cpuFeatures,omitempty"`
 }
 
 type DomainObservation struct {
@@ -96,6 +100,10 @@ type DependencyObservation struct {
 	Status   string `json:"status,omitempty"`
 	Detail   string `json:"detail,omitempty"`
 	DeepLink string `json:"deepLink,omitempty"`
+
+	// Extensions are the schema extensions a linked PostgreSQL server
+	// offers among those detection asks about; nil when it was not asked.
+	Extensions []string `json:"extensions,omitempty"`
 }
 
 type ObservationRequest struct {
@@ -114,6 +122,9 @@ type ObservationRequest struct {
 	Domains             []PlannedDomain
 	Dependencies        []PlannedDependency
 	NeedsFirewall       bool
+	// DatabaseExtensions are the schema extensions detection says a linked
+	// PostgreSQL must offer; only then is each linked server asked.
+	DatabaseExtensions []string
 }
 
 // PreflightObserver is intentionally read-only. A test double can prove
@@ -139,6 +150,14 @@ type PlanningFirewall interface {
 
 type PlanningDependencies interface {
 	ObserveDependencies(context.Context, []PlannedDependency) ([]DependencyObservation, error)
+}
+
+// PlanningDatabaseExtensions is the optional half of PlanningDependencies
+// that asks a linked database which of the wanted schema extensions it
+// offers. Each question is a connection to that database, so preflight asks
+// only when detection says the schema needs one.
+type PlanningDatabaseExtensions interface {
+	DatabaseExtensions(ctx context.Context, resourceID string, wanted []string) ([]string, error)
 }
 
 type PlanningProxy interface {
@@ -340,6 +359,18 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 	if len(request.Dependencies) > 0 && o.resources != nil {
 		dependencyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		observed, err := o.resources.ObserveDependencies(dependencyCtx, request.Dependencies)
+		if prober, ok := o.resources.(PlanningDatabaseExtensions); ok && err == nil && len(request.DatabaseExtensions) > 0 {
+			for index := range observed {
+				if observed[index].ResourceKind != "database_connection" || !observed[index].Available {
+					continue
+				}
+				// Unknown is not a refusal: a server that cannot be asked
+				// leaves the finding to the first migration.
+				if available, probeErr := prober.DatabaseExtensions(dependencyCtx, observed[index].ResourceID, request.DatabaseExtensions); probeErr == nil {
+					observed[index].Extensions = available
+				}
+			}
+		}
 		cancel()
 		if err == nil {
 			observation.Dependencies = observed
@@ -347,6 +378,7 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 	}
 	observation.AvailableMemory = availableMemory()
 	observation.CPUCount = runtime.NumCPU()
+	observation.CPUFeatures = HostCPUFeatures()
 	diskRoot := o.volumeRoot
 	if diskRoot == "" {
 		diskRoot = "/"
@@ -492,6 +524,15 @@ func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) 
 					request.Ports = append(request.Ports, PortObservation{Address: address, Port: port, Protocol: "tcp"})
 				}
 			}
+		}
+	}
+	if candidate := selectedDetectionCandidate(draft.Data.Detection); candidate != nil {
+		extensions := []string{}
+		for _, database := range candidate.Databases {
+			extensions = append(extensions, database.Extensions...)
+		}
+		if len(extensions) > 0 {
+			request.DatabaseExtensions = uniqueSorted(extensions)
 		}
 	}
 	request.Paths = uniqueSorted(request.Paths)
@@ -916,6 +957,7 @@ func preflightFindings(
 			"Variable references resolve without cycles", fmt.Sprintf("%d masked variable(s)", len(configuration.Variables)),
 			"Only typed reference identities were inspected; secret leaves remain masked.", "", "deploy", "variables"))
 	}
+	findings = append(findings, environmentFindings(draft, configuration, observation)...)
 	if selected := selectedDetectionCandidate(detection); selected != nil && selected.SchemaTool != "" &&
 		configuration.Build.Method == BuildRecipe {
 		// A pushed schema is a warning whether or not the database is linked
@@ -935,7 +977,7 @@ func preflightFindings(
 			"Add HTTP, TCP, or Docker-health readiness.", "deploy", "checks"))
 	}
 	findings = append(findings, readinessPreflightFindings(draft, configuration)...)
-	findings = append(findings, networkFindings(draft, configuration)...)
+	findings = withoutSupersededHostFindings(append(findings, networkFindings(draft, configuration)...))
 	persistentStorage := len(configuration.Runtime.Mounts)
 	if detection.Compose != nil {
 		for _, service := range detection.Compose.Services {

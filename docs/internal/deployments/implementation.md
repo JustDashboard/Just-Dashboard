@@ -139,8 +139,17 @@ only renderer/executor/validation authority for their feature.
   save credentials. Required-variable and reference-graph checks use the same effective values as commit.
   The environment section opens with the variables detection found the source reading — the template's
   example as the placeholder, the file it was read from beside the key — and a detected row left empty
-  is skipped at submit rather than set to nothing; each database the source connects to is one button
-  that opens the database sheet on that engine and variable. The framework is named as its own
+  and set up by nothing is skipped at submit rather than set to nothing. A row detection set up says
+  how the plan answers it (`detectedVariableDeclarations`): a secret generated when the project is
+  created (never shown in the browser), an address that follows the domain (held out of each save until
+  a domain is planned, and put back into the plan the server hands back — `withHeldDomainVariables` —
+  so a domain added after Review's check still binds it), a documented default, or a secret to paste; a required name is declared required, a browser-compiled name is tagged `public`,
+  and a typed value pointing at localhost is flagged under the field. Review lists the generated
+  secrets by shape and the plain values the plan carries. Each database the source connects to is one
+  button that opens the database sheet on that engine (PostgreSQL with pgvector or PostGIS when the
+  schema needs one) and variable, in the connection shape the application parses; a hosted-only driver
+  asks for its provider's connection string instead, and a suggestion stays offered while the variable
+  holds only a localhost value. The framework is named as its own
   documentation spells it (`frameworkLabel`), a Python recipe shows its interpreter field, and static
   output shows the single-page switch. `?repo=<clone url>&ref=<branch>` arrives on the Git tab with
   the URL filled in (only an `https://`, `ssh://` or `git@` URL is accepted), which is what a deploy
@@ -265,17 +274,27 @@ only renderer/executor/validation authority for their feature.
   `Cargo.toml`, `pom.xml`/`build.gradle(.kts)`, `*.csproj` and `deno.json(c)`. A `Procfile`'s `web:`
   process outranks every guess. The candidate carries `spaFallback` (a client-routed site's nginx
   fallback), `pythonVersion`, `unpinnedDependencies` (a `dependencies_unpinned` preflight warning,
-  never a refusal), `variables` (the environment names the source reads, with example values and
-  where each was read — `env_discovery.go`) and `databases` (the engines its dependencies and
-  documented URLs name, each with the variable the connection belongs in), `listen` (where the source
-  says its server listens: a port it fixes, whether it reads PORT, a loopback bind, each naming its
-  file and line — `detect_listen.go`, `detect_network.go`) and `networkVariables` (plain runtime
-  variables the proxy decides: `AUTH_TRUST_HOST`, `NEXTAUTH_URL` on a domain template, `HOST`, which
-  the form seeds as removable plan variables). Preflight re-checks `listen` against the plan
-  (`preflight_network.go`: `listen_loopback`, `port_hardcoded`, `proxy_headers_trusted`,
-  `forwarded_headers_untrusted`, `public_url_variable_missing`, `request_body_limit` and the rest,
-  listed in the recipe guide), so a certain loopback bind is a blocker before Deploy rather than a
-  readiness timeout after it. The closed recipe set is
+  never a refusal), `variables` (the environment names the source reads, with example values, where
+  each was read, and how each is supplied and read — `setup`, `generateFormat`, `domainTemplate`,
+  `defaultValue`, `phase`, `browserInlined`, `required`, `requiredRead`, `localhostIn`;
+  `env_discovery.go`, `env_discovery_languages.go`, `detect_variables.go`), `databases` (the engines
+  its manifests and documented URLs name, each with the variable the connection belongs in and its
+  `format`, `extensions`, `hosted` driver and Rails `alsoVariables`; `detect_databases.go`),
+  `browserPrefixes` and `environmentNotes` (facts preflight answers: a committed Django key, a fatal
+  dotenv load, an identity provider's callback, Rails credentials), `listen` (where the source says its
+  server listens: a port it fixes, whether it reads PORT, a loopback bind, each naming its file and line
+  — `detect_listen.go`, `detect_network.go`) and `networkVariables` (plain runtime variables the proxy
+  decides: `AUTH_TRUST_HOST`, `NEXTAUTH_URL` on a domain template, `HOST`). The form declares a set-up
+  variable once: the classification's declaration first, then a network variable for a name it did not
+  set up. The environment is described last for each root, after the state, readiness and network
+  passes, so its classification sees the ports and frameworks they settled. A Dockerfile candidate at a
+  Rails or Phoenix root is named that framework, and Phoenix's release image gets port 4000 when neither
+  its `EXPOSE` nor its source names one. `validateDetectedEnvironment` bounds every added field like the
+  rest of a saved detection. Preflight re-checks `listen` against the plan (`preflight_network.go`:
+  `listen_loopback`, `port_hardcoded`, `proxy_headers_trusted`, `forwarded_headers_untrusted`,
+  `public_url_variable_missing`, `request_body_limit` and the rest, listed in the recipe guide), so a
+  certain loopback bind is a blocker before Deploy rather than a readiness timeout after it. The closed
+  recipe set is
   `node`, `go`, `python`, `rust`, `java`, `dotnet`, `deno` (`validRecipe`), and `build.pythonVersion`
   and `build.spaFallback` are the two additive plan fields, bounded by `PlanConfiguration.Validate`.
   The contract per language is [the recipe guide](recipes.md). The framework detection recognised is
@@ -311,9 +330,11 @@ only renderer/executor/validation authority for their feature.
   its own budgets (configuration apart from source, so a large tree cannot crowd out the schema); it reads
   text only. Per root it runs before the readiness and network passes: the schema step it chains into a
   Python start command is what readiness budgets a slow start for, and the start command it gives
-  PocketBase is the one network reads a listener from. The configure form plans one managed named volume per target with a storage dependency,
-  named per draft, declares the moving variable (plain, runtime and release-task scopes) and releases
-  stop-first; preflight (`deploy/preflight_state.go`) compares the state with the plan's writable mounts
+  PocketBase is the one network reads a listener from. The server database it offers in place of a
+  Python SQLite default is added after the environment pass, which replaces the root's databases. The
+  configure form plans one managed named volume per target with a storage dependency, named per draft,
+  declares the moving variable (plain, runtime and release-task scopes, and build when detection saw
+  the build read it) and releases stop-first; preflight (`deploy/preflight_state.go`) compares the state with the plan's writable mounts
   and planned values — never echoing a value — and warns per kind (`sqlite_ephemeral`,
   `uploads_ephemeral`, `persistent_path_unmounted`, `declared_volume_unmounted`,
   `dotnet_data_protection_ephemeral`) or passes `persistent_state_kept`; SQLite on a volume also has its
@@ -326,8 +347,11 @@ only renderer/executor/validation authority for their feature.
   `Commit` checks again inside its transaction, refusing with `ErrInvalidPlan` a volume taken in between.
   Linked and bind mounts are never owned.
 - Deployment preflight depends on a read-only observer: filesystem/proc capacity, listener inventory,
-  Docker/Compose availability, proxy inventory and bounded DNS lookups. It cannot build, pull, start,
-  stop, write proxy/firewall configuration, modify a checkout or enqueue a backup. The persisted exact
+  Docker/Compose availability, proxy inventory, bounded DNS lookups, the CPU's `avx`/`atomics` flags
+  from `/proc/cpuinfo`, and — for a linked PostgreSQL, only when detection says the schema needs
+  pgvector or PostGIS — one bounded `pg_available_extensions` read through the dashboard's own pool
+  (`PlanningDatabaseExtensions`). It cannot build, pull, start, stop, write proxy/firewall
+  configuration, modify a checkout or enqueue a backup. The persisted exact
   plan excludes raw observed import material and accepts only typed secret references.
 - Normalized build execution uses the project-owned versioned recipe set or an explicit Dockerfile,
   static, immutable-image, or Compose adapter. Reviewed base tags are resolved before rendering and every
@@ -756,8 +780,12 @@ only renderer/executor/validation authority for their feature.
   (refused for secrets and for anything shaped like a reference). A `secret` input is deferred to the
   Variables screen as a required secret variable, never accepted in `blueprintInputs`; Mongo Express
   uses this for its MongoDB URI and offers the MongoDB connection sheet. Declared generated secrets become
-  `PlannedVariable.generate` (16–128 characters, secret only) and commit produces each value from
-  `crypto/rand` so it exists only sealed, revealed through the audited reveal route. Preflight accepts a
+  `PlannedVariable.generate` (16–128, secret only) with an optional `generateFormat` (`hex`, `base64`,
+  `laravel`, `keylist`; empty is alphanumeric, and the length counts random bytes for the base64
+  shapes), and commit produces each value from `crypto/rand` so it exists only sealed, revealed through
+  the audited reveal route. A detected self-issued secret is declared the same way, and Generate or
+  Rotate in the Variables settings keeps the shape the environment's recorded detection gives the
+  name, so a rotated Laravel `APP_KEY` keeps its `base64:` prefix. Preflight accepts a
   literal, generated, referenced or encrypted draft value for a required variable, and a managed `docker_volume` that Docker has not
   created yet passes as `storage_pending_creation` (Docker creates it on first start); a linked or
   uninspectable volume still blocks. Default automation presets that need a backup job arrive paused so

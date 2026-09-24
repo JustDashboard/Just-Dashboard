@@ -44,6 +44,7 @@ import {
   adoptImport,
   commitDraft,
   configurationForSave,
+  withHeldDomainVariables,
   declaredVariablesNeedReview,
   enqueueDeploy,
   environmentText,
@@ -622,7 +623,10 @@ export function Configure({
       }
       // The server seals visitor passwords and records staged variable scopes.
       // Keeping the submitted copy would lose those values on reload.
-      const canonical = saved.data.configuration ?? toSave
+      const canonical = withHeldDomainVariables(
+        saved.data.configuration ?? toSave,
+        configuration.variables,
+      )
       onFlowChange((current) =>
         current ? { ...current, draft: saved, configuration: canonical } : current,
       )

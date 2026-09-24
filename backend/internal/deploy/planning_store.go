@@ -1070,7 +1070,7 @@ func (s *PlanningStore) Commit(
 		case variable.Generate > 0:
 			// Generated here and never anywhere else: the value exists only
 			// sealed, revealed on demand through the audited reveal route.
-			value, err = generatedSecret(variable.Generate)
+			value, err = generatedSecretValue(variable.Generate, variable.GenerateFormat)
 			if err != nil {
 				return nil, err
 			}

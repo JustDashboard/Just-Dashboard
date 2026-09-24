@@ -30,21 +30,33 @@ export const DEFAULT_REQUEST_BODY_LIMIT = `${DEFAULT_MAX_REQUEST_BODY_MB} MB on 
  * API key from a provider it cannot.
  */
 export const SELF_ISSUED_SECRET =
-  /(^|_)(APP_KEY|APP_SECRET|SECRET_KEY|SECRET_KEY_BASE|SESSION_SECRET|JWT_SECRET|AUTH_SECRET|NEXTAUTH_SECRET|ENCRYPTION_KEY|COOKIE_SECRET|CSRF_SECRET|TOKEN_SECRET|SIGNING_SECRET|SIGNING_KEY|HASH_SALT)$/
+  /(^|_)(APP_KEY|APP_KEYS|APP_SECRET|SECRET_KEY|SECRET_KEY_BASE|SESSION_SECRET|JWT_SECRET|AUTH_SECRET|NEXTAUTH_SECRET|BETTER_AUTH_SECRET|PAYLOAD_SECRET|ENCRYPTION_KEY|COOKIE_SECRET|CSRF_SECRET|TOKEN_SECRET|SIGNING_SECRET|SIGNING_KEY|HASH_SALT|TOKEN_SALT)$/
+
+/**
+ * Names a provider issues even though they end like a self-issued secret:
+ * STRIPE_SECRET_KEY, CLERK_SECRET_KEY, SUPABASE_JWT_SECRET, Auth.js's
+ * AUTH_GITHUB_SECRET, any OAuth client or webhook secret. A random string is
+ * never the right value for one, so the form never offers to make it.
+ */
+const PROVIDER_ISSUED =
+  /^(STRIPE|CLERK|SUPABASE|GITHUB|GITLAB|GOOGLE|AUTH0|AWS|AZURE|OPENAI|ANTHROPIC|TWILIO|SENDGRID|RESEND|PAYPAL|SLACK|DISCORD|FIREBASE|CLOUDINARY|MAILGUN|POSTMARK|ALGOLIA|SENTRY|PUSHER|SHOPIFY|NOTION|LINEAR|OKTA|KEYCLOAK|LEMONSQUEEZY|PADDLE|PLAID)_|^AUTH_[A-Z0-9]+_(ID|SECRET)$|_CLIENT_SECRET$|_WEBHOOK_SECRET$/
 
 export function canGenerateSecret(name: string) {
-  return SELF_ISSUED_SECRET.test(name)
+  return SELF_ISSUED_SECRET.test(name) && !PROVIDER_ISSUED.test(name)
 }
 
 /**
  * A fresh secret in the shape the variable's own framework expects: Laravel
  * reads a base64 32-byte key with its `base64:` prefix, Rails wants a long
- * hex string, and everything else takes 32 random bytes as hex.
+ * hex string, Strapi's APP_KEYS is a list of four, and everything else takes
+ * 32 random bytes as hex. Detected secrets are minted by the server when the
+ * project is created; this is the Generate button's, for a row typed by hand.
  */
 export type RandomBytes = (length: number) => Uint8Array<ArrayBuffer>
 
 export function generateSecretValue(name: string, random: RandomBytes = randomBytes) {
   if (name === "APP_KEY") return `base64:${toBase64(random(32))}`
+  if (name === "APP_KEYS") return [0, 1, 2, 3].map(() => toBase64(random(16))).join(",")
   if (name.endsWith("SECRET_KEY_BASE")) return toHex(random(64))
   return toHex(random(32))
 }
@@ -341,10 +353,13 @@ export function persistentStorage(
 /**
  * The plan's declarations for the variables that move detected state onto
  * its volume. The value is a path, not a secret, so it travels in the plan;
- * and it reaches the runtime and release tasks only — the build has no volume
+ * and it reaches the runtime and release tasks — the build has no volume
  * mounted, and a build that opens the database there would fail where the
- * committed default still works. A declaration the plan already makes for the
- * same name is replaced, unless it is a reference or a generated secret.
+ * committed default still works. A variable detection saw the build itself
+ * read (Prisma 7's `prisma.config`, which `prisma generate` loads) reaches the
+ * build too, since there an unset one fails before any file is opened. A
+ * declaration the plan already makes for the same name is replaced, unless it
+ * is a reference or a generated secret.
  */
 export function withPersistentVariables(
   variables: DeploymentConfiguration["variables"],
@@ -359,6 +374,11 @@ export function withPersistentVariables(
     (variable) => !moved.has(variable.name) || variable.reference || variable.generate,
   )
   const declared = new Set(kept.map((variable) => variable.name))
+  const readByBuild = new Set(
+    (candidate?.variables ?? [])
+      .filter((variable) => variable.phase === "build")
+      .map((variable) => variable.name),
+  )
   return [
     ...kept,
     ...[...moved]
@@ -366,7 +386,9 @@ export function withPersistentVariables(
       .map(([name, value]) => ({
         name,
         sensitivity: "plain" as const,
-        scopes: ["runtime", "release_task"],
+        scopes: readByBuild.has(name)
+          ? ["runtime", "release_task", "build"]
+          : ["runtime", "release_task"],
         value,
       })),
   ]
@@ -454,7 +476,7 @@ export function defaultConfiguration(
           required: true,
           reference: `\${{blueprint.${source?.blueprintId}-${name}-accepted}}`,
         })),
-        ...networkVariables(candidate),
+        ...detectedVariableDeclarations(candidate, profile),
       ],
       candidate,
     ),
@@ -579,27 +601,28 @@ export function checksForRuntime(
 /**
  * The environment rows a detected candidate opens with: every variable the
  * source was seen reading, with its example as the placeholder and where it
- * was read as the hint. Values stay empty — the operator types them — and a
- * row left empty is skipped at submit rather than set to nothing.
+ * was read as the hint. Values stay empty. A row detection set up — a secret
+ * the server mints at commit, an address bound to the domain, a documented
+ * default — is answered by the plan's declaration (`detectedVariableDeclarations`)
+ * and says so; a row left empty with no setup is skipped at submit rather
+ * than set to nothing.
  */
 export function discoveredEnvironmentRows(
   candidate?: DeploymentDetectionCandidate,
-  random?: RandomBytes,
 ): EnvironmentRow[] {
-  const rows = unplannedVariables(candidate).map((variable): EnvironmentRow => {
-    // Laravel cannot answer a single request without its application key,
-    // and the key is nothing but 32 random bytes — so the row arrives with
-    // one, the way `php artisan key:generate` would have written it.
-    const generated = candidate?.framework === "laravel" && variable.name === "APP_KEY"
-    return {
-      name: variable.name,
-      value: generated ? generateSecretValue(variable.name, random) : "",
-      example: variable.example,
-      source: variable.sources[0],
-      detected: true,
-      ...(generated ? { generated: true } : {}),
-    }
-  })
+  const rows = unplannedVariables(candidate).map((variable): EnvironmentRow => ({
+    name: variable.name,
+    value: "",
+    example: variable.example,
+    source: variable.sources[0],
+    detected: true,
+    ...(variable.setup ? { setup: variable.setup, reason: variable.setupReason } : {}),
+    ...(variable.required ? { required: true } : {}),
+    ...(variable.browserInlined || browserInlined(variable.name, candidate?.browserPrefixes)
+      ? { browser: true }
+      : {}),
+    ...(variable.localhostIn ? { localhostIn: variable.localhostIn } : {}),
+  }))
   // State moved onto a planned volume through a variable the application
   // reads: the plan declares the value that points the file there
   // (`withPersistentVariables`), and the row shows it, filled.
@@ -618,6 +641,141 @@ export function discoveredEnvironmentRows(
     else if (!rows[index].value) rows[index] = { ...rows[index], value: entry.value, note }
   }
   return rows.length ? rows : [{ name: "", value: "" }]
+}
+
+/** Whether a detected row still needs the operator: nothing set it up, or only they hold it. */
+export function rowNeedsOperator(row: EnvironmentRow) {
+  return Boolean(row.detected && !row.value && (!row.setup || row.setup === "paste"))
+}
+
+/**
+ * The plan's own declarations for what detection set up, so a detected
+ * variable arrives configured rather than as a blank row: a self-issued
+ * secret the server generates at commit in its framework's shape, a public
+ * address that follows the primary domain, a harmless documented default, and
+ * a variable the application cannot start without, which is required. A
+ * value typed into the row still wins at commit.
+ */
+export function detectedVariableDeclarations(
+  candidate: DeploymentDetectionCandidate | undefined,
+  profile: WorkloadProfile,
+): DeploymentConfiguration["variables"] {
+  const declarations: DeploymentConfiguration["variables"] = []
+  for (const variable of candidate?.variables ?? []) {
+    // A static site has no runtime to read anything; its values are build input.
+    const scopes = profile === "static" ? ["build"] : ["runtime", "build"]
+    const required = variable.required || undefined
+    if (variable.setup === "generate" && variable.generateLength)
+      declarations.push({
+        name: variable.name,
+        sensitivity: "secret",
+        scopes,
+        generate: variable.generateLength,
+        ...(variable.generateFormat ? { generateFormat: variable.generateFormat } : {}),
+      })
+    else if (variable.setup === "domain" && variable.domainTemplate)
+      declarations.push({
+        name: variable.name,
+        sensitivity: "plain",
+        scopes,
+        domainTemplate: variable.domainTemplate,
+        value: "",
+      })
+    else if (variable.setup === "default" && variable.defaultValue)
+      declarations.push({
+        name: variable.name,
+        sensitivity: "plain",
+        scopes,
+        value: variable.defaultValue,
+      })
+    else if (required)
+      declarations.push({ name: variable.name, sensitivity: "secret", scopes, required: true })
+  }
+  // What the proxy decides (`networkVariables`) is declared for the names
+  // detection did not already set up, such as a trust setting a framework
+  // reads without the source naming it.
+  const declared = new Set(declarations.map((variable) => variable.name))
+  return [
+    ...declarations,
+    ...networkVariables(candidate).filter((variable) => !declared.has(variable.name)),
+  ]
+}
+
+/**
+ * Browser prefixes for when detection named none: the frameworks' own
+ * conventions that no server reads under the same name. SvelteKit's and
+ * Astro's bare PUBLIC_ is left out — PUBLIC_URL is as often a server's own
+ * address — and counts only where detection saw one of those frameworks.
+ */
+export const BROWSER_PREFIXES = [
+  "NEXT_PUBLIC_",
+  "VITE_",
+  "REACT_APP_",
+  "NUXT_PUBLIC_",
+  "EXPO_PUBLIC_",
+  "GATSBY_",
+  "VUE_APP_",
+]
+
+/** Whether a framework compiles this name into the JavaScript every visitor downloads. */
+export function browserInlined(name: string, prefixes: string[] = BROWSER_PREFIXES) {
+  return prefixes.some((prefix) => name.startsWith(prefix) && name.length > prefix.length)
+}
+
+const BIND_NAMES = new Set([
+  "HOST",
+  "BIND",
+  "BIND_HOST",
+  "BIND_ADDR",
+  "BIND_ADDRESS",
+  "LISTEN",
+  "LISTEN_HOST",
+  "LISTEN_ADDR",
+  "LISTEN_ADDRESS",
+  "SERVER_HOST",
+  "SERVER_ADDRESS",
+  "HTTP_BIND",
+  "ADDR",
+])
+
+function loopbackHost(host: string) {
+  const bare = host
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+  return (
+    bare === "localhost" ||
+    bare.endsWith(".localhost") ||
+    bare === "::1" ||
+    bare === "0.0.0.0" ||
+    bare === "::" ||
+    /^127(\.\d{1,3}){3}$/.test(bare)
+  )
+}
+
+/**
+ * Whether a value, read as a connection target, points at loopback — which
+ * inside the container is the application itself. The backend's preflight
+ * answers the same question; this is the form's early word. A bind address
+ * (HOST=0.0.0.0) is a different question and never counts.
+ */
+export function pointsAtLocalhost(name: string, value: string) {
+  const trimmed = value.trim()
+  if (!trimmed || trimmed.startsWith("${{") || BIND_NAMES.has(name)) return false
+  const scheme = trimmed.replace(/^jdbc:/, "").match(/^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i)
+  if (scheme)
+    return scheme[1]
+      .replace(/^.*@/, "")
+      .split(",")
+      .some((host) => loopbackHost(host.replace(/:\d+$/, "")))
+  for (const part of trimmed.split(";")) {
+    const [key, setting] = part.split("=")
+    if (setting && /^(host|server|data source|address|addr)$/i.test(key.trim()))
+      return loopbackHost(setting.split(/[,:]/)[0])
+  }
+  if (/_(HOST|HOSTNAME|SERVER|ADDR|ADDRESS|HOSTS)$/.test(name))
+    return loopbackHost(trimmed.replace(/:\d+$/, ""))
+  return false
 }
 
 /**
@@ -734,4 +892,20 @@ export function validateConfiguration(
     errors.releaseTasks =
       "Release tasks need a name, command, 1–3600 second timeout, and Release task-scoped variables."
   return errors
+}
+
+const CONNECTION_FORMATS = new Set(["jdbc", "jdbc-mariadb", "adonet", "mysql2"])
+
+/**
+ * A database link rewritten in the connection shape an earlier reference of
+ * the same variable asked for (`5.jdbc`): relinking from Settings is the same
+ * consumer, and a plain reference would hand a Spring or .NET application an
+ * address it refuses. A reference naming another database on the server
+ * (`5.url.app_cache`) keeps nothing, since that name belongs to the old one.
+ */
+export function withPreviousConnectionShape(link: string, previousTarget?: string) {
+  const [, format, database] = (previousTarget ?? "").split(".")
+  const connection = link.match(/^\$\{\{database\.(\d+)\}\}$/)
+  if (!connection || database || !CONNECTION_FORMATS.has(format)) return link
+  return `\${{database.${connection[1]}.${format}}}`
 }

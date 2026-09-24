@@ -1466,10 +1466,10 @@ test("a deploy link arrives on the Git tab with its clone URL and branch filled 
   await expect(page.getByRole("textbox", { name: "Clone URL" })).toHaveValue("")
 })
 
-test("a Laravel import arrives with its application key minted and mints other secrets on request", async ({
+test("a Laravel import arrives with its application key and address set up, and mints other secrets on request", async ({
   page,
 }) => {
-  await mockNewProject(page)
+  const quick = await mockNewProject(page)
   const candidate = {
     id: "laravel-candidate",
     name: "Laravel application",
@@ -1482,9 +1482,25 @@ test("a Laravel import arrives with its application key minted and mints other s
     startCommand:
       "php artisan migrate --force && frankenphp php-server --listen :80 --root /app/public",
     port: 80,
+    // Detection says how each is supplied: the server mints APP_KEY in
+    // Laravel's own shape at commit, and APP_URL follows the domain.
     variables: [
-      { name: "APP_KEY", sources: [".env.example"] },
-      { name: "APP_URL", example: "http://localhost", sources: [".env.example"] },
+      {
+        name: "APP_KEY",
+        sources: [".env.example"],
+        setup: "generate",
+        setupReason: "Laravel encrypts with it (laravel/framework)",
+        generateLength: 32,
+        generateFormat: "laravel",
+      },
+      {
+        name: "APP_URL",
+        example: "http://localhost",
+        sources: [".env.example"],
+        setup: "domain",
+        setupReason: "Laravel generates absolute URLs from it",
+        domainTemplate: "{{scheme}}://{{hostname}}",
+      },
       { name: "SESSION_SECRET", sources: ["config/session.php"] },
       { name: "STRIPE_KEY", sources: ["config/services.php"] },
     ],
@@ -1527,24 +1543,55 @@ test("a Laravel import arrives with its application key minted and mints other s
   await expect(page.getByText("Laravel", { exact: true })).toBeVisible()
   await gotoStep(page, "variables")
 
-  // APP_KEY is what `php artisan key:generate` would have written; APP_URL
-  // is a plain setting and stays empty.
+  // APP_KEY is minted on the server when the project is created, so the
+  // browser never holds it; APP_URL follows the suggested address.
   await expect(page.locator("#env-key-0")).toHaveValue("APP_KEY")
-  await expect(page.locator("#env-value-0")).toHaveValue(/^base64:[A-Za-z0-9+/]{43}=$/)
-  await expect(page.getByText("Generated here")).toBeVisible()
+  await expect(page.locator("#env-value-0")).toHaveValue("")
+  await expect(page.locator("#env-value-0")).toHaveAttribute(
+    "placeholder",
+    "Generated when the project is created",
+  )
   await expect(page.locator("#env-value-1")).toHaveValue("")
+  await expect(page.locator("#env-value-1")).toHaveAttribute(
+    "placeholder",
+    "https://wesmokefish-a1b2c3.203-0-113-7.sslip.io",
+  )
 
-  // A self-issued secret offers to be minted; a provider's key does not.
+  // A self-issued secret typed by hand offers to be minted; one the server
+  // mints, and a provider's key, do not.
   const generate = page.getByRole("button", { name: "Generate", exact: true })
   await expect(generate).toHaveCount(1)
   await generate.click()
   await expect(page.locator("#env-value-2")).toHaveValue(/^[0-9a-f]{64}$/)
   await expect(generate).toHaveCount(0)
-  // APP_URL (a plain setting with an example) and STRIPE_KEY (a provider's
-  // key nothing here can mint) are still empty, and the note says so.
+  // STRIPE_KEY (a provider's key nothing here can mint) is still empty, and
+  // the note says so; the set-up rows are not counted.
   await expect(
-    page.getByText("2 detected variables have no value yet and will not be set."),
+    page.getByText("1 detected variable has no value yet and will not be set."),
   ).toBeVisible()
+  await gotoStep(page, "review")
+  await expect(
+    page.getByText("a Laravel base64: key over 32 random bytes", { exact: false }),
+  ).toBeVisible()
+  await page.getByRole("button", { name: "Deploy", exact: true }).click()
+  await page.waitForURL(/\/deploy\/77\/runs\/84$/)
+  const saved = quick.configuration() as { variables: Record<string, unknown>[] }
+  expect(saved.variables).toEqual([
+    {
+      name: "APP_KEY",
+      sensitivity: "secret",
+      scopes: ["runtime", "build"],
+      generate: 32,
+      generateFormat: "laravel",
+    },
+    {
+      name: "APP_URL",
+      sensitivity: "plain",
+      scopes: ["runtime", "build"],
+      domainTemplate: "{{scheme}}://{{hostname}}",
+      value: "https://wesmokefish-a1b2c3.203-0-113-7.sslip.io",
+    },
+  ])
 })
 
 test("the public address can ask visitors for a password before the first deploy", async ({

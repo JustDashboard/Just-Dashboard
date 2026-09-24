@@ -366,3 +366,44 @@ func TestPreflightChecksThePublicURLNextAuthBuildsCallbacksFrom(t *testing.T) {
 		})
 	}
 }
+
+// The environment classification and the network facts can both speak for
+// one variable — next-auth 4's NEXTAUTH_URL, a HOST the code falls back to
+// loopback without — and each such variable is named once.
+func TestEnvironmentAndNetworkFindingsNameAVariableOnce(t *testing.T) {
+	t.Parallel()
+	candidate := DetectedCandidate{Name: "web", BuildMethod: BuildRecipe, Recipe: "node", StartCommand: "node server.js",
+		NetworkVariables: []DetectedNetworkVariable{
+			{Name: "NEXTAUTH_URL", DomainTemplate: "{{scheme}}://{{hostname}}", Reason: "next-auth 4.24.0 in package.json builds its callback URLs from NEXTAUTH_URL"},
+			{Name: "HOST", Value: "0.0.0.0", Reason: "server.js falls back to 127.0.0.1 without HOST"},
+		},
+		Variables: []DetectedVariable{
+			{Name: "NEXTAUTH_URL", Sources: []string{"package.json"}, Setup: "domain", SetupReason: "NextAuth builds its callback URLs from it", DomainTemplate: "{{scheme}}://{{hostname}}"},
+			{Name: "HOST", Sources: []string{"server.js"}, Setup: "default", DefaultValue: "0.0.0.0", SetupReason: "read as the address the server listens on"},
+		},
+		Listen: &DetectedListen{Loopback: "127.0.0.1", LoopbackFrom: "server.js:3", LoopbackCertain: true, LoopbackVariable: "HOST"}}
+	count := func(findings []PreflightFinding, prefixes ...string) int {
+		total := 0
+		for _, item := range findings {
+			for _, prefix := range prefixes {
+				if strings.HasPrefix(item.Code, prefix) {
+					total++
+				}
+			}
+		}
+		return total
+	}
+	for _, environment := range []map[string]string{nil, {"HOST": "127.0.0.1"}} {
+		configuration := networkConfiguration("node", "node server.js", 3000)
+		draft := networkDraft(candidate, ProfileWeb)
+		draft.Data.Configuration = &configuration
+		draft.environment = environment
+		findings := preflightFindings(draft, configuration, HostObservation{}, true)
+		if count(findings, "public_url_variable_", "public_url_unbound_", "public_url_mismatch_") != 1 || findingByCode(findings, "public_url_unbound_nextauth_url") == nil {
+			t.Fatalf("NEXTAUTH_URL findings with HOST=%q: %+v", environment["HOST"], findings)
+		}
+		if count(findings, "listen_loopback", "host_variable_loopback_") != 1 || findingByCode(findings, "listen_loopback") == nil {
+			t.Fatalf("HOST findings with HOST=%q: %+v", environment["HOST"], findings)
+		}
+	}
+}

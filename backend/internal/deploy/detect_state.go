@@ -477,7 +477,6 @@ func applyStateDetection(marker *detectedMarkers, candidates []DetectedCandidate
 		for _, entry := range candidate.PersistentPaths {
 			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: entry.Source, Reason: persistentEvidence(entry)})
 		}
-		pythonDatabaseSuggestions(candidate)
 	}
 }
 

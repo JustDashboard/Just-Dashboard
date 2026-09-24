@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  browserInlined,
   canGenerateSecret,
   checksForRuntime,
   defaultConfiguration,
@@ -8,11 +9,14 @@ import {
   generateSecretValue,
   mergeDiscoveredRows,
   persistentStorage,
+  pointsAtLocalhost,
   projectVolumeName,
   releaseStrategy,
+  rowNeedsOperator,
   validateConfiguration,
   withPackageManagerRunner,
   withPersistentVariables,
+  withPreviousConnectionShape,
 } from "./deployment-defaults"
 
 const candidate = (overrides) => ({
@@ -321,8 +325,12 @@ describe("self-issued secrets", () => {
   test("only the secrets an application issues to itself can be generated", () => {
     for (const name of [
       "APP_KEY",
+      "APP_KEYS",
       "SESSION_SECRET",
       "NEXTAUTH_SECRET",
+      "BETTER_AUTH_SECRET",
+      "PAYLOAD_SECRET",
+      "API_TOKEN_SALT",
       "DJANGO_SECRET_KEY",
       "SECRET_KEY_BASE",
       "N8N_ENCRYPTION_KEY",
@@ -335,6 +343,13 @@ describe("self-issued secrets", () => {
       "RAILS_MASTER_KEY",
       "GITHUB_TOKEN",
       "KEY",
+      // A provider issues these, however much they end like a self-issued secret.
+      "STRIPE_SECRET_KEY",
+      "CLERK_SECRET_KEY",
+      "SUPABASE_JWT_SECRET",
+      "AUTH_GITHUB_SECRET",
+      "GOOGLE_CLIENT_SECRET",
+      "STRIPE_WEBHOOK_SECRET",
     ])
       expect(canGenerateSecret(name)).toBe(false)
   })
@@ -343,42 +358,117 @@ describe("self-issued secrets", () => {
     expect(generateSecretValue("APP_KEY", fixed)).toBe(
       `base64:${btoa(String.fromCharCode(...fixed(32)))}`,
     )
+    expect(generateSecretValue("APP_KEYS", fixed).split(",")).toHaveLength(4)
     expect(generateSecretValue("SECRET_KEY_BASE", fixed)).toBe("07".repeat(64))
     expect(generateSecretValue("SESSION_SECRET", fixed)).toBe("07".repeat(32))
     expect(generateSecretValue("SESSION_SECRET")).toMatch(/^[0-9a-f]{64}$/)
     expect(generateSecretValue("APP_KEY")).toMatch(/^base64:[A-Za-z0-9+/]{43}=$/)
   })
-  test("a Laravel import arrives with its application key minted", () => {
-    const fixed = (length) => new Uint8Array(length).fill(1)
-    const rows = discoveredEnvironmentRows(
-      candidate({
-        framework: "laravel",
-        variables: [
-          { name: "APP_KEY", sources: [".env.example"] },
-          { name: "APP_URL", example: "http://localhost", sources: [".env.example"] },
-        ],
-      }),
-      fixed,
-    )
-    expect(rows[0]).toEqual({
-      name: "APP_KEY",
-      value: `base64:${btoa(String.fromCharCode(...fixed(32)))}`,
-      example: undefined,
-      source: ".env.example",
-      detected: true,
-      generated: true,
-    })
-    expect(rows[1].value).toBe("")
-    // Another framework's APP_KEY is left for the operator: the form does
-    // not know what that application reads into it.
-    const other = discoveredEnvironmentRows(
-      candidate({
-        framework: "nextjs",
-        variables: [{ name: "APP_KEY", sources: [".env.example"] }],
-      }),
-      fixed,
-    )
-    expect(other[0].value).toBe("")
+})
+
+describe("variables detection set up", () => {
+  const detected = candidate({
+    profile: "web",
+    framework: "nextjs",
+    browserPrefixes: ["NEXT_PUBLIC_"],
+    variables: [
+      {
+        name: "AUTH_SECRET",
+        sources: [".env.example"],
+        setup: "generate",
+        setupReason: "Auth.js signs and encrypts sessions with it",
+        generateLength: 32,
+        generateFormat: "base64",
+      },
+      {
+        name: "AUTH_URL",
+        sources: [".env.example"],
+        setup: "domain",
+        setupReason: "Auth.js builds its callback URLs from it",
+        domainTemplate: "{{scheme}}://{{hostname}}",
+      },
+      {
+        name: "LOG_LEVEL",
+        example: "debug",
+        sources: [".env.example"],
+        setup: "default",
+        setupReason: "documented in .env.example",
+        defaultValue: "info",
+      },
+      { name: "DATABASE_URL", sources: ["prisma.config.ts"], required: true, phase: "build" },
+      { name: "NEXT_PUBLIC_API_URL", sources: ["src/api.ts"], localhostIn: ".env.production" },
+      { name: "RESEND_API_KEY", sources: [".env.example"] },
+    ],
+  })
+  test("the plan declares what detection set up, and a required name", () => {
+    const plan = defaultConfiguration("web", detected)
+    expect(plan.variables).toEqual([
+      {
+        name: "AUTH_SECRET",
+        sensitivity: "secret",
+        scopes: ["runtime", "build"],
+        generate: 32,
+        generateFormat: "base64",
+      },
+      {
+        name: "AUTH_URL",
+        sensitivity: "plain",
+        scopes: ["runtime", "build"],
+        domainTemplate: "{{scheme}}://{{hostname}}",
+        value: "",
+      },
+      { name: "LOG_LEVEL", sensitivity: "plain", scopes: ["runtime", "build"], value: "info" },
+      { name: "DATABASE_URL", sensitivity: "secret", scopes: ["runtime", "build"], required: true },
+    ])
+    // A static site's values are build input only.
+    expect(defaultConfiguration("static", detected).variables[0].scopes).toEqual(["build"])
+  })
+  test("rows say how they are answered, and only unanswered ones need the operator", () => {
+    const rows = discoveredEnvironmentRows(detected)
+    expect(rows.map((row) => [row.name, row.setup, row.required, row.browser])).toEqual([
+      ["AUTH_SECRET", "generate", undefined, undefined],
+      ["AUTH_URL", "domain", undefined, undefined],
+      ["LOG_LEVEL", "default", undefined, undefined],
+      ["DATABASE_URL", undefined, true, undefined],
+      ["NEXT_PUBLIC_API_URL", undefined, undefined, true],
+      ["RESEND_API_KEY", undefined, undefined, undefined],
+    ])
+    expect(rows.every((row) => row.value === "")).toBe(true)
+    expect(rows.filter(rowNeedsOperator).map((row) => row.name)).toEqual([
+      "DATABASE_URL",
+      "NEXT_PUBLIC_API_URL",
+      "RESEND_API_KEY",
+    ])
+    expect(rows[4].localhostIn).toBe(".env.production")
+    expect(
+      rowNeedsOperator({ name: "RAILS_MASTER_KEY", value: "", detected: true, setup: "paste" }),
+    ).toBe(true)
+  })
+  test("browser prefixes follow detection, and fall back to the unambiguous conventions", () => {
+    expect(browserInlined("NEXT_PUBLIC_SITE_URL")).toBe(true)
+    expect(browserInlined("VITE_API_URL")).toBe(true)
+    expect(browserInlined("PUBLIC_URL")).toBe(false)
+    expect(browserInlined("PUBLIC_SITE_NAME", ["PUBLIC_", "VITE_"])).toBe(true)
+    expect(browserInlined("NEXT_PUBLIC_")).toBe(false)
+  })
+  test("a value pointing at loopback is recognised in every connection shape", () => {
+    for (const [name, value] of [
+      ["DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/app"],
+      ["MONGODB_URI", "mongodb://db.internal:27017,127.0.0.1:27018/app"],
+      ["SPRING_DATASOURCE_URL", "jdbc:postgresql://localhost:5432/app"],
+      ["CONNECTIONSTRINGS__DEFAULT", "Host=localhost;Database=app"],
+      ["REDIS_HOST", "127.0.0.1:6379"],
+      ["NEXT_PUBLIC_API_URL", "http://[::1]:8000"],
+    ])
+      expect(pointsAtLocalhost(name, value)).toBe(true)
+    for (const [name, value] of [
+      ["DATABASE_URL", "postgres://db-4.jd.internal:5432/app"],
+      ["DATABASE_URL", "${{database.4}}"],
+      ["HOST", "127.0.0.1"],
+      ["SITE_NAME", "localhost"],
+      ["API_URL", ""],
+    ])
+      expect(pointsAtLocalhost(name, value)).toBe(false)
   })
 })
 
@@ -610,6 +700,20 @@ describe("persistent state", () => {
     ).toBe(typed)
   })
 
+  test("a moved variable the build reads reaches the build too", () => {
+    const variables = withPersistentVariables(
+      [],
+      candidate({
+        variables: [{ name: "DATABASE_URL", sources: ["prisma.config.ts"], phase: "build" }],
+        persistentPaths: [prisma, uploads],
+      }),
+    )
+    expect(variables.map((variable) => [variable.name, variable.scopes])).toEqual([
+      ["DATABASE_URL", ["runtime", "release_task", "build"]],
+      ["UPLOAD_DIR", ["runtime", "release_task"]],
+    ])
+  })
+
   test("the variable that moves the state onto its volume arrives filled", () => {
     const rows = discoveredEnvironmentRows(
       candidate({
@@ -635,4 +739,19 @@ describe("persistent state", () => {
       },
     ])
   })
+})
+
+test("relinking keeps the connection shape the variable's reference asked for", () => {
+  expect(withPreviousConnectionShape("${{database.7}}", "5.jdbc")).toBe("${{database.7.jdbc}}")
+  expect(withPreviousConnectionShape("${{database.7}}", "5.jdbc-mariadb")).toBe(
+    "${{database.7.jdbc-mariadb}}",
+  )
+  expect(withPreviousConnectionShape("${{database.7}}", "5.adonet")).toBe("${{database.7.adonet}}")
+  // A plain link, another server's database name, and a literal address stay as they are.
+  expect(withPreviousConnectionShape("${{database.7}}", "5")).toBe("${{database.7}}")
+  expect(withPreviousConnectionShape("${{database.7}}", "5.url.app_cache")).toBe("${{database.7}}")
+  expect(withPreviousConnectionShape("${{database.7}}")).toBe("${{database.7}}")
+  expect(withPreviousConnectionShape("postgres://db-7.jd.internal/app", "5.jdbc")).toBe(
+    "postgres://db-7.jd.internal/app",
+  )
 })

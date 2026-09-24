@@ -79,6 +79,14 @@ export function StepReview({
   const generated = declared.filter(
     (variable) => (variable.generate ?? 0) > 0 && !suppliedVariables.includes(variable.name),
   )
+  // Plain values the plan carries itself — an address that follows the
+  // domain, a documented default — read back so none of them is a surprise.
+  const settled = declared.filter(
+    (variable) =>
+      variable.sensitivity === "plain" &&
+      variable.value &&
+      !suppliedVariables.includes(variable.name),
+  )
   const mounts = configuration.runtime.mounts ?? []
   const readiness = configuration.checks.filter((check) => check.phase === "readiness")
   const smoke = configuration.checks.filter((check) => check.phase === "smoke")
@@ -146,7 +154,7 @@ export function StepReview({
                 <span className="font-mono text-foreground">{variable.name}</span>
                 <span className="text-muted-foreground">
                   {" — "}
-                  {variable.generate} characters, made when this plan is saved
+                  {secretShape(variable)}, made when this plan is saved
                 </span>
               </li>
             ))}
@@ -157,6 +165,23 @@ export function StepReview({
             Each is minted from this server&apos;s own randomness, stored sealed, and never shipped
             with the source. Back them up with the data they protect.
           </FormNote>
+        </FormSection>
+      )}
+
+      {settled.length > 0 && (
+        <FormSection title="Values set in the plan">
+          <ul className="min-w-0 space-y-1 text-hint">
+            {settled.map((variable) => (
+              <li key={variable.name} className="min-w-0 break-all">
+                <span className="font-mono text-foreground">{variable.name}</span>
+                <span className="text-muted-foreground">
+                  {" — "}
+                  <span className="font-mono">{variable.value}</span>
+                  {variable.domainTemplate ? ", follows the domain" : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
         </FormSection>
       )}
 
@@ -332,6 +357,21 @@ function variablesFact(declared: number, typed: number) {
     Boolean,
   )
   return parts.length === 0 ? "None" : parts.join(" · ")
+}
+
+/** A generated secret's shape, in the words its framework's own generator would use. */
+function secretShape(variable: DeploymentConfiguration["variables"][number]) {
+  switch (variable.generateFormat) {
+    case "hex":
+      return `${variable.generate} hex characters`
+    case "base64":
+      return `${variable.generate} random bytes, base64`
+    case "laravel":
+      return `a Laravel base64: key over ${variable.generate} random bytes`
+    case "keylist":
+      return `four keys of ${variable.generate} random bytes each`
+  }
+  return `${variable.generate} characters`
 }
 
 /** What a check actually asks — a path, a command, or a port. */
