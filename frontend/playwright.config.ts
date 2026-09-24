@@ -12,12 +12,15 @@ export default defineConfig({
     one worker at a time anyway, and thirty specs against a cold server is the
     five to ten minutes that stopped anybody running it during a change.
 
-    Serialised on CI, where the box is smaller and a flake costs a re-run.
+    Parallel on CI as well. It was serialised there — one worker, one file at
+    a time — which made the browser gate fifteen of the frontend job's twenty
+    minutes; CI now splits the suite into shards (`--shard`), and a shard
+    split by test rather than by file needs `fullyParallel` to balance.
   */
-  fullyParallel: !process.env.CI,
+  fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
-  workers: process.env.CI ? 1 : "50%",
+  workers: "50%",
   reporter: process.env.CI ? [["line"], ["html", { open: "never" }]] : "list",
   outputDir: "test-results",
   use: {
