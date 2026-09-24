@@ -27,14 +27,14 @@ func TestPythonFrameworkCatalogueDetectsServingDefaults(t *testing.T) {
 		{name: "fastapi at the root", files: map[string]string{
 			"requirements.txt": "fastapi\nsqlalchemy>=2\n",
 			"main.py":          "from fastapi import FastAPI\n\napp = FastAPI()\n",
-		}, framework: "fastapi", start: "uvicorn main:app --host 0.0.0.0 --port 8000", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, unpinned: true, version: "3.13"},
+		}, framework: "fastapi", start: "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, unpinned: true, version: "3.13"},
 		{name: "fastapi in a package with a version file", files: map[string]string{
 			"requirements.txt": "fastapi[standard]==0.116.1\n",
 			".python-version":  "3.12.4\n",
 			"app/__init__.py":  "",
 			"app/main.py":      "from fastapi import FastAPI\n\napi: FastAPI = FastAPI(title=\"x\")\n",
 			"tests/main.py":    "app = FastAPI()\n",
-		}, framework: "fastapi", start: "uvicorn app.main:api --host 0.0.0.0 --port 8000", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, version: "3.12"},
+		}, framework: "fastapi", start: "uvicorn app.main:api --host 0.0.0.0 --port ${PORT:-8000}", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, version: "3.12"},
 		{name: "fastapi without an application object", files: map[string]string{
 			"requirements.txt":   "fastapi==0.116.1\n",
 			"src/server/core.py": "app = FastAPI()\n",
@@ -42,23 +42,23 @@ func TestPythonFrameworkCatalogueDetectsServingDefaults(t *testing.T) {
 		{name: "flask module", files: map[string]string{
 			"requirements.txt": "Flask==3.1.0\ngunicorn==23.0.0\n",
 			"app.py":           "from flask import Flask\napp = Flask(__name__)\n",
-		}, framework: "flask", start: "gunicorn --bind 0.0.0.0:8000 app:app", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, version: "3.13"},
+		}, framework: "flask", start: "gunicorn --bind 0.0.0.0:${PORT:-8000} app:app", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, version: "3.13"},
 		{name: "flask factory", files: map[string]string{
 			"pyproject.toml":  "[project]\nname = \"site\"\nrequires-python = \">=3.11\"\ndependencies = [\n  \"flask>=3\",\n  \"psycopg[binary]\",\n]\n",
 			"app/__init__.py": "from flask import Flask\n\ndef create_app():\n    return Flask(__name__)\n",
-		}, framework: "flask", start: "gunicorn --bind 0.0.0.0:8000 'app:create_app()'", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, unpinned: true, version: "3.13"},
+		}, framework: "flask", start: "gunicorn --bind 0.0.0.0:${PORT:-8000} 'app:create_app()'", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, unpinned: true, version: "3.13"},
 		{name: "django", files: map[string]string{
 			"requirements.txt": "Django==5.1.4\n",
 			"manage.py":        "#!/usr/bin/env python\n",
 			"mysite/wsgi.py":   "application = get_wsgi_application()\n",
 			"mysite/asgi.py":   "application = get_asgi_application()\n",
-		}, framework: "django", start: "python manage.py migrate --noinput && gunicorn mysite.wsgi:application --bind 0.0.0.0:8000", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, version: "3.13"},
+		}, framework: "django", start: "python manage.py migrate --noinput && gunicorn mysite.wsgi:application --bind 0.0.0.0:${PORT:-8000}", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, version: "3.13"},
 		{name: "django with whitenoise from a uv lock", files: map[string]string{
 			"pyproject.toml": "[project]\nname = \"site\"\nrequires-python = \">=3.12,<3.13\"\ndependencies = [\"django\", \"whitenoise\"]\n",
 			"uv.lock":        "version = 1\n\n[[package]]\nname = \"django\"\nversion = \"5.1.4\"\n\n[[package]]\nname = \"whitenoise\"\nversion = \"6.8.2\"\n",
 			"manage.py":      "",
 			"config/wsgi.py": "",
-		}, framework: "django", start: "python manage.py migrate --noinput && python manage.py collectstatic --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:8000", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, version: "3.12"},
+		}, framework: "django", start: "python manage.py migrate --noinput && python manage.py collectstatic --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000}", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, version: "3.12"},
 		{name: "django without its wsgi module", files: map[string]string{
 			"requirements.txt": "django\n",
 			"manage.py":        "",
@@ -66,7 +66,7 @@ func TestPythonFrameworkCatalogueDetectsServingDefaults(t *testing.T) {
 		{name: "streamlit", files: map[string]string{
 			"requirements.txt": "streamlit\npandas\n",
 			"streamlit_app.py": "import streamlit as st\nst.title('x')\n",
-		}, framework: "streamlit", start: "streamlit run streamlit_app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true", port: 8501, profile: ProfileWeb, confidence: ConfidenceHigh, unpinned: true, version: "3.13"},
+		}, framework: "streamlit", start: "streamlit run streamlit_app.py --server.port ${PORT:-8501} --server.address 0.0.0.0 --server.headless true", port: 8501, profile: ProfileWeb, confidence: ConfidenceHigh, unpinned: true, version: "3.13"},
 		{name: "gradio", files: map[string]string{
 			"requirements.txt": "gradio==5.9.0\n",
 			"app.py":           "import gradio as gr\n\ndemo = gr.Interface(fn=lambda x: x, inputs='text', outputs='text')\ndemo.launch()\n",
@@ -75,7 +75,7 @@ func TestPythonFrameworkCatalogueDetectsServingDefaults(t *testing.T) {
 			"pyproject.toml": "[tool.poetry]\nname = \"site\"\n\n[tool.poetry.dependencies]\npython = \"^3.11\"\nflask = \"^3.1\"\n",
 			"poetry.lock":    "[[package]]\nname = \"flask\"\nversion = \"3.1.0\"\n",
 			"main.py":        "app = Flask(__name__)\n",
-		}, framework: "flask", start: "gunicorn --bind 0.0.0.0:8000 main:app", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, version: "3.13"},
+		}, framework: "flask", start: "gunicorn --bind 0.0.0.0:${PORT:-8000} main:app", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, version: "3.13"},
 		{name: "plain script", files: map[string]string{
 			"requirements.txt": "requests==2.32.3\n",
 			"main.py":          "print('hi')\n",
@@ -88,7 +88,7 @@ func TestPythonFrameworkCatalogueDetectsServingDefaults(t *testing.T) {
 			"requirements.txt": "flask==3.1.0\n",
 			"runtime.txt":      "python-3.9.19\n",
 			"app.py":           "app = Flask(__name__)\n",
-		}, framework: "flask", start: "gunicorn --bind 0.0.0.0:8000 app:app", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, decision: ""},
+		}, framework: "flask", start: "gunicorn --bind 0.0.0.0:${PORT:-8000} app:app", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, decision: ""},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			t.Parallel()
@@ -206,7 +206,7 @@ func TestPythonEntriesStayUnderTheirOwnRoot(t *testing.T) {
 				t.Fatalf("root: %+v", candidate)
 			}
 		case "services/api":
-			if candidate.StartCommand != "uvicorn app.main:app --host 0.0.0.0 --port 8000" {
+			if candidate.StartCommand != "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}" {
 				t.Fatalf("nested: %+v", candidate)
 			}
 			if !slices.ContainsFunc(candidate.Evidence, func(e DetectionEvidence) bool { return e.Path == "services/api/app/main.py" }) {
@@ -224,7 +224,7 @@ func TestPythonEntriesStayUnderTheirOwnRoot(t *testing.T) {
 func TestPreflightWarnsAboutUnpinnedDependencies(t *testing.T) {
 	candidate := DetectedCandidate{
 		ID: "root", Name: "api", Profile: ProfileWeb, BuildMethod: BuildRecipe, Recipe: "python", Framework: "fastapi",
-		Confidence: ConfidenceHigh, StartCommand: "uvicorn main:app --host 0.0.0.0 --port 8000", Port: 8000,
+		Confidence: ConfidenceHigh, StartCommand: "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}", Port: 8000,
 		UnpinnedDependencies: true, Evidence: []DetectionEvidence{}, NeedsDecision: []string{},
 	}
 	draft := &Draft{Data: DraftData{

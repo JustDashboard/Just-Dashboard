@@ -28,6 +28,9 @@ type dotnetProject struct {
 	exe         bool
 	assembly    string
 	multiTarget bool
+	// kestrel is where the project's appsettings make Kestrel listen, which
+	// the default start command moves onto PORT.
+	kestrel kestrelSettings
 }
 
 func parseDotnetProject(file string, content []byte) (dotnetProject, error) {
@@ -151,7 +154,14 @@ func selectDotnetRecipe(root string) (dotnetProject, error) {
 			projects[name] = content
 		}
 	}
-	return chooseDotnetProject(projects)
+	project, err := chooseDotnetProject(projects)
+	if err == nil && project.web {
+		project.kestrel = readKestrelSettings(func(name string) ([]byte, bool) {
+			content, err := readContainedRegular(root, name, 512<<10)
+			return content, err == nil
+		})
+	}
+	return project, err
 }
 
 func renderDotnetDockerfile(project dotnetProject, config BuildPlanConfig, bases []ResolvedImage, installSecrets, buildSecrets string) ([]string, error) {
@@ -183,10 +193,14 @@ func renderDotnetDockerfile(project dotnetProject, config BuildPlanConfig, bases
 		"COPY --from=build /out /app",
 		"USER app",
 	}
+	if project.web {
+		lines = append(lines, "ENV "+strings.Join(trustEnvironment(dotnetProxyTrust), " "))
+	}
 	if strings.TrimSpace(config.StartCommand) == "" {
 		// Kestrel reads its port from ASPNETCORE_HTTP_PORTS, not PORT; the
 		// shell bridges the one the runtime injects.
-		lines = append(lines, shellCMD("ASPNETCORE_HTTP_PORTS=${PORT:-8080} dotnet /app/"+project.assembly+".dll"))
+		bridge, _ := kestrelBridge(project.kestrel)
+		lines = append(lines, shellCMD(dotnetRuntimeStart(project.assembly, bridge)))
 	} else {
 		lines = append(lines, shellCMD(config.StartCommand))
 	}

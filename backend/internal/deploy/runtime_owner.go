@@ -311,6 +311,7 @@ func containerRuntimeEnvironment(plan RuntimePlanConfig, variables map[string]st
 	if _, explicit := variables["PORT"]; !explicit && plan.InternalPort > 0 && !plan.HostNetwork {
 		environment = append(environment, dockerx.EnvVar{Name: "PORT", Value: strconv.Itoa(plan.InternalPort)})
 	}
+	environment = append(environment, withdrawnProxyTrust(plan, variables)...)
 	return environment, names
 }
 

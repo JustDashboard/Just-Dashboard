@@ -117,10 +117,22 @@ func javaCandidate(marker *detectedMarkers, rootLabel string) DetectedCandidate 
 	return candidate
 }
 
+// javaFramework is the first catalogue framework a build definition names.
+func javaFramework(build string) string {
+	for _, framework := range javaFrameworks {
+		if strings.Contains(build, framework.marker) {
+			return framework.name
+		}
+	}
+	return ""
+}
+
 type javaRecipe struct {
 	tool    string
 	version string
 	wrapper bool
+	// framework decides the start command's port bridge and proxy trust.
+	framework string
 }
 
 func selectJavaRecipe(root string) (javaRecipe, error) {
@@ -146,10 +158,11 @@ func selectJavaRecipe(root string) (javaRecipe, error) {
 	if err != nil {
 		return javaRecipe{}, err
 	}
+	framework := javaFramework(string(pom) + string(gradle))
 	if len(pom) > 0 {
-		return javaRecipe{tool: "maven", version: version}, nil
+		return javaRecipe{tool: "maven", version: version, framework: framework}, nil
 	}
-	return javaRecipe{tool: "gradle", version: version, wrapper: regularExists(root, "gradlew")}, nil
+	return javaRecipe{tool: "gradle", version: version, wrapper: regularExists(root, "gradlew"), framework: framework}, nil
 }
 
 func renderJavaDockerfile(recipe javaRecipe, config BuildPlanConfig, bases []ResolvedImage, installSecrets, buildSecrets string) ([]string, error) {
@@ -187,7 +200,12 @@ func renderJavaDockerfile(recipe javaRecipe, config BuildPlanConfig, bases []Res
 		// The JVM sizes its heap from the container's limit rather than the host's memory.
 		`ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75"`,
 	)
-	if strings.TrimSpace(config.StartCommand) == "" {
+	if trust := trustEnvironment(recipeProxyTrust("java", recipe.framework)); len(trust) > 0 {
+		lines = append(lines, "ENV "+strings.Join(trust, " "))
+	}
+	if strings.TrimSpace(config.StartCommand) == "" && javaRuntimeStart(recipe.framework) != "" {
+		lines = append(lines, shellCMD(javaRuntimeStart(recipe.framework)))
+	} else if strings.TrimSpace(config.StartCommand) == "" {
 		lines = append(lines, `CMD ["java","-jar","/app/app.jar"]`)
 	} else {
 		lines = append(lines, shellCMD(config.StartCommand))

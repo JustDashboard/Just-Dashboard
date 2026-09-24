@@ -921,6 +921,7 @@ func preflightFindings(
 			"Choose a readiness check", "", "Traffic must not move to an unverified candidate.",
 			"Add HTTP, TCP, or Docker-health readiness.", "deploy", "checks"))
 	}
+	findings = append(findings, networkFindings(draft, configuration)...)
 	persistentStorage := len(configuration.Runtime.Mounts)
 	if detection.Compose != nil {
 		for _, service := range detection.Compose.Services {

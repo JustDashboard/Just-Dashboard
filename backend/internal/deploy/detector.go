@@ -99,7 +99,10 @@ func (m *detectedMarkers) phpOwnsAssets() bool {
 
 // denoEntryNames are the files a Deno service is conventionally run from
 // when deno.json declares no start task.
-var denoEntryNames = map[string]bool{"main.ts": true, "server.ts": true, "mod.ts": true, "main.js": true, "server.js": true}
+var denoEntryNames = map[string]bool{
+	"main.ts": true, "server.ts": true, "mod.ts": true, "main.js": true, "server.js": true,
+	"index.ts": true, "app.ts": true, "main.tsx": true,
+}
 
 // pythonEntryDirsSkipped are the directories an application object is never
 // looked for in, so a test's fixture app cannot become the served one.
@@ -139,6 +142,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	denoEntryPaths := []string{}
 	scanner := newEnvScanner()
 	prismaProviders := map[string]string{}
+	network := newNetworkDetection(detectCtx, root)
 	skip := map[string]bool{
 		".just-dashboard": true,
 		".git":            true, "node_modules": true, "vendor": true, ".next": true,
@@ -235,6 +239,9 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			if err == nil && sourceUsesCGO(content) {
 				cgoPaths = append(cgoPaths, rel)
 			}
+			if err == nil {
+				network.observeGo(filepath.ToSlash(rel), content)
+			}
 			if err == nil && scanner.scannable(filepath.ToSlash(rel), name) && scanner.budget(n) {
 				scanner.scanSource(filepath.ToSlash(rel), content)
 			}
@@ -259,6 +266,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			denoEntryPaths = append(denoEntryPaths, filepath.ToSlash(rel))
 		}
 		if !interesting {
+			network.observeFile(path, filepath.ToSlash(rel), entry.Name())
 			if scanner.scannable(filepath.ToSlash(rel), name) {
 				// Application code is read under the scanner's own budget, apart
 				// from detection's limits: the names an application reads are a
@@ -485,10 +493,17 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	roots := make([]string, 0, len(markers))
 	packageRoots := []string{}
 	pythonRoots := []string{}
+	goRoots, jvmRoots := []string{}, []string{}
 	for candidateRoot, marker := range markers {
 		roots = append(roots, candidateRoot)
 		if len(marker.packageJSON) > 0 {
 			packageRoots = append(packageRoots, filepath.ToSlash(candidateRoot))
+		}
+		if marker.goMod != "" {
+			goRoots = append(goRoots, filepath.ToSlash(candidateRoot))
+		}
+		if len(marker.pomXML) > 0 || len(marker.gradleBuild) > 0 {
+			jvmRoots = append(jvmRoots, filepath.ToSlash(candidateRoot))
 		}
 		if marker.hasPythonManifest() {
 			pythonRoots = append(pythonRoots, filepath.ToSlash(candidateRoot))
@@ -506,8 +521,9 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		for _, entry := range pathsUnderRoot(denoEntryPaths, root, allRoots) {
 			marker.denoEntries[entry] = true
 		}
-		candidates := candidatesForMarkers(marker,
-			pathsUnderRoot(schemaPaths, root, packageRoots), pythonEntriesUnderRoot(pythonEntries, root, pythonRoots))
+		rootPythonEntries := pythonEntriesUnderRoot(pythonEntries, root, pythonRoots)
+		candidates := candidatesForMarkers(marker, pathsUnderRoot(schemaPaths, root, packageRoots), rootPythonEntries)
+		network.apply(marker, candidates, rootPythonEntries, goRoots, jvmRoots)
 		variables := scanner.variables(root, allRoots)
 		databases := detectDatabases(marker, variables, prismaProviders)
 		for index := range candidates {
