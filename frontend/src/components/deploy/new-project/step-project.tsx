@@ -392,7 +392,7 @@ export function StepProject({
           title="Choose the detected candidate"
           hint={
             flow.detection?.selectedId
-              ? "The first is the one detection ranks as this repository's application."
+              ? "Ranked, with the application first. Pick another if the checked one is not it."
               : "Multiple equally strong roots or build methods were found."
           }
         >
