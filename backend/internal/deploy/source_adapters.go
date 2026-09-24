@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -203,6 +205,14 @@ func (a *HostSourceAnalyzer) analyzeRemoteGit(ctx context.Context, source DraftS
 		"ls-remote", "--exit-code", "--refs", remote, remoteRef)
 	cancelResolve()
 	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 2 {
+			return DetectionResult{}, fmt.Errorf("%w: %q has no matching branch or tag", ErrRefNotFound, ref)
+		}
+		var command *gitCommandError
+		if errors.As(err, &command) && sourceFailureMessages[command.code] != "" {
+			return DetectionResult{}, sourceFailure(err, "")
+		}
 		return DetectionResult{}, fmt.Errorf("%w: %w: Git ref could not be resolved: %v", ErrSourceUnavailable, ErrGitUnavailable, err)
 	}
 	fields := strings.Fields(out)
@@ -1025,8 +1035,12 @@ func runPlanningGit(ctx context.Context, dir string, environment []string, args 
 		// Remote-controlled stderr may reflect an Authorization header or
 		// credential helper response. Preserve bounded output for successful
 		// machine-readable commands, but never propagate failure output into an
-		// API error, audit detail, or process log.
-		return output.String(), fmt.Errorf("git %s failed: %w", strings.Join(redactedGitArgs(args), " "), err)
+		// API error, audit detail, or process log; only the code read from it
+		// against a fixed table leaves this function.
+		return output.String(), &gitCommandError{
+			code: gitFailureCode(output.String(), err),
+			err:  fmt.Errorf("git %s failed: %w", strings.Join(redactedGitArgs(args), " "), err),
+		}
 	}
 	return output.String(), nil
 }

@@ -272,11 +272,13 @@ func (a *HostSourceAnalyzer) materializeRemoteGit(
 		releaseRef := "refs/just-dashboard/releases/" + identity.Revision
 		if _, fetchErr := runPlanningGit(ctx, mirror, environment,
 			"fetch", "--force", "--no-tags", "origin", "+"+remoteRef+":"+releaseRef); fetchErr != nil {
-			return fmt.Errorf("%w: recorded Git object is no longer available", ErrSourceUnavailable)
+			return sourceFailure(fetchErr, "recorded Git object is no longer available")
 		}
 		resolved, resolveErr := runPlanningGit(ctx, mirror, environment, "rev-parse", releaseRef)
 		if resolveErr != nil || strings.TrimSpace(resolved) != identity.Revision {
-			return fmt.Errorf("%w: source ref moved after preflight; refusing a different revision", ErrSourceUnavailable)
+			// The branch now names another commit and the recorded one is not
+			// in the mirror: a force-push rewrote it away.
+			return &SourceFailure{Code: "source_revision_unavailable", Message: sourceFailureMessages["source_revision_unavailable"]}
 		}
 	}
 	if err := fetchExactGit(ctx, mirror, remote, target, identity.Revision, nil); err != nil {
@@ -332,7 +334,7 @@ func fetchExactGit(
 		"+"+revision+":"+releaseWorkspaceRef)
 	cancelFetch()
 	if err != nil {
-		return fmt.Errorf("%w: exact release fetch failed", ErrSourceUnavailable)
+		return sourceFailure(err, "exact release fetch failed")
 	}
 	checkoutCtx, cancelCheckout := context.WithTimeout(ctx, 10*time.Minute)
 	_, err = runPlanningGit(checkoutCtx, target, environment, "checkout", "--detach", "--force", revision)

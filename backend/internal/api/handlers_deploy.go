@@ -192,11 +192,24 @@ func mapDeployError(err error) error {
 		return httpx.Err(http.StatusBadRequest, "ref_not_applicable", err.Error())
 	case errors.Is(err, deploy.ErrRefNotFound):
 		return httpx.Err(http.StatusBadRequest, "ref_not_found", err.Error())
+	case errors.As(err, new(*deploy.SourceFailure)):
+		// The remote answered and git's output named why: a refused
+		// credential, a missing repository, an unreachable host or a commit
+		// that is gone. Each has its own remedy, so each keeps its own code.
+		return httpx.Err(http.StatusBadGateway, sourceFailureCode(err), err.Error())
 	case errors.Is(err, deploy.ErrSourceUnavailable):
 		return httpx.Err(http.StatusBadGateway, "source_unavailable", err.Error())
 	default:
 		return httpx.BadRequest("%v", err)
 	}
+}
+
+func sourceFailureCode(err error) string {
+	var failure *deploy.SourceFailure
+	if errors.As(err, &failure) {
+		return failure.Code
+	}
+	return "source_unavailable"
 }
 
 func (s *Server) enrichProject(r *http.Request, p *deploy.Project) {
