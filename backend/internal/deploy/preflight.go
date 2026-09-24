@@ -56,6 +56,11 @@ type HostObservation struct {
 	Domains         []DomainObservation            `json:"domains"`
 	Firewall        FirewallObservation            `json:"firewall"`
 	Dependencies    []DependencyObservation        `json:"dependencies"`
+
+	// Emulators are the architectures binfmt_misc can run here, when
+	// EmulationObserved says /proc could be read at all (preflight_image.go).
+	Emulators         []string `json:"emulators,omitempty"`
+	EmulationObserved bool     `json:"emulationObserved,omitempty"`
 }
 
 type DomainObservation struct {
@@ -111,6 +116,8 @@ type ObservationRequest struct {
 	Domains             []PlannedDomain
 	Dependencies        []PlannedDependency
 	NeedsFirewall       bool
+	// ReleaseTaskTools are the programs host release tasks run.
+	ReleaseTaskTools []string
 }
 
 // PreflightObserver is intentionally read-only. A test double can prove
@@ -199,6 +206,10 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 		cancel()
 		observation.Facilities["compose"] = FacilityObservation{Available: available}
 	}
+	if request.NeedsBuildx || request.NeedsCompose {
+		observation.Emulators, observation.EmulationObserved = observeEmulators()
+	}
+	observeReleaseTaskTools(request.ReleaseTaskTools, observation.Facilities)
 	if len(request.Domains) > 0 {
 		proxyAvailable := false
 		certificateAutomation := false
@@ -492,6 +503,7 @@ func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) 
 	}
 	request.Paths = uniqueSorted(request.Paths)
 	request.Ports = uniquePorts(request.Ports)
+	request.ReleaseTaskTools = releaseTaskHostTools(configuration.Build.ReleaseTasks)
 	request.NeedsFirewall = publicRuntimeBind(configuration.Runtime) && len(request.Ports) > 0
 	return request
 }
@@ -599,18 +611,19 @@ func preflightFindings(
 			"The selected evidence proposes "+string(selected.BuildMethod)+" for this source.",
 			action, "deploy", "configuration.build.method"))
 	}
+	findings = append(findings, imageBuildFindings(draft, configuration, observation)...)
 	if len(detection.Candidates) == 0 {
 		findings = append(findings, finding("detection_empty", PreflightBlocked,
 			"No deployable plan was detected", "", "There is no build/runtime candidate to review.",
 			"Choose a build method and configuration.", "deploy", "configuration.build.method"))
 	} else if detection.SelectedID == "" {
 		findings = append(findings, finding("detection_ambiguous", PreflightDecision,
-			"Choose one detected candidate", fmt.Sprintf("%d candidates", len(detection.Candidates)),
+			"Choose one detected candidate", detectionSelectionMeasured(detection, fmt.Sprintf("%d candidates", len(detection.Candidates))),
 			"Multiple equally strong roots or methods were found.", "Select the intended root and method.",
 			"deploy", "detection.selectedId"))
 	} else {
 		findings = append(findings, finding("detection_selected", PreflightPass,
-			"Detected plan selected", detection.SelectedID, "The build plan has explicit evidence.", "", "deploy", "detection"))
+			"Detected plan selected", detectionSelectionMeasured(detection, detection.SelectedID), "The build plan has explicit evidence.", "", "deploy", "detection"))
 	}
 	if detection.GitRequirements.Submodules {
 		severity := PreflightDecision
@@ -1274,10 +1287,15 @@ func cloneComposeAnalysis(source *ComposeAnalysis) *ComposeAnalysis {
 	copy.Warnings = append([]string(nil), source.Warnings...)
 	copy.Unsupported = append([]string(nil), source.Unsupported...)
 	copy.Services = append([]ComposeServicePlan(nil), source.Services...)
+	copy.OptionalVariables = append([]ComposeOptionalVariable(nil), source.OptionalVariables...)
 	for index := range copy.Services {
 		copy.Services[index].Ports = append([]string(nil), source.Services[index].Ports...)
 		copy.Services[index].Mounts = append([]string(nil), source.Services[index].Mounts...)
 		copy.Services[index].Advanced = append([]string(nil), source.Services[index].Advanced...)
+		copy.Services[index].BuildArgs = append([]ComposeBuildArg(nil), source.Services[index].BuildArgs...)
+		copy.Services[index].EnvFiles = append([]ComposeEnvFile(nil), source.Services[index].EnvFiles...)
+		copy.Services[index].ImagePlatforms = append([]string(nil), source.Services[index].ImagePlatforms...)
+		copy.Services[index].DockerfileIssues = append([]ImageBuildIssue(nil), source.Services[index].DockerfileIssues...)
 	}
 	return &copy
 }

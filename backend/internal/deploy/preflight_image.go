@@ -1,0 +1,419 @@
+package deploy
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path"
+	"sort"
+	"strings"
+)
+
+// Preflight for what the repository's own container definitions and the
+// plan's release tasks will do, from evidence detection already read. Every
+// finding here used to be a failed build or a failed release task after a
+// green Review.
+
+type imageIssueCopy struct {
+	title, means, action, field string
+}
+
+var imageIssueFindings = map[string]imageIssueCopy{
+	"dockerfile_refused": {"The Dockerfile would be refused at build",
+		"A secret-named value written literally into a Dockerfile ends up in an image layer or a process's arguments, so the builder refuses it.",
+		"Move the literal into a runtime variable; custom Dockerfiles receive no build values.", "configuration.build.dockerfile"},
+	"dockerfile_copy_source_missing": {"The Dockerfile copies a path its build context does not have",
+		"BuildKit stops at this COPY with 'not found'.",
+		"Commit the file, set the root directory to the directory the Dockerfile's paths are relative to, or remove the COPY.", "configuration.build.rootDirectory"},
+	"dockerfile_copy_ignored": {"The Dockerfile copies a path .dockerignore leaves out",
+		"BuildKit never sends an ignored path to the builder, so this COPY fails with 'not found'.",
+		"Remove the rule from .dockerignore, or stop copying the path.", "configuration.build.dockerfile"},
+	"dockerfile_arg_required": {"The Dockerfile needs a build argument it has no default for",
+		"FROM cannot resolve its base image without the value, and a custom Dockerfile build receives no build arguments for it.",
+		"Give the ARG a default in the Dockerfile.", "configuration.build.dockerfile"},
+	"dockerfile_ssh_mount": {"The Dockerfile mounts an SSH agent",
+		"Deployment builds never forward an SSH agent, so this RUN fails.",
+		"Fetch private dependencies over HTTPS with a scoped credential, or vendor them.", "configuration.build.dockerfile"},
+	"dockerfile_standalone_missing": {"The Dockerfile copies Next.js standalone output that is not configured",
+		"Without output: 'standalone' in next.config, next build never writes .next/standalone and the COPY fails.",
+		"Add output: 'standalone' to next.config, or build with the Next.js recipe instead of the Dockerfile.", "configuration.build.method"},
+	"dockerfile_dev_server": {"The Dockerfile starts a development server",
+		"A development server is unoptimised, watches files and often listens only on localhost.",
+		"Start the production server in the Dockerfile's CMD, or build with the automatic recipe.", "configuration.build.method"},
+	"dockerfile_missing": {"There is no Dockerfile for this application",
+		"There is no automatic recipe for its language, so the repository's own Dockerfile is the only way to build it.",
+		"Commit the Dockerfile the framework's template generates, then run detection again.", "configuration.build.dockerfile"},
+	"script_crlf": {"A script the image runs has Windows line endings",
+		"The kernel reads its interpreter as 'sh\\r', so executing it fails with 'no such file or directory'.",
+		"Convert the file to LF line endings (git add --renormalize, or dos2unix) and commit it.", "configuration.build"},
+	"script_not_executable": {"A script the image runs is committed without its executable bit",
+		"Executing it directly fails with 'permission denied' (exit 126).",
+		"Run git update-index --chmod=+x on the file and commit it, or chmod it in the Dockerfile.", "configuration.build"},
+	"dockerignore_drops_recipe_input": {"The repository's .dockerignore leaves out a file the automatic build reads",
+		"The rule suits the repository's own Dockerfile; the automatic build sets it aside so its inputs are present, and keeps every other rule.",
+		"No change is needed for this build.", "configuration.build"},
+	"php_htaccess_ignored": {"PHP access rules in .htaccess do not apply",
+		"FrankenPHP serves the application directly and does not read .htaccess, so files it was protecting are reachable over HTTP.",
+		"Move protected files outside the served directory, or deny them in the application.", "configuration.build.startCommand"},
+}
+
+func imageIssueFinding(code string, issues []ImageBuildIssue, prefix string) PreflightFinding {
+	copy, known := imageIssueFindings[code]
+	if !known {
+		copy = imageIssueCopy{"The build has a known problem", "Detection read this from the repository.", "Correct the source and run detection again.", "configuration.build"}
+	}
+	details := []string{}
+	severity := PreflightWarning
+	for _, issue := range issues {
+		details = append(details, prefix+issue.Detail)
+		if issue.Severity == PreflightBlocked {
+			severity = PreflightBlocked
+		}
+	}
+	measured := strings.Join(details, "; ")
+	if len(measured) > 2000 {
+		measured = measured[:1997] + "..."
+	}
+	return finding(code, severity, copy.title, measured, copy.means, copy.action, "deploy", copy.field)
+}
+
+// groupedImageFindings turns issues into one finding per code, in the order
+// the codes first appear.
+func groupedImageFindings(issues []ImageBuildIssue, prefix string) []PreflightFinding {
+	order := []string{}
+	byCode := map[string][]ImageBuildIssue{}
+	for _, issue := range issues {
+		if byCode[issue.Code] == nil {
+			order = append(order, issue.Code)
+		}
+		byCode[issue.Code] = append(byCode[issue.Code], issue)
+	}
+	findings := make([]PreflightFinding, 0, len(order))
+	for _, code := range order {
+		findings = append(findings, imageIssueFinding(code, byCode[code], prefix))
+	}
+	return findings
+}
+
+// plannedCandidate is the detected candidate the configuration still builds:
+// the same method and root, and for a Dockerfile the same file. Evidence
+// about any other file would be evidence about something else.
+func plannedCandidate(detection *DetectionResult, build BuildPlanConfig) *DetectedCandidate {
+	if detection == nil {
+		return nil
+	}
+	for index := range detection.Candidates {
+		candidate := &detection.Candidates[index]
+		if candidate.BuildMethod != build.Method || candidate.Root != build.RootDirectory {
+			continue
+		}
+		switch build.Method {
+		case BuildDockerfile:
+			configured := build.Dockerfile
+			if configured == "" {
+				configured = "Dockerfile"
+			}
+			if path.Clean(configured) == path.Clean(candidate.Dockerfile) {
+				return candidate
+			}
+		case BuildRecipe:
+			if build.Recipe == "" || build.Recipe == candidate.Recipe {
+				return candidate
+			}
+		default:
+			return candidate
+		}
+	}
+	return nil
+}
+
+func imageBuildFindings(draft *Draft, configuration PlanConfiguration, observation HostObservation) []PreflightFinding {
+	findings := []PreflightFinding{}
+	detection := draft.Data.Detection
+	build := configuration.Build
+	planned := plannedCandidate(detection, build)
+	if planned != nil {
+		issues := []ImageBuildIssue{}
+		for _, issue := range planned.ImageBuildIssues {
+			// A script found through the start command is evidence about that
+			// command only.
+			if planned.BuildMethod == BuildRecipe && strings.HasPrefix(issue.Code, "script_") && build.StartCommand != planned.StartCommand {
+				continue
+			}
+			issues = append(issues, issue)
+		}
+		findings = append(findings, groupedImageFindings(issues, "")...)
+	} else if build.Method == BuildDockerfile && detectionReadDockerfiles(detection) {
+		configured := build.Dockerfile
+		if configured == "" {
+			configured = "Dockerfile"
+		}
+		findings = append(findings, finding("dockerfile_unchecked", PreflightWarning,
+			"The chosen Dockerfile is checked only when it builds", joinRoot(build.RootDirectory, configured),
+			"Detection read the repository's Dockerfiles as they were found; this combination of file and build context was not one of them.",
+			"Choose the detected Dockerfile and root directory, or accept that problems in this file surface during the build.",
+			"deploy", "configuration.build.dockerfile"))
+	}
+	if build.Method == BuildRecipe || build.Method == BuildStatic {
+		for _, candidate := range detection.Candidates {
+			if candidate.BuildMethod != BuildDockerfile || candidate.Root != build.RootDirectory || candidate.DockerfileRole == DockerfileRoleDevelopment {
+				continue
+			}
+			if issue, blocked := candidate.blockingImageIssue(); blocked {
+				findings = append(findings, finding("dockerfile_not_selected", PreflightWarning,
+					"The repository's Dockerfile is not the build", joinRoot(candidate.Root, candidate.Dockerfile)+": "+issue.Detail,
+					"The Dockerfile would not build as committed, so the automatic recipe builds this application instead.",
+					"Fix the Dockerfile and choose it, or keep the automatic build.", "deploy", "configuration.build.method"))
+				break
+			}
+		}
+	}
+	if build.Method == BuildDockerfile && planned != nil {
+		findings = append(findings, dockerfileArgFindings(*planned, configuration)...)
+		for _, platform := range planned.DockerfilePlatforms {
+			if item, ok := foreignArchitectureFinding(platform, "FROM --platform in "+joinRoot(planned.Root, planned.Dockerfile), observation); ok {
+				findings = append(findings, item)
+			}
+		}
+	}
+	if build.Method == BuildRecipe && build.Recipe == "php" && phpDocumentRoot(build.StartCommand) == "" {
+		findings = append(findings, finding("php_docroot_is_repository_root", PreflightWarning,
+			"PHP serves the whole repository", "--root /app",
+			"Dependencies, lockfiles, logs and dotfiles under the served directory are reachable over HTTP, and any PHP file in vendor/ can be executed.",
+			"Move the entry point under public/, or serve the framework's own document root.", "deploy", "configuration.build.startCommand"))
+	}
+	findings = append(findings, composeBuildFindings(detection, configuration, observation)...)
+	findings = append(findings, releaseTaskFindings(planned, configuration, observation)...)
+	return findings
+}
+
+// dockerfileArgFindings: a custom Dockerfile build receives a build argument
+// only for a plain, browser-public build variable the Dockerfile declares.
+func dockerfileArgFindings(candidate DetectedCandidate, configuration PlanConfiguration) []PreflightFinding {
+	planned := map[string]PlannedVariable{}
+	for _, variable := range configuration.Variables {
+		planned[variable.Name] = variable
+	}
+	passed, unpassed := []string{}, []string{}
+	for _, arg := range candidate.DockerfileArgs {
+		variable, declared := planned[arg.Name]
+		buildScoped := declared && slicesContain(variable.Scopes, "build")
+		switch {
+		case buildScoped && variable.Sensitivity == "plain" && publicBuildVariable(arg.Name) && !reservedBuildArgName(arg.Name):
+			passed = append(passed, arg.Name)
+		case buildScoped:
+			unpassed = append(unpassed, arg.Name+" (a build variable, but only plain browser-public ones are passed)")
+		case publicBuildVariable(arg.Name) && arg.Consumed && !arg.HasDefault:
+			unpassed = append(unpassed, arg.Name+" (no build-scoped variable of that name)")
+		}
+	}
+	findings := []PreflightFinding{}
+	if len(passed) > 0 {
+		findings = append(findings, finding("dockerfile_build_args", PreflightPass,
+			"The Dockerfile receives its public build arguments", strings.Join(passed, ", "),
+			"Each is a plain build variable the Dockerfile declares with ARG, passed as --build-arg with the value only in the builder's environment.",
+			"", "deploy", "variables"))
+	}
+	if len(unpassed) > 0 {
+		findings = append(findings, finding("dockerfile_arg_not_passed", PreflightWarning,
+			"A Dockerfile build argument will be empty", strings.Join(unpassed, "; "),
+			"Custom Dockerfiles receive build values only for plain NEXT_PUBLIC_, VITE_, PUBLIC_, NUXT_PUBLIC_ or REACT_APP_ variables they declare; anything else is empty during the build.",
+			"Give the ARG a default, add it as a plain build variable if it is browser-public, or build with the automatic recipe, which passes build values as BuildKit secrets.",
+			"deploy", "variables"))
+	}
+	return findings
+}
+
+func slicesContain(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+// dockerArchitectureQemu maps a Docker architecture to the name binfmt_misc
+// registers its emulator under.
+var dockerArchitectureQemu = map[string]string{
+	"amd64": "x86_64", "arm64": "aarch64", "arm": "arm", "386": "i386", "ppc64le": "ppc64le",
+	"s390x": "s390x", "riscv64": "riscv64", "mips64le": "mips64el", "loong64": "loongarch64",
+}
+
+// foreignArchitectureFinding: an image pinned to another architecture builds
+// and runs only through emulation, and without an emulator every RUN fails
+// with 'exec format error'.
+func foreignArchitectureFinding(platform, where string, observation HostObservation) (PreflightFinding, bool) {
+	parts := strings.Split(strings.ToLower(platform), "/")
+	if len(parts) < 2 || observation.Architecture == "" || parts[1] == observation.Architecture {
+		return PreflightFinding{}, false
+	}
+	measured := fmt.Sprintf("%s pins %s; this host is %s/%s", where, platform, observation.OS, observation.Architecture)
+	emulated := slicesContain(observation.Emulators, parts[1])
+	if observation.EmulationObserved && !emulated {
+		return finding("foreign_architecture_build", PreflightBlocked,
+			"The image is for another architecture and this host cannot emulate it", measured,
+			"Without a binfmt emulator for "+parts[1]+", every RUN step and the container itself fail with 'exec format error'.",
+			"Remove --platform, or use $BUILDPLATFORM/$TARGETPLATFORM so the image builds for this host.", "docker", "configuration.build.dockerfile"), true
+	}
+	return finding("foreign_architecture_build", PreflightWarning,
+		"The image is for another architecture", measured,
+		"It builds and runs only under emulation, which is many times slower, if an emulator is installed at all.",
+		"Remove --platform, or use $BUILDPLATFORM/$TARGETPLATFORM so the image builds for this host.", "docker", "configuration.build.dockerfile"), true
+}
+
+// observeEmulators lists the architectures binfmt_misc can run on this host.
+// Reading /proc is the whole observation; nothing is registered or run.
+func observeEmulators() ([]string, bool) {
+	entries, err := os.ReadDir("/proc/sys/fs/binfmt_misc")
+	if err != nil {
+		return nil, false
+	}
+	byQemu := map[string]string{}
+	for architecture, qemu := range dockerArchitectureQemu {
+		byQemu[qemu] = architecture
+	}
+	emulators := []string{}
+	for _, entry := range entries {
+		name := strings.TrimPrefix(entry.Name(), "qemu-")
+		architecture, known := byQemu[name]
+		if !known || name == entry.Name() {
+			continue
+		}
+		content, err := os.ReadFile("/proc/sys/fs/binfmt_misc/" + entry.Name())
+		if err == nil && strings.HasPrefix(string(content), "enabled") {
+			emulators = append(emulators, architecture)
+		}
+	}
+	sort.Strings(emulators)
+	return emulators, true
+}
+
+func composeBuildFindings(detection *DetectionResult, configuration PlanConfiguration, observation HostObservation) []PreflightFinding {
+	findings := []PreflightFinding{}
+	if configuration.Build.Method != BuildCompose {
+		return findings
+	}
+	if detection == nil || detection.Compose == nil {
+		if detection != nil && detection.Source.Kind != SourceCompose {
+			findings = append(findings, finding("compose_analysis_missing", PreflightBlocked,
+				"This Compose file has not been analysed as a Compose source", "",
+				"A Compose file found in a repository is only named during detection; its services, images and builds are analysed when the repository is deployed as a Compose source.",
+				"Deploy this repository as a Compose stack (Compose files in Git), or choose another detected candidate.", "deploy", "source"))
+		}
+		return findings
+	}
+	for _, service := range detection.Compose.Services {
+		prefix := "service " + service.Name + ": "
+		if service.BuildContextMissing {
+			findings = append(findings, finding("compose_build_context_missing", PreflightBlocked,
+				"A Compose service builds from a directory the repository does not contain", prefix+service.BuildContext,
+				"docker compose cannot build the service; a context under vendor/ or node_modules/ is installed by a package manager, not committed.",
+				"Point build.context at a committed directory, or use a published image for the service.", "docker", "source.compose"))
+		}
+		missing := []string{}
+		for _, file := range service.EnvFiles {
+			if file.Missing && file.Required {
+				missing = append(missing, file.Path)
+			}
+		}
+		if len(missing) > 0 {
+			findings = append(findings, finding("compose_env_file_missing", PreflightBlocked,
+				"A Compose service reads an env_file the repository does not contain", prefix+strings.Join(missing, ", "),
+				"docker compose refuses to start a service whose env_file is missing; a .env is usually ignored by Git on purpose.",
+				"Set the service's variables with environment: and ${NAME} references to planned variables, mark the file required: false, or commit it.",
+				"docker", "source.compose"))
+		}
+		findings = append(findings, groupedImageFindings(service.DockerfileIssues, prefix)...)
+		if service.Platform != "" && !strings.Contains(service.Platform, "$") {
+			if item, ok := foreignArchitectureFinding(service.Platform, "service "+service.Name+" platform:", observation); ok {
+				findings = append(findings, item)
+			}
+		}
+		if len(service.ImagePlatforms) > 0 && observation.OS != "" && observation.Architecture != "" &&
+			!platformListContains(service.ImagePlatforms, observation.OS+"/"+observation.Architecture) {
+			findings = append(findings, finding("compose_image_platform_missing", PreflightBlocked,
+				"A Compose service image is not published for this host's architecture",
+				prefix+service.Image+" offers "+strings.Join(service.ImagePlatforms, ", ")+"; this host is "+observation.OS+"/"+observation.Architecture,
+				"Docker cannot pull a matching image, or runs it under emulation that fails without an emulator.",
+				"Use an image or tag published for "+observation.Architecture+".", "docker", "source.compose"))
+		}
+	}
+	if detection.Compose.PrimaryService != "" {
+		findings = append(findings, finding("compose_primary_service", PreflightPass,
+			"Readiness follows the Compose application service", detection.Compose.PrimaryService,
+			"The service that builds or publishes a port is the release's container identity and readiness target, never a database.",
+			"", "docker", "source.compose"))
+	}
+	return findings
+}
+
+func releaseTaskFindings(planned *DetectedCandidate, configuration PlanConfiguration, observation HostObservation) []PreflightFinding {
+	findings := []PreflightFinding{}
+	imageTask := false
+	for index, task := range configuration.Build.ReleaseTasks {
+		field := fmt.Sprintf("configuration.build.releaseTasks[%d]", index)
+		if task.Runner == ReleaseTaskRunnerImage {
+			imageTask = true
+			continue
+		}
+		if token, needs := releaseTaskNeedsApplication(task.Command); needs {
+			findings = append(findings, finding("release_task_tool_missing", PreflightBlocked,
+				"A release task needs the application's toolchain", task.Name+": "+token,
+				"This task runs in the dashboard's shell over the unbuilt source, which has no installed dependencies, interpreters or project network.",
+				"Run the task in the release image instead, where the application's toolchain and variables are.", "deploy", field))
+			continue
+		}
+		for _, tool := range releaseTaskHostTools([]ReleaseTaskConfig{task}) {
+			if observed, looked := observation.Facilities[releaseTaskToolFacility(tool)]; looked && !observed.Available {
+				findings = append(findings, finding("release_task_tool_missing", PreflightBlocked,
+					"A release task runs a program this host does not have", task.Name+": "+tool,
+					"The task's shell cannot find it, so the release fails with 'not found' (exit 127).",
+					"Run the task in the release image instead, or install the program on the host.", "deploy", field))
+				break
+			}
+		}
+	}
+	if planned != nil && planned.ReleaseCommand != "" && !imageTask {
+		findings = append(findings, finding("release_command_unmapped", PreflightWarning,
+			"The repository's release command is not planned", planned.ReleaseCommand,
+			"The repository declares a command that runs once before each release (usually migrations); without it the application starts against an unmigrated database.",
+			"Add it as a release task that runs in the release image.", "deploy", "configuration.build.releaseTasks"))
+	}
+	return findings
+}
+
+func releaseTaskToolFacility(tool string) string { return "release_task_tool:" + tool }
+
+// observeReleaseTaskTools answers whether each program a host task runs is
+// on the PATH of the shell that runs it — the dashboard's own, since /bin/sh
+// is always found here — as a lookup, never an execution.
+func observeReleaseTaskTools(tools []string, facilities map[string]FacilityObservation) {
+	for _, tool := range tools {
+		_, err := exec.LookPath(tool)
+		facilities[releaseTaskToolFacility(tool)] = FacilityObservation{Available: err == nil}
+	}
+}
+
+// detectionSelectionMeasured is why detection chose what it chose, where it
+// said so, instead of a candidate id nobody can read.
+func detectionSelectionMeasured(detection *DetectionResult, fallback string) string {
+	if detection.SelectionReason != "" {
+		return detection.SelectionReason
+	}
+	return fallback
+}
+
+// detectionReadDockerfiles says detection read the repository's Dockerfiles
+// itself, so a configured file it has no evidence about is a different one.
+func detectionReadDockerfiles(detection *DetectionResult) bool {
+	if detection == nil || (detection.Source.Kind != SourceGit && detection.Source.Kind != SourceLocal) {
+		return false
+	}
+	for _, candidate := range detection.Candidates {
+		if candidate.BuildMethod == BuildDockerfile && candidate.Dockerfile != "" {
+			return true
+		}
+	}
+	return false
+}

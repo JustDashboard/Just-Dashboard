@@ -170,8 +170,13 @@ func TestSchemaStepConfiguredReadsStartCommandAndReleaseTasks(t *testing.T) {
 	if !schemaStepConfigured(candidate, BuildPlanConfig{StartCommand: "bunx prisma migrate deploy && bun run start"}) {
 		t.Fatal("start command schema step not recognised")
 	}
-	if !schemaStepConfigured(candidate, BuildPlanConfig{StartCommand: "bun run start", ReleaseTasks: []ReleaseTaskConfig{{Name: "migrate", Command: "bunx prisma db push"}}}) {
+	if !schemaStepConfigured(candidate, BuildPlanConfig{StartCommand: "bun run start", ReleaseTasks: []ReleaseTaskConfig{{Name: "migrate", Command: "bunx prisma db push", Runner: ReleaseTaskRunnerImage}}}) {
 		t.Fatal("release task schema step not recognised")
+	}
+	// The host shell runs over the unbuilt checkout, where bunx has nothing to
+	// run: that task fails, so it cannot be what applies the schema.
+	if schemaStepConfigured(candidate, BuildPlanConfig{StartCommand: "bun run start", ReleaseTasks: []ReleaseTaskConfig{{Name: "migrate", Command: "bunx prisma db push"}}}) {
+		t.Fatal("a host release task that needs the application's toolchain counted as the schema step")
 	}
 	if !schemaStepConfigured(&DetectedCandidate{SchemaTool: "typeorm", SchemaInStart: true}, BuildPlanConfig{StartCommand: "npm run start"}) {
 		t.Fatal("package start script schema step not recognised")

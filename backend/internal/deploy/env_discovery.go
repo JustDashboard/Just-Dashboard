@@ -58,6 +58,8 @@ var (
 		regexp.MustCompile(`\bgetenv\(\s*['"]([A-Z][A-Z0-9_]+)['"]`),
 		regexp.MustCompile(`\$_ENV\[['"]([A-Z][A-Z0-9_]+)['"]\]`),
 		regexp.MustCompile(`\bENV(?:\.fetch\(|\[)\s*['"]([A-Z][A-Z0-9_]+)['"]`),
+		// Vapor and Hummingbird read their environment through Environment.get.
+		regexp.MustCompile(`\bEnvironment\.get\(\s*"([A-Z][A-Z0-9_]+)"`),
 	}
 	// envProvidedNames are set by the platform, the runtime or the shell;
 	// listing them would ask the operator for values the deployment supplies.
@@ -70,6 +72,7 @@ var (
 	envSourceExtensions = map[string]bool{
 		".js": true, ".mjs": true, ".cjs": true, ".ts": true, ".mts": true, ".tsx": true, ".jsx": true,
 		".py": true, ".go": true, ".rb": true, ".php": true, ".vue": true, ".svelte": true, ".astro": true,
+		".swift": true,
 	}
 	envSkippedDirs = map[string]bool{
 		"test": true, "tests": true, "__tests__": true, "spec": true, "e2e": true, "fixtures": true, "mocks": true,

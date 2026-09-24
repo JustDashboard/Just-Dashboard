@@ -124,6 +124,9 @@ func (s *Server) handleDeploymentDraftDetect(w http.ResponseWriter, r *http.Requ
 			return mapDeploymentPlanningError(fmt.Errorf(
 				"%w: selected candidate %q was not among the detected candidates", deploy.ErrInvalidPlan, request.SelectedID))
 		}
+		if detection.SelectedID != request.SelectedID {
+			detection.SelectionReason = "chosen on the project step"
+		}
 		detection.SelectedID = request.SelectedID
 	}
 	principal := httpx.MustPrincipal(r)

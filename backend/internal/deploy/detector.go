@@ -46,9 +46,10 @@ type Detector struct{ Limits DetectionLimits }
 
 type detectedMarkers struct {
 	root              string
-	dockerfile        string
-	dockerfileContent []byte
+	dockerfiles       []detectedDockerfile
+	packageSwift      []byte
 	compose           []string
+	composeFiles      []composeDetection
 	lockfiles         []string
 	packageJSON       []byte
 	packagePath       string
@@ -137,6 +138,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	schemaPathCounts := map[string]int{}
 	pythonEntries := []pythonEntry{}
 	denoEntryPaths := []string{}
+	skippedBuild := []string{}
 	scanner := newEnvScanner()
 	prismaProviders := map[string]string{}
 	skip := map[string]bool{
@@ -165,6 +167,9 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		}
 		if entry.IsDir() {
 			if rel != "." && (skip[entry.Name()] || depth > limits.MaxDepth) {
+				if entry.Name() == "build" && depth <= limits.MaxDepth {
+					skippedBuild = append(skippedBuild, filepath.ToSlash(rel))
+				}
 				return filepath.SkipDir
 			}
 			return nil
@@ -240,9 +245,9 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			}
 			return nil
 		}
-		interesting := name == "package.json" || name == "go.mod" || name == "dockerfile" ||
-			name == ".go-version" ||
-			name == "containerfile" || name == "compose.yml" || name == "compose.yaml" ||
+		interesting := name == "package.json" || name == "go.mod" || dockerfileFileName(name) ||
+			name == ".go-version" || name == "package.swift" ||
+			name == "compose.yml" || name == "compose.yaml" ||
 			name == "docker-compose.yml" || name == "docker-compose.yaml" ||
 			name == "index.html" || name == ".gitmodules" || name == ".gitattributes" ||
 			name == "bun.lock" || name == "bun.lockb" || name == "package-lock.json" ||
@@ -292,6 +297,9 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		if parent == "." {
 			parent = ""
 		}
+		if (dockerfileFileName(name) || composeFileName(name)) && dockerfileOutsideApplication(filepath.ToSlash(rel)) {
+			return nil
+		}
 		if name == "index.php" {
 			// A root's own index.php, or the one under its public/ directory,
 			// names a PHP application; one deeper (a theme, a plugin) does not.
@@ -320,18 +328,22 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			}
 			return content, err == nil
 		}
+		if dockerfileFileName(name) {
+			content, ok := readMarker(limits.MaxFileBytes)
+			if result.Truncated {
+				return stop
+			}
+			if ok {
+				appendDetectedDockerfile(marker, detectedDockerfile{path: filepath.ToSlash(rel), content: content})
+			}
+			return nil
+		}
 		switch name {
-		case "dockerfile", "containerfile":
-			if marker.dockerfile == "" {
-				marker.dockerfile = rel
-				content, n, err := readDetectionFile(path, limits.MaxFileBytes)
-				result.ScannedBytes += n
-				if err == nil && result.ScannedBytes <= limits.MaxReadBytes {
-					marker.dockerfileContent = content
-				} else if result.ScannedBytes > limits.MaxReadBytes {
-					result.Truncated, result.TruncatedReason = true, "read-byte limit reached"
-					return stop
-				}
+		case "package.swift":
+			if content, ok := readMarker(256 << 10); ok {
+				marker.packageSwift = content
+			} else if result.Truncated {
+				return stop
 			}
 		case "compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml":
 			marker.compose = append(marker.compose, rel)
@@ -481,6 +493,9 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	if walkErr != nil && !errors.Is(walkErr, stop) && !errors.Is(walkErr, context.Canceled) && !errors.Is(walkErr, context.DeadlineExceeded) {
 		return result, walkErr
 	}
+	tree := openDetectionTree(root)
+	defer tree.close()
+	addSkippedBuildDockerfiles(tree, markers, skippedBuild, limits, &result)
 
 	roots := make([]string, 0, len(markers))
 	packageRoots := []string{}
@@ -508,23 +523,27 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		}
 		candidates := candidatesForMarkers(marker,
 			pathsUnderRoot(schemaPaths, root, packageRoots), pythonEntriesUnderRoot(pythonEntries, root, pythonRoots))
-		variables := scanner.variables(root, allRoots)
-		databases := detectDatabases(marker, variables, prismaProviders)
-		for index := range candidates {
-			candidates[index].Variables = variables
-			candidates[index].Databases = databases
-		}
 		result.Candidates = append(result.Candidates, candidates...)
 	}
-	sort.Slice(result.Candidates, func(i, j int) bool {
-		if result.Candidates[i].Root != result.Candidates[j].Root {
-			return result.Candidates[i].Root < result.Candidates[j].Root
+	result.Candidates = append(result.Candidates, containerCandidates(tree, markers, roots)...)
+	// A candidate's variables and databases are its build root's, and a
+	// Dockerfile's context can sit above the directory the file is in.
+	variablesByRoot := map[string][]DetectedVariable{}
+	databasesByRoot := map[string][]DetectedDatabase{}
+	for index := range result.Candidates {
+		candidateRoot := result.Candidates[index].Root
+		if _, done := variablesByRoot[candidateRoot]; !done {
+			marker := markers[filepath.FromSlash(candidateRoot)]
+			if marker == nil {
+				marker = &detectedMarkers{root: candidateRoot, pythonFiles: map[string][]byte{}, csprojs: map[string][]byte{}}
+			}
+			variablesByRoot[candidateRoot] = scanner.variables(candidateRoot, allRoots)
+			databasesByRoot[candidateRoot] = detectDatabases(marker, variablesByRoot[candidateRoot], prismaProviders)
 		}
-		if result.Candidates[i].BuildMethod != result.Candidates[j].BuildMethod {
-			return result.Candidates[i].BuildMethod < result.Candidates[j].BuildMethod
-		}
-		return result.Candidates[i].ID < result.Candidates[j].ID
-	})
+		result.Candidates[index].Variables = variablesByRoot[candidateRoot]
+		result.Candidates[index].Databases = databasesByRoot[candidateRoot]
+	}
+	annotateImageFacts(tree, markers, result.Candidates)
 	for index := range result.Candidates {
 		candidate := &result.Candidates[index]
 		if candidate.Recipe == "go" {
@@ -552,7 +571,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		Submodules: gitModulesPath != "",
 		LFS:        lfsAttributesPath != "",
 	}
-	result.SelectedID = selectedCandidate(result.Candidates)
+	result.SelectedID, result.SelectionReason = rankCandidates(result.Candidates)
 	return result, nil
 }
 
@@ -603,39 +622,6 @@ func candidatesForMarkers(marker *detectedMarkers, schemaPaths []string, pythonE
 	rootLabel := marker.root
 	if rootLabel == "" {
 		rootLabel = "."
-	}
-	if marker.dockerfile != "" {
-		// A single literal EXPOSE is the port, which is what detectedDockerfilePort
-		// already decides: evidence, not a question. A Dockerfile that names none,
-		// or names several, leaves the port unset, and an unset port is the plan's
-		// own way of asking for one — on the screen that owns the field, rather
-		// than as a sentence on the first screen that owns nothing.
-		port := detectedDockerfilePort(marker.dockerfileContent)
-		evidence := []DetectionEvidence{{Path: marker.dockerfile, Reason: "container build definition"}}
-		if port > 0 {
-			evidence = append(evidence, DetectionEvidence{
-				Path: marker.dockerfile, Reason: fmt.Sprintf("EXPOSE %d/tcp", port),
-			})
-		}
-		result = append(result, newDetectedCandidate(marker.root, BuildDockerfile, DetectedCandidate{
-			Name: "Dockerfile in " + rootLabel, Profile: ProfileWeb, Confidence: ConfidenceHigh,
-			Dockerfile:    filepath.Base(marker.dockerfile),
-			Port:          port,
-			Evidence:      evidence,
-			NeedsDecision: []string{},
-		}))
-	}
-	if len(marker.compose) > 0 {
-		sort.Strings(marker.compose)
-		evidence := make([]DetectionEvidence, 0, len(marker.compose))
-		for _, path := range marker.compose {
-			evidence = append(evidence, DetectionEvidence{Path: path, Reason: "Compose configuration"})
-		}
-		result = append(result, newDetectedCandidate(marker.root, BuildCompose, DetectedCandidate{
-			Name: "Compose stack in " + rootLabel, Profile: ProfileCompose,
-			Confidence: ConfidenceHigh, Evidence: evidence,
-			NeedsDecision: []string{"review services, storage, ports, and unsupported fields"},
-		}))
 	}
 	if len(marker.packageJSON) > 0 && !marker.phpOwnsAssets() {
 		result = append(result, packageCandidate(marker, schemaPaths)...)
@@ -911,24 +897,6 @@ func newDetectedCandidate(root string, method BuildMethod, candidate DetectedCan
 	hash := sha256.Sum256([]byte(root + "\x00" + string(method) + "\x00" + candidate.Name))
 	candidate.ID = "candidate-" + hex.EncodeToString(hash[:6])
 	return candidate
-}
-
-func selectedCandidate(candidates []DetectedCandidate) string {
-	best := ""
-	bestRank := 0
-	tied := false
-	for _, candidate := range candidates {
-		rank := confidenceRank(candidate.Confidence)
-		if rank > bestRank {
-			best, bestRank, tied = candidate.ID, rank, false
-		} else if rank == bestRank && rank != 0 {
-			tied = true
-		}
-	}
-	if tied {
-		return ""
-	}
-	return best
 }
 
 func confidenceRank(confidence DetectionConfidence) int {
