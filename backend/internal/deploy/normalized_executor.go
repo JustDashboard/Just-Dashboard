@@ -432,6 +432,13 @@ func (e *NormalizedStepExecutor) buildArtifact(
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
+	if plan.Build.Method == BuildCompose {
+		// A Compose build receives values only as the file's own build
+		// arguments (build_dockerfile_args.go).
+		if buildVariables, err = e.composeBuildValues(ctx, execution.Run, plan.BuildEvidence.Compose); err != nil {
+			return normalizedStepFailure(err)
+		}
+	}
 	registryAuth := ""
 	if plan.SourceKind == SourceImage || plan.SourceKind == SourceBlueprint {
 		registryAuth, err = e.sources.registryAuth(ctx, plan.SourceConfig.CredentialID, plan.SourceIdentity.Repository)
@@ -560,8 +567,9 @@ func (e *NormalizedStepExecutor) runReleaseTasks(
 		if task.Runner == ReleaseTaskRunnerImage {
 			request := image
 			request.Task, request.Index = task, index
-			taskEvidence, taskErr = runImageReleaseTask(ctx, imageRunner, request, values, emit)
-			cleanupResults = append(cleanupResults, map[string]any{"container": "removed"})
+			var container any
+			taskEvidence, container, taskErr = runImageReleaseTask(ctx, imageRunner, request, values, emit)
+			cleanupResults = append(cleanupResults, container)
 		} else {
 			var group any
 			taskEvidence, group, taskErr = runStoredReleaseTask(ctx, source.Root, task, values, emit)

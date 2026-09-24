@@ -87,11 +87,13 @@ func TestPreflightPassesOnlyPlainPublicBuildArguments(t *testing.T) {
 		DockerfileArgs: []DockerfileArg{
 			{Name: "NEXT_PUBLIC_API_URL", Consumed: true}, {Name: "NPM_TOKEN", Consumed: true},
 			{Name: "VITE_SITE", Consumed: true}, {Name: "NODE_VERSION", HasDefault: true, UsedInFrom: true},
+			{Name: "NEXT_PUBLIC_KEY", Consumed: true},
 		},
 	})
 	draft, configuration := imageFindingDraft([]DetectedCandidate{dockerfile}, BuildPlanConfig{Method: BuildDockerfile},
 		PlannedVariable{Name: "NEXT_PUBLIC_API_URL", Sensitivity: "plain", Scopes: []string{"build", "runtime"}},
 		PlannedVariable{Name: "NPM_TOKEN", Sensitivity: "secret", Scopes: []string{"build"}},
+		PlannedVariable{Name: "NEXT_PUBLIC_KEY", Sensitivity: "secret", Scopes: []string{"build"}},
 	)
 	findings := imageBuildFindings(draft, configuration, HostObservation{})
 	passed, ok := findingByCode(findings, "dockerfile_build_args")
@@ -100,7 +102,7 @@ func TestPreflightPassesOnlyPlainPublicBuildArguments(t *testing.T) {
 	}
 	unpassed, ok := findingByCode(findings, "dockerfile_arg_not_passed")
 	if !ok || !strings.Contains(unpassed.Measured, "NPM_TOKEN") || !strings.Contains(unpassed.Measured, "VITE_SITE") ||
-		strings.Contains(unpassed.Measured, "NODE_VERSION") {
+		!strings.Contains(unpassed.Measured, "NEXT_PUBLIC_KEY (marked secret") || strings.Contains(unpassed.Measured, "NODE_VERSION") {
 		t.Fatalf("unpassed build arguments = %+v", unpassed)
 	}
 }
@@ -148,6 +150,23 @@ func TestPreflightNamesForeignArchitectureImages(t *testing.T) {
 	if item, ok := findingByCode(findings, "compose_primary_service"); !ok || item.Measured != "web" {
 		t.Fatalf("primary service = %+v", findings)
 	}
+	// Pinned to the platform the image has, the service runs under the
+	// installed emulator: the platform finding decides, and agrees.
+	compose.Services[0].Platform = "linux/amd64"
+	emulated := HostObservation{OS: "linux", Architecture: "arm64", EmulationObserved: true, Emulators: []string{"amd64"}}
+	findings = imageBuildFindings(composeDraft, PlanConfiguration{Build: BuildPlanConfig{Method: BuildCompose}}, emulated)
+	if item, ok := findingByCode(findings, "compose_image_platform_missing"); ok {
+		t.Fatalf("a pinned, emulated service is still refused: %+v", item)
+	}
+	if item, ok := findingByCode(findings, "foreign_architecture_build"); !ok || item.Severity != PreflightWarning {
+		t.Fatalf("emulated service platform = %+v", findings)
+	}
+	compose.Services[0].Platform = ""
+	findings = imageBuildFindings(composeDraft, PlanConfiguration{Build: BuildPlanConfig{Method: BuildCompose}}, emulated)
+	if item, ok := findingByCode(findings, "compose_image_platform_missing"); !ok || item.Severity != PreflightBlocked ||
+		!strings.Contains(item.Action, "platform: linux/amd64") {
+		t.Fatalf("an unpinned image with an emulator available = %+v", item)
+	}
 
 	gitCompose := newDetectedCandidate("", BuildCompose, DetectedCandidate{Name: "Compose stack in .", Profile: ProfileCompose, Confidence: ConfidenceHigh})
 	draft, configuration = imageFindingDraft([]DetectedCandidate{gitCompose}, BuildPlanConfig{Method: BuildCompose})
@@ -184,6 +203,9 @@ func TestPreflightChecksWhereReleaseTasksRun(t *testing.T) {
 	}
 	if strings.Join(tools, "|") != "migrate: npx|push: node_modules/.bin/prisma" {
 		t.Fatalf("tool findings = %v", tools)
+	}
+	if item, _ := findingByCode(findings, "release_task_tool_missing"); item.FieldID != "configuration.build.releaseTasks[0].command" {
+		t.Fatalf("tool finding field = %q", item.FieldID)
 	}
 	if _, ok := findingByCode(findings, "release_command_unmapped"); !ok {
 		t.Fatalf("an unplanned release command = %+v", findings)
@@ -223,5 +245,37 @@ func TestPreflightSaysWhyACandidateWasSelected(t *testing.T) {
 	findings := preflightFindings(draft, configuration, HostObservation{Facilities: map[string]FacilityObservation{}}, false)
 	if item, ok := findingByCode(findings, "detection_selected"); !ok || item.Measured != draft.Data.Detection.SelectionReason {
 		t.Fatalf("detection_selected = %+v", item)
+	}
+}
+
+func TestPreflightNamesImageTasksOutsideAComposeStack(t *testing.T) {
+	task := ReleaseTaskConfig{Name: "migrate", Command: "npx prisma migrate deploy", Runner: ReleaseTaskRunnerImage, TimeoutSeconds: 60}
+	for _, fixture := range []struct {
+		name     string
+		services []ComposeServicePlan
+		severity PreflightSeverity
+	}{
+		{"the stack runs its own database", []ComposeServicePlan{{Name: "db", Image: "postgres:17"}, {Name: "web", BuildContext: "."}}, PreflightBlocked},
+		{"the stack is only the application", []ComposeServicePlan{{Name: "web", BuildContext: "."}}, PreflightWarning},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			draft := &Draft{Data: DraftData{
+				Intent:    &DraftIntentConfig{Name: "stack", Profile: ProfileCompose},
+				Source:    &DraftSourceConfig{Kind: SourceCompose, Mode: SourceModeComposeGit},
+				Detection: &DetectionResult{Source: SourceIdentity{Kind: SourceCompose}, Compose: &ComposeAnalysis{PrimaryService: "web", Services: fixture.services}},
+			}}
+			configuration := PlanConfiguration{Build: BuildPlanConfig{Method: BuildCompose, ReleaseTasks: []ReleaseTaskConfig{task}}}
+			item, ok := findingByCode(imageBuildFindings(draft, configuration, HostObservation{}), "release_task_outside_compose_stack")
+			if !ok || item.Severity != fixture.severity || item.FieldID != "configuration.build.releaseTasks[0].runner" {
+				t.Fatalf("finding = %+v (%v)", item, ok)
+			}
+			if fixture.severity == PreflightBlocked && !strings.Contains(item.Measured, "db (postgres)") {
+				t.Fatalf("the unreachable service is not named: %q", item.Measured)
+			}
+		})
+	}
+	draft, configuration := imageFindingDraft(nil, BuildPlanConfig{Method: BuildDockerfile, ReleaseTasks: []ReleaseTaskConfig{task}})
+	if item, ok := findingByCode(imageBuildFindings(draft, configuration, HostObservation{}), "release_task_outside_compose_stack"); ok {
+		t.Fatalf("a Dockerfile release's task = %+v", item)
 	}
 }

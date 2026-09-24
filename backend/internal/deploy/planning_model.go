@@ -1168,7 +1168,7 @@ func (c PlanConfiguration) Validate() error {
 	seenTasks := map[string]bool{}
 	for index, task := range c.Build.ReleaseTasks {
 		field := fmt.Sprintf("build.releaseTasks[%d]", index)
-		if !releaseTaskNameRE.MatchString(task.Name) || seenTasks[task.Name] || task.Command == "" ||
+		if !releaseTaskNameRE.MatchString(task.Name) || seenTasks[task.Name] || strings.TrimSpace(task.Command) == "" ||
 			len(task.Command) > 16<<10 || task.TimeoutSeconds < 1 || task.TimeoutSeconds > 3600 ||
 			(task.WorkingDirectory != "" && !safeRelativePath(task.WorkingDirectory)) || len(task.Env) > 64 {
 			return invalidField(field, "release task %q is invalid", task.Name)

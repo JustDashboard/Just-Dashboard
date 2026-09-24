@@ -37,6 +37,14 @@ func TestLiveReleaseTaskRunsInTheReleaseImage(t *testing.T) {
 		Variables: map[string]string{"DATABASE_URL": "postgres://db-1.jd.internal/app"},
 		Secret:    map[string]bool{},
 	}
+	// A container a stopped dashboard left under the task's name does not
+	// block the resumed run.
+	if _, err := liveDockerOutput(context.Background(), "create", "--name", releaseTaskContainerName(environmentID, request.Run.ID, 0),
+		"--label", "io.just-dashboard.managed=true", "--label", "io.just-dashboard.environment-id="+strconv.FormatInt(environmentID, 10),
+		"--label", "io.just-dashboard.run-id="+strconv.FormatInt(request.Run.ID, 10), "--label", releaseTaskLabel+"=migrate",
+		request.Image, "true"); err != nil {
+		t.Fatal(err)
+	}
 	for _, fixture := range []struct {
 		command string
 		code    int
@@ -51,15 +59,15 @@ func TestLiveReleaseTaskRunsInTheReleaseImage(t *testing.T) {
 		request.Task = ReleaseTaskConfig{Name: "migrate", Command: fixture.command, TimeoutSeconds: fixture.timeout, Env: []string{"MIGRATION_TOKEN"}, Runner: ReleaseTaskRunnerImage}
 		request.Index = 0
 		lines := []string{}
-		evidence, err := runImageReleaseTask(context.Background(), owner, request, map[string]string{"MIGRATION_TOKEN": "task-secret"},
+		evidence, cleanup, err := runImageReleaseTask(context.Background(), owner, request, map[string]string{"MIGRATION_TOKEN": "task-secret"},
 			func(line BuildLog) error {
 				lines = append(lines, line.Text)
 				return nil
 			})
 		output := strings.Join(lines, "\n")
 		if evidence.ExitCode != fixture.code || (fixture.code == 0) != (err == nil) || !strings.Contains(output, fixture.output) ||
-			strings.Contains(output, "task-secret") {
-			t.Fatalf("%q: evidence %+v, err %v, output %q", fixture.command, evidence, err, output)
+			strings.Contains(output, "task-secret") || cleanup.(map[string]any)["removed"] != true {
+			t.Fatalf("%q: evidence %+v, cleanup %v, err %v, output %q", fixture.command, evidence, cleanup, err, output)
 		}
 		left, _ := liveDockerOutput(context.Background(), "ps", "--all", "--quiet", "--filter", "label=io.just-dashboard.run-id="+strconv.FormatInt(request.Run.ID, 10))
 		if strings.TrimSpace(string(left)) != "" {

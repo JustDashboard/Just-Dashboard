@@ -2,10 +2,16 @@ package deploy
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 )
 
 const selfHostedCompose = `services:
@@ -207,5 +213,131 @@ func TestDockerfileBuildReceivesOnlyDeclaredPublicArgsAndItsTarget(t *testing.T)
 	config.Target = "staging"
 	if _, err := builder.Prepare(context.Background(), root, config, false, "just-dashboard/release:1-3"); err == nil {
 		t.Fatal("a target that is not a stage was prepared")
+	}
+}
+
+type slowRegistryFake struct {
+	planningDockerFake
+	delay             time.Duration
+	active, highWater atomic.Int32
+}
+
+func (f *slowRegistryFake) ResolveDistributionImage(ctx context.Context, reference, _ string) (*dockerx.DistributionImage, error) {
+	current := f.active.Add(1)
+	defer f.active.Add(-1)
+	for {
+		high := f.highWater.Load()
+		if current <= high || f.highWater.CompareAndSwap(high, current) {
+			break
+		}
+	}
+	select {
+	case <-time.After(f.delay):
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return &dockerx.DistributionImage{Reference: reference, Platforms: []string{"linux/amd64"}}, nil
+}
+
+func TestComposeImagePlatformLookupsRunConcurrently(t *testing.T) {
+	registry := &slowRegistryFake{delay: 150 * time.Millisecond}
+	analysis := &ComposeAnalysis{}
+	for index := range 12 {
+		analysis.Services = append(analysis.Services, ComposeServicePlan{Name: fmt.Sprintf("s%d", index), Image: fmt.Sprintf("example/image-%d:1", index)})
+	}
+	analysis.Services = append(analysis.Services, ComposeServicePlan{Name: "web", BuildContext: "."})
+	started := time.Now()
+	resolveComposeImagePlatforms(t.Context(), registry, analysis)
+	// Twelve lookups one after another take 1.8 s; four at a time, 0.45 s.
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("lookups took %s", elapsed)
+	}
+	if high := registry.highWater.Load(); high < 2 || high > composeImageLookupWorkers {
+		t.Fatalf("%d lookups ran at once, want between 2 and %d", high, composeImageLookupWorkers)
+	}
+	for _, service := range analysis.Services {
+		if service.BuildContext == "" && !slices.Equal(service.ImagePlatforms, []string{"linux/amd64"}) {
+			t.Fatalf("service %s platforms = %v", service.Name, service.ImagePlatforms)
+		}
+	}
+}
+
+func TestComposeBuildArgumentsReadOnlyPlainRuntimeAndBuildValues(t *testing.T) {
+	t.Parallel()
+	analysis, err := analyzeComposeDocuments([]ComposeDocument{{Path: "compose.yml", Content: selfHostedCompose}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The form plans a Compose file's variables for runtime only; Compose
+	// itself reads one environment for the whole file.
+	runtime := []ScopedVariableValue{
+		{Name: "API_URL", Sensitivity: "plain", Value: "https://api.example.com"},
+		{Name: "POSTGRES_PASSWORD", Sensitivity: "secret", Value: "database-secret"},
+	}
+	build := []ScopedVariableValue{{Name: "BUILD_REVISION", Sensitivity: "plain", Value: "abc123"}}
+	values, err := composeBuildArgValues(&analysis, runtime, build)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values["API_URL"] != "https://api.example.com" || values["BUILD_REVISION"] != "abc123" {
+		t.Fatalf("values = %v", values)
+	}
+	if _, leaked := values["POSTGRES_PASSWORD"]; leaked {
+		t.Fatal("a secret no build argument reads reached the build")
+	}
+	root := t.TempDir()
+	writeBuildFixture(t, root, "Dockerfile", "FROM scratch AS production\n")
+	backend := &artifactBackendFake{}
+	if _, err := NewArtifactBuilder(backend).Build(
+		context.Background(), root, "just-dashboard/release:1-2", BuildPlanConfig{Method: BuildCompose},
+		PreparedBuild{Method: BuildCompose, CachePolicy: "reuse"}, values, "",
+		SourceIdentity{Kind: SourceCompose}, &analysis, nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if args := backend.builds[0].BuildArgs; len(args) != 3 || args[1] != (BuildArgValue{"NEXT_PUBLIC_API_URL", "https://api.example.com"}) {
+		t.Fatalf("a runtime-planned variable did not reach its build argument: %+v", args)
+	}
+
+	for name, fixture := range map[string]struct {
+		runtime []ScopedVariableValue
+		build   []ScopedVariableValue
+	}{
+		"a secret build argument":            {runtime: []ScopedVariableValue{{Name: "API_URL", Sensitivity: "secret", Value: "https://api.example.com"}}},
+		"a secret from the build scope":      {build: []ScopedVariableValue{{Name: "BUILD_REVISION", Sensitivity: "secret", Value: "abc123"}}},
+		"a secret read from the environment": {runtime: []ScopedVariableValue{{Name: "BUILD_REVISION", Sensitivity: "secret", Value: "abc123"}}},
+	} {
+		if _, err := composeBuildArgValues(&analysis, fixture.runtime, fixture.build); !errors.Is(err, ErrUnsupportedBuilder) || !strings.Contains(err.Error(), "image's history") {
+			t.Fatalf("%s = %v", name, err)
+		}
+	}
+	targeted := ComposeAnalysis{Services: []ComposeServicePlan{{Name: "web", BuildContext: ".", BuildTarget: "${STAGE:-production}"}}}
+	if _, err := composeBuildArgValues(&targeted, []ScopedVariableValue{{Name: "STAGE", Sensitivity: "secret", Value: "x"}}); !errors.Is(err, ErrUnsupportedBuilder) {
+		t.Fatalf("a secret build target = %v", err)
+	}
+}
+
+func TestPreflightNamesComposeBuildArgumentsThatCannotBePassed(t *testing.T) {
+	t.Parallel()
+	analysis, err := analyzeComposeDocuments([]ComposeDocument{{Path: "compose.yml", Content: selfHostedCompose}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings := composeBuildArgFindings(&analysis, PlanConfiguration{Variables: []PlannedVariable{
+		{Name: "API_URL", Sensitivity: "secret", Scopes: []string{"runtime"}},
+		{Name: "BUILD_REVISION", Sensitivity: "plain", Scopes: []string{"release_task"}},
+	}})
+	secret, ok := findingByCode(findings, "compose_build_arg_secret")
+	if !ok || secret.Severity != PreflightBlocked || secret.Measured != "service web: build argument NEXT_PUBLIC_API_URL reads API_URL" {
+		t.Fatalf("secret build argument = %+v", findings)
+	}
+	if unscoped, ok := findingByCode(findings, "compose_build_arg_unscoped"); !ok || unscoped.Severity != PreflightWarning ||
+		!strings.Contains(unscoped.Measured, "BUILD_REVISION") {
+		t.Fatalf("unscoped build argument = %+v", findings)
+	}
+	if clean := composeBuildArgFindings(&analysis, PlanConfiguration{Variables: []PlannedVariable{
+		{Name: "API_URL", Sensitivity: "plain", Scopes: []string{"runtime"}},
+	}}); len(clean) != 0 {
+		t.Fatalf("a plain runtime variable = %+v", clean)
 	}
 }

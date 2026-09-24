@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -329,35 +330,58 @@ func analyzeComposeTree(root string, analysis *ComposeAnalysis) {
 // resolveComposeImagePlatforms reads, from each image's registry manifest,
 // the platforms it is published for, so an amd64-only image on an arm64
 // host is a preflight finding rather than a failed pull. An image the
-// registry does not answer for says nothing.
+// registry does not answer for says nothing. The lookups run a few at a
+// time under one deadline, so a slow registry costs the analysis seconds,
+// not a registry round trip per service.
 func resolveComposeImagePlatforms(ctx context.Context, docker PlanningDocker, analysis *ComposeAnalysis) {
 	if docker == nil {
 		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, composeImageLookupBudget)
+	defer cancel()
+	pending := make(chan *ComposeServicePlan)
+	var workers sync.WaitGroup
+	for range composeImageLookupWorkers {
+		workers.Go(func() {
+			for service := range pending {
+				lookup, cancelLookup := context.WithTimeout(ctx, 5*time.Second)
+				resolved, err := docker.ResolveDistributionImage(lookup, service.Image, "")
+				cancelLookup()
+				if err != nil || resolved == nil {
+					continue
+				}
+				platforms := []string{}
+				for _, platform := range resolved.Platforms {
+					platform = strings.ToLower(strings.TrimSpace(platform))
+					if validPlatform(platform) {
+						platforms = append(platforms, platform)
+					}
+				}
+				service.ImagePlatforms = uniqueSorted(platforms)
+				if len(service.ImagePlatforms) > 64 {
+					service.ImagePlatforms = service.ImagePlatforms[:64]
+				}
+			}
+		})
 	}
 	for index := range analysis.Services {
 		service := &analysis.Services[index]
 		if service.BuildContext != "" || service.Image == "" || strings.Contains(service.Image, "$") {
 			continue
 		}
-		lookup, cancel := context.WithTimeout(ctx, 5*time.Second)
-		resolved, err := docker.ResolveDistributionImage(lookup, service.Image, "")
-		cancel()
-		if err != nil || resolved == nil {
-			continue
-		}
-		platforms := []string{}
-		for _, platform := range resolved.Platforms {
-			platform = strings.ToLower(strings.TrimSpace(platform))
-			if validPlatform(platform) {
-				platforms = append(platforms, platform)
-			}
-		}
-		service.ImagePlatforms = uniqueSorted(platforms)
-		if len(service.ImagePlatforms) > 64 {
-			service.ImagePlatforms = service.ImagePlatforms[:64]
+		select {
+		case pending <- service:
+		case <-ctx.Done():
 		}
 	}
+	close(pending)
+	workers.Wait()
 }
+
+const (
+	composeImageLookupWorkers = 4
+	composeImageLookupBudget  = 15 * time.Second
+)
 
 // composeValidationDocuments is what `docker compose config` validates: the
 // documents themselves, except that an env_file the checkout lacks is marked

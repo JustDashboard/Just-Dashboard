@@ -1052,7 +1052,7 @@ func (s *PlanningStore) Commit(
 		switch {
 		case supplied:
 			value = staged
-			sensitivity = "secret"
+			sensitivity = suppliedVariableSensitivity(variable)
 		case variable.Generate > 0:
 			// Generated here and never anywhere else: the value exists only
 			// sealed, revealed on demand through the audited reveal route.

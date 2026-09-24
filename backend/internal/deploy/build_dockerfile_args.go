@@ -58,9 +58,8 @@ func dockerfileBuildArgValues(names []string, variables map[string]string) ([]Bu
 }
 
 // composeServiceBuildArgs resolves a service's `build.args` the way Compose
-// would, against the scoped build values: a literal stays, `${X:-d}` falls
-// back to d, and a bare name takes the variable of that name when there is
-// one.
+// would, against composeBuildArgValues: a literal stays, `${X:-d}` falls back
+// to d, and a bare name takes the variable of that name when there is one.
 func composeServiceBuildArgs(service ComposeServicePlan, variables map[string]string) ([]BuildArgValue, error) {
 	values := []BuildArgValue{}
 	for _, arg := range service.BuildArgs {
@@ -109,4 +108,80 @@ func (e *NormalizedStepExecutor) plainBuildVariableNames(ctx context.Context, ru
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+// composeArgVariableNames are the variables a build argument's value reads:
+// its own name when it takes its value from the environment, otherwise every
+// name its expression interpolates.
+func composeArgVariableNames(arg ComposeBuildArg) []string {
+	if arg.FromEnvironment {
+		return []string{arg.Name}
+	}
+	return composeExpressionNames(arg.Value)
+}
+
+func composeExpressionNames(expression string) []string {
+	names := []string{}
+	for _, match := range composeInterpolationRE.FindAllStringSubmatch(strings.ReplaceAll(expression, "$$", ""), -1) {
+		name := match[1]
+		if name == "" {
+			name = match[2]
+		}
+		names = append(names, name)
+	}
+	return uniqueSorted(names)
+}
+
+// composeBuildArgValues are the values a Compose file's build arguments and
+// stage targets interpolate from: the plain runtime and build variables
+// together — Compose reads one environment for the whole file, and the form
+// plans a Compose file's variables for runtime — but never a secret, because
+// a build argument stays in the image's history and a target in buildx's
+// argv. An argument or target that reads a secret refuses the build, as
+// preflight's compose_build_arg_secret said it would.
+func composeBuildArgValues(compose *ComposeAnalysis, scopes ...[]ScopedVariableValue) (map[string]string, error) {
+	values, secret := map[string]string{}, map[string]bool{}
+	for _, scoped := range scopes {
+		for _, variable := range scoped {
+			if variable.Sensitivity == "plain" {
+				values[variable.Name] = variable.Value
+			} else {
+				secret[variable.Name] = true
+			}
+		}
+	}
+	if compose == nil {
+		return values, nil
+	}
+	for _, service := range compose.Services {
+		for _, arg := range service.BuildArgs {
+			for _, name := range composeArgVariableNames(arg) {
+				if secret[name] {
+					return nil, fmt.Errorf("%w: Compose service %s build argument %s reads secret variable %s, and a build argument stays in the image's history",
+						ErrUnsupportedBuilder, service.Name, arg.Name, name)
+				}
+			}
+		}
+		for _, name := range composeExpressionNames(service.BuildTarget) {
+			if secret[name] {
+				return nil, fmt.Errorf("%w: Compose service %s build target reads secret variable %s", ErrUnsupportedBuilder, service.Name, name)
+			}
+		}
+	}
+	return values, nil
+}
+
+func (e *NormalizedStepExecutor) composeBuildValues(ctx context.Context, run EngineRun, compose *ComposeAnalysis) (map[string]string, error) {
+	if e.variables == nil {
+		return nil, fmt.Errorf("%w: variable store is unavailable", ErrArtifactMissing)
+	}
+	runtime, err := e.variables.OpenRunScopedVariables(ctx, run.ID, run.EnvironmentID, "runtime")
+	if err != nil {
+		return nil, err
+	}
+	build, err := e.variables.OpenRunScopedVariables(ctx, run.ID, run.EnvironmentID, "build")
+	if err != nil {
+		return nil, err
+	}
+	return composeBuildArgValues(compose, runtime, build)
 }

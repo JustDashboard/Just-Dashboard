@@ -197,7 +197,7 @@ func imageBuildFindings(draft *Draft, configuration PlanConfiguration, observati
 			"Move the entry point under public/, or serve the framework's own document root.", "deploy", "configuration.build.startCommand"))
 	}
 	findings = append(findings, composeBuildFindings(detection, configuration, observation)...)
-	findings = append(findings, releaseTaskFindings(planned, configuration, observation)...)
+	findings = append(findings, releaseTaskFindings(planned, detection, configuration, observation)...)
 	return findings
 }
 
@@ -215,6 +215,8 @@ func dockerfileArgFindings(candidate DetectedCandidate, configuration PlanConfig
 		switch {
 		case buildScoped && variable.Sensitivity == "plain" && publicBuildVariable(arg.Name) && !reservedBuildArgName(arg.Name):
 			passed = append(passed, arg.Name)
+		case buildScoped && variable.Sensitivity != "plain" && publicBuildVariable(arg.Name):
+			unpassed = append(unpassed, arg.Name+" (marked secret, and a secret never becomes a build argument)")
 		case buildScoped:
 			unpassed = append(unpassed, arg.Name+" (a build variable, but only plain browser-public ones are passed)")
 		case publicBuildVariable(arg.Name) && arg.Consumed && !arg.HasDefault:
@@ -231,8 +233,8 @@ func dockerfileArgFindings(candidate DetectedCandidate, configuration PlanConfig
 	if len(unpassed) > 0 {
 		findings = append(findings, finding("dockerfile_arg_not_passed", PreflightWarning,
 			"A Dockerfile build argument will be empty", strings.Join(unpassed, "; "),
-			"Custom Dockerfiles receive build values only for plain NEXT_PUBLIC_, VITE_, PUBLIC_, NUXT_PUBLIC_ or REACT_APP_ variables they declare; anything else is empty during the build.",
-			"Give the ARG a default, add it as a plain build variable if it is browser-public, or build with the automatic recipe, which passes build values as BuildKit secrets.",
+			"Custom Dockerfiles receive build values only for plain NEXT_PUBLIC_, VITE_, PUBLIC_, NUXT_PUBLIC_ or REACT_APP_ variables they declare — the page's JavaScript carries those by design, so a value typed with such a name is kept plain; anything else is empty during the build.",
+			"Give the ARG a default, make a browser-public variable plain and build-scoped, or build with the automatic recipe, which passes build values as BuildKit secrets.",
 			"deploy", "variables"))
 	}
 	return findings
@@ -319,6 +321,7 @@ func composeBuildFindings(detection *DetectionResult, configuration PlanConfigur
 		}
 		return findings
 	}
+	findings = append(findings, composeBuildArgFindings(detection.Compose, configuration)...)
 	for _, service := range detection.Compose.Services {
 		prefix := "service " + service.Name + ": "
 		if service.BuildContextMissing {
@@ -346,13 +349,27 @@ func composeBuildFindings(detection *DetectionResult, configuration PlanConfigur
 				findings = append(findings, item)
 			}
 		}
-		if len(service.ImagePlatforms) > 0 && observation.OS != "" && observation.Architecture != "" &&
+		// A service that pins `platform:` to one the image offers is pulled
+		// for that platform and runs under emulation; the platform finding
+		// above says whether this host can emulate it. Without the pin Docker
+		// asks for this host's own platform, which the image does not have.
+		pinned := service.Platform != "" && !strings.Contains(service.Platform, "$") &&
+			platformListContains(service.ImagePlatforms, strings.ToLower(service.Platform))
+		if len(service.ImagePlatforms) > 0 && observation.OS != "" && observation.Architecture != "" && !pinned &&
 			!platformListContains(service.ImagePlatforms, observation.OS+"/"+observation.Architecture) {
+			action := "Use an image or tag published for " + observation.Architecture + "."
+			for _, platform := range service.ImagePlatforms {
+				if parts := strings.Split(platform, "/"); len(parts) >= 2 && parts[0] == observation.OS && slicesContain(observation.Emulators, parts[1]) {
+					action = "Use an image or tag published for " + observation.Architecture + ", or set platform: " + parts[0] + "/" + parts[1] +
+						" on the service to run it under this host's " + parts[1] + " emulator, many times slower."
+					break
+				}
+			}
 			findings = append(findings, finding("compose_image_platform_missing", PreflightBlocked,
 				"A Compose service image is not published for this host's architecture",
 				prefix+service.Image+" offers "+strings.Join(service.ImagePlatforms, ", ")+"; this host is "+observation.OS+"/"+observation.Architecture,
-				"Docker cannot pull a matching image, or runs it under emulation that fails without an emulator.",
-				"Use an image or tag published for "+observation.Architecture+".", "docker", "source.compose"))
+				"Docker asks the registry for this host's platform, which the image does not offer, so the pull fails.",
+				action, "docker", "source.compose"))
 		}
 	}
 	if detection.Compose.PrimaryService != "" {
@@ -364,13 +381,64 @@ func composeBuildFindings(detection *DetectionResult, configuration PlanConfigur
 	return findings
 }
 
-func releaseTaskFindings(planned *DetectedCandidate, configuration PlanConfiguration, observation HostObservation) []PreflightFinding {
+// composeBuildArgFindings: a Compose build argument is interpolated from the
+// plain runtime and build variables (composeBuildArgValues). One that reads a
+// secret would refuse the build; one whose variable is planned for neither
+// scope is empty during it. An unplanned variable is already a
+// compose_variable_* decision.
+func composeBuildArgFindings(compose *ComposeAnalysis, configuration PlanConfiguration) []PreflightFinding {
+	planned := map[string]PlannedVariable{}
+	for _, variable := range configuration.Variables {
+		planned[variable.Name] = variable
+	}
+	secret, unscoped := []string{}, []string{}
+	check := func(service, reader, name string) {
+		variable, declared := planned[name]
+		switch {
+		case !declared:
+		case variable.Sensitivity != "plain":
+			secret = append(secret, "service "+service+": "+reader+" reads "+name)
+		case !slicesContain(variable.Scopes, "runtime") && !slicesContain(variable.Scopes, "build"):
+			unscoped = append(unscoped, "service "+service+": "+reader+" reads "+name)
+		}
+	}
+	for _, service := range compose.Services {
+		for _, arg := range service.BuildArgs {
+			for _, name := range composeArgVariableNames(arg) {
+				check(service.Name, "build argument "+arg.Name, name)
+			}
+		}
+		for _, name := range composeExpressionNames(service.BuildTarget) {
+			check(service.Name, "build target", name)
+		}
+	}
+	findings := []PreflightFinding{}
+	if len(secret) > 0 {
+		findings = append(findings, finding("compose_build_arg_secret", PreflightBlocked,
+			"A Compose build argument reads a secret variable", strings.Join(secret, "; "),
+			"A build argument stays in the image's history, so a secret is never passed as one and the build refuses it.",
+			"If the value is public — a URL the page's JavaScript carries — make the variable plain; otherwise take it out of build.args and read it at runtime, or mount it as a BuildKit secret in the Dockerfile.",
+			"deploy", "variables"))
+	}
+	if len(unscoped) > 0 {
+		findings = append(findings, finding("compose_build_arg_unscoped", PreflightWarning,
+			"A Compose build argument will be empty", strings.Join(unscoped, "; "),
+			"Build arguments are interpolated from the runtime and build variables; this one is planned only for release tasks.",
+			"Give the variable runtime or build scope.", "deploy", "variables"))
+	}
+	return findings
+}
+
+func releaseTaskFindings(planned *DetectedCandidate, detection *DetectionResult, configuration PlanConfiguration, observation HostObservation) []PreflightFinding {
 	findings := []PreflightFinding{}
 	imageTask := false
 	for index, task := range configuration.Build.ReleaseTasks {
-		field := fmt.Sprintf("configuration.build.releaseTasks[%d]", index)
+		field := fmt.Sprintf("configuration.build.releaseTasks[%d].command", index)
 		if task.Runner == ReleaseTaskRunnerImage {
 			imageTask = true
+			if configuration.Build.Method == BuildCompose {
+				findings = append(findings, composeReleaseTaskFinding(task, detection, fmt.Sprintf("configuration.build.releaseTasks[%d].runner", index)))
+			}
 			continue
 		}
 		if token, needs := releaseTaskInstalledTool(task.Command); needs {
@@ -397,6 +465,34 @@ func releaseTaskFindings(planned *DetectedCandidate, configuration PlanConfigura
 			"Add it as a release task that runs in the release image.", "deploy", "configuration.build.releaseTasks"))
 	}
 	return findings
+}
+
+// composeReleaseTaskFinding: an image task of a Compose release runs the
+// primary service's image on its own, with the environment's runtime
+// variables and database networks — outside the Compose project, so neither
+// the stack's network nor the service's own environment: entries apply. A
+// migration against the stack's own database cannot even resolve its name.
+func composeReleaseTaskFinding(task ReleaseTaskConfig, detection *DetectionResult, field string) PreflightFinding {
+	backing := []string{}
+	if detection != nil && detection.Compose != nil {
+		for _, service := range detection.Compose.Services {
+			if family, known := composeImageFamily(service.Image); known && service.BuildContext == "" {
+				backing = append(backing, service.Name+" ("+family+")")
+			}
+		}
+	}
+	const means = "An image task runs the primary service's image once on its own, with the environment's runtime variables and the dashboard's database networks — not on the Compose project's network, and without the service's own environment: entries."
+	if len(backing) > 0 {
+		return finding("release_task_outside_compose_stack", PreflightBlocked,
+			"A release task cannot reach the Compose stack's own services",
+			task.Name+": "+strings.Join(backing, ", ")+" run only inside the stack",
+			means+" A service name such as db does not resolve from it.",
+			"Run the migration from the Compose file — a one-off service the application depends_on with condition: service_completed_successfully, or the service's own command — or point the task's variables at a dashboard database.",
+			"deploy", field)
+	}
+	return finding("release_task_outside_compose_stack", PreflightWarning,
+		"A release task runs outside the Compose stack", task.Name,
+		means, "Make sure the task needs only the runtime variables, or run it from the Compose file instead.", "deploy", field)
 }
 
 func releaseTaskToolFacility(tool string) string { return "release_task_tool:" + tool }
