@@ -91,7 +91,7 @@ func persistentStateAction(entries []DetectedPersistentPath) string {
 			action = "Persist the keys with PersistKeysToDbContext or Redis"
 		case entry.Path == "/pb_data":
 			action = "Start PocketBase with serve --dir=" + compiledRuntimeHome + "/data and mount a volume at " + compiledRuntimeHome + "/data"
-		case entry.Kind == PersistentStorage:
+		case entry.Kind == PersistentStorage && path.Ext(entry.Path) == "":
 			action = "Commit the changes back to the repository, or mount volumes on these directories (the repository's copies then only seed the first release)"
 		default:
 			action = "Keep the file in a directory of its own, or read its location from a variable, and mount a volume there; or use a server database"
@@ -105,13 +105,18 @@ func persistentStateAction(entries []DetectedPersistentPath) string {
 }
 
 // persistentPathCovered reports whether a release keeps the state, and on
-// which mount: a linked server database takes the file out of use (no
-// mount), a variable moves it under a writable mount, or a writable mount
-// covers where it is written by default.
+// which mount: a driver other than SQLite or a linked server database takes
+// the file out of use (no mount), a variable moves it under a writable
+// mount, or a writable mount covers where it is written by default.
 func persistentPathCovered(entry DetectedPersistentPath, mounts []RuntimeMount, values map[string]string) (bool, string) {
 	onMount := func(location string) (bool, string) {
 		mount := coveringMount(mounts, location)
 		return mount != "", mount
+	}
+	if entry.ConnectionVariable != "" {
+		if driver := strings.TrimSpace(values[entry.ConnectionVariable]); driver != "" && !strings.EqualFold(driver, "sqlite") {
+			return true, ""
+		}
 	}
 	if entry.DatabaseVariable != "" {
 		if value := strings.TrimSpace(values[entry.DatabaseVariable]); value != "" {
@@ -207,18 +212,51 @@ func schemaPushFinding(candidate *DetectedCandidate, build BuildPlanConfig) *Pre
 	return &item
 }
 
+// sqliteOnVolume reports whether the plan keeps a detected SQLite database
+// on a volume. A volume mounted for the first time is empty, so the database
+// there starts without the schema the image's copy had, the way a newly
+// linked server database does.
+func sqliteOnVolume(candidate *DetectedCandidate, configuration PlanConfiguration, values map[string]string) bool {
+	if candidate == nil {
+		return false
+	}
+	for _, entry := range candidate.PersistentPaths {
+		if entry.Kind != PersistentSQLite {
+			continue
+		}
+		if covered, mount := persistentPathCovered(entry, configuration.Runtime.Mounts, values); covered && mount != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// sqliteSchemaStepFinding is schemaStepFinding for a SQLite database moved
+// onto a volume, when no server database is linked: the file there starts
+// empty — or, seeded from a committed copy, only the first time — and a tool
+// whose schema step nothing runs creates no table.
+func sqliteSchemaStepFinding(candidate *DetectedCandidate, build BuildPlanConfig) PreflightFinding {
+	item := schemaStepFinding(candidate, build)
+	if item.Severity == PreflightPass {
+		item.Means = "The SQLite database on the volume receives the " + item.Measured + " schema from the start command, a release task or the application itself."
+		return item
+	}
+	item.Title = "The SQLite database on the volume will not receive the application's schema"
+	item.Means = "The volume starts empty, and " + item.Measured + " creates no table until its schema step runs, so the first request that reads the database fails with \"no such table\". A database file committed to the repository seeds the volume only the first time it is mounted; migrations added later are never applied."
+	return item
+}
+
 var seedStepRE = regexp.MustCompile(`db[: ]seed|\bseed\b`)
 
 // seedFinding says a new database will have the schema but none of the rows
-// the project seeds — often the only administrator account.
-func seedFinding(candidate *DetectedCandidate, configuration PlanConfiguration) *PreflightFinding {
-	if candidate == nil || candidate.SeedCommand == "" {
+// the project seeds — often the only administrator account. A database is
+// new only on a project's first release: a redeploy's database already holds
+// whatever was seeded into it.
+func seedFinding(candidate *DetectedCandidate, configuration PlanConfiguration, values map[string]string, firstRelease bool) *PreflightFinding {
+	if candidate == nil || candidate.SeedCommand == "" || !firstRelease {
 		return nil
 	}
-	fresh := hasDatabaseDependency(configuration.Dependencies)
-	for _, entry := range candidate.PersistentPaths {
-		fresh = fresh || (entry.Kind == PersistentSQLite && entry.Target != "" && coveringMount(configuration.Runtime.Mounts, entry.Target) != "")
-	}
+	fresh := hasDatabaseDependency(configuration.Dependencies) || sqliteOnVolume(candidate, configuration, values)
 	if !fresh || seedStepRE.MatchString(configuration.Build.StartCommand) {
 		return nil
 	}
@@ -238,14 +276,15 @@ func seedFinding(candidate *DetectedCandidate, configuration PlanConfiguration) 
 	return &item
 }
 
-// stateFindings is every persistent-state, schema-push and seed finding for
-// the selected candidate.
-func stateFindings(candidate *DetectedCandidate, configuration PlanConfiguration, values map[string]string) []PreflightFinding {
+// stateFindings is every persistent-state and seed finding for the selected
+// candidate. firstRelease is false when a live release's runtime is being
+// replaced.
+func stateFindings(candidate *DetectedCandidate, configuration PlanConfiguration, values map[string]string, firstRelease bool) []PreflightFinding {
 	if candidate == nil || candidate.BuildMethod != configuration.Build.Method {
 		return nil
 	}
 	findings := persistentStateFindings(candidate, configuration, values)
-	if seed := seedFinding(candidate, configuration); seed != nil {
+	if seed := seedFinding(candidate, configuration, values, firstRelease); seed != nil {
 		findings = append(findings, *seed)
 	}
 	return findings

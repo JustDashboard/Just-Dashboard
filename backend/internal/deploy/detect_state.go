@@ -28,16 +28,19 @@ import (
 // can hold the state without also hiding code, and the state is then only
 // reported. Variable and Value move the state under Target through a variable
 // the application reads; DatabaseVariable names the variable through which a
-// linked server database replaces the file altogether.
+// linked server database replaces the file altogether, and
+// ConnectionVariable the one choosing the database driver, which set to
+// anything but sqlite takes the file out of use (Laravel's DB_CONNECTION).
 type DetectedPersistentPath struct {
-	Kind             string `json:"kind"`
-	Path             string `json:"path"`
-	Target           string `json:"target,omitempty"`
-	Variable         string `json:"variable,omitempty"`
-	Value            string `json:"value,omitempty"`
-	DatabaseVariable string `json:"databaseVariable,omitempty"`
-	Source           string `json:"source"`
-	Reason           string `json:"reason"`
+	Kind               string `json:"kind"`
+	Path               string `json:"path"`
+	Target             string `json:"target,omitempty"`
+	Variable           string `json:"variable,omitempty"`
+	Value              string `json:"value,omitempty"`
+	DatabaseVariable   string `json:"databaseVariable,omitempty"`
+	ConnectionVariable string `json:"connectionVariable,omitempty"`
+	Source             string `json:"source"`
+	Reason             string `json:"reason"`
 }
 
 // The kinds of state detection recognises. Each has its own preflight code so
@@ -74,6 +77,7 @@ func validPersistentPaths(paths []DetectedPersistentPath) bool {
 			(entry.Target != "" && !absolute(entry.Target, false)) ||
 			(entry.Variable != "" && ValidateEnvKey(entry.Variable) != nil) ||
 			(entry.DatabaseVariable != "" && ValidateEnvKey(entry.DatabaseVariable) != nil) ||
+			(entry.ConnectionVariable != "" && ValidateEnvKey(entry.ConnectionVariable) != nil) ||
 			(entry.Value != "" && entry.Variable == "") ||
 			len(entry.Value) > 512 || strings.ContainsAny(entry.Value, "\x00\r\n") ||
 			rejectPlanSecretLiteral("persistent path value", entry.Value) != nil ||
@@ -160,6 +164,13 @@ func stateConfigFile(lowerRel, name string) bool {
 	case "alembic.ini", "prestart.sh", "settings.py", "appsettings.json", "appsettings.production.json",
 		"gemfile.lock", "gemfile":
 		return true
+	case "env.py":
+		// Alembic's environment script, read for where it connects.
+		return true
+	case "mix.exs":
+		return true
+	case "runtime.exs":
+		return parent == "config"
 	}
 	if strings.HasSuffix(name, ".prisma") || strings.HasPrefix(name, "prisma.config.") || strings.HasPrefix(name, "drizzle.config.") {
 		return true
@@ -183,6 +194,7 @@ var stateSourceTokens = []string{
 	"sqlite", "Sqlite", "multer", "MEDIA_ROOT", "SQLALCHEMY", "create_engine",
 	"AddIdentity", "AddDefaultIdentity", "AddCookie", "AddRazorPages", "AddControllersWithViews", "AddAntiforgery",
 	"AddServerSideBlazor", "AddRazorComponents", "PersistKeysTo", "Migrate(", "MigrateAsync(", "EnsureCreated",
+	"JSONFile",
 }
 
 var stateSkippedDirs = map[string]bool{
@@ -235,16 +247,23 @@ func (s *stateScanner) observe(rel, name, fullPath string, entry fs.DirEntry) {
 }
 
 // stateEvidenceFile names the files whose presence alone is evidence: an
-// Alembic revision, an EF Core model snapshot.
+// Alembic revision, an EF Core model snapshot, a committed SQLite database.
 func stateEvidenceFile(lowerRel, name string) bool {
 	switch {
 	case strings.HasSuffix(name, ".py") && path.Base(path.Dir(lowerRel)) == "versions":
 		return true
 	case strings.HasSuffix(name, "modelsnapshot.cs"):
 		return true
+	case strings.HasSuffix(name, ".db") || strings.HasSuffix(name, ".sqlite") || strings.HasSuffix(name, ".sqlite3"):
+		return true
+	case path.Base(path.Dir(lowerRel)) == "fixtures" && djangoFixtureExtensions[path.Ext(name)]:
+		// A Django application's fixtures, which loaddata seeds from.
+		return true
 	}
 	return false
 }
+
+var djangoFixtureExtensions = map[string]bool{".json": true, ".yaml": true, ".yml": true, ".xml": true}
 
 func stateSkippedSource(lowerRel, name string) bool {
 	if strings.HasSuffix(name, ".d.ts") || strings.HasSuffix(name, ".min.js") || strings.HasSuffix(name, "_test.go") ||
@@ -445,6 +464,7 @@ func applyStateDetection(marker *detectedMarkers, candidates []DetectedCandidate
 		found = append(found, railsStatePaths(candidate, marker, view, layout)...)
 		found = append(found, compiledStatePaths(candidate, marker, view, variables, layout)...)
 		found = append(found, dotnetStatePaths(candidate, marker, view, layout)...)
+		found = append(found, elixirStatePaths(candidate, view, layout)...)
 		if candidate.BuildMethod == BuildDockerfile {
 			for _, volume := range detectedDockerfileVolumes(marker.dockerfileContent) {
 				found = append(found, DetectedPersistentPath{
@@ -477,17 +497,22 @@ func persistentEvidence(entry DetectedPersistentPath) string {
 	return reason
 }
 
-// mergePersistentPaths keeps one entry per kind and path, in a stable order,
-// within the bound a saved detection allows.
+// mergePersistentPaths keeps one entry per kind and path, and one per
+// variable — a variable holds one value, and the detector that read it more
+// closely comes first — in a stable order, within the bound a saved detection
+// allows.
 func mergePersistentPaths(found []DetectedPersistentPath) []DetectedPersistentPath {
 	seen := map[string]bool{}
 	var result []DetectedPersistentPath
 	for _, entry := range found {
 		key := entry.Kind + "\x00" + entry.Path
-		if entry.Path == "" || seen[key] {
+		if entry.Path == "" || seen[key] || (entry.Variable != "" && seen["variable\x00"+entry.Variable]) {
 			continue
 		}
 		seen[key] = true
+		if entry.Variable != "" {
+			seen["variable\x00"+entry.Variable] = true
+		}
 		result = append(result, entry)
 	}
 	if !validPersistentPaths(result) {
@@ -513,7 +538,7 @@ func sqliteLocation(value string) (prefix, file, query string, ok bool) {
 	if value == "" || strings.Contains(value, ":memory:") || strings.Contains(value, "mode=memory") {
 		return "", "", "", false
 	}
-	if index := strings.IndexAny(value, "?"); index >= 0 {
+	if index := strings.IndexByte(value, '?'); index >= 0 {
 		value, query = value[:index], value[index:]
 	}
 	switch {
@@ -552,6 +577,14 @@ func sqliteFileName(value string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(value)), "file:")
 }
 
+// sqliteFileExample reports whether a variable's documented example leaves
+// it free to name a file on a volume: it names a SQLite file, or nothing. An
+// example naming a hosted database — Turso's libsql://, an https:// endpoint
+// — says the data lives elsewhere, and a local file would silently replace it.
+func sqliteFileExample(example string) bool {
+	return strings.TrimSpace(example) == "" || sqliteFileName(example)
+}
+
 // relocatedSQLite is the value that keeps a SQLite file named like example in
 // dir, in the example's own scheme so the driver reads it the same way.
 func relocatedSQLite(example, dir, defaultPrefix string) string {
@@ -585,8 +618,8 @@ func safeSQLiteQuery(query string) bool {
 	return query == "" || (len(query) <= 128 && sqliteQueryRE.MatchString(query))
 }
 
-// persistentFileVariable is a detected variable whose documented example is a
-// SQLite file: the variable a source reads its database location from.
+// persistentFileVariables are the detected variables whose documented example
+// is a SQLite file: the variables a source reads its database location from.
 func persistentFileVariables(variables []DetectedVariable) []DetectedVariable {
 	var result []DetectedVariable
 	for _, variable := range variables {
@@ -678,6 +711,7 @@ var (
 	jsSQLiteLiteralRE  = regexp.MustCompile(`(?:Database|DatabaseSync|createClient|drizzle|open)\s*\(\s*(?:\{[^}]*?(?:url|filename)\s*:\s*)?["'\x60]([^"'\x60\s]+)["'\x60]`)
 	multerDestRE       = regexp.MustCompile(`\b(?:dest|destination)\s*:\s*(?:["'\x60]([^"'\x60]+)["'\x60]|process\.env\.([A-Z][A-Z0-9_]*))`)
 	multerCallbackRE   = regexp.MustCompile(`\bcb\(\s*null\s*,\s*["'\x60]([^"'\x60]+)["'\x60]\s*\)`)
+	lowdbFileRE        = regexp.MustCompile(`\bJSONFile(?:Sync)?(?:Preset)?\(\s*["'\x60]([^"'\x60]+)["'\x60]`)
 )
 
 // nodeSQLiteLibraries are the packages that open a SQLite file themselves;
@@ -719,22 +753,38 @@ func nodeStatePaths(candidate *DetectedCandidate, marker *detectedMarkers, view 
 		claimed[entry.Variable] = true
 	}
 	if sqlite && len(prisma) == 0 {
+		drizzleConfigs := view.sorted(func(name string) bool { return strings.HasPrefix(path.Base(name), "drizzle.config.") })
+		// The turso dialect talks to a hosted libSQL database even when
+		// development points it at a local file; that file is not where
+		// production keeps its data, and a volume would silently stand in for
+		// the hosted database. Its variable is never relocated.
+		for _, name := range drizzleConfigs {
+			content := view.contents[name]
+			if dialect := drizzleDialectRE.FindSubmatch(content); dialect != nil && string(dialect[1]) == "turso" {
+				if match := configEnvURLRE.FindSubmatch(content); match != nil {
+					claimed[firstNonEmpty(string(match[1]), string(match[2]), string(match[3]))] = true
+				}
+			}
+		}
 		for _, variable := range persistentFileVariables(variables) {
+			if claimed[variable.Name] || strings.HasPrefix(variable.Name, "TURSO_") {
+				continue
+			}
 			claimed[variable.Name] = true
 			result = append(result, relocatableSQLite(variable, layout, defaultPrefix, "the source opens its SQLite database from "+variable.Name))
 		}
-		for _, name := range view.sorted(func(name string) bool { return strings.HasPrefix(path.Base(name), "drizzle.config.") }) {
+		for _, name := range drizzleConfigs {
 			content := view.contents[name]
-			if !drizzleDialectRE.Match(content) {
+			if dialect := drizzleDialectRE.FindSubmatch(content); dialect == nil || string(dialect[1]) == "turso" {
 				continue
 			}
 			if match := configEnvURLRE.FindSubmatch(content); match != nil {
 				variable := firstNonEmpty(string(match[1]), string(match[2]), string(match[3]))
-				if claimed[variable] {
+				detected, _ := variableByName(variables, variable)
+				if claimed[variable] || !sqliteFileExample(detected.Example) {
 					continue
 				}
 				claimed[variable] = true
-				detected, _ := variableByName(variables, variable)
 				detected.Name = variable
 				if len(detected.Sources) == 0 {
 					detected.Sources = []string{joinRoot(view.root, name)}
@@ -768,12 +818,12 @@ func nodeStatePaths(candidate *DetectedCandidate, marker *detectedMarkers, view 
 		if strings.EqualFold(client.Example, "sqlite") || (client.Example == "" && strings.Contains(string(config), "'sqlite'")) ||
 			(client.Example == "" && strings.Contains(string(config), `"sqlite"`)) {
 			result = append(result, DetectedPersistentPath{
-				Kind: PersistentSQLite, Path: layout.containerPath(".tmp/data.db"), Target: stateTarget(layout, view, ".tmp"),
+				Kind: PersistentSQLite, Path: layout.containerPath(".tmp/data.db"), Target: layout.writableTarget(view, ".tmp"),
 				Source: joinRoot(view.root, "package.json"), Reason: "Strapi keeps its SQLite database in .tmp/data.db",
 			})
 		}
 		result = append(result, DetectedPersistentPath{
-			Kind: PersistentUploads, Path: layout.containerPath("public/uploads"), Target: stateTarget(layout, view, "public/uploads"),
+			Kind: PersistentUploads, Path: layout.containerPath("public/uploads"), Target: layout.writableTarget(view, "public/uploads"),
 			Source: joinRoot(view.root, "package.json"), Reason: "Strapi's local upload provider writes public/uploads",
 		})
 	}
@@ -807,8 +857,30 @@ func nodeStatePaths(candidate *DetectedCandidate, marker *detectedMarkers, view 
 			}
 		}
 	}
+	if manifest.has("lowdb") {
+		for _, name := range view.sorted(func(name string) bool { return jsSourceFile(name) }) {
+			for _, match := range lowdbFileRE.FindAllSubmatch(view.contents[name], 4) {
+				if entry, ok := lowdbState(string(match[1]), joinRoot(view.root, name), view, layout); ok {
+					result = append(result, entry)
+				}
+			}
+		}
+	}
 	result = append(result, uploadVariables(variables, layout)...)
 	return result
+}
+
+// lowdbState is the JSON file lowdb keeps its whole database in. Like a
+// SQLite file, it can be kept only when it sits in a directory of its own.
+func lowdbState(literal, source string, view stateRoot, layout stateLayout) (DetectedPersistentPath, bool) {
+	file := strings.TrimPrefix(strings.TrimSpace(literal), "./")
+	if file == "" || path.IsAbs(file) || strings.HasPrefix(file, "..") || strings.ContainsAny(file, "$`{}") || !safeRelativePath(file) {
+		return DetectedPersistentPath{}, false
+	}
+	return DetectedPersistentPath{
+		Kind: PersistentStorage, Path: layout.containerPath(file), Target: layout.mountableDirectory(view, file),
+		Source: source, Reason: "lowdb keeps its database in the JSON file " + boundedEvidence(file),
+	}, true
 }
 
 func jsSourceFile(name string) bool {
@@ -817,12 +889,6 @@ func jsSourceFile(name string) bool {
 		return !strings.HasPrefix(path.Base(name), "drizzle.config.") && !strings.HasPrefix(path.Base(name), "prisma.config.")
 	}
 	return false
-}
-
-// stateTarget is the container directory for a root-relative directory the
-// framework itself writes, when a volume may stand there.
-func stateTarget(layout stateLayout, view stateRoot, dir string) string {
-	return layout.writableTarget(view, dir)
 }
 
 func literalUploads(literal, source string, view stateRoot, layout stateLayout) []DetectedPersistentPath {
@@ -837,7 +903,7 @@ func literalUploads(literal, source string, view stateRoot, layout stateLayout) 
 	if strings.Contains(dir, "/") {
 		entry.Target = layout.mountableDirectory(view, dir+"/file")
 	} else if stateDataDirectoryNames[strings.ToLower(dir)] {
-		entry.Target = stateTarget(layout, view, dir)
+		entry.Target = layout.writableTarget(view, dir)
 	}
 	return []DetectedPersistentPath{entry}
 }
@@ -921,6 +987,11 @@ func prismaSQLitePaths(manifest nodeManifest, view stateRoot, variables []Detect
 		if variable != "" {
 			detected, _ := variableByName(variables, variable)
 			detected.Name = variable
+			if !sqliteFileExample(detected.Example) {
+				// A driver adapter points the sqlite provider at a hosted
+				// libSQL database; its data is not in the container.
+				continue
+			}
 			if len(detected.Sources) == 0 {
 				detected.Sources = []string{source}
 			}
@@ -1179,7 +1250,7 @@ func laravelStatePaths(candidate *DetectedCandidate, marker *detectedMarkers, vi
 	if sqlite {
 		entry := DetectedPersistentPath{
 			Kind: PersistentSQLite, Path: layout.containerPath("database/database.sqlite"), DatabaseVariable: "DB_URL",
-			Source: firstNonEmpty(firstSource(connection), composer),
+			ConnectionVariable: "DB_CONNECTION", Source: firstNonEmpty(firstSource(connection), composer),
 			Reason: "Laravel's database connection is SQLite in database/database.sqlite, which also holds sessions, cache and queued jobs",
 		}
 		// config/database.php, when the application keeps its own copy, has to
@@ -1344,10 +1415,7 @@ func compiledStatePaths(candidate *DetectedCandidate, marker *detectedMarkers, v
 			sqlite = sqlite || strings.Contains(module, name)
 		}
 		if strings.Contains(module, "github.com/pocketbase/pocketbase") {
-			result = append(result, DetectedPersistentPath{
-				Kind: PersistentSQLite, Path: "/pb_data", Source: joinRoot(view.root, "go.mod"),
-				Reason: "PocketBase keeps pb_data beside its executable unless serve is given --dir",
-			})
+			result = append(result, pocketBaseState(candidate, view, layout))
 		}
 	}
 	if rustCrate && rustSQLiteCrateRE.Match(marker.cargoToml) {
@@ -1375,6 +1443,32 @@ func compiledStatePaths(candidate *DetectedCandidate, marker *detectedMarkers, v
 		}
 	}
 	return result
+}
+
+// pocketBaseState is where a PocketBase application built from Go keeps its
+// SQLite databases and uploaded files. Without --dir it is pb_data beside the
+// executable — /pb_data for the recipe's /app, which the unprivileged user
+// cannot create — and with no serve command the binary only prints its help.
+// A recipe candidate with no start command of its own is given one that
+// serves on the planned port from the data directory the image prepares.
+func pocketBaseState(candidate *DetectedCandidate, view stateRoot, layout stateLayout) DetectedPersistentPath {
+	entry := DetectedPersistentPath{
+		Kind: PersistentSQLite, Path: "/pb_data", Source: joinRoot(view.root, "go.mod"),
+		Reason: "PocketBase keeps pb_data beside its executable unless serve is given --dir",
+	}
+	if candidate.BuildMethod != BuildRecipe || candidate.Recipe != "go" || candidate.StartCommand != "" || layout.dataDir == "" {
+		return entry
+	}
+	candidate.StartCommand = "/app serve --http=0.0.0.0:${PORT:-8090} --dir=" + layout.dataDir
+	if candidate.Port == 0 {
+		candidate.Port = 8090
+	}
+	candidate.Evidence = append(candidate.Evidence, DetectionEvidence{
+		Path: entry.Source, Reason: "PocketBase application: the start command serves on all interfaces with its data in " + layout.dataDir,
+	})
+	entry.Path, entry.Target = layout.dataDir, layout.dataDir
+	entry.Reason = "PocketBase keeps its databases and uploaded files in the directory serve --dir names"
+	return entry
 }
 
 // .NET --------------------------------------------------------------------
@@ -1419,6 +1513,11 @@ func dotnetStatePaths(candidate *DetectedCandidate, marker *detectedMarkers, vie
 					// move without touching the source.
 					entry.Target, entry.Variable = layout.dataDir, "ConnectionStrings__"+match[1]
 					entry.Value = "Data Source=" + path.Join(layout.dataDir, path.Base(file))
+					if candidate.BuildMethod == BuildRecipe && view.present[file] {
+						// The recipe copies it into the data directory
+						// (dotnetSQLiteSeeds).
+						entry.Reason += "; the committed copy seeds the volume the first time it is mounted"
+					}
 					for _, option := range strings.Split(strings.TrimPrefix(match[4], ";"), ";") {
 						if kept := dotnetConnectionOptRE.FindStringSubmatch(option); kept != nil {
 							entry.Value += ";" + kept[1] + "=" + kept[2]
@@ -1458,6 +1557,50 @@ func dotnetStatePaths(candidate *DetectedCandidate, marker *detectedMarkers, vie
 		}
 	}
 	return result
+}
+
+// Elixir ------------------------------------------------------------------
+
+var (
+	mixAppRE          = regexp.MustCompile(`\bapp:\s*:([a-z][a-z0-9_]{0,63})\b`)
+	elixirEnvPathRE   = regexp.MustCompile(`System\.(?:get_env|fetch_env!)\(\s*"([A-Z][A-Z0-9_]*)"`)
+	elixirSQLiteDepRE = regexp.MustCompile(`\{\s*:ecto_sqlite3\b`)
+)
+
+// elixirStatePaths reads a Phoenix release built by its own Dockerfile
+// (there is no Elixir recipe) whose Ecto repository is SQLite: the file the
+// release's runtime.exs reads its location from, DATABASE_PATH in the
+// generator's own config.
+func elixirStatePaths(candidate *DetectedCandidate, view stateRoot, layout stateLayout) []DetectedPersistentPath {
+	_, mix := view.file("mix.exs")
+	if candidate.BuildMethod != BuildDockerfile || !elixirSQLiteDepRE.Match(mix) {
+		return nil
+	}
+	source, runtime := view.file("config/runtime.exs")
+	variable := ""
+	for _, match := range elixirEnvPathRE.FindAllSubmatch(runtime, 16) {
+		name := string(match[1])
+		if (strings.Contains(name, "DATABASE") || strings.Contains(name, "DB")) && !strings.Contains(name, "URL") {
+			variable = name
+			break
+		}
+	}
+	base := "app.db"
+	if match := mixAppRE.FindSubmatch(mix); match != nil {
+		base = string(match[1]) + ".db"
+	}
+	entry := DetectedPersistentPath{
+		Kind: PersistentSQLite, Path: layout.containerPath(base), Source: joinRoot(view.root, firstNonEmpty(source, "mix.exs")),
+		Reason: "the Ecto repository is a SQLite file (ecto_sqlite3)",
+	}
+	if variable != "" {
+		entry.Variable = variable
+		entry.Reason = "the Ecto repository is the SQLite file " + variable + " names (ecto_sqlite3)"
+		if layout.dataDir != "" {
+			entry.Target, entry.Value = layout.dataDir, path.Join(layout.dataDir, base)
+		}
+	}
+	return []DetectedPersistentPath{entry}
 }
 
 // Dockerfile --------------------------------------------------------------
@@ -1519,16 +1662,17 @@ func dockerfileFinalStage(content []byte) (string, string) {
 				name = strings.ToLower(arguments[2])
 			}
 		case "WORKDIR":
-			if len(instruction) > 1 && !strings.Contains(instruction[1], "$") {
-				if path.IsAbs(instruction[1]) {
-					current.workdir = path.Clean(instruction[1])
+			// Phoenix's generated Dockerfile writes WORKDIR "/app".
+			if dir := strings.Trim(strings.Join(instruction[1:], " "), `"'`); dir != "" && !strings.Contains(dir, "$") {
+				if path.IsAbs(dir) {
+					current.workdir = path.Clean(dir)
 				} else {
-					current.workdir = path.Join(current.workdir, instruction[1])
+					current.workdir = path.Join(current.workdir, dir)
 				}
 			}
 		case "USER":
 			if len(instruction) > 1 {
-				current.user = instruction[1]
+				current.user = strings.Trim(instruction[1], `"'`)
 			}
 		}
 	}
@@ -1574,7 +1718,7 @@ func detectedDockerfileVolumes(content []byte) []string {
 			}
 			for _, value := range paths {
 				value = strings.TrimSpace(value)
-				if !path.IsAbs(value) || strings.ContainsAny(value, "$\x00\r\n") || path.Clean(value) == "/" {
+				if !path.IsAbs(value) || strings.ContainsAny(value, "$\x00\r\n") || path.Clean(value) == "/" || scratchVolumePath(value) {
 					continue
 				}
 				volumes = append(volumes, path.Clean(value))
@@ -1585,13 +1729,30 @@ func detectedDockerfileVolumes(content []byte) []string {
 	return uniqueSorted(volumes)
 }
 
+// scratchVolumeRoots are where a process keeps what it can lose: temporary
+// files, sockets and pid files, caches. An image declares VOLUME /tmp (as the
+// Spring Boot guide's Dockerfile does) for speed, not to keep data, and a
+// managed volume there would keep scratch files across releases, force
+// stop-first releases and ask for a backup of nothing.
+var scratchVolumeRoots = []string{"/tmp", "/var/tmp", "/run", "/var/run", "/var/cache", "/dev/shm"}
+
+func scratchVolumePath(value string) bool {
+	value = path.Clean(value)
+	for _, root := range scratchVolumeRoots {
+		if value == root || strings.HasPrefix(value, root+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // imagePersistentPaths turns the volumes an image's configuration declares
 // into planned state, the way a Dockerfile's VOLUME lines are.
 func imagePersistentPaths(reference string, volumes []string) []DetectedPersistentPath {
 	var result []DetectedPersistentPath
 	for _, volume := range volumes {
 		volume = strings.TrimSpace(volume)
-		if !path.IsAbs(volume) || path.Clean(volume) == "/" || strings.ContainsAny(volume, "\x00\r\n") {
+		if !path.IsAbs(volume) || path.Clean(volume) == "/" || strings.ContainsAny(volume, "\x00\r\n") || scratchVolumePath(volume) {
 			continue
 		}
 		volume = path.Clean(volume)

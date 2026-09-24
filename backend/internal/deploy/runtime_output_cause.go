@@ -35,7 +35,9 @@ var schemaPushRefusedPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`Interactive prompts require a TTY terminal`),              // drizzle-kit push
 }
 
-// A SQLite file in a directory the container's user cannot write.
+// A SQLite file the container cannot open or write: its directory is missing
+// — a relocated path whose volume is gone — or not writable by the
+// container's user. SQLite words both as "unable to open database file".
 var sqliteReadOnlyPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`attempt to write a readonly database`),
 	regexp.MustCompile(`SQLITE_READONLY`),
@@ -75,7 +77,7 @@ func (c *OutputCause) sentence() string {
 	case "schema_push_refused":
 		return "the start command's schema push refused a change that would drop or rename data (or stopped to ask about it), so the server never started; commit migrations so the start applies them — `prisma migrate dev` then `prisma migrate deploy`, or `drizzle-kit generate` then `drizzle-kit migrate` — or apply the change to the database by hand"
 	case "sqlite_not_writable":
-		return "the application cannot write its SQLite database file, because the directory holding it is not writable by the container's user; keep the file in the image's data directory or on a volume that user owns"
+		return "the application cannot open or write its SQLite database file: the directory holding it is missing or not writable by the container's user; keep the file in the image's data directory or on a volume mounted there, which that user owns"
 	}
 	return ""
 }

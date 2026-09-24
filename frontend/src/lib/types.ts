@@ -3262,7 +3262,8 @@ export type DeploymentDetectedDatabase = {
  * would start without. `target` is where a managed volume can stand without
  * hiding code (absent when none can); `variable` and `value` move the state
  * under it; a server database linked through `databaseVariable` replaces the
- * file altogether.
+ * file altogether, and `connectionVariable` set to any driver but sqlite
+ * takes the file out of use (Laravel's DB_CONNECTION).
  */
 export type DeploymentDetectedPersistentPath = {
   kind: "sqlite" | "uploads" | "storage" | "volume" | "keys"
@@ -3271,6 +3272,7 @@ export type DeploymentDetectedPersistentPath = {
   variable?: string
   value?: string
   databaseVariable?: string
+  connectionVariable?: string
   source: string
   reason: string
 }

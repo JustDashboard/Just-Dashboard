@@ -178,6 +178,46 @@ func TestDetectionFindsTheStateAnApplicationKeeps(t *testing.T) {
 			want: []string{"sqlite /app/local.db -> /data DB_FILE_NAME=file:/data/local.db"},
 		},
 		{
+			name: "drizzle's turso dialect talks to a hosted database, even with a local development file",
+			files: map[string]string{
+				"package.json": `{"scripts":{"start":"node index.js"},"dependencies":{"hono":"4","@libsql/client":"0.14","drizzle-orm":"0.40"},"devDependencies":{"drizzle-kit":"0.30"}}`, "pnpm-lock.yaml": "",
+				".env.example":      "TURSO_DATABASE_URL=libsql://your-db.turso.io\nTURSO_AUTH_TOKEN=\n",
+				"drizzle.config.ts": "export default defineConfig({ dialect: 'turso', dbCredentials: { url: process.env.TURSO_DATABASE_URL!, authToken: process.env.TURSO_AUTH_TOKEN } })\n",
+			},
+			method: BuildRecipe, recipe: "node",
+			want: []string{},
+		},
+		{
+			name: "a turso variable documented with a local file is still the hosted database",
+			files: map[string]string{
+				"package.json": `{"scripts":{"start":"node index.js"},"dependencies":{"@libsql/client":"0.14","drizzle-orm":"0.40"},"devDependencies":{"drizzle-kit":"0.30"}}`, "pnpm-lock.yaml": "",
+				".env.example":      "DATABASE_URL=file:local.db\n",
+				"drizzle.config.ts": "export default defineConfig({ dialect: 'turso', dbCredentials: { url: process.env.DATABASE_URL! } })\n",
+			},
+			method: BuildRecipe, recipe: "node",
+			want: []string{},
+		},
+		{
+			name: "drizzle's sqlite dialect pointed at a libsql:// server keeps nothing locally",
+			files: map[string]string{
+				"package.json": `{"scripts":{"start":"node index.js"},"dependencies":{"@libsql/client":"0.14","drizzle-orm":"0.40"},"devDependencies":{"drizzle-kit":"0.30"}}`, "pnpm-lock.yaml": "",
+				".env.example":      "DATABASE_URL=libsql://db-org.turso.io\n",
+				"drizzle.config.ts": "export default defineConfig({ dialect: 'sqlite', dbCredentials: { url: process.env.DATABASE_URL! } })\n",
+			},
+			method: BuildRecipe, recipe: "node",
+			want: []string{},
+		},
+		{
+			name: "prisma's sqlite provider behind a hosted libsql adapter keeps nothing locally",
+			files: map[string]string{
+				"package.json": nextPrismaManifest, "bun.lock": "",
+				"prisma/schema.prisma": "datasource db {\n  provider = \"sqlite\"\n  url      = env(\"DATABASE_URL\")\n}\n",
+				".env.example":         "DATABASE_URL=\"libsql://app-org.turso.io\"\n",
+			},
+			method: BuildRecipe, recipe: "node",
+			want: []string{},
+		},
+		{
 			name: "a sqlite literal in its own directory, and one at the root",
 			files: map[string]string{
 				"package.json": `{"scripts":{"start":"node src/index.js"},"dependencies":{"express":"5","better-sqlite3":"11"}}`, "package-lock.json": "",
@@ -217,6 +257,16 @@ func TestDetectionFindsTheStateAnApplicationKeeps(t *testing.T) {
 			want: []string{"uploads /app/uploads -> /data/uploads UPLOAD_DIR=/data/uploads"},
 		},
 		{
+			name: "lowdb's JSON file in its own directory, and one at the root",
+			files: map[string]string{
+				"package.json": `{"type":"module","scripts":{"start":"node server.js"},"dependencies":{"express":"5","lowdb":"7"}}`, "package-lock.json": "",
+				"server.js":     "import { JSONFilePreset } from 'lowdb/node'\nconst db = await JSONFilePreset('data/db.json', { posts: [] })\nconst log = new JSONFileSync('log.json')\n",
+				"data/.gitkeep": "",
+			},
+			method: BuildRecipe, recipe: "node",
+			want: []string{"storage /app/data/db.json -> /app/data", "storage /app/log.json -> "},
+		},
+		{
 			name: "a static site keeps nothing",
 			files: map[string]string{
 				"package.json": `{"scripts":{"build":"vite build"},"devDependencies":{"vite":"8","better-sqlite3":"11"}}`, "package-lock.json": "",
@@ -253,6 +303,16 @@ func TestDetectionFindsTheStateAnApplicationKeeps(t *testing.T) {
 			},
 			method: BuildRecipe, recipe: "python",
 			want: []string{"sqlite /app/db.sqlite3 -> /data SQLITE_PATH=/data/db.sqlite3", "uploads /app/media -> /app/media"},
+		},
+		{
+			name: "django's MEDIA_ROOT read from the environment is one upload directory",
+			files: map[string]string{
+				"requirements.txt": "Django==5.1.4\n", "manage.py": "import django\n",
+				"mysite/settings.py": strings.Replace(djangoSettings, `MEDIA_ROOT = BASE_DIR / "media"`, `MEDIA_ROOT = os.environ.get("MEDIA_ROOT", BASE_DIR / "media")`, 1),
+				"mysite/wsgi.py":     "application = get_wsgi_application()\n",
+			},
+			method: BuildRecipe, recipe: "python",
+			want: []string{"sqlite /app/db.sqlite3 -> ", "uploads /app/media -> /data/media MEDIA_ROOT=/data/media"},
 		},
 		{
 			name: "the FastAPI tutorial's database lives beside the code",
@@ -353,14 +413,40 @@ func TestDetectionFindsTheStateAnApplicationKeeps(t *testing.T) {
 			},
 		},
 		{
-			name: "a Dockerfile's declared volumes",
+			name: "a phoenix release on ecto_sqlite3, run as nobody, is only warned about",
 			files: map[string]string{
-				"Dockerfile": "FROM alpine:3.22\nWORKDIR /app\nVOLUME [\"/app/data\", \"/var/log/app\"]\nVOLUME /cache \\\n  /tmp/work\nCMD [\"./run\"]\n",
+				"mix.exs":            "defmodule Blog.MixProject do\n  def project do\n    [app: :blog, version: \"0.1.0\"]\n  end\n  defp deps do\n    [{:phoenix, \"~> 1.7\"}, {:ecto_sqlite3, \">= 0.0.0\"}]\n  end\nend\n",
+				"config/runtime.exs": "if config_env() == :prod do\n  database_path =\n    System.get_env(\"DATABASE_PATH\") ||\n      raise \"environment variable DATABASE_PATH is missing.\"\n  config :blog, Blog.Repo, database: database_path\nend\n",
+				"Dockerfile":         "FROM elixir:1.17 AS builder\nWORKDIR /app\nFROM debian:bookworm-slim\nWORKDIR \"/app\"\nRUN chown nobody /app\nUSER nobody\nCMD [\"/app/bin/server\"]\n",
+			},
+			method: BuildDockerfile,
+			want:   []string{"sqlite /app/blog.db ->  DATABASE_PATH="},
+		},
+		{
+			name: "a phoenix release on ecto_sqlite3 run as root moves onto a data volume",
+			files: map[string]string{
+				"mix.exs":            "defmodule Blog.MixProject do\n  def project do\n    [app: :blog]\n  end\n  defp deps do\n    [{:ecto_sqlite3, \">= 0.0.0\"}]\n  end\nend\n",
+				"config/runtime.exs": "database_path = System.fetch_env!(\"DATABASE_PATH\")\n",
+				"Dockerfile":         "FROM elixir:1.17\nWORKDIR /app\nCMD [\"mix\", \"phx.server\"]\n",
+			},
+			method: BuildDockerfile,
+			want:   []string{"sqlite /app/blog.db -> /data DATABASE_PATH=/data/blog.db"},
+		},
+		{
+			name: "a Dockerfile's declared volumes, but not its scratch space",
+			files: map[string]string{
+				"Dockerfile": "FROM alpine:3.22\nWORKDIR /app\nVOLUME [\"/app/data\", \"/var/log/app\"]\nVOLUME /cache \\\n  /tmp/work\nVOLUME /tmp /var/run/app\nCMD [\"./run\"]\n",
 			},
 			method: BuildDockerfile,
 			want: []string{
-				"volume /app/data -> /app/data", "volume /cache -> /cache", "volume /tmp/work -> /tmp/work", "volume /var/log/app -> /var/log/app",
+				"volume /app/data -> /app/data", "volume /cache -> /cache", "volume /var/log/app -> /var/log/app",
 			},
+		},
+		{
+			name:   "the spring boot guide's VOLUME /tmp keeps nothing",
+			files:  map[string]string{"Dockerfile": "FROM eclipse-temurin:21-jre\nVOLUME /tmp\nCOPY app.jar app.jar\nENTRYPOINT [\"java\",\"-jar\",\"/app.jar\"]\n"},
+			method: BuildDockerfile,
+			want:   []string{},
 		},
 		{
 			name: "an unprivileged Dockerfile cannot be given a directory it lacks",
@@ -382,13 +468,13 @@ func TestDetectionFindsTheStateAnApplicationKeeps(t *testing.T) {
 			want: []string{"sqlite /home/app/data/app.db -> /home/app/data", "sqlite /home/app/cache.db -> "},
 		},
 		{
-			name: "pocketbase keeps pb_data beside its binary",
+			name: "pocketbase serves from the prepared data directory",
 			files: map[string]string{
 				"go.mod":  "module example.com/app\n\ngo 1.25\n\nrequire github.com/pocketbase/pocketbase v0.25.0\n",
 				"main.go": "package main\nfunc main() { app := pocketbase.New(); app.Start() }\n",
 			},
 			method: BuildRecipe, recipe: "go",
-			want: []string{"sqlite /pb_data -> "},
+			want: []string{"sqlite /home/app/data -> /home/app/data"},
 		},
 		{
 			name: "a rust service's sqlx URL keeps its scheme and query",
@@ -550,6 +636,15 @@ func TestSQLiteLocationsKeepTheDriversScheme(t *testing.T) {
 			t.Errorf("%q named a file", value)
 		}
 	}
+	// Only a file, or nothing, leaves a variable free to move onto a volume.
+	for example, want := range map[string]bool{
+		"": true, "file:./dev.db": true, "./local.db": true, "sqlite:app.sqlite": true,
+		"libsql://app-org.turso.io": false, "https://app.turso.io": false, "wss://db.example": false, "changeme": false,
+	} {
+		if got := sqliteFileExample(example); got != want {
+			t.Errorf("sqliteFileExample(%q) = %v, want %v", example, got, want)
+		}
+	}
 }
 
 func TestDockerfileFinalStageAndVolumes(t *testing.T) {
@@ -566,8 +661,50 @@ func TestDockerfileFinalStageAndVolumes(t *testing.T) {
 	if got := detectedDockerfileVolumes(inherited); !reflect.DeepEqual(got, []string{"/data"}) {
 		t.Fatalf("inherited volumes = %q", got)
 	}
-	if got := imagePersistentPaths("postgres:16", []string{"/var/lib/postgresql/data", "/", "relative"}); len(got) != 1 || got[0].Target != "/var/lib/postgresql/data" || got[0].Kind != PersistentVolume {
+	if got := imagePersistentPaths("postgres:16", []string{"/var/lib/postgresql/data", "/", "relative", "/tmp", "/var/cache/app", "/run/lock"}); len(got) != 1 || got[0].Target != "/var/lib/postgresql/data" || got[0].Kind != PersistentVolume {
 		t.Fatalf("image volumes = %+v", got)
+	}
+}
+
+func TestPocketBaseIsServedWithItsDataOnTheVolume(t *testing.T) {
+	t.Parallel()
+	candidate := candidateFor(t, detectFixture(t, map[string]string{
+		"go.mod":  "module example.com/app\n\ngo 1.25\n\nrequire github.com/pocketbase/pocketbase v0.25.0\n",
+		"main.go": "package main\nfunc main() { app := pocketbase.New(); app.Start() }\n",
+	}), BuildRecipe, "go")
+	if candidate.StartCommand != "/app serve --http=0.0.0.0:${PORT:-8090} --dir=/home/app/data" || candidate.Port != 8090 {
+		t.Fatalf("pocketbase start = %q port %d", candidate.StartCommand, candidate.Port)
+	}
+	// A start command of its own, or an image built by its own Dockerfile,
+	// is left as it is and only warned about.
+	layout := stateLayout{workdir: compiledRuntimeHome, dataDir: compiledRuntimeHome + "/data"}
+	for _, own := range []*DetectedCandidate{
+		{BuildMethod: BuildRecipe, Recipe: "go", StartCommand: "/app serve --http=0.0.0.0:8090"},
+		{BuildMethod: BuildDockerfile},
+	} {
+		before := *own
+		if entry := pocketBaseState(own, stateRoot{}, layout); entry.Path != "/pb_data" || entry.Target != "" || own.StartCommand != before.StartCommand {
+			t.Fatalf("pocketbase with its own start: %+v, start %q", entry, own.StartCommand)
+		}
+	}
+}
+
+func TestACommittedDotnetDatabaseSeedsItsVolume(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		"App.csproj":       `<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup><ItemGroup><PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.0" /></ItemGroup></Project>`,
+		"appsettings.json": `{"ConnectionStrings":{"DefaultConnection":"DataSource=app.db;Cache=Shared"}}`,
+		"Program.cs":       "builder.Services.AddDefaultIdentity<IdentityUser>();\n",
+		"app.db":           "SQLite format 3",
+	}
+	candidate := candidateFor(t, detectFixture(t, files), BuildRecipe, "dotnet")
+	if len(candidate.PersistentPaths) == 0 || !strings.Contains(candidate.PersistentPaths[0].Reason, "the committed copy seeds the volume") {
+		t.Fatalf("committed database reason = %+v", candidate.PersistentPaths)
+	}
+	delete(files, "app.db")
+	candidate = candidateFor(t, detectFixture(t, files), BuildRecipe, "dotnet")
+	if len(candidate.PersistentPaths) == 0 || strings.Contains(candidate.PersistentPaths[0].Reason, "seeds") {
+		t.Fatalf("uncommitted database reason = %+v", candidate.PersistentPaths)
 	}
 }
 

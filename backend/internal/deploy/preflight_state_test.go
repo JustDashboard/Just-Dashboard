@@ -14,7 +14,8 @@ func TestPersistentStateFindingsFollowTheMountsAndVariables(t *testing.T) {
 	}
 	laravel := DetectedPersistentPath{
 		Kind: PersistentSQLite, Path: "/app/database/database.sqlite", Target: "/app/storage", Variable: "DB_DATABASE",
-		Value: "/app/storage/database.sqlite", DatabaseVariable: "DB_URL", Source: "composer.json", Reason: "Laravel's database is SQLite",
+		Value: "/app/storage/database.sqlite", DatabaseVariable: "DB_URL", ConnectionVariable: "DB_CONNECTION",
+		Source: "composer.json", Reason: "Laravel's database is SQLite",
 	}
 	django := DetectedPersistentPath{
 		Kind: PersistentSQLite, Path: "/app/db.sqlite3", DatabaseVariable: "DATABASE_URL", Source: "mysite/settings.py", Reason: "Django falls back to SQLite",
@@ -41,6 +42,10 @@ func TestPersistentStateFindingsFollowTheMountsAndVariables(t *testing.T) {
 		{"a database reference takes the file out of use", django, nil, map[string]string{"DATABASE_URL": "${{database.3.url}}"}, "", false},
 		{"laravel linked to mysql", laravel, nil, map[string]string{"DB_URL": "mysql://db-2/app"}, "", false},
 		{"laravel moved into storage", laravel, []RuntimeMount{mount("/app/storage", false)}, map[string]string{"DB_DATABASE": "/app/storage/database.sqlite"}, "", true},
+		{"laravel switched to mysql by its connection", laravel, nil, map[string]string{"DB_CONNECTION": "mysql", "DB_HOST": "db-2.jd.internal", "DB_DATABASE": "laravel"}, "", false},
+		// The driver is compared without case; "Sqlite" also keeps the leak
+		// check below from matching the word in the finding's own text.
+		{"laravel's sqlite connection named explicitly", laravel, nil, map[string]string{"DB_CONNECTION": "Sqlite", "DB_DATABASE": "laravel"}, "sqlite_ephemeral", false},
 		{"laravel's default path is not under storage", laravel, []RuntimeMount{mount("/app/storage", false)}, nil, "sqlite_ephemeral", false},
 		{"django's fallback file with no database", django, nil, nil, "sqlite_ephemeral", false},
 		{"django pointed at a sqlite file on a volume", django, []RuntimeMount{mount("/data", false)}, map[string]string{"DATABASE_URL": "sqlite:////data/db.sqlite3"}, "", true},
@@ -143,6 +148,12 @@ func TestPreflightReportsStateSeedAndPushBeforeDeploy(t *testing.T) {
 	if seed.Severity != PreflightWarning || !strings.Contains(seed.Action, "npx prisma db seed") || !strings.Contains(seed.Means, "empty database") {
 		t.Fatalf("seed finding on a fresh volume = %+v", seed)
 	}
+	// A redeploy replaces a live runtime, whose database is not new.
+	redeploy := &preflightObserverFake{observation: observation}
+	redeploy.observation.ReplacesRuntime = true
+	if again, err := PreflightDraft(context.Background(), draft, redeploy, true); err != nil || findingSeverity(again.Findings, "seed_available") != "" {
+		t.Fatalf("redeploy seed findings = %#v, %v", again, err)
+	}
 	for _, item := range result.Findings {
 		if strings.Contains(item.Measured+item.Means+item.Action+item.Title, "file:/data/dev.db") && item.Code != "sqlite_ephemeral" {
 			t.Fatalf("a variable value reached a finding: %+v", item)
@@ -163,16 +174,60 @@ func TestPreflightReportsStateSeedAndPushBeforeDeploy(t *testing.T) {
 func TestSeedFindingNeedsAFreshDatabase(t *testing.T) {
 	t.Parallel()
 	candidate := &DetectedCandidate{SeedCommand: "php artisan db:seed --force"}
-	if seedFinding(candidate, PlanConfiguration{}) != nil {
+	if seedFinding(candidate, PlanConfiguration{}, nil, true) != nil {
 		t.Fatal("a seed was offered with no database in the plan")
 	}
 	linked := PlanConfiguration{Dependencies: []PlannedDependency{{Kind: "database", ResourceKind: "database_connection", ResourceID: "4"}}}
-	if item := seedFinding(candidate, linked); item == nil || item.Severity != PreflightWarning || strings.Contains(item.Means, "clears tables") {
+	if item := seedFinding(candidate, linked, nil, true); item == nil || item.Severity != PreflightWarning || strings.Contains(item.Means, "clears tables") {
 		t.Fatalf("linked database seed finding = %+v", item)
 	}
+	// A redeploy's database already holds whatever was seeded into it.
+	if seedFinding(candidate, linked, nil, false) != nil {
+		t.Fatal("a redeploy was told its database is new")
+	}
 	linked.Build.ReleaseTasks = []ReleaseTaskConfig{{Name: "seed", Command: "php artisan db:seed --force"}}
-	if seedFinding(candidate, linked) != nil {
+	if seedFinding(candidate, linked, nil, true) != nil {
 		t.Fatal("a release task that seeds still warned")
+	}
+	// SQLite moved onto a volume by its variable starts empty too.
+	onVolume := &DetectedCandidate{SeedCommand: "npx prisma db seed", PersistentPaths: []DetectedPersistentPath{{
+		Kind: PersistentSQLite, Path: "/app/prisma/dev.db", Target: "/data", Variable: "DATABASE_URL", Value: "file:/data/dev.db",
+		Source: "prisma/schema.prisma", Reason: "Prisma's SQLite datasource is read from DATABASE_URL",
+	}}}
+	mounted := PlanConfiguration{Runtime: RuntimePlanConfig{Mounts: []RuntimeMount{{Source: "notes-data", Target: "/data", Ownership: OwnershipManaged}}}}
+	if seedFinding(onVolume, mounted, map[string]string{"DATABASE_URL": "file:/data/dev.db"}, true) == nil {
+		t.Fatal("sqlite relocated onto a new volume was not offered its seed")
+	}
+	if seedFinding(onVolume, mounted, map[string]string{"DATABASE_URL": "postgres://db-4.jd.internal/app"}, true) != nil {
+		t.Fatal("a server database in place of the file was treated as the file")
+	}
+}
+
+func TestSQLiteOnANewVolumeNeedsItsSchemaStep(t *testing.T) {
+	t.Parallel()
+	candidate := &DetectedCandidate{SchemaTool: "ef-core", PersistentPaths: []DetectedPersistentPath{{
+		Kind: PersistentSQLite, Path: "/app/app.db", Target: "/app/data", Variable: "ConnectionStrings__DefaultConnection",
+		Value: "Data Source=/app/data/app.db", Source: "appsettings.json", Reason: "the DefaultConnection connection string opens the SQLite file app.db",
+	}}}
+	plan := PlanConfiguration{
+		Build:   BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet"},
+		Runtime: RuntimePlanConfig{Mounts: []RuntimeMount{{Source: "shop-data", Target: "/app/data", Ownership: OwnershipManaged}}},
+	}
+	values := map[string]string{"ConnectionStrings__DefaultConnection": "Data Source=/app/data/app.db"}
+	if !sqliteOnVolume(candidate, plan, values) {
+		t.Fatal("the relocated database was not seen on its volume")
+	}
+	item := sqliteSchemaStepFinding(candidate, plan.Build)
+	if item.Code != "schema_step_missing" || item.Severity != PreflightWarning ||
+		!strings.Contains(item.Title, "SQLite database on the volume") || !strings.Contains(item.Action, "Database.Migrate()") {
+		t.Fatalf("finding = %+v", item)
+	}
+	candidate.SchemaInStart = true
+	if item := sqliteSchemaStepFinding(candidate, plan.Build); item.Severity != PreflightPass || !strings.Contains(item.Means, "on the volume") {
+		t.Fatalf("applied finding = %+v", item)
+	}
+	if sqliteOnVolume(candidate, PlanConfiguration{}, values) {
+		t.Fatal("a plan without the volume keeps the database on one")
 	}
 }
 
@@ -191,5 +246,18 @@ func TestApplicationOutputNamesARefusedPushAndAnUnwritableDatabase(t *testing.T)
 		if cause == nil || cause.Code != fixture.code || cause.sentence() == "" {
 			t.Errorf("%q: cause = %+v", fixture.line, cause)
 		}
+	}
+}
+
+func TestTheHostObservationSaysWhenALiveRuntimeIsReplaced(t *testing.T) {
+	t.Parallel()
+	observer := NewHostPreflightObserver(nil, t.TempDir(), nil)
+	first, err := observer.Observe(context.Background(), ObservationRequest{})
+	if err != nil || first.ReplacesRuntime {
+		t.Fatalf("first release observation = %+v, %v", first.ReplacesRuntime, err)
+	}
+	again, err := observer.Observe(context.Background(), ObservationRequest{ExistingRuntimeID: "jd-e4-web", ExistingRuntimeKind: "container"})
+	if err != nil || !again.ReplacesRuntime {
+		t.Fatalf("redeploy observation = %+v, %v", again.ReplacesRuntime, err)
 	}
 }

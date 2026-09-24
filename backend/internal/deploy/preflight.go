@@ -56,6 +56,9 @@ type HostObservation struct {
 	Domains         []DomainObservation            `json:"domains"`
 	Firewall        FirewallObservation            `json:"firewall"`
 	Dependencies    []DependencyObservation        `json:"dependencies"`
+	// ReplacesRuntime says a live release is being replaced, so the data a
+	// plan keeps already exists; only a first release starts it empty.
+	ReplacesRuntime bool `json:"replacesRuntime,omitempty"`
 }
 
 type DomainObservation struct {
@@ -170,6 +173,7 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 	observation := HostObservation{
 		Facilities: map[string]FacilityObservation{}, Paths: []PathObservation{}, Ports: []PortObservation{},
 		Domains: []DomainObservation{}, Dependencies: []DependencyObservation{}, OS: runtime.GOOS, Architecture: runtime.GOARCH,
+		ReplacesRuntime: request.ExistingRuntimeID != "",
 	}
 	if request.NeedsGit {
 		observation.Facilities["git"] = FacilityObservation{Available: hostexec.Available("git")}
@@ -920,9 +924,11 @@ func preflightFindings(
 			findings = append(findings, *push)
 		} else if hasDatabaseDependency(configuration.Dependencies) {
 			findings = append(findings, schemaStepFinding(selected, configuration.Build))
+		} else if sqliteOnVolume(selected, configuration, resolvedVariables) {
+			findings = append(findings, sqliteSchemaStepFinding(selected, configuration.Build))
 		}
 	}
-	findings = append(findings, stateFindings(selectedDetectionCandidate(detection), configuration, resolvedVariables)...)
+	findings = append(findings, stateFindings(selectedDetectionCandidate(detection), configuration, resolvedVariables, !observation.ReplacesRuntime)...)
 	if (draft.Data.Intent.Profile == ProfileWeb || draft.Data.Intent.Profile == ProfileStatic) && !hasReadinessCheck(configuration.Checks) {
 		findings = append(findings, finding("readiness_missing", PreflightDecision,
 			"Choose a readiness check", "", "Traffic must not move to an unverified candidate.",
