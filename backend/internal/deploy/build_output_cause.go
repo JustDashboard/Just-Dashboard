@@ -603,9 +603,10 @@ func truncateUTF8Prefix(value string, limit int) string {
 // lockfileForCommand names the lockfile a frozen install reads, for the
 // installs whose own failure text does not.
 func lockfileForCommand(command string) string {
+	if manager := nodeManagerForCommand(command); manager != "" {
+		return nodeManagerLockfiles[manager]
+	}
 	for _, entry := range []struct{ prefix, lockfile string }{
-		{"npm ", "package-lock.json"}, {"bun ", "bun.lock"}, {"corepack enable && pnpm", "pnpm-lock.yaml"},
-		{"pnpm ", "pnpm-lock.yaml"}, {"corepack enable && yarn", "yarn.lock"}, {"yarn ", "yarn.lock"},
 		{"poetry ", "poetry.lock"}, {"uv ", "uv.lock"}, {"cargo ", "Cargo.lock"}, {"go ", "go.sum"},
 		{"composer ", "composer.lock"}, {"deno ", "deno.lock"}, {"bundle ", "Gemfile.lock"},
 	} {
@@ -616,24 +617,24 @@ func lockfileForCommand(command string) string {
 	return ""
 }
 
-// nodeManagerForCommand names the package manager a Node command runs with.
+// nodeManagerForCommand names the package manager a Node command runs with:
+// the first `&&` segment that starts with one, past any corepack set-up.
 func nodeManagerForCommand(command string) string {
-	fields := strings.Fields(command)
-	if len(fields) > 2 && fields[0] == "corepack" {
-		fields = fields[3:]
-	}
-	if len(fields) == 0 {
-		return ""
-	}
-	switch fields[0] {
-	case "npm", "npx":
-		return "npm"
-	case "pnpm":
-		return "pnpm"
-	case "yarn":
-		return "yarn"
-	case "bun", "bunx":
-		return "bun"
+	for _, segment := range strings.Split(command, "&&") {
+		fields := strings.Fields(segment)
+		if len(fields) == 0 {
+			continue
+		}
+		switch fields[0] {
+		case "npm", "npx":
+			return "npm"
+		case "pnpm":
+			return "pnpm"
+		case "yarn":
+			return "yarn"
+		case "bun", "bunx":
+			return "bun"
+		}
 	}
 	return ""
 }

@@ -793,6 +793,25 @@ func TestEverySignatureCodeHasATitleAndAnExplanation(t *testing.T) {
 	}
 }
 
+func TestNodeManagerForCommandLooksPastCorepack(t *testing.T) {
+	t.Parallel()
+	for command, want := range map[string]string{
+		"corepack enable && pnpm install --frozen-lockfile":                         "pnpm",
+		"corepack prepare pnpm@9.15.0 --activate && pnpm install --frozen-lockfile": "pnpm",
+		"corepack enable && yarn install --immutable":                               "yarn",
+		"npx prisma generate && npm run build":                                      "npm",
+		"bunx prisma generate":                                                      "bun",
+		"go mod download":                                                           "",
+	} {
+		if got := nodeManagerForCommand(command); got != want {
+			t.Fatalf("manager of %q = %q, want %q", command, got, want)
+		}
+	}
+	if got := lockfileForCommand("corepack prepare pnpm@9 --activate && pnpm install --frozen-lockfile"); got != "pnpm-lock.yaml" {
+		t.Fatalf("lockfile = %q", got)
+	}
+}
+
 func TestPreparedNodeManagerReadsTheInstallLine(t *testing.T) {
 	t.Parallel()
 	for preview, want := range map[string]string{
