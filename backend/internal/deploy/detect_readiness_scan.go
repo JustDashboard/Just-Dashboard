@@ -64,6 +64,9 @@ const (
 	factDjangoProxySSL = "django_proxy_ssl_header"
 	factDjangoURL      = "django_url"
 	factJVMSetting     = "jvm_setting"
+	// A root holds a file the scanner wanted and did not read, so what it
+	// did not find there may still be in the source (forRoot).
+	factSourceUnread = "source_unread"
 )
 
 // Budgets: configuration files are few and decisive, so they have their own
@@ -81,9 +84,18 @@ type readinessScanner struct {
 	configFiles, sourceFiles int
 	configBytes, sourceBytes int64
 	facts                    []readinessFact
+	// unread is one file per directory the scanner had a question for and
+	// did not read: past its budget, too large, or unreadable. factsDropped
+	// says a fact was lost to the fact cap, and walkStopped that the
+	// detector's walk ended before visiting every file.
+	unread       map[string]string
+	factsDropped bool
+	walkStopped  bool
 }
 
-func newReadinessScanner() *readinessScanner { return &readinessScanner{} }
+func newReadinessScanner() *readinessScanner {
+	return &readinessScanner{unread: map[string]string{}}
+}
 
 // visit is called for every regular file the detector walks. It records
 // path-only facts, and reads the file when it is one the scanner has a
@@ -103,9 +115,11 @@ func (s *readinessScanner) visit(file, rel string) {
 	}
 	if config {
 		if s.configFiles >= readinessConfigMaxFiles || s.configBytes >= readinessConfigMaxBytes {
+			s.skipped(rel)
 			return
 		}
 	} else if s.sourceFiles >= readinessSourceMaxFiles || s.sourceBytes >= readinessSourceMaxBytes {
+		s.skipped(rel)
 		return
 	}
 	content, n, err := readDetectionFile(file, readinessMaxFileBytes)
@@ -117,14 +131,23 @@ func (s *readinessScanner) visit(file, rel string) {
 		s.sourceBytes += n
 	}
 	if err != nil {
+		s.skipped(rel)
 		return
 	}
 	s.scan(rel, name, content)
 }
 
+func (s *readinessScanner) skipped(rel string) {
+	if _, seen := s.unread[path.Dir(rel)]; !seen {
+		s.unread[path.Dir(rel)] = rel
+	}
+}
+
 func (s *readinessScanner) add(fact readinessFact) {
 	if len(s.facts) < readinessMaxFacts {
 		s.facts = append(s.facts, fact)
+	} else {
+		s.factsDropped = true
 	}
 }
 

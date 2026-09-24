@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -379,5 +380,33 @@ func TestDetectedReadinessSanitizesWhatTheRepositoryWrote(t *testing.T) {
 	}), BuildRecipe)
 	if candidate.Readiness != nil {
 		t.Fatalf("unusable basePath kept: %+v", candidate.Readiness)
+	}
+}
+
+// A root whose files the scanner did not all read is marked, so nothing is
+// concluded from a fact it did not find; a nested root's unread file is that
+// root's alone.
+func TestReadinessScannerMarksRootsItDidNotReadCompletely(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeBuildFixture(t, root, "bot/index.js", "client.login(token)\n")
+	scanner := newReadinessScanner()
+	scanner.sourceFiles = readinessSourceMaxFiles
+	scanner.visit(filepath.Join(root, "bot", "index.js"), "bot/index.js")
+	roots := []string{"", "bot"}
+	if !scanner.forRoot("bot", roots).has(factSourceUnread) || scanner.forRoot("", roots).has(factSourceUnread) {
+		t.Fatalf("unread = %v", scanner.unread)
+	}
+	stopped := newReadinessScanner()
+	stopped.walkStopped = true
+	if !stopped.forRoot("", roots).has(factSourceUnread) {
+		t.Fatal("a stopped walk read every file")
+	}
+	full := newReadinessScanner()
+	for range readinessMaxFacts + 1 {
+		full.add(readinessFact{file: "a.js", kind: factListen})
+	}
+	if !full.forRoot("bot", roots).has(factSourceUnread) {
+		t.Fatal("a dropped fact went unnoticed")
 	}
 }

@@ -179,25 +179,35 @@ func (s *readinessScanner) forRoot(root string, roots []string) rootFacts {
 			inside = append(inside, rootPrefix(other))
 		}
 	}
-	var owned rootFacts
-	for _, fact := range s.facts {
-		if !strings.HasPrefix(fact.file, prefix) {
-			continue
+	owns := func(file string) bool {
+		if !strings.HasPrefix(file, prefix) {
+			return false
 		}
-		nested := false
 		for _, other := range inside {
-			if strings.HasPrefix(fact.file, other) {
-				nested = true
-				break
+			if strings.HasPrefix(file, other) {
+				return false
 			}
 		}
-		if !nested {
+		return true
+	}
+	var owned rootFacts
+	for _, fact := range s.facts {
+		if owns(fact.file) {
 			fact.file = strings.TrimPrefix(fact.file, prefix)
 			if fact.kind == factRouteFile {
 				fact.value = fact.file
 			}
 			owned = append(owned, fact)
 		}
+	}
+	// A fact's absence is evidence only when every file it could be in was
+	// read; the root says when one was not.
+	incomplete := s.walkStopped || s.factsDropped
+	for _, file := range s.unread {
+		incomplete = incomplete || owns(file)
+	}
+	if incomplete {
+		owned = append(owned, readinessFact{kind: factSourceUnread})
 	}
 	return owned
 }

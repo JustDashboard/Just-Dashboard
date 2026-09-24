@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"path"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -73,10 +74,21 @@ func classifyNodeWorker(candidate *DetectedCandidate, marker *detectedMarkers, f
 		if facts.has(factListen) {
 			return
 		}
+		// Nothing listening is known only when every source file was read;
+		// otherwise the keep-alive server may be in one that was not.
+		if facts.has(factSourceUnread) {
+			const decision = "confirm whether this package serves HTTP (web application) or runs as a worker"
+			if !slices.Contains(candidate.NeedsDecision, decision) {
+				candidate.NeedsDecision = append(candidate.NeedsDecision, decision)
+			}
+			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: marker.packagePath,
+				Reason: library.kind + " (" + library.dependency + "); not every source file was read, so whether it also listens is unknown"})
+			return
+		}
 		markWorker(candidate, &DetectedBackgroundWorker{
 			Library: library.dependency, Kind: library.kind,
 			Evidence: library.kind + " (" + library.dependency + "); nothing in the package listens for HTTP",
-		}, marker.packagePath, ConfidenceMedium)
+		}, marker.packagePath)
 		return
 	}
 }
@@ -94,7 +106,12 @@ func classifyPythonWorker(candidate *DetectedCandidate, marker *detectedMarkers,
 		markWorker(candidate, &DetectedBackgroundWorker{
 			Library: "Procfile", Kind: "worker process",
 			Evidence: "Procfile worker process: " + boundedEvidence(worker),
-		}, path.Join(marker.root, "Procfile"), ConfidenceHigh)
+		}, path.Join(marker.root, "Procfile"))
+		return
+	}
+	// The rest is inferred from what the source does not do, which only a
+	// complete read shows; the Procfile above says it outright.
+	if facts.has(factSourceUnread) {
 		return
 	}
 	for _, fact := range rootLevelFirst(facts.of(factPythonWorker)) {
@@ -116,7 +133,7 @@ func classifyPythonWorker(candidate *DetectedCandidate, marker *detectedMarkers,
 		markWorker(candidate, &DetectedBackgroundWorker{
 			Library: fact.value, Kind: kind,
 			Evidence: kind + " in " + fact.file + "; it connects out and never listens for HTTP",
-		}, path.Join(marker.root, fact.file), ConfidenceHigh)
+		}, path.Join(marker.root, fact.file))
 		return
 	}
 	type queue struct {
@@ -144,7 +161,7 @@ func classifyPythonWorker(candidate *DetectedCandidate, marker *detectedMarkers,
 		markWorker(candidate, &DetectedBackgroundWorker{
 			Library: worker.distribution, Kind: worker.kind,
 			Evidence: worker.kind + " from " + evidence,
-		}, evidence, ConfidenceHigh)
+		}, evidence)
 		return
 	}
 	for _, fact := range rootLevelFirst(facts.of(factSchedulerLoop)) {
@@ -155,14 +172,18 @@ func classifyPythonWorker(candidate *DetectedCandidate, marker *detectedMarkers,
 		markWorker(candidate, &DetectedBackgroundWorker{
 			Library: "scheduler", Kind: "scheduled job runner",
 			Evidence: "scheduled job runner in " + fact.file + "; it never listens for HTTP",
-		}, path.Join(marker.root, fact.file), ConfidenceHigh)
+		}, path.Join(marker.root, fact.file))
 		return
 	}
 }
 
 // markWorker plans a candidate as a worker and drops the question detection
-// had asked about it, which the evidence now answers.
-func markWorker(candidate *DetectedCandidate, worker *DetectedBackgroundWorker, evidencePath string, confidence DetectionConfidence) {
+// had asked about it, which the evidence now answers. A worker is raised to
+// medium confidence and no higher: a web root beside it at high confidence
+// must still be the one an import selects, and two high candidates tie, which
+// asks the operator to choose (selectedCandidate). Alone, medium is enough to
+// be selected.
+func markWorker(candidate *DetectedCandidate, worker *DetectedBackgroundWorker, evidencePath string) {
 	candidate.BackgroundWorker = worker
 	candidate.Profile, candidate.Port = ProfileWorker, 0
 	candidate.Readiness = nil
@@ -176,8 +197,8 @@ func markWorker(candidate *DetectedCandidate, worker *DetectedBackgroundWorker, 
 		decisions = append(decisions, decision)
 	}
 	candidate.NeedsDecision = decisions
-	if confidenceRank(confidence) > confidenceRank(candidate.Confidence) && (answered || len(decisions) == 0) && candidate.RecipeIssue == "" {
-		candidate.Confidence = confidence
+	if confidenceRank(ConfidenceMedium) > confidenceRank(candidate.Confidence) && (answered || len(decisions) == 0) && candidate.RecipeIssue == "" {
+		candidate.Confidence = ConfidenceMedium
 	}
 	candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: evidencePath, Reason: boundedEvidence(worker.Evidence)})
 }

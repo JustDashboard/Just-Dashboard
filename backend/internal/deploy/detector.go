@@ -483,6 +483,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	if walkErr != nil && !errors.Is(walkErr, stop) && !errors.Is(walkErr, context.Canceled) && !errors.Is(walkErr, context.DeadlineExceeded) {
 		return result, walkErr
 	}
+	readiness.walkStopped = result.Truncated
 
 	roots := make([]string, 0, len(markers))
 	packageRoots := []string{}
