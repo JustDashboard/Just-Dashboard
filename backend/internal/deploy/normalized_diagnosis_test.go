@@ -230,6 +230,9 @@ func TestBuilderUnavailableFailureKeepsItsCause(t *testing.T) {
 		"Get \"https://registry-1.docker.io/v2/\": dial tcp: lookup registry-1.docker.io: no such host": "registry_unreachable",
 		"manifest unknown: manifest unknown":                                                            "base_image_missing",
 		"unauthorized: incorrect username or password":                                                  "registry_auth_failed",
+		`Get "https://registry-1.docker.io/v2/": net/http: request canceled while waiting for connection (Client.Timeout exceeded while awaiting headers)`:   "registry_unreachable",
+		`Get "https://registry-1.docker.io/v2/": dial tcp: lookup registry-1.docker.io on 127.0.0.53:53: server misbehaving`:                                 "registry_unreachable",
+		"pull access denied for library/gradle, repository does not exist or may require 'docker login': denied: requested access to the resource is denied": "base_image_missing",
 	} {
 		err := fmt.Errorf("%w: resolve reviewed base image gradle:8-jdk25: %s", ErrBuilderUnavailable, text)
 		result := builderUnavailableFailure(err)

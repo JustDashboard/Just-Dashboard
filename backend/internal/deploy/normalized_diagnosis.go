@@ -129,12 +129,19 @@ func builderUnavailableFailure(err error) StepResult {
 	case strings.Contains(lower, "no such host") || strings.Contains(lower, "i/o timeout") ||
 		strings.Contains(lower, "tls handshake timeout") || strings.Contains(lower, "temporary failure in name resolution") ||
 		strings.Contains(lower, "network is unreachable") || strings.Contains(lower, "connection refused") ||
-		strings.Contains(lower, "deadline exceeded"):
+		strings.Contains(lower, "deadline exceeded") || strings.Contains(lower, "client.timeout exceeded") ||
+		strings.Contains(lower, "request canceled while waiting for connection") || strings.Contains(lower, "server misbehaving"):
 		result.ErrorCode = "registry_unreachable"
 		result.ErrorMessage = "Could not resolve " + subject + ": the registry could not be reached from this server; check its outbound network and DNS"
 	case strings.Contains(lower, "manifest unknown") || strings.Contains(lower, "not found"):
 		result.ErrorCode = "base_image_missing"
 		result.ErrorMessage = "Could not resolve " + subject + ": the registry has no such image or tag"
+	case strings.Contains(lower, "repository does not exist"):
+		// Docker Hub's "pull access denied … repository does not exist or may
+		// require 'docker login'": a public catalogue base it will not serve
+		// is gone, whatever the denial says about logging in.
+		result.ErrorCode = "base_image_missing"
+		result.ErrorMessage = "Could not resolve " + subject + ": the registry says the repository does not exist"
 	case strings.Contains(lower, "unauthorized") || strings.Contains(lower, "denied") ||
 		strings.Contains(lower, "authentication required"):
 		result.ErrorCode = "registry_auth_failed"
