@@ -329,6 +329,9 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			return content, err == nil
 		}
 		if dockerfileFileName(name) {
+			if len(marker.dockerfiles) >= 8 {
+				return nil
+			}
 			content, ok := readMarker(limits.MaxFileBytes)
 			if result.Truncated {
 				return stop
