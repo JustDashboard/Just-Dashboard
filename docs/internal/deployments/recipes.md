@@ -119,8 +119,9 @@ directory.
 
 A service whose manifest depends on a recognised migration tool starts by applying its schema: the
 detected start command becomes `<runner> <schema command> && <start>`, in front of a start script or a
-framework default alike. Prisma (`*.prisma`) runs `prisma migrate deploy` when a `migration.sql` is
-committed and `prisma db push` otherwise; Drizzle (`drizzle.config.*`) runs `drizzle-kit migrate` with a
+framework default alike. Prisma (`*.prisma` at the root or under `prisma/`, or where its configuration
+declares its schema) runs `prisma migrate deploy` when a `migration.sql` is committed and `prisma db push`
+otherwise; Drizzle (`drizzle.config.*`) runs `drizzle-kit migrate` with a
 `_journal.json` and `drizzle-kit push` otherwise; Knex (`knexfile.*`) runs `knex migrate:latest`;
 Sequelize CLI runs `sequelize-cli db:migrate`; MikroORM migrations run `mikro-orm migration:up`. TypeORM
 is recognised but needs an operator's command. A start script that already runs the tool is left as it
@@ -310,6 +311,30 @@ finding:
 Compilers never reach the runtime image. Puppeteer's and Playwright's own downloads land in the build
 stage's home directory, which the runtime stage never copied, so the recipe keeps them out of it or
 inside the application. A test runner's Playwright in `devDependencies` changes nothing.
+
+**Prisma.** When the `prisma` CLI is a dependency and a schema exists where Prisma looks for one —
+`prisma/schema.prisma`, `schema.prisma`, a `prisma/schema/` directory, or the path `prisma.config.*`'s
+`schema:` or `package.json`'s `prisma.schema` declares — the build runs `<runner> prisma generate` after
+the install and before the build command (`prisma_generate_added`). The install cannot be trusted to
+have done it: pnpm 10 and Bun skip `@prisma/client`'s install script, and Prisma 7 generates into a
+directory the repository ignores. No `--schema` flag is passed; Prisma resolves its configuration
+itself. With only `@prisma/client` declared nothing runs, since `npx` would download an unpinned CLI. A
+schema at a declared path also moves the schema tool's lookup (migrations beside it, or at `migrations:
+{ path }`), so `prisma migrate deploy` is still chained into the start command.
+
+Prisma 7's `prisma.config.ts` reads its datasource URL through `env("DATABASE_URL")`, which throws when
+the variable is unset even for `generate`, which never connects. The names `env()` reads (from
+`prisma.config.*` or `.config/prisma.*`, read as text) get a placeholder on every step that may run
+`generate` — the install, whose root `postinstall` or `@prisma/client` script can run it, the recipe's
+generate step, and the build command when it runs `prisma generate` itself — written as
+`export DATABASE_URL="${DATABASE_URL:-postgresql://127.0.0.1:5432/prisma-generate}" && …`. The value is a
+recipe constant shaped like the schema's provider (`mysql://…`, `sqlserver://…`, `file:./prisma-generate.db`,
+`mongodb://…`; a name without URL, URI or DSN gets `prisma-generate`), never a credential or an operator
+value, and it points at nothing. The RUN's shell expands it, not the Dockerfile parser, so a value the
+build mounts for that step wins, and it ends with the RUN: the runtime never sees it. A build command that
+runs `prisma migrate` or `prisma db` gets no placeholder, since it needs the real database. The real
+value is never widened to the install on its own — the install also runs every dependency's install
+script — unless the variable is mapped to `install_and_build` (`prisma_config_env`).
 
 ## Python
 

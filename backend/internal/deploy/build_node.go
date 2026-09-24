@@ -357,8 +357,11 @@ func renderNodeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases [
 	for _, run := range plan.image.buildRuns {
 		lines = append(lines, "RUN "+run)
 	}
+	if plan.prisma.generate != "" {
+		lines = append(lines, nodeRunWith(buildSecrets, plan.prisma.defaults, plan.prisma.generate))
+	}
 	if command := strings.TrimSpace(config.BuildCommand); command != "" {
-		lines = append(lines, "RUN "+buildSecrets+command)
+		lines = append(lines, nodeRunWith(buildSecrets, plan.buildDefaults(), command))
 	}
 	defaults := recipe.node.resolution.nodeFrameworkDefaults
 	if strings.TrimSpace(config.OutputDirectory) == "" && defaults.Entry != "" && frameworkDefaultStart(config.StartCommand, defaults.Start) {
@@ -431,7 +434,7 @@ func nodeInstallStage(plan nodeInstallPlan, node ResolvedImage, bases []Resolved
 	if plan.berry {
 		lines = append(lines, "ENV YARN_ENABLE_GLOBAL_CACHE=false")
 	}
-	return append(lines, nodeRunWith(installSecrets, plan.image.installEnv, plan.installLine())), base, nil
+	return append(lines, nodeRunWith(installSecrets, plan.installDefaults(), plan.installLine())), base, nil
 }
 
 // readNodeInstalls reads the install inputs of every package detection

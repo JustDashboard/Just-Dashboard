@@ -790,7 +790,7 @@ func packageCandidate(marker *detectedMarkers, schemaPaths []string) []DetectedC
 	}
 	inputs := nodeCommandInputs{
 		manifest: manifest, files: files, framework: framework, procfileWeb: procfileWeb,
-		schema: detectSchemaTool(dependencies, schemaPaths),
+		schema: detectSchemaTool(dependencies, schemaPaths, facts.prisma),
 	}
 	// The name becomes part of a command, so it has to be a package name.
 	if install.context != install.dir && facts.workspaceTurbo && nodePackageNameRE.MatchString(manifest.Name) && nodeHasWorkspaceDependency(manifest) {

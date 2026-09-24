@@ -299,7 +299,9 @@ only renderer/executor/validation authority for their feature.
   binary runner (`npx`/`bunx`/`pnpm exec`/`yarn`). Prisma and Drizzle deploy committed migrations and
   otherwise push the declared model; Knex, Sequelize and MikroORM run their migration command; TypeORM
   is recorded as a decision because its data source cannot be guessed. The rule set lives in
-  `deploy/schema_tools.go`. Preflight adds `schema_step_missing` (warning, on the start command) when a
+  `deploy/schema_tools.go`; Prisma's schema path follows `package.json`'s `prisma.schema` and
+  `prisma.config.*`'s `schema:`/`migrations.path`, and the recipe generates the Prisma client itself with
+  placeholders for the names `prisma.config.*` reads through `env()` (`build_node_prisma.go`). Preflight adds `schema_step_missing` (warning, on the start command) when a
   database is linked and neither the start command, a release task nor the start script runs the tool,
   and `schema_step` (pass) when one does; no linked database means no finding. Changing the package
   manager swaps the whole start command for detection's command for that manager, chained step included.

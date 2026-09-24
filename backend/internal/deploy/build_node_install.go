@@ -143,8 +143,9 @@ type nodeInstallFacts struct {
 	// workspaceTurbo says the workspace root builds with Turborepo.
 	workspaceTurbo bool
 	// runtime is what the image depends on: the Node and Bun releases the
-	// repository declares.
+	// repository declares; prisma is the package's Prisma configuration.
 	runtime nodeRuntimeFacts
+	prisma  nodePrismaFacts
 }
 
 // detectedLockfiles are the readings as the candidate records them.
@@ -296,6 +297,7 @@ func readNodeInstallFacts(files nodeFiles, member string, manifest []byte, arch 
 	}
 	facts.registry = mergeDetectedVariables(facts.registry)
 	facts.runtime = readNodeRuntimeFacts(files, member, facts.manifest, facts.settings, engineStrict)
+	facts.prisma = readPrismaFacts(files.sub(member), facts.manifest)
 	return facts
 }
 
@@ -781,8 +783,10 @@ type nodeInstallPlan struct {
 	// the image family: Alpine, or Debian slim for glibc-only packages.
 	node   nodeRelease
 	family string
-	// image is what the dependencies need from the image beyond the install.
-	image nodeImagePlan
+	// image is what the dependencies need from the image beyond the install,
+	// prisma the generate step and the placeholders Prisma's config needs.
+	image  nodeImagePlan
+	prisma nodePrismaPlan
 	// berry keeps Yarn's cache inside the build so a Plug'n'Play install
 	// is copied with the application.
 	berry     bool
@@ -998,8 +1002,24 @@ func planNodeInstall(facts nodeInstallFacts, choice nodeInstallChoice) nodeInsta
 		"Package manager release", plan.toolchain,
 		"The release that installs, and what chose it: a declaration, the lockfile's format, or the reviewed default.", "", field))
 	planNodeImage(facts, &plan, glibc, choice.assets)
+	if !choice.assets {
+		planPrisma(facts, &plan)
+	}
 	planNodeRelease(facts, &plan)
 	return plan
+}
+
+// installDefaults are the values the install RUN gives a variable the build
+// supplies none of; buildDefaults the same for the build command's RUN.
+func (p nodeInstallPlan) installDefaults() []nodeEnvDefault {
+	return append(append([]nodeEnvDefault(nil), p.image.installEnv...), p.prisma.defaults...)
+}
+
+func (p nodeInstallPlan) buildDefaults() []nodeEnvDefault {
+	if p.prisma.build {
+		return append([]nodeEnvDefault(nil), p.prisma.defaults...)
+	}
+	return nil
 }
 
 func nodeLockOrNone(lockfile string) string {
@@ -1300,6 +1320,27 @@ var nodeYarnCommands = map[string]bool{
 // own tooling signals its manager.
 func nodeCommandTools(scripts map[string]string, commands []string) map[string]bool {
 	tools := map[string]bool{}
+	segments := nodeReachedSegments(scripts, commands, true)
+	if commands == nil {
+		segments = []string{}
+		for _, body := range scripts {
+			segments = append(segments, nodeCommandSegments(body)...)
+		}
+	}
+	for _, segment := range segments {
+		if words := nodeSegmentWords(segment); len(words) > 0 {
+			tools[path.Base(words[0])] = true
+		}
+	}
+	return tools
+}
+
+// nodeReachedSegments lists the simple commands the given commands run,
+// following `<manager> run <script>` (and the script's pre and post hooks)
+// into the package's scripts; with lifecycle it also follows the scripts
+// every install runs (preinstall, install, postinstall, prepare).
+func nodeReachedSegments(scripts map[string]string, commands []string, lifecycle bool) []string {
+	reached := []string{}
 	visited := map[string]bool{}
 	var visit func(command string, depth int)
 	runScript := func(name string, depth int) {
@@ -1319,13 +1360,13 @@ func nodeCommandTools(scripts map[string]string, commands []string) map[string]b
 			if len(words) == 0 {
 				continue
 			}
-			program := path.Base(words[0])
-			tools[program] = true
+			reached = append(reached, segment)
 			if len(words) < 2 {
 				continue
 			}
-			switch program {
+			switch path.Base(words[0]) {
 			case "npm", "pnpm", "bun", "yarn":
+				program := path.Base(words[0])
 				switch {
 				case words[1] == "run" || words[1] == "run-script":
 					if len(words) > 2 {
@@ -1338,27 +1379,22 @@ func nodeCommandTools(scripts map[string]string, commands []string) map[string]b
 			}
 		}
 	}
-	if commands == nil {
-		for _, body := range scripts {
-			for _, segment := range nodeCommandSegments(body) {
-				if words := nodeSegmentWords(segment); len(words) > 0 {
-					tools[path.Base(words[0])] = true
-				}
+	if lifecycle {
+		for _, name := range nodeLifecycleScripts {
+			if body, ok := scripts[name]; ok && !visited[name] {
+				visited[name] = true
+				visit(body, 1)
 			}
-		}
-		return tools
-	}
-	for _, lifecycle := range []string{"preinstall", "install", "postinstall", "prepare"} {
-		if body, ok := scripts[lifecycle]; ok && !visited[lifecycle] {
-			visited[lifecycle] = true
-			visit(body, 1)
 		}
 	}
 	for _, command := range commands {
 		visit(command, 0)
 	}
-	return tools
+	return reached
 }
+
+// nodeLifecycleScripts are the root package's scripts every install runs.
+var nodeLifecycleScripts = []string{"preinstall", "install", "postinstall", "prepare"}
 
 // nodeCommandsRunThrough reports whether every simple command runs through
 // the given manager, which is what keeps Yarn's Plug'n'Play loader in place.
