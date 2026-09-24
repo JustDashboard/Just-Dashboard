@@ -558,6 +558,7 @@ export function defaultConfiguration(
       dockerfile: method === "dockerfile" ? (candidate?.dockerfile ?? "Dockerfile") : undefined,
       target: method === "dockerfile" ? candidate?.dockerfileTarget : undefined,
       pythonVersion: candidate?.recipe === "python" ? candidate.pythonVersion : undefined,
+      goPackage: candidate?.recipe === "go" ? candidate.goPackage : undefined,
       spaFallback: packagedStatic && candidate?.spaFallback ? true : undefined,
       noCache: false,
       secrets: [],
@@ -1130,6 +1131,9 @@ export function validateConfiguration(
   )
     errors.releaseTasks =
       "A release task that runs in the release image needs a build that produces one; run it in the dashboard's shell instead."
+  if (needsStartCommand(configuration.build))
+    errors.startCommand =
+      "Set the start command the image runs — or, for a static site, its output directory."
   return errors
 }
 
@@ -1176,4 +1180,37 @@ export const BROWSER_PREFIX = /^(NEXT_PUBLIC_|VITE_|PUBLIC_|NUXT_PUBLIC_|REACT_A
 export function dockerfileStageHint(stages?: string[]) {
   const base = "Leave empty to build the last stage."
   return stages?.length ? `${base} This Dockerfile's stages: ${stages.join(", ")}.` : base
+}
+
+/**
+ * Whether a recipe plan is missing the start command its recipe refuses to
+ * build without: Python, Deno and PHP always run one, and a JavaScript build
+ * runs one unless it has static output for nginx to serve. The screen that
+ * owns the field says so, rather than preflight four screens later or the
+ * build after Deploy.
+ */
+export function needsStartCommand(build: DeploymentConfiguration["build"]) {
+  if (build.method !== "recipe" || build.startCommand?.trim()) return false
+  switch (build.recipe) {
+    case "python":
+    case "deno":
+    case "php":
+      return true
+    case "node":
+      return !build.outputDirectory?.trim()
+    default:
+      return false
+  }
+}
+
+/**
+ * A Go candidate's main packages as the go command names them — `./cmd/api`
+ * — the first few, then how many more: a tools monorepo can have hundreds,
+ * and a hint is one line.
+ */
+export function goMainPackageList(candidate: DeploymentDetectionCandidate | undefined) {
+  const mains = candidate?.goMainPackages ?? []
+  const shown = mains.slice(0, 8).map((main) => (main === "." ? "." : `./${main}`))
+  const more = mains.length - shown.length + (candidate?.goMainPackagesOmitted ?? 0)
+  return shown.join(", ") + (more > 0 ? ` and ${more} more` : "")
 }

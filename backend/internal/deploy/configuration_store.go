@@ -1062,7 +1062,7 @@ func (s *PlanningStore) EnvironmentConfiguration(
 	}
 	var evidence StoredBuildEvidence
 	if json.Unmarshal([]byte(evidenceJSON), &evidence) == nil {
-		result.Detected = describedCandidate(evidence.Candidates, result.Build)
+		result.Detected = plannedDetectionCandidate(&DetectionResult{Candidates: evidence.Candidates}, result.Build)
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT kind, ownership, resource_kind, resource_id, config_json
@@ -1314,21 +1314,50 @@ func (s *PlanningStore) SaveEnvironmentSource(
 	source DraftSourceConfig,
 	identity SourceIdentity,
 ) (*EnvironmentConfiguration, error) {
+	configuration, _, err := s.saveEnvironmentSource(ctx, projectID, environmentID, revision, source, identity, nil)
+	return configuration, err
+}
+
+// SaveEnvironmentSourceDetection is SaveEnvironmentSource with the detection
+// the caller's inspection produced. That detection becomes the new
+// revision's evidence — candidates, Compose analysis and Git requirements —
+// instead of the old source's, since it describes the code the source now
+// points at; and it is compared with the saved plan field by field, for the
+// settings page to offer what changed.
+func (s *PlanningStore) SaveEnvironmentSourceDetection(
+	ctx context.Context,
+	projectID, environmentID int64,
+	revision int,
+	source DraftSourceConfig,
+	detection DetectionResult,
+) (*EnvironmentConfiguration, *DetectionProposal, error) {
+	return s.saveEnvironmentSource(ctx, projectID, environmentID, revision, source, detection.Source, &detection)
+}
+
+func (s *PlanningStore) saveEnvironmentSource(
+	ctx context.Context,
+	projectID, environmentID int64,
+	revision int,
+	source DraftSourceConfig,
+	identity SourceIdentity,
+	detection *DetectionResult,
+) (*EnvironmentConfiguration, *DetectionProposal, error) {
+	fail := func(err error) (*EnvironmentConfiguration, *DetectionProposal, error) { return nil, nil, err }
 	source = canonicalSourceConfig(source)
 	if err := source.ValidateForDeployment(); err != nil {
-		return nil, err
+		return fail(err)
 	}
 	if err := source.validateBlueprintSecretInputs(); err != nil {
-		return nil, err
+		return fail(err)
 	}
 	if exists, err := s.credentialExists(ctx, source.CredentialID); err != nil {
-		return nil, err
+		return fail(err)
 	} else if !exists {
-		return nil, fmt.Errorf("%w: credential does not exist", ErrInvalidSource)
+		return fail(fmt.Errorf("%w: credential does not exist", ErrInvalidSource))
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return fail(err)
 	}
 	defer tx.Rollback()
 	var current int
@@ -1341,15 +1370,15 @@ func (s *PlanningStore) SaveEnvironmentSource(
 		 WHERE e.id = ? AND e.project_id = ? AND e.archived_at = 0`, environmentID, projectID).
 		Scan(&current, &currentKind, &currentSourceJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrEnvironmentNotFound
+			return fail(ErrEnvironmentNotFound)
 		}
-		return nil, err
+		return fail(err)
 	}
 	if current != revision {
-		return nil, fmt.Errorf("%w: current revision is %d", ErrRevisionConflict, current)
+		return fail(fmt.Errorf("%w: current revision is %d", ErrRevisionConflict, current))
 	}
 	if currentKind != source.Kind {
-		return nil, fmt.Errorf("%w: source kind cannot change from %s to %s", ErrInvalidSource, currentKind, source.Kind)
+		return fail(fmt.Errorf("%w: source kind cannot change from %s to %s", ErrInvalidSource, currentKind, source.Kind))
 	}
 	next, now := current+1, s.now().UTC().Unix()
 	sourceJSON, _ := json.Marshal(source)
@@ -1358,38 +1387,66 @@ func (s *PlanningStore) SaveEnvironmentSource(
 		INSERT INTO deploy_sources(environment_id, revision, kind, config_json, credential_id, identity_json, digest, created_at)
 		VALUES(?, ?, ?, ?, ?, ?, ?, ?)`, environmentID, next, source.Kind, string(sourceJSON),
 		source.CredentialID, string(identityJSON), digestBytes(sourceJSON, identityJSON), now); err != nil {
-		return nil, err
+		return fail(err)
 	}
 	var currentSource DraftSourceConfig
 	moved := json.Unmarshal([]byte(currentSourceJSON), &currentSource) != nil ||
 		!sameSourceLocation(canonicalSourceConfig(currentSource), source)
-	if err := cloneBuildPlanTx(ctx, tx, environmentID, current, next, now, moved); err != nil {
-		return nil, err
+	var proposal *DetectionProposal
+	if detection == nil {
+		if err := cloneBuildPlanTx(ctx, tx, environmentID, current, next, now, moved); err != nil {
+			return fail(err)
+		}
+	} else {
+		proposal, err = redetectBuildPlanTx(ctx, tx, environmentID, current, next, now, moved, *detection)
+		if err != nil {
+			return fail(err)
+		}
 	}
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO deploy_runtime_plans(environment_id, revision, config_json, preview, digest, created_at)
 		 SELECT environment_id, ?, config_json, preview, digest, ?
 		   FROM deploy_runtime_plans WHERE environment_id = ? AND revision = ?`, next, now, environmentID, current)
 	if err != nil {
-		return nil, err
+		return fail(err)
 	}
 	if affected, _ := result.RowsAffected(); affected != 1 {
-		return nil, fmt.Errorf("%w: revision %d has incomplete plan rows", ErrInvalidPlan, current)
+		return fail(fmt.Errorf("%w: revision %d has incomplete plan rows", ErrInvalidPlan, current))
 	}
 	result, err = tx.ExecContext(ctx, `
 		UPDATE deploy_environments SET desired_revision = ?, updated_at = ?
 		 WHERE id = ? AND project_id = ? AND desired_revision = ? AND archived_at = 0`,
 		next, now, environmentID, projectID, current)
 	if err != nil {
-		return nil, err
+		return fail(err)
 	}
 	if affected, _ := result.RowsAffected(); affected != 1 {
-		return nil, ErrRevisionConflict
+		return fail(ErrRevisionConflict)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, err
+		return fail(err)
 	}
-	return s.EnvironmentConfiguration(ctx, projectID, environmentID)
+	configuration, err := s.EnvironmentConfiguration(ctx, projectID, environmentID)
+	if err != nil {
+		return fail(err)
+	}
+	if proposal != nil {
+		configured := map[string]bool{}
+		for _, variable := range configuration.Variables {
+			configured[variable.Name] = true
+		}
+		// The variable list is read after commit, so the proposal's unset
+		// names are judged against what the environment actually has.
+		variables := proposal.Variables[:0:0]
+		for _, variable := range proposal.Variables {
+			if !configured[variable.Name] {
+				variables = append(variables, variable)
+			}
+		}
+		proposal.Variables = variables
+		proposal.Revision = configuration.Revision
+	}
+	return configuration, proposal, nil
 }
 
 // cloneBuildPlanTx copies the build plan at one revision to the next. When
@@ -1418,6 +1475,64 @@ func cloneBuildPlanTx(ctx context.Context, tx *sql.Tx, environmentID int64, from
 		INSERT INTO deploy_build_plans(environment_id, revision, method, config_json, evidence_json, preview, digest, created_at)
 		VALUES(?, ?, ?, ?, ?, ?, ?, ?)`, environmentID, to, method, buildJSON, evidence, preview, digest, now)
 	return err
+}
+
+// redetectBuildPlanTx copies the build plan forward as cloneBuildPlanTx does,
+// with the fresh detection as its evidence. The recorded framework follows
+// the candidate detection now finds at the plan's root with its method, and
+// the proposal compares the plan with that candidate.
+func redetectBuildPlanTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	environmentID int64,
+	from, to int,
+	now int64,
+	moved bool,
+	detection DetectionResult,
+) (*DetectionProposal, error) {
+	var method BuildMethod
+	var buildJSON, storedEvidence, digest string
+	var runtimeJSON string
+	if err := tx.QueryRowContext(ctx, `
+		SELECT b.method, b.config_json, b.evidence_json, b.digest, r.config_json
+		  FROM deploy_build_plans b
+		  JOIN deploy_runtime_plans r ON r.environment_id = b.environment_id AND r.revision = b.revision
+		 WHERE b.environment_id = ? AND b.revision = ?`, environmentID, from).
+		Scan(&method, &buildJSON, &storedEvidence, &digest, &runtimeJSON); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: revision %d has incomplete plan rows", ErrInvalidPlan, from)
+		}
+		return nil, err
+	}
+	var build BuildPlanConfig
+	var runtime RuntimePlanConfig
+	if json.Unmarshal([]byte(buildJSON), &build) != nil || json.Unmarshal([]byte(runtimeJSON), &runtime) != nil {
+		return nil, fmt.Errorf("%w: desired plan configuration is malformed", ErrInvalidPlan)
+	}
+	var previous StoredBuildEvidence
+	_ = json.Unmarshal([]byte(storedEvidence), &previous)
+	fresh := plannedDetectionCandidate(&detection, build)
+	switch {
+	case fresh != nil:
+		build.Framework = fresh.Framework
+	case moved:
+		build.Framework = ""
+	}
+	encoded, _ := json.Marshal(build)
+	evidence, _ := json.Marshal(StoredBuildEvidence{
+		Candidates: detection.Candidates, Compose: cloneComposeAnalysis(detection.Compose),
+		GitRequirements: detection.GitRequirements,
+	})
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO deploy_build_plans(environment_id, revision, method, config_json, evidence_json, preview, digest, created_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?)`, environmentID, to, method, string(encoded), string(evidence),
+		renderBuildPreview(build), digest, now); err != nil {
+		return nil, err
+	}
+	stored := plannedDetectionCandidate(&DetectionResult{Candidates: previous.Candidates}, build)
+	proposal := detectionProposal(stored, &detection, build, runtime, nil)
+	proposal.SourceRevision = detection.Source.Revision
+	return &proposal, nil
 }
 
 type digestQuery interface {
@@ -1472,17 +1587,4 @@ func diffNamedDigests(kind string, before, after map[string]string) []PendingCha
 		})
 	}
 	return changes
-}
-
-// describedCandidate is the stored candidate a build still describes: the
-// same directory and method, and for a recipe the same recipe.
-func describedCandidate(candidates []DetectedCandidate, build BuildPlanConfig) *DetectedCandidate {
-	for index := range candidates {
-		candidate := &candidates[index]
-		if sameBuildRoot(candidate.Root, build.RootDirectory) && candidate.BuildMethod == build.Method &&
-			(build.Method != BuildRecipe || build.Recipe == "" || candidate.Recipe == build.Recipe) {
-			return candidate
-		}
-	}
-	return nil
 }

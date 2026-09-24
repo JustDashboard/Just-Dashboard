@@ -13,6 +13,7 @@ import {
   discoveredEnvironmentRows,
   environmentRowsToSend,
   generateSecretValue,
+  goMainPackageList,
   mergeDiscoveredRows,
   persistentStorage,
   pointsAtLocalhost,
@@ -291,6 +292,47 @@ describe("catalogue defaults carried into the plan", () => {
       validateConfiguration({ ...plan, build: { ...plan.build, pythonVersion: "3.12" } }, "web"),
     ).not.toHaveProperty("pythonVersion")
   })
+  test("a recipe that runs a server is refused without its start command", () => {
+    const build = (overrides) => ({ method: "recipe", secrets: [], releaseTasks: [], ...overrides })
+    const refused = (overrides) =>
+      "startCommand" in
+      validateConfiguration(
+        {
+          build: build(overrides),
+          runtime: { strategy: "stop_first" },
+          variables: [],
+          dependencies: [],
+          checks: [],
+          domains: [],
+        },
+        "web",
+      )
+    expect(refused({ recipe: "python" })).toBe(true)
+    expect(refused({ recipe: "python", startCommand: "  " })).toBe(true)
+    expect(refused({ recipe: "python", startCommand: "gunicorn app:app" })).toBe(false)
+    expect(refused({ recipe: "deno" })).toBe(true)
+    expect(refused({ recipe: "php" })).toBe(true)
+    expect(refused({ recipe: "node" })).toBe(true)
+    expect(refused({ recipe: "node", outputDirectory: "dist" })).toBe(false)
+    expect(refused({ recipe: "rust" })).toBe(false)
+    expect(refused({ recipe: "go" })).toBe(false)
+    expect(refused({ method: "dockerfile" })).toBe(false)
+  })
+})
+
+test("a Go module's main packages read as one bounded line", () => {
+  expect(goMainPackageList(candidate({ goMainPackages: [".", "cmd/worker"] }))).toBe(
+    "., ./cmd/worker",
+  )
+  const many = Array.from({ length: 12 }, (_, index) => `cmd/tool${index}`)
+  expect(goMainPackageList(candidate({ goMainPackages: many }))).toBe(
+    "./cmd/tool0, ./cmd/tool1, ./cmd/tool2, ./cmd/tool3, ./cmd/tool4, ./cmd/tool5, ./cmd/tool6, ./cmd/tool7 and 4 more",
+  )
+  // Detection's own list is bounded too, and says how many it left out.
+  expect(
+    goMainPackageList(candidate({ goMainPackages: ["cmd/a"], goMainPackagesOmitted: 70 })),
+  ).toBe("./cmd/a and 70 more")
+  expect(goMainPackageList(undefined)).toBe("")
 })
 
 describe("discovered environment rows", () => {

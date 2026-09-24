@@ -27,7 +27,9 @@ func TestDetectorIsDeterministicBoundedAndDoesNotFollowSymlinks(t *testing.T) {
 	writePlanningFixture(t, filepath.Join(root, "apps", "web", "package.json"), `{
   "name":"web","scripts":{"build":"vite build"},"devDependencies":{"vite":"6.0.0"}
 }`)
+	writePlanningFixture(t, filepath.Join(root, "apps", "web", "bun.lock"), "{}")
 	writePlanningFixture(t, filepath.Join(root, "services", "api", "go.mod"), "module example.test/api\n")
+	writePlanningFixture(t, filepath.Join(root, "services", "api", "main.go"), "package main\n\nfunc main() {}\n")
 	writePlanningFixture(t, filepath.Join(root, ".gitmodules"), "[submodule \"shared\"]\n  path = shared\n")
 	writePlanningFixture(t, filepath.Join(root, ".gitattributes"), "assets/** filter=lfs diff=lfs merge=lfs -text\n")
 	outside := t.TempDir()
@@ -51,7 +53,8 @@ func TestDetectorIsDeterministicBoundedAndDoesNotFollowSymlinks(t *testing.T) {
 	if string(firstJSON) != string(secondJSON) {
 		t.Fatalf("detection is not deterministic:\n%s\n%s", firstJSON, secondJSON)
 	}
-	if len(first.Candidates) != 2 || first.SelectedID != "" {
+	if len(first.Candidates) != 2 || first.SelectedID != "" ||
+		first.Candidates[0].Confidence != ConfidenceHigh || first.Candidates[1].Confidence != ConfidenceHigh {
 		t.Fatalf("monorepo detection = %#v, want two ambiguous high-confidence candidates", first)
 	}
 	// The declared submodule and LFS pattern lie outside both build roots,

@@ -711,6 +711,7 @@ export function RunPage() {
       )}
       {view === "details" && (
         <RunSteps
+          projectId={projectId}
           steps={attempts}
           now={clock}
           lineCounts={transcript.perStep}

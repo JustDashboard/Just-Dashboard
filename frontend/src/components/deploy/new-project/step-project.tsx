@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useRef } from "react"
 import type {
   DeploymentBuildMethod,
   DeploymentDraftSource,
@@ -36,6 +37,7 @@ import {
   commandsForPackageManager,
   composeSourceForCandidate,
   dockerfileStageHint,
+  goMainPackageList,
   packageManagerOptions,
   packageManagerReading,
 } from "@/components/deploy/deployment-defaults"
@@ -44,6 +46,7 @@ import { BuildExtras } from "@/components/deploy/new-project/configure-advanced"
 import {
   candidateStanding,
   lfsFilesForRoot,
+  rootEditCandidate,
   submodulesForRoot,
 } from "@/components/deploy/new-project/draft"
 import type { ConfigureFlow, FlowUpdate } from "@/components/deploy/new-project/draft"
@@ -116,6 +119,27 @@ export function StepProject({
     onFlowChange({ ...flow, configuration: next })
   const updateBuild = (patch: Partial<typeof configuration.build>) =>
     setConfiguration({ ...configuration, build: { ...configuration.build, ...patch } })
+
+  // A root typed after detection is judged by what detection found there: the
+  // candidate at that root, building the plan's way, is picked the way one is
+  // picked from the list, so its facts — not another directory's — are what
+  // preflight reads. Settled on a pause in the typing, not every keystroke,
+  // and tried once per candidate: a pick that fails is not retried in a loop.
+  const rootPickId = rootEditCandidate(flow.detection, flow.candidate, configuration.build)?.id
+  const pickCandidate = useRef(onPickCandidate)
+  useEffect(() => {
+    pickCandidate.current = onPickCandidate
+  })
+  const rootPickTried = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (!rootPickId) rootPickTried.current = undefined
+    if (!rootPickId || rootPickTried.current === rootPickId || busy) return
+    const timer = setTimeout(() => {
+      rootPickTried.current = rootPickId
+      pickCandidate.current(rootPickId)
+    }, 600)
+    return () => clearTimeout(timer)
+  }, [rootPickId, busy])
 
   const isGitSource = flow.source.kind === "git" || flow.source.kind === "local"
   const isImageSource = flow.source.kind === "image"
@@ -619,6 +643,7 @@ export function StepProject({
                       updateBuild({
                         recipe,
                         goVersion: recipe === "go" ? configuration.build.goVersion : undefined,
+                        goPackage: recipe === "go" ? configuration.build.goPackage : undefined,
                         pythonVersion:
                           recipe === "python" ? configuration.build.pythonVersion : undefined,
                         // The PHP recipe's asset stage installs through the
@@ -708,6 +733,29 @@ export function StepProject({
                     </Select>
                   </Field>
                 )}
+              {configuration.build.method === "recipe" && configuration.build.recipe === "go" && (
+                <Field
+                  label="Go main package"
+                  htmlFor="go-package"
+                  hint={
+                    (flow.candidate?.goMainPackages?.length ?? 0) > 1
+                      ? `This module has several commands: ${goMainPackageList(flow.candidate)}. Choose the one to build.`
+                      : "Leave empty to build the module's only command."
+                  }
+                >
+                  <Input
+                    id="go-package"
+                    value={configuration.build.goPackage ?? ""}
+                    onChange={(event) =>
+                      updateBuild({
+                        goPackage: event.target.value.replace(/^\.\//, "") || undefined,
+                      })
+                    }
+                    placeholder={flow.candidate?.goPackage ?? "cmd/api"}
+                    className="font-mono"
+                  />
+                </Field>
+              )}
               {configuration.build.method === "recipe" && configuration.build.recipe === "go" && (
                 <Field
                   label="Go version"

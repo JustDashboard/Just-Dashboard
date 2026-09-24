@@ -19,6 +19,7 @@ import type {
   DeploymentDraftSource,
   DeploymentHostnameSuggestion,
   DeploymentPreflight,
+  DeploymentPreflightFinding,
   DeploymentVariableSetup,
   WorkloadProfile,
 } from "@/lib/types"
@@ -194,10 +195,70 @@ export async function importEnvironment(
   )
 }
 
-export async function enqueueDeploy(projectId: number, environmentId: number) {
+export async function enqueueDeploy(
+  projectId: number,
+  environmentId: number,
+  sourceRevision?: string,
+) {
   return post<{ id: number }>(`/deploy/${projectId}/environments/${environmentId}/runs`, {
     operation: "deploy",
+    ...(sourceRevision ? { sourceRevision } : {}),
   })
+}
+
+/**
+ * The commit a new project's first deployment builds: the one Review checked,
+ * for a remote Git repository, rather than whatever the branch points at by
+ * the time Deploy lands. A draft resumed days later was reviewed against its
+ * detection's commit, and building the branch head instead would ship a plan
+ * nobody looked at. Every later deployment follows the branch.
+ *
+ * Only a remote Git source can be pinned — the run request refuses a
+ * revision for a local checkout, an image or a Compose file — and only when
+ * the check that just passed read that commit: one it could not read says
+ * nothing about it, and the branch head is what a deployment built before.
+ */
+export function firstDeployRevision(
+  source: DeploymentDraftSource,
+  detection: DeploymentDetection | undefined,
+  findings: DeploymentPreflightFinding[],
+) {
+  const revision = detection?.source.revision
+  const remote =
+    source.kind === "git" && (source.mode === "git_url" || source.mode === "connected_repository")
+  const read = !findings.some((finding) => finding.code === "source_inspection_unavailable")
+  return remote && read && revision && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(revision)
+    ? revision
+    : undefined
+}
+
+/**
+ * The candidate to pick after the root directory or builder was edited away
+ * from the picked one: the one detection found at the typed root that builds
+ * the plan's way — the plan's recipe first, then detection's own choice — so
+ * preflight judges that root by its facts, not another directory's.
+ *
+ * A picked candidate already at that root and builder stays picked. Two
+ * candidates can share a root (a Django app and its asset package.json), and
+ * which of them to build is detection's or the reader's choice, not an edit's.
+ */
+export function rootEditCandidate(
+  detection: DeploymentDetection | undefined,
+  picked: DeploymentDetectionCandidate | undefined,
+  build: Pick<DeploymentConfiguration["build"], "rootDirectory" | "method" | "recipe">,
+) {
+  if (!picked) return undefined
+  const root = (build.rootDirectory ?? "").trim().replace(/^\/+|\/+$/g, "")
+  if (picked.root === root && picked.buildMethod === build.method) return undefined
+  const here =
+    detection?.candidates.filter(
+      (candidate) => candidate.root === root && candidate.buildMethod === build.method,
+    ) ?? []
+  return (
+    here.find((candidate) => build.method === "recipe" && candidate.recipe === build.recipe) ??
+    here.find((candidate) => candidate.id === detection?.selectedId) ??
+    here[0]
+  )
 }
 
 /** What a source tab hands to Configure once it has inspected. */

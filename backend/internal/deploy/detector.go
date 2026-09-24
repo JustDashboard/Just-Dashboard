@@ -143,7 +143,6 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	markers := map[string]*detectedMarkers{}
 	shape := newRepoShapeScan(root, limits)
 	goSources := newGoSourceScan()
-	cgoPaths := []string{}
 	schemaPaths := []string{}
 	schemaPathCounts := map[string]int{}
 	pythonEntries := []pythonEntry{}
@@ -277,9 +276,6 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			// Go source is read head-first under a budget of its own, so
 			// generated code cannot spend what the manifests need.
 			content, ok := goSources.read(path, rel, name)
-			if ok && sourceUsesCGO(content) {
-				cgoPaths = append(cgoPaths, rel)
-			}
 			if ok {
 				source := content
 				if len(content) == goScanHead && goPackageMainRE.Match(content) {
@@ -686,18 +682,25 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	for index := range result.Candidates {
 		candidate := &result.Candidates[index]
 		if candidate.Recipe == "go" {
-			for _, path := range cgoPaths {
-				if candidate.Root == "" || strings.HasPrefix(path, candidate.Root+string(filepath.Separator)) {
-					candidate.RecipeIssue = "CGO source requires a Dockerfile with the required C toolchain"
-					break
-				}
+			// Main packages are read by the recipe's own scan of the module —
+			// headers only, under its own bound — not from the files this walk
+			// read before its budget ran out, so what detection says about
+			// them is what the recipe will decide.
+			packages, err := scanGoModule(filepath.Join(root, filepath.FromSlash(candidate.Root)))
+			if err != nil {
+				candidate.RecipeIssue = recipeRefusalText(err, root)
+			} else {
+				applyGoModulePackages(candidate, packages, markers[filepath.FromSlash(candidate.Root)])
 			}
 			if goSources.truncated {
 				candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(candidate.Root, "go.mod"),
-					Reason: fmt.Sprintf("Go source scan stopped after %d files; the rest was not checked for cgo", goSources.files)})
+					Reason: fmt.Sprintf("Go source scan stopped after %d files; the environment and listeners of the rest were not read", goSources.files)})
 			}
 		}
 	}
+	// A candidate the recipe would refuse is marked before the ranking
+	// chooses among them (recipe_preflight.go).
+	applyDetectedRecipeIssues(detectCtx, root, result.Candidates)
 	// The frontend and API a split repository pairs, by the ports and
 	// profiles the passes settled, and the ranking that selects the
 	// application.
@@ -789,11 +792,13 @@ func candidatesForMarkers(marker *detectedMarkers, schemaPaths []string, pythonE
 			// screen that has the field.
 			NeedsDecision: []string{},
 		}
-		version, err := chooseGoRecipeVersion("", string(marker.goVersionFile), marker.goModContent)
+		// Which toolchain builds the module is a setting, so a version the
+		// automatic choice cannot satisfy is left to preflight, which judges
+		// it against the plan's own Go version rather than this default.
 		candidate.GoMinimumVersion = goModuleMinimum(marker.goModContent)
-		if err != nil {
-			candidate.RecipeIssue = err.Error()
-		} else {
+		candidate.GoToolchain = goModuleToolchain(marker.goModContent)
+		candidate.GoVersionFile = goVersionFileValue(marker.goVersionFile)
+		if version, err := chooseGoRecipeVersion("", string(marker.goVersionFile), marker.goModContent); err == nil {
 			candidate.GoVersion = version
 		}
 		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, candidate))

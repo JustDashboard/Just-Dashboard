@@ -52,6 +52,7 @@ import {
   environmentText,
   loadDraft,
   preflightDraft,
+  firstDeployRevision,
   reinspect,
   redetectedConfiguration,
   saveConfiguration,
@@ -580,6 +581,7 @@ export function Configure({
         errors.buildMethod ??
         errors.pythonVersion ??
         errors.target ??
+        errors.startCommand ??
         errors.buildSecrets ??
         errors.releaseTasks
       )
@@ -708,7 +710,16 @@ export function Configure({
       })
 
       if (operation === "deploy" && !isImport) {
-        const run = await enqueueDeploy(commit.projectId, commit.environmentId)
+        const run = await enqueueDeploy(
+          commit.projectId,
+          commit.environmentId,
+          // The commit the check above read, which is the one it passed.
+          firstDeployRevision(
+            flow.source,
+            checkedDraft.draft.data.detection,
+            checkedDraft.preflight.findings,
+          ),
+        )
         router.push(`/deploy/${commit.projectId}/runs/${run.id}`)
         return
       }
@@ -761,6 +772,46 @@ export function Configure({
     // is what the `preflight` guard is there to make unnecessary.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current, preflight, busy, created, draftId, planSignature])
+
+  /**
+   * `source_moved`'s remedy: the branch has moved past the commit Review
+   * checked, so detection reads the newer one — keeping the candidate the
+   * reader chose where it still exists — and Review asks again. The plan may
+   * come out the same, so the answer about the old commit is dropped rather
+   * than left standing for an unchanged signature.
+   */
+  const inspectAgain = async () => {
+    if (mutating.current) return
+    mutating.current = true
+    setFailure(undefined)
+    setBusy("detect")
+    try {
+      const selected = flow.detection?.selectedId
+      const result = selected
+        ? await selectCandidate(flow.draft, flow.profile, flow.source, selected).catch(() =>
+            reinspect(flow.draft, flow.profile, flow.source),
+          )
+        : await reinspect(flow.draft, flow.profile, flow.source)
+      onFlowChange((current) =>
+        current
+          ? {
+              ...current,
+              draft: result.draft,
+              candidate: result.candidate,
+              detection: result.detection,
+              configuration: redetectedConfiguration(flow, result),
+            }
+          : current,
+      )
+      setReview(null)
+      autoChecked.current = undefined
+    } catch (error) {
+      setFailure(asError(error))
+    } finally {
+      mutating.current = false
+      setBusy("")
+    }
+  }
 
   if (created)
     return (
@@ -898,6 +949,7 @@ export function Configure({
                 onAcknowledgedChange={setAcknowledged}
                 onOpenRemedy={openRemedyField}
                 canOpenRemedy={(finding) => Boolean(sectionForField(finding.fieldId))}
+                onInspectAgain={() => void inspectAgain()}
               />
             )}
           </FlowPanelBody>

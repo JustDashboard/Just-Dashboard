@@ -13,7 +13,7 @@ import (
 // and a model downloaded at every start.
 func readinessPreflightFindings(draft *Draft, configuration PlanConfiguration) []PreflightFinding {
 	findings := []PreflightFinding{}
-	selected := selectedDetectionCandidate(draft.Data.Detection)
+	selected := rootDetectionCandidate(draft.Data.Detection, configuration.Build)
 	profile := draft.Data.Intent.Profile
 	findings = append(findings, startCommandFindings(selected, configuration)...)
 	if selected != nil && selected.BackgroundWorker != nil && (profile == ProfileWeb || profile == ProfileStatic) {

@@ -14,7 +14,7 @@ import (
 // command itself says is re-read.
 func networkFindings(draft *Draft, configuration PlanConfiguration) []PreflightFinding {
 	findings := []PreflightFinding{}
-	selected := selectedDetectionCandidate(draft.Data.Detection)
+	selected := rootDetectionCandidate(draft.Data.Detection, configuration.Build)
 	build := configuration.Build
 	runtime := configuration.Runtime
 	profile := draft.Data.Intent.Profile
@@ -333,7 +333,7 @@ func withoutSupersededHostFindings(findings []PreflightFinding) []PreflightFindi
 	named := map[string]bool{}
 	for _, item := range findings {
 		if item.Code == "listen_loopback" && strings.HasPrefix(item.FieldID, "variables.") {
-			named["host_variable_loopback_"+strings.ToLower(strings.TrimPrefix(item.FieldID, "variables."))] = true
+			named[variableFindingCode("host_variable_loopback_", strings.TrimPrefix(item.FieldID, "variables."))] = true
 		}
 	}
 	if len(named) == 0 {

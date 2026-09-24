@@ -94,6 +94,13 @@ var (
 	adonisSchemaRE      = regexp.MustCompile(`([A-Z][A-Z0-9_]+)\s*:\s*Env\.schema\.\w+(\.optional)?\(`)
 	nuxtRuntimeConfigRE = regexp.MustCompile(`\bruntimeConfig\s*:\s*\{`)
 	prismaConfigEnvRE   = regexp.MustCompile(`\benv\(\s*['"]([A-Z][A-Z0-9_]+)['"]\s*\)`)
+	// A non-null assertion or a throw-if-missing guard reads the value in a
+	// form that fails without one, wherever it runs.
+	jsAssertedEnvREs = []*regexp.Regexp{
+		regexp.MustCompile(`process\.env\.([A-Z][A-Z0-9_]+)!(?:[^=]|$)`),
+		regexp.MustCompile(`process\.env\[['"]([A-Z][A-Z0-9_]+)['"]\]!(?:[^=]|$)`),
+		regexp.MustCompile(`if\s*\(\s*!\s*process\.env\.([A-Z][A-Z0-9_]+)\s*\)\s*\{?\s*throw\b`),
+	}
 
 	// HOST read next to a listen call, or falling back to the any address,
 	// is a bind address, not a public name.
@@ -247,6 +254,13 @@ func (s *envScanner) observeFacts(rel, name string, content []byte) {
 // observeSchema reads a Prisma schema or a committed SQL migration for the
 // extensions the database must offer.
 func (s *envScanner) observeSchema(rel string, content []byte) {
+	if strings.HasSuffix(rel, ".prisma") {
+		// A datasource's env("X") has no default; the client cannot connect,
+		// nor a start-time migration run, without it.
+		for _, match := range prismaConfigEnvRE.FindAllSubmatch(content, -1) {
+			s.recordRead(string(match[1]), rel, "", envReadRequired)
+		}
+	}
 	for _, match := range extensionSQLRE.FindAllSubmatch(content, -1) {
 		s.facts.observe(rel, observeExtension, strings.ToLower(string(match[1])))
 	}
@@ -1041,9 +1055,15 @@ func (s *envScanner) scanGo(rel string, content []byte) {
 	}
 }
 
-// scanJavaScript reads what JavaScript frameworks decide at build time.
+// scanJavaScript reads what JavaScript frameworks decide at build time,
+// and the reads that fail without a value.
 func (s *envScanner) scanJavaScript(rel, name string, content []byte) {
 	text := string(content)
+	for _, expression := range jsAssertedEnvREs {
+		for _, match := range expression.FindAllStringSubmatch(text, -1) {
+			s.recordRead(match[1], rel, "", envReadRequiredForm)
+		}
+	}
 	if buildConfigFileRE.MatchString(name) {
 		// Everything a framework config reads is read while the build runs.
 		for variable, flags := range s.namesReadIn(rel) {
@@ -1108,12 +1128,12 @@ func (s *envScanner) scanJavaScript(rel, name string, content []byte) {
 		}
 	}
 	if strings.Contains(text, "createEnv(") {
-		for _, match := range t3SchemaKeyRE.FindAllStringSubmatch(text, -1) {
+		for _, match := range t3SchemaKeyRE.FindAllStringSubmatchIndex(text, -1) {
 			flags := envReadBuild
-			if !strings.Contains(match[2], ".optional()") && !strings.Contains(match[2], ".default(") {
+			if !zodChainOptional(text[match[4]:match[5]], text[match[1]:]) {
 				flags |= envReadRequired
 			}
-			s.recordRead(match[1], rel, "", flags)
+			s.recordRead(text[match[2]:match[3]], rel, "", flags)
 		}
 	}
 	if strings.Contains(text, "Env.schema.") {
@@ -1334,4 +1354,23 @@ func javaScriptRoutePath(rel string) string {
 		}
 	}
 	return ""
+}
+
+// zodChainOptional says whether a zod schema field accepts a missing value:
+// an optional, default, nullish or nullable modifier on its line or on the
+// lines that continue its chain (`z\n  .string()\n  .default("x")`).
+func zodChainOptional(line, rest string) bool {
+	chain := line
+	for _, next := range strings.Split(strings.TrimPrefix(rest, "\n"), "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(next), ".") {
+			break
+		}
+		chain += strings.TrimSpace(next)
+	}
+	for _, modifier := range []string{".optional(", ".default(", ".nullish(", ".nullable(", ".catch("} {
+		if strings.Contains(chain, modifier) {
+			return true
+		}
+	}
+	return false
 }

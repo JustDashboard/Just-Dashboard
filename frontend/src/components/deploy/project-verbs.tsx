@@ -26,13 +26,26 @@ import { del, post } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
-import type { DeploymentEngineRun, DeploymentRuntimeServices, DeploymentSummary } from "@/lib/types"
+import { useSessionState } from "@/lib/view-state"
+import type {
+  DeploymentCheckResult,
+  DeploymentEngineRun,
+  DeploymentRuntimeServices,
+  DeploymentSummary,
+} from "@/lib/types"
 import type { ConfirmRequest, useConfirm } from "@/components/confirm-dialog"
 import type { Verb } from "@/components/verbs"
 import { FormFact } from "@/components/form"
 import { ProductGlyph } from "@/components/product-logo"
 import type { ProjectOperation } from "@/components/deploy/project-context"
 import { ProjectMark } from "@/components/deploy/project-mark"
+import { DeployCheckDialog } from "@/components/deploy/deploy-check"
+import {
+  cachedDeploymentCheck,
+  confirmationSignature,
+  needsConfirmation,
+  rememberDeploymentCheck,
+} from "@/components/deploy/deploy-check-state"
 import {
   deploymentURL,
   hostOf,
@@ -56,19 +69,45 @@ const START_FAILURE: Record<ProjectOperation, string> = {
   start: "Could not start the application",
 }
 
+/** The operations that build, which the advisory check is about. */
+const BUILDS = new Set<ProjectOperation>(["deploy", "force_build"])
+
+/** A build command as its button reads, for "Ready to deploy?". */
+const BUILD_COMMAND: Partial<Record<ProjectOperation, string>> = {
+  deploy: "Deploy",
+  force_build: "Rebuild without cache",
+}
+
 /**
  * Enqueue a run for a project and open its page — for a surface that has the
  * project's summary but not the project page's context, such as a card on
  * the projects grid. `starting` is the operation whose request is in flight,
  * for the present participle while it is (§13).
+ *
+ * A build asks "Ready to deploy?" first when the environment's last advisory
+ * check found something that stops it, or warnings not yet confirmed in this
+ * tab — the check the project page made, or one handed in by `check`. With no
+ * check, or a clean one, it is still one press. `gate` is the dialog, for the
+ * caller to render.
  */
 export function useProjectStart(
-  summary: Pick<DeploymentSummary, "id" | "environmentId">,
+  summary: Pick<DeploymentSummary, "id" | "environmentId"> & Partial<DeploymentSummary>,
   refresh: () => void,
+  check?: {
+    result?: DeploymentCheckResult
+    recheck: () => Promise<DeploymentCheckResult | undefined>
+    checking: boolean
+  },
 ) {
   const router = useRouter()
   const [starting, setStarting] = useState<ProjectOperation>()
-  const start = async (operation: ProjectOperation) => {
+  const [asking, setAsking] = useState<{
+    operation: ProjectOperation
+    result: DeploymentCheckResult
+  }>()
+  const [rechecking, setRechecking] = useState(false)
+  const [confirmed, setConfirmed] = useSessionState(`deploy.${summary.id}.check.confirmed`, "")
+  const enqueue = async (operation: ProjectOperation) => {
     setStarting(operation)
     try {
       const run = await post<DeploymentEngineRun>(
@@ -84,7 +123,64 @@ export function useProjectStart(
       refresh()
     }
   }
-  return { start, starting }
+  const start = async (operation: ProjectOperation) => {
+    if (BUILDS.has(operation)) {
+      const result =
+        check?.result ?? cachedDeploymentCheck(summary.environmentId, summary.desiredRevision)
+      if (result && needsConfirmation(result, confirmed)) {
+        setAsking({ operation, result })
+        return
+      }
+    }
+    await enqueue(operation)
+  }
+  const recheck = async () => {
+    setRechecking(true)
+    try {
+      const result = check
+        ? await check.recheck()
+        : await post<DeploymentCheckResult>(
+            `/deploy/${summary.id}/environments/${summary.environmentId}/check`,
+            {},
+          )
+      if (Array.isArray(result?.findings)) {
+        rememberDeploymentCheck(summary.environmentId, result)
+        setAsking((current) => current && { ...current, result })
+      }
+    } catch (error) {
+      notify.error("Could not check the deployment", error)
+    } finally {
+      setRechecking(false)
+    }
+  }
+  const whole = summary.name !== undefined && summary.buildMethod !== undefined
+  const gate = asking && (
+    <DeployCheckDialog
+      open
+      onOpenChange={(open) => !open && setAsking(undefined)}
+      projectId={summary.id}
+      subject={
+        whole
+          ? {
+              mark: <ProjectMark deployment={summary as DeploymentSummary} size="sm" />,
+              name: summary.name,
+            }
+          : undefined
+      }
+      result={asking.result}
+      command={BUILD_COMMAND[asking.operation] ?? "Deploy"}
+      checking={rechecking || check?.checking}
+      busy={starting === asking.operation}
+      onRecheck={() => void recheck()}
+      onConfirm={() => {
+        setConfirmed(confirmationSignature(asking.result.findings))
+        const operation = asking.operation
+        setAsking(undefined)
+        void enqueue(operation)
+      }}
+    />
+  )
+  return { start, starting, gate }
 }
 
 /** Docker drawn as itself in a menu's glyph slot, for the verb that opens its page. */

@@ -329,7 +329,7 @@ func repoShapeFindings(detection *DetectionResult, configuration PlanConfigurati
 			if process.Kind == "web" {
 				action = "Create another project from the same repository for it, with the start command " + process.Command + " and its own port."
 			}
-			findings = append(findings, finding("secondary_process_not_deployed_"+strings.ToLower(process.Name), PreflightWarning,
+			findings = append(findings, finding(variableFindingCode("secondary_process_not_deployed_", process.Name), PreflightWarning,
 				"This source defines a "+processKindLabel(process.Kind)+" that this project does not run", boundedText(measured, 512),
 				process.Reason+". One project runs one process, so this one never starts unless it has a project of its own.",
 				boundedText(action, 512), "deploy", "configuration.build.startCommand"))

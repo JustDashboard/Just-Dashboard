@@ -157,20 +157,15 @@ func buildRootNames(root string) []string {
 	return names
 }
 
-// writeRecipeDockerignore renders the ignore file for a generated
-// Dockerfile at the build context root and writes it beside the Dockerfile,
-// with the same discipline: root-relative, exclusive, renamed into place, so
-// a checkout symlink cannot redirect it. It returns what the run log says
-// about each repository rule the build set aside or overrode.
-func writeRecipeDockerignore(root, kind string, installInputs []string) ([]string, error) {
+// recipeDockerignoreAt renders the ignore file for a generated Dockerfile
+// whose build context is root, with what the run log says about each
+// repository rule the build set aside or overrode.
+func recipeDockerignoreAt(root, kind string, installInputs []string) (string, []string) {
 	repository, _ := readContainedRegular(root, ".dockerignore", 256<<10)
 	content, dropped := recipeDockerignore(repository, buildRootNames(root), kind, installInputs)
-	if err := writeGeneratedFile(root, "Dockerfile.dockerignore", content); err != nil {
-		return nil, err
-	}
 	notes := make([]string, 0, len(dropped))
 	for _, drop := range dropped {
 		notes = append(notes, ".dockerignore excludes "+drop.Input+" (rule "+drop.Rule+"); the build context keeps it because the build reads it")
 	}
-	return notes, nil
+	return content, notes
 }

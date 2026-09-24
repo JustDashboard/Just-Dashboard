@@ -98,7 +98,7 @@ func TestPreparedRecipeAndStaticBuildsWriteTheirIgnoreFile(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(root, ".just-dashboard")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := writeRecipeDockerignore(root, "static", nil); err == nil {
+	if err := writeGeneratedFile(root, "Dockerfile.dockerignore", "x\n"); err == nil {
 		t.Fatal("the ignore file followed a checkout symlink out of the context")
 	}
 }

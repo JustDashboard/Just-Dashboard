@@ -267,17 +267,34 @@ func (a *HostSourceAnalyzer) materializeRemoteGit(
 	if err := ensurePlanningMirror(ctx, mirror, remote, environment); err != nil {
 		return err
 	}
-	if _, err := runPlanningGit(ctx, mirror, environment, "cat-file", "-e", identity.Revision+"^{commit}"); err != nil {
+	hasRevision := func() bool {
+		_, err := runPlanningGit(ctx, mirror, environment, "cat-file", "-e", identity.Revision+"^{commit}")
+		return err == nil
+	}
+	releaseRef := "refs/just-dashboard/releases/" + identity.Revision
+	if !hasRevision() {
+		// The branch usually still points at the recorded commit. When it has
+		// moved on — a first deployment pinned to the commit Review checked, a
+		// specific earlier version — the commit normally arrives with the
+		// branch, behind its new head; one the branch no longer contains is
+		// asked for by id, which most hosts serve. Either way the commit built
+		// is exactly the recorded one: the workspace below is verified
+		// against it, so a moved branch can never stand in for it.
 		remoteRef, _ := planningGitRef(source.Ref)
-		releaseRef := "refs/just-dashboard/releases/" + identity.Revision
-		if _, fetchErr := runPlanningGit(ctx, mirror, environment,
-			"fetch", "--force", "--no-tags", "origin", "+"+remoteRef+":"+releaseRef); fetchErr != nil {
+		_, _ = runPlanningGit(ctx, mirror, environment,
+			"fetch", "--force", "--no-tags", "origin", "+"+remoteRef+":"+releaseRef)
+		if !hasRevision() {
+			_, _ = runPlanningGit(ctx, mirror, environment,
+				"fetch", "--force", "--no-tags", "origin", "+"+identity.Revision+":"+releaseRef)
+		}
+		if !hasRevision() {
 			return fmt.Errorf("%w: recorded Git object is no longer available", ErrSourceUnavailable)
 		}
-		resolved, resolveErr := runPlanningGit(ctx, mirror, environment, "rev-parse", releaseRef)
-		if resolveErr != nil || strings.TrimSpace(resolved) != identity.Revision {
-			return fmt.Errorf("%w: source ref moved after preflight; refusing a different revision", ErrSourceUnavailable)
-		}
+	}
+	// The release ref names the commit itself, so the workspace fetch below
+	// asks for a ref tip and the mirror keeps the commit for later releases.
+	if _, err := runPlanningGit(ctx, mirror, environment, "update-ref", releaseRef, identity.Revision); err != nil {
+		return fmt.Errorf("%w: managed Git mirror is unavailable", ErrSourceUnavailable)
 	}
 	if err := fetchExactGit(ctx, mirror, remote, target, identity.Revision, nil); err != nil {
 		return err

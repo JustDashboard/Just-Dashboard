@@ -38,7 +38,7 @@ type environmentState struct {
 
 func newEnvironmentState(draft *Draft, configuration PlanConfiguration) environmentState {
 	state := environmentState{
-		candidate: selectedDetectionCandidate(draft.Data.Detection), declared: map[string]PlannedVariable{},
+		candidate: rootDetectionCandidate(draft.Data.Detection, configuration.Build), declared: map[string]PlannedVariable{},
 		staged: map[string]string{}, holdsValues: draft.ID != "", domains: configuration.Domains,
 		method: configuration.Build.Method,
 	}
@@ -202,18 +202,18 @@ func valueFindings(state environmentState) []PreflightFinding {
 		switch {
 		case bindAddressName(name):
 			if loopbackTarget(strings.Split(value, ":")[0]) && strings.Split(value, ":")[0] != "0.0.0.0" {
-				findings = append(findings, finding("host_variable_loopback_"+strings.ToLower(name), PreflightWarning,
+				findings = append(findings, finding(variableFindingCode("host_variable_loopback_", name), PreflightWarning,
 					name+" makes the server listen on loopback only", name+" is a loopback address",
 					"Inside the container, loopback is unreachable from the proxy, so readiness and every request fail.",
 					"Set "+name+" to 0.0.0.0.", "deploy", variableField(name)))
 			}
 		case browser && loopbackValue(name, value):
-			findings = append(findings, finding("build_inlines_localhost_"+strings.ToLower(name), PreflightWarning,
+			findings = append(findings, finding(variableFindingCode("build_inlines_localhost_", name), PreflightWarning,
 				name+" compiles a localhost address into the browser bundle", name+" points at localhost",
 				"The build writes the value into the JavaScript every visitor downloads, so each browser calls its own machine.",
 				"Use the public address the browser should call, such as "+state.publicOrigin()+".", "deploy", variableField(name)))
 		case loopbackValue(name, value):
-			findings = append(findings, finding("variable_points_to_localhost_"+strings.ToLower(name), PreflightWarning,
+			findings = append(findings, finding(variableFindingCode("variable_points_to_localhost_", name), PreflightWarning,
 				name+" points at localhost, which inside the container is the app itself", name+" names a loopback host",
 				"Nothing listens there from the container's point of view, so every connection is refused.",
 				"Link a database (it becomes db-N.jd.internal) or use a host the container can reach.", "deploy", variableField(name)))
@@ -224,7 +224,7 @@ func valueFindings(state environmentState) []PreflightFinding {
 				if blocked {
 					severity = PreflightBlocked
 				}
-				findings = append(findings, finding("public_variable_secret_"+strings.ToLower(name), severity,
+				findings = append(findings, finding(variableFindingCode("public_variable_secret_", name), severity,
 					name+" is compiled into the JavaScript every visitor downloads", shape,
 					"A browser-prefixed value is public after the build, however it is stored here.",
 					"Call the API from a server route and keep the key server-only, or accept the exposure.", "deploy", variableField(name)))
@@ -293,7 +293,7 @@ func detectedVariableFindings(state environmentState) []PreflightFinding {
 				generated = append(generated, name)
 			}
 			if !set {
-				findings = append(findings, finding("secret_unset_"+strings.ToLower(name), PreflightWarning,
+				findings = append(findings, finding(variableFindingCode("secret_unset_", name), PreflightWarning,
 					name+" is not set", variable.SetupReason,
 					"The dashboard generates this secret when it is left to it; cleared, the application refuses to start or to sign sessions.",
 					"Let the dashboard generate it, or enter your own value.", "deploy", variableField(name)))
@@ -318,7 +318,7 @@ func detectedVariableFindings(state environmentState) []PreflightFinding {
 		}
 		if variable.Phase == "build" && state.method == BuildRecipe && !state.buildScoped(name) && !state.recipeSupplied[name] {
 			if variable.Required {
-				findings = append(findings, finding("build_variable_missing_"+strings.ToLower(name), PreflightBlocked,
+				findings = append(findings, finding(variableFindingCode("build_variable_missing_", name), PreflightBlocked,
 					name+" is needed while the build runs", "read at build time in "+variableReadIn(variable),
 					"The build fails without it: a static env import, a compile-time read or a build-time schema needs the value.",
 					"Set "+name+" with Build scope.", "deploy", variableField(name)))
@@ -329,16 +329,16 @@ func detectedVariableFindings(state environmentState) []PreflightFinding {
 		// A name the Dockerfile declares with ARG is answered by
 		// dockerfile_build_args or dockerfile_arg_not_passed (preflight_image.go).
 		if variable.Phase == "build" && state.method == BuildDockerfile && variable.Required && set && !dockerfileDeclaresArg(state.candidate, name) {
-			findings = append(findings, finding("build_variable_unreachable_"+strings.ToLower(name), PreflightWarning,
+			findings = append(findings, finding(variableFindingCode("build_variable_unreachable_", name), PreflightWarning,
 				name+" does not reach a Dockerfile build", "read at build time in "+variableReadIn(variable),
 				"A repository Dockerfile builds only with the plain, browser-public build variables it declares with ARG; this one it does not declare.",
 				"Declare it with ARG in the Dockerfile and a default, or build with an automatic recipe.", "deploy", variableField(name)))
 		}
 		if variable.LocalhostIn != "" && !set {
-			code, title := "variable_points_to_localhost_"+strings.ToLower(name), name+" falls back to a localhost address"
+			code, title := variableFindingCode("variable_points_to_localhost_", name), name+" falls back to a localhost address"
 			means := "The committed file supplies it when the dashboard does not, and inside the container localhost is the app itself."
 			if state.browserInlined(variable) {
-				code, title = "build_inlines_localhost_"+strings.ToLower(name), name+" compiles a localhost address into the browser bundle"
+				code, title = variableFindingCode("build_inlines_localhost_", name), name+" compiles a localhost address into the browser bundle"
 				means = "The build reads the committed file and writes its localhost value into the JavaScript every visitor downloads."
 			}
 			findings = append(findings, finding(code, PreflightWarning, title, variable.LocalhostIn+" sets it to a loopback address",
@@ -413,7 +413,7 @@ func publicURLFinding(state environmentState, variable DetectedVariable) []Prefl
 		if planned {
 			measured = "cleared"
 		}
-		return []PreflightFinding{finding(code+"_unbound_"+strings.ToLower(name), PreflightWarning,
+		return []PreflightFinding{finding(variableFindingCode(code+"_unbound_", name), PreflightWarning,
 			name+" has no value", measured,
 			variable.SetupReason+"; without it the application builds its own links and callbacks from the wrong address.",
 			"Add a domain on the runtime step, or enter the public address yourself.", "deploy", variableField(name))}
@@ -440,7 +440,7 @@ func publicURLFinding(state environmentState, variable DetectedVariable) []Prefl
 		}
 	}
 	if !matches && !loopbackValue(name, value) {
-		return []PreflightFinding{finding(code+"_mismatch_"+strings.ToLower(name), PreflightWarning,
+		return []PreflightFinding{finding(variableFindingCode(code+"_mismatch_", name), PreflightWarning,
 			name+" names a host this deployment does not serve", "none of the planned domains",
 			variable.SetupReason+"; links, redirects and origin checks will point elsewhere.",
 			"Leave it bound to the domain, or plan the domain it names.", "deploy", variableField(name))}
@@ -456,7 +456,7 @@ func publicURLFinding(state environmentState, variable DetectedVariable) []Prefl
 	if _, typed := state.staged[name]; typed {
 		measured = name + " → " + domain.Hostname
 	}
-	return []PreflightFinding{finding(code+"_bound_"+strings.ToLower(name), PreflightPass,
+	return []PreflightFinding{finding(variableFindingCode(code+"_bound_", name), PreflightPass,
 		name+" is the planned address", measured, means, "", "deploy", variableField(name))}
 }
 
@@ -511,7 +511,7 @@ func frameworkFindings(state environmentState) []PreflightFinding {
 		if state.set(note.Detail) {
 			continue
 		}
-		findings = append(findings, finding("allowed_hosts_unbound_"+strings.ToLower(note.Detail), PreflightWarning,
+		findings = append(findings, finding(variableFindingCode("allowed_hosts_unbound_", note.Detail), PreflightWarning,
 			note.Detail+" is not bound to the domain", "the settings do not say whether they split it on commas or spaces",
 			"Django answers 400 to every host it does not allow, the readiness check included.",
 			"Set "+note.Detail+" to the domain, localhost and 127.0.0.1, separated the way your settings split it.", "deploy", variableField(note.Detail)))

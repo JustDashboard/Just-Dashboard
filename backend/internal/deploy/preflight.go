@@ -464,6 +464,19 @@ func PreflightDraft(
 	observer PreflightObserver,
 	advancedAllowed bool,
 ) (*PreflightResult, error) {
+	return PreflightDraftWithSource(ctx, draft, observer, nil, advancedAllowed)
+}
+
+// PreflightDraftWithSource is PreflightDraft that also reads the commit the
+// draft's detection reviewed — asking the recipe whether it would prepare the
+// plan from it — and says when the branch has moved past that commit.
+func PreflightDraftWithSource(
+	ctx context.Context,
+	draft *Draft,
+	observer PreflightObserver,
+	inspector SourceInspector,
+	advancedAllowed bool,
+) (*PreflightResult, error) {
 	if draft == nil || draft.Data.Intent == nil || draft.Data.Source == nil ||
 		draft.Data.Detection == nil || draft.Data.Configuration == nil {
 		return nil, ErrDraftIncomplete
@@ -491,6 +504,7 @@ func PreflightDraft(
 		}
 	}
 	findings := preflightFindings(draft, configuration, observation, advancedAllowed)
+	findings = withDraftSourceChecks(ctx, draft, configuration, inspector, findings)
 	plan := exactPlan(draft, configuration)
 	preview, err := json.MarshalIndent(plan, "", "  ")
 	if err != nil {
@@ -547,7 +561,7 @@ func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) 
 			}
 		}
 	}
-	if candidate := selectedDetectionCandidate(draft.Data.Detection); candidate != nil {
+	if candidate := rootDetectionCandidate(draft.Data.Detection, configuration.Build); candidate != nil {
 		extensions := []string{}
 		for _, database := range candidate.Databases {
 			extensions = append(extensions, database.Extensions...)
@@ -617,28 +631,27 @@ func preflightFindings(
 		}
 	}
 	selected := selectedDetectionCandidate(detection)
-	if selected != nil && selected.Recipe == "go" && configuration.Build.Method == BuildRecipe && configuration.Build.GoVersion != "" {
-		if _, err := chooseGoRecipeVersion(configuration.Build.GoVersion, "", []byte("go "+selected.GoMinimumVersion)); err != nil {
-			findings = append(findings, finding("go_version_unsupported", PreflightBlocked,
-				"Selected Go version cannot build this source", err.Error(),
-				"The toolchain must satisfy the module's declared language requirement.",
-				"Choose a compatible Go version or use a Dockerfile.", "deploy", "configuration.build.goVersion"))
-		}
+	// The recipe checks read the candidate at the plan's own root and method,
+	// which is the selected one until the root is edited after detection.
+	planned := plannedDetectionCandidate(detection, configuration.Build)
+	if mismatch, ok := detectionRootMismatchFinding(detection, configuration.Build, planned); ok {
+		findings = append(findings, mismatch)
 	}
-	if selected != nil && configuration.Build.Method == BuildRecipe &&
-		(selected.Recipe == "node" || (selected.Recipe == "php" && len(selected.NodeInstalls) > 0)) {
-		findings = append(findings, nodeInstallFindings(selected, configuration)...)
+	findings = append(findings, plannedRecipeFindings(planned, configuration.Build)...)
+	if planned != nil && configuration.Build.Method == BuildRecipe &&
+		(planned.Recipe == "node" || (planned.Recipe == "php" && len(planned.NodeInstalls) > 0)) {
+		findings = append(findings, nodeInstallFindings(planned, configuration)...)
 	}
-	if selected != nil && selected.UnpinnedDependencies && configuration.Build.Method == BuildRecipe {
+	if planned != nil && planned.UnpinnedDependencies && configuration.Build.Method == BuildRecipe {
 		findings = append(findings, finding("dependencies_unpinned", PreflightWarning,
 			"Dependencies are not pinned to exact versions", "unpinned entries in the dependency manifest",
 			"Each build installs the newest versions the manifest allows, so a rebuild of this same commit can run different code.",
 			"Commit a lockfile (uv lock, poetry lock, or pip freeze > requirements.txt) when rebuilds must be identical; deploying as is works today.",
 			"deploy", "configuration.build"))
 	}
-	if selected != nil && selected.RecipeIssue != "" && configuration.Build.Method == BuildRecipe {
+	if planned != nil && planned.RecipeIssue != "" && configuration.Build.Method == BuildRecipe {
 		findings = append(findings, finding("recipe_unsupported", PreflightBlocked,
-			"Source needs a different build plan", selected.RecipeIssue,
+			"Source needs a different build plan", planned.RecipeIssue,
 			"The automatic recipe cannot satisfy the detected source requirements.",
 			"Use a Dockerfile or correct the source adapter/toolchain and run detection again.", "deploy", "configuration.build"))
 	}
@@ -668,7 +681,7 @@ func preflightFindings(
 		}
 		for _, variable := range detection.Compose.Variables {
 			if !configuredVariables[variable] {
-				findings = append(findings, finding("compose_variable_"+strings.ToLower(variable), PreflightDecision,
+				findings = append(findings, finding(variableFindingCode("compose_variable_", variable), PreflightDecision,
 					"Compose variable needs a scoped value", variable,
 					"Planning validation used an inert placeholder and did not inherit the dashboard environment.",
 					"Add the variable with build/runtime scope or revise the Compose source.", "deploy", "variables."+variable))
@@ -931,7 +944,7 @@ func preflightFindings(
 		// A literal value or a generation request satisfies a required
 		// variable as well as a typed reference or sealed draft input does.
 		if variable.Required && resolvedVariables[variable.Name] == "" {
-			findings = append(findings, finding("variable_required_"+strings.ToLower(variable.Name), PreflightDecision,
+			findings = append(findings, finding(variableFindingCode("variable_required_", variable.Name), PreflightDecision,
 				"Required variable needs a value", variable.Name, "The runtime would receive an empty required value.",
 				"Set or reference the variable.", "deploy", "variables."+variable.Name))
 		}
@@ -942,19 +955,18 @@ func preflightFindings(
 			"Only typed reference identities were inspected; secret leaves remain masked.", "", "deploy", "variables"))
 	}
 	findings = append(findings, environmentFindings(draft, configuration, observation)...)
-	if selected := selectedDetectionCandidate(detection); selected != nil && selected.SchemaTool != "" &&
-		configuration.Build.Method == BuildRecipe {
+	if planned != nil && planned.SchemaTool != "" && configuration.Build.Method == BuildRecipe {
 		// A pushed schema is a warning whether or not the database is linked
 		// here; it takes the place of the step's pass.
-		if push := schemaPushFinding(selected, configuration.Build); push != nil {
+		if push := schemaPushFinding(planned, configuration.Build); push != nil {
 			findings = append(findings, *push)
 		} else if hasDatabaseDependency(configuration.Dependencies) {
-			findings = append(findings, schemaStepFinding(selected, configuration.Build))
-		} else if sqliteOnVolume(selected, configuration, resolvedVariables) {
-			findings = append(findings, sqliteSchemaStepFinding(selected, configuration.Build))
+			findings = append(findings, schemaStepFinding(planned, configuration.Build))
+		} else if sqliteOnVolume(planned, configuration, resolvedVariables) {
+			findings = append(findings, sqliteSchemaStepFinding(planned, configuration.Build))
 		}
 	}
-	findings = append(findings, stateFindings(selectedDetectionCandidate(detection), configuration, resolvedVariables, !observation.ReplacesRuntime)...)
+	findings = append(findings, stateFindings(rootDetectionCandidate(detection, configuration.Build), configuration, resolvedVariables, !observation.ReplacesRuntime)...)
 	if (draft.Data.Intent.Profile == ProfileWeb || draft.Data.Intent.Profile == ProfileStatic) && !hasReadinessCheck(configuration.Checks) {
 		findings = append(findings, finding("readiness_missing", PreflightDecision,
 			"Choose a readiness check", "", "Traffic must not move to an unverified candidate.",
@@ -1049,11 +1061,11 @@ func preflightFindings(
 			"Docker caps the container at the host's CPU count; the extra allowance has no effect.",
 			"Lower the limit to at most the host CPU count.", "metrics", "runtime.cpus"))
 	}
-	findings = append(findings, buildMemoryFindings(selected, configuration, observation)...)
+	findings = append(findings, buildMemoryFindings(planned, configuration, observation)...)
 	findings = append(findings, platformVariableFindings(configuration, resolvedVariables)...)
-	if selected != nil && configuration.Build.Method == BuildRecipe && configuration.Build.Recipe == "node" {
-		findings = append(findings, buildEnvValidationFindings(selected, configuration, resolvedVariables)...)
-		findings = append(findings, buildDatabaseFindings(selected, configuration, resolvedVariables)...)
+	if planned != nil && configuration.Build.Method == BuildRecipe && configuration.Build.Recipe == "node" {
+		findings = append(findings, buildEnvValidationFindings(planned, configuration, resolvedVariables)...)
+		findings = append(findings, buildDatabaseFindings(planned, configuration, resolvedVariables)...)
 	}
 	if observation.AvailableMemory > 0 && observation.AvailableMemory < 256<<20 {
 		findings = append(findings, finding("host_memory_low", PreflightWarning,
