@@ -136,6 +136,50 @@ func TestInlineComposeMaterializationPreservesFileOrderAndPrivacy(t *testing.T) 
 	}
 }
 
+// A branch that moved on since the run was planned still holds the recorded
+// commit in its history; only one rewritten out of that history is gone.
+func TestReleaseMirrorFindsARecordedCommitTheBranchMovedPast(t *testing.T) {
+	t.Parallel()
+	upstream := t.TempDir()
+	runPlanningGitFixture(t, upstream, "init", "-q", "-b", "main")
+	runPlanningGitFixture(t, upstream, "config", "user.email", "fixture@example.test")
+	runPlanningGitFixture(t, upstream, "config", "user.name", "Fixture")
+	commit := func(content string) string {
+		writeBuildFixture(t, upstream, "message.txt", content)
+		runPlanningGitFixture(t, upstream, "add", "message.txt")
+		runPlanningGitFixture(t, upstream, "commit", "-q", "-m", content)
+		return strings.TrimSpace(runPlanningGitOutput(t, upstream, "rev-parse", "HEAD"))
+	}
+	recorded := commit("planned\n")
+	commit("pushed after planning\n")
+	runPlanningGitFixture(t, upstream, "checkout", "-q", "-b", "side", recorded+"~0")
+	sideOnly := commit("never on main\n")
+	runPlanningGitFixture(t, upstream, "checkout", "-q", "main")
+
+	environment := append(cleanPlanningGitEnvironment(os.Environ()),
+		"GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_CONFIG_GLOBAL=/dev/null")
+	mirror := filepath.Join(t.TempDir(), "release.git")
+	if err := ensurePlanningMirror(context.Background(), mirror, upstream, environment); err != nil {
+		t.Fatal(err)
+	}
+	if err := fetchReleaseRevision(context.Background(), mirror, environment, "main", recorded); err != nil {
+		t.Fatalf("a commit the branch moved past = %v", err)
+	}
+	target := filepath.Join(t.TempDir(), "source")
+	if err := fetchExactGit(context.Background(), mirror, upstream, target, recorded, environment); err != nil {
+		t.Fatalf("materializing the recorded commit = %v", err)
+	}
+	if content, err := os.ReadFile(filepath.Join(target, "message.txt")); err != nil || string(content) != "planned\n" {
+		t.Fatalf("materialized %q, %v", content, err)
+	}
+
+	err := fetchReleaseRevision(context.Background(), mirror, environment, "main", sideOnly)
+	var failure *SourceFailure
+	if !errors.As(err, &failure) || failure.Code != "source_revision_unavailable" || !errors.Is(err, ErrSourceUnavailable) {
+		t.Fatalf("a commit outside the branch's history = %v", err)
+	}
+}
+
 func runPlanningGitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	output, err := runPlanningGit(context.Background(), dir, nil, args...)

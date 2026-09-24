@@ -267,19 +267,8 @@ func (a *HostSourceAnalyzer) materializeRemoteGit(
 	if err := ensurePlanningMirror(ctx, mirror, remote, environment); err != nil {
 		return err
 	}
-	if _, err := runPlanningGit(ctx, mirror, environment, "cat-file", "-e", identity.Revision+"^{commit}"); err != nil {
-		remoteRef, _ := planningGitRef(source.Ref)
-		releaseRef := "refs/just-dashboard/releases/" + identity.Revision
-		if _, fetchErr := runPlanningGit(ctx, mirror, environment,
-			"fetch", "--force", "--no-tags", "origin", "+"+remoteRef+":"+releaseRef); fetchErr != nil {
-			return sourceFailure(fetchErr, "recorded Git object is no longer available")
-		}
-		resolved, resolveErr := runPlanningGit(ctx, mirror, environment, "rev-parse", releaseRef)
-		if resolveErr != nil || strings.TrimSpace(resolved) != identity.Revision {
-			// The branch now names another commit and the recorded one is not
-			// in the mirror: a force-push rewrote it away.
-			return &SourceFailure{Code: "source_revision_unavailable", Message: sourceFailureMessages["source_revision_unavailable"]}
-		}
+	if err := fetchReleaseRevision(ctx, mirror, environment, source.Ref, identity.Revision); err != nil {
+		return err
 	}
 	if err := fetchExactGit(ctx, mirror, remote, target, identity.Revision, nil); err != nil {
 		return err
@@ -305,6 +294,36 @@ func (a *HostSourceAnalyzer) materializeLocalGit(
 	}
 	return materializeGitExtras(ctx, target, nil, source)
 }
+
+// fetchReleaseRevision makes sure the release mirror holds the recorded
+// commit, fetching the source's ref when it does not. The ref may have moved
+// on since the run was planned — a push in between, or a mirror cleared since
+// — and a full fetch of it still brings the recorded commit as an ancestor,
+// which is what the release builds. Only a commit the fetched history no
+// longer contains is gone, as after a force-push.
+func fetchReleaseRevision(ctx context.Context, mirror string, environment []string, ref, revision string) error {
+	present := func() bool {
+		_, err := runPlanningGit(ctx, mirror, environment, "cat-file", "-e", revision+"^{commit}")
+		return err == nil
+	}
+	if present() {
+		return nil
+	}
+	remoteRef, _ := planningGitRef(ref)
+	releaseRef := "refs/just-dashboard/releases/" + revision
+	if _, err := runPlanningGit(ctx, mirror, environment,
+		"fetch", "--force", "--no-tags", "origin", "+"+remoteRef+":"+releaseRef); err != nil {
+		return sourceFailure(err, "recorded Git object is no longer available")
+	}
+	if present() {
+		return nil
+	}
+	return &SourceFailure{Code: "source_revision_unavailable", Message: revisionRewrittenMessage}
+}
+
+// revisionRewrittenMessage is the recorded commit missing from everything the
+// branch holds now, which git itself did not complain about.
+const revisionRewrittenMessage = "the recorded commit is no longer in the branch's history on the remote; it was rewritten, as by a force-push"
 
 // fetchExactGit materializes exactly one revision into a fresh workspace
 // repository. Cloning is deliberately avoided: `git clone --local` silently
