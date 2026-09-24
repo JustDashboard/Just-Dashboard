@@ -34,7 +34,7 @@ func applicationOutputCause(containers []ContainerDiagnostics) *OutputCause {
 			}
 		}
 	}
-	return nil
+	return startCommandExitedCause(containers)
 }
 
 func (c *OutputCause) sentence() string {
@@ -42,6 +42,8 @@ func (c *OutputCause) sentence() string {
 		return ""
 	}
 	switch c.Code {
+	case "start_command_exited":
+		return "the application's start command finished with exit code 0 instead of serving, so the container stopped; a start command must keep the server in the foreground — pm2 start, forever start, a trailing & and a one-off script all return at once (use pm2-runtime, or run the server directly)"
 	case "schema_missing":
 		return fmt.Sprintf("the application reports that table %s does not exist in its database, so the linked database has not received the application's schema; apply it before the application starts — for Prisma, `prisma migrate deploy`, or `prisma db push` when the project has no migrations", c.Table)
 	}
