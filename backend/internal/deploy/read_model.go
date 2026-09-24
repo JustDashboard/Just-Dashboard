@@ -265,15 +265,11 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 	if err != nil {
 		return nil, err
 	}
-	lastRuns, err := s.latestProjectRuns(ctx, projectIDs, false)
+	lastRuns, recentRuns, err := s.recentProjectRuns(ctx, projectIDs)
 	if err != nil {
 		return nil, err
 	}
-	activeRuns, err := s.latestProjectRuns(ctx, projectIDs, true)
-	if err != nil {
-		return nil, err
-	}
-	recentRuns, err := s.recentProjectRuns(ctx, projectIDs)
+	activeRuns, err := s.activeProjectRuns(ctx, projectIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -593,27 +589,22 @@ func healthFromEvidence(checks []PlannedCheck, latest map[StepKey]json.RawMessag
 	return summarizeChecks(observed)
 }
 
-// latestProjectRuns reads the newest run, or newest recoverable run, for every
-// named project in one statement.
-func (s *OrchestrationStore) latestProjectRuns(
+// activeProjectRuns reads the newest run still in flight for every named
+// project in one statement.
+func (s *OrchestrationStore) activeProjectRuns(
 	ctx context.Context,
 	projectIDs []int64,
-	active bool,
 ) (map[int64]*EngineRun, error) {
 	result := map[int64]*EngineRun{}
 	if len(projectIDs) == 0 {
 		return result, nil
 	}
 	placeholders, args := inPlaceholders(projectIDs)
-	filter := ""
-	if active {
-		filter = " AND " + activeRunWhere
-	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT `+engineRunColumns+` FROM (
 		  SELECT `+engineRunColumns+`,
 		         ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY requested_at DESC, id DESC) AS rank
-		    FROM deploy_runs WHERE project_id IN `+placeholders+filter+`
+		    FROM deploy_runs WHERE project_id IN `+placeholders+` AND `+activeRunWhere+`
 		) WHERE rank = 1`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read deployment run: %w", err)
@@ -629,37 +620,48 @@ func (s *OrchestrationStore) latestProjectRuns(
 	return result, rows.Err()
 }
 
-// recentProjectRuns reads every named project's newest runs in one statement,
-// ordered the way latestProjectRuns picks the last run so the two agree.
+// recentProjectRuns reads every named project's newest runs in one statement:
+// the last run whole, and the history strip of at most recentRunLimit runs,
+// newest first. Both come from one ranking, so the strip always starts with
+// the last run and the fleet ranks a project's runs once rather than twice.
+// The ranking carries only ids, which idx_deploy_runs_project_requested
+// answers in order, and whole rows are fetched for the runs it keeps: a window
+// over every run's full row was the fleet read's most expensive statement.
 func (s *OrchestrationStore) recentProjectRuns(
 	ctx context.Context,
 	projectIDs []int64,
-) (map[int64][]RecentRun, error) {
-	result := map[int64][]RecentRun{}
+) (map[int64]*EngineRun, map[int64][]RecentRun, error) {
+	lastRuns := map[int64]*EngineRun{}
+	recentRuns := map[int64][]RecentRun{}
 	if len(projectIDs) == 0 {
-		return result, nil
+		return lastRuns, recentRuns, nil
 	}
 	placeholders, args := inPlaceholders(projectIDs)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT project_id, id, run_number, state, operation, requested_at, ended_at FROM (
-		  SELECT project_id, id, run_number, state, operation, requested_at, ended_at,
+		SELECT `+engineRunColumns+` FROM (
+		  SELECT id AS ranked_id,
 		         ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY requested_at DESC, id DESC) AS rank
 		    FROM deploy_runs WHERE project_id IN `+placeholders+`
-		) WHERE rank <= ? ORDER BY project_id, rank`, append(args, recentRunLimit)...)
+		) ranked JOIN deploy_runs ON deploy_runs.id = ranked.ranked_id
+		 WHERE ranked.rank <= ? ORDER BY project_id, ranked.rank`, append(args, recentRunLimit)...)
 	if err != nil {
-		return nil, fmt.Errorf("read recent deployment runs: %w", err)
+		return nil, nil, fmt.Errorf("read recent deployment runs: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var projectID, requested, ended int64
-		var run RecentRun
-		if err := rows.Scan(&projectID, &run.ID, &run.RunNumber, &run.State, &run.Operation, &requested, &ended); err != nil {
-			return nil, err
+		run, err := scanEngineRun(rows)
+		if err != nil {
+			return nil, nil, err
 		}
-		run.RequestedAt, run.EndedAt = unixTime(requested), unixTimePtr(ended)
-		result[projectID] = append(result[projectID], run)
+		if lastRuns[run.ProjectID] == nil {
+			lastRuns[run.ProjectID] = run
+		}
+		recentRuns[run.ProjectID] = append(recentRuns[run.ProjectID], RecentRun{
+			ID: run.ID, RunNumber: run.RunNumber, State: run.State, Operation: run.Operation,
+			RequestedAt: run.RequestedAt, EndedAt: run.EndedAt,
+		})
 	}
-	return result, rows.Err()
+	return lastRuns, recentRuns, rows.Err()
 }
 
 // currentSteps reads where each named run stands in one statement: the step

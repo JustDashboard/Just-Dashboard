@@ -264,11 +264,10 @@ func TestFleetReadModelStatementCountDoesNotGrowWithTheFleet(t *testing.T) {
 	if smallCount == 0 || largeCount != smallCount {
 		t.Fatalf("fleet statements grew with the fleet: %d for 2 deployments, %d for 40", smallCount, largeCount)
 	}
-	// Eleven: the summary row, five live-release facts, the last and active
-	// runs, the recent-run strip, the host's active work and the slot usage.
-	// The strip is one batched statement over every card, so it raises the
-	// fixed set by exactly one and still does not grow with the fleet.
-	if largeCount > 11 {
+	// Ten: the summary row, five live-release facts, one ranked read that is
+	// both every card's last run and its recent-run strip, the active runs,
+	// the host's active work and the slot usage.
+	if largeCount > 10 {
 		t.Fatalf("fleet read model issued %d statements, want a small fixed set", largeCount)
 	}
 	for _, summary := range fleet.Deployments {
@@ -319,7 +318,7 @@ func TestFleetReadModelStatementCountDoesNotGrowWithAnAllStoppedFleet(t *testing
 	if smallCount == 0 || largeCount != smallCount {
 		t.Fatalf("all-stopped fleet statements grew with the fleet: %d for 2 deployments, %d for 40", smallCount, largeCount)
 	}
-	if largeCount > 11 {
+	if largeCount > 10 {
 		t.Fatalf("all-stopped fleet read model issued %d statements, want a small fixed set", largeCount)
 	}
 	for _, summary := range fleet.Deployments {
@@ -350,8 +349,7 @@ func TestDeploymentSummaryReadsOnlyTheRequestedDeployment(t *testing.T) {
 			t.Fatalf("workspace read loaded the whole fleet: %s", statement)
 		}
 	}
-	// The same fixed set as the fleet, recent-run strip included.
-	if got := driver.count.Load(); got > 11 {
+	if got := driver.count.Load(); got > 10 {
 		t.Fatalf("workspace read issued %d statements, want a small fixed set", got)
 	}
 }

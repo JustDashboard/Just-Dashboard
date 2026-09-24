@@ -56,8 +56,7 @@ func TestFleetReadStaysWithinItsBudgetAtReferenceScale(t *testing.T) {
 		t.Fatalf("fleet p95 = %s, budget is 500ms", got)
 	}
 	// Twenty reads of a hundred deployments must not be two thousand statements.
-	// Eleven per read since the recent-run strip joined as one batched statement.
-	if perRead := driver.count.Load() / 20; perRead > 11 {
+	if perRead := driver.count.Load() / 20; perRead > 10 {
 		t.Fatalf("fleet issued %d statements per read at reference scale", perRead)
 	}
 	t.Logf("fleet p95 %s over %d deployments, %d statements per read",
@@ -88,8 +87,7 @@ func TestWorkspaceReadStaysWithinItsBudgetAtReferenceScale(t *testing.T) {
 	if got := percentile(samples, 0.95); got > 250*time.Millisecond {
 		t.Fatalf("workspace p95 = %s, budget is 250ms", got)
 	}
-	// The fleet's fixed set, recent-run strip included.
-	if perRead := driver.count.Load() / 40; perRead > 11 {
+	if perRead := driver.count.Load() / 40; perRead > 10 {
 		t.Fatalf("workspace read issued %d statements at reference scale", perRead)
 	}
 	t.Logf("workspace p95 %s, %d statements per read",

@@ -619,10 +619,11 @@ only renderer/executor/validation authority for their feature.
   claim and never a clean result. Release comparison (`.../releases/{release}/comparison`) names source,
   image, command, ports, runtime plan, storage, dependencies, checks and domains, compares variables by
   name and value digest only, and reports artifact retention through the same planner a prune uses.
-- The fleet read model batches every per-deployment join. `liveReleaseFacts` and `latestProjectRuns`
-  use `IN (…)` and `ROW_NUMBER() OVER (PARTITION BY …)`, and `DeploymentSummary` reads one deployment
-  rather than filtering the whole fleet in Go. Both are pinned by statement-counting tests: the cost of
-  a fleet read is fixed in the number of deployments, and a regression fails rather than slows.
+- The fleet read model batches every per-deployment join. `liveReleaseFacts`, `activeProjectRuns` and
+  `recentProjectRuns` use `IN (…)` and `ROW_NUMBER() OVER (PARTITION BY …)`, and `DeploymentSummary`
+  reads one deployment rather than filtering the whole fleet in Go. Both are pinned by
+  statement-counting tests: the cost of a fleet read is fixed in the number of deployments, and a
+  regression fails rather than slows.
   `DeploymentSummary.serviceCount` rides the same batched artifact read `liveReleaseFacts` already runs
   for health: the live release's `runtime_config` snapshot names its Compose service count directly, or
   1 for any release that is not a Compose build, and the count is read from the snapshot regardless of
@@ -636,11 +637,14 @@ only renderer/executor/validation authority for their feature.
   refused in URLs can carry a token there — and left out when it does not parse), the desired build
   plan's `recipe` and `framework`, `images` (the distinct references the live release's runtime
   snapshot runs, read from the same snapshot as the service count) and `recentRuns` (the newest
-  fourteen, newest first, ordered the way `latestProjectRuns` picks the last run, so `recentRuns[0]`
-  is `lastRun`). The strip is one more batched statement over every card, which makes a fleet read
-  eleven fixed statements where it was ten, and twelve while anything is in flight (the step read
-  below), beside the active-work list's own reads of each run and its project; the counting tests
-  measure a fleet at rest, allow eleven and say why. A run that
+  fourteen, newest first). The strip and `lastRun` are one statement, `recentProjectRuns`: a
+  `ROW_NUMBER()` ranking of every card's runs that carries only ids, answered in order by
+  `idx_deploy_runs_project_requested (project_id, requested_at DESC, id DESC)`, joined back to the
+  whole rows it keeps, so `recentRuns[0]` is `lastRun` by construction. Ranking whole rows in a second
+  window was the fleet read's most expensive statement and pushed its `-race` p95 against the
+  budget. A fleet read stays ten fixed statements, and eleven while anything is in flight (the step
+  read below), beside the active-work list's own reads of each run and its project; the counting
+  tests measure a fleet at rest. A run that
   has not ended carries `currentStep` — the step it is running, else the one blocking it, else a
   failed one, else the next one waiting, with the name the release path gives it (`Fetch source`,
   `Readiness checks`, `Switch traffic`) — on the fleet's active work, on a summary's `lastRun` and
