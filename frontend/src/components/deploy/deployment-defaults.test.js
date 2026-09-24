@@ -76,6 +76,18 @@ describe("package manager runner", () => {
     expect(withPackageManagerRunner("npm run build", "bun")).toBe("bun run build")
     expect(withPackageManagerRunner("bun run start", "npm")).toBe("npm run start")
   })
+  test("the start and test shorthands and leading assignments follow too", () => {
+    expect(withPackageManagerRunner("npm start", "bun")).toBe("bun run start")
+    expect(withPackageManagerRunner("yarn start", "yarn")).toBe("yarn start")
+    expect(withPackageManagerRunner("yarn test", "pnpm")).toBe("pnpm run test")
+    expect(withPackageManagerRunner("NODE_ENV=production npm run start", "bun")).toBe(
+      "NODE_ENV=production bun run start",
+    )
+    expect(withPackageManagerRunner("bun test", "npm")).toBe("bun test")
+    expect(withPackageManagerRunner("npm run build --if-present", "bun")).toBe(
+      "npm run build --if-present",
+    )
+  })
   test("custom commands and the lockfile default are left alone", () => {
     expect(withPackageManagerRunner("prisma generate && next build", "bun")).toBe(
       "prisma generate && next build",

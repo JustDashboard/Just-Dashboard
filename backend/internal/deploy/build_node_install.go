@@ -1363,30 +1363,38 @@ func nodeInstallSegments(command string) []string {
 }
 
 var (
-	nodeScriptRunRE = regexp.MustCompile(`^(?:bun|npm|pnpm|yarn) run (\S+)$`)
-	nodeBinaryRunRE = regexp.MustCompile(`^(?:npx|bunx|pnpm exec) (.+)$`)
-	nodeYarnBinRE   = regexp.MustCompile(`^yarn (\S.*)$`)
+	nodeAssignmentsRE = regexp.MustCompile(`^((?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*)(.*)$`)
+	nodeScriptRunRE   = regexp.MustCompile(`^(?:bun|npm|pnpm|yarn) run (\S+)$`)
+	nodeShorthandRE   = regexp.MustCompile(`^(npm|pnpm|yarn) (start|test)$`)
+	nodeBinaryRunRE   = regexp.MustCompile(`^(?:npx|bunx|pnpm exec) (.+)$`)
+	nodeYarnBinRE     = regexp.MustCompile(`^yarn (\S.*)$`)
 )
 
 // nodeRunnerFor moves a command to another manager's runner the way the
 // configure form does (deployment-defaults.ts withPackageManagerRunner):
-// each `&&` segment that is a plain `<manager> run <script>`, or a binary
-// run through a manager, follows the manager; anything else is the
-// operator's own command and is left alone. A bare `yarn <thing>` is a
-// binary run only when chained, since alone it is as likely a script.
+// each `&&` segment that is a plain `<manager> run <script>`, npm's, pnpm's
+// or Yarn's start and test shorthands, or a binary run through a manager,
+// follows the manager, after any NAME=value assignments in front of it;
+// anything else is the operator's own command and is left alone. A bare
+// `yarn <thing>` is a binary run only when chained, since alone it is as
+// likely a script.
 func nodeRunnerFor(command, manager string) string {
 	if manager == "" || strings.TrimSpace(command) == "" {
 		return command
 	}
 	segments := nodeAndSeparatorRE.Split(strings.TrimSpace(command), -1)
 	for index, segment := range segments {
+		parts := nodeAssignmentsRE.FindStringSubmatch(segment)
+		assignments, body := parts[1], parts[2]
 		switch {
-		case nodeScriptRunRE.MatchString(segment):
-			segments[index] = manager + " run " + nodeScriptRunRE.FindStringSubmatch(segment)[1]
-		case nodeBinaryRunRE.MatchString(segment):
-			segments[index] = nodeExecRunner(manager) + " " + nodeBinaryRunRE.FindStringSubmatch(segment)[1]
-		case len(segments) > 1 && nodeYarnBinRE.MatchString(segment) && !strings.HasPrefix(segment, "yarn run "):
-			segments[index] = nodeExecRunner(manager) + " " + nodeYarnBinRE.FindStringSubmatch(segment)[1]
+		case nodeScriptRunRE.MatchString(body):
+			segments[index] = assignments + manager + " run " + nodeScriptRunRE.FindStringSubmatch(body)[1]
+		case nodeShorthandRE.MatchString(body) && nodeShorthandRE.FindStringSubmatch(body)[1] != manager:
+			segments[index] = assignments + manager + " run " + nodeShorthandRE.FindStringSubmatch(body)[2]
+		case nodeBinaryRunRE.MatchString(body):
+			segments[index] = assignments + nodeExecRunner(manager) + " " + nodeBinaryRunRE.FindStringSubmatch(body)[1]
+		case len(segments) > 1 && nodeYarnBinRE.MatchString(body) && !strings.HasPrefix(body, "yarn run "):
+			segments[index] = assignments + nodeExecRunner(manager) + " " + nodeYarnBinRE.FindStringSubmatch(body)[1]
 		}
 	}
 	return strings.Join(segments, " && ")

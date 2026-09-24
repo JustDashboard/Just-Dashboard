@@ -220,23 +220,30 @@ const EXEC_RUNNER: Record<NodePackageManager, string> = {
 
 /**
  * Moves a detected command to another package manager: each `&&` segment
- * that is a plain `<manager> run <script>` or a dependency binary run through
- * the manager (`npx prisma migrate deploy`) follows the choice; anything else
- * is the operator's own command and is left alone. A bare `yarn <thing>` is
- * only a binary run when it is chained, because on its own it is just as
- * likely a script shorthand.
+ * that is a plain `<manager> run <script>`, npm's, pnpm's or Yarn's `start`
+ * and `test` shorthands, or a dependency binary run through the manager
+ * (`npx prisma migrate deploy`) follows the choice, after any `NAME=value`
+ * assignments in front of it; anything else is the operator's own command and
+ * is left alone. A bare `yarn <thing>` is only a binary run when it is
+ * chained, because on its own it is just as likely a script shorthand. The
+ * backend moves a saved command the same way at build time (nodeRunnerFor in
+ * build_node_install.go); the two are held to the same rows.
  */
 export function withPackageManagerRunner(command: string, manager?: NodePackageManager) {
   if (!manager) return command
   const segments = command.trim().split(/\s+&&\s+/)
   return segments
     .map((segment) => {
-      const script = /^(?:bun|npm|pnpm|yarn) run (\S+)$/.exec(segment)
-      if (script) return `${manager} run ${script[1]}`
-      const binary = /^(?:npx|bunx|pnpm exec) (.+)$/.exec(segment)
-      if (binary) return `${EXEC_RUNNER[manager]} ${binary[1]}`
-      const yarnBinary = segments.length > 1 ? /^yarn (?!run )(.+)$/.exec(segment) : null
-      if (yarnBinary) return `${EXEC_RUNNER[manager]} ${yarnBinary[1]}`
+      const [, assignments, body] = /^((?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*)(.*)$/.exec(segment)!
+      const script = /^(?:bun|npm|pnpm|yarn) run (\S+)$/.exec(body)
+      if (script) return `${assignments}${manager} run ${script[1]}`
+      const shorthand = /^(npm|pnpm|yarn) (start|test)$/.exec(body)
+      if (shorthand && shorthand[1] !== manager)
+        return `${assignments}${manager} run ${shorthand[2]}`
+      const binary = /^(?:npx|bunx|pnpm exec) (.+)$/.exec(body)
+      if (binary) return `${assignments}${EXEC_RUNNER[manager]} ${binary[1]}`
+      const yarnBinary = segments.length > 1 ? /^yarn (?!run )(.+)$/.exec(body) : null
+      if (yarnBinary) return `${assignments}${EXEC_RUNNER[manager]} ${yarnBinary[1]}`
       return segment
     })
     .join(" && ")

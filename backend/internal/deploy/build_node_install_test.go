@@ -460,6 +460,12 @@ func TestNodeRunnerForMatchesTheConfigureForm(t *testing.T) {
 		{"bunx prisma db push && bun run start", "pnpm", "pnpm exec prisma db push && pnpm run start"},
 		{"yarn knex migrate:latest && yarn run start", "npm", "npx knex migrate:latest && npm run start"},
 		{"pnpm exec drizzle-kit migrate && node dist/index.js", "yarn", "yarn drizzle-kit migrate && node dist/index.js"},
+		{"npm start", "bun", "bun run start"},
+		{"yarn start", "yarn", "yarn start"},
+		{"yarn test", "pnpm", "pnpm run test"},
+		{"NODE_ENV=production npm run start", "bun", "NODE_ENV=production bun run start"},
+		{"bun test", "npm", "bun test"},
+		{"npm run build --if-present", "bun", "npm run build --if-present"},
 	} {
 		if got := nodeRunnerFor(test.command, test.manager); got != test.want {
 			t.Errorf("nodeRunnerFor(%q, %q) = %q, want %q", test.command, test.manager, got, test.want)
