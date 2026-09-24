@@ -232,6 +232,50 @@ func TestSecondaryProcessesAreDetected(t *testing.T) {
 			t.Fatalf("one command became two processes: %#v", merged)
 		}
 	})
+	t.Run("solid queue inside puma", func(t *testing.T) {
+		result := detectShapeFixture(t, map[string]string{
+			"Gemfile":        "gem 'rails', '~> 8.0'\ngem 'puma'\ngem 'solid_queue'\n",
+			"Gemfile.lock":   "GEM\n  specs:\n    puma (6.5.0)\n    rails (8.0.1)\n    railties (8.0.1)\n    solid_queue (1.1.2)\n\nDEPENDENCIES\n  rails (~> 8.0)\n",
+			"config/puma.rb": "port ENV.fetch(\"PORT\", 3000)\nplugin :solid_queue if ENV[\"SOLID_QUEUE_IN_PUMA\"]\n",
+			"Dockerfile":     "FROM ruby:3.3-slim\nWORKDIR /rails\nCOPY . .\nEXPOSE 3000\nCMD [\"./bin/rails\", \"server\"]\n",
+		})
+		candidate := selectedOf(result)
+		jobs := false
+		for _, process := range candidate.Processes {
+			jobs = jobs || process.Command == "bin/jobs"
+		}
+		if !jobs {
+			t.Fatalf("processes = %#v", candidate.Processes)
+		}
+		inPuma := PlanConfiguration{Build: BuildPlanConfig{Method: BuildDockerfile},
+			Variables: []PlannedVariable{{Name: "SOLID_QUEUE_IN_PUMA", Value: "true", Sensitivity: "plain", Scopes: []string{"runtime"}}}}
+		if hasFinding(repoShapeFindings(&result, inPuma), "secondary_process_not_deployed_jobs", PreflightWarning) {
+			t.Fatal("the jobs Puma runs were reported as not deployed")
+		}
+		if !hasFinding(repoShapeFindings(&result, PlanConfiguration{Build: BuildPlanConfig{Method: BuildDockerfile}}), "secondary_process_not_deployed_jobs", PreflightWarning) {
+			t.Fatal("jobs nothing runs were not reported")
+		}
+	})
+	t.Run("fly release command is the release overlay", func(t *testing.T) {
+		result := detectShapeFixture(t, map[string]string{
+			"mix.exs": "defp deps do [{:phoenix, \"~> 1.7\"}] end", "rel/overlays/bin/migrate": "#!/bin/sh\n",
+			"Dockerfile": "FROM elixir:1.17\nWORKDIR /app\nCOPY . .\nCMD [\"/app/bin/server\"]\n",
+			"fly.toml":   "app = \"shop\"\n\n[deploy]\n  release_command = \"/app/bin/migrate\"\n",
+		})
+		candidate := selectedOf(result)
+		if candidate.ReleaseCommand != "bin/migrate" || len(candidate.Processes) != 1 || candidate.Processes[0].Command != "/app/bin/migrate" {
+			t.Fatalf("release command %q, processes %#v", candidate.ReleaseCommand, candidate.Processes)
+		}
+		planned := PlanConfiguration{Build: BuildPlanConfig{Method: BuildDockerfile,
+			ReleaseTasks: []ReleaseTaskConfig{{Name: "release", Command: "bin/migrate", Runner: ReleaseTaskRunnerImage}}}}
+		if findings := repoShapeFindings(&result, planned); hasFinding(findings, "release_process_not_run", PreflightWarning) {
+			t.Fatalf("the planned release task was reported as not run: %#v", findings)
+		}
+		if sameReleaseCommand("/app/bin/migrate", "app/bin/migrate x") || sameReleaseCommand("/app/bin/migrate", "") ||
+			!sameReleaseCommand(" bin/migrate", "/app/bin/migrate") {
+			t.Fatal("sameReleaseCommand")
+		}
+	})
 	t.Run("bullmq worker file", func(t *testing.T) {
 		result := detectShapeFixture(t, map[string]string{
 			"package.json":      `{"name":"api","scripts":{"start":"node server.js"},"dependencies":{"express":"4","bullmq":"5"}}`,

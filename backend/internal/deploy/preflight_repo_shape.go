@@ -2,6 +2,8 @@ package deploy
 
 import (
 	"fmt"
+	"path"
+	"regexp"
 	"strings"
 )
 
@@ -306,7 +308,7 @@ func repoShapeFindings(detection *DetectionResult, configuration PlanConfigurati
 				// The release command detection read is planned as a release
 				// task, and release_command_unmapped asks for it while it is
 				// not (preflight_image.go).
-				if process.Command == selected.ReleaseCommand || releaseTaskRuns(configuration.Build.ReleaseTasks, process.Command) {
+				if sameReleaseCommand(process.Command, selected.ReleaseCommand) || releaseTaskRuns(configuration.Build.ReleaseTasks, process.Command) {
 					continue
 				}
 				findings = append(findings, finding("release_process_not_run", PreflightWarning,
@@ -314,6 +316,9 @@ func repoShapeFindings(detection *DetectionResult, configuration PlanConfigurati
 					process.Reason+"; nothing in this plan runs it before a release starts.",
 					"Add it as a release task that runs in the release image, or chain it in front of the start command (<release> && <start>).",
 					"deploy", "configuration.build.releaseTasks"))
+				continue
+			}
+			if solidQueueRunsInPuma(*selected, configuration, process) {
 				continue
 			}
 			action := "After this project is created, create another project from the same repository with the Worker type"
@@ -403,9 +408,51 @@ func processKindLabel(kind string) string {
 // releaseTaskRuns says a planned release task runs the command.
 func releaseTaskRuns(tasks []ReleaseTaskConfig, command string) bool {
 	for _, task := range tasks {
-		if strings.TrimSpace(task.Command) == strings.TrimSpace(command) {
+		if sameReleaseCommand(task.Command, command) {
 			return true
 		}
 	}
 	return false
 }
+
+// sameReleaseCommand compares two spellings of one command: fly.toml names
+// a release's script by its path in the image (/app/bin/migrate), where the
+// Phoenix release overlay gives the path a release task runs from the
+// image's working directory (bin/migrate).
+func sameReleaseCommand(a, b string) bool {
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return false
+	}
+	if strings.HasPrefix(b, "/") {
+		a, b = b, a
+	}
+	return a == b || (strings.HasPrefix(a, "/") && !strings.HasPrefix(b, "/") && strings.HasSuffix(a, "/"+b))
+}
+
+// solidQueueRunsInPuma says a Solid Queue worker's jobs already run inside
+// the web server: Rails 8's puma.rb loads the plugin whenever
+// SOLID_QUEUE_IN_PUMA is set, which the plan declares by default
+// (detect_variables.go), so bin/jobs has nothing left to run.
+func solidQueueRunsInPuma(candidate DetectedCandidate, configuration PlanConfiguration, process DetectedProcess) bool {
+	if !solidQueueCommandRE.MatchString(process.Command) {
+		return false
+	}
+	readByPuma := false
+	for _, variable := range candidate.Variables {
+		if variable.Name == "SOLID_QUEUE_IN_PUMA" {
+			for _, source := range variable.Sources {
+				readByPuma = readByPuma || path.Base(source) == "puma.rb"
+			}
+		}
+	}
+	for _, variable := range configuration.Variables {
+		// Ruby reads any string as true, so any value turns the plugin on.
+		if variable.Name == "SOLID_QUEUE_IN_PUMA" {
+			return readByPuma && (variable.Value != "" || variable.Reference != "")
+		}
+	}
+	return false
+}
+
+var solidQueueCommandRE = regexp.MustCompile(`(?:^|[\s/])bin/jobs\b|\bsolid_queue:start\b`)

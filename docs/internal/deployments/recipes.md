@@ -371,7 +371,9 @@ the dashboard's own container; preflight refuses one that runs a tool only insta
 provide (`prisma`, `knex`, `alembic`, anything under `node_modules/.bin` or `.venv`) or a program the
 dashboard does not have — in its own image that includes `npx`, `python` and `bundle` — as
 `release_task_tool_missing`, and a host task that runs the application's code no longer counts as the
-schema step.
+schema step. `release_process_not_run` is not raised for a process the release command or a planned task
+already runs; `fly.toml`'s `/app/bin/migrate` is the overlay's `bin/migrate`, run from the image's
+working directory.
 
 ## Repository shape and candidate selection
 
@@ -545,7 +547,9 @@ Sidekiq beside `worker: bundle exec sidekiq` is one worker), two processes with 
 one, and a Procfile command is held to the same 1,024-character bound and credential screen as a
 command from any other platform's file. Preflight raises `secondary_process_not_deployed_<name>`
 (warning) for each, unless the plan's start command is that process's own, which is the second
-project; a release process is not a project of its own but a [release task](#release-commands), and the
+project, or the process is Solid Queue's `bin/jobs` while the plan sets `SOLID_QUEUE_IN_PUMA` for a
+`puma.rb` that reads it — the web server then runs the jobs itself, and the plan declares it by default;
+a release process is not a project of its own but a [release task](#release-commands), and the
 project step lists only the others. Octane is recorded as an alternative start command, not a failure.
 
 ## Ecosystems without a recipe
