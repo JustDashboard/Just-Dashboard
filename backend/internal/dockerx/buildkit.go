@@ -13,10 +13,12 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/client"
 )
 
 type BuildxSecret struct {
@@ -180,6 +182,27 @@ func scrubBuildEnvironment(source []string) []string {
 // large Rust, Gradle or monorepo project on a small server approaches it.
 const buildTimeout = 30 * time.Minute
 
+// pipeDrainGrace is how long a read waits for more output once buildx has
+// exited: whatever BuildKit printed last is already in the pipe by then.
+var pipeDrainGrace = 5 * time.Second
+
+// drainReader stops waiting on a pipe that stays open after the build's
+// process exited. A descendant that inherited it can outlive buildx, which
+// RunGroup leaves running after a normal exit, and the step must not wait on
+// that process. The deadline is set as each read starts, so a slow reader
+// downstream never cuts off output that had already arrived.
+type drainReader struct {
+	file   *os.File
+	exited *atomic.Bool
+}
+
+func (r drainReader) Read(buffer []byte) (int, error) {
+	if r.exited.Load() {
+		_ = r.file.SetReadDeadline(time.Now().Add(pipeDrainGrace))
+	}
+	return r.file.Read(buffer)
+}
+
 func runGroupStream(ctx context.Context, cmd *exec.Cmd, out chan<- LogLine, failure *buildFailureReader) error {
 	// Plain pipes rather than StdoutPipe: Wait closes a StdoutPipe as soon as
 	// the process exits, which can drop the last lines still buffered in it,
@@ -196,10 +219,12 @@ func runGroupStream(ctx context.Context, cmd *exec.Cmd, out chan<- LogLine, fail
 	}
 	defer stderr.Close()
 	cmd.Stdout, cmd.Stderr = stdoutWriter, stderrWriter
+	var exited atomic.Bool
 	var wg sync.WaitGroup
 	wg.Add(2)
-	scan := func(reader io.Reader, stream string) {
+	scan := func(file *os.File, stream string) {
 		defer wg.Done()
+		reader := drainReader{file: file, exited: &exited}
 		// Whatever stops the scanner, the pipe keeps being read so the build
 		// never blocks writing to it.
 		defer io.Copy(io.Discard, reader)
@@ -224,6 +249,10 @@ func runGroupStream(ctx context.Context, cmd *exec.Cmd, out chan<- LogLine, fail
 	// The child's copies closed when it exited; closing these ends the reads.
 	stdoutWriter.Close()
 	stderrWriter.Close()
+	exited.Store(true)
+	// A read already waiting started before the exit and carries no deadline.
+	_ = stdout.SetReadDeadline(time.Now().Add(pipeDrainGrace))
+	_ = stderr.SetReadDeadline(time.Now().Add(pipeDrainGrace))
 	wg.Wait()
 	var exit *exec.ExitError
 	if errors.As(runErr, &exit) {
@@ -269,7 +298,13 @@ func (c *Client) PullImmutable(
 	}
 	stream, err := cli.ImagePull(ctx, reference, image.PullOptions{RegistryAuth: registryAuth})
 	if err != nil {
-		return ImmutableImage{}, err
+		if client.IsErrConnectionFailed(err) {
+			return ImmutableImage{}, err
+		}
+		// A registry that refuses before the stream starts — a credential
+		// gone stale, a digest the registry no longer has — is the same pull
+		// failure as one it reports inside the stream.
+		return ImmutableImage{}, fmt.Errorf("pull image: %w", err)
 	}
 	defer stream.Close()
 	decoder := json.NewDecoder(stream)

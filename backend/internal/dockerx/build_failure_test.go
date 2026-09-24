@@ -3,13 +3,18 @@ package dockerx
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
+	"github.com/docker/docker/client"
 )
 
 // The streams below are BuildKit's own plain progress, captured from
@@ -176,5 +181,75 @@ func TestBuildRunErrorSeparatesTimeoutFromCancellation(t *testing.T) {
 	other := errors.New("docker: not found")
 	if err := buildRunError(context.Background(), context.Background(), other); err != other {
 		t.Fatalf("unrelated error = %v", err)
+	}
+}
+
+// A process buildx leaves behind can hold the output pipes open after buildx
+// exits. Reading stops once nothing more arrives, and nothing already
+// written is lost. Not parallel: it shortens the package's grace.
+func TestRunGroupStreamDoesNotWaitOnAProcessHoldingItsOutput(t *testing.T) {
+	grace := pipeDrainGrace
+	pipeDrainGrace = 200 * time.Millisecond
+	defer func() { pipeDrainGrace = grace }()
+	cmd := exec.Command("/bin/sh", "-c", "sleep 30 & echo '#1 DONE 0.1s'; exit 0")
+	out := make(chan LogLine, 16)
+	started := time.Now()
+	err := runGroupStream(context.Background(), cmd, out, newBuildFailureReader())
+	elapsed := time.Since(started)
+	if cmd.Process != nil {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	close(out)
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("waited %s on a process that outlived the build", elapsed)
+	}
+	lines := []string{}
+	for line := range out {
+		lines = append(lines, line.Text)
+	}
+	if len(lines) != 1 || lines[0] != "#1 DONE 0.1s" {
+		t.Fatalf("streamed %q", lines)
+	}
+}
+
+// A registry that refuses a pull before the stream starts answers the pull
+// with an error, which must still read as a pull failure; a daemon nobody
+// can reach is the engine's own fault and keeps its error.
+func TestPullImmutableNamesAnUpFrontRefusalAsAPullFailure(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1.47/images/create" {
+			t.Errorf("unexpected Docker request: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"message":"Head \"https://registry.example.test/v2/team/app/manifests/sha256:1\": unauthorized: authentication required"}`))
+	}))
+	defer server.Close()
+	reference := "registry.example.test/team/app@sha256:" + strings.Repeat("a", 64)
+	cli, err := client.NewClientWithOpts(client.WithHost(server.URL), client.WithVersion("1.47"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cli.Close()
+	_, err = (&Client{cli: cli}).PullImmutable(t.Context(), reference, "", nil)
+	if err == nil || !strings.HasPrefix(err.Error(), "pull image: ") || !strings.Contains(err.Error(), "unauthorized") {
+		t.Fatalf("up-front refusal = %v", err)
+	}
+
+	// A socket nothing listens on: a closed test server's port could be
+	// handed to a parallel test's server meanwhile.
+	socket := "unix://" + filepath.Join(t.TempDir(), "docker.sock")
+	unreachable, err := client.NewClientWithOpts(client.WithHost(socket), client.WithVersion("1.47"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unreachable.Close()
+	_, err = (&Client{cli: unreachable}).PullImmutable(t.Context(), reference, "", nil)
+	if err == nil || strings.Contains(err.Error(), "pull image:") {
+		t.Fatalf("unreachable daemon = %v", err)
 	}
 }
