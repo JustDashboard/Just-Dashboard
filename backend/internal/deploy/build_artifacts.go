@@ -23,7 +23,7 @@ var (
 	ErrArtifactRetained   = errors.New("deployment artifact is retained")
 )
 
-const AutomaticRecipeVersion = "just-dashboard-recipes-v2"
+const AutomaticRecipeVersion = "just-dashboard-recipes-v3"
 
 // The catalogue is deliberately small and reviewed. Tags are never written
 // into a release Dockerfile: the backend resolves each to a digest first.
@@ -459,6 +459,9 @@ type selectedRecipe struct {
 	dotnet        dotnetProject
 	deno          denoRecipe
 	php           phpRecipe
+	// runtimeAssets are the root-level files a compiled service reads at
+	// runtime, copied beside its binary (recipe_runtime_files.go).
+	runtimeAssets []string
 }
 
 func selectRecipe(root string, config BuildPlanConfig) (selectedRecipe, error) {
@@ -547,7 +550,7 @@ func selectRecipe(root string, config BuildPlanConfig) (selectedRecipe, error) {
 		if len(mains) == 1 {
 			main = mains[0]
 		}
-		return selectedRecipe{kind: "go", catalogueKey: "go", mainPackage: main, goVersion: goVersion}, nil
+		return selectedRecipe{kind: "go", catalogueKey: "go", mainPackage: main, goVersion: goVersion, runtimeAssets: compiledRuntimeAssets(root, ".go")}, nil
 	case "python":
 		files := map[string][]byte{}
 		for _, name := range []string{"requirements.txt", "pyproject.toml", "uv.lock", "poetry.lock"} {
@@ -584,6 +587,7 @@ func selectRecipe(root string, config BuildPlanConfig) (selectedRecipe, error) {
 		if err != nil {
 			return selectedRecipe{}, err
 		}
+		rust.assets = compiledRuntimeAssets(root, ".rs")
 		return selectedRecipe{kind: "rust", catalogueKey: "rust", rust: rust}, nil
 	case "java":
 		java, err := selectJavaRecipe(root)
@@ -701,13 +705,8 @@ func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases
 			command = "go build -trimpath -ldflags='-s -w' -o /out/app " + packagePath
 		}
 		lines = append(lines, "RUN "+buildSecrets+command,
-			`RUN test -f /out/app && test -x /out/app || (echo 'Go build command must write an executable to /out/app' >&2; exit 1)`,
-			"FROM "+immutableImageReference(bases[1]), "RUN adduser -D -u 10001 app", "USER app", "COPY --from=build /out/app /app")
-		if strings.TrimSpace(config.StartCommand) == "" {
-			lines = append(lines, `ENTRYPOINT ["/app"]`)
-		} else {
-			lines = append(lines, shellCMD(config.StartCommand))
-		}
+			`RUN test -f /out/app && test -x /out/app || (echo 'Go build command must write an executable to /out/app' >&2; exit 1)`)
+		lines = append(lines, compiledRuntimeLines(bases[1], recipe.runtimeAssets, config.StartCommand)...)
 	case "python":
 		base := immutableImageReference(bases[0])
 		lines = append(lines, "FROM "+base, "WORKDIR /app",

@@ -185,6 +185,8 @@ type rustRecipe struct {
 	binary  string
 	version string
 	locked  bool
+	// assets are the root-level files the service reads at runtime.
+	assets []string
 }
 
 func selectRustRecipe(root string, config BuildPlanConfig) (rustRecipe, error) {
@@ -243,17 +245,8 @@ func renderRustDockerfile(recipe rustRecipe, config BuildPlanConfig, bases []Res
 		"RUN " + installSecrets + "cargo fetch" + locked,
 		"RUN " + buildSecrets + build,
 		"RUN mkdir -p /out && test -f /src/target/release/" + recipe.binary + " && cp /src/target/release/" + recipe.binary + " /out/app || (echo 'Rust build must produce target/release/" + recipe.binary + "; configure the build command and binary together' >&2; exit 1)",
-		"FROM " + immutableImageReference(bases[1]),
-		"RUN adduser -D -u 10001 app",
-		"USER app",
-		"COPY --from=build /out/app /app",
 	}
-	if strings.TrimSpace(config.StartCommand) == "" {
-		lines = append(lines, `ENTRYPOINT ["/app"]`)
-	} else {
-		lines = append(lines, shellCMD(config.StartCommand))
-	}
-	return lines, nil
+	return append(lines, compiledRuntimeLines(bases[1], recipe.assets, config.StartCommand)...), nil
 }
 
 func joinRoot(root, name string) string {

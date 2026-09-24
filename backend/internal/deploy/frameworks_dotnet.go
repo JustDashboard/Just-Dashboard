@@ -180,7 +180,12 @@ func renderDotnetDockerfile(project dotnetProject, config BuildPlanConfig, bases
 		"RUN test -f /out/" + project.assembly + ".dll || (echo '.NET publish must write /out/" + project.assembly + ".dll; configure the build command and project together' >&2; exit 1)",
 		"FROM " + immutableImageReference(bases[1]),
 		"WORKDIR /app",
-		"COPY --from=build /out /app",
+		// The application runs as the image's app user, so the directory it
+		// runs from — where a relative app.db lands — its data directory and
+		// the Data Protection key ring are made that user's. A volume mounted
+		// on one of them copies that ownership the first time it is used.
+		"RUN mkdir -p " + dotnetRuntimeDataDir + " " + dotnetDataProtectionAt + " && chown app:app /app " + dotnetRuntimeDataDir + " /home/app/.aspnet " + dotnetDataProtectionAt,
+		"COPY --from=build --chown=app:app /out /app",
 		"USER app",
 	}
 	if strings.TrimSpace(config.StartCommand) == "" {

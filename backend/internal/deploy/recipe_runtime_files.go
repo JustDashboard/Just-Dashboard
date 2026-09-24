@@ -1,0 +1,162 @@
+package deploy
+
+import (
+	"io/fs"
+	"os"
+	"path"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+)
+
+// compiledRuntimeHome is the unprivileged user's home in the Go and Rust
+// runtime images. It is the working directory, so a relative path the
+// service opens — templates/, ./app.db — resolves somewhere the service can
+// read what the build shipped and write what it creates, instead of against
+// a filesystem root owned by root. The binary stays at /app, where saved
+// start commands already name it.
+const compiledRuntimeHome = "/home/app"
+
+// The .NET runtime's directories its app user owns: where data is kept, and
+// where ASP.NET Core keeps the Data Protection key ring for a non-root user.
+const (
+	dotnetRuntimeDataDir   = "/app/data"
+	dotnetDataProtectionAt = "/home/app/.aspnet/DataProtection-Keys"
+)
+
+// compiledRuntimeAssetNames are the root-level files and directories a
+// compiled service conventionally reads at runtime rather than embedding:
+// templates, static files, migrations, translations and configuration.
+var compiledRuntimeAssetNames = []string{
+	"templates", "views", "static", "public", "assets", "migrations", "locales", "i18n", "config",
+}
+
+var compiledConfigFileRE = regexp.MustCompile(`^config[A-Za-z0-9._-]*\.(?:ya?ml|toml|json)$`)
+
+// Literal paths a Go or Rust service hands to a template loader, a file
+// server or a migration source. Group 1 is the path.
+var (
+	goRuntimeFileREs = []*regexp.Regexp{
+		regexp.MustCompile(`(?:LoadHTMLGlob|LoadHTMLFiles|ParseGlob|ParseFiles|http\.Dir|os\.DirFS|NewFileSystem|html\.New)\(\s*"([^"]+)"`),
+		regexp.MustCompile(`\.(?:Static|StaticFile|StaticFS|File)\(\s*"[^"]*"\s*,\s*"([^"]+)"`),
+		regexp.MustCompile(`"file://([^"]+)"`),
+	}
+	rustRuntimeFileREs = []*regexp.Regexp{
+		regexp.MustCompile(`(?:ServeDir::new|ServeFile::new|Tera::new|NamedFile::open(?:_async)?|FileServer::from|path_loader)\(\s*"([^"]+)"`),
+		regexp.MustCompile(`Files::new\(\s*"[^"]*"\s*,\s*"([^"]+)"`),
+		regexp.MustCompile(`"file://([^"]+)"`),
+	}
+	runtimeAssetNameRE = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$`)
+)
+
+// compiledRuntimeAssets lists the root-level entries the runtime stage copies
+// beside the binary: the conventional names that exist, and the first
+// segment of every literal path the sources pass to a loader. Sources are
+// read as text under a fixed budget; nothing is executed. Symlinks are never
+// copied, so the image cannot pick up a file from outside the checkout.
+func compiledRuntimeAssets(root, extension string) []string {
+	found := map[string]bool{}
+	add := func(name string) {
+		name = strings.TrimSuffix(strings.TrimPrefix(name, "./"), "/")
+		if first, _, _ := strings.Cut(name, "/"); first != "" {
+			name = first
+		}
+		if !runtimeAssetNameRE.MatchString(name) || strings.ContainsAny(name, "*?[") || name == ".git" ||
+			name == "target" || name == "vendor" || name == ".just-dashboard" || name == "node_modules" {
+			return
+		}
+		info, err := os.Lstat(filepath.Join(root, name))
+		if err != nil || info.Mode()&fs.ModeSymlink != 0 || (!info.IsDir() && !info.Mode().IsRegular()) {
+			return
+		}
+		found[name] = true
+	}
+	for _, name := range compiledRuntimeAssetNames {
+		add(name)
+	}
+	if entries, err := os.ReadDir(root); err == nil {
+		for _, entry := range entries {
+			if compiledConfigFileRE.MatchString(entry.Name()) {
+				add(entry.Name())
+			}
+		}
+	}
+	expressions := goRuntimeFileREs
+	if extension == ".rs" {
+		expressions = rustRuntimeFileREs
+	}
+	files, bytes := 0, int64(0)
+	_ = filepath.WalkDir(root, func(current string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, current)
+		if relErr != nil {
+			return nil
+		}
+		if entry.IsDir() {
+			switch entry.Name() {
+			case ".git", "vendor", "target", "node_modules", "testdata", ".just-dashboard":
+				return filepath.SkipDir
+			}
+			if rel != "." && strings.Count(filepath.ToSlash(rel), "/") >= 6 {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !entry.Type().IsRegular() || path.Ext(entry.Name()) != extension || strings.HasSuffix(entry.Name(), "_test.go") {
+			return nil
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil || info.Size() > 256<<10 {
+			return nil
+		}
+		if files >= 400 || bytes+info.Size() > 4<<20 {
+			return filepath.SkipAll
+		}
+		files, bytes = files+1, bytes+info.Size()
+		content, _, readErr := readDetectionFile(current, 256<<10)
+		if readErr != nil {
+			return nil
+		}
+		for _, expression := range expressions {
+			for _, match := range expression.FindAllSubmatch(content, 16) {
+				literal := string(match[1])
+				if path.IsAbs(literal) || strings.HasPrefix(literal, "..") {
+					continue
+				}
+				add(literal)
+			}
+		}
+		return nil
+	})
+	names := make([]string, 0, len(found))
+	for name := range found {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// compiledRuntimeLines is the runtime stage the Go and Rust recipes share:
+// the binary at /app, run as an unprivileged user from its own home, with the
+// files the service reads at runtime owned by that user, and a data
+// directory it owns so a volume mounted there starts writable.
+func compiledRuntimeLines(base ResolvedImage, assets []string, startCommand string) []string {
+	lines := []string{
+		"FROM " + immutableImageReference(base),
+		"RUN adduser -D -u 10001 app",
+		"USER app",
+		"WORKDIR " + compiledRuntimeHome,
+		"COPY --from=build /out/app /app",
+	}
+	for _, asset := range assets {
+		lines = append(lines, "COPY --from=build --chown=app:app /src/"+asset+" "+compiledRuntimeHome+"/"+asset)
+	}
+	lines = append(lines, "RUN mkdir -p "+compiledRuntimeHome+"/data")
+	if strings.TrimSpace(startCommand) == "" {
+		return append(lines, `ENTRYPOINT ["/app"]`)
+	}
+	return append(lines, shellCMD(startCommand))
+}

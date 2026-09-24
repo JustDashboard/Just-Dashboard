@@ -363,7 +363,11 @@ func renderPHPDockerfile(recipe phpRecipe, config BuildPlanConfig, bases []Resol
 		lines = append(lines, "COPY --from=assets /app/public/build /app/public/build")
 	}
 	if recipe.framework == "laravel" {
-		lines = append(lines, "RUN mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs bootstrap/cache database && chmod -R a+rwX storage bootstrap/cache database")
+		lines = append(lines, "RUN mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs storage/app/public bootstrap/cache database && chmod -R a+rwX storage bootstrap/cache database")
+		// What `php artisan storage:link` writes, without booting the
+		// application in the build: files on the public disk are served from
+		// public/storage. A committed public/storage is left alone.
+		lines = append(lines, "RUN if [ -d public ] && [ ! -e public/storage ]; then ln -s /app/storage/app/public public/storage; fi")
 	}
 	if command := strings.TrimSpace(config.BuildCommand); command != "" {
 		lines = append(lines, "RUN "+buildSecrets+command)
