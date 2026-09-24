@@ -231,7 +231,7 @@ export function Configure({
       name: flow.name,
       profile: flow.profile,
       source: flow.source,
-      configuration: configurationForSave(configuration),
+      configuration: configurationForSave(configuration, flow.source),
       dotenv: text,
       retainedKeys,
     })
@@ -588,7 +588,7 @@ export function Configure({
     try {
       // Readiness follows the runtime publication, which may differ from the
       // container port when Docker allocates a free host port.
-      const toSave = configurationForSave(configuration)
+      const toSave = configurationForSave(configuration, flow.source)
       let working = flow.draft
       const savePlan = async (draft: DeploymentDraft) => {
         working = draft

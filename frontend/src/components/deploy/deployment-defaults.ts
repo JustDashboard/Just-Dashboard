@@ -15,6 +15,12 @@ export const PYTHON_VERSION = /^3\.(10|11|12|13)$/
 /** The request-body ceiling a route gets when the plan names none, and the most it may name. */
 export const DEFAULT_MAX_REQUEST_BODY_MB = 64
 export const MAX_REQUEST_BODY_MB = 10240
+/**
+ * What zero means, which depends on the proxy: host nginx routes are given
+ * the 64 MB default because nginx's own refused a phone photo, while Caddy,
+ * which has no default limit, is left without one.
+ */
+export const DEFAULT_REQUEST_BODY_LIMIT = `${DEFAULT_MAX_REQUEST_BODY_MB} MB on nginx, no limit on Caddy`
 
 /**
  * The variables an application issues to itself — a session or signing
@@ -432,9 +438,17 @@ export function discoveredEnvironmentRows(
   return rows.length ? rows : [{ name: "", value: "" }]
 }
 
-/** The detected variables, less the ones the plan already answers as network variables. */
+/**
+ * The detected variables, less the ones the plan already answers as network
+ * variables. A public URL that follows the primary domain stays askable: with
+ * no domain planned it has no value, and the row is where one is typed.
+ */
 function unplannedVariables(candidate?: DeploymentDetectionCandidate) {
-  const planned = new Set((candidate?.networkVariables ?? []).map((variable) => variable.name))
+  const planned = new Set(
+    (candidate?.networkVariables ?? [])
+      .filter((variable) => !variable.domainTemplate)
+      .map((variable) => variable.name),
+  )
   return (candidate?.variables ?? []).filter((variable) => !planned.has(variable.name))
 }
 
@@ -466,7 +480,7 @@ export function validateConfiguration(
     if (value < 0 || value > 65535) errors[name] = "Use a port from 1 to 65535, or 0 for none."
   const maxBody = configuration.runtime.maxRequestBodyMb ?? 0
   if (maxBody < 0 || maxBody > MAX_REQUEST_BODY_MB)
-    errors.maxRequestBodyMb = `Use 1 to ${MAX_REQUEST_BODY_MB} MB, or 0 for the ${DEFAULT_MAX_REQUEST_BODY_MB} MB default.`
+    errors.maxRequestBodyMb = `Use 1 to ${MAX_REQUEST_BODY_MB} MB, or 0 for the proxy's default (${DEFAULT_REQUEST_BODY_LIMIT}).`
   if (profile === "game" && !configuration.variables.some((variable) => variable.name === "EULA"))
     errors.eula = "Accept the Minecraft EULA before continuing."
   const names = new Set<string>()

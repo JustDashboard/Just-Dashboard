@@ -6,6 +6,7 @@ import {
   validateConfiguration,
 } from "./deployment-defaults"
 import { synchronizePrimaryDomain } from "./new-project/domain-bindings"
+import { configurationForSave, withSuggestedHostname } from "./new-project/draft"
 
 const candidate = (overrides) => ({
   id: "fixture",
@@ -59,8 +60,62 @@ describe("variables the proxy decides", () => {
     )
   })
 
-  test("are not asked for again as environment rows", () => {
-    expect(discoveredEnvironmentRows(auth).map((row) => row.name)).toEqual(["AUTH_SECRET"])
+  test("a suggested hostname fills the public URL like a typed one", () => {
+    const plan = withSuggestedHostname(
+      defaultConfiguration("web", auth),
+      "web",
+      { kind: "git" },
+      {
+        hostname: "App.example.com",
+        method: "sslip",
+      },
+    )
+    expect(plan.variables.find((variable) => variable.name === "NEXTAUTH_URL")?.value).toBe(
+      "https://app.example.com",
+    )
+  })
+
+  // next-auth 4 reads `NEXTAUTH_URL=` as a URL and fails every sign-in request.
+  test("an empty public URL is not saved", () => {
+    const git = { kind: "git" }
+    const saved = configurationForSave(defaultConfiguration("web", auth), git)
+    expect(saved.variables.map((variable) => variable.name)).toEqual(["AUTH_TRUST_HOST"])
+    const routed = configurationForSave(
+      synchronizePrimaryDomain(defaultConfiguration("web", auth), [
+        { hostname: "app.example.com", https: true, ownership: "managed" },
+      ]),
+      git,
+    )
+    expect(routed.variables.map((variable) => variable.name)).toEqual([
+      "AUTH_TRUST_HOST",
+      "NEXTAUTH_URL",
+    ])
+    // A blueprint's plan is its reviewed definition's, empty values included.
+    const blueprint = {
+      ...defaultConfiguration("web"),
+      variables: [
+        {
+          name: "WEBHOOK_URL",
+          sensitivity: "plain",
+          scopes: ["runtime"],
+          domainTemplate: "https://{{hostname}}",
+        },
+      ],
+    }
+    expect(
+      configurationForSave(blueprint, { kind: "blueprint", mode: "blueprint" }).variables,
+    ).toEqual(blueprint.variables)
+  })
+
+  test("only a trust switch stops being asked for as an environment row", () => {
+    const detected = candidate({
+      networkVariables: auth.networkVariables,
+      variables: [...auth.variables, { name: "NEXTAUTH_URL", sources: [".env.example"] }],
+    })
+    expect(discoveredEnvironmentRows(detected).map((row) => row.name)).toEqual([
+      "AUTH_SECRET",
+      "NEXTAUTH_URL",
+    ])
   })
 })
 

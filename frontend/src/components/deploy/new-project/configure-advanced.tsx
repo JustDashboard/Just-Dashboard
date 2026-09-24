@@ -22,7 +22,7 @@ import { imageProduct } from "@/components/product-logo"
 import { EmptyNote } from "@/components/state"
 import type { DeploymentConfiguration, DeploymentRestartPolicy } from "@/lib/types"
 import {
-  DEFAULT_MAX_REQUEST_BODY_MB,
+  DEFAULT_REQUEST_BODY_LIMIT,
   MAX_REQUEST_BODY_MB,
   type WizardErrors,
 } from "@/components/deploy/deployment-defaults"
@@ -187,7 +187,7 @@ export function RuntimeLimits({
         <Field
           label="Largest upload (MB)"
           htmlFor="adv-max-body"
-          hint={`0 keeps the ${DEFAULT_MAX_REQUEST_BODY_MB} MB default; the proxy refuses larger requests.`}
+          hint={`0 keeps the proxy's default: ${DEFAULT_REQUEST_BODY_LIMIT}. A set limit is refused with 413 on both.`}
           error={errors.maxRequestBodyMb}
         >
           <Input

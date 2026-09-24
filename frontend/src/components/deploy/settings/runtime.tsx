@@ -38,7 +38,7 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import {
-  DEFAULT_MAX_REQUEST_BODY_MB,
+  DEFAULT_REQUEST_BODY_LIMIT,
   MAX_REQUEST_BODY_MB,
 } from "@/components/deploy/deployment-defaults"
 import { useProject } from "@/components/deploy/project-context"
@@ -649,8 +649,10 @@ function RuntimeForm({
         <Field
           label="Largest upload"
           htmlFor="runtime-max-body"
-          info={`The proxy answers a bigger request with 413 before the application sees it. Zero keeps the ${DEFAULT_MAX_REQUEST_BODY_MB} MB default.`}
-          hint={runtime.maxRequestBodyMb ? undefined : `${DEFAULT_MAX_REQUEST_BODY_MB} MB default`}
+          info={`The proxy answers a bigger request with 413 before the application sees it. Zero keeps the proxy's default: ${DEFAULT_REQUEST_BODY_LIMIT}.`}
+          hint={
+            runtime.maxRequestBodyMb ? undefined : `Proxy default: ${DEFAULT_REQUEST_BODY_LIMIT}`
+          }
           error={errorFor("runtime-max-body")}
         >
           <InputGroup>
