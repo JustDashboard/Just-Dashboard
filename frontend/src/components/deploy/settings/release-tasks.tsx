@@ -73,7 +73,8 @@ export function ReleaseTasks({
   const failedOnTask = project.runs.find(
     (run) =>
       run.environmentId === project.environmentId &&
-      run.terminalCode === "release_task_failed" &&
+      // Every release-task failure's code starts so, whichever cause it named.
+      run.terminalCode?.startsWith("release_") &&
       run.id > (liveRun?.id ?? 0),
   )
   const lastRun = failedOnTask ?? liveRun

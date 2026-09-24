@@ -208,6 +208,23 @@ describe("autoDeployReading", () => {
     )
     expect(autoDeployReading(watch({ status: "not_applicable" }))).toBeUndefined()
   })
+
+  test("a branch it could not read says why when git said", () => {
+    expect(
+      autoDeployReading(
+        watch({ status: "unavailable", reason: "ref_not_found", branch: "master" }),
+      ),
+    ).toEqual({ tone: "warning", label: "Auto-deploy stopped: master no longer exists" })
+    expect(
+      autoDeployReading(watch({ status: "unavailable", reason: "source_auth_failed" }))?.label,
+    ).toBe("Auto-deploy stopped: the credential was refused")
+    expect(
+      autoDeployReading(watch({ status: "unavailable", reason: "source_unavailable" }))?.label,
+    ).toBe("Auto-deploy needs attention")
+    expect(autoDeployReading(watch({ status: "stale", reason: "ref_not_found" }))?.label).toBe(
+      "Auto-deploy needs attention",
+    )
+  })
 })
 
 describe("sourceLine", () => {

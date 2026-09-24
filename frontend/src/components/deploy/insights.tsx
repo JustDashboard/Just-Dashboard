@@ -11,7 +11,8 @@ import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { BarList } from "@/components/bar-list"
 import { TileTrend } from "@/components/metrics/sparkline"
-import { formatDuration, sentence } from "@/components/deploy/vocabulary"
+import { formatDuration } from "@/components/deploy/vocabulary"
+import { causeTitle } from "@/components/deploy/failure-cause"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import {
   Select,
@@ -271,7 +272,7 @@ export function Insights({
                   <BarList
                     items={data.topFailures.map((failure) => ({
                       key: failure.code,
-                      label: sentence(failure.code),
+                      label: causeTitle(failure.code),
                       mono: false,
                       value: `×${failure.count}`,
                       share: failure.count / topFailure,

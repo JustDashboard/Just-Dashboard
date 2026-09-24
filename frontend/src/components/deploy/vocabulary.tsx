@@ -942,6 +942,20 @@ export function deploymentName(raw: string) {
   return cleaned || "app"
 }
 
+function autoDeployStopped(watch: DeploymentGitWatch) {
+  switch (watch.reason) {
+    case "ref_not_found":
+      return `Auto-deploy stopped: ${watch.branch ?? "the branch"} no longer exists`
+    case "source_auth_failed":
+      return "Auto-deploy stopped: the credential was refused"
+    case "source_repository_missing":
+      return "Auto-deploy stopped: repository not found"
+    case "source_unreachable":
+      return "Auto-deploy paused: the Git remote is unreachable"
+  }
+  return undefined
+}
+
 /**
  * Whether a repository deploys itself, as one reading. The project header and
  * the overview's wiring each had their own copy, and they had already drifted:
@@ -955,7 +969,9 @@ export function autoDeployReading(
   if (watch.status === "not_applicable") return undefined
   const automatic = watch.policy?.automatic ?? watch.automatic
   if (["unavailable", "stale", "policy_conflict"].includes(watch.status)) {
-    return { tone: "warning", label: "Auto-deploy needs attention" }
+    // A branch the watcher could not read says why when git's answer did.
+    const stopped = watch.status === "unavailable" ? autoDeployStopped(watch) : undefined
+    return { tone: "warning", label: stopped ?? "Auto-deploy needs attention" }
   }
   if (!automatic) return { tone: "stopped", label: "Manual deployments" }
   if (watch.status === "awaiting_first_deployment") {
