@@ -12,7 +12,8 @@ static output, the interpreter or toolchain release, and the environment variabl
 source reads. Every default is a plan field the configure form and the Build settings can change. A
 detected framework that the recipe cannot serve automatically (a provider adapter, a workspace without a
 root package, an unsupported interpreter release) is a low-confidence candidate with a decision or a
-`recipe_unsupported` preflight finding, never a silent guess.
+`recipe_unsupported` preflight finding, never a silent guess. Which of a repository's roots is the
+application, and what it is when it is not a service, is [repository shape](#repository-shape-and-candidate-selection).
 
 ## Build values
 
@@ -57,9 +58,193 @@ engine.
 ## Procfile
 
 A `web:` process in a Heroku-style `Procfile` is the repository declaring how it is served, and outranks
-a start script and a framework default alike; it is only ever a server command, so a site framework's
-build is still served by nginx. `release:` processes are not run automatically; add one as a release
-task. A command that carries credential material is ignored.
+a start script, another platform's file and a framework default alike; it is only ever a server command,
+so a site framework's build is still served by nginx. Every other process line is recorded as one of the
+candidate's [processes](#background-processes): `release:` is not run automatically (preflight's
+`release_process_not_run` says so unless the start command already migrates), and a worker, clock or
+beat line is a process this project does not run. A command that carries credential material is ignored.
+
+## Repository shape and candidate selection
+
+Detection reads a checkout in two passes (`detect_walk.go`). The first lists directories breadth-first
+to the depth bound and reads only the files whose names say what a directory is — the manifests above,
+Dockerfiles and Compose files, and the repository-shape files below — so ten thousand images under
+`assets/` or megabytes of generated Go under `api/` can no longer spend the bound before the root's
+`package.json` or `go.mod` is read. The second walks everything else. The file bound (10,000) counts
+files detection opens, not files the repository holds. Go source is read head-first (64 KiB, enough for
+the package clause, the imports and the cgo check) under a budget of its own (3,000 files, 24 MiB), and
+files marked `// Code generated … DO NOT EDIT.` and `*.pb.go` are skipped; a module whose scan stopped
+early says so in its evidence. A manifest the depth bound kept detection from reading sets `truncated`,
+and every candidate found before a bound carries that as evidence. Editor, CI and tool directories
+(`.devcontainer`, `.github`, `.vscode`, `.idea`, caches and build outputs such as `.svelte-kit`,
+`.nuxt`, `coverage`) are never walked; a development container's Dockerfile is recorded as set aside,
+not offered. A directory holding `pyvenv.cfg` or `conda-meta/` is a committed virtualenv whatever it is
+called: it is skipped, and preflight's `committed_virtualenv` warns that the build context carries it.
+A manifest that starts with a UTF-8 byte-order mark (PowerShell 5.1 writes one), or is UTF-16 with a
+mark, is read as npm, Composer and Deno read it; the recipe accepts the same file.
+
+Candidates are ranked, and the one that outranks every other is selected (`detect_repo_shape.go`). The
+order is: whether it is a service at all; whether something ranks it below the application; its
+confidence; between two nested roots, `apps/`, `services/` or `web/` above `packages/`, `libs/` or
+`tools/`; and, on a tie, the shallower root — unless that is plain static files, which say least about
+what a repository is for. A tie is still the operator's choice. A candidate ranked down is chosen on its
+own only when it is the only deployable thing and nothing in the repository is a library it could be
+the example of; a candidate that is not a service is never chosen on its own. Ranked down
+(`demotion`, said beside it in the candidate chooser and by `selected_candidate_demoted` when it is
+picked anyway):
+
+- roots under `examples/`, `demo(s)/`, `sample(s)/`, `fixtures/`, `test(s)/`, `e2e/`, `playground/`,
+  `sandbox/`, `benchmark(s)/`, `templates/` or a Storybook;
+- a documentation site (Docusaurus, VitePress, Starlight, Nextra, MkDocs, Hugo, Jekyll, or plain HTML
+  under `docs/`) beside an application;
+- a workspace root whose applications are its member packages;
+- an `index.html` root nested inside a code root outside the folders a framework serves
+  (`static_candidate_nested` when selected);
+- the frontend of a split repository's API, and a desktop shell's frontend (below).
+
+An `index.html` is not a site when it sits under `templates/`, `layouts/`, `_includes/`, `partials/`,
+`views/`, `themes/`, a coverage or test report, or when its first 4 KiB start with front matter or hold
+`{%`, `<?php` or `<%=` — a Flask or Jinja template used to become a site serving raw template source. An
+`index.html` nested inside another plain static root is a page of that site ("2 more pages under ."). One
+at or under a code root, in a folder the framework serves (`public/`, `static/`, `assets/`,
+`templates/`, `views/`, `wwwroot/`, `priv/`), is that application's static files and is set aside with
+evidence on the application — an Express API with `public/index.html` used to deploy the folder on nginx
+and not the API. A plain HTML site whose `package.json` only runs tooling (the Tailwind CLI, PostCSS,
+a formatter, a `live-server` or `http-server` preview) is a static site: with a build script it is
+"Static site with a build step", the Node recipe with output directory `.`, whose image serves the
+package root after the build without `node_modules`, the package manifests, the lockfiles or dotfiles;
+without one it is a plain static site.
+
+A repository split into a frontend and an API (`detect_split_repository.go`) is one deployment when the
+server's own scripts build the frontend (`npm --prefix client run build`, `cd client`, `--workspace`,
+`--filter`): the frontend's candidate folds into the server's, which becomes high confidence and, when
+the build lives in `heroku-postbuild` or `render-build`, builds with that script. When the two build
+separately but talk to each other — the frontend's Vite `server.proxy` points at the API's port, it
+reads an `*_API_URL`, or the API reads `CORS_ORIGIN`, `FRONTEND_URL` or `CLIENT_URL` — they are
+companions: the API is selected, the frontend is ranked down, and preflight's
+`companion_service_not_deployed` names the root the second project deploys from.
+
+Not a service (`notDeployable`, `detect_not_deployable.go`): a package that publishes a library
+(`exports`, `types`, `files`, `peerDependencies`) and starts nothing, a `bin`-only command-line tool, a
+VS Code extension (`engines.vscode`), a browser extension (a `manifest_version` manifest, WXT, Plasmo,
+CRXJS), Electron and React Native or Expo apps without `react-native-web`, a GitHub Action
+(`action.yml`), a Python project with no framework and no entry point (`[project.scripts]` makes it a
+tool), a notebook-only root, a Rust library crate, a Windows-only .NET program (.NET Framework,
+`-windows`, WinForms, WPF), a Go module with no main package outside its examples, and a Wails or Tauri
+shell. Android modules (`com.android.*` in a Gradle script), a Flutter app's native folders and the
+functions directories Supabase, Netlify and Firebase host are set aside rather than offered. Preflight's
+`source_not_a_service` is blocked when every candidate is one, or when the selected one is and its
+start command is still detection's; with a start command of the operator's own it is a warning. A
+Tauri or Wails frontend is ranked down and warned (`desktop_frontend_only`): its calls into the shell
+have nothing to answer them in a browser. Expo with `react-native-web` builds its web target
+(`expo export --platform web` into `dist`, single-page fallback on); `expo.web.output: "server"` is a
+`recipe_unsupported` finding.
+
+Serverless and edge code (`detect_serverless.go`) is named rather than dropped: a Wrangler `main` is a
+Worker entry, which a container never runs (`edge_runtime_code_not_deployed`, blocked); a Vite app with
+`@cloudflare/vite-plugin` serves `dist/client`, where the plugin writes the client; and Vercel `api/`,
+`netlify/functions` or Cloudflare Pages `functions/` beside a static site are listed by route in
+`serverless_functions_dropped`. The static server's single-page fallback is unchanged, so those routes
+answer with `index.html`.
+
+When the Git remote is the upstream repository of an application the template catalogue packages —
+n8n, Gitea, Uptime Kuma — detection offers the reviewed template, and a workflow that publishes the
+project's own image to `ghcr.io/<owner>/…` or `docker.io/<owner>/…` offers that image
+(`alternatives`; `source_has_packaged_release` or `source_publishes_image`, a warning). The project step
+links to `/deploy/new?source=template&template=<id>` or `?source=image&image=<ref>`. Everything detection
+recognised and deliberately did not offer is listed as `setAside` and shown under "Not offered", so an
+empty result can say what the repository is instead of "No deployable plan was detected".
+
+## Other platforms' deployment files
+
+A repository that ran somewhere else declares how it runs there, and detection reads those files as
+bounded data (64 KiB each, `detect_platform_manifests.go`; TOML through a line reader of the shapes
+these files use, YAML and JSON parsed): `fly.toml`, `render.yaml`, `railway.json`/`railway.toml`, Heroku
+`app.json` and `heroku.yml`, `nixpacks.toml`, `netlify.toml` and `_redirects`, `vercel.json`,
+DigitalOcean `.do/app.yaml`, Kamal `config/deploy.yml` (ERB tags stripped), `Aptfile`,
+`.readthedocs.yaml`, `firebase.json` hosting and a Hugging Face Space's README front matter. What they
+declare ranks below the operator's input and the Procfile and above a framework's defaults, and each
+candidate records the file, the facts and which it took (`platformManifests`):
+
+| Declared | Taken as |
+| --- | --- |
+| start command (`startCommand`, `[start] cmd`, `run_command`, fly `app` process, Space `app_file`) | the start command of a recipe candidate that did not take the Procfile's, unless it runs a package manager the lockfile does not build with; it answers the start-command decisions |
+| build command | the build command when detection had none, with its dependency installs (`npm ci`, `pip install`, `bundle install`, …) removed — the recipe installs from the lockfile |
+| port (`internal_port`, `http_port`, Kamal `proxy.app_port`, Space `app_port`) | the port when the start command came from the same file, or when nothing named one |
+| publish directory (`publish`, `outputDirectory`, `staticPublishPath`, `output_dir`, hosting `public`) and a rewrite of every path to `/index.html` | the output directory and the single-page fallback of a static candidate |
+| health check path | evidence, and `healthPath` for the readiness check |
+| `generateValue`, `generator: "secret"` | a variable the configure form generates |
+| secret env names, `sync: false`, `required` | a variable row that must be set |
+| accessories, add-ons, `fromDatabase`, `databases:` | a database suggestion on the declared variable |
+| worker, cron, Kamal roles, `[processes]` | [processes](#background-processes) |
+| release command (`release_command`, `preDeployCommand`, `PRE_DEPLOY` job) | a `release` process |
+| volumes and `[[mounts]]` | evidence and `volumes` |
+| `Aptfile`, `aptPkgs` | `platform_system_packages_ignored` (warning) for a recipe build |
+| redirect rules other than the SPA rewrite | `static_redirects_unsupported` (warning) |
+
+Values are never imported from these files: a secret is a name to fill in or generate, and plain values
+become examples only when they are not shaped like a host, an address or a URL — `PHX_HOST` and a Kamal
+accessory's IP belong to the old host. Kamal's `env.clear` brings examples only for framework toggles
+(`SOLID_QUEUE_IN_PUMA`, `WEB_CONCURRENCY`, `JOB_CONCURRENCY`, `RAILS_LOG_LEVEL`, …). Every command passes
+the same credential screen as the rest of detection.
+
+## Background processes
+
+A project runs one process. Detection records every other process the source declares or its framework
+implies on the candidate (`processes`, `detect_processes.go`), each with the command a second project
+from the same repository would start: the Procfile's lines; Celery's worker and, with a beat schedule or
+`django-celery-beat`, its beat (`celery -A <module> worker`, the module found where `Celery(` is
+assigned); an RQ worker on `REDIS_URL`; Dramatiq and arq workers by name; a Laravel queue worker when a
+job, mailable, notification or listener implements `ShouldQueue` and `QUEUE_CONNECTION` is not `sync`
+(`php artisan horizon` with Horizon, whose image then carries `pcntl` and `redis`), its scheduler when
+`routes/console.php` or the console kernel schedules anything, and Reverb's WebSocket server; a Symfony
+Messenger consumer; Sidekiq, Solid Queue, GoodJob, Resque and Delayed Job for Ruby; a BullMQ worker file
+the start command does not run; and the workers, cron jobs and roles of the platform files above.
+Preflight raises `secondary_process_not_deployed_<name>` (warning) for each, unless the plan's start
+command is that process's own, which is the second project. Octane is recorded as an alternative start
+command, not a failure.
+
+## Ecosystems without a recipe
+
+A root the builder has no recipe for is still named (`detect_ecosystems.go`), with a low-confidence
+candidate whose framework is the language or framework and whose `recipeIssue` says what to commit —
+which preflight's `recipe_unsupported` shows instead of "No deployable plan was detected". Rails
+(`rails new` has generated a production Dockerfile since 7.1; older applications use `dockerfile-rails`),
+Hanami, Sinatra and Rack, Jekyll and Middleman; Phoenix (`mix phx.gen.release --docker`) and Elixir;
+Crystal, Haskell, Zig, Swift, Scala, Clojure, Gleam, F#, OCaml, Nim, Perl, Erlang, Dart, R Shiny and
+Plumber, C/C++ (CMake, Meson), Elm, Hugo, MkDocs and a Flutter web app. A web framework among the
+manifest's dependencies makes it a web service on its conventional port. A Rails, Hanami or Phoenix
+application owns its `package.json` (and `assets/package.json`): that asset pipeline is set aside rather
+than offered as a Node service — a CocoaPods or fastlane Gemfile beside a React Native app owns nothing.
+With a Dockerfile at the same root the Dockerfile is the candidate, and it takes the framework, the
+processes and the database drivers. Every other language is named only when nothing else at its root
+is a candidate, and C/C++ and MkDocs never inside another candidate's root, where they are that
+application's vendored code or manual. Recipes for some of these are planned; each entry is removed when
+its recipe lands.
+
+## Submodules and Git LFS
+
+Detection parses `.gitmodules` and the LFS patterns of `.gitattributes` (`detect_git_extras.go`): each
+submodule's path and whether its URL is relative or on the repository's own host (`submoduleList`), and
+the files under the root that LFS tracks (`lfsFiles`, `lfsPaths`). Only what the build root holds
+matters. The configure screen turns submodules on when every one under the root is on the source's own
+host, and LFS when files under the root are tracked, and both switches sit in the Source section beside
+the branch. Preflight's `git_submodules` is a decision only for a submodule on another host, a warning
+when a same-host one is left off, and a pass when none is under the root; `git_lfs` warns that
+LFS-tracked files deploy as pointer files when LFS is off, and `git_lfs_unavailable` is blocked when LFS
+is on and this host has no `git-lfs`, which is where the release would otherwise stop at acquiring the
+source. Evidence recorded before this (no `submodulesChecked`/`lfsChecked`) keeps the old decisions.
+
+## Case-mismatched imports
+
+The source detection already reads for its environment is also read for relative import specifiers
+(`import … from './x'`, `require('./x')`, dynamic `import()`), resolved against the file list with the
+bundlers' extension and `index` rules (a `.js` specifier may name a `.ts` file). An import with no exact
+match and exactly one file that differs only in letter case builds on macOS and Windows and fails on the
+Linux build: `import_case_mismatch` names the file, line and real name, blocked for a Node recipe and a
+warning for a Dockerfile. A PHP class whose file differs from Composer's PSR-4 expectation only in case
+is a warning: the optimized autoloader skips it. An alias, a generated file or a typo that matches
+nothing says nothing about case and is not reported.
 
 ## JavaScript and static output
 
@@ -250,7 +435,8 @@ Composer runs from the `composer:2` image with `--no-dev --optimize-autoloader`;
 build script names Vite, `laravel-vite-plugin` or Encore gets an asset stage on the manifest's own
 runtime whose `public/build` is copied in. Laravel's start runs `php artisan migrate --force` first;
 Symfony's runs `doctrine:migrations:migrate` when the migrations bundle is present. `storage/`,
-`bootstrap/cache` and `database/` are created writable so a first start on an empty volume works. The
+`bootstrap/cache` and `database/` are created writable so a first start on an empty volume works. With
+`laravel/horizon` the image also carries `pcntl` and `redis`, which Horizon's own manifest requires. The
 configure form mints `APP_KEY` for a Laravel import (`base64:` over 32 random bytes) and offers a
 **Generate** button on any variable whose name ends in `SECRET`, `KEY` or `SECRET_KEY_BASE`. Laravel's
 `.env.example` names its engine in `DB_CONNECTION`, which becomes a database suggestion on `DB_URL`.
@@ -270,4 +456,7 @@ metadata and saved image layers for private install credentials. The Go fixture 
 custom startup and the selected toolchain through its HTTP response. These local adapter journeys
 complement the production-build browser gate; they do not constitute public provider/DNS/TLS or clean-VM
 acceptance. The remaining catalogue entries are covered by rendered-Dockerfile and detection tests
-(`frameworks_*_test.go`, `build_recipes_test.go`).
+(`frameworks_*_test.go`, `build_recipes_test.go`). Repository shape — ranking, decoys, static roots,
+split repositories, shapes that are not services, ecosystems without a recipe, processes, other
+platforms' files, submodules and LFS, case-mismatched imports and the preflight findings they raise — is
+covered by `detect_*_test.go` and `preflight_repo_shape_test.go` against written fixtures.
