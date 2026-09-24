@@ -2,10 +2,14 @@ import { del, get, post, put } from "@/lib/api"
 import { forgetMemoryState, forgetSessionState } from "@/lib/view-state"
 import {
   defaultConfiguration,
+  detectedVariableDeclarations,
   discoveredEnvironmentRows,
   rowNeedsOperator,
 } from "@/components/deploy/deployment-defaults"
-import { synchronizePrimaryDomain } from "@/components/deploy/new-project/domain-bindings"
+import {
+  domainValue,
+  synchronizePrimaryDomain,
+} from "@/components/deploy/new-project/domain-bindings"
 import { DEPLOYMENT_NAME } from "@/components/deploy/vocabulary"
 import type {
   DeploymentConfiguration,
@@ -405,6 +409,23 @@ function effectiveConfiguration(
   return defaultConfiguration(candidate?.profile ?? fallbackProfile, candidate, source, detection)
 }
 
+type PlannedVariable = DeploymentConfiguration["variables"][number]
+
+/**
+ * An address that follows the domain has nothing to follow until one is
+ * planned. Committed empty, it would be set to "" — which an application
+ * reads as a value, unlike an unset variable — so it waits in the form.
+ */
+function awaitsDomain(variable: PlannedVariable) {
+  return Boolean(
+    variable.domainTemplate &&
+    !variable.value &&
+    !variable.reference &&
+    !variable.generate &&
+    !variable.required,
+  )
+}
+
 /** Match the saved plan so pruning an empty address never triggers another preflight. */
 export function configurationForSave(
   configuration: DeploymentConfiguration,
@@ -412,22 +433,38 @@ export function configurationForSave(
   return {
     ...configuration,
     domains: configuration.domains.filter((domain) => domain.hostname.trim()),
-    // An address that follows the domain has nothing to follow until one is
-    // planned. Committed empty, it would be set to "" — which an application
-    // reads as a value, unlike an unset variable — so it waits in the form.
-    variables: configuration.variables.filter(
-      (variable) =>
-        !variable.domainTemplate ||
-        variable.value ||
-        variable.reference ||
-        variable.generate ||
-        variable.required,
-    ),
+    variables: configuration.variables.filter((variable) => !awaitsDomain(variable)),
     checks: configuration.checks.map((check) =>
       check.phase === "readiness" && check.kind === "http"
         ? { ...check, config: { ...(check.config ?? {}), port: undefined } }
         : check,
     ),
+  }
+}
+
+/**
+ * Puts the addresses `configurationForSave` held back into a plan the server
+ * handed back, bound to whatever domain it plans. The saved copy never has
+ * them, and without them a domain added after Review's automatic check has
+ * nothing to bind: AUTH_URL or ORIGIN would reach the release unset while
+ * its row still read "Follows the project's domain".
+ */
+export function withHeldDomainVariables(
+  configuration: DeploymentConfiguration,
+  held: PlannedVariable[],
+): DeploymentConfiguration {
+  const present = new Set(configuration.variables.map((variable) => variable.name))
+  const missing = held.filter((variable) => awaitsDomain(variable) && !present.has(variable.name))
+  if (!missing.length) return configuration
+  return {
+    ...configuration,
+    variables: [
+      ...configuration.variables,
+      ...missing.map((variable) => ({
+        ...variable,
+        value: domainValue(variable.domainTemplate ?? "", configuration.domains[0]),
+      })),
+    ],
   }
 }
 
@@ -692,6 +729,11 @@ export async function resumeFlow(draft: DeploymentDraft): Promise<ConfigureFlow>
   const hostname = await fetchHostnameSuggestion(intent.name)
   if (!draft.data.configuration)
     configuration = withSuggestedHostname(configuration, profile, source, hostname)
+  else if (source.kind !== "blueprint")
+    configuration = withHeldDomainVariables(
+      configuration,
+      detectedVariableDeclarations(candidate, profile),
+    )
   return {
     name: intent.name,
     // A saved configuration records the operator's profile choice; detection

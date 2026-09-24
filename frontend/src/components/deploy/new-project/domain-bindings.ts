@@ -2,7 +2,8 @@ import type { DeploymentConfiguration } from "@/lib/types"
 
 type Domain = DeploymentConfiguration["domains"][number]
 
-function domainValue(template: string, domain: Domain | undefined) {
+/** A domain-bound template's value for a domain; empty until one is planned. */
+export function domainValue(template: string, domain: Domain | undefined) {
   const hostname = domain?.hostname.trim().toLowerCase()
   if (!hostname) return ""
   return template

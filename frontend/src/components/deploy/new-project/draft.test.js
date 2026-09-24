@@ -1,11 +1,13 @@
 import { expect, test } from "bun:test"
-import { defaultConfiguration } from "../deployment-defaults"
+import { defaultConfiguration, detectedVariableDeclarations } from "../deployment-defaults"
+import { synchronizePrimaryDomain } from "./domain-bindings"
 import {
   configurationForSave,
   landingStep,
   mergeDetectedConfiguration,
   persistableFlow,
   railsDatabaseRows,
+  withHeldDomainVariables,
   withSuggestedHostname,
 } from "./draft"
 
@@ -326,4 +328,34 @@ test("persisting a flow excludes credentials from both live and server draft sna
     expect(JSON.stringify(flow)).toContain(secret)
   }
   expect(saved.configuration.domains[0].protection.username).toBe("reader")
+})
+
+test("an address held back while no domain is planned binds to a domain added after the check", () => {
+  const origin = {
+    name: "ORIGIN",
+    sources: ["package.json"],
+    setup: "domain",
+    domainTemplate: "{{scheme}}://{{hostname}}",
+  }
+  const configuration = defaultConfiguration("web", candidate({ port: 3000, variables: [origin] }))
+  // Review's automatic check saves without the address, and the server hands
+  // back what it saved.
+  const toSave = configurationForSave(configuration)
+  expect(toSave.variables).toEqual([])
+  const canonical = withHeldDomainVariables(toSave, configuration.variables)
+  expect(configurationForSave(canonical)).toEqual(toSave)
+  const hosted = synchronizePrimaryDomain(canonical, [
+    { hostname: "shop.example.test", https: true, ownership: "managed" },
+  ])
+  expect(hosted.variables.find((variable) => variable.name === "ORIGIN")?.value).toBe(
+    "https://shop.example.test",
+  )
+  // A saved draft read back later gets it from detection, bound to its domain.
+  const resumed = withHeldDomainVariables(
+    { ...toSave, domains: [{ hostname: "app.example.test", https: true, ownership: "managed" }] },
+    detectedVariableDeclarations(candidate({ variables: [origin] }), "web"),
+  )
+  expect(resumed.variables.find((variable) => variable.name === "ORIGIN")?.value).toBe(
+    "https://app.example.test",
+  )
 })
