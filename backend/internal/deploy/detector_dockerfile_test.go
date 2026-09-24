@@ -254,6 +254,13 @@ func TestDockerfileStaticBuildabilityIssues(t *testing.T) {
 	if !found || issue.Subject != "start.sh" || issue.Severity != PreflightBlocked {
 		t.Fatalf("exec bit: %+v", result.Candidates[0].ImageBuildIssues)
 	}
+	// A wildcard chmod covers the entrypoint without naming it.
+	writeBuildFixture(t, root, "Dockerfile", "FROM alpine\nCOPY start.sh /usr/local/bin/\nRUN chmod +x /usr/local/bin/*.sh\nENTRYPOINT [\"start.sh\"]\n")
+	result, _ = (Detector{}).DetectPath(t.Context(), root, SourceIdentity{})
+	if _, found := fixtureIssue(result.Candidates[0], "script_not_executable"); found {
+		t.Fatalf("a wildcard chmod was not read: %+v", result.Candidates[0].ImageBuildIssues)
+	}
+	writeBuildFixture(t, root, "Dockerfile", "FROM alpine\nCOPY start.sh /usr/local/bin/\nCOPY run.sh /usr/local/bin/\nRUN chmod +x /usr/local/bin/run.sh\nENTRYPOINT [\"start.sh\"]\n")
 	if err := os.Chmod(filepath.Join(root, "start.sh"), 0o755); err != nil {
 		t.Fatal(err)
 	}

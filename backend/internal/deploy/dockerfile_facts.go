@@ -535,6 +535,11 @@ func (m dockerfileModel) scripts(target string) []dockerfileScript {
 							if operand == "&&" || operand == ";" {
 								break
 							}
+							// A recursive or wildcard chmod covers files this
+							// cannot name one by one.
+							if operand == "-R" || operand == "--recursive" || strings.ContainsAny(operand, "*?") {
+								chmodded["*"] = true
+							}
 							chmodded[path.Base(operand)] = true
 						}
 					}
@@ -587,7 +592,7 @@ func (m dockerfileModel) scripts(target string) []dockerfileScript {
 	}
 	if script, ok := dockerfileExecutedScript(start, scriptable); ok {
 		script.Line, script.Keyword, script.Starts = startLine, keyword, true
-		script.Chmodded = chmodded[path.Base(script.Container)]
+		script.Chmodded = chmodded[path.Base(script.Container)] || chmodded["*"]
 		script.Candidates = resolve(script.Container, workdirs[stage])
 		result = append(result, script)
 	}
@@ -608,7 +613,7 @@ func (m dockerfileModel) scripts(target string) []dockerfileScript {
 				continue
 			}
 			script.Line, script.Keyword = instruction.Line, "RUN"
-			script.Chmodded = chmodded[path.Base(script.Container)]
+			script.Chmodded = chmodded[path.Base(script.Container)] || chmodded["*"]
 			script.Candidates = resolve(script.Container, workdirs[index])
 			result = append(result, script)
 		}
