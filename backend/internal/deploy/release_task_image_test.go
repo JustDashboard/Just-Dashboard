@@ -152,4 +152,8 @@ func TestPlanValidationKeepsImageTasksToBuildsWithAnImage(t *testing.T) {
 	if err := configuration.Validate(); err == nil {
 		t.Fatal("a malformed target was accepted")
 	}
+	configuration.Build.Method, configuration.Build.Target = BuildRecipe, "production"
+	if canonicalConfiguration(configuration).Build.Target != "" {
+		t.Fatal("a Dockerfile stage outlived the switch to a recipe")
+	}
 }

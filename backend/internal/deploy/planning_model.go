@@ -1704,6 +1704,11 @@ func sameSourceLocation(left, right DraftSourceConfig) bool {
 }
 
 func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
+	// A stage belongs to the Dockerfile it was detected in; switching the
+	// build method away must not leave a plan that validation refuses.
+	if c.Build.Method != BuildDockerfile {
+		c.Build.Target = ""
+	}
 	if c.Build.Secrets == nil {
 		c.Build.Secrets = []BuildSecretConfig{}
 	}
