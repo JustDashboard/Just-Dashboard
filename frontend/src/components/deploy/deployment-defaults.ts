@@ -618,3 +618,19 @@ export function validateConfiguration(
       "Release tasks need a name, command, 1–3600 second timeout, and Release task-scoped variables."
   return errors
 }
+
+const CONNECTION_FORMATS = new Set(["jdbc", "jdbc-mariadb", "adonet", "mysql2"])
+
+/**
+ * A database link rewritten in the connection shape an earlier reference of
+ * the same variable asked for (`5.jdbc`): relinking from Settings is the same
+ * consumer, and a plain reference would hand a Spring or .NET application an
+ * address it refuses. A reference naming another database on the server
+ * (`5.url.app_cache`) keeps nothing, since that name belongs to the old one.
+ */
+export function withPreviousConnectionShape(link: string, previousTarget?: string) {
+  const [, format, database] = (previousTarget ?? "").split(".")
+  const connection = link.match(/^\$\{\{database\.(\d+)\}\}$/)
+  if (!connection || database || !CONNECTION_FORMATS.has(format)) return link
+  return `\${{database.${connection[1]}.${format}}}`
+}

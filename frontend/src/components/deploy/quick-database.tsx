@@ -4,7 +4,11 @@ import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { Database, Eye, EyeOff, Copy, Warning } from "@/components/icons"
 import { errorMessage, get, post } from "@/lib/api"
-import type { DbConnection, DbProvisionOption } from "@/lib/types"
+import type {
+  DbConnection,
+  DbProvisionOption,
+  DeploymentDatabaseConnectionFormat,
+} from "@/lib/types"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { ErrorState, Notice, Spinner } from "@/components/state"
 import { ChoiceGrid, EngineCard, driverKind } from "@/components/choice-card"
@@ -61,7 +65,7 @@ export function DatabaseQuickDeploy({
   /** The engine detection found the source connecting to, preselected. */
   initialEngine?: string
   /** The connection shape the application parses when it is not a URL. */
-  format?: "jdbc" | "adonet" | "mysql2"
+  format?: DeploymentDatabaseConnectionFormat
 }) {
   const inSheet = useInSidePanel()
   const alive = useRef(true)

@@ -11,6 +11,7 @@ import {
   rowNeedsOperator,
   validateConfiguration,
   withPackageManagerRunner,
+  withPreviousConnectionShape,
 } from "./deployment-defaults"
 
 const candidate = (overrides) => ({
@@ -376,4 +377,19 @@ describe("variables detection set up", () => {
     ])
       expect(pointsAtLocalhost(name, value)).toBe(false)
   })
+})
+
+test("relinking keeps the connection shape the variable's reference asked for", () => {
+  expect(withPreviousConnectionShape("${{database.7}}", "5.jdbc")).toBe("${{database.7.jdbc}}")
+  expect(withPreviousConnectionShape("${{database.7}}", "5.jdbc-mariadb")).toBe(
+    "${{database.7.jdbc-mariadb}}",
+  )
+  expect(withPreviousConnectionShape("${{database.7}}", "5.adonet")).toBe("${{database.7.adonet}}")
+  // A plain link, another server's database name, and a literal address stay as they are.
+  expect(withPreviousConnectionShape("${{database.7}}", "5")).toBe("${{database.7}}")
+  expect(withPreviousConnectionShape("${{database.7}}", "5.url.app_cache")).toBe("${{database.7}}")
+  expect(withPreviousConnectionShape("${{database.7}}")).toBe("${{database.7}}")
+  expect(withPreviousConnectionShape("postgres://db-7.jd.internal/app", "5.jdbc")).toBe(
+    "postgres://db-7.jd.internal/app",
+  )
 })

@@ -3274,6 +3274,13 @@ export type DeploymentDetectedVariable = {
 
 export type DeploymentVariableSetup = "generate" | "domain" | "default" | "paste"
 
+/**
+ * A database address in the shape its consumer parses: JDBC (Spring,
+ * Quarkus), JDBC over MariaDB Connector/J, which accepts only
+ * `jdbc:mariadb://`, ADO.NET (.NET), or Rails' `mysql2://`.
+ */
+export type DeploymentDatabaseConnectionFormat = "jdbc" | "jdbc-mariadb" | "adonet" | "mysql2"
+
 export type DeploymentGeneratedSecretFormat = "" | "hex" | "base64" | "laravel" | "keylist"
 
 /** A database engine detection found the source connecting to. */
@@ -3282,7 +3289,7 @@ export type DeploymentDetectedDatabase = {
   variable: string
   evidence: string
   /** The connection shape the consumer parses when it is not a URL. */
-  format?: "jdbc" | "adonet" | "mysql2"
+  format?: DeploymentDatabaseConnectionFormat
   /** Postgres extensions the schema needs; the official image ships neither. */
   extensions?: ("vector" | "postgis")[]
   /** A driver that only speaks its hosted provider's protocol. */

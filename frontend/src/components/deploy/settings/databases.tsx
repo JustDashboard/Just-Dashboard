@@ -86,6 +86,7 @@ import { OwnershipSelect } from "@/components/deploy/settings/mounts"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { useProject } from "@/components/deploy/project-context"
 import { ProjectDatabase } from "@/components/deploy/project-database"
+import { withPreviousConnectionShape } from "@/components/deploy/deployment-defaults"
 
 /**
  * Databases & backups — what the release reaches and what protects it.
@@ -291,7 +292,10 @@ function DatabasesBody({
       const existing = configuration.variables.find((entry) => entry.name === variable)
       await put(`/deploy/${projectId}/environments/${environmentId}/variables/${variable}`, {
         revision: updated.revision,
-        value: url,
+        value: withPreviousConnectionShape(
+          url,
+          existing?.reference?.kind === "database" ? existing.reference.target : undefined,
+        ),
         sensitivity: "secret",
         scopes: existing ? [...new Set([...existing.scopes, "runtime"])] : ["runtime", "build"],
       })

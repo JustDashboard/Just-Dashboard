@@ -762,6 +762,8 @@ const FRAMEWORK_LABELS: Record<string, string> = {
   laravel: "Laravel",
   symfony: "Symfony",
   slim: "Slim",
+  rails: "Rails",
+  phoenix: "Phoenix",
 }
 
 /** The Language select, in the order a reader expects to find their stack. */

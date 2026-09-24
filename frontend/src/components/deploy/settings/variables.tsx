@@ -328,11 +328,15 @@ function VariablesBody({
 
   // A name the framework compiles into the bundle is build input and public:
   // left at the runtime-only default it built as undefined, silently, while
-  // the server saw the value. Only an untouched default is moved.
+  // the server saw the value. Only an untouched default is moved, and static
+  // output, which has no runtime to read anything, takes the build alone.
+  const staticOutput =
+    configuration.build.method === "static" ||
+    (configuration.build.method === "recipe" && Boolean(configuration.build.outputDirectory))
   const changeName = (next: string) => {
     setName(next)
     if (!editingName && browserInlined(next) && scopes.length === 1 && scopes[0] === "runtime") {
-      setScopes(["runtime", "build"])
+      setScopes(staticOutput ? ["build"] : ["runtime", "build"])
       setSensitivity("plain")
     }
   }
