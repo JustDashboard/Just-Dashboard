@@ -108,6 +108,16 @@ func TestApplicationOutputCauseNamesRuntimeFailures(t *testing.T) {
 			want:  OutputCause{Code: "runtime_module_missing", Subjects: []string{"psycopg2"}},
 		},
 		{
+			name: "psycopg without libpq",
+			lines: []string{
+				"ImportError: no pq wrapper available.", "Attempts made:",
+				"- couldn't import psycopg 'c' implementation: No module named 'psycopg_c'",
+				"- couldn't import psycopg 'binary' implementation: No module named 'psycopg_binary'",
+				"- couldn't import psycopg 'python' implementation: libpq library not found",
+			},
+			want: OutputCause{Code: "runtime_library_missing", Detail: "psycopg", Subjects: []string{"libpq"}},
+		},
+		{
 			name:  "libGL",
 			lines: []string{"ImportError: libGL.so.1: cannot open shared object file: No such file or directory"},
 			want:  OutputCause{Code: "runtime_library_missing", Subjects: []string{"libGL.so.1"}},
@@ -143,6 +153,19 @@ func TestApplicationOutputCauseNamesRuntimeFailures(t *testing.T) {
 			lines:   []string{"   ▲ Next.js 16.0.1", "   - Local:        http://localhost:3000", " ✓ Ready in 412ms"},
 			context: runtimeCauseContext{runtime: RuntimePlanConfig{InternalPort: 8080}},
 			want:    OutputCause{Code: "runtime_port_mismatch", Subjects: []string{"3000"}, Fix: &CauseFix{Kind: fixSetRuntime, Field: "runtime.internalPort", Value: "3000"}},
+		},
+		{
+			name:    "a warning beside the port it really listens on",
+			lines:   []string{"warn: SENTRY_DSN is not set, error reporting disabled", "Server listening on port 3000"},
+			context: runtimeCauseContext{runtime: RuntimePlanConfig{InternalPort: 8080}},
+			want:    OutputCause{Code: "runtime_port_mismatch", Subjects: []string{"3000"}, Fix: &CauseFix{Kind: fixSetRuntime, Field: "runtime.internalPort", Value: "3000"}},
+		},
+		{
+			name:      "a variable a Go program exits over",
+			lines:     []string{"2026/09/24 12:00:00 DATABASE_URL is required"},
+			container: ContainerDiagnostics{State: "restarting", ExitCode: 1, RestartCount: 2},
+			context:   runtimeCauseContext{runtime: RuntimePlanConfig{InternalPort: 8080}},
+			want:      OutputCause{Code: "runtime_env_missing", Subjects: []string{"DATABASE_URL"}, Fix: &CauseFix{Kind: fixAddVariable, Field: "variables.DATABASE_URL", Scope: "runtime"}},
 		},
 		{
 			name:      "pm2 daemonized",
@@ -194,7 +217,9 @@ func TestApplicationOutputCauseStaysSilentWithoutEvidence(t *testing.T) {
 		"a metrics listener beside the application's own": {3000, []string{
 			"metrics server listening on port 9090", "Server listening on port 3000",
 		}},
-		"a JavaScript reference error": {3000, []string{"ReferenceError: API_URL is not defined"}},
+		"a JavaScript reference error":           {3000, []string{"ReferenceError: API_URL is not defined"}},
+		"a request refused for its token":        {3000, []string{"Error: JWT is required to access /api/health"}},
+		"a variable warning it carried on after": {3000, []string{"WARNING: REDIS_URL is not set, caching disabled"}},
 	} {
 		cause := applicationOutputCause([]ContainerDiagnostics{{State: "running", Lines: runtimeLines(test.lines...)}},
 			runtimeCauseContext{runtime: RuntimePlanConfig{InternalPort: test.port}})
@@ -236,6 +261,14 @@ func TestReleaseTaskCauseNamesMigrationAndToolFailures(t *testing.T) {
 			lines: []string{"/bin/sh: npx: not found"},
 			exit:  127,
 			want:  OutputCause{Code: "release_task_command_not_found", Subjects: []string{"npx"}, Fix: &CauseFix{Kind: fixReview, Field: "configuration.build.startCommand"}},
+		},
+		{
+			lines: []string{"warn: SHADOW_DATABASE_URL is not set", "Error: P1001: Can't reach database server at `db-4.jd.internal:5432`"},
+			want:  OutputCause{Code: "release_database_unreachable", Subjects: []string{"db-4.jd.internal:5432"}},
+		},
+		{
+			lines: []string{"Error: MIGRATION_TOKEN must be set"},
+			want:  OutputCause{Code: "release_env_missing", Subjects: []string{"MIGRATION_TOKEN"}, Fix: &CauseFix{Kind: fixAddVariable, Field: "variables.MIGRATION_TOKEN", Scope: "release_task"}},
 		},
 		{
 			lines: []string{"error: Environment variable not found: DATABASE_URL."},

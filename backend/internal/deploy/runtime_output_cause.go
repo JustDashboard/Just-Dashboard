@@ -79,9 +79,18 @@ var envMissingSignatures = []buildSignature{
 	signature("", "python", "KeyError", `KeyError: '([A-Z][A-Z0-9_]{2,})'`).requiring(`environ`),
 	signature("", "rails", "secret_key_base", `Missing secret_key_base for`).naming("SECRET_KEY_BASE"),
 	signature("", "phoenix", "environment variable", `environment variable ([A-Z_][A-Z0-9_]*) is missing`),
-	// "X is not defined" is left out: that is JavaScript's ReferenceError for
-	// an identifier, not an environment variable.
-	signature("", "", "", `\b([A-Z][A-Z0-9]*_[A-Z0-9_]+|[A-Z]{3,}) (?:is not set|must be set|is required|environment variable is (?:required|missing))\b|Missing (?:required )?(?:env(?:ironment)? )?variable:? "?([A-Z][A-Z0-9_]{2,})`),
+}
+
+// genericEnvMissingSignatures are the sentences any program may print about a
+// variable. They are read after every more specific cause, because a program
+// prints them as a warning too and carries on — "SENTRY_DSN is not set" beside
+// the port it really listens on — and a line that says it is a warning is not
+// read at all. "X is not defined" is left out: that is JavaScript's
+// ReferenceError for an identifier. A lone word "is required" is left out:
+// "JWT is required" is a request refused, not a variable.
+var genericEnvMissingSignatures = []buildSignature{
+	signature("", "", "", `\b([A-Z][A-Z0-9]*_[A-Z0-9_]+) (?:is not set|must be set|is required|environment variable is (?:required|missing))\b|\b([A-Z]{3,}) (?:is not set|must be set|environment variable is (?:required|missing))\b|Missing (?:required )?(?:env(?:ironment)? )?variable:? "?([A-Z][A-Z0-9_]{2,})`).
+		unlessLine(`(?i)\bwarn(?:ing)?\b`),
 }
 
 // runtimeSignatures are the candidate's own output after it failed its
@@ -94,6 +103,9 @@ var runtimeSignatures = []buildSignature{
 	signature("runtime_host_disallowed", "play", "Host not allowed", `Host not allowed`),
 	signature("runtime_entry_missing", "", "", `Could not find a production build in the '([^']+)' directory|Failed to find attribute '(\w+)' in '[\w.]+'|Error loading ASGI app\.|no main manifest attribute, in (\S+)|Unable to access jarfile (\S+)|can't open file '([^']+)': \[Errno 2\]|Cannot find module '(/[^']+)'|Module not found "(file:///[^"]+)"`),
 	signature("runtime_library_missing", "", "cannot open shared object file", `(lib[\w+.-]+\.so[\d.]*): cannot open shared object file`),
+	// psycopg 3 without its binary extra loads libpq itself; its import error
+	// also lists the optional modules it tried first, which are not the cause.
+	signature("runtime_library_missing", "psycopg", "libpq library not found", `libpq library not found`).naming("libpq"),
 	signature("runtime_module_missing", "", "", `ModuleNotFoundError: No module named '([\w.]+)'|Cannot find (?:module|package) '([^'/.][^']*)'`),
 	signature("runtime_cgo_required", "go", "", `go-sqlite3 requires cgo|Binary was compiled with 'CGO_ENABLED=0'`),
 	signature("runtime_version", "java", "UnsupportedClassVersionError", `UnsupportedClassVersionError`),
@@ -146,12 +158,15 @@ func applicationOutputCause(containers []ContainerDiagnostics, context runtimeCa
 			}
 		}
 	}
-	if match := classifyLines(envMissingSignatures, lines, -1); match != nil {
+	envMissing := func(match *buildMatch) *OutputCause {
 		cause := &OutputCause{Code: "runtime_env_missing", Detail: match.detail, Subjects: match.subjects}
 		if len(match.subjects) > 0 {
 			cause.Fix = variableFix(match.subjects[0], "runtime", "", context.variables)
 		}
 		return cause
+	}
+	if match := classifyLines(envMissingSignatures, lines, -1); match != nil {
+		return envMissing(match)
 	}
 	if name := pydanticMissingField(lines); name != "" {
 		cause := &OutputCause{Code: "runtime_env_missing", Detail: "pydantic", Subjects: []string{name}}
@@ -194,6 +209,9 @@ func applicationOutputCause(containers []ContainerDiagnostics, context runtimeCa
 			return &OutputCause{Code: "runtime_port_mismatch", Subjects: printed[:1],
 				Fix: &CauseFix{Kind: fixSetRuntime, Field: "runtime.internalPort", Value: printed[0]}}
 		}
+	}
+	if match := classifyLines(genericEnvMissingSignatures, lines, -1); match != nil {
+		return envMissing(match)
 	}
 	for _, container := range containers {
 		if container.State != "running" && container.ExitCode == 0 && (container.State == "exited" || container.RestartCount > 0) {
@@ -335,15 +353,21 @@ var releaseTaskSignatures = []buildSignature{
 // releaseTaskCause names why a release task failed from its own output, or
 // returns nil when the output proves nothing in particular.
 func releaseTaskCause(lines []collectedLine, exitCode int, variables []ReleaseVariableSnapshot) *OutputCause {
-	if match := classifyLines(envMissingSignatures, lines, exitCode); match != nil {
+	envMissing := func(match *buildMatch) *OutputCause {
 		cause := &OutputCause{Code: "release_env_missing", Detail: match.detail, Subjects: match.subjects}
 		if len(match.subjects) > 0 {
 			cause.Fix = variableFix(match.subjects[0], "release_task", "", variables)
 		}
 		return cause
 	}
+	if match := classifyLines(envMissingSignatures, lines, exitCode); match != nil {
+		return envMissing(match)
+	}
 	match := classifyLines(releaseTaskSignatures, lines, exitCode)
 	if match == nil {
+		if match := classifyLines(genericEnvMissingSignatures, lines, exitCode); match != nil {
+			return envMissing(match)
+		}
 		return nil
 	}
 	cause := &OutputCause{Code: match.code, Detail: match.detail, Subjects: match.subjects}
