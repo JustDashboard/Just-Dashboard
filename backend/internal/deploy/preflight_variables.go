@@ -300,7 +300,7 @@ func detectedVariableFindings(state environmentState) []PreflightFinding {
 		if variable.Phase == "build" && state.method == BuildRecipe && !state.buildScoped(name) {
 			if variable.Required {
 				findings = append(findings, finding("build_variable_missing_"+strings.ToLower(name), PreflightBlocked,
-					name+" is needed while the build runs", "read at build time in "+variable.Sources[0],
+					name+" is needed while the build runs", "read at build time in "+firstSource(variable),
 					"The build fails without it: a static env import, a compile-time read or a build-time schema needs the value.",
 					"Set "+name+" with Build scope.", "deploy", variableField(name)))
 			} else if state.browserInlined(variable) {
@@ -309,7 +309,7 @@ func detectedVariableFindings(state environmentState) []PreflightFinding {
 		}
 		if variable.Phase == "build" && state.method == BuildDockerfile && variable.Required && set {
 			findings = append(findings, finding("build_variable_unreachable_"+strings.ToLower(name), PreflightWarning,
-				name+" does not reach a Dockerfile build", "read at build time in "+variable.Sources[0],
+				name+" does not reach a Dockerfile build", "read at build time in "+firstSource(variable),
 				"Values are handed only to the dashboard's own recipes during a build; a repository Dockerfile builds without them.",
 				"Declare it with ARG in the Dockerfile and a default, or build with an automatic recipe.", "deploy", variableField(name)))
 		}
@@ -349,6 +349,13 @@ func detectedVariableFindings(state environmentState) []PreflightFinding {
 			"Set them, or confirm the path that reads them never runs here.", "deploy", "variables"))
 	}
 	return findings
+}
+
+func firstSource(variable DetectedVariable) string {
+	if len(variable.Sources) == 0 {
+		return "the source"
+	}
+	return variable.Sources[0]
 }
 
 func isDeclared(state environmentState, name string) bool {

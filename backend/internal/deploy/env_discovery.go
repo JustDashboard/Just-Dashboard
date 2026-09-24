@@ -369,7 +369,12 @@ func (s *envScanner) variables(root string, roots []string) []DetectedVariable {
 		// A name whose first four sources all belong elsewhere may still be
 		// read here; the flags keep every source, so they are asked too.
 		if best < 0 {
+			others := make([]string, 0, len(s.positions[name]))
 			for source := range s.positions[name] {
+				others = append(others, source)
+			}
+			sort.Slice(others, func(i, j int) bool { return s.positions[name][others[i]] < s.positions[name][others[j]] })
+			for _, source := range others {
 				if r := s.sourceRank(root, source); r >= 0 && (best < 0 || r < bestRank) {
 					best, bestRank = len(variable.Sources), r
 					variable.Sources = append(append([]string(nil), variable.Sources...), source)
