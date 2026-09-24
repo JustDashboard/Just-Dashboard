@@ -178,6 +178,7 @@ func TestDatabaseReferenceShapeIsReadOnlyAfterANumericID(t *testing.T) {
 		"5.jdbc":          {"5", "jdbc", ""},
 		"5.url.app_cache": {"5", "url", "app_cache"},
 		"5.adonet":        {"5", "adonet", ""},
+		"5.jdbc-mariadb":  {"5", "jdbc-mariadb", ""},
 		"my.db.jdbc":      {},
 		"5.jdbc.../x":     {},
 		"5":               {},

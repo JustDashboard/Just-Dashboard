@@ -343,7 +343,7 @@ func (s *Server) handleDBConnURL(w http.ResponseWriter, r *http.Request) error {
 	// release resolves the same shape.
 	format, database := r.URL.Query().Get("format"), r.URL.Query().Get("database")
 	if !databaseURLFormatRE.MatchString(format) || (database != "" && !dbNameRe.MatchString(database)) {
-		return httpx.BadRequest("format must be url, jdbc, adonet or mysql2, and database a plain name")
+		return httpx.BadRequest("format must be url, jdbc, jdbc-mariadb, adonet or mysql2, and database a plain name")
 	}
 	if format != "" && format != "url" || database != "" {
 		dsn, err = deploy.ConnectionStringForFormat(dsn, format, database)
@@ -376,7 +376,7 @@ func (s *Server) handleDBConnURL(w http.ResponseWriter, r *http.Request) error {
 
 // databaseURLFormatRE is the closed set of connection shapes the URL route
 // renders; empty means the engine's own URL.
-var databaseURLFormatRE = regexp.MustCompile(`^(?:|url|jdbc|adonet|mysql2)$`)
+var databaseURLFormatRE = regexp.MustCompile(`^(?:|url|jdbc|jdbc-mariadb|adonet|mysql2)$`)
 
 func (s *Server) publicDatabaseURL(conn *dbConnection, dsn string) (string, error) {
 	info, err := dbx.ParseDSN(conn.Driver, dsn)

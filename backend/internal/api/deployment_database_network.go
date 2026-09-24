@@ -290,7 +290,7 @@ func (o *deploymentDatabaseNetworks) ResolveVariable(ctx context.Context, enviro
 // connection shape, and optionally another database on the same server:
 // 5.jdbc, 5.adonet, 5.url.app_cache. Only a numeric id takes a suffix, so a
 // connection name that contains dots is never misread.
-var databaseReferenceShapeRE = regexp.MustCompile(`^([0-9]+)\.(url|jdbc|adonet|mysql2)(?:\.([A-Za-z0-9_]{1,63}))?$`)
+var databaseReferenceShapeRE = regexp.MustCompile(`^([0-9]+)\.(url|jdbc-mariadb|jdbc|adonet|mysql2)(?:\.([A-Za-z0-9_]{1,63}))?$`)
 
 // markUnavailable records why a binding could not be repaired, beside the
 // status the settings page already reads.

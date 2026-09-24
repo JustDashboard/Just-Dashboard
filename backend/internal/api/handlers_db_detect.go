@@ -802,6 +802,10 @@ func (s *Server) handleDBProvisionOptions(w http.ResponseWriter, r *http.Request
 	// every poll is unusable.
 	out := []provisionOption{}
 	for _, key := range []string{"postgres", "pgvector", "postgis", "mysql", "mariadb", "redis", "mongodb"} {
+		if key == "postgis" && !deploy.PostGISImageSupported(runtime.GOARCH) {
+			// Offered where it cannot run, it would fail only at the pull.
+			continue
+		}
 		t := provisionTemplates[key]
 		out = append(out, provisionOption{
 			Engine: key, Label: t.label, Image: t.image, Driver: string(t.driver),
@@ -863,6 +867,9 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	tmpl, ok := provisionTemplates[req.Engine]
 	if !ok {
 		return httpx.BadRequest("unknown engine %q", req.Engine)
+	}
+	if req.Engine == "postgis" && !deploy.PostGISImageSupported(runtime.GOARCH) {
+		return httpx.BadRequest("the PostGIS image is published for x86-64 only and this server is %s; run a PostGIS server yourself and connect it", runtime.GOARCH)
 	}
 	// MongoDB 5 and later die with an illegal instruction on a CPU without
 	// AVX (a Proxmox default CPU type) or ARMv8.2 atomics, and the linked

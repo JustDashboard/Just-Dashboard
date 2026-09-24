@@ -54,7 +54,8 @@ func TestDependencyDeepLinksOpenTheOwningPage(t *testing.T) {
 
 // A linked PostgreSQL reports the schema extensions it offers, so preflight
 // can refuse a pgvector schema before its first migration; a server that
-// cannot be asked reports nothing rather than an empty list.
+// cannot be asked reports nothing rather than an empty list, and a plan whose
+// schema needs no extension asks nothing at all.
 func TestDependencyObserverReportsDatabaseExtensions(t *testing.T) {
 	s := testServer(t)
 	sealed, err := s.Sealer.Seal("postgres://app:private@127.0.0.1:5432/orders")
@@ -67,25 +68,29 @@ func TestDependencyObserverReportsDatabaseExtensions(t *testing.T) {
 	}
 	connectionID, _ := res.LastInsertId()
 	answers := map[int64][]string{connectionID: {"postgis"}}
+	asked := 0
 	observer := newDeploymentDependencyObserver(s.Store, s.modules.backupStore, nil).withExtensionProbe(
 		func(_ context.Context, id int64) ([]string, error) {
+			asked++
 			if available, ok := answers[id]; ok {
 				return available, nil
 			}
 			return nil, errors.New("unreachable")
 		})
-	observed, err := observer.ObserveDependencies(t.Context(), []deploy.PlannedDependency{
-		{Kind: "database", ResourceKind: "database_connection", ResourceID: fmt.Sprint(connectionID)},
-	})
-	if err != nil || len(observed) != 1 || !reflect.DeepEqual(observed[0].Extensions, []string{"postgis"}) {
-		t.Fatalf("observed = %#v, %v", observed, err)
+	preflight := deploy.NewHostPreflightObserver(nil, "", nil).WithDependencies(observer)
+	link := []deploy.PlannedDependency{{Kind: "database", ResourceKind: "database_connection", ResourceID: fmt.Sprint(connectionID)}}
+	observation, err := preflight.Observe(t.Context(), deploy.ObservationRequest{Dependencies: link})
+	if err != nil || len(observation.Dependencies) != 1 || observation.Dependencies[0].Extensions != nil || asked != 0 {
+		t.Fatalf("a schema needing no extension asked %d times: %#v, %v", asked, observation.Dependencies, err)
+	}
+	observation, err = preflight.Observe(t.Context(), deploy.ObservationRequest{Dependencies: link, DatabaseExtensions: []string{"vector"}})
+	if err != nil || len(observation.Dependencies) != 1 || !reflect.DeepEqual(observation.Dependencies[0].Extensions, []string{"postgis"}) {
+		t.Fatalf("observed = %#v, %v", observation.Dependencies, err)
 	}
 	delete(answers, connectionID)
-	observed, _ = observer.ObserveDependencies(t.Context(), []deploy.PlannedDependency{
-		{Kind: "database", ResourceKind: "database_connection", ResourceID: fmt.Sprint(connectionID)},
-	})
-	if observed[0].Extensions != nil || !observed[0].Available {
-		t.Fatalf("an unreachable probe = %#v", observed[0])
+	observation, _ = preflight.Observe(t.Context(), deploy.ObservationRequest{Dependencies: link, DatabaseExtensions: []string{"vector"}})
+	if observation.Dependencies[0].Extensions != nil || !observation.Dependencies[0].Available {
+		t.Fatalf("an unreachable probe = %#v", observation.Dependencies[0])
 	}
 }
 
