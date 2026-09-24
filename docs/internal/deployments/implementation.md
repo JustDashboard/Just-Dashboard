@@ -338,8 +338,9 @@ only renderer/executor/validation authority for their feature.
   privileges, the image's entrypoint replaced by the command, and the container removed however the
   task ends. A task without a runner is the historical `/bin/sh` over the immutable source workspace in
   the dashboard's container, which has none of an application's dependencies; preflight refuses one
-  that needs them or a program the dashboard lacks (`release_task_tool_missing`), and a failed task
-  that exits 127 reports the same code. Output is redacted of the task's own values and every secret
+  that runs a tool only installed dependencies provide, or a program a PATH lookup in the dashboard
+  does not find (`release_task_tool_missing`, a lookup that executes nothing), and a failed task that
+  exits 127 reports the same code. Output is redacted of the task's own values and every secret
   runtime value before persistence. Interrupted tasks stop for operator review because their side
   effects cannot be inferred safely.
 - Artifact retention keeps the live release, five prior successful rollback releases, candidates, pins,

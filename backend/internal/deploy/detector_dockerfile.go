@@ -394,7 +394,7 @@ func dockerfileCandidate(tree detectionTree, dockerfile detectedDockerfile, refe
 	case role == DockerfileRoleProduction:
 		evidence = append(evidence, DetectionEvidence{Path: dockerfile.path, Reason: "named for production"})
 	}
-	if strings.Contains(strings.ToLower(string(dockerfile.content)), "designed for production") {
+	if role != DockerfileRoleDevelopment && strings.Contains(strings.ToLower(string(dockerfile.content)), "designed for production") {
 		candidate.DockerfileRole = DockerfileRoleProduction
 		evidence = append(evidence, DetectionEvidence{Path: dockerfile.path, Reason: "the file says it is designed for production"})
 	}

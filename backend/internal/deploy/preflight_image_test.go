@@ -149,14 +149,18 @@ func TestPreflightChecksWhereReleaseTasksRun(t *testing.T) {
 	})
 	draft, configuration := imageFindingDraft([]DetectedCandidate{candidate}, BuildPlanConfig{Method: BuildDockerfile, ReleaseTasks: []ReleaseTaskConfig{
 		{Name: "migrate", Command: "cd api && npx prisma migrate deploy", TimeoutSeconds: 60},
+		{Name: "push", Command: "node_modules/.bin/prisma db push", TimeoutSeconds: 60},
 		{Name: "notify", Command: "curl -fsS https://hooks.example.com/deployed", TimeoutSeconds: 60},
+		{Name: "check", Command: "psql \"$DATABASE_URL\" -c 'select 1'", TimeoutSeconds: 60},
 	}})
 	request := preflightObservationRequest(draft, configuration)
-	if strings.Join(request.ReleaseTaskTools, ",") != "curl,npx" {
+	if strings.Join(request.ReleaseTaskTools, ",") != "curl,npx,psql" {
 		t.Fatalf("tools looked up = %v", request.ReleaseTaskTools)
 	}
+	// The dashboard's own image has no Node, and never an installed prisma.
 	observation := HostObservation{Facilities: map[string]FacilityObservation{
-		releaseTaskToolFacility("curl"): {Available: false}, releaseTaskToolFacility("npx"): {Available: true},
+		releaseTaskToolFacility("curl"): {Available: true}, releaseTaskToolFacility("npx"): {Available: false},
+		releaseTaskToolFacility("psql"): {Available: true},
 	}}
 	findings := imageBuildFindings(draft, configuration, observation)
 	tools := []string{}
@@ -165,7 +169,7 @@ func TestPreflightChecksWhereReleaseTasksRun(t *testing.T) {
 			tools = append(tools, item.Measured)
 		}
 	}
-	if strings.Join(tools, "|") != "migrate: npx|notify: curl" {
+	if strings.Join(tools, "|") != "migrate: npx|push: node_modules/.bin/prisma" {
 		t.Fatalf("tool findings = %v", tools)
 	}
 	if _, ok := findingByCode(findings, "release_command_unmapped"); !ok {

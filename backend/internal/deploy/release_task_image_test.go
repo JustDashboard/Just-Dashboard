@@ -101,6 +101,9 @@ func TestReleaseTaskCommandShapes(t *testing.T) {
 	if tokens := releaseTaskCommandTokens("cd api && env A=1 npx prisma migrate deploy; ./bin/seed | tee log || exec curl -f x"); !slices.Equal(tokens, []string{"npx", "./bin/seed", "tee", "curl"}) {
 		t.Fatalf("tokens = %v", tokens)
 	}
+	if tools := releaseTaskHostTools([]ReleaseTaskConfig{{Command: "set -e; if [ -n \"$X\" ]; then echo ok; fi; export A=1; curl -f x"}}); !slices.Equal(tools, []string{"curl"}) {
+		t.Fatalf("host tools = %v", tools)
+	}
 	for command, wantsApplication := range map[string]bool{
 		"npx prisma migrate deploy":            true,
 		"bundle exec rails db:migrate":         true,

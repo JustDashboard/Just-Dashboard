@@ -295,7 +295,9 @@ func composeBuildFindings(detection *DetectionResult, configuration PlanConfigur
 		return findings
 	}
 	if detection == nil || detection.Compose == nil {
-		if detection != nil && detection.Source.Kind != SourceCompose {
+		// Only a repository's Compose file is found without being analysed;
+		// an adopted stack runs through its own compatibility path.
+		if detection != nil && (detection.Source.Kind == SourceGit || detection.Source.Kind == SourceLocal) {
 			findings = append(findings, finding("compose_analysis_missing", PreflightBlocked,
 				"This Compose file has not been analysed as a Compose source", "",
 				"A Compose file found in a repository is only named during detection; its services, images and builds are analysed when the repository is deployed as a Compose source.",
@@ -357,10 +359,10 @@ func releaseTaskFindings(planned *DetectedCandidate, configuration PlanConfigura
 			imageTask = true
 			continue
 		}
-		if token, needs := releaseTaskNeedsApplication(task.Command); needs {
+		if token, needs := releaseTaskInstalledTool(task.Command); needs {
 			findings = append(findings, finding("release_task_tool_missing", PreflightBlocked,
-				"A release task needs the application's toolchain", task.Name+": "+token,
-				"This task runs in the dashboard's shell over the unbuilt source, which has no installed dependencies, interpreters or project network.",
+				"A release task needs the application's installed dependencies", task.Name+": "+token,
+				"This task runs in the dashboard's shell over the unbuilt source, where nothing the application installs — node_modules, a virtualenv, a bundle — exists.",
 				"Run the task in the release image instead, where the application's toolchain and variables are.", "deploy", field))
 			continue
 		}

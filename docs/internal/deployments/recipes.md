@@ -78,9 +78,10 @@ with plus the task's own `release_task`-scoped ones, on the project's database n
 it exits. A command with shell syntax runs through the image's `/bin/sh`; a plain one is executed
 directly, so an image without a shell still runs `bin/migrate`. Without such a task preflight warns
 `release_command_unmapped`. A task with no runner is the historical shell over the unbuilt checkout in
-the dashboard's own container; preflight refuses one that needs the application's toolchain
-(`npx`, `python`, `bundle`, a `node_modules/.bin` or `.venv` tool, a repository script) or a program
-the dashboard does not have, as `release_task_tool_missing`, and such a task no longer counts as the
+the dashboard's own container; preflight refuses one that runs a tool only installed dependencies
+provide (`prisma`, `knex`, `alembic`, anything under `node_modules/.bin` or `.venv`) or a program the
+dashboard does not have — in its own image that includes `npx`, `python` and `bundle` — as
+`release_task_tool_missing`, and a host task that runs the application's code no longer counts as the
 schema step.
 
 ## JavaScript and static output
