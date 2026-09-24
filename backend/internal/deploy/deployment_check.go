@@ -208,14 +208,16 @@ func evaluateDeployment(
 
 // withoutWizardFindings drops what only means something while a plan is
 // being chosen: which candidate detection selected, whether the choice was
-// ambiguous, a scan bound, and the notice that the method was overridden.
-// A saved plan has made those choices.
+// ambiguous, a scan bound, the notice that the method was overridden, and
+// what the repository's shape says about choosing this candidate over the
+// application (preflight_repo_shape.go). A saved plan has made those choices.
 func withoutWizardFindings(findings []PreflightFinding) []PreflightFinding {
 	kept := findings[:0:0]
 	for _, item := range findings {
 		switch item.Code {
 		case "detection_ambiguous", "detection_selected", "detection_empty", "detection_truncated",
-			"detection_root_mismatch":
+			"detection_root_mismatch", "selected_candidate_demoted", "static_candidate_nested",
+			"desktop_frontend_only", "companion_service_not_deployed":
 			continue
 		case "build_method_changed":
 			if item.Severity == PreflightPass {

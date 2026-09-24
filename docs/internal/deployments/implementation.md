@@ -466,7 +466,9 @@ only renderer/executor/validation authority for their feature.
   — only for a source with no files, an image or a Compose file — the plan's own shape
   (`candidateSource` `detected`/`recorded`/`plan`). Wizard-only findings are dropped at run time
   (`detection_selected`, `detection_ambiguous`, `detection_empty`, `detection_truncated`,
-  `detection_root_mismatch`, a passing `build_method_changed`), and `plan_drift_*` warnings compare the
+  `detection_root_mismatch`, a passing `build_method_changed`, and what the repository's shape says
+  about the choice: `selected_candidate_demoted`, `static_candidate_nested`, `desktop_frontend_only`,
+  `companion_service_not_deployed`), and `plan_drift_*` warnings compare the
   stored and fresh candidates where the plan still carries the old answer: the lockfile set or the manager
   it resolves (`plan_drift_package_manager`), the framework, the output directory, and names the commit
   reads that nothing sets and no other finding names (`plan_drift_variables` leaves out a read without

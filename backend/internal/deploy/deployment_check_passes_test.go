@@ -175,3 +175,38 @@ func TestDryRunChecksTheCommitsDockerfileAndWritesNothing(t *testing.T) {
 		}
 	}
 }
+
+// What the repository's shape says about choosing a candidate — a frontend
+// whose API is another project, an example ranked below the application —
+// is the wizard's question; a saved plan made that choice, so a run and the
+// check before Deploy do not ask it again.
+func TestDeploymentEvaluationDoesNotAskTheShapesChoiceAgain(t *testing.T) {
+	t.Parallel()
+	build := BuildPlanConfig{Method: BuildRecipe, Recipe: "node", RootDirectory: "web", BuildCommand: "npm run build", OutputDirectory: "dist"}
+	stored := newDetectedCandidate("web", BuildRecipe, DetectedCandidate{
+		Name: "web", Recipe: "node", Profile: ProfileStatic, Confidence: ConfidenceHigh, OutputDirectory: "dist",
+		Companions: []string{"api"}, Demotion: "the frontend of the API in api",
+	})
+	plan := deploymentPlan{
+		Source:   DraftSourceConfig{Kind: SourceImage, Mode: SourceModeImageReference, Image: "example.test/web:1"},
+		Identity: SourceIdentity{Kind: SourceImage},
+		Profile:  ProfileStatic, Configuration: nodeTestConfiguration(build),
+		Evidence: StoredBuildEvidence{Candidates: []DetectedCandidate{stored}},
+	}
+	draft := &Draft{Data: DraftData{
+		Intent: &DraftIntentConfig{Name: "web", Profile: ProfileStatic}, Source: &plan.Source,
+		Detection: &DetectionResult{Candidates: []DetectedCandidate{stored}, SelectedID: stored.ID}, Configuration: &plan.Configuration,
+	}}
+	if item := findingByCode(preflightFindings(draft, plan.Configuration, HostObservation{}, true), "companion_service_not_deployed"); item == nil {
+		t.Fatal("the wizard no longer names the companion")
+	}
+	evaluation, err := evaluateDeployment(context.Background(), plan, sourceReading{}, readyObserver())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []string{"companion_service_not_deployed", "selected_candidate_demoted"} {
+		if item := findingByCode(evaluation.Findings, code); item != nil {
+			t.Fatalf("a run asks the wizard's question: %#v", item)
+		}
+	}
+}
