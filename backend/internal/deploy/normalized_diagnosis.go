@@ -106,7 +106,7 @@ const builderDetailLength = 300
 
 // builderUnavailableFailure keeps the state a builder fault has always had,
 // and names which fault it was from fixed substrings of the daemon's error.
-func builderUnavailableFailure(err error, redact func(string) string) StepResult {
+func builderUnavailableFailure(err error) StepResult {
 	result := StepResult{
 		State: StepUnavailable, ErrorCode: "builder_unavailable",
 		ErrorMessage: "BuildKit or a reviewed base image is unavailable",
@@ -139,7 +139,9 @@ func builderUnavailableFailure(err error, redact func(string) string) StepResult
 		strings.Contains(lower, "authentication required"):
 		result.ErrorCode = "registry_auth_failed"
 		result.ErrorMessage = "Could not resolve " + subject + ": the registry refused this server; a stale `docker login` on the server is the usual cause"
-	case errors.Is(err, ErrBuilderUnavailable) && image == "":
+	case err == ErrBuilderUnavailable:
+		// Only the builder itself returns the bare sentinel: no backend, so
+		// no Docker to build with.
 		result.ErrorCode = "builder_missing"
 		result.ErrorMessage = "Docker or its Buildx plugin is not available to the deployment builder"
 	}

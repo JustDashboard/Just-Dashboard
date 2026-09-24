@@ -402,7 +402,7 @@ func (e *NormalizedStepExecutor) prepareContext(
 		cleaned, cleanupErr := source.Cleanup()
 		result := normalizedStepFailure(err)
 		if errors.Is(err, ErrBuilderUnavailable) {
-			result = builderUnavailableFailure(err, buildRedactor(buildVariables))
+			result = builderUnavailableFailure(err)
 			// The daemon's own words are the only record of why, and nothing
 			// else writes them down before the step ends.
 			_ = stepLog(execution, "stderr", builderUnavailableDetail(err, buildRedactor(buildVariables)))
@@ -828,7 +828,7 @@ func normalizedStepFailure(err error) StepResult {
 	case errors.Is(err, ErrUnsupportedBuilder):
 		result.ErrorCode, result.ErrorMessage = "unsupported_builder", err.Error()
 	case errors.Is(err, ErrBuilderUnavailable):
-		result = builderUnavailableFailure(err, nil)
+		result = builderUnavailableFailure(err)
 	case errors.Is(err, ErrArtifactMissing):
 		result.ErrorCode, result.ErrorMessage = "artifact_missing", err.Error()
 	case errors.Is(err, ErrInvalidPlan):

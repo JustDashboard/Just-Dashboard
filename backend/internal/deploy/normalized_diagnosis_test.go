@@ -232,13 +232,16 @@ func TestBuilderUnavailableFailureKeepsItsCause(t *testing.T) {
 		"unauthorized: incorrect username or password":                                                  "registry_auth_failed",
 	} {
 		err := fmt.Errorf("%w: resolve reviewed base image gradle:8-jdk25: %s", ErrBuilderUnavailable, text)
-		result := builderUnavailableFailure(err, nil)
+		result := builderUnavailableFailure(err)
 		if result.ErrorCode != want || result.State != StepUnavailable || !strings.Contains(result.ErrorMessage, "gradle:8-jdk25") {
 			t.Fatalf("%q = %+v", text, result)
 		}
 	}
-	if result := builderUnavailableFailure(ErrBuilderUnavailable, nil); result.ErrorCode != "builder_missing" {
+	if result := builderUnavailableFailure(ErrBuilderUnavailable); result.ErrorCode != "builder_missing" {
 		t.Fatalf("no backend = %+v", result)
+	}
+	if result := builderUnavailableFailure(fmt.Errorf("%w: reviewed base nginx:1.29-alpine was not resolved", ErrBuilderUnavailable)); result.ErrorCode != "builder_unavailable" {
+		t.Fatalf("an unresolved catalogue base = %+v", result)
 	}
 	detail := builderUnavailableDetail(fmt.Errorf("%w: resolve reviewed base image x: %s token-value", ErrBuilderUnavailable, strings.Repeat("y", 500)),
 		buildRedactor(map[string]string{"TOKEN": "token-value"}))
