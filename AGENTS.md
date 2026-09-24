@@ -64,7 +64,7 @@ bunx playwright test tests/browser/docker-ui.spec.ts                            
 
 Cold, each invocation paid a fresh production server before the first assertion — which is why the
 whole suite was five to ten minutes and nobody ran it during a change. Specs run in parallel
-locally and serially on CI. A UI change also runs `tests/browser/design-system.spec.ts`
+locally and, sharded six ways, on CI. A UI change also runs `tests/browser/design-system.spec.ts`
 (`design-system.md` §15 pass 10).
 
 **Before a pull request**, the full gate:
