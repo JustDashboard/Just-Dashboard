@@ -67,6 +67,10 @@ type DomainRoute struct {
 	CertificateDaysLeft int           `json:"certificateDaysLeft,omitempty"`
 	DeepLink            string        `json:"deepLink,omitempty"`
 	CertificateLink     string        `json:"certificateLink,omitempty"`
+	// CertificateIssuer is who issued the covering certificate, read from the
+	// same certificate as its name, so the issuer is observed rather than
+	// inferred from the domain's ownership.
+	CertificateIssuer string `json:"certificateIssuer,omitempty"`
 }
 
 type StorageSummary struct {
@@ -443,6 +447,7 @@ func observeDomainRoutes(
 					continue
 				}
 				row.CertificateName, row.CertificateDaysLeft = certificate.Name, certificate.DaysLeft
+				row.CertificateIssuer = certificate.Issuer
 				row.CertificateLink = "/proxy/certificates"
 				switch {
 				case certificate.Expired:

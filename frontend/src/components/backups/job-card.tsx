@@ -9,6 +9,7 @@ import type { BackupJob, BackupRun } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { ChoiceRow } from "@/components/flow"
+import { OutcomeStrip } from "@/components/outcome-strip"
 import { ProductLogo, ProductLogos } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { VerbActions, type Verb } from "@/components/verbs"
@@ -40,11 +41,24 @@ export function JobCard({
   job,
   products,
   verbs,
+  verb = job.name,
+  note,
+  working,
 }: {
   job: BackupJob
   /** The products of what the job covers, from the coverage report. */
   products: string[]
   verbs: Verb[]
+  /**
+   * The card's accessible name where the page around it says more than the
+   * job's name does — a deployment's settings open "the backup job" a release
+   * gates on, not one job among many.
+   */
+  verb?: string
+  /** A reading the surface adds to the card's second line: the live release's view of the job. */
+  note?: React.ReactNode
+  /** The job is running now, so a light runs round the card (§11 *live*). */
+  working?: boolean
 }) {
   const fetchRuns = useCallback(
     (signal: AbortSignal) =>
@@ -63,12 +77,13 @@ export function JobCard({
 
   return (
     <ChoiceRow
-      verb={job.name}
+      verb={verb}
       href={`/backups/${job.id}`}
+      busy={working}
       className={cn(!job.enabled && job.schedule && "opacity-80")}
       leading={
         products.length > 1 ? (
-          <ProductLogos ids={products} />
+          <ProductLogos ids={products} ring="ring-choice-surface" />
         ) : (
           <ProductLogo id={products[0]} size="sm" fallback={Archive} />
         )
@@ -106,13 +121,18 @@ export function JobCard({
             : "nothing stored yet"}
           <span className="text-muted-foreground/60"> · {retentionLabel(job).toLowerCase()}</span>
         </span>
+        {note}
       </div>
     </ChoiceRow>
   )
 }
 
-/** The last run's outcome, in its colour, beside the name. */
-function LastRun({ job }: { job: BackupJob }) {
+/**
+ * The last run's outcome, in its colour, beside the name. Exported for the
+ * other surfaces that draw a backup job — a project's runtime, its database
+ * settings — so the words and colours are this card's rather than a copy.
+ */
+export function LastRun({ job }: { job: BackupJob }) {
   if (!job.enabled && job.schedule) return <Status state="stopped" label="paused" />
   if (!job.lastRun) return <span className="text-xs text-muted-foreground">never run</span>
   const { status, startedAt } = job.lastRun
@@ -130,33 +150,22 @@ function LastRun({ job }: { job: BackupJob }) {
 }
 
 /**
- * The job's recent runs, oldest first: a square per run in the colour of how
- * it ended. Squares with a radius of their own, not dots — a row of filled
- * circles reads as a row of pills (§4) — and no tooltip machinery for
- * fourteen marks: each says what it was in its title.
+ * The job's recent runs as the shared outcome strip, oldest first. The API
+ * answers newest first, which is the order a list reads; a strip reads left to
+ * right into the present.
  */
-function RunStrip({ runs }: { runs: BackupRun[] | undefined }) {
-  if (!runs || runs.length === 0) return null
+export function RunStrip({ runs }: { runs: BackupRun[] | undefined }) {
+  if (!runs) return null
   const ordered = [...runs].reverse()
   return (
-    <span
-      role="img"
-      aria-label={`Last ${plural(ordered.length, "run")}: ${ordered.filter((r) => r.status === "failed").length} failed`}
-      className="flex shrink-0 items-center gap-0.5"
-    >
-      {ordered.map((run) => (
-        <span
-          key={run.id}
-          title={`${run.status} · ${relativeTime(run.startedAt)}${run.sizeBytes ? ` · ${bytes(run.sizeBytes)}` : ""}`}
-          className={cn(
-            "h-3 w-1.5 rounded-sm",
-            run.status === "success" && "bg-success/80",
-            run.status === "failed" && "bg-destructive",
-            run.status === "running" && "bg-brand",
-          )}
-        />
-      ))}
-    </span>
+    <OutcomeStrip
+      label={`Last ${plural(ordered.length, "run")}: ${ordered.filter((r) => r.status === "failed").length} failed`}
+      items={ordered.map((run) => ({
+        key: String(run.id),
+        tone: run.status === "success" ? "success" : run.status === "failed" ? "danger" : "running",
+        title: `${run.status} · ${relativeTime(run.startedAt)}${run.sizeBytes ? ` · ${bytes(run.sizeBytes)}` : ""}`,
+      }))}
+    />
   )
 }
 

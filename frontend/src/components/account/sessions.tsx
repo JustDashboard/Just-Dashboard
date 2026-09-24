@@ -4,13 +4,13 @@ import { DesktopDevice, Terminal } from "@/components/icons"
 import { del, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { plural, relativeTime } from "@/lib/format"
-import { describeClient, networkOf, parseAgent } from "@/lib/clients"
+import { describeClient, parseAgent } from "@/lib/clients"
 import type { SessionInfo } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { DimActions } from "@/components/icon-action"
 import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { ProductGlyph, ProductLogo } from "@/components/product-logo"
+import { ClientMark, NetworkFact } from "@/components/client-mark"
 import { Row, RowList } from "@/components/row-list"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -30,48 +30,6 @@ const ACTIVE_MS = 2 * 60_000
 
 function activeNow(session: SessionInfo) {
   return Date.now() - new Date(session.lastSeenAt).getTime() < ACTIVE_MS
-}
-
-/**
- * What signed this session in, as the product it is: the browser's own mark
- * on the tile, with the system it runs on as a badge in the corner — the way
- * a status sits on an avatar — so Safari on an iPhone reads as Safari first
- * and Apple second. A program is drawn as itself; a client the parser cannot
- * name keeps a glyph for its kind on the same tile, so its title lines up
- * with the rest.
- */
-export function ClientMark({ userAgent }: { userAgent: string }) {
-  const agent = parseAgent(userAgent)
-  const badge = agent.product && agent.osProduct !== agent.product ? agent.osProduct : undefined
-  return (
-    <span className="relative flex shrink-0">
-      <ProductLogo
-        id={agent.product ?? agent.osProduct}
-        size="sm"
-        fallback={agent.device === "program" ? Terminal : DesktopDevice}
-      />
-      {badge && (
-        <span
-          aria-hidden
-          className="absolute -right-1 -bottom-1 flex size-4 items-center justify-center rounded-sm border border-hairline bg-background"
-        >
-          <ProductGlyph id={badge} className="size-2.5" />
-        </span>
-      )}
-    </span>
-  )
-}
-
-/** Where the address is — the tailnet drawn as Tailscale — and the address itself. */
-export function NetworkFact({ ip }: { ip: string }) {
-  const network = networkOf(ip)
-  return (
-    <span className="inline-flex min-w-0 items-center gap-1.5">
-      {network.product && <ProductGlyph id={network.product} />}
-      <span className="shrink-0">{network.label}</span>
-      <span className="truncate font-mono text-muted-foreground/80">{ip}</span>
-    </span>
-  )
 }
 
 function factorLabel(session: SessionInfo) {

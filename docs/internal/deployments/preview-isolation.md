@@ -17,8 +17,12 @@ cannot revive a superseded approval.
 `GET /deploy/{id}/previews/approvals` lists pending/approved requests and whether configuration completed.
 Session-only administrator `POST /deploy/{id}/previews/approvals/{approval}/approve` accepts `revision` and
 optional `deploy` (default false). Approval is audited even if subsequent configuration fails; the same
-request can be retried. `deploy:true` uses a stable approval idempotency key. The UI shows the author,
-repository and revision, opens the preview's own variable editor, and provides a separate deployment action.
+request can be retried. `deploy:true` uses a stable approval idempotency key. An approval carries
+`headRef`, the branch the pull request proposes — kept apart from the ref the build fetches, which is
+the provider's own ref, `refs/pull/N/head` on GitHub and `refs/merge-requests/N/head` on GitLab — and
+approvals recorded before it was kept have none. The UI shows the author as their face, the repository, the branch and the revision, warns
+before approving a head that comes from a fork, opens the preview's own variable editor, and provides a
+separate deployment action.
 The key includes the approval generation. Reopening requires completed prior cleanup and a fresh
 approval; it cannot reuse an earlier generation's run. New environment slugs include the trigger ID so
 the same PR number from different triggers cannot select the same environment.

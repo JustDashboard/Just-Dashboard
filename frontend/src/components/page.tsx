@@ -154,6 +154,13 @@ export function Toolbar({ className, ...props }: React.ComponentProps<"div">) {
  * The filter box, which appeared in six pages as the same three elements
  * assembled slightly differently each time — a different width, a different
  * icon offset, sometimes no icon at all.
+ *
+ * On a phone it is a field like any other: 40px, beside the 40px `Select
+ * size="sm"` it usually shares a toolbar with, and at `Input`'s own 16px so
+ * iOS does not zoom the page when it takes focus. It also takes the first
+ * line of a wrapping toolbar to itself — a call site's `flex-1` had squeezed
+ * the projects search to 95px beside its chips at 390. From `sm` it is the
+ * 32px box it always was. The dense one is a pane's chrome and keeps its size.
  */
 export function SearchInput({
   dense,
@@ -169,7 +176,13 @@ export function SearchInput({
   containerClassName?: string
 }) {
   return (
-    <div className={cn("relative flex w-full items-center sm:w-72", containerClassName)}>
+    <div
+      className={cn(
+        "relative flex w-full min-w-0 items-center sm:w-72",
+        !dense && "max-sm:basis-full",
+        containerClassName,
+      )}
+    >
       <MagnifyingGlass
         className={cn(
           "pointer-events-none absolute top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground",
@@ -177,7 +190,7 @@ export function SearchInput({
         )}
       />
       <Input
-        className={cn(dense ? "h-7 pl-7 text-xs" : "h-8 pl-8 text-body", className)}
+        className={cn(dense ? "h-7 pl-7 text-xs" : "h-10 pl-8 sm:h-8", className)}
         {...props}
       />
       {trailing && <div className="absolute right-1 flex items-center gap-0.5">{trailing}</div>}
@@ -210,12 +223,22 @@ export function Metric({
   )
 }
 
-/** A horizontal run of Metrics, separated by rules rather than by gap alone. */
+/**
+ * A horizontal run of Metrics, separated by rules rather than by gap alone.
+ *
+ * Two columns on a phone rather than a wrapping row: wrapped, the first
+ * metric of each new line kept the rule and the indent that belonged beside
+ * its neighbour on the line above, and a date took whatever width was left of
+ * the line and truncated in it. In a grid every rule is between two cells and
+ * every value has half the width to itself.
+ */
 export function MetricStrip({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       className={cn(
-        "flex flex-wrap gap-x-6 gap-y-3 [&>*]:min-w-0 [&>*+*]:border-l [&>*+*]:border-hairline [&>*+*]:pl-6",
+        "grid grid-cols-2 gap-x-4 gap-y-3 [&>*]:min-w-0",
+        "max-sm:[&>*:nth-child(2n)]:border-l max-sm:[&>*:nth-child(2n)]:border-hairline max-sm:[&>*:nth-child(2n)]:pl-4",
+        "sm:flex sm:flex-wrap sm:gap-x-6 sm:[&>*+*]:border-l sm:[&>*+*]:border-hairline sm:[&>*+*]:pl-6",
         className,
       )}
       {...props}

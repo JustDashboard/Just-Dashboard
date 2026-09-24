@@ -92,6 +92,12 @@ type Panel = {
   /** Absent on the top-level list, and on a panel whose subject has not loaded. */
   title?: string
   caption?: string
+  /**
+   * The title is a name the reader gave something — a project, a connection —
+   * rather than one of this product's words, so it is printed as written.
+   */
+  named?: boolean
+  mark?: React.ReactNode
   /** The top-level list is never titled and has nothing to go back to. */
   root?: boolean
   groups: { label?: string; pending?: boolean; items: Row[] }[]
@@ -116,6 +122,8 @@ function fromScope(scope: NavScope): Panel {
     key: `scope:${scope.path}`,
     title: scope.title,
     caption: scope.caption,
+    named: true,
+    mark: scope.mark,
     groups: scope.groups,
   }
 }
@@ -131,6 +139,7 @@ function projectPlaceholder(id: number): Panel {
   const base = `/deploy/${id}`
   return {
     key: `scope:${base}`,
+    named: true,
     groups: [
       {
         items: PROJECT_NAV.filter((entry) => !entry.game).map((entry) => ({
@@ -151,9 +160,9 @@ function projectPlaceholder(id: number): Panel {
   }
 }
 
-/** The project a path belongs to, or `null`. A run is its own destination. */
+/** The project a path belongs to, or `null`. A run is one of its Deployments. */
 function projectIdFrom(pathname: string): number | null {
-  const match = /^\/deploy\/(\d+)(?:\/(?!runs\/).*)?$/.exec(pathname)
+  const match = /^\/deploy\/(\d+)(?:\/.*)?$/.exec(pathname)
   return match ? Number(match[1]) : null
 }
 
@@ -363,6 +372,9 @@ export function AppSidebar() {
  */
 function isCurrent(item: NavScopeEntry, pathname: string) {
   const path = item.href.split("?")[0]
+  // A run is opened from its project's Deployments, and is one of them.
+  const run = /^\/deploy\/(\d+)\/runs\//.exec(pathname)
+  if (run) return path === `/deploy/${run[1]}/deployments`
   return path === pathname
 }
 
@@ -416,16 +428,29 @@ function PanelHead({ panel, parent, onBack }: { panel: Panel; parent: Panel; onB
 
       {/* Where you are, as a heading rather than a link: the panel under it is
           the section, so a control here would only ever go where you already
-          are. Drawn as an eyebrow — the rail's label voice, the one "Settings"
-          above a group speaks in — and not as icon-plus-name in the row slot,
-          which is exactly what a row looks like and so read as a button that
-          did nothing when pressed. Collapsed, the icon rail is too narrow for
-          it and the section is named by the back button's tooltip instead. */}
+          are. A section is drawn as an eyebrow — the rail's label voice, the
+          one "Settings" above a group speaks in — and not as icon-plus-name in
+          the row slot, which is exactly what a row looks like and so read as a
+          button that did nothing when pressed. A project or a connection is a
+          name somebody typed, and small caps turned "api-production" into
+          API-PRODUCTION (§4), so it is printed as written, after its own mark
+          at the line's height rather than in a row's icon slot. Collapsed, the
+          icon rail is too narrow for it and the section is named by the back
+          button's tooltip instead. */}
       <div className="min-w-0 px-2 pt-2.5 pb-1 group-data-[collapsible=icon]:hidden">
-        {panel.title ? (
-          <p className="eyebrow truncate leading-tight">{panel.title}</p>
-        ) : (
+        {!panel.title ? (
           <Skeleton className="h-2.5 w-24" />
+        ) : panel.named ? (
+          <p className="flex min-w-0 items-center gap-1.5 text-hint leading-tight font-semibold text-foreground/90">
+            {panel.mark && (
+              <span aria-hidden="true" className="flex shrink-0">
+                {panel.mark}
+              </span>
+            )}
+            <span className="truncate">{panel.title}</span>
+          </p>
+        ) : (
+          <p className="eyebrow truncate leading-tight">{panel.title}</p>
         )}
         {panel.caption && (
           <p className="mt-1 truncate text-hint leading-tight text-muted-foreground">

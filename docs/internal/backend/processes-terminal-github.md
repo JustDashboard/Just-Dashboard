@@ -210,7 +210,11 @@ session.
   every GitHub avatar the product drew — the Git tab's two identity rows, the App card's
   installations, the git tools' account button — was blocked before it was fetched and fell back to
   initials. Widening the policy would instead have the operator's browser announce each view of those
-  pages to GitHub. The address is fixed (`github.com/<login>.png`, which needs no token) and the login
+  pages to GitHub. Since the 2026-09-24 deployment pass `ForgeFace` (`git/marks.tsx`) draws through it
+  as well: a pull request's author on a preview approval — a login read from the provider's webhook
+  payload, not one of the operator's own accounts — and the repository owners on `/deploy/new`. The
+  login rule and the fixed address below are what make a login from a payload safe to ask about, and
+  any forge but GitHub is drawn as initials without a request. The address is fixed (`github.com/<login>.png`, which needs no token) and the login
   is matched against GitHub's own rule for one before it is built, so nothing the browser sends
   chooses a host; redirects are followed only within github.com and githubusercontent.com over HTTPS,
   three at most. It reads at most 512 KB within five seconds, accepts only an image, and remembers

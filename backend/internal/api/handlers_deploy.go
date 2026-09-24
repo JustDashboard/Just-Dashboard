@@ -223,10 +223,20 @@ func (s *Server) handleDeployList(w http.ResponseWriter, r *http.Request) error 
 		return httpx.Internal(err)
 	}
 	if r.URL.Query().Get("view") == "archived" {
-		archived := make([]*deploy.Project, 0)
+		facts, err := s.modules.deployRuns.ArchivedDeploymentFacts(r.Context())
+		if err != nil {
+			return httpx.Internal(err)
+		}
+		// Each row carries what it deployed beside the project record, so the
+		// archived list can draw it as that product without a read per row.
+		type archivedDeployment struct {
+			*deploy.Project
+			deploy.DeploymentFacts
+		}
+		archived := make([]archivedDeployment, 0)
 		for _, p := range projects {
 			if p.ArchivedAt != nil {
-				archived = append(archived, p)
+				archived = append(archived, archivedDeployment{Project: p, DeploymentFacts: facts[p.ID]})
 			}
 		}
 		httpx.JSON(w, http.StatusOK, archived)

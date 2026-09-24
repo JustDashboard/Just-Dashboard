@@ -1,14 +1,16 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { useRouter, useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { ArrowLeft } from "@/components/icons"
-import { get, post } from "@/lib/api"
-import { notify } from "@/lib/toast"
+import { get } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
 import type {
+  BlueprintDetail,
   DeploymentEngineRun,
+  DeploymentEnvironmentConfiguration,
+  DeploymentGitWatch,
   DeploymentOperations,
   DeploymentRelease,
   DeploymentRuntimeServices,
@@ -16,18 +18,31 @@ import type {
   DeployProject,
   DeploymentRunsPage,
 } from "@/lib/types"
-import { Page, PageHeader, PageState } from "@/components/page"
-import { ErrorState } from "@/components/state"
+import { Page, PageHeader } from "@/components/page"
+import { ErrorState, LoadingPanel } from "@/components/state"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { useProjectStart } from "@/components/deploy/project-verbs"
+import { projectProduct } from "@/components/deploy/vocabulary"
+import { OverviewSkeleton } from "@/components/deploy/overview-skeleton"
 
 /**
  * One project, read once for every page under it.
  *
- * The project shell (header, facts, tab strip) and each tab used to poll the
- * same detail endpoint separately, and a tab that opened from a link had to
+ * The project shell (its header and identity line) and each page used to poll
+ * the same detail endpoint separately, and a tab that opened from a link had to
  * fetch the project before it could draw anything. The layout owns the reads
  * now — detail, runs, releases and the slower operational evidence — and the
  * pages take what they need from here.
+ *
+ * So do the reads more than one page drew from separately: the environment's
+ * configuration (what the source, its identity and the build are), whether
+ * the branch deploys itself — the shell and the Overview each polled that on
+ * the same fifteen seconds — and the template a blueprint project came from.
+ *
+ * Starting a run is the projects grid's own `useProjectStart`, so the header's
+ * command, its menu and a card on the grid enqueue a run and word a refusal
+ * the same way.
  */
 
 export type ProjectDetail = {
@@ -39,18 +54,6 @@ export type ProjectDetail = {
 
 export type ProjectOperation = "deploy" | "redeploy" | "restart" | "force_build" | "stop" | "start"
 
-// What to say when `start(operation)` itself never reaches the server — the
-// operation-specific words a reader needs to tell "could not stop the
-// application" from "could not start the rebuild" apart.
-const OPERATION_FAILURE_TITLES: Record<ProjectOperation, string> = {
-  deploy: "Could not start the deployment",
-  redeploy: "Could not start the redeploy",
-  restart: "Could not restart the application",
-  force_build: "Could not start the rebuild",
-  stop: "Could not stop the application",
-  start: "Could not start the application",
-}
-
 export type ProjectContextValue = {
   projectId: number
   environmentId: number
@@ -59,6 +62,8 @@ export type ProjectContextValue = {
   normalized: boolean
   archived: boolean
   markArchived: () => void
+  /** Undoes `markArchived` after a restore, and re-reads the project to confirm it. */
+  markUnarchived: () => void
   runs: DeploymentEngineRun[]
   runsLoading: boolean
   /** The newest page did not reach the oldest run, so an older page can be asked for. */
@@ -66,7 +71,28 @@ export type ProjectContextValue = {
   releases: DeploymentRelease[]
   operations?: DeploymentOperations
   operationsLoading: boolean
-  /** The run that recorded the live release, for "deployed 3h ago by operator". */
+  /**
+   * The environment's desired configuration — `source`, `identity`, `build`
+   * and the rest. Read once, again by `refresh`, and again whenever the
+   * summary's desired revision moves; a settings page that edits it keeps
+   * its own copy (`useConfiguration`).
+   */
+  configuration?: DeploymentEnvironmentConfiguration
+  /** Whether a Git project's branch deploys itself: the one fifteen-second poll. */
+  gitWatch?: DeploymentGitWatch
+  /** The template a blueprint project was made from: its name, and how its first sign-in works. */
+  blueprint?: BlueprintDetail
+  /**
+   * What the project is, as a `product-logo` id — `projectProduct` read over
+   * the summary, the configuration and the template together, so the header,
+   * the preview and the dialogs draw one mark.
+   */
+  product?: string
+  /**
+   * The run that recorded the live release, for "deployed 3h ago by
+   * operator" — by the run's release or the release's run, and only a run
+   * that succeeded. Undefined when it is older than the runs read here.
+   */
   liveRun?: DeploymentEngineRun
   liveRelease?: DeploymentRelease
   refresh: () => void
@@ -92,10 +118,8 @@ export function ProjectProvider({
   projectId: number
   children: React.ReactNode
 }) {
-  const router = useRouter()
   const valid = Number.isInteger(projectId) && projectId > 0
   const [archivedLocally, setArchivedLocally] = useState(false)
-  const [starting, setStarting] = useState<ProjectOperation>()
 
   const detail = usePoll(
     (signal) => get<ProjectDetail>(`/deploy/${projectId}`, undefined, signal),
@@ -130,47 +154,93 @@ export function ProjectProvider({
     [projectId],
     { enabled: valid && !archived },
   )
-
+  const configuration = usePoll(
+    (signal) =>
+      get<DeploymentEnvironmentConfiguration>(
+        `/deploy/${projectId}/environments/${environmentId}/configuration`,
+        undefined,
+        signal,
+      ),
+    0,
+    [projectId, environmentId],
+    { enabled: valid && environmentId > 0 },
+  )
+  const gitWatch = usePoll(
+    (signal) =>
+      get<DeploymentGitWatch>(
+        `/deploy/${projectId}/environments/${environmentId}/git-watch`,
+        undefined,
+        signal,
+      ),
+    15000,
+    [projectId, environmentId],
+    {
+      enabled:
+        valid &&
+        detail.data?.deployment.buildMethod !== "legacy_compose" &&
+        detail.data?.deployment.sourceKind === "git" &&
+        environmentId > 0 &&
+        !archived,
+    },
+  )
+  // A template's source reference is `id@version`; the definition is read by id.
+  const blueprintId =
+    detail.data?.deployment.sourceKind === "blueprint"
+      ? (detail.data.deployment.sourceRef ?? "").split("@")[0]
+      : ""
+  const blueprint = usePoll(
+    (signal) => get<BlueprintDetail>(`/deploy/blueprints/${blueprintId}`, undefined, signal),
+    0,
+    [blueprintId],
+    { enabled: Boolean(blueprintId) },
+  )
   // The poll objects are rebuilt every render; their refresh callbacks are the
   // stable part, so depending on those keeps the context value stable too.
   const refreshDetail = detail.refresh
   const refreshRuns = runs.refresh
   const refreshReleases = releases.refresh
+  const refreshConfiguration = configuration.refresh
   const refresh = useCallback(() => {
     refreshDetail()
     refreshRuns()
     refreshReleases()
-  }, [refreshDetail, refreshRuns, refreshReleases])
+    refreshConfiguration()
+  }, [refreshDetail, refreshRuns, refreshReleases, refreshConfiguration])
+  // Every configuration write advances the environment's desired revision,
+  // which the five-second summary carries: a save on any settings page — each
+  // edits its own copy — is re-read here when it moves, so the rail's
+  // per-page marks and the header's facts follow it. Not a dependency of the
+  // read itself, which would clear its data and blank the facts meanwhile.
+  const desiredRevision = detail.data?.deployment.desiredRevision
+  const seenRevision = useRef(desiredRevision)
+  useEffect(() => {
+    if (desiredRevision === undefined || desiredRevision === seenRevision.current) return
+    const first = seenRevision.current === undefined
+    seenRevision.current = desiredRevision
+    if (!first) refreshConfiguration()
+  }, [desiredRevision, refreshConfiguration])
 
-  const start = useCallback(
-    async (operation: ProjectOperation) => {
-      const deployment = detail.data?.deployment
-      if (!deployment) return
-      setStarting(operation)
-      try {
-        const run = await post<DeploymentEngineRun>(
-          `/deploy/${projectId}/environments/${deployment.environmentId}/runs`,
-          { operation },
-        )
-        router.push(`/deploy/${projectId}/runs/${run.id}`)
-      } catch (error) {
-        notify.error(OPERATION_FAILURE_TITLES[operation], error)
-        setStarting(undefined)
-        // A stop/start refused as `already_stopped`/`not_stopped` means the
-        // card's own copy of `stopped` disagrees with the server right now —
-        // re-read immediately rather than leave it wrong for up to 5s.
-        refreshDetail()
-      }
-    },
-    [detail.data?.deployment, projectId, router, refreshDetail],
-  )
+  const markUnarchived = useCallback(() => {
+    setArchivedLocally(false)
+    refreshDetail()
+  }, [refreshDetail])
+
+  // The same request the projects grid's cards make, so a refused start is
+  // worded once — and re-reads the detail, since a stop or start refused as
+  // already done means this copy of `stopped` disagrees with the server.
+  const { start, starting } = useProjectStart({ id: projectId, environmentId }, refreshDetail)
 
   const value = useMemo<ProjectContextValue | null>(() => {
     if (!detail.data) return null
     const summary = detail.data.deployment
     const runList = runs.data?.runs ?? []
+    const liveRelease = releases.data?.find((release) => release.id === summary.liveReleaseId)
     const liveRun = summary.liveReleaseId
-      ? runList.find((run) => run.releaseId === summary.liveReleaseId && run.state === "succeeded")
+      ? runList.find(
+          (run) =>
+            run.state === "succeeded" &&
+            (run.releaseId === summary.liveReleaseId || run.id === liveRelease?.runId),
+        )
       : undefined
     return {
       projectId,
@@ -179,14 +249,23 @@ export function ProjectProvider({
       normalized: summary.buildMethod !== "legacy_compose",
       archived,
       markArchived: () => setArchivedLocally(true),
+      markUnarchived,
       runs: runList,
       runsLoading: runs.loading && !runs.data,
       hasOlderRuns: runs.data?.nextBefore !== undefined,
       releases: releases.data ?? [],
       operations: operations.data,
       operationsLoading: operations.loading && !operations.data,
+      configuration: configuration.data,
+      gitWatch: gitWatch.data,
+      blueprint: blueprint.data,
+      product: projectProduct(
+        summary,
+        configuration.data,
+        blueprint.data && { id: blueprint.data.id, image: blueprint.data.image.reference },
+      ),
       liveRun,
-      liveRelease: releases.data?.find((release) => release.id === summary.liveReleaseId),
+      liveRelease,
       refresh,
       refreshOperations: operations.refresh,
       start,
@@ -200,8 +279,12 @@ export function ProjectProvider({
     operations.data,
     operations.loading,
     operations.refresh,
+    configuration.data,
+    gitWatch.data,
+    blueprint.data,
     projectId,
     archived,
+    markUnarchived,
     refresh,
     start,
     starting,
@@ -220,8 +303,55 @@ export function ProjectProvider({
       </Page>
     )
   }
-  if (!value) return <PageState eyebrow="Deployments" title="Deployment" />
+  if (!value) return <ShellSkeleton projectId={projectId} />
   return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>
+}
+
+/**
+ * The project shell's silhouette while its first read is in flight: the way
+ * back and the name with the command's place beside it, then the identity
+ * line under them — the mark's tile, where it answers, the facts — then the
+ * page's own: the Overview's preview, wiring and readings on the Overview, a
+ * plain block elsewhere. It was a page titled "Deployment" over a framed
+ * table, so every project opened on a heading and a box that were both
+ * replaced a moment later by different ones.
+ */
+function ShellSkeleton({ projectId }: { projectId: number }) {
+  const overview = usePathname() === `/deploy/${projectId}`
+  return (
+    <Page aria-busy="true">
+      <div className="flex min-w-0 flex-wrap items-end justify-between gap-x-6 gap-y-3">
+        <div className="min-w-0 space-y-1.5">
+          <p className="eyebrow">
+            <Link
+              href="/deploy"
+              className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
+            >
+              <ArrowLeft className="size-3" /> Deployments
+            </Link>
+          </p>
+          <h1 className="sr-only">Loading deployment</h1>
+          <Skeleton aria-hidden className="h-8 w-56 max-w-full" />
+        </div>
+        <div aria-hidden className="flex shrink-0 items-center gap-2">
+          <Skeleton className="h-8 w-20" />
+          <Skeleton className="h-8 w-32" />
+        </div>
+      </div>
+      <div aria-hidden className="flex min-w-0 items-center gap-4 border-b border-hairline pb-6">
+        <Skeleton className="size-12 shrink-0 rounded-xl" />
+        <div className="min-w-0 flex-1 space-y-2">
+          <Skeleton className="h-4 w-44 max-w-full" />
+          <div className="flex min-w-0 gap-3">
+            <Skeleton className="h-3 w-32" />
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="hidden h-3 w-40 sm:block" />
+          </div>
+        </div>
+      </div>
+      {overview ? <OverviewSkeleton /> : <LoadingPanel plain />}
+    </Page>
+  )
 }
 
 /**

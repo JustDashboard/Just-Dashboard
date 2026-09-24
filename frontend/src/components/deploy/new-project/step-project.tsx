@@ -11,6 +11,7 @@ import { Disclosure, Field, FieldRow, FormFact, FormFacts, FormSection } from "@
 import { OptionList, OptionRow } from "@/components/form"
 import { Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
+import { ProductGlyph, frameworkProduct } from "@/components/product-logo"
 import { Well } from "@/components/panel"
 import { Input } from "@/components/ui/input"
 import {
@@ -150,9 +151,11 @@ export function StepProject({
       (configuration.build.secrets?.length ?? 0) > 0 &&
         `${configuration.build.secrets!.length} build secrets`,
       configuration.build.targetPlatform,
+      configuration.build.noCache && "without the cache",
     ]
       .filter(Boolean)
-      .join(" · ") || "Platform, clean build, release tasks, build secrets"
+      .join(" · ") || "Platform, cache, release tasks, build secrets"
+  const frameworkMark = frameworkProduct(flow.candidate?.framework)
 
   return (
     <>
@@ -162,8 +165,16 @@ export function StepProject({
         /* What detection made of it, at the section's edge rather than
            floating beside the branch control — a tag annotates the thing it
            sits at the end of (§4). Untinted: a framework is a fixed property,
-           and green is a reading of state (§3). */
-        actions={flow.candidate?.framework && <Tag>{frameworkLabel(flow.candidate.framework)}</Tag>}
+           and green is a reading of state (§3). Its own mark goes before the
+           word, the one the plan drawing's Build node carries. */
+        actions={
+          flow.candidate?.framework && (
+            <span className="inline-flex items-center gap-1.5">
+              {frameworkMark && <ProductGlyph id={frameworkMark} />}
+              <Tag>{frameworkLabel(flow.candidate.framework)}</Tag>
+            </span>
+          )
+        }
       >
         {/* The source's own name and mark are the first node of the plan
             drawing, so neither is repeated here: this section is the controls
@@ -351,12 +362,9 @@ export function StepProject({
               !configuration.build.outputDirectory)
           }
           facts={buildFacts}
-          summary={
-            <>
-              Build &amp; output settings
-              {flow.candidate?.framework ? ` · ${frameworkLabel(flow.candidate.framework)}` : ""}
-            </>
-          }
+          // No framework in the head: the Source section's tag and the plan's
+          // Build node already name it, and this made it four times on screen.
+          summary="Build & output settings"
         >
           {/* Three groups, not one auto-flowing grid. With every field in one
               `grid-cols-2` the pairs that land side by side are whichever ones

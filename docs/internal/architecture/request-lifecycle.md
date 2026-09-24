@@ -70,6 +70,14 @@ set the POST routes use. That socket is the one place a phrase may arrive as a q
 (`RequireTypedConfirmationWS`) — a browser cannot set a header on a WS handshake, and `wsx`'s origin
 check replaces what the header guarded.
 
+Two deployment reads open to every account answer more for an administrator. A webhook trigger list
+(`GET /deploy/{id}/environments/{env}/triggers`) carries each trigger's delivery summary
+(`lastDelivery`, `recent`) only for a session holding `system.admin`, because the delivery log it
+summarises is that caller's route and a summary is not a way around it. `GET /deploy/hostname?hostname=`
+resolves the typed name and answers `resolves` only for `system.admin`: resolving a name the caller
+chose is traffic the caller directs, and the reverse proxy's own DNS check, which it reuses, is kept at
+that capability. For anyone else the lookup never runs and the field is absent, never `false`.
+
 Files: `api/handlers_*.go`, one per feature, each with `mount<Feature>Routes` called from `Routes()`.
 `handlers_domains.go` and `handlers_docker_manage.go` own no mount function — they are mounted from the
 proxy and Docker mounts so those route maps stay in one place. Shared plumbing (`atoiDefault`,

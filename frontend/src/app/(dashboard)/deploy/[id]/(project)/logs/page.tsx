@@ -1,12 +1,11 @@
 "use client"
 
 import { Suspense } from "react"
-import { ProjectLogs } from "@/components/deploy/project-logs"
-import { LoadingPanel } from "@/components/state"
+import { LogsSkeleton, ProjectLogs } from "@/components/deploy/project-logs"
 
 export default function Page() {
   return (
-    <Suspense fallback={<LoadingPanel rows={4} />}>
+    <Suspense fallback={<LogsSkeleton />}>
       <ProjectLogs />
     </Suspense>
   )

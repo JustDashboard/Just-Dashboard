@@ -5,8 +5,10 @@ import { workingTreeCounts, workingTreeSquares, type WorkingTreePart } from "@/l
 import type { GitRepo } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { SourceBranch, SourceCommit } from "@/components/git/glyphs"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { hueFor } from "@/lib/hue"
+import { githubAvatarUrl } from "@/hooks/use-github"
+import { InitialsMark } from "@/components/account/user-avatar"
 
 /**
  * The four marks a git surface repeats everywhere, drawn once.
@@ -152,32 +154,68 @@ export function ShortSha({ sha, className }: { sha?: string; className?: string 
 }
 
 /**
- * Who made a commit, as the square a forge draws.
+ * Who made a commit, as the person they are everywhere else in the product.
  *
  * There is no avatar to fetch — these are checkouts on a host, not rows from
- * an API — so it is the author's initial on their own hue. It earns its pixels
- * the way the language mark does in the deploy chooser (§14's wayfinding
- * exception): a column of commits where mine and the bot's are two colours is
- * scanned, and one where they are the same grey is read.
- *
- * A square with a 3px radius, not a circle: at 16px tall a fully rounded
- * filled mark with a character in it is the pill §4 deleted.
+ * an API — so it is the account face without a picture (`InitialsMark`): the
+ * initial on the tinted wash of the hue the name is given in the rail, a run's
+ * actor and a variable's author. It was a solid square on a palette of its
+ * own, which drew "mira" in one colour as the author of a commit and another
+ * as the person who deployed it, in the same row (§14). It still earns its
+ * pixels the way the language mark does in the deploy chooser: a column of
+ * commits where mine and the bot's are two colours is scanned, and one where
+ * they are the same grey is read.
  */
 export function AuthorMark({ name, className }: { name?: string; className?: string }) {
   const who = (name ?? "").trim()
   if (!who) return null
+  return <InitialsMark name={who} size="xs" className={className} />
+}
+
+/**
+ * The two places a face goes: inside a line of text, where `AuthorMark` sits
+ * in a commit line, and at a row's head, the size of `ProductLogo`'s small
+ * tile.
+ */
+const FACE_BOX = { xs: "size-4 rounded-sm", sm: "size-8 rounded-md" } as const
+
+/**
+ * Who opened a pull request or pushed a revision, as the face their forge
+ * shows for them.
+ *
+ * GitHub's picture is fetched through the dashboard (`/git/github/avatar`),
+ * which is the one forge the server can ask; every other forge, and a GitHub
+ * login with no picture to find, is the account face's initials on its hue —
+ * the same mark the commit lines and a run's actor draw, so a login looks
+ * alike wherever the picture is missing. Square either way: a face in a
+ * circle is the pill §4 deleted.
+ */
+export function ForgeFace({
+  login,
+  provider,
+  size = "sm",
+  className,
+}: {
+  login?: string
+  /** The forge the login belongs to, as a trigger names it: `github`, `gitlab`… */
+  provider?: string
+  size?: keyof typeof FACE_BOX
+  className?: string
+}) {
+  const who = (login ?? "").trim()
+  if (!who) return null
+  if (provider !== "github") {
+    return <InitialsMark name={who} size={size} className={cn(FACE_BOX[size], className)} />
+  }
   return (
-    <span
-      aria-hidden
-      title={who}
-      className={cn(
-        "inline-flex size-4 shrink-0 items-center justify-center rounded-[3px] text-micro font-semibold text-background",
-        className,
-      )}
-      style={{ background: hueFor(who) }}
-    >
-      {who[0].toUpperCase()}
-    </span>
+    <Avatar className={cn(FACE_BOX[size], className)}>
+      <AvatarImage src={githubAvatarUrl(who)} alt="" />
+      {/* The mark shows while the picture is on its way and stays if there
+          is none; the root's radius clips it, so it draws square-edged. */}
+      <AvatarFallback className="rounded-none bg-transparent">
+        <InitialsMark name={who} size={size} className="size-full rounded-none" />
+      </AvatarFallback>
+    </Avatar>
   )
 }
 

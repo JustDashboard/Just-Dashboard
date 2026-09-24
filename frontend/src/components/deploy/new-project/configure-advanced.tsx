@@ -1,10 +1,9 @@
 "use client"
 
 import { Plus, Trash } from "@/components/icons"
-import { Field, FieldRow, FormSection, OptionRow } from "@/components/form"
+import { Field, FieldRow, FormSection, OptionList, OptionRow } from "@/components/form"
 import { Group } from "@/components/panel"
 import { IconAction } from "@/components/icon-action"
-import { ExplainIcon } from "@/components/docker/explain"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -16,9 +15,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { humanize } from "@/components/deploy/vocabulary"
+import { MountRows } from "@/components/deploy/settings/mounts"
+import { imageProduct } from "@/components/product-logo"
+import { EmptyNote } from "@/components/state"
 import type { DeploymentConfiguration, DeploymentRestartPolicy } from "@/lib/types"
 import type { WizardErrors } from "@/components/deploy/deployment-defaults"
 
@@ -256,94 +257,45 @@ export function HealthChecks({ configuration, onChange }: AdvancedProps) {
   )
 }
 
-/** What survives the container it is written in. */
+/**
+ * What survives the container it is written in.
+ *
+ * The rows are `MountRows`, the editor Storage settings draws, so a mount is
+ * the same fields in the same order on the day the project is created and on
+ * every day after: this had grown its own copy with a 12px "Read-only"
+ * checkbox and no labels, which is two answers to one question.
+ */
 export function StorageMounts({ configuration, onChange }: AdvancedProps) {
   const mounts = configuration.runtime.mounts ?? []
   const setMounts = (next: Mount[]) =>
     onChange({ ...configuration, runtime: { ...configuration.runtime, mounts: next } })
+  // A named volume is drawn as the product whose data it keeps, as Storage
+  // settings draws it — Postgres's elephant, not a generic disk, for an image
+  // or template that names one.
+  const named = configuration.runtime.image ? imageProduct(configuration.runtime.image) : undefined
   return (
     <div className="space-y-3">
+      {/* One line, not MountRows' own empty state: that is a dashed frame and
+          a plate inside the step's framed surface, repeating an absence the
+          fold's head has already stated. */}
       {mounts.length === 0 ? (
-        <p className="text-hint text-muted-foreground">No mounts configured.</p>
+        <EmptyNote className="px-0 py-2 text-left">
+          Nothing is mounted, so whatever the container writes is gone on its next release.
+        </EmptyNote>
       ) : (
-        <div className="space-y-2">
-          {mounts.map((mount, index) => (
-            <Group
-              key={index}
-              className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_9rem_auto_auto]"
-            >
-              <Input
-                aria-label={`Mount ${index + 1} source`}
-                value={mount.source}
-                placeholder="volume-name or /host/path"
-                className="font-mono"
-                onChange={(event) =>
-                  setMounts(
-                    mounts.map((item, i) =>
-                      i === index ? { ...item, source: event.target.value } : item,
-                    ),
-                  )
-                }
-              />
-              <Input
-                aria-label={`Mount ${index + 1} target`}
-                value={mount.target}
-                placeholder="/data"
-                className="font-mono"
-                onChange={(event) =>
-                  setMounts(
-                    mounts.map((item, i) =>
-                      i === index ? { ...item, target: event.target.value } : item,
-                    ),
-                  )
-                }
-              />
-              <Select
-                value={mount.ownership}
-                onValueChange={(ownership) =>
-                  setMounts(
-                    mounts.map((item, i) =>
-                      i === index ? { ...item, ownership: ownership as Mount["ownership"] } : item,
-                    ),
-                  )
-                }
-              >
-                <SelectTrigger aria-label={`Mount ${index + 1} ownership`} className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="managed">Managed</SelectItem>
-                  <SelectItem value="linked">Linked</SelectItem>
-                  <SelectItem value="observed">Observed</SelectItem>
-                </SelectContent>
-              </Select>
-              <Label className="flex min-h-9 items-center gap-2 text-xs whitespace-nowrap">
-                <Checkbox
-                  checked={mount.readOnly ?? false}
-                  onCheckedChange={(checked) =>
-                    setMounts(
-                      mounts.map((item, i) =>
-                        i === index ? { ...item, readOnly: checked === true } : item,
-                      ),
-                    )
-                  }
-                />
-                Read-only
-              </Label>
-              <IconAction
-                label={`Remove mount ${index + 1}`}
-                onClick={() => setMounts(mounts.filter((_, i) => i !== index))}
-              >
-                <Trash />
-              </IconAction>
-            </Group>
-          ))}
-        </div>
+        <MountRows
+          mounts={mounts}
+          onChange={setMounts}
+          idPrefix="adv-mount"
+          product={named === "docker" ? undefined : named}
+        />
       )}
       <Button
         type="button"
         variant="outline"
         size="sm"
+        // Managed, not the settings page's linked: a mount named while the
+        // project is being created is one the project makes, and owns.
         onClick={() => setMounts([...mounts, { source: "", target: "", ownership: "managed" }])}
       >
         <Plus className="size-3.5" /> Add mount
@@ -352,32 +304,37 @@ export function StorageMounts({ configuration, onChange }: AdvancedProps) {
   )
 }
 
-/** What the container is allowed to reach on the host it runs on. */
+/**
+ * What the container is allowed to reach on the host it runs on.
+ *
+ * The two binaries were 12px words beside a switch, each with a "?" holding
+ * the sentence that said what turning it on costs. On `/deploy/new` an
+ * option's title says the whole thing (§7), so the consequence is the title
+ * and the explainer went with it. The title turns amber while the option is
+ * on: that is a reading of what this container will be allowed to do, not a
+ * warning painted on a switch nobody has touched.
+ */
 export function ContainerAccess({ configuration, onChange }: AdvancedProps) {
   const updateRuntime = (patch: Partial<DeploymentConfiguration["runtime"]>) =>
     onChange({ ...configuration, runtime: { ...configuration.runtime, ...patch } })
+  const privileged = configuration.runtime.privileged ?? false
+  const hostNetwork = configuration.runtime.hostNetwork ?? false
   return (
-    <div className="space-y-3">
-      <div className="flex min-h-9 items-center gap-1.5 text-xs">
-        <Label className="flex items-center gap-2 text-xs">
-          <Switch
-            checked={configuration.runtime.privileged ?? false}
-            onCheckedChange={(privileged) => updateRuntime({ privileged })}
-          />
-          Privileged container
-        </Label>
-        <ExplainIcon name="privileged" />
-      </div>
-      <div className="flex min-h-9 items-center gap-1.5 text-xs">
-        <Label className="flex items-center gap-2 text-xs">
-          <Switch
-            checked={configuration.runtime.hostNetwork ?? false}
-            onCheckedChange={(hostNetwork) => updateRuntime({ hostNetwork })}
-          />
-          Use the host network
-        </Label>
-        <ExplainIcon name="hostNetwork" />
-      </div>
+    <div className="space-y-4">
+      <OptionList>
+        <OptionRow
+          title="Run privileged — every host device and kernel capability"
+          tone={privileged ? "warning" : "default"}
+          checked={privileged}
+          onCheckedChange={(next) => updateRuntime({ privileged: next })}
+        />
+        <OptionRow
+          title="Share the host's network — every port it opens is open on the host"
+          tone={hostNetwork ? "warning" : "default"}
+          checked={hostNetwork}
+          onCheckedChange={(next) => updateRuntime({ hostNetwork: next })}
+        />
+      </OptionList>
       <FieldRow columns={2}>
         <Field label="Linux capabilities" htmlFor="adv-capabilities" hint="One per line.">
           <Textarea
@@ -385,7 +342,7 @@ export function ContainerAccess({ configuration, onChange }: AdvancedProps) {
             value={(configuration.runtime.capabilities ?? []).join("\n")}
             onChange={(event) => updateRuntime({ capabilities: nonemptyLines(event.target.value) })}
             rows={3}
-            className="font-mono text-xs"
+            className="font-mono sm:text-xs"
           />
         </Field>
         <Field label="Host devices" htmlFor="adv-devices" hint="One absolute path per line.">
@@ -394,7 +351,7 @@ export function ContainerAccess({ configuration, onChange }: AdvancedProps) {
             value={(configuration.runtime.devices ?? []).join("\n")}
             onChange={(event) => updateRuntime({ devices: nonemptyLines(event.target.value) })}
             rows={3}
-            className="font-mono text-xs"
+            className="font-mono sm:text-xs"
           />
         </Field>
       </FieldRow>
@@ -430,13 +387,11 @@ export function BuildExtras({
             className="font-mono"
           />
         </Field>
-        <Label className="flex min-h-9 items-center gap-2 text-xs">
-          <Switch
-            checked={configuration.build.noCache ?? false}
-            onCheckedChange={(noCache) => updateBuild({ noCache })}
-          />
-          Force a clean build
-        </Label>
+        <OptionRow
+          title="Build without the cache — every layer from scratch"
+          checked={configuration.build.noCache ?? false}
+          onCheckedChange={(noCache) => updateBuild({ noCache })}
+        />
       </div>
 
       <FormSection
@@ -609,7 +564,7 @@ function CheckFields({
             value={Array.isArray(config.command) ? (config.command as string[]).join("\n") : ""}
             onChange={(event) => updateConfig({ command: nonemptyLines(event.target.value) })}
             rows={3}
-            className="font-mono text-xs"
+            className="font-mono sm:text-xs"
           />
         </Field>
       )}
@@ -677,33 +632,12 @@ function VariableEditor({
   onChange: (variables: Variable[]) => void
   overriddenNames?: string[]
 }) {
+  // The add sits under the rows, where every other list on these screens puts
+  // it (Add variable, Add mount, Add another hostname), and an empty list is
+  // just that button rather than a sentence saying there is nothing above it.
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() =>
-            onChange([
-              ...variables,
-              {
-                name: "",
-                sensitivity: "secret",
-                scopes: ["runtime"],
-                required: false,
-                reference: "",
-              },
-            ])
-          }
-        >
-          <Plus className="size-3.5" />
-          Add variable reference
-        </Button>
-      </div>
-      {variables.length === 0 ? (
-        <p className="text-hint text-muted-foreground">No variable references configured.</p>
-      ) : (
+      {variables.length > 0 && (
         <div className="space-y-2">
           {variables.map((variable, index) => (
             <Group
@@ -808,7 +742,7 @@ function VariableEditor({
               </IconAction>
               <div className="flex flex-wrap gap-x-4 gap-y-2 sm:col-span-4">
                 {["build", "runtime", "release_task"].map((scope) => (
-                  <Label key={scope} className="flex min-h-9 items-center gap-2 text-xs">
+                  <Label key={scope} className="flex min-h-9 items-center gap-2 text-body">
                     <Checkbox
                       checked={variable.scopes.includes(scope)}
                       onCheckedChange={(checked) =>
@@ -829,7 +763,7 @@ function VariableEditor({
                     {humanize(scope)}
                   </Label>
                 ))}
-                <Label className="flex min-h-9 items-center gap-2 text-xs">
+                <Label className="flex min-h-9 items-center gap-2 text-body">
                   <Checkbox
                     checked={variable.required ?? false}
                     onCheckedChange={(checked) =>
@@ -847,6 +781,26 @@ function VariableEditor({
           ))}
         </div>
       )}
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={() =>
+          onChange([
+            ...variables,
+            {
+              name: "",
+              sensitivity: "secret",
+              scopes: ["runtime"],
+              required: false,
+              reference: "",
+            },
+          ])
+        }
+      >
+        <Plus className="size-3.5" />
+        Add variable reference
+      </Button>
     </div>
   )
 }
@@ -865,25 +819,7 @@ function BuildSecretEditor({
   const buildVariables = variables.filter((variable) => variable.scopes.includes("build"))
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() => onChange([...secrets, { variable: "", step: "install" }])}
-        >
-          <Plus className="size-3.5" />
-          Add build secret
-        </Button>
-      </div>
-      {error && (
-        <p role="alert" className="text-xs text-destructive">
-          {error}
-        </p>
-      )}
-      {secrets.length === 0 ? (
-        <p className="text-hint text-muted-foreground">No build secrets configured.</p>
-      ) : (
+      {secrets.length > 0 && (
         <div className="space-y-2">
           {secrets.map((secret, index) => (
             <Group key={index} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_10rem_auto]">
@@ -933,6 +869,20 @@ function BuildSecretEditor({
           ))}
         </div>
       )}
+      {error && (
+        <p role="alert" className="text-hint leading-relaxed text-destructive">
+          {error}
+        </p>
+      )}
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={() => onChange([...secrets, { variable: "", step: "install" }])}
+      >
+        <Plus className="size-3.5" />
+        Add build secret
+      </Button>
       <datalist id="build-variable-names">
         {buildVariables.map((variable) => (
           <option key={variable.name} value={variable.name} />
@@ -958,30 +908,7 @@ function ReleaseTaskEditor({
     onChange(tasks.map((task, i) => (i === index ? { ...task, ...patch } : task)))
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() =>
-            onChange([
-              ...tasks,
-              { name: "", command: "", workingDirectory: "", timeoutSeconds: 300, env: [] },
-            ])
-          }
-        >
-          <Plus className="size-3.5" />
-          Add release task
-        </Button>
-      </div>
-      {error && (
-        <p role="alert" className="text-xs text-destructive">
-          {error}
-        </p>
-      )}
-      {tasks.length === 0 ? (
-        <p className="text-hint text-muted-foreground">No release tasks configured.</p>
-      ) : (
+      {tasks.length > 0 && (
         <div className="space-y-3">
           {tasks.map((task, index) => (
             <Group key={index} className="space-y-3">
@@ -1023,7 +950,7 @@ function ReleaseTaskEditor({
                 onChange={(event) => update(index, { command: event.target.value })}
                 placeholder="./bin/migrate"
                 rows={3}
-                className="font-mono text-xs"
+                className="font-mono sm:text-xs"
               />
               <div>
                 <p className="text-hint text-muted-foreground">Release task environment</p>
@@ -1036,7 +963,7 @@ function ReleaseTaskEditor({
                     {releaseVariables.map((variable) => (
                       <Label
                         key={variable.name}
-                        className="flex min-h-9 items-center gap-2 text-xs"
+                        className="flex min-h-9 items-center gap-2 text-body"
                       >
                         <Checkbox
                           checked={task.env.includes(variable.name)}
@@ -1058,6 +985,25 @@ function ReleaseTaskEditor({
           ))}
         </div>
       )}
+      {error && (
+        <p role="alert" className="text-hint leading-relaxed text-destructive">
+          {error}
+        </p>
+      )}
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={() =>
+          onChange([
+            ...tasks,
+            { name: "", command: "", workingDirectory: "", timeoutSeconds: 300, env: [] },
+          ])
+        }
+      >
+        <Plus className="size-3.5" />
+        Add release task
+      </Button>
     </div>
   )
 }

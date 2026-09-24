@@ -191,6 +191,11 @@
           "kind": "fixed",
           "text": "Installing or updating no longer runs out of memory on a 2 GB server",
           "detail": "The image build ran the type-check in a second process alongside the compiler, which intermittently exceeded a small server's memory. The image build skips it; the application it emits is identical, and the developer's build still type-checks."
+        },
+        {
+          "kind": "changed",
+          "text": "Every deployment page draws what it is about, and a project's settings read as forms",
+          "detail": "The projects page opens on what is live, how much traffic there is and how much of it fails, and how busy the builders are, with the projects that need you first; each card shows the project's own logo, where its code comes from, its last commit, its hour of traffic and its last fourteen runs. A project opens on one line describing it and its site, a run shows who started it and the stage it has reached, and the build log groups each step, counts its errors and can be downloaded. The Logs page's readings each carry their last hour, and the first alert can be added right there. Every settings page puts its section names down the left and a Save at the foot of each form, and saving one section no longer throws away unsaved edits in another. Credentials are drawn as the hosts they sign in to, and notification channels and webhooks as the services they reach with their last fourteen deliveries; a pasted token names the service it belongs to, a .env import shows what each line will do before anything is written, Add domain shows the DNS record to create and whether it already points here, schedules show their next five runs, and deleting a project for good asks for its name. Restart and Stop ask before they interrupt the site, and an archived project can be restored from its Danger zone. Along the way a long traffic window says how wide its points really are and keeps the minute happening now, a project's links to its backup job and database open them, and a build whose commit could not be described keeps the rest of that step's log."
         }
       ]
     },

@@ -9,9 +9,10 @@
  * what the builder writes is what the reader sees described.
  *
  * Only what Vixie cron accepts: five fields, `*`, lists, ranges, steps, the
- * month and weekday names, and the `@` nicknames. Times are computed in this
- * browser's clock and time zone — cron runs on the server's — and the page
- * says so beside the figure.
+ * month and weekday names, and the `@` nicknames. `nextCronRun` computes in
+ * this browser's clock and time zone — cron runs on the server's — and the
+ * page says so beside the figure; a schedule that names its own zone (a
+ * deployment's) is read in that zone by `nextCronRunsIn`.
  */
 
 export type CronFields = {
@@ -252,15 +253,7 @@ export function nextCronRun(expression: string, from: Date = new Date()): Date |
   if (!cron) return null
   const hours = [...cron.hour].sort((a, b) => a - b)
   const minutes = [...cron.minute].sort((a, b) => a - b)
-  const dayMatches = (d: Date) => {
-    if (!cron.month.has(d.getMonth() + 1)) return false
-    const dom = cron.dayOfMonth.has(d.getDate())
-    const dow = cron.dayOfWeek.has(d.getDay())
-    if (cron.anyDayOfMonth && cron.anyDayOfWeek) return true
-    if (cron.anyDayOfMonth) return dow
-    if (cron.anyDayOfWeek) return dom
-    return dom || dow
-  }
+  const dayMatches = (d: Date) => onDay(cron, d.getMonth() + 1, d.getDate(), d.getDay())
 
   const start = new Date(from.getTime())
   start.setSeconds(0, 0)
@@ -279,6 +272,123 @@ export function nextCronRun(expression: string, from: Date = new Date()): Date |
     }
   }
   return null
+}
+
+/**
+ * Whether a schedule fires at all on a date. When both day fields are
+ * restricted cron fires on either — the 15th, or any Friday — not only on a
+ * Friday the 15th.
+ */
+function onDay(cron: CronFields, month: number, date: number, weekday: number): boolean {
+  if (!cron.month.has(month)) return false
+  const dom = cron.dayOfMonth.has(date)
+  const dow = cron.dayOfWeek.has(weekday)
+  if (cron.anyDayOfMonth && cron.anyDayOfWeek) return true
+  if (cron.anyDayOfMonth) return dow
+  if (cron.anyDayOfWeek) return dom
+  return dom || dow
+}
+
+const MINUTE = 60_000
+const HOUR = 60 * MINUTE
+const DAY = 24 * HOUR
+
+const zoneFormats = new Map<string, Intl.DateTimeFormat>()
+
+/** Reads an instant as a zone's wall clock; undefined for a zone this browser does not know. */
+function zoneFormat(timeZone: string): Intl.DateTimeFormat | undefined {
+  let format = zoneFormats.get(timeZone)
+  if (format) return format
+  try {
+    format = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+      second: "numeric",
+    })
+  } catch {
+    // A zone typed by hand, or one the server knows and this browser's
+    // tables do not: there is nothing honest to preview.
+    return undefined
+  }
+  zoneFormats.set(timeZone, format)
+  return format
+}
+
+/** The zone's wall clock at an instant, written as the UTC instant with the same digits. */
+function wallAt(format: Intl.DateTimeFormat, instant: number): number {
+  const at: Record<string, number> = {}
+  for (const part of format.formatToParts(instant)) at[part.type] = Number(part.value)
+  return Date.UTC(at.year, at.month - 1, at.day, at.hour, at.minute, at.second)
+}
+
+function offsetAt(format: Intl.DateTimeFormat, instant: number): number {
+  return wallAt(format, instant) - Math.floor(instant / 1000) * 1000
+}
+
+/**
+ * The next `count` moments a schedule fires after `from`, reading its fields
+ * as the wall clock of `timeZone` — the zone a deployment's schedule names,
+ * which is rarely the browser's. Empty for `@reboot`, for a schedule that
+ * never matches, and for a zone this browser cannot read.
+ *
+ * Daylight saving is kept the way the server's own walk keeps it: a time the
+ * spring change skips never fires that day, and a time the autumn change
+ * repeats fires twice, once on each side of it.
+ *
+ * It walks the zone's calendar a day at a time, as `nextCronRun` does. On a
+ * day with no change of offset near it every wall time is one instant, found
+ * by arithmetic; only a day with a change is checked time by time.
+ */
+export function nextCronRunsIn(
+  expression: string,
+  timeZone: string,
+  count: number,
+  from: Date = new Date(),
+): Date[] {
+  const cron = parseCron(expression)
+  const format = zoneFormat(timeZone)
+  if (!cron || !format) return []
+  const hours = [...cron.hour].sort((a, b) => a - b)
+  const minutes = [...cron.minute].sort((a, b) => a - b)
+
+  const start = Math.floor(from.getTime() / MINUTE) * MINUTE + MINUTE
+  const first = new Date(wallAt(format, start))
+  let day = Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), first.getUTCDate())
+  // Five years covers every real schedule; anything further is unmatchable.
+  const limit = Date.UTC(first.getUTCFullYear() + 5, first.getUTCMonth(), first.getUTCDate())
+  const out: number[] = []
+  for (; day < limit && out.length < count; day += DAY) {
+    const date = new Date(day)
+    if (!onDay(cron, date.getUTCMonth() + 1, date.getUTCDate(), date.getUTCDay())) continue
+    // Offsets run from -12h to +14h, so every instant this day's wall times
+    // name lies between these two readings.
+    const before = offsetAt(format, day - 14 * HOUR)
+    const after = offsetAt(format, day + DAY + 12 * HOUR)
+    const offsets = before === after ? [before] : [before, after]
+    const found: number[] = []
+    for (const h of hours) {
+      for (const m of minutes) {
+        const wall = day + h * HOUR + m * MINUTE
+        for (const offset of offsets) {
+          const instant = wall - offset
+          if (instant < start) continue
+          // Only on a day with a change can an offset be the wrong one: the
+          // spring gap matches neither, the autumn overlap matches both.
+          if (offsets.length === 1 || wallAt(format, instant) === wall) found.push(instant)
+        }
+      }
+    }
+    // The repeated hour interleaves: 01:45 before the change comes ahead of
+    // 01:15 after it.
+    found.sort((a, b) => a - b)
+    out.push(...found.slice(0, count - out.length))
+  }
+  return out.map((instant) => new Date(instant))
 }
 
 /** The presets the job dialog offers, each a real expression. */

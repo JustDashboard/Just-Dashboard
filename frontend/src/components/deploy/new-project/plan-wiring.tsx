@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef } from "react"
-import { Cpu, Globe, Wrench } from "@/components/icons"
+import { Box, Globe, Wrench } from "@/components/icons"
 import type { DeploymentConfiguration, DeploymentDraftSource, WorkloadProfile } from "@/lib/types"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import {
@@ -9,8 +9,15 @@ import {
   SourceMark,
   frameworkLabel,
   humanize,
-  isGitHubSource,
+  sourceProduct,
 } from "@/components/deploy/vocabulary"
+import {
+  ProductGlyph,
+  buildMethodProduct,
+  frameworkProduct,
+  hasProductLogo,
+  imageProduct,
+} from "@/components/product-logo"
 import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
 
 /**
@@ -112,6 +119,33 @@ export function PlanWiring({
       ? "The workload is recorded, never rebuilt"
       : "The image is pulled at its digest"
 
+  const sourceId = sourceProduct(
+    {
+      sourceKind: source.kind,
+      sourceRef: source.ref ?? "",
+      sourceRepository: source.image ?? source.repository ?? "",
+      sourceRemote: source.url ?? "",
+    },
+    source,
+  )
+  // What runs, by the resolver the overview's Runtime node reads
+  // (`runtimeProduct` in project-overview.tsx): a repository's language, or
+  // Docker for a Dockerfile and nginx for a static site; the product an image
+  // or a template is; Compose for a stack. The Build node draws only what
+  // detection named, so a Node.js project is not the Node.js mark twice.
+  const runtimeId =
+    source.kind === "image"
+      ? imageProduct(source.image ?? "")
+      : source.kind === "blueprint"
+        ? source.blueprintId
+        : source.kind === "compose"
+          ? "docker-compose"
+          : buildMethodProduct(build.method, {
+              recipe: build.recipe,
+              packageManager: build.packageManager,
+            })
+  const buildId = frameworkProduct(framework)
+
   const limits = [
     runtime.memoryMb ? `${runtime.memoryMb} MB` : undefined,
     runtime.cpus ? `${runtime.cpus} CPU` : undefined,
@@ -148,17 +182,18 @@ export function PlanWiring({
             <WireNode
               nodeRef={sourceMark}
               mark={
-                /* The mark the source was chosen under, drawn from the one
-                   mapping the chooser also reads: this node used to pick its
-                   own, so a repository chosen under GitHub's mark was redrawn
-                   here as a share glyph. */
-                /* `ink` is the tone this vocabulary keeps for a third
-                   party's own mark, and it is how the Credentials picture
-                   already draws GitHub: the octocat is a filled silhouette,
-                   and in the neutral plate — which is sized for a 5px-stroke
-                   outline glyph — it read as a smudge rather than as a logo. */
-                <WireMark size="md" tone={isGitHubSource(source) ? "ink" : "neutral"}>
-                  <SourceMark source={source} />
+                /* Where it comes from, drawn as that product on the logo
+                   tile — GitHub, GitLab, the image's own mark, the template's
+                   — by the resolver the project overview's picture reads, so
+                   the node looks the same before the project exists and
+                   after. A source no product names keeps the chooser's glyph
+                   for its kind on the same tile. */
+                <WireMark size="md" tone="logo">
+                  {hasProductLogo(sourceId) ? (
+                    <ProductGlyph id={sourceId} />
+                  ) : (
+                    <SourceMark source={source} />
+                  )}
                 </WireMark>
               }
               eyebrow="Source"
@@ -170,7 +205,6 @@ export function PlanWiring({
                   ) : (
                     SOURCE_KIND_LABELS[source.kind]
                   )}
-                  {framework && ` · ${frameworkLabel(framework)}`}
                 </span>
               }
             />
@@ -183,9 +217,18 @@ export function PlanWiring({
               nodeRef={buildMark}
               mark={
                 builds ? (
-                  <WireMark size="md">
-                    <Wrench />
-                  </WireMark>
+                  // The framework detection found, as itself; a wrench when
+                  // detection named none. What the build makes runs on the
+                  // next node, drawn as that.
+                  hasProductLogo(buildId) ? (
+                    <WireMark size="md" tone="logo">
+                      <ProductGlyph id={buildId} />
+                    </WireMark>
+                  ) : (
+                    <WireMark size="md">
+                      <Wrench />
+                    </WireMark>
+                  )
                 ) : (
                   <WirePlaceholder size="md">
                     <Wrench />
@@ -204,8 +247,15 @@ export function PlanWiring({
             <WireNode
               nodeRef={runtimeMark}
               mark={
-                <WireMark size="md">
-                  <Cpu />
+                // The overview's Runtime node before the project exists: the
+                // product the container runs on its logo tile, a container
+                // glyph on the same tile when nothing names one.
+                <WireMark size="md" tone="logo">
+                  {hasProductLogo(runtimeId) ? (
+                    <ProductGlyph id={runtimeId} />
+                  ) : (
+                    <Box aria-hidden />
+                  )}
                 </WireMark>
               }
               eyebrow="Runtime"
@@ -235,8 +285,10 @@ export function PlanWiring({
             <WireNode
               nodeRef={addressMark}
               mark={
+                // Neutral, as the overview's Domains node is: brand there is the
+                // live release, and having a hostname is not a place (§3).
                 domain ? (
-                  <WireMark size="md" tone="brand">
+                  <WireMark size="md">
                     <Globe />
                   </WireMark>
                 ) : (

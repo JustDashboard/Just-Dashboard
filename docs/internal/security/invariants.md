@@ -109,7 +109,10 @@ route does, and *which version* is what has to be read before pressing a button 
 forgetting a connection; stopping a database session; stopping/restarting/killing/removing/recreating a
 container; removing an image or network; any prune that spares volumes; deleting one file; signalling a
 process; ending an SSH session; stopping or restarting a service; revoking a token or SSH key; deleting a
-backup job or deploy project; rolling back a deploy; disabling **or deleting** a vhost; deleting an nginx
+backup job or deploy project (permanently deleting an *archived* deployment asks for its name in the
+dialog, as the dialog's own guard against a slip in an act that cannot be undone, but the name is not
+sent and the route stays in this set — see [permanent-deletion](../deployments/permanent-deletion.md));
+rolling back a deploy; disabling **or deleting** a vhost; deleting an nginx
 stream, htpasswd file or saved DNS-provider credential (pasted again in a minute); deleting a git branch, a branch on the remote, a tag or a remote; adding, **editing** or deleting a firewall rule; tuning a
 fail2ban jail; unbanning an address; stopping a running job; closing a terminal session, window or pane;
 and **removing a package without purging it** — undone by installing it again, where the /etc files

@@ -1,54 +1,76 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { ArrowRight } from "@/components/icons"
 import { get } from "@/lib/api"
 import { percent, relativeTime } from "@/lib/format"
+import { perMinute } from "@/lib/requests"
+import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import { useSocket, type Envelope } from "@/hooks/use-socket"
 import type {
-  BlueprintDetail,
-  TrafficPulse,
-  ContainerHistory,
-  ContainerStats,
   DeploymentDiagnosis,
-  DeploymentGitWatch,
   DeploymentPreview,
+  DeploymentSummary,
+  TrafficPulse,
 } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
-import { EmptyNote, Notice } from "@/components/state"
+import { EmptyNote } from "@/components/state"
 import { FindingList, type Finding } from "@/components/finding-list"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { Status, StatusDot } from "@/components/status-dot"
+import { ChoiceList } from "@/components/flow"
+import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
+import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
+import { ProductLogo, buildMethodProduct, imageProduct } from "@/components/product-logo"
+import { TileTrend } from "@/components/metrics/sparkline"
+import { SourcePull } from "@/components/git/glyphs"
 import { Button } from "@/components/ui/button"
+import { BlurFade } from "@/components/ui/blur-fade"
+import { Confetti, type ConfettiRef } from "@/components/ui/confetti"
+import { NumberTicker } from "@/components/ui/number-ticker"
 import { useProject } from "@/components/deploy/project-context"
 import {
-  RunStatus,
+  WORKLOAD_LABELS,
   deploymentURL,
   hostOf,
+  isActiveRun,
   projectState,
-  runSubject,
-  runTitle,
+  shortRevision,
   sourceLine,
+  sourceProduct,
 } from "@/components/deploy/vocabulary"
+import { failingTone } from "@/components/deploy/fleet"
 import { FirstSignIn } from "@/components/deploy/first-sign-in"
 import { SitePreview } from "@/components/deploy/site-preview"
 import { RollbackDialog } from "@/components/deploy/rollback-dialog"
 import { ProjectWiring } from "@/components/deploy/project-wiring"
 import { Insights } from "@/components/deploy/insights"
-import { Sparkline } from "@/components/metrics/sparkline"
-import { perMinute } from "@/lib/requests"
-import { NumberTicker } from "@/components/ui/number-ticker"
+import { RunRow } from "@/components/deploy/run-row"
+import { UsageTiles } from "@/components/deploy/usage-tiles"
 
 /**
- * The project's front page: a window onto the live site, the facts a visitor
- * asks first, what needs attention, and the last few deployments and the
- * usage they produced. Findings live here rather than on Runtime — Runtime is
- * evidence, this is the verdict.
+ * The project's front page, in the order a visitor asks: is something
+ * happening now, what is live and how a request reaches it, how it is doing,
+ * what needs attention, how often it ships, and what shipped last.
+ *
+ * A run in flight is the first thing on the page, as the run itself — the
+ * runs list's own row, with the stage it is at and a light running round its
+ * edge — where it was a notice with a link in it (§14: a state is not a
+ * banner), and it is not listed again under recent deployments. Under it,
+ * Production: a window onto the live site beside the way a request reaches
+ * it, and under both the four live readings — requests, the share failing,
+ * processor and memory — each carrying its last hour and each a way to the
+ * page that has the rest. They were two panels of two tiles, the second of
+ * which sat alone on its own row at every desktop width.
+ *
+ * Findings live here rather than on Runtime — Runtime is evidence, this is
+ * the verdict — and the identity line's "needs attention" links to them. The
+ * recent deployments are runs you open, drawn as the runs list draws them,
+ * beside the preview environments. Each block arrives on its own beat, and a
+ * block whose read settles later rises when it does (§11).
  */
 export function ProjectOverview() {
   const project = useProject()
@@ -58,29 +80,12 @@ export function ProjectOverview() {
   const [rollbackOpen, setRollbackOpen] = useState(false)
 
   const url = deploymentURL(deployment.endpoint)
-  const source = sourceLine(deployment, record, project.liveRun ?? deployment.lastRun)
+  const state = projectState(deployment, runtime, project.archived)
   const opsDomains =
     project.operations?.domains.status === "available"
       ? project.operations.domains.domains
       : undefined
-
-  const watch = usePoll(
-    (signal) =>
-      get<DeploymentGitWatch>(
-        `/deploy/${project.projectId}/environments/${project.environmentId}/git-watch`,
-        undefined,
-        signal,
-      ),
-    15000,
-    [project.projectId, project.environmentId],
-    {
-      enabled:
-        project.normalized &&
-        deployment.sourceKind === "git" &&
-        project.environmentId > 0 &&
-        !project.archived,
-    },
-  )
+  const domain = opsDomains?.find((route) => route.hostname === hostOf(url))
 
   const previews = usePoll(
     (signal) =>
@@ -91,220 +96,203 @@ export function ProjectOverview() {
   )
 
   const findings = useFindings(project.operations?.diagnosis, router)
-  const recentRuns = project.runs
-    .filter((run) => run.environmentId === project.environmentId)
-    .slice(0, 5)
+  const runs = project.runs.filter((run) => run.environmentId === project.environmentId)
+  // The run in flight is the page's first block; it is not listed a second
+  // time under it.
+  const recent = runs.filter((run) => run.id !== deployment.activeRun?.id).slice(0, 5)
   const liveService =
     runtime?.status === "available"
       ? (runtime.services.find((service) => service.liveRelease) ?? runtime.services[0])
       : undefined
   const buildLogsRun = deployment.activeRun ?? project.liveRun
-  /**
-   * How to get into what was just deployed.
-   *
-   * A template deployment's source identity carries the reviewed `id@version`,
-   * and the definition behind it declares how its first sign-in works. That
-   * declaration is the whole point: the operator who deployed a template and
-   * met a login form for an account nobody had created was reading a page that
-   * knew the image, the port and the volumes, and had nothing to say about the
-   * one thing they needed.
-   */
-  const blueprintId =
-    deployment.sourceKind === "blueprint" ? (deployment.sourceRef ?? "").split("@")[0] : ""
-  const blueprint = usePoll(
-    (signal) => get<BlueprintDetail>(`/deploy/blueprints/${blueprintId}`, undefined, signal),
-    0,
-    [blueprintId],
-    { enabled: Boolean(blueprintId) },
-  )
-  const access = blueprint.data?.id === blueprintId ? blueprint.data.access : undefined
+  const product = project.product
+  const access = project.blueprint?.access
 
   const rollbackEligible = project.releases.some(
     (release) => release.state === "retained" && release.id !== deployment.liveReleaseId,
   )
   const domainHostnames = useMemo(() => {
-    if (opsDomains) return opsDomains.map((domain) => domain.hostname)
+    if (opsDomains) return opsDomains.map((route) => route.hostname)
     const host = url && hostOf(url)
     return host ? [host] : []
   }, [opsDomains, url])
 
-  return (
-    <div className="animate-rise space-y-8">
-      {deployment.activeRun && (
-        <Notice title="A deployment is in progress">
-          <Link
-            className="inline-flex items-center gap-2 rounded-sm underline focus-ring"
-            href={`/deploy/${project.projectId}/runs/${deployment.activeRun.id}`}
-          >
-            Follow the build <ArrowRight className="size-3.5" />
-          </Link>
-        </Notice>
-      )}
+  const celebrate = useCelebration(deployment)
 
-      {/* The one framed block on the page: a window you look through (spec §1.1). */}
-      <Panel plain>
-        <PanelHeader
-          title="Production"
-          actions={
-            <>
-              {buildLogsRun && (
-                <Button variant="outline" size="sm" asChild>
-                  <Link href={`/deploy/${project.projectId}/runs/${buildLogsRun.id}`}>
-                    Build logs
-                  </Link>
-                </Button>
-              )}
-              {rollbackEligible && can("destructive") && (
-                <Button variant="outline" size="sm" onClick={() => setRollbackOpen(true)}>
-                  Roll back
-                </Button>
-              )}
-            </>
-          }
-        />
-        <PanelBody
-          flush
-          // The preview takes a measure rather than a share: past about 32rem a
-          // thumbnail stops telling the reader more and only grows a tall block
-          // of somebody else's website into the middle of the page.
-          className="grid items-start gap-8 pt-4 lg:grid-cols-[minmax(0,32rem)_minmax(0,1fr)]"
+  const blocks: [string, React.ReactNode][] = []
+  if (deployment.activeRun)
+    blocks.push([
+      `run-${deployment.activeRun.id}`,
+      <ChoiceList key="run" aria-label="Deployment in progress">
+        <RunRow run={deployment.activeRun} deployment={deployment} />
+      </ChoiceList>,
+    ])
+
+  blocks.push([
+    "production",
+    <Panel key="production" plain>
+      <PanelHeader
+        title={deployment.environmentName}
+        actions={
+          <>
+            {buildLogsRun && (
+              <Button variant="outline" size="sm" asChild>
+                <Link href={`/deploy/${project.projectId}/runs/${buildLogsRun.id}`}>
+                  Build logs
+                </Link>
+              </Button>
+            )}
+            {rollbackEligible && can("destructive") && (
+              <Button variant="outline" size="sm" onClick={() => setRollbackOpen(true)}>
+                Roll back
+              </Button>
+            )}
+          </>
+        }
+      />
+      <PanelBody flush className="pt-4">
+        <div
+          // The preview takes a measure rather than a share from `xl`: past
+          // about 32rem a thumbnail stops telling the reader more and only
+          // grows a tall block of somebody else's website into the middle of
+          // the page. Below it the two share the width, because at a 1024
+          // window a fixed preview left the wiring 170 pixels and its
+          // addresses ran past the page's edge.
+          className="grid grid-cols-[minmax(0,1fr)] items-start gap-8 lg:grid-cols-2 xl:grid-cols-[minmax(0,32rem)_minmax(0,1fr)]"
         >
           <SitePreview
-            key={`${deployment.endpoint}:${deployment.liveReleaseId}`}
+            // A new address, a new release or a start after a stop is a fresh
+            // load: the frame is hidden again until it has painted.
+            key={`${deployment.endpoint}:${deployment.liveReleaseId}:${state === "stopped"}`}
             deployment={deployment}
+            product={product}
+            domain={domain}
+            stopped={state === "stopped"}
           />
           <ProjectWiring
             projectId={project.projectId}
             deployment={deployment}
-            state={projectState(deployment, runtime, project.archived)}
-            source={source}
+            state={state}
+            branch={sourceLine(deployment, record).primary}
+            title={sourceTitle(deployment, record.repoPath, project)}
+            sourceMark={sourceProduct(deployment, project.configuration?.source)}
+            sourceDetail={sourceDetail(deployment, project)}
+            runtimeProduct={runtimeProduct(deployment, product, project.configuration)}
+            product={product}
             liveRelease={project.liveRelease}
             liveRun={project.liveRun}
+            runs={runs}
             runtime={runtime}
             domains={opsDomains}
             url={url}
-            watch={watch.data}
+            watch={project.gitWatch}
           />
+        </div>
+        {/* The four readings a visitor asks after "is it up": two from the
+            request record and two from the live container, one row of
+            figures under the picture they describe. */}
+        <div className="mt-6 grid min-w-0 border-t border-hairline xl:grid-cols-2">
+          <TrafficTiles projectId={project.projectId} />
+          <div className="min-w-0 border-t border-hairline xl:border-t-0 xl:border-l xl:pl-5">
+            {/* A container that has exited has no usage to read live: its
+                last socket frame would claim a reading of something that is
+                not running (§11). */}
+            <UsageTiles
+              containerId={liveService?.state === "running" ? liveService.containerId : undefined}
+              name={liveService?.name}
+              reason={
+                liveService && liveService.state !== "running"
+                  ? "The containers are not running"
+                  : runtime?.reason || "Usage appears when your application starts."
+              }
+              href={`/deploy/${project.projectId}/runtime`}
+            />
+          </div>
+        </div>
+      </PanelBody>
+    </Panel>,
+  ])
+
+  if (access)
+    blocks.push([
+      "sign-in",
+      <FirstSignIn
+        key="sign-in"
+        access={access}
+        url={url}
+        projectId={project.projectId}
+        environmentId={project.environmentId}
+        canReveal={can("system.admin")}
+        product={product}
+        service={liveService?.name}
+        port={deployment.internalPort}
+      />,
+    ])
+
+  if (findings.length > 0)
+    blocks.push([
+      "attention",
+      <Panel key="attention" plain id="attention" className="scroll-mt-6">
+        <PanelHeader title="Needs attention" />
+        <PanelBody>
+          <FindingList findings={findings} />
+        </PanelBody>
+      </Panel>,
+    ])
+
+  // The delivery figures belong on the front page as much as on Deployments:
+  // how often this project ships and how often it fails are the two facts a
+  // visitor asks after "is it up".
+  if (project.normalized)
+    blocks.push(["delivery", <Insights key="delivery" projectId={project.projectId} />])
+
+  const hasPreviews = Boolean(previews.data && previews.data.length > 0)
+  blocks.push([
+    "history",
+    <div
+      key="history"
+      className={
+        hasPreviews ? "grid min-w-0 gap-8 2xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]" : "min-w-0"
+      }
+    >
+      <Panel plain>
+        <PanelHeader
+          title="Recent deployments"
+          actions={
+            <Link
+              href={`/deploy/${project.projectId}/deployments`}
+              className="inline-flex items-center gap-1 rounded-sm text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
+            >
+              View all <ArrowRight className="size-3" />
+            </Link>
+          }
+        />
+        <PanelBody>
+          {recent.length ? (
+            <ChoiceList>
+              {recent.map((run, index) => (
+                <RunRow
+                  key={run.id}
+                  run={run}
+                  deployment={deployment}
+                  // The release names the commit of a run that recorded none.
+                  release={project.releases.find((release) => release.id === run.releaseId)}
+                  index={index}
+                  live={run.id === project.liveRun?.id}
+                />
+              ))}
+            </ChoiceList>
+          ) : (
+            <EmptyNote className="px-0 py-5 text-left">
+              {deployment.activeRun
+                ? "The deployment above is the first. It is listed here once it finishes."
+                : "Start your first deployment to see its build and release here."}
+            </EmptyNote>
+          )}
         </PanelBody>
       </Panel>
 
-      {access && (
-        <FirstSignIn
-          access={access}
-          url={url}
-          projectId={project.projectId}
-          environmentId={project.environmentId}
-          canReveal={can("system.admin")}
-        />
-      )}
-
-      {findings.length > 0 && (
-        <Panel plain>
-          <PanelHeader title="Needs attention" />
-          <PanelBody>
-            <FindingList findings={findings} />
-          </PanelBody>
-        </Panel>
-      )}
-
-      {/* The delivery figures belong on the front page as much as on
-          Deployments: how often this project ships and how often it
-          fails are the two facts a visitor asks after "is it up". */}
-      {project.normalized && <Insights projectId={project.projectId} />}
-
-      <div className="grid min-w-0 gap-8 xl:grid-cols-2">
-        <Panel plain>
-          <PanelHeader
-            title="Recent deployments"
-            actions={
-              <Link
-                href={`/deploy/${project.projectId}/deployments`}
-                className="inline-flex items-center gap-1 rounded-sm text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-              >
-                View all <ArrowRight className="size-3" />
-              </Link>
-            }
-          />
-          <PanelBody flush>
-            {recentRuns.length ? (
-              <RowList>
-                {recentRuns.map((run) => (
-                  <Row
-                    key={run.id}
-                    href={`/deploy/${project.projectId}/runs/${run.id}`}
-                    leading={<RunStatus state={run.state} />}
-                    title={
-                      <span className="flex min-w-0 items-baseline gap-2">
-                        <span>{runTitle(run)}</span>
-                        {runSubject(run) && (
-                          <span className="min-w-0 truncate font-normal text-muted-foreground">
-                            {runSubject(run)}
-                          </span>
-                        )}
-                      </span>
-                    }
-                    trailing={
-                      <span className="numeric text-hint text-muted-foreground">
-                        {relativeTime(run.requestedAt)}
-                      </span>
-                    }
-                  />
-                ))}
-              </RowList>
-            ) : (
-              <EmptyNote className="px-0 py-5 text-left">
-                Start your first deployment to see its build and release here.
-              </EmptyNote>
-            )}
-          </PanelBody>
-        </Panel>
-
-        <Panel plain>
-          <PanelHeader
-            title="Traffic"
-            actions={
-              <Link
-                href={`/deploy/${project.projectId}/logs`}
-                className="inline-flex items-center gap-1 rounded-sm text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-              >
-                Requests <ArrowRight className="size-3" />
-              </Link>
-            }
-          />
-          <PanelBody>
-            <TrafficTiles projectId={project.projectId} />
-          </PanelBody>
-        </Panel>
-
-        <Panel plain>
-          <PanelHeader
-            title="Resource usage"
-            actions={
-              <Link
-                href={`/deploy/${project.projectId}/runtime`}
-                className="inline-flex items-center gap-1 rounded-sm text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-              >
-                Runtime <ArrowRight className="size-3" />
-              </Link>
-            }
-          />
-          <PanelBody>
-            {liveService && runtime?.status === "available" ? (
-              <UsageTiles
-                key={liveService.containerId}
-                containerId={liveService.containerId}
-                name={liveService.name}
-              />
-            ) : (
-              <EmptyNote className="px-0 py-5 text-left">
-                {runtime?.reason || "Usage appears when your application starts."}
-              </EmptyNote>
-            )}
-          </PanelBody>
-        </Panel>
-      </div>
-
-      {previews.data && previews.data.length > 0 && (
+      {hasPreviews && (
         <Panel plain>
           <PanelHeader
             title="Preview environments"
@@ -319,11 +307,12 @@ export function ProjectOverview() {
           />
           <PanelBody flush>
             <RowList aria-label="Preview environments">
-              {previews.data.map((preview) => (
+              {previews.data?.map((preview) => (
                 <Row
                   key={preview.id}
-                  title={preview.environmentSlug}
-                  subtitle={`PR ${preview.providerRef} · updated ${relativeTime(preview.updatedAt)}`}
+                  leading={<ProductLogo size="sm" fallback={SourcePull} />}
+                  title={<span className="font-mono">{preview.environmentSlug}</span>}
+                  subtitle={`updated ${relativeTime(preview.updatedAt)}`}
                   trailing={
                     preview.isolationStatus === "quarantined" ? (
                       <Status tone="danger" label="Quarantined" />
@@ -340,6 +329,16 @@ export function ProjectOverview() {
           </PanelBody>
         </Panel>
       )}
+    </div>,
+  ])
+
+  return (
+    <div className="space-y-8">
+      {blocks.map(([key, block], index) => (
+        <BlurFade key={key} delay={index * 0.04}>
+          {block}
+        </BlurFade>
+      ))}
 
       <RollbackDialog
         open={rollbackOpen}
@@ -351,82 +350,117 @@ export function ProjectOverview() {
         runs={project.runs}
         domains={domainHostnames}
       />
+      <Confetti ref={celebrate} className="pointer-events-none fixed inset-0 z-50 size-full" />
     </div>
   )
 }
 
+/** What the source is called, as the wiring's first node names it. */
+function sourceTitle(
+  deployment: DeploymentSummary,
+  repoPath: string | undefined,
+  project: ReturnType<typeof useProject>,
+) {
+  switch (deployment.sourceKind) {
+    case "git":
+      return (
+        deployment.sourceRepository ||
+        project.configuration?.identity?.repository ||
+        project.configuration?.source?.url ||
+        repoPath ||
+        deployment.sourceRef ||
+        "Repository"
+      )
+    case "local":
+      return project.configuration?.source?.localPath || repoPath || "Local checkout"
+    case "image":
+      return deployment.sourceRepository || deployment.sourceRef || "Docker image"
+    case "compose":
+      return "Compose stack"
+    case "blueprint":
+      return project.blueprint?.name ?? deployment.sourceRepository ?? "Template"
+    default:
+      return WORKLOAD_LABELS[deployment.profile]
+  }
+}
+
 /**
- * CPU and memory from the live stats socket — the same reading Runtime
- * shows, at a glance — with the last hour's shape beside each figure, from
- * the recorded history, so "1.2%" also says whether it was 40% a moment ago.
+ * What a source with no commit resolved to: a template's version and the
+ * image it pins, an image's digest, the file a stack was read from.
  */
-function UsageTiles({ containerId, name }: { containerId: string; name: string }) {
-  const [stats, setStats] = useState<ContainerStats | null>(null)
-  const onMessage = useCallback((message: Envelope) => {
-    if (message.type === "stats") setStats(message.data as ContainerStats)
-  }, [])
-  const socket = useSocket(`/docker/containers/${containerId}/stats/stream`, { onMessage })
-  const live = socket.state === "open"
-  const history = usePoll(
-    (signal) =>
-      get<ContainerHistory>(
-        `/docker/containers/${encodeURIComponent(containerId)}/stats/history`,
-        { points: 60 },
-        signal,
-      ),
-    60000,
-    [containerId],
-  )
-  const points = history.data?.points ?? []
-  const trend = (values: number[], label: string, color: string) =>
-    values.length > 1 ? (
-      <Sparkline values={values} label={label} color={color} width={72} height={20} />
-    ) : null
-  return (
-    <StatGrid columns={2}>
-      {/* The figures spring from one reading to the next rather than jumping,
-          so a stats socket at one message a second reads as a gauge. */}
-      <StatTile
-        label="CPU"
-        value={stats ? <NumberTicker value={stats.cpuPercent} decimalPlaces={1} /> : "—"}
-        trailing={
-          <span className="inline-flex items-center gap-3">
-            {stats && "%"}
-            {trend(
-              points.map((point) => point.cpuPeak),
-              "CPU over the last hour",
-              "var(--chart-1)",
-            )}
-          </span>
-        }
-        hint={name}
-      />
-      <StatTile
-        label="Memory"
-        value={stats ? <NumberTicker value={stats.memUsage / 1024 / 1024} /> : "—"}
-        trailing={
-          <span className="inline-flex items-center gap-3">
-            {stats && "MiB"}
-            {trend(
-              points.map((point) => point.memBytesPeak),
-              "Memory over the last hour",
-              "var(--chart-2)",
-            )}
-            {live && <StatusDot tone="running" live />}
-          </span>
-        }
-        hint={name}
-      />
-    </StatGrid>
-  )
+function sourceDetail(deployment: DeploymentSummary, project: ReturnType<typeof useProject>) {
+  switch (deployment.sourceKind) {
+    case "blueprint": {
+      const version = (deployment.sourceRepository || deployment.sourceRef || "").split("@")[1]
+      return [version && `v${version}`, project.blueprint?.image.reference]
+        .filter(Boolean)
+        .join(" · ")
+    }
+    case "image":
+      return shortRevision(deployment.sourceRevision)
+    case "compose":
+      return deployment.sourceRef
+    default:
+      return undefined
+  }
+}
+
+/**
+ * What the containers run: a repository's language (or Docker for a
+ * Dockerfile, nginx for a static site), the product an image or a template is.
+ * The header's tile names the framework; this is the thing actually running.
+ */
+function runtimeProduct(
+  deployment: DeploymentSummary,
+  product: string | undefined,
+  configuration: ReturnType<typeof useProject>["configuration"],
+) {
+  if (deployment.sourceKind === "git" || deployment.sourceKind === "local") {
+    const build = configuration?.build
+    return (
+      buildMethodProduct(build?.method ?? deployment.buildMethod, {
+        recipe: build?.recipe ?? deployment.recipe,
+        packageManager: build?.packageManager,
+      }) ?? product
+    )
+  }
+  if (deployment.sourceKind === "image")
+    return imageProduct(deployment.sourceRepository || deployment.sourceRef || "")
+  return product
+}
+
+/**
+ * Paper, once, when a run the reader watched from this page goes live in front
+ * of them — never on arrival at a page whose last run happened to succeed.
+ */
+function useCelebration(deployment: DeploymentSummary) {
+  const confetti = useRef<ConfettiRef>(null)
+  const watched = useRef<number | undefined>(undefined)
+  const active = deployment.activeRun?.id
+  const last = deployment.lastRun
+  useEffect(() => {
+    if (active) {
+      watched.current = active
+      return
+    }
+    if (watched.current === undefined) return
+    if (last?.id !== watched.current) {
+      watched.current = undefined
+      return
+    }
+    if (isActiveRun(last.state)) return
+    if (last.state === "succeeded") confetti.current?.fire()
+    watched.current = undefined
+  }, [active, last?.id, last?.state])
+  return confetti
 }
 
 /**
  * `operations.diagnosis.findings` read through `FindingList`'s vocabulary:
  * severity is already the shared level, `measured` is the detail, `means` and
- * `action` join into the advice, and a `deepLink` becomes "Open {owner}".
- * Owners the diagnosis could not read at all are folded into one notice-level
- * row rather than counted as healthy.
+ * `action` join into the advice, a `deepLink` becomes "Open {owner}", and the
+ * owner is the tag at the row's edge (§4). Owners the diagnosis could not read
+ * at all are folded into one notice-level row rather than counted as healthy.
  */
 function useFindings(
   diagnosis: DeploymentDiagnosis | undefined,
@@ -440,6 +474,7 @@ function useFindings(
       title: finding.title,
       detail: finding.measured,
       advice: [finding.means, finding.action].filter(Boolean).join(" "),
+      meta: finding.owner ? <Tag>{finding.owner}</Tag> : undefined,
       action: finding.deepLink
         ? {
             label: `Open ${finding.owner}`,
@@ -472,10 +507,15 @@ function useFindings(
   }, [diagnosis, router])
 }
 
+const TILE_HOVER = "h-full transition-colors group-hover:bg-row-hover"
+
 /**
- * The last hour at the ingress: how much, how much failing, and the line of
- * it. Read from the record the server holds, content with a reading a minute
- * old — this is a glance, and the Logs page is where the rows are.
+ * The last hour at the ingress: how much, with its shape, and how much of it
+ * failed — read from the record the server holds, content with a reading a
+ * minute old. Each is a way to the Logs page, where the rows are. With no
+ * record yet the tiles stay, with a dash and the reason, so the row of four
+ * does not reflow when the first request lands. The failing share takes the
+ * fleet's colour for it, so one share is one colour on every deploy page.
  */
 function TrafficTiles({ projectId }: { projectId: number }) {
   const pulse = usePoll<Record<string, TrafficPulse>>(
@@ -484,34 +524,45 @@ function TrafficTiles({ projectId }: { projectId: number }) {
     [],
   )
   const mine = pulse.data?.[String(projectId)]
-  if (!mine || mine.status !== "available") {
-    return (
-      <EmptyNote className="px-0 py-5 text-left">
-        {pulse.data ? "No requests recorded yet. They appear here once the site is reached." : "Reading the request record…"}
-      </EmptyNote>
-    )
-  }
+  const ready = mine?.status === "available" ? mine : undefined
+  const waiting = pulse.data ? "No requests recorded yet" : "Reading the request record…"
+  const base = `/deploy/${projectId}/logs`
   return (
-    <StatGrid columns={2}>
-      <StatTile
-        key={`rpm:${mine.perMinute}`}
-        label="Requests"
-        value={<NumberTicker value={Number(perMinute(mine.perMinute))} decimalPlaces={mine.perMinute < 10 ? 2 : mine.perMinute < 100 ? 1 : 0} />}
-        trailing="per minute"
-        hint={
-          <span className="flex items-center gap-2">
-            <Sparkline values={mine.points} label="Requests per minute, last hour" width={72} height={20} />
-            {mine.pages.toLocaleString()} page views
-          </span>
-        }
-      />
-      <StatTile
-        key={`err:${mine.errorRate}`}
-        label="Failing"
-        value={percent(mine.errorRate * 100, 1)}
-        tone={mine.errorRate > 0.01 ? "danger" : "default"}
-        hint="answered 5xx in the last hour"
-      />
+    <StatGrid columns={2} dense>
+      <StatLink href={base} label="Requests on Logs">
+        <StatTile
+          // Keyed by whether there is a figure, so it rises when the record
+          // lands rather than on every poll.
+          key={ready ? "requests" : "requests-waiting"}
+          label="Requests"
+          value={
+            ready ? (
+              <NumberTicker
+                value={Number(perMinute(ready.perMinute))}
+                decimalPlaces={ready.perMinute < 10 ? 2 : ready.perMinute < 100 ? 1 : 0}
+              />
+            ) : (
+              "—"
+            )
+          }
+          trailing={ready && "/min"}
+          trend={
+            ready && <TileTrend values={ready.points} label="Requests per minute, last hour" />
+          }
+          hint={ready ? `${ready.pages.toLocaleString()} page views · last hour` : waiting}
+          className={cn(TILE_HOVER, ready && "animate-rise")}
+        />
+      </StatLink>
+      <StatLink href={`${base}?view=insights`} label="Failing requests on Logs">
+        <StatTile
+          key={ready ? "failing" : "failing-waiting"}
+          label="Failing"
+          value={ready ? percent(ready.errorRate * 100, 1) : "—"}
+          tone={ready ? failingTone(ready.errorRate) : "default"}
+          hint="answered 5xx · last hour"
+          className={cn(TILE_HOVER, ready && "animate-rise")}
+        />
+      </StatLink>
     </StatGrid>
   )
 }

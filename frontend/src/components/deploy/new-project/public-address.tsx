@@ -2,9 +2,8 @@
 
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { LockClosed, Plus, RefreshClockwise, Trash, Warning } from "@/components/icons"
+import { Plus, RefreshClockwise, Trash, Warning } from "@/components/icons"
 import { errorMessage, get } from "@/lib/api"
-import { cn } from "@/lib/utils"
 import { Field, FormNote, FormSection, OptionRow } from "@/components/form"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -16,58 +15,20 @@ import {
   InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group"
-import { Toggle } from "@/components/ui/toggle"
+import { HttpsToggle } from "@/components/deploy/https-toggle"
 import type { DeploymentConfiguration, DeploymentHostnameSuggestion } from "@/lib/types"
 
 type Domain = DeploymentConfiguration["domains"][number]
 
 /**
- * Whether the name is served over HTTPS, as the last segment of the field it
- * belongs to.
- *
- * A `Switch` is the right control for an option in a list of options, where a
- * sentence names it and the switch answers. It is the wrong one at the end of
- * a text field: at 14px beside a 36px input it is the smallest thing in a row
- * of the largest, and the two read as unrelated. Pressed state here is
- * `aria-pressed` on a control the size of the field, lit with `bg-accent` —
- * §6's three mechanisms are untouched, the selection one is simply on a
- * control that can carry it.
- */
-function HttpsToggle({
-  checked,
-  onChange,
-}: {
-  checked: boolean
-  onChange: (checked: boolean) => void
-}) {
-  return (
-    <Toggle
-      aria-label="Serve this hostname over HTTPS"
-      pressed={checked}
-      onPressedChange={onChange}
-      className="h-full gap-1.5 rounded-none px-3 text-xs font-medium focus-ring-inset data-[state=off]:text-muted-foreground"
-    >
-      {/* The lock is the mark, and it takes the brand when the scheme is on —
-          the same blue `ChoiceCard` puts on a chosen option's glyph and
-          `FlowSteps` on a completed step. `bg-accent` alone is a step of
-          ground a reader has to compare with the field beside it to see; the
-          tinted glyph says it without the comparison. */}
-      <LockClosed className={cn("size-3.5", checked ? "text-brand" : "text-muted-foreground")} />
-      {/* The word goes on a phone, where 390px of field had become 140px of
-          field and 250px of two labels. The lock is the mark, the group is
-          still one box, and `aria-label` above is what names the control
-          either way. */}
-      <span className="max-sm:hidden">HTTPS</span>
-    </Toggle>
-  )
-}
-
-/**
  * The address the deployment answers on, and the certificate it needs to do
  * it over HTTPS — ported from `quick-deploy.tsx`'s `PublicAddress` with the
- * same behaviour (suggestion, re-check, covered / will-issue / needs-attention
- * notices, the no-public-address notice), now operating on the plan's own
- * `domains` entry instead of a parallel `hostname`/`https`/`publish` triple.
+ * same behaviour (suggestion, re-check, the certificate reading, the
+ * no-public-address warning), now operating on the plan's own `domains`
+ * entry instead of a parallel `hostname`/`https`/`publish` triple. Whether
+ * the name is covered is a `Status` at the field's label, what the run will
+ * do about it a line of note, and only the case that needs a decision is a
+ * `Notice`; the scheme is `HttpsToggle`, the segment the Domains rows use.
  *
  * Activation resolves an existing certificate or refuses the cutover, so a
  * name with no certificate is a release that fails at the last step; this is
@@ -216,19 +177,15 @@ export function PublicAddress({
               </InputGroupAddon>
             </InputGroup>
           </Field>
-          {/* Only where something is still going to happen. What the run will
-              do about a certificate it has not got is worth a line; that it
-              already has one is what the `Status` above says, in two words. */}
+          {/* Only what nothing above says. That a certificate is coming is the
+              `Status` at the label and the server's hint under the field; the
+              name is in the field. What is left is who orders it, when, and
+              that nobody has to renew it. */}
           {https && matches && current && !current.covered && current.certificateMethod && (
             <FormNote>
-              A certificate will be issued during the deploy. The run orders one for{" "}
-              <code className="font-mono">{hostname}</code> over the{" "}
               {current.certificateMethod === "caddy"
-                ? "managed Caddy ingress"
-                : `${current.certificateMethod} challenge`}{" "}
-              before it starts anything.{" "}
-              {current.certificateMethod === "caddy" ? "Caddy" : "Certbot"} handles renewal
-              automatically.
+                ? "The managed Caddy ingress orders the certificate before the release starts, and renews it automatically."
+                : `Certbot orders the certificate over the ${current.certificateMethod} challenge before the release starts, and renews it automatically.`}
             </FormNote>
           )}
           <OptionRow
@@ -357,7 +314,7 @@ export function PublicAddress({
         </div>
       </OptionRow>
       {current?.method === "none" && (
-        <Notice icon={Warning} title="This server has no public address">
+        <Notice tone="warning" icon={Warning} title="This server has no public address">
           A hostname cannot be generated. The deployment still runs; reach it through the port it
           publishes, or set a domain that resolves here.
         </Notice>

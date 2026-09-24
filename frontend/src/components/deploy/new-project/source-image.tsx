@@ -13,9 +13,9 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { SearchInput } from "@/components/page"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { deploymentName } from "@/components/deploy/vocabulary"
-import { ProductLogo, imageProduct } from "@/components/product-logo"
+import { ProductGlyph, ProductLogo, hostProduct, imageProduct } from "@/components/product-logo"
 import { useSourceInspection } from "./use-source-inspection"
 import {
   imageName,
@@ -25,6 +25,11 @@ import {
 
 function asError(error: unknown) {
   return error instanceof Error ? error : new Error(String(error))
+}
+
+function referenceMark(reference: string) {
+  const named = imageProduct(reference)
+  return named !== "docker" ? named : (hostProduct(reference) ?? "docker")
 }
 
 /**
@@ -40,7 +45,9 @@ export function SourceImage({ onInspected }: { onInspected: (flow: ConfigureFlow
     "deploy.new.image.credential",
     undefined,
   )
-  const [busy, setBusy] = useState(false)
+  // Which press is in flight — a row's tag, or the registry field — so the
+  // light runs round the thing that was pressed and nothing else.
+  const [busy, setBusy] = useState("")
   const [failure, setFailure] = useState<Error>()
   const inspection = useSourceInspection(onInspected)
 
@@ -50,7 +57,7 @@ export function SourceImage({ onInspected }: { onInspected: (flow: ConfigureFlow
   const doInspect = async (chosen: string, withCredential = false) => {
     const trimmed = chosen.trim()
     if (!trimmed || busy) return
-    setBusy(true)
+    setBusy(withCredential ? "registry" : trimmed)
     setFailure(undefined)
     try {
       await inspection.inspect(() =>
@@ -69,7 +76,7 @@ export function SourceImage({ onInspected }: { onInspected: (flow: ConfigureFlow
     } catch (error) {
       setFailure(asError(error))
     } finally {
-      setBusy(false)
+      setBusy("")
     }
   }
 
@@ -114,7 +121,11 @@ export function SourceImage({ onInspected }: { onInspected: (flow: ConfigureFlow
             onChange={(event) => setFilter(event.target.value)}
             placeholder="Filter images on this server"
             aria-label="Filter images"
-            containerClassName="sm:w-full"
+            // Its own height, not the column's: SearchInput takes a whole line
+            // of a wrapping toolbar on a phone with `basis-full`, and in this
+            // column that basis is the column's height, so the field sat in a
+            // band of nothing and squeezed the list under it to a row and a half.
+            containerClassName="shrink-0 max-sm:basis-auto sm:w-full"
           />
           {images.loading && <LoadingRows rows={4} />}
           {images.data && tags.length === 0 && (
@@ -138,6 +149,7 @@ export function SourceImage({ onInspected }: { onInspected: (flow: ConfigureFlow
                   key={tag}
                   verb={`Use ${tag}`}
                   onSelect={() => void doInspect(tag)}
+                  busy={busy === tag}
                   leading={<ProductLogo id={imageProduct(tag)} size="sm" />}
                   // Mono because a tag is read character by character: which of
                   // `app:1.0.9` and `app:1.09` this is decides what runs.
@@ -172,13 +184,24 @@ export function SourceImage({ onInspected }: { onInspected: (flow: ConfigureFlow
             htmlFor="image-reference"
             hint="A tag is resolved to an immutable digest during inspection."
           >
-            <Input
-              id="image-reference"
-              value={reference}
-              onChange={(event) => setReference(event.target.value)}
-              placeholder="ghcr.io/owner/app:tag"
-              className="font-mono"
-            />
+            {/* The reference as it is typed, drawn the way the rows above and
+                the plan on the next screen draw it: `postgres:16` is Postgres
+                here as it is there. Only a reference no product names falls
+                back to where it is pulled from — GitHub's mark for ghcr.io,
+                Quay's, an Amazon or Azure registry's — which is what decides
+                the credential under it, and Docker Hub's whale for the rest. */}
+            <InputGroup>
+              <InputGroupAddon aria-hidden className="px-3">
+                <ProductGlyph id={referenceMark(reference)} />
+              </InputGroupAddon>
+              <InputGroupInput
+                id="image-reference"
+                value={reference}
+                onChange={(event) => setReference(event.target.value)}
+                placeholder="ghcr.io/owner/app:tag"
+                className="font-mono"
+              />
+            </InputGroup>
           </Field>
           <Field label="Credential" htmlFor="image-credential" hint="For a private image only.">
             <CredentialSelect
@@ -198,7 +221,7 @@ export function SourceImage({ onInspected }: { onInspected: (flow: ConfigureFlow
           <Button
             className="h-11 w-full sm:h-9"
             variant={tags.length > 0 ? "outline" : "default"}
-            pending={busy}
+            pending={busy === "registry"}
             disabled={!reference.trim()}
             onClick={() => void doInspect(reference, true)}
           >

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/url"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -270,6 +271,12 @@ type BuildPlanConfig struct {
 	NoCache        bool                `json:"noCache,omitempty"`
 	Secrets        []BuildSecretConfig `json:"secrets"`
 	ReleaseTasks   []ReleaseTaskConfig `json:"releaseTasks"`
+	// Framework is what detection recognised the chosen candidate as, recorded
+	// when the project is created so later reads can name it without detecting
+	// again. The server owns it: a client's value is never kept, it is carried
+	// forward only while the build still describes that candidate, and it is
+	// left out of the plan's digest because it is a name, not a build input.
+	Framework string `json:"framework,omitempty"`
 }
 
 // BuildSecretConfig names a variable and the single reviewed recipe stage in
@@ -1605,6 +1612,55 @@ func equalStrings(left, right []string) bool {
 var platformRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}/[a-z0-9][a-z0-9._-]{0,63}(?:/[a-z0-9][a-z0-9._-]{0,63})?$`)
 
 func validPlatform(platform string) bool { return platformRE.MatchString(platform) }
+
+// buildPlanDigest identifies a build plan for pending-change and release
+// comparison. Framework is left out, so recording or dropping the name
+// detection gave the source never makes a plan differ from the live one.
+func buildPlanDigest(build BuildPlanConfig) string {
+	build.Framework = ""
+	encoded, _ := json.Marshal(build)
+	return digestBytes(encoded)
+}
+
+// detectedFramework is the framework a committed plan records: the chosen
+// candidate's, while the build still reads that candidate's directory.
+// Without a chosen candidate the plan keeps what it carries, which only a
+// server-side copy such as a duplicate can have put there.
+func detectedFramework(detection *DetectionResult, build BuildPlanConfig) string {
+	candidate := selectedDetectionCandidate(detection)
+	if candidate == nil {
+		return build.Framework
+	}
+	if !sameBuildRoot(candidate.Root, build.RootDirectory) {
+		return ""
+	}
+	return candidate.Framework
+}
+
+// carriedFramework keeps a stored framework on a saved build plan only while
+// the plan builds the same way from the same directory. Once the method,
+// recipe or root changes, detection no longer describes what is built.
+func carriedFramework(previous, next BuildPlanConfig) string {
+	if previous.Method != next.Method || previous.Recipe != next.Recipe ||
+		!sameBuildRoot(previous.RootDirectory, next.RootDirectory) {
+		return ""
+	}
+	return previous.Framework
+}
+
+func sameBuildRoot(left, right string) bool {
+	return path.Clean("/"+left) == path.Clean("/"+right)
+}
+
+// sameSourceLocation says two source configurations point at the same code.
+// A new branch or credential still builds the app detection recognised; a
+// new repository, directory or image may not.
+func sameSourceLocation(left, right DraftSourceConfig) bool {
+	return left.URL == right.URL && left.Provider == right.Provider &&
+		left.ProviderBaseURL == right.ProviderBaseURL && left.Repository == right.Repository &&
+		left.LocalPath == right.LocalPath && left.Subdirectory == right.Subdirectory &&
+		left.Image == right.Image
+}
 
 func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 	if c.Build.Secrets == nil {

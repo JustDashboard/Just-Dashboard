@@ -985,6 +985,10 @@ CREATE INDEX IF NOT EXISTS idx_container_samples_identity_ts
   ON metric_container_samples(container_id, ts);
 CREATE INDEX IF NOT EXISTS idx_deploy_runs_queue
   ON deploy_runs(state, priority, requested_at, id);
+-- Every fleet poll ranks each project's runs newest first; an index in that
+-- order lets the ranking read ids from the index alone instead of sorting rows.
+CREATE INDEX IF NOT EXISTS idx_deploy_runs_project_requested
+  ON deploy_runs(project_id, requested_at DESC, id DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_deploy_runs_idempotency
   ON deploy_runs(project_id, environment_id, operation, idempotency_key)
   WHERE idempotency_key <> '';

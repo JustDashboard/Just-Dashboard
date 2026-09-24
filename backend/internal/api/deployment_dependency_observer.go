@@ -43,6 +43,7 @@ func (o *deploymentDependencyObserver) ObserveDependencies(
 		}
 		switch dependency.ResourceKind {
 		case "backup_job":
+			// The list until the job is known to exist; its own page after.
 			observed.DeepLink = "/backups"
 			id, err := strconv.ParseInt(dependency.ResourceID, 10, 64)
 			if err != nil || id <= 0 || o.backups == nil {
@@ -54,6 +55,7 @@ func (o *deploymentDependencyObserver) ObserveDependencies(
 				observed.Detail = "backup job was not found"
 				break
 			}
+			observed.DeepLink = "/backups/" + strconv.FormatInt(id, 10)
 			observed.Available, observed.Status = true, "never run"
 			maxAge := 0
 			var config struct {
@@ -73,7 +75,8 @@ func (o *deploymentDependencyObserver) ObserveDependencies(
 				return nil, lastErr
 			}
 		case "database_connection":
-			observed.DeepLink = "/databases/" + dependency.ResourceID
+			// Databases selects a connection by query, not by path.
+			observed.DeepLink = "/databases"
 			id, err := strconv.ParseInt(dependency.ResourceID, 10, 64)
 			if err != nil || id <= 0 || o.store == nil {
 				observed.Detail = "database connection id is invalid"
@@ -87,6 +90,7 @@ func (o *deploymentDependencyObserver) ObserveDependencies(
 				}
 				return nil, err
 			}
+			observed.DeepLink = "/databases/connection?conn=" + strconv.FormatInt(id, 10)
 			observed.Available, observed.Status = true, name
 		case "docker_volume":
 			observed.DeepLink = "/docker/volumes/" + dependency.ResourceID

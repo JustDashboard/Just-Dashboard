@@ -2,16 +2,45 @@
 
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { Database, Eye, EyeOff, Copy } from "@/components/icons"
+import { Database, Eye, EyeOff, Copy, Warning } from "@/components/icons"
 import { errorMessage, get, post } from "@/lib/api"
 import type { DbConnection, DbProvisionOption } from "@/lib/types"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { ErrorState, Notice, Spinner } from "@/components/state"
 import { ChoiceGrid, EngineCard, driverKind } from "@/components/choice-card"
-import { Field } from "@/components/form"
+import { Field, FieldRow, FormFact, FormFacts, FormNote } from "@/components/form"
+import { ProductLogo } from "@/components/product-logo"
+import { RunPhases, phaseStates } from "@/components/run-phases"
+import { SidePanelFooter, useInSidePanel } from "@/components/side-panel"
+import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { useCopy } from "@/hooks/use-copy"
+import { cn } from "@/lib/utils"
+
+/**
+ * A database started on this server in one step: an engine, two optional
+ * names, and a connection string to take away — or to hand straight to the
+ * project that asked for one.
+ *
+ * Starting one is three things that take between seconds and a minute each,
+ * and it used to be a centred spinner and a sentence that changed under it.
+ * The engines stay drawn now, the one being started with a light running
+ * round its edge (§11 *live*), and under them the three stages as the
+ * release path draws a run's — the one at work lit, the one that failed red
+ * — so what is happening and how much is left read at a glance. The result
+ * is a plain panel, since both places this is drawn — a sheet, and
+ * `/deploy/new`'s focused surface — already give it its edge; in the sheet
+ * its commands sit in the sheet's footer, beside the sheet's Cancel.
+ */
+
+const PHASES = ["Start the container", "Wait for connections", "Prepare the connection string"]
 
 export function DatabaseQuickDeploy({
   target = "host",
@@ -31,6 +60,7 @@ export function DatabaseQuickDeploy({
   /** The engine detection found the source connecting to, preselected. */
   initialEngine?: string
 }) {
+  const inSheet = useInSidePanel()
   const alive = useRef(true)
   const provisioning = useRef(false)
   const [startedContainer, setStartedContainer] = useState<string | undefined>(resume?.container)
@@ -41,7 +71,10 @@ export function DatabaseQuickDeploy({
   const [engine, setEngine] = useState(resume?.engine ?? initialEngine ?? "")
   const [name, setName] = useState("")
   const [database, setDatabase] = useState("")
-  const [progress, setProgress] = useState("")
+  // The stage at work while a start is in flight, and where the last one
+  // stopped when it failed.
+  const [phase, setPhase] = useState<number>()
+  const [failedAt, setFailedAt] = useState<number>()
   const [failure, setFailure] = useState<Error>()
   const [created, setCreated] = useState<{
     connection: DbConnection
@@ -68,12 +101,24 @@ export function DatabaseQuickDeploy({
   }, [optionsAttempt])
 
   const selected = options?.find((option) => option.engine === engine)
+  const inFlight = phase !== undefined
 
   const create = async () => {
     if (!selected || provisioning.current) return
     provisioning.current = true
     setFailure(undefined)
-    setProgress("Starting the container…")
+    setFailedAt(undefined)
+    let at = 0
+    const reach = (next: number) => {
+      at = next
+      setPhase(next)
+    }
+    const fail = (error: unknown) => {
+      setFailure(error instanceof Error ? error : new Error(String(error)))
+      setFailedAt(at)
+      setPhase(undefined)
+    }
+    reach(0)
     try {
       const started = startedContainer
         ? { container: startedContainer }
@@ -88,7 +133,7 @@ export function DatabaseQuickDeploy({
       onStarted?.({ container: started.container, engine: selected.engine })
       if (!alive.current) return
       setStartedContainer(started.container)
-      setProgress("Waiting for it to accept connections…")
+      reach(1)
       // The container exists a second after that request; the engine inside it
       // answers somewhere between seconds and a minute later, and MySQL will
       // accept a connection on a temporary server mid-initialisation and then
@@ -112,40 +157,71 @@ export function DatabaseQuickDeploy({
           break
         } catch (error) {
           if (Date.now() > deadline) {
-            setFailure(
+            fail(
               new Error(
                 `${selected.label} started but did not become reachable: ${errorMessage(error)}`,
               ),
             )
-            setProgress("")
             return
           }
           await new Promise((resolve) => setTimeout(resolve, 2000))
         }
       }
       if (!alive.current) return
-      setProgress("Preparing the connection string…")
-      const revealed = await get<{ url: string; reference?: string }>(
+      reach(2)
+      const address = await get<{ url: string; reference?: string }>(
         `/databases/${connection.id}/url`,
         { target },
       )
       if (!alive.current) return
-      setCreated({ connection, url: revealed.url, reference: revealed.reference })
-      setProgress("")
+      setCreated({ connection, url: address.url, reference: address.reference })
+      setPhase(undefined)
     } catch (error) {
       if (!alive.current) return
-      setFailure(error instanceof Error ? error : new Error(String(error)))
-      setProgress("")
+      fail(error)
     } finally {
       provisioning.current = false
     }
   }
 
-  if (created)
+  if (created) {
+    const { connection } = created
+    const address = connection.host
+      ? `${connection.host}${connection.port ? `:${connection.port}` : ""}`
+      : undefined
     return (
-      <Panel>
-        <PanelHeader title={`${created.connection.name} is ready`} />
-        <PanelBody className="space-y-4">
+      <Panel plain className="animate-rise">
+        <PanelHeader title={`${connection.name} is ready`} />
+        <PanelBody className="space-y-5">
+          {/* The ping answered before this panel could be drawn, so the state
+              is a reading, not a hope. */}
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+            <ProductLogo size="sm" id={connection.driver} fallback={Database} />
+            <div className="min-w-0 flex-1 space-y-0.5">
+              <p className="truncate text-body font-medium">{connection.name}</p>
+              {(address || connection.database) && (
+                <FormFacts>
+                  {address && (
+                    <FormFact label="Host" mono>
+                      {address}
+                    </FormFact>
+                  )}
+                  {connection.database && (
+                    <FormFact label="Database" mono>
+                      {connection.database}
+                    </FormFact>
+                  )}
+                </FormFacts>
+              )}
+            </div>
+            {/* The one reading this panel exists for, so a phone keeps it —
+                under the name when the line has no room beside it. */}
+            <Status
+              tone="running"
+              label="Accepting connections"
+              className="max-sm:basis-full max-sm:pl-11"
+            />
+          </div>
           <Field
             label="Connection string"
             htmlFor="database-connection-string"
@@ -155,43 +231,40 @@ export function DatabaseQuickDeploy({
                 : "This address is for processes on the host. Use Add database during project setup to get the address for an application container."
             }
           >
-            <div className="flex gap-2">
-              <Input
+            <InputGroup>
+              <InputGroupInput
                 id="database-connection-string"
                 type={revealed ? "text" : "password"}
                 readOnly
                 value={created.url}
                 className="font-mono"
               />
-              <Button
-                variant="outline"
-                size="icon-sm"
-                aria-label={revealed ? "Hide connection string" : "Reveal connection string"}
-                onClick={() => setRevealed(!revealed)}
-              >
-                {revealed ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-              </Button>
-              <Button
-                variant="outline"
-                size="icon-sm"
-                aria-label="Copy connection string"
-                onClick={() => copy(created.url, "Connection string copied")}
-              >
-                <Copy className="size-4" />
-              </Button>
-            </div>
+              <InputGroupAddon align="inline-end" className="gap-0 p-0">
+                <InputGroupButton
+                  aria-label={revealed ? "Hide connection string" : "Reveal connection string"}
+                  onClick={() => setRevealed(!revealed)}
+                >
+                  {revealed ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                </InputGroupButton>
+                <InputGroupButton
+                  aria-label="Copy connection string"
+                  onClick={() => copy(created.url, "Connection string copied")}
+                >
+                  <Copy className="size-3.5" />
+                  <span className="max-sm:hidden">Copy</span>
+                </InputGroupButton>
+              </InputGroupAddon>
+            </InputGroup>
           </Field>
         </PanelBody>
-        <PanelFooter className="justify-between">
+        <Foot className="justify-between">
           <Button variant="outline" asChild>
-            <Link href={`/databases?connection=${encodeURIComponent(created.connection.name)}`}>
-              Open in Databases
-            </Link>
+            <Link href={`/databases?conn=${connection.id}`}>Open in Databases</Link>
           </Button>
           {onConnect ? (
             <Button
               disabled={!canConnect}
-              onClick={() => onConnect(created.connection, created.reference || created.url)}
+              onClick={() => onConnect(connection, created.reference || created.url)}
             >
               Use this database
             </Button>
@@ -201,6 +274,7 @@ export function DatabaseQuickDeploy({
                 setCreated(undefined)
                 setRevealed(false)
                 setStartedContainer(undefined)
+                setFailedAt(undefined)
                 setEngine("")
                 setName("")
                 setDatabase("")
@@ -211,84 +285,98 @@ export function DatabaseQuickDeploy({
               Create another
             </Button>
           )}
-        </PanelFooter>
+        </Foot>
       </Panel>
     )
+  }
+
+  // A failure while starting is one of two things: nothing was made, or a
+  // container was made and the rest did not follow — in which case Retry
+  // resumes it rather than starting a second one, and the notice says so.
+  const startFailure =
+    failure &&
+    options &&
+    (startedContainer ? (
+      <Notice tone="danger" icon={Warning} title="Database container already created">
+        <p className="text-foreground/85">{failure.message}</p>
+        <p className="mt-1">
+          Retry continues setup for {startedContainer}. You can also open it in Docker.
+        </p>
+      </Notice>
+    ) : (
+      <ErrorState error={failure} />
+    ))
 
   return (
     <Panel plain>
       <PanelHeader title="Start a database" />
       <PanelBody className="space-y-4">
-        {failure && <ErrorState error={failure} />}
-        {startedContainer && failure && (
-          <Notice title="Database container already created">
-            Retry continues setup for {startedContainer}. You can also open it in Docker.
-          </Notice>
-        )}
-        {progress ? (
-          <div className="flex flex-col items-center gap-3 py-10 text-sm text-muted-foreground">
-            <Spinner className="size-6 text-primary" />
-            {progress}
-            <p className="text-hint">
-              The first start can take a minute while the image is pulled.
-            </p>
-          </div>
-        ) : (
-          <>
-            {/* The engine's own logo, as the template catalogue draws it: five
-                identical database glyphs in front of five names said
-                "database" five times and nothing about which. Every card is
-                one height, whatever its image tag's length. */}
-            <ChoiceGrid
-              columns="fill"
-              className="grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-2"
+        {failure && !options && <ErrorState error={failure} />}
+        {startFailure}
+        {/* The engine's own logo, as the template catalogue draws it: five
+            identical database glyphs in front of five names said "database"
+            five times and nothing about which. Two to a row on a phone, where
+            one to a row put Create below the fold; every card is one height,
+            whatever its image tag's length. */}
+        <ChoiceGrid
+          columns="fill"
+          className="grid-cols-2 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(11rem,1fr))]"
+        >
+          {options?.map((option) => (
+            <EngineCard
+              key={option.engine}
+              engine={option.engine}
+              label={option.label}
+              kind={driverKind(option.driver)}
+              detail={option.image}
+              disabled={(Boolean(startedContainer) || inFlight) && engine !== option.engine}
+              selected={engine === option.engine}
+              working={inFlight && engine === option.engine}
+              onClick={() => !inFlight && setEngine(option.engine)}
+            />
+          ))}
+          {!options && !failure && <Spinner />}
+        </ChoiceGrid>
+        {selected && (
+          <FieldRow className="max-w-3xl">
+            <Field
+              label="Container name"
+              htmlFor="db-name"
+              hint={`Defaults to an available name starting with jd-${engine}.`}
             >
-              {options?.map((option) => (
-                <EngineCard
-                  key={option.engine}
-                  engine={option.engine}
-                  label={option.label}
-                  kind={driverKind(option.driver)}
-                  detail={option.image}
-                  disabled={Boolean(startedContainer)}
-                  selected={engine === option.engine}
-                  onClick={() => setEngine(option.engine)}
-                />
-              ))}
-              {!options && !failure && <Spinner />}
-            </ChoiceGrid>
-            {selected && (
-              <div className="grid max-w-3xl gap-3 sm:grid-cols-2">
-                <Field
-                  label="Container name"
-                  htmlFor="db-name"
-                  hint={`Defaults to an available name starting with jd-${engine}.`}
-                >
-                  <Input
-                    id="db-name"
-                    value={name}
-                    readOnly={Boolean(startedContainer)}
-                    onChange={(event) => setName(event.target.value)}
-                    placeholder={`jd-${engine}`}
-                    className="font-mono"
-                  />
-                </Field>
-                <Field label="Database name" htmlFor="db-database" hint="Defaults to app.">
-                  <Input
-                    id="db-database"
-                    value={database}
-                    readOnly={Boolean(startedContainer)}
-                    onChange={(event) => setDatabase(event.target.value)}
-                    placeholder="app"
-                    className="font-mono"
-                  />
-                </Field>
-              </div>
+              <Input
+                id="db-name"
+                value={name}
+                readOnly={Boolean(startedContainer) || inFlight}
+                onChange={(event) => setName(event.target.value)}
+                placeholder={`jd-${engine}`}
+                className="font-mono"
+              />
+            </Field>
+            <Field label="Database name" htmlFor="db-database" hint="Defaults to app.">
+              <Input
+                id="db-database"
+                value={database}
+                readOnly={Boolean(startedContainer) || inFlight}
+                onChange={(event) => setDatabase(event.target.value)}
+                placeholder="app"
+                className="font-mono"
+              />
+            </Field>
+          </FieldRow>
+        )}
+        {(inFlight || failedAt !== undefined) && (
+          <div className="min-w-0 animate-rise space-y-2 pt-1">
+            <RunPhases
+              phases={phaseStates(PHASES, phase ?? failedAt ?? 0, inFlight ? "running" : "failed")}
+            />
+            {inFlight && phase! < 2 && (
+              <FormNote>The first start can take a minute while the image is pulled.</FormNote>
             )}
-          </>
+          </div>
         )}
       </PanelBody>
-      <PanelFooter className="justify-end">
+      <Foot className="justify-end">
         {!options && failure ? (
           <Button
             onClick={() => {
@@ -300,15 +388,34 @@ export function DatabaseQuickDeploy({
           </Button>
         ) : (
           <Button
-            className="h-11 sm:h-9"
-            disabled={!selected || Boolean(progress)}
+            // A thumb's height where it stands alone at the panel's foot; in a
+            // sheet's footer it is the size of the Cancel beside it.
+            className={cn(!inSheet && "h-11 sm:h-9")}
+            disabled={!selected || inFlight}
+            pending={inFlight}
             onClick={() => void create()}
           >
             <Database className="size-4" />
-            {startedContainer ? "Retry connection setup" : "Create database"}
+            {inFlight
+              ? "Starting…"
+              : startedContainer
+                ? "Retry connection setup"
+                : "Create database"}
           </Button>
         )}
-      </PanelFooter>
+      </Foot>
     </Panel>
+  )
+}
+
+/**
+ * The commands, in the sheet's footer after its Cancel when this is drawn in
+ * a sheet, and at the panel's own foot on `/deploy/new`'s surface.
+ */
+function Foot({ className, children }: { className?: string; children: React.ReactNode }) {
+  return useInSidePanel() ? (
+    <SidePanelFooter>{children}</SidePanelFooter>
+  ) : (
+    <PanelFooter className={className}>{children}</PanelFooter>
   )
 }

@@ -66,21 +66,41 @@ taking a frame:
   certificate expiry; the sites, certificates, streams and ports tables with their toolbars; the
   TLS report's readings, findings, protocol, certificate, chain and HTTP rows; the password files
   and DNS provider lists),
-  health findings, the runtime-health bar, and the
-  deployment pages' lists, overview facts, run summary and create flow are plain (the framed
-  blocks in the deployment section are its two *pictures*: the GitHub App on Credentials — the
-  accounts that installed it, the App and this server — and where an outcome goes on
-  Notifications — every deployment on the left, a mark per channel on the right, dashed rings
-  for the kinds not yet added; each draws its lines with `ui/animated-beam` from the marks' own
-  positions, and the line is the state: dotted before the thing exists, still while it is
-  paused or not installed, a brand-to-signal pulse travelling along it while it carries —
-  because a picture needs an edge to read as one thing. The same vocabulary
-  (`components/deploy/wire.tsx`) draws one more picture that sits *unframed* because it is
-  inside a block that already has its edge: the way a request reaches a project on the overview —
-  source, live release, runtime, domains — in the column beside the preview; each mark paints the
-  ground under its tint so the line never shows through it. The release path on a deployment page
-  is not a wiring picture but a timeline: one bar in seven segments, each as long as its stage
-  took, `components/deploy/run-pipeline.tsx`), and so are the
+  health findings, the runtime-health bar, and every block of the deployment section — the fleet
+  and its archive, Credentials and Notifications, a project's Overview, Deployments, Logs, Runtime
+  and Console, the run page, the nine settings pages and the create flow — are plain, with every
+  row in them that is *taken* rather than read (a project, a run, a credential, a channel, a
+  service, a webhook, a schedule, a variable, a linked database) a lit card — a `ChoiceRow` in a
+  `ChoiceList`, or on the fleet's grid a project's own `SpotlightBorder` card with the same lit
+  edge (what keeps a frame there is, first, a *picture*, because a picture needs an edge to read as
+  one thing: the GitHub App on Credentials — the accounts that
+  installed it, the App and this server — where an outcome goes on Notifications — every
+  deployment on the left, a mark per channel on the right, dashed rings for the kinds not yet
+  added — and four on the settings pages, each inside its rail section and drawn through
+  `settings/setting-picture.tsx` or, for Automation's, `settings/automation/wiring.tsx`:
+  General's automatic deployment (the repository, the watch, the deploys), Runtime's where it
+  listens (the domain, this server, the container, with an amber *Anywhere* node when the port is
+  open on every interface), Databases' way the application reaches its databases (each engine, the
+  managed network, the application) and Automation's what deploys it (the watched branch, each
+  webhook and each schedule, the project, then production and the pull-request previews). Each
+  draws its lines with `ui/animated-beam` from the marks' own positions, and the line is the state:
+  dashed before the thing exists or where a hop is missing, still while it is paused, manual or
+  only a draft, amber where it works but should not be relied on (a branch that cannot be read, a
+  port that bypasses the proxy), red where a link has broken, a brand-to-signal pulse travelling
+  along it while it carries. The rollback dialog holds a small one of its own — your domains wired
+  to the live release by a still line and to the release you are going back to by a dotted one,
+  which is the line that carries once Roll back is pressed. The same vocabulary
+  (`components/deploy/wire.tsx`) draws one more picture that sits *unframed* because it is inside a
+  block that already has its edge: the way a request reaches a project on the overview — source,
+  live release, runtime, domains, each drawn as its product — in the column beside the preview; each
+  mark paints the ground under its tint so the line never shows through it. The preview beside it is the
+  Overview's one framed block, a tile that *is* the website. Past the pictures, the build console
+  and the two shells, Docker's and a game server's, are `Pane`s and a game's raw settings file is
+  a `Well`, for §7's reasons; and the Danger zone is one `border-rule-danger` panel, because
+  everything inside it changes what the deployment is, so one red edge says "careful" once where
+  four red cards said it four times. The release path on a deployment page is not a wiring
+  picture but a timeline: one bar in seven segments, each as long as its stage took,
+  `components/deploy/run-pipeline.tsx`), and so are the
   databases section's connection facts and maintenance rows, its find, monitor and generate panels,
   and every block on the four Processes pages — the live table, the PM2 applications, the systemd
   units, and the cron jobs, timers and system cron files on Scheduled, each a title, a toolbar and
@@ -193,7 +213,13 @@ blue rather than a reference to any role token, or `ls` paints directories in th
 and chroma rather than by hue. `--chart-3` is a magenta.
 
 Status keeps its own three hues (`--success`, `--warning`, `--destructive`) and they are never
-borrowed for anything that is not a reading of state.
+borrowed for anything that is not a reading of state. What changed between two releases is not a
+state, so the release comparison marks an addition, a change and a removal with git's letters in
+`--git-added`, `--git-modified` and `--git-deleted`, and the pending-changes strip names them in the
+same hues (`CHANGE_TONE` and `ChangeTag` in `deploy/vocabulary.tsx`) — a green "added" beside a green
+"healthy" said the same thing about two different facts. The same argument runs the other way for a command: rolling back is the brand
+face, not destructive red, because it moves traffic between immutable releases and destroys
+nothing.
 
 **Selection is `bg-accent`, everywhere** — a neutral fill, deliberately not a hue. The active session
 in the terminal rail, a pressed `ToggleGroupItem`, an applied `FilterChip`, a highlighted command row,
@@ -240,10 +266,17 @@ renders on any page.
   **second** `ChoiceCard` in `components/flow.tsx`, with a lit border the first one did not have — so
   the deploy pages had the new treatment and the database dialogs, the credential picker and the
   engine picker kept the old one. There is one again. A component whose name already exists in this
-  product is not a new component.
+  product is not a new component — and the rule holds for a shape as well as a name. `ProductCard`
+  is `ChoiceCard`'s compact form, a product's logo, its name and one line of what exactly would be
+  used; it began as the database engine picker's card, and when the build settings needed the
+  same card for ten builders and five package managers it became the shared one rather than a
+  second, with `EngineCard` now rendering through it. A run of them sits in
+  `ChoiceGrid columns="compact"`, two to a row on a phone and five across at `xl`.
 
 A tag that annotates a **row** belongs at the row's edge, not against its title: ten of them
-interrupt ten sentences at ten different points, and in a column they are a column.
+interrupt ten sentences at ten different points, and in a column they are a column. And a tag is a
+property, not a state: on a run card *Live* is a `Status`, because a release serving is a reading
+that will change, and *Pinned* is a `Tag` with a pin, because somebody set it and it stays.
 
 `components/tone.ts` exports the one severity union: `"default" | "success" | "warning" | "danger"`.
 `Verdict` keeps `critical` because that is what the backend sends and `Button` keeps `destructive`
@@ -340,7 +373,47 @@ beside the field that caused it.
 at, the certificate on disk) in a 15rem column beside the fields from `lg`, with a hairline between
 sections. It exists for `/dashboard/configuration`, whose five sections with their heads over their
 fields read as one column in which a head was as far from the fields above it as from its own; a
-dialog's form keeps the stacked head.
+dialog's form keeps the stacked head. `railFrom="xl"` moves that width up for a form inside a
+shell that already spends a column of its own — a project's settings, beside the project's
+navigation, where at 1024 a 15rem rail left a row of three fields about 130px each. It is said
+once, on `FormSections`, and inherited, so the heads of one page cannot leave the rail at two
+widths.
+
+**The deployment settings are that shape, and they were the last pages in the product that were
+all containers.** Each of the nine was a stack of framed cards — a title strip, the form, a footer
+holding Save — on the argument that things filled in one at a time read best as bordered boxes,
+which is the wrong shape for a page that *is* a form. `settings/setting-card.tsx` draws them now.
+`SettingsPage` reads the configuration, then draws what is saved but not live yet (a strip with no
+button: the project header already carries the one "Deploy changes", and a second brand face a
+hundred and fifty pixels under it was two commands on one surface), the page's readings, and its
+forms in one run of rail sections. `SettingForm` is one `<form>` and one save, and may span several
+sections, because what one PUT writes is what one Save means — Runtime is five. `SettingSection`
+is a rail head carrying what the section currently is as data (the host and branch it builds from,
+the port it answers on) and at most one `settingStatus`: *Not saved*, *Unsaved changes* or *Saved ·
+not live yet*. `SettingFoot` ends the form with when its change applies, Discard and Save. Save is
+the outline face while the form is clean and the brand face once it holds an edit — the command
+face as a function of state, so the one blue on a page of five forms is the form with something to
+save — and on the nine settings pages it is never disabled, because saving an untouched Source
+checks it again, which is how an operator finds out a credential stopped working (the game server's
+settings, which declare a range for each value, hold it only while a value is outside that range). While the form is dirty the foot follows the
+reader down it, sticky, opaque (§16 has no glass) and hairlined, its row held to the fields column;
+at rest it is the form's last line rather than a strip of chrome. Each form keeps its draft keyed on
+a digest of its own saved value (`useSettingDraft`): every save writes a new revision of the whole
+configuration, and a draft keyed on the revision was thrown away by a save of the section beside it.
+
+**A sheet is the same anatomy wherever it opens**, which is `SidePanel`'s doc comment and `Modal`'s
+too. The deployment section's sheets each put a different body in the one frame — a `Select` for a
+kind, an eyebrow `<legend>` over a group, Cancel on one and not the next — so a sheet was
+recognisable by which page opened it. In order: a sheet that edits a thing that exists opens on
+that thing, its mark, its name and its `FormFacts`, so the subject is recognised before a field is
+read; a choice between kinds — a credential kind, a channel's service, a webhook's provider, an
+alert's measure, a schedule's action — is a `ChoiceGrid` of cards carrying their marks (a
+service's own logo where it has one), never a `Select`, because a kind is picked by its mark;
+groups of fields are `FormSection`s, a title and a hairline, never a legend quieter than the labels
+it heads (§8); options are an `OptionList`; and the footer is Cancel, then the one command,
+right-aligned, with a line about what the command will do first and pushed to the left. A body that brings its own command — the traffic-alert form,
+which opens both on Automation and on Logs — hands it to the sheet's footer through
+`SidePanelFooter` rather than drawing a second foot inside the body.
 
 **A field and the controls that belong to it are one box.** `ui/input-group.tsx` — shadcn's
 `InputGroup`, re-sized onto this product's control ladder — holds an `InputGroupInput` with
@@ -352,12 +425,49 @@ the site answers on 443. Inside a group there is one border, one height and one 
 group takes `focus-ring-within` and the field drops its own, because the border it would hang a ring
 on now belongs to the group. A binary inside a group is a `Toggle` the height of the field (pressed
 is `bg-accent` and a `text-brand` mark, which is §3's selection), never a `Switch` — a switch is the
-control for an option in a list of options, where a sentence names it and it answers. A group sits
+control for an option in a list of options, where a sentence names it and it answers. That toggle is
+`InputGroupToggle`, in the same file: it began as `/deploy/new`'s HTTPS segment, and the settings
+pages wanted the same control for two more fields — *Read only* on a container path, *Reference* on
+a variable's value — and the credential and channel sheets and first sign-in a third, *Show* on a
+secret. Its word goes on a phone, where 390px of
+field had become 140px of field and 250px of labels, and its `aria-label` says the whole of what it
+does ("Serve this hostname over HTTPS") at every width. The requests page's path filter is the
+reference for a field that holds its own binary: *Pages only* inside the path's group, and the
+narrowings already applied beside it as chips that each clear themselves. A group sits
 *inside* a `Field` and takes its label, its hint and its error; it does not replace one.
 **Every rule inside a group is the addon's**, drawn for each child after the first — a call site
 adding its own `border-l` to the button it puts there gets two pixels where §2 asked for one, which
 is what the environment rows shipped with while the hostname field a section above them drew the
 same divider correctly.
+
+**A closed set of short words is one segmented control.** `settings/segments.tsx` is a single
+`ToggleGroup` for two to five words — a Python release, the stage a variable reaches, a health
+check's kind and phase, an HTTP method — which the settings had drawn as a `Select` (a closed set
+asked for as if it were open, behind a press that hid the other answers) or as free text that
+accepted "3.9". The segments not chosen step back to the muted ink, because `bg-accent` on its own
+is one step of ground the reader has to compare against its neighbours rather than a mark; and an
+empty value is ignored, because Radix lets a second press clear the choice and here there is always
+an answer. Two binaries that belong to one row — a domain's HTTPS and its password, a variable's
+Secret or Config — are one outline `ToggleGroup`, not two switches.
+
+**A rule a value has to meet is lit as it is met.** `FieldCheck` (`form.tsx`) sits under the field
+it belongs to — a credential's name rules, a Telegram channel's token and chat id, a password's
+length and mix — so an error is
+never the first the reader hears of a rule; a run of them is `aria-live="polite"`, never
+`role="alert"`, because a rule being met is news rather than an interruption.
+
+**A run of filter chips is a `ChipStrip`** (`tabs.tsx`). On a phone it scrolls sideways and bleeds
+to the page's gutter, so the chip cut off at the edge is the cue that there are more; wrapped, a
+strip of five broke into ragged lines with the last chip alone and pushed the list it filters a
+screen down. From `sm` it wraps as chips always have. A chip that is a legend — the request log's
+status families — may colour its count for the chosen state, so "5xx 13" says which thirteen.
+
+**A confirmation names its subject.** `ConfirmRequest.subject` draws the thing an act touches above
+its sentence — its mark, its name and the facts that tell it from its neighbours — because "Remove
+credential" over GitHub's logo and *GitHub PAT · github.com* is recognised before it is read, which
+is the moment the wrong one gets caught. Where the act takes a typed phrase, the phrase is a
+`Field` like every other in the product rather than a bare label at a fourth size, an `InputGroup`
+whose mark at the end answers the typing: the phrase is right, and the button under it is live.
 
 **A fold is a section whose head is a button.** `Disclosure` is a native `<details>`, so a page can
 open one from outside by setting `.open` (which is how a preflight finding reaches a control folded
@@ -435,7 +545,12 @@ each release as a GitHub commit status" is the fact. Where the hint carried a *c
 has to carry it too — "Required — a failing readiness check blocks activation", not "Readiness check
 required" — and where it carried something that belongs to the whole section rather than to one
 switch (which branch is watched, that nothing fires before the first deployment) it moves to the
-section's `FormNote`, where it is said once.
+section's `FormNote`, where it is said once. Configure's container access is the shape to copy:
+"Run privileged — every host device and kernel capability", "Share the host's network — every port
+it opens is open on the host", "Build without the cache — every layer from scratch". A risky
+option's title turns amber only while it is on — a reading of state, not a warning at rest — and a
+template's yes-or-no input is an `OptionRow` whose label is the title, never a switch under a
+label with an *On*/*Off* word beside it.
 
 `hint` stays on the component, and §5's second exception is why: the ambiguous-candidate rows on
 Configure pass `high confidence · Next.js via recipe in apps/web`, which is **data** about the option
@@ -469,7 +584,37 @@ finds without reading.
 Weight carries hierarchy where size cannot. The sidebar is the one surface dense enough to need
 three: group labels in the eyebrow's small caps, resting entries `font-normal` so the column reads as
 a list rather than as forty-nine headings, and the current entry `font-medium` alongside its accent
-fill and brand-blue icon.
+fill and brand-blue icon. A panel's head speaks in the eyebrow when it names one of this product's
+sections, and not when it names something the reader called — a project, a database connection:
+small caps turned `api-production` into API-PRODUCTION, which is the corruption §4 keeps literal
+strings out of caps for, so a scope's head is printed as written at `text-hint` semibold, after its
+own mark (the project's favicon or product, the connection's engine) at the line's height.
+
+A menu reads the same way at a smaller size: a `DropdownMenuLabel` is an eyebrow over the group of
+verbs it names, and every item, like every `Select` option, is `text-body`, the size of the rows
+the menu was opened from. A `SelectLabel` naming a group of options is the same eyebrow. An option
+can carry a reading about itself in `SelectItem`'s `hint` — the host a credential signs in to and
+its kind — drawn at the option's far end and outside the item's text, which is the part Radix copies
+into the closed field and names the option by: the list says "github.com · SSH key" beside each
+name, and the chosen field says the name alone. `CredentialSelect` (`deploy/credentials-page.tsx`),
+the one picker the new-project steps and a project's Source settings share, draws each option this
+way, on its host's glyph.
+
+**A field is 16px on a phone.** `Input` has always gone to 16px below `sm`, because iOS zooms the
+page into any smaller field that takes focus, and `SelectTrigger` and `SearchInput` now follow it —
+the search box had pinned `text-body` over it. From `sm` the select's text is `text-body`, where it
+was 14px throughout, so an `Input` and a `Select` in one `FieldRow` read at one size. The search box
+is 40px on a phone, beside the 40px compact `Select` it usually shares a toolbar with, and takes a
+wrapping toolbar's first line to itself: a call site's `flex-1` had squeezed the projects search to
+95px beside its chips. The same pass sized the rest of a phone for a finger. A dialog's or a sheet's
+close button is 40px below `sm` and 32px from it, and answers the pointer with a wash rather than an
+opacity step; it was a bare 16px glyph, the smallest thing to hit on a surface whose fields are
+44px. A `MetricStrip` is two columns on a phone rather than a wrapping row, because wrapped, the
+first metric of each new line kept the rule that belonged beside its neighbour on the line above.
+And `HostIdentity` sets its tile and title on one row with the facts the full width beneath them,
+where they had run down a narrow column beside the tile. These are primitives, so every page that
+draws them — Docker, Security, Audit, the account pages and the rest — changed with the deployment
+section, not only `/deploy`.
 
 A **view strip** — the underlined tabs that switch between two readings of the *same* page — is
 `text-body`. It was `text-xs` while the page title was 20px and the strip sat within two pixels of both
@@ -537,6 +682,17 @@ rather than assembling its own recharts tree — adding a measurement should mea
   *is* the quantity.
 - A chart's `height` is a **floor**, not a fixed size. Panels in a row stretch to the tallest of
   them, and a fixed plot puts the surplus between the chart and its legend as a band of nothing.
+- **A scale fitted a little above a limit splits into unround steps** (143 / 286 / 429 MB), so
+  `yTicks` on `MetricChart` and `ChartPanel` names the ticks. A container's memory chart is scaled to
+  its limit and ticks at the limit's quarters, so the top tick names the limit — on Docker's
+  container page and on a project's Runtime alike, since both draw `ContainerUsage`.
+- **A reading's last hour in a deployment page's `StatTile` is `TileTrend`** (`sparkline.tsx`), the
+  one shape for it: the tile's full width, 36px tall, rising once (§11 *arrived*). Nothing is drawn
+  below two points, which is not yet a shape, nor for a series that never moves on a scale of its
+  own — scaled to its own maximum a flat line fills the band and reads as a full meter — and the
+  tile's trend band then collapses rather than leave a gap. With a fixed `max` a flat line sits at
+  its level and says so. Its colour is a series colour, never a status one: a failing share is
+  `--chart-3`, because `--destructive` on a line says the line itself is an error (§3).
 
 ## 11. Motion says one of four things
 
@@ -580,28 +736,92 @@ The deployment section brings in registry components — Magic UI's `ui/animated
 Primitives' `ui/text-shimmer` — each rewritten onto the tokens and each saying one of the four things
 above:
 
-- *arrived* — `BlurFade` staggers the fleet's cards by a beat each, and the first screen of the Git
-  branch graph's rows while its lanes draw down beside them; `NumberTicker` counts a figure up
-  to its value on the Credentials readings, the delivery insights and the overview's live usage;
-- *live* — `AnimatedBeam`'s pulse on a line, `BorderBeam` running around a project card while a run
-  is in progress, and `TextShimmer` lighting the name of the stage a release is at, are `breathe`
-  for a link, a frame and a word: a reading that is happening now;
-- *once* — `Confetti` fires only when a release goes live in front of the reader, never on arrival.
+- *arrived* — `BlurFade` staggers the fleet's cards by a beat each, the Overview's blocks by
+  0.04s, the Insights facets, and the first screen of the Git branch graph's rows while its lanes
+  draw down beside them; `ChoiceRow` given its `index` staggers every lit list the same way, capped
+  at twelve so a long list does not spend a second arriving, and `ChoiceCard` staggers a grid by its
+  `index`, a beat each and uncapped. `NumberTicker` counts a figure up to its value once it lands:
+  the fleet's live and build-slot figures, the Credentials and Notifications readings, the
+  Overview's requests, the delivery insights, the run page's traffic after activation, Automation's
+  revisions awaiting review and alerts firing, and the live usage tiles. A figure that follows a
+  draft as it is typed — Build's and Runtime's settings readings — does not count, because it would
+  count again on every keystroke; it rises once when it lands instead;
+- *live* — `AnimatedBeam`'s pulse on a line, `BorderBeam` running around anything whose work is in
+  flight, and `TextShimmer` lighting the word for what it is doing, are `breathe` for a link, a
+  frame and a word: a reading that is happening now. The beam reaches a row through
+  `ChoiceRow busy` and a card through `ProductCard working`, so it is one mark for one meaning
+  wherever it lands — a project card, a run row and the build console while a run is going (the
+  fleet's in-progress rows carry the sweeping release path and the lit stage instead); the
+  in-flight card on the Overview; a channel while its test is out and a
+  credential while its probe runs; a candidate service during a release, a backup job taking a
+  backup, a game command waiting on its reply; a webhook whose delivery's run is building, a
+  schedule firing, a preview environment building; a variable being rotated, a linked database
+  being tested, an engine being started from quick setup; and, on `/deploy/new`, a repository or
+  an image being inspected. The shimmer lights the stage a release is at and the present
+  participles that stand for a wait — *Sending test…*, *Testing…*, *Pausing…*, *Candidate for
+  release #14*, *deploying #14*, *running now*;
+- *once* — `Confetti` fires only when a release goes live in front of the reader — on the run page,
+  and on the Overview when a run watched there from start to finish ends in success — never on
+  arrival.
+
+`animate-sweep` is spent the same way, on the three waits in the section that cannot say how far
+along they are: a credential's test while the server tries it, the website preview while the site
+paints behind an invisible frame, and the build console before its first line. The preview's rise
+sits on a wrapper round the frame, because the keyframe ends on `transform: none` and cancelled the
+scale that shrinks a desktop-width page into the tile.
+
+**`hooks/use-arrivals.ts` is *arrived* for a polled list, in the tokens rather than a library.** A
+new request, a container event, a delivery or a player who has just joined used to appear in its
+list with nothing to say it had not been there a moment ago, so a list that gained a row read
+exactly like one that had merely re-rendered; only the run transcript let its new lines rise.
+`useArrivals(keys)` returns the keys that were not in the list the last time it changed, and those
+rows take `animate-rise` once — the live request rows, the lifecycle feed's events, a channel's and
+a webhook's deliveries, a game's players. It is empty on the first render, because the page's own
+rise covers what arrived with it and forty rows rising at once are not forty arrivals, and its
+answer is held until the keys change again, so a re-render halfway through a rise does not cut it
+short. A list whose rows already stagger in on mount — the runs, keyed by id — does not take it as
+well, which would draw one arrival twice.
 
 The dashboard's own restarts and upgrades use the same three and nothing new: `BorderBeam` runs
 around the transcript console and around the Restart or Rebuild card while that run is in flight,
 `TextShimmer` lights the stage it is at (`components/run-phases.tsx`, drawn with the release path's
 own `Segment`), and the transcript's new lines *arrive* — a poll's forty lines are let out a few a
 frame, each taking `animate-rise` once, so a live log reads line by line instead of jumping; scrolled
-up, searching or with reduced motion they are simply drawn. The version history's timeline took its
-layout from Aceternity's and Magic UI's timelines — the sticky label, the rail — and not their
-scroll-driven gradient beam, which is a motion this section does not have.
+up, searching or with reduced motion they are simply drawn. A deployment's build console draws its
+lines through the same painter and the same drip (`components/transcript-line.tsx`), so the two
+consoles cannot drift into two answers to what a live log looks like. The version history's
+timeline took its layout from Aceternity's and Magic UI's timelines — the sticky label, the rail —
+and not their scroll-driven gradient beam, which is a motion this section does not have.
 
 Magic UI's `animated-circular-progress-bar` was tried beside the release path and removed: a ring
 saying "100%" next to a header saying "Ready" was the same fact twice, and the timeline now shows how
 far a run is by how much of the bar has coloured. Its `safari` device mock was evaluated for the
 website preview and not adopted — its chrome is drawn for a hero, and at tile size the address bar's
 text is too small to read — so the preview draws its own strip and shrinks a desktop-width frame.
+
+The redesign of the whole section in September 2026 measured it against Magic UI's registry again,
+fetched live a component at a time, and took nothing new. `animated-list` reveals items it already
+holds on a timer, which is an arrival made up — its real meaning is `useArrivals`. `code-comparison`
+needs shiki and next-themes, and there is no theme to switch (§1); a release comparison keeps its
+field list in the git hues, and a text diff is the file manager's `diff-view`. `file-tree` brings
+Radix's accordion and lucide into a product that already draws a file as what it is
+(`files/file-icon.tsx`). `terminal` types scripted lines that claim a liveness they do not have,
+beside a real console. `animated-circular-progress-bar` stays out for the reason above, and every
+proportion in the section is already a figure and a `Meter`. `progressive-blur` is stacked
+`backdrop-filter`, which is glass (§15), where `.scroll-affordance` already says "more past here"
+with ground; `scroll-progress` is a gradient bar tied to the window's scroll in a shell that
+scrolls an inner container, and reading progress is none of the four meanings. `avatar-circles` is
+round faces in white rings with a filled "+N" circle — §4's pill three times over — where this
+product's faces are squares. `pulsating-button` glows a command at rest, and §3 never lets a
+command be a state. `dock` magnifies on hover and blurs behind itself; `orbiting-circles` and
+`ripple` are perpetual decoration, beside wires that draw the real mechanism and a `StatusDot` that
+already breathes. `shine-border` and `magic-card` are `BorderBeam` and `SpotlightBorder` already,
+and `animated-shiny-text` is `TextShimmer`. The marquee, the globe and the dotted map (which would
+need a GeoIP database and would fabricate the rest), the device mocks, the lens, the highlighter,
+the glyph matrix, the flickering grid, particles, patterns and the aurora, sparkle, hyper and
+morphing texts each sell a gradient, a glow or a movement this system does not have. What the pass
+took instead was more of what was already here, on more of the section: the ticker, the border
+beam, the fade, and wire marks that draw the products they connect.
 
 Every one of them honours `prefers-reduced-motion` in JavaScript, because the root CSS rule cannot
 reach a JavaScript-driven animation.
@@ -642,6 +862,20 @@ because a reading that exists in a hidden copy is two answers to every query a t
 reader makes. The list around the cards is a plain panel — a frame around framed cards is two nested
 frames, which is the stacking this section refuses.
 
+**The deployment section's rows took the same rule, and it moved the breakpoint twice more.** A run
+(`deploy/run-row.tsx`), a runtime service and a channel set their readings beside the name in fixed
+measures where there is room and under it where there is not, chosen once with a media query — and
+the width they need is measured inside the project's shell, not the window: at 1280 the content
+column beside the project's navigation is about 968px, which left a service's name 150px beside
+five readings, so the wide shape of a service and of the Overview's runs-beside-previews starts at
+`2xl`, as does the build console's rail of stages beside the transcript. Inside a settings page the
+column is narrower still, because from `xl` the rail takes its own 15rem, so there the window is
+the wrong thing to ask at all: `settings/use-column-width.ts` measures the column a list is drawn
+in, before its first paint, and the variables (from 600px), mounts and linked databases (from 480px)
+choose beside-or-under from that — still once, still drawn once. A row that only reflows rather
+than rearranging, a domain or a mount editor, uses a container query (`@container`, `@min-[40rem]`
+for a domain and `@min-[36rem]` for a mount) and draws nothing twice by construction.
+
 A row drawn this way is a **click target, not a control**. `role="button"` on the wrapper is the
 obvious way to make a whole card pressable and is wrong: an ARIA button takes its accessible name
 from its contents, so a screen reader announces the entire row — readings, ports, and the label of
@@ -680,6 +914,18 @@ The rule that fell out of the Docker pass, and which generalises:
   nothing inline: the daily verb on a process table is reading it, and a stop glyph beside four
   hundred rows is four hundred invitations to end something by mis-click, so Terminate and Kill are
   named buttons in the sheet and words in the row's menu.
+
+The deployment section declares its two sets the same way. A project's verbs are declared once in
+`deploy/project-verbs.tsx` and drawn by the project header — whose one brand command,
+`projectCommand`, is the first of View, Start, Deploy and Redeploy the list holds — by a fleet
+card's menu and by a fleet row, so a card and the header cannot disagree about what can be done to
+a project. A run's and its release's are declared once in `deploy/run-verbs.tsx` and drawn by a
+Deployments row's menu and by the run page's header, which is what keeps a finished run from being
+a dead end. A long menu is grouped: a `Verb` may name its `group` — Running, Building, Project,
+*Release #4* — and `VerbMenu` draws an eyebrow and a separator where the group changes, because
+eleven sentences in a row are a wall and the same eleven under three names are three short lists.
+Cancelling a run is not a danger verb, any more than Stop is: it is undone by deploying again, and
+the danger rule in front of it would have cut its group in two.
 
 A choice **closes the menu**. `VerbMenu` lets Radix's default close run from 0.6.7: the item's
 `preventDefault`, copied from the Docker actions menu, had kept every menu drawn through it open after
@@ -826,7 +1072,86 @@ live, so `github-actions` is GitHub's, and `backup-cron`, whose name says nothin
 from `LANES` — `AuthorMark`'s argument: a users list of eight brand-blue squares was a texture, and
 the same person now keeps one colour in the rail, the list and their own profile. The profile opens on
 `HostIdentity` with that picture where the tile would be, which makes it the fourth page that
-describes a thing the same way.
+describes a thing the same way; a project's header and a deployment's run page are the fifth and
+sixth. A game server's three pages add one line under that header (`GameIdentity`) with what only
+the game can say — the address a player types, the edition, how full it is — and draw neither the
+game nor its name again.
+
+**A project is drawn as its website, else as what it is.** `ProjectMark` tries three things in
+order, all on `ProductLogo`'s tile so a card does not change shape when an icon arrives: the icon
+the site declares (read through the dashboard's origin), then the product the project is
+(`projectProduct` — the template, the image's product, Compose, the framework detection recognised,
+else the recipe's language, Docker for a Dockerfile, nginx for a static site), then its workload's
+glyph (`WORKLOAD_GLYPH`: a globe for a site, a box for an image or a service, layers for a stack,
+servers for a game). A repository's own site says what it is and not what it runs on, so there the
+favicon carries the framework or language as a badge in the corner, the session list's
+browser-over-system shape; a template's or an image's favicon already is its product, and the badge
+would be one logo twice. It is one tile rather than `ProductLogos`, because a column of titles has
+to line up — a stack's services are drawn after its words instead. The fleet card, the rail's
+scope head, the project header and the notification picture's source all draw it; the archive
+draws the product alone, at a step of opacity — a project at rest, the way Backups dims a paused
+job.
+
+**Where a project comes from, and what builds it, are products too.** A Git remote, a clone URL, a
+registry host or an image reference is drawn as the forge or registry it names (`hostProduct`:
+GitHub, `ghcr.io` included, GitLab, Bitbucket, Codeberg, Gitea, Forgejo, Docker Hub, Quay, Harbor,
+Azure, AWS and Google Cloud's registries, and a self-hosted host whose name carries one of those
+words), falling back to git's or Docker's own mark — on a fleet card's source line, the run page's
+identity line, and as the field is typed on `/deploy/new`'s Clone URL, Compose Git URL and Image
+reference and the credential sheet's Host. A saved credential is the host it signs in to, an SSH key
+with a key in the tile's corner and a GitHub App credential as the installed account's face with
+GitHub's there. What is pasted into a credential's secret is read for what it says about itself
+(`lib/secrets.ts`): providers prefix their tokens so that secret scanners can find them, so
+`glpat-` is named a GitLab token the moment it is pasted and a mismatch with the host is said
+before it is saved, and a key's first line names its format — which is how the public half of a key
+pair, pasted where the private half belongs, is caught. A build is its framework
+(`frameworkProduct` over detection's ids — Next.js, Django, Laravel, Spring Boot), else its
+recipe's language (`recipeProduct`; Bun rather than Node.js when that is what runs it), else what
+its method is (`buildMethodProduct`), and a package manager is itself. A GitHub App that is not
+connected is GitHub's own tile, and a GitHub CLI that is not signed in the terminal's tile with
+GitHub's mark in its corner, `ClientMark`'s shape.
+
+**Where an outcome goes, and who came asking, are products.** A notification channel is its service
+(`channelProduct`): Discord, Slack and Telegram as themselves, a signed webhook as the receiver its
+URL's host names (`webhookProduct`: n8n, ntfy, Gotify, Home Assistant, Healthchecks, Uptime Kuma)
+and the webhook's own mark otherwise, e-mail as an envelope or as the mail service its server's host
+names with an envelope in the corner; a paused channel is drawn greyed. A request's client is
+`ClientMark` again, now shared with the account pages (`components/client-mark.tsx`), and a crawler
+is the search engine it belongs to — Googlebot is Google, bingbot is Bing — or a bug glyph when
+nothing names it (`agentProduct`); a referrer is the site it came from (`refererProduct`: Google in
+every country domain, GitHub, Hacker News, Reddit, X, LinkedIn); an address is the network it is on
+(`NETWORK_GLYPH`: Tailscale's mark, this server, the local network, the internet).
+
+**A variable is the service that holds it, and a certificate its issuer.** `variableProduct` reads a
+service word anywhere in an environment name — `STRIPE_SECRET_KEY` is Stripe's, `SENTRY_DSN`
+Sentry's — and otherwise the first word, which is a framework's prefix (`NEXT_PUBLIC_`, `VITE_`);
+`DATABASE_URL` names nothing and keeps the key glyph, and a typed reference is drawn as the database
+it points at, in its engine's colours. A prefix two names share takes a `LANES` hue, so a family of
+`STRIPE_*` variables is found as one. A domain's certificate is drawn as its issuer — Let's Encrypt
+from the intermediate's name (`issuerProduct`), read off the certificate the route actually matched
+and never guessed from how the domain is owned. A running service is its image's product, else the
+project's (`deploy/service-product.ts`); a mount is the file manager's folder in the colour the
+operator gave it, or its volume's product; and a Docker event on a project's Logs page is drawn on
+its project's or image's tile with what happened as a toned badge in the corner.
+
+**And a person is their face, or their initials in their hue.** `RunActorMark` draws who started a
+run: you, as your own picture; anyone else as `InitialsMark` in the `LANES` hue their name has in
+the rail — another administrator's picture would cost a users request per list, and the hue is the
+same colour they are everywhere else; a push as the host its remote names, a pull request's preview
+as its forge, and a schedule, an API call or the system as a glyph on the same tile. `ForgeFace`
+draws a pull request's or a commit's author, GitHub's picture where the forge has one and
+`AuthorMark` everywhere else, and the connected identities and repository owners on `/deploy/new`
+are the same squares. A game's players are initials in the hue their names take in the console's
+replies, and whoever set a variable is drawn beside it the same way.
+
+The families above brought 57 files into `public/logos/`, keyed in `product-logo.tsx` and each
+recorded in `NOTICE`: the dashboard-icons set (Apache-2.0) in the variant drawn for a dark ground,
+Simple Icons' framework marks (CC0) filled with their brand colour — the black ones, Express,
+Fastify, Remix, Symfony and Koa, filled white — with Azure's, Django's, .NET's and Solid's colours
+lifted to the L 0.72 rung the way MySQL's navy was. Rust's and pnpm's originals, dark marks drawn
+for the file manager's paper page, stay, while the tile draws light copies (`rust-light.svg`,
+`pnpm-light.svg`), and two marks already keyed, Valkey's and FreshRSS's, were lifted after the
+contact sheet showed them failing the ground.
 
 **The same argument buys the git surface its own glyph set.** Heroicons draws no branch, no commit
 and no pull request, so `icons.tsx` maps those words onto the share, hash and chat-bubble marks —
@@ -835,9 +1160,10 @@ the drawing. `components/git/glyphs.tsx` takes six from Material Design Icons, w
 dependency for the language marks (`language-icon.tsx`). Nothing else is imported from MDI there: a glyph that exists in both sets stays Heroicons, or the git pages grow a
 second icon weight. `AuthorMark` in `git/marks.tsx` is the coloured-wayfinding rule again — a column
 of commits where mine and the bot's are two hues is scanned, one where they are the same grey is read
-— on the eight fixed `--tag-*` hues the branch graph gives its lanes, and drawn as a square with a
-3px radius rather than a circle, because a filled 16px round mark with a character in it is the pill
-§4 deleted.
+— drawn as the account face without a picture (`InitialsMark`): the initial on a wash of the `LANES`
+hue the name is given in the rail and as a run's actor, hashed without its case, so one person is one
+colour in a commit line, a run row and a forge's face alike. A square rather than a circle, because a
+filled 16px round mark with a character in it is the pill §4 deleted.
 
 **A log line is read by its shapes, and coloured by the same rules as the rest of the product.**
 The logs console used to draw every line as one grey-white string with a 10px level tag in front of it,
@@ -858,6 +1184,15 @@ way the build console washes a failing step, a warning row in amber; the level c
 word at the line's size. A structured line is drawn as its message and fields in the logfmt shape the
 tokenizer reads, most telling field first. The "Colour" toggle beside Wrap and Time turns all of it
 off and shows each line exactly as it was written.
+
+A deployment's request log is a log, and is drawn by the same rules: the request console, a request
+opened in place, the Insights lists and the scanners notice all take their parts from
+`deploy/request-marks.tsx`, which is `log-text.tsx`'s token classes over `lib/requests.ts`'s one
+status map. A status is coloured by its family — 2xx success, 3xx the path hue, 4xx amber, 5xx red —
+a write takes the method hue while a read stays muted (a `DELETE` is a change, not a danger), the
+path and query are tokens, and an address takes the address hue beside the client drawn as itself.
+Its Colour switch is the console's own; turned off it keeps a failure, a refusal and an answer
+slower than a second, because those are readings of state (§3) rather than decoration.
 
 **A file is drawn as what it is, and a folder in the colour it was given.** The file manager drew
 Material Design Icons' file family, a stencil per category in one flat tone: it told a config from a
@@ -926,7 +1261,27 @@ The passes, in order. Each one is a diff you can review on its own.
    draft rather than the saved revision, because what you are setting is what the page is about.
    A reading is `warning` where the *absence* of an answer is the answer: an uncapped container and
    a port open on every interface are the two facts an operator wants off that page without opening
-   a fold.
+   a fold. Two of them now read the running container as well as the form: the memory limit is drawn
+   against what the live release peaked at in the last hour, and the release strategy is checked
+   against the rule the executor applies at the next deployment — a writable mount, a fixed host
+   port or the host network cannot run two releases side by side, and blue/green on such a plan was
+   offered there and then refused at start. Build took the pass it had skipped (what it builds with,
+   the last build read from the live release's own build step, the release tasks, the build
+   variables with a warning where a secret would be compiled into browser code), and Domains,
+   Storage, Databases and Automation open on four readings each. Those four pages draw theirs from
+   the saved configuration and what the server observed rather than from a draft, because a page's
+   readings stand above its forms, out of the drafts' reach; what is saved and not live yet is said
+   by the pending strip and by the rows themselves.
+
+   The rest of the deployment section took the pass as a question of *which* figures. The fleet
+   opens on four the chips beneath it cannot say — how many projects are live, requests a minute
+   across the fleet, the share of them failing, the build slots in use — and leaves the per-state
+   counts to the chips, with the cards ordered worst first. Credentials opens on how many are held
+   and across which hosts, how many a source reads through, how many were never used and when one
+   last was; the GitHub App's state moved out of the tiles into its own section, where its header
+   and its setup path already said it. Notifications opens on whether messages are arriving — a
+   message retried until it went out counts once, as delivered. The Logs page's readings each carry
+   their last hour, as the host Overview's do.
 
    **And the one page with no tiles, which is the shape of the argument for dropping this pass.**
    `/git` had four — repositories, uncommitted, behind, unpushed — and the operator asked for them to
@@ -949,6 +1304,15 @@ The passes, in order. Each one is a diff you can review on its own.
    The account's Security page took it for the same reason — the second factor's state and how many
    sessions are signed in are the rail heads of the sections that change them — and Sessions opens on
    the session it is read through, with the count of the rest on their header.
+
+   Three deployment pages took it in the same pass. A project's General settings did because the
+   project header's facts line already is that page's reading line: each figure of the old Project
+   card went beside the control that sets it, and the page's doc comment names where. Variables took the
+   `/git` exit exactly — every count (all, pending, secret, config, reaching the build, the runtime
+   or a release task, holding a reference) is a filter chip over the list, where it also narrows
+   to what it counts, and the products the environment talks to sit under the rail head. And a
+   project's Runtime page carries each count in the header of the block it counts, with the four
+   moving readings — processor, memory, processes, network — as the live usage tiles.
 3. **Lists are rows — and a row you *take* is not a row you read.** `RowList`/`Row` for things with
    a title and a second line, `FindingList` for verdicts, a table for columns. Never a grid of framed
    cards standing in for rows. A scroll container that holds plain rows pads by the rows' bleed
@@ -1058,7 +1422,7 @@ the reader through it.
 | `/deploy/new` — the source chooser | **Flow** | Step one of three, and the screen is asking a question. |
 | Any page with a run of *choices* on it | either | The register is about the page; the lit choice is about the thing. A reading page with an engine picker in a dialog gets the edge on that picker and changes in no other way. |
 | `/deploy/new` — Configure | **Flow** | Step two of three, ending in the one command that creates the project. |
-| A run in progress (`/deploy/[id]/runs/[run]`) | Reading | You are *watching*, not deciding. It carries the spine's last step so the sequence still reads as one, and nothing else changes. |
+| A run in progress (`/deploy/[id]/runs/[run]`) | Reading | You are *watching*, not deciding. A project's first deploy carries the spine the reader walked on `/deploy/new` with one step more, *Deploy* — current while it builds, done once it goes live — so the sequence still reads as one, and nothing else changes. |
 | Deploy settings, credentials, notifications | Reading | Editable readings of state, not a sequence with an end. |
 | Sign-in, first-run setup | **Flow** | A sequence with an outcome. |
 
@@ -1079,7 +1443,11 @@ Each of these is bought against a specific failure, and each is the smallest thi
   release, so the screen where a project is planned and the screen where it is built agree about how
   "where we are" is drawn. **Never numbered circles**: a filled circle under 32px with a character in
   it is the pill §4 deleted, and `tests/browser/design-system.spec.ts` fails any page that renders
-  one. Where a spine is drawn it *is* the head rule, and `--flow-rule` yields to it.
+  one. Credentials was the last to draw them, for the GitHub App's three setup steps; they are
+  three equal segments of the release path's own bar now — green and ticked when done, amber while
+  the App waits to be installed, the brand for the step that is simply next — and the spec checks
+  that page and Notifications with the showcase's App, accounts and channels in them. Where a spine
+  is drawn it *is* the head rule, and `--flow-rule` yields to it.
 - **Exactly one surface with depth.** §2 says nothing lifts, and the reason is that forty-nine
   surfaces all claiming the foreground is a page with no foreground. One does not have that problem.
   `FlowPanel` is the thing being decided right now: a step of ground above the card, `border-strong`,
@@ -1151,6 +1519,17 @@ reading page is revamped:
 A page that is mostly readings with one run of choices in it takes the edge on that one run. That is
 the honest answer to "use it everywhere": everywhere something is picked.
 
+The deployment section is the widest application of it so far, and it draws the line in both
+directions on one page. Everything there that opens something is a lit card — a project, a run, a
+credential or a channel that opens its sheet, a service that opens its container, a domain on
+Runtime that opens the proxy site serving it, a webhook, a schedule, an approval or a preview, a
+variable, a linked database — and so is every run of choices inside a sheet or a dialog: a provider,
+a channel's service, an alert's measure, a schedule's action, the commits a version can be deployed
+from, whether a database is created or an existing one used, the saved connections to take. The
+traffic-alert rules on Automation are the counter-example on the same page: a rule is read against
+its threshold, with a `Meter` carrying a tick where the line is, and opens nothing, so its rows stay
+rows you read.
+
 ### What register B does not get
 
 The bans are not relaxed here. No glass, no glow, no gradient ground, no hover-transform, no shadow
@@ -1183,11 +1562,16 @@ palette, and a reading page must not grow a use for them.
    screen is shelved the way the reader looks for one — `FilterChip`s with counts over the shelves,
    the Git page's filter strip — and laid out as `ChoiceGrid columns="fill"`, whose rows are equal,
    with the card's hint clamped to two lines beside a `logo`: sixty cards at three heights read as a
-   grid that failed to load.
+   grid that failed to load. The strip that picks between kinds of source is a `role="group"` of
+   pressed buttons, never a tablist — a tablist must own tabs, and these are five toggles for one
+   answer — and on a phone it runs to the screen's edge, where the source cut off is the cue that
+   there are more, as a `ChipStrip` does; the scroll shade is drawn in the page's own ground and
+   cannot show on it.
 7. **Motion on the state change, not only on arrival.** §11's four still apply and no fifth is added:
    the spine's current segment, a `BorderBeam` on a card while its work is in flight, a
    `NumberTicker` on a figure that settled, `Confetti` once when the outcome lands in front of the
-   reader.
+   reader. On `/deploy/new` the beam is the repository or image row being inspected
+   (`ChoiceRow busy`), beside its *Importing…*, so the row that was pressed is the row that answers.
 8. **Hold it to the window.** A flow screen is decided in one view: `<Page fill="xl">` holds it to
    the window at `xl`, the question, the spine and any strip stay put, and what scrolls is the one
    list or form longer than the space left — inside its own surface, under its own toolbar and above

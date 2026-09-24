@@ -2,31 +2,39 @@
 
 import { useEffect, useRef, useState, type RefObject } from "react"
 import Link from "next/link"
-import { Check, Copy, External, GitHubMark, Plus, Trash } from "@/components/icons"
+import { CheckCircle, Copy, External, GitHubMark, Plus, Trash, Warning } from "@/components/icons"
 import { del, errorMessage, post } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { plural, relativeTime } from "@/lib/format"
+import { calendarDate, plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useMediaQuery } from "@/hooks/use-mobile"
-import {
-  githubAppStage,
-  githubAvatarUrl,
-  useGitHubApp,
-  type GitHubAppStage,
-} from "@/hooks/use-github"
-import type { GitHubAppInstallation, GitHubAppManifestStart, GitHubAppStatus } from "@/lib/types"
+import { githubAppStage, useGitHubApp, type GitHubAppStage } from "@/hooks/use-github"
+import type {
+  DeploymentCredential,
+  GitHubAppInstallation,
+  GitHubAppManifestStart,
+  GitHubAppStatus,
+} from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { Field } from "@/components/form"
+import { Field, FormFact } from "@/components/form"
 import { LogoGlyph } from "@/components/logo"
+import { ProductLogo } from "@/components/product-logo"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
+import { ForgeFace } from "@/components/git/marks"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+  InputGroupText,
+} from "@/components/ui/input-group"
 import { useConfirm } from "@/components/confirm-dialog"
 import { VerbActions, type Verb } from "@/components/verbs"
+import { Segment } from "@/components/deploy/run-pipeline"
+import { StepMark } from "@/components/deploy/vocabulary"
 import { WireLabel, WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
 
 /**
@@ -38,6 +46,10 @@ import { WireLabel, WireLink, WireMark, WireNode, WirePlaceholder } from "@/comp
  * Once it exists, three manual steps disappear: no webhook and secret per
  * repository, no personal token for private clones and statuses, and the
  * preview address arrives on the pull request itself.
+ *
+ * Its state is said here and nowhere else on the page: the header's `Status`,
+ * and the setup path under the picture. The Credentials readings used to
+ * carry it as a third statement of the same fact.
  */
 /** Posts the manifest to GitHub the way GitHub requires: a form, from the browser. */
 function submitManifest(start: GitHubAppManifestStart) {
@@ -85,23 +97,66 @@ function hostOf(url: string | undefined) {
 }
 
 /**
+ * How many projects read their source through a credential. `usedBy` counts
+ * environments, so a project deploying two of them through one token is one
+ * project; the ids say which, where the server sent them.
+ */
+export function projectsUsing(credential: DeploymentCredential) {
+  return credential.usedByProjectIds?.length ?? credential.usedBy
+}
+
+/** The credential an installation mints its clone tokens through. */
+function credentialOf(
+  installation: GitHubAppInstallation,
+  credentials: DeploymentCredential[] | undefined,
+) {
+  return credentials?.find((credential) => credential.id === installation.credentialId)
+}
+
+/**
+ * A GitHub account, drawn as its own picture on a square — the face
+ * `/deploy/new` draws the same account with (`ForgeFace`), because a filled
+ * circle holding a letter is the pill §4 deleted. Until the picture arrives,
+ * and wherever it cannot (a network that does not reach GitHub, the mocked
+ * API), the account's initials stand in the hue its name is given everywhere
+ * else, so `acme` keeps one colour on the Git tab, in this picture, on the
+ * credential it mints and in the repository chooser.
+ */
+export function AccountFace({ account, className }: { account: string; className?: string }) {
+  return (
+    <span className={cn("relative flex shrink-0 overflow-hidden", className)}>
+      <ForgeFace
+        login={account}
+        provider="github"
+        size="sm"
+        className="size-full rounded-[inherit]"
+      />
+    </span>
+  )
+}
+
+/**
  * The picture: the accounts that installed the App, the App, and this
- * server, with the traffic between them drawn as lines. What moves on the
- * lines is the state — nothing before the App exists, a still line while
- * nothing is installed, a pulse once repositories can reach here — so
- * "is this working" is answered before a word is read.
+ * server, with the traffic between them drawn as lines. What moves on a line
+ * is the state (§2) — dotted before the thing exists, still while it is not
+ * installed or while nothing deploys through it, a pulse once a project's
+ * source is read through it — so "is this working" is answered before a word
+ * is read, per account rather than for the App as a whole.
  *
  * The lines are measured from the marks, so the layout can change under them:
- * three columns wide, one column narrow.
+ * three columns wide, one column narrow. Wide, the three sit as one
+ * composition in the middle of the frame rather than at its far edges.
  */
 function Picture({
   stage,
   data,
   admin,
+  credentials,
 }: {
   stage: GitHubAppStage
   data: GitHubAppStatus
   admin: boolean
+  credentials?: DeploymentCredential[]
 }) {
   const wide = useMediaQuery("(min-width: 1024px)")
   const container = useRef<HTMLDivElement>(null)
@@ -111,8 +166,9 @@ function Picture({
 
   const app = data.app
   const host = hostOf(data.webhookUrl)
-  const live = stage === "import"
-  const still = !live
+  const carries = (installation: GitHubAppInstallation) =>
+    (credentialOf(installation, credentials)?.usedBy ?? 0) > 0
+  const live = stage === "import" && data.installations.some(carries)
   const dashed = stage === "create"
   // Wide, the two directions between the App and the server are two lines a
   // little apart; narrow, they would run down the same column, so one is drawn.
@@ -120,12 +176,12 @@ function Picture({
   const more = admin && data.installUrl
 
   return (
-    <div ref={container} className="relative">
+    <div ref={container} className="relative mx-auto max-w-5xl">
       <AnimatedBeam
         containerRef={container}
         fromRef={appMark}
         toRef={serverMark}
-        still={still}
+        still={!live}
         dashed={dashed}
         startYOffset={-spread}
         endYOffset={-spread}
@@ -135,7 +191,7 @@ function Picture({
           containerRef={container}
           fromRef={appMark}
           toRef={serverMark}
-          still={still}
+          still={!live}
           dashed={dashed}
           reverse
           delay={1.4}
@@ -144,21 +200,28 @@ function Picture({
         />
       )}
 
-      <div className="flex flex-col gap-7 lg:grid lg:min-h-40 lg:grid-cols-[minmax(0,1fr)_minmax(3rem,0.5fr)_auto_minmax(13.5rem,0.6fr)_minmax(0,1fr)] lg:items-center lg:gap-0">
-        <ul className="flex flex-col gap-5 lg:items-end" aria-label="GitHub App installations">
+      <div className="flex flex-col gap-6 lg:grid lg:min-h-40 lg:grid-cols-[minmax(0,1fr)_minmax(3rem,0.5fr)_auto_minmax(13.5rem,0.6fr)_minmax(0,1fr)] lg:items-center lg:gap-0">
+        <ul
+          className="flex flex-col gap-4 lg:items-end lg:gap-5"
+          aria-label="GitHub App installations"
+        >
           {data.installations.map((installation, index) => (
             <AccountNode
               key={installation.id}
               installation={installation}
+              credential={credentialOf(installation, credentials)}
               containerRef={container}
               appRef={appMark}
-              still={still}
+              wide={wide}
               delay={index * 0.35}
             />
           ))}
           {/* The spot where the next account goes: the only account before
-              any has installed, a smaller one after the list once some have. */}
-          {(stage !== "import" || more) && (
+              any has installed, a smaller one after the list once some have.
+              That smaller one is drawn wide only: in one column the line from
+              an account to the App would run through it, reading as a chain,
+              and the strip's button and the menu already carry the verb. */}
+          {(stage !== "import" || (more && wide)) && (
             <li className="min-w-0">
               <AnimatedBeam
                 containerRef={container}
@@ -245,7 +308,9 @@ function Picture({
           }
           hint={
             app
-              ? `owned by ${app.owner || "you"} · created ${relativeTime(app.createdAt)}`
+              ? // A creation date is a date, not an age: "53d 23h ago" asked
+                // the reader to do the subtraction back to the day it was.
+                `owned by ${app.owner || "you"} · created ${calendarDate(app.createdAt)}`
               : "one App in place of a token and a webhook per repository"
           }
         />
@@ -293,40 +358,51 @@ function Picture({
   )
 }
 
-/** One installed account, and its line to the App. It owns the ref its line is measured from. */
+/**
+ * One installed account, and its line to the App. It owns the ref its line is
+ * measured from. The line pulses only while a project's source is read through
+ * this installation's credential: an account that installed the App and
+ * deploys nothing through it is connected, and still.
+ */
 function AccountNode({
   installation,
+  credential,
   containerRef,
   appRef,
-  still,
+  wide,
   delay,
 }: {
   installation: GitHubAppInstallation
+  credential?: DeploymentCredential
   containerRef: RefObject<HTMLDivElement | null>
   appRef: RefObject<HTMLDivElement | null>
-  still: boolean
+  wide: boolean
   delay: number
 }) {
   const mark = useRef<HTMLDivElement>(null)
+  const projects = credential ? projectsUsing(credential) : 0
   return (
     <li className="min-w-0">
       <AnimatedBeam
         containerRef={containerRef}
         fromRef={mark}
         toRef={appRef}
-        still={still}
+        still={projects === 0}
         delay={delay}
       />
       <WireNode
         nodeRef={mark}
         align="end"
         mark={
-          <Avatar className="size-11 border border-hairline">
-            <AvatarImage src={githubAvatarUrl(installation.account)} alt="" />
-            <AvatarFallback className="bg-plot-brand text-sm font-semibold text-brand uppercase">
-              {installation.account.slice(0, 1)}
-            </AvatarFallback>
-          </Avatar>
+          // Three accounts at 44px were two hundred pixels of a phone before
+          // the App; the picture is the same at 36.
+          <AccountFace
+            account={installation.account}
+            className={cn(
+              "border border-hairline",
+              wide ? "size-11 rounded-xl" : "size-9 rounded-lg",
+            )}
+          />
         }
         title={
           <a
@@ -338,60 +414,107 @@ function AccountNode({
             {installation.account}
           </a>
         }
-        hint={`${installation.accountType.toLowerCase()} · ${
-          installation.repositorySelection === "all" ? "every repository" : "chosen repositories"
-        }`}
+        hint={
+          // Two lines on purpose: what the installation is, then what deploys
+          // through it — one string wrapped wherever the column ended.
+          <>
+            <span className="block">
+              {installation.accountType.toLowerCase()} ·{" "}
+              {installation.repositorySelection === "all"
+                ? "every repository"
+                : "chosen repositories"}
+            </span>
+            {credential && (
+              <span className="block">
+                {projects > 0
+                  ? `${plural(projects, "project")} deploy through it`
+                  : "nothing deployed yet"}
+              </span>
+            )}
+          </>
+        }
       />
     </li>
   )
 }
 
-/** The three steps: a filled line up to where you are. */
-function Rail({ stage }: { stage: GitHubAppStage }) {
-  const steps: { key: GitHubAppStage; label: string }[] = [
+type PathState = "passed" | "warning" | "current" | "pending"
+
+const PATH_WORD: Record<PathState, string> = {
+  passed: "Done",
+  warning: "Waiting on you",
+  current: "Next",
+  pending: "Not yet",
+}
+
+/**
+ * The three steps from nothing to deploying, drawn the way the release path
+ * and the dashboard's own restarts draw a run of stages: a segment of rule per
+ * step, coloured by where the App is, its name under it. The step that waits
+ * on GitHub's install screen is amber — the header says "Connected, not
+ * installed" in the same colour — and the one that is simply next is the
+ * brand's location mark.
+ *
+ * It replaced numbered filled circles, which is the pill §4 deleted and §16
+ * names for exactly this shape. The last step is done once a project's
+ * source reads through the App, not when the App merely could be used.
+ */
+function SetupPath({ stage, deploying }: { stage: GitHubAppStage; deploying: boolean }) {
+  const steps = [
     { key: "create", label: "Create the App" },
     { key: "install", label: "Install it on an account" },
-    { key: "import", label: "Import a repository" },
+    { key: "import", label: deploying ? "Repositories deploy through it" : "Import a repository" },
   ]
-  const current = steps.findIndex((step) => step.key === stage)
+  const at = steps.findIndex((step) => step.key === stage)
   return (
-    <ol className="flex flex-wrap items-center gap-x-3 gap-y-2" aria-label="GitHub App setup">
+    <ol
+      aria-label="GitHub App setup"
+      className="grid min-w-0 flex-1 gap-x-3 lg:max-w-xl"
+      style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}
+    >
       {steps.map((step, index) => {
-        const state = index < current ? "done" : index === current ? "current" : "next"
+        const state: PathState =
+          index < at || (index === 2 && deploying)
+            ? "passed"
+            : index > at
+              ? "pending"
+              : stage === "install"
+                ? "warning"
+                : "current"
         return (
-          <li key={step.key} className="flex items-center gap-3">
-            {index > 0 && (
-              <span
-                aria-hidden
-                className={cn(
-                  "hidden h-px w-8 sm:block",
-                  state === "next" ? "bg-border" : "bg-success",
-                )}
-              />
+          <li
+            key={step.key}
+            aria-current={state === "current" || state === "warning" ? "step" : undefined}
+            className="flex min-w-0 flex-col gap-2"
+          >
+            {state === "current" ? (
+              <span className="relative block h-1.5 w-full rounded-full bg-brand" />
+            ) : (
+              <Segment state={state} />
             )}
-            <span
-              aria-current={state === "current" ? "step" : undefined}
-              className="flex items-center gap-2"
-            >
-              <span
-                aria-hidden
-                className={cn(
-                  "numeric flex size-5 items-center justify-center rounded-full text-micro font-semibold",
-                  state === "done" && "bg-plot-success text-success",
-                  state === "current" && "bg-brand text-brand-foreground",
-                  state === "next" && "bg-muted text-muted-foreground",
-                )}
-              >
-                {state === "done" ? <Check className="size-3" /> : index + 1}
-              </span>
+            {/* Wrapped rather than truncated: three steps across a phone are
+                a hundred pixels each, and "Install it on an a…" is not one. */}
+            <span className="flex min-w-0 items-start gap-1.5">
+              {state === "current" ? (
+                <span
+                  aria-hidden
+                  className="mt-0.5 flex size-3.5 shrink-0 items-center justify-center"
+                >
+                  <span className="size-1.5 rounded-full bg-brand" />
+                </span>
+              ) : (
+                <StepMark state={state} className="mt-0.5" />
+              )}
               <span
                 className={cn(
-                  "text-xs",
-                  state === "current" ? "font-medium" : "text-muted-foreground",
+                  "min-w-0 text-xs leading-snug font-medium",
+                  state === "pending" && "text-muted-foreground",
+                  state === "warning" && "text-warning",
                 )}
               >
                 {step.label}
               </span>
+              <span className="sr-only">{PATH_WORD[state]}</span>
             </span>
           </li>
         )
@@ -403,11 +526,17 @@ function Rail({ stage }: { stage: GitHubAppStage }) {
 export function GitHubAppPanel({
   admin,
   status,
+  credentials,
   onChange,
 }: {
   admin: boolean
-  /** The page polls the App once and shares the reading with its tiles. */
+  /** The page polls the App once and shares the reading with its credential marks. */
   status: ReturnType<typeof useGitHubApp>
+  /**
+   * The page's saved credentials: an installation's own credential says how
+   * many projects deploy through that account, which is what its line draws.
+   */
+  credentials?: DeploymentCredential[]
   /** Disconnecting removes the App's own credentials; the list beside it re-reads. */
   onChange?: () => void
 }) {
@@ -456,6 +585,15 @@ export function GitHubAppPanel({
     confirm({
       title: "Disconnect the GitHub App",
       confirmLabel: "Disconnect",
+      subject: status.data?.app && {
+        mark: <ProductLogo id="github" size="sm" />,
+        name: status.data.app.name,
+        facts: (
+          <FormFact label="Installed on">
+            {plural(status.data.installations.length, "account")}
+          </FormFact>
+        ),
+      },
       description: (
         <p>
           Deliveries through the App stop, and repositories imported through it can no longer be
@@ -472,22 +610,57 @@ export function GitHubAppPanel({
       },
     })
 
-  const verbs: Verb[] = admin
-    ? [
-        {
-          key: "disconnect",
-          label: "Disconnect",
-          detail: "Forget the App's key and secrets on this server.",
-          icon: Trash,
-          danger: true,
-          run: disconnect,
-        },
-      ]
-    : []
-
   const data = status.data
   const stage = githubAppStage(data)
   const installations = data?.installations ?? []
+  const deploying = installations.some(
+    (installation) => (credentialOf(installation, credentials)?.usedBy ?? 0) > 0,
+  )
+
+  // Declared once, and drawn by the header's menu: each verb with its sentence
+  // (§13). The copy button beside the server's address stays, because that is
+  // where the address is read.
+  const verbs: Verb[] = []
+  if (data?.app) {
+    const htmlUrl = data.app.htmlUrl
+    verbs.push({
+      key: "open",
+      label: "Open on GitHub",
+      detail: "The App's settings page on GitHub.",
+      icon: External,
+      run: () => window.open(htmlUrl, "_blank", "noreferrer"),
+    })
+  }
+  if (admin && data?.installUrl && stage !== "create") {
+    const installUrl = data.installUrl
+    verbs.push({
+      key: "install",
+      label: "Install on another account",
+      detail: "GitHub asks which repositories it may read.",
+      icon: Plus,
+      run: () => window.open(installUrl, "_blank", "noreferrer"),
+    })
+  }
+  if (data?.webhookUrl) {
+    const webhookUrl = data.webhookUrl
+    verbs.push({
+      key: "copy",
+      label: "Copy webhook address",
+      detail: "Where GitHub sends every push.",
+      icon: Copy,
+      run: () => void copyText(webhookUrl, "Webhook address copied"),
+    })
+  }
+  if (admin) {
+    verbs.push({
+      key: "disconnect",
+      label: "Disconnect",
+      detail: "Forget the App's key and secrets on this server.",
+      icon: Trash,
+      danger: true,
+      run: disconnect,
+    })
+  }
 
   return (
     <Panel plain>
@@ -517,6 +690,7 @@ export function GitHubAppPanel({
         {outcome && (
           <Notice
             tone={outcome.tone}
+            icon={outcome.tone === "success" ? CheckCircle : Warning}
             title={outcome.tone === "success" ? "Connected" : "Not connected"}
           >
             {outcome.text}
@@ -525,7 +699,7 @@ export function GitHubAppPanel({
         {status.error && <ErrorState error={status.error} onRetry={status.refresh} />}
         {status.loading && !data && <LoadingRows rows={2} />}
         {data?.error && (
-          <Notice tone="warning" title="GitHub is not answering for this App">
+          <Notice tone="warning" icon={Warning} title="GitHub is not answering for this App">
             {data.error}
           </Notice>
         )}
@@ -535,70 +709,89 @@ export function GitHubAppPanel({
           // bare ground: this is a picture of three things and the lines
           // between them, and a picture needs an edge to be read as one.
           <div className="animate-rise overflow-hidden rounded-xl border bg-card">
-            <div className="px-6 py-7 lg:px-8 lg:py-10">
-              <Picture stage={stage} data={data} admin={admin} />
+            <div className="px-5 py-6 sm:px-6 sm:py-7 lg:px-8 lg:py-10">
+              <Picture stage={stage} data={data} admin={admin} credentials={credentials} />
             </div>
 
-            <div className="flex flex-col gap-4 border-t border-hairline px-6 py-4 lg:flex-row lg:items-center lg:justify-between lg:gap-8">
-              <Rail stage={stage} />
+            <div className="border-t border-hairline px-5 py-4 sm:px-6">
+              {/* The picture's own measure, so the path and its command sit
+                  under the drawing rather than at the frame's far edges. */}
+              <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 lg:flex-row lg:items-center lg:justify-between lg:gap-10">
+                <SetupPath stage={stage} deploying={deploying} />
 
-              {stage === "create" &&
-                (admin ? (
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                {stage === "create" &&
+                  (admin ? (
                     <Field
                       label="Organisation"
                       htmlFor="github-app-organization"
                       hint="Leave empty to create it on your account."
-                      className="sm:w-56"
+                      className="lg:shrink-0"
                     >
-                      <Input
-                        id="github-app-organization"
-                        value={organization}
-                        onChange={(event) => setOrganization(event.target.value)}
-                        placeholder="acme"
-                        autoComplete="off"
-                      />
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        {/* The slug is an account's path on GitHub, so the field
+                            says so: the prefix and the name read as one address. */}
+                        <InputGroup className="sm:w-64">
+                          <InputGroupAddon className="gap-0 border-r-0 pr-0">
+                            {/* At the field's own size, so the two read as one path. */}
+                            <InputGroupText className="text-base sm:text-body">
+                              github.com/
+                            </InputGroupText>
+                          </InputGroupAddon>
+                          <InputGroupInput
+                            id="github-app-organization"
+                            value={organization}
+                            onChange={(event) => setOrganization(event.target.value)}
+                            placeholder="acme"
+                            autoComplete="off"
+                            spellCheck={false}
+                            className="pl-0"
+                          />
+                        </InputGroup>
+                        <Button
+                          pending={starting}
+                          onClick={() => void create()}
+                          className="max-sm:h-11 max-sm:w-full sm:shrink-0"
+                        >
+                          <GitHubMark className="size-4" />
+                          Create GitHub App
+                        </Button>
+                      </div>
                     </Field>
-                    {/* mb matches the field's hint line so the button sits on the input's row. */}
-                    <Button
-                      pending={starting}
-                      onClick={() => void create()}
-                      className="sm:mb-6 sm:shrink-0"
-                    >
-                      <GitHubMark className="size-4" />
-                      Create GitHub App
+                  ) : (
+                    <p className="text-body text-muted-foreground">
+                      An administrator creates the App from this page.
+                    </p>
+                  ))}
+
+                {stage === "install" && data.installUrl && (
+                  <Button asChild className="max-sm:h-11 sm:shrink-0">
+                    <a href={data.installUrl} target="_blank" rel="noreferrer">
+                      Install on GitHub
+                      <External className="size-3.5" aria-hidden />
+                    </a>
+                  </Button>
+                )}
+
+                {/* Installing and importing are an administrator's. */}
+                {stage === "import" && admin && (
+                  <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
+                    {data.installUrl && (
+                      <Button asChild size="sm" variant="outline">
+                        <a href={data.installUrl} target="_blank" rel="noreferrer">
+                          <Plus className="size-3.5" />
+                          Another account
+                        </a>
+                      </Button>
+                    )}
+                    {/* The command face while the last step is still next; once
+                        a project deploys through the App nothing here waits on
+                        the reader, and the page's one command is its own. */}
+                    <Button asChild size="sm" variant={deploying ? "outline" : "default"}>
+                      <Link href="/deploy/new">Import a repository</Link>
                     </Button>
                   </div>
-                ) : (
-                  <p className="text-body text-muted-foreground">
-                    An administrator creates the App from this page.
-                  </p>
-                ))}
-
-              {stage === "install" && data.installUrl && (
-                <Button asChild className="sm:shrink-0">
-                  <a href={data.installUrl} target="_blank" rel="noreferrer">
-                    Install on GitHub
-                    <External className="size-3.5" aria-hidden />
-                  </a>
-                </Button>
-              )}
-
-              {stage === "import" && (
-                <div className="flex flex-wrap items-center gap-2">
-                  {admin && data.installUrl && (
-                    <Button asChild size="sm" variant="outline">
-                      <a href={data.installUrl} target="_blank" rel="noreferrer">
-                        <Plus className="size-3.5" />
-                        Another account
-                      </a>
-                    </Button>
-                  )}
-                  <Button asChild size="sm">
-                    <Link href="/deploy/new">Import a repository</Link>
-                  </Button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
         )}

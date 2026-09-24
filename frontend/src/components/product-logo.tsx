@@ -2,6 +2,8 @@
 
 import { useState } from "react"
 import { Box, type Icon } from "@/components/icons"
+import { hostOf, productOfHost, wordsProduct } from "@/lib/clients"
+import type { NotificationChannelKind } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 /**
@@ -39,6 +41,19 @@ import { cn } from "@/lib/utils"
  * Vivaldi; Windows, Apple, Android, Linux) or as the program that sent it
  * (curl), and a key as the service its name says holds it — GitLab, Jenkins,
  * Ansible, Home Assistant, Postman beside the ones above.
+ *
+ * The deploy pages draw what a project is made of and what it talks to: the
+ * language its recipe builds and the framework detection found, the package
+ * manager, the host its source or image lives on (GitHub, Codeberg, Quay, an
+ * Azure or Amazon registry), the channel a notification goes to, the service
+ * a variable's name says holds it, and on the request log the crawler that
+ * asked and the site a visitor came from. Where homarr draws these for a dark
+ * ground they are its files; the frameworks it lacks are Simple Icons' paths
+ * filled with the brand's colour — white for a black mark, the L 0.72 rung
+ * for a navy one, as MySQL's dolphin was. Rust and pnpm have two files each:
+ * devicon's, drawn for paper, stay the file manager's, and the tile draws a
+ * light one, because Rust's black gear and pnpm's charcoal squares vanish on
+ * this ground.
  */
 const LOGOS: Record<string, string> = {
   actual: "actual-budget.svg",
@@ -47,13 +62,19 @@ const LOGOS: Record<string, string> = {
   alpine: "alpine.svg",
   amd: "amd.svg",
   android: "android.svg",
+  angular: "angular.svg",
   ansible: "ansible.svg",
   apple: "apple.svg",
   arch: "arch.svg",
   arm: "arm.svg",
+  astro: "astro.svg",
   audiobookshelf: "audiobookshelf.svg",
+  aws: "aws.svg",
+  azure: "azure.svg",
   backblaze: "backblaze.svg",
   beszel: "beszel.svg",
+  bing: "bing.svg",
+  bitbucket: "bitbucket.svg",
   brave: "brave.svg",
   bun: "bun.svg",
   caddy: "caddy.svg",
@@ -61,44 +82,71 @@ const LOGOS: Record<string, string> = {
   chrome: "chrome.svg",
   claude: "claude.svg",
   clickhouse: "clickhouse.svg",
+  cloudflare: "cloudflare.svg",
   "code-server": "code-server.webp",
+  codeberg: "codeberg.svg",
   curl: "curl.svg",
   cyberchef: "cyberchef.svg",
   debian: "debian.svg",
   deno: "deno.svg",
   directus: "directus.svg",
+  discord: "discord.svg",
+  django: "django.svg",
   docker: "docker.svg",
   "docker-compose": "docker-compose.webp",
+  docusaurus: "docusaurus.svg",
   docuseal: "docuseal.svg",
+  dotnet: "dotnet.svg",
   dozzle: "dozzle.svg",
   drawio: "drawio.svg",
+  duckduckgo: "duckduckgo.svg",
   edge: "edge.svg",
+  eleventy: "eleventy.svg",
+  ember: "ember.svg",
+  express: "express.svg",
+  facebook: "facebook.svg",
+  fastapi: "fastapi.svg",
+  fastify: "fastify.svg",
   fedora: "fedora.svg",
   filebrowser: "filebrowser.svg",
   firefox: "firefox.svg",
+  flask: "flask.svg",
+  forgejo: "forgejo.svg",
   freshrss: "freshrss.svg",
+  gatsby: "gatsby.svg",
   git: "git.svg",
   gitea: "gitea.svg",
   github: "github.svg",
   gitlab: "gitlab.svg",
   go: "go.svg",
+  google: "google.svg",
+  "google-cloud": "google-cloud.svg",
   gotify: "gotify.svg",
+  gradio: "gradio.svg",
   grafana: "grafana.svg",
+  harbor: "harbor.svg",
   healthchecks: "healthchecks.svg",
   "home-assistant": "home-assistant.svg",
   homepage: "homepage.webp",
+  hono: "hono.svg",
   influxdb: "influxdb.svg",
   intel: "intel.svg",
   "it-tools": "it-tools.svg",
+  java: "java.svg",
   jellyfin: "jellyfin.svg",
   jenkins: "jenkins.svg",
   jupyter: "jupyter.svg",
   kavita: "kavita.svg",
+  koa: "koa.svg",
+  kotlin: "kotlin.svg",
   kubernetes: "kubernetes.svg",
+  laravel: "laravel.svg",
   "lets-encrypt": "lets-encrypt.svg",
   linkding: "linkding.svg",
+  linkedin: "linkedin.svg",
   linux: "linux.svg",
   linuxmint: "linuxmint.svg",
+  mailgun: "mailgun.svg",
   mariadb: "mariadb.svg",
   meilisearch: "meilisearch.svg",
   memos: "memos.webp",
@@ -112,58 +160,111 @@ const LOGOS: Record<string, string> = {
   n8n: "n8n.svg",
   navidrome: "navidrome.svg",
   neovim: "neovim.svg",
+  nestjs: "nestjs.svg",
   nextcloud: "nextcloud.svg",
   nextjs: "nextjs.svg",
+  nginx: "nginx.svg",
   "nginx-static": "nginx.svg",
   nocodb: "nocodb.svg",
   nodejs: "nodejs.svg",
   npm: "npm.svg",
   ntfy: "ntfy.svg",
+  nuxt: "nuxt.svg",
   ollama: "ollama.svg",
   "open-webui": "open-webui.svg",
+  openai: "openai.svg",
   opengist: "opengist.svg",
   opensuse: "opensuse.svg",
   opera: "opera.svg",
   oracle: "oracle.svg",
   pgadmin: "pgadmin.svg",
+  php: "php.svg",
   phpmyadmin: "phpmyadmin.svg",
   pm2: "pm2.svg",
+  pnpm: "pnpm-light.svg",
   portainer: "portainer.svg",
   postgres: "postgresql.svg",
   postgresql: "postgresql.svg",
+  posthog: "posthog.svg",
   postman: "postman.svg",
   prometheus: "prometheus.svg",
   python: "python.svg",
   qdrant: "qdrant.svg",
   qemu: "qemu.svg",
+  quarkus: "quarkus.svg",
+  quay: "quay.svg",
   rabbitmq: "rabbitmq.svg",
+  react: "react.svg",
+  "react-router": "react-router.svg",
+  reddit: "reddit.svg",
   redis: "redis.svg",
+  remix: "remix.svg",
   rocky: "rocky.svg",
+  ruby: "ruby.svg",
+  rust: "rust-light.svg",
   safari: "safari.svg",
   searxng: "searxng.svg",
   seerr: "seerr.svg",
+  sendgrid: "sendgrid.svg",
+  sentry: "sentry.svg",
   shlink: "shlink.svg",
+  slack: "slack.svg",
+  solid: "solid.svg",
+  "spring-boot": "spring-boot.svg",
   sqlite: "sqlite.svg",
   sqlserver: "sqlserver.svg",
   "stirling-pdf": "stirling-pdf.svg",
+  streamlit: "streamlit.svg",
+  stripe: "stripe.svg",
+  supabase: "supabase.svg",
+  svelte: "svelte.svg",
+  symfony: "symfony.svg",
   syncthing: "syncthing.svg",
   tailscale: "tailscale.svg",
+  tanstack: "tanstack.svg",
+  telegram: "telegram.svg",
+  // No product's mark: the terminal window `ProgramMark` draws for a program
+  // with none, keyed so a command-line identity (the GitHub CLI) takes a tile.
+  terminal: "terminal.svg",
   terraform: "terraform.svg",
   traefik: "traefik.svg",
   trilium: "trilium.svg",
+  typescript: "typescript.svg",
   typesense: "typesense.svg",
   ubuntu: "ubuntu.svg",
   "uptime-kuma": "uptime-kuma.svg",
   valkey: "valkey.svg",
   vaultwarden: "vaultwarden.svg",
   vim: "vim.svg",
+  vite: "vitejs.svg",
+  vitepress: "vitepress.svg",
   vivaldi: "vivaldi.svg",
+  vuejs: "vuejs.svg",
   wallabag: "wallabag.svg",
+  webhook: "webhook.svg",
   whoami: "traefik.svg",
   windows: "windows.svg",
+  x: "x.svg",
+  yarn: "yarn.svg",
+  ycombinator: "ycombinator.svg",
 }
 
-/** Image names that are not their product's own key. */
+/**
+ * Whether the product has a file, for a caller choosing between a logo and
+ * something else — a project's favicon, a kind's glyph — before it draws
+ * either, rather than finding out from an empty tile.
+ */
+export function hasProductLogo(id: string | undefined): id is string {
+  return id !== undefined && id in LOGOS
+}
+
+/**
+ * Image names that are not their product's own key. The language images are
+ * the ones the build recipes use (`recipeBaseCatalogue` in the backend) —
+ * `node`, `golang`, Temurin and the Maven and Gradle builders, FrankenPHP and
+ * Composer, .NET's `aspnet` runtime — so a project built by a recipe is drawn
+ * as the same language on the Docker page.
+ */
 const IMAGE_ALIASES: Record<string, string> = {
   mongo: "mongodb",
   nginx: "nginx-static",
@@ -171,6 +272,15 @@ const IMAGE_ALIASES: Record<string, string> = {
   "actual-server": "actual",
   "mssql-server": "sqlserver",
   "clickhouse-server": "clickhouse",
+  node: "nodejs",
+  golang: "go",
+  "eclipse-temurin": "java",
+  openjdk: "java",
+  maven: "java",
+  gradle: "java",
+  frankenphp: "php",
+  composer: "php",
+  aspnet: "dotnet",
 }
 
 /**
@@ -232,7 +342,9 @@ const PROCESS_ALIASES: Record<string, string> = {
 export function processProduct(name: string) {
   const bare = name.toLowerCase().replace(/[:\s].*$/, "")
   const id = PROCESS_ALIASES[name.toLowerCase()] ?? PROCESS_ALIASES[bare] ?? bare
-  return id in LOGOS && id !== "docker-compose" ? id : undefined
+  // Compose's mark is a stack's, not a program's, and a process called `X` is
+  // the X server rather than the site whose mark shares its key.
+  return id in LOGOS && id !== "docker-compose" && id !== "x" ? id : undefined
 }
 
 /**
@@ -332,6 +444,334 @@ export function virtualizationProduct(virtualization: string | undefined) {
 }
 
 /**
+ * The hosts that are one product's, matched with every name under them:
+ * `api.github.com` and `ghcr.io` are GitHub's, a registry at
+ * `123.dkr.ecr.eu-west-1.amazonaws.com` is Amazon's, `europe-docker.pkg.dev`
+ * is Google Cloud's Artifact Registry.
+ */
+const HOSTS: Record<string, string> = {
+  "github.com": "github",
+  "ghcr.io": "github",
+  "githubusercontent.com": "github",
+  "gitlab.com": "gitlab",
+  "bitbucket.org": "bitbucket",
+  "codeberg.org": "codeberg",
+  "gitea.com": "gitea",
+  "docker.io": "docker",
+  "docker.com": "docker",
+  "quay.io": "quay",
+  "azurecr.io": "azure",
+  "amazonaws.com": "aws",
+  "ecr.aws": "aws",
+  "gcr.io": "google-cloud",
+  "pkg.dev": "google-cloud",
+}
+
+/**
+ * The words a self-hosted forge or registry is usually named by:
+ * `gitlab.example.com`, `forgejo.lan`, `harbor.corp.internal`. The host
+ * saying it is the reading; a host that says nothing (`git.example.com`) is
+ * no product.
+ */
+const HOST_WORDS: Record<string, string> = {
+  github: "github",
+  gitlab: "gitlab",
+  bitbucket: "bitbucket",
+  gitea: "gitea",
+  forgejo: "forgejo",
+  codeberg: "codeberg",
+  harbor: "harbor",
+  quay: "quay",
+}
+
+/**
+ * Where a Git remote or an image registry lives, from whatever names it: a
+ * URL, an scp-style `git@host:owner/repo`, an image reference's registry or a
+ * bare host. A credential's target, a project's source and the Host field as
+ * it is typed all read through this, so the one host is drawn the same way in
+ * each.
+ */
+export function hostProduct(hostOrUrl: string | undefined): string | undefined {
+  const host = hostOf(hostOrUrl ?? "")
+  if (!host.includes(".")) return undefined
+  return productOfHost(host, HOSTS) ?? wordsProduct(host.split(/[.-]/), HOST_WORDS)
+}
+
+/** The forges a trigger or a source names by `provider`. */
+const GIT_PROVIDERS = new Set(["github", "gitlab", "bitbucket", "gitea"])
+
+/**
+ * The forge a webhook trigger or a Git source says it is. `generic_hook`,
+ * `api` and the legacy hook are no forge: they keep their glyph.
+ */
+export function gitProviderProduct(provider: string | undefined): string | undefined {
+  return provider && GIT_PROVIDERS.has(provider) ? provider : undefined
+}
+
+/** The language each automatic recipe builds. */
+const RECIPES: Record<string, string> = {
+  node: "nodejs",
+  go: "go",
+  python: "python",
+  rust: "rust",
+  java: "java",
+  dotnet: "dotnet",
+  deno: "deno",
+  php: "php",
+}
+
+/**
+ * The language a recipe builds — or Bun, for a Node recipe whose package
+ * manager is Bun, because then Bun is the runtime the project runs on as well
+ * as the tool it installs with.
+ */
+export function recipeProduct(
+  recipe: string | undefined,
+  packageManager?: string,
+): string | undefined {
+  if (recipe === "node" && packageManager === "bun") return "bun"
+  return recipe ? RECIPES[recipe] : undefined
+}
+
+const PACKAGE_MANAGERS = new Set(["bun", "npm", "pnpm", "yarn"])
+
+export function packageManagerProduct(packageManager: string | undefined): string | undefined {
+  return packageManager && PACKAGE_MANAGERS.has(packageManager) ? packageManager : undefined
+}
+
+/**
+ * The frameworks detection names, by the backend's own ids. One with a mark
+ * of its own is drawn as itself; the Rust, Java and Kotlin frameworks that
+ * have none are drawn as their language, which is still what the project is.
+ * Nitro, Parcel, Elysia, hapi and Slim are neither, and the caller falls back
+ * to the recipe.
+ */
+const FRAMEWORKS: Record<string, string> = {
+  nextjs: "nextjs",
+  sveltekit: "svelte",
+  vite: "vite",
+  astro: "astro",
+  nuxt: "nuxt",
+  remix: "remix",
+  "react-router": "react-router",
+  "solid-start": "solid",
+  "tanstack-start": "tanstack",
+  angular: "angular",
+  nestjs: "nestjs",
+  gatsby: "gatsby",
+  docusaurus: "docusaurus",
+  vitepress: "vitepress",
+  eleventy: "eleventy",
+  "create-react-app": "react",
+  "vue-cli": "vuejs",
+  ember: "ember",
+  express: "express",
+  fastify: "fastify",
+  hono: "hono",
+  koa: "koa",
+  go: "go",
+  python: "python",
+  django: "django",
+  fastapi: "fastapi",
+  flask: "flask",
+  streamlit: "streamlit",
+  gradio: "gradio",
+  rust: "rust",
+  axum: "rust",
+  "actix-web": "rust",
+  rocket: "rust",
+  warp: "rust",
+  poem: "rust",
+  salvo: "rust",
+  java: "java",
+  "spring-boot": "spring-boot",
+  quarkus: "quarkus",
+  micronaut: "java",
+  javalin: "java",
+  helidon: "java",
+  vertx: "java",
+  ktor: "kotlin",
+  dotnet: "dotnet",
+  aspnet: "dotnet",
+  deno: "deno",
+  fresh: "deno",
+  php: "php",
+  laravel: "laravel",
+  symfony: "symfony",
+}
+
+export function frameworkProduct(framework: string | undefined): string | undefined {
+  return framework ? FRAMEWORKS[framework] : undefined
+}
+
+/**
+ * What a build produces, as the product it runs on: a recipe as its
+ * language, a Dockerfile as Docker, a static site as the nginx that serves
+ * it, a Compose file as Compose, and an image as the product the image is.
+ */
+export function buildMethodProduct(
+  method: string | undefined,
+  {
+    recipe,
+    packageManager,
+    image,
+  }: { recipe?: string; packageManager?: string; image?: string } = {},
+): string | undefined {
+  switch (method) {
+    case "recipe":
+      return recipeProduct(recipe, packageManager)
+    case "dockerfile":
+      return "docker"
+    case "static":
+      return "nginx"
+    case "compose":
+    case "legacy_compose":
+      return "docker-compose"
+    case "image":
+      return image ? imageProduct(image) : "docker"
+    default:
+      return undefined
+  }
+}
+
+/**
+ * A notification channel as the service it posts to. A signed webhook is
+ * drawn with the webhook's own mark — the protocol's, which misattributes
+ * nothing — unless `webhookProduct` can say whose it is; e-mail is a protocol
+ * with no mark and keeps its glyph.
+ */
+export function channelProduct(kind: NotificationChannelKind): string | undefined {
+  return kind === "email" ? undefined : kind
+}
+
+/** The services whose own host a webhook URL can point at. */
+const WEBHOOK_HOSTS: Record<string, string> = {
+  "discord.com": "discord",
+  "discordapp.com": "discord",
+  "slack.com": "slack",
+  "telegram.org": "telegram",
+  "hc-ping.com": "healthchecks",
+}
+
+/**
+ * The self-hosted receivers a webhook is usually pointed at, by the word
+ * their host is named with: `n8n.example.com`, `ntfy.sh`, `hass.lan`.
+ */
+const WEBHOOK_WORDS: Record<string, string> = {
+  n8n: "n8n",
+  ntfy: "ntfy",
+  gotify: "gotify",
+  homeassistant: "home-assistant",
+  hass: "home-assistant",
+  healthchecks: "healthchecks",
+  uptimekuma: "uptime-kuma",
+  kuma: "uptime-kuma",
+}
+
+/**
+ * Which product receives a webhook, from its URL's host — nothing when the
+ * host does not say, and the caller draws the webhook's own mark.
+ */
+export function webhookProduct(url: string | undefined): string | undefined {
+  const host = hostOf(url ?? "")
+  return productOfHost(host, WEBHOOK_HOSTS) ?? wordsProduct(host.split(/[.-]/), WEBHOOK_WORDS)
+}
+
+/**
+ * Let's Encrypt, from the issuer's common name a certificate carries: its
+ * intermediates are `R10`, `E6` and, from the 2025 hierarchy, `YR1`, `YE1` —
+ * names no other public CA uses — and older chains say "Let's Encrypt" or
+ * "ISRG" outright. The proxy issues through certbot, so every managed
+ * certificate is one of these; an imported one is whatever it says.
+ */
+export function issuerProduct(issuer: string | undefined): string | undefined {
+  const name = (issuer ?? "").trim()
+  return /^Y?[RE]\d{1,2}$/.test(name) || /let'?s ?encrypt|^ISRG\b/i.test(name)
+    ? "lets-encrypt"
+    : undefined
+}
+
+/**
+ * The services a variable's name says hold it, at any position:
+ * `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_SENTRY_DSN`, `AWS_REGION`. `S3_` names a
+ * protocol a dozen providers speak and stays unnamed (§14), and so does
+ * `DATABASE_URL`, which says nothing about which database.
+ */
+const VARIABLE_SERVICES: Record<string, string> = {
+  stripe: "stripe",
+  sentry: "sentry",
+  openai: "openai",
+  anthropic: "claude",
+  claude: "claude",
+  aws: "aws",
+  azure: "azure",
+  gcp: "google-cloud",
+  cloudflare: "cloudflare",
+  supabase: "supabase",
+  slack: "slack",
+  discord: "discord",
+  telegram: "telegram",
+  google: "google",
+  posthog: "posthog",
+  mailgun: "mailgun",
+  sendgrid: "sendgrid",
+  github: "github",
+  gh: "github",
+  gitlab: "gitlab",
+  npm: "npm",
+  docker: "docker",
+  redis: "redis",
+  valkey: "valkey",
+  postgres: "postgres",
+  postgresql: "postgres",
+  pg: "postgres",
+  mysql: "mysql",
+  mariadb: "mariadb",
+  mongo: "mongodb",
+  mongodb: "mongodb",
+  clickhouse: "clickhouse",
+  minio: "minio",
+  meili: "meilisearch",
+  meilisearch: "meilisearch",
+  typesense: "typesense",
+  qdrant: "qdrant",
+  rabbitmq: "rabbitmq",
+  amqp: "rabbitmq",
+  influx: "influxdb",
+  influxdb: "influxdb",
+  grafana: "grafana",
+  prometheus: "prometheus",
+  tailscale: "tailscale",
+  ntfy: "ntfy",
+  gotify: "gotify",
+}
+
+/**
+ * The runtimes and frameworks that read a variable by its first word:
+ * `NEXT_PUBLIC_*` is inlined by Next.js, `VITE_*` by Vite, `NODE_ENV` read by
+ * Node. Only the first word, because `API_NODE_URL` is no Node setting.
+ */
+const VARIABLE_PREFIXES: Record<string, string> = {
+  next: "nextjs",
+  nextauth: "nextjs",
+  vite: "vite",
+  node: "nodejs",
+  bun: "bun",
+  python: "python",
+}
+
+/**
+ * A variable as the product its name says holds it — `keyProduct`'s reading
+ * of a key's name, applied to an environment variable. The service wins over
+ * the framework prefix: `NEXT_PUBLIC_SUPABASE_URL` is Supabase's URL, exposed
+ * through Next.js.
+ */
+export function variableProduct(name: string): string | undefined {
+  const words = name.toLowerCase().split("_").filter(Boolean)
+  return wordsProduct(words, VARIABLE_SERVICES) ?? VARIABLE_PREFIXES[words[0]]
+}
+
+/**
  * A product's logo on a recessed tile, the size of the mark a deployment card
  * carries (`ProjectMark`), so a template and the project it becomes are drawn
  * the same way.
@@ -371,12 +811,13 @@ export function ProductLogo({
     >
       {file && file !== failed ? (
         // Same-origin and already sized for the tile: a plain element, as
-        // `ProjectMark`'s favicon is.
+        // `ProjectMark`'s favicon is. Not lazy: the page scrolls an inner
+        // column, which lazy loading does not see into, so a tile below the
+        // fold stayed empty until it was scrolled to — for a 3 KB file.
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={`/logos/${file}`}
           alt=""
-          loading="lazy"
           className={cn("object-contain", size === "sm" ? "size-4.5" : "size-6")}
           onError={() => setFailed(file)}
         />
@@ -432,19 +873,37 @@ export function ProductGlyphs({ ids, max = 5 }: { ids: string[]; max?: number })
  * the way a group of avatars does: the first is whole and each after it tucks
  * under its neighbour, so three marks take the width of two. Past three it
  * says how many more rather than drawing a wall.
+ *
+ * The ring that parts one tile from the next is the ground the stack sits
+ * on, so it reads as a gap rather than a halo: the panel's ground where a
+ * panel declares one, the page's otherwise — `ring-card` drew a lighter band
+ * round every tile on a plain panel. A stack on a surface no panel describes,
+ * a card you pick, passes that surface's ring.
  */
-export function ProductLogos({ ids, size = "sm" }: { ids: string[]; size?: "sm" | "md" }) {
+export function ProductLogos({
+  ids,
+  size = "sm",
+  ring = "ring-[var(--panel-ground,var(--background))]",
+}: {
+  ids: string[]
+  size?: "sm" | "md"
+  /** The ring colour, as a class: the ground the stack sits on. */
+  ring?: string
+}) {
   const shown = ids.slice(0, 3)
   const more = ids.length - shown.length
   return (
     <span aria-hidden="true" className="flex shrink-0 items-center">
       {shown.map((id, index) => (
-        <ProductLogo
+        // Stacked against document order, so the first — the one the stack
+        // is named for — is the tile nothing covers.
+        <span
           key={id}
-          id={id}
-          size={size}
-          className={cn(index > 0 && (size === "sm" ? "-ml-3" : "-ml-4"), "ring-2 ring-card")}
-        />
+          className={cn("relative", index > 0 && (size === "sm" ? "-ml-3" : "-ml-4"))}
+          style={{ zIndex: shown.length - index }}
+        >
+          <ProductLogo id={id} size={size} className={cn("ring-2", ring)} />
+        </span>
       ))}
       {more > 0 && <span className="numeric ml-1 text-micro text-muted-foreground">+{more}</span>}
     </span>

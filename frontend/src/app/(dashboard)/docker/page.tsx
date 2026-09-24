@@ -522,7 +522,12 @@ function Route({
 /** What a project is made of: its services' products, or Compose itself. */
 function StackMark({ stack }: { stack: ComposeStack }) {
   const images = stack.services.map((service) => service.image).filter(Boolean)
-  return <ProductLogos ids={images.length > 0 ? imageProducts(images) : ["docker-compose"]} />
+  return (
+    <ProductLogos
+      ids={images.length > 0 ? imageProducts(images) : ["docker-compose"]}
+      ring="ring-choice-surface"
+    />
+  )
 }
 
 function stackTone(stack: ComposeStack) {

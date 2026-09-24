@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { classify, extendTranscript, transcriptLines, TRIMMED_MARKER } from "./transcript"
+import {
+  classify,
+  extendTranscript,
+  hitRanges,
+  transcriptLine,
+  transcriptLines,
+  TRIMMED_MARKER,
+} from "./transcript"
 
 describe("a transcript's lines", () => {
   test("BuildKit's step, output, verdict and cache lines are told apart", () => {
@@ -66,6 +73,38 @@ describe("a transcript's lines", () => {
 
   test("the trimmed marker is its own kind of line", () => {
     expect(transcriptLines(`${TRIMMED_MARKER}\nlater`)[0].kind).toBe("trimmed")
+  })
+
+  // The deploy engine's status stream is its own voice whatever the words
+  // look like: "Readiness check failed" there is a chapter heading, and the
+  // shapes alone would call it an error in somebody's output.
+  test("a caller that knows the voice can say a line is a note", () => {
+    expect(transcriptLine(4, "Resolved main to 3f2c1a9")).toEqual({
+      number: 4,
+      text: "Resolved main to 3f2c1a9",
+      kind: "output",
+    })
+    expect(transcriptLine(4, "Resolved main to 3f2c1a9", true)).toEqual({
+      number: 4,
+      text: "Resolved main to 3f2c1a9",
+      kind: "note",
+    })
+    expect(transcriptLine(5, "  ", true).kind).toBe("blank")
+  })
+})
+
+describe("finding a search in a line", () => {
+  test("every hit, ignoring case, without overlaps", () => {
+    expect(hitRanges("GET /health 200 · get /Health", "health")).toEqual([
+      [5, 11],
+      [23, 29],
+    ])
+    expect(hitRanges("aaaa", "aa")).toEqual([
+      [0, 2],
+      [2, 4],
+    ])
+    expect(hitRanges("nothing here", "")).toEqual([])
+    expect(hitRanges("nothing here", "missing")).toEqual([])
   })
 })
 

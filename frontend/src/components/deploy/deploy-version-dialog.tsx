@@ -1,17 +1,40 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { ApiError, post } from "@/lib/api"
+import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import type { DeploymentEngineRun } from "@/lib/types"
+import { cn } from "@/lib/utils"
+import type { DeploymentCommit, DeploymentEngineRun, DeploymentRelease } from "@/lib/types"
 import { Modal } from "@/components/modal"
-import { Field, FormNote } from "@/components/form"
+import { Field, FormFact, FormFacts } from "@/components/form"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ProductLogo } from "@/components/product-logo"
+import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+  InputGroupText,
+} from "@/components/ui/input-group"
+import { SourceBranch, SourceCommit } from "@/components/git/glyphs"
+import { BranchChip, ShortSha } from "@/components/git/marks"
+import { InitialsMark } from "@/components/account/user-avatar"
+import { useProject } from "@/components/deploy/project-context"
+import { runCommit } from "@/components/deploy/vocabulary"
 
 /** A full Git object id; anything else is a name the remote is asked about. */
 const OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i
+
+/** What looks like a shortened commit id, which the remote cannot be asked about by name. */
+const PARTIAL_ID = /^[0-9a-f]{7,39}$/i
+
+/** How many commits the dialog offers from the project's own history. */
+const PICKS = 5
+
+type Version = { commit: DeploymentCommit; run: DeploymentEngineRun; release?: DeploymentRelease }
 
 /**
  * Deploy a version other than the branch's tip: a tag for a release, an
@@ -21,25 +44,63 @@ const OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i
  * The configured branch is untouched. Automatic deployments keep following
  * it, and the next push builds as before; this is one run of one version,
  * with the saved build settings and variables.
+ *
+ * It opens on what it is choosing between: the branch the project follows
+ * and what is live, then the commits this environment has already deployed —
+ * read from its own runs that succeeded, which record the commit each one
+ * built, rather than from the remote — as rows you take, the branch first.
+ * Taking one fills the field; the field says how it will read what is in it,
+ * because a full commit id is deployed exactly and anything else is a name
+ * the remote is asked about, and that difference used to be a paragraph under
+ * the field. The command names the version it will build, the way the field
+ * reads it.
  */
 export function DeployVersionDialog({
   open,
   onOpenChange,
-  projectId,
-  environmentId,
-  branch,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  projectId: number
-  environmentId: number
-  branch?: string
 }) {
   const router = useRouter()
+  const project = useProject()
+  const { deployment } = project.detail
+  const branch = deployment.sourceRef
   const [value, setValue] = useState("")
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
   const trimmed = value.trim()
+  const exact = OBJECT_ID.test(trimmed)
+  const partial = !exact && PARTIAL_ID.test(trimmed)
+  const live = runCommit(project.liveRun)?.sha ?? project.liveRelease?.sourceRevision
+
+  // Newest first and once per commit: a commit redeployed three times is one
+  // version, and the run that built it last is the one worth naming. Only
+  // this environment's runs that went live: a preview's pull request, or a
+  // build that failed, was never deployed here.
+  const picks = useMemo(() => {
+    const seen = new Set<string>()
+    const found: Version[] = []
+    for (const run of project.runs) {
+      if (run.environmentId !== project.environmentId || run.state !== "succeeded") continue
+      const commit = runCommit(run)
+      if (!commit || seen.has(commit.sha)) continue
+      seen.add(commit.sha)
+      found.push({
+        commit,
+        run,
+        release: project.releases.find((release) => release.id === run.releaseId),
+      })
+      if (found.length === PICKS) break
+    }
+    return found
+  }, [project.runs, project.releases, project.environmentId])
+
+  const close = () => {
+    onOpenChange(false)
+    setValue("")
+    setError(undefined)
+  }
 
   const deploy = async () => {
     if (!trimmed) {
@@ -49,16 +110,15 @@ export function DeployVersionDialog({
     setBusy(true)
     setError(undefined)
     try {
-      const body = OBJECT_ID.test(trimmed)
+      const body = exact
         ? { operation: "deploy", sourceRevision: trimmed.toLowerCase() }
         : { operation: "deploy", ref: trimmed }
       const run = await post<DeploymentEngineRun>(
-        `/deploy/${projectId}/environments/${environmentId}/runs`,
+        `/deploy/${project.projectId}/environments/${project.environmentId}/runs`,
         body,
       )
-      onOpenChange(false)
-      setValue("")
-      router.push(`/deploy/${projectId}/runs/${run.id}`)
+      close()
+      router.push(`/deploy/${project.projectId}/runs/${run.id}`)
     } catch (caught) {
       if (caught instanceof ApiError && caught.code === "ref_not_found") {
         setError("The remote has no branch or tag with that name.")
@@ -72,56 +132,151 @@ export function DeployVersionDialog({
     }
   }
 
+  const pick = (next: string) => {
+    setValue(next)
+    setError(undefined)
+  }
+
   return (
     <Modal
       open={open}
-      onOpenChange={(next) => !busy && onOpenChange(next)}
+      onOpenChange={(next) => !busy && (next ? onOpenChange(true) : close())}
       title="Deploy a specific version"
       description="Build a branch, a tag or a commit instead of the configured branch."
-      size="sm"
+      size="md"
       footer={
         <>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+          <Button variant="outline" onClick={close} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={() => void deploy()} pending={busy}>
-            Deploy
+          <Button onClick={() => void deploy()} pending={busy} className="max-w-64">
+            <span className="truncate">
+              {trimmed ? `Deploy ${exact ? trimmed.slice(0, 7) : trimmed}` : "Deploy"}
+            </span>
           </Button>
         </>
       }
     >
       <form
-        className="space-y-4"
+        className="space-y-5"
         onSubmit={(event) => {
           event.preventDefault()
           void deploy()
         }}
       >
+        <FormFacts>
+          {branch && (
+            <FormFact label="Follows">
+              <BranchChip branch={branch} className="max-w-48" />
+            </FormFact>
+          )}
+          {project.liveRelease && (
+            <FormFact label="Live">
+              <span className="inline-flex items-center gap-1.5">
+                <ShortSha sha={live} />
+                <span className="numeric">#{project.liveRelease.number}</span>
+              </span>
+            </FormFact>
+          )}
+        </FormFacts>
+
         <Field
           label="Branch, tag or commit"
           htmlFor="deploy-version"
           hint={
-            branch
-              ? `Builds that version once. Automatic deployments keep following ${branch}.`
-              : "Builds that version once; the configured branch is not changed."
+            partial
+              ? "A commit is deployed by its full 40-character id; this is asked about as a name."
+              : branch
+                ? `Builds that version once. Automatic deployments keep following ${branch}.`
+                : "Builds that version once; the configured branch is not changed."
           }
           error={error}
         >
-          <Input
-            id="deploy-version"
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            placeholder="v1.4.2"
-            className="font-mono"
-            autoComplete="off"
-            spellCheck={false}
-            aria-invalid={Boolean(error)}
-          />
+          <InputGroup>
+            {/* How the value will be read, said as it is typed: a full id is
+                that exact commit, anything else is looked up on the remote
+                with no guess between a tag and a branch. */}
+            <InputGroupAddon align="inline-start">
+              <InputGroupText className={cn(exact && "text-foreground")}>
+                {exact ? (
+                  <SourceCommit aria-hidden className="size-3.5" />
+                ) : (
+                  <SourceBranch aria-hidden className="size-3.5" />
+                )}
+                {exact ? "commit" : "name"}
+              </InputGroupText>
+            </InputGroupAddon>
+            <InputGroupInput
+              id="deploy-version"
+              value={value}
+              onChange={(event) => pick(event.target.value)}
+              placeholder="v1.4.2"
+              className="font-mono"
+              autoComplete="off"
+              spellCheck={false}
+              aria-invalid={Boolean(error)}
+            />
+          </InputGroup>
         </Field>
-        <FormNote>
-          A full commit id deploys that exact commit; any other name is looked up on the remote. The
-          saved build settings and variables apply.
-        </FormNote>
+
+        {(branch || picks.length > 0) && (
+          <section aria-labelledby="deploy-version-picks" className="space-y-2">
+            <p id="deploy-version-picks" className="eyebrow">
+              Deployed before
+            </p>
+            <ChoiceList>
+              {branch && (
+                <ChoiceRow
+                  verb={trimmed === branch ? `Use ${branch}, selected` : `Use ${branch}`}
+                  onSelect={() => pick(branch)}
+                  className={cn(trimmed === branch && "bg-accent")}
+                  leading={<ProductLogo size="sm" fallback={SourceBranch} />}
+                  title={<span className="font-mono">{branch}</span>}
+                  description="The branch it follows · builds its newest commit"
+                />
+              )}
+              {picks.map(({ commit, run, release }) => {
+                // The row knows its release; a run whose release is not in
+                // the page read here is matched by the run that recorded it,
+                // then by its commit.
+                const isLive = release
+                  ? release.id === deployment.liveReleaseId
+                  : run.id === project.liveRun?.id ||
+                    Boolean(live && commit.sha.startsWith(live.slice(0, 12)))
+                const verb = `Use ${commit.sha.slice(0, 7)}`
+                return (
+                  <ChoiceRow
+                    key={commit.sha}
+                    verb={trimmed === commit.sha ? `${verb}, selected` : verb}
+                    onSelect={() => pick(commit.sha)}
+                    className={cn(trimmed === commit.sha && "bg-accent")}
+                    leading={
+                      commit.author ? (
+                        <InitialsMark name={commit.author} size="sm" className="size-8" />
+                      ) : (
+                        <ProductLogo size="sm" fallback={SourceCommit} />
+                      )
+                    }
+                    title={commit.subject ?? commit.sha.slice(0, 7)}
+                    description={
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <ShortSha sha={commit.sha} />
+                        {commit.author && <span className="truncate">{commit.author}</span>}
+                        <span className="shrink-0">
+                          · {relativeTime(commit.authoredAt ?? run.requestedAt)}
+                        </span>
+                        {release && (
+                          <span className="numeric shrink-0">· Release #{release.number}</span>
+                        )}
+                      </span>
+                    }
+                    trailing={isLive ? <Status tone="running" label="Live" /> : undefined}
+                  />
+                )
+              })}
+            </ChoiceList>
+          </section>
+        )}
       </form>
     </Modal>
   )

@@ -121,6 +121,7 @@ export function MetricChart({
   stacked = false,
   className,
   thresholds,
+  yTicks,
 }: {
   rows: ChartRowLike[]
   series: Series[]
@@ -128,6 +129,11 @@ export function MetricChart({
   height?: number
   /** Y domain. Omit to let recharts fit the data. */
   domain?: [number | string, number | string]
+  /**
+   * Y ticks, for a domain recharts would otherwise split into unround steps —
+   * a scale fitted a little above a memory limit read "143 / 286 / 429 MB".
+   */
+  yTicks?: number[]
   unit?: string
   format?: (value: number) => string
   /**
@@ -263,7 +269,11 @@ export function MetricChart({
           />
           <YAxis
             domain={domain}
-            width={unit === "%" ? 34 : 56}
+            ticks={yTicks}
+            // Wide enough for "384 MB": recharts wraps a label it measures
+            // wider than the gutter, and at 56 a three-digit figure with a
+            // unit broke onto two lines beside one that did not.
+            width={unit === "%" ? 34 : 64}
             tickLine={false}
             axisLine={false}
             fontSize={10}
@@ -312,7 +322,7 @@ export function MetricChart({
               label={{
                 value: t.label,
                 position: "insideTopRight",
-                fontSize: 9,
+                fontSize: 10,
                 fill: "var(--muted-foreground)",
               }}
             />

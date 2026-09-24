@@ -17,10 +17,25 @@ import type { Tone } from "@/components/tone"
  * fraction of *that* bar drawn in the danger or warning tone — a path's 5xx
  * share, a client's refused share — so "the busiest" and "the failing" are
  * one row read two ways rather than two lists compared across a gap.
+ *
+ * A row may lead with a `mark` — the browser an agent is, the network an
+ * address is on (§14). Clients, agents and status codes were identical grey
+ * strings, and a column of ten of them is read rather than scanned. The mark
+ * has a slot of its own, drawn on every row once any row has one, so the
+ * names still start on one line; and it sits outside the name's truncation,
+ * so a long name never ellipses its own mark away.
  */
 export type BarListItem = {
   key: string
   label: React.ReactNode
+  /** What the name is, drawn before it — a `ProductGlyph`, a network's mark. */
+  mark?: React.ReactNode
+  /**
+   * The name is a literal — a path, an address — and is set in mono. Default
+   * true; a product's name ("Chrome", "www.google.com" as a referrer) is a
+   * word and reads as one.
+   */
+  mono?: boolean
   value: React.ReactNode
   /** 0–1: this bar against the longest one. */
   share: number
@@ -31,7 +46,10 @@ export type BarListItem = {
   hint?: React.ReactNode
   title?: string
   onClick?: () => void
-  /** Anything at the right of the figure: a verb. */
+  /**
+   * A verb for the row, drawn before the figure so the figures stay the last
+   * column and read down as one, whether a row has a verb or not.
+   */
   trailing?: React.ReactNode
 }
 
@@ -47,6 +65,7 @@ export function BarList({
   if (items.length === 0) {
     return <p className={cn("py-3 text-hint text-muted-foreground", className)}>{emptyLabel}</p>
   }
+  const marked = items.some((item) => item.mark !== undefined)
   return (
     <ul className={cn("flex flex-col", className)} data-slot="bar-list">
       {items.map((item) => {
@@ -68,9 +87,31 @@ export function BarList({
               )}
             >
               <span className="flex min-w-0 items-baseline gap-2">
-                <span className="min-w-0 truncate font-mono text-xs">{item.label}</span>
+                {marked && (
+                  <span
+                    aria-hidden
+                    className="flex size-3.5 shrink-0 items-center justify-center self-center"
+                  >
+                    {item.mark}
+                  </span>
+                )}
+                {/* The name is the row's identity, so it keeps its width and
+                    the hint gives way first — all of it, before the name loses
+                    a character: a shared shrink cut an address to
+                    "198.51.100…" for two pixels of caption on a phone. The name
+                    truncates only once it alone is wider than the row. The
+                    hint's pixel of padding keeps its last glyph's overhang
+                    from being clipped by its own truncation. */}
+                <span
+                  className={cn(
+                    "max-w-full min-w-0 shrink-0 truncate text-xs",
+                    item.mono === false ? "font-medium" : "font-mono",
+                  )}
+                >
+                  {item.label}
+                </span>
                 {item.hint && (
-                  <span className="min-w-0 shrink-0 truncate text-micro text-muted-foreground">
+                  <span className="min-w-0 truncate pr-px text-micro text-muted-foreground">
                     {item.hint}
                   </span>
                 )}
@@ -87,17 +128,21 @@ export function BarList({
                   <span
                     className={cn(
                       "absolute inset-y-0 left-0 rounded-full",
-                      item.tone === "warning" ? "bg-warning" : "bg-destructive",
+                      item.tone === "warning"
+                        ? "bg-warning"
+                        : item.tone === "success"
+                          ? "bg-success"
+                          : "bg-destructive",
                     )}
                     style={{ width: `${Math.max(item.share * item.signal * 100, 1.5)}%` }}
                   />
                 )}
               </span>
             </Row>
+            {item.trailing}
             <span className="numeric w-14 shrink-0 text-right text-hint text-muted-foreground">
               {item.value}
             </span>
-            {item.trailing}
           </li>
         )
       })}

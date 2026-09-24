@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test"
-import { deployment, json, mockProject, now, run, user } from "./deploy-fixture"
+import { archivedProject, deployment, json, mockProject, now, run, user } from "./deploy-fixture"
 
 /**
  * Projects, Archived and Notifications — the fleet-level screens.
@@ -41,6 +41,15 @@ test("fleet grid and list preserve filters and fit multiple projects", async ({
     "aria-pressed",
     "true",
   )
+  // The fleet's four readings sit over the cards; the per-state counts are
+  // the chips', and a state nothing is in draws no chip. Health nobody has
+  // observed is not a reason for attention.
+  for (const reading of ["Live", "Requests", "Failing requests", "Build slots"]) {
+    await expect(page.getByText(reading, { exact: true })).toBeVisible()
+  }
+  await expect(page.getByRole("button", { name: /^Changes pending/ })).toContainText("6")
+  await expect(page.getByRole("button", { name: /^Deploying/ })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /^Attention/ })).toHaveCount(0)
   await testInfo.attach("fleet-grid-1280", {
     body: await page.screenshot({
       path: testInfo.outputPath("fleet-grid-1280.png"),
@@ -142,20 +151,26 @@ test("filter chips narrow the grid", async ({ page }) => {
   const projects = page.getByRole("list", { name: "Deployment projects" })
   await expect(projects.locator(":scope > li")).toHaveCount(3)
 
-  await page.getByRole("button", { name: "Deploying", exact: true }).click()
+  // Each chip carries its count, so its name is "Deploying 1" and the like.
+  await expect(page.getByRole("button", { name: /^Failed/ })).toContainText("1")
+  await page.getByRole("button", { name: /^Deploying/ }).click()
   await expect(projects.locator(":scope > li")).toHaveCount(1)
   await expect(projects.getByText("deploying-app", { exact: true })).toBeVisible()
 
-  await page.getByRole("button", { name: "Failed", exact: true }).click()
+  await page.getByRole("button", { name: /^Failed/ }).click()
   await expect(projects.locator(":scope > li")).toHaveCount(1)
   await expect(projects.getByText("failed-app", { exact: true })).toBeVisible()
 
-  await page.getByRole("button", { name: "Pending changes", exact: true }).click()
+  await page.getByRole("button", { name: /^Changes pending/ }).click()
   await expect(projects.locator(":scope > li")).toHaveCount(1)
   await expect(projects.getByText("pending-app", { exact: true })).toBeVisible()
 
-  await page.getByRole("button", { name: "All", exact: true }).click()
+  await page.getByRole("button", { name: /^All/ }).click()
   await expect(projects.locator(":scope > li")).toHaveCount(3)
+
+  // A failed deploy is said once, in the engine's words, above the fleet.
+  await expect(page.getByRole("heading", { name: "Attention", exact: true })).toBeVisible()
+  await expect(page.getByText(/^failed-app: #1 Deploy failed/)).toBeVisible()
 })
 
 test("the empty state offers to start a project or clear the filters", async ({ page }) => {
@@ -235,6 +250,20 @@ test("Credentials link is hidden for a read-only role, unlike Notifications", as
   await expect(rail.getByRole("link", { name: "Credentials", exact: true })).toHaveCount(0)
 })
 
+test("on a phone the header's pages sit behind one menu beside New project", async ({ page }) => {
+  await mockProject(page)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/deploy")
+  const main = page.getByRole("main")
+  await expect(main.getByRole("link", { name: "New project", exact: true })).toBeVisible()
+  // One render per shape: the links are not also drawn and hidden.
+  await expect(main.getByRole("link", { name: "Notifications", exact: true })).toHaveCount(0)
+  await main.getByRole("button", { name: "Pages", exact: true }).click()
+  await expect(page.getByRole("menuitem", { name: /^Credentials/ })).toBeVisible()
+  await page.getByRole("menuitem", { name: /^Archived/ }).click()
+  await expect(page).toHaveURL(/\/deploy\?view=archived$/)
+})
+
 test("a stopped project reads Stopped", async ({ page }) => {
   await mockProject(page)
   await page.route("**/api/v1/deploy/?view=fleet", (route) =>
@@ -280,7 +309,12 @@ test("in-progress Cancel is hidden once the engine would refuse it", async ({ pa
     .filter({ hasText: "api-production" })
   await expect(row).toBeVisible()
   await expect(row.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0)
-  await expect(row.getByRole("link", { name: "View", exact: true })).toBeVisible()
+  // The row is the destination: its title opens the run, named for it.
+  await expect(row.getByRole("link", { name: "View api-production", exact: true })).toHaveAttribute(
+    "href",
+    "/deploy/7/runs/84",
+  )
+  await expect(row.getByRole("img", { name: /^Stage \d of 7/ })).toBeVisible()
 })
 
 test("in-progress Cancel disables itself after the first click", async ({ page }) => {
@@ -385,7 +419,7 @@ test("archived list can be permanently deleted with confirmation and errors rema
   let refuse = true
   let calls = 0
   await page.route("**/api/v1/deploy/?view=archived", (route) =>
-    json(route, deleted ? [] : [{ id: 9, name: "retired-api", archivedAt: now }]),
+    json(route, deleted ? [] : [{ ...archivedProject, archivedAt: now }]),
   )
   await page.route("**/api/v1/deploy/9/permanent", (route) => {
     calls++
@@ -406,6 +440,10 @@ test("archived list can be permanently deleted with confirmation and errors rema
   await expect(page).toHaveURL(/\/deploy\?view=archived$/)
   await expect(page.getByRole("heading", { name: "Archived", exact: true })).toBeVisible()
   await expect(page.getByRole("link", { name: "retired-api" })).toBeVisible()
+  // What deleting it would take with it is on the row.
+  const archived = page.getByRole("list", { name: "Archived deployments" })
+  await expect(archived.getByText("4 variables", { exact: true })).toBeVisible()
+  await expect(archived.getByText("acme/retired-api", { exact: true })).toBeVisible()
   await testInfo.attach("archived-1280", {
     body: await page.screenshot({ path: testInfo.outputPath("archived-1280.png"), fullPage: true }),
     contentType: "image/png",
@@ -420,13 +458,24 @@ test("archived list can be permanently deleted with confirmation and errors rema
   )
   await page.setViewportSize({ width: 1280, height: 720 })
 
-  await page.getByRole("button", { name: "Delete permanently" }).click()
-  const dialog = page.getByRole("dialog")
+  // Restore is the row's named act; deleting for good is in its menu.
+  const purge = async () => {
+    await archived.getByRole("button", { name: "Actions for retired-api" }).click()
+    await page.getByRole("menuitem", { name: /Delete permanently/ }).click()
+  }
+  await purge()
+  const dialog = page.getByRole("dialog", { name: "Delete retired-api permanently" })
   await expect(dialog).toContainText("persistent data remain on the server")
+  await expect(dialog.getByText("Deleted for good", { exact: true })).toBeVisible()
+  await expect(dialog.getByText("Stays on the server", { exact: true })).toBeVisible()
+  await expect(dialog.getByText("4 variables", { exact: true })).toBeVisible()
   await dialog.getByRole("button", { name: "Cancel" }).click()
   expect(calls).toBe(0)
 
-  await page.getByRole("button", { name: "Delete permanently" }).click()
+  await purge()
+  // Rare and unrecoverable, so the name is typed first, as on the Danger zone.
+  await expect(dialog.getByRole("button", { name: "Delete permanently" })).toBeDisabled()
+  await dialog.getByRole("textbox").fill("retired-api")
   await dialog.getByRole("button", { name: "Delete permanently" }).click()
   await expect(page.getByText("A deployment run is still active", { exact: true })).toBeVisible()
   await expect(dialog).toBeVisible()
@@ -443,7 +492,7 @@ test("a restored project clears a name conflict, then returns to the fleet", asy
   let refused = true
   const unarchiveCalls: string[] = []
   await page.route("**/api/v1/deploy/?view=archived", (route) =>
-    json(route, restored ? [] : [{ id: 9, name: "retired-api", archivedAt: now }]),
+    json(route, restored ? [] : [{ ...archivedProject, archivedAt: now }]),
   )
   await page.route("**/api/v1/deploy/9/unarchive", (route) => {
     unarchiveCalls.push(route.request().method())
@@ -471,6 +520,7 @@ test("a restored project clears a name conflict, then returns to the fleet", asy
 
   refused = false
   await page.getByRole("button", { name: "Restore", exact: true }).click()
+  await expect(page.getByText("Restored retired-api", { exact: true })).toBeVisible()
   await expect(page).toHaveURL(/\/deploy\/9$/)
   expect(unarchiveCalls).toEqual(["POST", "POST"])
 })
@@ -483,7 +533,10 @@ test("Discord channel creation, pause, test delivery, history and removal", asyn
   await expect(page.getByRole("heading", { name: "Notifications", exact: true })).toBeVisible()
 
   await page.getByRole("button", { name: "Add channel", exact: true }).click()
-  await expect(page.getByLabel("Deliver to")).toContainText("Discord")
+  // The kinds are cards named by their service; Discord is the one chosen.
+  await expect(
+    page.getByRole("group", { name: "Deliver to" }).getByRole("button", { name: /^Discord/ }),
+  ).toHaveAttribute("aria-pressed", "true")
   await page.getByLabel("Name").fill("Ops room")
   await page
     .getByLabel("Discord webhook URL")
@@ -498,7 +551,7 @@ test("Discord channel creation, pause, test delivery, history and removal", asyn
     contentType: "image/png",
   })
   await page.getByRole("switch", { name: "Started" }).click()
-  await page.getByRole("button", { name: "Create channel", exact: true }).click()
+  await page.getByRole("dialog").getByRole("button", { name: "Add channel", exact: true }).click()
 
   const row = page.getByRole("listitem").filter({ hasText: "Ops room" })
   await expect(row).toBeVisible()
@@ -524,7 +577,8 @@ test("Discord channel creation, pause, test delivery, history and removal", asyn
   await expect(row).toContainText("https://discord.com/api/webhooks/123456/••••")
   await expect(row).not.toContainText("secret-token-value")
   await expect(row).toContainText("Started, Succeeded, Failed")
-  await expect(row.getByText("Enabled", { exact: true })).toBeVisible()
+  // The card says how the last message went, not "Enabled": nothing yet.
+  await expect(row.getByText("never sent", { exact: true })).toBeVisible()
   await expect(page.getByText("one-time-notification-secret")).toHaveCount(0)
 
   await row.getByRole("button", { name: "Send test", exact: true }).click()

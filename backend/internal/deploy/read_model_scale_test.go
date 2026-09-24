@@ -264,8 +264,16 @@ func TestFleetReadModelStatementCountDoesNotGrowWithTheFleet(t *testing.T) {
 	if smallCount == 0 || largeCount != smallCount {
 		t.Fatalf("fleet statements grew with the fleet: %d for 2 deployments, %d for 40", smallCount, largeCount)
 	}
+	// Ten: the summary row, five live-release facts, one ranked read that is
+	// both every card's last run and its recent-run strip, the active runs,
+	// the host's active work and the slot usage.
 	if largeCount > 10 {
 		t.Fatalf("fleet read model issued %d statements, want a small fixed set", largeCount)
+	}
+	for _, summary := range fleet.Deployments {
+		if len(summary.RecentRuns) != 3 || summary.RecentRuns[0].ID != summary.LastRun.ID {
+			t.Fatalf("%s recent runs = %#v, want its three runs led by the last one", summary.Name, summary.RecentRuns)
+		}
 	}
 	for _, summary := range fleet.Deployments {
 		if summary.Health != string(HealthPassed) {

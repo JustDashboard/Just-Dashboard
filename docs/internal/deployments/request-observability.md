@@ -174,7 +174,14 @@ new live file, a vanished inode reading as absent.
 - **Slowest** is a running top-5 during the scan, not a sort of the row buffer: the slowest request
   of the day is almost never in the last 500.
 - **Buckets** are 60 columns over the requested window, counted by status family, each with its own
-  p95.
+  p95 and the bytes its answers sent (`bytes`, which is what lets the Served reading carry its hour as
+  a line). A long window widens the column rather than adding columns, and `Summary.bucketSeconds` is
+  that width: it used to say 60 whatever the window, so a day's chart captioned each of its 24-minute
+  points as one minute. A window a whole number of columns long touches one column more than the
+  chart has — "the last hour" asked at 12:00:40 runs from 11:00:40, so it spans 11:00 through 12:00 —
+  and the column that goes is the oldest, which the window only clips: dropping the newest, as the
+  histogram first did, drew a 5xx the readings had already counted nowhere on the chart or on the
+  minute strip. A window asked for whole, both ends on the minute, keeps its own start.
 - Bounds: `latencyCap` 250k samples, `facetCap` 20k distinct values per dimension. A path with a
   request id in it produces a new key per request; without a bound the top-paths table is a memory
   leak that happens to render. Hitting either sets `Truncated`, and the page says the figures are a
@@ -236,8 +243,12 @@ none. "Send test" delivers the rule as if it had just fired, at twice its limit,
 title so nobody wakes up for it.
 
 The Logs page carries one line under its readings — no alerts, all quiet with the rules as sentences,
-or what is firing and since when — with the Automation settings card a press away. The card lists
-rules as sentences with their state, and its form speaks the rule back before it is saved.
+or what is firing and since when — naming the channels each rule tells by their logos, and saying
+so in amber when a rule tells no channel at all. With no rule yet, the first is written in a sheet
+on the page itself, opening on the reading as it stands so the line is chosen against it, and the
+form in it is Automation's own (`AlertForm`, drawn in `add-alert-sheet.tsx`), so one rule has one
+form wherever it opens. Automation lists the rules as sentences with their state and a meter with a
+tick at the line; its form speaks the rule back before it is saved, and removing one asks first.
 
 ## Security intel and blocking
 
@@ -249,9 +260,12 @@ firewall stands at the edge of does nothing.
 
 "Private" is read from the actual reservations rather than from a prefix. The first version tested
 `172.` and so hid the verb for the whole of `172.32`–`172.255`, which is public space — 172.217 is
-Google — while RFC 1918 reserves only `172.16`–`172.31`. `isPrivate` in `traffic-facets.tsx` covers
-`0/8`, `10/8`, `127/8`, `172.16/12`, `192.168/16`, `169.254/16`, `::1`, `fc00::/7` and `fe80::/10`,
-and unwraps an IPv4-mapped address first.
+Google — while RFC 1918 reserves only `172.16`–`172.31`. `isPrivate` in `request-marks.tsx` (the
+Insights list and the opened request both ask it) is `networkOf` in `lib/clients.ts` asked one
+question — is this the internet — so it covers `0/8`, `10/8`, `127/8`, `172.16/12`, `192.168/16`,
+`169.254/16`, Tailscale's `100.64/10` and `fd7a:115c:a1e0::/48`, `::1`, `fc00::/7` and `fe80::/10`,
+and unwraps an IPv4-mapped address first. It was a second classifier once, and the two disagreed: a
+row drawn with Tailscale's mark offered a firewall deny against a tailnet peer.
 
 ## Lifecycle
 
@@ -338,9 +352,23 @@ of a host's logs.
 
 `ProjectLogs` is a `StatGrid` of five readings (requests/min with page views, failing share, p95,
 bytes served, container events — the figures count up on arrival through `NumberTicker`) and the
-alerts line over a `Pane` with the three views. The chart carries marks through the house chart's `events`: a release going live
-(`releases[].activatedAt`, the Metrics page's deploy colour), a container exit or OOM kill (danger), a restart (warning) — a
-spike of red with a deploy mark at its foot is a different afternoon from the same spike with none.
+alerts line over a `Pane` with the three views. Each reading carries its last hour in the tile, as
+the host Overview's do: the request rate, the p95 and the bytes as lines from the buckets, the
+browsers, programs and crawlers that asked as their logos beside the tile's name, the failing share
+as a strip of the hour's sixty minutes (green where a minute went fine, red where it had a 5xx, grey
+where nothing came in), and the container as its newest disruption with a rail of a tick per exit,
+restart and start (`traffic-strip.tsx`, the Backups run strip's shape; two strips on one scale, so a
+red minute and an exit at the same place are one incident read twice), two to a row on a phone. An
+exit with status 0 is not a disruption: it is a routine stop or the old container of a release
+swap, which the server already logs as a notice. The rail draws it as a muted tick, never the
+failure's red; the reading counts it as a stop, reading "Stopped" in no tone when nothing started
+after it and "Steady" after a swap; and the Events tab does not count it. A kill is not counted
+either, because Docker reports the exit that follows it and one stop would read as two. The chart
+carries marks through the house chart's `events`: a release going live (`releases[].activatedAt`,
+the Metrics page's deploy colour), a container exit that was not clean or an OOM kill (danger), a
+restart or a start (warning) — a clean exit is the other half of a release going live or of somebody
+stopping it, and is not marked. A spike of red with a deploy mark at its foot is a different
+afternoon from the same spike with none.
 A failing request's detail opens onto the container's output around that minute (host Logs page) and
 onto Events scoped to two minutes either side. The view and that instant are written back to the URL
 (`?view=events&moment=…`, through `history.replaceState` as the host Logs page does): they were read
@@ -356,8 +384,11 @@ Its empty state names the boundary instead of asserting steadiness. "Watching si
 backend's own start, so a few minutes after a restart the old copy — "which for a running deployment
 is the reading you want" — was a claim the page could not make; under an hour it now says the record
 begins with the dashboard and nothing from before was kept. A row's release links to the run that put
-it there and a correlated trigger links to `/audit?action=…`, the same hand-off the host feed makes. The Overview carries a Traffic panel (rate, failing
-share, a sparkline of the hour) and each fleet card a sparkline with the rate, both from
+it there and a correlated trigger links to `/audit?action=…`, the same hand-off the host feed makes.
+Its rows are grouped under hour rules, each event drawn on its project's or image's tile with what
+happened as a toned badge in the corner, and the rows a poll or the socket brings rise as they
+arrive. The Overview carries two of this page's readings among its own four (requests a minute with
+the hour's line, and the failing share), and each fleet card a sparkline with the rate, both from
 `/deploy/traffic`; the run page's Metrics view leads with `RunTrafficPanel` — requests/min, failing
 share and p95 before → after activation. The readings are
 the page's own, over a fixed last hour, so they hold still while the reader narrows the rows beneath
@@ -367,9 +398,15 @@ else is a figure people learn to ignore.
 
 `lib/requests.ts` holds the vocabulary. A request log is read by status **family**, not by code —
 nobody scans for 418, they scan for "is anything 5xx" — and the four families are the chips, the
-chart's stack and the colour of the code in the row. Only 5xx and 4xx take a hue; the rest are steps
-of ink, exactly as the log histogram beside them is, because brand blue is a command's face or a
-location mark and a chart of served requests is neither.
+chart's stack and the colour of the code in the row. It is the one status map (`CLASS_TEXT`,
+`CLASS_DOT`), and the host log console reads its in-line statuses from it too, so a code is one
+colour on both pages: 2xx success, 3xx the path hue, 4xx amber, 5xx red. A method is a word, not a
+colour: a read stays muted and a write steps forward in the log's method hue, a `DELETE` included —
+it is a change, not a danger. The rows, the opened request, the Insights lists and the scanners
+notice take their parts from `request-marks.tsx`, over the log console's token classes, so a path,
+a query and an address read the same wherever they are drawn; its Colour switch is the log
+console's, and turned off it keeps only what is a reading of state — a 5xx, a 4xx and an answer over
+a second.
 
 The socket opens with the window's cursor (`after=`), and rows are keyed by sequence, so a live
 prepend neither remounts the list nor shows a request twice.
@@ -378,21 +415,35 @@ prepend neither remounts the list nor shows a request twice.
 onto the tokens as a house primitive in `components/bar-list.tsx`: the meter's own track behind a
 name, the figure at the right in `.numeric`, and a signal segment inside the bar for the failing or
 refused share, so "the busiest" and "the failing" are one row read two ways. A path row narrows the
-rows to it; a client row narrows to the client and, for an admin, blocks it.
+rows to it; a client row narrows to the client and, for an admin, blocks it. Insights opens on a
+response-time ladder (`latency-ladder.tsx`): the window's distribution from the median to the
+slowest on one logarithmic rule, where the gap between the median and the tail is the picture — a
+line of footer text had stated the same numbers and shown none of it — with the span past a second,
+or past the line a latency alert watches, washed amber, and each mark narrowing the rows to the
+requests at least that slow. Every narrowing the page makes is one of the API's own filters —
+`host`, exact `status` codes, `minMs` — and the poll, the socket and the CSV export are asked the
+same query, so what is exported is what is on screen.
 
 `RequestConsole` draws rows in the log console's own anatomy rather than a `<table>`: a request record
 is read the way a log is read, and a nine-column table at this density spends its width on cell
 padding and its maintenance on breakpoint rules. Following holds the *top* — newest first — and
 pausing holds what arrives rather than dropping it, both carried over from the log console next door.
 `content-visibility` rather than a virtualiser, for the same three reasons: an honest scrollbar, real
-row heights, and the browser's own find.
+row heights, and the browser's own find. A request that arrives live rises into place
+(`hooks/use-arrivals.ts`). A row opened in place leads with who asked — the client drawn as itself,
+its network and address, a scanner tag when it is one — then typed facts (the code and its word, the
+time and where it sits in the window's distribution, TLS or plaintext, the referrer as its site), and
+its menu carries filter by client, copy as JSON, copy as curl and — for an administrator and an
+address that is not private — Block.
 
 `RequestChart` goes through `components/metrics/` like every chart (§10): a `ChartPanel` of request
 volume as the chart's ramped area with 4xx and 5xx as lines that sit on the floor until they don't,
 and a second, shorter `ChartPanel` of the p95 on the same time axis — a wall of red with a flat p95 is
 a deployment refusing requests, the same red with the p95 climbing is one falling over. Numeric time
 axis, synced crosshair readout, drag-to-narrow and `events` for the marks come with the house chart;
-the legend is a one-line one, because here the chart is a row of a workspace, not the page. A first
+the legend is a one-line one, because here the chart is a row of a workspace, not the page. Its
+header reads the window's own count and failures, and after a drag the span with a way back to the
+last hour; the p95 chart draws each enabled latency alert as a line at its threshold. A first
 version hand-drew stacked columns to mirror the log histogram and stacked the families solid; on a
 working deployment the ok share is ninety-five per cent of every column, and a pale slab that size
 swallowed the red sliver that is the only thing anyone looks for.
@@ -437,7 +488,8 @@ cd ../frontend && bun run lint && bun run build && bun run test:browser
 ```
 
 `internal/accesslog` covers both formats, the junk that is not either, the filter, nearest-rank
-percentiles, facet error counts, histogram coverage of the requested window, that the row limit does
+percentiles, facet error counts, histogram coverage of the requested window, each column's bytes
+and its real width, the minute happening now kept on the chart, that the row limit does
 not cap the readings, and the store against a fake disk: that only appended bytes are read, that a
 half-written line waits for its newline, a roll with and without the old generation surviving,
 truncation in place, the seed budget and its ordering of generations, eviction past the cap without
@@ -465,4 +517,9 @@ tests cannot hold is whether Docker still carries an object's labels on its even
 covers the three views, the readings, chip narrowing, the opened row, the absent-record sentence,
 the Events toolbar (kind chips, search, the no-match sentence, the socket), the audit and run links
 on a correlated row, the restart-empty sentence, `?view=`/`?moment=` surviving a reload, which
-addresses are offered a Block, and that the page fits at 390 and 1280.
+addresses are offered a Block, and that the page fits at 390 and 1280 — and that a code, a latency
+and a client on Insights each narrow the window through the API's own filters, that a chosen method
+keeps its chip as the way back, that a row opens from the keyboard, that a clean exit reads as a
+stop rather than a failure, and that a role which cannot add an alert rule is pointed at Automation
+instead of a form. `tests/browser/deploy-alerts.spec.ts` covers the first rule written from the
+sheet on the Logs page.

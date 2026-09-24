@@ -1,8 +1,8 @@
 "use client"
 
-import { useId, useState } from "react"
+import { createContext, useContext, useId, useState } from "react"
 
-import { ChevronDown, Copy, Information } from "@/components/icons"
+import { Check, ChevronDown, Copy, Information, Minus } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { copyText } from "@/lib/clipboard"
 import type { Tone } from "@/components/tone"
@@ -85,15 +85,51 @@ export function Field({
   )
 }
 
-/** The ⓘ a `Field` draws for its `info`, for a label a form lays out itself. */
-export function InfoTip({ children }: { children: React.ReactNode }) {
+/**
+ * One rule a field's value has to meet, lit once it does — "12 characters or
+ * more", "starts with a letter or digit".
+ *
+ * The hint says what is wanted before anything is typed; this says, while
+ * typing, which part of it is already true, so an error is never the first
+ * the reader hears of a rule. The Security page drew it for a new password and
+ * the credential and channel forms wanted it for a name, a token and an
+ * address, which is one shape three times — so it is here, beside the field
+ * it belongs under. Put a run of them in a wrapper with `aria-live="polite"`,
+ * never `role="alert"`: a rule being met is news, not an interruption.
+ */
+export function FieldCheck({ met, children }: { met: boolean; children: React.ReactNode }) {
+  const Mark = met ? Check : Minus
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 text-hint transition-colors",
+        met ? "text-success" : "text-muted-foreground",
+      )}
+    >
+      <Mark aria-hidden className="size-3" />
+      {children}
+    </span>
+  )
+}
+
+/**
+ * The ⓘ a `Field` draws for its `info`, for a label a form lays out itself —
+ * or a fact outside a form, which names what it explains in `label`.
+ */
+export function InfoTip({
+  label = "What this setting does",
+  children,
+}: {
+  label?: string
+  children: React.ReactNode
+}) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
           type="button"
-          aria-label="What this setting does"
-          className="text-muted-foreground/60 transition-colors hover:text-foreground"
+          aria-label={label}
+          className="rounded-sm text-muted-foreground/60 focus-ring transition-colors hover:text-foreground"
         >
           <Information className="size-3.5" />
         </button>
@@ -149,14 +185,18 @@ export function FormSection({
   hint,
   actions,
   aside,
+  railFrom,
   className,
   children,
+  "data-slot": slot,
 }: {
   /** A scroll target, for a page that sends a reader to one of its sections. */
   id?: string
   title: React.ReactNode
   hint?: React.ReactNode
   actions?: React.ReactNode
+  /** Names the section for a caller composing it, as `SettingSection` does. */
+  "data-slot"?: string
   /**
    * The title in a column of its own beside the fields, from `lg` — for a
    * page that *is* a form, where the sections are the page's structure
@@ -171,15 +211,22 @@ export function FormSection({
    * a title rather than a caption for it (§5).
    */
   aside?: boolean
+  /** Where the rail starts. Inherited from the `FormSections` around it. */
+  railFrom?: RailFrom
   className?: string
   children: React.ReactNode
 }) {
+  const inherited = useContext(RailContext)
   if (aside) {
     return (
       <section
         id={id}
+        data-slot={slot}
         className={cn(
-          "grid min-w-0 scroll-mt-6 gap-x-12 gap-y-4 py-8 first:pt-0 last:pb-0 lg:grid-cols-[15rem_minmax(0,1fr)]",
+          "grid min-w-0 scroll-mt-6 gap-x-12 gap-y-4 py-8 first:pt-0 last:pb-0",
+          (railFrom ?? inherited) === "xl"
+            ? "xl:grid-cols-[15rem_minmax(0,1fr)]"
+            : "lg:grid-cols-[15rem_minmax(0,1fr)]",
           className,
         )}
       >
@@ -193,7 +240,7 @@ export function FormSection({
     )
   }
   return (
-    <section id={id} className={cn("min-w-0 space-y-3", className)}>
+    <section id={id} data-slot={slot} className={cn("min-w-0 space-y-3", className)}>
       <div className="flex min-w-0 flex-wrap items-end justify-between gap-x-4 gap-y-1 border-b border-hairline pb-2">
         <div className="min-w-0">
           <h3 className="min-w-0 text-title font-semibold tracking-tight">{title}</h3>
@@ -206,9 +253,33 @@ export function FormSection({
   )
 }
 
-/** A run of `FormSection aside`s, a hairline between each. */
-export function FormSections({ className, ...props }: React.ComponentProps<"div">) {
-  return <div className={cn("min-w-0 divide-y divide-hairline", className)} {...props} />
+/**
+ * The width from which a `FormSection aside` sets its head beside its fields.
+ *
+ * `lg` for a page with the whole content column to itself. `xl` for a form
+ * inside a shell that already spends a column of its own — a project's
+ * settings, beside the project's 256px navigation — where at 1024 a 15rem
+ * rail left the fields about 416px, and a row of three fields 130px each.
+ */
+type RailFrom = "lg" | "xl"
+
+const RailContext = createContext<RailFrom>("lg")
+
+/**
+ * A run of `FormSection aside`s, a hairline between each. `railFrom` is said
+ * once here rather than on every section, so the heads of one page can never
+ * leave the rail at two different widths.
+ */
+export function FormSections({
+  railFrom = "lg",
+  className,
+  ...props
+}: React.ComponentProps<"div"> & { railFrom?: RailFrom }) {
+  return (
+    <RailContext.Provider value={railFrom}>
+      <div className={cn("min-w-0 divide-y divide-hairline", className)} {...props} />
+    </RailContext.Provider>
+  )
 }
 
 /**
@@ -506,7 +577,11 @@ export function FormFact({
   return (
     <span className="inline-flex min-w-0 items-baseline gap-1.5">
       <span className="shrink-0">{label}</span>
-      <span className={cn("min-w-0 truncate text-foreground", mono && "font-mono")}>
+      {/* The value is exactly as wide as its text, and a round glyph's ink
+          runs a hair past its advance, so an edge flush with the text cut
+          "ago" to "agc" — too little overflow to earn the ellipsis. The
+          padding is that hair. */}
+      <span className={cn("min-w-0 truncate pr-0.5 text-foreground", mono && "font-mono")}>
         {children}
       </span>
     </span>

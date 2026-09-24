@@ -45,7 +45,10 @@ func TestRunMetricsUsesRetainedIdentitiesAndDisjointActivationWindows(t *testing
 	f.addPlan(t, 1, strings.Repeat("a", 40))
 	first, lease := f.claimedRun(t, 1)
 	prior := f.candidate(t, *first, lease, fakeContentDigest("prior"))
-	_, err := f.runs.RecordCandidateRuntime(t.Context(), *first, lease.Token, ReleaseRuntimeInput{ReleaseID: prior.Release.ID, Kind: "container", RuntimeID: "retired-id"})
+	_, err := f.runs.RecordCandidateRuntime(t.Context(), *first, lease.Token, ReleaseRuntimeInput{
+		ReleaseID: prior.Release.ID, Kind: "container", RuntimeID: "retired-id", Name: "jd-e1-r1",
+		Metadata: json.RawMessage(`{"version":1,"image":"example.test/app:v1"}`),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,6 +80,12 @@ func TestRunMetricsUsesRetainedIdentitiesAndDisjointActivationWindows(t *testing
 	}
 	if !owner.hostWindows[0][1].Before(owner.hostWindows[1][0]) || !result.After.History.From.Equal(anchor) || !result.Before.History.To.Equal(anchor) {
 		t.Fatalf("overlapping windows: %+v", owner.hostWindows)
+	}
+	// A container release recorded its name and image; a Compose release
+	// recorded only ids, so its series stay unnamed rather than guessed.
+	if !reflect.DeepEqual(result.Before.Sources, []RunMetricSource{{ContainerID: "retired-id", Name: "jd-e1-r1", Image: "example.test/app:v1"}}) ||
+		result.After.Sources != nil {
+		t.Fatalf("metric sources before=%+v after=%+v", result.Before.Sources, result.After.Sources)
 	}
 	owner.fail = true
 	result, err = f.runs.RunMetrics(t.Context(), owner, snapshot)

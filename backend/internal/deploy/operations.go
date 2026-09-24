@@ -33,6 +33,9 @@ type RuntimeService struct {
 	Stack       string     `json:"stack,omitempty"`
 	Service     string     `json:"service,omitempty"`
 	StartedAt   *time.Time `json:"startedAt,omitempty"`
+	// Image is the reference the container was created from, as Docker
+	// reports it, so a service can be drawn as the product it runs.
+	Image string `json:"image,omitempty"`
 }
 
 func ObserveRuntimeServices(ctx context.Context, owner RuntimeObserver, environmentID, liveReleaseID int64) RuntimeServices {
@@ -84,7 +87,7 @@ func observeRuntimeServices(ctx context.Context, owner RuntimeObserver, environm
 			ContainerID: item.ID, Name: item.Name, ReleaseID: releaseID,
 			LiveRelease: releaseID == liveReleaseID, State: item.State,
 			Health: health, ImageID: item.ImageID, Stack: item.ComposeStack,
-			Service: item.ComposeSvc, StartedAt: item.StartedAt,
+			Service: item.ComposeSvc, StartedAt: item.StartedAt, Image: item.Image,
 		})
 	}
 	sort.Slice(result.Services, func(i, j int) bool {

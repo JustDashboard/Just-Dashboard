@@ -1,17 +1,25 @@
 "use client"
 
 import { useState } from "react"
-import { Copy, Eye, EyeOff, External, Key, LockOpen, UserPlus, Warning } from "@/components/icons"
+import Link from "next/link"
+import { Copy, Eye, External, Key, Warning } from "@/components/icons"
 import { get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { notify } from "@/lib/toast"
 import type { BlueprintAccess } from "@/lib/types"
-import { Field } from "@/components/form"
+import { Field, FieldRow, FormFact, FormFacts } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { ProductLogo } from "@/components/product-logo"
 import { Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+  InputGroupToggle,
+} from "@/components/ui/input-group"
 
 /**
  * How the operator gets in, said before the deploy and again after it.
@@ -43,15 +51,6 @@ const ACCESS_TITLE: Record<BlueprintAccess["kind"], string> = {
   unavailable: "There is no first credential this dashboard can give you",
 }
 
-const ACCESS_ICON = {
-  setup: UserPlus,
-  credentials: Key,
-  token: Key,
-  client: Key,
-  open: LockOpen,
-  unavailable: Warning,
-} as const
-
 /** The one word a template's card carries about getting in. */
 export function AccessTag({ access }: { access: BlueprintAccess | undefined }) {
   if (!access?.kind) return null
@@ -66,12 +65,11 @@ export function AccessTag({ access }: { access: BlueprintAccess | undefined }) {
  */
 export function AccessPromise({ access }: { access: BlueprintAccess | undefined }) {
   if (!access?.kind) return null
+  const { tone } = ACCESS_TAG[access.kind]
+  // A severity is the one thing a notice's glyph may say (§14): the kinds
+  // that warn carry it, and the rest are a promise with nothing to act on.
   return (
-    <Notice
-      title={ACCESS_TITLE[access.kind]}
-      icon={ACCESS_ICON[access.kind]}
-      tone={ACCESS_TAG[access.kind].tone ?? "default"}
-    >
+    <Notice title={ACCESS_TITLE[access.kind]} icon={tone && Warning} tone={tone ?? "default"}>
       {access.note}
     </Notice>
   )
@@ -85,6 +83,17 @@ type Revealed = { username?: string; secret?: string }
  * Values are read one at a time through the audited reveal route rather than
  * carried on the project payload: a password that arrives with every poll of
  * the overview is a password in every browser cache and every proxy log.
+ *
+ * It opens on the product it is for, drawn as itself beside what its own
+ * documentation says about getting in, and the address it is reached at. The
+ * username and the secret are each one box — the value, and the controls that
+ * belong to it inside the same edge (§7) — where they were an input with
+ * loose outline buttons beside it at two other heights. Showing the secret is
+ * a toggle the height of the field, named for what it holds: a token was
+ * announced as a password.
+ *
+ * It is a plain block like every other on the Overview: a sign-in is a
+ * reading of the project, not a card standing in front of it.
  */
 export function FirstSignIn({
   access,
@@ -92,17 +101,26 @@ export function FirstSignIn({
   projectId,
   environmentId,
   canReveal,
+  product,
+  service,
+  port,
 }: {
   access: BlueprintAccess
   url?: string
   projectId: number
   environmentId: number
-  /** Reading a stored value is privileged; without it the card still explains. */
+  /** Reading a stored value is privileged; without it the block still explains. */
   canReveal: boolean
+  /** The template, as a `product-logo` id. */
+  product?: string
+  /** The live container's name, which is the host another container connects to. */
+  service?: string
+  port?: number
 }) {
   const [revealed, setRevealed] = useState<Revealed>()
   const [busy, setBusy] = useState(false)
   const target = url && access.path ? new URL(access.path, url).toString() : url
+  const variables = `/deploy/${projectId}/settings/variables`
 
   const reveal = async () => {
     setBusy(true)
@@ -130,9 +148,65 @@ export function FirstSignIn({
   const username = access.username ?? revealed?.username
   const secretLabel =
     access.kind === "token" ? "Token" : access.kind === "client" ? "Credential" : "Password"
+  const secretWord = secretLabel.toLowerCase()
+
+  const secretField = (
+    <Field
+      label={secretLabel}
+      htmlFor="first-sign-in-secret"
+      hint={
+        canReveal ? (
+          <>
+            Reading it is recorded in the audit log ·{" "}
+            <Link href={variables} className="rounded-sm focus-ring hover:text-foreground">
+              <Tag mono>{access.secretVariable}</Tag>
+            </Link>
+          </>
+        ) : (
+          <>
+            Held as{" "}
+            <Link href={variables} className="rounded-sm focus-ring hover:text-foreground">
+              <Tag mono>{access.secretVariable}</Tag>
+            </Link>{" "}
+            · reading it needs the deployment write capability
+          </>
+        )
+      }
+    >
+      <InputGroup>
+        <InputGroupInput
+          id="first-sign-in-secret"
+          readOnly
+          type={revealed?.secret ? "text" : "password"}
+          value={revealed?.secret ?? "••••••••••••"}
+          className="font-mono"
+        />
+        {canReveal && (
+          <InputGroupAddon align="inline-end" className="gap-0 p-0">
+            <InputGroupToggle
+              icon={Eye}
+              label="Reveal"
+              aria-label={`Reveal the ${secretWord}`}
+              pressed={Boolean(revealed?.secret)}
+              disabled={busy}
+              onPressedChange={(next) => (next ? void reveal() : setRevealed(undefined))}
+            />
+            <InputGroupButton
+              aria-label={`Copy the ${secretWord}`}
+              disabled={!revealed?.secret}
+              onClick={() => void copyText(revealed?.secret ?? "", `${secretLabel} copied`)}
+            >
+              <Copy className="size-3.5" />
+              <span className="max-sm:hidden">Copy</span>
+            </InputGroupButton>
+          </InputGroupAddon>
+        )}
+      </InputGroup>
+    </Field>
+  )
 
   return (
-    <Panel>
+    <Panel plain>
       <PanelHeader
         // A database has no first sign-in; it has a credential another program
         // connects with, and calling that a sign-in would send the reader
@@ -148,8 +222,26 @@ export function FirstSignIn({
           )
         }
       />
-      <PanelBody className="space-y-4">
-        <p className="text-body text-muted-foreground">{access.note}</p>
+      <PanelBody className="space-y-5">
+        <div className="flex min-w-0 items-start gap-3">
+          <ProductLogo id={product} size="sm" fallback={Key} />
+          <div className="min-w-0 space-y-1">
+            <p className="text-body leading-relaxed">{access.note}</p>
+            {target && (
+              <a
+                href={target}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-sm font-mono text-hint text-muted-foreground focus-ring hover:text-foreground"
+              >
+                <span className="truncate">
+                  {target.replace(/^https?:\/\//, "").replace(/\/$/, "")}
+                </span>
+                <External aria-hidden className="size-3 shrink-0" />
+              </a>
+            )}
+          </div>
+        </div>
 
         {access.kind === "setup" && (
           <Notice title="Do this now" icon={Warning} tone="warning">
@@ -165,7 +257,13 @@ export function FirstSignIn({
         {access.kind === "open" && url && (
           <Notice title="Anyone who reaches this address can use it" icon={Warning} tone="warning">
             It has no accounts and no password of its own. Switch on{" "}
-            <strong>Ask visitors for a password</strong> for this address under Settings → Domains
+            <strong>Ask visitors for a password</strong> for this address under{" "}
+            <Link
+              href={`/deploy/${projectId}/settings/domains`}
+              className="rounded-sm font-medium text-foreground underline underline-offset-2 focus-ring"
+            >
+              Settings → Domains
+            </Link>{" "}
             and the dashboard&rsquo;s own proxy will ask for one before anything reaches it.
           </Notice>
         )}
@@ -178,70 +276,50 @@ export function FirstSignIn({
           </Notice>
         )}
 
-        {access.secretVariable && (
-          <>
-            {username && (
+        {/* Another container reaches a database by the live container's name
+            on the project's network, at the port it listens on inside. */}
+        {access.kind === "client" && (service || port) ? (
+          <FormFacts>
+            {service && (
+              <FormFact label="Host" mono>
+                {service}
+              </FormFact>
+            )}
+            {port ? (
+              <FormFact label="Port" mono>
+                {port}
+              </FormFact>
+            ) : null}
+          </FormFacts>
+        ) : null}
+
+        {access.secretVariable &&
+          (username ? (
+            <FieldRow>
               <Field label="Username" htmlFor="first-sign-in-username">
-                <div className="flex min-w-0 gap-2">
-                  <Input
+                <InputGroup>
+                  <InputGroupInput
                     id="first-sign-in-username"
                     readOnly
                     value={username}
-                    className="min-w-0 flex-1 font-mono"
+                    className="font-mono"
                   />
-                  <Button
-                    variant="outline"
-                    size="icon-sm"
-                    aria-label="Copy username"
-                    onClick={() => void copyText(username, "Username copied")}
-                  >
-                    <Copy className="size-4" />
-                  </Button>
-                </div>
+                  <InputGroupAddon align="inline-end" className="gap-0 p-0">
+                    <InputGroupButton
+                      aria-label="Copy username"
+                      onClick={() => void copyText(username, "Username copied")}
+                    >
+                      <Copy className="size-3.5" />
+                      <span className="max-sm:hidden">Copy</span>
+                    </InputGroupButton>
+                  </InputGroupAddon>
+                </InputGroup>
               </Field>
-            )}
-            <Field
-              label={secretLabel}
-              htmlFor="first-sign-in-secret"
-              hint={
-                canReveal
-                  ? `Generated on this server when the plan was saved. Reading it is recorded in the audit log. Rotate it under Settings → Variables (${access.secretVariable}).`
-                  : `Held as ${access.secretVariable} under Settings → Variables. Reading it needs the deployment write capability.`
-              }
-            >
-              <div className="flex min-w-0 gap-2">
-                <Input
-                  id="first-sign-in-secret"
-                  readOnly
-                  type={revealed?.secret ? "text" : "password"}
-                  value={revealed?.secret ?? "••••••••••••"}
-                  className="min-w-0 flex-1 font-mono"
-                />
-                {canReveal && (
-                  <Button
-                    variant="outline"
-                    size="icon-sm"
-                    pending={busy}
-                    aria-label={revealed?.secret ? "Hide the password" : "Reveal the password"}
-                    onClick={() => (revealed ? setRevealed(undefined) : void reveal())}
-                  >
-                    {revealed?.secret ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                  </Button>
-                )}
-                {revealed?.secret && (
-                  <Button
-                    variant="outline"
-                    size="icon-sm"
-                    aria-label={`Copy the ${secretLabel.toLowerCase()}`}
-                    onClick={() => void copyText(revealed.secret ?? "", `${secretLabel} copied`)}
-                  >
-                    <Copy className="size-4" />
-                  </Button>
-                )}
-              </div>
-            </Field>
-          </>
-        )}
+              {secretField}
+            </FieldRow>
+          ) : (
+            secretField
+          ))}
       </PanelBody>
     </Panel>
   )

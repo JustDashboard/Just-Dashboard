@@ -1,8 +1,21 @@
 "use client"
 
-import { useState } from "react"
+import { createRef, useMemo, useRef, useState } from "react"
+import type { FormEvent } from "react"
 import Link from "next/link"
-import { Copy, Database, Lightning, Play, Plus, ShieldCheck, Trash } from "@/components/icons"
+import {
+  Archive,
+  ArrowUpRight,
+  Connection,
+  Copy,
+  Database,
+  Lightning,
+  Pencil,
+  Play,
+  Plus,
+  Trash,
+  Warning,
+} from "@/components/icons"
 import { ApiError, del, get, post, put, refusedIndex } from "@/lib/api"
 import { bytes, plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -13,24 +26,36 @@ import type {
   BackupJob,
   DbConnection,
   DeploymentBackupGateEvidence,
+  DeploymentBackupJob,
   DeploymentDatabaseLink,
   DeploymentEnvironmentConfiguration,
   DeploymentRunSnapshot,
+  DeploymentStorageMount,
   DeploymentVariable,
   DockerVolume,
 } from "@/lib/types"
-import { Field, FormFact, FormFacts, OptionRow } from "@/components/form"
-import { Group, Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, Notice } from "@/components/state"
-import { Row, RowList } from "@/components/row-list"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { Status, type DotTone } from "@/components/status-dot"
-import { Tag } from "@/components/tag"
+import { JobCard } from "@/components/backups/job-card"
+import { destinationProduct } from "@/components/backups/marks"
+import { scheduleLabel } from "@/components/backups/shared"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { Field, OptionList, OptionRow } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
+import { ProductGlyph, ProductGlyphs, ProductLogo, ProductLogos } from "@/components/product-logo"
+import { StatGrid, StatTile } from "@/components/stat-tile"
+import { EmptyNote, EmptyState, Notice } from "@/components/state"
+import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
+import type { Tone } from "@/components/tone"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { AnimatedBeam } from "@/components/ui/animated-beam"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+  InputGroupText,
+} from "@/components/ui/input-group"
 import {
   Select,
   SelectContent,
@@ -38,15 +63,56 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { SettingCard } from "@/components/deploy/settings/setting-card"
-import { PendingChanges } from "@/components/deploy/settings/pending-changes"
 import {
-  ConfigurationState,
-  useConfiguration,
-} from "@/components/deploy/settings/use-configuration"
-import { humanize } from "@/components/deploy/vocabulary"
+  SettingForm,
+  SettingSection,
+  SettingsPage,
+  settingStatus,
+} from "@/components/deploy/settings/setting-card"
+import { SettingPicture } from "@/components/deploy/settings/setting-picture"
+import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
+import {
+  DATABASE_ENGINE_LABELS,
+  humanize,
+  LINK_STATUS,
+  MOUNT_STATUS,
+  MountMark,
+} from "@/components/deploy/vocabulary"
+import { volumeProduct } from "@/components/deploy/service-product"
+import { WireMark, WireNode } from "@/components/deploy/wire"
+import { ProjectMark } from "@/components/deploy/project-mark"
+import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { OwnershipSelect } from "@/components/deploy/settings/mounts"
+import { useMediaQuery } from "@/hooks/use-mobile"
 import { useProject } from "@/components/deploy/project-context"
 import { ProjectDatabase } from "@/components/deploy/project-database"
+
+/**
+ * Databases & backups — what the release reaches and what protects it.
+ *
+ * The page read as a framed card of eyebrow-headed blocks whose one Save did
+ * not apply to its first block, a backup policy that was a select, a raw cron
+ * string and a cluster of underlined links, and readings that truncated to
+ * "Not observed rec…". It is three sections now, in the settings frame's
+ * rail, under four short readings:
+ *
+ *   Linked databases — linking is its own write (it also writes the variable
+ *   that carries the address), so it sits outside the form whose Save it
+ *   never used. Each database is a card drawn as its engine that opens its
+ *   connection, saying which variable carries it and whether the policy's job
+ *   takes a native dump of it; above them, where there are any, a picture of
+ *   how the application reaches them over its managed network, the line
+ *   being the link's state.
+ *
+ *   Backups & volumes — one form, one Save. The job a release gates on is
+ *   drawn as the Backups page draws it (`JobCard`): its products, its last
+ *   run in colour, where it writes and its last fourteen runs; the policy's
+ *   options are sentences under it. A volume the release needs is a row with
+ *   its size and whether the live release found it.
+ *
+ *   Latest backup gate evidence — what the last deployment's gate recorded,
+ *   each job a card that opens the job.
+ */
 
 type Dependency = DeploymentEnvironmentConfiguration["dependencies"][number]
 
@@ -54,13 +120,6 @@ type BackupDependencyConfig = {
   requiredBeforeDeploy?: boolean
   requireRestoreTest?: boolean
   maxAgeSeconds?: number
-}
-
-const LINK_STATUS: Record<DeploymentDatabaseLink["status"], { label: string; tone: DotTone }> = {
-  connected: { label: "Connected", tone: "running" },
-  stale: { label: "Not observed recently", tone: "warning" },
-  pending: { label: "Waiting for the first deployment", tone: "unknown" },
-  unavailable: { label: "Needs reconnection", tone: "danger" },
 }
 
 export function DatabasesSettings({
@@ -71,51 +130,6 @@ export function DatabasesSettings({
   environmentId: number
 }) {
   const state = useConfiguration(projectId, environmentId)
-  return (
-    <ConfigurationState state={state}>
-      {(configuration) => (
-        <DatabasesForm
-          key={configuration.revision}
-          projectId={projectId}
-          environmentId={environmentId}
-          configuration={configuration}
-          save={state.save}
-          refresh={state.refresh}
-        />
-      )}
-    </ConfigurationState>
-  )
-}
-
-function DatabasesForm({
-  projectId,
-  environmentId,
-  configuration,
-  save,
-  refresh,
-}: {
-  projectId: number
-  environmentId: number
-  configuration: DeploymentEnvironmentConfiguration
-  save: ReturnType<typeof useConfiguration>["save"]
-  refresh: () => void
-}) {
-  const { can } = useAuth()
-  const canAdmin = can("system.admin")
-  const canRun = can("service.control")
-  const project = useProject()
-  const { confirm, dialog } = useConfirm()
-  const databaseDependencies = configuration.dependencies.filter((d) => d.kind === "database")
-  // Backup and volume dependencies batch through one local copy and one Save,
-  // the way the other settings sections do; a database link is its own
-  // mutation (it also writes a variable), so it is never staged here.
-  const [otherDependencies, setOtherDependencies] = useState<Dependency[]>(() =>
-    configuration.dependencies.filter((d) => d.kind !== "database"),
-  )
-  const [saving, setSaving] = useState(false)
-  const [busy, setBusy] = useState<string>()
-  const [dependencyError, setDependencyError] = useState<{ target: Dependency; message: string }>()
-
   const links = usePoll(
     (signal) =>
       get<DeploymentDatabaseLink[]>(
@@ -126,14 +140,95 @@ function DatabasesForm({
     5000,
     [projectId, environmentId],
   )
-  const linkFor = (resourceId?: string) =>
-    links.data?.find((link) => String(link.connectionId) === resourceId)
-
   // The jobs themselves, not only their names: whether the one this release
   // gates on dumps the databases beside it is the question this page exists to
   // answer before a deployment answers it the hard way.
   const jobs = usePoll((signal) => get<BackupJob[]>("/backups/", undefined, signal), 15000)
+  return (
+    <SettingsPage
+      state={state}
+      pageKinds={["dependency"]}
+      readings={(configuration) => (
+        <DatabaseReadings configuration={configuration} links={links.data} jobs={jobs.data} />
+      )}
+    >
+      {(configuration) => (
+        <DatabasesBody
+          projectId={projectId}
+          environmentId={environmentId}
+          configuration={configuration}
+          save={state.save}
+          refresh={state.refresh}
+          links={links}
+          jobs={jobs}
+        />
+      )}
+    </SettingsPage>
+  )
+}
+
+type Poll<T> = ReturnType<typeof usePoll<T>>
+
+function DatabasesBody({
+  projectId,
+  environmentId,
+  configuration,
+  save,
+  refresh,
+  links,
+  jobs,
+}: {
+  projectId: number
+  environmentId: number
+  configuration: DeploymentEnvironmentConfiguration
+  save: ReturnType<typeof useConfiguration>["save"]
+  refresh: () => void
+  links: Poll<DeploymentDatabaseLink[]>
+  jobs: Poll<BackupJob[]>
+}) {
+  const { can } = useAuth()
+  const canAdmin = can("system.admin")
+  const canRun = can("service.control")
+  const project = useProject()
+  const { confirm, dialog } = useConfirm()
+  // The three lists share one fields column; readings go beside a name
+  // where it has room and under it where it does not.
+  const [column, columnWidth] = useColumnWidth()
+  const wide = columnWidth >= 480
+  // Where SettingPicture lays its marks out in a row rather than a column.
+  const pictureRow = useMediaQuery("(min-width: 1024px)")
+  const databaseDependencies = configuration.dependencies.filter((d) => d.kind === "database")
+  const savedOthers = configuration.dependencies.filter((d) => d.kind !== "database")
+  // Backup and volume dependencies stage through one draft and one Save, the
+  // way the other settings forms do; a database link is its own mutation (it
+  // also writes a variable), so it is never staged here.
+  const draft = useSettingDraft(`deploy.${projectId}.settings.dependencies`, savedOthers)
+  const otherDependencies = draft.value
+  const setOtherDependencies = draft.set
+  const [saving, setSaving] = useState(false)
+  const [busy, setBusy] = useState<string>()
+  // The backup rows whose job is being changed: drawn as the job picker
+  // rather than as the job's card.
+  const [changing, setChanging] = useState<number[]>([])
+  const [dependencyError, setDependencyError] = useState<{
+    kind: "database" | "other"
+    index: number
+    message: string
+  }>()
+
+  const linkFor = (resourceId?: string) =>
+    links.data?.find((link) => String(link.connectionId) === resourceId)
   const jobFor = (resourceId?: string) => jobs.data?.find((job) => String(job.id) === resourceId)
+  const driverOf = (connectionId: number): string | undefined =>
+    links.data?.find((link) => link.connectionId === connectionId)?.driver
+
+  const volumeDeps = otherDependencies.filter((d) => d.kind === "storage")
+  const volumes = usePoll(
+    (signal) => get<DockerVolume[]>("/docker/volumes/", undefined, signal),
+    60000,
+    [],
+    { enabled: volumeDeps.length > 0 },
+  )
 
   const latestRunId = project.runs[0]?.id ?? project.detail.deployment.lastRun?.id
   const latestRun = usePoll(
@@ -167,15 +262,12 @@ function DatabasesForm({
 
   const connect = async (connection: DbConnection, url: string, variable: string) => {
     try {
-      // The saved copy, not the staged `otherDependencies` rows: a
-      // half-filled "Add backup"/"Add volume" row the operator has not
-      // pressed Save on has no business riding along on a database link,
-      // which the "invalid planned dependency" refusal made painfully literal.
-      const savedOtherDependencies = configuration.dependencies.filter(
-        (dependency) => dependency.kind !== "database",
-      )
+      // The saved copy, not the staged rows: a half-filled "Add backup" row
+      // the operator has not pressed Save on has no business riding along on
+      // a database link, which the "invalid planned dependency" refusal made
+      // painfully literal.
       const nextDependencies: Dependency[] = [
-        ...savedOtherDependencies,
+        ...savedOthers,
         ...databaseDependencies,
         {
           kind: "database",
@@ -216,10 +308,16 @@ function DatabasesForm({
     const link = linkFor(dependency.resourceId)
     const name = link?.name ?? `Database ${dependency.resourceId}`
     const carriers = variablesFor(dependency.resourceId)
-    const savedOtherDependencies = configuration.dependencies.filter(
-      (item) => item.kind !== "database",
-    )
     const nextDatabaseDeps = databaseDependencies.filter((_, i) => i !== index)
+    const subject = {
+      mark: <ProductLogo size="sm" id={link?.driver} fallback={Database} />,
+      name,
+      facts: link && (
+        <span className="font-mono">
+          {link.hostname} · {link.database}
+        </span>
+      ),
+    }
     const apply = async () => {
       // Every write advances the environment's desired revision, and the next
       // one has to send the revision the last handed back or it is refused as
@@ -237,7 +335,7 @@ function DatabasesForm({
       await put(`/deploy/${projectId}/environments/${environmentId}/configuration`, {
         ...configBase,
         revision,
-        dependencies: [...savedOtherDependencies, ...nextDatabaseDeps],
+        dependencies: [...savedOthers, ...nextDatabaseDeps],
       })
       links.refresh()
       refresh()
@@ -255,6 +353,7 @@ function DatabasesForm({
       confirm({
         title: `Remove ${name}`,
         confirmLabel: "Remove the link",
+        subject,
         description: (
           <>
             <p>
@@ -272,6 +371,7 @@ function DatabasesForm({
     confirm({
       title: `Remove ${name}`,
       confirmLabel: "Remove the link and its variables",
+      subject,
       description: (
         <>
           <p>
@@ -363,19 +463,24 @@ function DatabasesForm({
     }
   }
 
-  const onSaveOthers = async () => {
+  const onSaveOthers = async (event: FormEvent) => {
+    event.preventDefault()
     setSaving(true)
     setDependencyError(undefined)
     const merged = [...databaseDependencies, ...otherDependencies]
     try {
       await save({ dependencies: merged })
+      setChanging([])
       notify.success("Dependencies saved")
     } catch (error) {
       const index =
         error instanceof ApiError ? refusedIndex(error.field, "dependencies") : undefined
-      const target = index !== undefined ? merged[index] : undefined
-      if (error instanceof ApiError && target) {
-        setDependencyError({ target, message: error.message })
+      if (error instanceof ApiError && index !== undefined && index < merged.length) {
+        setDependencyError(
+          index < databaseDependencies.length
+            ? { kind: "database", index, message: error.message }
+            : { kind: "other", index: index - databaseDependencies.length, message: error.message },
+        )
       } else {
         notify.error("Could not save dependencies", error)
       }
@@ -384,15 +489,30 @@ function DatabasesForm({
     }
   }
 
-  const backupDeps = otherDependencies.filter((d) => d.kind === "backup")
-  const volumeDeps = otherDependencies.filter((d) => d.kind === "storage")
-  const updateDependency = (target: Dependency, next: Dependency) =>
-    setOtherDependencies(otherDependencies.map((item) => (item === target ? next : item)))
-  const removeOther = (target: Dependency) =>
-    setOtherDependencies(otherDependencies.filter((item) => item !== target))
+  const errorFor = (kind: "database" | "other", index: number) =>
+    dependencyError?.kind === kind && dependencyError.index === index
+      ? dependencyError.message
+      : undefined
+
+  const updateDependency = (index: number, next: Dependency) =>
+    setOtherDependencies(otherDependencies.map((item, i) => (i === index ? next : item)))
+  const removeOther = (index: number) => {
+    setOtherDependencies(otherDependencies.filter((_, i) => i !== index))
+    setChanging((current) =>
+      current.filter((item) => item !== index).map((item) => (item > index ? item - 1 : item)),
+    )
+  }
+  const addOther = (dependency: Dependency) =>
+    setOtherDependencies([...otherDependencies, dependency])
 
   const observedBackups = project.operations?.backups
   const observedStorage = project.operations?.storage
+  // A volume is drawn as the product that keeps its data in it, as on Storage.
+  const volumeMark = volumeProduct(
+    configuration.runtime.image || project.operations?.runtime.services[0]?.image,
+    project.detail.deployment.sourceKind,
+    project.product,
+  )
   const observedBackupFor = (resourceId?: string) =>
     observedBackups?.status === "available"
       ? observedBackups.jobs.find((job) => job.resourceId === resourceId)
@@ -402,7 +522,6 @@ function DatabasesForm({
       ? observedStorage.mounts.find((mount) => mount.source === resourceId)
       : undefined
 
-  const readings = summarise(databaseDependencies, links.data, backupDeps, jobs.data)
   // A binding can outlive the variable that made it — removing a variable does
   // not detach a database from retained releases — so an observed link is not
   // proof that a variable still holds the address. It only rules out saying
@@ -418,621 +537,517 @@ function DatabasesForm({
       ),
     ),
   ]
+  const savedBackups = savedOthers
+    .filter((dependency) => dependency.kind === "backup")
+    .map((dependency) => jobFor(dependency.resourceId))
+    .filter((job): job is BackupJob => Boolean(job))
+
+  const backupRows = otherDependencies
+    .map((dependency, index) => ({ dependency, index }))
+    .filter(({ dependency }) => dependency.kind === "backup")
+  const volumeRows = otherDependencies
+    .map((dependency, index) => ({ dependency, index }))
+    .filter(({ dependency }) => dependency.kind === "storage")
+  const observedLinks = databaseDependencies
+    .map((dependency) => linkFor(dependency.resourceId))
+    .filter((link): link is DeploymentDatabaseLink => Boolean(link))
 
   return (
-    <div className="space-y-6">
-      <PendingChanges pending={configuration.pending} />
-
-      <StatGrid columns={4} className="animate-rise">
-        <StatTile
-          label="Linked databases"
-          value={readings.linked}
-          hint={readings.engines || undefined}
-        />
-        <StatTile
-          label="Connection"
-          value={readings.connection.value}
-          tone={readings.connection.tone}
-        />
-        <StatTile
-          label="Backup policy"
-          value={readings.policy.value}
-          tone={readings.policy.tone}
-          hint={readings.policy.hint}
-        />
-        <StatTile
-          label="Native dumps"
-          value={readings.dumps.value}
-          tone={readings.dumps.tone}
-          hint={readings.dumps.hint}
-        />
-      </StatGrid>
-
-      <SettingCard
-        title="Databases & backups"
-        note="Applies on the next deployment."
-        action={
-          canAdmin && (
-            <Button size="sm" onClick={onSaveOthers} pending={saving}>
-              Save
-            </Button>
-          )
-        }
-        bodyClassName="space-y-5"
-      >
-        <div className="space-y-3">
-          <p className="eyebrow">Linked databases</p>
-          {databaseDependencies.length === 0 ? (
-            <EmptyNote>No database is linked to this environment.</EmptyNote>
-          ) : (
-            <RowList aria-label="Linked databases">
-              {databaseDependencies.map((dependency, index) => {
-                const link = linkFor(dependency.resourceId)
-                const status = LINK_STATUS[link?.status ?? "pending"]
-                // The dependency is what the verbs act on, not the
-                // observation: a link whose binding has not been reported
-                // still has to be removable, which is exactly the state an
-                // operator reaches this page in when it stopped working.
-                const id = dependency.resourceId ?? ""
-                const name = link?.name ?? `Database ${id}`
-                const verbs: Verb[] = [
-                  {
-                    key: "test",
-                    label: "Test connection",
-                    detail: "Opens a connection to the engine and reports what it says.",
-                    icon: Lightning,
-                    inline: true,
-                    disabled: busy === `ping-${id}`,
-                    run: () => void testConnection(id, name),
-                  },
-                ]
-                if (canAdmin) {
-                  verbs.push(
-                    {
-                      key: "copy",
-                      label: "Copy application URL",
-                      detail: "The address and credentials the container receives. Audited.",
-                      icon: Copy,
-                      disabled: busy === `url-${id}`,
-                      run: () => void copyApplicationURL(id),
-                    },
-                    {
-                      key: "remove",
-                      label: "Remove database",
-                      detail: "Unlinks it here. The container and its data are left alone.",
-                      icon: Trash,
-                      danger: true,
-                      run: () => removeDatabase(dependency, index),
-                    },
-                  )
-                }
-                return (
-                  <Row
-                    key={`${id}-${index}`}
-                    title={
-                      <span className="flex min-w-0 items-center gap-2">
-                        <Link
-                          href={`/databases?conn=${id}`}
-                          className="min-w-0 truncate rounded-sm focus-ring hover:underline"
-                        >
-                          {name}
-                        </Link>
-                        {link?.driver && <Tag>{link.driver}</Tag>}
-                        {link?.database && <Tag mono>{link.database}</Tag>}
-                      </span>
-                    }
-                    subtitle={link?.hostname}
-                    mono
-                    trailing={
-                      <>
-                        <Status tone={status.tone} label={status.label} />
-                        <VerbActions verbs={verbs} menuLabel={`${name} actions`} dim />
-                      </>
-                    }
-                  />
-                )
-              })}
-            </RowList>
-          )}
-          {/*
-            The rows above are the state; these are the facts about each link
-            that do not fit on one line — which variables carry it, and why the
-            last reconciliation could not repair it.
-          */}
-          {databaseDependencies.map((dependency, index) => {
-            const link = linkFor(dependency.resourceId)
-            const carriers = variablesFor(dependency.resourceId)
-            const failing = link?.status === "unavailable"
-            // A binding exists because a variable named this database, so an
-            // observed link is proof one carries it even when the value is a
-            // literal URL rather than the typed reference this page writes.
-            // Only an unbound link with no reference is really uncarried.
-            const uncarried = carriers.length === 0 && !link
-            if (!failing && !uncarried && !dependencyError) return null
-            return (
-              <div key={`facts-${dependency.resourceId}-${index}`} className="space-y-2">
-                {failing && (
-                  <Notice tone="danger" title={`${link?.name} needs reconnection`}>
-                    {link?.detail ||
-                      "The original database container or Compose service is not running. The dashboard retries every five seconds."}
-                  </Notice>
-                )}
-                {uncarried && (
-                  <Notice tone="warning" title="No variable carries this database">
-                    The release attaches a database by reading the variable that holds its address.
-                    Add it again from Add database, or write the reference into a variable yourself.
-                  </Notice>
-                )}
-                {dependencyError?.target === dependency && (
-                  <p role="alert" className="text-hint text-destructive">
-                    {dependencyError.message}
-                  </p>
-                )}
-              </div>
-            )
-          })}
-          {databaseDependencies.length > 0 && (
-            <p className="text-hint text-muted-foreground">
-              {allCarriers.length > 0
-                ? `Carried by ${allCarriers.join(", ")}.`
-                : boundWithoutReference
-                  ? "Bound on the managed network; no variable names one by reference."
-                  : "No variable carries a linked database."}{" "}
+    <>
+      <SettingSection
+        title="Linked databases"
+        state={
+          // Which variable carries each database is its row's own "via"
+          // link; the head says only what the rows cannot — that none does.
+          databaseDependencies.length > 0 && (
+            <p>
+              {allCarriers.length === 0 &&
+                (boundWithoutReference
+                  ? "Bound on the managed network; no variable names one by reference. "
+                  : "No variable carries a linked database. ")}
               Last checked{" "}
               {links.data?.[0]?.checkedAt ? relativeTime(links.data[0].checkedAt) : "never"}.
             </p>
+          )
+        }
+        actions={canAdmin && <ProjectDatabase target="container" onConnect={connect} />}
+      >
+        <div ref={column} className="min-w-0 space-y-5">
+          {databaseDependencies.length === 0 ? (
+            <EmptyState
+              icon={Database}
+              mark={<ProductLogos ids={["postgres", "mysql", "redis", "mongodb"]} size="md" />}
+              title="No database is linked"
+              description="Start one or connect a saved connection; its address reaches the application through a variable."
+            />
+          ) : (
+            <>
+              {/* Narrow, the picture stacks its marks in one column and the
+                  lines run straight down them, so two databases side by side
+                  read as a chain through each other. Every fact in it is in
+                  the rows, so it is drawn only where its shape is true. */}
+              {observedLinks.length > 0 && (pictureRow || observedLinks.length === 1) && (
+                <DatabasePicture links={observedLinks} deployment={project.detail.deployment} />
+              )}
+              <ChoiceList aria-label="Linked databases" className="animate-rise">
+                {databaseDependencies.map((dependency, index) => {
+                  const link = linkFor(dependency.resourceId)
+                  const status = LINK_STATUS[link?.status ?? "pending"]
+                  // The dependency is what the verbs act on, not the observation:
+                  // a link whose binding has not been reported still has to be
+                  // removable, which is exactly the state an operator reaches
+                  // this page in when it stopped working.
+                  const id = dependency.resourceId ?? ""
+                  const name = link?.name ?? `Database ${id}`
+                  const carriers = variablesFor(dependency.resourceId)
+                  const failing = link?.status === "unavailable"
+                  // A binding exists because a variable named this database, so
+                  // an observed link is proof one carries it even when the value
+                  // is a literal URL rather than the typed reference this page
+                  // writes. Only an unbound link with no reference is uncarried.
+                  const uncarried = carriers.length === 0 && !link
+                  const dumpedBy = savedBackups.find((job) =>
+                    (job.databaseDumps ?? []).includes(Number(id)),
+                  )
+                  const verbs: Verb[] = [
+                    {
+                      key: "test",
+                      label: "Test connection",
+                      detail: "Opens a connection to the engine and reports what it says.",
+                      icon: Lightning,
+                      inline: true,
+                      disabled: busy === `ping-${id}`,
+                      run: () => void testConnection(id, name),
+                    },
+                  ]
+                  if (canAdmin)
+                    verbs.push(
+                      {
+                        key: "copy",
+                        label: "Copy application URL",
+                        detail: "The address and credentials the container receives. Audited.",
+                        icon: Copy,
+                        disabled: busy === `url-${id}`,
+                        run: () => void copyApplicationURL(id),
+                      },
+                      {
+                        key: "remove",
+                        label: "Remove database",
+                        detail: "Unlinks it here. The container and its data are left alone.",
+                        icon: Trash,
+                        danger: true,
+                        run: () => removeDatabase(dependency, index),
+                      },
+                    )
+                  const statusMark = <Status tone={status.tone} label={status.label} />
+                  return (
+                    <DatabaseRowGroup key={`${id}-${index}`}>
+                      <ChoiceRow
+                        href={`/databases?conn=${id}`}
+                        verb={name}
+                        busy={busy === `ping-${id}`}
+                        leading={<ProductLogo size="sm" id={link?.driver} fallback={Database} />}
+                        title={name}
+                        description={
+                          link ? (
+                            <span className="flex min-w-0 items-center gap-1.5">
+                              {/* The engine's own name, as the picture spells
+                                  it; narrow, the logo beside says it and the
+                                  width goes to the address. */}
+                              {wide && (
+                                <Tag>{DATABASE_ENGINE_LABELS[link.driver] ?? link.driver}</Tag>
+                              )}
+                              <span className="shrink-0 font-mono">{link.database}</span>
+                              <span aria-hidden>·</span>
+                              <span className="min-w-0 truncate font-mono">{link.hostname}</span>
+                            </span>
+                          ) : (
+                            "Not observed yet — the first deployment binds it"
+                          )
+                        }
+                        trailing={wide ? statusMark : undefined}
+                        actions={
+                          <VerbActions dim verbs={verbs} menuLabel={`Actions for ${name}`} />
+                        }
+                      >
+                        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 text-hint text-muted-foreground sm:pl-11">
+                          {!wide && statusMark}
+                          {carriers.length > 0 ? (
+                            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                              via
+                              {carriers.map((variable) => (
+                                <Link
+                                  key={variable.name}
+                                  href={`/deploy/${projectId}/settings/variables`}
+                                  className="rounded-sm focus-ring hover:underline"
+                                >
+                                  <Tag mono>{variable.name}</Tag>
+                                </Link>
+                              ))}
+                            </span>
+                          ) : (
+                            <span>no variable names it</span>
+                          )}
+                          {savedBackups.length > 0 && (
+                            <Status
+                              tone={dumpedBy ? "running" : "warning"}
+                              label={dumpedBy ? `dumped by ${dumpedBy.name}` : "no native dump"}
+                            />
+                          )}
+                        </div>
+                      </ChoiceRow>
+                      {failing && (
+                        <Notice
+                          tone="danger"
+                          icon={Warning}
+                          title={`${link?.name} needs reconnection`}
+                        >
+                          {link?.detail ||
+                            "The original database container or Compose service is not running. The dashboard retries every five seconds."}
+                        </Notice>
+                      )}
+                      {uncarried && (
+                        <Notice
+                          tone="warning"
+                          icon={Warning}
+                          title="No variable carries this database"
+                        >
+                          The release attaches a database by reading the variable that holds its
+                          address. Add it again from Add database, or write the reference into a
+                          variable yourself.
+                        </Notice>
+                      )}
+                      {errorFor("database", index) && (
+                        <p role="alert" className="text-hint text-destructive">
+                          {errorFor("database", index)}
+                        </p>
+                      )}
+                    </DatabaseRowGroup>
+                  )
+                })}
+              </ChoiceList>
+            </>
           )}
-          {canAdmin && <ProjectDatabase target="container" onConnect={connect} />}
         </div>
+      </SettingSection>
 
-        <div className="space-y-3 border-t border-hairline pt-4">
-          <div className="flex items-center justify-between gap-3">
-            <p className="eyebrow">Backups</p>
-            {canAdmin && (
+      <SettingForm
+        name="Backups & volumes"
+        onSubmit={(event) => void onSaveOthers(event)}
+        dirty={draft.dirty}
+        changes={draft.changes}
+        saving={saving}
+        canEdit={canAdmin}
+        onDiscard={() => {
+          setDependencyError(undefined)
+          setChanging([])
+          draft.discard()
+        }}
+      >
+        <SettingSection
+          title="Backup before a release"
+          state={
+            // Whether the release waits is the policy's own switch and the
+            // Backup policy reading; the head keeps only the warning neither
+            // of them gives.
+            backupRows.length === 0 && databaseDependencies.length > 0
+              ? "Persistent storage is not a backup"
+              : undefined
+          }
+          status={settingStatus({ dirty: draft.dirty, refused: Boolean(dependencyError) })}
+          actions={
+            canAdmin && (
               <Button
+                type="button"
                 size="sm"
                 variant="outline"
                 onClick={() =>
-                  setOtherDependencies([
-                    ...otherDependencies,
-                    {
-                      kind: "backup",
-                      ownership: "linked",
-                      resourceKind: "backup_job",
-                      resourceId: "",
-                      config: { requiredBeforeDeploy: true, maxAgeSeconds: 86400 },
-                    },
-                  ])
+                  addOther({
+                    kind: "backup",
+                    ownership: "linked",
+                    resourceKind: "backup_job",
+                    resourceId: "",
+                    config: { requiredBeforeDeploy: true, maxAgeSeconds: 86400 },
+                  })
                 }
               >
                 <Plus className="size-3.5" /> Add backup
               </Button>
-            )}
-          </div>
-          {backupDeps.length === 0 ? (
-            <EmptyNote>
-              {databaseDependencies.length > 0
-                ? "No backup policy is declared. Persistent storage is not a backup."
-                : "No backup dependency is declared."}
-            </EmptyNote>
-          ) : (
+            )
+          }
+        >
+          {backupRows.length === 0 ? (
             <div className="space-y-3">
-              {backupDeps.map((dependency, index) => {
-                const config = (dependency.config ?? {}) as BackupDependencyConfig
-                const job = jobFor(dependency.resourceId)
-                const observed = observedBackupFor(dependency.resourceId)
-                const uncovered = job
-                  ? databaseDependencies.filter(
-                      (database) =>
-                        database.resourceId &&
-                        !(job.databaseDumps ?? []).includes(Number(database.resourceId)),
+              <EmptyNote className="px-0 py-0 text-left">
+                {databaseDependencies.length > 0
+                  ? "No backup policy is declared, so a release takes nothing with it."
+                  : "No backup dependency is declared."}
+              </EmptyNote>
+              {/*
+                A database nothing dumps and no job covers: the coverage list
+                on Backups already knows how to write that job, so this sends
+                the operator to it with the database chosen rather than
+                building a second form here.
+              */}
+              {canAdmin && databaseDependencies.length > 0 && (
+                <ChoiceList aria-label="Databases with no backup">
+                  {databaseDependencies.map((dependency) => {
+                    const link = linkFor(dependency.resourceId)
+                    const name = link?.name ?? `database ${dependency.resourceId}`
+                    return (
+                      <ChoiceRow
+                        key={`protect-${dependency.resourceId}`}
+                        href={`/backups?database=${dependency.resourceId}`}
+                        verb={`Back up ${name}`}
+                        leading={<ProductLogo size="sm" id={link?.driver} fallback={Database} />}
+                        title={`Back up ${name}`}
+                        description="No job dumps it — opens Backups with the native dump chosen"
+                      />
                     )
-                  : []
-                return (
-                  <Group key={index} className="space-y-3">
-                    <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-                      <ResourceSelect<BackupJob>
-                        id={`backup-job-${index}`}
-                        label="Backup job"
-                        path="/backups/"
-                        given={jobs.data}
-                        value={dependency.resourceId ?? ""}
-                        onChange={(resourceId) =>
-                          updateDependency(dependency, { ...dependency, resourceId })
-                        }
-                        disabled={!canAdmin}
-                        toId={(item) => String(item.id)}
-                        toLabel={(item) => item.name}
-                      />
-                      {canAdmin && (
-                        <IconAction
-                          label="Remove backup dependency"
-                          className="mt-6 text-destructive"
-                          onClick={() => removeOther(dependency)}
-                        >
-                          <Trash />
-                        </IconAction>
-                      )}
-                    </div>
-
-                    {job && (
-                      <FormFacts>
-                        <FormFact label="Schedule">
-                          {job.enabled ? job.schedule || "manual only" : "paused"}
-                        </FormFact>
-                        <FormFact label="Last success">
-                          {job.lastSuccessAt ? relativeTime(job.lastSuccessAt) : "never"}
-                        </FormFact>
-                        <FormFact label="Next run">
-                          {job.enabled && job.nextRun ? relativeTime(job.nextRun) : "—"}
-                        </FormFact>
-                        <FormFact label="Stored">
-                          {job.stored.runs > 0
-                            ? `${plural(job.stored.runs, "artifact")} · ${bytes(job.stored.bytes)}`
-                            : "nothing yet"}
-                        </FormFact>
-                      </FormFacts>
-                    )}
-                    {job && (
-                      <div className="flex min-w-0 flex-wrap items-center gap-2">
-                        {observed && (
-                          <Status
-                            tone={
-                              observed.status === "present"
-                                ? "running"
-                                : observed.status === "missing"
-                                  ? "danger"
-                                  : "unknown"
-                            }
-                            label={
-                              observed.status === "present"
-                                ? `Observed${observed.lastStatus ? ` · last run ${observed.lastStatus}` : ""}`
-                                : observed.status === "missing"
-                                  ? "Missing from the live release"
-                                  : "Not observed"
-                            }
-                          />
-                        )}
-                        {job.overdue && <Tag tone="warning">overdue</Tag>}
-                        {!job.enabled && <Tag tone="warning">paused</Tag>}
-                        <Tag mono>{job.targetKind}</Tag>
-                        {canRun && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            pending={busy === `run-${job.id}`}
-                            onClick={() => void runBackup(job)}
-                          >
-                            <Play className="size-3.5" /> Run now
-                          </Button>
-                        )}
-                        <Link
-                          href={`/backups/${job.id}`}
-                          className="inline-flex min-h-9 items-center text-hint underline underline-offset-4 focus-ring"
-                        >
-                          Open the backup job
-                        </Link>
-                      </div>
-                    )}
-                    {observed?.detail && (
-                      <p className="text-hint text-muted-foreground">{observed.detail}</p>
-                    )}
-
-                    {job &&
-                      uncovered.map((database) => {
-                        const link = linkFor(database.resourceId)
-                        const name = link?.name ?? `database ${database.resourceId}`
-                        return (
-                          <Notice
-                            key={`uncovered-${database.resourceId}`}
-                            tone="warning"
-                            icon={ShieldCheck}
-                            title={`${job.name} takes no native dump of ${name}`}
-                          >
-                            <p>
-                              The release falls back to this database&rsquo;s data directory and
-                              refuses if the job does not cover it. A dump is a transaction boundary
-                              the engine chose; a copy of its files while it runs is not.
-                            </p>
-                            {canAdmin && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="mt-2"
-                                pending={busy === `dump-${job.id}-${database.resourceId}`}
-                                onClick={() => void addDump(job, Number(database.resourceId))}
-                              >
-                                <Database className="size-3.5" /> Add the dump to {job.name}
-                              </Button>
-                            )}
-                          </Notice>
-                        )
-                      })}
-
-                    <OptionRow
-                      title="Backup before deploy"
-                      hint="Runs the job and gates the release on it finishing."
-                      checked={Boolean(config.requiredBeforeDeploy)}
-                      disabled={!canAdmin}
-                      onCheckedChange={(requiredBeforeDeploy) =>
-                        updateDependency(dependency, {
-                          ...dependency,
-                          config: { ...config, requiredBeforeDeploy },
-                        })
-                      }
-                    />
-                    <OptionRow
-                      title="Require restore evidence"
-                      hint="Refuses the release unless a restore of this job's artifact has been verified."
-                      checked={Boolean(config.requireRestoreTest)}
-                      disabled={!canAdmin}
-                      onCheckedChange={(requireRestoreTest) =>
-                        updateDependency(dependency, {
-                          ...dependency,
-                          config: { ...config, requireRestoreTest },
-                        })
-                      }
-                    />
-                    <Field
-                      label="Maximum age (hours)"
-                      htmlFor={`backup-age-${index}`}
-                      hint={
-                        config.maxAgeSeconds
-                          ? `Refuses the release when the newest backup is older than ${plural(Math.round(config.maxAgeSeconds / 3600), "hour")}.`
-                          : "Zero accepts a backup of any age."
-                      }
-                    >
-                      <Input
-                        id={`backup-age-${index}`}
-                        type="number"
-                        min={0}
-                        readOnly={!canAdmin}
-                        value={Math.round((config.maxAgeSeconds ?? 0) / 3600)}
-                        onChange={(event) =>
-                          updateDependency(dependency, {
-                            ...dependency,
-                            config: {
-                              ...config,
-                              maxAgeSeconds: Math.max(0, Number(event.target.value) || 0) * 3600,
-                            },
-                          })
-                        }
-                        className="w-32"
-                      />
-                    </Field>
-                    {dependencyError?.target === dependency && (
-                      <p role="alert" className="text-hint text-destructive">
-                        {dependencyError.message}
-                      </p>
-                    )}
-                  </Group>
-                )
-              })}
+                  })}
+                </ChoiceList>
+              )}
             </div>
-          )}
-          {/*
-            A database nothing dumps and no job covers: the coverage list on
-            Backups already knows how to write that job, so this sends the
-            operator to it with the database chosen rather than building a
-            second form here.
-          */}
-          {canAdmin && backupDeps.length === 0 && databaseDependencies.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {databaseDependencies.map((dependency) => (
-                <Button
-                  key={`protect-${dependency.resourceId}`}
-                  size="sm"
-                  variant="outline"
-                  asChild
-                >
-                  <Link href={`/backups?database=${dependency.resourceId}`}>
-                    <Plus className="size-3.5" /> Back up{" "}
-                    {linkFor(dependency.resourceId)?.name ?? `database ${dependency.resourceId}`}
-                  </Link>
-                </Button>
+          ) : (
+            <div className="divide-y divide-hairline">
+              {backupRows.map(({ dependency, index }) => (
+                <BackupPolicy
+                  key={index}
+                  index={index}
+                  dependency={dependency}
+                  job={jobFor(dependency.resourceId)}
+                  jobs={jobs.data}
+                  observed={observedBackupFor(dependency.resourceId)}
+                  databases={databaseDependencies}
+                  driverOf={driverOf}
+                  linkFor={linkFor}
+                  canAdmin={canAdmin}
+                  canRun={canRun}
+                  busy={busy}
+                  changing={changing.includes(index) || !dependency.resourceId}
+                  error={errorFor("other", index)}
+                  onChange={(next) => updateDependency(index, next)}
+                  onChangeJob={() => setChanging((current) => [...current, index])}
+                  onRemove={() => removeOther(index)}
+                  onRun={(job) => void runBackup(job)}
+                  onAddDump={(job, connectionId) => void addDump(job, connectionId)}
+                />
               ))}
             </div>
           )}
-        </div>
+        </SettingSection>
 
-        <div className="space-y-3 border-t border-hairline pt-4">
-          <div className="flex items-center justify-between gap-3">
-            <p className="eyebrow">Volumes</p>
-            {canAdmin && (
+        <SettingSection
+          title="Volumes this release needs"
+          state={
+            volumeRows.length > 0 &&
+            `${plural(volumeRows.length, "volume")} checked before the release starts`
+          }
+          actions={
+            canAdmin && (
               <Button
+                type="button"
                 size="sm"
                 variant="outline"
                 onClick={() =>
-                  setOtherDependencies([
-                    ...otherDependencies,
-                    {
-                      kind: "storage",
-                      ownership: "linked",
-                      resourceKind: "docker_volume",
-                      resourceId: "",
-                      config: {},
-                    },
-                  ])
+                  addOther({
+                    kind: "storage",
+                    ownership: "linked",
+                    resourceKind: "docker_volume",
+                    resourceId: "",
+                    config: {},
+                  })
                 }
               >
                 <Plus className="size-3.5" /> Add volume
               </Button>
-            )}
-          </div>
-          {volumeDeps.length === 0 ? (
-            <EmptyNote>No volume dependency is declared.</EmptyNote>
+            )
+          }
+        >
+          {volumeRows.length === 0 ? (
+            <EmptyNote className="px-0 py-0 text-left">No volume dependency is declared.</EmptyNote>
           ) : (
-            <div className="space-y-3">
-              {volumeDeps.map((dependency, index) => {
-                const observed = observedVolumeFor(dependency.resourceId)
-                return (
-                  <Group key={index} className="space-y-3">
-                    <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_9rem_auto] sm:items-end">
-                      <ResourceSelect<DockerVolume>
-                        id={`volume-${index}`}
-                        label="Volume"
-                        path="/docker/volumes/"
-                        value={dependency.resourceId ?? ""}
-                        onChange={(resourceId) =>
-                          updateDependency(dependency, { ...dependency, resourceId })
-                        }
-                        disabled={!canAdmin}
-                        toId={(volume) => volume.name}
-                        toLabel={(volume) => volume.name}
-                      />
-                      <Field label="Ownership" htmlFor={`volume-ownership-${index}`}>
-                        <Select
-                          value={dependency.ownership}
-                          onValueChange={(ownership: Dependency["ownership"]) =>
-                            updateDependency(dependency, { ...dependency, ownership })
-                          }
-                          disabled={!canAdmin}
-                        >
-                          <SelectTrigger id={`volume-ownership-${index}`} className="w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="managed">Managed</SelectItem>
-                            <SelectItem value="linked">Linked</SelectItem>
-                            <SelectItem value="observed">Observed</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                      {canAdmin && (
-                        <IconAction
-                          label="Remove volume dependency"
-                          className="text-destructive"
-                          onClick={() => removeOther(dependency)}
-                        >
-                          <Trash />
-                        </IconAction>
-                      )}
-                    </div>
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      {observed && (
-                        <Status
-                          tone={
-                            observed.status === "present"
-                              ? "running"
-                              : observed.status === "missing"
-                                ? "danger"
-                                : "unknown"
-                          }
-                          label={
-                            observed.status === "present"
-                              ? "Present"
-                              : observed.status === "missing"
-                                ? "Missing"
-                                : "Not observed"
-                          }
-                        />
-                      )}
-                      {observed?.target && <Tag mono>{observed.target}</Tag>}
-                      {dependency.resourceId && (
-                        <Link
-                          href={`/docker/volumes?volume=${encodeURIComponent(dependency.resourceId)}`}
-                          className="inline-flex min-h-9 items-center text-hint underline underline-offset-4 focus-ring"
-                        >
-                          Open the volume
-                        </Link>
-                      )}
-                    </div>
-                    {observed?.detail && (
-                      <p className="text-hint text-muted-foreground">{observed.detail}</p>
-                    )}
-                    {dependencyError?.target === dependency && (
-                      <p role="alert" className="text-hint text-destructive">
-                        {dependencyError.message}
-                      </p>
-                    )}
-                  </Group>
-                )
-              })}
-            </div>
-          )}
-        </div>
-      </SettingCard>
-
-      <Panel plain>
-        <PanelHeader title="Latest backup gate evidence" />
-        <PanelBody>
-          {!latestRunId ? (
-            <EmptyNote>No deployment run has produced backup evidence yet.</EmptyNote>
-          ) : latestRun.loading ? (
-            <EmptyNote>Reading the latest run…</EmptyNote>
-          ) : backupGateEvidence.length === 0 ? (
-            <EmptyNote>The latest run did not execute a backup policy.</EmptyNote>
-          ) : (
-            <div className="space-y-3">
-              {backupGateEvidence.map((item) => (
-                <Group key={`${item.jobId}-${item.runId ?? 0}`} className="space-y-1.5">
-                  <FormFacts>
-                    <FormFact label="Backup job">
-                      {jobFor(String(item.jobId))?.name ?? `#${item.jobId}`}
-                    </FormFact>
-                    <FormFact label="Run">{item.runId ? `#${item.runId}` : "—"}</FormFact>
-                    <FormFact label="Fresh">{item.fresh ? "Yes" : "No"}</FormFact>
-                    <FormFact label="Restore tested">
-                      {item.restoreTested ? "Yes" : "No evidence"}
-                    </FormFact>
-                  </FormFacts>
-                  {(item.databaseDumps?.length ?? 0) > 0 && (
-                    <p className="text-hint text-muted-foreground">
-                      {item.databaseDumps!.length === 1
-                        ? "1 linked database covered by a native dump"
-                        : `${item.databaseDumps!.length} linked databases covered by native dumps`}
-                    </p>
-                  )}
-                  {item.restoreVerificationId && (
-                    <p className="text-hint break-all text-muted-foreground">
-                      Recovery check #{item.restoreVerificationId} · Schema{" "}
-                      {item.restoreSchemaVersion}
-                      {item.restoreApplicationImage ? ` · ${item.restoreApplicationImage}` : ""}
-                    </p>
-                  )}
-                  {item.endedAt && (
-                    <p className="text-hint text-muted-foreground">
-                      Completed {relativeTime(item.endedAt)} · {humanize(item.status)}
-                      {item.detail ? ` · ${item.detail}` : ""}
-                    </p>
-                  )}
-                </Group>
+            <ul aria-label="Volumes this release needs" className="divide-y divide-hairline">
+              {volumeRows.map(({ dependency, index }) => (
+                <VolumeRow
+                  key={index}
+                  index={index}
+                  dependency={dependency}
+                  volumes={volumes}
+                  observed={observedVolumeFor(dependency.resourceId)}
+                  product={volumeMark}
+                  canAdmin={canAdmin}
+                  error={errorFor("other", index)}
+                  onChange={(next) => updateDependency(index, next)}
+                  onRemove={() => removeOther(index)}
+                />
               ))}
-            </div>
+            </ul>
           )}
-        </PanelBody>
-      </Panel>
+        </SettingSection>
+      </SettingForm>
+
+      <SettingSection
+        title="Latest backup gate evidence"
+        state={
+          latestRun.data && (
+            <Link
+              href={`/deploy/${projectId}/runs/${latestRun.data.run.id}`}
+              className="inline-flex items-center gap-1 rounded-sm focus-ring hover:text-foreground hover:underline"
+            >
+              From deployment #{latestRun.data.run.runNumber}
+              <ArrowUpRight aria-hidden className="size-3" />
+            </Link>
+          )
+        }
+      >
+        {!latestRunId ? (
+          <EmptyNote className="px-0 text-left">
+            No deployment run has produced backup evidence yet.
+          </EmptyNote>
+        ) : latestRun.loading ? (
+          <EmptyNote className="px-0 text-left">Reading the latest run…</EmptyNote>
+        ) : backupGateEvidence.length === 0 ? (
+          <EmptyNote className="px-0 text-left">
+            The latest run did not execute a backup policy.
+          </EmptyNote>
+        ) : (
+          <ChoiceList aria-label="Latest backup gate evidence">
+            {backupGateEvidence.map((item, index) => {
+              const job = jobFor(String(item.jobId))
+              const jobName = job?.name ?? `Job #${item.jobId}`
+              const engines = [
+                ...new Set(
+                  (item.databaseDumps ?? [])
+                    .map(driverOf)
+                    .filter((driver): driver is string => Boolean(driver)),
+                ),
+              ]
+              const readings = (
+                <>
+                  <Status
+                    tone={item.fresh ? "running" : "warning"}
+                    label={item.fresh ? "Fresh" : "Older than the policy allows"}
+                  />
+                  <Status
+                    tone={item.restoreTested ? "running" : "stopped"}
+                    label={item.restoreTested ? "Restore tested" : "No restore evidence"}
+                  />
+                </>
+              )
+              const dumps = item.databaseDumps?.length ?? 0
+              return (
+                <ChoiceRow
+                  key={`${item.jobId}-${item.runId ?? 0}`}
+                  index={index}
+                  href={`/backups/${item.jobId}`}
+                  verb={`${jobName} gate evidence`}
+                  leading={
+                    engines.length > 1 ? (
+                      <ProductLogos ids={engines} ring="ring-choice-surface" />
+                    ) : (
+                      <ProductLogo size="sm" id={engines[0]} fallback={Archive} />
+                    )
+                  }
+                  title={jobName}
+                  description={
+                    <>
+                      {item.runId ? <span className="numeric">#{item.runId}</span> : "No run"}
+                      {item.endedAt && <> · completed {relativeTime(item.endedAt)}</>}
+                      {" · "}
+                      {humanize(item.status)}
+                      {item.detail ? ` · ${item.detail}` : ""}
+                    </>
+                  }
+                  trailing={wide ? readings : undefined}
+                >
+                  {(!wide || dumps > 0 || item.restoreVerificationId) && (
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-hint text-muted-foreground sm:pl-11">
+                      {!wide && readings}
+                      {dumps > 0 && (
+                        <span className="flex items-center gap-1.5">
+                          <ProductGlyphs ids={engines} />
+                          {dumps === 1
+                            ? "1 linked database covered by a native dump"
+                            : `${dumps} linked databases covered by native dumps`}
+                        </span>
+                      )}
+                      {item.restoreVerificationId && (
+                        <span className="font-mono break-all">
+                          Recovery check #{item.restoreVerificationId} · schema{" "}
+                          {item.restoreSchemaVersion}
+                          {item.restoreApplicationImage ? ` · ${item.restoreApplicationImage}` : ""}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </ChoiceRow>
+              )
+            })}
+          </ChoiceList>
+        )}
+      </SettingSection>
       {dialog}
-    </div>
+    </>
   )
 }
 
 /**
- * The four figures at the top, from what the page already holds.
+ * A linked database's card and what has to be said under it. A `ChoiceRow`
+ * renders its own list item, so the notices that belong to one database go
+ * in an item of their own directly after it.
+ */
+function DatabaseRowGroup({ children }: { children: React.ReactNode }) {
+  const [row, ...rest] = Array.isArray(children) ? children : [children]
+  const after = rest.filter(Boolean)
+  return (
+    <>
+      {row}
+      {after.length > 0 && <li className="min-w-0 space-y-2">{after}</li>}
+    </>
+  )
+}
+
+/**
+ * The four figures at the top, from the saved configuration and what the
+ * page has read of the links and the jobs.
  *
  * Coverage is the one worth the space: the gate refuses a release whose job
  * takes no dump of a linked database, and until this reading existed that
- * refusal arrived during the deployment it stopped.
+ * refusal arrived during the deployment it stopped. A figure that needs a
+ * read says "—" until that read lands — and goes on saying it for a reader
+ * the read is refused to — rather than stating the answer an empty list would
+ * give; each changes its key as its read lands, so it rises into place.
  */
-function summarise(
-  databases: Dependency[],
-  links: DeploymentDatabaseLink[] | undefined,
-  backupDeps: Dependency[],
-  jobs: BackupJob[] | undefined,
-) {
+function DatabaseReadings({
+  configuration,
+  links,
+  jobs,
+}: {
+  configuration: DeploymentEnvironmentConfiguration
+  links?: DeploymentDatabaseLink[]
+  jobs?: BackupJob[]
+}) {
+  const databases = configuration.dependencies.filter((d) => d.kind === "database")
+  const backupDeps = configuration.dependencies.filter((d) => d.kind === "backup")
   const linked = databases.length
   const observed = databases
     .map((dependency) => links?.find((link) => String(link.connectionId) === dependency.resourceId))
     .filter((link): link is DeploymentDatabaseLink => Boolean(link))
-  const engines = [...new Set(observed.map((link) => link.driver))].join(", ")
-  const failing = observed.filter((link) => link.status === "unavailable").length
-  const stale = observed.filter((link) => link.status === "stale").length
+  const engines = [...new Set(observed.map((link) => link.driver))]
+  const failing = observed.filter((link) => link.status === "unavailable")
+  const stale = observed.filter((link) => link.status === "stale")
+  const connected = observed.filter((link) => link.status === "connected").length
+  const network = observed[0]?.network
 
   const declared = backupDeps
     .map((dependency) => jobs?.find((job) => String(job.id) === dependency.resourceId))
     .filter((job): job is BackupJob => Boolean(job))
   const required = backupDeps.some(
     (dependency) => (dependency.config as BackupDependencyConfig)?.requiredBeforeDeploy,
+  )
+  const dumpedLinks = observed.filter((link) =>
+    declared.some((job) => (job.databaseDumps ?? []).includes(link.connectionId)),
   )
   const dumped = databases.filter((dependency) =>
     declared.some((job) => (job.databaseDumps ?? []).includes(Number(dependency.resourceId))),
@@ -1043,90 +1058,557 @@ function summarise(
     .sort()
     .at(-1)
 
-  return {
-    linked,
-    engines,
-    connection:
-      linked === 0
-        ? { value: "—", tone: "default" as const }
-        : failing > 0
+  const connection: { value: string; tone: Tone; hint?: string } =
+    linked === 0
+      ? { value: "None yet", tone: "default" }
+      : !links
+        ? { value: "—", tone: "default" }
+        : failing.length > 0
           ? {
-              value: `${failing} need${failing === 1 ? "s" : ""} attention`,
-              tone: "danger" as const,
+              value: `${failing.length} need${failing.length === 1 ? "s" : ""} attention`,
+              tone: "danger",
+              hint: `${failing[0].name} is not reachable`,
             }
-          : stale > 0
-            ? { value: "Not observed recently", tone: "warning" as const }
-            : observed.length === linked
-              ? { value: "All connected", tone: "success" as const }
-              : { value: "Awaiting deployment", tone: "default" as const },
-    policy:
-      backupDeps.length === 0
-        ? {
-            value: "None",
-            tone: (linked > 0 ? "warning" : "default") as "warning" | "default",
-            hint: linked > 0 ? "A linked database with no backup policy" : undefined,
-          }
-        : {
-            value: required ? "Required" : "Declared",
-            tone: "default" as const,
-            hint: newestSuccess ? `Last success ${relativeTime(newestSuccess)}` : "Never succeeded",
-          },
-    dumps:
-      linked === 0
-        ? { value: "—", tone: "default" as const, hint: undefined }
-        : {
-            value: `${dumped} of ${linked}`,
-            tone: (dumped === linked ? "success" : "warning") as "success" | "warning",
-            hint:
-              dumped === linked ? "Every linked database" : "A database falls back to its files",
-          },
-  }
+          : stale.length > 0
+            ? {
+                value: `${stale.length} stale`,
+                tone: "warning",
+                hint: `${stale[0].name} not observed recently`,
+              }
+            : connected === linked
+              ? { value: "All connected", tone: "success", hint: network && `On ${network}` }
+              : { value: "Waiting", tone: "default", hint: "Until the first deployment" }
+  const dumps: { value: string; tone: Tone; hint?: string } =
+    linked === 0
+      ? { value: "None yet", tone: "default" }
+      : !jobs
+        ? { value: "—", tone: "default" }
+        : dumped === linked
+          ? { value: `${dumped} of ${linked}`, tone: "success", hint: "Every linked database" }
+          : {
+              value: `${dumped} of ${linked}`,
+              tone: "warning",
+              hint: "A database falls back to its files",
+            }
+  const arrived = (value: string, loaded: unknown) => (
+    <span key={loaded ? `value-${value}` : "loading"} className="animate-rise">
+      {value}
+    </span>
+  )
+
+  return (
+    <StatGrid columns={4} dense>
+      <StatTile
+        label="Linked databases"
+        value={linked}
+        trailing={<ProductGlyphs ids={engines} />}
+        hint={linked === 0 ? "Start one or connect a saved one" : network && `On ${network}`}
+      />
+      <StatTile
+        label="Connection"
+        value={arrived(connection.value, links || linked === 0)}
+        tone={connection.tone}
+        hint={connection.hint}
+      />
+      <StatTile
+        label="Backup policy"
+        value={backupDeps.length === 0 ? "None" : required ? "Required" : "Declared"}
+        tone={backupDeps.length === 0 && linked > 0 ? "warning" : "default"}
+        hint={
+          backupDeps.length === 0
+            ? linked > 0
+              ? "A linked database with no backup policy"
+              : undefined
+            : !jobs
+              ? undefined
+              : newestSuccess
+                ? `Last success ${relativeTime(newestSuccess)}`
+                : "Never succeeded"
+        }
+      />
+      <StatTile
+        label="Native dumps"
+        value={arrived(dumps.value, jobs || linked === 0)}
+        tone={dumps.tone}
+        trailing={<ProductGlyphs ids={[...new Set(dumpedLinks.map((link) => link.driver))]} />}
+        hint={dumps.hint}
+      />
+    </StatGrid>
+  )
 }
 
-function ResourceSelect<T>({
-  id,
-  label,
-  path,
-  given,
-  value,
-  onChange,
-  disabled,
-  toId,
-  toLabel,
+/**
+ * How the application reaches its databases: each database on the left as
+ * its engine, the managed network in the middle, the application on the
+ * right — framed, because a picture needs an edge to read as one thing (§2).
+ * The line is the link's state: a pulse while it is connected, still when it
+ * has not been seen lately, red and still when it needs reconnecting, dashed
+ * before the first deployment binds it.
+ */
+function DatabasePicture({
+  links,
+  deployment,
 }: {
-  id: string
-  label: string
-  path: string
-  /** Already held by the caller, so the page reads the list once. */
-  given?: T[]
-  value: string
-  onChange: (id: string) => void
-  disabled?: boolean
-  toId: (item: T) => string
-  toLabel: (item: T) => string
+  links: DeploymentDatabaseLink[]
+  deployment: ReturnType<typeof useProject>["detail"]["deployment"]
 }) {
-  const resources = usePoll((signal) => get<T[]>(path, undefined, signal), 0, [path], {
-    enabled: given === undefined,
-  })
-  const items = given ?? resources.data ?? []
-  const loading = given === undefined && resources.loading
+  const container = useRef<HTMLDivElement>(null)
+  const network = useRef<HTMLDivElement>(null)
+  const application = useRef<HTMLDivElement>(null)
+  // One ref per database mark, made again only when the set of databases
+  // changes, so each line keeps measuring the mark it was drawn to.
+  const ids = links.map((link) => link.connectionId).join(",")
+  const marks = useMemo(() => ids.split(",").map(() => createRef<HTMLDivElement>()), [ids])
+  const anyConnected = links.some((link) => link.status === "connected")
+  const networks = [...new Set(links.map((link) => link.network))]
   return (
-    <Field label={label} htmlFor={id}>
-      <Select value={value} onValueChange={onChange} disabled={disabled || loading}>
-        <SelectTrigger id={id} className="w-full">
-          <SelectValue placeholder={loading ? "Loading…" : "Choose a resource"} />
-        </SelectTrigger>
-        <SelectContent>
-          {value && !items.some((item) => toId(item) === value) && (
-            <SelectItem value={value}>{value}</SelectItem>
-          )}
-          {items.map((item) => (
-            <SelectItem key={toId(item)} value={toId(item)}>
-              {toLabel(item)}
-            </SelectItem>
+    <SettingPicture
+      label="How the application reaches its databases"
+      containerRef={container}
+      lines={
+        <>
+          {links.map((link, index) => (
+            <AnimatedBeam
+              key={link.connectionId}
+              containerRef={container}
+              fromRef={marks[index]}
+              toRef={network}
+              reverse
+              still={link.status !== "connected"}
+              dashed={link.status === "pending"}
+              tone={link.status === "unavailable" ? "danger" : "default"}
+              duration={2.8}
+              delay={index * 0.4}
+            />
           ))}
-        </SelectContent>
-      </Select>
-    </Field>
+          <AnimatedBeam
+            containerRef={container}
+            fromRef={network}
+            toRef={application}
+            reverse
+            still={!anyConnected}
+            duration={2.8}
+            delay={0.6}
+          />
+        </>
+      }
+      start={links.map((link, index) => (
+        <WireNode
+          key={link.connectionId}
+          nodeRef={marks[index]}
+          align="end"
+          mark={
+            <WireMark tone="logo" size="md">
+              <ProductGlyph id={link.driver} />
+            </WireMark>
+          }
+          eyebrow={DATABASE_ENGINE_LABELS[link.driver] ?? link.driver}
+          title={link.name}
+          hint={`database ${link.database}`}
+        />
+      ))}
+      middle={
+        <WireNode
+          nodeRef={network}
+          align="center"
+          mark={
+            <WireMark size="md">
+              <Connection />
+            </WireMark>
+          }
+          eyebrow="Managed network"
+          title={<span className="font-mono">{networks.join(", ")}</span>}
+        />
+      }
+      end={
+        <WireNode
+          nodeRef={application}
+          align="start"
+          mark={
+            // The WireMarks' own box, so the four words start on one edge.
+            <span className="flex size-11 items-center justify-center">
+              <ProjectMark deployment={deployment} size="md" />
+            </span>
+          }
+          eyebrow="Application"
+          title={deployment.name}
+        />
+      }
+    />
+  )
+}
+
+/**
+ * One backup job a release gates on. A chosen job is the Backups page's own
+ * card — its products, its last run in colour, where it writes, its last
+ * fourteen runs — with what the live release observed of it added to its
+ * second line. A new row, a job being changed, or one that no longer exists
+ * is the picker instead, never a bare id.
+ */
+function BackupPolicy({
+  index,
+  dependency,
+  job,
+  jobs,
+  observed,
+  databases,
+  driverOf,
+  linkFor,
+  canAdmin,
+  canRun,
+  busy,
+  changing,
+  error,
+  onChange,
+  onChangeJob,
+  onRemove,
+  onRun,
+  onAddDump,
+}: {
+  index: number
+  dependency: Dependency
+  job?: BackupJob
+  jobs?: BackupJob[]
+  observed?: DeploymentBackupJob
+  databases: Dependency[]
+  driverOf: (connectionId: number) => string | undefined
+  linkFor: (resourceId?: string) => DeploymentDatabaseLink | undefined
+  canAdmin: boolean
+  canRun: boolean
+  busy?: string
+  changing: boolean
+  error?: string
+  onChange: (next: Dependency) => void
+  onChangeJob: () => void
+  onRemove: () => void
+  onRun: (job: BackupJob) => void
+  onAddDump: (job: BackupJob, connectionId: number) => void
+}) {
+  const config = (dependency.config ?? {}) as BackupDependencyConfig
+  const missing = Boolean(dependency.resourceId) && Boolean(jobs) && !job
+  const uncovered = job
+    ? databases.filter(
+        (database) =>
+          database.resourceId && !(job.databaseDumps ?? []).includes(Number(database.resourceId)),
+      )
+    : []
+  const products = job
+    ? [
+        ...new Set(
+          (job.databaseDumps ?? [])
+            .map(driverOf)
+            .filter((driver): driver is string => Boolean(driver)),
+        ),
+      ]
+    : []
+  const observation = observed && (
+    <Status
+      tone={
+        observed.status === "present"
+          ? "running"
+          : observed.status === "missing"
+            ? "danger"
+            : "unknown"
+      }
+      label={
+        observed.status === "present"
+          ? `Observed${observed.lastStatus ? ` · last run ${observed.lastStatus}` : ""}`
+          : observed.status === "missing"
+            ? "Missing from the live release"
+            : "Not observed"
+      }
+    />
+  )
+  const verbs: Verb[] = []
+  if (job && canRun)
+    verbs.push({
+      key: "run",
+      label: "Run now",
+      detail: "Takes a backup with this job now; progress appears in Backups.",
+      icon: Play,
+      inline: true,
+      progressive: "Starting…",
+      disabled: busy === `run-${job.id}`,
+      run: () => onRun(job),
+    })
+  if (canAdmin)
+    verbs.push(
+      {
+        key: "change",
+        label: "Change job",
+        detail: "Gate this release on a different backup job.",
+        icon: Pencil,
+        run: onChangeJob,
+      },
+      {
+        key: "remove",
+        label: "Remove from the policy",
+        detail: "The release stops waiting for this job once saved.",
+        icon: Trash,
+        danger: true,
+        run: onRemove,
+      },
+    )
+
+  return (
+    <div className="min-w-0 space-y-4 py-5 first:pt-0 last:pb-0">
+      {job && !changing ? (
+        <ChoiceList>
+          <JobCard
+            job={job}
+            products={products}
+            verbs={verbs}
+            verb={`Open the backup job ${job.name}`}
+            note={observation}
+            working={job.lastRun?.status === "running" || busy === `run-${job.id}`}
+          />
+        </ChoiceList>
+      ) : (
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-end gap-3">
+          <Field label="Backup job" htmlFor={`backup-job-${index}`}>
+            <Select
+              value={dependency.resourceId ?? ""}
+              onValueChange={(resourceId) => onChange({ ...dependency, resourceId })}
+              disabled={!canAdmin || !jobs}
+            >
+              <SelectTrigger id={`backup-job-${index}`} className="w-full">
+                <SelectValue placeholder={jobs ? "Choose a backup job" : "Loading…"} />
+              </SelectTrigger>
+              <SelectContent>
+                {missing && (
+                  <SelectItem value={dependency.resourceId!}>
+                    Job #{dependency.resourceId} — not found
+                  </SelectItem>
+                )}
+                {jobs?.map((item) => (
+                  <SelectItem
+                    key={item.id}
+                    value={String(item.id)}
+                    hint={<span aria-hidden>{scheduleLabel(item.schedule)}</span>}
+                  >
+                    {destinationProduct(item) ? (
+                      <ProductGlyph id={destinationProduct(item)!} />
+                    ) : (
+                      <Archive />
+                    )}
+                    {item.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          {canAdmin && (
+            <IconAction
+              label="Remove backup dependency"
+              className="size-9 text-muted-foreground hover:text-destructive"
+              onClick={onRemove}
+            >
+              <Trash />
+            </IconAction>
+          )}
+          {missing && (
+            <Status
+              tone="danger"
+              label="The job this release gates on no longer exists"
+              className="col-span-full"
+            />
+          )}
+        </div>
+      )}
+
+      {job &&
+        uncovered.map((database) => {
+          const link = linkFor(database.resourceId)
+          const name = link?.name ?? `database ${database.resourceId}`
+          return (
+            <Notice
+              key={`uncovered-${database.resourceId}`}
+              tone="warning"
+              icon={Warning}
+              title={`${job.name} takes no native dump of ${name}`}
+            >
+              <p>
+                The release falls back to this database&rsquo;s data directory and refuses if the
+                job does not cover it. A dump is a transaction boundary the engine chose; a copy of
+                its files while it runs is not.
+              </p>
+              {canAdmin && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="mt-2"
+                  pending={busy === `dump-${job.id}-${database.resourceId}`}
+                  onClick={() => onAddDump(job, Number(database.resourceId))}
+                >
+                  <Database className="size-3.5" /> Add the dump to {job.name}
+                </Button>
+              )}
+            </Notice>
+          )
+        })}
+
+      <OptionList>
+        <OptionRow
+          title="Backup before deploy — the release waits for this job to finish"
+          checked={Boolean(config.requiredBeforeDeploy)}
+          disabled={!canAdmin}
+          onCheckedChange={(requiredBeforeDeploy) =>
+            onChange({ ...dependency, config: { ...config, requiredBeforeDeploy } })
+          }
+        />
+        <OptionRow
+          title="Require restore evidence — refuse a release until a restore is verified"
+          checked={Boolean(config.requireRestoreTest)}
+          disabled={!canAdmin}
+          onCheckedChange={(requireRestoreTest) =>
+            onChange({ ...dependency, config: { ...config, requireRestoreTest } })
+          }
+        />
+      </OptionList>
+      <Field
+        label="Maximum age"
+        htmlFor={`backup-age-${index}`}
+        hint={
+          config.maxAgeSeconds
+            ? `Refuses the release when the newest backup is older than ${plural(Math.round(config.maxAgeSeconds / 3600), "hour")}.`
+            : "Zero accepts a backup of any age."
+        }
+      >
+        <InputGroup className="w-full sm:w-44">
+          <InputGroupInput
+            id={`backup-age-${index}`}
+            type="number"
+            min={0}
+            readOnly={!canAdmin}
+            value={Math.round((config.maxAgeSeconds ?? 0) / 3600)}
+            onChange={(event) =>
+              onChange({
+                ...dependency,
+                config: {
+                  ...config,
+                  maxAgeSeconds: Math.max(0, Number(event.target.value) || 0) * 3600,
+                },
+              })
+            }
+            className="numeric"
+          />
+          <InputGroupAddon align="inline-end">
+            <InputGroupText>hours</InputGroupText>
+          </InputGroupAddon>
+        </InputGroup>
+      </Field>
+      {error && (
+        <p role="alert" className="text-hint text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * One volume the release needs before it starts: the volume, drawn on the
+ * volumes tab's tile, chosen from Docker's own list with its size and whether
+ * anything uses it; and on the line under it, who owns it and what the live
+ * release found — the same two lines a mount on Storage is.
+ */
+function VolumeRow({
+  index,
+  dependency,
+  volumes,
+  observed,
+  product,
+  canAdmin,
+  error,
+  onChange,
+  onRemove,
+}: {
+  index: number
+  dependency: Dependency
+  volumes: Poll<DockerVolume[]>
+  observed?: DeploymentStorageMount
+  /** The product of the container that keeps its data in the volume. */
+  product?: string
+  canAdmin: boolean
+  error?: string
+  onChange: (next: Dependency) => void
+  onRemove: () => void
+}) {
+  const items = volumes.data ?? []
+  const value = dependency.resourceId ?? ""
+  const volume = items.find((item) => item.name === value)
+  const status = observed ? MOUNT_STATUS[observed.status] : undefined
+  return (
+    <li className="grid min-w-0 grid-cols-[2rem_minmax(0,1fr)_auto] items-end gap-x-3 gap-y-3 py-4 first:pt-0">
+      <MountMark source={value} product={product} className="mb-0.5" />
+      <Field label="Volume" htmlFor={`volume-${index}`}>
+        <Select
+          value={value}
+          onValueChange={(resourceId) => onChange({ ...dependency, resourceId })}
+          disabled={!canAdmin || volumes.loading}
+        >
+          <SelectTrigger id={`volume-${index}`} className="w-full">
+            <SelectValue placeholder={volumes.loading ? "Loading…" : "Choose a volume"} />
+          </SelectTrigger>
+          <SelectContent>
+            {value && !volume && <SelectItem value={value}>{value}</SelectItem>}
+            {items.map((item) => (
+              <SelectItem
+                key={item.name}
+                value={item.name}
+                hint={
+                  <span aria-hidden>
+                    {item.size > 0 ? `${bytes(item.size)} · ` : ""}
+                    {item.inUse ? "in use" : "unused"}
+                  </span>
+                }
+              >
+                {item.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      <span className="flex gap-0.5">
+        {value && (
+          <IconAction label="Open the volume" asChild>
+            <Link href={`/docker/volumes?volume=${encodeURIComponent(value)}`}>
+              <ArrowUpRight />
+            </Link>
+          </IconAction>
+        )}
+        {canAdmin && (
+          <IconAction
+            label="Remove volume dependency"
+            className="text-muted-foreground hover:text-destructive"
+            onClick={onRemove}
+          >
+            <Trash />
+          </IconAction>
+        )}
+      </span>
+      <div className="col-[2/-1] flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
+        <OwnershipSelect
+          value={dependency.ownership}
+          onChange={(ownership) => onChange({ ...dependency, ownership })}
+          label={value ? `Ownership of ${value}` : "Ownership"}
+          disabled={!canAdmin}
+        />
+        {status && <Status tone={status.tone} label={status.label} />}
+        {observed?.target && <Tag mono>{observed.target}</Tag>}
+        {volume && volume.size > 0 && (
+          <span className="numeric text-hint text-muted-foreground">{bytes(volume.size)}</span>
+        )}
+        {observed?.detail && (
+          <span className="text-hint text-muted-foreground">{observed.detail}</span>
+        )}
+      </div>
+      {error && (
+        <p role="alert" className="col-span-full pl-11 text-hint text-destructive">
+          {error}
+        </p>
+      )}
+    </li>
   )
 }

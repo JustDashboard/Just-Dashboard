@@ -1,19 +1,18 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useReducedMotion } from "motion/react"
 import { Copy, Download } from "@/components/icons"
 import { Pane, PaneFooter, PaneHeader } from "@/components/panel"
 import { SearchInput } from "@/components/page"
 import { ChipCount, FilterChip } from "@/components/tabs"
 import { IconAction } from "@/components/icon-action"
 import { Status } from "@/components/status-dot"
+import { TranscriptRow, useTranscriptDrip } from "@/components/transcript-line"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { getText } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { downloadText } from "@/lib/metrics-export"
-import { LANES, hueFor } from "@/lib/hue"
-import { extendTranscript, isTrimmed, transcriptLines, type TranscriptLine } from "@/lib/transcript"
+import { extendTranscript, isTrimmed, transcriptLines } from "@/lib/transcript"
 import { cn } from "@/lib/utils"
 
 /**
@@ -58,7 +57,6 @@ export function RunTranscript({
   /** Its height: a console sizes itself to the space it is given. */
   className?: string
 }) {
-  const reduced = useReducedMotion()
   const [whole, setWhole] = useState<string>()
   const [query, setQuery] = useState("")
   const [errorsOnly, setErrorsOnly] = useState(false)
@@ -86,42 +84,11 @@ export function RunTranscript({
   const display = whole !== undefined && merged.overlapped ? merged.text : text
   const lines = useMemo(() => transcriptLines(display), [display])
 
-  // The drip. `held` is how many lines at the end are not drawn yet; it grows
-  // only when the transcript grew by appending, so the switch from the tail to
-  // the whole file — which renumbers everything — is drawn at once.
-  const drips = live && follow && !query && !errorsOnly && !reduced
-  const [previous, setPrevious] = useState({ display, count: lines.length, generation: 0 })
-  const [held, setHeld] = useState(0)
-  const [arrivedFrom, setArrivedFrom] = useState(lines.length)
-  if (display !== previous.display) {
-    const appended = display.startsWith(previous.display)
-    setPrevious({
-      display,
-      count: lines.length,
-      generation: appended ? previous.generation : previous.generation + 1,
-    })
-    if (appended && drips) {
-      // Four hundred is a screenful and then some; a burst past that is drawn
-      // outright rather than queued for longer than the next poll.
-      setHeld(Math.min(held + lines.length - previous.count, 400))
-    } else {
-      setHeld(0)
-      if (!appended) setArrivedFrom(lines.length)
-    }
-  }
-  // Whatever was held is drawn the moment the reader stops following, and
-  // must not be held again when they come back to the end.
-  if (!drips && held !== 0) setHeld(0)
-  const pending = drips ? held : 0
-  useEffect(() => {
-    if (pending === 0) return
-    const frame = requestAnimationFrame(() =>
-      setHeld((h) => Math.max(0, h - Math.max(1, Math.ceil(h / 24)))),
-    )
-    return () => cancelAnimationFrame(frame)
-  }, [pending])
-
-  const drawn = pending > 0 ? lines.slice(0, lines.length - pending) : lines
+  const { drawn, generation, arrivedFrom } = useTranscriptDrip(
+    display,
+    lines,
+    live && follow && !query && !errorsOnly,
+  )
   const needle = query.trim().toLowerCase()
   const visible = useMemo(
     () =>
@@ -226,8 +193,8 @@ export function RunTranscript({
             className={cn("py-3 font-mono text-xs leading-6", !wrap && "min-w-max")}
           >
             {visible.map((line) => (
-              <Line
-                key={`${previous.generation}:${line.number}`}
+              <TranscriptRow
+                key={`${generation}:${line.number}`}
                 line={line}
                 wrap={wrap}
                 needle={needle}
@@ -269,194 +236,4 @@ export function RunTranscript({
       </PaneFooter>
     </Pane>
   )
-}
-
-/**
- * The hue a service's steps are drawn in, picked by name so `frontend` is one
- * colour down the whole braid — and never red or amber, which on this console
- * mean a line that failed or warned.
- */
-function laneFor(service: string | undefined) {
-  return service ? hueFor(service, LANES) : undefined
-}
-
-const SETTLED = /^(Built|Created|Recreated|Started|Healthy|Running|Pulled|Removed|Stopped)$/
-
-function Line({
-  line,
-  wrap,
-  needle,
-  arrived,
-  loading,
-}: {
-  line: TranscriptLine
-  wrap: boolean
-  needle: string
-  arrived: boolean
-  loading: boolean
-}) {
-  if (line.kind === "blank") return <li aria-hidden className="h-3" />
-  const lane = laneFor(line.service)
-  const text = (value: string) => <Hit text={value} needle={needle} />
-  const flow = wrap ? "break-all whitespace-pre-wrap" : "whitespace-pre"
-
-  let content: React.ReactNode
-  switch (line.kind) {
-    case "trimmed":
-      content = (
-        <span className="text-muted-foreground italic">
-          {loading ? "Reading the start of the transcript…" : "Earlier output was not kept."}
-        </span>
-      )
-      break
-    case "command":
-      content = (
-        <span className={cn("font-medium text-foreground", flow)}>
-          <span className="text-brand select-none">$ </span>
-          {text(line.text.slice(2))}
-        </span>
-      )
-      break
-    case "note":
-      // The runner's own voice, in the product's face rather than the
-      // commands' monospace: it is the dashboard telling the story, and the
-      // eye finds the chapter headings of a thousand-line run by it.
-      content = (
-        <span className={cn("font-sans text-body font-medium text-foreground", flow)}>
-          {text(line.text)}
-        </span>
-      )
-      break
-    case "step": {
-      const rest = line.text.slice(line.text.indexOf("]") + 2)
-      content = (
-        <span className={flow}>
-          <StepNo step={line.step} />
-          <span className="font-medium" style={lane ? { color: lane } : undefined}>
-            [{line.target}]
-          </span>{" "}
-          <span className="font-medium text-foreground">{text(rest)}</span>
-        </span>
-      )
-      break
-    }
-    case "done":
-      content = (
-        <span>
-          <StepNo step={line.step} />
-          <span className="text-success">DONE</span>{" "}
-          <span className="numeric text-muted-foreground">{line.time}</span>
-        </span>
-      )
-      break
-    case "cached":
-      content = (
-        <span className="text-muted-foreground">
-          <StepNo step={line.step} />
-          CACHED
-        </span>
-      )
-      break
-    case "resource": {
-      const [, name] = line.text.trim().split(/\s+/)
-      content = (
-        <span className={flow}>
-          <span className="text-muted-foreground">{line.resource} </span>
-          <span style={lane ? { color: lane } : undefined}>{text(name ?? "")}</span>{" "}
-          <span
-            className={cn(
-              "font-medium",
-              SETTLED.test(line.state ?? "") ? "text-success" : "text-muted-foreground",
-            )}
-          >
-            {line.state}
-          </span>
-        </span>
-      )
-      break
-    }
-    default: {
-      const stepped = line.step !== undefined && line.text.startsWith(`#${line.step} `)
-      let rest = stepped ? line.text.slice(line.step!.length + 2) : line.text
-      if (line.time && rest.startsWith(`${line.time} `)) rest = rest.slice(line.time.length + 1)
-      content = (
-        <span className={flow}>
-          {stepped && <StepNo step={line.step} />}
-          {line.time && line.kind !== "progress" && (
-            <span className="numeric mr-2 text-muted-foreground/70 select-none">{line.time}</span>
-          )}
-          <span
-            className={cn(
-              line.kind === "error" && "text-destructive",
-              line.kind === "warning" && "text-warning",
-              line.kind === "progress" && "text-muted-foreground",
-              line.kind === "output" && "text-foreground/85",
-            )}
-          >
-            {text(rest)}
-          </span>
-        </span>
-      )
-    }
-  }
-
-  return (
-    <li
-      // Long runs are a few thousand rows; the ones off screen are not laid out.
-      style={{ contentVisibility: "auto", containIntrinsicSize: "auto 24px" }}
-      className={cn(
-        "relative flex min-w-0 gap-3 px-3 hover:bg-row-hover sm:px-4",
-        line.kind === "error" && "bg-wash-danger hover:bg-wash-danger",
-        line.kind === "warning" && "bg-wash-warning hover:bg-wash-warning",
-        line.kind === "command" && "mt-1 border-t border-hairline pt-1",
-        line.kind === "note" && "py-0.5",
-        arrived && "animate-rise",
-      )}
-    >
-      {lane && (line.kind === "step" || line.kind === "resource") && (
-        // The lane, drawn once at the step's head: which image this braid of
-        // lines is building is read off the edge before the words.
-        <span
-          aria-hidden
-          className="absolute inset-y-1 left-0 w-0.5 rounded-sm"
-          style={{ background: lane }}
-        />
-      )}
-      <span
-        aria-hidden
-        className="numeric w-9 shrink-0 text-right text-muted-foreground/60 select-none"
-      >
-        {line.number}
-      </span>
-      <span className="min-w-0 flex-1">{content}</span>
-    </li>
-  )
-}
-
-function StepNo({ step }: { step?: string }) {
-  if (!step) return null
-  return (
-    <span className="numeric mr-2 inline-block min-w-7 text-muted-foreground/70 select-none">
-      #{step}
-    </span>
-  )
-}
-
-/** A search hit, marked the way the log console marks one. */
-function Hit({ text, needle }: { text: string; needle: string }) {
-  if (!needle) return text
-  const parts: React.ReactNode[] = []
-  const lower = text.toLowerCase()
-  let from = 0
-  for (let at = lower.indexOf(needle); at >= 0; at = lower.indexOf(needle, from)) {
-    if (at > from) parts.push(text.slice(from, at))
-    parts.push(
-      <mark key={at} className="rounded-sm bg-mark px-px text-foreground">
-        {text.slice(at, at + needle.length)}
-      </mark>,
-    )
-    from = at + needle.length
-  }
-  parts.push(text.slice(from))
-  return parts
 }

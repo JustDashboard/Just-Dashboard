@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,6 +52,23 @@ type DotenvImportRequest struct {
 	Dotenv      string   `json:"dotenv"`
 	Sensitivity string   `json:"sensitivity"`
 	Scopes      []string `json:"scopes"`
+}
+
+// DotenvImportVerdict is what importing the same request would do to one name:
+// added, changed, unchanged or refused. Reason names a refusal (invalid_name,
+// duplicate or invalid_value) because one refused name refuses the whole
+// import, and the page has to point at the line to fix.
+type DotenvImportVerdict struct {
+	Name   string `json:"name"`
+	Line   int    `json:"line"`
+	Change string `json:"change"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// DotenvImportPreview answers POST …/variables/import?dryRun=1, one verdict
+// per name in the order the names were written.
+type DotenvImportPreview struct {
+	Variables []DotenvImportVerdict `json:"variables"`
 }
 
 type VariableMutationResult struct {
@@ -130,12 +148,56 @@ type storedVariableValue struct {
 // duplicates and trailing material after a quoted value. It deliberately does
 // not expand shell variables or escapes in unquoted values.
 func ParseDotenv(input string) (map[string]string, error) {
+	entries, err := parseDotenvEntries(input)
+	if err = firstDotenvError(entries, err); err != nil {
+		return nil, err
+	}
+	result := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		result[entry.name] = entry.value
+	}
+	return result, nil
+}
+
+// dotenvEntry is one NAME=value assignment where it was written. refused is
+// the entry's own fault — a name no variable may have, a name given twice, a
+// value no variable may hold — which a preview reports beside every other
+// name. A line the parser cannot read past is the whole input's fault
+// instead, and parseDotenvEntries returns it as its error.
+type dotenvEntry struct {
+	name, value string
+	line        int
+	refused     string
+	err         error
+}
+
+// The reasons an entry is refused, as an import preview names them.
+const (
+	dotenvRefusedName      = "invalid_name"
+	dotenvRefusedDuplicate = "duplicate"
+	dotenvRefusedValue     = "invalid_value"
+)
+
+// firstDotenvError is the error a strict read stops at. Every entry read lies
+// before the point a structural error stopped the parser, so the earliest
+// refused entry, when there is one, comes first.
+func firstDotenvError(entries []dotenvEntry, structural error) error {
+	for _, entry := range entries {
+		if entry.err != nil {
+			return entry.err
+		}
+	}
+	return structural
+}
+
+func parseDotenvEntries(input string) ([]dotenvEntry, error) {
 	if len(input) > maxDotenvBytes {
 		return nil, fmt.Errorf("%w: dotenv input exceeds 256 KiB", ErrInvalidVariable)
 	}
 	input = strings.ReplaceAll(input, "\r\n", "\n")
 	input = strings.ReplaceAll(input, "\r", "\n")
-	result := map[string]string{}
+	entries := []dotenvEntry{}
+	seen := map[string]bool{}
 	for offset, line := 0, 1; offset < len(input); line++ {
 		entryLine := line
 		for offset < len(input) && (input[offset] == ' ' || input[offset] == '\t') {
@@ -165,15 +227,17 @@ func ParseDotenv(input string) (map[string]string, error) {
 			offset++
 		}
 		if offset >= len(input) || input[offset] != '=' {
-			return nil, fmt.Errorf("%w: line %d needs NAME=value", ErrInvalidVariable, line)
+			return entries, fmt.Errorf("%w: line %d needs NAME=value", ErrInvalidVariable, line)
 		}
 		key := strings.TrimSpace(input[keyStart:offset])
-		if ValidateEnvKey(key) != nil {
-			return nil, fmt.Errorf("%w: line %d has invalid name %q", ErrInvalidVariable, line, key)
+		entry := dotenvEntry{name: key, line: line}
+		switch {
+		case ValidateEnvKey(key) != nil:
+			entry.refused, entry.err = dotenvRefusedName, fmt.Errorf("%w: line %d has invalid name %q", ErrInvalidVariable, line, key)
+		case seen[key]:
+			entry.refused, entry.err = dotenvRefusedDuplicate, fmt.Errorf("%w: duplicate name %q", ErrInvalidVariable, key)
 		}
-		if _, duplicate := result[key]; duplicate {
-			return nil, fmt.Errorf("%w: duplicate name %q", ErrInvalidVariable, key)
-		}
+		seen[key] = true
 		offset++
 		for offset < len(input) && (input[offset] == ' ' || input[offset] == '\t') {
 			offset++
@@ -215,14 +279,14 @@ func ParseDotenv(input string) (map[string]string, error) {
 				out.WriteByte(ch)
 			}
 			if !closed {
-				return nil, fmt.Errorf("%w: quoted value starting on line %d is not closed", ErrInvalidVariable, entryLine)
+				return append(entries, entry), fmt.Errorf("%w: quoted value starting on line %d is not closed", ErrInvalidVariable, entryLine)
 			}
 			value = out.String()
 			for offset < len(input) && (input[offset] == ' ' || input[offset] == '\t') {
 				offset++
 			}
 			if offset < len(input) && input[offset] != '\n' && input[offset] != '#' {
-				return nil, fmt.Errorf("%w: line %d has text after its quoted value", ErrInvalidVariable, line)
+				return append(entries, entry), fmt.Errorf("%w: line %d has text after its quoted value", ErrInvalidVariable, line)
 			}
 			if offset < len(input) && input[offset] == '#' {
 				for offset < len(input) && input[offset] != '\n' {
@@ -236,18 +300,19 @@ func ParseDotenv(input string) (map[string]string, error) {
 			}
 			value = strings.TrimSpace(input[valueStart:offset])
 		}
-		if len(value) > maxDeploymentVariableValue || strings.ContainsRune(value, '\x00') {
-			return nil, fmt.Errorf("%w: value for %s is invalid or exceeds 64 KiB", ErrInvalidVariable, key)
+		if entry.err == nil && (len(value) > maxDeploymentVariableValue || strings.ContainsRune(value, '\x00')) {
+			entry.refused, entry.err = dotenvRefusedValue, fmt.Errorf("%w: value for %s is invalid or exceeds 64 KiB", ErrInvalidVariable, key)
 		}
-		result[key] = value
+		entry.value = value
+		entries = append(entries, entry)
 		if offset < len(input) && input[offset] == '\n' {
 			offset++
 		}
-		if len(result) > 256 {
-			return nil, fmt.Errorf("%w: dotenv input exceeds 256 variables", ErrInvalidVariable)
+		if len(entries) > 256 {
+			return entries, fmt.Errorf("%w: dotenv input exceeds 256 variables", ErrInvalidVariable)
 		}
 	}
-	return result, nil
+	return entries, nil
 }
 
 func validateVariableWrite(request VariableWriteRequest) (string, error) {
@@ -453,6 +518,77 @@ func (s *PlanningStore) ImportDotenv(
 		return nil, err
 	}
 	return &VariableMutationResult{Variables: variables, DesiredRevision: desired}, nil
+}
+
+// PreviewDotenvImport answers what ImportDotenv would do with the same request
+// and writes nothing. Values meet the stored ones only as digests, here on the
+// server, so the answer carries neither a value nor a digest of one. What the
+// import would refuse as a whole — a line the parser cannot read past, a bad
+// sensitivity or scope, a reference that would not resolve — is refused here
+// with the same error; a refusal that belongs to one name is that name's
+// verdict instead, so every other line can still be read.
+func (s *PlanningStore) PreviewDotenvImport(
+	ctx context.Context,
+	projectID, environmentID int64,
+	request DotenvImportRequest,
+) (*DotenvImportPreview, error) {
+	entries, err := parseDotenvEntries(request.Dotenv)
+	if err != nil {
+		return nil, firstDotenvError(entries, err)
+	}
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("%w: dotenv input is empty", ErrInvalidVariable)
+	}
+	template := VariableWriteRequest{Value: new(string), Sensitivity: request.Sensitivity, Scopes: request.Scopes}
+	if _, err := validateVariableWrite(template); err != nil {
+		return nil, err
+	}
+	stored, err := s.activeVariableValues(ctx, s.db, projectID, environmentID)
+	if err != nil {
+		return nil, err
+	}
+	current := make(map[string]storedVariableValue, len(stored))
+	after := make(map[string]string, len(stored)+len(entries))
+	for _, value := range stored {
+		current[value.name], after[value.name] = value, value.value
+	}
+	scopes := slices.Sorted(slices.Values(request.Scopes))
+	preview := &DotenvImportPreview{Variables: make([]DotenvImportVerdict, 0, len(entries))}
+	position := map[string]int{}
+	refused := false
+	for _, entry := range entries {
+		if at, repeated := position[entry.name]; repeated {
+			preview.Variables[at].Change, preview.Variables[at].Reason = "refused", dotenvRefusedDuplicate
+			refused = true
+			continue
+		}
+		position[entry.name] = len(preview.Variables)
+		verdict := DotenvImportVerdict{Name: entry.name, Line: entry.line}
+		existing, exists := current[entry.name]
+		switch {
+		case entry.refused != "":
+			verdict.Change, verdict.Reason = "refused", entry.refused
+			refused = true
+		case !exists:
+			verdict.Change = "added"
+		case existing.valueDigest == digestBytes([]byte(entry.value)) &&
+			existing.sensitivity == request.Sensitivity &&
+			slices.Equal(slices.Sorted(slices.Values(existing.scopes)), scopes):
+			verdict.Change = "unchanged"
+		default:
+			verdict.Change = "changed"
+		}
+		after[entry.name] = entry.value
+		preview.Variables = append(preview.Variables, verdict)
+	}
+	// The import checks the references of the set it leaves behind. With a
+	// refused name there is no such set: the parse already refuses the import.
+	if !refused {
+		if _, _, err := ResolveVariableGraph(after, nil); err != nil {
+			return nil, err
+		}
+	}
+	return preview, nil
 }
 
 func (s *PlanningStore) DeleteVariable(
@@ -1044,6 +1180,20 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 			return nil, err
 		}
 	}
+	var previousBuildJSON string
+	if err := tx.QueryRowContext(ctx, `
+		SELECT config_json FROM deploy_build_plans WHERE environment_id = ? AND revision = ?`,
+		environmentID, current).Scan(&previousBuildJSON); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: desired build plan is missing", ErrInvalidPlan)
+		}
+		return nil, err
+	}
+	var previousBuild BuildPlanConfig
+	if err := json.Unmarshal([]byte(previousBuildJSON), &previousBuild); err != nil {
+		return nil, fmt.Errorf("%w: desired build plan is malformed", ErrInvalidPlan)
+	}
+	configuration.Build.Framework = carriedFramework(previousBuild, configuration.Build)
 	next, now := current+1, s.now().UTC().Unix()
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO deploy_sources(environment_id, revision, kind, config_json, credential_id, identity_json, digest, created_at)
@@ -1060,7 +1210,7 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 		INSERT INTO deploy_build_plans(environment_id, revision, method, config_json, evidence_json, preview, digest, created_at)
 		 SELECT environment_id, ?, ?, ?, evidence_json, ?, ?, ?
 		   FROM deploy_build_plans WHERE environment_id = ? AND revision = ?`, next,
-		configuration.Build.Method, string(buildJSON), renderBuildPreview(configuration.Build), digestBytes(buildJSON), now,
+		configuration.Build.Method, string(buildJSON), renderBuildPreview(configuration.Build), buildPlanDigest(configuration.Build), now,
 		environmentID, current)
 	if err != nil {
 		return nil, err
@@ -1175,12 +1325,13 @@ func (s *PlanningStore) SaveEnvironmentSource(
 	defer tx.Rollback()
 	var current int
 	var currentKind SourceKind
+	var currentSourceJSON string
 	if err := tx.QueryRowContext(ctx, `
-		SELECT e.desired_revision, s.kind
+		SELECT e.desired_revision, s.kind, s.config_json
 		  FROM deploy_environments e
 		  JOIN deploy_sources s ON s.environment_id = e.id AND s.revision = e.desired_revision
 		 WHERE e.id = ? AND e.project_id = ? AND e.archived_at = 0`, environmentID, projectID).
-		Scan(&current, &currentKind); err != nil {
+		Scan(&current, &currentKind, &currentSourceJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrEnvironmentNotFound
 		}
@@ -1201,23 +1352,23 @@ func (s *PlanningStore) SaveEnvironmentSource(
 		source.CredentialID, string(identityJSON), digestBytes(sourceJSON, identityJSON), now); err != nil {
 		return nil, err
 	}
-	for _, statement := range []string{
-		`INSERT INTO deploy_build_plans(environment_id, revision, method, config_json, evidence_json, preview, digest, created_at)
-		 SELECT environment_id, ?, method, config_json, evidence_json, preview, digest, ?
-		   FROM deploy_build_plans WHERE environment_id = ? AND revision = ?`,
-		`INSERT INTO deploy_runtime_plans(environment_id, revision, config_json, preview, digest, created_at)
-		 SELECT environment_id, ?, config_json, preview, digest, ?
-		   FROM deploy_runtime_plans WHERE environment_id = ? AND revision = ?`,
-	} {
-		result, err := tx.ExecContext(ctx, statement, next, now, environmentID, current)
-		if err != nil {
-			return nil, err
-		}
-		if affected, _ := result.RowsAffected(); affected != 1 {
-			return nil, fmt.Errorf("%w: revision %d has incomplete plan rows", ErrInvalidPlan, current)
-		}
+	var currentSource DraftSourceConfig
+	moved := json.Unmarshal([]byte(currentSourceJSON), &currentSource) != nil ||
+		!sameSourceLocation(canonicalSourceConfig(currentSource), source)
+	if err := cloneBuildPlanTx(ctx, tx, environmentID, current, next, now, moved); err != nil {
+		return nil, err
 	}
 	result, err := tx.ExecContext(ctx, `
+		INSERT INTO deploy_runtime_plans(environment_id, revision, config_json, preview, digest, created_at)
+		 SELECT environment_id, ?, config_json, preview, digest, ?
+		   FROM deploy_runtime_plans WHERE environment_id = ? AND revision = ?`, next, now, environmentID, current)
+	if err != nil {
+		return nil, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return nil, fmt.Errorf("%w: revision %d has incomplete plan rows", ErrInvalidPlan, current)
+	}
+	result, err = tx.ExecContext(ctx, `
 		UPDATE deploy_environments SET desired_revision = ?, updated_at = ?
 		 WHERE id = ? AND project_id = ? AND desired_revision = ? AND archived_at = 0`,
 		next, now, environmentID, projectID, current)
@@ -1231,6 +1382,34 @@ func (s *PlanningStore) SaveEnvironmentSource(
 		return nil, err
 	}
 	return s.EnvironmentConfiguration(ctx, projectID, environmentID)
+}
+
+// cloneBuildPlanTx copies the build plan at one revision to the next. When
+// the source has moved, a recorded framework is dropped on the way, since
+// detection named the code that used to be there. The digest is copied
+// either way: buildPlanDigest leaves the framework out.
+func cloneBuildPlanTx(ctx context.Context, tx *sql.Tx, environmentID int64, from, to int, now int64, dropFramework bool) error {
+	var method BuildMethod
+	var buildJSON, evidence, preview, digest string
+	if err := tx.QueryRowContext(ctx, `
+		SELECT method, config_json, evidence_json, preview, digest
+		  FROM deploy_build_plans WHERE environment_id = ? AND revision = ?`, environmentID, from).
+		Scan(&method, &buildJSON, &evidence, &preview, &digest); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: revision %d has incomplete plan rows", ErrInvalidPlan, from)
+		}
+		return err
+	}
+	var build BuildPlanConfig
+	if dropFramework && json.Unmarshal([]byte(buildJSON), &build) == nil && build.Framework != "" {
+		build.Framework = ""
+		encoded, _ := json.Marshal(build)
+		buildJSON, preview = string(encoded), renderBuildPreview(build)
+	}
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO deploy_build_plans(environment_id, revision, method, config_json, evidence_json, preview, digest, created_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?)`, environmentID, to, method, buildJSON, evidence, preview, digest, now)
+	return err
 }
 
 type digestQuery interface {

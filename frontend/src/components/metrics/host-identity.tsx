@@ -69,7 +69,10 @@ export function HostIdentity({
         className,
       )}
     >
-      <div className="flex min-w-0 items-center gap-4">
+      {/* On a phone the tile and the title share a row and the facts run the
+          full width under both, rather than down a column beside the tile;
+          from `sm` the text stands beside the tile as one block. */}
+      <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-3 sm:flex">
         {logo ?? (
           <ProductLogo
             id={mark}
@@ -77,9 +80,9 @@ export function HostIdentity({
             className="size-12 rounded-xl [&_img]:size-7"
           />
         )}
-        <div className="min-w-0 space-y-1">
+        <div className="contents sm:block sm:min-w-0 sm:space-y-1">
           <p className="min-w-0 truncate text-title font-semibold tracking-tight">{title}</p>
-          <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          <p className="col-span-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
             {facts}
           </p>
         </div>

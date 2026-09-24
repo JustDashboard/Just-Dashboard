@@ -9,6 +9,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -43,6 +44,12 @@ export type Verb = {
   progressive?: string
   danger?: boolean
   disabled?: boolean
+  /**
+   * The part of a long menu this verb belongs to — "Run", "Project". A menu
+   * of eleven sentences in a row is a wall; the same eleven under two names
+   * are two short lists. Verbs of one group are declared next to each other.
+   */
+  group?: string
 }
 
 /**
@@ -161,25 +168,34 @@ export function VerbMenu({
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align={align ?? "end"} className="w-72">
-        {verbs.map((verb, i) => (
-          <Fragment key={verb.key}>
-            {verb.danger && i > 0 && !verbs[i - 1].danger && <DropdownMenuSeparator />}
-            <DropdownMenuItem
-              variant={verb.danger ? "destructive" : "default"}
-              disabled={verb.disabled}
-              className="items-start gap-2.5 py-1.5"
-              onSelect={() => verb.run()}
-            >
-              <verb.icon className="mt-0.5 size-3.5 shrink-0" />
-              <span className="min-w-0 flex-1">
-                <span className="block text-body leading-tight font-medium">{verb.label}</span>
-                <span className="mt-0.5 block text-hint leading-snug text-muted-foreground">
-                  {verb.detail}
+        {verbs.map((verb, i) => {
+          const previous = verbs[i - 1]
+          const regroups = i > 0 && verb.group !== previous.group
+          return (
+            <Fragment key={verb.key}>
+              {i > 0 && (regroups || (verb.danger && !previous.danger)) && (
+                <DropdownMenuSeparator />
+              )}
+              {verb.group && (i === 0 || regroups) && (
+                <DropdownMenuLabel>{verb.group}</DropdownMenuLabel>
+              )}
+              <DropdownMenuItem
+                variant={verb.danger ? "destructive" : "default"}
+                disabled={verb.disabled}
+                className="items-start gap-2.5 py-1.5"
+                onSelect={() => verb.run()}
+              >
+                <verb.icon className="mt-0.5 size-3.5 shrink-0" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-body leading-tight font-medium">{verb.label}</span>
+                  <span className="mt-0.5 block text-hint leading-snug text-muted-foreground">
+                    {verb.detail}
+                  </span>
                 </span>
-              </span>
-            </DropdownMenuItem>
-          </Fragment>
-        ))}
+              </DropdownMenuItem>
+            </Fragment>
+          )
+        })}
       </DropdownMenuContent>
     </DropdownMenu>
   )

@@ -81,6 +81,39 @@ export function clock(iso: string | undefined | null): string {
   return d.toLocaleTimeString(undefined, { hour12: false })
 }
 
+/** Hour and minute: a chart's axis, and a span dragged out of one. */
+export function clockMinute(iso: string | undefined | null): string {
+  if (!iso) return "—"
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return "—"
+  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false })
+}
+
+/**
+ * A span at the minute: "11:46–11:51" inside one day, and each end with its
+ * date once the span crosses midnight or runs past a day — a drag on a week's
+ * chart read "11:41–09:12", which is two times and no way to tell which days.
+ * An open end is "now".
+ */
+export function minuteSpan(since: string, until?: string): string {
+  const from = new Date(since)
+  const to = until ? new Date(until) : undefined
+  const dated =
+    to !== undefined &&
+    (from.toDateString() !== to.toDateString() || to.getTime() - from.getTime() > 86_400_000)
+  const at = (d: Date) =>
+    dated
+      ? d.toLocaleString(undefined, {
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        })
+      : clockMinute(d.toISOString())
+  return `${at(from)}–${to ? at(to) : "now"}`
+}
+
 export function shortSha(sha: string | undefined | null, length = 7): string {
   if (!sha) return "—"
   return sha.slice(0, length)

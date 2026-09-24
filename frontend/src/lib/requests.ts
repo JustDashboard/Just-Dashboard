@@ -1,4 +1,4 @@
-import type { RequestEntry, RequestSummary } from "@/lib/types"
+import type { RequestEntry, RequestLatency, RequestSummary } from "@/lib/types"
 import type { Tone } from "@/components/tone"
 
 /**
@@ -58,31 +58,36 @@ export const CLASS_TONE: Record<StatusClass, Tone> = {
   other: "default",
 }
 
-/** The status code's own colour in a row. 2xx is ink; a page of green is noise. */
+/**
+ * A status code's colour, wherever a code is drawn: the request rows, their
+ * detail, the facets, and a status inside a line of the host's log console
+ * (`components/logs/log-text.tsx` reads it from here). One map, so a 404 is
+ * the same amber in both consoles.
+ *
+ * Every family takes its hue, 2xx included. A column of codes then scans as
+ * all green (§11), and the 500 and the 404 in it are found by colour rather
+ * than by reading — which ink-on-ink for 2xx and 3xx never allowed. 3xx takes
+ * the path hue, not a status hue: a redirect is a direction, not a verdict.
+ */
 export const CLASS_TEXT: Record<StatusClass, string> = {
   "5xx": "text-destructive",
   "4xx": "text-warning",
-  "3xx": "text-muted-foreground",
-  "2xx": "text-foreground",
+  "3xx": "text-[var(--tag-cyan)]",
+  "2xx": "text-success",
   "1xx": "text-muted-foreground",
   other: "text-muted-foreground",
 }
 
 /**
- * The swatch: the chart's stack, the chip's dot and the legend, one colour
- * each. Only the two families that mean something went wrong take a hue — the
- * rest are steps of ink, exactly as the log histogram beside them is, because
- * brand blue is a command's face or a location mark and a chart of served
- * requests is neither.
+ * The chip's dot, in the code's own colour, so the chip is the legend for the
+ * codes in the rows it filters. The chart names its area separately — it is
+ * one series of requests, not a stack by family.
  */
 export const CLASS_DOT: Record<StatusClass, string> = {
   "5xx": "bg-destructive",
   "4xx": "bg-warning",
-  "3xx": "bg-muted-foreground",
-  // The chart's own first colour, as every primary series on the Metrics
-  // page takes: the ok share is the chart's ground, and a chip whose dot is
-  // the series' colour is a legend, not a decoration.
-  "2xx": "bg-chart-1",
+  "3xx": "bg-[var(--tag-cyan)]",
+  "2xx": "bg-success",
   "1xx": "bg-muted-foreground/60",
   other: "bg-muted-foreground/40",
 }
@@ -103,8 +108,13 @@ export const CLASS_EDGE: Record<StatusClass, string> = {
  * The registry blocks that do this draw a filled chip per verb in seven
  * colours, which turns a column of GETs into a column of coloured rectangles —
  * the loudest thing on a page whose actual signal is the status. Here the
- * method is monospace like the path it introduces, and only the ones that
- * change something step forward in weight.
+ * method is monospace like the path it introduces, reads stay muted, and the
+ * ones that change something take the class a method has inside a log line
+ * (`log-text.tsx`'s method token), so a POST reads the same in both consoles.
+ *
+ * DELETE is one of them and nothing more. It used to borrow the danger hue,
+ * and a DELETE answered 204 is not a failure: the status says whether it went
+ * wrong.
  */
 export function methodEmphasis(method: string): string {
   switch (method.toUpperCase()) {
@@ -112,11 +122,86 @@ export function methodEmphasis(method: string): string {
     case "HEAD":
     case "OPTIONS":
       return "text-muted-foreground"
+    case "POST":
+    case "PUT":
+    case "PATCH":
     case "DELETE":
-      return "text-destructive/90 font-medium"
+      return "font-semibold text-[var(--tag-blue)]"
     default:
       return "text-foreground font-medium"
   }
+}
+
+/**
+ * What a status code says, in the words a reader uses for it: "404 Not
+ * found". Only the codes a deployment actually answers with; anything else is
+ * its family's word from `CLASS_LABEL`, which is never wrong.
+ */
+const STATUS_WORDS: Record<number, string> = {
+  101: "Switching protocols",
+  200: "OK",
+  201: "Created",
+  202: "Accepted",
+  204: "No content",
+  206: "Partial content",
+  301: "Moved",
+  302: "Found",
+  303: "See other",
+  304: "Not modified",
+  307: "Redirect",
+  308: "Redirect",
+  400: "Bad request",
+  401: "Unauthorized",
+  403: "Forbidden",
+  404: "Not found",
+  405: "Method not allowed",
+  408: "Timeout",
+  409: "Conflict",
+  410: "Gone",
+  413: "Too large",
+  422: "Unprocessable",
+  429: "Too many",
+  // nginx's own code for a caller that hung up before the answer.
+  499: "Client closed",
+  500: "Server error",
+  502: "Bad gateway",
+  503: "Unavailable",
+  504: "Gateway timeout",
+}
+
+export function statusWord(code: number): string {
+  const word = STATUS_WORDS[code] ?? CLASS_LABEL[statusClass(code)]
+  return word === "ok" ? "OK" : word.charAt(0).toUpperCase() + word.slice(1)
+}
+
+/**
+ * The line past which a response is slow: a second, the same line the
+ * Slowest tenth tile draws. Below it a figure is a reading; above it the
+ * figure is what the reader came to find.
+ */
+export function latencyTone(ms: number | undefined): Tone {
+  return ms !== undefined && ms > 1000 ? "warning" : "default"
+}
+
+/**
+ * Where one request sits among the window's, in words: "in the slowest
+ * hundredth". A figure alone asks the reader to remember the percentiles; the
+ * bracket answers whether 412ms is this deployment being slow or this
+ * deployment being itself. Each bracket is the percentile its words name —
+ * the slowest tenth begins at the p90 — because a request between the p90
+ * and the p95 is in the slowest tenth, and saying "slower than most" of it
+ * was the words being wrong about the number beside them.
+ */
+export function latencyBracket(
+  ms: number | undefined,
+  latency: RequestLatency | undefined,
+): string | undefined {
+  if (ms === undefined || !latency) return undefined
+  if (ms > latency.p99) return "in the slowest hundredth"
+  if (ms > latency.p90) return "in the slowest tenth"
+  if (ms > latency.p75) return "slower than most"
+  if (ms >= latency.p50) return "about the median"
+  return "faster than the median"
 }
 
 /**

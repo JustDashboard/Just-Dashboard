@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { ArrowRight, Check, Copy, Key, Minus, ShieldCheck, ShieldOff } from "@/components/icons"
+import { ArrowRight, Check, Copy, Key, ShieldCheck, ShieldOff } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { post } from "@/lib/api"
 import { plural } from "@/lib/format"
@@ -11,7 +11,7 @@ import { passwordChecks } from "@/lib/password"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { useCopy } from "@/hooks/use-copy"
-import { Field, FieldRow, FormSection } from "@/components/form"
+import { Field, FieldCheck, FieldRow, FormSection } from "@/components/form"
 import { Well } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
 import { Notice } from "@/components/state"
@@ -20,22 +20,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { TotpSecret } from "@/components/account/totp-secret"
 import type { useSessions } from "@/components/account/sessions"
-
-/** One half of the server's rule, lit once the typed password meets it. */
-function Rule({ met, children }: { met: boolean; children: React.ReactNode }) {
-  const Mark = met ? Check : Minus
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 text-hint transition-colors",
-        met ? "text-success" : "text-muted-foreground",
-      )}
-    >
-      <Mark aria-hidden className="size-3" />
-      {children}
-    </span>
-  )
-}
 
 export function PasswordSection() {
   const { logout } = useAuth()
@@ -107,11 +91,11 @@ export function PasswordSection() {
           </Field>
         </FieldRow>
         <p className="flex flex-wrap gap-x-4 gap-y-1" aria-live="polite">
-          <Rule met={checks.long}>12 characters or more</Rule>
-          <Rule met={checks.mixed}>
+          <FieldCheck met={checks.long}>12 characters or more</FieldCheck>
+          <FieldCheck met={checks.mixed}>
             three of upper case, lower case, digits, symbols
             {next && !checks.mixed && ` · ${checks.classes} so far`}
-          </Rule>
+          </FieldCheck>
         </p>
       </div>
       <Button

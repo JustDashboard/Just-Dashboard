@@ -235,14 +235,17 @@ func (e *NormalizedStepExecutor) acquireSource(
 		return normalizedStepFailure(err)
 	}
 	_ = stepLog(execution, "status", "Materialized the recorded source in a private release workspace")
+	// A missing commit summary is a warning on stderr: the transcript has
+	// only stdout, stderr and status, and a stream it refuses would fail the
+	// append and silence everything this step logs after it.
 	if gitSourceMode(plan.SourceConfig.Mode) {
 		if source.Commit != nil {
 			if _, mergeErr := e.store.MergeRunMetadata(ctx, execution.Run.ID,
 				map[string]any{"commit": source.Commit}); mergeErr != nil {
-				_ = stepLog(execution, "warning", "Could not record commit metadata: "+mergeErr.Error())
+				_ = stepLog(execution, "stderr", "Could not record commit metadata: "+mergeErr.Error())
 			}
 		} else {
-			_ = stepLog(execution, "warning",
+			_ = stepLog(execution, "stderr",
 				"Could not read commit metadata for the recorded source; continuing without it")
 		}
 	}

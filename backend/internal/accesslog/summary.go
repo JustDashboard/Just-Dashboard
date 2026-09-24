@@ -190,6 +190,9 @@ type Bucket struct {
 	Total  int            `json:"total"`
 	Counts map[string]int `json:"counts"`
 	P95    *float64       `json:"p95,omitempty"`
+	// Bytes is what the column's answers sent, so the page's Served reading
+	// can carry its hour as a line the way the request count does.
+	Bytes int64 `json:"bytes"`
 }
 
 // Latency is the distribution, not an average. A mean response time is the one
@@ -315,6 +318,7 @@ type Collector struct {
 type minuteBucket struct {
 	counts    map[string]int
 	total     int
+	bytes     int64
 	latencies []float64
 }
 
@@ -409,6 +413,7 @@ func (c *Collector) Feed(e Entry) {
 	}
 	bucket.total++
 	bucket.counts[class]++
+	bucket.bytes += e.Size
 	if e.timed && len(bucket.latencies) < 4096 {
 		bucket.latencies = append(bucket.latencies, e.duration)
 	}
@@ -512,7 +517,7 @@ func agentFamily(agent string) string {
 func (c *Collector) Result() *Result {
 	out := &Result{Summary: Summary{
 		Total: c.total, Scanned: c.scanned, Classes: c.classes,
-		Bytes: c.bytes, Truncated: c.truncated, BucketSeconds: 60,
+		Bytes: c.bytes, Truncated: c.truncated,
 	}, Format: c.format}
 
 	entries := c.entries
@@ -568,7 +573,7 @@ func (c *Collector) Result() *Result {
 	out.Summary.Probes = rank(c.probes, 10)
 	out.Summary.Scanners = rankScanners(c.clients)
 	out.Summary.Statuses = rankStatuses(c.statuses)
-	out.Summary.Buckets = c.histogram()
+	out.Summary.Buckets, out.Summary.BucketSeconds = c.histogram()
 	out.Slowest = c.slowest()
 	return out
 }
@@ -609,10 +614,12 @@ func (c *Collector) keepSlowest(e Entry) {
 
 // histogram lays the per-minute counts onto a fixed column count over the
 // window, widening the column rather than adding columns so a day and an hour
-// draw the same instrument at different resolutions.
-func (c *Collector) histogram() []Bucket {
+// draw the same instrument at different resolutions. It returns the columns'
+// width in seconds beside them: the summary said 60 whatever the window, so a
+// day's chart claimed each of its 24-minute points was one minute.
+func (c *Collector) histogram() ([]Bucket, int) {
 	if len(c.byMinute) == 0 {
-		return []Bucket{}
+		return []Bucket{}, 60
 	}
 	from := time.Unix(0, c.first).UTC().Truncate(time.Minute)
 	to := time.Unix(0, c.last).UTC().Truncate(time.Minute)
@@ -636,7 +643,18 @@ func (c *Collector) histogram() []Bucket {
 		width = time.Minute
 	}
 	count := int(span/width) + 1
+	// A window a whole number of columns long touches one more column than
+	// it has: "the last hour" asked at 12:00:40 runs from 11:00:40, so it
+	// spans 11:00 through 12:00. The column that goes is the oldest, which
+	// the window only clips, whenever nothing asked for an end or the window
+	// starts partway into it — the newest is the minute happening now, and
+	// dropping it drew a 5xx the readings had already counted nowhere on the
+	// chart or the minute strip. A window asked for whole, both ends on the
+	// minute, keeps its own start.
 	if count > buckets {
+		if c.filter.Until.IsZero() || from.Before(c.filter.Since) {
+			from = from.Add(time.Duration(count-buckets) * width)
+		}
 		count = buckets
 	}
 	out := make([]Bucket, count)
@@ -654,6 +672,7 @@ func (c *Collector) histogram() []Bucket {
 			continue
 		}
 		out[offset].Total += bucket.total
+		out[offset].Bytes += bucket.bytes
 		for class, n := range bucket.counts {
 			out[offset].Counts[class] += n
 		}
@@ -667,7 +686,7 @@ func (c *Collector) histogram() []Bucket {
 		p95 := percentile(samples[i], 0.95)
 		out[i].P95 = &p95
 	}
-	return out
+	return out, int(width / time.Second)
 }
 
 // percentile reads the nearest-rank value of an already-sorted sample. Nearest

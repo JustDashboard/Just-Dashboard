@@ -309,7 +309,7 @@ function StackRow({
       verb={stack.name}
       onSelect={onOpen}
       className={cn(busy && "opacity-70")}
-      leading={<ProductLogos ids={products} />}
+      leading={<ProductLogos ids={products} ring="ring-choice-surface" />}
       title={
         <span className="flex min-w-0 items-center gap-2">
           <StatusDot tone={stackTone(stack.state)} live={stack.state === "running"} />

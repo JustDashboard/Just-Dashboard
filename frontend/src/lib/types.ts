@@ -2258,6 +2258,19 @@ export type DeployProject = {
   envVarCount: number
 }
 
+/** What an archived deployment's plan recorded; absent for a legacy project. */
+export type DeploymentFacts = {
+  sourceKind?: DeploymentSourceKind
+  sourceRef?: string
+  sourceRepository?: string
+  buildMethod?: DeploymentBuildMethod
+  recipe?: DeploymentRecipe
+  framework?: string
+}
+
+/** A row of GET /deploy/?view=archived: the project record and what it deployed. */
+export type ArchivedDeployment = DeployProject & DeploymentFacts
+
 export type WorkloadProfile =
   "web" | "static" | "worker" | "image" | "compose" | "service" | "game" | "imported"
 
@@ -2331,6 +2344,15 @@ export type DeploymentEngineRun = {
   priority: number
   slotClass: "light" | "heavy"
   metadata: Record<string, unknown>
+  /** Where a run in flight stands; set by the list reads, absent once it ends. */
+  currentStep?: DeploymentCurrentStep
+}
+
+/** The step a run in flight is at: running, else blocking, else failed, else next. */
+export type DeploymentCurrentStep = {
+  key: string
+  label: string
+  state: DeploymentStepState
 }
 
 export type DeploymentStep = {
@@ -2347,6 +2369,36 @@ export type DeploymentStep = {
   errorCode?: string
   errorMessage?: string
   lastSeq: number
+}
+
+/**
+ * The Build step's evidence: the image it made and how it was prepared, read
+ * back from `DeploymentStep.evidence`. Everything is optional because a failed
+ * build, or one recorded before a field existed, left less behind.
+ */
+export type DeploymentBuildEvidence = {
+  result?: {
+    image?: {
+      reference: string
+      digest: string
+      sizeBytes?: number
+      os?: string
+      architecture?: string
+      platforms?: string[]
+    }
+    prepared?: {
+      method: DeploymentBuildMethod
+      recipe?: string
+      recipeVersion?: string
+      /** The language release the recipe built with: "rust 1.85", "java 21 (maven)". */
+      toolchain?: string
+      baseImages?: { reference: string; digest: string }[]
+      dockerfilePreview?: string
+      dockerfileDigest?: string
+      targetPlatform?: string
+      cachePolicy?: string
+    }
+  }
 }
 
 export type DeploymentRunSnapshot = {
@@ -2374,6 +2426,8 @@ export type DeploymentRuntimeService = {
   stack?: string
   service?: string
   startedAt?: string
+  /** The image reference the container was created from, as Docker reports it. */
+  image?: string
 }
 
 export type DeploymentRuntimeServices = {
@@ -2677,6 +2731,8 @@ export type DeploymentDomainRoute = {
   certificate: "valid" | "expiring" | "expired" | "missing" | "not requested" | "unavailable"
   certificateName?: string
   certificateDaysLeft?: number
+  /** Who issued the covering certificate, read from the certificate itself. */
+  certificateIssuer?: string
   deepLink?: string
   certificateLink?: string
   protected?: boolean
@@ -2831,6 +2887,27 @@ export type DeploymentSummary = {
   lastRun?: DeploymentEngineRun
   activeRun?: DeploymentEngineRun
   updatedAt: string
+  /** owner/name for Git; the reference itself for an image or template, whose sourceRef is empty. */
+  sourceRepository?: string
+  /** A Git source's remote without userinfo: `https://host/path` or `git@host:path`. */
+  sourceRemote?: string
+  recipe?: DeploymentRecipe
+  /** What detection recognised the source as (`nextjs`, `vite`, `django`…), recorded at creation. */
+  framework?: string
+  /** Image references the live release runs, one per distinct Compose service image. */
+  images?: string[]
+  /** The newest runs, newest first, at most 14; the first is `lastRun`. */
+  recentRuns?: DeploymentRecentRun[]
+}
+
+/** One square of a deployment's run-history strip. */
+export type DeploymentRecentRun = {
+  id: number
+  runNumber: number
+  state: DeploymentRunState
+  operation: string
+  requestedAt: string
+  endedAt?: string
 }
 
 /** The commit a Git run built, recorded in the run's metadata under `commit`. */
@@ -2962,6 +3039,20 @@ export type DeploymentTrigger = {
   enabled: boolean
   lastDeliveryAt?: string
   lastStatus?: string
+  /**
+   * The delivery log as the list row draws it: the newest delivery in full, and
+   * the last 14 decisions oldest first. Present only for an administrator in a
+   * session — the log's own route is theirs alone — so absent is not "none".
+   */
+  lastDelivery?: DeploymentTriggerDelivery
+  recent?: DeploymentTriggerOutcome[]
+}
+
+/** One square of a trigger's recent-delivery strip. */
+export type DeploymentTriggerOutcome = {
+  decision: string
+  reason?: string
+  receivedAt: string
 }
 
 /** One account that installed the dashboard's GitHub App. */
@@ -3026,7 +3117,18 @@ export type DeploymentSchedule = {
   timezone: string
   enabled: boolean
   nextRunAt?: string
+  /**
+   * The next five firings, led by `nextRunAt` and walked in `timezone`, so a
+   * daylight-saving change lands where the dispatcher puts it. Absent while paused.
+   */
+  nextRuns?: string[]
   steps: { action: string; config: Record<string, unknown>; required: boolean }[]
+}
+
+/** POST …/schedules/test: when an expression would fire, in its zone. */
+export type DeploymentScheduleTest = {
+  nextRunAt: string
+  nextRuns: string[]
 }
 
 export type DeploymentPreview = {
@@ -3049,6 +3151,8 @@ export type DeploymentPreviewApproval = {
   revision: string
   repository: string
   headRepository: string
+  /** The pull request's branch; absent on an approval recorded before deliveries kept it. */
+  headRef?: string
   author: string
   state: "pending" | "approved" | "rejected" | "superseded" | "closed"
   approvedBy?: string
@@ -3093,7 +3197,14 @@ export type DeploymentHostnameSuggestion = {
   certificateIssue?: string
   method: "wildcard" | "sslip" | "custom" | "none"
   detail: string
+  /** This server's public IPv4 — for a typed hostname, what its A record should name. */
   address?: string
+  /**
+   * For a typed hostname, whether its DNS already points at this server. Only an
+   * administrator is answered (resolving a chosen name is theirs, as on the proxy
+   * page), and never when this host has no public address — absent is not a no.
+   */
+  resolves?: boolean
   /**
    * Whether a live project already answers to the `name` this was asked with.
    * Absent when the question was about a hostname, which carries no claim
@@ -3248,6 +3359,30 @@ export type NotificationChannel = {
   enabled: boolean
   createdAt: string
   updatedAt: string
+  /**
+   * The list's reading of a channel, only on GET /deploy/notifications — a
+   * mutation's answer is the bare channel, so reload the list after one. `via`
+   * is an e-mail channel's SMTP host; `recent` is the last 14 attempts, oldest first.
+   */
+  via?: string
+  lastDelivery?: NotificationAttempt
+  recent?: NotificationOutcome[]
+}
+
+/** A channel's newest delivery attempt, as its row reports it. */
+export type NotificationAttempt = {
+  status: string
+  event: string
+  responseClass: string
+  createdAt: string
+  nextAttemptAt?: string
+}
+
+/** One square of a channel's recent-delivery strip; `test` marks a message sent from the page. */
+export type NotificationOutcome = {
+  status: string
+  createdAt: string
+  test: boolean
 }
 
 export type NotificationChannelConfig = {
@@ -3267,6 +3402,10 @@ export type NotificationDelivery = {
   id: number
   channelId: number
   runId?: number
+  /** The run it announced; all three absent for a test message or a purged run. */
+  projectId?: number
+  projectName?: string
+  runNumber?: number
   event: string
   attempt: number
   status: string
@@ -3280,6 +3419,12 @@ export type DeploymentConfiguration = {
   build: {
     method: DeploymentBuildMethod
     recipe?: DeploymentRecipe
+    /**
+     * What detection recognised the source as, recorded at creation. Read-only:
+     * the server ignores a sent value and drops it once the method, recipe,
+     * root directory or source location changes.
+     */
+    framework?: string
     goVersion?: string
     pythonVersion?: string
     packageManager?: NodePackageManager
@@ -3381,6 +3526,20 @@ export type DeploymentVariable = {
   createdAt: string
   environmentId: number
   desiredRevision: number
+}
+
+/**
+ * POST …/variables/import?dryRun=1: what importing the same body would do to
+ * each name, in the order written, compared by digest on the server. One
+ * refused name refuses the whole import; `reason` says which line to fix.
+ */
+export type DeploymentDotenvImportPreview = {
+  variables: {
+    name: string
+    line: number
+    change: "added" | "changed" | "unchanged" | "refused"
+    reason?: "invalid_name" | "duplicate" | "invalid_value"
+  }[]
 }
 
 export type DeploymentPendingChange = {
@@ -3559,6 +3718,8 @@ export type DeploymentCredential = {
   lastUsedAt?: string
   /** How many non-archived projects' current source uses it — 0 means safe to remove. */
   usedBy: number
+  /** The projects behind `usedBy`, ascending; `usedBy` counts environments, so it can be larger. */
+  usedByProjectIds?: number[]
 }
 
 /**
@@ -5051,6 +5212,8 @@ export type RequestBucket = {
   total: number
   counts: Record<string, number>
   p95?: number
+  /** What the column's answers sent, for the Served reading's line. */
+  bytes?: number
 }
 
 /** The distribution, not an average: a p50 of 30ms hides a p99 of nine seconds. */

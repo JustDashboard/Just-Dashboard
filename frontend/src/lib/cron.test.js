@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { describeCron, isValidCron, nextCronRun, parseCron, presetFor } from "./cron"
+import {
+  describeCron,
+  isValidCron,
+  nextCronRun,
+  nextCronRunsIn,
+  parseCron,
+  presetFor,
+} from "./cron"
 
 // The sentences the Scheduled page prints beside an expression have to say
 // what cron will do, not what the builder meant: a wrong description is worse
@@ -72,5 +79,94 @@ describe("recognising a preset", () => {
     expect(presetFor("0 3 1 * *")).toBe("monthly")
     expect(presetFor("@reboot")).toBe("reboot")
     expect(presetFor("0 3 * * 1-5")).toBe("custom")
+  })
+})
+
+// A deployment's schedule names its zone, and the server walks that zone's
+// wall clock. The preview has to land on the same instants, or the timeline
+// promises a run at a time the server never fires.
+describe("the next runs in a named zone", () => {
+  const utc = (iso) => new Date(iso)
+
+  test("reads the fields as UTC's wall clock", () => {
+    const from = utc("2026-09-17T14:30:45Z")
+    expect(nextCronRunsIn("0 3 * * *", "UTC", 3, from)).toEqual([
+      utc("2026-09-18T03:00:00Z"),
+      utc("2026-09-19T03:00:00Z"),
+      utc("2026-09-20T03:00:00Z"),
+    ])
+    expect(nextCronRunsIn("*/15 * * * *", "UTC", 2, from)).toEqual([
+      utc("2026-09-17T14:45:00Z"),
+      utc("2026-09-17T15:00:00Z"),
+    ])
+    // Cron's or-rule: the 15th, or any Friday.
+    expect(nextCronRunsIn("0 0 15 * fri", "UTC", 2, from)).toEqual([
+      utc("2026-09-18T00:00:00Z"),
+      utc("2026-09-25T00:00:00Z"),
+    ])
+  })
+
+  test("reads them in the zone, not in UTC", () => {
+    // 09:00 in Bucharest is 06:00 UTC in summer and 07:00 once the clocks go
+    // back on the last Sunday of October.
+    expect(nextCronRunsIn("0 9 * * *", "Europe/Bucharest", 3, utc("2026-10-23T12:00:00Z"))).toEqual(
+      [utc("2026-10-24T06:00:00Z"), utc("2026-10-25T07:00:00Z"), utc("2026-10-26T07:00:00Z")],
+    )
+  })
+
+  test("a time the spring change skips does not fire that day", () => {
+    // New York goes from 02:00 to 03:00 on 8 March 2026.
+    expect(
+      nextCronRunsIn("30 2 * * *", "America/New_York", 2, utc("2026-03-07T12:00:00Z")),
+    ).toEqual([utc("2026-03-09T06:30:00Z"), utc("2026-03-10T06:30:00Z")])
+  })
+
+  test("a time the autumn change repeats fires on both sides of it", () => {
+    // And back from 02:00 to 01:00 on 1 November 2026.
+    expect(
+      nextCronRunsIn("30 1 * * *", "America/New_York", 3, utc("2026-10-31T12:00:00Z")),
+    ).toEqual([
+      utc("2026-11-01T05:30:00Z"),
+      utc("2026-11-01T06:30:00Z"),
+      utc("2026-11-02T06:30:00Z"),
+    ])
+    // In time order, not wall order: 01:45 before the change is ahead of
+    // 01:00 after it.
+    expect(
+      nextCronRunsIn("*/15 1 * * *", "America/New_York", 6, utc("2026-11-01T05:20:00Z")),
+    ).toEqual([
+      utc("2026-11-01T05:30:00Z"),
+      utc("2026-11-01T05:45:00Z"),
+      utc("2026-11-01T06:00:00Z"),
+      utc("2026-11-01T06:15:00Z"),
+      utc("2026-11-01T06:30:00Z"),
+      utc("2026-11-01T06:45:00Z"),
+    ])
+  })
+
+  test("understands the nicknames", () => {
+    // 23:30 in Tokyo: midnight is half an hour away.
+    const from = utc("2026-09-17T14:30:45Z")
+    expect(nextCronRunsIn("@daily", "Asia/Tokyo", 1, from)).toEqual([utc("2026-09-17T15:00:00Z")])
+    expect(nextCronRunsIn("@hourly", "UTC", 2, from)).toEqual([
+      utc("2026-09-17T15:00:00Z"),
+      utc("2026-09-17T16:00:00Z"),
+    ])
+    expect(nextCronRunsIn("@weekly", "UTC", 1, from)).toEqual([utc("2026-09-20T00:00:00Z")])
+  })
+
+  test("returns nothing it cannot honestly say", () => {
+    const from = utc("2026-09-17T14:30:45Z")
+    expect(nextCronRunsIn("@reboot", "UTC", 3, from)).toEqual([])
+    expect(nextCronRunsIn("0 0 30 2 *", "UTC", 3, from)).toEqual([])
+    expect(nextCronRunsIn("0 3 * * *", "Not/AZone", 3, from)).toEqual([])
+  })
+
+  test("agrees with the browser's own walk in the browser's zone", () => {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    const from = new Date(2026, 8, 17, 14, 30, 45)
+    for (const expression of ["*/15 * * * *", "0 3 * * *", "0 9 * * 1", "0 0 1 * *"]) {
+      expect(nextCronRunsIn(expression, zone, 1, from)).toEqual([nextCronRun(expression, from)])
+    }
   })
 })

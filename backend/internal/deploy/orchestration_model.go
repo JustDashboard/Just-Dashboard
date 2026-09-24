@@ -69,6 +69,9 @@ type EngineRun struct {
 	Priority           int             `json:"priority"`
 	SlotClass          SlotClass       `json:"slotClass"`
 	Metadata           json.RawMessage `json:"metadata"`
+	// CurrentStep is filled by the list reads for a run that has not ended,
+	// so a row can show its stage without loading the run's snapshot.
+	CurrentStep *CurrentStep `json:"currentStep,omitempty"`
 }
 
 type RunStep struct {
