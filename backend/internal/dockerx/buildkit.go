@@ -96,12 +96,13 @@ func (c *Client) BuildImmutable(
 	if err != nil {
 		return ImmutableImage{}, err
 	}
-	buildCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	buildCtx, cancel := context.WithTimeout(ctx, buildTimeout)
 	defer cancel()
 	cmd := hostexec.CommandInDir(buildCtx, opts.Dir, "docker", args...)
 	cmd.Env = environment
-	if err := runGroupStream(buildCtx, cmd, out); err != nil {
-		return ImmutableImage{}, err
+	reader := newBuildFailureReader()
+	if err := runGroupStream(buildCtx, cmd, out, reader); err != nil {
+		return ImmutableImage{}, buildRunError(ctx, buildCtx, err)
 	}
 	var buildMetadata map[string]any
 	if raw, err := os.ReadFile(metadataPath); err == nil {
@@ -175,23 +176,38 @@ func scrubBuildEnvironment(source []string) []string {
 	return result
 }
 
-func runGroupStream(ctx context.Context, cmd *exec.Cmd, out chan<- LogLine) error {
-	stdout, err := cmd.StdoutPipe()
+// buildTimeout is how long one buildx run may take. A release build of a
+// large Rust, Gradle or monorepo project on a small server approaches it.
+const buildTimeout = 30 * time.Minute
+
+func runGroupStream(ctx context.Context, cmd *exec.Cmd, out chan<- LogLine, failure *buildFailureReader) error {
+	// Plain pipes rather than StdoutPipe: Wait closes a StdoutPipe as soon as
+	// the process exits, which can drop the last lines still buffered in it,
+	// and BuildKit's last lines are the ones that name the failure.
+	stdout, stdoutWriter, err := os.Pipe()
 	if err != nil {
 		return err
 	}
-	stderr, err := cmd.StderrPipe()
+	defer stdout.Close()
+	stderr, stderrWriter, err := os.Pipe()
 	if err != nil {
+		stdoutWriter.Close()
 		return err
 	}
+	defer stderr.Close()
+	cmd.Stdout, cmd.Stderr = stdoutWriter, stderrWriter
 	var wg sync.WaitGroup
 	wg.Add(2)
 	scan := func(reader io.Reader, stream string) {
 		defer wg.Done()
+		// Whatever stops the scanner, the pipe keeps being read so the build
+		// never blocks writing to it.
+		defer io.Copy(io.Discard, reader)
 		scanner := bufio.NewScanner(reader)
 		scanner.Buffer(make([]byte, 0, 64*1024), maxLogLine)
 		for scanner.Scan() {
 			line := LogLine{Stream: stream, Text: strings.TrimRight(scanner.Text(), "\r")}
+			failure.observe(line.Text)
 			if out == nil {
 				continue
 			}
@@ -205,12 +221,19 @@ func runGroupStream(ctx context.Context, cmd *exec.Cmd, out chan<- LogLine) erro
 	go scan(stdout, "stdout")
 	go scan(stderr, "stderr")
 	result, runErr := hostexec.RunGroup(ctx, cmd, 5*time.Second)
+	// The child's copies closed when it exited; closing these ends the reads.
+	stdoutWriter.Close()
+	stderrWriter.Close()
 	wg.Wait()
+	var exit *exec.ExitError
+	if errors.As(runErr, &exit) {
+		return failure.failure(exit.ExitCode())
+	}
 	if runErr != nil {
 		return runErr
 	}
 	if result.ExitCode != 0 {
-		return fmt.Errorf("docker buildx exited with code %d", result.ExitCode)
+		return failure.failure(result.ExitCode)
 	}
 	return nil
 }
