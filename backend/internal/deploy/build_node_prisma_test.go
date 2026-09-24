@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -208,4 +209,42 @@ func TestSchemaToolFollowsPrismasDeclaredSchemaPath(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The incident repository once its lockfile question is settled: Prisma 7's
+// prisma.config.ts reads DATABASE_URL through env(), and the build script
+// runs `bunx prisma generate` before `next build`. Nothing is bound, as on a
+// first import, and the build still generates the client in every step.
+func TestIncidentRepositoryGeneratesPrismaWithoutADatabaseValue(t *testing.T) {
+	t.Parallel()
+	tree := incidentTree(t)
+	tree["prisma.config.ts"] = prisma7Config
+	root := writeNodeTree(t, tree)
+	result, err := (Detector{}).DetectPath(context.Background(), root, SourceIdentity{Kind: SourceGit, Revision: strings.Repeat("a", 40)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := result.Candidates[0]
+	if candidate.NodeVersion != "22 (recipe default)" || candidate.NodeBuild == nil || candidate.NodeBuild.MemoryMiB != 2048 {
+		t.Fatalf("candidate = node %q build %+v", candidate.NodeVersion, candidate.NodeBuild)
+	}
+	bun := candidate.NodeInstalls[slices.IndexFunc(candidate.NodeInstalls, func(install DetectedNodeInstall) bool { return install.Manager == "bun" })]
+	for _, code := range []string{"prisma_generate_added", "prisma_config_env", "node_version_selected"} {
+		if findingByCode(bun.Findings, code) == nil {
+			t.Fatalf("bun install findings %+v lack %s", bun.Findings, code)
+		}
+	}
+	prepared, err := NewArtifactBuilder(&artifactBackendFake{}).Prepare(context.Background(), root, BuildPlanConfig{
+		Method: BuildRecipe, Recipe: "node", BuildCommand: candidate.BuildCommand, StartCommand: candidate.StartCommand,
+	}, false, "t:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	database := `DATABASE_URL="${DATABASE_URL:-postgresql://127.0.0.1:5432/prisma-generate}"`
+	assertDockerfile(t, prepared.DockerfilePreview, []string{
+		"RUN apk add --no-cache openssl\n",
+		"RUN export " + database + " && bun install --frozen-lockfile\n",
+		"RUN export " + database + " && bunx prisma generate\n",
+		nodeBuildRunWith("", database, "bun run build\n"),
+	}, nil)
 }

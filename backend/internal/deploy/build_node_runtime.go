@@ -50,10 +50,7 @@ func nodeImage(major int, family string) string {
 	if family == nodeFamilyGlibc {
 		key += "-glibc"
 	}
-	if images := recipeBaseCatalogue[key]; len(images) > 0 {
-		return images[0]
-	}
-	return recipeBaseCatalogue["node:npm"][0]
+	return recipeBaseCatalogue[key][0]
 }
 
 // bunImage is the Bun image a release is copied from: the Alpine build for
@@ -294,12 +291,13 @@ func (r nodeRelease) label() string {
 }
 
 var (
-	nodeExactSpecRE = regexp.MustCompile(`^v?([0-9]+)(?:\.[0-9]+){0,2}$`)
+	nodeExactSpecRE = regexp.MustCompile(`^v?([0-9]+)(?:\.(?:[0-9]+|x|\*)){0,2}$`)
 	nodeMinorLineRE = regexp.MustCompile(`^[0-9]+\.[0-9]+$`)
 )
 
 // nodeSpecMajor reads a version file's declaration as a major: 22,
-// v22.11.0, 22.11, lts/jod, lts/*, node. ok is false for anything else.
+// v22.11.0, 22.11, 22.x, lts/jod, lts/*, node. ok is false for anything
+// else.
 func nodeSpecMajor(spec string) (int, bool) {
 	spec = strings.ToLower(strings.TrimSpace(spec))
 	if match := nodeExactSpecRE.FindStringSubmatch(spec); match != nil {
@@ -345,15 +343,6 @@ func nearestNodeMajor(major int) int {
 	return nodeMajors[len(nodeMajors)-1]
 }
 
-func nodeMajorSupported(major int) bool {
-	for _, candidate := range nodeMajors {
-		if candidate == major {
-			return true
-		}
-	}
-	return false
-}
-
 // rangeLowMajor is the major a range starts at, for choosing the nearest
 // catalogue major to a range none of them satisfies.
 func rangeLowMajor(spec string) int {
@@ -380,7 +369,7 @@ func selectNodeRelease(facts nodeRuntimeFacts) nodeRelease {
 				continue
 			}
 			release := nodeRelease{major: major, source: declaration.source, exact: true}
-			if !nodeMajorSupported(major) {
+			if !slices.Contains(nodeMajors, major) {
 				release.major, release.declared = nearestNodeMajor(major), declaration.spec
 			}
 			return release
@@ -393,7 +382,7 @@ func selectNodeRelease(facts nodeRuntimeFacts) nodeRelease {
 		switch {
 		case len(majors) == 0:
 			release.major, release.declared = nearestNodeMajor(rangeLowMajor(declaration.spec)), declaration.spec
-		case containsInt(majors, nodeDefaultMajor):
+		case slices.Contains(majors, nodeDefaultMajor):
 			release.major = nodeDefaultMajor
 		default:
 			release.major = majors[len(majors)-1]
@@ -401,15 +390,6 @@ func selectNodeRelease(facts nodeRuntimeFacts) nodeRelease {
 		return release
 	}
 	return nodeRelease{major: nodeDefaultMajor, source: "recipe default"}
-}
-
-func containsInt(values []int, wanted int) bool {
-	for _, value := range values {
-		if value == wanted {
-			return true
-		}
-	}
-	return false
 }
 
 // nodeBunRelease is the Bun image release a declaration outside
@@ -503,7 +483,7 @@ func planNodeRelease(facts nodeInstallFacts, plan *nodeInstallPlan) {
 	release := plan.node
 	major := strconv.Itoa(release.major)
 	plan.findings = append(plan.findings, nodeFinding("node_version_selected", PreflightPass,
-		"Node "+major+" builds and runs this package", release.label(),
+		"Node "+major+" for this package", release.label(),
 		"The build and the server run on "+nodeImage(release.major, plan.family)+". A version file (.nvmrc, .node-version, .tool-versions) or package.json (volta, devEngines, engines) chooses the major; without one the recipe's default does.",
 		"", "configuration.build"))
 	mismatch := false
@@ -629,26 +609,35 @@ func nodeGitSource(spec string) (cloned, ssh bool) {
 }
 
 // gitDependencies lists the packages the install clones, from the package's
-// and its workspace root's manifests and from npm's lockfile.
-func (f nodeInstallFacts) gitDependencies() (names []string, ssh bool) {
-	set := map[string]bool{}
+// and its workspace root's manifests and from npm's lockfile, and those it
+// clones over SSH; a lockfile that resolves one over SSH without naming
+// which is counted as the lockfile.
+func (f nodeInstallFacts) gitDependencies() (names, ssh []string) {
+	cloned, overSSH := map[string]bool{}, map[string]bool{}
 	for _, manifest := range []nodeInstallManifest{f.manifest, f.settings} {
 		for _, kind := range []map[string]string{manifest.Dependencies, manifest.DevDependencies, manifest.OptionalDependencies} {
 			for name, spec := range kind {
-				if cloned, overSSH := nodeGitSource(spec); cloned {
-					set[name] = true
-					ssh = ssh || overSSH
+				if git, viaSSH := nodeGitSource(spec); git {
+					cloned[name] = true
+					overSSH[name] = overSSH[name] || viaSSH
 				}
 			}
 		}
 	}
 	for _, reading := range f.readings {
 		for _, name := range reading.git {
-			set[name] = true
+			cloned[name] = true
 		}
-		ssh = ssh || reading.gitSSH
+		if reading.gitSSH {
+			overSSH[reading.Path] = true
+		}
 	}
-	return sortedNames(set), ssh
+	for name, viaSSH := range overSSH {
+		if !viaSSH {
+			delete(overSSH, name)
+		}
+	}
+	return sortedNames(cloned), sortedNames(overSSH)
 }
 
 // nodeImagePlan is what the image adds to the install: the family, the
@@ -747,10 +736,10 @@ func planNodeImage(facts nodeInstallFacts, plan *nodeInstallPlan, glibc []string
 		plan.findings = append(plan.findings, nodeFinding("git_dependencies", PreflightPass,
 			"Git dependencies are cloned", strings.Join(boundedNames(names), ", "),
 			"The package manager clones these from Git, which the Node image lacks; the build stage installs git.", "", "configuration.build"))
-		if ssh {
+		if len(ssh) > 0 {
 			add(build, nodeSSH)
 			plan.findings = append(plan.findings, nodeFinding("git_dependency_credentials", PreflightWarning,
-				"A Git dependency is fetched over SSH", strings.Join(boundedNames(names), ", "),
+				"A Git dependency is fetched over SSH", strings.Join(boundedNames(ssh), ", "),
 				"The build has no SSH key or known host, so cloning a repository over SSH fails unless the package manager fetches it over HTTPS instead.",
 				"Use an https:// URL — for a private repository with a token variable mapped to the install step — or publish the package to a registry.", "configuration.build"))
 		}

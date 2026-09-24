@@ -132,9 +132,6 @@ func requiredEnvKeys(body string) []string {
 			flush(index)
 			entryStart = index + 1
 		}
-		if index > 32<<10 {
-			break
-		}
 	}
 	return keys
 }
@@ -257,18 +254,22 @@ func boundToBuild(secrets []BuildSecretConfig) map[string]bool {
 	return bound
 }
 
-// nodeHeavyBuilds are frameworks and packages whose production build peaks
-// around 2 GiB; other frameworks around 1 GiB, and a plain TypeScript or
-// bundler build around 512 MiB. The figures are upstream experience, used
-// only to warn before a build on a host that cannot give them.
-var nodeHeavyBuilds = []string{"nextjs", "nuxt", "angular", "gatsby", "docusaurus", "@strapi/strapi", "payload"}
+// nodeHeavyBuilds are frameworks, and nodeHeavyPackages packages, whose
+// production build peaks around 2 GiB; other frameworks peak around 1 GiB,
+// and a plain TypeScript or bundler build around 512 MiB. The figures are
+// upstream experience, used only to warn before a build on a host that
+// cannot give them.
+var (
+	nodeHeavyBuilds   = []string{"nextjs", "nuxt", "angular", "gatsby", "docusaurus"}
+	nodeHeavyPackages = []string{"@strapi/strapi", "payload"}
+)
 
 // nodeBuildMemoryMiB estimates the peak memory of a package's build.
 func nodeBuildMemoryMiB(framework, build string, facts nodeInstallFacts) int {
 	switch {
 	case strings.TrimSpace(build) == "":
 		return 0
-	case slices.Contains(nodeHeavyBuilds, framework) || facts.present("@strapi/strapi") || facts.present("payload"):
+	case slices.Contains(nodeHeavyBuilds, framework) || slices.ContainsFunc(nodeHeavyPackages, facts.present):
 		return 2048
 	case framework != "":
 		return 1024

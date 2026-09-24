@@ -182,7 +182,7 @@ func TestNodeReleaseDeclarationsAreReadAsData(t *testing.T) {
 		major int
 		ok    bool
 	}{
-		{"22", 22, true}, {"v24.1.0", 24, true}, {"20.11", 20, true}, {"lts/jod", 22, true}, {"lts/krypton", 24, true},
+		{"22", 22, true}, {"v24.1.0", 24, true}, {"20.11", 20, true}, {"22.x", 22, true}, {"lts/jod", 22, true}, {"lts/krypton", 24, true},
 		{"lts/*", nodeNewestLTS, true}, {"node", 24, true}, {"lts/unknown", 0, false}, {"system", 0, false}, {">=20", 0, false},
 	} {
 		if major, ok := nodeSpecMajor(test.spec); major != test.major || ok != test.ok {

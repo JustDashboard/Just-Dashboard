@@ -823,11 +823,7 @@ func (p nodeInstallPlan) baseImages(static bool) []string {
 
 // nodeImage is the catalogue Node image the plan builds on.
 func (p nodeInstallPlan) nodeImage() string {
-	major := p.node.major
-	if major == 0 {
-		major = nodeDefaultMajor
-	}
-	return nodeImage(major, p.family)
+	return nodeImage(p.node.major, p.family)
 }
 
 // nodeInstallChoice is what the plan is asked for.
