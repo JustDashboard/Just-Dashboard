@@ -3,7 +3,6 @@ package deploy
 import (
 	"fmt"
 	"sort"
-	"strings"
 )
 
 // DiagnosisSeverity orders findings by what an operator must do about them.
@@ -399,7 +398,9 @@ func lastDeployFailed(input DiagnosisInput) *DiagnosisFinding {
 	}
 	title := "The last deployment failed"
 	if cause := causeTitle(run.TerminalCode); cause != "" {
-		title = "The last deployment failed: " + strings.ToLower(cause[:1]) + cause[1:]
+		// The cause's own title, as written: many begin with a name —
+		// COPY, PHP, Gemfile.lock, Docker — that lowercasing would break.
+		title += " — " + cause
 	}
 	finding := DiagnosisFinding{
 		Code: "last_deploy_failed", Severity: DiagnosisWarning, Title: title,

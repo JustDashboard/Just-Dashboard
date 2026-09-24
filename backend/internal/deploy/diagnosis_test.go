@@ -261,7 +261,7 @@ func TestDiagnosisNamesTheLastFailedDeployment(t *testing.T) {
 	}
 	finding := never.Findings[0]
 	if finding.Code != "last_deploy_failed" || finding.Severity != DiagnosisCritical ||
-		finding.Title != "The last deployment failed: lockfile out of sync" ||
+		finding.Title != "The last deployment failed — Lockfile out of sync" ||
 		finding.DeepLink != "/deploy/9/runs/41" || !strings.Contains(finding.Measured, "package-lock.json") {
 		t.Fatalf("finding = %+v", finding)
 	}
@@ -273,6 +273,19 @@ func TestDiagnosisNamesTheLastFailedDeployment(t *testing.T) {
 	if len(diagnosis.Findings) != 1 || diagnosis.Findings[0].Severity != DiagnosisWarning ||
 		!strings.Contains(diagnosis.Findings[0].Measured, "runtime_env_missing") {
 		t.Fatalf("live diagnosis = %+v", diagnosis.Findings)
+	}
+
+	for code, want := range map[string]string{
+		"build_copy_source_missing":     "The last deployment failed — COPY source missing",
+		"build_php_extension_missing":   "The last deployment failed — PHP extension missing",
+		"build_bundle_platform_missing": "The last deployment failed — Gemfile.lock lacks Linux",
+		"builder_missing":               "The last deployment failed — Docker Buildx missing",
+		"internal_error":                "The last deployment failed",
+	} {
+		named := Diagnose(DiagnosisInput{ProjectID: 9, LastRun: &EngineRun{ID: 44, State: RunFailed, TerminalCode: code}})
+		if len(named.Findings) != 1 || named.Findings[0].Title != want {
+			t.Fatalf("%s titled %+v, want %q", code, named.Findings, want)
+		}
 	}
 
 	replaced := healthyDiagnosisInput()
