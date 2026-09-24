@@ -43,7 +43,17 @@ export function DetectionProposalPanel({
     (variable) => variable.required || proposal.newVariables.includes(variable.name),
   )
   const detected = proposal.candidate
-  if (changes.length === 0 && unset.length === 0 && proposal.databases.length === 0) {
+  const detectedName = detected
+    ? `${detected.framework ? frameworkLabel(detected.framework) : detected.name}${
+        detected.root ? ` in ${detected.root}` : ""
+      }`
+    : ""
+  if (
+    !proposal.elsewhere &&
+    changes.length === 0 &&
+    unset.length === 0 &&
+    proposal.databases.length === 0
+  ) {
     return (
       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-hairline p-3 text-body">
         <span className="min-w-0 flex-1">
@@ -67,12 +77,25 @@ export function DetectionProposalPanel({
         <div className="min-w-0 flex-1 space-y-0.5">
           <p className="text-body font-medium">{title}</p>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            {detected
-              ? `Read ${detected.framework ? frameworkLabel(detected.framework) : detected.name}${
-                  detected.root ? ` in ${detected.root}` : ""
-                }${proposal.sourceRevision ? ` at ${proposal.sourceRevision.slice(0, 7)}` : ""}.`
-              : "Detection found nothing to compare with the plan."}{" "}
-            Applying changes the settings below; a deployment takes them once they are saved.
+            {proposal.elsewhere && detected ? (
+              // Another directory's or builder's commands would be wrong
+              // here even where they differ, so none is offered.
+              <>
+                Detection found nothing at this plan&apos;s root directory that builds the way the
+                plan does; it reads {detectedName} instead
+                {proposal.sourceRevision ? ` at ${proposal.sourceRevision.slice(0, 7)}` : ""}.
+                Change the root directory or builder in Build settings to build that.
+              </>
+            ) : (
+              <>
+                {detected
+                  ? `Read ${detectedName}${
+                      proposal.sourceRevision ? ` at ${proposal.sourceRevision.slice(0, 7)}` : ""
+                    }.`
+                  : "Detection found nothing to compare with the plan."}{" "}
+                Applying changes the settings below; a deployment takes them once they are saved.
+              </>
+            )}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">

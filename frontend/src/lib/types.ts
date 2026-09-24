@@ -3688,6 +3688,12 @@ export type DeploymentDetectionProposal = {
   revision: number
   sourceRevision?: string
   candidate?: DeploymentDetectionCandidate
+  /**
+   * Detection found nothing at the plan's root that builds the plan's way:
+   * `candidate` is what it selected instead, for information, and no field
+   * is compared with it.
+   */
+  elsewhere?: boolean
   changes: DeploymentDetectionChange[]
   variables: DeploymentDetectedVariable[]
   newVariables: string[]

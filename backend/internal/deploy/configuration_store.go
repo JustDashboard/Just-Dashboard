@@ -1522,7 +1522,7 @@ func redetectBuildPlanTx(
 		return nil, err
 	}
 	stored := plannedDetectionCandidate(&DetectionResult{Candidates: previous.Candidates}, build)
-	proposal := detectionProposal(stored, detectionCandidateFor(&detection, build), build, runtime, nil)
+	proposal := detectionProposal(stored, &detection, build, runtime, nil)
 	proposal.SourceRevision = detection.Source.Revision
 	return &proposal, nil
 }

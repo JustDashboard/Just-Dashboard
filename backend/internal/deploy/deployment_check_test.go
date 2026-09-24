@@ -352,3 +352,55 @@ func TestDeploymentCheckerWithoutItsModulesSaysSo(t *testing.T) {
 		t.Fatalf("detect without a source analyzer = %v", err)
 	}
 }
+
+// A proposal compares the plan with what detection finds at the plan's own
+// root building the plan's way. Another directory's candidate is named for
+// information with nothing offered, and a command detection could not tell
+// is never proposed as clearing the plan's.
+func TestDetectionProposalComparesOnlyThePlansOwnRoot(t *testing.T) {
+	build := BuildPlanConfig{
+		Method: BuildRecipe, Recipe: "node", RootDirectory: "apps/web",
+		BuildCommand: "npm run build", StartCommand: "npm start",
+	}
+	runtime := RuntimePlanConfig{InternalPort: 3000}
+	web := newDetectedCandidate("apps/web", BuildRecipe, DetectedCandidate{
+		Name: "web", Recipe: "node", Confidence: ConfidenceHigh, Port: 3000,
+		BuildCommand: "npm run build", NeedsDecision: []string{"choose a start command"},
+		Variables: []DetectedVariable{{Name: "API_URL", Sources: []string{"apps/web/src/api.ts"}}},
+	})
+	docs := newDetectedCandidate("apps/docs", BuildRecipe, DetectedCandidate{
+		Name: "docs", Recipe: "node", Confidence: ConfidenceHigh, Port: 4321,
+		BuildCommand: "pnpm run build", StartCommand: "pnpm start", PackageManager: "pnpm",
+		Variables: []DetectedVariable{{Name: "DOCS_TOKEN", Sources: []string{"apps/docs/src/a.ts"}}},
+	})
+
+	proposal := detectionProposal(nil, &DetectionResult{Candidates: []DetectedCandidate{web, docs}, SelectedID: docs.ID},
+		build, runtime, map[string]bool{})
+	if proposal.Elsewhere || proposal.Candidate == nil || proposal.Candidate.ID != web.ID {
+		t.Fatalf("the plan's own root was not compared: %#v", proposal)
+	}
+	if len(proposal.Changes) != 0 {
+		t.Fatalf("an unknown start command was proposed as clearing the plan's: %#v", proposal.Changes)
+	}
+	if len(proposal.Variables) != 1 || proposal.Variables[0].Name != "API_URL" {
+		t.Fatalf("variables = %#v", proposal.Variables)
+	}
+
+	proposal = detectionProposal(nil, &DetectionResult{Candidates: []DetectedCandidate{docs}, SelectedID: docs.ID},
+		build, runtime, map[string]bool{})
+	if !proposal.Elsewhere || proposal.Candidate == nil || proposal.Candidate.ID != docs.ID ||
+		len(proposal.Changes) != 0 || len(proposal.Variables) != 0 || len(proposal.Databases) != 0 {
+		t.Fatalf("another directory's settings were offered for the plan: %#v", proposal)
+	}
+
+	// The same directory built another way still reads the same variables.
+	dockerfile := newDetectedCandidate("apps/web", BuildDockerfile, DetectedCandidate{
+		Name: "web image", Confidence: ConfidenceHigh, Port: 8080,
+		Variables: []DetectedVariable{{Name: "API_URL", Sources: []string{"apps/web/src/api.ts"}}},
+	})
+	proposal = detectionProposal(nil, &DetectionResult{Candidates: []DetectedCandidate{dockerfile}, SelectedID: dockerfile.ID},
+		build, runtime, map[string]bool{})
+	if !proposal.Elsewhere || len(proposal.Changes) != 0 || len(proposal.Variables) != 1 {
+		t.Fatalf("a Dockerfile at the plan's root = %#v", proposal)
+	}
+}

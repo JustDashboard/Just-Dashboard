@@ -347,8 +347,12 @@ only renderer/executor/validation authority for their feature.
   set explicitly, build and start commands, output directory, single-page fallback, Go main package,
   port), what the plan saves, what detection proposes now, what it proposed when the plan was saved and
   whether it `changed`, plus the variables and databases the source reads that the plan does not set.
-  Settings → Source shows the changed fields as "Detection changed", each applied through the ordinary
-  configuration save. `POST …/detect` (a settings write's capability, audited as
+  Only the candidate at the plan's root building the plan's way is compared; when there is none the
+  proposal names what detection selected instead with `elsewhere` and offers no field (its commands
+  describe another directory or builder). A command detection could not tell is never proposed as
+  clearing the plan's. Settings → Source shows the changed fields as "Detection changed", each applied
+  onto the configuration the proposal was compared with under the proposal's `revision`, so a plan
+  saved since refuses the apply. `POST …/detect` (a settings write's capability, audited as
   `deploy.source.detect`) reads the source again without writing, and Build settings' **Detect again**
   shows the same proposal, marks each field that differs and applies into the form's draft.
 - Normalized build execution uses the project-owned versioned recipe set or an explicit Dockerfile,

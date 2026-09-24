@@ -24,7 +24,12 @@ type DetectionProposal struct {
 	Revision       int                `json:"revision"`
 	SourceRevision string             `json:"sourceRevision,omitempty"`
 	Candidate      *DetectedCandidate `json:"candidate,omitempty"`
-	Changes        []DetectionChange  `json:"changes"`
+	// Elsewhere says detection found nothing at the plan's root that builds
+	// the plan's way. Candidate is then what it selected instead, shown for
+	// information: its commands, output and port describe another directory
+	// or builder, so none of them is offered for the plan.
+	Elsewhere bool              `json:"elsewhere,omitempty"`
+	Changes   []DetectionChange `json:"changes"`
 	// Variables are the names the source reads that the plan does not set;
 	// NewVariables are those detection had not read when the plan was saved.
 	Variables    []DetectedVariable `json:"variables"`
@@ -47,11 +52,13 @@ type DetectionChange struct {
 	Changed  bool   `json:"changed"`
 }
 
-// detectionProposal compares the saved plan with fresh detection. stored is
-// what detection proposed for the plan's root and method when the plan was
-// saved, nil when nothing was stored.
+// detectionProposal compares the saved plan with fresh detection: with the
+// candidate detection finds at the plan's root building the plan's way, and
+// no other. stored is what detection proposed for that root and method when
+// the plan was saved, nil when nothing was stored.
 func detectionProposal(
-	stored, fresh *DetectedCandidate,
+	stored *DetectedCandidate,
+	detection *DetectionResult,
 	build BuildPlanConfig,
 	runtime RuntimePlanConfig,
 	configured map[string]bool,
@@ -60,7 +67,19 @@ func detectionProposal(
 		Changes: []DetectionChange{}, Variables: []DetectedVariable{}, NewVariables: []string{},
 		Databases: []DetectedDatabase{},
 	}
+	fresh := plannedDetectionCandidate(detection, build)
 	if fresh == nil {
+		selected := selectedDetectionCandidate(detection)
+		if selected == nil {
+			return proposal
+		}
+		copied := *selected
+		proposal.Candidate, proposal.Elsewhere = &copied, true
+		// The same directory's code reads the same variables whichever way
+		// it is built; another directory's say nothing about this one.
+		if sameBuildRoot(selected.Root, build.RootDirectory) {
+			proposeDetectedNames(&proposal, stored, selected, configured)
+		}
 		return proposal
 	}
 	copied := *fresh
@@ -76,33 +95,46 @@ func detectionProposal(
 		}
 		proposal.Changes = append(proposal.Changes, change)
 	}
-	if fresh.BuildMethod == build.Method {
-		if fresh.BuildMethod == BuildRecipe {
-			// "Lockfile decides" already follows whatever the lockfile says.
-			if build.PackageManager != "" && fresh.PackageManager != "" {
-				compare("build.packageManager", "Package manager", build.PackageManager, fresh.PackageManager,
-					func(c *DetectedCandidate) string { return c.PackageManager })
-			}
-			compare("build.buildCommand", "Build command", build.BuildCommand, fresh.BuildCommand,
-				func(c *DetectedCandidate) string { return c.BuildCommand })
-			compare("build.startCommand", "Start command", build.StartCommand, fresh.StartCommand,
-				func(c *DetectedCandidate) string { return c.StartCommand })
-			if build.GoPackage != "" && fresh.GoPackage != "" {
-				compare("build.goPackage", "Go main package", build.GoPackage, fresh.GoPackage,
-					func(c *DetectedCandidate) string { return c.GoPackage })
-			}
+	// An empty command from detection means it could not tell — the start
+	// command is asked for, a build step may be run from a script it does
+	// not read — never that the plan's command should go.
+	compareCommand := func(field, label, saved, detected string, previous func(*DetectedCandidate) string) {
+		if detected != "" {
+			compare(field, label, saved, detected, previous)
 		}
-		if fresh.BuildMethod == BuildRecipe || fresh.BuildMethod == BuildStatic {
-			compare("build.outputDirectory", "Output directory", build.OutputDirectory, fresh.OutputDirectory,
-				func(c *DetectedCandidate) string { return c.OutputDirectory })
-			compare("build.spaFallback", "Single-page fallback", strconv.FormatBool(build.SPAFallback),
-				strconv.FormatBool(fresh.SPAFallback), func(c *DetectedCandidate) string { return strconv.FormatBool(c.SPAFallback) })
+	}
+	if fresh.BuildMethod == BuildRecipe {
+		// "Lockfile decides" already follows whatever the lockfile says.
+		if build.PackageManager != "" && fresh.PackageManager != "" {
+			compare("build.packageManager", "Package manager", build.PackageManager, fresh.PackageManager,
+				func(c *DetectedCandidate) string { return c.PackageManager })
 		}
+		compareCommand("build.buildCommand", "Build command", build.BuildCommand, fresh.BuildCommand,
+			func(c *DetectedCandidate) string { return c.BuildCommand })
+		compareCommand("build.startCommand", "Start command", build.StartCommand, fresh.StartCommand,
+			func(c *DetectedCandidate) string { return c.StartCommand })
+		if build.GoPackage != "" && fresh.GoPackage != "" {
+			compare("build.goPackage", "Go main package", build.GoPackage, fresh.GoPackage,
+				func(c *DetectedCandidate) string { return c.GoPackage })
+		}
+	}
+	if fresh.BuildMethod == BuildRecipe || fresh.BuildMethod == BuildStatic {
+		compare("build.outputDirectory", "Output directory", build.OutputDirectory, fresh.OutputDirectory,
+			func(c *DetectedCandidate) string { return c.OutputDirectory })
+		compare("build.spaFallback", "Single-page fallback", strconv.FormatBool(build.SPAFallback),
+			strconv.FormatBool(fresh.SPAFallback), func(c *DetectedCandidate) string { return strconv.FormatBool(c.SPAFallback) })
 	}
 	if fresh.Port > 0 {
 		compare("runtime.internalPort", "Port", strconv.Itoa(runtime.InternalPort), strconv.Itoa(fresh.Port),
 			func(c *DetectedCandidate) string { return strconv.Itoa(c.Port) })
 	}
+	proposeDetectedNames(&proposal, stored, fresh, configured)
+	return proposal
+}
+
+// proposeDetectedNames lists the variables and databases a candidate's code
+// reads that the plan does not set.
+func proposeDetectedNames(proposal *DetectionProposal, stored, fresh *DetectedCandidate, configured map[string]bool) {
 	known := map[string]bool{}
 	if stored != nil {
 		for _, variable := range stored.Variables {
@@ -123,20 +155,6 @@ func detectionProposal(
 			proposal.Databases = append(proposal.Databases, database)
 		}
 	}
-	return proposal
-}
-
-// detectionCandidateFor is the candidate a fresh detection proposes for a
-// plan: the one at the plan's root with its method, or else what detection
-// selected — a proposal is still owed when the method no longer fits.
-func detectionCandidateFor(detection *DetectionResult, build BuildPlanConfig) *DetectedCandidate {
-	if detection == nil {
-		return nil
-	}
-	if candidate := plannedDetectionCandidate(detection, build); candidate != nil {
-		return candidate
-	}
-	return selectedDetectionCandidate(detection)
 }
 
 // Detect reads the environment's source again — the branch head, or a local
@@ -174,8 +192,8 @@ func (c *DeploymentChecker) Detect(ctx context.Context, projectID, environmentID
 		detection = &DetectionResult{Source: plan.Identity, Candidates: plan.Evidence.Candidates}
 	}
 	stored := plannedDetectionCandidate(&DetectionResult{Candidates: plan.Evidence.Candidates}, plan.Configuration.Build)
-	proposal := detectionProposal(stored, detectionCandidateFor(detection, plan.Configuration.Build),
-		plan.Configuration.Build, plan.Configuration.Runtime, configuredVariableNames(plan.Configuration, nil))
+	proposal := detectionProposal(stored, detection, plan.Configuration.Build, plan.Configuration.Runtime,
+		configuredVariableNames(plan.Configuration, nil))
 	proposal.Revision, proposal.SourceRevision = revision, identity.Revision
 	return &proposal, nil
 }

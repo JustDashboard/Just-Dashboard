@@ -119,7 +119,6 @@ export function GeneralSettings({
                   environmentId={environmentId}
                   canEdit={canEdit}
                   configuration={configuration}
-                  save={state.save}
                   deployment={deployment}
                   repoPath={record.repoPath}
                   onSaved={() => {
@@ -391,7 +390,6 @@ function SourceForm({
   environmentId,
   canEdit,
   configuration,
-  save: saveConfiguration,
   deployment,
   repoPath,
   onSaved,
@@ -400,7 +398,6 @@ function SourceForm({
   environmentId: number
   canEdit: boolean
   configuration: DeploymentEnvironmentConfiguration
-  save: ReturnType<typeof useConfiguration>["save"]
   deployment: DeploymentSummary
   repoPath: string
   onSaved: () => void
@@ -430,16 +427,35 @@ function SourceForm({
   const [proposal, setProposal] = useState<DeploymentDetectionProposal>()
   const [applying, setApplying] = useState(false)
   const detectionChanges = (proposal?.changes ?? []).filter((change) => change.changed)
+  // Applied onto the plan detection was compared with, under that plan's
+  // revision: a plan saved since — another tab, another reader — refuses
+  // the save rather than taking values compared with a plan that is gone.
   const applyDetection = async (changes: DeploymentDetectionChange[]) => {
+    if (!proposal) return
     setApplying(true)
     try {
-      await saveConfiguration(
-        applyDetectionChanges(configuration.build, configuration.runtime, changes),
-      )
+      const path = `/deploy/${projectId}/environments/${environmentId}/configuration`
+      const compared = await get<DeploymentEnvironmentConfiguration>(path)
+      if (compared.revision !== proposal.revision)
+        throw new Error(
+          "The settings changed after detection read the source. Use Detect again in Build settings to compare with them.",
+        )
+      const next = applyDetectionChanges(compared.build, compared.runtime, changes)
+      const saved = await put<DeploymentEnvironmentConfiguration>(path, {
+        revision: proposal.revision,
+        build: next.build,
+        runtime: next.runtime,
+        dependencies: compared.dependencies,
+        checks: compared.checks,
+        domains: compared.domains,
+      })
+      // The rest of the proposal was compared with the plan this save
+      // started from, which it changed only where it applied.
       setProposal(
         (current) =>
           current && {
             ...current,
+            revision: saved.revision,
             changes: current.changes.filter((change) => !changes.includes(change)),
           },
       )

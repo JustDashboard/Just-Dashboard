@@ -922,7 +922,7 @@ function BuildForm({
             htmlFor="build-go-package"
             hint={
               proposedFor("build.goPackage") ??
-              (proposal?.candidate?.goMainPackages?.length
+              (proposal?.candidate?.goMainPackages?.length && !proposal.elsewhere
                 ? `Main packages: ${goMainPackageList(proposal.candidate)}.`
                 : "The directory of the command to build, such as cmd/api; empty lets the recipe choose.")
             }
