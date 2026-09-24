@@ -253,6 +253,14 @@ func TestVariablePhaseRequirednessAndBrowserInlining(t *testing.T) {
 			t.Fatalf("%s: required/build/inlined = %v, want %v", name, got, want)
 		}
 	}
+	prisma := detectFixture(t, map[string]string{
+		"package.json":      `{"scripts":{"build":"prisma generate && next build","start":"next start"},"dependencies":{"next":"16","@prisma/client":"7"},"devDependencies":{"prisma":"7"}}`,
+		"package-lock.json": `{}`,
+		"prisma.config.ts":  "import { defineConfig, env } from 'prisma/config'\nexport default defineConfig({ datasource: { url: env('DATABASE_URL') } })\n",
+	})
+	if variable, _ := variableNamed(prisma.Candidates[0].Variables, "DATABASE_URL"); !variable.Required || variable.Phase != "build" {
+		t.Fatalf("Prisma 7's config needs DATABASE_URL while the build runs: %+v", variable)
+	}
 	for _, builtin := range []string{"MODE", "BASE_URL", "DEV"} {
 		if _, ok := variableNamed(candidate.Variables, builtin); ok {
 			t.Fatalf("Vite's own %s was listed as a variable", builtin)

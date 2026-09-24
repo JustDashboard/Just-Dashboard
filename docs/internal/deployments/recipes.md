@@ -78,7 +78,8 @@ block. `required` marks a read with no default where the application starts or b
 subscript or default-less `env()`/`config()` at module level of a settings, config or entry module, a
 `BaseSettings` field with no default, Elixir `fetch_env!` or `|| raise` in `config/`, Rails
 `ENV.fetch` without a default in `config/`, a Spring or HOCON placeholder without a default, a Go
-`required` tag, a static env import, a t3, Astro or AdonisJS schema entry without `optional`.
+`required` tag, a static env import, Prisma 7's `env()` in `prisma.config.*` (which `prisma generate`
+loads during the build), a t3, Astro or AdonisJS schema entry without `optional`.
 `requiredRead` is the same form somewhere that may only run on one path. `localhostIn` names the
 committed file whose value points at loopback.
 

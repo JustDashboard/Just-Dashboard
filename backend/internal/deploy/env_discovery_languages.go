@@ -86,6 +86,7 @@ var (
 	astroEnvFieldRE     = regexp.MustCompile(`([A-Z][A-Z0-9_]+)\s*:\s*envField\.\w+\(\s*\{([^}]*)\}`)
 	adonisSchemaRE      = regexp.MustCompile(`([A-Z][A-Z0-9_]+)\s*:\s*Env\.schema\.\w+(\.optional)?\(`)
 	nuxtRuntimeConfigRE = regexp.MustCompile(`\bruntimeConfig\s*:\s*\{`)
+	prismaConfigEnvRE   = regexp.MustCompile(`\benv\(\s*['"]([A-Z][A-Z0-9_]+)['"]\s*\)`)
 
 	// HOST read next to a listen call is a bind address, not a public name.
 	hostBindContextRE = regexp.MustCompile(`\bPORT\b|\.listen\(|ListenAndServe|\.bind\(|bind_addr|SocketAddr|TcpListener|HttpServer::new|axum::serve|\bserve\(|\.run\(|uvicorn\.run|Kestrel|UseUrls`)
@@ -818,6 +819,13 @@ func (s *envScanner) scanJavaScript(rel, name string, content []byte) {
 		}
 		if strings.HasPrefix(name, "nuxt.config.") {
 			s.scanNuxtRuntimeConfig(rel, text)
+		}
+		// Prisma's config helper throws on a missing variable while the
+		// config loads, which `prisma generate` does during the build.
+		if strings.HasPrefix(name, "prisma.config.") && strings.Contains(text, "prisma/config") {
+			for _, match := range prismaConfigEnvRE.FindAllStringSubmatch(text, -1) {
+				s.recordRead(match[1], rel, "", envReadBuild|envReadRequired)
+			}
 		}
 		if strings.HasPrefix(name, "astro.config.") {
 			for _, match := range astroEnvFieldRE.FindAllStringSubmatch(text, -1) {
