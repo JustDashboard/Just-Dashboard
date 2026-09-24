@@ -231,6 +231,7 @@ func TestNodeRecipeAddsTheSystemPackagesDependenciesNeed(t *testing.T) {
 		want     []string
 		absent   []string
 		findings []string
+		lacks    []string
 	}{
 		{name: "bcrypt gets compilers in the build stage only", files: map[string]string{"package.json": manifest(`"dependencies":{"bcrypt":"^5.1.1"}`)},
 			config: server, findings: []string{"native_addon_toolchain"},
@@ -260,6 +261,22 @@ func TestNodeRecipeAddsTheSystemPackagesDependenciesNeed(t *testing.T) {
 		{name: "npm's lockfile names a transitive Git dependency", files: map[string]string{"package.json": manifest(`"dependencies":{"left-pad":"^1.3.0"}`),
 			"package-lock.json": `{"lockfileVersion":3,"packages":{"":{"dependencies":{"left-pad":"^1.3.0"}},"node_modules/left-pad":{"version":"1.3.0"},"node_modules/patched":{"version":"1.0.0","resolved":"git+https://github.com/owner/patched.git#0123456789abcdef0123456789abcdef01234567"}}}`},
 			config: server, findings: []string{"git_dependencies"}, want: []string{"RUN apk add --no-cache git\n"}},
+		{name: "a glibc image adds nothing to a lock written on glibc Linux", files: map[string]string{
+			"package.json":      manifest(`"dependencies":{"onnxruntime-node":"1.20.1","vite":"6.0.0"}`),
+			"package-lock.json": `{"lockfileVersion":3,"packages":{"":{"dependencies":{"onnxruntime-node":"1.20.1","vite":"6.0.0"}},"node_modules/onnxruntime-node":{"version":"1.20.1"},"node_modules/vite":{"version":"6.0.0"},"node_modules/rollup":{"version":"4.40.0","optionalDependencies":{"@rollup/rollup-linux-x64-musl":"4.40.0","@rollup/rollup-linux-x64-gnu":"4.40.0"}},"node_modules/@rollup/rollup-linux-x64-gnu":{"version":"4.40.0","optional":true}}}`},
+			config: BuildPlanConfig{BuildCommand: "npm run build", StartCommand: "npm run start", TargetPlatform: "linux/amd64"}, findings: []string{"glibc_image_selected"},
+			want: []string{"FROM node:22-bookworm-slim@sha256:", "RUN npm ci\n"}, absent: []string{"musl", "--no-save"}},
+		{name: "a glibc image adds the glibc binary the lock lacks", files: map[string]string{
+			"package.json":      manifest(`"dependencies":{"onnxruntime-node":"1.20.1","vite":"6.0.0"}`),
+			"package-lock.json": `{"lockfileVersion":3,"packages":{"":{"dependencies":{"onnxruntime-node":"1.20.1","vite":"6.0.0"}},"node_modules/onnxruntime-node":{"version":"1.20.1"},"node_modules/vite":{"version":"6.0.0"},"node_modules/rollup":{"version":"4.40.0","optionalDependencies":{"@rollup/rollup-linux-x64-musl":"4.40.0","@rollup/rollup-linux-x64-gnu":"4.40.0","@rollup/rollup-darwin-arm64":"4.40.0"}},"node_modules/@rollup/rollup-darwin-arm64":{"version":"4.40.0","optional":true}}}`},
+			config: BuildPlanConfig{BuildCommand: "npm run build", StartCommand: "npm run start", TargetPlatform: "linux/amd64"}, findings: []string{"glibc_image_selected", "optional_binary_missing"},
+			want: []string{"FROM node:22-bookworm-slim@sha256:", "RUN npm ci && npm install --no-save --no-audit --no-fund @rollup/rollup-linux-x64-gnu@4.40.0\n"}, absent: []string{"musl"}},
+		{name: "npm workspace links are not Git dependencies", files: map[string]string{
+			"package.json":                 `{"name":"root","private":true,"workspaces":["packages/*"],"scripts":{"build":"tsc","start":"node dist/index.js"},"dependencies":{"@acme/shared":"*","left-pad":"^1.3.0"}}`,
+			"packages/shared/package.json": `{"name":"@acme/shared","version":"1.0.0"}`,
+			"vendor/x/package.json":        `{"name":"x","version":"1.0.0"}`,
+			"package-lock.json":            `{"lockfileVersion":3,"packages":{"":{"name":"root","workspaces":["packages/*"],"dependencies":{"@acme/shared":"*","left-pad":"^1.3.0"}},"node_modules/@acme/shared":{"resolved":"packages/shared","link":true},"node_modules/x":{"resolved":"vendor/x","link":true},"node_modules/left-pad":{"version":"1.3.0","resolved":"https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz"},"packages/shared":{"name":"@acme/shared","version":"1.0.0"}}}`},
+			config: server, want: []string{"RUN npm ci\n"}, absent: []string{"apk add", "git"}, lacks: []string{"git_dependencies", "registry_host_private"}},
 		{name: "Prisma gets OpenSSL where it generates and where it runs", files: map[string]string{"package.json": manifest(`"dependencies":{"@prisma/client":"^6.2.0"},"devDependencies":{"prisma":"^6.2.0"}`)},
 			config: server, want: []string{" AS build\nRUN apk add --no-cache openssl\n", "\nRUN apk add --no-cache openssl\nWORKDIR /app\n"}},
 		{name: "puppeteer uses the image's Chromium", files: map[string]string{"package.json": manifest(`"dependencies":{"puppeteer":"^23.0.0"}`), "package-lock.json": npmLock},
@@ -285,6 +302,11 @@ func TestNodeRecipeAddsTheSystemPackagesDependenciesNeed(t *testing.T) {
 					t.Fatalf("findings %+v lack %s", plan.findings, code)
 				}
 			}
+			for _, code := range test.lacks {
+				if found := findingByCode(plan.findings, code); found != nil {
+					t.Fatalf("finding %+v was raised", *found)
+				}
+			}
 		})
 	}
 }
@@ -304,6 +326,20 @@ func TestNodeGitSourcesAreReadFromTheSpecification(t *testing.T) {
 	} {
 		if cloned, ssh := nodeGitSource(test.spec); cloned != test.cloned || ssh != test.ssh {
 			t.Fatalf("nodeGitSource(%q) = %t, %t", test.spec, cloned, ssh)
+		}
+	}
+	// A lockfile writes Git sources as URLs; there owner/repo is the path
+	// of a workspace package or a file: directory.
+	for _, test := range []struct {
+		resolved    string
+		cloned, ssh bool
+	}{
+		{"packages/shared", false, false}, {"vendor/x", false, false}, {"file:vendor/x.tgz", false, false},
+		{"git+ssh://git@github.com/owner/repo.git#0123", true, true}, {"git+https://github.com/owner/repo.git#0123", true, false},
+		{"github:owner/repo#0123", true, false}, {"https://registry.npmjs.org/a/-/a-1.0.0.tgz", false, false},
+	} {
+		if cloned, ssh := nodeGitURL(test.resolved); cloned != test.cloned || ssh != test.ssh {
+			t.Fatalf("nodeGitURL(%q) = %t, %t", test.resolved, cloned, ssh)
 		}
 	}
 }

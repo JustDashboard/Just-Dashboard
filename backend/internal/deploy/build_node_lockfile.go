@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,7 +52,24 @@ const (
 	LockfileUnknown = "unknown"
 )
 
-type nodeReadBudget struct{ remaining int64 }
+// nodeReadBudget bounds what one detection or one build preparation reads
+// for Node installs, and remembers what it has parsed: every workspace
+// member is compared against its workspace root's lockfile and siblings'
+// manifests, which are read and parsed once rather than once per member.
+type nodeReadBudget struct {
+	remaining int64
+	locks     map[string]nodeLockfileComparer
+	manifests map[string]nodeManifestReading
+}
+
+// nodeLockfileComparer compares a parsed lockfile with the package at own,
+// a path under the lockfile's directory.
+type nodeLockfileComparer func(own string) nodeLockfileReading
+
+type nodeManifestReading struct {
+	specs nodeDependencySpecs
+	ok    bool
+}
 
 func newNodeReadBudget() *nodeReadBudget { return &nodeReadBudget{remaining: nodeReadBudgetBytes} }
 
@@ -126,6 +144,39 @@ func (f nodeFiles) open(rel string, limit int64) (io.ReadCloser, error) {
 	}{io.LimitReader(file, limit), file}, nil
 }
 
+// openHead opens a file of which only the beginning may be parsed, and
+// charges the budget for the bytes actually read.
+func (f nodeFiles) openHead(rel string, limit int64) (io.ReadCloser, error) {
+	info, ok := f.stat(rel)
+	if !ok || !info.Mode().IsRegular() {
+		return nil, fs.ErrNotExist
+	}
+	if info.Size() > limit {
+		return nil, errNodeFileTooLarge
+	}
+	file, err := f.root.Open(f.name(rel))
+	if err != nil {
+		return nil, err
+	}
+	return struct {
+		io.Reader
+		io.Closer
+	}{nodeBudgetReader{io.LimitReader(file, limit), f.budget}, file}, nil
+}
+
+type nodeBudgetReader struct {
+	reader io.Reader
+	budget *nodeReadBudget
+}
+
+func (r nodeBudgetReader) Read(buffer []byte) (int, error) {
+	count, err := r.reader.Read(buffer)
+	if !r.budget.take(int64(count)) {
+		return 0, errNodeBudget
+	}
+	return count, err
+}
+
 func (f nodeFiles) read(rel string, limit int64) ([]byte, error) {
 	file, err := f.open(rel, limit)
 	if err != nil {
@@ -187,8 +238,10 @@ type nodePeerConflict struct {
 	Package, Peer, Range, Version string
 }
 
+// nodeOptionalBinary is a platform package an entry's optionalDependencies
+// name for Linux on one architecture and one C library: musl or glibc.
 type nodeOptionalBinary struct {
-	Name, Version, Arch string
+	Name, Version, Arch, Libc string
 }
 
 // nodeLockfileReading is what one lockfile says about the install.
@@ -210,17 +263,37 @@ type nodeLockfileReading struct {
 	names map[string]string
 }
 
-// nodeLockComparison accumulates one importer's differences.
+// nodeLockComparison accumulates one importer's differences. extrasAccepted
+// is npm's rule: npm ci installs what package.json asks for from the lock
+// and leaves out a locked dependency package.json no longer lists, where
+// Bun, pnpm and Yarn refuse the lock.
 type nodeLockComparison struct {
 	missing, extra, changed []string
 	missingTotal            int
 	stale, unknown          bool
+	extrasAccepted          bool
 }
 
 func (c *nodeLockComparison) add(list *[]string, name string) {
 	if len(*list) < nodeListedNames {
-		*list = append(*list, name)
+		*list = append(*list, nodeListedName(name))
 	}
+}
+
+// nodeListedName is a dependency name as a reading lists it: names are keys
+// of a repository's JSON and YAML, so one is cut to the bound a saved draft
+// validates and loses any line break that would make the draft malformed.
+func nodeListedName(name string) string {
+	name = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return '?'
+		}
+		return r
+	}, name)
+	if cut, truncated := truncateUTF8(name, 256); truncated {
+		return cut + "..."
+	}
+	return name
 }
 
 // compare checks one importer's locked specs against its manifest. locked
@@ -271,7 +344,7 @@ func (c *nodeLockComparison) compare(
 	sort.Strings(extras)
 	for _, name := range extras {
 		c.add(&c.extra, prefix+name)
-		c.stale = true
+		c.stale = c.stale || !c.extrasAccepted
 	}
 }
 
@@ -290,9 +363,13 @@ func (c *nodeLockComparison) reading(path, manager, format, version string) node
 	case c.unknown:
 		reading.State = LockfileUnknown
 		reading.Note = path + " records ranges this reader cannot evaluate (" + nodeNameList(c.changed, len(c.changed)) + ")"
+	case len(c.extra) > 0:
+		reading.Note = path + " matches package.json; it still lists " + nodeCount(len(c.extra), "dependency", "dependencies") +
+			" package.json no longer has (" + nodeNameList(c.extra, len(c.extra)) + "), which npm ci leaves out"
 	default:
 		reading.Note = path + " matches package.json"
 	}
+	reading.Note = boundedFindingText(reading.Note)
 	return reading
 }
 
@@ -339,20 +416,48 @@ func nodeUnreadLockfile(path, manager, note string) nodeLockfileReading {
 // package.json. importer is the package being deployed, relative to files;
 // its differences are listed by name, a sibling's are prefixed with its path.
 func readNodeLockfile(files nodeFiles, lockfile, importer string, arch string) nodeLockfileReading {
-	manager := nodeLockfileManager(lockfile)
+	budget, key := files.budget, arch+"\x00"+files.name(lockfile)
+	if budget == nil {
+		return parseNodeLockfile(files, lockfile, arch)(importer)
+	}
+	compare, ok := budget.locks[key]
+	if !ok {
+		compare = parseNodeLockfile(files, lockfile, arch)
+		if budget.locks == nil {
+			budget.locks = map[string]nodeLockfileComparer{}
+		}
+		budget.locks[key] = compare
+	}
+	return compare(importer)
+}
+
+func parseNodeLockfile(files nodeFiles, lockfile, arch string) nodeLockfileComparer {
 	switch lockfile {
 	case "package-lock.json", "npm-shrinkwrap.json":
-		return readNPMLockfile(files, lockfile, importer, arch)
+		return readNPMLockfile(files, lockfile, arch)
 	case "bun.lock":
-		return readBunLockfile(files, importer)
+		return readBunLockfile(files)
 	case "bun.lockb":
-		return readBunBinaryLockfile(files, importer)
+		return readBunBinaryLockfile(files)
 	case "pnpm-lock.yaml":
-		return readPNPMLockfile(files, importer)
+		return readPNPMLockfile(files)
 	case "yarn.lock":
-		return readYarnLockfile(files, importer)
+		return readYarnLockfile(files)
 	}
-	return nodeUnreadLockfile(lockfile, manager, "not a recognised lockfile")
+	return nodeFixedReading(nodeUnreadLockfile(lockfile, nodeLockfileManager(lockfile), "not a recognised lockfile"))
+}
+
+// nodeFixedReading is a lockfile that reads the same for every package: one
+// that could not be read.
+func nodeFixedReading(reading nodeLockfileReading) nodeLockfileComparer {
+	return func(string) nodeLockfileReading { return reading }
+}
+
+// withFacts gives a comparison's reading what its lockfile records whichever
+// package is compared. The lists are shared, and never modified.
+func (r nodeLockfileReading) withFacts(facts nodeLockfileReading) nodeLockfileReading {
+	r.names, r.peers, r.optional, r.hosts, r.git, r.gitSSH = facts.names, facts.peers, facts.optional, facts.hosts, facts.git, facts.gitSSH
+	return r
 }
 
 func nodeReadFailure(path, manager string, err error) nodeLockfileReading {
@@ -365,7 +470,7 @@ func nodeReadFailure(path, manager string, err error) nodeLockfileReading {
 	return nodeUnreadLockfile(path, manager, path+" could not be read as data")
 }
 
-// importerManifest reads a workspace's package.json.
+// importerManifest reads a workspace's package.json, once per detection.
 func importerManifest(files nodeFiles, importer string, withPeers bool) (nodeDependencySpecs, bool) {
 	name := "package.json"
 	if importer != "" && importer != "." {
@@ -374,11 +479,23 @@ func importerManifest(files nodeFiles, importer string, withPeers bool) (nodeDep
 		}
 		name = path.Join(importer, "package.json")
 	}
-	content, err := files.read(name, nodeManifestMax)
-	if err != nil {
-		return nil, false
+	budget, key := files.budget, strconv.FormatBool(withPeers)+"\x00"+files.name(name)
+	if budget != nil {
+		if cached, ok := budget.manifests[key]; ok {
+			return cached.specs, cached.ok
+		}
 	}
-	return nodeManifestSpecs(content, withPeers)
+	var reading nodeManifestReading
+	if content, err := files.read(name, nodeManifestMax); err == nil {
+		reading.specs, reading.ok = nodeManifestSpecs(content, withPeers)
+	}
+	if budget != nil {
+		if budget.manifests == nil {
+			budget.manifests = map[string]nodeManifestReading{}
+		}
+		budget.manifests[key] = reading
+	}
+	return reading.specs, reading.ok
 }
 
 func importerPrefix(importer, own string) string {
@@ -420,16 +537,32 @@ type npmLockEntry struct {
 	} `json:"peerDependenciesMeta"`
 }
 
-var nodeMuslBinaryRE = regexp.MustCompile(`-linux(?:musl)?-(x64|arm64)(?:-musl)?$`)
+// Platform packages name their C library: rollup-linux-x64-musl and
+// sharp-linuxmusl-x64 for musl, rollup-linux-x64-gnu and
+// watcher-linux-x64-glibc for glibc. A name that says neither is left alone.
+var (
+	nodeMuslBinaryRE  = regexp.MustCompile(`-linux(?:musl-(x64|arm64)|-(x64|arm64)-musl)$`)
+	nodeGlibcBinaryRE = regexp.MustCompile(`-linux-(x64|arm64)-(?:gnu|glibc)$`)
+)
+
+func nodePlatformBinary(name, version string) (nodeOptionalBinary, bool) {
+	if match := nodeMuslBinaryRE.FindStringSubmatch(name); match != nil {
+		return nodeOptionalBinary{Name: name, Version: version, Arch: match[1] + match[2], Libc: "musl"}, true
+	}
+	if match := nodeGlibcBinaryRE.FindStringSubmatch(name); match != nil {
+		return nodeOptionalBinary{Name: name, Version: version, Arch: match[1], Libc: "glibc"}, true
+	}
+	return nodeOptionalBinary{}, false
+}
 
 // readNPMLockfile streams package-lock.json (or npm-shrinkwrap.json) entry by
 // entry: the workspace entries are compared with their manifests, and every
 // entry contributes the versions, peers, platform binaries and registry
 // hosts the other checks need.
-func readNPMLockfile(files nodeFiles, lockfile, own string, arch string) nodeLockfileReading {
+func readNPMLockfile(files nodeFiles, lockfile, arch string) nodeLockfileComparer {
 	file, err := files.open(lockfile, nodeLockfileMaxBytes)
 	if err != nil {
-		return nodeReadFailure(lockfile, "npm", err)
+		return nodeFixedReading(nodeReadFailure(lockfile, "npm", err))
 	}
 	defer file.Close()
 	decoder := json.NewDecoder(file)
@@ -446,8 +579,8 @@ func readNPMLockfile(files nodeFiles, lockfile, own string, arch string) nodeLoc
 	hosts := map[string]bool{}
 	git := map[string]bool{}
 	gitSSH := false
-	fail := func() nodeLockfileReading {
-		return nodeUnreadLockfile(lockfile, "npm", lockfile+" is not valid JSON")
+	fail := func() nodeLockfileComparer {
+		return nodeFixedReading(nodeUnreadLockfile(lockfile, "npm", lockfile+" is not valid JSON"))
 	}
 	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
 		return fail()
@@ -486,10 +619,15 @@ func readNPMLockfile(files nodeFiles, lockfile, own string, arch string) nodeLoc
 				versions[entryPath] = entry.Version
 				_, name, _ := strings.Cut(entryPath[strings.LastIndex(entryPath, "node_modules/"):], "node_modules/")
 				present[name] = true
+				if entry.Link {
+					// A workspace package or a file: directory: its resolved
+					// is a path in the checkout, and nothing is downloaded.
+					continue
+				}
 				if host := npmResolvedHost(entry.Resolved); host != "" {
 					hosts[host] = true
 				}
-				if cloned, ssh := nodeGitSource(entry.Resolved); cloned {
+				if cloned, ssh := nodeGitURL(entry.Resolved); cloned {
 					git[name] = true
 					gitSSH = gitSSH || ssh
 				}
@@ -508,8 +646,8 @@ func readNPMLockfile(files nodeFiles, lockfile, own string, arch string) nodeLoc
 					}
 				}
 				for dependency, spec := range entry.OptionalDependencies {
-					if match := nodeMuslBinaryRE.FindStringSubmatch(dependency); match != nil && strings.Contains(dependency, "musl") {
-						optional = append(optional, nodeOptionalBinary{Name: dependency, Version: spec, Arch: match[1]})
+					if binary, ok := nodePlatformBinary(dependency, spec); ok {
+						optional = append(optional, binary)
 					}
 				}
 			}
@@ -528,8 +666,8 @@ func readNPMLockfile(files nodeFiles, lockfile, own string, arch string) nodeLoc
 			for name, entry := range tree {
 				v1[name] = entry.Version
 				// A version 1 lock records a Git dependency's source as its
-				// version.
-				if cloned, ssh := nodeGitSource(entry.Version); cloned {
+				// version, as a URL or a github: shorthand.
+				if cloned, ssh := nodeGitURL(entry.Version); cloned {
 					git[name] = true
 					gitSSH = gitSSH || ssh
 				}
@@ -542,61 +680,28 @@ func readNPMLockfile(files nodeFiles, lockfile, own string, arch string) nodeLoc
 		}
 	}
 	if version == "" {
-		return nodeUnreadLockfile(lockfile, "npm", lockfile+" records no lockfileVersion")
+		return nodeFixedReading(nodeUnreadLockfile(lockfile, "npm", lockfile+" records no lockfileVersion"))
 	}
-	comparison := nodeLockComparison{}
+	facts := nodeLockfileReading{git: sortedNames(git), gitSSH: gitSSH}
 	if len(workspaces) == 0 {
-		// A version 1 lock records resolved versions, not the ranges asked
-		// for, so a range is judged by whether its locked version fits it.
-		manifest, ok := importerManifest(files, own, false)
-		if !ok {
-			return nodeUnreadLockfile(lockfile, "npm", "package.json could not be read")
-		}
-		comparison.compareV1(manifest, v1)
-		reading := comparison.reading(lockfile, "npm", "npm", version)
-		reading.names = v1
-		reading.git, reading.gitSSH = sortedNames(git), gitSSH
-		return reading
-	}
-	importers := make([]string, 0, len(workspaces))
-	for importer := range workspaces {
-		importers = append(importers, importer)
-	}
-	if own == "." {
-		own = ""
-	}
-	for _, importer := range orderedImporters(importers, own) {
-		entry := workspaces[importer]
-		if entry.Link {
-			continue
-		}
-		manifest, ok := importerManifest(files, importer, true)
-		if !ok {
-			comparison.unknown = true
-			continue
-		}
-		lock := nodeDependencySpecs{}
-		for _, kind := range []map[string]string{entry.PeerDependencies, entry.DevDependencies, entry.OptionalDependencies, entry.Dependencies} {
-			for name, spec := range kind {
-				lock[name] = spec
+		facts.names = v1
+		return func(own string) nodeLockfileReading {
+			// A version 1 lock records resolved versions, not the ranges
+			// asked for, so a range is judged by whether its locked
+			// version fits it.
+			manifest, ok := importerManifest(files, own, false)
+			if !ok {
+				return nodeUnreadLockfile(lockfile, "npm", "package.json could not be read")
 			}
+			comparison := nodeLockComparison{extrasAccepted: true}
+			comparison.compareV1(manifest, v1)
+			return comparison.reading(lockfile, "npm", "npm", version).withFacts(facts)
 		}
-		base := ""
-		if importer != "" {
-			base = importer + "/"
-		}
-		comparison.compare(importerPrefix(importer, own), manifest, lock, false, func(name string) string {
-			if version, ok := versions[base+"node_modules/"+name]; ok {
-				return version
-			}
-			return versions["node_modules/"+name]
-		})
 	}
-	reading := comparison.reading(lockfile, "npm", "npm", version)
-	reading.names = map[string]string{}
+	facts.names = map[string]string{}
 	for entryPath, version := range versions {
 		if strings.Count(entryPath, "node_modules/") == 1 && strings.HasPrefix(entryPath, "node_modules/") {
-			reading.names[strings.TrimPrefix(entryPath, "node_modules/")] = version
+			facts.names[strings.TrimPrefix(entryPath, "node_modules/")] = version
 		}
 	}
 	for _, entry := range peers {
@@ -607,31 +712,67 @@ func readNPMLockfile(files nodeFiles, lockfile, own string, arch string) nodeLoc
 			}
 			if satisfied, known := nodeRangeSatisfies(resolved, spec); known && !satisfied {
 				name := entry.path[strings.LastIndex(entry.path, "node_modules/")+len("node_modules/"):]
-				reading.peers = append(reading.peers, nodePeerConflict{Package: name, Peer: peer, Range: spec, Version: resolved})
+				facts.peers = append(facts.peers, nodePeerConflict{Package: name, Peer: peer, Range: spec, Version: resolved})
 			}
 		}
 	}
-	sort.Slice(reading.peers, func(i, j int) bool {
-		if reading.peers[i].Package != reading.peers[j].Package {
-			return reading.peers[i].Package < reading.peers[j].Package
+	sort.Slice(facts.peers, func(i, j int) bool {
+		if facts.peers[i].Package != facts.peers[j].Package {
+			return facts.peers[i].Package < facts.peers[j].Package
 		}
-		return reading.peers[i].Peer < reading.peers[j].Peer
+		return facts.peers[i].Peer < facts.peers[j].Peer
 	})
 	seen := map[string]bool{}
 	for _, binary := range optional {
-		if present[binary.Name] || seen[binary.Name+"@"+binary.Arch] || (arch != "" && binary.Arch != arch) {
+		if present[binary.Name] || seen[binary.Name] || (arch != "" && binary.Arch != arch) {
 			continue
 		}
-		seen[binary.Name+"@"+binary.Arch] = true
-		reading.optional = append(reading.optional, binary)
+		seen[binary.Name] = true
+		facts.optional = append(facts.optional, binary)
 	}
-	sort.Slice(reading.optional, func(i, j int) bool { return reading.optional[i].Name < reading.optional[j].Name })
+	sort.Slice(facts.optional, func(i, j int) bool { return facts.optional[i].Name < facts.optional[j].Name })
 	for host := range hosts {
-		reading.hosts = append(reading.hosts, host)
+		facts.hosts = append(facts.hosts, host)
 	}
-	sort.Strings(reading.hosts)
-	reading.git, reading.gitSSH = sortedNames(git), gitSSH
-	return reading
+	sort.Strings(facts.hosts)
+	importers := make([]string, 0, len(workspaces))
+	for importer := range workspaces {
+		importers = append(importers, importer)
+	}
+	return func(own string) nodeLockfileReading {
+		if own == "." {
+			own = ""
+		}
+		comparison := nodeLockComparison{extrasAccepted: true}
+		for _, importer := range orderedImporters(slices.Clone(importers), own) {
+			entry := workspaces[importer]
+			if entry.Link {
+				continue
+			}
+			manifest, ok := importerManifest(files, importer, true)
+			if !ok {
+				comparison.unknown = true
+				continue
+			}
+			lock := nodeDependencySpecs{}
+			for _, kind := range []map[string]string{entry.PeerDependencies, entry.DevDependencies, entry.OptionalDependencies, entry.Dependencies} {
+				for name, spec := range kind {
+					lock[name] = spec
+				}
+			}
+			base := ""
+			if importer != "" {
+				base = importer + "/"
+			}
+			comparison.compare(importerPrefix(importer, own), manifest, lock, false, func(name string) string {
+				if version, ok := versions[base+"node_modules/"+name]; ok {
+					return version
+				}
+				return versions["node_modules/"+name]
+			})
+		}
+		return comparison.reading(lockfile, "npm", "npm", version).withFacts(facts)
+	}
 }
 
 func sortedNames(set map[string]bool) []string {
@@ -718,10 +859,10 @@ func npmResolvedHost(resolved string) string {
 // readBunLockfile reads Bun's text lock: JSON with trailing commas, whose
 // workspaces section records each package.json's ranges and whose packages
 // section records what each name resolved to.
-func readBunLockfile(files nodeFiles, own string) nodeLockfileReading {
+func readBunLockfile(files nodeFiles) nodeLockfileComparer {
 	content, err := files.read("bun.lock", nodeLockfileMaxBytes)
 	if err != nil {
-		return nodeReadFailure("bun.lock", "bun", err)
+		return nodeFixedReading(nodeReadFailure("bun.lock", "bun", err))
 	}
 	var lock struct {
 		LockfileVersion json.Number `json:"lockfileVersion"`
@@ -734,7 +875,7 @@ func readBunLockfile(files nodeFiles, own string) nodeLockfileReading {
 		Packages map[string]json.RawMessage `json:"packages"`
 	}
 	if json.Unmarshal(denoJSONWithoutComments(content), &lock) != nil || lock.Workspaces == nil {
-		return nodeUnreadLockfile("bun.lock", "bun", "bun.lock is not a readable Bun text lockfile")
+		return nodeFixedReading(nodeUnreadLockfile("bun.lock", "bun", "bun.lock is not a readable Bun text lockfile"))
 	}
 	resolved := func(key string) string {
 		raw, ok := lock.Packages[key]
@@ -749,71 +890,76 @@ func readBunLockfile(files nodeFiles, own string) nodeLockfileReading {
 		return identity[strings.LastIndex(identity, "@")+1:]
 	}
 	importers := make([]string, 0, len(lock.Workspaces))
-	for importer := range lock.Workspaces {
+	recorded := map[string]nodeDependencySpecs{}
+	for importer, workspace := range lock.Workspaces {
 		importers = append(importers, importer)
-	}
-	if own == "." {
-		own = ""
-	}
-	comparison := nodeLockComparison{}
-	for _, importer := range orderedImporters(importers, own) {
-		workspace := lock.Workspaces[importer]
-		manifest, ok := importerManifest(files, importer, true)
-		if !ok {
-			comparison.unknown = true
-			continue
-		}
-		recorded := nodeDependencySpecs{}
+		specs := nodeDependencySpecs{}
 		for _, kind := range []map[string]string{workspace.PeerDependencies, workspace.DevDependencies, workspace.OptionalDependencies, workspace.Dependencies} {
 			for name, spec := range kind {
-				recorded[name] = spec
+				specs[name] = spec
 			}
 		}
-		comparison.compare(importerPrefix(importer, own), manifest, recorded, false, resolved)
+		recorded[importer] = specs
 	}
-	reading := comparison.reading("bun.lock", "bun", "bun", lock.LockfileVersion.String())
-	reading.names = map[string]string{}
+	facts := nodeLockfileReading{names: map[string]string{}}
 	for key := range lock.Packages {
 		// Nested entries are keyed "<dependent>/<name>"; only hoisted ones
 		// name what the application imports.
 		if !strings.Contains(key, "/") || (strings.HasPrefix(key, "@") && strings.Count(key, "/") == 1) {
-			reading.names[key] = resolved(key)
+			facts.names[key] = resolved(key)
 		}
 	}
-	return reading
+	version := lock.LockfileVersion.String()
+	return func(own string) nodeLockfileReading {
+		if own == "." {
+			own = ""
+		}
+		comparison := nodeLockComparison{}
+		for _, importer := range orderedImporters(slices.Clone(importers), own) {
+			manifest, ok := importerManifest(files, importer, true)
+			if !ok {
+				comparison.unknown = true
+				continue
+			}
+			comparison.compare(importerPrefix(importer, own), manifest, recorded[importer], false, func(name string) string { return facts.names[name] })
+		}
+		return comparison.reading("bun.lock", "bun", "bun", version).withFacts(facts)
+	}
 }
 
 // readBunBinaryLockfile can only prove absence: bun.lockb stores every
 // package name as raw bytes, so a dependency whose name is not in it is
 // certainly not locked. Presence of every name is not proof of agreement.
-func readBunBinaryLockfile(files nodeFiles, own string) nodeLockfileReading {
+func readBunBinaryLockfile(files nodeFiles) nodeLockfileComparer {
 	content, err := files.read("bun.lockb", nodeLockfileMaxBytes)
 	if err != nil {
-		return nodeReadFailure("bun.lockb", "bun", err)
+		return nodeFixedReading(nodeReadFailure("bun.lockb", "bun", err))
 	}
-	manifest, ok := importerManifest(files, own, true)
-	if !ok {
-		return nodeUnreadLockfile("bun.lockb", "bun", "package.json could not be read")
-	}
-	comparison := nodeLockComparison{}
-	names := make([]string, 0, len(manifest))
-	for name := range manifest {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		if !bytes.Contains(content, []byte(name)) {
-			comparison.missingTotal++
-			comparison.add(&comparison.missing, name)
-			comparison.stale = true
+	return func(own string) nodeLockfileReading {
+		manifest, ok := importerManifest(files, own, true)
+		if !ok {
+			return nodeUnreadLockfile("bun.lockb", "bun", "package.json could not be read")
 		}
+		comparison := nodeLockComparison{}
+		names := make([]string, 0, len(manifest))
+		for name := range manifest {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			if !bytes.Contains(content, []byte(name)) {
+				comparison.missingTotal++
+				comparison.add(&comparison.missing, name)
+				comparison.stale = true
+			}
+		}
+		if comparison.stale {
+			return comparison.reading("bun.lockb", "bun", "bun-binary", "")
+		}
+		reading := nodeUnreadLockfile("bun.lockb", "bun", "bun.lockb is binary: every dependency name is in it, but its ranges cannot be compared")
+		reading.format = "bun-binary"
+		return reading
 	}
-	if comparison.stale {
-		return comparison.reading("bun.lockb", "bun", "bun-binary", "")
-	}
-	reading := nodeUnreadLockfile("bun.lockb", "bun", "bun.lockb is binary: every dependency name is in it, but its ranges cannot be compared")
-	reading.format = "bun-binary"
-	return reading
 }
 
 // pnpmDependency is an importer entry: version 5 locks record the resolved
@@ -861,10 +1007,10 @@ func (i pnpmImporter) specs() nodeDependencySpecs {
 // readPNPMLockfile parses pnpm-lock.yaml up to its package list, which is
 // all the frozen check reads: pnpm refuses unless every importer's
 // specifiers equal its package.json ranges exactly.
-func readPNPMLockfile(files nodeFiles, own string) nodeLockfileReading {
-	file, err := files.open("pnpm-lock.yaml", nodeLockfileMaxBytes)
+func readPNPMLockfile(files nodeFiles) nodeLockfileComparer {
+	file, err := files.openHead("pnpm-lock.yaml", nodeLockfileMaxBytes)
 	if err != nil {
-		return nodeReadFailure("pnpm-lock.yaml", "pnpm", err)
+		return nodeFixedReading(nodeReadFailure("pnpm-lock.yaml", "pnpm", err))
 	}
 	defer file.Close()
 	var head bytes.Buffer
@@ -878,45 +1024,49 @@ func readPNPMLockfile(files nodeFiles, own string) nodeLockfileReading {
 		head.WriteString(line)
 		head.WriteByte('\n')
 	}
+	if err := scanner.Err(); errors.Is(err, errNodeBudget) {
+		return nodeFixedReading(nodeReadFailure("pnpm-lock.yaml", "pnpm", err))
+	}
 	var lock struct {
 		LockfileVersion yaml.Node               `yaml:"lockfileVersion"`
 		Importers       map[string]pnpmImporter `yaml:"importers"`
 		pnpmImporter    `yaml:",inline"`
 	}
 	if scanner.Err() != nil || yaml.Unmarshal(head.Bytes(), &lock) != nil || lock.LockfileVersion.Value == "" {
-		return nodeUnreadLockfile("pnpm-lock.yaml", "pnpm", "pnpm-lock.yaml is not a readable pnpm lockfile")
+		return nodeFixedReading(nodeUnreadLockfile("pnpm-lock.yaml", "pnpm", "pnpm-lock.yaml is not a readable pnpm lockfile"))
 	}
 	version := lock.LockfileVersion.Value
 	importers := lock.Importers
 	if importers == nil {
 		importers = map[string]pnpmImporter{".": lock.pnpmImporter}
 	}
-	if own == "" {
-		own = "."
-	}
 	names := make([]string, 0, len(importers))
-	for importer := range importers {
+	recorded := map[string]nodeDependencySpecs{}
+	facts := nodeLockfileReading{names: map[string]string{}}
+	for importer, entry := range importers {
 		names = append(names, importer)
-	}
-	comparison := nodeLockComparison{}
-	for _, importer := range orderedImporters(names, own) {
-		manifest, ok := importerManifest(files, importer, false)
-		if !ok {
-			comparison.unknown = true
-			continue
-		}
-		comparison.compare(importerPrefix(importer, own), manifest, importers[importer].specs(), true, nil)
-	}
-	reading := comparison.reading("pnpm-lock.yaml", "pnpm", "pnpm", version)
-	reading.names = map[string]string{}
-	for _, importer := range importers {
-		for _, kind := range []map[string]pnpmDependency{importer.Dependencies, importer.DevDependencies, importer.OptionalDependencies} {
+		recorded[importer] = entry.specs()
+		for _, kind := range []map[string]pnpmDependency{entry.Dependencies, entry.DevDependencies, entry.OptionalDependencies} {
 			for name, dependency := range kind {
-				reading.names[name] = dependency.version
+				facts.names[name] = dependency.version
 			}
 		}
 	}
-	return reading
+	return func(own string) nodeLockfileReading {
+		if own == "" {
+			own = "."
+		}
+		comparison := nodeLockComparison{}
+		for _, importer := range orderedImporters(slices.Clone(names), own) {
+			manifest, ok := importerManifest(files, importer, false)
+			if !ok {
+				comparison.unknown = true
+				continue
+			}
+			comparison.compare(importerPrefix(importer, own), manifest, recorded[importer], true, nil)
+		}
+		return comparison.reading("pnpm-lock.yaml", "pnpm", "pnpm", version).withFacts(facts)
+	}
 }
 
 // yarnDescriptor splits "name@range", where a scoped name has an @ of its
@@ -960,10 +1110,10 @@ func yarnBerryRange(spec string) string {
 // headers and workspace blocks. Classic Yarn's --frozen-lockfile refuses when
 // a package.json range has no entry; Berry's --immutable when a workspace's
 // recorded dependencies differ from its manifest.
-func readYarnLockfile(files nodeFiles, own string) nodeLockfileReading {
+func readYarnLockfile(files nodeFiles) nodeLockfileComparer {
 	file, err := files.open("yarn.lock", nodeLockfileMaxBytes)
 	if err != nil {
-		return nodeReadFailure("yarn.lock", "yarn", err)
+		return nodeFixedReading(nodeReadFailure("yarn.lock", "yarn", err))
 	}
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
@@ -1025,70 +1175,74 @@ func readYarnLockfile(files nodeFiles, own string) nodeLockfileReading {
 		}
 	}
 	if scanner.Err() != nil {
-		return nodeUnreadLockfile("yarn.lock", "yarn", "yarn.lock could not be read")
+		return nodeFixedReading(nodeUnreadLockfile("yarn.lock", "yarn", "yarn.lock could not be read"))
 	}
-	comparison := nodeLockComparison{}
 	if berry {
 		importers := make([]string, 0, len(workspaces))
 		for importer := range workspaces {
 			importers = append(importers, importer)
 		}
-		if own == "" {
-			own = "."
-		}
 		if len(importers) == 0 {
-			return nodeUnreadLockfile("yarn.lock", "yarn", "yarn.lock records no workspace")
+			return nodeFixedReading(nodeUnreadLockfile("yarn.lock", "yarn", "yarn.lock records no workspace"))
 		}
-		for _, importer := range orderedImporters(importers, own) {
+		if _, err := strconv.Atoi(metadata); err != nil {
+			metadata = ""
+		}
+		return func(own string) nodeLockfileReading {
+			if own == "" {
+				own = "."
+			}
+			comparison := nodeLockComparison{}
+			for _, importer := range orderedImporters(slices.Clone(importers), own) {
+				manifest, ok := importerManifest(files, importer, false)
+				if !ok {
+					comparison.unknown = true
+					continue
+				}
+				normalized := nodeDependencySpecs{}
+				for name, spec := range manifest {
+					normalized[name] = yarnBerryRange(spec)
+				}
+				comparison.compare(importerPrefix(importer, own), normalized, workspaces[importer], true, nil)
+			}
+			return comparison.reading("yarn.lock", "yarn", "yarn-berry", metadata)
+		}
+	}
+	if !classic && len(descriptors) == 0 {
+		return nodeFixedReading(nodeUnreadLockfile("yarn.lock", "yarn", "yarn.lock is empty"))
+	}
+	return func(own string) nodeLockfileReading {
+		comparison := nodeLockComparison{}
+		for _, importer := range []string{own, ""} {
 			manifest, ok := importerManifest(files, importer, false)
 			if !ok {
 				comparison.unknown = true
 				continue
 			}
-			normalized := nodeDependencySpecs{}
-			for name, spec := range manifest {
-				normalized[name] = yarnBerryRange(spec)
+			names := make([]string, 0, len(manifest))
+			for name := range manifest {
+				names = append(names, name)
 			}
-			comparison.compare(importerPrefix(importer, own), normalized, workspaces[importer], true, nil)
-		}
-		reading := comparison.reading("yarn.lock", "yarn", "yarn-berry", metadata)
-		if _, err := strconv.Atoi(metadata); err != nil {
-			reading.version = ""
-		}
-		return reading
-	}
-	if !classic && len(descriptors) == 0 {
-		return nodeUnreadLockfile("yarn.lock", "yarn", "yarn.lock is empty")
-	}
-	for _, importer := range []string{own, ""} {
-		manifest, ok := importerManifest(files, importer, false)
-		if !ok {
-			comparison.unknown = true
-			continue
-		}
-		names := make([]string, 0, len(manifest))
-		for name := range manifest {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		prefix := importerPrefix(importer, own)
-		for _, name := range names {
-			switch {
-			case descriptors[name+"@"+manifest[name]]:
-			case byName[name]:
-				comparison.add(&comparison.changed, prefix+name)
-				comparison.stale = true
-			case strings.HasPrefix(manifest[name], "workspace:") || strings.HasPrefix(manifest[name], "file:") || strings.HasPrefix(manifest[name], "link:"):
-				// Classic Yarn links local packages without a lock entry.
-			default:
-				comparison.missingTotal++
-				comparison.add(&comparison.missing, prefix+name)
-				comparison.stale = true
+			sort.Strings(names)
+			prefix := importerPrefix(importer, own)
+			for _, name := range names {
+				switch {
+				case descriptors[name+"@"+manifest[name]]:
+				case byName[name]:
+					comparison.add(&comparison.changed, prefix+name)
+					comparison.stale = true
+				case strings.HasPrefix(manifest[name], "workspace:") || strings.HasPrefix(manifest[name], "file:") || strings.HasPrefix(manifest[name], "link:"):
+					// Classic Yarn links local packages without a lock entry.
+				default:
+					comparison.missingTotal++
+					comparison.add(&comparison.missing, prefix+name)
+					comparison.stale = true
+				}
+			}
+			if own == "" || own == "." {
+				break
 			}
 		}
-		if own == "" || own == "." {
-			break
-		}
+		return comparison.reading("yarn.lock", "yarn", "yarn-classic", "1")
 	}
-	return comparison.reading("yarn.lock", "yarn", "yarn-classic", "1")
 }

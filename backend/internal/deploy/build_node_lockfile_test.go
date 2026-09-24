@@ -59,7 +59,7 @@ func TestNodeLockfileReadingsFollowEachManagersFrozenCheck(t *testing.T) {
 			content: `{"lockfileVersion":3,"packages":{"":{"dependencies":{"left-pad":"^1.3.0"}},"node_modules/left-pad":{"version":"1.3.0"}}}`,
 		},
 		{
-			name: "npm keeps a removed dependency", lockfile: "package-lock.json", state: LockfileStale, extra: []string{"zod"},
+			name: "npm ci leaves out a removed dependency", lockfile: "package-lock.json", state: LockfileInSync, extra: []string{"zod"},
 			content: `{"lockfileVersion":3,"packages":{"":{"dependencies":{"left-pad":"^1.3.0","zod":"^3"},"devDependencies":{"is-number":"7.0.0"}},"node_modules/left-pad":{"version":"1.3.0"},"node_modules/is-number":{"version":"7.0.0"}}}`,
 		},
 		{
@@ -92,6 +92,10 @@ func TestNodeLockfileReadingsFollowEachManagersFrozenCheck(t *testing.T) {
 			content:  `{"lockfileVersion":1,"workspaces":{"":{"dependencies":{"left-pad":"^1.3.0",},"devDependencies":{"is-number":"7.0.0",},},},"packages":{"left-pad":["left-pad@1.3.0","",{},"x"],"is-number":["is-number@7.0.0","",{},"x"],}}`,
 		},
 		{
+			name: "bun refuses a lock that keeps a removed dependency", lockfile: "bun.lock", state: LockfileStale, extra: []string{"zod"},
+			content: `{"lockfileVersion":1,"workspaces":{"":{"dependencies":{"left-pad":"^1.3.0","zod":"^3",},"devDependencies":{"is-number":"7.0.0",},},},"packages":{"left-pad":["left-pad@1.3.0","",{},"x"],"is-number":["is-number@7.0.0","",{},"x"],"zod":["zod@3.24.0","",{},"x"],}}`,
+		},
+		{
 			name: "bun binary lock proves absence only", lockfile: "bun.lockb", state: LockfileStale, missing: []string{"is-number"},
 			content: "\x00\x01bun-lockfile-format-v0\x00left-pad\x00^1.3.0\x00",
 		},
@@ -107,6 +111,10 @@ func TestNodeLockfileReadingsFollowEachManagersFrozenCheck(t *testing.T) {
 			name: "pnpm compares range text", lockfile: "pnpm-lock.yaml", state: LockfileStale, changed: []string{"left-pad"},
 			manifest: `{"dependencies":{"left-pad":"^1.2.0"},"devDependencies":{"is-number":"7.0.0"}}`,
 			content:  "lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies:\n      left-pad:\n        specifier: ^1.3.0\n        version: 1.3.0\n    devDependencies:\n      is-number:\n        specifier: 7.0.0\n        version: 7.0.0\npackages:\n  left-pad@1.3.0: {}\n",
+		},
+		{
+			name: "pnpm refuses a lock that keeps a removed dependency", lockfile: "pnpm-lock.yaml", state: LockfileStale, extra: []string{"zod"},
+			content: "lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies:\n      left-pad:\n        specifier: ^1.3.0\n        version: 1.3.0\n      zod:\n        specifier: ^3\n        version: 3.24.0\n    devDependencies:\n      is-number:\n        specifier: 7.0.0\n        version: 7.0.0\n",
 		},
 		{
 			name: "pnpm 8 single project", lockfile: "pnpm-lock.yaml", state: LockfileInSync,
@@ -181,7 +189,7 @@ func TestNPMLockfileReadsPeersPlatformBinariesAndHosts(t *testing.T) {
 	if len(reading.peers) != 1 || reading.peers[0] != (nodePeerConflict{Package: "react-helmet-async", Peer: "react", Range: "^16.6.0 || ^17.0.0 || ^18.0.0", Version: "19.1.0"}) {
 		t.Fatalf("peers = %+v", reading.peers)
 	}
-	if len(reading.optional) != 1 || reading.optional[0] != (nodeOptionalBinary{Name: "@rollup/rollup-linux-x64-musl", Version: "4.40.0", Arch: "x64"}) {
+	if len(reading.optional) != 1 || reading.optional[0] != (nodeOptionalBinary{Name: "@rollup/rollup-linux-x64-musl", Version: "4.40.0", Arch: "x64", Libc: "musl"}) {
 		t.Fatalf("optional binaries = %+v", reading.optional)
 	}
 	if !slices.Equal(reading.hosts, []string{"artifactory.corp"}) {
@@ -273,6 +281,72 @@ func TestOversizedLockfileIsUnknownRatherThanStale(t *testing.T) {
 	source, err = readNodeInstallSource(writeNodeTree(t, map[string]string{"package.json": lockedManifest, "yarn.lock": "# yarn lockfile v1\n"}), "", "x64", spent)
 	if err == nil {
 		t.Fatalf("a spent budget still read package.json: %+v", source)
+	}
+}
+
+// A workspace's lockfile is parsed once per detection, however many members
+// compare against it: four members of a workspace whose lockfile is larger
+// than a quarter of the read budget each get a comparison, not "the read
+// budget is spent". pnpm's lock is charged only for the head that is read.
+func TestWorkspaceLockfileIsReadOncePerDetection(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{"package.json": `{"name":"root","private":true,"workspaces":["apps/*"]}`}
+	entries := []string{`"":{"name":"root","workspaces":["apps/*"]}`}
+	for _, member := range []string{"a", "b", "c", "d"} {
+		files["apps/"+member+"/package.json"] = `{"name":"` + member + `","scripts":{"start":"node index.js"},"dependencies":{"left-pad":"^1.3.0"}}`
+		entries = append(entries, `"apps/`+member+`":{"name":"`+member+`","dependencies":{"left-pad":"^1.3.0"}}`)
+	}
+	entries = append(entries, `"node_modules/left-pad":{"version":"1.3.0"}`)
+	files["package-lock.json"] = `{"lockfileVersion":3,"filler":"` + strings.Repeat("x", 12<<20) + `","packages":{` + strings.Join(entries, ",") + `}}`
+	result, err := (Detector{}).DetectPath(t.Context(), writeNodeTree(t, files), SourceIdentity{Kind: SourceGit, Revision: strings.Repeat("a", 40)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	members := 0
+	for _, candidate := range result.Candidates {
+		if !strings.HasPrefix(candidate.Root, "apps/") {
+			continue
+		}
+		members++
+		if len(candidate.Lockfiles) != 1 || candidate.Lockfiles[0].State != LockfileInSync {
+			t.Fatalf("%s lockfiles = %+v", candidate.Root, candidate.Lockfiles)
+		}
+	}
+	if members != 4 {
+		t.Fatalf("candidates = %+v", result.Candidates)
+	}
+
+	budget := newNodeReadBudget()
+	pnpm := "lockfileVersion: '9.0'\n\nimporters:\n\n  .:\n    dependencies:\n      left-pad:\n        specifier: ^1.3.0\n        version: 1.3.0\n\npackages:\n\n" +
+		strings.Repeat("  filler@1.0.0: {}\n", 1<<19)
+	source, err := readNodeInstallSource(writeNodeTree(t, map[string]string{"package.json": `{"dependencies":{"left-pad":"^1.3.0"}}`, "pnpm-lock.yaml": pnpm}), "", "x64", budget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source.facts.readings[0].State != LockfileInSync || nodeReadBudgetBytes-budget.remaining > 1<<20 {
+		t.Fatalf("reading %+v cost %d bytes of a %d-byte lockfile", source.facts.readings[0].DetectedLockfile, nodeReadBudgetBytes-budget.remaining, len(pnpm))
+	}
+}
+
+// A lockfile's note and names are a repository's text: whatever their
+// length or characters, the candidate stays inside the bounds a saved draft
+// is validated against.
+func TestLockfileReadingFitsTheDetectionBounds(t *testing.T) {
+	t.Parallel()
+	dependencies := []string{}
+	for index := range 20 {
+		dependencies = append(dependencies, `"@`+strings.Repeat("s", 100)+`/`+strings.Repeat(string(rune('a'+index)), 110)+`":"^1.0.0"`)
+	}
+	dependencies = append(dependencies, `"line\nbreak":"^1.0.0"`)
+	_, candidate := detectNodeTree(t, map[string]string{
+		"package.json":      `{"name":"app","scripts":{"start":"node index.js"},"dependencies":{` + strings.Join(dependencies, ",") + `}}`,
+		"package-lock.json": `{"lockfileVersion":3,"packages":{"":{"dependencies":{"left-pad":"^1.3.0","` + strings.Repeat("é", 300) + `":"^1"}}}}`,
+	})
+	if len(candidate.Lockfiles) != 1 || candidate.Lockfiles[0].State != LockfileStale || len(candidate.Lockfiles[0].Note) > 480 {
+		t.Fatalf("lockfiles = %+v", candidate.Lockfiles)
+	}
+	if err := validateDetectedNodeInstall(candidate); err != nil {
+		t.Fatalf("detection does not validate: %v", err)
 	}
 }
 

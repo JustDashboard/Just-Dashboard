@@ -247,7 +247,8 @@ only renderer/executor/validation authority for their feature.
   Existing literal IP variables require reconnecting once. See [database networks](database-networks.md).
 - A JavaScript package's install is one plan (`deploy/build_node_install.go`) that detection,
   preflight and the recipe share, computed from lockfiles and package-manager configuration read as data
-  under their own budget (`build_node_lockfile.go`). Detection records each committed lockfile compared
+  under their own budget (`build_node_lockfile.go`), each lockfile and workspace manifest parsed once per
+  detection however many members compare against it. Detection records each committed lockfile compared
   with `package.json` (`lockfiles`: `in_sync`/`stale`/`unknown` with the drift named), the plan under each
   of the four managers with that manager's build and start commands and its preflight findings
   (`nodeInstalls`), and the Node release (`nodeVersion`: the nearest version file or the `package.json`

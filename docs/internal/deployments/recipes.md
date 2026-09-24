@@ -142,11 +142,16 @@ follow a symlink to a file; nothing in the checkout is executed.
 `package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml`, `yarn.lock` — is read under a budget of its
 own (16 MiB a file, 32 MiB a detection or build, never counted as detection truncation) and compared with
 the `package.json` of every workspace it records, the way that manager's frozen install compares it
-(`build_node_lockfile.go`): a dependency missing from the lock or removed from `package.json` is drift for
-every manager; pnpm and Yarn also compare the range text, while npm and Bun accept a changed range the
-locked version still satisfies (npm's range grammar is evaluated as data, `node_semver.go`). Yarn 1 is read
-from its entry headers, Berry from its workspace blocks, pnpm up to its package list, npm entry by entry,
-Bun's text lock as JSONC; `bun.lockb` is binary and can only prove a name missing. Each reading on the
+(`build_node_lockfile.go`): a dependency missing from the lock is drift for every manager; one removed
+from `package.json` but still locked is drift for Bun, pnpm and Yarn, while `npm ci` leaves it out and
+installs, so npm's reading stays `in_sync` and lists it under `extra`; pnpm and Yarn also compare the range
+text, while npm and Bun accept a changed range the locked version still satisfies (npm's range grammar is
+evaluated as data, `node_semver.go`). Yarn 1 is read from its entry headers, Berry from its workspace
+blocks, pnpm up to its package list (only the bytes read are charged to the budget), npm entry by entry,
+Bun's text lock as JSONC; `bun.lockb` is binary and can only prove a name missing. A lockfile and the
+workspace manifests it is compared with are parsed once per detection, whichever member is compared, so a
+monorepo's members never exhaust the budget re-reading the same root lockfile. Notes and listed names are
+bounded to what a saved draft validates. Each reading on the
 candidate (`lockfiles`) is `in_sync`, `stale` — the frozen install would refuse it — or `unknown`, with the
 sentence the screens show: "package-lock.json is missing 15 dependencies (prisma, @prisma/client, … and 12
 more)".
@@ -220,10 +225,15 @@ install trusts such packages that are installed but not listed (`bun pm trust`, 
 
 **npm's lockfile quirks.** A `package-lock.json` whose locked peers break their ranges was written with
 `--legacy-peer-deps`; unless `.npmrc` already says so the install passes that flag, which installs exactly
-the locked tree (`peer_dependencies_legacy`). A lock that lacks this platform's `-linux-<arch>-musl`
-optional binaries (npm/cli#4828 — Rollup, lightningcss, Tailwind's oxide, SWC) gets them added at the
-exact version the parent names, after `npm ci` (`optional_binary_missing`). A lock resolving packages from
-an intranet host is `registry_host_private`.
+the locked tree (`peer_dependencies_legacy`). A lock that lacks the image's own platform binaries
+(npm/cli#4828 — Rollup, lightningcss, Tailwind's oxide, SWC, sharp) gets them added at the exact version
+the parent names, after `npm ci` (`optional_binary_missing`): the `-linux-<arch>-musl` (or `linuxmusl`)
+packages on Alpine, the `-linux-<arch>-gnu` (or `-glibc`) ones on the Debian image — never the other C
+library's, which npm refuses outright when asked for by name (`EBADPLATFORM`). A lock resolving packages
+from an intranet host is `registry_host_private`. A workspace package or `file:` directory is a `link`
+entry whose `resolved` is a path in the checkout: it is neither a download nor a Git dependency, and a
+lockfile's `resolved` is read as a Git source only when it is a URL (`git+…`, `git://`, `github:`, a
+`.git` address), never by the `owner/repo` shorthand a `package.json` range may use.
 
 **Registry credentials.** `.npmrc` (`${NAME}`), `.yarnrc.yml` (`${NAME}`, with or without a default) and
 `bunfig.toml` (`$NAME`) are read as data for the variables their credentials name. Each becomes a detected
@@ -303,7 +313,7 @@ finding:
 | --- | --- | --- | --- |
 | A native addon that compiles when no prebuilt binary matches the platform, Node release and C library (`better-sqlite3`, `sqlite3`, `bcrypt`, `argon2`, `canvas`, `node-sass`, `re2`, `isolated-vm`, `node-pty`, …, from `package.json` or the lockfile) | `python3 make g++` | — | `native_addon_toolchain` |
 | `canvas` on Alpine, which publishes no musl binary | cairo, pango, jpeg, gif, rsvg and pixman headers, `pkgconf` | their libraries | `native_addon_toolchain` |
-| A Git dependency (`github:`, `owner/repo`, `git+https:`, a `.git` URL, or a lockfile entry resolved from Git) | `git` (`openssh-client` for SSH) | — | `git_dependencies`; `git_dependency_credentials` (warning) over SSH, which has no key |
+| A Git dependency (`github:`, `owner/repo` or `git+https:` in `package.json`, a `.git` URL, or a lockfile entry whose `resolved` is a Git URL — not a workspace or `file:` link) | `git` (`openssh-client` for SSH) | — | `git_dependencies`; `git_dependency_credentials` (warning) over SSH, which has no key |
 | Prisma (`prisma` or `@prisma/client`) | `openssl` | `openssl` | — (logged) |
 | `puppeteer`/`puppeteer-core` in `dependencies` | install skips the Chrome download (`PUPPETEER_SKIP_DOWNLOAD`) | Chromium, fonts, `PUPPETEER_EXECUTABLE_PATH` | `headless_browser` (warning) |
 | `playwright`/`playwright-core` in `dependencies` (Debian) | `PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright`, `<runner> playwright install chromium` | the same path, `<runner> playwright install-deps chromium` | `headless_browser` (warning) |

@@ -838,11 +838,12 @@ func nodeFinding(code string, severity PreflightSeverity, title, measured, means
 	return finding(code, severity, title, boundedFindingText(measured), means, action, "deploy", field)
 }
 
-// boundedFindingText keeps a finding's measured text inside the detection
-// bounds a saved draft is validated against.
+// boundedFindingText keeps a finding's measured text, or a lockfile's note,
+// inside the detection bounds a saved draft is validated against, cut on a
+// character boundary.
 func boundedFindingText(text string) string {
-	if len(text) > 480 {
-		return text[:477] + "..."
+	if cut, truncated := truncateUTF8(text, 477); truncated {
+		return cut + "..."
 	}
 	return text
 }
@@ -1058,9 +1059,15 @@ func planNPMInstall(facts nodeInstallFacts, plan *nodeInstallPlan) {
 			"npm ci re-checks peers and would refuse with ERESOLVE; the install passes --legacy-peer-deps, which installs exactly the locked tree.",
 			"Commit .npmrc with legacy-peer-deps=true, or upgrade the package whose peer range is out of date.", "configuration.build.packageManager"))
 	}
+	// npm refuses a platform package explicitly asked for on the wrong C
+	// library (EBADPLATFORM), so only the image family's own are added.
+	libc := "musl"
+	if plan.family == nodeFamilyGlibc {
+		libc = "glibc"
+	}
 	missing := []string{}
 	for _, binary := range reading.optional {
-		if nodePackageNameRE.MatchString(binary.Name) && nodeExactVersionRE.MatchString(binary.Version) {
+		if binary.Libc == libc && nodePackageNameRE.MatchString(binary.Name) && nodeExactVersionRE.MatchString(binary.Version) {
 			missing = append(missing, binary.Name+"@"+binary.Version)
 		}
 	}

@@ -592,22 +592,30 @@ var (
 	nodeGitShorthandRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+(?:#\S*)?$`)
 )
 
-// nodeGitSource says whether a dependency specification or a lockfile's
-// resolved source is a Git repository the install clones, and whether it is
-// reached over SSH. A tarball URL, a registry range and a local path are not.
+// nodeGitSource says whether a package.json dependency specification is a
+// Git repository the install clones, and whether it is reached over SSH. A
+// tarball URL, a registry range and a local path are not.
 func nodeGitSource(spec string) (cloned, ssh bool) {
-	spec = strings.TrimSpace(spec)
+	if cloned, ssh = nodeGitURL(spec); cloned {
+		return cloned, ssh
+	}
+	// npm reads owner/repo as a GitHub repository.
+	return nodeGitShorthandRE.MatchString(strings.TrimSpace(spec)), false
+}
+
+// nodeGitURL is nodeGitSource for a lockfile's resolved source, which npm
+// always writes as a full URL: there, owner/repo is a workspace or file:
+// directory's path ("packages/shared"), never a GitHub shorthand.
+func nodeGitURL(source string) (cloned, ssh bool) {
+	source = strings.TrimSpace(source)
 	switch {
-	case strings.HasPrefix(spec, "git+ssh://"), strings.HasPrefix(spec, "ssh://"), strings.HasPrefix(spec, "git@"):
+	case strings.HasPrefix(source, "git+ssh://"), strings.HasPrefix(source, "ssh://"), strings.HasPrefix(source, "git@"):
 		return true, true
-	case nodeGitPrefixRE.MatchString(spec):
+	case nodeGitPrefixRE.MatchString(source):
 		return true, false
-	case strings.HasPrefix(spec, "https://") || strings.HasPrefix(spec, "http://"):
-		address, _, _ := strings.Cut(spec, "#")
+	case strings.HasPrefix(source, "https://") || strings.HasPrefix(source, "http://"):
+		address, _, _ := strings.Cut(source, "#")
 		return strings.HasSuffix(address, ".git"), false
-	case nodeGitShorthandRE.MatchString(spec):
-		// npm reads owner/repo as a GitHub repository.
-		return true, false
 	}
 	return false, false
 }
