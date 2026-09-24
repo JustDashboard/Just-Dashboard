@@ -367,12 +367,22 @@ func (e *NormalizedStepExecutor) analyzePlan(
 	if err != nil {
 		return StepResult{State: StepUnavailable, ErrorCode: "preflight_unavailable", ErrorMessage: "deployment host evidence could not be refreshed"}
 	}
-	evidence := mustJSON(map[string]any{
-		"sourceDigest": plan.SourceDigest, "buildDigest": plan.BuildDigest,
-		"runtimeDigest": plan.RuntimeDigest, "planRevision": execution.Run.PlanRevision,
-		"candidate": evaluation.Candidate, "candidateSource": evaluation.CandidateSource,
-		"findings": evaluation.Findings,
-	})
+	record := func(candidate DetectedCandidate) json.RawMessage {
+		return mustJSON(map[string]any{
+			"sourceDigest": plan.SourceDigest, "buildDigest": plan.BuildDigest,
+			"runtimeDigest": plan.RuntimeDigest, "planRevision": execution.Run.PlanRevision,
+			"candidate": candidate, "candidateSource": evaluation.CandidateSource,
+			"findings": evaluation.Findings,
+		})
+	}
+	evidence := record(evaluation.Candidate)
+	if len(evidence) > maxEventBytes/2 {
+		// A step's evidence is bounded; the candidate's own evidence list is
+		// the part that can grow, and the facts beside it are what is read.
+		compact := evaluation.Candidate
+		compact.Evidence = []DetectionEvidence{}
+		evidence = record(compact)
+	}
 	state := StepPassed
 	for _, finding := range evaluation.Findings {
 		if finding.Severity == PreflightBlocked ||

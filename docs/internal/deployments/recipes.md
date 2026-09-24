@@ -200,7 +200,8 @@ Django project answers only the hosts its settings allow; `ALLOWED_HOSTS` read f
 listed like any other variable. A plain `main.py`/`app.py` is a low-confidence worker that asks whether
 it serves. The recipe refuses a plan with no start command, naming the frameworks detection proposes one
 for, and preflight says so first: `start_command_missing` (blocked, on the start command) for the
-Python, Deno and PHP recipes and a JavaScript server with no static output.
+Python, Deno and PHP recipes and a JavaScript server with no static output. The configure form's
+first step refuses to go on without one for the same plans (`needsStartCommand`).
 
 ## Go
 
