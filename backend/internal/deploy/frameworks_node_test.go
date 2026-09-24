@@ -90,8 +90,10 @@ func TestNodeFrameworkCatalogueDetectsServingDefaults(t *testing.T) {
 			framework: "express", start: "npm run start", port: 3000, profile: ProfileWeb, confidence: ConfidenceMedium},
 		{name: "main entry with an http library", manifest: `{"main":"src/index.js","dependencies":{"fastify":"^5.0.0"}}`,
 			framework: "fastify", start: "node src/index.js", port: 3000, profile: ProfileWeb, confidence: ConfidenceMedium},
-		{name: "main entry alone", manifest: `{"main":"bot.js","dependencies":{"discord.js":"^14.0.0"}}`,
-			start: "node bot.js", profile: ProfileWorker, confidence: ConfidenceLow, decision: "web application) or runs as a worker"},
+		{name: "main entry alone", manifest: `{"main":"index.js","dependencies":{"lodash":"^4.17.21"}}`,
+			start: "node index.js", profile: ProfileWorker, confidence: ConfidenceLow, decision: "web application) or runs as a worker"},
+		{name: "main entry of a bot", manifest: `{"main":"bot.js","dependencies":{"discord.js":"^14.0.0"}}`,
+			start: "node bot.js", profile: ProfileWorker, confidence: ConfidenceMedium},
 		{name: "framework without its build script", manifest: `{"scripts":{"dev":"astro dev"},"dependencies":{"astro":"^5.4.0"}}`,
 			framework: "astro", output: "dist", port: 80, profile: ProfileStatic, confidence: ConfidenceLow, decision: "add a build script"},
 	} {

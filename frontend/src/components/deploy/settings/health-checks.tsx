@@ -30,6 +30,8 @@ type Config = {
   port?: number
   method?: string
   expectedStatus?: number[]
+  /** Any answer below 500 (but 400 and 421) counts, as detection sets for an API. */
+  acceptAnyAnswer?: boolean
   command?: string[]
   attempts?: number
   timeoutSeconds?: number
@@ -52,12 +54,14 @@ function defaultsFor(kind: CheckKind): Config {
   switch (kind) {
     case "http":
       return { path: "/", method: "GET", attempts: 20, timeoutSeconds: 5, intervalSeconds: 3 }
+    // The runner waits the interval between attempts of every kind; without
+    // one, ten attempts at a container still starting take a millisecond.
     case "tcp":
-      return { port: 0, attempts: 10, timeoutSeconds: 3 }
+      return { port: 0, attempts: 10, timeoutSeconds: 3, intervalSeconds: 3 }
     case "command":
-      return { command: [], attempts: 10, timeoutSeconds: 3 }
+      return { command: [], attempts: 10, timeoutSeconds: 3, intervalSeconds: 3 }
     case "docker_health":
-      return { attempts: 10, timeoutSeconds: 3 }
+      return { attempts: 20, timeoutSeconds: 3, intervalSeconds: 3 }
   }
 }
 
@@ -106,19 +110,23 @@ export function savedChecks(checks: Check[]): Check[] {
 function checkSummary(check: Check, port?: number) {
   const config = (check.config ?? {}) as Config
   const attempts = config.attempts ?? 10
+  // With no wait between them, "× 0 s" is a cadence that says nothing.
+  const cadence = config.intervalSeconds
+    ? `${attempts} × ${config.intervalSeconds} s`
+    : `${attempts} tries`
   switch (check.kind as CheckKind) {
     case "http": {
-      const codes = config.expectedStatus?.length ? config.expectedStatus.join(", ") : "2xx"
-      // With no wait between them, "× 0 s" is a cadence that says nothing.
-      const cadence = config.intervalSeconds
-        ? `${attempts} × ${config.intervalSeconds} s`
-        : `${attempts} tries`
+      const codes = config.acceptAnyAnswer
+        ? "any answer < 500 but 400, 421"
+        : config.expectedStatus?.length
+          ? config.expectedStatus.join(", ")
+          : "2xx"
       return `${config.method ?? "GET"} ${config.path || "/"} → ${codes} · ${cadence}`
     }
     case "tcp":
-      return `TCP ${config.host ?? ""}:${config.port || port || "port"} · ${attempts} tries`
+      return `TCP ${config.host ?? ""}:${config.port || port || "port"} · ${cadence}`
     case "docker_health":
-      return `the image's HEALTHCHECK · ${attempts} tries`
+      return `the image's HEALTHCHECK · ${cadence}`
     case "command": {
       const argv = argvOf(config.command ?? [])
       return argv.length ? `$ ${argv.join(" ")}` : "$ (no command yet)"
@@ -131,13 +139,14 @@ function checkSummary(check: Check, port?: number) {
 /** A path or host beside the port it goes with: a port is five digits, so it keeps a narrow column. */
 const ADDRESS = "grid-cols-[minmax(0,1fr)_7.5rem] sm:grid-cols-[minmax(0,1fr)_9rem]"
 
-/** How long a check keeps trying before it gives up: every attempt's timeout and wait. */
+/**
+ * How long a check keeps trying before it gives up: every attempt's timeout
+ * and the wait between attempts, which the runner applies to every kind.
+ */
 function givesUpAfter(check: Check) {
   const config = (check.config ?? {}) as Config
   const attempts = config.attempts ?? 10
-  const wait =
-    (config.timeoutSeconds ?? 3) + (check.kind === "http" ? (config.intervalSeconds ?? 0) : 0)
-  return attempts * wait
+  return attempts * ((config.timeoutSeconds ?? 3) + (config.intervalSeconds ?? 0))
 }
 
 /**
@@ -354,18 +363,38 @@ function CheckEditor({
                 value={(config.expectedStatus ?? []).join(", ")}
                 readOnly={disabled}
                 className="font-mono"
-                placeholder="200, 204 · any 2xx"
-                onChange={(event) =>
-                  updateConfig({
-                    expectedStatus: event.target.value
-                      .split(",")
-                      .map((part) => Number(part.trim()))
-                      .filter((code) => Number.isInteger(code) && code > 0),
-                  })
+                placeholder={
+                  config.acceptAnyAnswer
+                    ? "any answer below 500 but 400, 421"
+                    : "200, 204 · any 2xx"
                 }
+                onChange={(event) => {
+                  const expectedStatus = event.target.value
+                    .split(",")
+                    .map((part) => Number(part.trim()))
+                    .filter((code) => Number.isInteger(code) && code > 0)
+                  // Listed statuses replace any-answer; the server refuses both.
+                  updateConfig({
+                    expectedStatus,
+                    ...(expectedStatus.length ? { acceptAnyAnswer: undefined } : {}),
+                  })
+                }}
               />
             </Field>
           </FieldRow>
+          <OptionRow
+            title="Any answer counts"
+            hint="Anything below 500 except 400 and 421 passes, for an API with no page at this path. Off, only the statuses listed, or any 2xx, pass."
+            checked={Boolean(config.acceptAnyAnswer)}
+            disabled={disabled}
+            onCheckedChange={(acceptAnyAnswer) =>
+              updateConfig(
+                acceptAnyAnswer
+                  ? { acceptAnyAnswer: true, expectedStatus: [] }
+                  : { acceptAnyAnswer: undefined },
+              )
+            }
+          />
         </>
       )}
 
@@ -422,9 +451,9 @@ function CheckEditor({
       )}
 
       <FieldRow
-        columns={kind === "http" ? 3 : 2}
+        columns={3}
         // Short numbers with their units: side by side even on a phone.
-        className={kind === "http" ? "grid-cols-3" : "grid-cols-2"}
+        className="grid-cols-3"
       >
         <NumberField
           id={id("attempts")}
@@ -444,17 +473,15 @@ function CheckEditor({
           disabled={disabled}
           onChange={(timeoutSeconds) => updateConfig({ timeoutSeconds })}
         />
-        {kind === "http" && (
-          <NumberField
-            id={id("interval")}
-            label="Interval"
-            unit="s"
-            max={60}
-            value={config.intervalSeconds ?? 0}
-            disabled={disabled}
-            onChange={(intervalSeconds) => updateConfig({ intervalSeconds })}
-          />
-        )}
+        <NumberField
+          id={id("interval")}
+          label="Interval"
+          unit="s"
+          max={60}
+          value={config.intervalSeconds ?? 0}
+          disabled={disabled}
+          onChange={(intervalSeconds) => updateConfig({ intervalSeconds })}
+        />
       </FieldRow>
 
       <OptionRow

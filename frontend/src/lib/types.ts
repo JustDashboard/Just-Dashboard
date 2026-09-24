@@ -3257,6 +3257,47 @@ export type DeploymentDetectedDatabase = {
   evidence: string
 }
 
+/**
+ * How detection proposes a release proves it serves (`DetectedReadiness`):
+ * the check `defaultChecks` builds, where it came from, and what the source
+ * says about hosts and HTTPS that preflight turns into findings.
+ */
+export type DeploymentDetectedReadiness = {
+  kind: "http" | "docker_health"
+  path?: string
+  /** Any answer below 500 (but 400 and 421) counts as ready. */
+  acceptAnyAnswer?: boolean
+  attempts?: number
+  intervalSeconds?: number
+  source: "healthcheck" | "platform" | "framework" | "code" | "convention"
+  evidence: string
+  slowStart?: string
+  modelDownload?: string
+  modelCache?: string
+  rootRoute?: "routed" | "unrouted"
+  httpsRedirect?: string
+  httpsRedirectIgnoresProxy?: boolean
+  allowedHosts?: string[]
+  allowedHostsSource?: string
+}
+
+/** The library that makes a candidate a process that never listens. */
+export type DeploymentDetectedBackgroundWorker = {
+  library: string
+  kind: string
+  evidence: string
+}
+
+/** A start command that backgrounds the application, which detection could not rewrite. */
+export type DeploymentDetectedStartDetach = {
+  command: string
+  script?: string
+  source: string
+  effect: "exits" | "backgrounds"
+  reason: string
+  action: string
+}
+
 export type DeploymentDetectionCandidate = {
   dockerfile?: string
   goVersion?: string
@@ -3285,6 +3326,9 @@ export type DeploymentDetectionCandidate = {
   databases?: DeploymentDetectedDatabase[]
   evidence: { path: string; reason: string }[]
   needsDecision: string[]
+  readiness?: DeploymentDetectedReadiness
+  backgroundWorker?: DeploymentDetectedBackgroundWorker
+  startDetaches?: DeploymentDetectedStartDetach
 }
 
 export type DeploymentDetection = {

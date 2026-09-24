@@ -39,6 +39,14 @@ type CheckConfiguration struct {
 	Attempts        int      `json:"attempts,omitempty"`
 	TimeoutSeconds  int      `json:"timeoutSeconds,omitempty"`
 	IntervalSeconds int      `json:"intervalSeconds,omitempty"`
+
+	// AcceptAnyAnswer counts any answer a serving application gives — a 404
+	// from an API with no page at the path, a 401 from a login wall, a
+	// redirect to another site — as ready; only a 5xx, a 400 or 421 (what host
+	// allowlists answer) or no answer at all is not. Detection sets it for
+	// services whose root is not a page, where 2xx-only failed healthy
+	// releases (checks_http.go).
+	AcceptAnyAnswer bool `json:"acceptAnyAnswer,omitempty"`
 }
 
 func decodeCheckConfiguration(raw json.RawMessage) (CheckConfiguration, error) {
@@ -81,6 +89,9 @@ func validateCheckConfiguration(kind string, raw json.RawMessage) error {
 			return errors.New("expected HTTP status is invalid")
 		}
 	}
+	if config.AcceptAnyAnswer && len(config.ExpectedStatus) != 0 {
+		return errors.New("an HTTP check expects either listed statuses or any answer, not both")
+	}
 	if config.URL != "" {
 		parsed, err := url.Parse(config.URL)
 		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" ||
@@ -103,18 +114,18 @@ func validateCheckConfiguration(kind string, raw json.RawMessage) error {
 			return errors.New("HTTP checks cannot include a command")
 		}
 	case CheckTCP, CheckDockerHealth:
-		if config.URL != "" || len(config.Command) != 0 {
+		if config.URL != "" || len(config.Command) != 0 || config.AcceptAnyAnswer {
 			return errors.New("TCP/Docker-health checks contain unrelated fields")
 		}
 	case CheckCommand:
-		if len(config.Command) == 0 || config.URL != "" {
+		if len(config.Command) == 0 || config.URL != "" || config.AcceptAnyAnswer {
 			return errors.New("command checks require a non-empty argv")
 		}
 	default:
 		// DNS/TLS/game/backup checks are owned by later feature joins. Their
 		// closed kind is already valid, but accepting arbitrary C5 fields here
 		// would make an unavailable check look executable.
-		if config.URL != "" || config.Host != "" || config.Port != 0 || len(config.Command) != 0 {
+		if config.URL != "" || config.Host != "" || config.Port != 0 || len(config.Command) != 0 || config.AcceptAnyAnswer {
 			return errors.New("this check kind has no C5 execution configuration")
 		}
 	}
@@ -139,6 +150,10 @@ type CheckAttemptEvidence struct {
 	ExitCode       int           `json:"exitCode,omitempty"`
 	OutputDigest   string        `json:"outputDigest,omitempty"`
 	Code           string        `json:"code,omitempty"`
+
+	// RedirectOrigin is where an unfollowed redirect pointed: its scheme and
+	// host only, since a login redirect's query carries state tokens.
+	RedirectOrigin string `json:"redirectOrigin,omitempty"`
 }
 
 type CheckEvidence struct {
@@ -249,57 +264,7 @@ func (r *CheckRunner) runAttempt(
 	result := CheckAttemptEvidence{Outcome: HealthFailed}
 	switch kind {
 	case CheckHTTP, CheckPublicRoute:
-		address := config.URL
-		if address == "" && kind == CheckPublicRoute && len(target.PublicURLs) > 0 {
-			address = target.PublicURLs[0]
-		}
-		if address == "" {
-			host, port := targetAddress(config, target)
-			if host == "" || port == 0 {
-				result.Outcome, result.Code = HealthUnavailable, "target_unavailable"
-				break
-			}
-			path := config.Path
-			if path == "" {
-				path = "/"
-			}
-			address = "http://" + net.JoinHostPort(host, strconv.Itoa(port)) + path
-		}
-		method := config.Method
-		if method == "" {
-			method = http.MethodGet
-		}
-		request, err := http.NewRequestWithContext(attemptCtx, method, address, nil)
-		if err != nil {
-			result.Code = "invalid_target"
-			break
-		}
-		client := *r.http
-		if len(config.ExpectedStatus) == 0 {
-			// A redirect alone does not prove the candidate can serve a page.
-			// Stay on that candidate: following an external login/public route
-			// could accidentally check the predecessor instead.
-			client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
-				if len(via) >= 5 || next.URL.Scheme != request.URL.Scheme || next.URL.Host != request.URL.Host {
-					return http.ErrUseLastResponse
-				}
-				return nil
-			}
-		}
-		response, err := client.Do(request)
-		result.Address = address
-		if err != nil {
-			result.Code = checkNetworkError(attemptCtx, err)
-			break
-		}
-		_, _ = io.CopyN(io.Discard, response.Body, 4096)
-		_ = response.Body.Close()
-		result.StatusCode = response.StatusCode
-		if expectedHTTPStatus(response.StatusCode, config.ExpectedStatus) {
-			result.Outcome = HealthPassed
-		} else {
-			result.Code = "unexpected_status"
-		}
+		r.httpAttempt(attemptCtx, kind, config, target, &result)
 	case CheckTCP:
 		host, port := targetAddress(config, target)
 		if host == "" || port == 0 {
@@ -437,6 +402,11 @@ func checkFailureMessage(phase string, outcome HealthOutcome, checks ...CheckEvi
 			reason = "the application did not respond before the timeout"
 		case "unexpected_status":
 			reason = fmt.Sprintf("the application returned HTTP %d", last.StatusCode)
+		case "redirect_off_origin":
+			reason = fmt.Sprintf("the application redirected (HTTP %d) to %s, another site readiness does not follow",
+				last.StatusCode, last.RedirectOrigin)
+		case "redirect_loop":
+			reason = fmt.Sprintf("the application kept redirecting (HTTP %d to %s)", last.StatusCode, last.RedirectOrigin)
 		case "target_unavailable":
 			reason = "the application's runtime address is unavailable"
 		case "exit_nonzero":

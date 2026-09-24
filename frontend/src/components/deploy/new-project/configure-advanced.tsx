@@ -528,6 +528,20 @@ function CheckFields({
           </Field>
         </FieldRow>
       )}
+      {check.kind === "http" && (
+        <OptionRow
+          title="Any answer counts"
+          hint="Anything below 500 except 400 and 421 passes, for an API with no page at this path. Off, only a 2xx passes."
+          checked={Boolean(config.acceptAnyAnswer)}
+          onCheckedChange={(acceptAnyAnswer) =>
+            updateConfig(
+              acceptAnyAnswer
+                ? { acceptAnyAnswer: true, expectedStatus: undefined }
+                : { acceptAnyAnswer: undefined },
+            )
+          }
+        />
+      )}
       {check.kind === "tcp" && (
         <FieldRow columns={2}>
           <Field

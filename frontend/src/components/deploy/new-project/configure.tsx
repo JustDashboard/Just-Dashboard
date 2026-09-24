@@ -388,7 +388,12 @@ export function Configure({
     // the plan stop-first with nothing verifying it would answer half the
     // question the operator just answered.
     const gated = profile === "web" || profile === "static"
-    const checks = checksForRuntime(configuration.checks, profile, internalPort)
+    const checks = checksForRuntime(
+      configuration.checks,
+      profile,
+      internalPort,
+      flow.candidate?.readiness,
+    )
     return onFlowChange({
       ...flow,
       profile,

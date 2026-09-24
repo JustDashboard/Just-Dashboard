@@ -67,6 +67,94 @@ describe("detected deployment serving defaults", () => {
   })
 })
 
+describe("readiness detected from the source", () => {
+  test("a declared health route becomes the check's path", () => {
+    const plan = defaultConfiguration(
+      "web",
+      candidate({
+        profile: "web",
+        buildMethod: "dockerfile",
+        port: 3000,
+        readiness: {
+          kind: "http",
+          path: "/up",
+          source: "framework",
+          evidence: "Rails health route in config/routes.rb",
+        },
+      }),
+    )
+    expect(plan.checks).toEqual([
+      {
+        name: "HTTP readiness",
+        kind: "http",
+        phase: "readiness",
+        required: true,
+        config: { path: "/up", attempts: 20, timeoutSeconds: 5, intervalSeconds: 3 },
+      },
+    ])
+  })
+  test("an API without a health route accepts any answer, with a slow start's budget", () => {
+    const plan = defaultConfiguration(
+      "web",
+      candidate({
+        profile: "web",
+        recipe: "java",
+        port: 8080,
+        readiness: {
+          kind: "http",
+          path: "/",
+          acceptAnyAnswer: true,
+          attempts: 40,
+          intervalSeconds: 3,
+          source: "convention",
+          evidence: "no health route found",
+        },
+      }),
+    )
+    expect(plan.checks[0].config).toEqual({
+      path: "/",
+      acceptAnyAnswer: true,
+      attempts: 40,
+      timeoutSeconds: 5,
+      intervalSeconds: 3,
+    })
+  })
+  test("a Dockerfile HEALTHCHECK command waits for the container's health", () => {
+    const readiness = {
+      kind: "docker_health",
+      attempts: 44,
+      intervalSeconds: 3,
+      source: "healthcheck",
+      evidence: "HEALTHCHECK in the Dockerfile runs node",
+    }
+    const plan = defaultConfiguration(
+      "web",
+      candidate({ profile: "web", buildMethod: "dockerfile", port: 3000, readiness }),
+    )
+    expect(plan.checks).toEqual([
+      {
+        name: "Container health",
+        kind: "docker_health",
+        phase: "readiness",
+        required: true,
+        config: { attempts: 44, timeoutSeconds: 5, intervalSeconds: 3 },
+      },
+    ])
+    // The port field adding the check later uses the same evidence.
+    expect(checksForRuntime([], "web", 3000, readiness)[0].kind).toBe("docker_health")
+  })
+  test("a worker gets no readiness gate whatever detection read", () => {
+    const plan = defaultConfiguration(
+      "worker",
+      candidate({
+        profile: "worker",
+        backgroundWorker: { library: "discord.js", kind: "Discord bot", evidence: "" },
+      }),
+    )
+    expect(plan.checks).toEqual([])
+  })
+})
+
 describe("package manager runner", () => {
   test("choosing a manager moves the plain script runner with it", () => {
     expect(withPackageManagerRunner("npm run build", "bun")).toBe("bun run build")
