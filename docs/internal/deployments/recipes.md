@@ -89,7 +89,9 @@ confidence; between two nested roots, `apps/`, `services/` or `web/` above `pack
 `tools/`; and, on a tie, the shallower root — unless that is plain static files, which say least about
 what a repository is for. A tie is still the operator's choice. A candidate ranked down is chosen on its
 own only when it is the only deployable thing and nothing in the repository is a library it could be
-the example of; a candidate that is not a service is never chosen on its own. Ranked down
+the example of; a candidate that is not a service is never chosen on its own. At most the 64
+best-ranked candidates are listed, and the rest are counted under "Not offered", so a repository of
+fixtures stays a result the chooser can show. Ranked down
 (`demotion`, said beside it in the candidate chooser and by `selected_candidate_demoted` when it is
 picked anyway):
 
