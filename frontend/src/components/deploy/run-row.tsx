@@ -13,6 +13,7 @@ import { AuthorMark, BranchChip, ShortSha } from "@/components/git/marks"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { RunActorMark } from "@/components/deploy/run-marks"
 import { MiniReleasePath } from "@/components/deploy/run-pipeline"
+import { failureLabel } from "@/components/deploy/failure-cause"
 import {
   RunStatus,
   formatDuration,
@@ -26,7 +27,6 @@ import {
   runTitle,
   runTriggerLine,
   shortRevision,
-  terminalLabel,
   useNow,
 } from "@/components/deploy/vocabulary"
 
@@ -92,9 +92,10 @@ export function RunRow({
   const active = isActiveRun(run.state)
   const now = useNow(1000, active)
   const subject = runSubject(run)
-  // Under a status that already says it failed, the code names only where.
+  // Under a status that already says it failed, the code names only where —
+  // or, for a cause the output proved, what.
   const failure =
-    runFailed(run.state) && run.terminalCode ? terminalLabel(run.terminalCode) : undefined
+    runFailed(run.state) && run.terminalCode ? failureLabel(run.terminalCode) : undefined
   const state = live ? <Status tone="running" label="Live" /> : <RunStatus state={run.state} />
   const stage = active && run.currentStep && (
     <span className="flex items-center gap-2">

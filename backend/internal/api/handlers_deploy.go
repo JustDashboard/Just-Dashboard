@@ -44,6 +44,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/runs/{run}/logs", s.handle(s.handleDeploymentRunLogs))
 		r.Method(http.MethodGet, "/{id}/runs/{run}/metrics", s.handle(s.handleDeploymentRunMetrics))
 		r.Method(http.MethodGet, "/{id}/runs/{run}/stream", s.handle(s.handleDeploymentRunStream))
+		r.Method(http.MethodGet, "/{id}/runs/{run}/settings-drift", s.handle(s.handleDeploymentRunSettingsDrift))
 		r.Method(http.MethodGet, "/{id}/requests", s.handle(s.handleDeploymentRequests))
 		r.Method(http.MethodGet, "/{id}/requests/stream", s.handle(s.handleDeploymentRequestStream))
 		r.Method(http.MethodGet, "/{id}/requests/export", s.handle(s.handleDeploymentRequestExport))
@@ -194,11 +195,24 @@ func mapDeployError(err error) error {
 		return httpx.Err(http.StatusBadRequest, "ref_not_applicable", err.Error())
 	case errors.Is(err, deploy.ErrRefNotFound):
 		return httpx.Err(http.StatusBadRequest, "ref_not_found", err.Error())
+	case errors.As(err, new(*deploy.SourceFailure)):
+		// The remote answered and git's output named why: a refused
+		// credential, a missing repository, an unreachable host or a commit
+		// that is gone. Each has its own remedy, so each keeps its own code.
+		return httpx.Err(http.StatusBadGateway, sourceFailureCode(err), err.Error())
 	case errors.Is(err, deploy.ErrSourceUnavailable):
 		return httpx.Err(http.StatusBadGateway, "source_unavailable", err.Error())
 	default:
 		return httpx.BadRequest("%v", err)
 	}
+}
+
+func sourceFailureCode(err error) string {
+	var failure *deploy.SourceFailure
+	if errors.As(err, &failure) {
+		return failure.Code
+	}
+	return "source_unavailable"
 }
 
 func (s *Server) enrichProject(r *http.Request, p *deploy.Project) {
@@ -993,6 +1007,24 @@ func (s *Server) handleDeploymentRunGet(w http.ResponseWriter, r *http.Request) 
 		return mapDeployError(deploy.ErrRunNotFound)
 	}
 	httpx.JSON(w, http.StatusOK, snapshot)
+	return nil
+}
+
+// handleDeploymentRunSettingsDrift says what changed in the environment's
+// settings since a run was planned, so a failed run's page can offer a deploy
+// with the current settings rather than a retry of the ones that failed. It
+// reads what the configuration read already shows: plan fields, and variable
+// names and scopes without values.
+func (s *Server) handleDeploymentRunSettingsDrift(w http.ResponseWriter, r *http.Request) error {
+	projectID, runID, err := deploymentRunIDs(r)
+	if err != nil {
+		return err
+	}
+	drift, err := s.modules.deployPlanning.RunSettingsDrift(r.Context(), projectID, runID)
+	if err != nil {
+		return mapDeployError(err)
+	}
+	httpx.JSON(w, http.StatusOK, drift)
 	return nil
 }
 

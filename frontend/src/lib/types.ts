@@ -2403,6 +2403,64 @@ export type DeploymentBuildEvidence = {
   }
 }
 
+/**
+ * What a failed step's own output proved about why it failed, read from its
+ * evidence: `cause` on a failed build or release task, `diagnostics.cause` on
+ * a failed health gate. The code is also the step's error code and the run's
+ * terminal code; the subjects are identifiers the output named, never a line
+ * of it, and `lineSeq` is the transcript line that proves it.
+ */
+export type DeploymentFailureCause = {
+  code: string
+  phase?: "install" | "build" | "output_check" | "setup" | "dockerfile" | "base_image" | "pull"
+  command?: string
+  exitCode?: number
+  subjects?: string[]
+  /** What the code is about when it covers several tools: "package-lock.json", "go". */
+  detail?: string
+  lineSeq?: number
+  /** The Compose service whose build failed. */
+  service?: string
+  /** A schema_missing cause names its table here. */
+  table?: string
+  fix?: DeploymentCauseFix
+}
+
+/**
+ * The one plan change a cause's evidence supports. `set_build` and
+ * `set_runtime` replace the field with `value`; `add_variable` creates the
+ * variable in `scope`; `variable_scope` adds `scope` to an existing one;
+ * `review` opens a field whose right value the output cannot prove.
+ */
+export type DeploymentCauseFix = {
+  kind: "set_build" | "set_runtime" | "add_variable" | "variable_scope" | "review"
+  /** `configuration.build.packageManager`, `runtime.internalPort`, `variables.NAME`, `dependencies`. */
+  field: string
+  value?: string
+  scope?: string
+}
+
+/** What changed in the environment's settings since a run was planned. */
+export type DeploymentRunSettingsDrift = {
+  runId: number
+  planRevision: number
+  desiredRevision: number
+  changed: boolean
+  changes: DeploymentSettingsChange[]
+}
+
+/**
+ * One changed setting. `before`/`after` are plan values that are not secret
+ * — a package manager, a port, a command — or, for a variable, its scopes.
+ */
+export type DeploymentSettingsChange = {
+  kind: "build" | "runtime" | "source" | "variable"
+  field: string
+  change: "changed" | "added" | "removed" | "scope"
+  before?: string
+  after?: string
+}
+
 export type DeploymentRunSnapshot = {
   run: DeploymentEngineRun
   steps: DeploymentStep[]

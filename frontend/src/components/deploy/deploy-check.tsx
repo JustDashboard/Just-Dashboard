@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { RefreshClockwise } from "@/components/icons"
 import { post } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
+import { useSessionState } from "@/lib/view-state"
 import type { DeploymentCheckResult, DeploymentPreflightFinding } from "@/lib/types"
 import { FormFact, FormNote } from "@/components/form"
 import { Modal } from "@/components/modal"
@@ -14,6 +15,8 @@ import { ShortSha } from "@/components/git/marks"
 import { FindingRow } from "@/components/deploy/deployment-findings"
 import {
   attentionFindings,
+  confirmationSignature,
+  needsConfirmation,
   rememberDeploymentCheck,
   settingsPathForField,
   stopsDeployment,
@@ -276,4 +279,56 @@ export function DeployCheckDialog({
       </div>
     </Modal>
   )
+}
+
+/**
+ * A deployment started away from the header — "Deploy with current settings"
+ * on a failed run's page or row — checked first like every other: the commit
+ * it names is asked about, and "Ready to deploy?" opens when something would
+ * stop it or warnings are not yet confirmed in this tab. A check that cannot
+ * answer leaves the deployment to check itself before it builds. `start`
+ * says whether it asked; `gate` is the dialog, for the caller to render.
+ */
+export function useCheckedDeploy(projectId: number) {
+  const [confirmed, setConfirmed] = useSessionState(`deploy.${projectId}.check.confirmed`, "")
+  const [asking, setAsking] = useState<{
+    result: DeploymentCheckResult
+    deploy: () => Promise<void>
+  }>()
+  const [busy, setBusy] = useState(false)
+  const start = async (
+    environmentId: number,
+    version: { sourceRevision?: string },
+    deploy: () => Promise<void>,
+  ) => {
+    const result = await post<DeploymentCheckResult>(
+      `/deploy/${projectId}/environments/${environmentId}/check`,
+      version,
+    ).catch(() => undefined)
+    if (Array.isArray(result?.findings) && needsConfirmation(result, confirmed)) {
+      setAsking({ result, deploy })
+      return true
+    }
+    await deploy()
+    return false
+  }
+  const gate = asking && (
+    <DeployCheckDialog
+      open
+      onOpenChange={(open) => !open && setAsking(undefined)}
+      projectId={projectId}
+      result={asking.result}
+      command="Deploy"
+      busy={busy}
+      onConfirm={() => {
+        setConfirmed(confirmationSignature(asking.result.findings))
+        setBusy(true)
+        void asking.deploy().finally(() => {
+          setBusy(false)
+          setAsking(undefined)
+        })
+      }}
+    />
+  )
+  return { start, gate }
 }

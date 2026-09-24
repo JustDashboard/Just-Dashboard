@@ -63,6 +63,11 @@ func (p *CommitStatusPublisher) RunFinished(ctx context.Context, run EngineRun) 
 }
 
 func failureDescription(run EngineRun) string {
+	// A commit status has room for a few words, and a named cause's title
+	// says more in them than the first words of its sentence.
+	if cause := namedCauseTitle(run.TerminalCode); cause != "" {
+		return "Deployment failed: " + cause
+	}
 	if reason := strings.TrimSpace(run.TerminalReason); reason != "" {
 		return "Deployment failed: " + reason
 	}

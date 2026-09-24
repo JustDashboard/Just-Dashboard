@@ -503,6 +503,9 @@ func (b *ArtifactBuilder) Build(
 				if err := validateCustomDockerfile(content); err != nil {
 					return result, fmt.Errorf("Compose service %s: %w", service.Name, err)
 				}
+				if err := emit(BuildLog{Stream: "status", Text: composeServiceBuildStatus + service.Name}); err != nil {
+					return result, err
+				}
 				serviceTag := composeServiceImageTag(tag, service.Name)
 				buildArgs, err := composeServiceBuildArgs(service, variables)
 				if err != nil {
@@ -526,7 +529,7 @@ func (b *ArtifactBuilder) Build(
 					Target: target, BuildArgs: buildArgs,
 				}, redactBuildEmitter(variables, emit))
 				if err != nil {
-					return result, fmt.Errorf("build Compose service %s: %w", service.Name, err)
+					return result, &ComposeServiceError{Service: service.Name, Err: err}
 				}
 				if err := validateResolvedImage(image); err != nil {
 					return result, err
@@ -1045,6 +1048,16 @@ func composeServiceImageTag(tag, service string) string {
 }
 
 func redactBuildEmitter(values map[string]string, emit func(BuildLog) error) func(BuildLog) error {
+	redact := buildRedactor(values)
+	return func(line BuildLog) error {
+		line.Text = redact(line.Text)
+		return emit(line)
+	}
+}
+
+// buildRedactor replaces every variable value in a text, longest first so a
+// value that contains another is not left half redacted.
+func buildRedactor(values map[string]string) func(string) string {
 	secrets := make([]string, 0, len(values))
 	for _, value := range values {
 		if value != "" {
@@ -1052,11 +1065,11 @@ func redactBuildEmitter(values map[string]string, emit func(BuildLog) error) fun
 		}
 	}
 	sort.Slice(secrets, func(i, j int) bool { return len(secrets[i]) > len(secrets[j]) })
-	return func(line BuildLog) error {
+	return func(text string) string {
 		for _, secret := range secrets {
-			line.Text = strings.ReplaceAll(line.Text, secret, "[REDACTED]")
+			text = strings.ReplaceAll(text, secret, "[REDACTED]")
 		}
-		return emit(line)
+		return text
 	}
 }
 

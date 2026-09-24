@@ -134,9 +134,15 @@ func (s *OrchestrationStore) Operations(
 		Dependencies: DependencySummary{Status: statusUnavailable, Items: []DependencyObservation{}},
 	}
 	input := DiagnosisInput{
-		LiveReleaseID: summary.LiveReleaseID, PendingChanges: summary.PendingChanges,
+		ProjectID: summary.ID, LiveReleaseID: summary.LiveReleaseID, PendingChanges: summary.PendingChanges,
 		DesiredRevision: summary.DesiredRevision, LivePlanRevision: summary.LivePlanRevision,
 		Runtime: result.Runtime,
+	}
+	if summary.LastRun != nil && summary.LastRun.EnvironmentID == summary.EnvironmentID {
+		input.LastRun = summary.LastRun
+	}
+	if watch, err := s.GitWatchStatus(ctx, summary.ID, summary.EnvironmentID); err == nil {
+		input.GitWatch = &watch
 	}
 	if summary.LiveReleaseID <= 0 {
 		result.Reason = "This deployment has no live release. Deploy it to record the runtime, domain and storage evidence this page reads."

@@ -14,10 +14,12 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/client"
 )
 
 type BuildxSecret struct {
@@ -107,12 +109,13 @@ func (c *Client) BuildImmutable(
 	if err != nil {
 		return ImmutableImage{}, err
 	}
-	buildCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	buildCtx, cancel := context.WithTimeout(ctx, buildTimeout)
 	defer cancel()
 	cmd := hostexec.CommandInDir(buildCtx, opts.Dir, "docker", args...)
 	cmd.Env = environment
-	if err := runGroupStream(buildCtx, cmd, out); err != nil {
-		return ImmutableImage{}, err
+	reader := newBuildFailureReader()
+	if err := runGroupStream(buildCtx, cmd, out, reader); err != nil {
+		return ImmutableImage{}, buildRunError(ctx, buildCtx, err)
 	}
 	var buildMetadata map[string]any
 	if raw, err := os.ReadFile(metadataPath); err == nil {
@@ -215,23 +218,61 @@ func scrubBuildEnvironment(source []string) []string {
 	return result
 }
 
-func runGroupStream(ctx context.Context, cmd *exec.Cmd, out chan<- LogLine) error {
-	stdout, err := cmd.StdoutPipe()
+// buildTimeout is how long one buildx run may take. A release build of a
+// large Rust, Gradle or monorepo project on a small server approaches it.
+const buildTimeout = 30 * time.Minute
+
+// pipeDrainGrace is how long a read waits for more output once buildx has
+// exited: whatever BuildKit printed last is already in the pipe by then.
+var pipeDrainGrace = 5 * time.Second
+
+// drainReader stops waiting on a pipe that stays open after the build's
+// process exited. A descendant that inherited it can outlive buildx, which
+// RunGroup leaves running after a normal exit, and the step must not wait on
+// that process. The deadline is set as each read starts, so a slow reader
+// downstream never cuts off output that had already arrived.
+type drainReader struct {
+	file   *os.File
+	exited *atomic.Bool
+}
+
+func (r drainReader) Read(buffer []byte) (int, error) {
+	if r.exited.Load() {
+		_ = r.file.SetReadDeadline(time.Now().Add(pipeDrainGrace))
+	}
+	return r.file.Read(buffer)
+}
+
+func runGroupStream(ctx context.Context, cmd *exec.Cmd, out chan<- LogLine, failure *buildFailureReader) error {
+	// Plain pipes rather than StdoutPipe: Wait closes a StdoutPipe as soon as
+	// the process exits, which can drop the last lines still buffered in it,
+	// and BuildKit's last lines are the ones that name the failure.
+	stdout, stdoutWriter, err := os.Pipe()
 	if err != nil {
 		return err
 	}
-	stderr, err := cmd.StderrPipe()
+	defer stdout.Close()
+	stderr, stderrWriter, err := os.Pipe()
 	if err != nil {
+		stdoutWriter.Close()
 		return err
 	}
+	defer stderr.Close()
+	cmd.Stdout, cmd.Stderr = stdoutWriter, stderrWriter
+	var exited atomic.Bool
 	var wg sync.WaitGroup
 	wg.Add(2)
-	scan := func(reader io.Reader, stream string) {
+	scan := func(file *os.File, stream string) {
 		defer wg.Done()
+		reader := drainReader{file: file, exited: &exited}
+		// Whatever stops the scanner, the pipe keeps being read so the build
+		// never blocks writing to it.
+		defer io.Copy(io.Discard, reader)
 		scanner := bufio.NewScanner(reader)
 		scanner.Buffer(make([]byte, 0, 64*1024), maxLogLine)
 		for scanner.Scan() {
 			line := LogLine{Stream: stream, Text: strings.TrimRight(scanner.Text(), "\r")}
+			failure.observe(line.Text)
 			if out == nil {
 				continue
 			}
@@ -245,12 +286,23 @@ func runGroupStream(ctx context.Context, cmd *exec.Cmd, out chan<- LogLine) erro
 	go scan(stdout, "stdout")
 	go scan(stderr, "stderr")
 	result, runErr := hostexec.RunGroup(ctx, cmd, 5*time.Second)
+	// The child's copies closed when it exited; closing these ends the reads.
+	stdoutWriter.Close()
+	stderrWriter.Close()
+	exited.Store(true)
+	// A read already waiting started before the exit and carries no deadline.
+	_ = stdout.SetReadDeadline(time.Now().Add(pipeDrainGrace))
+	_ = stderr.SetReadDeadline(time.Now().Add(pipeDrainGrace))
 	wg.Wait()
+	var exit *exec.ExitError
+	if errors.As(runErr, &exit) {
+		return failure.failure(exit.ExitCode())
+	}
 	if runErr != nil {
 		return runErr
 	}
 	if result.ExitCode != 0 {
-		return fmt.Errorf("docker buildx exited with code %d", result.ExitCode)
+		return failure.failure(result.ExitCode)
 	}
 	return nil
 }
@@ -286,7 +338,13 @@ func (c *Client) PullImmutable(
 	}
 	stream, err := cli.ImagePull(ctx, reference, image.PullOptions{RegistryAuth: registryAuth})
 	if err != nil {
-		return ImmutableImage{}, err
+		if client.IsErrConnectionFailed(err) {
+			return ImmutableImage{}, err
+		}
+		// A registry that refuses before the stream starts — a credential
+		// gone stale, a digest the registry no longer has — is the same pull
+		// failure as one it reports inside the stream.
+		return ImmutableImage{}, fmt.Errorf("pull image: %w", err)
 	}
 	defer stream.Close()
 	decoder := json.NewDecoder(stream)

@@ -389,8 +389,8 @@ container record nothing, so what their authors bake in is never overridden.
 When a candidate fails its readiness gate anyway, the diagnosis also reads its listening sockets: the
 runtime owner runs `cat /proc/net/tcp /proc/net/tcp6` inside the candidate's own container (closed
 argv, bounded output, only the parsed addresses kept; an image without `cat` reports nothing). A
-candidate listening only on loopback gets the cause `loopback_only`, named in the failure message even
-when the application printed nothing.
+candidate listening only on loopback gets the cause `runtime_loopback_bind` with the listener as its
+subject, named in the failure message even when the application printed nothing.
 
 ## Release commands
 
@@ -706,7 +706,7 @@ fails the start instead of dropping it. That is why a push is never a pass: pref
 `schema_push_unversioned` (a warning in place of `schema_step`, linked database or not) whenever the start
 command, a release task or the package's own start script pushes, with the command that commits
 migrations instead (`prisma migrate dev`, `drizzle-kit generate`). When a push does refuse, the failed
-readiness gate names it — `schema_push_refused`, from Prisma's `--accept-data-loss` message or Drizzle's
+readiness gate names it — `runtime_schema_push_refused`, from Prisma's `--accept-data-loss` message or Drizzle's
 rename and data-loss prompts — rather than a bare timeout. The tool must be installed by the lockfile; the
 runtime stage copies the build's `node_modules`, so a devDependency is available to the start command.
 
@@ -1466,7 +1466,7 @@ variables, which only the package manager sets, is left as it is and recorded in
 warning for a Dockerfile's own `CMD`; `a & b` runs a second, unsupervised process and is
 `start_command_backgrounds` (one process per project: deploy the other as its own worker). When a
 single container nonetheless exits with code 0 while readiness waits, the run's diagnosis is
-`start_command_exited`.
+`runtime_start_exited`.
 
 ## Persistent state
 
@@ -1534,7 +1534,7 @@ file out of use and raises nothing. SQLite moved onto a volume starts empty the 
 does, so the detected schema tool's step is checked for it too (`schema_step_missing`, titled for the
 volume); only the start command or the application itself counts there, because a release task, on the
 host or in the release image, runs without the plan's volumes. A container that cannot open or write its SQLite file — the directory is missing or not writable
-by its user — fails its readiness gate with `sqlite_not_writable` named.
+by its user — fails its readiness gate with `runtime_sqlite_not_writable` named.
 
 Limits: an image's declared volumes are read only when the image is already on this host (the registry
 manifest does not carry its configuration), and a base image's own `VOLUME` behind a Dockerfile is not
@@ -1555,6 +1555,52 @@ warning) naming the command to run once from the project's console after the fir
 first release does: a deployment that replaces a live runtime has a database that already holds whatever
 was seeded. It is never planned as a release task, which runs before every release, because a seed that
 clears tables must not run on every release.
+
+## Failure diagnosis
+
+A failed build is named from its own output, never by running anything more (see
+[implementation](implementation.md) for the collector and the evidence). The phase comes from which
+rendered instruction failed: a recipe's dependency install (`npm ci`, `bun install`, `pip install`,
+`uv sync`, `poetry install`, `go mod download`, `cargo fetch`, `dotnet restore`, `composer install`,
+`deno install`, an `apk add`) is **install**; the plan's build command, or the recipe's default build
+when it has none, is **build**; the `test -f … || (echo '… must produce …' >&2; exit 1)` guard and a
+`COPY --from=build` of an output directory are **output_check**; any other generated line is
+**setup**, and every step of a custom Dockerfile or Compose build is **dockerfile**. A recipe step the
+JavaScript recipe prefixes with the defaults it exports (`export NAME="${NAME:-…}" && …`: Prisma's
+placeholders, `SKIP_ENV_VALIDATION`, the legacy OpenSSL provider) is read, and named, by the command
+after them.
+
+The signature table (`build_output_signatures.go`) is ordered most specific first; the failed step's
+own lines are read before the stream's, which keeps only the steps that have not finished and
+BuildKit's closing replay — a step that passed printed nothing that explains a later failure. What it
+names, with the remedy the evidence supports:
+
+| Code | Recognised from | Fix computed |
+|------|-----------------|--------------|
+| `build_lockfile_out_of_sync` | npm `EUSAGE … are in sync` (subjects from `Missing:`/`Invalid:`), Bun `lockfile had changes, but lockfile is frozen`, `ERR_PNPM_OUTDATED_LOCKFILE`, Yarn `YN0028` and Yarn 1 `--frozen-lockfile`, Poetry `changed significantly`, uv `--locked`, Cargo `--locked was passed`, Go `missing go.sum entry` / `updates to go.mod needed`, Composer lock errors, Deno `The lockfile is out of date`, Bundler deployment mode | the package manager whose lockfile the detected candidate reads as in sync |
+| `build_lockfile_incompatible` | pnpm `ERR_PNPM_LOCKFILE_BREAKING_CHANGE`/`BROKEN_LOCKFILE`, Cargo lock version, Poetry/uv lock format, Bun lockfile version | — |
+| `build_package_manager_mismatch` | corepack `This project is configured to use X`, `ERR_PNPM_BAD_PM_VERSION` | the manager `packageManager` declares |
+| `build_lifecycle_script_blocked` | `ERR_PNPM_IGNORED_BUILDS`, Bun `Blocked N postinstalls` with a consequence | — |
+| `build_runtime_version` | EBADENGINE, `ERR_PNPM_UNSUPPORTED_ENGINE`, Yarn/Next engine lines, Go `GOTOOLCHAIN=local`, rustc `or newer`, Maven release, Gradle class version, NETSDK1045, Composer `requires php`, pip `requires a different Python`, uv/Poetry Python requirement, Ruby/Elixir/Hugo versions | a Go or Python release the recipe offers |
+| `build_env_missing` | PrismaConfigEnvError, P1012, t3-env, SvelteKit `$env/static`, Astro, Rails `secret_key_base`, Phoenix, Django, `KeyError` on the environment | the variable, or its build scope (recipes only) |
+| `build_sqlx_offline` | sqlx `set DATABASE_URL to use query macros` / no cached data | `SQLX_OFFLINE=true` for the build |
+| `build_database_unreachable`, `build_prerender_failed` | Next prerender/collect-page-data errors, with or without a database error; `Can't reach database server`; a `*.jd.internal` address that does not resolve (a linked database is reachable only on the project network, which a build is not on); Django `OperationalError` | — |
+| `build_prisma_client_missing` | `@prisma/client did not initialize yet` | `prisma generate` before the build command, unless the recipe already runs it (the `prisma` CLI is a dependency); otherwise the sentence says to add the CLI |
+| `build_platform_binary_missing` | rollup/esbuild/SWC/lightningcss/oxide/sharp Linux binaries missing | — |
+| `build_legacy_openssl` | `0308010C`, `ERR_OSSL_EVP_UNSUPPORTED` | `NODE_OPTIONS=--openssl-legacy-provider` |
+| `build_system_library_missing`, `build_native_toolchain_missing` | `pg_config`, `mysql_config`, pkg-config, `cannot find -l`, `*-sys` crates, headers, Prisma libssl, glibc on musl; `gyp ERR!`, a missing compiler (a shell's `make: not found` only with exit 127 or a wrapper reporting 127), `Failed building wheel`, cgo, `linking with cc`, `protoc`, perl, NativeAOT's clang | — |
+| `build_install_script_failed` | npm `error path /app/node_modules/X` with `command failed`, Yarn `YN0009` | — |
+| `build_php_extension_missing` | `requires ext-X … it is missing from your system` | — |
+| `build_dependency_conflict`, `build_dependency_unavailable`, `build_dependency_local_path`, `build_dependency_advisory_blocked` | ERESOLVE, `ResolutionImpossible`, Composer/uv/Cargo/NuGet conflicts; ETARGET/E404, `No matching distribution`, NU1101, Maven artifacts, Go revisions, gems; conda `/croot/` paths; Composer advisories | — |
+| `build_registry_auth`, `build_registry_rate_limited`, `build_network` | E401/E403, `YN0041`, `terminal prompts disabled`; `toomanyrequests`; DNS, TLS and connection failures | — |
+| `build_command_not_found`, `build_script_missing` | `sh: X: not found` when the step exited 127 or a wrapper reports that status (`exit code 127`, `exited (127)`) — a caught probe prints the same line and carries on —, `executable file not found`, pip's `Cannot find command 'git'`, Laravel Wayfinder's `php artisan wayfinder:generate` in an asset stage without PHP; npm/pnpm/Bun/Yarn missing script | the build command with its runner moved to the image's package manager (the install planner's own rewrite, `nodeRunnerFor`), read from the install the build recorded |
+| `build_module_not_found`, `build_type_error`, `build_compile_error` | `Cannot find module`, `Can't resolve`, `No module named`, `no required module provides`; `Type error:`, `error TS…`; rustc, C#, javac/Kotlin, Go, Maven, Gradle, bundler and framework compile errors | — |
+| `build_output_missing`, `build_copy_source_missing`, `build_embed_source_missing`, `build_wrong_root` | the recipe's own guard, a missing `COPY` source, `go:embed` without files, a manifest the build cannot find | the detected output directory, else the field to review |
+| `build_out_of_memory`, `build_disk_full`, `build_timeout` | heap limits, exit 137 (which points at no line: the step's output only shows where it was), `OutOfMemoryError`; `no space left on device`; the 30-minute limit | `NODE_OPTIONS=--max-old-space-size=` three quarters of the server's memory (from 1 GiB, at most 8 GiB) |
+| `build_permission`, `build_script_crlf`, `build_wrapper_missing`, `build_dev_dependency_in_production`, `build_bundle_platform_missing`, `build_hugo_extended_required`, `build_base_image_missing`, `build_platform_unsupported`, `build_dockerfile_invalid` | exit 126, `\r` interpreters, the Gradle/Maven wrapper, Symfony dev bundles and Telescope, a Gemfile.lock without Linux, Hugo Pipes' Sass, a FROM that does not resolve, a manifest for another platform, a Dockerfile that does not parse | — |
+
+Nothing matched is `build_failed`, still with the phase, command and exit code. A Dockerfile build
+never gets a variable fix, because a custom Dockerfile cannot take build secrets.
 
 ## Verification
 

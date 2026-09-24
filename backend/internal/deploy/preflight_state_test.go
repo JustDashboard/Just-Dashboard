@@ -243,24 +243,6 @@ func TestSQLiteOnANewVolumeNeedsItsSchemaStep(t *testing.T) {
 	}
 }
 
-func TestApplicationOutputNamesARefusedPushAndAnUnwritableDatabase(t *testing.T) {
-	t.Parallel()
-	for _, fixture := range []struct{ line, code string }{
-		{"Error: Use the --accept-data-loss flag to ignore the data loss warnings like prisma migrate reset", "schema_push_refused"},
-		{"⚠️ We found changes that cannot be executed:", "schema_push_refused"},
-		{"Is display_name column in users table created or renamed from another column?", "schema_push_refused"},
-		{"Error: Interactive prompts require a TTY terminal (process.stdin.isTTY or process.stdout.isTTY is false)", "schema_push_refused"},
-		{"SqliteError: attempt to write a readonly database", "sqlite_not_writable"},
-		{"sqlite3.OperationalError: unable to open database file", "sqlite_not_writable"},
-		{`relation "users" does not exist`, "schema_missing"},
-	} {
-		cause := applicationOutputCause([]ContainerDiagnostics{{Lines: []RuntimeLogLine{{Text: "starting"}, {Text: fixture.line}}}})
-		if cause == nil || cause.Code != fixture.code || cause.sentence() == "" {
-			t.Errorf("%q: cause = %+v", fixture.line, cause)
-		}
-	}
-}
-
 func TestTheHostObservationSaysWhenALiveRuntimeIsReplaced(t *testing.T) {
 	t.Parallel()
 	observer := NewHostPreflightObserver(nil, t.TempDir(), nil)

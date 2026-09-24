@@ -398,6 +398,10 @@ func mapDeploymentPlanningError(err error) error {
 		return httpx.Err(http.StatusBadRequest, "invalid_compose", err.Error())
 	case errors.Is(err, deploy.ErrUnsupportedSource):
 		return httpx.Err(http.StatusUnprocessableEntity, "unsupported_source", err.Error())
+	case errors.Is(err, deploy.ErrRefNotFound):
+		return httpx.Err(http.StatusBadRequest, "ref_not_found", err.Error())
+	case errors.As(err, new(*deploy.SourceFailure)):
+		return httpx.Err(http.StatusBadGateway, sourceFailureCode(err), err.Error())
 	case errors.Is(err, deploy.ErrGitUnavailable):
 		return httpx.Err(http.StatusServiceUnavailable, "git_unavailable", "Git source evidence is unavailable")
 	case errors.Is(err, deploy.ErrDockerUnavailable):

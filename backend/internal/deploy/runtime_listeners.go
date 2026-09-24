@@ -3,7 +3,6 @@ package deploy
 import (
 	"context"
 	"encoding/hex"
-	"fmt"
 	"net"
 	"strconv"
 	"strings"
@@ -72,9 +71,10 @@ func parseProcNetTCP(content []byte) []ListeningSocket {
 	return sockets
 }
 
-// listenerCause names a candidate whose every listening socket is bound to
-// loopback: it is up, and unreachable from the proxy and the check alike.
-func listenerCause(containers []ContainerDiagnostics) *OutputCause {
+// loopbackOnlyListener is the first socket of a candidate whose every
+// listening socket is bound to loopback: it is up, and unreachable from the
+// proxy and the check alike (runtime_output_cause.go names it).
+func loopbackOnlyListener(containers []ContainerDiagnostics) string {
 	for _, container := range containers {
 		if len(container.Listening) == 0 {
 			continue
@@ -87,21 +87,8 @@ func listenerCause(containers []ContainerDiagnostics) *OutputCause {
 			}
 		}
 		if loopbackOnly {
-			return &OutputCause{Code: "loopback_only", Listener: container.Listening[0].String()}
+			return container.Listening[0].String()
 		}
 	}
-	return nil
-}
-
-// runtimeOutputCause is the one cause a failed candidate's diagnostics
-// prove: what its output says first, then where it listens.
-func runtimeOutputCause(containers []ContainerDiagnostics) *OutputCause {
-	if cause := applicationOutputCause(containers); cause != nil {
-		return cause
-	}
-	return listenerCause(containers)
-}
-
-func loopbackOnlySentence(listener string) string {
-	return fmt.Sprintf("the application is listening only on %s, a loopback address that nothing outside its container reaches; bind it to 0.0.0.0 (or read the address from HOST) so the proxy and the readiness check can connect", listener)
+	return ""
 }

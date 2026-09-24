@@ -399,7 +399,7 @@ only renderer/executor/validation authority for their feature.
   start script runs the tool, and `schema_step` (pass) when one does; no linked database means no
   finding. A step that pushes the declared model (`prisma db push`, `drizzle-kit push`, recorded as
   `schemaPush` when the package's own start script does it) is `schema_push_unversioned` (warning)
-  instead of a pass, linked database or not, and a refused push is named `schema_push_refused` by the
+  instead of a pass, linked database or not, and a refused push is named `runtime_schema_push_refused` by the
   failed gate's output classifier. Changing the package manager swaps the whole start command for
   detection's command for that manager, chained step included; detection records each manager's commands
   after every pass that rewrites them (`refreshNodeInstalls`), so a settled detaching start or a preview
@@ -577,10 +577,22 @@ only renderer/executor/validation authority for their feature.
   (`release_task_outside_compose_stack`, blocked when the stack runs its own backing services). A task without a runner is the historical `/bin/sh` over the immutable source workspace in
   the dashboard's container, which has none of an application's dependencies; preflight refuses one
   that runs a tool only installed dependencies provide, or a program a PATH lookup in the dashboard
-  does not find (`release_task_tool_missing`, a lookup that executes nothing), and a failed task that
-  exits 127 reports the same code. Output is redacted of the task's own values and every secret
-  runtime value before persistence. Interrupted tasks stop for operator review because their side
-  effects cannot be inferred safely.
+  does not find (`release_task_tool_missing`, a lookup that executes nothing). Output is redacted of
+  the task's own values and every secret runtime value before persistence. Interrupted tasks stop for
+  operator review because their side effects cannot be inferred safely. A failed task's own redacted
+  output (the last 400 lines / 64 KiB) is classified before the step ends: Prisma's P3009, P3018,
+  P3005, P1000 and P1001, a variable the task was not given, and a program where the task ran does
+  not have (the shell's line, or exit status 127 without it) become `release_migration_failed_before`,
+  `release_migration_failed`, `release_database_not_empty`, `release_database_auth_failed`,
+  `release_database_unreachable`, `release_env_missing` and `release_task_command_not_found`; a task
+  past its limit is `release_task_timeout`, anything else stays `release_task_failed`. A missing
+  program and an unreachable database are worded for where the task ran: in the release image, which
+  joins the database's networks, the image lacks the program or the database is down; in the
+  dashboard's shell, the fix is running the task in the release image. A generic "`X_Y` is not set /
+  must be set / is required" sentence is read only after every other signature here, and never from a
+  line that calls itself a warning. The code is the step's and the run's terminal code, the sentence
+  joins the message, and the step evidence carries the cause (identifiers only) beside the task
+  evidence.
 - Artifact retention keeps the live release, five prior successful rollback releases, candidates, pins,
   retain-until windows, recent failed diagnostics, shared physical digests, and every environment under
   an active deployment lease. Cleanup reports the reason for every retained row and removes a mutable
@@ -617,10 +629,32 @@ only renderer/executor/validation authority for their feature.
   why the application never listened instead of only "could not connect". The step message points at the
   transcript when output was captured. A running candidate's listening sockets are read too, by
   `cat /proc/net/tcp /proc/net/tcp6` inside its own container through the check runner's closed-argv
-  exec (bounded output, only parsed addresses kept); one listening only on loopback gets the cause
-  `loopback_only`, named in the step message even when the application printed nothing. Otherwise the
-  diagnosis names one proven cause: a missing table (`schema_missing`), or a single container that
-  stopped with exit code 0 (`start_command_exited`, a start command that returned instead of serving).
+  exec (bounded output, only parsed addresses kept). `applicationOutputCause`
+  (`runtime_output_cause.go`, the one table of runtime and release-task causes) then names one cause,
+  most specific first: the container's own OOM flag (`runtime_oom`), a missing table
+  (`schema_missing`), a refused schema push (`runtime_schema_push_refused`: Prisma's
+  `--accept-data-loss` and "changes that cannot be executed", Drizzle's rename and data-loss prompts),
+  a SQLite file it cannot open or write (`runtime_sqlite_not_writable`), a variable the application
+  reads and was not given (Prisma P1012 and config errors, t3-env, Django, Rails, Phoenix, Auth.js's
+  MissingSecret, pydantic-settings, `KeyError` on the environment — `runtime_env_missing`), Rails
+  credentials `RAILS_MASTER_KEY` cannot decrypt, an Auth.js host it does not trust (fixed with
+  `AUTH_TRUST_HOST=true`), a missing `.env` it exits over, a database address on localhost (Node,
+  libpq, Go, MySQL and Rust wordings), Prisma's engine on Alpine, a disallowed Host, a missing entry
+  file or app object, a missing module or shared library (psycopg's `libpq library not found` among
+  them), a cgo-less binary, an architecture mismatch, a runner that is not installed, Phoenix's origin
+  check (fixed with `PHX_HOST`), Play's PID file, a server that prints a loopback bind (uvicorn,
+  gunicorn, werkzeug, puma, Kestrel — not Next.js, which prints `localhost` whatever it binds) or whose
+  every listening socket is on loopback (`runtime_loopback_bind`, named in the step message even when
+  the application printed nothing, with the listener as its subject), a port other than the plan's
+  printed by a framework's own startup line, then any program's generic "`X_Y` is not set / must be
+  set / is required" (read this late, and never from a line that calls itself a warning, because
+  programs print it as a warning and carry on: `SENTRY_DSN is not set` beside the port the server
+  really took must name the port), and a single container that stopped with exit code 0 instead of
+  serving (`runtime_start_exited`; several containers are a Compose stack, where a one-off service
+  exits 0 by design). The cause is the step's code and the run's terminal code in place of
+  `health_gate_failed`, with the health evidence kept; it carries identifiers only (a variable, a
+  port, a module, a listener) and, where the plan can supply one, a fix: the variable or its runtime
+  scope, the internal port, a start command bound to `0.0.0.0`.
 - Container applications receive `PORT` from the frozen internal-port setting unless a runtime variable
   explicitly supplies it. Compose and host-network applications keep their own environment conventions.
   This keeps application startup aligned with Docker publication; the host port may still move. The
@@ -677,6 +711,43 @@ only renderer/executor/validation authority for their feature.
   stop-first failure restarts the predecessor from its exact immutable runtime spec. Cancellation between
   persisted steps removes an uncommitted candidate, or finishes predecessor retirement after a committed
   cutover, and records sequenced cleanup evidence.
+- A failed build names its cause instead of `internal_error` and exec's `exit status 1`. `dockerx`
+  reads buildx's plain progress as it streams (over `os.Pipe`s read to EOF, because a `StdoutPipe` is
+  closed by `Wait` and dropped BuildKit's closing lines; once buildx has exited a read waits at most
+  five seconds for more, since a process it left behind can hold the pipes open) and returns a
+  `BuildError` with the failed RUN's command, exit code and step number, or BuildKit's own reason for
+  a failure that was not a process exit;
+  a build that reaches its 30-minute limit while the run is alive returns `ErrBuildTimeout`, which does
+  not wrap a context error and so is never recorded as a cancellation. The executor feeds the persisted,
+  already redacted transcript to a bounded collector (`build_output_cause.go`): a ring per open BuildKit
+  step (400 lines, 64 KiB), one over the stream (64 KiB), BuildKit's replayed and Dockerfile-excerpt
+  lines refused. A step that finishes (`DONE` or `CACHED`) is dropped from both: what a passing step
+  printed on its way — npm retrying a request that hung up, a config probing for `git` — is never a
+  later step's cause. The failed step's lines are read first against one ordered signature table
+  (`build_output_signatures.go`), then the stream's, which by then holds only the steps still unfinished
+  and BuildKit's closing replay; the phase comes from which rendered instruction failed (the recipe's
+  install line, the plan's build command, the output guard, a setup line, or any step of a custom
+  Dockerfile). The resulting `BuildCause` — code, phase, command
+  (redacted, 160 characters), exit code, at most five validated identifiers, the transcript line that
+  proves it and a fix — is the step's evidence `cause`; its code is the step's and the run's terminal
+  code (`build_failed` when nothing matched) and its sentence the message, also written to the
+  transcript as `Diagnosis:`. The fix is computed from analyze_plan's recorded `candidate` when present,
+  else the plan's stored candidate for the same root and method, and the run's variable names and
+  scopes: the package manager whose lockfile is in sync, a variable or its build scope, a rewritten
+  runner, a Go or Python release the recipe offers, `NODE_OPTIONS` sized to three quarters of the
+  server's memory, `prisma generate` before the build, the detected output directory. A Compose
+  service's build is announced on the status stream so its steps are read apart and named with the
+  service; an image or Compose pull failure is named from the registry's error, including a refusal the
+  daemon returns before the pull's stream starts (`dockerx` prefixes it `pull image:` like one inside
+  the stream; only an unreachable daemon keeps its own error). A base image that cannot be resolved
+  keeps its cause (`registry_rate_limited`, `registry_unreachable` — DNS, TLS, refused and timed-out
+  connections, Go's `Client.Timeout exceeded` and a resolver's `server misbehaving` —,
+  `base_image_missing` — also Docker Hub's "repository does not exist or may require 'docker login'" —,
+  `registry_auth_failed`, `builder_missing`) with the daemon's own bounded reason in the transcript, and
+  a candidate's start names `runtime_port_in_use`, `image_missing` and `mount_invalid` from Docker's
+  refusal without repeating it. A context deadline that reaches a step while its run is alive is
+  `step_timeout`; only a cancelled context is a cancellation. The signature table and fixes are listed
+  in [the recipe contract](recipes.md#failure-diagnosis).
 - Deploy and force-build resolve the current desired revision (force-build disables cache); redeploy and
   rollback clone only available immutable artifacts and traverse the same checks/cutover path; restart
   stops and starts the existing live runtime without creating a release, then verifies the plan's
@@ -797,29 +868,40 @@ only renderer/executor/validation authority for their feature.
   Anything other than a remote Git source refuses either field with `400 ref_not_applicable`; a name the
   remote does not have answers `400 ref_not_found` (git's own `ls-remote --exit-code` exit status 2, "read
   the remote fine, no such ref"), and a remote that could not be read at all answers `502
-  source_unavailable`. The resolved revision and, when given, the requested ref name are recorded as
-  `{"requestedRevision", "requestedRef"}` in the run's metadata so the UI can say "Deploy of v1.4.2". This
-  never touches `deploy_git_watches`: that cursor is written only by the watcher's own poll/webhook path,
-  so a manual deploy of an older commit cannot make the watcher believe the branch lives there and
-  suppress its next real push. Retries copy it, while redeploy/rollback reuse their selected
-  release's identity. Old runs keep their saved plan identity. The deprecated draft `autoDeploy` input
-  remains accepted for compatibility but has no effect; draft commit no longer creates a hook without
-  a secret or provider registration. Automatic runs are audited as `deploy.git.change` and use the
-  same persistent queue, configuration/variable snapshots, checks and activation as manual runs.
-  For a Git source, `acquire_source` additionally reads the frozen revision's subject, author and date
-  with one `git log` against whichever repository it already has open — the materialized workspace, or
-  a local checkout — and folds a `commit` object (`sha`, `subject` capped at 200 characters, `author`,
-  `authoredAt`) into the run's metadata through `OrchestrationStore.MergeRunMetadata`, the one path that
-  mutates `deploy_runs.metadata_json` after enqueue. An unreadable history logs a transcript line and
-  leaves the field absent rather than failing the step. That line goes to `stderr`: the transcript
-  accepts only `stdout`, `stderr` and `status`, and the `warning` stream it was first written on was
-  refused, which failed the append and silenced every line the step logged after it. A retry's
-  wholesale metadata copy, plus every
-  run independently re-deriving the same commit from the same frozen revision, is what carries it
-  forward through a retry, redeploy or rollback. `GET /deploy/{id}/commits` still reads a legacy
-  project's local checkout only; a normalized Git-URL project's private release mirror keeps only
-  narrow per-revision snapshot refs, not a maintained branch tip, so listing its history cheaply from
-  that mirror remains open.
+  source_unavailable`. The configured branch's own resolution distinguishes the same exit status: a
+  renamed or deleted branch is `ref_not_found` for enqueue, detection and the watcher alike. Every other
+  git failure is classified inside `runPlanningGit` from its bounded output against a fixed substring
+  table (`source_failure.go`) and only the code crosses the boundary — git's stderr is remote-controlled
+  and still never reaches an error, an audit detail or a log: `source_auth_failed`,
+  `source_repository_missing`, `source_unreachable` (also any fetch that timed out) and
+  `source_revision_unavailable` (a recorded commit a force-push or deleted branch removed; the release
+  mirror names it only when a full fetch of the branch no longer contains the commit, since a branch
+  that merely moved on still holds it as an ancestor and the release builds it) each carry a fixed
+  sentence as `SourceFailure`, which unwraps to `ErrSourceUnavailable`. The API answers them `502` with
+  the code; the run's `acquire_source` step and terminal code carry it; the watcher records it as its
+  cursor reason, which the header's auto-deploy reading and the diagnosis (`auto_deploy_stopped`,
+  linking to the source settings or Credentials) name. The resolved revision and, when given, the
+  requested ref name are recorded as `{"requestedRevision", "requestedRef"}` in the run's metadata so
+  the UI can say "Deploy of v1.4.2". This never touches `deploy_git_watches`: that cursor is written
+  only by the watcher's own poll/webhook path, so a manual deploy of an older commit cannot make the
+  watcher believe the branch lives there and suppress its next real push. Retries copy it, while
+  redeploy/rollback reuse their selected release's identity. Old runs keep their saved plan identity.
+  The deprecated draft `autoDeploy` input remains accepted for compatibility but has no effect; draft
+  commit no longer creates a hook without a secret or provider registration. Automatic runs are audited
+  as `deploy.git.change` and use the same persistent queue, configuration/variable snapshots, checks
+  and activation as manual runs. For a Git source, `acquire_source` additionally reads the frozen
+  revision's subject, author and date with one `git log` against whichever repository it already has
+  open — the materialized workspace, or a local checkout — and folds a `commit` object (`sha`,
+  `subject` capped at 200 characters, `author`, `authoredAt`) into the run's metadata through
+  `OrchestrationStore.MergeRunMetadata`, the one path that mutates `deploy_runs.metadata_json` after
+  enqueue. An unreadable history logs a transcript line and leaves the field absent rather than failing
+  the step. That line goes to `stderr`: the transcript accepts only `stdout`, `stderr` and `status`,
+  and the `warning` stream it was first written on was refused, which failed the append and silenced
+  every line the step logged after it. A retry's wholesale metadata copy, plus every run independently
+  re-deriving the same commit from the same frozen revision, is what carries it forward through a
+  retry, redeploy or rollback. `GET /deploy/{id}/commits` still reads a legacy project's local checkout
+  only; a normalized Git-URL project's private release mirror keeps only narrow per-revision snapshot
+  refs, not a maintained branch tip, so listing its history cheaply from that mirror remains open.
 - Additional automation provider hooks verify each provider's exact raw-body signature before parsing and then fence
   event, repository, ref and delivery identity. The delivery row is reserved before preview or queue side
   effects, while legacy HMAC and scoped generic hooks retain their existing contracts. Environment branch/
@@ -1327,7 +1409,11 @@ with automatic deployments, the live release with who deployed it, the runtime's
 health, domains with their certificates), each drawn as its product, over four readings (requests
 a minute, the failing share, processor and memory, each carrying its last hour and each a way to
 the page that has the rest); first sign-in, for a template that declares one; the findings from
-the operations diagnosis (`#attention`, which the header's verdict links to); the delivery
+the operations diagnosis (`#attention`, which the header's verdict links to) — among them
+`last_deploy_failed`, which diagnosis raises before its no-live-release silence from the
+environment's newest run when that run failed and made nothing live (critical when nothing serves,
+a warning while an older release does), titled by its cause and linking to the run, and
+`auto_deploy_stopped` when the watcher could not read its branch for a named reason; the delivery
 insights; and the recent deployments beside the preview environments from `2xl`. A service with no
 public address draws its product and where it answers inside Docker in the preview's place. Deploy
 a specific version picks from the commits the project's runs recorded, with no remote call, and
@@ -1361,9 +1447,14 @@ grouped under In progress and then by day, narrowed by counted chips. A run is o
 (`run-row.tsx`): who started it as a face or a product, `#N Deploy` and the commit subject, then
 branch (or the requested tag or commit) · sha · author · trigger, and its state, duration and time in
 fixed columns, the duration with a bar that turns amber past twice the median of at least five
-finished runs listed. Its verbs are declared once in `run-verbs.tsx` and shared with the run page's
-header: Redeploy (live), Retry (only a `failed` or `cancelled` run), Cancel (never during activation
-or a rollback) and, under the release's own name, What changed in this release (a comparison with
+finished runs listed. A failed run's row names its cause's title rather than its step. Its verbs are
+declared once in `run-verbs.tsx` and shared with the run page's header: Redeploy (live), Retry (only a
+`failed` or `cancelled` run — and, once the settings moved on since it, preceded by Deploy with current
+settings and relabelled "Retry with the settings it used", since Retry replays the run's own plan and
+variable snapshots; the list reads the settings drift of its newest run when that run can be retried,
+so a variable given another scope counts, and goes by the plan revision alone for older rows, as the
+project header's and the fleet's Retry does), Cancel (never during activation or a rollback) and,
+under the release's own name, What changed in this release (a comparison with
 the release before it), Compare with live (a sheet), Roll back to this release (a retained release,
 through a two-step dialog that names the domains, draws the swap and says what a rollback does not
 restore) and Pin or Unpin. Older runs load on request through the `before` cursor. Runtime draws the
@@ -1378,7 +1469,8 @@ Logs offers the activation window of the live run when the run's log handoff nam
 Settings are nine pages — General, Build, Runtime, Environment variables, Domains, Storage, Databases
 & backups, Automation, Danger zone — drawn in one frame (`settings/setting-card.tsx`): what is saved
 but not live yet at the top, as a strip that names each change and links to its page but carries no
-command (the header's is the one), then the page's readings, then its forms with their heads in a rail
+command (the header's is the one), then, on the page that holds it, the newest failed deployment's
+fix while that failure is still the news (`settings/last-failure.tsx`), then the page's readings, then its forms with their heads in a rail
 from `xl`. Each form saves the whole configuration with the revision it read, keeps its draft keyed on
 a digest of its own saved value (`useSettingDraft`) so a save of the form beside it no longer throws
 the draft away, and ends in a foot with when the change applies, Discard and Save; a refusal that
@@ -1435,7 +1527,22 @@ The deployment page (`/deploy/[id]/runs/[run]`) keeps the sequence-based stream,
 started the run and where, and how long it has taken — then, on a project's first deploy, the
 creation spine with *Deploy* as its last step, the release path (a stage the run did not include
 drawn dashed), and how the run ended: a failure in words with the engine's code beside it and a way to
-the failing step, the live address, or which release is live now. The build console paints its lines
+the failing step, the live address, or which release is live now. A failure is titled from the cause
+the failed step recorded (`failure-cause.ts` reads a build's or release task's `cause` and a health
+gate's `diagnostics.cause`), lists the identifiers it named, and offers its fix — to an administrator —
+as a button that opens the field it targets: the Build section for a package manager or version, the
+commands for a command, the output or the root, Runtime for the port or memory, Databases for a
+localhost database, and Variables with the editor opened on the variable (`?variable=NAME&scope=…`,
+plus `&value=…` for a computed flag) with the scope it lacked. "Show the line" selects the failing
+step and scrolls the console to the transcript line the cause points at, clearing a search or the
+errors filter that could hide it. When `GET /deploy/{id}/runs/{run}/settings-drift` says the plan or
+the variables changed since the run — the plan revision's fields and the variables' names, digests
+and scopes, never a value — the header's command becomes Deploy with current settings (the run's own
+commit for a remote Git source whose drift names no source change, a plain deploy otherwise — a source
+moved to another branch or repository is never asked for the old commit), Retry moves to the menu as
+"Retry with the settings it used", and one line under the failure says what changed. A run that failed
+with `source_revision_unavailable` offers Deploy the branch head the same way, since its commit cannot
+be fetched again. The build console paints its lines
 through the painter the dashboard's own transcripts use (`components/transcript-line.tsx`), numbers
 them, strips terminal escapes, groups each step's lines under a sticky rule, filters by stage and
 errors (with a count), shows the time since the run began, wraps, follows, copies and downloads

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
@@ -434,6 +435,12 @@ func (e *NormalizedStepExecutor) prepareContext(
 	if err != nil {
 		cleaned, cleanupErr := source.Cleanup()
 		result := normalizedStepFailure(err)
+		if errors.Is(err, ErrBuilderUnavailable) {
+			result = builderUnavailableFailure(err)
+			// The daemon's own words are the only record of why, and nothing
+			// else writes them down before the step ends.
+			_ = stepLog(execution, "stderr", builderUnavailableDetail(err, buildRedactor(buildVariables)))
+		}
 		result.Cleanup = mustJSON(map[string]any{"workspaceRemoved": cleaned, "error": safeCleanupError(cleanupErr)})
 		return result
 	}
@@ -482,23 +489,37 @@ func (e *NormalizedStepExecutor) buildArtifact(
 			return normalizedStepFailure(err)
 		}
 	}
+	// The collector reads the transcript as it is persisted, after the
+	// builder has redacted it, so a failure can be named from its own output.
+	collector := newBuildOutputCollector(func() int64 { return lastLogSeq(execution.Output) })
 	result, err := e.builder.Build(
 		ctx, preparedEvidence.BuildRoot,
 		releaseImageTag(execution.Run.EnvironmentID, execution.Run.ID),
 		plan.Build, preparedEvidence.Prepared, buildVariables, registryAuth,
 		plan.SourceIdentity, plan.BuildEvidence.Compose,
-		func(line BuildLog) error { return stepLog(execution, line.Stream, line.Text) },
+		func(line BuildLog) error {
+			if err := stepLog(execution, line.Stream, line.Text); err != nil {
+				return err
+			}
+			collector.observe(line)
+			return nil
+		},
 	)
 	if err != nil {
 		cleaned, cleanupErr := preparedEvidence.Source.Cleanup()
+		cleanup := map[string]any{"workspaceRemoved": cleaned, "error": safeCleanupError(cleanupErr)}
 		if ctx.Err() != nil {
 			return StepResult{
 				State: StepCancelled, ErrorCode: "cancelled", ErrorMessage: "artifact build cancelled",
-				Cleanup: mustJSON(map[string]any{"workspaceRemoved": cleaned, "error": safeCleanupError(cleanupErr)}),
+				Cleanup: mustJSON(cleanup),
 			}
 		}
+		if failure := e.buildFailure(ctx, execution, plan, preparedEvidence.Prepared, buildVariables, collector, err); failure != nil {
+			failure.Cleanup = mustJSON(buildFailureCleanup(cleanup, err))
+			return *failure
+		}
 		failure := normalizedStepFailure(err)
-		failure.Cleanup = mustJSON(map[string]any{"workspaceRemoved": cleaned, "error": safeCleanupError(cleanupErr)})
+		failure.Cleanup = mustJSON(cleanup)
 		return failure
 	}
 	return StepResult{State: StepPassed, Evidence: mustJSON(builtStepEvidence{Result: result})}
@@ -598,7 +619,14 @@ func (e *NormalizedStepExecutor) runReleaseTasks(
 		if err := stepLog(execution, "status", "Running release task "+task.Name); err != nil {
 			return normalizedStepFailure(err)
 		}
-		emit := func(line BuildLog) error { return stepLog(execution, line.Stream, line.Text) }
+		output := newLineRing(outputRingLines, outputRingBytes)
+		emit := func(line BuildLog) error {
+			if err := stepLog(execution, line.Stream, line.Text); err != nil {
+				return err
+			}
+			output.add(collectedLine{text: truncateUTF8Prefix(line.Text, collectedLineBytes), seq: lastLogSeq(execution.Output)})
+			return nil
+		}
 		var taskEvidence ReleaseTaskEvidence
 		var taskErr error
 		if task.Runner == ReleaseTaskRunnerImage {
@@ -616,18 +644,17 @@ func (e *NormalizedStepExecutor) runReleaseTasks(
 		if taskErr != nil {
 			cleaned, cleanupErr := source.Cleanup()
 			state := StepFailed
-			code := "release_task_failed"
-			if taskEvidence.ExitCode == 127 {
-				// `sh: npx: not found`: the program is not where the task ran.
-				code = "release_task_tool_missing"
-			}
+			code, message, cause := releaseTaskFailure(task, taskEvidence, taskErr, output.lines, plan.Variables)
 			if ctx.Err() != nil {
-				state, code = StepCancelled, "cancelled"
+				state, code, message, cause = StepCancelled, "cancelled", "release task "+task.Name+" did not complete", nil
+			}
+			if cause != nil {
+				_ = stepLog(execution, "status", "Diagnosis: "+cause.releaseSentence())
 			}
 			return StepResult{
 				State: state, ErrorCode: code,
-				ErrorMessage: "release task " + task.Name + " did not complete",
-				Evidence:     mustJSON(map[string]any{"tasks": evidence}),
+				ErrorMessage: message,
+				Evidence:     mustJSON(releaseTaskStepEvidence(evidence, cause)),
 				Cleanup: mustJSON(map[string]any{
 					"processGroups": cleanupResults, "workspaceRemoved": cleaned,
 					"error": safeCleanupError(cleanupErr),
@@ -849,19 +876,38 @@ func (s *OrchestrationStore) deploymentProfile(ctx context.Context, projectID in
 
 func normalizedStepFailure(err error) StepResult {
 	result := StepResult{State: StepFailed, ErrorCode: "internal_error", ErrorMessage: "deployment step failed"}
+	var sourceFailure *SourceFailure
+	var buildFailure *dockerx.BuildError
 	switch {
+	case errors.As(err, &sourceFailure):
+		result.ErrorCode, result.ErrorMessage = sourceFailure.Code, sourceFailure.Error()
+	case errors.Is(err, dockerx.ErrBuildTimeout):
+		result.ErrorCode, result.ErrorMessage = "build_timeout", "the build exceeded its 30-minute limit"
+	case errors.As(err, &buildFailure):
+		// The command is left out: without the run's variables at hand it
+		// cannot be redacted, and buildFailure names it where they are.
+		result.ErrorCode = "build_failed"
+		result.ErrorMessage = "a build step failed; its output is in the build log"
+		if buildFailure.ExitCode >= 0 {
+			result.ErrorMessage = fmt.Sprintf("a build step exited with code %d; its output is in the build log", buildFailure.ExitCode)
+		}
 	case errors.Is(err, ErrUnsupportedBuilder):
 		result.ErrorCode, result.ErrorMessage = "unsupported_builder", err.Error()
 	case errors.Is(err, ErrBuilderUnavailable):
-		result.State, result.ErrorCode, result.ErrorMessage = StepUnavailable, "builder_unavailable", "BuildKit or a reviewed base image is unavailable"
+		result = builderUnavailableFailure(err)
 	case errors.Is(err, ErrArtifactMissing):
 		result.ErrorCode, result.ErrorMessage = "artifact_missing", err.Error()
 	case errors.Is(err, ErrInvalidPlan):
 		result.ErrorCode, result.ErrorMessage = "invalid_plan", err.Error()
 	case errors.Is(err, ErrInvalidSource), errors.Is(err, ErrInvalidRef), errors.Is(err, ErrSourceUnavailable):
 		result.ErrorCode, result.ErrorMessage = "invalid_source", err.Error()
-	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+	case errors.Is(err, context.Canceled):
 		result.State, result.ErrorCode, result.ErrorMessage = StepCancelled, "cancelled", "deployment step cancelled"
+	case errors.Is(err, context.DeadlineExceeded):
+		// The engine turns a step into a cancellation itself whenever the run's
+		// own context ended; a deadline that reaches here expired while the run
+		// was alive, which nobody cancelled.
+		result.ErrorCode, result.ErrorMessage = "step_timeout", "an operation in this step ran out of time"
 	default:
 		result.ErrorMessage = err.Error()
 	}

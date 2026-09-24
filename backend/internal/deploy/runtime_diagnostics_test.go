@@ -81,7 +81,9 @@ func TestFailedReadinessCapturesRedactedCandidateOutputBeforeCompensation(t *tes
 		t.Fatalf("start candidate = %#v", result)
 	}
 	result := executor.verifyChecks(context.Background(), execution, mustExecutionPlan(t, fixture, *run), "readiness")
-	if result.State != StepFailed || result.ErrorCode != "health_gate_failed" {
+	// The kernel's OOM kill is the cause the container's own state proves,
+	// ahead of anything the output says.
+	if result.State != StepFailed || result.ErrorCode != "runtime_oom" {
 		t.Fatalf("readiness result = %#v", result)
 	}
 	if !strings.Contains(result.ErrorMessage, "last output is in the build log") {
@@ -160,7 +162,9 @@ func TestFailedReadinessNamesMissingSchemaFromCandidateOutput(t *testing.T) {
 		t.Fatalf("start candidate = %#v", result)
 	}
 	result := executor.verifyChecks(context.Background(), execution, mustExecutionPlan(t, fixture, *run), "readiness")
-	if result.State != StepFailed || result.ErrorCode != "health_gate_failed" {
+	// The cause the output proves is the step's code, so the run's terminal
+	// code names it rather than the gate that noticed.
+	if result.State != StepFailed || result.ErrorCode != "schema_missing" {
 		t.Fatalf("readiness result = %#v", result)
 	}
 	for _, want := range []string{
@@ -181,7 +185,7 @@ func TestFailedReadinessNamesMissingSchemaFromCandidateOutput(t *testing.T) {
 	if err := json.Unmarshal(result.Evidence, &evidence); err != nil {
 		t.Fatal(err)
 	}
-	if evidence.Diagnostics == nil || evidence.Diagnostics.Cause == nil || *evidence.Diagnostics.Cause != (OutputCause{Code: "schema_missing", Table: "public.products"}) {
+	if evidence.Diagnostics == nil || evidence.Diagnostics.Cause == nil || evidence.Diagnostics.Cause.Code != "schema_missing" || evidence.Diagnostics.Cause.Table != "public.products" {
 		t.Fatalf("diagnostics evidence = %+v", evidence.Diagnostics)
 	}
 	if strings.Contains(string(result.Evidence), "findMany") {

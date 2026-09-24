@@ -33,6 +33,7 @@ import {
   buildsReleaseImage,
   defaultReleaseTaskRunner,
 } from "@/components/deploy/deployment-defaults"
+import { isReleaseTaskFailure } from "@/components/deploy/failure-cause"
 
 export type ReleaseTask = NonNullable<DeploymentConfiguration["build"]["releaseTasks"]>[number]
 
@@ -113,8 +114,7 @@ export function ReleaseTasks({
   const failedOnTask = project.runs.find(
     (run) =>
       run.environmentId === project.environmentId &&
-      (run.terminalCode === "release_task_failed" ||
-        run.terminalCode === "release_task_tool_missing") &&
+      isReleaseTaskFailure(run.terminalCode) &&
       run.id > (liveRun?.id ?? 0),
   )
   const lastRun = failedOnTask ?? liveRun

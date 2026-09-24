@@ -91,6 +91,10 @@ carries no licensing question at all.
   host: `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveC4ArtifactAdapters -count=1 -v`.
   Recipe/detection/default changes also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveDetectedFrameworkBuildAndServing -count=1 -v`.
+  Changes to build-failure diagnosis (the BuildKit reader in `dockerx`, the collector or the signature
+  table) also run `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveBuildFailureIsNamedFromBuildKit -count=1 -v`,
+  which builds an npm project whose lockfile no longer matches package.json and checks the cause is
+  named from buildx's own output; it creates no image.
 - Git workspace changes also exercise `internal/gitx`, `internal/ghx` and `internal/forgex`, including
   race checks, plus `git-features.spec.ts`, `git-ui.spec.ts` and `design-system.spec.ts`. The LFS lifecycle
   test needs `git-lfs` on PATH (it is included in the backend image); it touches only a temporary

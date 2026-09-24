@@ -382,6 +382,9 @@ func renderNotification(envelope NotificationEnvelope) notificationMessage {
 	if envelope.DurationSeconds > 0 {
 		fields = append(fields, [2]string{"Duration", humanDuration(time.Duration(envelope.DurationSeconds) * time.Second)})
 	}
+	if cause := namedCauseTitle(envelope.TerminalCode); cause != "" && envelope.Event == NotificationEventFailed {
+		fields = append(fields, [2]string{"Cause", cause})
+	}
 	if envelope.TerminalReason != "" && envelope.Event == NotificationEventFailed {
 		reason := envelope.TerminalReason
 		if len(reason) > 600 {

@@ -117,6 +117,12 @@ func inspectDeploymentSource(ctx context.Context, inspector SourceInspector, pla
 // sourceInspectionUnavailable words why a commit could not be read, without
 // Git's own output, which never leaves the planning boundary.
 func sourceInspectionUnavailable(err error) string {
+	// A Git failure already named from its own output says which one it was
+	// (source_failure.go), in fixed words.
+	var failure *SourceFailure
+	if errors.As(err, &failure) {
+		return failure.Message
+	}
 	switch {
 	case errors.Is(err, errInspectionTooLarge):
 		return fmt.Sprintf("the commit has more than %d files or %d MiB, more than a check copies",

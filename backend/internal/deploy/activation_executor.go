@@ -394,7 +394,8 @@ func (e *NormalizedStepExecutor) startCandidate(
 	}, func(line BuildLog) error { return stepLog(execution, line.Stream, line.Text) })
 	if err != nil {
 		recovery := e.restorePrevious(ctx, execution, release.Release, snapshot.Plan)
-		return runtimeStepFailure(err, "candidate_start_failed", "the candidate runtime did not start", recovery)
+		code, message := candidateStartFailure(err)
+		return runtimeStepFailure(err, code, message, recovery)
 	}
 	runtime, err := e.store.RecordCandidateRuntime(ctx, execution.Run, execution.ClaimToken, started.Input)
 	if err != nil {
@@ -506,10 +507,18 @@ func (e *NormalizedStepExecutor) verifyChecks(
 		// Read the candidate's own account of itself before compensation
 		// removes it. This is the difference between "could not connect" and
 		// "Error: DATABASE_URL is not set".
-		diagnostics := e.captureRuntimeDiagnostics(ctx, execution, release.Release, *runtime)
+		diagnostics := e.captureRuntimeDiagnostics(ctx, execution, release.Release, *runtime, runtimeCauseContext{
+			build: plan.Build, runtime: snapshot.Plan, variables: snapshot.Variables, compose: snapshot.Compose != nil,
+		})
 		message := checkFailureMessage(phase, outcome, checks...) + diagnosticsSuffix(diagnostics)
+		// A cause the output proves is the run's terminal code, so every
+		// surface that reads the code names it; the health evidence stays.
+		failedCode := "health_gate_failed"
+		if diagnostics != nil && diagnostics.Cause != nil {
+			failedCode = diagnostics.Cause.Code
+		}
 		if operationTargetsLiveRelease(execution.Run.Operation) {
-			state, code := StepFailed, "health_gate_failed"
+			state, code := StepFailed, failedCode
 			if ctx.Err() != nil {
 				state, code, message = StepCancelled, "cancelled", "health verification was cancelled"
 			}
@@ -517,7 +526,7 @@ func (e *NormalizedStepExecutor) verifyChecks(
 				Evidence: mustJSON(map[string]any{"health": evidence, "diagnostics": diagnostics})}
 		}
 		recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, nil)
-		state, code := StepFailed, "health_gate_failed"
+		state, code := StepFailed, failedCode
 		if ctx.Err() != nil {
 			state, code, message = StepCancelled, "cancelled", "health verification was cancelled"
 		}
@@ -1234,6 +1243,7 @@ func (e *NormalizedStepExecutor) captureRuntimeDiagnostics(
 	execution StepExecution,
 	release Release,
 	runtime ReleaseRuntime,
+	causeContext runtimeCauseContext,
 ) *runtimeDiagnosticsEvidence {
 	diagnoser, ok := e.runtime.(RuntimeDiagnoser)
 	if !ok || runtime.RuntimeID == "" {
@@ -1274,8 +1284,11 @@ func (e *NormalizedStepExecutor) captureRuntimeDiagnostics(
 	if evidence.Lines == 0 {
 		_ = stepLog(execution, "status", "The application printed no output before the check failed.")
 	}
-	if cause := runtimeOutputCause(result.Containers); cause != nil {
+	if cause := applicationOutputCause(result.Containers, causeContext); cause != nil {
 		cause.Table = redact.sanitize(cause.Table)
+		for index, subject := range cause.Subjects {
+			cause.Subjects[index] = redact.sanitize(subject)
+		}
 		evidence.Cause = cause
 		_ = stepLog(execution, "status", "Diagnosis: "+cause.sentence())
 	}

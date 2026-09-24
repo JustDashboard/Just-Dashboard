@@ -14,6 +14,7 @@ import type {
   DeploymentEngineRun,
   DeploymentPreview,
   DeploymentRelease,
+  DeploymentRunSettingsDrift,
   DeploymentRunState,
   DeploymentRunsPage,
 } from "@/lib/types"
@@ -47,16 +48,19 @@ import {
   deploymentURL,
   hostOf,
   isActiveRun,
+  isRetryable,
   runDurationSeconds,
   runFailed,
   runTitle,
   useNow,
 } from "@/components/deploy/vocabulary"
 import { Insights } from "@/components/deploy/insights"
+import { deployWithCurrentSettings, runPlanIsStale } from "@/components/deploy/failure-cause"
 import { RollbackDialog } from "@/components/deploy/rollback-dialog"
 import { ReleaseComparisonSheet } from "@/components/deploy/release-comparison-sheet"
 import { ProjectMark } from "@/components/deploy/project-mark"
 import { RunRow } from "@/components/deploy/run-row"
+import { useCheckedDeploy } from "@/components/deploy/deploy-check"
 import { RunStrip } from "@/components/deploy/run-marks"
 import { releaseVerbs, runVerbs, type RunVerbKey } from "@/components/deploy/run-verbs"
 
@@ -180,6 +184,7 @@ export function ProjectDeployments() {
   const project = useProject()
   const router = useRouter()
   const { can } = useAuth()
+  const checkedDeploy = useCheckedDeploy(project.projectId)
   const { deployment, project: record } = project.detail
   const [filter, setFilter] = useSessionState<StatusFilter>(
     `deploy.${project.projectId}.deployments.filter`,
@@ -251,6 +256,25 @@ export function ProjectDeployments() {
   }, [project.runs, older])
 
   const environmentRuns = allRuns.filter((run) => run.environmentId === selectedEnv)
+  // The newest run, when it can be retried, is the one a fix was saved for.
+  // Its drift counts what no plan revision does — a variable given another
+  // scope — and says whether the source itself moved; older rows go by the
+  // plan revision alone.
+  const newest = environmentRuns[0]
+  const retryable = newest && isRetryable(newest.state) ? newest : undefined
+  const drift = usePoll(
+    (signal) =>
+      get<DeploymentRunSettingsDrift>(
+        `/deploy/${project.projectId}/runs/${retryable?.id}/settings-drift`,
+        undefined,
+        signal,
+      ),
+    0,
+    [project.projectId, retryable?.id, deployment.desiredRevision],
+    { enabled: retryable !== undefined && can("service.control") },
+  )
+  const driftOf = (run: DeploymentEngineRun) =>
+    drift.data?.runId === run.id ? drift.data : undefined
   const runs = environmentRuns.filter((run) => matchesFilter(run, filter))
   const counts = Object.fromEntries(
     STATUS_FILTERS.map((entry) => [
@@ -346,6 +370,31 @@ export function ProjectDeployments() {
     return host ? [host] : []
   }, [project.operations, deployment.endpoint])
 
+  const deployCurrent = async (run: DeploymentEngineRun) => {
+    press(run, { verb: "deploy", word: "Starting…" })
+    const request = deployWithCurrentSettings(run, deployment, driftOf(run))
+    const deploy = async () => {
+      try {
+        const created = await post<DeploymentEngineRun>(
+          `/deploy/${project.projectId}/environments/${run.environmentId}/runs`,
+          request,
+        )
+        answered(run.id)
+        router.push(`/deploy/${project.projectId}/runs/${created.id}`)
+      } catch (error) {
+        notify.error("Could not start deployment", error)
+        settle(run.id)
+      }
+    }
+    const asked = await checkedDeploy.start(
+      run.environmentId,
+      "sourceRevision" in request ? { sourceRevision: request.sourceRevision } : {},
+      deploy,
+    )
+    // A check that asks leaves the press to its dialog.
+    if (asked) settle(run.id)
+  }
+
   const act = async (run: DeploymentEngineRun, verb: "cancel" | "retry") => {
     press(run, { verb, word: verb === "cancel" ? "Cancelling…" : "Starting…" })
     try {
@@ -375,12 +424,14 @@ export function ProjectDeployments() {
       url,
       can,
       working: busy,
+      stale: driftOf(run)?.changed ?? runPlanIsStale(run, deployment),
       on: {
         open: () => router.push(`/deploy/${project.projectId}/runs/${run.id}`),
         visit: () => window.open(url, "_blank", "noopener,noreferrer"),
         redeploy: () => void project.start("redeploy"),
         retry: () => void act(run, "retry"),
         cancel: () => void act(run, "cancel"),
+        deploy: () => void deployCurrent(run),
       },
     }),
     ...releaseVerbs({
@@ -418,6 +469,7 @@ export function ProjectDeployments() {
 
   return (
     <div className="space-y-8">
+      {checkedDeploy.gate}
       {project.normalized && (
         <Insights
           projectId={project.projectId}
