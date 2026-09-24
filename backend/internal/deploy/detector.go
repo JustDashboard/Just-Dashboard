@@ -193,6 +193,14 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 					if provider := prismaProvider(content); provider != "" {
 						prismaProviders[filepath.ToSlash(rel)] = provider
 					}
+					scanner.observeSchema(filepath.ToSlash(rel), content)
+				}
+			}
+			// The first few migrations are where a schema enables the
+			// extensions the database it runs on has to provide.
+			if name == "migration.sql" && schemaPathCounts[name] <= 4 && scanner.budget(64<<10) {
+				if content, _, err := readDetectionFile(path, 64<<10); err == nil {
+					scanner.observeSchema(filepath.ToSlash(rel), content)
 				}
 			}
 			return nil
@@ -200,7 +208,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		if envTemplateFile(name) {
 			if scanner.budget(64 << 10) {
 				if content, _, err := readDetectionFile(path, 64<<10); err == nil {
-					scanner.scanTemplate(filepath.ToSlash(rel), content, name == ".env")
+					scanner.scanTemplate(filepath.ToSlash(rel), content, envRealFile(name))
 				}
 			}
 			return nil
@@ -514,6 +522,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			candidates[index].Variables = variables
 			candidates[index].Databases = databases
 		}
+		describeRootEnvironment(marker, scanner, prismaProviders, candidates)
 		result.Candidates = append(result.Candidates, candidates...)
 	}
 	sort.Slice(result.Candidates, func(i, j int) bool {

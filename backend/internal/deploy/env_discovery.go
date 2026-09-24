@@ -16,9 +16,10 @@ import (
 
 // envTemplateFile recognises the files a repository documents its variables
 // in: .env.example, .env.sample, .env.template, .env.dist, example.env and
-// the like. `.env` itself is read for names only.
+// the like. `.env` and the other files a framework loads with real values
+// (envRealFile) are read for names only.
 func envTemplateFile(name string) bool {
-	if name == ".env" {
+	if envRealFile(name) {
 		return true
 	}
 	base := strings.TrimPrefix(name, ".")
@@ -38,6 +39,41 @@ func envTemplateFile(name string) bool {
 	return false
 }
 
+// envRealFile names the committed env files Next.js, Vite and dotenv load
+// into a production build or process. Their values are real, so only the
+// names leave the repository — and whether a value points at loopback, which
+// is a fact about the value rather than the value itself.
+func envRealFile(name string) bool {
+	switch name {
+	case ".env", ".env.local", ".env.production", ".env.production.local":
+		return true
+	}
+	return false
+}
+
+// envReadFlags record how a name was read, per source file, so a root keeps
+// only what its own sources say about it.
+type envReadFlags uint16
+
+const (
+	// envReadBuild: the value is read while the build runs — a framework
+	// config file, a static env import, a compile-time macro.
+	envReadBuild envReadFlags = 1 << iota
+	// envReadInlined: a define or env block compiles the value into the
+	// browser bundle regardless of its prefix.
+	envReadInlined
+	// envReadRequired: read in a form that fails without a value, at a
+	// position that runs when the application starts or builds.
+	envReadRequired
+	// envReadRequiredForm: read in a form that fails without a value
+	// somewhere that may only run on one code path.
+	envReadRequiredForm
+	// envReadBindHost: HOST is read as the address a server listens on.
+	envReadBindHost
+	// envReadLocalhost: a committed real env file's value points at loopback.
+	envReadLocalhost
+)
+
 var (
 	envNameRE       = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,127}$`)
 	envTemplateLine = regexp.MustCompile(`^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*[=:]\s*(.*)$`)
@@ -46,7 +82,6 @@ var (
 	envReferenceREs = []*regexp.Regexp{
 		regexp.MustCompile(`process\.env\.([A-Z][A-Z0-9_]+)`),
 		regexp.MustCompile(`process\.env\[['"]([A-Z][A-Z0-9_]+)['"]\]`),
-		regexp.MustCompile(`import\.meta\.env\.([A-Z][A-Z0-9_]+)`),
 		regexp.MustCompile(`Bun\.env\.([A-Z][A-Z0-9_]+)`),
 		regexp.MustCompile(`Deno\.env\.get\(['"]([A-Z][A-Z0-9_]+)['"]\)`),
 		regexp.MustCompile(`os\.environ\[['"]([A-Z][A-Z0-9_]+)['"]\]`),
@@ -59,17 +94,30 @@ var (
 		regexp.MustCompile(`\$_ENV\[['"]([A-Z][A-Z0-9_]+)['"]\]`),
 		regexp.MustCompile(`\bENV(?:\.fetch\(|\[)\s*['"]([A-Z][A-Z0-9_]+)['"]`),
 	}
+	// importMetaEnvRE is Vite's read; a handful of its names are the
+	// bundler's own and are never set from the environment.
+	importMetaEnvRE     = regexp.MustCompile(`import\.meta\.env\.([A-Z][A-Z0-9_]+)`)
+	importMetaBuiltins  = map[string]bool{"MODE": true, "DEV": true, "PROD": true, "SSR": true, "BASE_URL": true, "SITE": true, "ASSETS_PREFIX": true}
+	envJavaScriptSource = map[string]bool{".js": true, ".mjs": true, ".cjs": true, ".ts": true, ".mts": true, ".tsx": true, ".jsx": true, ".vue": true, ".svelte": true, ".astro": true}
 	// envProvidedNames are set by the platform, the runtime or the shell;
 	// listing them would ask the operator for values the deployment supplies.
+	// HOST is not among them: the runtime injects only PORT, and an
+	// application that binds HOST needs a row that says so.
 	envProvidedNames = map[string]bool{
-		"PORT": true, "HOST": true, "HOSTNAME": true, "NODE_ENV": true, "PATH": true, "HOME": true, "PWD": true,
+		"PORT": true, "HOSTNAME": true, "NODE_ENV": true, "PATH": true, "HOME": true, "PWD": true,
 		"USER": true, "SHELL": true, "LANG": true, "LC_ALL": true, "TERM": true, "TZ": true, "CI": true,
 		"NEXT_RUNTIME": true, "NEXT_PHASE": true, "PYTHONUNBUFFERED": true, "PYTHONPATH": true, "VIRTUAL_ENV": true,
-		"NODE_OPTIONS": true, "DEBUG": true, "npm_package_version": true,
+		"NODE_OPTIONS": true, "npm_package_version": true,
 	}
-	envSourceExtensions = map[string]bool{
+	// envProvidedInJavaScript are names JavaScript reads for its own tools:
+	// DEBUG is the `debug` package's namespace list there, while in Python it
+	// is the framework's debug mode and has to be seen.
+	envProvidedInJavaScript = map[string]bool{"DEBUG": true}
+	envSourceExtensions     = map[string]bool{
 		".js": true, ".mjs": true, ".cjs": true, ".ts": true, ".mts": true, ".tsx": true, ".jsx": true,
 		".py": true, ".go": true, ".rb": true, ".php": true, ".vue": true, ".svelte": true, ".astro": true,
+		".java": true, ".kt": true, ".kts": true, ".scala": true, ".clj": true, ".rs": true, ".cs": true, ".fs": true,
+		".ex": true, ".exs": true, ".dart": true, ".swift": true, ".cr": true, ".hs": true, ".gleam": true,
 	}
 	envSkippedDirs = map[string]bool{
 		"test": true, "tests": true, "__tests__": true, "spec": true, "e2e": true, "fixtures": true, "mocks": true,
@@ -87,8 +135,18 @@ type envScanner struct {
 	// positions records where each name was first seen in each source, in
 	// walk order, so a template's names can be listed in the file's order.
 	positions map[string]map[string]int
+	// flags records how each name was read in each source.
+	flags map[string]map[string]envReadFlags
+	// examples keeps a documented default seen in configuration (a Spring
+	// `${X:default}`) per name and source, for a root to use as its hint.
+	examples  map[string]map[string]string
 	counter   int
 	exhausted bool
+	// facts are what the environment's classification needs beyond names:
+	// the few manifests and settings files that say which framework issues
+	// which secret, and per-source observations. See detect_variables.go.
+	facts environmentFacts
+	roots []string
 }
 
 const (
@@ -98,17 +156,26 @@ const (
 )
 
 func newEnvScanner() *envScanner {
-	return &envScanner{found: map[string]*DetectedVariable{}, positions: map[string]map[string]int{}}
+	return &envScanner{
+		found: map[string]*DetectedVariable{}, positions: map[string]map[string]int{},
+		flags: map[string]map[string]envReadFlags{}, examples: map[string]map[string]string{},
+		facts: environmentFacts{files: map[string][]byte{}},
+	}
 }
 
 // scannable reports whether a source file is worth reading for references:
-// application code, not tests, fixtures, documentation or generated files.
+// application code, not tests, fixtures, documentation or generated files —
+// plus the configuration templates and manifests environmentFactFile names.
 func (s *envScanner) scannable(rel, name string) bool {
-	if s.exhausted || !envSourceExtensions[path.Ext(name)] {
+	if s.exhausted {
+		return false
+	}
+	if !envSourceExtensions[path.Ext(name)] && !environmentFactFile(rel, name) && envConfigKind(rel, name) == "" {
 		return false
 	}
 	if strings.HasSuffix(name, ".d.ts") || strings.HasSuffix(name, ".min.js") || strings.HasSuffix(name, "_test.go") ||
-		strings.HasPrefix(name, "test_") || name == "conftest.py" ||
+		strings.HasPrefix(name, "test_") || name == "conftest.py" || strings.HasSuffix(name, "_test.exs") ||
+		strings.HasSuffix(name, "_spec.rb") || strings.HasSuffix(name, "tests.cs") ||
 		strings.Contains(name, ".test.") || strings.Contains(name, ".spec.") || strings.Contains(name, ".stories.") {
 		return false
 	}
@@ -135,7 +202,12 @@ func (s *envScanner) budget(size int64) bool {
 }
 
 func (s *envScanner) record(name, source, example string) {
-	if !envNameRE.MatchString(name) || envProvidedNames[name] {
+	s.recordRead(name, source, example, 0)
+}
+
+func (s *envScanner) recordRead(name, source, example string, flags envReadFlags) {
+	if !envNameRE.MatchString(name) || envProvidedNames[name] ||
+		(envProvidedInJavaScript[name] && envJavaScriptSource[path.Ext(source)]) {
 		return
 	}
 	variable := s.found[name]
@@ -149,11 +221,13 @@ func (s *envScanner) record(name, source, example string) {
 	}
 	if s.positions[name] == nil {
 		s.positions[name] = map[string]int{}
+		s.flags[name] = map[string]envReadFlags{}
 	}
 	if _, seen := s.positions[name][source]; !seen {
 		s.positions[name][source] = s.counter
 		s.counter++
 	}
+	s.flags[name][source] |= flags
 	if len(variable.Sources) < 4 {
 		for _, existing := range variable.Sources {
 			if existing == source {
@@ -164,9 +238,24 @@ func (s *envScanner) record(name, source, example string) {
 	}
 }
 
+// recordDefault keeps a default a configuration file documents beside its
+// read, the way a template's example is kept: as a hint, never a value.
+func (s *envScanner) recordDefault(name, source, value string) {
+	if value = envExampleValue(value); value == "" {
+		return
+	}
+	if s.examples[name] == nil {
+		s.examples[name] = map[string]string{}
+	}
+	if _, seen := s.examples[name][source]; !seen {
+		s.examples[name][source] = value
+	}
+}
+
 // scanTemplate reads a dotenv-shaped file. Values are kept as examples only
 // from a documented template and only when they carry no credential
-// material; a real .env's values never leave the repository.
+// material; a real .env's values never leave the repository — only whether
+// one points at loopback, which the container cannot reach.
 func (s *envScanner) scanTemplate(rel string, content []byte, real bool) {
 	for _, raw := range strings.Split(string(content), "\n") {
 		line := strings.TrimSpace(raw)
@@ -178,27 +267,48 @@ func (s *envScanner) scanTemplate(rel string, content []byte, real bool) {
 			continue
 		}
 		example := ""
+		flags := envReadFlags(0)
 		if !real {
 			example = envExampleValue(match[2])
+		} else {
+			value := unquotedEnvValue(match[2])
+			if !bindAddressName(match[1]) && loopbackValue(match[1], value) {
+				flags |= envReadLocalhost
+			}
+			for _, scheme := range databaseURLSchemes {
+				if strings.HasPrefix(strings.ToLower(value), scheme.prefix) {
+					s.facts.observe(rel, observeCommittedEngine, scheme.engine+"|"+match[1])
+					break
+				}
+			}
 		}
-		s.record(match[1], rel, example)
+		if match[1] == "HOST" && loopbackOrAnyAddress(unquotedEnvValue(match[2])) {
+			flags |= envReadBindHost
+		}
+		s.recordRead(match[1], rel, example, flags)
 	}
+}
+
+// unquotedEnvValue strips the quoting and trailing comment of a dotenv
+// value without judging it; envExampleValue is the judging variant.
+func unquotedEnvValue(raw string) string {
+	value := strings.TrimSpace(raw)
+	switch {
+	case strings.HasPrefix(value, `"`) && strings.Count(value, `"`) >= 2:
+		return value[1 : 1+strings.Index(value[1:], `"`)]
+	case strings.HasPrefix(value, "'") && strings.Count(value, "'") >= 2:
+		return value[1 : 1+strings.Index(value[1:], "'")]
+	}
+	if comment := strings.Index(value, " #"); comment >= 0 {
+		value = strings.TrimSpace(value[:comment])
+	}
+	return value
 }
 
 // envExampleValue strips quotes and trailing comments from a template value
 // and drops anything credential-shaped or too long to be a hint.
 func envExampleValue(raw string) string {
-	value := strings.TrimSpace(raw)
-	switch {
-	case strings.HasPrefix(value, `"`) && strings.Count(value, `"`) >= 2:
-		value = value[1 : 1+strings.Index(value[1:], `"`)]
-	case strings.HasPrefix(value, "'") && strings.Count(value, "'") >= 2:
-		value = value[1 : 1+strings.Index(value[1:], "'")]
-	default:
-		if comment := strings.Index(value, " #"); comment >= 0 {
-			value = strings.TrimSpace(value[:comment])
-		}
-	}
+	value := unquotedEnvValue(raw)
 	if value == "" || len(value) > 256 || strings.ContainsAny(value, "\x00\r\n") ||
 		rejectPlanSecretLiteral("example", value) != nil {
 		return ""
@@ -207,60 +317,41 @@ func envExampleValue(raw string) string {
 }
 
 func (s *envScanner) scanSource(rel string, content []byte) {
+	name := strings.ToLower(path.Base(rel))
+	s.observeFacts(rel, name, content)
+	if kind := envConfigKind(rel, name); kind != "" {
+		s.scanConfig(kind, rel, content)
+		return
+	}
+	extension := path.Ext(name)
+	if !envSourceExtensions[extension] {
+		return
+	}
 	for _, expression := range envReferenceREs {
 		for _, match := range expression.FindAllSubmatch(content, -1) {
 			s.record(string(match[1]), rel, "")
 		}
 	}
+	for _, match := range importMetaEnvRE.FindAllSubmatch(content, -1) {
+		if !importMetaBuiltins[string(match[1])] {
+			s.record(string(match[1]), rel, "")
+		}
+	}
+	s.scanLanguage(extension, rel, name, content)
 }
 
 // variables returns the discovered variables that belong to a root: those
 // found under it (and not under a nested root), plus every variable found
 // outside all roots — a repository-level .env.example documents the
-// application in apps/web even though nothing else there is the root's own.
-// The root's own documented template comes first in file order, then a
-// committed .env's names, then what the repository documents above the
-// root, and finally the names only the code reads, by name — so the form
-// reads the way the repository documents itself.
+// application in apps/web even though nothing else at the repository root is
+// the root's own. The root's own documented template comes first in file
+// order, then a committed .env's names, then what the repository documents
+// above the root, and finally the names only the code reads, by name — so
+// the form reads the way the repository documents itself. How each name was
+// read in the root's own sources becomes its phase, requiredness and
+// loopback evidence.
 func (s *envScanner) variables(root string, roots []string) []DetectedVariable {
-	prefix := rootPrefix(root)
-	claimed := func(source string) bool {
-		if !strings.HasPrefix(source, prefix) {
-			return false
-		}
-		for _, other := range roots {
-			if other != root && strings.HasPrefix(other, prefix) && strings.HasPrefix(source, rootPrefix(other)) {
-				return false
-			}
-		}
-		return true
-	}
-	orphan := func(source string) bool {
-		for _, other := range roots {
-			if strings.HasPrefix(source, rootPrefix(other)) {
-				return false
-			}
-		}
-		return true
-	}
-	rank := func(source string) int {
-		owned := claimed(source)
-		if !owned && !orphan(source) {
-			return -1
-		}
-		name := path.Base(source)
-		switch {
-		case !envTemplateFile(name):
-			return 4
-		case owned && name != ".env":
-			return 0
-		case owned:
-			return 1
-		case name != ".env":
-			return 2
-		}
-		return 3
-	}
+	s.roots = roots
 	type ranked struct {
 		variable DetectedVariable
 		rank     int
@@ -271,8 +362,18 @@ func (s *envScanner) variables(root string, roots []string) []DetectedVariable {
 		variable := *s.found[name]
 		best, bestRank := -1, 99
 		for index, source := range variable.Sources {
-			if r := rank(source); r >= 0 && r < bestRank {
+			if r := s.sourceRank(root, source); r >= 0 && r < bestRank {
 				best, bestRank = index, r
+			}
+		}
+		// A name whose first four sources all belong elsewhere may still be
+		// read here; the flags keep every source, so they are asked too.
+		if best < 0 {
+			for source := range s.positions[name] {
+				if r := s.sourceRank(root, source); r >= 0 && (best < 0 || r < bestRank) {
+					best, bestRank = len(variable.Sources), r
+					variable.Sources = append(append([]string(nil), variable.Sources...), source)
+				}
 			}
 		}
 		if best < 0 {
@@ -280,11 +381,15 @@ func (s *envScanner) variables(root string, roots []string) []DetectedVariable {
 		}
 		sources := []string{variable.Sources[best]}
 		for index, source := range variable.Sources {
-			if index != best {
+			if index != best && s.sourceRank(root, source) >= 0 {
 				sources = append(sources, source)
 			}
 		}
+		if len(sources) > 4 {
+			sources = sources[:4]
+		}
 		variable.Sources = sources
+		s.applyReadFlags(root, name, &variable)
 		items = append(items, ranked{variable: variable, rank: bestRank, seen: s.positions[name][sources[0]]})
 	}
 	sort.SliceStable(items, func(i, j int) bool {
@@ -304,6 +409,105 @@ func (s *envScanner) variables(root string, roots []string) []DetectedVariable {
 		result = result[:64]
 	}
 	return result
+}
+
+// sourceRank orders a source for a root, or returns -1 when the source
+// belongs to another root.
+func (s *envScanner) sourceRank(root, source string) int {
+	owned := s.claimed(root, source)
+	if !owned && !s.orphan(source) {
+		return -1
+	}
+	name := path.Base(source)
+	switch {
+	case !envTemplateFile(name):
+		return 4
+	case owned && !envRealFile(name):
+		return 0
+	case owned:
+		return 1
+	case !envRealFile(name):
+		return 2
+	}
+	return 3
+}
+
+func (s *envScanner) claimed(root, source string) bool {
+	prefix := rootPrefix(root)
+	if !strings.HasPrefix(source, prefix) {
+		return false
+	}
+	for _, other := range s.roots {
+		if other != root && strings.HasPrefix(other, prefix) && strings.HasPrefix(source, rootPrefix(other)) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *envScanner) orphan(source string) bool {
+	for _, other := range s.roots {
+		if strings.HasPrefix(source, rootPrefix(other)) {
+			return false
+		}
+	}
+	return true
+}
+
+// rootReadFlags merges how a name was read across the sources a root owns.
+func (s *envScanner) rootReadFlags(root, name string) (envReadFlags, []string) {
+	var merged envReadFlags
+	localhost := []string{}
+	sources := make([]string, 0, len(s.flags[name]))
+	for source := range s.flags[name] {
+		sources = append(sources, source)
+	}
+	sort.Strings(sources)
+	for _, source := range sources {
+		if s.sourceRank(root, source) < 0 {
+			continue
+		}
+		flags := s.flags[name][source]
+		merged |= flags
+		if flags&envReadLocalhost != 0 {
+			localhost = append(localhost, source)
+		}
+	}
+	return merged, localhost
+}
+
+// applyReadFlags turns the merged read flags into the variable's own
+// evidence: its phase, whether it is required, and which committed file
+// gives it a loopback value.
+func (s *envScanner) applyReadFlags(root, name string, variable *DetectedVariable) {
+	flags, localhost := s.rootReadFlags(root, name)
+	if flags&envReadBuild != 0 {
+		variable.Phase = "build"
+	}
+	if flags&envReadInlined != 0 {
+		variable.BrowserInlined = true
+	}
+	switch {
+	case flags&envReadRequired != 0:
+		variable.Required = true
+	case flags&envReadRequiredForm != 0:
+		variable.RequiredRead = true
+	}
+	if len(localhost) > 0 {
+		variable.LocalhostIn = localhost[0]
+	}
+	if variable.Example == "" {
+		sources := make([]string, 0, len(s.examples[name]))
+		for source := range s.examples[name] {
+			if s.sourceRank(root, source) >= 0 {
+				sources = append(sources, source)
+			}
+		}
+		sort.Strings(sources)
+		if len(sources) > 0 {
+			variable.Example = s.examples[name][sources[0]]
+		}
+	}
 }
 
 // Database suggestions: the engine a source connects to is written in its
@@ -363,7 +567,7 @@ func prismaProvider(content []byte) string {
 // detectDatabases lists the engines a root's manifests and variables name,
 // each with the variable the connection belongs in and the evidence that
 // named it, in a stable order.
-func detectDatabases(marker *detectedMarkers, variables []DetectedVariable, prismaProviders map[string]string) []DetectedDatabase {
+func detectDatabases(marker *detectedMarkers, variables []DetectedVariable, prismaProviders map[string]string, extra ...databaseEvidence) []DetectedDatabase {
 	type suggestion struct {
 		evidence string
 		variable string
@@ -405,6 +609,11 @@ func detectDatabases(marker *detectedMarkers, variables []DetectedVariable, pris
 			}
 		}
 	}
+	// Manifests detection does not hold as markers — Gemfile.lock, mix.exs —
+	// and those of compiled languages arrive from the root's classification.
+	for _, found := range extra {
+		suggest(found.engine, found.evidence)
+	}
 	prismaPaths := make([]string, 0, len(prismaProviders))
 	for schema := range prismaProviders {
 		prismaPaths = append(prismaPaths, schema)
@@ -426,13 +635,15 @@ func detectDatabases(marker *detectedMarkers, variables []DetectedVariable, pris
 			engine = engineForVariableName(variable.Name)
 		}
 		// Laravel's .env.example names its engine in DB_CONNECTION and reads
-		// a whole URL from DB_URL.
+		// a whole URL from DB_URL — from Laravel 11 on. Laravel 10 and older
+		// read DATABASE_URL and ignore DB_URL entirely, so the suggestion
+		// follows whichever name the application's own config reads.
 		if engine == "" && variable.Name == "DB_CONNECTION" {
 			engine = map[string]string{"mysql": "mysql", "mariadb": "mariadb", "pgsql": "postgres", "postgres": "postgres"}[strings.ToLower(variable.Example)]
 			if engine != "" {
 				suggest(engine, variable.Name+"="+strings.ToLower(variable.Example)+" in "+variable.Sources[0])
 				if engines[engine].variable == "" {
-					engines[engine].variable = "DB_URL"
+					engines[engine].variable = laravelURLVariable(marker, variables)
 				}
 				continue
 			}
