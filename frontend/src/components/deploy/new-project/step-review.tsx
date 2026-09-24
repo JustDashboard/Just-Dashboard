@@ -4,6 +4,7 @@ import Link from "next/link"
 import { FormFact, FormFacts, FormNote, FormSection } from "@/components/form"
 import { Group } from "@/components/panel"
 import { Status } from "@/components/status-dot"
+import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import type { DeploymentConfiguration, DeploymentPreflightFinding } from "@/lib/types"
@@ -54,6 +55,7 @@ export function StepReview({
   onAcknowledgedChange,
   onOpenRemedy,
   canOpenRemedy,
+  onInspectAgain,
 }: {
   flow: ConfigureFlow
   branch?: string
@@ -72,6 +74,12 @@ export function StepReview({
   onAcknowledgedChange: (codes: string[]) => void
   onOpenRemedy: (finding: DeploymentPreflightFinding) => void
   canOpenRemedy: (finding: DeploymentPreflightFinding) => boolean
+  /**
+   * Reads the source again at the branch's newer commit, keeping the chosen
+   * candidate — `source_moved`'s remedy, since accepting the warning deploys
+   * the commit this screen checked instead.
+   */
+  onInspectAgain?: () => void
 }) {
   const isGitSource = flow.source.kind === "git" || flow.source.kind === "local"
   const configuration = flow.configuration
@@ -260,6 +268,21 @@ export function StepReview({
                           </>
                         )}
                       </span>
+                    )}
+                    {finding.code === "source_moved" && onInspectAgain && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="xs"
+                        className="mt-1.5"
+                        onClick={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          onInspectAgain()
+                        }}
+                      >
+                        Inspect again
+                      </Button>
                     )}
                   </span>
                 </Label>

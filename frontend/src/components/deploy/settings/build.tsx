@@ -3,7 +3,7 @@
 import { useState } from "react"
 import type { FormEvent } from "react"
 import { Copy, LockClosed } from "@/components/icons"
-import { ApiError, get, refusedIndex } from "@/lib/api"
+import { ApiError, get, post, refusedIndex } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -12,6 +12,8 @@ import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentBuildEvidence,
   DeploymentConfiguration,
+  DeploymentDetectionChange,
+  DeploymentDetectionProposal,
   DeploymentEnvironmentConfiguration,
   DeploymentRecipe,
   DeploymentRunSnapshot,
@@ -64,6 +66,12 @@ import {
 } from "@/components/deploy/settings/setting-card"
 import { ReleaseTasks, spoken, type ReleaseTask } from "@/components/deploy/settings/release-tasks"
 import { Segments } from "@/components/deploy/settings/segments"
+import { DetectionProposalPanel } from "@/components/deploy/settings/detection-proposal"
+import {
+  applyDetectionChanges,
+  buildFieldChange,
+  proposedValue,
+} from "@/components/deploy/settings/detection-changes"
 
 /**
  * How the release is built — which toolchain, from which directory, into
@@ -118,6 +126,7 @@ const BUILD_FIELD_IDS: Record<string, string> = {
   "build.packageManager": "build-package-manager",
   "build.rootDirectory": "build-root",
   "build.goVersion": "build-go-version",
+  "build.goPackage": "build-go-package",
   "build.pythonVersion": "build-python-version",
   "build.spaFallback": "build-spa",
   "build.dockerfile": "build-dockerfile",
@@ -132,6 +141,7 @@ const FIELD_SECTION: Record<string, "build" | "commands" | "image"> = {
   "build-method": "build",
   "build-package-manager": "build",
   "build-go-version": "build",
+  "build-go-package": "build",
   "build-python-version": "build",
   "build-dockerfile": "build",
   "build-root": "commands",
@@ -569,7 +579,8 @@ function BuildForm({
 }) {
   const { can } = useAuth()
   const canEdit = can("system.admin")
-  const { deployment } = useProject().detail
+  const project = useProject()
+  const { deployment } = project.detail
   const draft = useBuildDraft(projectId, configuration)
   const build = draft.value
   const setBuild = (next: BuildDraft) => draft.set(next)
@@ -579,6 +590,40 @@ function BuildForm({
   const errorFor = (id: string) => (fieldError?.id === id ? fieldError.message : undefined)
   const refusedIn = (section: string) =>
     fieldError !== undefined && FIELD_SECTION[fieldError.id] === section
+
+  // Detect again: the source read now, compared with the saved plan. Only the
+  // build fields are this form's to apply, into the draft; a field already
+  // matching what detection proposes has nothing left to offer.
+  const [proposal, setProposal] = useState<DeploymentDetectionProposal>()
+  const [detecting, setDetecting] = useState(false)
+  const detect = async () => {
+    setDetecting(true)
+    try {
+      setProposal(
+        await post<DeploymentDetectionProposal>(
+          `/deploy/${projectId}/environments/${project.environmentId}/detect`,
+          {},
+        ),
+      )
+    } catch (caught) {
+      notify.error("Could not read the source again", caught)
+    } finally {
+      setDetecting(false)
+    }
+  }
+  const draftValue = (field: string) =>
+    field === "build.spaFallback"
+      ? String(Boolean(build.spaFallback))
+      : String(build[field.slice("build.".length) as keyof BuildDraft] ?? "")
+  const proposed = (proposal?.changes ?? [])
+    .filter(buildFieldChange)
+    .filter((change) => draftValue(change.field) !== change.detected)
+  const proposedFor = (field: string) => {
+    const change = proposed.find((one) => one.field === field)
+    return change && `Detection proposes ${proposedValue(change, change.detected)}.`
+  }
+  const applyProposed = (changes: DeploymentDetectionChange[]) =>
+    setBuild(applyDetectionChanges(build, configuration.runtime, changes).build)
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -679,6 +724,7 @@ function BuildForm({
         recipe: next,
         secrets: build.method === "recipe" ? build.secrets : [],
         goVersion: next === "go" ? build.goVersion : undefined,
+        goPackage: next === "go" ? build.goPackage : undefined,
         pythonVersion: next === "python" ? build.pythonVersion : undefined,
         packageManager: next === "node" ? build.packageManager : undefined,
       })
@@ -693,6 +739,7 @@ function BuildForm({
       recipe: undefined,
       secrets: [],
       goVersion: undefined,
+      goPackage: undefined,
       pythonVersion: undefined,
       packageManager: undefined,
       spaFallback: choice.method === "static" ? build.spaFallback : undefined,
@@ -734,12 +781,38 @@ function BuildForm({
             "recipe",
             "packageManager",
             "goVersion",
+            "goPackage",
             "pythonVersion",
             "dockerfile",
           ]),
           refused: refusedIn("build") || Boolean(error),
         })}
+        actions={
+          canEdit &&
+          picks && (
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              onClick={() => void detect()}
+              pending={detecting}
+            >
+              Detect again
+            </Button>
+          )
+        }
       >
+        {proposal && (
+          <DetectionProposalPanel
+            projectId={projectId}
+            title="Detection proposes"
+            proposal={proposal}
+            changes={proposed}
+            canEdit={canEdit}
+            onApply={applyProposed}
+            onDismiss={() => setProposal(undefined)}
+          />
+        )}
         {picks ? (
           <Field label="Builder" error={errorFor("build-method")}>
             <ChoiceGrid id="build-method" columns="compact" role="group" aria-label="Builder">
@@ -771,7 +844,10 @@ function BuildForm({
         {build.method === "recipe" && recipe === "node" && (
           <Field
             label="Package manager"
-            hint="Pick one when the repository has more than one lockfile."
+            hint={
+              proposedFor("build.packageManager") ??
+              "Pick one when the repository has more than one lockfile."
+            }
             error={errorFor("build-package-manager")}
           >
             <ChoiceGrid
@@ -836,6 +912,42 @@ function BuildForm({
                   : []),
               ]}
             />
+          </Field>
+        )}
+
+        {build.method === "recipe" && recipe === "go" && (
+          <Field
+            label="Go main package"
+            htmlFor="build-go-package"
+            hint={
+              proposedFor("build.goPackage") ??
+              (proposal?.candidate?.goMainPackages?.length
+                ? `Main packages: ${proposal.candidate.goMainPackages.map((main) => (main === "." ? "." : `./${main}`)).join(", ")}.`
+                : "The directory of the command to build, such as cmd/api; empty lets the recipe choose.")
+            }
+            error={errorFor("build-go-package")}
+          >
+            <InputGroup>
+              <InputGroupAddon align="inline-start">
+                <InputGroupText className="font-mono">./</InputGroupText>
+              </InputGroupAddon>
+              <InputGroupInput
+                id="build-go-package"
+                value={build.goPackage ?? ""}
+                readOnly={!canEdit}
+                aria-invalid={Boolean(errorFor("build-go-package"))}
+                className="font-mono"
+                placeholder="recipe chooses"
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(event) =>
+                  setBuild({
+                    ...build,
+                    goPackage: event.target.value.replace(/^\.\//, "") || undefined,
+                  })
+                }
+              />
+            </InputGroup>
           </Field>
         )}
 
@@ -943,6 +1055,7 @@ function BuildForm({
                   id="build-command"
                   label="Build command"
                   value={build.buildCommand ?? ""}
+                  hint={proposedFor("build.buildCommand")}
                   error={errorFor("build-command")}
                   readOnly={!canEdit}
                   onChange={(buildCommand) => setBuild({ ...build, buildCommand })}
@@ -954,6 +1067,7 @@ function BuildForm({
                     id="build-command"
                     label="Build command"
                     value={build.buildCommand ?? ""}
+                    hint={proposedFor("build.buildCommand")}
                     error={errorFor("build-command")}
                     readOnly={!canEdit}
                     onChange={(buildCommand) => setBuild({ ...build, buildCommand })}
@@ -962,6 +1076,7 @@ function BuildForm({
                     id="build-start"
                     label="Start command"
                     value={build.startCommand ?? ""}
+                    hint={proposedFor("build.startCommand")}
                     error={errorFor("build-start")}
                     readOnly={!canEdit}
                     onChange={(startCommand) => setBuild({ ...build, startCommand })}
@@ -971,6 +1086,7 @@ function BuildForm({
               <Field
                 label="Output directory"
                 htmlFor="build-output"
+                hint={proposedFor("build.outputDirectory")}
                 error={errorFor("build-output")}
               >
                 <InputGroup>
@@ -1182,6 +1298,7 @@ function CommandField({
   id,
   label,
   value,
+  hint,
   error,
   readOnly,
   onChange,
@@ -1189,12 +1306,13 @@ function CommandField({
   id: string
   label: string
   value: string
+  hint?: string
   error?: string
   readOnly: boolean
   onChange: (value: string) => void
 }) {
   return (
-    <Field label={label} htmlFor={id} error={error}>
+    <Field label={label} htmlFor={id} hint={hint} error={error}>
       <InputGroup>
         <InputGroupAddon align="inline-start">
           <InputGroupText className="font-mono">$</InputGroupText>

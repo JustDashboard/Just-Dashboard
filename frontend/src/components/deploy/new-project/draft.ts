@@ -6,6 +6,7 @@ import {
 } from "@/components/deploy/deployment-defaults"
 import { DEPLOYMENT_NAME } from "@/components/deploy/vocabulary"
 import type {
+  DeploymentBuildMethod,
   DeploymentConfiguration,
   DeploymentDetection,
   DeploymentDetectionCandidate,
@@ -187,10 +188,53 @@ export async function importEnvironment(
   )
 }
 
-export async function enqueueDeploy(projectId: number, environmentId: number) {
+export async function enqueueDeploy(
+  projectId: number,
+  environmentId: number,
+  sourceRevision?: string,
+) {
   return post<{ id: number }>(`/deploy/${projectId}/environments/${environmentId}/runs`, {
     operation: "deploy",
+    ...(sourceRevision ? { sourceRevision } : {}),
   })
+}
+
+/**
+ * The commit a new project's first deployment builds: the one Review checked,
+ * for a remote Git repository, rather than whatever the branch points at by
+ * the time Deploy lands. A draft resumed days later was reviewed against its
+ * detection's commit, and building the branch head instead would ship a plan
+ * nobody looked at. Every later deployment follows the branch.
+ *
+ * Only a remote Git source can be pinned — the run request refuses a
+ * revision for a local checkout, an image or a Compose file.
+ */
+export function firstDeployRevision(
+  source: DeploymentDraftSource,
+  detection: DeploymentDetection | undefined,
+) {
+  const revision = detection?.source.revision
+  const remote =
+    source.kind === "git" && (source.mode === "git_url" || source.mode === "connected_repository")
+  return remote && revision && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(revision)
+    ? revision
+    : undefined
+}
+
+/**
+ * The candidate detection found at a root directory typed after detection,
+ * building the way the plan does — the one whose facts preflight should
+ * judge that root by, picked the way a candidate is picked from the list.
+ */
+export function candidateAtRoot(
+  detection: DeploymentDetection | undefined,
+  root: string | undefined,
+  method: DeploymentBuildMethod,
+) {
+  const clean = (root ?? "").trim().replace(/^\/+|\/+$/g, "")
+  return detection?.candidates.find(
+    (candidate) => candidate.root === clean && candidate.buildMethod === method,
+  )
 }
 
 /** What a source tab hands to Configure once it has inspected. */

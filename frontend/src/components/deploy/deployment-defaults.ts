@@ -272,6 +272,7 @@ export function defaultConfiguration(
       outputDirectory: candidate?.outputDirectory,
       dockerfile: method === "dockerfile" ? (candidate?.dockerfile ?? "Dockerfile") : undefined,
       pythonVersion: candidate?.recipe === "python" ? candidate.pythonVersion : undefined,
+      goPackage: candidate?.recipe === "go" ? candidate.goPackage : undefined,
       spaFallback: packagedStatic && candidate?.spaFallback ? true : undefined,
       noCache: false,
       secrets: [],

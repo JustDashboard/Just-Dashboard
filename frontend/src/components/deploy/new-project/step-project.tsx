@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useRef } from "react"
 import type {
   DeploymentBuildMethod,
   DeploymentRecipe,
@@ -31,6 +32,7 @@ import {
 import { withPackageManagerRunner } from "@/components/deploy/deployment-defaults"
 import type { WizardErrors } from "@/components/deploy/deployment-defaults"
 import { BuildExtras } from "@/components/deploy/new-project/configure-advanced"
+import { candidateAtRoot } from "@/components/deploy/new-project/draft"
 import type { ConfigureFlow, FlowUpdate } from "@/components/deploy/new-project/draft"
 import { SECTION_IDS } from "@/components/deploy/new-project/plan-sections"
 
@@ -93,6 +95,26 @@ export function StepProject({
     onFlowChange({ ...flow, configuration: next })
   const updateBuild = (patch: Partial<typeof configuration.build>) =>
     setConfiguration({ ...configuration, build: { ...configuration.build, ...patch } })
+
+  // A root typed after detection is judged by what detection found there: the
+  // candidate at that root, building the plan's way, is picked the way one is
+  // picked from the list, so its facts — not another directory's — are what
+  // preflight reads. Settled on a pause in the typing, not every keystroke.
+  const rootCandidateId = candidateAtRoot(
+    flow.detection,
+    configuration.build.rootDirectory,
+    configuration.build.method,
+  )?.id
+  const pickCandidate = useRef(onPickCandidate)
+  useEffect(() => {
+    pickCandidate.current = onPickCandidate
+  })
+  const pickedId = flow.candidate?.id
+  useEffect(() => {
+    if (!rootCandidateId || rootCandidateId === pickedId || busy) return
+    const timer = setTimeout(() => pickCandidate.current(rootCandidateId), 600)
+    return () => clearTimeout(timer)
+  }, [rootCandidateId, pickedId, busy])
 
   const isGitSource = flow.source.kind === "git" || flow.source.kind === "local"
   const isImageSource = flow.source.kind === "image"
@@ -401,6 +423,7 @@ export function StepProject({
                       updateBuild({
                         recipe,
                         goVersion: recipe === "go" ? configuration.build.goVersion : undefined,
+                        goPackage: recipe === "go" ? configuration.build.goPackage : undefined,
                         pythonVersion:
                           recipe === "python" ? configuration.build.pythonVersion : undefined,
                         packageManager:
@@ -466,6 +489,31 @@ export function StepProject({
                       <SelectItem value="yarn">Yarn</SelectItem>
                     </SelectContent>
                   </Select>
+                </Field>
+              )}
+              {configuration.build.method === "recipe" && configuration.build.recipe === "go" && (
+                <Field
+                  label="Go main package"
+                  htmlFor="go-package"
+                  hint={
+                    (flow.candidate?.goMainPackages?.length ?? 0) > 1
+                      ? `This module has several commands: ${flow.candidate?.goMainPackages
+                          ?.map((main) => (main === "." ? "." : `./${main}`))
+                          .join(", ")}. Choose the one to build.`
+                      : "Leave empty to build the module's only command."
+                  }
+                >
+                  <Input
+                    id="go-package"
+                    value={configuration.build.goPackage ?? ""}
+                    onChange={(event) =>
+                      updateBuild({
+                        goPackage: event.target.value.replace(/^\.\//, "") || undefined,
+                      })
+                    }
+                    placeholder={flow.candidate?.goPackage ?? "cmd/api"}
+                    className="font-mono"
+                  />
                 </Field>
               )}
               {configuration.build.method === "recipe" && configuration.build.recipe === "go" && (

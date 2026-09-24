@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test"
 import { defaultConfiguration } from "../deployment-defaults"
 import {
+  candidateAtRoot,
   configurationForSave,
+  firstDeployRevision,
   landingStep,
   mergeDetectedConfiguration,
   persistableFlow,
@@ -255,4 +257,37 @@ test("persisting a flow excludes credentials from both live and server draft sna
     expect(JSON.stringify(flow)).toContain(secret)
   }
   expect(saved.configuration.domains[0].protection.username).toBe("reader")
+})
+
+test("the first deployment builds the commit Review checked, for a remote repository only", () => {
+  const revision = "c".repeat(40)
+  const detection = { source: { kind: "git", revision }, candidates: [] }
+  expect(
+    firstDeployRevision({ kind: "git", mode: "git_url", url: "https://x/y.git" }, detection),
+  ).toBe(revision)
+  expect(firstDeployRevision({ kind: "git", mode: "connected_repository" }, detection)).toBe(
+    revision,
+  )
+  // A local checkout, a Compose repository or an image cannot be pinned by
+  // the run request, and a missing or partial revision is not a commit.
+  expect(firstDeployRevision({ kind: "local", mode: "local_checkout" }, detection)).toBeUndefined()
+  expect(firstDeployRevision({ kind: "compose", mode: "compose_git" }, detection)).toBeUndefined()
+  expect(firstDeployRevision({ kind: "git", mode: "git_url" }, undefined)).toBeUndefined()
+  expect(
+    firstDeployRevision(
+      { kind: "git", mode: "git_url" },
+      { ...detection, source: { revision: "abc123" } },
+    ),
+  ).toBeUndefined()
+})
+
+test("a root typed after detection finds the candidate detected there", () => {
+  const web = { id: "web", root: "apps/web", buildMethod: "recipe" }
+  const docs = { id: "docs", root: "apps/docs", buildMethod: "static" }
+  const detection = { source: { kind: "git" }, candidates: [web, docs] }
+  expect(candidateAtRoot(detection, "apps/web", "recipe")).toBe(web)
+  expect(candidateAtRoot(detection, "/apps/web/", "recipe")).toBe(web)
+  expect(candidateAtRoot(detection, "apps/docs", "recipe")).toBeUndefined()
+  expect(candidateAtRoot(detection, "apps/api", "recipe")).toBeUndefined()
+  expect(candidateAtRoot(undefined, "apps/web", "recipe")).toBeUndefined()
 })

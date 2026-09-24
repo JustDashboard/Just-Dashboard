@@ -10,6 +10,8 @@ import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type {
+  DeploymentDetectionChange,
+  DeploymentDetectionProposal,
   DeployProject,
   DeploymentDraftSource,
   DeploymentEnvironmentConfiguration,
@@ -54,6 +56,8 @@ import {
 } from "@/components/deploy/settings/setting-card"
 import { SettingPicture } from "@/components/deploy/settings/setting-picture"
 import { CredentialSelect } from "@/components/deploy/credentials-page"
+import { DetectionProposalPanel } from "@/components/deploy/settings/detection-proposal"
+import { applyDetectionChanges } from "@/components/deploy/settings/detection-changes"
 
 /**
  * What the project is called, where it is built from, and — for a Git
@@ -115,6 +119,7 @@ export function GeneralSettings({
                   environmentId={environmentId}
                   canEdit={canEdit}
                   configuration={configuration}
+                  save={state.save}
                   deployment={deployment}
                   repoPath={record.repoPath}
                   onSaved={() => {
@@ -386,6 +391,7 @@ function SourceForm({
   environmentId,
   canEdit,
   configuration,
+  save: saveConfiguration,
   deployment,
   repoPath,
   onSaved,
@@ -394,6 +400,7 @@ function SourceForm({
   environmentId: number
   canEdit: boolean
   configuration: DeploymentEnvironmentConfiguration
+  save: ReturnType<typeof useConfiguration>["save"]
   deployment: DeploymentSummary
   repoPath: string
   onSaved: () => void
@@ -417,6 +424,35 @@ function SourceForm({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [formError, setFormError] = useState<string>()
   const [saving, setSaving] = useState(false)
+  // What detection read at the source just saved, where it answers a build
+  // field differently than it did when the plan was saved: the plan keeps
+  // the old answer until one is applied.
+  const [proposal, setProposal] = useState<DeploymentDetectionProposal>()
+  const [applying, setApplying] = useState(false)
+  const detectionChanges = (proposal?.changes ?? []).filter((change) => change.changed)
+  const applyDetection = async (changes: DeploymentDetectionChange[]) => {
+    setApplying(true)
+    try {
+      await saveConfiguration(
+        applyDetectionChanges(configuration.build, configuration.runtime, changes),
+      )
+      setProposal(
+        (current) =>
+          current && {
+            ...current,
+            changes: current.changes.filter((change) => !changes.includes(change)),
+          },
+      )
+      notify.success(changes.length === 1 ? `${changes[0].label} applied` : "Detection applied", {
+        description: "The next deployment builds with it.",
+      })
+      onSaved()
+    } catch (caught) {
+      notify.error("Could not apply what detection found", caught)
+    } finally {
+      setApplying(false)
+    }
+  }
 
   // Absent entirely (the backend has not shipped it yet) or missing the one
   // field this kind actually identifies itself by — either way, the value on
@@ -465,7 +501,11 @@ function SourceForm({
               credentialId: value.credentialId,
             }
     try {
-      await put(`/deploy/${projectId}/environments/${environmentId}/source`, body)
+      const updated = await put<{ proposal?: DeploymentDetectionProposal }>(
+        `/deploy/${projectId}/environments/${environmentId}/source`,
+        body,
+      )
+      setProposal(updated.proposal)
       // The fields went out trimmed; the draft takes what was sent, or a
       // trailing space would read as an edit the save did not make.
       patch({
@@ -558,6 +598,18 @@ function SourceForm({
           notLive: pending.changes.some((change) => change.kind === "source"),
         })}
       >
+        {proposal && (
+          <DetectionProposalPanel
+            projectId={projectId}
+            title="Detection changed"
+            proposal={proposal}
+            changes={detectionChanges}
+            canEdit={canEdit}
+            applying={applying}
+            onApply={(changes) => void applyDetection(changes)}
+            onDismiss={() => setProposal(undefined)}
+          />
+        )}
         {isGit ? (
           <>
             <Field
