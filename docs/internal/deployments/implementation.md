@@ -148,7 +148,9 @@ only renderer/executor/validation authority for their feature.
   documentation spells it (`frameworkLabel`), a Python recipe shows its interpreter field, and static
   output shows the single-page switch. `?repo=<clone url>&ref=<branch>` arrives on the Git tab with
   the URL filled in (only an `https://`, `ssh://` or `git@` URL is accepted), which is what a deploy
-  link in a README points at.
+  link in a README points at. `?template=<blueprint id>` (only an identifier's shape is taken) and
+  `?image=<reference>` arrive on those tabs with the blueprint chosen or the reference filled in, which
+  is where the project step sends the upstream repository of an application the catalogue packages.
   Reviewed blueprints deploy as image releases (below); game-server blueprints and blueprints that
   install configuration files or downloaded artifacts stay preview-only, the catalogue names the
   reason per blueprint, and direct API calls are refused with the same reason before deployment work
