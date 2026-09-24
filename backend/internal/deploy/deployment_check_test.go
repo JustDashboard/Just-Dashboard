@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -131,6 +132,50 @@ func TestAnalyzePlanReadsTheCommitBeingBuilt(t *testing.T) {
 	result = executor.analyzePlan(context.Background(), StepExecution{Run: *run}, plan)
 	if result.State == StepFailed {
 		t.Fatalf("a decided plan was stopped: %s %s", result.ErrorCode, result.ErrorMessage)
+	}
+}
+
+// A Go service whose internal sources outweigh detection's walk budget is
+// still a service at deploy time: analyze_plan reads its main packages with
+// the recipe's own scan, and a plan saved while detection called it a
+// library is not stopped once the recipe prepares it.
+func TestAnalyzePlanDoesNotStopALargeGoServiceAsALibrary(t *testing.T) {
+	files := map[string]string{
+		"go.mod":  "module example.test/store\n\ngo 1.26\n",
+		"main.go": "package main\n\nimport \"net/http\"\n\nfunc main() { _ = http.ListenAndServe }\n",
+	}
+	for index := range 12 {
+		files[fmt.Sprintf("internal/store/generated_%02d.go", index)] = "package store\n\n// " + strings.Repeat("x", 400<<10) + "\n"
+	}
+	repository, revision := gitTree(t, files)
+	stored := newDetectedCandidate("", BuildRecipe, DetectedCandidate{
+		Name: "Go library in .", Recipe: "go", Confidence: ConfidenceLow, Profile: ProfileService, GoLibrary: true,
+	})
+	fixture := newReleaseStoreFixture(t)
+	fixture.setProfile(t, ProfileService)
+	fixture.addSourcePlan(t, 1, repository, revision, BuildPlanConfig{Method: BuildRecipe, Recipe: "go"},
+		StoredBuildEvidence{Candidates: []DetectedCandidate{stored}})
+	run, _ := fixture.claimedRun(t, 1)
+	plan, err := fixture.runs.ExecutionPlan(context.Background(), *run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &NormalizedStepExecutor{
+		store: fixture.runs, preflight: readyObserver(), workspaceRoot: t.TempDir(),
+		sources: NewHostSourceAnalyzer([]string{repository}, nil, t.TempDir(), nil, nil),
+	}
+	result := executor.analyzePlan(context.Background(), StepExecution{Run: *run}, plan)
+	if result.State == StepFailed {
+		t.Fatalf("a Go service was stopped: %s %q", result.ErrorCode, result.ErrorMessage)
+	}
+	var evidence struct {
+		Candidate DetectedCandidate `json:"candidate"`
+	}
+	if err := json.Unmarshal(result.Evidence, &evidence); err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Candidate.GoLibrary || evidence.Candidate.GoPackage != "." {
+		t.Fatalf("candidate = %#v", evidence.Candidate)
 	}
 }
 
