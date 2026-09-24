@@ -141,8 +141,9 @@ only renderer/executor/validation authority for their feature.
   example as the placeholder, the file it was read from beside the key — and a detected row left empty
   and set up by nothing is skipped at submit rather than set to nothing. A row detection set up says
   how the plan answers it (`detectedVariableDeclarations`): a secret generated when the project is
-  created (never shown in the browser), an address that follows the domain, a documented default, or a
-  secret to paste; a required name is declared required, a browser-compiled name is tagged `public`,
+  created (never shown in the browser), an address that follows the domain (held out of each save until
+  a domain is planned, and put back into the plan the server hands back — `withHeldDomainVariables` —
+  so a domain added after Review's check still binds it), a documented default, or a secret to paste; a required name is declared required, a browser-compiled name is tagged `public`,
   and a typed value pointing at localhost is flagged under the field. Review lists the generated
   secrets by shape and the plain values the plan carries. Each database the source connects to is one
   button that opens the database sheet on that engine (PostgreSQL with pgvector or PostGIS when the
@@ -304,8 +305,9 @@ only renderer/executor/validation authority for their feature.
   manager rewrites the chained binary runner with the script runner.
 - Deployment preflight depends on a read-only observer: filesystem/proc capacity, listener inventory,
   Docker/Compose availability, proxy inventory, bounded DNS lookups, the CPU's `avx`/`atomics` flags
-  from `/proc/cpuinfo`, and — for a linked PostgreSQL — one bounded `pg_available_extensions` read
-  through the dashboard's own pool. It cannot build, pull, start,
+  from `/proc/cpuinfo`, and — for a linked PostgreSQL, only when detection says the schema needs
+  pgvector or PostGIS — one bounded `pg_available_extensions` read through the dashboard's own pool
+  (`PlanningDatabaseExtensions`). It cannot build, pull, start,
   stop, write proxy/firewall configuration, modify a checkout or enqueue a backup. The persisted exact
   plan excludes raw observed import material and accepts only typed secret references.
 - Normalized build execution uses the project-owned versioned recipe set or an explicit Dockerfile,

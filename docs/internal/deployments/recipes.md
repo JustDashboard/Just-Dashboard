@@ -59,7 +59,10 @@ documentation, migrations and generated files are not read, and names the platfo
 `NODE_ENV`, …) are left out; `DEBUG` is left out of JavaScript, where it is the `debug` package's, and
 kept from Python, where it is the framework's debug mode. The scan has its own budget (400 files,
 3 MiB) apart from detection's limits: a large repository stops contributing names quietly and is never
-reported truncated for it. The root's own template comes first in file order, then a committed `.env`,
+reported truncated for it. The fact files classification reads whole — `Gemfile.lock`, `mix.exs`,
+Rails' credentials, `config/puma.rb`, `production.rb` and `database.yml`, Phoenix's migrate overlay,
+codegen configs — have a budget of their own (64 files, 1 MiB), so an `app/` tree walked first cannot
+crowd them out. The root's own template comes first in file order, then a committed `.env`,
 then what the repository documents above the root, then code references by name. Each row carries where
 it was read; a detected row left empty and set up by nothing is skipped at submit, not set to an empty
 value, and the form says how many are unset.
@@ -79,7 +82,13 @@ subscript or default-less `env()`/`config()` at module level of a settings, conf
 `BaseSettings` field with no default, Elixir `fetch_env!` or `|| raise` in `config/`, Rails
 `ENV.fetch` without a default in `config/`, a Spring or HOCON placeholder without a default, a Go
 `required` tag, a static env import, Prisma 7's `env()` in `prisma.config.*` (which `prisma generate`
-loads during the build), a t3, Astro or AdonisJS schema entry without `optional`.
+loads during the build), a t3, Astro or AdonisJS schema entry without `optional`. A Python default may
+be positional: django-environ's typed readers (`env.bool("X", False)`) and python-decouple's
+`config("X", 30)` take it second, while a bare `env()`, `env.list()` and Starlette's `config()` take a
+cast there, so a type name in that position is a cast and anything else is a default. Only Spring's
+base `application.*` and `application-prod*` decide requiredness: a `dev`, `local`, `test` or `ci`
+profile is not read at all, and any other profile is listed without it. Mix's `config/dev.exs` and
+`config/test.exs` are not read, since a release never loads them.
 `requiredRead` is the same form somewhere that may only run on one path. `localhostIn` names the
 committed file whose value points at loopback.
 
@@ -97,15 +106,21 @@ committed file whose value points at loopback.
   secret) is added even when no line of code names it.
 - `domain` — a self-URL bound to the planned domain through `domainTemplate`: `AUTH_URL`,
   `NEXTAUTH_URL`, `BETTER_AUTH_URL`, SvelteKit adapter-node's `ORIGIN`, Laravel's `APP_URL`, Phoenix's
-  `PHX_HOST` (the bare hostname), Django's `CSRF_TRUSTED_ORIGINS` and `ALLOWED_HOSTS` (with `localhost`
-  and `127.0.0.1` kept so the readiness probe answers), `SITE_URL`, `PUBLIC_URL`, `BASE_URL` and
+  `PHX_HOST` (the bare hostname), Django's `CSRF_TRUSTED_ORIGINS` and the variable its settings read
+  `ALLOWED_HOSTS` from (with `localhost` and `127.0.0.1` kept so the readiness probe answers), joined
+  with the separator the settings split it on — commas for `env.list`, `Csv()` or `.split(",")`, spaces
+  for `.split(" ")` or `.split()`. A list joined the other way is one host Django never matches, so
+  when the settings do not say, the variable is left unbound and noted. `SITE_URL`, `PUBLIC_URL`, `BASE_URL` and
   `NEXT_PUBLIC_APP_URL`/`SITE_URL`/`BASE_URL`, and any variable whose example is an http(s) URL on
   loopback at the application's own port. Another port or a non-http scheme — `API_URL` on 8000,
   `DATABASE_URL` — is never rebound.
 - `default` — a harmless documented setting: `LOG_LEVEL` (pinned to `info`), `SESSION_DRIVER`,
   `DB_CONNECTION`, `DB_CLIENT`, `DATABASE_CLIENT` from the template; `HOST=0.0.0.0` where `HOST` is read
-  beside a listen; Django or Flask `DEBUG` off (`False`, or `0` for an `int()` read) where the settings
-  turn debug on by default; `SOLID_QUEUE_IN_PUMA=true` where Puma loads Solid Queue's plugin;
+  within a few lines of a listen or bind call, or falls back to `0.0.0.0` (reading `PORT` beside it
+  proves nothing — links are built from both); Django or Flask debug off (`False`, or `0` for an
+  `int()` read) on whichever variable the settings read it from (`DJANGO_DEBUG`) where they turn debug
+  on by default — a settings module named `local`, `dev`, `test` and the like is a developer's and is
+  not read for debug or a committed key; `SOLID_QUEUE_IN_PUMA=true` where Puma loads Solid Queue's plugin;
   `AUTH_TRUST_HOST=true` for Auth.js v5, whose only ingress is the managed proxy. `NODE_ENV`, `PORT`
   and loopback URLs are never filled.
 - `paste` — a secret only the operator holds: Rails' `RAILS_MASTER_KEY` beside committed credentials,
@@ -127,9 +142,12 @@ for a relational engine the dependencies name, or the documented name). SQLite n
 suggestion also carries:
 
 - `format` — the connection shape its consumer parses: `jdbc` for Spring (`SPRING_DATASOURCE_URL`, or
-  the placeholder `spring.datasource.url` reads), Quarkus and Micronaut, `adonet` for .NET
+  the placeholder the `spring.datasource.url` key reads — by its full path, never another `url:`),
+  Quarkus (`quarkus.datasource.jdbc.url`, `%prod.` included) and Micronaut, `jdbc-mariadb` for the
+  same over MariaDB Connector/J, which refuses `jdbc:mysql://`, `adonet` for .NET
   (`CONNECTIONSTRINGS__<NAME>` from `GetConnectionString`), `mysql2` for Rails before 7.2 on MySQL. The
-  link requests that shape, and the typed reference records it (`${{database.5.jdbc}}`).
+  link requests that shape, and the typed reference records it (`${{database.5.jdbc}}`). Relinking a
+  variable from Settings → Databases keeps the shape its previous reference asked for.
 - `extensions` — `vector` or `postgis`, read from a Prisma `extensions` list or `Unsupported` type, the
   first migrations' `CREATE EXTENSION`, Rails `enable_extension`, a drizzle `vector()` column, or a
   library that needs one (pgvector, langchain-postgres, GeoAlchemy2, neighbor, PostGIS adapters). Quick
@@ -152,20 +170,25 @@ bound to the planned one, or naming another host (`public_url_unbound_*`, `publi
 with no build-scoped value (`build_variable_missing_*`, blocked) and browser variables that would build
 as undefined (`browser_variables_unbuilt`); a value, or a committed file's fallback, that points at
 loopback (`variable_points_to_localhost_*`, `build_inlines_localhost_*`, `host_variable_loopback_*`); a
+Django host list left unbound because its separator is unknown (`allowed_hosts_unbound_*`); a
 secret compiled into the browser bundle (`public_variable_secret_*`, blocked for a live Stripe secret
 key or a Supabase service_role token); documented or required-form variables left unset
 (`documented_variables_unset`, `variable_likely_required`); Rails without its secret or master key
 (`rails_secret_missing`, `rails_master_key_missing`); Django debug or a committed secret key
 (`django_insecure_settings`); build scripts that fetch from localhost (`build_fetches_localhost`); a
 hosted driver linked to a local database (`hosted_driver_local_database`); a URL where JDBC or ADO.NET
-is read (`database_url_format`); Rails' extra databases on quick-setup MySQL
+is read (`database_url_format`, whose action names the shaped reference, `${{database.5.jdbc}}`); Rails'
+extra databases on quick-setup MySQL
 (`rails_multidb_create_denied`); a linked PostgreSQL without the schema's extension
-(`database_extension_missing`, blocked); MongoDB 5+ on a CPU without AVX or ARMv8.2 atomics
+(`database_extension_missing`, blocked; the linked server is asked only when the schema needs an
+extension); MongoDB 5+ on a CPU without AVX or ARMv8.2 atomics
 (`database_cpu_unsupported`); a Laravel or Symfony start that migrates a database nobody linked
 (`database_required_for_start`, blocked); the callback, authorized-domain and webhook addresses to
-register with Auth.js providers, Better Auth, OmniAuth, django-allauth, Auth0, Clerk, Firebase, Supabase
-and Stripe (`external_callback_registration`); a Clerk production key issued for another domain
-(`clerk_key_domain_mismatch`, blocked); and a Phoenix release whose migrate overlay nothing runs
+register with Auth.js providers, Better Auth, OmniAuth, django-allauth, Passport (named by the strategy
+constructed around its `callbackURL`), Auth0, Clerk, Firebase, Supabase and Stripe
+(`external_callback_registration`); a Clerk production key issued for another host
+(`clerk_key_domain_mismatch`: a warning on the same registrable domain, blocked on another); and a
+Phoenix release whose migrate overlay nothing runs
 (`migrations_not_run`). No finding repeats a secret value.
 
 When a candidate still fails its checks, its own output names the environment cause beside a missing
@@ -274,8 +297,9 @@ or `examples/`), shallowest first:
 | Gradio | `python <script>` with `GRADIO_SERVER_NAME=0.0.0.0` in the image | 7860 |
 
 A framework whose application object is not in an entry file keeps the port and asks for the module. A
-Django project answers only the hosts its settings allow; `ALLOWED_HOSTS` read from the environment is
-listed like any other variable. A plain `main.py`/`app.py` is a low-confidence worker that asks whether
+Django project answers only the hosts its settings allow; the variable `ALLOWED_HOSTS` is read from is
+bound to the planned domain in the separator the settings split it on (see
+[environment discovery](#environment-discovery-and-database-suggestions)). A plain `main.py`/`app.py` is a low-confidence worker that asks whether
 it serves. The recipe refuses a plan with no start command, naming the frameworks detection proposes one
 for.
 

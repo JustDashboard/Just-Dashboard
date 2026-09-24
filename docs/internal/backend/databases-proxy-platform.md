@@ -149,8 +149,9 @@ an official image that finds a populated data directory skips initialisation, so
 password is never set and the server refuses every sign-in while looking reachable. The `/ping` reply's
 `error` is surfaced by both creation dialogs so an engine's own refusal is not reported as "not ready".
 Besides the five engines, provisioning offers `pgvector` (`pgvector/pgvector:pg16`) and `postgis`
-(`postgis/postgis:16-3.5-alpine`): the same PostgreSQL 16 contract with the extension a retrieval or
-geospatial schema creates on its first migration, which the official image lacks. Deployment setup
+(`postgis/postgis:16-3.5-alpine`, listed and accepted only on x86-64, the one architecture it is
+published for): the same PostgreSQL 16 contract with the extension a retrieval or geospatial schema
+creates on its first migration, which the official image lacks. Deployment setup
 preselects one when detection read that extension from the schema. `mongodb` is refused before any pull
 on a CPU without AVX (x86-64) or ARMv8.2 atomics (arm64), where MongoDB 5 and later die with an illegal
 instruction. The URL read also takes `format` and `database`; see
