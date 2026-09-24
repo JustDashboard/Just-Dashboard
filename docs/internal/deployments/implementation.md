@@ -301,14 +301,26 @@ only renderer/executor/validation authority for their feature.
   is recorded as a decision because its data source cannot be guessed. The rule set lives in
   `deploy/schema_tools.go`; Prisma's schema path follows `package.json`'s `prisma.schema` and
   `prisma.config.*`'s `schema:`/`migrations.path`, and the recipe generates the Prisma client itself with
-  placeholders for the names `prisma.config.*` reads through `env()` (`build_node_prisma.go`). Preflight adds `schema_step_missing` (warning, on the start command) when a
-  database is linked and neither the start command, a release task nor the start script runs the tool,
+  placeholders for the names `prisma.config.*` reads through `env()` (`build_node_prisma.go`).
+  Preflight adds `schema_step_missing` (warning, on the start command) when a database is linked and neither the start command, a release task nor the start script runs the tool,
   and `schema_step` (pass) when one does; no linked database means no finding. Changing the package
   manager swaps the whole start command for detection's command for that manager, chained step included.
 - Deployment preflight depends on a read-only observer: filesystem/proc capacity, listener inventory,
   Docker/Compose availability, proxy inventory and bounded DNS lookups. It cannot build, pull, start,
   stop, write proxy/firewall configuration, modify a checkout or enqueue a backup. The persisted exact
-  plan excludes raw observed import material and accepts only typed secret references.
+  plan excludes raw observed import material and accepts only typed secret references. The observer
+  reads `MemAvailable` and `SwapFree`, and `build_memory_low` (warning, `preflight_build.go`) compares
+  them with the selected recipe's estimated build peak (a Next.js, Nuxt, Angular, Gatsby, Docusaurus,
+  Strapi or Payload build ~2 GiB, other JavaScript frameworks ~1 GiB, Rust ~2 GiB, Maven/Gradle and .NET
+  ~1.5 GiB). The same file judges what the configuration gives a JavaScript build against what the
+  candidate recorded (`nodeBuild`): an env-validation schema's variables without a build value
+  (`build_env_validation_skipped`, `build_env_missing`, `build_env_client_missing`), a prerendering
+  framework's build-scoped database URL that points at a `db-N.jd.internal` alias or loopback, or a
+  typed database reference (`build_database_unreachable` — BuildKit cannot join the environment's
+  network, and `--network=host` would hand repository build code the host's loopback services), and
+  platform variables an operator's pasted `.env` sets (`port_variable_mismatch`,
+  `node_env_not_production`, `host_variable_loopback`). Values are compared, never echoed, except a
+  port number, a `NODE_ENV` word and a host name.
 - Normalized build execution uses the project-owned versioned recipe set or an explicit Dockerfile,
   static, immutable-image, or Compose adapter. Reviewed base tags are resolved before rendering and every
   generated `FROM` is digest-pinned. Build secrets are BuildKit environment-backed secret mounts and

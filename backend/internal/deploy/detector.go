@@ -888,6 +888,7 @@ func packageCandidate(marker *detectedMarkers, schemaPaths []string) []DetectedC
 		}
 	}
 	candidate.NodeInstalls = facts.detectedInstalls(candidate.PackageManager, false, inputs.commands)
+	candidate.NodeBuild = detectedNodeBuild(facts, candidate.Framework, candidate.BuildCommand)
 	candidate.Variables = facts.registry
 	if _, err := validateNodeRecipeContent(marker.packageJSON, files,
 		BuildPlanConfig{Method: BuildRecipe, Recipe: "node", PackageManager: runner, BuildCommand: candidate.BuildCommand, StartCommand: candidate.StartCommand, OutputDirectory: candidate.OutputDirectory}); err != nil {

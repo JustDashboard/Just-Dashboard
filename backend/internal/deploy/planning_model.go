@@ -223,6 +223,21 @@ type DetectedCandidate struct {
 	Lockfiles    []DetectedLockfile    `json:"lockfiles,omitempty"`
 	NodeInstalls []DetectedNodeInstall `json:"nodeInstalls,omitempty"`
 	NodeVersion  string                `json:"nodeVersion,omitempty"`
+	// NodeBuild is what the build reads that preflight judges against the
+	// configuration and the host.
+	NodeBuild *DetectedNodeBuild `json:"nodeBuild,omitempty"`
+}
+
+// DetectedNodeBuild is what a JavaScript build reads beyond its install:
+// the env-validation schema it imports (EnvSchema, read as text) with the
+// server and client variables it requires and whether it honours
+// SKIP_ENV_VALIDATION, and the memory the build is estimated to peak at.
+type DetectedNodeBuild struct {
+	EnvSchema    string   `json:"envSchema,omitempty"`
+	EnvServer    []string `json:"envServer,omitempty"`
+	EnvClient    []string `json:"envClient,omitempty"`
+	EnvSkippable bool     `json:"envSkippable,omitempty"`
+	MemoryMiB    int      `json:"memoryMiB,omitempty"`
 }
 
 // DetectedVariable is an environment variable the source reads, found in an
@@ -1624,6 +1639,16 @@ func validateDetectedNodeInstall(candidate DetectedCandidate) error {
 	}
 	if len(candidate.Lockfiles) > len(nodeLockfileNames) || len(candidate.NodeInstalls) > len(nodeManagerOrder) || !text(candidate.NodeVersion, 64) {
 		return malformed
+	}
+	if build := candidate.NodeBuild; build != nil {
+		if !text(build.EnvSchema, 256) || len(build.EnvServer) > 64 || len(build.EnvClient) > 64 || build.MemoryMiB < 0 || build.MemoryMiB > 65536 {
+			return malformed
+		}
+		for _, name := range append(append([]string(nil), build.EnvServer...), build.EnvClient...) {
+			if ValidateEnvKey(name) != nil {
+				return malformed
+			}
+		}
 	}
 	for _, lockfile := range candidate.Lockfiles {
 		if nodeLockfileManager(lockfile.Path) == "" || nodeLockfileManager(lockfile.Path) != lockfile.Manager ||

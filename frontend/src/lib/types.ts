@@ -2392,6 +2392,8 @@ export type DeploymentBuildEvidence = {
       recipeVersion?: string
       /** The language release the recipe built with: "rust 1.85", "java 21 (maven)". */
       toolchain?: string
+      /** The Node major a JavaScript build ran on and what chose it: "22 (.nvmrc)". */
+      nodeVersion?: string
       baseImages?: { reference: string; digest: string }[]
       dockerfilePreview?: string
       dockerfileDigest?: string
@@ -3332,6 +3334,18 @@ export type DeploymentDetectionCandidate = {
   nodeInstalls?: DeploymentDetectedNodeInstall[]
   /** The Node major the recipe builds on and where it came from, e.g. "22 (.nvmrc)". */
   nodeVersion?: string
+  /**
+   * What the build reads that preflight judges against the configuration and
+   * the host: the env-validation schema it imports and the memory it is
+   * estimated to peak at.
+   */
+  nodeBuild?: {
+    envSchema?: string
+    envServer?: string[]
+    envClient?: string[]
+    envSkippable?: boolean
+    memoryMiB?: number
+  }
 }
 
 export type DeploymentDetection = {

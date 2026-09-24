@@ -50,11 +50,14 @@ type HostObservation struct {
 	OS              string                         `json:"os"`
 	Architecture    string                         `json:"architecture"`
 	AvailableMemory int64                          `json:"availableMemoryBytes"`
-	AvailableDisk   int64                          `json:"availableDiskBytes"`
-	CPUCount        int                            `json:"cpuCount,omitempty"`
-	Domains         []DomainObservation            `json:"domains"`
-	Firewall        FirewallObservation            `json:"firewall"`
-	Dependencies    []DependencyObservation        `json:"dependencies"`
+	// AvailableSwap is free swap, which a build can page into when memory
+	// runs short.
+	AvailableSwap int64                   `json:"availableSwapBytes,omitempty"`
+	AvailableDisk int64                   `json:"availableDiskBytes"`
+	CPUCount      int                     `json:"cpuCount,omitempty"`
+	Domains       []DomainObservation     `json:"domains"`
+	Firewall      FirewallObservation     `json:"firewall"`
+	Dependencies  []DependencyObservation `json:"dependencies"`
 }
 
 type DomainObservation struct {
@@ -340,7 +343,7 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 			observation.Dependencies = observed
 		}
 	}
-	observation.AvailableMemory = availableMemory()
+	observation.AvailableMemory, observation.AvailableSwap = hostMemory()
 	observation.CPUCount = runtime.NumCPU()
 	diskRoot := o.volumeRoot
 	if diskRoot == "" {
@@ -997,6 +1000,12 @@ func preflightFindings(
 			"Docker caps the container at the host's CPU count; the extra allowance has no effect.",
 			"Lower the limit to at most the host CPU count.", "metrics", "runtime.cpus"))
 	}
+	findings = append(findings, buildMemoryFindings(selected, configuration, observation)...)
+	findings = append(findings, platformVariableFindings(configuration, resolvedVariables)...)
+	if selected != nil && configuration.Build.Method == BuildRecipe && configuration.Build.Recipe == "node" {
+		findings = append(findings, buildEnvValidationFindings(selected, configuration, resolvedVariables)...)
+		findings = append(findings, buildDatabaseFindings(selected, configuration, resolvedVariables)...)
+	}
 	if observation.AvailableMemory > 0 && observation.AvailableMemory < 256<<20 {
 		findings = append(findings, finding("host_memory_low", PreflightWarning,
 			"Host memory headroom is low", fmt.Sprintf("%d MiB available", observation.AvailableMemory>>20),
@@ -1378,21 +1387,29 @@ func listeningTCPPorts() map[int]bool {
 	return result
 }
 
-func availableMemory() int64 {
+// hostMemory reads the memory available to a new workload and the free
+// swap, in bytes.
+func hostMemory() (available, swap int64) {
 	file, err := os.Open("/proc/meminfo")
 	if err != nil {
-		return 0
+		return 0, 0
 	}
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
-		if len(fields) >= 2 && fields[0] == "MemAvailable:" {
-			value, _ := strconv.ParseInt(fields[1], 10, 64)
-			return value * 1024
+		if len(fields) < 2 {
+			continue
+		}
+		value, _ := strconv.ParseInt(fields[1], 10, 64)
+		switch fields[0] {
+		case "MemAvailable:":
+			available = value * 1024
+		case "SwapFree:":
+			swap = value * 1024
 		}
 	}
-	return 0
+	return available, swap
 }
 
 func stableFindingCodes(findings []PreflightFinding) []string {

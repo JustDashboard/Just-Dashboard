@@ -256,3 +256,36 @@ func boundToBuild(secrets []BuildSecretConfig) map[string]bool {
 	}
 	return bound
 }
+
+// nodeHeavyBuilds are frameworks and packages whose production build peaks
+// around 2 GiB; other frameworks around 1 GiB, and a plain TypeScript or
+// bundler build around 512 MiB. The figures are upstream experience, used
+// only to warn before a build on a host that cannot give them.
+var nodeHeavyBuilds = []string{"nextjs", "nuxt", "angular", "gatsby", "docusaurus", "@strapi/strapi", "payload"}
+
+// nodeBuildMemoryMiB estimates the peak memory of a package's build.
+func nodeBuildMemoryMiB(framework, build string, facts nodeInstallFacts) int {
+	switch {
+	case strings.TrimSpace(build) == "":
+		return 0
+	case slices.Contains(nodeHeavyBuilds, framework) || facts.present("@strapi/strapi") || facts.present("payload"):
+		return 2048
+	case framework != "":
+		return 1024
+	}
+	return 512
+}
+
+// detectedNodeBuild is the candidate's record of the build, or nil when
+// there is nothing for preflight to judge.
+func detectedNodeBuild(facts nodeInstallFacts, framework, build string) *DetectedNodeBuild {
+	record := DetectedNodeBuild{MemoryMiB: nodeBuildMemoryMiB(framework, build, facts)}
+	if validation := facts.envValidation; validation.source != "" {
+		record.EnvSchema, record.EnvServer, record.EnvClient, record.EnvSkippable =
+			validation.source, validation.server, validation.client, validation.skippable
+	}
+	if record.MemoryMiB == 0 && record.EnvSchema == "" {
+		return nil
+	}
+	return &record
+}

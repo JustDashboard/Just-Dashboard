@@ -363,6 +363,20 @@ way.
   and the process environment takes precedence over the empty file (`env_file_placeholder`). Only a
   plain path inside the package is written; `--env-file-if-exists` needs nothing.
 
+**Before Deploy.** Preflight (`preflight_build.go`) judges what the build will meet from the candidate's
+`nodeBuild` record, the configuration's values and the host, and names each case before a build runs:
+
+| Finding | When |
+| --- | --- |
+| `build_memory_low` (warning) | the host's free memory and swap are below the build's estimated peak (~2 GiB for Next.js, Nuxt, Angular, Gatsby, Docusaurus, Strapi, Payload; ~1 GiB for other frameworks) |
+| `build_env_validation_skipped` (pass; warning when a skipped variable has no value at all) | the schema's required server variables have no build value and the schema honours `SKIP_ENV_VALIDATION` |
+| `build_env_missing` (warning) | the same, and the schema cannot be skipped, so the build stops with "Invalid environment variables" |
+| `build_env_client_missing` (warning) | a `client` variable has no build value; the browser bundle gets `undefined` |
+| `build_database_unreachable` (warning) | Next.js, Nuxt, Astro, SvelteKit or Gatsby with a database client, and a build-scoped URL pointing at `db-N.jd.internal`, at loopback, or a linked database reference: the build runs apart from the environment's network, so a prerendered page that queries it fails; the action is rendering those pages on request |
+| `port_variable_mismatch` (warning) | a `PORT` variable differs from the internal port the proxy and readiness check use |
+| `node_env_not_production` (warning) | `NODE_ENV` other than `production` reaches the build or the server |
+| `host_variable_loopback` (warning) | `HOST` or `HOSTNAME` on loopback, which frameworks bind to |
+
 ## Python
 
 The recipe reads `requirements.txt`, a PEP 621 `pyproject.toml`, a Poetry `pyproject.toml`, `uv.lock`

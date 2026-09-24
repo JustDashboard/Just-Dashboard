@@ -745,6 +745,7 @@ function BuildForm({
           asLastBuilt &&
           evidence?.prepared?.toolchain && (
             <span className="block truncate font-mono">
+              {evidence.prepared.nodeVersion && `node ${evidence.prepared.nodeVersion} · `}
               {evidence.prepared.toolchain} · last build
             </span>
           )
