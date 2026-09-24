@@ -3248,6 +3248,42 @@ export type DeploymentDetectedVariable = {
   /** The example file's own value, when it had one and it was not credential-shaped. */
   example?: string
   sources: string[]
+  /**
+   * "install" for a registry credential a package manager's configuration
+   * (.npmrc, .yarnrc.yml, bunfig.toml) names: only the dependency install
+   * reads it. `installRequired` says the install fails without it.
+   */
+  step?: "install"
+  installRequired?: boolean
+}
+
+/** A committed JavaScript lockfile, compared as data with package.json. */
+export type DeploymentDetectedLockfile = {
+  path: string
+  manager: NodePackageManager
+  /** `stale` is what the manager's frozen install would refuse. */
+  state: "in_sync" | "stale" | "unknown"
+  missing?: string[]
+  extra?: string[]
+  changed?: string[]
+  /** The sentence an operator reads: "package-lock.json is missing 15 dependencies (…)". */
+  note?: string
+}
+
+/**
+ * What the recipe installs when `manager` is chosen, computed by the same
+ * planner the build runs. An empty `install` with a blocked finding is a
+ * choice the build would refuse.
+ */
+export type DeploymentDetectedNodeInstall = {
+  manager: NodePackageManager
+  lockfile?: string
+  install?: string
+  toolchain?: string
+  /** Detection's commands for this manager's runner. */
+  buildCommand?: string
+  startCommand?: string
+  findings?: DeploymentPreflightFinding[]
 }
 
 /** A database engine detection found the source connecting to. */
@@ -3285,6 +3321,10 @@ export type DeploymentDetectionCandidate = {
   databases?: DeploymentDetectedDatabase[]
   evidence: { path: string; reason: string }[]
   needsDecision: string[]
+  lockfiles?: DeploymentDetectedLockfile[]
+  nodeInstalls?: DeploymentDetectedNodeInstall[]
+  /** The Node major the recipe builds on and where it came from, e.g. "22 (.nvmrc)". */
+  nodeVersion?: string
 }
 
 export type DeploymentDetection = {
@@ -3565,6 +3605,8 @@ export type DeploymentEnvironmentConfiguration = Omit<DeploymentConfiguration, "
   /** Present once the backend fills it in; until then the Source card falls back to the summary. */
   source?: DeploymentDraftSource
   identity?: SourceIdentity
+  /** The detected candidate this build still describes, from the evidence saved with the plan. */
+  detected?: DeploymentDetectionCandidate
 }
 
 /**

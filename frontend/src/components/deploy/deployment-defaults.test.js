@@ -8,6 +8,10 @@ import {
   mergeDiscoveredRows,
   validateConfiguration,
   withPackageManagerRunner,
+  commandsForPackageManager,
+  packageManagerOptions,
+  packageManagerReading,
+  automaticPackageManagerHint,
 } from "./deployment-defaults"
 
 const candidate = (overrides) => ({
@@ -286,5 +290,132 @@ describe("self-issued secrets", () => {
       fixed,
     )
     expect(other[0].value).toBe("")
+  })
+})
+
+// The incident's shape: bun.lock matches package.json, package-lock.json is
+// fifteen dependencies behind, and detection recorded what each choice runs.
+const incident = candidate({
+  profile: "web",
+  recipe: "node",
+  packageManager: "bun",
+  packageManagers: ["bun", "npm"],
+  buildCommand: "bun run build",
+  startCommand: "bunx prisma db push && bun run start",
+  lockfiles: [
+    { path: "bun.lock", manager: "bun", state: "in_sync", note: "bun.lock matches package.json" },
+    {
+      path: "package-lock.json",
+      manager: "npm",
+      state: "stale",
+      note: "package-lock.json is missing 15 dependencies (prisma, zod and 13 more)",
+    },
+  ],
+  nodeInstalls: [
+    {
+      manager: "bun",
+      lockfile: "bun.lock",
+      install: "bun install --frozen-lockfile",
+      buildCommand: "bun run build",
+      startCommand: "bunx prisma db push && bun run start",
+    },
+    {
+      manager: "npm",
+      lockfile: "package-lock.json",
+      install: "npm install --no-audit --no-fund",
+      buildCommand: "npm run build",
+      startCommand: "npx prisma db push && npm run start",
+    },
+    {
+      manager: "pnpm",
+      buildCommand: "pnpm run build",
+      startCommand: "pnpm exec prisma db push && pnpm run start",
+      findings: [{ code: "package_manager_lockfile_missing", severity: "blocked", title: "x" }],
+    },
+    {
+      manager: "yarn",
+      buildCommand: "yarn run build",
+      startCommand: "yarn prisma db push && yarn run start",
+      findings: [{ code: "package_manager_lockfile_missing", severity: "blocked", title: "x" }],
+    },
+  ],
+})
+
+describe("choosing a package manager from what detection read", () => {
+  test("each option says whether its lockfile matches, and a choice the build refuses is off", () => {
+    expect(packageManagerOptions(incident)).toEqual([
+      { value: "bun", label: "Bun", hint: "bun.lock matches", disabled: false },
+      { value: "npm", label: "npm", hint: "package-lock.json out of sync", disabled: false },
+      { value: "pnpm", label: "pnpm", hint: "no lockfile", disabled: true },
+      { value: "yarn", label: "Yarn", hint: "no lockfile", disabled: true },
+    ])
+    expect(automaticPackageManagerHint(incident)).toBe("Bun")
+    expect(automaticPackageManagerHint(candidate({ packageManagers: ["bun", "npm"] }))).toBe(
+      "choose one",
+    )
+  })
+  test("the reading under the field names the lockfile and the install", () => {
+    expect(packageManagerReading(incident, undefined)).toBe(
+      "bun.lock matches package.json · bun install --frozen-lockfile",
+    )
+    expect(packageManagerReading(incident, "npm")).toBe(
+      "package-lock.json is missing 15 dependencies (prisma, zod and 13 more) · npm install --no-audit --no-fund",
+    )
+    expect(packageManagerReading(incident, "pnpm")).toBeUndefined()
+  })
+  test("detected commands are swapped whole; the operator's keep their words", () => {
+    expect(commandsForPackageManager(incident, incident, "npm")).toEqual({
+      buildCommand: "npm run build",
+      startCommand: "npx prisma db push && npm run start",
+    })
+    expect(
+      commandsForPackageManager(
+        incident,
+        { buildCommand: "npm run build -- --debug", startCommand: "node server.js" },
+        "bun",
+      ),
+    ).toEqual({ buildCommand: "npm run build -- --debug", startCommand: "node server.js" })
+    const kit = candidate({
+      packageManager: "bun",
+      nodeInstalls: [
+        { manager: "bun", startCommand: "bun ./build/index.js", buildCommand: "bun run build" },
+        { manager: "npm", startCommand: "node build", buildCommand: "npm run build" },
+      ],
+    })
+    expect(
+      commandsForPackageManager(
+        kit,
+        { buildCommand: "bun run build", startCommand: "bun ./build/index.js" },
+        "npm",
+      ),
+    ).toEqual({ buildCommand: "npm run build", startCommand: "node build" })
+  })
+  test("from the lockfile moves a stale runner to the manager detection resolved", () => {
+    expect(
+      commandsForPackageManager(
+        incident,
+        { buildCommand: "npm run build", startCommand: "npx prisma db push && npm run start" },
+        undefined,
+      ),
+    ).toEqual({
+      buildCommand: "bun run build",
+      startCommand: "bunx prisma db push && bun run start",
+    })
+    expect(
+      commandsForPackageManager(undefined, { buildCommand: "npm run build" }, undefined),
+    ).toEqual({
+      buildCommand: "npm run build",
+    })
+  })
+  test("a registry credential row says the install reads it", () => {
+    const rows = discoveredEnvironmentRows(
+      candidate({
+        variables: [
+          { name: "NODE_AUTH_TOKEN", sources: [".npmrc"], step: "install", installRequired: true },
+          { name: "DATABASE_URL", sources: [".env.example"] },
+        ],
+      }),
+    )
+    expect(rows.map((row) => row.source)).toEqual([".npmrc · read by the install", ".env.example"])
   })
 })
