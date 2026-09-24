@@ -35,6 +35,25 @@ export type ReleaseTask = NonNullable<DeploymentConfiguration["build"]["releaseT
 type TaskEvidence = { name: string; durationMs: number; exitCode: number; variableNames?: string[] }
 
 /**
+ * Where a task runs, said as a place: the release's own image, with the
+ * application's toolchain and variables, or the dashboard's shell over the
+ * source as committed — which has none of the application's dependencies, so
+ * `npx`, `python manage.py` or `bundle exec` can only fail there.
+ */
+const RUNNERS: { runner: ReleaseTask["runner"]; label: string; hint: string }[] = [
+  {
+    runner: "image",
+    label: "Release image",
+    hint: "Runs once in the release's own image, with its runtime variables and the ones below, before it starts.",
+  },
+  {
+    runner: undefined,
+    label: "Dashboard shell",
+    hint: "Runs in the dashboard's shell over the unbuilt source, without the application's dependencies.",
+  },
+]
+
+/**
  * Named, timed gates that run after the artifact is built and before the new
  * version starts — a migration, a cache warm, a smoke script.
  *
@@ -73,7 +92,8 @@ export function ReleaseTasks({
   const failedOnTask = project.runs.find(
     (run) =>
       run.environmentId === project.environmentId &&
-      run.terminalCode === "release_task_failed" &&
+      (run.terminalCode === "release_task_failed" ||
+        run.terminalCode === "release_task_tool_missing") &&
       run.id > (liveRun?.id ?? 0),
   )
   const lastRun = failedOnTask ?? liveRun
@@ -222,10 +242,28 @@ export function ReleaseTasks({
                       </InputGroup>
                     </Field>
                   </FieldRow>
+                  <Field label="Runs in">
+                    <div className="flex flex-wrap gap-1.5">
+                      {RUNNERS.map((option) => (
+                        <FilterChip
+                          key={option.label}
+                          selected={task.runner === option.runner}
+                          disabled={disabled}
+                          onClick={() => update(index, { runner: option.runner })}
+                          className={cn(
+                            "h-8 font-normal disabled:opacity-60 sm:h-7",
+                            task.runner !== option.runner && "border-border",
+                          )}
+                        >
+                          {option.label}
+                        </FilterChip>
+                      ))}
+                    </div>
+                  </Field>
                   <Field
                     label="Command"
                     htmlFor={`${id}-task-${index}-command`}
-                    hint="Run by the shell in the built source, with the environment below."
+                    hint={RUNNERS.find((option) => option.runner === task.runner)?.hint}
                   >
                     <Textarea
                       id={`${id}-task-${index}-command`}
@@ -242,7 +280,10 @@ export function ReleaseTasks({
                   <Disclosure
                     quiet
                     summary="Working directory"
-                    facts={task.workingDirectory?.trim() || "source root"}
+                    facts={
+                      task.workingDirectory?.trim() ||
+                      (task.runner === "image" ? "the image's own" : "source root")
+                    }
                   >
                     <Input
                       aria-label={`Release task ${n} working directory`}
@@ -318,7 +359,14 @@ export function ReleaseTasks({
           onClick={() => {
             onChange([
               ...tasks,
-              { name: "", command: "", workingDirectory: "", timeoutSeconds: 300, env: [] },
+              {
+                name: "",
+                command: "",
+                workingDirectory: "",
+                timeoutSeconds: 300,
+                env: [],
+                runner: "image",
+              },
             ])
             // A task just added takes the keyboard at its name, the field it
             // cannot do without — once it has been drawn.

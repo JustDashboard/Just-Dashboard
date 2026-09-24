@@ -3285,6 +3285,33 @@ export type DeploymentDetectionCandidate = {
   databases?: DeploymentDetectedDatabase[]
   evidence: { path: string; reason: string }[]
   needsDecision: string[]
+  /** What the Dockerfile's name, place or command says it was written for. */
+  dockerfileRole?: "production" | "development"
+  /** The Dockerfile stage to build when its last stage is a development one. */
+  dockerfileTarget?: string
+  /** The Dockerfile's build arguments, by name only. */
+  dockerfileArgs?: DeploymentDockerfileArg[]
+  /** Literal `FROM --platform=` values the Dockerfile pins. */
+  dockerfilePlatforms?: string[]
+  /** What detection proved about how this candidate's image would build. */
+  imageBuildIssues?: DeploymentImageBuildIssue[]
+  /** The command the repository declares runs once before each release. */
+  releaseCommand?: string
+}
+
+export type DeploymentDockerfileArg = {
+  name: string
+  hasDefault?: boolean
+  usedInFrom?: boolean
+  consumed?: boolean
+}
+
+export type DeploymentImageBuildIssue = {
+  code: string
+  severity: "blocked" | "warning"
+  line?: number
+  subject?: string
+  detail: string
 }
 
 export type DeploymentDetection = {
@@ -3314,14 +3341,27 @@ export type DeploymentDetection = {
       ports: string[]
       mounts: string[]
       advanced: string[]
+      buildTarget?: string
+      buildArgs?: { name: string; value?: string; fromEnvironment?: boolean }[]
+      platform?: string
+      imagePlatforms?: string[]
+      envFiles?: { path: string; required: boolean; missing?: boolean }[]
+      buildContextMissing?: boolean
+      dockerfileIssues?: DeploymentImageBuildIssue[]
     }[]
     variables: string[]
     warnings: string[]
     unsupported: string[]
     preview: string
     digest: string
+    /** The service readiness and the release's container follow. */
+    primaryService?: string
+    /** Variables the file interpolates with a default; never required. */
+    optionalVariables?: { name: string; default?: string }[]
   }
   selectedId?: string
+  /** Why `selectedId` won, or why nothing did. */
+  selectionReason?: string
   scannedFiles: number
   scannedBytes: number
   truncated: boolean
@@ -3435,6 +3475,8 @@ export type DeploymentConfiguration = {
     outputDirectory?: string
     spaFallback?: boolean
     targetPlatform?: string
+    /** The Dockerfile stage to build (custom Dockerfiles only). */
+    target?: string
     noCache?: boolean
     secrets?: { variable: string; step: "install" | "build" }[]
     releaseTasks?: {
@@ -3443,6 +3485,8 @@ export type DeploymentConfiguration = {
       workingDirectory?: string
       timeoutSeconds: number
       env: string[]
+      /** "image" runs it in the release's own image; absent is the host shell. */
+      runner?: "image"
     }[]
   }
   runtime: {

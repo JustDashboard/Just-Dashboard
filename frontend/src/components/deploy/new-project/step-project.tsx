@@ -13,6 +13,7 @@ import { Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { ProductGlyph, frameworkProduct } from "@/components/product-logo"
 import { Well } from "@/components/panel"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -28,7 +29,11 @@ import {
   frameworkLabel,
   humanize,
 } from "@/components/deploy/vocabulary"
-import { withPackageManagerRunner } from "@/components/deploy/deployment-defaults"
+import {
+  candidateBlocker,
+  composeSourceForCandidate,
+  withPackageManagerRunner,
+} from "@/components/deploy/deployment-defaults"
 import type { WizardErrors } from "@/components/deploy/deployment-defaults"
 import { BuildExtras } from "@/components/deploy/new-project/configure-advanced"
 import type { ConfigureFlow, FlowUpdate } from "@/components/deploy/new-project/draft"
@@ -67,6 +72,7 @@ export function StepProject({
   onChangeBranch,
   onEditBranch,
   onPickCandidate,
+  onDeployAsCompose,
   busy,
   nameTouched,
   onNameTouched,
@@ -82,6 +88,8 @@ export function StepProject({
   onChangeBranch: (ref: string) => void
   onEditBranch: (ref: string) => void
   onPickCandidate: (id: string) => void
+  /** Re-reads the repository as a Compose source, the only way its services build. */
+  onDeployAsCompose: () => void
   busy: string
   nameTouched: boolean
   onNameTouched: () => void
@@ -249,6 +257,27 @@ export function StepProject({
             </ul>
           </Notice>
         )}
+        {/* A Compose file found in a repository is only named here; nothing
+            analyses its services until the repository is read as a Compose
+            source, and a plan built from it cannot build. */}
+        {composeSourceForCandidate(flow.source, flow.candidate) && (
+          <Notice tone="warning" title="This Compose file has not been analysed">
+            <p>
+              Its services, images and builds are read when the repository is deployed as a Compose
+              stack.
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="mt-2"
+              disabled={busy === "detect"}
+              onClick={onDeployAsCompose}
+            >
+              Deploy as a Compose stack
+            </Button>
+          </Notice>
+        )}
         {flow.detection?.compose && (
           <div className="space-y-2 pt-1">
             <div className="flex flex-wrap gap-1.5">
@@ -275,23 +304,32 @@ export function StepProject({
       {ambiguous && (
         <FormSection
           title="Choose the detected candidate"
-          hint="Multiple equally strong roots or build methods were found."
+          hint={
+            flow.detection?.selectionReason ??
+            "Multiple equally strong roots or build methods were found."
+          }
         >
           <OptionList role="group" aria-label="Detected candidates">
-            {candidates.map((item) => (
-              <OptionRow
-                key={item.id}
-                title={item.name}
-                hint={`${humanize(item.confidence)} confidence · ${
-                  item.framework ? `${item.framework} via ` : ""
-                }${humanize(item.buildMethod)}${
-                  item.root && item.root !== "." ? ` in ${item.root}` : ""
-                }`}
-                checked={item.id === flow.detection?.selectedId}
-                onCheckedChange={(checked) => checked && onPickCandidate(item.id)}
-                disabled={busy === "detect"}
-              />
-            ))}
+            {candidates.map((item) => {
+              // What stops a candidate building is the reason to pick another
+              // one, so it is said in the row instead of after Deploy.
+              const blocker = candidateBlocker(item)
+              return (
+                <OptionRow
+                  key={item.id}
+                  title={item.name}
+                  tone={blocker ? "warning" : "default"}
+                  hint={`${humanize(item.confidence)} confidence · ${
+                    item.framework ? `${item.framework} via ` : ""
+                  }${humanize(item.buildMethod)}${
+                    item.root && item.root !== "." ? ` in ${item.root}` : ""
+                  }${blocker ? ` · cannot build as detected: ${blocker}` : ""}`}
+                  checked={item.id === flow.detection?.selectedId}
+                  onCheckedChange={(checked) => checked && onPickCandidate(item.id)}
+                  disabled={busy === "detect"}
+                />
+              )
+            })}
           </OptionList>
         </FormSection>
       )}

@@ -271,11 +271,12 @@ export function defaultConfiguration(
       startCommand: candidate?.startCommand,
       outputDirectory: candidate?.outputDirectory,
       dockerfile: method === "dockerfile" ? (candidate?.dockerfile ?? "Dockerfile") : undefined,
+      target: method === "dockerfile" ? candidate?.dockerfileTarget : undefined,
       pythonVersion: candidate?.recipe === "python" ? candidate.pythonVersion : undefined,
       spaFallback: packagedStatic && candidate?.spaFallback ? true : undefined,
       noCache: false,
       secrets: [],
-      releaseTasks: [],
+      releaseTasks: detectedReleaseTasks(method, candidate),
     },
     runtime: {
       image,
@@ -313,6 +314,79 @@ export function defaultConfiguration(
     checks: defaultChecks(profile, port),
     domains: [],
   }
+}
+
+/**
+ * The command a repository declares runs once before each release — a
+ * Procfile `release:`, fly.toml's release_command, render.yaml's
+ * preDeployCommand, a Phoenix release's bin/migrate — planned as a task in
+ * the release's own image, where the application's toolchain is. Left out of
+ * a plan that builds no image to run it in.
+ */
+export function detectedReleaseTasks(
+  method: DeploymentBuildMethod,
+  candidate?: DeploymentDetectionCandidate,
+): NonNullable<DeploymentConfiguration["build"]["releaseTasks"]> {
+  const command = candidate?.releaseCommand?.trim()
+  if (!command || method === "none") return []
+  return [{ name: "release", command, timeoutSeconds: 600, env: [], runner: "image" }]
+}
+
+/**
+ * Why a detected candidate cannot build as detected, in the words detection
+ * used, for the list the operator chooses from.
+ */
+export function candidateBlocker(candidate: DeploymentDetectionCandidate): string | undefined {
+  const blocked = candidate.imageBuildIssues?.find((issue) => issue.severity === "blocked")
+  if (blocked) return blocked.detail
+  if (candidate.recipeIssue) return candidate.recipeIssue
+  if (
+    candidate.recipe === "node" &&
+    !candidate.packageManager &&
+    (candidate.packageManagers?.length ?? 0) > 1
+  )
+    return `choose the package manager: ${candidate.packageManagers!.join(", ")}`
+  if (candidate.buildMethod === "compose")
+    return "deploy the repository as a Compose source to analyse and build its services"
+  return undefined
+}
+
+/**
+ * A Compose file found in a repository is only named by detection; its
+ * services are analysed, and can build, when the same repository is read as
+ * a Compose source. The switch keeps the repository, branch, credential and
+ * subdirectory, and selects the files the candidate was found from.
+ */
+export function composeSourceForCandidate(
+  source: DeploymentDraftSource,
+  candidate?: DeploymentDetectionCandidate,
+): DeploymentDraftSource | undefined {
+  if (candidate?.buildMethod !== "compose") return undefined
+  const composeFiles = candidate.evidence
+    .filter((item) => item.reason === "Compose configuration")
+    .map((item, order) => ({ path: item.path, content: "", order }))
+  if (composeFiles.length === 0) return undefined
+  if (source.mode === "git_url")
+    return {
+      kind: "compose",
+      mode: "compose_git",
+      url: source.url,
+      ref: source.ref,
+      credentialId: source.credentialId,
+      subdirectory: source.subdirectory,
+      includeSubmodules: source.includeSubmodules,
+      includeLfs: source.includeLfs,
+      composeFiles,
+    }
+  if (source.mode === "local_checkout")
+    return {
+      kind: "compose",
+      mode: "compose_local",
+      localPath: source.localPath,
+      subdirectory: source.subdirectory,
+      composeFiles,
+    }
+  return undefined
 }
 
 /**
@@ -474,5 +548,11 @@ export function validateConfiguration(
   )
     errors.releaseTasks =
       "Release tasks need a name, command, 1–3600 second timeout, and Release task-scoped variables."
+  else if (
+    configuration.build.method === "none" &&
+    releaseTasks.some((task) => task.runner === "image")
+  )
+    errors.releaseTasks =
+      "A release task that runs in the release image needs a build that produces one; run it in the dashboard's shell instead."
   return errors
 }

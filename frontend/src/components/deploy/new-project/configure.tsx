@@ -22,6 +22,7 @@ import { DEPLOYMENT_NAME } from "@/components/deploy/vocabulary"
 import { blockingFindings, warningFindings } from "@/components/deploy/deployment-findings"
 import {
   checksForRuntime,
+  composeSourceForCandidate,
   discoveredEnvironmentRows,
   mergeDiscoveredRows,
   validateConfiguration,
@@ -444,6 +445,37 @@ export function Configure({
     }
   }
 
+  // `compose_analysis_missing`'s remedy: the same repository, branch and
+  // files, read as a Compose source so its services are analysed and built.
+  const deployAsCompose = async () => {
+    const nextSource = composeSourceForCandidate(flow.source, flow.candidate)
+    if (!nextSource || mutating.current) return
+    mutating.current = true
+    setFailure(undefined)
+    setBusy("detect")
+    try {
+      const result = await reinspect(flow.draft, "compose", nextSource)
+      onFlowChange((current) =>
+        current
+          ? {
+              ...current,
+              source: nextSource,
+              profile: "compose",
+              draft: result.draft,
+              candidate: result.candidate,
+              detection: result.detection,
+              configuration: result.configuration,
+            }
+          : current,
+      )
+    } catch (error) {
+      setFailure(asError(error))
+    } finally {
+      mutating.current = false
+      setBusy("")
+    }
+  }
+
   const current: ConfigureStepKey = created ? "done" : step === "done" ? "review" : step
 
   /** The head of the screen, so a step change starts where the question is. */
@@ -784,6 +816,7 @@ export function Configure({
                 onChangeBranch={(ref) => void changeBranch(ref)}
                 onEditBranch={setBranch}
                 onPickCandidate={(id) => void pickCandidate(id)}
+                onDeployAsCompose={() => void deployAsCompose()}
                 busy={busy}
                 nameTouched={nameTouched}
                 onNameTouched={() => setNameTouched(true)}

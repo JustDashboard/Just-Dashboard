@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import {
   canGenerateSecret,
+  candidateBlocker,
   checksForRuntime,
+  composeSourceForCandidate,
   defaultConfiguration,
   discoveredEnvironmentRows,
   generateSecretValue,
@@ -286,5 +288,109 @@ describe("self-issued secrets", () => {
       fixed,
     )
     expect(other[0].value).toBe("")
+  })
+})
+
+describe("repository container definitions", () => {
+  test("a Dockerfile plan builds the stage detection chose", () => {
+    const plan = defaultConfiguration(
+      "web",
+      candidate({
+        buildMethod: "dockerfile",
+        dockerfile: "deploy/app.Dockerfile",
+        dockerfileTarget: "production",
+      }),
+    )
+    expect(plan.build.dockerfile).toBe("deploy/app.Dockerfile")
+    expect(plan.build.target).toBe("production")
+    const recipe = defaultConfiguration("web", candidate({ dockerfileTarget: "production" }))
+    expect(recipe.build.target).toBeUndefined()
+  })
+
+  test("a declared release command is planned in the release image", () => {
+    const plan = defaultConfiguration(
+      "web",
+      candidate({ buildMethod: "recipe", releaseCommand: "python manage.py migrate --noinput" }),
+    )
+    expect(plan.build.releaseTasks).toEqual([
+      {
+        name: "release",
+        command: "python manage.py migrate --noinput",
+        timeoutSeconds: 600,
+        env: [],
+        runner: "image",
+      },
+    ])
+    expect(validateConfiguration(plan, "web").releaseTasks).toBeUndefined()
+    expect(
+      defaultConfiguration("web", candidate({ buildMethod: "recipe" })).build.releaseTasks,
+    ).toEqual([])
+  })
+
+  test("an image task without an image to run in is refused before save", () => {
+    const plan = defaultConfiguration("worker", candidate({ buildMethod: "recipe" }))
+    plan.build.method = "none"
+    plan.build.releaseTasks = [
+      { name: "migrate", command: "bin/migrate", timeoutSeconds: 60, env: [], runner: "image" },
+    ]
+    expect(validateConfiguration(plan, "worker").releaseTasks).toContain("release image")
+  })
+
+  test("the candidate list says what stops a candidate building", () => {
+    expect(
+      candidateBlocker(
+        candidate({
+          buildMethod: "dockerfile",
+          imageBuildIssues: [
+            { code: "dockerfile_dev_server", severity: "warning", detail: "starts a watcher" },
+            {
+              code: "dockerfile_copy_source_missing",
+              severity: "blocked",
+              detail: "line 3 COPY .env: not in the build context .",
+            },
+          ],
+        }),
+      ),
+    ).toBe("line 3 COPY .env: not in the build context .")
+    expect(candidateBlocker(candidate({ recipe: "node", packageManagers: ["bun", "npm"] }))).toBe(
+      "choose the package manager: bun, npm",
+    )
+    expect(candidateBlocker(candidate({ recipe: "node", packageManager: "bun" }))).toBeUndefined()
+  })
+
+  test("a repository's Compose file switches to a Compose source with the same checkout", () => {
+    const compose = candidate({
+      buildMethod: "compose",
+      profile: "compose",
+      evidence: [
+        { path: "docker-compose.yml", reason: "Compose configuration" },
+        { path: "docker-compose.yml", reason: "development services" },
+      ],
+    })
+    expect(
+      composeSourceForCandidate(
+        {
+          kind: "git",
+          mode: "git_url",
+          url: "https://example.com/o/r.git",
+          ref: "main",
+          subdirectory: "app",
+        },
+        compose,
+      ),
+    ).toEqual({
+      kind: "compose",
+      mode: "compose_git",
+      url: "https://example.com/o/r.git",
+      ref: "main",
+      credentialId: undefined,
+      subdirectory: "app",
+      includeSubmodules: undefined,
+      includeLfs: undefined,
+      composeFiles: [{ path: "docker-compose.yml", content: "", order: 0 }],
+    })
+    expect(composeSourceForCandidate({ kind: "git", mode: "git_url", url: "x" }, candidate())).toBe(
+      undefined,
+    )
   })
 })

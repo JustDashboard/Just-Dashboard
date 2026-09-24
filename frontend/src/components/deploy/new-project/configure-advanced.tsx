@@ -952,6 +952,17 @@ function ReleaseTaskEditor({
                 rows={3}
                 className="font-mono sm:text-xs"
               />
+              <Label className="flex min-h-9 items-center gap-2 text-body">
+                <Checkbox
+                  checked={task.runner === "image"}
+                  onCheckedChange={(checked) =>
+                    update(index, { runner: checked ? "image" : undefined })
+                  }
+                />
+                {/* Unticked it runs in the dashboard's shell over the unbuilt
+                    source, where the application's dependencies are not. */}
+                <span>Run in the release image, with the application&apos;s variables</span>
+              </Label>
               <div>
                 <p className="text-hint text-muted-foreground">Release task environment</p>
                 {releaseVariables.length === 0 ? (
@@ -997,7 +1008,14 @@ function ReleaseTaskEditor({
         onClick={() =>
           onChange([
             ...tasks,
-            { name: "", command: "", workingDirectory: "", timeoutSeconds: 300, env: [] },
+            {
+              name: "",
+              command: "",
+              workingDirectory: "",
+              timeoutSeconds: 300,
+              env: [],
+              runner: "image",
+            },
           ])
         }
       >
