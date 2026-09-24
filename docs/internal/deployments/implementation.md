@@ -272,9 +272,10 @@ only renderer/executor/validation authority for their feature.
   the chosen candidate's, while the plan still builds that candidate's directory — so a later read,
   a fleet card or the Build settings, names it without detecting again. The server owns it: a value
   the browser sends in a draft or a configuration save is never kept. A save carries it forward only
-  while the method, recipe and root directory stay the same, and a source change that moves the code
-  — another repository, directory or image, though not a new branch or credential — drops it,
-  because detection named the code that used to be there. It is left out of the plan's digest
+  while the method, recipe and root directory stay the same. A source change records the framework the
+  fresh detection finds at the plan's root with its method, and drops it when detection finds nothing
+  there and the code moved — another repository, directory or image, though not a new branch or
+  credential. It is left out of the plan's digest
   (`buildPlanDigest`, which every path that writes a build plan uses), so recording or dropping a
   name never shows as a pending build change. Projects created before it was kept have none.
 - A detected Node service that declares a migration tool applies its schema before it serves. Detection
@@ -291,6 +292,63 @@ only renderer/executor/validation authority for their feature.
   Docker/Compose availability, proxy inventory and bounded DNS lookups. It cannot build, pull, start,
   stop, write proxy/firewall configuration, modify a checkout or enqueue a backup. The persisted exact
   plan excludes raw observed import material and accepts only typed secret references.
+- **Preflight runs before every deployment, against the commit it builds** (`deploy/deployment_check.go`).
+  A plan was reviewed against the commit detection read when it was saved; a deployment can build a
+  later one (a push, a specific version) of a plan edited since. `analyze_plan` therefore reads the commit
+  `acquire_source` materialized (the workspace's marker makes this a lookup): a fresh, bounded, data-only
+  `DetectPath`, and the recipe's own dry run (see [the recipe guide](recipes.md)). The plan is judged
+  against the fresh candidate at its root with its method, else the candidate stored with the plan, else
+  — only for a source with no files, an image or a Compose file — the plan's own shape
+  (`candidateSource` `detected`/`recorded`/`plan`). Wizard-only findings are dropped at run time
+  (`detection_selected`, `detection_ambiguous`, `detection_empty`, `detection_truncated`,
+  `detection_root_mismatch`, a passing `build_method_changed`), and `plan_drift_*` warnings compare the
+  stored and fresh candidates where the plan still carries the old answer: the lockfile set or the manager
+  it resolves (`plan_drift_package_manager`), the framework, the output directory, and names the commit
+  reads that nothing sets (`plan_drift_variables`). The step's evidence carries `candidate` and
+  `findings`, which the run page draws as findings ("Checked before building"); a blocked finding — or
+  one of the decisions a run cannot pass: `readiness_missing`, `domain_link_missing`,
+  `go_main_ambiguous` — stops the run with the finding's code as the terminal code and
+  `title: measured. action` as the reason.
+- `POST /deploy/{id}/environments/{env}/check` answers the same evaluation for the environment's desired
+  plan before Deploy is pressed. It carries the run request's capability (`service.control`), resolves
+  the commit exactly as the run request does (`sourceRevision`, `ref` via `ResolveGitRef`, else
+  `ResolveGitRevision`; a local checkout's recorded commit), reads it through a temporary planning
+  worktree (`HostSourceAnalyzer.InspectRevision`: the bounded, blob-filtered planning mirror, fetching a
+  pinned commit by id when the branch has moved past it; a local checkout's commit is fetched at depth
+  one, never its working tree) and returns `{findings, planRevision, sourceRevision, checkedAt}`. An
+  answer is kept for three minutes per environment, plan revision and commit. It is advisory — a
+  warning never gates `/runs`, and analyze_plan stays the gate every trigger passes, git watch, hooks,
+  schedules and previews included — and, being a read, it is kept out of the audit log
+  (`httpx.SkipAudit`); a refused attempt is still recorded. A commit that cannot be read is a
+  `source_inspection_unavailable` finding, and the evaluation falls back to the stored evidence.
+- The project page asks the check on arrival and after each settings save that leaves changes waiting
+  (`useDeploymentCheck`), and draws what it found in the pending-changes strip and as "Before you
+  deploy" on the Overview, each finding opening the settings page that holds its `fieldId`
+  (`settingsPathForField`). Every build a page starts — the header's Deploy, Deploy changes and Rebuild
+  without cache, a fleet card's Deploy (from the check the project page last made, for the revision
+  the card shows, while recent), and Deploy a specific version (which checks that version itself) —
+  opens "Ready to deploy?" when the check found something that stops the deployment, which keeps the
+  command disabled, or warnings not yet confirmed in this tab; confirming deploys, and the same warnings
+  are not asked again this session. With no answer yet, or a clean one, Deploy stays one press.
+- A draft's preflight reads the commit its detection reviewed (`PreflightDraftWithSource`): the recipe's
+  dry run replaces what detection alone could say about the plan, a root directory edited to one
+  detection found nothing in is `detection_root_mismatch` (a decision without a tree, a warning once the
+  recipe prepares that directory; the configure form picks the candidate detection found at a typed
+  root on its own), and a remote branch that has moved past the reviewed commit is `source_moved`
+  (warning, "Inspect again" reads the newer commit keeping the chosen candidate). The first deployment
+  of a new remote Git project is pinned to the reviewed commit (`sourceRevision`); later ones follow the
+  branch.
+- Detection is refreshed for a project that exists. A source change (`PUT …/source`) saves what the
+  inspection read — candidates, Compose analysis and Git requirements — as the new revision's
+  evidence, rather than copying the old source's forward (a Compose-from-Git source moved to another
+  branch builds the new service list), and returns a `proposal`: field by field (package manager when
+  set explicitly, build and start commands, output directory, single-page fallback, Go main package,
+  port), what the plan saves, what detection proposes now, what it proposed when the plan was saved and
+  whether it `changed`, plus the variables and databases the source reads that the plan does not set.
+  Settings → Source shows the changed fields as "Detection changed", each applied through the ordinary
+  configuration save. `POST …/detect` (a settings write's capability, audited as
+  `deploy.source.detect`) reads the source again without writing, and Build settings' **Detect again**
+  shows the same proposal, marks each field that differs and applies into the form's draft.
 - Normalized build execution uses the project-owned versioned recipe set or an explicit Dockerfile,
   static, immutable-image, or Compose adapter. Reviewed base tags are resolved before rendering and every
   generated `FROM` is digest-pinned. Build secrets are BuildKit environment-backed secret mounts and
@@ -436,7 +494,7 @@ only renderer/executor/validation authority for their feature.
   Backups and Databases. Deployments store typed ownership links and use read-only owner observations for
   domain conflicts, DNS, existing certificate pairs, ports, public binds, firewall policy and dependency
   availability. A deploy re-runs those host observations from its frozen configuration in `analyze_plan`
-  before build or backup work; only its exact managed proxy site and exact live Docker runtime may be
+  — alongside the source checks above — before build or backup work; only its exact managed proxy site and exact live Docker runtime may be
   treated as reusable ownership. HTTPS activation resolves an already-issued certificate/key pair through
   Proxy and fails closed if it no longer exists; deployment activation never invents certificate paths or
   performs issuance itself.

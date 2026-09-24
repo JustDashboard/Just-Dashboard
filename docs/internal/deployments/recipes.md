@@ -14,6 +14,31 @@ detected framework that the recipe cannot serve automatically (a provider adapte
 root package, an unsupported interpreter release) is a low-confidence candidate with a decision or a
 `recipe_unsupported` preflight finding, never a silent guess.
 
+## What the recipe refuses is said before Deploy
+
+A recipe refuses from what the tree holds — which lockfiles sit at the root, what a manifest declares,
+which packages are main — so a refusal knowable from the tree is never left for a build slot to say.
+Preflight asks the recipe itself: `dryRunBuild` (`deploy/recipe_preflight.go`) runs the real
+`ArtifactBuilder.Prepare` — recipe selection and Dockerfile rendering — over the checkout with every
+reviewed base resolved to a placeholder digest and the generated Dockerfile never written. Nothing is
+pulled, built or executed, so it keeps detection's model: repository files read as bounded data. Its
+error is exactly the one `prepare_context` would return, and it becomes `recipe_unsupported` (blocked,
+pointing at the setting it names), `build_root_missing` when the root directory is not in the commit, or
+`recipe_check_incomplete` (warning) when a file the recipe needs could not be read. The dry run runs:
+
+- at detection, for every recipe candidate with the settings detection proposes, so a candidate the
+  recipe would refuse carries `recipeIssue` at low confidence and loses selection to a buildable one —
+  except for what the operator supplies (a start command) or chooses (a package manager among competing
+  lockfiles, while any one of them prepares), which preflight asks for instead;
+- at Review, over the commit the draft's detection read, with the draft's own settings;
+- in the advisory check and in `analyze_plan`, over the commit a deployment builds, with the saved plan.
+
+Where it ran, it replaces the candidate's `recipeIssue`, which was decided with detection's settings
+rather than the plan's; a refusal already named by a more precise finding (`package_manager_*`,
+`go_version_unsupported`, `go_main_*`, `python_version_unsupported`, `start_command_missing`) is not
+reported twice. Without a tree — an image, a pasted Compose file, a commit that could not be fetched —
+the same checks run from the candidate's stored facts.
+
 ## Build values
 
 Every `build`-scoped variable automatically reaches the recipe's build command through a required
@@ -45,6 +70,17 @@ reported truncated for it. The root's own template comes first in file order, th
 then what the repository documents above the root, then code references by name. Each row carries where
 it was read; a detected row left empty is skipped at submit, not set to an empty value, and the form
 says how many are unset.
+
+A variable is `required` only when it is read in a form that fails without a value: `os.environ["X"]`
+(not an assignment), `ENV.fetch("X")` with no default argument or block, TypeScript's
+`process.env.X!`, an `if (!process.env.X) throw` guard, a key of a t3-env/zod schema with no
+`.optional()`, `.default()`, `.nullish()` or `.nullable()` in its chain, a name imported from
+SvelteKit's `$env/static/*`, Prisma's `env("X")` in a schema or `prisma.config.*`, and a pydantic
+`BaseSettings` field with no default (when the class sets no `env_prefix`). Preflight warns once per
+required name the plan does not set — no variable row, staged value, generated secret or database link
+— as `variable_detected_required_<name>`, naming the database to link when one is suggested for it, and
+lists the optional remainder in one `variables_detected_unset` pass. They are warnings rather than
+decisions: a heuristic must not make a project uncreatable.
 
 The engines a source connects to are read from its dependencies (`pg`, `mysql2`, `mongoose`, `ioredis`,
 `psycopg`, `asyncpg`, `pymongo`, `redis`, `github.com/jackc/pgx`, …), from a Prisma datasource
@@ -140,6 +176,12 @@ The interpreter family comes from `build.pythonVersion`, then `.python-version`,
 newest release the constraint allows, `~=3.11.0` and `==3.12.*` mean that family. The catalogue carries
 3.10 to 3.13; anything else is a `recipe_unsupported` finding pointing at a Dockerfile.
 
+The candidate keeps pyproject's declared range (`pythonRequires`) and the manifest the recipe installs
+from (`pythonInstall`). A family the plan selects — or the one detection chose, from `.python-version`
+say — outside that range is `python_version_unsupported`: blocked on the `uv.lock` and `poetry.lock`
+paths, which refuse the interpreter, and a warning on pip, which installs anyway. The action names the
+newest family the range allows.
+
 `deploy/frameworks_python.go` recognises the frameworks from the dependency names and finds the
 application object in the conventional entry files (`main.py`, `app.py`, `server.py`, `api.py`,
 `wsgi.py`, `asgi.py`, `streamlit_app.py`, a package's `__init__.py`; never under `tests/`, `migrations/`
@@ -157,7 +199,8 @@ A framework whose application object is not in an entry file keeps the port and 
 Django project answers only the hosts its settings allow; `ALLOWED_HOSTS` read from the environment is
 listed like any other variable. A plain `main.py`/`app.py` is a low-confidence worker that asks whether
 it serves. The recipe refuses a plan with no start command, naming the frameworks detection proposes one
-for.
+for, and preflight says so first: `start_command_missing` (blocked, on the start command) for the
+Python, Deno and PHP recipes and a JavaScript server with no static output.
 
 ## Go
 
@@ -168,16 +211,37 @@ version cannot be older than the module requires. Resolved image digests, select
 generated Dockerfile are recorded in build evidence. `GOTOOLCHAIN=local` prevents an unrecorded automatic
 toolchain download inside the build. See the [Go toolchain rules](https://go.dev/doc/toolchain).
 
-The default build compiles the one detected main package to `/out/app`. A custom build command executes
-exactly as configured and must produce an executable there; this also allows code generation and an
-explicit package choice for a repository with several mains. The historical detected `go build ./...`
+Which toolchain builds the module is a setting, so detection keeps the facts — `goMinimumVersion`, the
+`toolchain` line (`goToolchain`) and the `.go-version` pin (`goVersionFile`) — rather than a refusal.
+Preflight runs `chooseGoRecipeVersion` with the plan's own `build.goVersion` over them and raises
+`go_version_unsupported` (blocked, naming the pins) only when that fails: pinning 1.26 for a module
+whose `.go-version` says 1.24 clears it, as it lets the recipe build.
+
+The main package is read the way the go command reads it, from package clauses and build constraints
+and never by compiling (`deploy/go_packages.go`, shared by detection and the recipe): a file counts for
+linux on the host's architecture with cgo disabled and no extra tags, judged on its `//go:build` line
+(or legacy `+build` lines) and its `_GOOS`/`_GOARCH` file-name suffix, so `ignore`, `tools` and mage
+files drop out; `testdata/`, `_*` and `.*` directories and nested modules (a directory with its own
+`go.mod`) are not part of the module. Detection records `goMainPackages` and chooses `goPackage` by
+the layout's own convention: the module root, then `cmd/<module name>`, then the one of
+`cmd/{server,api,web,app}` that exists, then the only main that imports `net/http` or a known router or
+RPC server. A tie asks — a `NeedsDecision` and the `go_main_ambiguous` decision on
+`build.goPackage`, which a run cannot go past — and a module with no main package is a low-confidence
+`Go library` candidate (`goLibrary`) with the blocked `go_main_missing`. `build.goPackage` names the
+package the recipe builds (`go build … ./<goPackage>`); it must be a buildable main, or the recipe and
+preflight refuse it. Without it the recipe makes the same choice detection did, and refuses an
+undecided module with its main packages named.
+
+A custom build command executes exactly as configured and must produce an executable at `/out/app`; it
+decides what it compiles, so no main package is asked for. The historical detected `go build ./...`
 command still executes, followed by the default output-producing build for compatibility. A custom start
 command replaces the default `/app` entrypoint and runs inside the unprivileged runtime container.
 
-This recipe uses `CGO_ENABLED=0`. Local non-test source importing `C`, unsupported source versions and
-explicit CGO-enabling commands produce actionable planning/preparation refusals. Dependencies needing
-CGO or more complex native-library/workspace arrangements require a Dockerfile; source scanning does
-not certify all transitive dependencies. The dashboard's own required Go toolchain remains 1.26.8.
+This recipe uses `CGO_ENABLED=0`. A local file importing `C` that the build would compile — one whose
+constraints do not already restrict it to cgo builds, beside a `!cgo` fallback — produces the refusal,
+as do unsupported source versions and explicit CGO-enabling commands. Dependencies needing CGO or more
+complex native-library/workspace arrangements require a Dockerfile; source scanning does not certify
+all transitive dependencies. The dashboard's own required Go toolchain remains 1.26.8.
 
 ## Rust
 
