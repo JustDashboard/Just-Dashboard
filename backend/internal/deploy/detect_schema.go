@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"path"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -24,6 +25,9 @@ var runtimeSchemaTools = []schemaTool{
 	},
 	{
 		Name: "alembic", Label: "Alembic", Deploy: "alembic upgrade head", Push: "alembic upgrade head",
+		// Only named when detection left the step out: env.py connects to the
+		// URL alembic.ini commits, which is a developer's own database.
+		advice: `Make alembic's env.py read the database URL from the environment (config.set_main_option("sqlalchemy.url", os.environ["DATABASE_URL"])), then run alembic upgrade head in the start command before the server starts.`,
 		applied: func(command string) bool {
 			return strings.Contains(command, "alembic") && strings.Contains(command, "upgrade")
 		},
@@ -53,6 +57,10 @@ var schemaGenerateCommand = map[string]string{
 
 var (
 	alembicScriptLocationRE = regexp.MustCompile(`(?m)^\s*script_location\s*=\s*(\S+)`)
+	// How an env.py takes the database from the running environment rather
+	// than from alembic.ini: it overrides sqlalchemy.url, reads a variable or
+	// the application's settings, or imports the application's own engine.
+	alembicEnvironmentURLRE = regexp.MustCompile(`(?m)set_main_option\(\s*["']sqlalchemy\.url["']|os\.environ|\bgetenv\(|\bsettings\.|get_settings\(|DATABASE_UR[LI]|create_(?:async_)?engine\(|^\s*from\s+\S+\s+import\s+[^\n]*\bengine\b`)
 	efCoreDesignRE          = regexp.MustCompile(`Include="Microsoft\.EntityFrameworkCore\.(?:Design|Tools)"`)
 	efCoreMigratesRE        = regexp.MustCompile(`\.(?:Migrate|MigrateAsync|EnsureCreated|EnsureCreatedAsync)\(`)
 )
@@ -84,6 +92,7 @@ func applySchemaDetection(candidate *DetectedCandidate, marker *detectedMarkers,
 func applyPythonSchemaTool(candidate *DetectedCandidate, marker *detectedMarkers, view stateRoot) {
 	deps := readPythonDependencies(marker.pythonFiles)
 	name, command, evidence := "", "", DetectionEvidence{}
+	committedURL := false
 	switch {
 	case candidate.Framework == "django":
 		name, command = "django", djangoMigrate
@@ -116,6 +125,7 @@ func applyPythonSchemaTool(candidate *DetectedCandidate, marker *detectedMarkers
 			reason += " with committed revisions"
 		}
 		evidence = DetectionEvidence{Path: joinRoot(view.root, ini), Reason: reason}
+		committedURL = !alembicURLFromEnvironment(view, ini)
 	case deps.has("aerich") && strings.Contains(string(marker.pythonFiles["pyproject.toml"]), "[tool.aerich]"):
 		name, command = "aerich", "aerich upgrade"
 		evidence = DetectionEvidence{Path: joinRoot(view.root, "pyproject.toml"), Reason: "Aerich migrations"}
@@ -127,12 +137,19 @@ func applyPythonSchemaTool(candidate *DetectedCandidate, marker *detectedMarkers
 	start := candidate.StartCommand
 	procfileWeb := procfileProcess(marker.procfile, "web")
 	switch {
-	case start == "":
-	case tool.applied(start):
+	case start != "" && tool.applied(start):
 		evidence.Reason += "; the start command applies them before serving"
-	case prestartRunsTool(start, view, tool):
+	case start != "" && prestartRunsTool(start, view, tool):
 		candidate.SchemaInStart = true
 		evidence.Reason += "; the prestart script the start command runs applies them"
+	case committedURL:
+		// Chained, the step would connect to the developer's database the
+		// ini names, fail, and keep the server from ever starting. The
+		// missing step is preflight's to name once a database is linked,
+		// with the tool's advice rather than a command that cannot work.
+		candidate.SchemaCommand = ""
+		evidence.Reason += "; env.py connects to the URL alembic.ini commits, so the start command does not run them"
+	case start == "":
 	case start == procfileWeb:
 		// The repository declared its own process; a missing step is the
 		// preflight warning's to name, not a command to rewrite.
@@ -176,6 +193,19 @@ func alembicRevisions(view stateRoot, ini string) bool {
 		}
 	}
 	return false
+}
+
+// alembicURLFromEnvironment reports whether the migrations connect to the
+// database the running environment names: env.py beside the ini's script
+// location takes the URL from a variable or the application's settings. An
+// env.py this scan did not read counts as not doing so.
+func alembicURLFromEnvironment(view stateRoot, ini string) bool {
+	location := "alembic"
+	if match := alembicScriptLocationRE.FindSubmatch(view.contents[ini]); match != nil {
+		location = strings.TrimPrefix(string(match[1]), "%(here)s/")
+	}
+	env, ok := view.contents[path.Join(path.Dir(ini), location, "env.py")]
+	return ok && alembicEnvironmentURLRE.Match(env)
 }
 
 // prestartRunsTool reports whether the start command runs a committed
@@ -246,6 +276,8 @@ func applySeedDetection(candidate *DetectedCandidate, marker *detectedMarkers, v
 				command, file = "php artisan db:seed --force", "database/seeders/DatabaseSeeder.php"
 			}
 		}
+	case candidate.Recipe == "python" && candidate.Framework == "django":
+		command, file = djangoFixtureSeed(view)
 	case candidate.BuildMethod == BuildDockerfile || candidate.Recipe == "ruby":
 		if content, ok := view.contents["db/seeds.rb"]; ok && rubyCodeLineRE.Match(content) {
 			command, file = "bin/rails db:seed", "db/seeds.rb"
@@ -261,6 +293,33 @@ func applySeedDetection(candidate *DetectedCandidate, marker *detectedMarkers, v
 		reason += "; the seed clears tables before inserting"
 	}
 	candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(view.root, firstNonEmpty(file, "package.json")), Reason: reason})
+}
+
+// djangoFixtureSeed loads the fixtures Django applications commit in their
+// fixtures/ directories — the initial data loaddata finds by name. Fixtures
+// under a test directory are the tests' own and are left out.
+func djangoFixtureSeed(view stateRoot) (string, string) {
+	var names, files []string
+	seen := map[string]bool{}
+	for rel := range view.present {
+		dir := path.Dir(rel)
+		name := strings.TrimSuffix(path.Base(rel), path.Ext(rel))
+		if path.Base(dir) != "fixtures" || !djangoFixtureExtensions[path.Ext(rel)] || strings.Contains(strings.ToLower(dir), "test") ||
+			!pythonModuleRE.MatchString(strings.ReplaceAll(name, "-", "_")) || seen[name] {
+			continue
+		}
+		seen[name] = true
+		names, files = append(names, name), append(files, rel)
+	}
+	if len(names) == 0 {
+		return "", ""
+	}
+	sort.Strings(names)
+	sort.Strings(files)
+	if len(names) > 8 {
+		names = names[:8]
+	}
+	return "python manage.py loaddata " + strings.Join(names, " "), files[0]
 }
 
 // nodeSeedCommand is Prisma's own seed step when one is configured, else a

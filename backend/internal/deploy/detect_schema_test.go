@@ -19,17 +19,41 @@ func TestPythonAndDotnetSchemaToolsApplyTheSchemaBeforeServing(t *testing.T) {
 			name: "alembic with revisions is chained before uvicorn",
 			files: map[string]string{
 				"requirements.txt": "fastapi[standard]==0.115.0\nalembic==1.14.0\n", "main.py": "from fastapi import FastAPI\napp = FastAPI()\n",
-				"alembic.ini": "[alembic]\nscript_location = %(here)s/alembic\n", "alembic/versions/0001_init.py": "revision = '0001'\n",
+				"alembic.ini":                   "[alembic]\nscript_location = %(here)s/alembic\nsqlalchemy.url = driver://user:pass@localhost/dbname\n",
+				"alembic/versions/0001_init.py": "revision = '0001'\n",
+				"alembic/env.py":                "import os\nconfig = context.config\nconfig.set_main_option(\"sqlalchemy.url\", os.environ[\"DATABASE_URL\"])\n",
 			},
 			recipe: "python", tool: "alembic", command: "alembic upgrade head",
 			start:    "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000",
 			evidence: "Alembic migrations with committed revisions",
 		},
 		{
+			name: "alembic connecting to the URL its ini commits is not chained",
+			files: map[string]string{
+				"requirements.txt": "fastapi==0.115.0\nuvicorn==0.32.0\nalembic==1.14.0\n", "main.py": "from fastapi import FastAPI\napp = FastAPI()\n",
+				"alembic.ini":    "[alembic]\nscript_location = alembic\nsqlalchemy.url = postgresql://me@localhost/devdb\n",
+				"alembic/env.py": "from sqlalchemy import engine_from_config, pool\nconfig = context.config\nconnectable = engine_from_config(config.get_section(config.config_ini_section), prefix=\"sqlalchemy.\")\n",
+			},
+			recipe: "python", tool: "alembic",
+			start:    "uvicorn main:app --host 0.0.0.0 --port 8000",
+			evidence: "env.py connects to the URL alembic.ini commits",
+		},
+		{
+			name: "alembic whose env.py imports the application's settings is chained",
+			files: map[string]string{
+				"requirements.txt": "fastapi==0.115.0\nuvicorn==0.32.0\nalembic==1.14.0\n", "main.py": "from fastapi import FastAPI\napp = FastAPI()\n",
+				"alembic.ini":    "[alembic]\nscript_location = alembic\n",
+				"alembic/env.py": "from app.core.config import settings\ndef get_url():\n    return str(settings.SQLALCHEMY_DATABASE_URI)\n",
+			},
+			recipe: "python", tool: "alembic", command: "alembic upgrade head",
+			start: "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000",
+		},
+		{
 			name: "alembic configured one directory down names its ini",
 			files: map[string]string{
 				"requirements.txt": "fastapi==0.115.0\nuvicorn==0.32.0\nalembic==1.14.0\n", "main.py": "from fastapi import FastAPI\napp = FastAPI()\n",
-				"db/alembic.ini": "[alembic]\nscript_location = migrations\n",
+				"db/alembic.ini":       "[alembic]\nscript_location = migrations\n",
+				"db/migrations/env.py": "from myapp.db import engine\nconnectable = engine\n",
 			},
 			recipe: "python", tool: "alembic", command: "alembic -c db/alembic.ini upgrade head",
 			start: "alembic -c db/alembic.ini upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000",
@@ -139,6 +163,12 @@ func TestEFCoreSchemaStepMissingNamesTheStartupCall(t *testing.T) {
 	if !schemaStepConfigured(&DetectedCandidate{SchemaTool: "alembic"}, BuildPlanConfig{StartCommand: "alembic -c db/alembic.ini upgrade head && uvicorn main:app"}) {
 		t.Fatal("alembic with its ini not recognised")
 	}
+	// Alembic left unchained names the env.py change, not a command that
+	// would connect to the ini's database.
+	item = schemaStepFinding(&DetectedCandidate{SchemaTool: "alembic"}, BuildPlanConfig{StartCommand: "uvicorn main:app"})
+	if item.Code != "schema_step_missing" || !strings.Contains(item.Action, "env.py read the database URL from the environment") {
+		t.Fatalf("alembic finding = %+v", item)
+	}
 }
 
 func TestNodeSchemaPushIsRecorded(t *testing.T) {
@@ -237,6 +267,15 @@ func TestSeedCommandsAreDetected(t *testing.T) {
 				"db/seeds.rb": "# Admin\nUser.find_or_create_by!(email: \"admin@example.com\")\n",
 			},
 			method: BuildDockerfile, command: "bin/rails db:seed",
+		},
+		{
+			name: "django fixtures an application commits, but not the tests' own",
+			files: map[string]string{
+				"requirements.txt": "Django==5.1.4\n", "manage.py": "import django\n", "mysite/wsgi.py": "application = None\n",
+				"shop/fixtures/categories.json": "[]", "shop/fixtures/initial-roles.yaml": "[]",
+				"shop/tests/fixtures/sample_orders.json": "[]", "shop/fixtures/notes.txt": "x",
+			},
+			method: BuildRecipe, recipe: "python", command: "python manage.py loaddata categories initial-roles",
 		},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
