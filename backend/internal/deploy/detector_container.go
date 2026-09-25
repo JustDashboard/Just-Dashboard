@@ -180,11 +180,9 @@ func annotateImageFacts(tree detectionTree, markers map[string]*detectedMarkers,
 				}
 			}
 		}
-		if candidate.ReleaseCommand == "" && marker != nil {
-			if command, evidence, ok := declaredReleaseCommand(tree, marker); ok {
-				candidate.ReleaseCommand = command
-				candidate.Evidence = append(candidate.Evidence, evidence)
-			}
+		if candidate.ReleaseCommand == "" && marker != nil && marker.release != "" {
+			candidate.ReleaseCommand = marker.release
+			candidate.Evidence = append(candidate.Evidence, marker.releaseEvidence)
 		}
 		switch candidate.BuildMethod {
 		case BuildRecipe, BuildStatic:

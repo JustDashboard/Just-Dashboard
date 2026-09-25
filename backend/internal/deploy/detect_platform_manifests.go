@@ -1058,7 +1058,7 @@ func applyPlatformTarget(candidate *DetectedCandidate, target platformTarget, ma
 			evidence(platform + " start command not used: " + reason)
 			break
 		}
-		candidate.StartCommand = withSchemaStep(candidate, manifest.StartCommand)
+		candidate.StartCommand = withSchemaStep(candidate, marker, manifest.StartCommand)
 		startTaken = true
 		manifest.Applied = append(manifest.Applied, "start command")
 		evidence(platform + " start command: " + boundedEvidence(manifest.StartCommand))
@@ -1147,11 +1147,20 @@ func applyPlatformTarget(candidate *DetectedCandidate, target platformTarget, ma
 // withSchemaStep keeps the detected schema step in front of a start command
 // another platform's file declares, the way the package's own start gets it:
 // the database this server creates is empty until the step runs, and that
-// platform ran it somewhere this file does not say.
-func withSchemaStep(candidate *DetectedCandidate, command string) string {
+// platform ran it somewhere this file does not say — unless the release
+// command the candidate plans as a release task runs it once before each
+// release.
+func withSchemaStep(candidate *DetectedCandidate, marker *detectedMarkers, command string) string {
 	tool := schemaToolByName(candidate.SchemaTool)
 	if candidate.Recipe != "node" || candidate.SchemaCommand == "" || candidate.SchemaInStart || tool == nil || tool.applied(command) {
 		return command
+	}
+	if marker != nil {
+		var node nodeManifest
+		parseNodeManifest(marker.packageJSON, &node)
+		if releaseAppliesSchema(tool, marker.release, node.Scripts) {
+			return command
+		}
 	}
 	runner := candidate.PackageManager
 	if runner == "" {

@@ -199,10 +199,12 @@ type DetectedCandidate struct {
 	// SchemaTool names the migration tool the source declares. SchemaCommand
 	// is how the detected start command applies its schema; it is empty when
 	// the tool needs a decision, and SchemaInStart says the package's own
-	// start script already runs it.
-	SchemaTool    string `json:"schemaTool,omitempty"`
-	SchemaCommand string `json:"schemaCommand,omitempty"`
-	SchemaInStart bool   `json:"schemaInStart,omitempty"`
+	// start script already runs it. SchemaInRelease says ReleaseCommand runs
+	// it — itself or through the scripts it runs — so the start does not.
+	SchemaTool      string `json:"schemaTool,omitempty"`
+	SchemaCommand   string `json:"schemaCommand,omitempty"`
+	SchemaInStart   bool   `json:"schemaInStart,omitempty"`
+	SchemaInRelease bool   `json:"schemaInRelease,omitempty"`
 	// SPAFallback says the site's client owns its routes, so nginx answers
 	// any path it has no file for with index.html.
 	SPAFallback   bool   `json:"spaFallback,omitempty"`

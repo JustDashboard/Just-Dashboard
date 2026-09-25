@@ -421,6 +421,16 @@ schema step. `release_process_not_run` is not raised for a process the release c
 already runs; `fly.toml`'s `/app/bin/migrate` is the overlay's `bin/migrate`, run from the image's
 working directory.
 
+A release command that applies the detected schema tool's step — itself, or through the package scripts
+it runs (`npm run migrate` whose script is `prisma migrate deploy`) — owns that step: detection reads
+the release command before it makes any candidate, and then chains nothing into the start command,
+neither the package's own start, a Procfile or platform file's start command, nor Django's default start
+(which keeps `collectstatic` but leaves `migrate` out). The candidate records `schemaInRelease`, the
+schema evidence says the release command applies it, and preflight counts the release task planned from
+that command as the schema step even when its text names a script rather than the tool. Chained as well,
+the migration would run a second time in every container start, beside the release task that already
+ran it. A release command that does not migrate leaves the step in front of the start.
+
 ## Repository shape and candidate selection
 
 Detection reads a checkout in two passes (`detect_walk.go`). The first lists directories breadth-first
@@ -552,7 +562,7 @@ candidate records the file, the facts and which it took (`platformManifests`):
 
 | Declared | Taken as |
 | --- | --- |
-| start command (`startCommand`, `[start] cmd`, `run_command`, fly `app` process, Space `app_file`) | the start command of a recipe candidate that did not take the Procfile's, unless it runs a package manager the lockfile does not build with, with the detected schema step kept in front of it unless it applies the schema itself; it answers the start-command decisions |
+| start command (`startCommand`, `[start] cmd`, `run_command`, fly `app` process, Space `app_file`) | the start command of a recipe candidate that did not take the Procfile's, unless it runs a package manager the lockfile does not build with, with the detected schema step kept in front of it unless it applies the schema itself or the repository's release command does; it answers the start-command decisions |
 | build command | the build command when detection had none, with its dependency installs (`npm ci`, `pip install`, `bundle install`, …) removed — the recipe installs from the lockfile |
 | port (`internal_port`, `http_port`, Kamal `proxy.app_port`, Space `app_port`) | the port when the start command came from the same file, or when nothing named one |
 | publish directory (`publish`, `outputDirectory`, `staticPublishPath`, `output_dir`, hosting `public`) and a rewrite of every path to `/index.html` | the output directory and the single-page fallback of a static candidate |
@@ -1149,7 +1159,8 @@ Django (`python manage.py migrate --noinput`, already the default start's first 
 (`alembic.ini` beside the manifest or one directory down, with the `alembic` dependency: `alembic upgrade
 head`, `-c <ini>` when it is not at the root), Flask-Migrate (`migrations/alembic.ini` with
 `flask-migrate`: `flask --app <module> db upgrade`) and Aerich (`[tool.aerich]`: `aerich upgrade`). The
-command is chained before a detected start; a `Procfile` web process is the repository's own and is not
+command is chained before a detected start unless the repository's release command applies it
+([Release commands](#release-commands)); a `Procfile` web process is the repository's own and is not
 rewritten, so a linked database without the step raises `schema_step_missing` instead. A start command
 that runs a committed `prestart.sh` (or `scripts/prestart.sh`) which applies the migrations counts as the
 step. Alembic is chained only when the `env.py` beside its script location takes the database from the

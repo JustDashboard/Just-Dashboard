@@ -3525,6 +3525,8 @@ export type DeploymentDetectionCandidate = {
   schemaTool?: string
   schemaCommand?: string
   schemaInStart?: boolean
+  /** The repository's release command applies the schema, so the start command does not. */
+  schemaInRelease?: boolean
   spaFallback?: boolean
   pythonVersion?: string
   unpinnedDependencies?: boolean

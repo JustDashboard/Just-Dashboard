@@ -213,7 +213,24 @@ func schemaStepConfigured(candidate *DetectedCandidate, build BuildPlanConfig) b
 		if _, unbuilt := releaseTaskNeedsApplication(task.Command); unbuilt && task.Runner != ReleaseTaskRunnerImage {
 			continue
 		}
-		if tool.applied(task.Command) {
+		if tool.applied(task.Command) || (candidate.SchemaInRelease && sameReleaseCommand(task.Command, candidate.ReleaseCommand)) {
+			return true
+		}
+	}
+	return false
+}
+
+// releaseAppliesSchema says whether the repository's declared release
+// command runs the tool's schema step, itself or through the package
+// scripts it runs. The release task runs it once before each release, so
+// chained into the start command too it would run twice — the second time
+// in every container start, racing the release it follows.
+func releaseAppliesSchema(tool *schemaTool, release string, scripts map[string]string) bool {
+	if tool == nil || strings.TrimSpace(release) == "" {
+		return false
+	}
+	for _, segment := range nodeReachedSegments(scripts, []string{release}, false) {
+		if tool.applied(segment) {
 			return true
 		}
 	}

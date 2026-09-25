@@ -142,6 +142,9 @@ func applyPythonSchemaTool(candidate *DetectedCandidate, marker *detectedMarkers
 	case start != "" && prestartRunsTool(start, view, tool):
 		candidate.SchemaInStart = true
 		evidence.Reason += "; the prestart script the start command runs applies them"
+	case releaseAppliesSchema(tool, marker.release, nil):
+		candidate.SchemaInRelease = true
+		evidence.Reason += "; the release command applies them before each release, so the start command does not"
 	case committedURL:
 		// Chained, the step would connect to the developer's database the
 		// ini names, fail, and keep the server from ever starting. The

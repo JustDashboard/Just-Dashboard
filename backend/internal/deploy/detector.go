@@ -87,6 +87,11 @@ type detectedMarkers struct {
 	// node is the package's install inputs, read after the walk under
 	// their own budget.
 	node *nodeInstallSource
+	// release is the command the repository declares runs once before each
+	// release (declaredReleaseCommand), read before any candidate is made:
+	// a schema step it runs is not chained into the start command too.
+	release         string
+	releaseEvidence DetectionEvidence
 }
 
 // phpOwnsAssets says the PHP recipe builds this root's package.json itself:
@@ -588,6 +593,10 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	readNodeInstalls(root, markers)
 	for _, candidateRoot := range roots {
 		marker := markers[candidateRoot]
+		marker.release, marker.releaseEvidence, _ = declaredReleaseCommand(tree, marker)
+	}
+	for _, candidateRoot := range roots {
+		marker := markers[candidateRoot]
 		root := filepath.ToSlash(marker.root)
 		marker.denoEntries = map[string]bool{}
 		for _, entry := range pathsUnderRoot(denoEntryPaths, root, allRoots) {
@@ -928,7 +937,7 @@ func packageCandidate(marker *detectedMarkers, schemaPaths []string) []DetectedC
 	}
 	inputs := nodeCommandInputs{
 		manifest: manifest, files: files, framework: framework, procfileWeb: procfileWeb,
-		schema: detectSchemaTool(dependencies, schemaPaths, facts.prisma),
+		schema: detectSchemaTool(dependencies, schemaPaths, facts.prisma), release: marker.release,
 	}
 	// The name becomes part of a command, so it has to be a package name.
 	if install.context != install.dir && facts.workspaceTurbo && nodePackageNameRE.MatchString(manifest.Name) && nodeHasWorkspaceDependency(manifest, facts.workspacePackages) {
@@ -1020,6 +1029,10 @@ func packageCandidate(marker *detectedMarkers, schemaPaths []string) []DetectedC
 		case inputs.schemaInStart(bareStart):
 			candidate.SchemaInStart = true
 			candidate.Evidence[len(candidate.Evidence)-1].Reason = tool.Tool.Label + " schema applied by the package's own start script"
+		case tool.Command != "" && inputs.releaseAppliesSchema():
+			candidate.SchemaCommand, candidate.SchemaInRelease = tool.Command, true
+			reason, _, _ := strings.Cut(tool.Evidence.Reason, "; the start command")
+			candidate.Evidence[len(candidate.Evidence)-1].Reason = reason + "; the release command applies it before each release, so the start command does not"
 		case tool.Command == "":
 			candidate.NeedsDecision = append(candidate.NeedsDecision, "choose how "+tool.Tool.Label+" migrations run before the database is used")
 		default:
@@ -1049,10 +1062,16 @@ type nodeCommandInputs struct {
 	// turboFilter is the workspace member Turborepo builds, with the
 	// workspace packages it depends on.
 	turboFilter string
+	// release is the repository's declared release command.
+	release string
 }
 
 func (in nodeCommandInputs) schemaInStart(start string) bool {
 	return in.schema != nil && (in.schema.Tool.applied(in.manifest.Scripts["start"]) || in.schema.Tool.applied(start))
+}
+
+func (in nodeCommandInputs) releaseAppliesSchema() bool {
+	return in.schema != nil && releaseAppliesSchema(&in.schema.Tool, in.release, in.manifest.Scripts)
 }
 
 func (in nodeCommandInputs) commands(runner string) (string, string) {
@@ -1072,7 +1091,7 @@ func (in nodeCommandInputs) commands(runner string) (string, string) {
 		}
 	}
 	start := in.start(runner)
-	if in.schema != nil && in.schema.Command != "" && start != "" && !in.schemaInStart(start) {
+	if in.schema != nil && in.schema.Command != "" && start != "" && !in.schemaInStart(start) && !in.releaseAppliesSchema() {
 		start = nodeExecRunner(runner) + " " + in.schema.Command + " && " + start
 	}
 	return build, start

@@ -411,7 +411,8 @@ only renderer/executor/validation authority for their feature.
   read from a variable, the value that moves it there. The walk hands every file to a state scanner with
   its own budgets (configuration apart from source, so a large tree cannot crowd out the schema); it reads
   text only. Per root it runs before the readiness and network passes: the schema step it chains into a
-  Python start command is what readiness budgets a slow start for, and the start command it gives
+  Python start command is what readiness budgets a slow start for — nothing is chained when the release
+  command the repository declares (read per root before any candidate is made) applies it — and the start command it gives
   PocketBase is the one network reads a listener from. The server database it offers in place of a
   Python SQLite default is added after the environment pass, which replaces the root's databases. The
   configure form plans one managed named volume per target with a storage dependency, named per draft,

@@ -188,6 +188,8 @@ type pythonResolution struct {
 type pythonRootFiles struct {
 	managePy bool
 	procfile []byte
+	// release is the repository's declared release command.
+	release string
 }
 
 var pythonFrameworks = []pythonFramework{
@@ -213,10 +215,14 @@ var pythonFrameworks = []pythonFramework{
 				return pythonResolution{Confidence: ConfidenceLow, Decisions: []string{"name the Django WSGI module for gunicorn (project.wsgi:application)"}}
 			}
 			start := "python manage.py migrate --noinput && "
+			evidence := []DetectionEvidence{{Path: "manage.py", Reason: "Django project; migrations are applied before the server starts"}}
+			if releaseAppliesSchema(schemaToolByName("django"), files.release, nil) {
+				start = ""
+				evidence[0].Reason = "Django project; the release command applies migrations before each release"
+			}
 			if deps.has("whitenoise") {
 				start += "python manage.py collectstatic --noinput && "
 			}
-			evidence := []DetectionEvidence{{Path: "manage.py", Reason: "Django project; migrations are applied before the server starts"}}
 			if strings.HasSuffix(module, ".asgi") && deps.has("uvicorn") {
 				return pythonResolution{Start: start + "uvicorn " + module + ":application --host 0.0.0.0 --port ${PORT:-8000}", Evidence: evidence}
 			}
@@ -386,7 +392,7 @@ func pythonCandidate(marker *detectedMarkers, entries []pythonEntry, rootLabel s
 	} else {
 		candidate.PythonVersion = version
 	}
-	files := pythonRootFiles{managePy: marker.managePy, procfile: marker.procfile}
+	files := pythonRootFiles{managePy: marker.managePy, procfile: marker.procfile, release: marker.release}
 	procfileWeb := procfileProcess(marker.procfile, "web")
 	if procfileWeb != "" && rejectPlanSecretLiteral("Procfile web process", procfileWeb) != nil {
 		procfileWeb = ""
