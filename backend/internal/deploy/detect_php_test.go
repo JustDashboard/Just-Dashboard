@@ -322,6 +322,13 @@ func TestPHPHerokuProcfile(t *testing.T) {
 	if ignored := findingByCode(findings, "php_procfile_server_config_ignored"); ignored == nil || ignored.Measured != "-C nginx_app.conf" {
 		t.Fatalf("php_procfile_server_config_ignored = %+v", ignored)
 	}
+	// -p's port and -l's log are values, neither a document root nor a
+	// server configuration.
+	candidate, _, findings = phpPlan(t, map[string]string{"composer.json": `{"require":{"slim/slim":"^4"}}`, "public/index.php": "<?php",
+		"Procfile": "web: heroku-php-apache2 public/ -p 5000 -l storage/logs/app.log\n"})
+	if candidate.StartCommand != "frankenphp php-server --listen :80 --root /app/public" || findingByCode(findings, "php_procfile_server_config_ignored") != nil {
+		t.Fatalf("start = %q", candidate.StartCommand)
+	}
 	// Any other web process is the start command, as it always was.
 	_, candidate = detectNodeTree(t, map[string]string{"index.php": "<?php", "Procfile": "web: php -S 0.0.0.0:$PORT\n"})
 	if candidate.StartCommand != "php -S 0.0.0.0:$PORT" {

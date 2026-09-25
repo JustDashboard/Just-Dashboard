@@ -1386,8 +1386,8 @@ there are migrations, since a migrate with nothing to migrate still needs a data
 plain PHP served from the directory that holds `index.php`. A Heroku `web: heroku-php-apache2 public/`
 (or `heroku-php-nginx`) is translated rather than run — the buildpack's server is not in the image and
 `--no-dev` does not install its scripts — into FrankenPHP serving the document root it names after the
-framework's migrations; `-C`/`-F`/`-i` server configurations are `php_procfile_server_config_ignored`,
-and a `release:` line is the release task.
+framework's migrations; `-C`/`-F`/`-i` server configurations are `php_procfile_server_config_ignored`
+(`-p`'s port and `-l`'s log are skipped as values), and a `release:` line is the release task.
 
 The image is `dunglas/frankenphp:1-php<release>-alpine`, one catalogue entry per release — FrankenPHP
 serves on 80 with its own worker, so no nginx or php-fpm pair. The release satisfies composer.json's
@@ -1426,12 +1426,14 @@ print before headers) and adds uploads as large as the managed proxy lets throug
 `memory_limit=256M`, `expose_php=Off` and an `auto_prepend_file`. Behind the proxy the connection is plain
 HTTP, so FrankenPHP never sets `HTTPS`; the prepend — constant text written with `printf`, with no plan
 value in it — sets `HTTPS=on`, `REQUEST_SCHEME=https` and `SERVER_PORT=443` from `X-Forwarded-Proto` and
-`REMOTE_ADDR` from the last `X-Forwarded-For` hop (the one the proxy appended; Caddy does not set
-`X-Real-IP`), and only for a request whose own peer is a loopback, private or reserved address, which the
-proxy's always is and a visitor reaching a public port directly is not. It acts only while
-`PHP_FORWARDED_TRUST=private`, which the runtime withdraws like every recipe's proxy trust (see [Where the
-server listens](#where-the-server-listens-and-whom-it-trusts)). Laravel's `@vite` and `url()`, Symfony's
-`isSecure()` and WordPress's `is_ssl()` then produce https without the application trusting any proxy.
+`REMOTE_ADDR` from the last `X-Forwarded-For` hop (the proxy appends the peer it saw — nginx's
+`$proxy_add_x_forwarded_for`, the same address it sends as `X-Real-IP` — so the last hop is the visitor
+whatever earlier hops a client forged), and only for a request whose own peer is a loopback, private or
+reserved address, which the proxy's always is and a visitor reaching a public port directly is not. It
+acts only while `PHP_FORWARDED_TRUST=private`, which the runtime withdraws like every recipe's proxy trust
+(see [Where the server listens](#where-the-server-listens-and-whom-it-trusts)). Laravel's `@vite` and
+`url()`, Symfony's `isSecure()` and WordPress's `is_ssl()` then produce https without the application
+trusting any proxy.
 Laravel's `APP_URL`, Symfony's `DEFAULT_URI` and Bedrock's `WP_HOME`/`WP_SITEURL` follow the planned
 domain; Laravel's `APP_KEY`, Symfony's `APP_SECRET` (64 hex characters) and Bedrock's keys and salts are
 generated on the server at commit.

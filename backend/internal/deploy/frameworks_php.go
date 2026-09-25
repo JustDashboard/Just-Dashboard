@@ -468,7 +468,8 @@ func phpCandidate(marker *detectedMarkers, rootLabel string) DetectedCandidate {
 // herokuDocumentRoot reads a heroku-php-* command's arguments: its last
 // positional argument is the document root ("" for the application root,
 // "-" when it is not a path to serve), and -C, -F and -i name server and PHP
-// configurations FrankenPHP does not read.
+// configurations FrankenPHP does not read. -l (a log) and -p (a port) take
+// a value that is neither.
 func herokuDocumentRoot(arguments string) (string, []string) {
 	fields := strings.Fields(arguments)
 	configs := []string{}
@@ -476,9 +477,9 @@ func herokuDocumentRoot(arguments string) (string, []string) {
 	for index := 0; index < len(fields); index++ {
 		field := fields[index]
 		switch field {
-		case "-C", "-F", "-i", "-l":
+		case "-C", "-F", "-i", "-l", "-p":
 			if index+1 < len(fields) {
-				if field != "-l" {
+				if field == "-C" || field == "-F" || field == "-i" {
 					configs = append(configs, field+" "+fields[index+1])
 				}
 				index++
