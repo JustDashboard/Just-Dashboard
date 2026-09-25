@@ -3307,7 +3307,20 @@ export type BuildSecretStep = "install" | "build" | "install_and_build"
 
 /** The automatic recipes the backend can build; `validRecipe` is its closed set. */
 export type DeploymentRecipe =
-  "node" | "go" | "python" | "rust" | "java" | "dotnet" | "deno" | "php"
+  | "node"
+  | "go"
+  | "python"
+  | "rust"
+  | "java"
+  | "dotnet"
+  | "deno"
+  | "php"
+  | "ruby"
+  | "elixir"
+  | "scala"
+  | "clojure"
+  | "dart"
+  | "gleam"
 
 /** An environment variable detection found the source reading. */
 export type DeploymentDetectedVariable = {

@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test"
 import {
   browserInlined,
   canGenerateSecret,
+  installsAssetsWithNode,
+  needsStartCommand,
   candidateBlocker,
   checksForRuntime,
   composeSourceForCandidate,
@@ -397,6 +399,7 @@ describe("self-issued secrets", () => {
       "API_TOKEN_SALT",
       "DJANGO_SECRET_KEY",
       "SECRET_KEY_BASE",
+      "APPLICATION_SECRET",
       "N8N_ENCRYPTION_KEY",
     ])
       expect(canGenerateSecret(name)).toBe(true)
@@ -1157,5 +1160,25 @@ describe("choosing a package manager from what detection read", () => {
       }),
     )
     expect(rows.map((row) => row.source)).toEqual([".npmrc · read by the install", ".env.example"])
+  })
+})
+
+describe("the language recipes", () => {
+  test("Ruby needs a start command; the release-built languages start their own", () => {
+    expect(needsStartCommand({ method: "recipe", recipe: "ruby" })).toBe(true)
+    expect(
+      needsStartCommand({ method: "recipe", recipe: "ruby", startCommand: "bundle exec puma" }),
+    ).toBe(false)
+    for (const recipe of ["elixir", "scala", "clojure", "dart", "gleam"]) {
+      expect(needsStartCommand({ method: "recipe", recipe })).toBe(false)
+    }
+  })
+
+  test("PHP, Ruby and Elixir install their assets through the Node planner", () => {
+    for (const recipe of ["php", "ruby", "elixir"])
+      expect(installsAssetsWithNode(recipe)).toBe(true)
+    for (const recipe of ["node", "python", "scala", "dart", undefined]) {
+      expect(installsAssetsWithNode(recipe)).toBe(false)
+    }
   })
 })

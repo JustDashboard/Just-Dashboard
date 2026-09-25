@@ -38,6 +38,7 @@ import {
   composeSourceForCandidate,
   dockerfileStageHint,
   goMainPackageList,
+  installsAssetsWithNode,
   packageManagerOptions,
   packageManagerReading,
 } from "@/components/deploy/deployment-defaults"
@@ -646,10 +647,11 @@ export function StepProject({
                         goPackage: recipe === "go" ? configuration.build.goPackage : undefined,
                         pythonVersion:
                           recipe === "python" ? configuration.build.pythonVersion : undefined,
-                        // The PHP recipe's asset stage installs through the
-                        // same Node install, so the choice survives the move.
+                        // The PHP recipe's asset stage, and the Ruby and
+                        // Elixir builds' assets, install through the same Node
+                        // install, so the choice survives the move.
                         packageManager:
-                          recipe === "node" || recipe === "php"
+                          recipe === "node" || installsAssetsWithNode(recipe)
                             ? configuration.build.packageManager
                             : undefined,
                       })
@@ -675,7 +677,7 @@ export function StepProject({
               )}
               {configuration.build.method === "recipe" &&
                 (configuration.build.recipe === "node" ||
-                  (configuration.build.recipe === "php" &&
+                  (installsAssetsWithNode(configuration.build.recipe) &&
                     (flow.candidate?.nodeInstalls?.length ?? 0) > 0)) && (
                   <Field
                     label="Package manager"
@@ -693,10 +695,11 @@ export function StepProject({
                       onValueChange={(value) => {
                         const packageManager =
                           value === "lockfile" ? undefined : (value as NodePackageManager)
-                        // The PHP recipe's commands are PHP's; only the asset
-                        // stage follows the manager, and it names its own.
+                        // The PHP, Ruby and Elixir recipes' commands are
+                        // their own; only the asset install follows the
+                        // manager, and it names its own.
                         updateBuild(
-                          configuration.build.recipe === "php"
+                          installsAssetsWithNode(configuration.build.recipe)
                             ? { packageManager }
                             : {
                                 packageManager,

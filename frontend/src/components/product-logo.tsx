@@ -87,6 +87,7 @@ const LOGOS: Record<string, string> = {
   codeberg: "codeberg.svg",
   curl: "curl.svg",
   cyberchef: "cyberchef.svg",
+  dart: "dart.svg",
   debian: "debian.svg",
   deno: "deno.svg",
   directus: "directus.svg",
@@ -102,6 +103,7 @@ const LOGOS: Record<string, string> = {
   duckduckgo: "duckduckgo.svg",
   edge: "edge.svg",
   eleventy: "eleventy.svg",
+  elixir: "elixir.svg",
   ember: "ember.svg",
   express: "express.svg",
   facebook: "facebook.svg",
@@ -205,6 +207,7 @@ const LOGOS: Record<string, string> = {
   ruby: "ruby.svg",
   rust: "rust-light.svg",
   safari: "safari.svg",
+  scala: "scala.svg",
   searxng: "searxng.svg",
   seerr: "seerr.svg",
   sendgrid: "sendgrid.svg",
@@ -520,6 +523,10 @@ const RECIPES: Record<string, string> = {
   dotnet: "dotnet",
   deno: "deno",
   php: "php",
+  ruby: "ruby",
+  elixir: "elixir",
+  scala: "scala",
+  dart: "dart",
 }
 
 /**
@@ -606,6 +613,18 @@ const FRAMEWORKS: Record<string, string> = {
   php: "php",
   laravel: "laravel",
   symfony: "symfony",
+  ruby: "ruby",
+  rails: "ruby",
+  hanami: "ruby",
+  sinatra: "ruby",
+  elixir: "elixir",
+  phoenix: "elixir",
+  scala: "scala",
+  play: "scala",
+  http4s: "scala",
+  dart: "dart",
+  dart_frog: "dart",
+  shelf: "dart",
 }
 
 export function frameworkProduct(framework: string | undefined): string | undefined {
