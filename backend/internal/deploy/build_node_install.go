@@ -134,6 +134,9 @@ type nodeInstallFacts struct {
 	// found under it.
 	workspace         string
 	workspacePackages []string
+	// workspaceBuilds are the workspace packages the member depends on that
+	// build themselves, dependencies first (nodeWorkspaceBuildOrder).
+	workspaceBuilds []string
 	// readings are the lockfiles at the install root.
 	readings    []nodeLockfileReading
 	declared    nodeDeclaredManager
@@ -843,6 +846,8 @@ type nodeInstallChoice struct {
 	build, start        string
 	assets              bool
 	fieldPackageManager string
+	// nodeVersion is the plan's Node major, which outranks the source.
+	nodeVersion string
 }
 
 func nodeFinding(code string, severity PreflightSeverity, title, measured, means, action, field string) PreflightFinding {
@@ -900,6 +905,9 @@ func planNodeInstall(facts nodeInstallFacts, choice nodeInstallChoice) nodeInsta
 	var glibc []string
 	plan.family, glibc = nodeImageFamily(facts, choice.assets)
 	plan.node = nodeReleaseFor(facts)
+	if major, err := strconv.Atoi(choice.nodeVersion); err == nil && slices.Contains(nodeMajors, major) {
+		plan.node = nodeRelease{major: major, source: "Build settings", exact: true}
+	}
 	// A saved command still naming another manager's runner — detected when
 	// a different lockfile resolved, or left behind by a later commit that
 	// switched managers — would run a program the image may not have.
@@ -963,11 +971,11 @@ func planNodeInstall(facts nodeInstallFacts, choice nodeInstallChoice) nodeInsta
 			"pnpm is added for the scripts that call it", "pnpm "+version,
 			"The image installs with "+nodeManagerLabel(plan.manager)+"; pnpm is installed through Corepack so those scripts find it.", "", "configuration.build.buildCommand"))
 	}
-	if tools["deno"] {
+	if runner, field := nodeForeignRunner(facts, plan.build, plan.start); runner != "" {
 		blocked := nodeFinding("command_runner_missing", PreflightBlocked,
-			"A command needs a runtime the Node image does not have", "deno",
-			"The build and start commands, or the package scripts they run, call deno, which the Node recipe does not install.",
-			"Use a Dockerfile, or change the command to one the Node image runs.", "configuration.build.buildCommand")
+			"A command needs a runtime the Node image does not have", runner,
+			"The build and start commands, or the package scripts they run, call "+runner+", which the Node recipe does not install.",
+			"Use a Dockerfile, or change the command to one the Node image runs.", field)
 		plan.blocked = &blocked
 		return plan
 	}
@@ -1484,9 +1492,12 @@ func nodeInstallSegments(command string) []string {
 var (
 	nodeAssignmentsRE = regexp.MustCompile(`^((?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*)(.*)$`)
 	nodeScriptRunRE   = regexp.MustCompile(`^(?:bun|npm|pnpm|yarn) run (\S+)$`)
-	nodeShorthandRE   = regexp.MustCompile(`^(npm|pnpm|yarn) (start|test)$`)
-	nodeBinaryRunRE   = regexp.MustCompile(`^(?:npx|bunx|pnpm exec) (.+)$`)
-	nodeYarnBinRE     = regexp.MustCompile(`^yarn (\S.*)$`)
+	// nodeBunFileRE is Bun running a JavaScript file, which Node runs the
+	// same way; a TypeScript file stays with Bun, whose APIs it may use.
+	nodeBunFileRE   = regexp.MustCompile(`^bun (?:run )?(\.?/?[\w./@-]+\.(?:js|mjs|cjs))$`)
+	nodeShorthandRE = regexp.MustCompile(`^(npm|pnpm|yarn) (start|test)$`)
+	nodeBinaryRunRE = regexp.MustCompile(`^(?:npx|bunx|pnpm exec) (.+)$`)
+	nodeYarnBinRE   = regexp.MustCompile(`^yarn (\S.*)$`)
 )
 
 // nodeRunnerFor moves a command to another manager's runner the way the
@@ -1506,6 +1517,12 @@ func nodeRunnerFor(command, manager string) string {
 		parts := nodeAssignmentsRE.FindStringSubmatch(segment)
 		assignments, body := parts[1], parts[2]
 		switch {
+		case nodeBunFileRE.MatchString(body):
+			if manager != "bun" {
+				segments[index] = assignments + "node " + nodeBunFileRE.FindStringSubmatch(body)[1]
+			}
+		case strings.HasPrefix(body, "bun run ") && nodeScriptFile(strings.TrimPrefix(body, "bun run ")):
+			// `bun run src/index.ts` runs a file, not a package script.
 		case nodeScriptRunRE.MatchString(body):
 			segments[index] = assignments + manager + " run " + nodeScriptRunRE.FindStringSubmatch(body)[1]
 		case nodeShorthandRE.MatchString(body) && nodeShorthandRE.FindStringSubmatch(body)[1] != manager:

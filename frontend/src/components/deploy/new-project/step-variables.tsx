@@ -33,6 +33,7 @@ export function StepVariables({
   onRowsChange,
   dotenv,
   onDotenvChange,
+  platformSkipped,
   retainedKeys,
   onRemoveRetainedKey,
   suppliedVariables,
@@ -44,6 +45,8 @@ export function StepVariables({
   onRowsChange: (next: EnvironmentRow[] | ((rows: EnvironmentRow[]) => EnvironmentRow[])) => void
   dotenv: string
   onDotenvChange: (value: string) => void
+  /** Names the paste sets that the deployment sets itself, which are left out. */
+  platformSkipped: string[]
   retainedKeys: string[]
   onRemoveRetainedKey: (key: string) => void
   suppliedVariables: string[]
@@ -122,6 +125,7 @@ export function StepVariables({
         onRowsChange={changeRows}
         dotenv={dotenv}
         onDotenvChange={onDotenvChange}
+        platformSkipped={platformSkipped}
         retainedKeys={retainedKeys}
         onRemoveRetainedKey={onRemoveRetainedKey}
         hostNetwork={configuration.runtime.hostNetwork}

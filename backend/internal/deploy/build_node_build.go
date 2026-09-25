@@ -149,6 +149,9 @@ type nodeBuildPlan struct {
 	// legacyOpenSSL names the toolchain that needs the legacy provider.
 	legacyOpenSSL string
 	env           nodeEnvValidation
+	// framework are the defaults the matched framework's build needs
+	// (NITRO_PRESET for a provider preset, NODE_ENV for Strapi's admin).
+	framework []nodeEnvDefault
 }
 
 // planNodeBuild records the build's environment decisions: the legacy
@@ -225,7 +228,7 @@ func (p nodeInstallPlan) buildRun(mounts, command string, bound map[string]bool)
 		// NODE_OPTIONS is kept beside it rather than replacing it.
 		assignments = append(assignments, `NODE_OPTIONS="--openssl-legacy-provider${NODE_OPTIONS:+ $NODE_OPTIONS}"`)
 	}
-	for _, value := range p.buildDefaults() {
+	for _, value := range append(p.buildDefaults(), p.buildEnv.framework...) {
 		assignments = append(assignments, value.assignment())
 	}
 	if len(p.buildEnv.env.missing(bound)) > 0 && p.buildEnv.env.skippable {

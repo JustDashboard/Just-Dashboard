@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -34,6 +35,9 @@ func nodeInstallFindings(candidate *DetectedCandidate, configuration PlanConfigu
 	}
 	install := candidate.NodeInstalls[index]
 	findings := append([]PreflightFinding{}, install.Findings...)
+	if build.NodeVersion != "" {
+		findings = withSelectedNodeVersion(findings, build.NodeVersion)
+	}
 	if slices.ContainsFunc(findings, func(item PreflightFinding) bool { return item.Severity == PreflightBlocked }) {
 		return findings
 	}
@@ -59,11 +63,14 @@ func nodeInstallFindings(candidate *DetectedCandidate, configuration PlanConfigu
 			"The build installs with "+nodeManagerLabel(manager)+", so a command still naming another manager's runner is run through "+manager+" instead.",
 			"Save the command with "+manager+"'s runner, or choose the package manager it names.", "deploy", command.field))
 	}
-	if nodeCommandTools(nil, []string{runs["build"], runs["start"]})["deno"] {
-		return append(findings, finding("command_runner_missing", PreflightBlocked,
-			"A command needs a runtime the Node image does not have", "deno",
-			"The build or start command calls deno, which the Node recipe does not install.",
-			"Use a Dockerfile, or change the command to one the Node image runs.", "deploy", "configuration.build.buildCommand"))
+	for _, command := range commands {
+		tools := nodeCommandTools(nil, []string{runs[command.label]})
+		if runner := slices.IndexFunc(nodeForeignRunners, func(name string) bool { return tools[name] && name != "python3" }); runner >= 0 {
+			return append(findings, finding("command_runner_missing", PreflightBlocked,
+				"A command needs a runtime the Node image does not have", nodeForeignRunners[runner],
+				"The "+command.label+" command calls "+nodeForeignRunners[runner]+", which the Node recipe does not install.",
+				"Use a Dockerfile, or change the command to one the Node image runs.", "deploy", command.field))
+		}
 	}
 	for _, segment := range nodeInstallSegments(runs["build"]) {
 		if !slices.ContainsFunc(findings, func(item PreflightFinding) bool { return item.Code == "install_in_build_command" }) {
@@ -148,4 +155,36 @@ func legacyNodeInstallFindings(candidate *DetectedCandidate, chosen string) []Pr
 			"Choose the package manager, declare packageManager in package.json, or delete the stale lockfile.", "deploy", "configuration.build.packageManager")}
 	}
 	return nil
+}
+
+// withSelectedNodeVersion replaces what detection said about the Node
+// release, which it decided from the repository's declarations, with the
+// release Build settings chose. Whether the install accepts that release
+// (Yarn 1 and engine-strict check engines.node) is the recipe's to say, and
+// the check of the reviewed commit asks it.
+func withSelectedNodeVersion(findings []PreflightFinding, version string) []PreflightFinding {
+	kept := findings[:0:0]
+	for _, item := range findings {
+		switch item.Code {
+		case "node_version_selected", "node_version_unsupported", "node_version_eol":
+			continue
+		case "node_sass_unsupported":
+			if version == strconv.Itoa(nodeSassMajor) {
+				continue
+			}
+		}
+		kept = append(kept, item)
+	}
+	major, _ := strconv.Atoi(version)
+	kept = append(kept, finding("node_version_selected", PreflightPass,
+		"Node "+version+" for this package", version+" (Build settings)",
+		"The build and the server run on "+nodeImage(major, nodeFamilyAlpine)+", or its Debian image for packages built for glibc only; the Build setting outranks the repository's version files and engines field.",
+		"", "deploy", "configuration.build.nodeVersion"))
+	if eol := nodeEndOfLife[major]; eol != "" {
+		kept = append(kept, finding("node_version_eol", PreflightWarning,
+			"Node "+version+" no longer receives security fixes", "Node "+version+" reached end of life in "+eol,
+			"The image is still built and served, but vulnerabilities found in this release are not fixed upstream.",
+			"Choose Node 22 or 24 in Build settings once the package builds on it.", "deploy", "configuration.build.nodeVersion"))
+	}
+	return kept
 }

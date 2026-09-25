@@ -12,6 +12,8 @@ import type {
 import type { EnvironmentRow } from "@/components/deploy/new-project/draft"
 
 export const PYTHON_VERSION = /^3\.(10|11|12|13)$/
+/** The Node majors the JavaScript recipe builds on (build_node_runtime.go nodeMajors). */
+export const NODE_VERSION = /^(20|22|24)$/
 
 /** The request-body ceiling a route gets when the plan names none, and the most it may name. */
 export const DEFAULT_MAX_REQUEST_BODY_MB = 64
@@ -258,6 +260,12 @@ export function withPackageManagerRunner(command: string, manager?: NodePackageM
   return segments
     .map((segment) => {
       const [, assignments, body] = /^((?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*)(.*)$/.exec(segment)!
+      // Bun running a JavaScript file (SvelteKit's `bun ./build/index.js`)
+      // runs on Node the same way; a TypeScript file stays with Bun, whose
+      // APIs it may use, and is not a package script.
+      const bunFile = /^bun (?:run )?(\.?\/?[\w./@-]+\.(?:js|mjs|cjs))$/.exec(body)
+      if (bunFile) return manager === "bun" ? segment : `${assignments}node ${bunFile[1]}`
+      if (/^bun run \S+\.(?:ts|tsx|mts|cts|jsx)$/.test(body)) return segment
       const script = /^(?:bun|npm|pnpm|yarn) run (\S+)$/.exec(body)
       if (script) return `${assignments}${manager} run ${script[1]}`
       const shorthand = /^(npm|pnpm|yarn) (start|test)$/.exec(body)
@@ -1075,6 +1083,8 @@ export function validateConfiguration(
   if (!configuration.build.method) errors.buildMethod = "Choose a build method."
   if (configuration.build.pythonVersion && !PYTHON_VERSION.test(configuration.build.pythonVersion))
     errors.pythonVersion = "Use Python 3.10, 3.11, 3.12 or 3.13, or leave the version empty."
+  if (configuration.build.nodeVersion && !NODE_VERSION.test(configuration.build.nodeVersion))
+    errors.nodeVersion = "Use Node 20, 22 or 24, or leave the version to the repository."
   if (configuration.build.target && !DOCKERFILE_STAGE.test(configuration.build.target))
     errors.target = "A stage name starts with a letter and has only letters, digits, . _ and -."
   for (const [name, value] of [

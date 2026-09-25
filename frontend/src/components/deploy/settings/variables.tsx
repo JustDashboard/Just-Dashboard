@@ -84,7 +84,13 @@ import {
   Warning,
 } from "@/components/icons"
 import { LINK_STATUS } from "@/components/deploy/vocabulary"
-import { NAME, readDotenv, REFUSAL_WORD } from "@/components/deploy/settings/dotenv"
+import {
+  isPlatformEntry,
+  NAME,
+  platformReason,
+  readDotenv,
+  REFUSAL_WORD,
+} from "@/components/deploy/settings/dotenv"
 import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { SettingSection, SettingsPage } from "@/components/deploy/settings/setting-card"
 import {
@@ -1442,6 +1448,9 @@ function ReferencePicker({
   )
 }
 
+/** The verdict on a name the import leaves out because the deployment sets it. */
+const LEFT_OUT = "left out · set by the deployment"
+
 type ImportVerdict = {
   name: string
   line: number
@@ -1499,7 +1508,18 @@ function ImportSheet({
     dotenv.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/gm),
     (match) => match[1],
   ).filter((entry) => browserInlined(entry))
-  const body = { revision: configuration.revision, dotenv, sensitivity, scopes }
+  // A Compose file may interpolate ${PORT} itself, so its stack keeps what
+  // the paste says unless the reader leaves it out.
+  const [keepPlatform, setKeepPlatform] = useState(configuration.build.method === "compose")
+  const platform = reading.entries.filter(isPlatformEntry).map((entry) => entry.name)
+  const skip = keepPlatform ? [] : platform
+  const body = {
+    revision: configuration.revision,
+    dotenv,
+    sensitivity,
+    scopes,
+    ...(skip.length ? { skip } : {}),
+  }
   const key = JSON.stringify(body)
   const ready = open && dotenv.trim() !== "" && scopes.length > 0 && !reading.error
 
@@ -1550,6 +1570,8 @@ function ImportSheet({
         label: `refused · ${REFUSAL_WORD[refusal ?? "invalid_name"]}`,
         refused: true,
       }
+    if (answer?.change === "skipped" || (!answer && skip.includes(entry.name)))
+      return { ...entry, tone: "stopped", label: LEFT_OUT, refused: false }
     if (answer?.change === "unchanged")
       return { ...entry, tone: "stopped", label: "unchanged", refused: false }
     if (answer?.change === "changed" || (!answer && existing.has(entry.name)))
@@ -1564,6 +1586,7 @@ function ImportSheet({
     { key: "new", count: count("new") },
     { key: "replaced", count: count("replaces the current value"), className: "text-warning" },
     { key: "unchanged", count: count("unchanged") },
+    { key: "left out", count: count(LEFT_OUT) },
     { key: "refused", count: refused, className: "text-destructive" },
   ]
 
@@ -1631,7 +1654,10 @@ function ImportSheet({
             onClick={() => void importDotenv()}
             pending={importing}
             disabled={
-              verdicts.length === 0 || refused > 0 || Boolean(reading.error || refusedWhole)
+              verdicts.length === 0 ||
+              verdicts.every((verdict) => verdict.label === LEFT_OUT) ||
+              refused > 0 ||
+              Boolean(reading.error || refusedWhole)
             }
           >
             Import variables
@@ -1725,6 +1751,16 @@ function ImportSheet({
                 </li>
               ))}
             </ul>
+          )}
+          {platform.length > 0 && (
+            <OptionList>
+              <OptionRow
+                title={`Leave out ${platform.join(" and ")}`}
+                hint={`Left out because ${platformReason(platform)}.`}
+                checked={!keepPlatform}
+                onCheckedChange={(checked) => setKeepPlatform(!checked)}
+              />
+            </OptionList>
           )}
         </FormSection>
         <FormSection title="Import as">

@@ -60,6 +60,9 @@ type nodeReadBudget struct {
 	remaining int64
 	locks     map[string]nodeLockfileComparer
 	manifests map[string]nodeManifestReading
+	// configs bounds the framework reads (nodeConfigBudget) apart from
+	// the install's.
+	configs *nodeReadBudget
 }
 
 // nodeLockfileComparer compares a parsed lockfile with the package at own,

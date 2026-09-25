@@ -22,6 +22,13 @@ func plannedDetectionCandidate(detection *DetectionResult, build BuildPlanConfig
 			(build.Recipe == "" || candidate.Recipe == "" || candidate.Recipe == build.Recipe) &&
 			(build.Method != BuildDockerfile || sameDockerfile(candidate.Dockerfile, build.Dockerfile))
 	}
+	// Candidates that share a root and method (an Nx workspace's
+	// applications) are told apart by the commands the plan runs: a saved
+	// plan carries no selection, and the plan for one application must not
+	// be judged by another's facts.
+	if same := plannedByCommands(detection, build, matches); same != nil {
+		return same
+	}
 	if selected := selectedDetectionCandidate(detection); selected != nil && matches(selected) {
 		return selected
 	}
@@ -30,6 +37,35 @@ func plannedDetectionCandidate(detection *DetectionResult, build BuildPlanConfig
 	for index := range detection.Candidates {
 		if candidate := &detection.Candidates[index]; matches(candidate) {
 			return candidate
+		}
+	}
+	return nil
+}
+
+// plannedByCommands is the one candidate among several matching ones whose
+// build and start commands are the plan's, or failing that whose build
+// command is, when exactly one is.
+func plannedByCommands(detection *DetectionResult, build BuildPlanConfig, matches func(*DetectedCandidate) bool) *DetectedCandidate {
+	var all []*DetectedCandidate
+	for index := range detection.Candidates {
+		if candidate := &detection.Candidates[index]; matches(candidate) {
+			all = append(all, candidate)
+		}
+	}
+	if len(all) < 2 {
+		return nil
+	}
+	same := func(detected, planned string) bool { return strings.TrimSpace(detected) == strings.TrimSpace(planned) }
+	for _, both := range []bool{true, false} {
+		var found *DetectedCandidate
+		count := 0
+		for _, candidate := range all {
+			if same(candidate.BuildCommand, build.BuildCommand) && (!both || same(candidate.StartCommand, build.StartCommand)) {
+				found, count = candidate, count+1
+			}
+		}
+		if count == 1 {
+			return found
 		}
 	}
 	return nil

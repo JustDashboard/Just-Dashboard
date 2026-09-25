@@ -552,6 +552,10 @@ var (
 		{"mysql2", "mysql"}, {"mysql", "mysql"}, {"mariadb", "mariadb"},
 		{"mongoose", "mongodb"}, {"mongodb", "mongodb"},
 		{"ioredis", "redis"}, {"redis", "redis"}, {"bullmq", "redis"}, {"connect-redis", "redis"},
+		// Adapters that name their engine: Payload's database packages, and
+		// Medusa, which runs on Postgres alone.
+		{"@payloadcms/db-postgres", "postgres"}, {"@payloadcms/db-vercel-postgres", "postgres"}, {"@payloadcms/db-mongodb", "mongodb"},
+		{"@medusajs/medusa", "postgres"},
 	}
 	pythonDatabaseDrivers = []struct{ dependency, engine string }{
 		{"psycopg", "postgres"}, {"psycopg2", "postgres"}, {"psycopg2-binary", "postgres"}, {"asyncpg", "postgres"}, {"psycopg-binary", "postgres"},
@@ -688,10 +692,11 @@ func detectDatabases(marker *detectedMarkers, variables []DetectedVariable, pris
 			engines[engine].variable = variable.Name
 		}
 	}
-	// A generic DATABASE_URL belongs to the one relational engine the
-	// dependencies named; with several, or with none, it names nothing.
+	// A generic DATABASE_URL (Payload's DATABASE_URI) belongs to the one
+	// relational engine the dependencies named; with several, or with none,
+	// it names nothing.
 	for _, variable := range variables {
-		if variable.Name != "DATABASE_URL" || engineForVariableName(variable.Name) != "" {
+		if (variable.Name != "DATABASE_URL" && variable.Name != "DATABASE_URI") || engineForVariableName(variable.Name) != "" {
 			continue
 		}
 		relational := []string{}

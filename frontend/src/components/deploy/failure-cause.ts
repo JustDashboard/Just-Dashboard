@@ -28,6 +28,7 @@ export const CAUSE_TITLES: Record<string, string> = {
   build_sqlx_offline: "sqlx has no offline query data",
   build_database_unreachable: "Database unreachable during build",
   build_prerender_failed: "Page failed to prerender",
+  build_next_image_export: "next/image in a static export",
   build_prisma_client_missing: "Prisma Client not generated",
   build_platform_binary_missing: "Platform binary missing from the lockfile",
   build_legacy_openssl: "Build tool needs legacy OpenSSL",
@@ -264,6 +265,11 @@ export function fixTarget(
       return {
         href: `${base}/build#build`,
         label: fix.value ? `Use Python ${fix.value}` : "Choose the Python version",
+      }
+    case "nodeVersion":
+      return {
+        href: `${base}/build#build`,
+        label: fix.value ? `Use Node ${fix.value}` : "Choose the Node version",
       }
     case "buildCommand":
       return {

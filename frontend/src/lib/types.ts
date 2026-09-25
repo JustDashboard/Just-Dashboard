@@ -3599,6 +3599,10 @@ export type DeploymentDetectionCandidate = {
     memoryMiB?: number
     /** Names `prisma.config` reads that the recipe gives a placeholder while `prisma generate` runs. */
     prismaEnv?: string[]
+    /** What the framework's configuration made the recipe do, said before Deploy. */
+    findings?: DeploymentPreflightFinding[]
+    /** Package scripts that start a development server or a watcher, with what they start. */
+    devScripts?: Record<string, string>
   }
   /** go.mod's toolchain line and the .go-version pin, judged against the plan's Go version. */
   goToolchain?: string
@@ -3840,6 +3844,8 @@ export type DeploymentConfiguration = {
     /** The main package a Go recipe builds, relative to the root directory; empty lets it choose. */
     goPackage?: string
     pythonVersion?: string
+    /** The Node major a JavaScript recipe builds and runs on; empty follows the repository. */
+    nodeVersion?: string
     packageManager?: NodePackageManager
     rootDirectory?: string
     dockerfile?: string
@@ -3960,7 +3966,8 @@ export type DeploymentDotenvImportPreview = {
   variables: {
     name: string
     line: number
-    change: "added" | "changed" | "unchanged" | "refused"
+    /** "skipped" is a name the request asked the import to leave out. */
+    change: "added" | "changed" | "unchanged" | "skipped" | "refused"
     reason?: "invalid_name" | "duplicate" | "invalid_value"
   }[]
 }

@@ -641,6 +641,7 @@ func preflightFindings(
 	if planned != nil && configuration.Build.Method == BuildRecipe &&
 		(planned.Recipe == "node" || (planned.Recipe == "php" && len(planned.NodeInstalls) > 0)) {
 		findings = append(findings, nodeInstallFindings(planned, configuration)...)
+		findings = append(findings, nodeFrameworkFindings(planned, configuration)...)
 	}
 	if planned != nil && planned.UnpinnedDependencies && configuration.Build.Method == BuildRecipe {
 		findings = append(findings, finding("dependencies_unpinned", PreflightWarning,

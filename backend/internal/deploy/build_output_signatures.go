@@ -140,6 +140,7 @@ var buildSignatures = []buildSignature{
 	signature("build_database_unreachable", "", ".jd.internal", `getaddrinfo (?:ENOTFOUND|EAI_AGAIN) ([\w.-]+\.jd\.internal)`),
 	signature("build_database_unreachable", "django", "OperationalError", `OperationalError: (?:could not translate host name|connection to server at)`),
 	signature("build_prerender_failed", "next", "", `Error occurred prerendering page "([^"]+)"|Failed to collect page data for (\S+)|Export encountered an error on ([^\s,:]+)`),
+	signature("build_next_image_export", "next", "Image Optimization", `Image Optimization using the default loader is not compatible with`),
 
 	// What a Node build needed from its dependencies and did not get.
 	signature("build_prisma_client_missing", "prisma", "prisma", `@prisma/client did not initialize yet|Cannot find module '\.prisma/client|Can't resolve '\.prisma/client`),
@@ -201,6 +202,7 @@ var buildSignatures = []buildSignature{
 	signature("build_dependency_unavailable", "hugo", "module", `module "([^"\s]+)" not found`),
 
 	// Registries that refused the build, and a network that failed it.
+	signature("build_registry_auth", "npmrc", "Failed to replace env in config", `Failed to replace env in config: \$\{([A-Za-z_]\w*)\}`),
 	signature("build_registry_auth", "", "", `code E401|code E403|ERR_PNPM_FETCH_40[13]|YN0041|401 Unauthorized|403 Forbidden|401 Client Error|Invalid credentials for|authentication required|terminal prompts disabled|unauthorized: `),
 	signature("build_registry_auth", "dotnet", "NU1301", `NU1301`).requiring(`401|403`),
 	signature("build_network", "", "", `getaddrinfo (?:ENOTFOUND|EAI_AGAIN) ([\w.-]+)|Could not resolve host:? ([\w.-]+)|dial tcp: lookup ([\w.-]+)|Temporary failure in name resolution|TLS handshake timeout|i/o timeout|network is unreachable|Failed to establish a new connection|Connection timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|socket hang up|EAI_AGAIN|NU1301`),

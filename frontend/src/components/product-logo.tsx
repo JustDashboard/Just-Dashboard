@@ -571,6 +571,7 @@ const FRAMEWORKS: Record<string, string> = {
   fastify: "fastify",
   hono: "hono",
   koa: "koa",
+  directus: "directus",
   go: "go",
   gin: "go",
   echo: "go",

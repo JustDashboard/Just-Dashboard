@@ -63,7 +63,9 @@ func TestNodeFrameworkCatalogueDetectsServingDefaults(t *testing.T) {
 		{name: "angular application builder", manifest: `{"scripts":{"build":"ng build","start":"ng serve"},"dependencies":{"@angular/core":"^19.0.0"}}`,
 			files:     map[string]string{"angular.json": angularWorkspace},
 			framework: "angular", output: "dist/my-app/browser", port: 80, profile: ProfileStatic, confidence: ConfidenceHigh, spa: true},
-		{name: "angular ssr", manifest: `{"scripts":{"build":"ng build"},"dependencies":{"@angular/core":"^19.0.0","@angular/ssr":"^19.0.0"}}`,
+		// The Angular CLI writes "start": "ng serve", the development server,
+		// into every SSR project; the production server is its entry.
+		{name: "angular ssr", manifest: `{"scripts":{"build":"ng build","start":"ng serve"},"dependencies":{"@angular/core":"^19.0.0","@angular/ssr":"^19.0.0"}}`,
 			files:     map[string]string{"angular.json": angularWorkspace},
 			framework: "angular", start: "node dist/my-app/server/server.mjs", port: 4000, profile: ProfileWeb, confidence: ConfidenceHigh},
 		{name: "angular without a workspace file", manifest: `{"scripts":{"build":"ng build"},"dependencies":{"@angular/core":"^19.0.0"}}`,

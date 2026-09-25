@@ -880,6 +880,9 @@ func frameworkDisplayName(name string) string {
 	if label, ok := frameworkDisplayNames[name]; ok {
 		return label
 	}
+	if framework := nodeFrameworkByName(name); framework != nil {
+		return framework.Label
+	}
 	if name == "" {
 		return ""
 	}
@@ -937,7 +940,7 @@ func hasApplication(candidates []DetectedCandidate) bool {
 
 var documentationFrameworks = map[string]bool{
 	"docusaurus": true, "vitepress": true, "mkdocs": true, "sphinx": true, "vuepress": true, "starlight": true,
-	"nextra": true, "hugo": true, "jekyll": true,
+	"nextra": true, "hugo": true, "jekyll": true, "rspress": true,
 }
 
 // documentationCandidate is a docs-site generator's candidate, or a static

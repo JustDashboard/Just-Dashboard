@@ -643,22 +643,15 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 			return selectedRecipe{}, err
 		}
 		plan := planNodeInstall(source.facts, nodeInstallChoice{
-			selected: config.PackageManager, build: config.BuildCommand, start: config.StartCommand,
+			selected: config.PackageManager, build: config.BuildCommand, start: config.StartCommand, nodeVersion: config.NodeVersion,
 		})
 		if plan.blocked != nil {
 			return selectedRecipe{}, plan.blockedError()
 		}
 		manager := plan.manager
-		files := nodeRootFiles{}
-		if regularExists(root, "angular.json") {
-			files.angularJSON, _ = readContainedRegular(root, "angular.json", 512<<10)
-		}
-		if regularExists(root, "Procfile") {
-			files.procfile, _ = readContainedRegular(root, "Procfile", 64<<10)
-		}
-		framework, err := validateNodeRecipeContent(manifest, files, BuildPlanConfig{
+		framework, err := validateNodeRecipeContent(manifest, source.files, BuildPlanConfig{
 			Method: config.Method, Recipe: config.Recipe, PackageManager: manager,
-			BuildCommand: plan.build, StartCommand: plan.start, OutputDirectory: config.OutputDirectory,
+			BuildCommand: plan.build, StartCommand: plan.start, OutputDirectory: config.OutputDirectory, SPAFallback: config.SPAFallback,
 		})
 		if err != nil {
 			return selectedRecipe{}, err

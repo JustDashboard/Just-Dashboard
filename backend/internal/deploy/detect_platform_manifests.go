@@ -1157,7 +1157,7 @@ func withSchemaStep(candidate *DetectedCandidate, command string) string {
 	if runner == "" {
 		runner = "npm"
 	}
-	return nodeExecRunner(runner) + " " + candidate.SchemaCommand + " && " + command
+	return nodeSchemaStep(runner, *tool, candidate.SchemaCommand) + " && " + command
 }
 
 // runnerConflict refuses a declared command that runs a JavaScript package

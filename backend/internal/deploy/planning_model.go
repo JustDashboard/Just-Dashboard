@@ -345,6 +345,13 @@ type DetectedNodeBuild struct {
 	EnvSkippable bool     `json:"envSkippable,omitempty"`
 	MemoryMiB    int      `json:"memoryMiB,omitempty"`
 	PrismaEnv    []string `json:"prismaEnv,omitempty"`
+	// Findings are what the framework's configuration made the recipe do
+	// that the repository could say itself (adapter-node for adapter-auto,
+	// a Nitro preset replaced); DevScripts names each package script that
+	// starts a development server or a watcher, with what it starts, so a
+	// start command written later is judged without the source.
+	Findings   []PreflightFinding `json:"findings,omitempty"`
+	DevScripts map[string]string  `json:"devScripts,omitempty"`
 }
 
 // DetectedVariable is an environment variable the source reads, found in an
@@ -480,6 +487,7 @@ type BuildPlanConfig struct {
 	Recipe          string      `json:"recipe,omitempty"`
 	GoVersion       string      `json:"goVersion,omitempty"`
 	PythonVersion   string      `json:"pythonVersion,omitempty"`
+	NodeVersion     string      `json:"nodeVersion,omitempty"`
 	PackageManager  string      `json:"packageManager,omitempty"`
 	RootDirectory   string      `json:"rootDirectory,omitempty"`
 	Dockerfile      string      `json:"dockerfile,omitempty"`
@@ -1173,6 +1181,11 @@ func (c PlanConfiguration) Validate() error {
 	}
 	if c.Build.PythonVersion != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "python" || !pythonRecipeVersionRE.MatchString(c.Build.PythonVersion)) {
 		return fmt.Errorf("Python version must select 3.10, 3.11, 3.12 or 3.13 in a Python recipe; use a Dockerfile for other interpreters")
+	}
+	// A Node major chosen in Build settings outranks what the repository
+	// declares; empty follows the repository.
+	if c.Build.NodeVersion != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "node" || !nodeRecipeVersionRE.MatchString(c.Build.NodeVersion)) {
+		return fmt.Errorf("Node version must select 20, 22 or 24 in a JavaScript recipe; use a Dockerfile for other releases")
 	}
 	if c.Build.SPAFallback && c.Build.Method != BuildRecipe && c.Build.Method != BuildStatic {
 		return fmt.Errorf("the single-page fallback applies only to a static site or a recipe with static output")
@@ -1888,6 +1901,14 @@ func validateDetectedNodeInstall(candidate DetectedCandidate) error {
 				return malformed
 			}
 		}
+		if len(build.Findings) > 8 || len(build.DevScripts) > 32 || !validDetectedFindings(build.Findings, text) {
+			return malformed
+		}
+		for name, label := range build.DevScripts {
+			if !nodeScriptNameRE.MatchString(name) || len(name) > 64 || !text(label, 64) {
+				return malformed
+			}
+		}
 	}
 	for _, lockfile := range candidate.Lockfiles {
 		if nodeLockfileManager(lockfile.Path) == "" || nodeLockfileManager(lockfile.Path) != lockfile.Manager ||
@@ -1899,23 +1920,30 @@ func validateDetectedNodeInstall(candidate DetectedCandidate) error {
 	for _, install := range candidate.NodeInstalls {
 		if !validNodePackageManager(install.Manager) || (install.Lockfile != "" && nodeLockfileManager(install.Lockfile) == "") ||
 			!text(install.Install, 1024) || !text(install.Toolchain, 256) ||
-			!text(install.BuildCommand, 4096) || !text(install.StartCommand, 4096) || len(install.Findings) > 32 {
+			!text(install.BuildCommand, 4096) || !text(install.StartCommand, 4096) || len(install.Findings) > 32 ||
+			!validDetectedFindings(install.Findings, text) {
 			return malformed
-		}
-		for _, finding := range install.Findings {
-			switch finding.Severity {
-			case PreflightPass, PreflightWarning, PreflightDecision, PreflightBlocked, PreflightUnavailable:
-			default:
-				return malformed
-			}
-			if finding.Code == "" || !text(finding.Code, 64) || !text(finding.Title, 512) || !text(finding.Measured, 512) ||
-				!text(finding.Means, 512) || !text(finding.Action, 512) || !text(finding.Owner, 64) ||
-				!text(finding.FieldID, 256) || finding.DeepLink != "" {
-				return malformed
-			}
 		}
 	}
 	return nil
+}
+
+// validDetectedFindings bounds findings detection recorded on a candidate
+// the way a saved draft revalidates them.
+func validDetectedFindings(findings []PreflightFinding, text func(string, int) bool) bool {
+	for _, finding := range findings {
+		switch finding.Severity {
+		case PreflightPass, PreflightWarning, PreflightDecision, PreflightBlocked, PreflightUnavailable:
+		default:
+			return false
+		}
+		if finding.Code == "" || !text(finding.Code, 64) || !text(finding.Title, 512) || !text(finding.Measured, 512) ||
+			!text(finding.Means, 512) || !text(finding.Action, 512) || !text(finding.Owner, 64) ||
+			!text(finding.FieldID, 256) || finding.DeepLink != "" {
+			return false
+		}
+	}
+	return true
 }
 
 var contentDigestRE = regexp.MustCompile(`^[a-z0-9][a-z0-9+._-]{0,31}:[0-9a-f]{32,128}$`)

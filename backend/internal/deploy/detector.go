@@ -912,11 +912,12 @@ func packageCandidate(marker *detectedMarkers, schemaPaths []string) []DetectedC
 	if runner == "" {
 		runner = "npm"
 	}
-	framework := matchNodeFramework(manifest)
-	files := nodeRootFiles{angularJSON: marker.angularJSON, procfile: marker.procfile}
-	var resolution nodeFrameworkResolution
-	if framework != nil {
-		resolution = framework.resolve(manifest, files, runner)
+	files := install.files
+	if marker.node == nil {
+		files = nodeRootFiles{angularJSON: marker.angularJSON, procfile: marker.procfile}
+	}
+	if files.nx != nil {
+		return nxCandidates(marker, candidate, facts, files, settled, detectSchemaTool(dependencies, schemaPaths, facts.prisma))
 	}
 	// A Procfile is the one place a repository declares how it is served
 	// rather than leaving it to be inferred, so it outranks a start script
@@ -926,13 +927,41 @@ func packageCandidate(marker *detectedMarkers, schemaPaths []string) []DetectedC
 	if procfileWeb != "" && rejectPlanSecretLiteral("Procfile web process", procfileWeb) != nil {
 		procfileWeb = ""
 	}
+	serves := procfileWeb
+	if serves == "" && manifest.Scripts["start"] != "" {
+		serves = "npm run start"
+	}
+	framework, setAside, confirm := resolveNodeFramework(manifest, files, serves)
+	if setAside != "" {
+		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: marker.packagePath, Reason: setAside})
+	}
+	// asked are the framework's own questions, which preflight names
+	// before each deploy while the plan still runs detection's guess.
+	var asked []string
+	if confirm != "" {
+		asked = append(asked, confirm)
+	}
+	var resolution nodeFrameworkResolution
+	if framework != nil {
+		resolution = framework.resolve(manifest, files, runner)
+	}
 	inputs := nodeCommandInputs{
 		manifest: manifest, files: files, framework: framework, procfileWeb: procfileWeb,
 		schema: detectSchemaTool(dependencies, schemaPaths, facts.prisma),
 	}
+	if owned := frameworkSchemaTool(resolution.Schema, marker.root); owned != nil {
+		inputs.schema = owned
+	}
+	if framework == nil {
+		inputs.serverLibrary = matchNodeServerLibrary(manifest)
+	}
 	// The name becomes part of a command, so it has to be a package name.
 	if install.context != install.dir && facts.workspaceTurbo && nodePackageNameRE.MatchString(manifest.Name) && nodeHasWorkspaceDependency(manifest, facts.workspacePackages) {
 		inputs.turboFilter = manifest.Name
+	} else if install.context != install.dir && nodePackageNameRE.MatchString(manifest.Name) && len(facts.workspaceBuilds) > 0 {
+		inputs.memberName, inputs.workspaceBuilds = manifest.Name, facts.workspaceBuilds
+		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: marker.packagePath,
+			Reason: boundedEvidenceSentence("its workspace dependencies build first: " + strings.Join(facts.workspaceBuilds, ", "))})
 	}
 	candidate.BuildCommand, candidate.StartCommand = inputs.commands(runner)
 	bareStart := inputs.start(runner)
@@ -947,6 +976,10 @@ func packageCandidate(marker *detectedMarkers, schemaPaths []string) []DetectedC
 	if framework == nil {
 		candidate.Framework = matchNodeServerLibrary(manifest)
 		entry := nodeMainEntry(manifest)
+		derived, derivedWhy := "", ""
+		if entry == "" && procfileWeb == "" && manifest.Scripts["start"] == "" && inputs.serverLibrary != "" {
+			derived, derivedWhy = inputs.derivedStart(runner)
+		}
 		switch {
 		case procfileWeb != "":
 			candidate.Profile, candidate.Port = ProfileWeb, 3000
@@ -956,6 +989,17 @@ func packageCandidate(marker *detectedMarkers, schemaPaths []string) []DetectedC
 			candidate.Profile, candidate.Port = ProfileWeb, 3000
 			candidate.Evidence = append(candidate.Evidence,
 				DetectionEvidence{Path: marker.packagePath, Reason: "start script: " + boundedEvidence(manifest.Scripts["start"])})
+			if dev := nodeScriptDevServer(manifest.Scripts, "start"); dev != "" && bareStart != runner+" run start" {
+				candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: marker.packagePath,
+					Reason: boundedEvidenceSentence("the start script runs " + dev + ", which watches for changes; the start command runs " + boundedEvidence(bareStart))})
+			}
+		case derived != "":
+			candidate.Profile, candidate.Port = ProfileWeb, 3000
+			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: marker.packagePath,
+				Reason: boundedEvidenceSentence("start derived from the " + derivedWhy)})
+			if file := nodeTypeScriptOnNode(derived); file != "" {
+				asked = append(asked, file+" is TypeScript, which node runs only by stripping its types (Node 22.6 and later, without enums, decorators or extensionless imports); install tsx, or build it to JavaScript and start that")
+			}
 		case entry != "":
 			candidate.Evidence = append(candidate.Evidence,
 				DetectionEvidence{Path: marker.packagePath, Reason: "main entry: " + entry})
@@ -984,7 +1028,14 @@ func packageCandidate(marker *detectedMarkers, schemaPaths []string) []DetectedC
 				break
 			}
 		}
-		candidate.NeedsDecision = append(candidate.NeedsDecision, resolution.Decisions...)
+		asked = append(asked, resolution.Decisions...)
+		for _, note := range resolution.Notes {
+			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(marker.root, note.file), Reason: boundedEvidenceSentence(note.reason)})
+		}
+		if dev := nodeScriptDevServer(manifest.Scripts, "start"); dev != "" && resolution.Output == "" && bareStart != runner+" run start" && procfileWeb == "" {
+			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: marker.packagePath,
+				Reason: boundedEvidenceSentence("the start script runs " + dev + ", the development server; the start command runs " + boundedEvidence(bareStart))})
+		}
 		if resolution.Output != "" {
 			candidate.Profile, candidate.OutputDirectory, candidate.Port = ProfileStatic, resolution.Output, 80
 			candidate.SPAFallback = resolution.SPA
@@ -1017,7 +1068,7 @@ func packageCandidate(marker *detectedMarkers, schemaPaths []string) []DetectedC
 		candidate.SchemaTool = tool.Tool.Name
 		candidate.Evidence = append(candidate.Evidence, tool.Evidence)
 		switch {
-		case inputs.schemaInStart(bareStart):
+		case !tool.owned && inputs.schemaInStart(bareStart):
 			candidate.SchemaInStart = true
 			candidate.Evidence[len(candidate.Evidence)-1].Reason = tool.Tool.Label + " schema applied by the package's own start script"
 		case tool.Command == "":
@@ -1027,12 +1078,19 @@ func packageCandidate(marker *detectedMarkers, schemaPaths []string) []DetectedC
 		}
 	}
 	candidate.NodeInstalls = facts.detectedInstalls(candidate.PackageManager, false, inputs.commands)
-	candidate.NodeBuild = detectedNodeBuild(facts, candidate.Framework, candidate.BuildCommand)
 	candidate.Variables = facts.registry
-	if _, err := validateNodeRecipeContent(marker.packageJSON, files,
-		BuildPlanConfig{Method: BuildRecipe, Recipe: "node", PackageManager: runner, BuildCommand: candidate.BuildCommand, StartCommand: candidate.StartCommand, OutputDirectory: candidate.OutputDirectory}); err != nil {
+	recipe, err := validateNodeRecipeContent(marker.packageJSON, files,
+		BuildPlanConfig{Method: BuildRecipe, Recipe: "node", PackageManager: runner, BuildCommand: candidate.BuildCommand, StartCommand: candidate.StartCommand, OutputDirectory: candidate.OutputDirectory, SPAFallback: candidate.SPAFallback})
+	if err != nil {
 		candidate.RecipeIssue = err.Error()
 	}
+	for _, note := range recipe.serving.notes {
+		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(marker.root, note.file), Reason: boundedEvidenceSentence(note.reason)})
+	}
+	candidate.NeedsDecision = append(candidate.NeedsDecision, asked...)
+	candidate.NodeBuild = withNodeFrameworkFacts(detectedNodeBuild(facts, candidate.Framework, candidate.BuildCommand),
+		slices.Concat(resolution.Findings, nodeDecisionFindings(asked)), nodeDevScripts(manifest.Scripts))
+	applyNodePackageShape(&candidate, install, files, framework != nil)
 	return []DetectedCandidate{newDetectedCandidate(marker.root, BuildRecipe, candidate)}
 }
 
@@ -1047,12 +1105,24 @@ type nodeCommandInputs struct {
 	procfileWeb string
 	schema      *detectedSchemaTool
 	// turboFilter is the workspace member Turborepo builds, with the
-	// workspace packages it depends on.
-	turboFilter string
+	// workspace packages it depends on; without Turborepo, workspaceBuilds
+	// are the workspace packages the member named memberName builds after.
+	turboFilter     string
+	memberName      string
+	workspaceBuilds []string
+	// serverLibrary is the HTTP library a package without a framework is
+	// served by, which lets its start be derived from its dev script.
+	serverLibrary string
 }
 
 func (in nodeCommandInputs) schemaInStart(start string) bool {
-	return in.schema != nil && (in.schema.Tool.applied(in.manifest.Scripts["start"]) || in.schema.Tool.applied(start))
+	if in.schema == nil {
+		return false
+	}
+	if in.schema.owned {
+		return in.schema.Tool.applied(start)
+	}
+	return in.schema.Tool.applied(in.manifest.Scripts["start"]) || in.schema.Tool.applied(start)
 }
 
 func (in nodeCommandInputs) commands(runner string) (string, string) {
@@ -1065,15 +1135,20 @@ func (in nodeCommandInputs) commands(runner string) (string, string) {
 		buildScript = resolution.BuildScript
 	}
 	build := ""
-	if in.manifest.Scripts[buildScript] != "" {
+	switch {
+	case in.manifest.Scripts[buildScript] != "":
 		build = runner + " run " + buildScript
 		if in.turboFilter != "" {
 			build = nodeExecRunner(runner) + " turbo run " + buildScript + " --filter=" + in.turboFilter + "..."
+		} else if len(in.workspaceBuilds) > 0 {
+			build = nodeWorkspaceBuild(runner, in.memberName, buildScript, in.workspaceBuilds)
 		}
+	case resolution.Build != "":
+		build = resolution.Build
 	}
 	start := in.start(runner)
 	if in.schema != nil && in.schema.Command != "" && start != "" && !in.schemaInStart(start) {
-		start = nodeExecRunner(runner) + " " + in.schema.Command + " && " + start
+		start = nodeSchemaStep(runner, in.schema.Tool, in.schema.Command) + " && " + start
 	}
 	return build, start
 }
@@ -1089,21 +1164,22 @@ func (in nodeCommandInputs) start(runner string) string {
 	case in.framework == nil && in.procfileWeb != "":
 		start = in.procfileWeb
 	case in.framework == nil && in.manifest.Scripts["start"] != "":
-		start = runner + " run start"
+		start = in.scriptStart(runner)
 	case in.framework == nil:
 		if entry := nodeMainEntry(in.manifest); entry != "" {
 			start = nodeEntryCommand(runner, entry)
+		} else if in.serverLibrary != "" {
+			start, _ = in.derivedStart(runner)
 		}
 	case resolution.Output != "":
 	case in.procfileWeb != "":
 		start = in.procfileWeb
 	default:
 		start = resolution.Start
-		for _, script := range resolution.StartScripts {
-			if in.manifest.Scripts[script] != "" {
-				start = runner + " run " + script
-				break
-			}
+		// A framework's start script serves its build unless it starts the
+		// development server (Angular's "start": "ng serve").
+		if script := nodeServingScript(in.manifest.Scripts, resolution.StartScripts); script != "" {
+			start = runner + " run " + script
 		}
 	}
 	return start
