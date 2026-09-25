@@ -24,6 +24,8 @@ var (
 	// requires-python, or Poetry's python key, in either TOML quote style.
 	pythonRequiresRE  = regexp.MustCompile(`(?m)^\s*(?:requires-python|python)\s*=\s*(?:"([^"\n]+)"|'([^'\n]+)')`)
 	pythonSpecifierRE = regexp.MustCompile(`(>=|~=|\^|==|>|<=|<)\s*(3\.[0-9]{1,2})(\.[0-9*]+)?`)
+	// pythonPackageNameRE is a PEP 503 normalized distribution name.
+	pythonPackageNameRE = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$`)
 )
 
 // The tools the recipe installs a locked project with are pinned, so two
@@ -645,6 +647,11 @@ func selectPythonRecipe(boundary, root string, config BuildPlanConfig) (pythonRe
 	arch := pythonBuildArch(config.TargetPlatform)
 	installRoot := root
 	workspace := findPythonWorkspace(boundary, root)
+	if workspace != nil && (!safeRelativePath(workspace.member) || !nodeMemberPathRE.MatchString(workspace.member) || !pythonPackageNameRE.MatchString(workspace.name)) {
+		// The member's directory and name are written unquoted into the
+		// recipe's WORKDIR and uv sync lines.
+		return recipe, fmt.Errorf("%w: the uv workspace member %q (package %q) needs a directory of letters, digits and . _ @ + - / and a package name of letters, digits and -; build it with a Dockerfile", ErrUnsupportedBuilder, boundedText(workspace.member, 128), boundedText(workspace.name, 128))
+	}
 	if workspace != nil {
 		installRoot = filepath.Join(boundary, filepath.FromSlash(workspace.root))
 		recipe.contextDir, recipe.workdir = firstNonEmpty(workspace.root, "."), workspace.member

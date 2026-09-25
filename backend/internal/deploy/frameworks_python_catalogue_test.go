@@ -415,3 +415,28 @@ func TestPythonDjangoHostsAndOriginsFollowThePlannedDomain(t *testing.T) {
 		})
 	}
 }
+
+// The facts quote the checkout: a path a shell would split stays out of the
+// proposed start command, and a line that carries credential material stays
+// out of the saved detection rather than making it unsavable.
+func TestPythonFactsKeepOnlyWhatCanBeRunAndSaved(t *testing.T) {
+	t.Parallel()
+	_, candidate := detectPythonFixture(t, map[string]string{"requirements.txt": "streamlit\n", "my app.py": "import streamlit as st\nst.title('x')\n"})
+	if candidate == nil || strings.Contains(candidate.StartCommand, "my app") {
+		t.Fatalf("candidate = %+v", candidate)
+	}
+	candidate = &DetectedCandidate{Recipe: "python", Python: &DetectedPython{
+		LocalArtifacts: []string{"lib @ https://build:hunter2@ci.example.com/lib.whl", "pywin32==306"},
+		Modules:        []string{"api_token=abc", "main"},
+		WheelBlockers:  map[string][]string{"3.14": {"numpy==2.1.3", "x\ny"}},
+		VersionSource:  "runtime.txt password=x",
+		Django:         &DetectedDjango{ManageDir: "../escape", SettingsModule: "site.settings"},
+	}}
+	keepValidPythonFacts(candidate)
+	python := candidate.Python
+	if err := validateDetectedPython(*candidate); err != nil || !slices.Equal(python.LocalArtifacts, []string{"pywin32==306"}) ||
+		!slices.Equal(python.Modules, []string{"main"}) || !slices.Equal(python.WheelBlockers["3.14"], []string{"numpy==2.1.3"}) ||
+		python.VersionSource != "" || python.Django != nil {
+		t.Fatalf("kept %+v (%v)", python, err)
+	}
+}

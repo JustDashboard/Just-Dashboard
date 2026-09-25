@@ -138,17 +138,18 @@ func (p pythonProject) versionBlockers(arch string) map[int][]string {
 		blockers[minor] = append(blockers[minor], what)
 	}
 	if p.lock != nil && !p.lock.unreadable {
-		main := p.lock.mainPackages()
-		for _, pkg := range p.lock.packages {
-			if len(main) > 0 && !main[pkg.name] {
-				continue
-			}
-			support := pythonWheelSupport(pkg.wheels, arch)
-			if !support.binary {
-				continue
-			}
-			for _, minor := range pythonCatalogueMinors {
-				if !support.supports(minor) {
+		// Each family is judged by the versions a lock installs on it: a lock
+		// that pins numpy 2.2 below 3.11 and 2.4 above does not hold 2.2's
+		// missing 3.14 wheels against 3.14.
+		supports := map[*pythonLockedPackage]pythonWheels{}
+		for _, minor := range pythonCatalogueMinors {
+			for _, pkg := range p.lock.installedPackages(minor, arch) {
+				support, seen := supports[pkg]
+				if !seen {
+					support = pythonWheelSupport(pkg.wheels, arch)
+					supports[pkg] = support
+				}
+				if support.binary && !support.supports(minor) {
 					block(minor, pkg.name+"=="+pkg.version)
 				}
 			}
@@ -166,6 +167,9 @@ func (p pythonProject) versionBlockers(arch string) map[int][]string {
 			}
 			for _, minor := range pythonCatalogueMinors {
 				first, _ := firsts.first(arch, minor)
+				if requirement.marker != "" && !pythonMarkerAllows(requirement.marker, minor, arch) {
+					continue
+				}
 				if !pythonRequirementReaches(requirement, first) {
 					block(minor, requirement.text)
 				}
@@ -346,6 +350,12 @@ type pythonWheels struct {
 	minors map[int]bool
 }
 
+func (w *pythonWheels) from(minor int) {
+	if w.abi3 == 0 || minor < w.abi3 {
+		w.abi3 = minor
+	}
+}
+
 func (w pythonWheels) supports(minor int) bool {
 	return w.pure || (w.abi3 > 0 && w.abi3 <= minor) || w.minors[minor]
 }
@@ -372,19 +382,31 @@ func pythonWheelSupport(wheels []string, arch string) pythonWheels {
 			continue
 		}
 		for _, tag := range strings.Split(python, ".") {
-			if !strings.HasPrefix(tag, "cp3") {
-				continue
-			}
-			minor, err := strconv.Atoi(strings.TrimPrefix(tag, "cp3"))
-			if err != nil {
-				continue
-			}
+			var minor int
+			var err error
 			switch {
-			case abi == "abi3":
-				if support.abi3 == 0 || minor < support.abi3 {
-					support.abi3 = minor
+			case abi == "none" && tag == "py3":
+				// py3-none-manylinux is compiled code that loads no CPython
+				// ABI (the NVIDIA libraries, ruff): every family installs it.
+				support.pure = true
+				continue
+			case abi == "none" && strings.HasPrefix(tag, "py3"):
+				minor, err = strconv.Atoi(strings.TrimPrefix(tag, "py3"))
+				if err == nil {
+					// py3N-none installs on CPython 3.N and later, as abi3 does.
+					support.from(minor)
 				}
-			case abi == "cp3"+strconv.Itoa(minor):
+				continue
+			case strings.HasPrefix(tag, "cp3"):
+				minor, err = strconv.Atoi(strings.TrimPrefix(tag, "cp3"))
+			}
+			if err != nil || minor == 0 {
+				continue
+			}
+			switch abi {
+			case "abi3":
+				support.from(minor)
+			case "cp3" + strconv.Itoa(minor), "none":
 				support.minors[minor] = true
 			}
 		}

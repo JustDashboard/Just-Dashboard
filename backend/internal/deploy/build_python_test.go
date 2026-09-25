@@ -262,6 +262,16 @@ func TestPythonRecipeRendersSystemPackagesAssetsAndWorkspaces(t *testing.T) {
 			want:   []string{"uv sync --locked --no-dev --package api", "WORKDIR /app/packages/api\n"},
 		},
 		{
+			name: "a workspace member whose directory the Dockerfile cannot name is refused",
+			files: map[string]string{
+				"pyproject.toml": "[tool.uv.workspace]\nmembers = [\"packages/*\"]\n", "uv.lock": "version = 1\n",
+				"packages/my api/pyproject.toml": "[project]\nname = \"api\"\ndependencies = [\"fastapi\"]\n",
+			},
+			root:   "packages/my api",
+			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "python", StartCommand: "uvicorn api.main:app"},
+			fails:  "build it with a Dockerfile",
+		},
+		{
 			name:   "a workspace source without its workspace is refused",
 			files:  map[string]string{"pyproject.toml": "[project]\nname = \"api\"\ndependencies = [\"fastapi\", \"shared\"]\n[tool.uv.sources]\nshared = { workspace = true }\n"},
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "python", StartCommand: "uvicorn api.main:app"},

@@ -378,6 +378,247 @@ category = "main"
 	}
 }
 
+func TestPythonMarkersAreEvaluatedForALinuxBuild(t *testing.T) {
+	t.Parallel()
+	for _, fixture := range []struct {
+		marker string
+		minor  int
+		arch   string
+		want   bool
+	}{
+		{`python_full_version < '3.12'`, 11, "amd64", true},
+		{`python_full_version < '3.12'`, 12, "amd64", false},
+		{`python_full_version >= '3.13'`, 13, "amd64", true},
+		{`python_full_version >= '3.12.4'`, 12, "amd64", true},
+		{`python_version < "3.11"`, 10, "amd64", true},
+		{`python_version < "3.11"`, 14, "amd64", false},
+		{`"3.11" > python_version`, 10, "amd64", true},
+		{`python_version == "3.12.*"`, 12, "amd64", true},
+		{`python_version ~= "3.11"`, 13, "amd64", true},
+		{`python_version in '3.10 3.11'`, 11, "amd64", true},
+		{`python_version not in '3.10 3.11'`, 11, "amd64", false},
+		{`sys_platform == 'win32'`, 13, "amd64", false},
+		{`sys_platform != 'darwin' and platform_machine == 'x86_64'`, 13, "amd64", true},
+		{`sys_platform != 'darwin' and platform_machine == 'x86_64'`, 13, "arm64", false},
+		{`platform_system == "Windows" or (python_version >= "3.12" and os_name == "posix")`, 11, "amd64", false},
+		{`platform_system == "Windows" or (python_version >= "3.12" and os_name == "posix")`, 12, "amd64", true},
+		{`implementation_name == 'pypy'`, 13, "amd64", false},
+		// What the build does not settle holds.
+		{`extra == 'cuda'`, 13, "amd64", true},
+		{`platform_machine == 'x86_64'`, 13, "riscv64", true},
+		{`python_version < '3.11' or`, 13, "amd64", true},
+		{`sys_platform = 'linux'`, 13, "amd64", true},
+		{`(python_version < '3.11'`, 13, "amd64", true},
+	} {
+		if got := pythonMarkerAllows(fixture.marker, fixture.minor, fixture.arch); got != fixture.want {
+			t.Errorf("%q on 3.%d/%s = %v", fixture.marker, fixture.minor, fixture.arch, got)
+		}
+	}
+}
+
+// A lock resolved for several Pythons pins some packages once per range and
+// gates others behind markers; each family is judged by what it installs.
+func TestPythonLockWheelsAreJudgedPerFamily(t *testing.T) {
+	t.Parallel()
+	lock := `version = 1
+requires-python = ">=3.10"
+resolution-markers = [
+    "python_full_version >= '3.12'",
+    "python_full_version < '3.12'",
+]
+
+[[package]]
+name = "app"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "pydub" },
+    { name = "tool", extra = ["gpu"] },
+    { name = "winonly", marker = "sys_platform == 'win32'" },
+]
+
+[[package]]
+name = "audioop-lts"
+version = "0.2.2"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/audioop_lts-0.2.2-cp313-abi3-manylinux_2_17_x86_64.whl" },
+]
+
+[[package]]
+name = "numpy"
+version = "2.2.6"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version < '3.12'",
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/numpy-2.2.6-cp310-cp310-manylinux_2_17_x86_64.whl" },
+    { url = "https://files.pythonhosted.org/numpy-2.2.6-cp311-cp311-manylinux_2_17_x86_64.whl" },
+]
+
+[[package]]
+name = "numpy"
+version = "2.4.6"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12'",
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/numpy-2.4.6-cp312-cp312-manylinux_2_17_x86_64.whl" },
+    { url = "https://files.pythonhosted.org/numpy-2.4.6-cp313-cp313-manylinux_2_17_x86_64.whl" },
+]
+
+[[package]]
+name = "nvidia-cublas"
+version = "13.1.1.3"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/nvidia_cublas-13.1.1.3-py3-none-manylinux_2_27_x86_64.whl" },
+    { url = "https://files.pythonhosted.org/nvidia_cublas-13.1.1.3-py3-none-manylinux_2_27_aarch64.whl" },
+]
+
+[[package]]
+name = "pydub"
+version = "0.25.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "audioop-lts", marker = "python_full_version >= '3.13'" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/pydub-0.25.1-py2.py3-none-any.whl" },
+]
+
+[[package]]
+name = "tool"
+version = "1.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/tool-1.0-py3-none-any.whl" },
+]
+
+[package.optional-dependencies]
+gpu = [
+    { name = "nvidia-cublas", marker = "sys_platform == 'linux'" },
+]
+
+[[package]]
+name = "winonly"
+version = "1.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/winonly-1.0-cp312-cp312-win_amd64.whl" },
+]
+`
+	parsed := readPythonLock("uv.lock", []byte(lock))
+	main := parsed.mainPackages()
+	if !main["numpy"] || !main["nvidia-cublas"] || !main["audioop-lts"] || !main["winonly"] {
+		t.Fatalf("main packages = %v", main)
+	}
+	names := func(minor int) []string {
+		var result []string
+		for _, pkg := range parsed.installedPackages(minor, "amd64") {
+			result = append(result, pkg.name+"=="+pkg.version)
+		}
+		slices.Sort(result)
+		return result
+	}
+	if got := names(11); !slices.Equal(got, []string{"numpy==2.2.6", "nvidia-cublas==13.1.1.3", "pydub==0.25.1", "tool==1.0"}) {
+		t.Fatalf("3.11 installs %v", got)
+	}
+	if got := names(13); !slices.Equal(got, []string{"audioop-lts==0.2.2", "numpy==2.4.6", "nvidia-cublas==13.1.1.3", "pydub==0.25.1", "tool==1.0"}) {
+		t.Fatalf("3.13 installs %v", got)
+	}
+	project := readPythonProject(map[string][]byte{
+		"pyproject.toml": []byte("[project]\nname = \"app\"\ndependencies = [\"numpy\", \"pydub\", \"tool[gpu]\", \"winonly; sys_platform == 'win32'\"]\n"),
+		"uv.lock":        []byte(lock),
+	})
+	// audioop-lts' abi3 wheel serves 3.14, and the lock installs it wherever
+	// pydub needs it.
+	blockers := project.versionBlockers("amd64")
+	want := map[int][]string{14: {"numpy==2.4.6"}}
+	for _, minor := range pythonCatalogueMinors {
+		if !slices.Equal(blockers[minor], want[minor]) {
+			t.Fatalf("blockers = %v", blockers)
+		}
+	}
+	for _, fixture := range []struct {
+		wheel    string
+		minor    int
+		supports bool
+	}{
+		{"nvidia_cublas-13.1.1.3-py3-none-manylinux_2_27_x86_64.whl", 14, true},
+		{"ruff-0.8.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", 10, true},
+		{"x-1-py312-none-manylinux_2_17_x86_64.whl", 13, true},
+		{"x-1-py312-none-manylinux_2_17_x86_64.whl", 11, false},
+		{"x-1-cp312-none-manylinux_2_17_x86_64.whl", 12, true},
+		{"x-1-cp312-none-manylinux_2_17_x86_64.whl", 13, false},
+		{"x-1-cp311-abi3-manylinux_2_17_x86_64.whl", 14, true},
+		{"x-1-cp313-cp313t-manylinux_2_17_x86_64.whl", 13, false},
+		{"x-1-cp313-cp313-manylinux_2_17_aarch64.whl", 13, false},
+	} {
+		if got := pythonWheelSupport([]string{fixture.wheel}, "amd64").supports(fixture.minor); got != fixture.supports {
+			t.Errorf("%s on 3.%d = %v", fixture.wheel, fixture.minor, got)
+		}
+	}
+}
+
+// Poetry and PDM record each package's own marker.
+func TestPoetryAndPDMPackageMarkersLimitTheFamiliesTheyInstallOn(t *testing.T) {
+	t.Parallel()
+	for file, content := range map[string]string{
+		"poetry.lock": `[[package]]
+name = "tomli"
+version = "2.0.1"
+groups = ["main"]
+markers = "python_version < \"3.11\""
+
+[[package]]
+name = "flask"
+version = "3.1.0"
+groups = ["main"]
+
+[package.dependencies]
+tomli = {version = ">=1.1.0", markers = "python_version < \"3.11\""}
+`,
+		"pdm.lock": `[[package]]
+name = "tomli"
+version = "2.0.1"
+groups = ["default"]
+marker = "python_version < \"3.11\""
+
+[[package]]
+name = "flask"
+version = "3.1.0"
+groups = ["default"]
+dependencies = [
+    "tomli>=1.1.0; python_version < \"3.11\"",
+]
+`,
+	} {
+		lock := readPythonLock(file, []byte(content))
+		if len(lock.installedPackages(10, "amd64")) != 2 || len(lock.installedPackages(13, "amd64")) != 1 || !lock.mainPackages()["tomli"] {
+			t.Fatalf("%s: %+v", file, lock.packages[0])
+		}
+		if edge := lock.find("flask").edges[0]; edge.name != "tomli" || edge.marker != `python_version < "3.11"` {
+			t.Fatalf("%s edge = %+v", file, edge)
+		}
+	}
+}
+
+// Requirement lines pinned per Python by markers are judged only on the
+// Pythons their markers select.
+func TestPythonRequirementMarkersLimitTheirBlockers(t *testing.T) {
+	t.Parallel()
+	project := readPythonProject(map[string][]byte{"requirements.txt": []byte("numpy==1.24.4; python_version < \"3.12\"\nnumpy==2.1.3; python_version >= \"3.12\"\n")})
+	blockers := project.versionBlockers("amd64")
+	if len(blockers[10]) != 0 || len(blockers[11]) != 0 || len(blockers[12]) != 0 || len(blockers[13]) != 0 || !slices.Equal(blockers[14], []string{`numpy==2.1.3; python_version >= "3.12"`}) {
+		t.Fatalf("blockers = %v", blockers)
+	}
+}
+
 // A lock is compared with the manifest it was generated from, the Python
 // shape of the npm incident: uv ships a package the pyproject no longer
 // matches, Poetry refuses, and Pipfile.lock misses what the Pipfile adds.

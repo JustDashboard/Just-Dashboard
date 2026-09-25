@@ -4,6 +4,7 @@ import (
 	"path"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -756,7 +757,9 @@ func pythonCandidate(marker *detectedMarkers, entries []pythonEntry, rootLabel s
 	if source == nil {
 		source = &pythonSource{}
 	}
-	entries = mergePythonEntries(entries, source.scripts)
+	entries = slices.DeleteFunc(mergePythonEntries(entries, source.scripts), func(entry pythonEntry) bool {
+		return !pythonShellPathRE.MatchString(entry.path)
+	})
 	deps := project.deps
 	candidate := DetectedCandidate{
 		Name: "Python service in " + rootLabel, Profile: ProfileService, Confidence: ConfidenceMedium,

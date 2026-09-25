@@ -247,6 +247,11 @@ func readPythonSources(tree detectionTree, markers map[string]*detectedMarkers, 
 
 var pythonModuleNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// pythonShellPathRE is a checkout path a proposed start command can name
+// unquoted: a space, a quote or a $ would split or expand it, and a leading
+// dash would read as an option.
+var pythonShellPathRE = regexp.MustCompile(`^[\p{L}\p{N}_.][\p{L}\p{N}_./@+-]*$`)
+
 func slashRoot(root string) string {
 	return strings.ReplaceAll(root, "\\", "/")
 }
@@ -336,7 +341,7 @@ func readPythonManage(tree detectionTree, markers map[string]*detectedMarkers, m
 				continue
 			}
 			relative := strings.TrimPrefix(otherRoot, rootPrefix(root))
-			if strings.Count(relative, "/") > 1 || ownedByNestedRoot(otherRoot, root, pythonRoots) {
+			if strings.Count(relative, "/") > 1 || !pythonShellPathRE.MatchString(relative) || ownedByNestedRoot(otherRoot, root, pythonRoots) {
 				continue
 			}
 			source.manageDirs = append(source.manageDirs, relative)
@@ -1117,8 +1122,11 @@ func validateDetectedPython(candidate DetectedCandidate) error {
 	return nil
 }
 
+// pythonFactText is a fact the saved detection can carry: bounded, one line,
+// and without credential material, even a URL's inside a requirement line.
 func pythonFactText(value string, limit int) bool {
-	return len(value) <= limit && !strings.ContainsAny(value, "\x00\r\n") && rejectPlanSecretLiteral("detected Python fact", value) == nil
+	return len(value) <= limit && !strings.ContainsAny(value, "\x00\r\n") && rejectPlanSecretLiteral("detected Python fact", value) == nil &&
+		!containsURLCredentials(value)
 }
 
 // aptTrixieNames are the Debian names an Aptfile written for Ubuntu or an
@@ -1180,6 +1188,51 @@ func applyPythonEnvironment(marker *detectedMarkers, candidates []DetectedCandid
 				}
 				seen[name] = true
 				candidate.SystemPackages = append(candidate.SystemPackages, DetectedSystemPackage{Name: name, Reason: boundedText(reason, 256), Source: manifest.File})
+			}
+		}
+		keepValidPythonFacts(candidate)
+	}
+}
+
+// keepValidPythonFacts drops what validateDetectedPython refuses: the facts
+// quote the checkout's own paths and lines, which can read like a
+// credential, and one such line must not leave the detection unsavable.
+func keepValidPythonFacts(candidate *DetectedCandidate) {
+	invalid := func(limit int) func(string) bool {
+		return func(value string) bool { return !pythonFactText(value, limit) }
+	}
+	candidate.SystemPackages = slices.DeleteFunc(candidate.SystemPackages, func(pkg DetectedSystemPackage) bool {
+		return !systemPackageRE.MatchString(pkg.Name) || !pythonFactText(pkg.Reason, 256) || !pythonFactText(pkg.Source, 512)
+	})
+	python := candidate.Python
+	for _, list := range []*[]string{&python.VersionLimited, &python.ManifestConflict, &python.LocalArtifacts, &python.CondaConverted,
+		&python.PrivateIndexes, &python.InlineCredentials, &python.GitSSH, &python.GPUWheels, &python.Modules, &python.StreamlitNested} {
+		*list = slices.DeleteFunc(*list, invalid(256))
+	}
+	python.StreamlitSecrets = slices.DeleteFunc(python.StreamlitSecrets, func(key string) bool { return ValidateEnvKey(key) != nil })
+	for family, blockers := range python.WheelBlockers {
+		python.WheelBlockers[family] = slices.DeleteFunc(blockers, invalid(256))
+	}
+	for _, text := range []*string{&python.InstallFile, &python.Toolchain, &python.VersionSource, &python.VersionRaised, &python.Workspace,
+		&python.GradioLoopback, &python.WebsocketLibraryMissing, &python.Assets} {
+		if !pythonFactText(*text, 512) {
+			*text = ""
+		}
+	}
+	if lock := python.Lock; lock != nil {
+		lock.Missing, lock.Changed = slices.DeleteFunc(lock.Missing, invalid(256)), slices.DeleteFunc(lock.Changed, invalid(256))
+		if !pythonFactText(lock.Note, 512) {
+			lock.Note = ""
+		}
+	}
+	if django := python.Django; django != nil {
+		if (django.ManageDir != "" && !safeRelativePath(django.ManageDir)) || !pythonFactText(django.ManageDir, 512) || !pythonFactText(django.SettingsModule, 512) {
+			python.Django = nil
+			return
+		}
+		for _, text := range []*string{&django.SettingsSource, &django.Development} {
+			if !pythonFactText(*text, 512) {
+				*text = ""
 			}
 		}
 	}

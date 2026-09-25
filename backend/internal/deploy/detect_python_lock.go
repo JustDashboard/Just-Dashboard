@@ -33,13 +33,23 @@ type pythonLock struct {
 	members []string
 }
 
+// pythonLockEdge is one dependency as a lock records it: the package (and
+// the version, where uv pins one of several), the extras it asks for, and
+// the environment marker it is installed under.
+type pythonLockEdge struct {
+	name, version string
+	extras        []string
+	marker        string
+}
+
 type pythonLockedPackage struct {
 	name, version string
 	// source is registry, git, path, editable, virtual, directory or url;
 	// sourceRef the URL or path it names.
 	source, sourceRef string
 	dependencies      []string
-	extras            map[string][]string
+	edges             []pythonLockEdge
+	extras            map[string][]pythonLockEdge
 	dev               map[string][]string
 	requiresDist      []pythonRequirement
 	requiresDev       map[string][]string
@@ -49,6 +59,10 @@ type pythonLockedPackage struct {
 	// extraOnly marks a Poetry package installed only for an extra.
 	groups    []string
 	extraOnly bool
+	// markers are the environments this version of the package is for
+	// (uv's resolution-markers, Poetry's and PDM's own marker): a lock
+	// that pins numpy twice pins each for its own Pythons.
+	markers []string
 }
 
 func (l *pythonLock) find(name string) *pythonLockedPackage {
@@ -62,10 +76,14 @@ var (
 	lockNameRE      = regexp.MustCompile(`name\s*=\s*"([^"]+)"`)
 	lockExtraRE     = regexp.MustCompile(`extras?\s*=\s*\[([^\]]*)\]`)
 	lockSpecifierRE = regexp.MustCompile(`specifier\s*=\s*"([^"]*)"`)
+	lockVersionRE   = regexp.MustCompile(`\bversion\s*=\s*"([^"]+)"`)
 	lockMarkerRE    = regexp.MustCompile(`marker\s*=\s*"([^"]*)"`)
 	lockSourceRE    = regexp.MustCompile(`^source\s*=\s*\{\s*([a-z-]+)\s*=\s*(?:"([^"]*)"|(true))`)
 	lockFileRE      = regexp.MustCompile(`(?:url|file|filename)\s*=\s*"([^"]+)"`)
 	lockQuotedRE    = regexp.MustCompile(`"([^"]+)"`)
+	// lockStringRE is a TOML basic string with its escapes.
+	lockStringRE    = regexp.MustCompile(`"((?:[^"\\]|\\.)*)"`)
+	poetryMarkersRE = regexp.MustCompile(`markers\s*=\s*"((?:[^"\\]|\\.)*)"`)
 )
 
 // readPythonLock reads a uv.lock, poetry.lock or pdm.lock.
@@ -155,7 +173,15 @@ func readPythonLock(file string, content []byte) *pythonLock {
 			case "path":
 				current.source, current.sourceRef = "path", tomlScalar(value)
 			case "dependencies":
-				current.dependencies = lockDependencyNames(value)
+				current.edges = lockDependencyEdges(value)
+				current.dependencies = edgeNames(current.edges)
+			case "resolution-markers":
+				current.markers = nil
+				for _, marker := range lockQuotedRE.FindAllStringSubmatch(value, -1) {
+					current.markers = append(current.markers, marker[1])
+				}
+			case "markers", "marker":
+				current.markers = []string{tomlScalar(value)}
 			case "wheels", "files":
 				readLockFiles(current, value)
 			case "sdist":
@@ -166,18 +192,27 @@ func readPythonLock(file string, content []byte) *pythonLock {
 		case table == "package.source" && key == "url":
 			current.sourceRef = tomlScalar(value)
 		case table == "package.dependencies":
-			// Poetry lists each dependency as a key.
-			current.dependencies = append(current.dependencies, normalizePythonName(strings.Trim(key, `"`)))
+			// Poetry lists each dependency as a key, its value a version or an
+			// inline table with the markers and extras.
+			edge := pythonLockEdge{name: normalizePythonName(strings.Trim(key, `"`))}
+			if marker := poetryMarkersRE.FindStringSubmatch(value); marker != nil {
+				edge.marker = strings.ReplaceAll(marker[1], `\"`, `"`)
+			}
+			if extras := lockExtraRE.FindStringSubmatch(value); extras != nil {
+				edge.extras = pythonExtras(strings.ReplaceAll(extras[1], `"`, ""))
+			}
+			current.edges = append(current.edges, edge)
+			current.dependencies = append(current.dependencies, edge.name)
 		case table == "package.optional-dependencies":
 			if current.extras == nil {
-				current.extras = map[string][]string{}
+				current.extras = map[string][]pythonLockEdge{}
 			}
-			current.extras[key] = lockDependencyNames(value)
+			current.extras[key] = lockDependencyEdges(value)
 		case table == "package.dev-dependencies":
 			if current.dev == nil {
 				current.dev = map[string][]string{}
 			}
-			current.dev[key] = lockDependencyNames(value)
+			current.dev[key] = edgeNames(lockDependencyEdges(value))
 		case table == "package.metadata" && key == "requires-dist":
 			current.requiresDist = lockRequirements(value)
 		case table == "package.metadata.requires-dev":
@@ -197,20 +232,43 @@ func readPythonLock(file string, content []byte) *pythonLock {
 	return lock
 }
 
-// lockDependencyNames reads uv's `[{ name = "x" }, …]` and PDM's
-// `["x>=1", …]` alike.
-func lockDependencyNames(value string) []string {
-	var names []string
-	if strings.Contains(value, "name") {
-		for _, match := range lockNameRE.FindAllStringSubmatch(value, -1) {
-			names = append(names, normalizePythonName(match[1]))
+// lockDependencyEdges reads uv's `[{ name = "x", extra = […], marker = "…" }, …]`
+// and PDM's `["x[extra]>=1; marker", …]` alike.
+func lockDependencyEdges(value string) []pythonLockEdge {
+	var edges []pythonLockEdge
+	if strings.Contains(value, "{") {
+		for _, item := range splitLockItems(value) {
+			name := lockNameRE.FindStringSubmatch(item)
+			if name == nil {
+				continue
+			}
+			edge := pythonLockEdge{name: normalizePythonName(name[1])}
+			if version := lockVersionRE.FindStringSubmatch(item); version != nil {
+				edge.version = version[1]
+			}
+			if extras := lockExtraRE.FindStringSubmatch(item); extras != nil {
+				edge.extras = pythonExtras(strings.ReplaceAll(extras[1], `"`, ""))
+			}
+			if marker := lockMarkerRE.FindStringSubmatch(item); marker != nil {
+				edge.marker = marker[1]
+			}
+			edges = append(edges, edge)
 		}
-		return names
+		return edges
 	}
-	for _, match := range lockQuotedRE.FindAllStringSubmatch(value, -1) {
-		if requirement, ok := parsePythonRequirement(match[1]); ok {
-			names = append(names, requirement.name)
+	for _, match := range lockStringRE.FindAllStringSubmatch(value, -1) {
+		text := strings.ReplaceAll(match[1], `\"`, `"`)
+		if requirement, ok := parsePythonRequirement(text); ok {
+			edges = append(edges, pythonLockEdge{name: requirement.name, extras: requirement.extras, marker: requirement.marker})
 		}
+	}
+	return edges
+}
+
+func edgeNames(edges []pythonLockEdge) []string {
+	names := make([]string, 0, len(edges))
+	for _, edge := range edges {
+		names = append(names, edge.name)
 	}
 	return names
 }
@@ -285,40 +343,79 @@ func readLockFiles(pkg *pythonLockedPackage, value string) {
 	}
 }
 
-// mainPackages says which packages a lock installs for production: uv
-// from the project's own dependencies (dev groups and extras left out),
-// Poetry and PDM from each package's groups.
+// mainPackages says which packages a lock installs for production, on any
+// platform: uv from the project's own dependencies and the extras each edge
+// asks for (dev groups and the project's own extras left out), Poetry and
+// PDM from each package's groups.
 func (l *pythonLock) mainPackages() map[string]bool {
 	result := map[string]bool{}
-	if l == nil || l.unreadable {
-		return result
+	for _, pkg := range l.reach(func(string) bool { return true }) {
+		result[pkg.name] = true
 	}
-	switch {
-	case l.root != nil:
-		queue := append([]string(nil), l.root.dependencies...)
-		for _, member := range l.members {
-			if pkg := l.byName[member]; pkg != nil && pkg != l.root {
-				queue = append(queue, member)
-			}
-		}
-		for len(queue) > 0 && len(result) < 4096 {
-			name := queue[0]
-			queue = queue[1:]
-			if result[name] {
-				continue
-			}
-			result[name] = true
-			if pkg := l.byName[name]; pkg != nil {
-				queue = append(queue, pkg.dependencies...)
-			}
-		}
-	default:
+	return result
+}
+
+// installedPackages are the locked versions a Linux build on one CPython
+// family installs: the edges whose markers hold there, and of a package
+// the lock pins more than once, the version meant for it.
+func (l *pythonLock) installedPackages(minor int, arch string) []*pythonLockedPackage {
+	return l.reach(func(marker string) bool { return pythonMarkerAllows(marker, minor, arch) })
+}
+
+func (l *pythonLock) reach(allows func(marker string) bool) []*pythonLockedPackage {
+	if l == nil || l.unreadable {
+		return nil
+	}
+	holds := func(markers []string) bool {
+		return len(markers) == 0 || slices.ContainsFunc(markers, allows)
+	}
+	var result []*pythonLockedPackage
+	if l.root == nil {
 		for _, pkg := range l.packages {
-			if pkg.name == "" || pkg.extraOnly {
+			if pkg.name == "" || pkg.extraOnly || !holds(pkg.markers) {
 				continue
 			}
 			if len(pkg.groups) == 0 || slices.Contains(pkg.groups, "main") || slices.Contains(pkg.groups, "default") {
-				result[pkg.name] = true
+				result = append(result, pkg)
+			}
+		}
+		return result
+	}
+	queue := append([]pythonLockEdge(nil), l.root.edges...)
+	for _, member := range l.members {
+		if pkg := l.byName[member]; pkg != nil && pkg != l.root {
+			queue = append(queue, pythonLockEdge{name: member})
+		}
+	}
+	versions := map[string][]*pythonLockedPackage{}
+	for _, pkg := range l.packages {
+		versions[pkg.name] = append(versions[pkg.name], pkg)
+	}
+	// Each package version and each of its extras is expanded once, so the
+	// queue ends.
+	visited := map[*pythonLockedPackage]bool{}
+	expanded := map[string]bool{}
+	for len(queue) > 0 {
+		edge := queue[0]
+		queue = queue[1:]
+		if edge.marker != "" && !allows(edge.marker) {
+			continue
+		}
+		for _, pkg := range versions[edge.name] {
+			if (edge.version != "" && pkg.version != edge.version) || (edge.version == "" && !holds(pkg.markers)) {
+				continue
+			}
+			if !visited[pkg] {
+				visited[pkg] = true
+				result = append(result, pkg)
+				queue = append(queue, pkg.edges...)
+			}
+			for _, extra := range edge.extras {
+				key := pkg.name + "==" + pkg.version + "[" + extra + "]"
+				if !expanded[key] {
+					expanded[key] = true
+					queue = append(queue, pkg.extras[extra]...)
+				}
 			}
 		}
 	}

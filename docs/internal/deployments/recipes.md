@@ -1157,7 +1157,9 @@ index or dependency URL is `credential_in_manifest`; a `git+ssh` dependency is t
 A uv workspace member (a directory a parent pyproject's `[tool.uv.workspace]` members cover, with the
 workspace's `uv.lock`) installs from the workspace root: the build context widens to it
 (`ContextDirectory`), `uv sync --locked --no-dev --package <member>` installs the member with its sibling
-packages, and the server runs from the member's directory. A `[tool.uv.sources]` workspace or path
+packages, and the server runs from the member's directory. Both are written unquoted into the
+Dockerfile, so a member whose directory is not letters, digits and `. _ @ + - /`, or whose name is not a
+normalized distribution name, is `recipe_unsupported`. A `[tool.uv.sources]` workspace or path
 dependency built without its workspace is `recipe_unsupported`: pip would fetch an unrelated package of
 the same name from PyPI.
 
@@ -1189,9 +1191,15 @@ publish 3.10 wheels, and refused naming them otherwise.
 Pins decide too: a 2024 `pip freeze` pins numpy 1.26 and pydantic-core 2.14, which publish no wheel for
 3.13, and on an image with no compiler the build fails. A lock is read exactly — a locked package with
 Linux wheels supports a family when one of them is tagged for it (`cp3N`, `abi3` from an earlier `cp3M`,
-or pure) for the build's architecture — and a requirement file's `==` pins and upper bounds are checked
-against a reviewed table of the first release with Linux wheels for each family, for the compiled
-distributions freezes commonly pin (`build_python_wheels.go`, generated from PyPI's JSON). A few releases
+`py3-none` compiled code such as the NVIDIA libraries, or pure) for the build's architecture, and each
+family is judged by the versions the lock installs on it: the lock is walked from the project's own
+dependencies, following the extras each edge asks for, and an edge or a version whose environment marker
+rules out a Linux build of that family (`python_full_version < '3.12'`, uv's `resolution-markers`,
+Poetry's and PDM's per-package markers, `sys_platform == 'win32'`) is skipped; what a marker asks that the
+build does not settle, such as an extra, counts as installed (`detect_python_markers.go`). A requirement
+file's `==` pins and upper bounds, under their own markers, are checked against a reviewed table of the
+first release with Linux wheels for each family, for the compiled distributions freezes commonly pin
+(`build_python_wheels.go`, generated from PyPI's JSON). A few releases
 import a module a later Python removed (python-telegram-bot before 20, Django before 4.1, pydub without
 `audioop-lts`). An undeclared version then stays below the family those pins cannot use, with the pins as
 evidence (`python_version_limited`); a chosen one they cannot use is `python_version_wheels_missing`
@@ -1232,8 +1240,9 @@ factory that takes a configuration used through the object a `wsgi.py` builds fr
 imports by package name with `--app-dir src` (uvicorn) or `--pythonpath src` (gunicorn), and installs the
 project itself (`pip install .`, Poetry without `--no-root`) when it declares a build system; an
 application folder whose modules import their siblings by bare name (`app/main.py` importing `routers`)
-runs from inside it. `start_module_unresolved` warns when a start command's module is none of the root's
-importable names.
+runs from inside it. A script or `manage.py` directory whose path a shell would split or expand (a space,
+a quote, a `$`, a leading dash) is never written into a proposed start command. `start_module_unresolved`
+warns when a start command's module is none of the root's importable names.
 
 A start command the repository declares outranks every guess: a `Procfile` web process, then a task
 runner's `start`/`serve` task (`[tool.pdm.scripts]`, `[tool.poe.tasks]`, `[tool.taskipy.tasks]`, Hatch's
