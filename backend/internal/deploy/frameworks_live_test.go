@@ -81,6 +81,11 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 			} else {
 				copyFrameworkFixture(t, name, root)
 			}
+			if name == "symfony" {
+				// The .env the Symfony skeleton commits, which says dev; it is
+				// written here because this repository never commits a .env.
+				writeBuildFixture(t, root, ".env", "APP_ENV=dev\nAPP_SECRET=\n")
+			}
 			detection, err := (Detector{}).DetectPath(ctx, root, SourceIdentity{})
 			if err != nil {
 				t.Fatal(err)
