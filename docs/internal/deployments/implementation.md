@@ -394,7 +394,7 @@ only renderer/executor/validation authority for their feature.
   (blocked while submodules are off), `static_redirects_unsupported` and `static_hosting_rules`. The
   rules themselves, the base path and SvelteKit's fallback page are read again from the commit when the
   build is prepared (`build_static_serving.go`) and written into nginx's configuration as literals that
-  pass a strict character check.
+  pass a strict character check, one location block per path so the configuration always loads.
 - A detected Node service that declares a migration tool applies its schema before it serves. Detection
   records the tool (`schemaTool`), the command it chose (`schemaCommand`) and whether the package's own
   start script already runs it, and chains the step in front of the start command through the manager's

@@ -694,7 +694,7 @@ missing is a low-confidence candidate that asks for one.
 | SolidStart, TanStack Start, Nitro | `@solidjs/start`, `@tanstack/*-start`, `nitropack` | server, 3000 | `node .output/server/index.mjs` (TanStack asks to confirm the entry) |
 | Angular | `@angular/core` (+ `@angular/ssr`) | site from `angular.json` (`dist/<app>/browser` with the application builder) / server, 4000 | `node dist/<app>/server/server.mjs` |
 | NestJS | `@nestjs/core` | server, 3000 | `start:prod` script, else `node dist/main` |
-| Gatsby, Docusaurus, VitePress, Eleventy | their packages | site `public`, `build`, `<docs>/.vitepress/dist`, `_site` | VitePress reads the docs directory from its build script (`docs:build`); Eleventy's output is its build script's `--output`, else `dir.output` in its configuration, and with no build script it builds with `<runner> @11ty/eleventy` |
+| Gatsby, Docusaurus, VitePress, Eleventy | their packages | site `public`, `build`, `<docs>/.vitepress/dist`, `_site` | VitePress reads the docs directory from its build script (`docs:build`); Eleventy's output is its build script's `--output`, else `dir.output` in its configuration, and with no build script it builds with `<runner> eleventy` (the binary's name, which `pnpm exec` and `yarn` run; neither resolves a package name) |
 | Hexo, VuePress, Slidev | `hexo`, `vuepress`/`vuepress-vite`/`@vuepress/cli`, `@slidev/cli` | site `_config.yml`'s `public_dir` (default `public`), `<docs>/.vuepress/dist`, `dist` (single-page) | Hexo builds with `<runner> hexo generate` and Slidev with `<runner> slidev build` when there is no build script; VuePress reads the docs directory from `vuepress build <dir>` |
 | Create React App, Vue CLI, Ember, Parcel, Vite | their packages | site `build` / `dist` | single-page fallback on by default |
 | Express, Fastify, Hono, Koa, Elysia, hapi | their packages | server, 3000 | the `start` script, else `node <main>` (`bun <main>` with a Bun lockfile) |
@@ -714,8 +714,12 @@ it a worker without one, and a start script beside such a library no longer make
 A site whose client owns its routes — Vite, Create React App, Vue CLI, Ember, Parcel, Angular and Slidev
 detections, a SvelteKit adapter-static whose configuration names a `fallback` page, and a host rule that
 rewrites every path to `/index.html` — carries `build.spaFallback`, which makes nginx answer any path with
-no file behind it with `index.html` (SvelteKit's `fallback` page, `200.html`, when it names one), except
-`/api` and the paths under it, which answer 404; multi-page generators (Astro, Gatsby, Docusaurus,
+no file behind it with `index.html` (SvelteKit's `fallback` page, `200.html`, when it names one, or the page
+a `/* /app.html 200` rule names). Paths that belonged to code another host ran answer 404 instead: `/api`
+and the paths under it when the site keeps functions there (Vercel's `api/`, Cloudflare Pages'
+`functions/api/`, read from the commit when the build is prepared), and the paths a rule sends to a Netlify
+function or another host. A site with no functions keeps `/api` for its client's own routes (a developer
+portal's `/api/reference`). Multi-page generators (Astro, Gatsby, Docusaurus,
 VitePress, Eleventy, Hexo, SvelteKit static without a fallback) serve files by their clean URLs with no
 fallback. The switch is on the configure form and Build settings whenever there is static output, and is
 valid only with a static site or a recipe with an output directory.
@@ -754,7 +758,7 @@ the plan.
 | Generator | Recognised by | Recipe and image | Build | Output |
 | --- | --- | --- | --- | --- |
 | Hugo | `hugo.toml`/`.yaml`/`.json`, `config/_default/`, or `config.toml` with `baseURL` or a theme beside `content/`, `layouts/`, `archetypes/` or `themes/` | `site`, `ghcr.io/gohugoio/hugo` (extended, as its own `hugo` user) | `hugo --gc --minify --baseURL "${HUGO_BASEURL:-/}"` | `publishDir`, default `public` |
-| Zola | `config.toml` with `base_url` beside `templates/`, `content/`, `themes/` or `sass/` | `site`, the binary of `ghcr.io/getzola/zola` on Alpine (0.23 and later, musl) or Debian slim (earlier, glibc) | `zola build --base-url /` | `output_dir`, default `public` |
+| Zola | `config.toml` with `base_url` and Zola's own shape: `content/` beside `templates/`, a committed theme, or a setting only Zola has (`compile_sass`, `taxonomies`, `[markdown]`, `[extra]`, …); beside an application that runs its own server from the same directory it ranks below it | `site`, the binary of `ghcr.io/getzola/zola` on Alpine (0.23 and later, musl) or Debian slim (earlier, glibc) | `zola build --base-url "${ZOLA_BASE_URL:-/}"` | `output_dir`, default `public` |
 | mdBook | `book.toml` | `site`, the project's release archive on Alpine, checked against its digest | `mdbook build` | `build-dir`, default `book` (`book/html` with more than one renderer) |
 | Jekyll | `_config.yml` with a Gemfile naming `jekyll` or `github-pages`, or with `_posts/`, `_layouts/`, `_includes/` or a theme; never beside `.nojekyll` or Hexo's `package.json` | `site`, `ruby:<3.1–3.4>-slim` with `build-essential` | `bundle exec jekyll build --baseurl ""` | `destination`, default `_site` |
 | MkDocs, Zensical | `mkdocs.yml`, `zensical.toml` | `python` with an output directory | `mkdocs build`, `zensical build` | `site_dir`, default `site` |
@@ -767,8 +771,15 @@ the JavaScript recipe always has; they need no start command, and preflight asks
 installs what `.readthedocs.yaml` lists for the documentation build, else a docs requirements file
 (`docs/requirements.txt`, `requirements-docs.txt`, …), else the root's manifest as any Python project does
 (with the generator's pinned release beside it when the manifest does not name it), else — nothing
-declared — the pinned releases its configuration needs: MkDocs and Material for MkDocs, the Sphinx theme
-and extensions `conf.py` names, Pelican with Markdown, and the plugins in `pythonSitePackages`. A plugin
+declared — the pinned releases its configuration needs: MkDocs and Material for MkDocs (PyMdown
+Extensions for a `pymdownx.*` extension on MkDocs' own theme), the Sphinx theme and extensions `conf.py`
+names, Pelican with Markdown, and the plugins in `pythonSitePackages`. A library usually declares its
+documentation tool in a dependency group (`[dependency-groups] docs`, `[tool.poetry.group.docs]`), which an
+application's `uv sync --no-dev` or `poetry install --only main` leaves out: when the generator is not
+among the project's own dependencies but its lock names it, the site's build installs every group
+(`uv sync --frozen --all-groups`, `poetry install --all-groups`). Plugins and extensions are read from the
+list items directly under `plugins:` and `markdown_extensions:` (or a flow list on the key's line); the
+lists inside an item's options — a blog's categories, a fence's names — are not plugins. A plugin
 outside that table has no package the recipe can be sure of, so the plan is refused with the plugin named
 and a requirements file asked for. A plugin that dates pages from their commits brings `git` into the
 image.
@@ -783,46 +794,67 @@ warning); a minimum (`module.hugoVersion.min`, a theme's `min_version`) is a flo
 unpinned Hugo site is `hugo_version_unpinned` (warning). A pinned release whose image the registry does
 not have when the build is prepared falls back to the default with a note in the run log. Jekyll builds
 on the Ruby `.ruby-version`, the Gemfile's `ruby` line or `Gemfile.lock` asks for, from 3.1 to 3.4
-(default 3.3); another release, or a Gemfile pin to one exact patch, is `jekyll_ruby_version` (warning).
+(default 3.3). A Gemfile that pins one exact patch release (`ruby "3.3.0"`, or `ruby file: ".ruby-version"`
+reading one) builds on that release's own image, `ruby:3.3.0-slim`, since Bundler refuses any other; a
+patch release with no image builds on its line's newest with a note in the run log. Another release line is
+`jekyll_ruby_version` (warning).
 A `Gemfile.lock` installs frozen; one that lists no Linux platform gains `x86_64-linux` and
 `aarch64-linux` first. A site with no Gemfile gets one naming the `github-pages` gem, as GitHub Pages
 builds it, and `dependencies_unpinned` says how to lock it.
 
 **Building for the root it is served from.** Hugo, Zola, Jekyll and mdBook are built for `/`: a GitHub
 Pages project site's `baseURL`, `base_url`, `baseurl` or `site-url` names a sub-path this server does not
-serve it under. Hugo's base URL follows the planned domain through `HUGO_BASEURL`, a build variable
-detection declares with the domain template `{{scheme}}://{{hostname}}/`, so its sitemap and feeds name
-the site's own address. The GitHub Pages gem derives `url` from the repository's GitHub name, which a
+serve it under. Hugo's and Zola's base URLs follow the planned domain through `HUGO_BASEURL` and `ZOLA_BASE_URL`, build
+variables detection declares with the domain templates `{{scheme}}://{{hostname}}/` and
+`{{scheme}}://{{hostname}}`, so their sitemaps and feeds name the site's own address rather than relative
+paths. The GitHub Pages gem derives `url` from the repository's GitHub name, which a
 checkout here does not carry, and stops the build; a site whose `_config.yml` sets no `url` builds with a
 one-line override (`url: ""`) the recipe writes, and `PAGES_DISABLE_NETWORK=1` keeps the gem from asking
 GitHub's API while it builds.
 
 **Sub-paths.** A framework whose output is built for a sub-path — a literal `baseUrl` in
 `docusaurus.config.*`, `base` in `vite.config.*`, `astro.config.*`, `.vitepress/config.*` or
-`.vuepress/config.*`, SvelteKit's `paths.base`, Angular's `baseHref` or `--base-href`, Create React App's
-`homepage`, Vue CLI's `publicPath`, Gatsby's `pathPrefix` with `--prefix-paths`, Nuxt's `app.baseURL`, a
-`--base` flag in the build script — is served under that path, with `/` redirecting there (302, relative)
+`.vuepress/config.*`, SvelteKit's `kit.paths.base`, Angular's `baseHref` or `--base-href`, Create React App's
+`homepage`, Vue CLI's `publicPath`, Gatsby's `pathPrefix` with `--prefix-paths`, Nuxt's `app.baseURL`,
+Next's `basePath` for a static export an operator serves from `out/`, a `--base` flag in the build script —
+is served under that path, with `/` redirecting there (302, relative)
 and the fallback and 404 pages under it, and preflight's `static_base_path` (warning) says how to serve it
 at the root instead. A base the configuration computes (`base: process.env.BASE`) is served at the root
 and named (`static_base_path_computed`), since what it evaluates to here is not something reading can
-know. Only a plain path of letters, digits and `._~-` segments is ever written into the configuration.
+know. The key is read from the object the configuration file exports (`export default`, `module.exports`,
+through `defineConfig(…)`, an arrow function or a variable; `detect_js_config.go`) and never from inside a
+nested object or a comment: VitePress's sidebar groups carry a `base` of their own, Nuxt's
+`runtimeConfig.public.baseURL` is an API's, and a commented-out `// base: '/repo/'` is not configuration.
+Only a plain path of letters, digits and `._~-` segments is ever written into the configuration.
 
 **Other hosts' rules.** `_redirects` and `_headers` (Netlify and Cloudflare Pages, at the root or in
-`public/` or `static/`, where a framework copies them into its output), `netlify.toml`'s `[[redirects]]`
+`public/` or `static/`, where a framework copies them into its output, and first in the directory a
+committed site serves), `netlify.toml`'s `[[redirects]]`
 and `[[headers]]` (from the checkout's top too, when its `[build] base` is the site's root) and
 `vercel.json`'s `redirects`, `rewrites` and `headers` become nginx rules when the build is prepared:
 
 - an exact path or a `/dir/*` splat (Vercel's `:path*` and `(.*)` tails too), to a path or an http(s)
   URL, with 301, 302, 303, 307 or 308, as a `return` that keeps the query string;
-- a 200 rewrite to a page of the site, and `/dir/* /dir/index.html 200` as a single-page application in
-  that directory; `/* /index.html 200` is the fallback switch;
+- a 200 rewrite to a page of the site, served from its target in the rule's own location as the host
+  serves it, and `/dir/* /dir/index.html 200` as a single-page application in that directory that keeps
+  its own page under the site-wide fallback; `/* /index.html 200` is the fallback switch, and
+  `/* /app.html 200` the fallback to that page;
 - a header for every path, a `/dir/*` prefix or one exact path, as `add_header … always`, repeated in a
   location with headers of its own because nginx inherits none into it.
 
-Placeholders (`:slug`), conditions (country, language, role, query, `has`), a proxy to another host, a
-rewrite into its own prefix, `Basic-Auth` (a password, not a header), framing and transport headers and
-any value with a `"`, `\`, `$` or control character are left out and counted
-(`static_redirects_unsupported`, warning); what is applied is `static_hosting_rules` (pass). At most 100
+Each path has one location block: nginx refuses to start on a second `location = /old` or
+`location /app/`, so the first rule for a path is the one kept, as the hosts apply the first rule that
+matches; the same rule declared twice (in `_redirects` and again in `netlify.toml`, as a migration leaves
+it) is one rule, and a header rule for a path a redirect, a directory's application or the 404 page
+already answers joins that block. Placeholders (`:slug`), conditions (country, language, role, query,
+`has`), a proxy to another host or to a Netlify function, a redirect or rewrite into its own prefix (it
+would match itself again), a second rule for a path, a redirect from `/404.html`, any path with a dot
+segment other than `.well-known` or naming `_redirects` or `_headers` (an exact location would end nginx's
+search before the dot-path refusal and serve `/.env`), `Basic-Auth` (a password, not a header), framing and
+transport headers and any value with a `"`, `\`, `$` or control character are left out and counted
+(`static_redirects_unsupported`, warning); what is applied is `static_hosting_rules` (pass). A platform
+file the server does not read for the site (one outside its root) keeps its own count, and the same
+finding says it is not read. At most 100
 redirects and 64 header rules are written, and on a site built for a sub-path each rule's paths move
 under it. A rule applies whether or not a file exists at its path, as Netlify's forced rules do.
 
