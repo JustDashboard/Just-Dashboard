@@ -74,9 +74,9 @@ taking a frame:
   `ChoiceList`, or on the fleet's grid a project's own `SpotlightBorder` card with the same lit
   edge (what keeps a frame there is, first, a *picture*, because a picture needs an edge to read as
   one thing: the GitHub App on Credentials — the accounts that
-  installed it, the App and this server — where an outcome goes on Notifications — every
-  deployment on the left, a mark per channel on the right, dashed rings for the kinds not yet
-  added — and four on the settings pages, each inside its rail section and drawn through
+  installed it, the App and this server — where an outcome goes on Notifications — the projects
+  on the left, this server in the middle, a mark per channel on the right, dashed rings for the
+  kinds not yet added — and four on the settings pages, each inside its rail section and drawn through
   `settings/setting-picture.tsx` or, for Automation's, `settings/automation/wiring.tsx`:
   General's automatic deployment (the repository, the watch, the deploys), Runtime's where it
   listens (the domain, this server, the container, with an amber *Anywhere* node when the port is
@@ -87,7 +87,9 @@ taking a frame:
   dashed before the thing exists or where a hop is missing, still while it is paused, manual or
   only a draft, amber where it works but should not be relied on (a branch that cannot be read, a
   port that bypasses the proxy), red where a link has broken, a brand-to-signal pulse travelling
-  along it while it carries. The rollback dialog holds a small one of its own — your domains wired
+  along it while it carries. Those two draw this server as one mark (`WireHost`): the J in its own
+  blue on `bg-wash-brand` inside a ring of `--rule-brand`, because it is a location — where the
+  reader is standing — and the filled brand face it used to stand on is a command's (§3). The rollback dialog holds a small one of its own — your domains wired
   to the live release by a still line and to the release you are going back to by a dotted one,
   which is the line that carries once Roll back is pressed. The same vocabulary
   (`components/deploy/wire.tsx`) draws one more picture that sits *unframed* because it is inside a

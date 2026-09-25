@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState, type RefObject } from "react"
+import { Fragment, useEffect, useRef, useState, type RefObject } from "react"
 import Link from "next/link"
 import { CheckCircle, Copy, External, GitHubMark, Plus, Trash, Warning } from "@/components/icons"
 import { del, errorMessage, post } from "@/lib/api"
@@ -17,7 +17,6 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Field, FormFact } from "@/components/form"
-import { LogoGlyph } from "@/components/logo"
 import { ProductLogo } from "@/components/product-logo"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ErrorState, LoadingRows, Notice } from "@/components/state"
@@ -35,7 +34,14 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { Segment } from "@/components/deploy/run-pipeline"
 import { StepMark } from "@/components/deploy/vocabulary"
-import { WireLabel, WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import {
+  WireHost,
+  WireLabel,
+  WireLink,
+  WireMark,
+  WireNode,
+  WirePlaceholder,
+} from "@/components/deploy/wire"
 
 /**
  * The dashboard's own identity on GitHub. Created once through GitHub's
@@ -103,6 +109,24 @@ function hostOf(url: string | undefined) {
  */
 export function projectsUsing(credential: DeploymentCredential) {
   return credential.usedByProjectIds?.length ?? credential.usedBy
+}
+
+/**
+ * A host name that wraps after a dot, never inside a label: a tailnet name is
+ * wider than the column, and `break-all` cut it wherever the column ended —
+ * `tailed39b` on one line and `a.ts.net` on the next.
+ */
+function HostName({ host }: { host: string }) {
+  return (
+    <span className="break-words">
+      {host.split(/(?<=\.)/).map((label, index) => (
+        <Fragment key={index}>
+          {index > 0 && <wbr />}
+          {label}
+        </Fragment>
+      ))}
+    </span>
+  )
 }
 
 /** The credential an installation mints its clone tokens through. */
@@ -328,13 +352,9 @@ function Picture({
         <WireNode
           nodeRef={serverMark}
           align="start"
-          mark={
-            <WireMark tone="brand" shape="square">
-              <LogoGlyph className="h-7" />
-            </WireMark>
-          }
+          mark={<WireHost />}
           eyebrow="This server"
-          title={<span className="break-all">{host ?? "Just Dashboard"}</span>}
+          title={host ? <HostName host={host} /> : "Just Dashboard"}
           hint={
             data.webhookUrl ? (
               <span className="inline-flex max-w-full items-center gap-1">

@@ -196,8 +196,9 @@ tokens; see `docs/internal/frontend/design-system.md` §11):
   read through `GET /deploy/{id}/favicon` — the dashboard's image policy allows its own origin
   only — bound to the recorded website address, one host, one megabyte, remembered for an hour
   (`project-mark.tsx`, `handlers_deploy_favicon.go`).
-- **Notifications:** every deployment on the left and a mark per channel on the right, with dashed
-  rings an administrator presses to add a kind not yet set up; the rows under it are the list.
+- **Notifications:** the projects on the left, this server in the middle and a mark per channel on
+  the right, with dashed rings an administrator presses to add a kind not yet set up; the rows under
+  it are the list.
 - **Projects:** cards land one after another, a card whose run is in progress carries a light
   around its frame and a seven-dot release path beside its state; the in-progress rows carry the
   same dots. **New project:** "Start with something ready" is a bento of the five other ways in.
