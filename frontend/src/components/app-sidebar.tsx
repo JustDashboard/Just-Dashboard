@@ -435,11 +435,11 @@ function PanelHead({ panel, parent, onBack }: { panel: Panel; parent: Panel; onB
           at the line's height rather than in a row's icon slot. Collapsed, the
           icon rail is too narrow for it and the section is named by the back
           button's tooltip instead. */}
-      <div className="min-w-0 px-2 pt-2.5 pb-1 group-data-[collapsible=icon]:hidden">
+      <div className="min-w-0 px-2 pt-3 pb-1.5 group-data-[collapsible=icon]:hidden">
         {!panel.title ? (
           <Skeleton className="h-2.5 w-24" />
         ) : panel.named ? (
-          <p className="flex min-w-0 items-center gap-1.5 text-hint leading-tight font-semibold text-foreground/90">
+          <p className="flex min-w-0 items-center gap-2 text-title leading-tight font-semibold text-foreground">
             {panel.mark && (
               <span aria-hidden="true" className="flex shrink-0">
                 {panel.mark}

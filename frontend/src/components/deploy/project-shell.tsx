@@ -294,7 +294,7 @@ export function useProjectNavScope(
     scope = {
       path: base,
       title: name,
-      mark: <ProjectMark deployment={deployment} size="xs" className="size-3.5" />,
+      mark: <ProjectMark deployment={deployment} size="xs" />,
       groups: [
         {
           items: PROJECT_NAV.filter((entry) => !entry.game || deployment.profile === "game").map(

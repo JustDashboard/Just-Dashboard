@@ -64,8 +64,9 @@ keeps the project's panel, with Deployments marked as where you are, because a r
 A scope's head is not a section's. A section's name is one of this product's words and is drawn as an
 eyebrow, the rail's label voice; a project or a connection is a name somebody typed, and small caps
 turned `api-production` into API-PRODUCTION, so a scope's head (`named` in `app-sidebar.tsx`) is printed
-as written at `text-hint` semibold, after the scope's `mark` — the thing drawn as itself at the line's
-height, a project's favicon or product (`ProjectMark size="xs"`), a connection's engine
+as written at `text-title` semibold — a step above the rows, so the name reads as what the rows belong
+to rather than as one of them — after the scope's `mark`, the thing drawn as itself at the rows' icon
+size, a project's favicon or product (`ProjectMark size="xs"`), a connection's engine
 (`ProductGlyph`). The mark rides along with the rest of the scope but is not what decides a republish,
 so it is derived from the same data as the title. A scope carries no `icon`: a glyph in a
 row's slot made the heading read as one more row to press.
