@@ -86,7 +86,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { VerbActions, VerbBar, type Verb } from "@/components/verbs"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { ProjectMark } from "@/components/deploy/project-mark"
-import { WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { WireHost, WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
 import { ChannelGlyph, channelMark, mailProduct } from "@/components/deploy/vocabulary"
 
 /**
@@ -1025,18 +1025,24 @@ function outcomeWords(channel: NotificationChannel) {
 }
 
 /**
- * Where an outcome goes: every deployment — the projects themselves — on one
- * side, and a mark for each channel it reaches on the other, each the service
- * it posts to. The line to a channel pulses while its last message arrived,
- * stands still and red once one was given up on, still while it is paused,
- * retrying or has never sent anything; the kinds not yet set up are their
- * services faded in dashed rings — pressed to add one, for an administrator —
- * so the empty page is the same picture with nothing wired yet.
+ * Where an outcome goes: the projects on one side, this server in the middle
+ * — it is what hears every run end and sends the message — and a mark for
+ * each channel it reaches on the other, each the service it posts to. It is
+ * the GitHub App's picture on Credentials read the other way: the accounts
+ * there and the projects here are the same column of real things with their
+ * own faces, and the server is the same mark in both.
  *
- * Wide, the source and the channels balance around the lines in the middle of
- * the frame. On a phone the list below already names every channel, so the
- * picture shrinks to what it adds: the source over a row of marks and the
- * lines fanning down to them.
+ * The line to a channel pulses while its last message arrived, stands still
+ * and red once one was given up on, still while it is paused, retrying or has
+ * never sent anything; the kinds not yet set up are their services faded in
+ * dashed rings — pressed to add one, for an administrator — so the empty page
+ * is the same picture with nothing wired yet. The lines from the projects are
+ * still: every one of them reports, and a project is not a delivery.
+ *
+ * Wide, the three balance around the lines across the frame. On a phone the
+ * list below already names every channel, so the picture shrinks to what it
+ * adds: the projects over this server over a row of channels, the lines
+ * running down through it.
  */
 function Fanout({
   channels,
@@ -1049,7 +1055,7 @@ function Fanout({
 }) {
   const wide = useMediaQuery("(min-width: 1024px)")
   const container = useRef<HTMLDivElement>(null)
-  const source = useRef<HTMLDivElement>(null)
+  const hub = useRef<HTMLDivElement>(null)
   const missing = KINDS.filter((item) => !channels.some((channel) => channel.kind === item.kind))
   const targets: { key: string; kind: NotificationChannelKind; channel?: NotificationChannel }[] = [
     ...channels.map((channel) => ({ key: `channel-${channel.id}`, channel, kind: channel.kind })),
@@ -1060,48 +1066,41 @@ function Fanout({
   const hint =
     channels.length === 0 ? "reaching nobody yet" : `reaching ${plural(channels.length, "channel")}`
   const shown = fleet.slice(0, 3)
-  const projects = shown.length > 0 && (
-    <span
-      aria-hidden
-      className={cn("mt-2 flex items-center", wide ? "justify-end" : "justify-center")}
-    >
-      {shown.map((deployment, index) => (
-        <ProjectMark
+  const rest = fleet.length - shown.length
+  const group = { role: "group", "aria-label": "Where deployment events go" } as const
+  const sources = { role: "group", "aria-label": "Projects that report here" } as const
+  const projects = (
+    <>
+      {shown.map((deployment) => (
+        <FanoutProject
           key={deployment.id}
+          compact={!wide}
+          containerRef={container}
+          hubRef={hub}
           deployment={deployment}
-          size="sm"
-          className={cn(index > 0 && "-ml-3", "ring-2 ring-card")}
         />
       ))}
-      {fleet.length > shown.length && (
-        <span className="numeric ml-1.5 text-micro text-muted-foreground">
-          +{fleet.length - shown.length}
-        </span>
+      {rest > 0 && (
+        <FanoutRest compact={!wide} containerRef={container} hubRef={hub} count={rest} />
       )}
-    </span>
+      {fleet.length === 0 && <FanoutRest compact={!wide} containerRef={container} hubRef={hub} />}
+    </>
   )
-  const mark = (
-    <WireMark tone="brand" shape="square">
-      <CloudUpload />
-    </WireMark>
-  )
-  const group = { role: "group", "aria-label": "Where deployment events go" } as const
 
   return (
     <div ref={container} className="relative mx-auto max-w-5xl">
       {wide ? (
-        <div className="grid grid-cols-[minmax(0,1fr)_minmax(6rem,0.5fr)_minmax(0,1fr)] items-center">
+        <div className="grid grid-cols-[minmax(0,1fr)_minmax(3rem,0.4fr)_auto_minmax(4.5rem,0.5fr)_minmax(0,1.3fr)] items-center">
+          <div {...sources} className="flex flex-col items-end gap-5">
+            {projects}
+          </div>
+          <div aria-hidden />
           <WireNode
-            nodeRef={source}
-            align="end"
-            mark={mark}
-            eyebrow="Every deployment"
-            title={
-              <>
-                All projects
-                {projects}
-              </>
-            }
+            nodeRef={hub}
+            align="center"
+            mark={<WireHost />}
+            eyebrow="This server"
+            title="Every deployment"
             hint={hint}
           />
           <div aria-hidden />
@@ -1112,7 +1111,7 @@ function Fanout({
               <FanoutTarget
                 key={target.key}
                 containerRef={container}
-                sourceRef={source}
+                sourceRef={hub}
                 channel={target.channel}
                 kind={target.kind}
                 onAdd={onAdd}
@@ -1121,15 +1120,17 @@ function Fanout({
           </div>
         </div>
       ) : (
-        // The words over the mark, so the lines leave it downwards over
-        // nothing but the frame's own ground.
+        // The words over the marks, so the lines run downwards over nothing
+        // but the frame's own ground.
         <div className="flex flex-col items-center text-center">
-          <p className="eyebrow">Every deployment</p>
-          <p className="text-body leading-snug font-medium">All projects</p>
+          <p className="eyebrow">This server</p>
+          <p className="text-body leading-snug font-medium">Every deployment</p>
           <p className="text-hint leading-snug text-muted-foreground">{hint}</p>
-          {projects}
-          <div ref={source} className="relative z-10 mt-4 flex">
-            {mark}
+          <div {...sources} className="mt-5 flex flex-wrap justify-center gap-4">
+            {projects}
+          </div>
+          <div ref={hub} className="relative z-10 mt-10 flex">
+            <WireHost />
           </div>
           <div {...group} className="mt-10 flex flex-wrap justify-center gap-4">
             {targets.map((target) => (
@@ -1137,7 +1138,7 @@ function Fanout({
                 key={target.key}
                 compact
                 containerRef={container}
-                sourceRef={source}
+                sourceRef={hub}
                 channel={target.channel}
                 kind={target.kind}
                 onAdd={onAdd}
@@ -1146,6 +1147,116 @@ function Fanout({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * One project, drawn as itself — the favicon or product its card on the fleet
+ * carries — with its line into this server, as an account is drawn beside the
+ * GitHub App.
+ */
+function FanoutProject({
+  deployment,
+  containerRef,
+  hubRef,
+  compact,
+}: {
+  deployment: DeploymentSummary
+  containerRef: RefObject<HTMLDivElement | null>
+  hubRef: RefObject<HTMLDivElement | null>
+  compact: boolean
+}) {
+  const mark = useRef<HTMLDivElement>(null)
+  const run = deployment.activeRun ?? deployment.lastRun
+  const beam = <AnimatedBeam containerRef={containerRef} fromRef={mark} toRef={hubRef} still />
+  if (compact)
+    return (
+      <div className="min-w-0">
+        {beam}
+        <div ref={mark} className="relative z-10 flex">
+          <ProjectMark deployment={deployment} size="sm" />
+        </div>
+        <span className="sr-only">{deployment.name}</span>
+      </div>
+    )
+  return (
+    <div className="min-w-0">
+      {beam}
+      <WireNode
+        nodeRef={mark}
+        align="end"
+        mark={<ProjectMark deployment={deployment} size="md" />}
+        title={
+          <Link href={`/deploy/${deployment.id}`} className="rounded-sm focus-ring hover:underline">
+            {deployment.name}
+          </Link>
+        }
+        hint={`${deployment.environmentName} · ${
+          run ? `last run ${relativeTime(run.endedAt ?? run.requestedAt)}` : "never deployed"
+        }`}
+      />
+    </div>
+  )
+}
+
+/**
+ * The projects the column has no room for, as a count on a tile of the
+ * projects' own shape; or, before there is any project, the dashed ring where
+ * the first will stand.
+ */
+function FanoutRest({
+  count,
+  containerRef,
+  hubRef,
+  compact,
+}: {
+  count?: number
+  containerRef: RefObject<HTMLDivElement | null>
+  hubRef: RefObject<HTMLDivElement | null>
+  compact: boolean
+}) {
+  const mark = useRef<HTMLDivElement>(null)
+  const drawn = count ? (
+    <span
+      className={cn(
+        "numeric flex shrink-0 items-center justify-center rounded-lg border border-hairline bg-background text-hint text-muted-foreground",
+        compact ? "size-8" : "size-10",
+      )}
+    >
+      +{count}
+    </span>
+  ) : (
+    <WirePlaceholder size={compact ? "sm" : "md"}>
+      <CloudUpload />
+    </WirePlaceholder>
+  )
+  const beam = (
+    <AnimatedBeam containerRef={containerRef} fromRef={mark} toRef={hubRef} still dashed={!count} />
+  )
+  if (compact)
+    return (
+      <div className="min-w-0">
+        {beam}
+        <div ref={mark} className="relative z-10 flex">
+          {drawn}
+        </div>
+      </div>
+    )
+  return (
+    <div className="min-w-0">
+      {beam}
+      <WireNode
+        nodeRef={mark}
+        align="end"
+        mark={drawn}
+        title={
+          <span className="font-normal text-muted-foreground">
+            {count ? plural(count, "more project") : "No projects yet"}
+          </span>
+        }
+        hint={count ? undefined : "each reports here once it deploys"}
+      />
     </div>
   )
 }
