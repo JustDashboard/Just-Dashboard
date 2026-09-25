@@ -569,8 +569,12 @@ only renderer/executor/validation authority for their feature.
   `dockerx.RunToCompletion`): the runtime variables the release starts with plus the task's
   `release_task`-scoped ones as container environment, on the project's database networks (and the
   preview network for an isolated preview) or on the host's network when the release runs there, with
-  the release's resource limits, no ports, mounts or privileges, the image's entrypoint replaced by the
-  command, and the container removed however the task ends. The container carries
+  the release's resource limits and the plan's mounts (its volumes and binds, read-only where the plan
+  says so, recorded in the task evidence as `mounts`) — a Heroku or Render release phase that sees the
+  application's own data, so a migration or seed of SQLite on a volume reaches the file the release then
+  opens — but no ports, devices, capabilities or privilege, the image's entrypoint replaced by the
+  command, and the container removed however the task ends. The task runs while the live release still
+  serves from the same volume; a stop-first release stops it only when the candidate starts. The container carries
   `io.just-dashboard.release-task`, so runtime observation leaves it out; `Server.Start` removes any a
   previous process left before the engine resumes runs, a task removes a stale one of its own name
   before it starts, and the step's cleanup records whether removal succeeded. A blank command is

@@ -399,8 +399,9 @@ The command a repository declares runs once before each release — a Procfile `
 it), or a Phoenix release's `rel/overlays/bin/migrate` — is the candidate's `releaseCommand`. The form
 plans it as a release task named `release` that runs **in the release image** (`runner: "image"`): one
 throwaway container of the candidate release's image, with the runtime variables the release starts
-with plus the task's own `release_task`-scoped ones, on the project's database networks — or on the
-host's network when the release runs there — removed when it exits. A command with shell syntax runs
+with plus the task's own `release_task`-scoped ones and the plan's volumes mounted where the release
+mounts them, on the project's database networks — or on the host's network when the release runs there
+— removed when it exits. A command with shell syntax runs
 through the image's `/bin/sh`; a plain one is executed directly, so an image without a shell still runs
 `bin/migrate`. Its container is labelled as a release task, so it never counts as one of the release's
 services; one a stopped dashboard left behind is removed when the dashboard starts and before the task
@@ -1535,8 +1536,9 @@ the source needs. State that is kept passes as `persistent_state_kept`, and `bac
 asks for a backup. A linked server database in the variable a SQLite default falls back from takes the
 file out of use and raises nothing. SQLite moved onto a volume starts empty the way a new server database
 does, so the detected schema tool's step is checked for it too (`schema_step_missing`, titled for the
-volume); only the start command or the application itself counts there, because a release task, on the
-host or in the release image, runs without the plan's volumes. A container that cannot open or write its SQLite file — the directory is missing or not writable
+volume); the start command, the application itself and a release task in the release image count there,
+since that task mounts the plan's volumes as the release does, but not a task in the dashboard's shell,
+which runs over the checkout. A container that cannot open or write its SQLite file — the directory is missing or not writable
 by its user — fails its readiness gate with `runtime_sqlite_not_writable` named.
 
 Limits: an image's declared volumes are read only when the image is already on this host (the registry
@@ -1553,7 +1555,8 @@ Laravel's `DatabaseSeeder` when it does more than the skeleton's test user (`php
 --force`), a `db/seeds.rb` with code (`bin/rails db:seed`), and the fixtures a Django application commits
 in its `fixtures/` directories, outside any test directory (`python manage.py loaddata <names>`). When
 the plan links a database or keeps SQLite on a new volume, and neither the start command nor a release
-task seeds — a release task reaches a linked server, never a volume — preflight raises `seed_available` (a
+task seeds — any release task reaches a linked server, and one in the release image reaches the volume —
+preflight raises `seed_available` (a
 warning) naming the command to run once from the project's console after the first release. Only a
 first release does: a deployment that replaces a live runtime has a database that already holds whatever
 was seeded. It is never planned as a release task, which runs before every release, because a seed that

@@ -42,7 +42,7 @@ type TaskEvidence = { name: string; durationMs: number; exitCode: number; variab
 
 /**
  * Where a task runs, said as a place: the release's own image, with the
- * application's toolchain and variables, or the dashboard's shell over the
+ * application's toolchain, variables and volumes, or the dashboard's shell over the
  * source as committed — which has none of the application's dependencies, so
  * `npx`, `python manage.py` or `bundle exec` can only fail there.
  */
@@ -50,7 +50,7 @@ const RUNNERS: { runner: ReleaseTask["runner"]; label: string; hint: string }[] 
   {
     runner: "image",
     label: "Release image",
-    hint: "Runs once in the release's own image, with its runtime variables and the ones below, before it starts.",
+    hint: "Runs once in the release's own image, with its volumes, its runtime variables and the ones below, before it starts.",
   },
   {
     runner: undefined,

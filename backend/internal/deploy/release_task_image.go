@@ -21,7 +21,11 @@ import (
 // `npx prisma migrate deploy` or `python manage.py migrate` could only ever
 // fail there. The image runner starts the release's own image once instead,
 // with the application's variables, on its database networks, and removes it
-// when the command exits.
+// when the command exits. It mounts the plan's volumes as the release will,
+// the way Heroku's and Render's release phases see the application's own
+// filesystem: a migration of a SQLite database on a volume, or a seed of
+// the uploads directory, reaches the data the release then opens rather
+// than a throwaway copy inside the image.
 
 // ReleaseTaskRuntime is the runtime owner's one-shot container boundary.
 type ReleaseTaskRuntime interface {
@@ -193,9 +197,11 @@ func (o *DockerRuntimeOwner) RemoveOrphanedReleaseTasks(ctx context.Context) err
 }
 
 // releaseTaskContainerSpec is the one-shot container a task runs in: the
-// release's image, variables, limits and networks — the host's own network
-// when the release runs on it, so a task reaches what the application
-// reaches — labelled as a release task so runtime observation leaves it out.
+// release's image, variables, limits, networks and mounts — the host's own
+// network when the release runs on it, so a task reaches what the
+// application reaches — labelled as a release task so runtime observation
+// leaves it out. It publishes no port and takes none of the release's
+// devices, capabilities or privilege.
 func releaseTaskContainerSpec(request ReleaseTaskRuntimeRequest, networks []string) (dockerx.ContainerSpec, error) {
 	entrypoint, cmd := releaseTaskArgv(request.Task.Command)
 	if len(entrypoint) == 0 {
@@ -217,7 +223,7 @@ func releaseTaskContainerSpec(request ReleaseTaskRuntimeRequest, networks []stri
 	spec := dockerx.ContainerSpec{
 		Name:  releaseTaskContainerName(request.Release.EnvironmentID, request.Run.ID, request.Index),
 		Image: request.Image, Entrypoint: entrypoint, Command: cmd, Env: environment,
-		Labels: labels, Networks: networks, Logging: dockerx.CappedLogging(), Init: true,
+		Labels: labels, Networks: networks, Mounts: runtimeMountSpecs(plan), Logging: dockerx.CappedLogging(), Init: true,
 		NetworkMode: map[bool]string{true: "host"}[plan.HostNetwork],
 		Limits:      dockerx.ResourceLimits{MemoryMB: plan.MemoryMB, CPUs: plan.CPUs, PidsLimit: plan.PidsLimit},
 	}
@@ -255,6 +261,9 @@ func runImageReleaseTask(
 	task := request.Task
 	evidence := ReleaseTaskEvidence{Name: task.Name, VariableNames: append([]string(nil), task.Env...), ExitCode: -1, Runner: ReleaseTaskRunnerImage}
 	sort.Strings(evidence.VariableNames)
+	for _, mount := range request.Plan.Mounts {
+		evidence.Mounts = append(evidence.Mounts, mount.Target)
+	}
 	cleanup := map[string]any{"container": releaseTaskContainerName(request.Release.EnvironmentID, request.Run.ID, request.Index), "removed": true}
 	variables := map[string]string{}
 	for name, value := range request.Variables {

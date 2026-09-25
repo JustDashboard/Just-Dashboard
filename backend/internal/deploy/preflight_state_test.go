@@ -198,11 +198,18 @@ func TestSeedFindingNeedsAFreshDatabase(t *testing.T) {
 	if seedFinding(onVolume, mounted, map[string]string{"DATABASE_URL": "file:/data/dev.db"}, true) == nil {
 		t.Fatal("sqlite relocated onto a new volume was not offered its seed")
 	}
-	// A release task runs without the plan's volumes.
-	mounted.Build.ReleaseTasks = []ReleaseTaskConfig{{Name: "seed", Command: "npx prisma db seed", Runner: ReleaseTaskRunnerImage}}
+	// A task in the dashboard's shell runs over the checkout, without the
+	// plan's volumes; one in the release image mounts them as the release
+	// does, so its seed reaches the file on the volume.
+	mounted.Build.ReleaseTasks = []ReleaseTaskConfig{{Name: "seed", Command: "npx prisma db seed"}}
 	if seedFinding(onVolume, mounted, map[string]string{"DATABASE_URL": "file:/data/dev.db"}, true) == nil {
-		t.Fatal("a release task was taken to seed the database on the volume")
+		t.Fatal("a shell release task was taken to seed the database on the volume")
 	}
+	mounted.Build.ReleaseTasks[0].Runner = ReleaseTaskRunnerImage
+	if seedFinding(onVolume, mounted, map[string]string{"DATABASE_URL": "file:/data/dev.db"}, true) != nil {
+		t.Fatal("a release task in the release image did not count as seeding the database on the volume")
+	}
+	mounted.Build.ReleaseTasks = nil
 	if seedFinding(onVolume, mounted, map[string]string{"DATABASE_URL": "postgres://db-4.jd.internal/app"}, true) != nil {
 		t.Fatal("a server database in place of the file was treated as the file")
 	}
@@ -227,12 +234,17 @@ func TestSQLiteOnANewVolumeNeedsItsSchemaStep(t *testing.T) {
 		!strings.Contains(item.Title, "SQLite database on the volume") || !strings.Contains(item.Action, "Database.Migrate()") {
 		t.Fatalf("finding = %+v", item)
 	}
-	// A release task runs without the plan's volumes, so its migrations
-	// never reach the file on one.
+	// A task in the dashboard's shell never reaches the file on the volume;
+	// one in the release image mounts the volume as the release does.
 	migrating := plan.Build
-	migrating.ReleaseTasks = []ReleaseTaskConfig{{Name: "migrate", Command: "alembic upgrade head", Runner: ReleaseTaskRunnerImage}}
-	if item := sqliteSchemaStepFinding(&DetectedCandidate{SchemaTool: "alembic", PersistentPaths: candidate.PersistentPaths}, migrating); item.Severity != PreflightWarning {
-		t.Fatalf("release-task finding = %+v", item)
+	migrating.ReleaseTasks = []ReleaseTaskConfig{{Name: "migrate", Command: "alembic upgrade head"}}
+	alembic := &DetectedCandidate{SchemaTool: "alembic", PersistentPaths: candidate.PersistentPaths}
+	if item := sqliteSchemaStepFinding(alembic, migrating); item.Severity != PreflightWarning {
+		t.Fatalf("shell release-task finding = %+v", item)
+	}
+	migrating.ReleaseTasks[0].Runner = ReleaseTaskRunnerImage
+	if item := sqliteSchemaStepFinding(alembic, migrating); item.Severity != PreflightPass || !strings.Contains(item.Means, "release image") {
+		t.Fatalf("image release-task finding = %+v", item)
 	}
 	candidate.SchemaInStart = true
 	if item := sqliteSchemaStepFinding(candidate, plan.Build); item.Severity != PreflightPass || !strings.Contains(item.Means, "on the volume") {
