@@ -42,3 +42,5 @@ next-env.d.ts
 
 # vendored Monaco runtime, copied from node_modules by scripts/sync-monaco.mjs
 /public/monaco
+# Excalidraw fonts copied from node_modules by scripts/sync-excalidraw.mjs
+/public/excalidraw

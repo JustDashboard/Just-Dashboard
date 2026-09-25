@@ -39,6 +39,9 @@ It manages exactly one machine. There is no fleet view, no agents to enrol, no c
 - **Databases you can hand out.** Eight engines browsed, queried and diagrammed from one place. A
   database started here gets a connection string, and one press opens it to the internet or
   closes it again.
+- **Boards for the server you run.** Sketch with the bundled Excalidraw editor, keep multiple boards
+  in the dashboard's own database, and place linked cards for this host, deployment projects and
+  database connections. Changes save automatically; an older tab cannot silently replace a newer save.
 - **Fifty-seven reviewed templates, each one saying how you get in.** PostgreSQL, Redis, n8n,
   Grafana, Uptime Kuma, Vaultwarden, Nextcloud, Jellyfin, code-server, Ollama, Open WebUI, ntfy,
   Qdrant, NocoDB and more, one click each — and every card says whether you create the first
@@ -123,6 +126,13 @@ Stacks deploy, rebuild and roll back with the compose diff shown first.
 
 A real PTY into a host account. Sessions group windows, each named after what it is running,
 and they survive the tab closing. Files and Git sit beside the shell.
+
+### Boards
+
+Open **Boards** in Workspace to create a drawing. Each board has its own address and is saved in
+`JD_DATA_DIR` with the dashboard's other state. **Add server item** inserts a linked host, project or
+database card. The card shows the resource's name and status when inserted; its link opens the current
+resource page. Board editing needs `service.control`, and deletion asks for the board's name.
 
 ### Files
 
