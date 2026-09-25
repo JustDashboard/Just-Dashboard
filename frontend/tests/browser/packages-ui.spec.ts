@@ -4,14 +4,16 @@ import { expect, test, type Page, type Route } from "@playwright/test"
  * The Packages page, checked in a browser against a mocked host.
  *
  * What these assert is what a type check cannot: that the page reads the way
- * the design system says (design-system.md §15) — the manager and the index
- * age as a facts row under the title, four figures as tiles, three views under
- * one underlined strip, each a plain panel, and no framed block anywhere on
- * the page; that the one decision worth making in a hurry (security updates
- * waiting) carries its own button above the fold; that a row's fixed
- * properties sit at its edge; and that the search, the install verb and the
- * package sheet are all reachable from the strip. The screenshots at 1280 and
- * 1720 are the eyes the assertions do not have.
+ * the design system says (design-system.md §15) — the host's identity line
+ * with its distribution as the mark and the manager and index age as facts,
+ * four figures as tiles carrying the products they count, three views under
+ * one underlined strip, and no framed block but a table anywhere on the page;
+ * that every package is drawn as the software it is (§14) and an upgrade shows
+ * the part of the version it changes; that the one decision worth making in a
+ * hurry (security updates waiting) carries its own button above the fold; that
+ * a row's fixed properties sit at its edge; and that the search, the install
+ * verb and the package sheet are all reachable from the strip. The screenshots
+ * at 1280 and 1720 are the eyes the assertions do not have.
  */
 
 const now = new Date().toISOString()
@@ -146,6 +148,22 @@ const report = {
   lastChecked: now,
 }
 
+const host = {
+  hostname: "web-1",
+  os: "linux",
+  platform: "ubuntu",
+  platformVersion: "24.04",
+  kernelVersion: "6.8.0-45-generic",
+  kernelArch: "x86_64",
+  virtualization: "kvm",
+  bootTime: now,
+  uptimeSeconds: 86400,
+  processes: 212,
+  cpuModel: "AMD EPYC 7B13",
+  cpuCores: 4,
+  cpuMhz: 2450,
+}
+
 const search = [
   {
     name: "htop",
@@ -207,6 +225,7 @@ async function mockHost(page: Page) {
     const method = route.request().method()
     if (path === "/auth/session") return json(route, user)
     if (path === "/updates/self") return json(route, { current: "0.6.7", latest: "0.6.7" })
+    if (path === "/system/host") return json(route, host)
     if (path === "/packages/") return json(route, inventory)
     if (path === "/packages/updates") return json(route, report)
     if (path === "/packages/search") return json(route, search)
@@ -248,16 +267,20 @@ async function framedNonTables(page: Page) {
   )
 }
 
-test("the page reads the host as facts and figures, with nothing framed", async ({ page }) => {
+test("the page opens on the host and its figures, with nothing framed", async ({ page }) => {
   await mockHost(page)
   await page.goto("/packages")
   await page.waitForLoadState("networkidle")
 
-  // The manager and index age sit beside the actions as page facts.
-  const facts = page.locator("[data-slot='page'] > div").first()
-  await expect(facts).toContainText("apt")
-  await expect(facts).toContainText("index refreshed")
-  await expect(facts).toContainText("1 security update")
+  // The distribution as the mark, the manager beside its name, the index age
+  // as a fact and what is owed as the verdict at the line's end.
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity).toContainText("Ubuntu 24.04")
+  await expect(identity).toContainText("apt")
+  await expect(identity).toContainText("index refreshed")
+  await expect(identity).toContainText("1 security update")
+  await expect(identity.locator("img[src='/logos/ubuntu.svg']")).toHaveCount(1)
+  await expect(identity.getByRole("button", { name: "Refresh index" })).toBeVisible()
 
   const tiles = page.locator("[data-slot='stat-tile']")
   await expect(tiles).toHaveCount(4)
@@ -266,6 +289,9 @@ test("the page reads the host as facts and figures, with nothing framed", async 
   await expect(tiles.nth(2)).toContainText("3")
   await expect(tiles.nth(2)).toContainText("1 security")
   await expect(tiles.nth(3)).toContainText("gcc-13 is the largest")
+  // The tiles say which software they count: what was asked for, what is behind.
+  await expect(tiles.nth(1).locator("img[src='/logos/postgresql.svg']")).toHaveCount(1)
+  await expect(tiles.nth(2).locator("img[src='/logos/curl.svg']")).toHaveCount(1)
 
   // The decision, above the fold, with its own button.
   await expect(page.getByRole("button", { name: "Install security updates" })).toBeVisible()
@@ -275,6 +301,21 @@ test("the page reads the host as facts and figures, with nothing framed", async 
   expect(await framedNonTables(page), "a framed block that is not a table").toEqual([])
   // The pill-shaped tab list is gone; the strip is the product's underlined one.
   expect(await page.locator("[data-slot='tabs-list']").count()).toBe(0)
+})
+
+test("each package is drawn as the software it is", async ({ page }) => {
+  await mockHost(page)
+  await page.goto("/packages")
+  await page.waitForLoadState("networkidle")
+  await page.getByRole("button", { name: /^Everything/ }).click()
+
+  const logo = (name: string) => page.getByRole("row", { name }).locator("img[src^='/logos/']")
+  await expect(logo("nginx")).toHaveAttribute("src", "/logos/nginx.svg")
+  await expect(logo("postgresql-16")).toHaveAttribute("src", "/logos/postgresql.svg")
+  await expect(logo("curl")).toHaveAttribute("src", "/logos/curl.svg")
+  // A library nothing names keeps its section's glyph on the same tile.
+  await expect(logo("libc6")).toHaveCount(0)
+  await expect(page.getByRole("row", { name: /libc6/ }).locator("svg").first()).toBeVisible()
 })
 
 test("the installed view filters and puts a row's properties at its edge", async ({ page }) => {
@@ -324,8 +365,17 @@ test("updates and add software are reachable from the strip", async ({ page }) =
   await expect(page.getByRole("button", { name: "Upgrade all 3" })).toBeVisible()
   const security = page.getByRole("row", { name: /openssl/ })
   await expect(security.getByRole("cell").last()).toContainText("security")
+  // The upgrade keeps "3.0.13-0ubuntu3" and changes ".4", in amber for a fix.
+  await expect(security.getByText(".4", { exact: true })).toHaveClass(/text-warning/)
+  // The origin is the archive that published it.
+  await expect(security.locator("img[src='/logos/ubuntu.svg']")).toHaveCount(1)
 
   await strip.getByRole("button", { name: "Add software" }).click()
+  // An empty search offers software to look for, each drawn as itself.
+  const suggestion = page.getByRole("button", { name: "postgresql", exact: true })
+  await expect(suggestion.locator("img[src='/logos/postgresql.svg']")).toHaveCount(1)
+  await suggestion.click()
+  await expect(page.getByPlaceholder(/What do you need/)).toHaveValue("postgresql")
   await page.getByPlaceholder(/What do you need/).fill("htop")
   await expect(page.getByText("2 matches")).toBeVisible()
   const htop = page.getByRole("listitem").filter({ hasText: "htop" }).first()
