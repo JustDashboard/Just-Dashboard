@@ -17,8 +17,21 @@ func nodeFrameworkFindings(candidate *DetectedCandidate, configuration PlanConfi
 	var devScripts map[string]string
 	if record := candidate.NodeBuild; record != nil {
 		devScripts = record.DevScripts
+		asked := map[string]int{}
 		for _, item := range record.Findings {
 			switch item.Code {
+			case "node_decision_open":
+				// A question is answered once the setting that answers it
+				// no longer holds detection's guess; the questions one
+				// setting answers are one finding.
+				if !nodeDecisionOpen(candidate, build, item.FieldID) {
+					continue
+				}
+				if index, ok := asked[item.FieldID]; ok {
+					findings[index].Measured = boundedFindingText(findings[index].Measured + "; " + item.Measured)
+					continue
+				}
+				asked[item.FieldID] = len(findings)
 			case "next_export_images":
 				if !static {
 					continue
@@ -48,6 +61,25 @@ func nodeFrameworkFindings(candidate *DetectedCandidate, configuration PlanConfi
 			"deploy", "configuration.build.startCommand"))
 	}
 	return findings
+}
+
+// nodeDecisionOpen says the plan still holds what detection proposed for the
+// setting that answers a question: every command and the output directory
+// for a question no one setting answers.
+func nodeDecisionOpen(candidate *DetectedCandidate, build BuildPlanConfig, field string) bool {
+	same := func(detected, planned string) bool { return strings.TrimSpace(detected) == strings.TrimSpace(planned) }
+	start, output := same(candidate.StartCommand, build.StartCommand), same(candidate.OutputDirectory, build.OutputDirectory)
+	// A plan without a package manager builds with the one detected.
+	manager := build.PackageManager == "" || same(candidate.PackageManager, build.PackageManager)
+	switch field {
+	case "configuration.build.startCommand":
+		return start && output
+	case "configuration.build.outputDirectory":
+		return output
+	case "configuration.build.packageManager":
+		return manager
+	}
+	return start && output && manager && same(candidate.BuildCommand, build.BuildCommand)
 }
 
 // nodeCommandDevServer is the development server or watcher a start command

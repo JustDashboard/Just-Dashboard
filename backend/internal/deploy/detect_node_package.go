@@ -22,15 +22,52 @@ func withNodeFrameworkFacts(record *DetectedNodeBuild, findings []PreflightFindi
 	if record == nil {
 		record = &DetectedNodeBuild{}
 	}
+	findings = append(record.Findings, findings...)
 	if len(findings) > nodeFrameworkFindingsKept {
 		findings = findings[:nodeFrameworkFindingsKept]
 	}
-	record.Findings, record.DevScripts = findings, devScripts
+	record.Findings = findings
+	if devScripts != nil {
+		record.DevScripts = devScripts
+	}
 	return record
 }
 
 // nodeFrameworkFindingsKept bounds the framework findings a candidate carries.
 const nodeFrameworkFindingsKept = 8
+
+// nodeDecisionFindings carries the framework's open questions to preflight,
+// each with the build setting that answers it, so a project deployed again
+// later is asked them before Deploy as well, not only when it was created.
+func nodeDecisionFindings(decisions []string) []PreflightFinding {
+	findings := make([]PreflightFinding, 0, len(decisions))
+	for _, decision := range decisions {
+		findings = append(findings, nodeFinding("node_decision_open", PreflightWarning,
+			"Detection left a question about this application open", decision,
+			"The repository does not settle it, so the plan runs detection's best guess, which may not build or serve.",
+			"Answer it in the build settings, or change the repository so its configuration says it.", nodeDecisionField(decision)))
+	}
+	return findings
+}
+
+// nodeDecisionField is the build setting whose value answers a question.
+func nodeDecisionField(decision string) string {
+	switch {
+	case strings.Contains(decision, "package manager"):
+		return "configuration.build.packageManager"
+	case strings.Contains(decision, "output directory"):
+		return "configuration.build.outputDirectory"
+	case strings.Contains(decision, "start"), strings.Contains(decision, "entry"):
+		return "configuration.build.startCommand"
+	}
+	return "configuration.build"
+}
+
+// addNodeDecision asks a question after the build record is made.
+func addNodeDecision(candidate *DetectedCandidate, decision string) {
+	candidate.NeedsDecision = append(candidate.NeedsDecision, decision)
+	candidate.NodeBuild = withNodeFrameworkFacts(candidate.NodeBuild, nodeDecisionFindings([]string{decision}), nil)
+}
 
 // applyNodePackageShape marks what the package is when it is not a plain
 // service: a Meteor application, which the recipe refuses; a workspace root
@@ -53,16 +90,30 @@ func applyNodePackageShape(candidate *DetectedCandidate, install *nodeInstallSou
 		return
 	}
 	if candidate.Framework == "elysia" {
-		candidate.NeedsDecision = append(candidate.NeedsDecision, "Elysia serves through Bun's own server; choose Bun as the package manager, or add @elysiajs/node")
+		addNodeDecision(candidate, "Elysia serves through Bun's own server; choose Bun as the package manager, or add @elysiajs/node")
 		candidate.Confidence = minConfidence(candidate.Confidence, ConfidenceMedium)
 		return
 	}
 	file := nodeStartedFile(candidate.StartCommand)
 	if head, ok := files.entryHeads[file]; ok && nodeBunOnlyEntry(head) {
-		candidate.NeedsDecision = append(candidate.NeedsDecision,
-			file+" exports a fetch handler, which only Bun serves by itself; choose Bun as the package manager, or serve it with @hono/node-server")
+		addNodeDecision(candidate, file+" exports a fetch handler, which only Bun serves by itself; choose Bun as the package manager, or serve it with @hono/node-server")
 		candidate.Confidence = minConfidence(candidate.Confidence, ConfidenceMedium)
 	}
+}
+
+// frameworkSchemaTool is the migration step of a framework that owns its
+// migrations, in the shape detectSchemaTool gives a package's own tool.
+func frameworkSchemaTool(schema *nodeFrameworkSchema, root string) *detectedSchemaTool {
+	if schema == nil {
+		return nil
+	}
+	tool := schemaToolByName(schema.tool)
+	if tool == nil {
+		return nil
+	}
+	return &detectedSchemaTool{Tool: *tool, Command: schema.command, owned: true, Evidence: DetectionEvidence{
+		Path: joinRoot(root, schema.file), Reason: boundedEvidenceSentence(tool.Label + " migrations, applied before the server starts: " + schema.command),
+	}}
 }
 
 func minConfidence(current, cap DetectionConfidence) DetectionConfidence {
@@ -85,7 +136,7 @@ func nxCandidates(marker *detectedMarkers, base DetectedCandidate, facts nodeIns
 		if schema == nil || schema.Command == "" || start == "" || schema.Tool.applied(start) {
 			return start
 		}
-		return nodeExecRunner(manager) + " " + schema.Command + " && " + start
+		return nodeSchemaStep(manager, schema.Tool, schema.Command) + " && " + start
 	}
 	candidates := []DetectedCandidate{}
 	for _, project := range files.nx.projects {
@@ -111,7 +162,9 @@ func nxCandidates(marker *detectedMarkers, base DetectedCandidate, facts nodeIns
 		default:
 			candidate.Profile, candidate.Port = ProfileWorker, 0
 		}
+		var asked []string
 		if nx.decision != "" {
+			asked = append(asked, nx.decision)
 			candidate.NeedsDecision = append(candidate.NeedsDecision, nx.decision)
 			candidate.Confidence = ConfidenceMedium
 		}
@@ -129,7 +182,7 @@ func nxCandidates(marker *detectedMarkers, base DetectedCandidate, facts nodeIns
 			commands := project.candidate(manager)
 			return commands.build, withSchema(manager, commands.start)
 		})
-		candidate.NodeBuild = detectedNodeBuild(facts, candidate.Framework, candidate.BuildCommand)
+		candidate.NodeBuild = withNodeFrameworkFacts(detectedNodeBuild(facts, candidate.Framework, candidate.BuildCommand), nodeDecisionFindings(asked), nil)
 		candidate.Variables = facts.registry
 		if _, err := validateNodeRecipeContent(marker.packageJSON, files, BuildPlanConfig{
 			Method: BuildRecipe, Recipe: "node", PackageManager: runner, BuildCommand: candidate.BuildCommand,

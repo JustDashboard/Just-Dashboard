@@ -106,11 +106,26 @@ func (f nodeRootFiles) configText(kind string) (nodeConfigText, bool) {
 
 func (f nodeRootFiles) has(rel string) bool { return f.present[rel] }
 
+// nodeConfigBudget is what the framework reads of one detection or build
+// preparation may spend — configuration files, entry heads, Nx projects, the
+// next/image scan — kept apart from the install's budget, so a monorepo's
+// configuration never spends what a later package's lockfile needs.
+func (b *nodeReadBudget) nodeConfigBudget() *nodeReadBudget {
+	if b == nil {
+		return nil
+	}
+	if b.configs == nil {
+		b.configs = &nodeReadBudget{remaining: nodeConfigReadBudgetBytes}
+	}
+	return b.configs
+}
+
 const (
-	nodeEntryHeadBytes    = 16 << 10
-	nodeSourceScanFiles   = 400
-	nodeSourceScanHead    = 32 << 10
-	nodeSourceScanEntries = 4096
+	nodeConfigReadBudgetBytes = 16 << 20
+	nodeEntryHeadBytes        = 16 << 10
+	nodeSourceScanFiles       = 400
+	nodeSourceScanHead        = 32 << 10
+	nodeSourceScanEntries     = 4096
 )
 
 // readNodeRootFiles reads a package's framework files under files, its own
@@ -379,7 +394,9 @@ var (
 	svelteAdapterCallRE   = regexp.MustCompile(`(?:^|[\s{,])adapter\s*:\s*(\w+)\s*\(`)
 	svelteFallbackRE      = regexp.MustCompile(`(?:^|[\s{,])fallback\s*:\s*['"]([\w.-]+\.html)['"]`)
 	sveltePagesRE         = regexp.MustCompile(`(?:^|[\s{,])pages\s*:\s*['"]([\w./-]+)['"]`)
+	svelteNodeOutRE       = regexp.MustCompile(`(?:^|[\s{,(])out\s*:\s*['"]([\w./-]+)['"]`)
 	astroOutputRE         = regexp.MustCompile(`(?:^|[\s{,])output\s*:\s*['"](static|server|hybrid)['"]`)
+	astroOutputExprRE     = regexp.MustCompile(`(?:^|[\s{,])output\s*:\s*[A-Za-z_$(]`)
 	astroModeRE           = regexp.MustCompile(`(?:^|[\s{,(])mode\s*:\s*['"](standalone|middleware)['"]`)
 	astroAdapterRE        = regexp.MustCompile(`from\s+['"](@astrojs/(?:node|vercel|netlify|cloudflare|deno)(?:/[\w-]+)?|astro-sst|@deno/astro-adapter)['"]`)
 	jsBaseRE              = regexp.MustCompile(`(?:^|[\s{,])base\s*:\s*['"](/[\w./-]*)['"]`)
@@ -440,23 +457,24 @@ func literalBasePath(re *regexp.Regexp, text string) string {
 }
 
 // svelteAdapter is the adapter package svelte.config passes to kit.adapter:
-// the import the adapter call names, or the only adapter imported.
-func svelteAdapter(text string) string {
+// the import the adapter call names, or the only adapter imported. imported
+// lists every adapter package the file imports, which is more than one when
+// the adapter is chosen by an expression.
+func svelteAdapter(text string) (adapter string, imported []string) {
 	imports := map[string]string{}
-	packages := []string{}
 	for _, match := range svelteAdapterImportRE.FindAllStringSubmatch(text, -1) {
 		imports[match[1]] = match[2]
-		if !slices.Contains(packages, match[2]) {
-			packages = append(packages, match[2])
+		if !slices.Contains(imported, match[2]) {
+			imported = append(imported, match[2])
 		}
 	}
 	if call := svelteAdapterCallRE.FindStringSubmatch(text); call != nil && imports[call[1]] != "" {
-		return imports[call[1]]
+		return imports[call[1]], imported
 	}
-	if len(packages) == 1 {
-		return packages[0]
+	if len(imported) == 1 {
+		return imported[0], imported
 	}
-	return ""
+	return "", imported
 }
 
 // nestLayout is where `nest build` writes the entry, read from nest-cli.json

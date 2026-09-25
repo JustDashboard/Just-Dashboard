@@ -59,7 +59,16 @@ func TestNodeRecipeRendersTheFrameworksServing(t *testing.T) {
 				"svelte.config.js": "import adapter from '@sveltejs/adapter-static';\nexport default { kit: { adapter: adapter({ fallback: '200.html' }) } };",
 			}),
 			config: BuildPlanConfig{BuildCommand: "npm run build", OutputDirectory: "build", SPAFallback: true},
-			want:   []string{"try_files $uri $uri.html $uri/ /200.html;"},
+			want:   []string{"try_files $uri $uri.html $uri/ /200.html /index.html;"},
+		},
+		{
+			name: "react router spa mode answers from its prerendered shell",
+			files: lock(map[string]string{
+				"package.json":           `{"scripts":{"build":"react-router build"},"dependencies":{"react-router":"^7.6.0"},"devDependencies":{"@react-router/dev":"^7.6.0"}}`,
+				"react-router.config.ts": "export default { ssr: false, prerender: ['/'] }",
+			}),
+			config: BuildPlanConfig{BuildCommand: "npm run build", OutputDirectory: "build/client", SPAFallback: true},
+			want:   []string{"try_files $uri $uri/ /__spa-fallback.html /index.html;"},
 		},
 		{
 			name: "next standalone started from its server.js",
@@ -86,6 +95,27 @@ func TestNodeRecipeRendersTheFrameworksServing(t *testing.T) {
 				`RUN mv svelte.config.js svelte.config.user.js && printf '%s\n' "import config from './svelte.config.user.js';"`,
 				"RUN test -f /app/build/index.js",
 			},
+		},
+		{
+			name: "sveltekit adapter-auto in svelte.config.mjs",
+			files: lock(map[string]string{
+				"package.json":      `{"type":"module","scripts":{"build":"vite build"},"devDependencies":{"@sveltejs/kit":"^2.20.0","@sveltejs/adapter-auto":"^6.0.0"}}`,
+				"svelte.config.mjs": sveltekitAuto,
+			}),
+			config: BuildPlanConfig{BuildCommand: "npm run build", StartCommand: "node build"},
+			want: []string{
+				`RUN mv svelte.config.mjs svelte.config.user.mjs && printf '%s\n' "import config from './svelte.config.user.mjs';"`,
+				`> svelte.config.js`,
+			},
+		},
+		{
+			name: "sveltekit adapter-node's out directory is the entry checked",
+			files: lock(map[string]string{
+				"package.json":     `{"type":"module","scripts":{"build":"vite build"},"devDependencies":{"@sveltejs/kit":"^2.20.0","@sveltejs/adapter-node":"^5.2.0"}}`,
+				"svelte.config.js": "import adapter from '@sveltejs/adapter-node';\nexport default { kit: { adapter: adapter({ out: 'server' }) } };",
+			}),
+			config: BuildPlanConfig{BuildCommand: "npm run build", StartCommand: "node server"},
+			want:   []string{"RUN test -f /app/server/index.js"},
 		},
 		{
 			name: "sveltekit 1 with adapter-node installed needs only the wrapper",

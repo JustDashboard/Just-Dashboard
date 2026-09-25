@@ -24,16 +24,55 @@ func (in nodeCommandInputs) scriptStart(runner string) string {
 	if script := nodeServingScript(scripts, nodeProductionScripts); script != "" {
 		return runner + " run " + script
 	}
-	command, ok := nodeWatchedCommand(scripts["start"], in.declared)
+	// "start": "npm run dev" hands the watcher to another script.
+	ran := []string{"start"}
+	for len(ran) < 4 {
+		alias := nodeScriptAlias(scripts, scripts[ran[len(ran)-1]])
+		if alias == "" || slices.Contains(ran, alias) {
+			break
+		}
+		ran = append(ran, alias)
+	}
+	command, ok := nodeWatchedCommand(scripts[ran[len(ran)-1]], in.declared)
 	if !ok {
 		return runner + " run start"
 	}
 	command = withExecRunner(command, nodeExecRunner(runner), in.declared)
-	// npm, pnpm, Bun and Yarn 1 ran prestart before the script.
-	if strings.TrimSpace(scripts["prestart"]) != "" {
-		command = runner + " run prestart && " + command
+	// npm, pnpm, Bun and Yarn 1 ran each script's pre script before it.
+	for index := len(ran) - 1; index >= 0; index-- {
+		if strings.TrimSpace(scripts["pre"+ran[index]]) != "" {
+			command = runner + " run pre" + ran[index] + " && " + command
+		}
 	}
 	return command
+}
+
+// nodeScriptAlias is the script a script body runs when running it is all
+// the body does (`npm run dev`, `yarn dev`, `bun run dev`), with no
+// arguments passed on.
+func nodeScriptAlias(scripts map[string]string, body string) string {
+	segments := nodeCommandSegments(body)
+	if len(segments) != 1 {
+		return ""
+	}
+	words := nodeSegmentWords(segments[0])
+	if len(words) < 2 || len(nodeAssignmentPrefix(segments[0])) > 0 {
+		return ""
+	}
+	program, name := path.Base(words[0]), ""
+	switch {
+	case program != "npm" && program != "pnpm" && program != "yarn" && program != "bun":
+	case len(words) == 3 && (words[1] == "run" || words[1] == "run-script"):
+		name = words[2]
+	case len(words) == 2 && program == "npm" && words[1] == "start":
+		name = "start"
+	case len(words) == 2 && program != "npm" && !nodeYarnCommands[words[1]]:
+		name = words[1]
+	}
+	if strings.TrimSpace(scripts[name]) == "" {
+		return ""
+	}
+	return name
 }
 
 func (in nodeCommandInputs) declared(name string) bool { return in.manifest.has(name) }
@@ -73,6 +112,34 @@ func nodeFileCommand(runner, file string, declared func(string) bool) string {
 		return nodeExecRunner(runner) + " tsx " + file
 	}
 	return "node " + file
+}
+
+// nodeTypeScriptOnNode is the TypeScript file a start command hands to node
+// itself, with no loader: only Node's own type stripping runs it.
+func nodeTypeScriptOnNode(start string) string {
+	segments := nodeCommandSegments(start)
+	if len(segments) == 0 {
+		return ""
+	}
+	words := nodeProgramWords(segments[len(segments)-1])
+	if len(words) < 2 || words[0] != "node" {
+		return ""
+	}
+	for _, word := range words[1:] {
+		if strings.HasPrefix(word, "-") {
+			// --import tsx and --loader ts-node/esm bring a loader.
+			if word == "--import" || word == "--loader" || word == "--experimental-loader" || word == "-r" || word == "--require" {
+				return ""
+			}
+			continue
+		}
+		switch path.Ext(word) {
+		case ".ts", ".mts", ".cts":
+			return strings.TrimPrefix(word, "./")
+		}
+		return ""
+	}
+	return ""
 }
 
 // nodeBunFileRunner moves a `bun <file>` a Bun starter's dev script runs to

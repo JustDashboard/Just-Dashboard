@@ -100,7 +100,13 @@ func nodeStaticServerLines(site nodeStaticSite) []string {
 	}
 	fallback := "=404"
 	if site.spa {
-		fallback = site.base + "/" + orDefault(site.fallback, "index.html")
+		// A fallback page other than index.html is tried as a file first:
+		// a framework writes it only in some of its modes (React Router's
+		// __spa-fallback.html when "/" is prerendered).
+		fallback = site.base + "/index.html"
+		if site.fallback != "" && site.fallback != "index.html" {
+			fallback = site.base + "/" + site.fallback + " " + fallback
+		}
 	}
 	tries := "$uri $uri/ " + fallback
 	if site.cleanURLs {

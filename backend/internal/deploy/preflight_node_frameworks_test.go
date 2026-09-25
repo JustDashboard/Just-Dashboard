@@ -71,6 +71,48 @@ func TestPreflightJudgesFrameworkFactsAgainstThePlan(t *testing.T) {
 	}
 }
 
+// A question detection left open about the framework is asked before every
+// Deploy, on the setting that answers it, until that setting no longer
+// holds detection's guess; the questions one setting answers are one
+// finding.
+func TestPreflightAsksTheFrameworksOpenQuestions(t *testing.T) {
+	t.Parallel()
+	result, candidate := detectNodeTree(t, withLockfile(map[string]string{
+		"package.json":   `{"scripts":{"build":"next build"},"dependencies":{"next":"16.0.0"}}`,
+		"next.config.js": "module.exports = { output: process.env.STATIC ? 'export' : undefined }",
+	}))
+	plan := BuildPlanConfig{Method: BuildRecipe, Recipe: "node", BuildCommand: candidate.BuildCommand, StartCommand: candidate.StartCommand}
+	item := findingByCode(preflightFindings(nodeDraft(result), nodeTestConfiguration(plan), dockerHost, false), "node_decision_open")
+	if item == nil || item.Severity != PreflightWarning || item.FieldID != "configuration.build.outputDirectory" || !strings.Contains(item.Measured, "sets output from an expression") {
+		t.Fatalf("node_decision_open = %+v", item)
+	}
+	plan.StartCommand, plan.OutputDirectory = "", "out"
+	if item := findingByCode(preflightFindings(nodeDraft(result), nodeTestConfiguration(plan), dockerHost, false), "node_decision_open"); item != nil {
+		t.Fatalf("an answered question was asked again: %+v", item)
+	}
+
+	result, candidate = detectNodeTree(t, withLockfile(map[string]string{
+		"package.json": `{"scripts":{"dev":"tsx watch src/index.ts"},"dependencies":{"hono":"^4.7.0"},"devDependencies":{"tsx":"^4.19.0"}}`,
+		"src/index.ts": "import { Hono } from 'hono'\nconst app = new Hono()\nexport default app\n",
+	}))
+	plan = BuildPlanConfig{Method: BuildRecipe, Recipe: "node", PackageManager: "npm", BuildCommand: candidate.BuildCommand, StartCommand: candidate.StartCommand}
+	item = findingByCode(preflightFindings(nodeDraft(result), nodeTestConfiguration(plan), dockerHost, false), "node_decision_open")
+	if item == nil || item.FieldID != "configuration.build.packageManager" || !strings.Contains(item.Measured, "only Bun serves") {
+		t.Fatalf("bun-only entry = %+v", item)
+	}
+	plan.PackageManager, plan.StartCommand = "bun", "bun src/index.ts"
+	if item := findingByCode(preflightFindings(nodeDraft(result), nodeTestConfiguration(plan), dockerHost, false), "node_decision_open"); item != nil {
+		t.Fatalf("choosing Bun still asked: %+v", item)
+	}
+
+	merged := nodeFrameworkFindings(&DetectedCandidate{StartCommand: "node src/index.ts", NodeBuild: &DetectedNodeBuild{
+		Findings: nodeDecisionFindings([]string{"confirm the start command of the express server", "src/index.ts is TypeScript; install tsx and start that"}),
+	}}, nodeTestConfiguration(BuildPlanConfig{Method: BuildRecipe, Recipe: "node", StartCommand: "node src/index.ts"}))
+	if len(merged) != 1 || merged[0].Measured != "confirm the start command of the express server; src/index.ts is TypeScript; install tsx and start that" {
+		t.Fatalf("questions on one setting = %+v", merged)
+	}
+}
+
 // The Node major chosen in Build settings replaces what detection read from
 // the repository, and the recipe builds on it.
 func TestNodeVersionSettingOutranksTheRepository(t *testing.T) {

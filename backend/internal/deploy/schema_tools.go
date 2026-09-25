@@ -28,6 +28,10 @@ type schemaTool struct {
 	applied func(string) bool
 	// advice is the remedy when the tool has no command a start can run.
 	advice string
+	// direct says Deploy names its own program (node build/ace.js), so a
+	// start runs it as written rather than through the package manager's
+	// binary runner.
+	direct bool
 }
 
 // The dependency named for each tool is its command-line package, not its
@@ -76,6 +80,39 @@ var schemaTools = []schemaTool{
 		Deploy:     "knex migrate:latest", Push: "knex migrate:latest",
 		applied: commandMentions("knex migrate"),
 	},
+	// The frameworks that own their migrations. No dependency names them
+	// here: the catalogue entry that serves the framework does
+	// (nodeFrameworkResolution.Schema), since the command depends on what
+	// the framework's build writes and where its server starts.
+	{
+		Name: "lucid", Label: "Lucid", Deploy: "node build/ace.js migration:run --force", direct: true,
+		applied: commandMentions("migration:run"),
+	},
+	{
+		// Medusa migrates from the server `medusa build` writes, where its
+		// compiled configuration is; the subshell keeps that directory from
+		// the command that follows.
+		Name: "medusa", Label: "Medusa", Deploy: "(cd .medusa/server && medusa db:migrate)", direct: true,
+		applied: commandMentions("medusa db:migrate", "medusa migrations run"),
+	},
+	{
+		Name: "keystone", Label: "Keystone", Deploy: "keystone prisma migrate deploy",
+		applied: commandMentions("--with-migrations", "prisma migrate deploy"),
+	},
+	{
+		Name: "redwood-prisma", Label: "Redwood's Prisma", Deploy: "rw prisma migrate deploy",
+		applied: commandMentions("prisma migrate deploy", "prisma db push"),
+	},
+}
+
+// nodeSchemaStep is the command a start runs first to apply a tool's
+// schema: the tool's binary through the package manager's runner, or a
+// command that names its own program as written.
+func nodeSchemaStep(runner string, tool schemaTool, command string) string {
+	if tool.direct {
+		return command
+	}
+	return nodeExecRunner(runner) + " " + command
 }
 
 func commandMentions(phrases ...string) func(string) bool {
@@ -100,6 +137,10 @@ type detectedSchemaTool struct {
 	Tool     schemaTool
 	Command  string
 	Evidence DetectionEvidence
+	// owned says the framework's catalogue entry named the step, not the
+	// package's own dependencies: the package's start script is not the
+	// start, so only the start command itself can apply it.
+	owned bool
 }
 
 // detectSchemaTool picks the first configured tool the manifest depends on.

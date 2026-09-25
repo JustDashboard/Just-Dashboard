@@ -67,7 +67,7 @@ func readNodeInstallSourceIn(root *os.Root, dir, arch string, budget *nodeReadBu
 	}
 	var parsed nodeManifest
 	parseNodeManifest(manifest, &parsed)
-	source.files = readNodeRootFiles(files, parsed)
+	source.files = readNodeRootFiles(nodeFiles{root: root, dir: dir, budget: budget.nodeConfigBudget()}, parsed)
 	source.workspace = member == "" && len(nodeWorkspacePatterns(files)) > 0
 	source.facts = readNodeInstallFacts(nodeFiles{root: root, dir: source.context, budget: budget}, member, manifest, arch)
 	return source, nil
@@ -216,7 +216,7 @@ func validateNodeRecipeContent(content []byte, files nodeRootFiles, config Build
 		runner = "npm"
 	}
 	result := nodeRecipeFramework{}
-	framework, _ := resolveNodeFramework(manifest, files, config.StartCommand)
+	framework, _, _ := resolveNodeFramework(manifest, files, config.StartCommand)
 	if framework != nil {
 		result = nodeRecipeFramework{name: framework.Name, label: framework.Label, resolution: framework.resolve(manifest, files, runner)}
 	}

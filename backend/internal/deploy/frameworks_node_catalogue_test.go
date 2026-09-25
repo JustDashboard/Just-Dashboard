@@ -125,6 +125,22 @@ func TestNodeFrameworkConfigurationDecidesTheServingPlan(t *testing.T) {
 			"package.json":     `{"type":"module","scripts":{"build":"vite build"},"devDependencies":{"@sveltejs/kit":"^2.20.0","@sveltejs/adapter-auto":"^6.0.0","@sveltejs/adapter-node":"^5.2.0"}}`,
 			"svelte.config.js": sveltekitAuto,
 		}, framework: "sveltekit", start: "node build", port: 3000, profile: ProfileWeb, confidence: ConfidenceHigh, finding: "sveltekit_adapter_substituted"},
+		{name: "sveltekit adapter-auto in svelte.config.mjs", files: map[string]string{
+			"package.json":      `{"type":"module","scripts":{"build":"vite build"},"devDependencies":{"@sveltejs/kit":"^2.20.0","@sveltejs/adapter-auto":"^6.0.0","vite":"^6.0.0"}}`,
+			"svelte.config.mjs": sveltekitAuto,
+		}, framework: "sveltekit", start: "node build", port: 3000, profile: ProfileWeb, confidence: ConfidenceHigh, finding: "sveltekit_adapter_substituted"},
+		{name: "sveltekit adapter-auto in svelte.config.mjs of a commonjs package", files: map[string]string{
+			"package.json":      `{"scripts":{"build":"vite build"},"devDependencies":{"@sveltejs/kit":"^2.20.0","@sveltejs/adapter-auto":"^6.0.0","vite":"^6.0.0"}}`,
+			"svelte.config.mjs": sveltekitAuto,
+		}, framework: "sveltekit", profile: ProfileWeb, confidence: ConfidenceLow, decision: "needs a repository change", issue: "SvelteKit requires one of adapter-node or adapter-static"},
+		{name: "sveltekit adapters chosen by an expression", files: map[string]string{
+			"package.json":     `{"type":"module","scripts":{"build":"vite build"},"devDependencies":{"@sveltejs/kit":"^2.20.0","@sveltejs/adapter-node":"^5.2.0","@sveltejs/adapter-static":"^3.0.0"}}`,
+			"svelte.config.js": "import node from '@sveltejs/adapter-node';\nimport staticSite from '@sveltejs/adapter-static';\nexport default { kit: { adapter: process.env.STATIC ? staticSite() : node() } };\n",
+		}, framework: "sveltekit", profile: ProfileWeb, confidence: ConfidenceLow, decision: "imports several adapters", issue: "SvelteKit requires one of adapter-node or adapter-static"},
+		{name: "sveltekit adapter-node writing to its out directory", files: map[string]string{
+			"package.json":     `{"type":"module","scripts":{"build":"vite build"},"devDependencies":{"@sveltejs/kit":"^2.20.0","@sveltejs/adapter-node":"^5.2.0"}}`,
+			"svelte.config.js": "import adapter from '@sveltejs/adapter-node';\nexport default { kit: { adapter: adapter({ out: 'server' }) } };\n",
+		}, framework: "sveltekit", start: "node server", port: 3000, profile: ProfileWeb, confidence: ConfidenceHigh, evidence: "adapter-node writes the server to server"},
 		{name: "sveltekit static spa fallback", files: map[string]string{
 			"package.json":     `{"type":"module","scripts":{"build":"vite build"},"devDependencies":{"@sveltejs/kit":"^2.20.0","@sveltejs/adapter-static":"^3.0.0"}}`,
 			"svelte.config.js": "import adapter from '@sveltejs/adapter-static';\nexport default { kit: { adapter: adapter({ pages: 'public', fallback: '200.html' }) } };\n",
@@ -140,6 +156,10 @@ func TestNodeFrameworkConfigurationDecidesTheServingPlan(t *testing.T) {
 		{name: "react router spa mode", files: map[string]string{
 			"package.json":           `{"scripts":{"build":"react-router build","dev":"react-router dev"},"dependencies":{"react-router":"^7.6.0"},"devDependencies":{"@react-router/dev":"^7.6.0","vite":"^6.0.0"}}`,
 			"react-router.config.ts": "import type { Config } from '@react-router/dev/config';\nexport default { ssr: false } satisfies Config;\n",
+		}, framework: "react-router", output: "build/client", port: 80, profile: ProfileStatic, confidence: ConfidenceHigh, spa: true},
+		{name: "react router spa mode with prerendering", files: map[string]string{
+			"package.json":           `{"scripts":{"build":"react-router build","dev":"react-router dev"},"dependencies":{"react-router":"^7.6.0"},"devDependencies":{"@react-router/dev":"^7.6.0","vite":"^6.0.0"}}`,
+			"react-router.config.ts": "import type { Config } from '@react-router/dev/config';\nexport default { ssr: false, async prerender() { return ['/', '/about'] } } satisfies Config;\n",
 		}, framework: "react-router", output: "build/client", port: 80, profile: ProfileStatic, confidence: ConfidenceHigh, spa: true},
 		{name: "remix spa mode", files: map[string]string{
 			"package.json":   `{"scripts":{"build":"remix vite:build"},"devDependencies":{"@remix-run/dev":"^2.15.0","vite":"^5.4.0"}}`,
@@ -173,6 +193,28 @@ func TestNodeFrameworkConfigurationDecidesTheServingPlan(t *testing.T) {
 			"vite.config.ts": "export default defineConfig({ base: '/app/', build: { outDir: 'build' } })\n",
 			"index.html":     "<div id=app></div>",
 		}, framework: "vite", output: "build", port: 80, profile: ProfileStatic, confidence: ConfidenceHigh, spa: true},
+		{name: "vite root resolved from the package", files: map[string]string{
+			"package.json":   `{"scripts":{"build":"vite build"},"devDependencies":{"vite":"^6.0.0"}}`,
+			"vite.config.ts": "export default defineConfig({ root: path.resolve(__dirname, 'client'), build: { outDir: 'out' } })\n",
+		}, framework: "vite", output: "client/out", port: 80, profile: ProfileStatic, confidence: ConfidenceHigh, spa: true},
+		{name: "vite root at the package itself", files: map[string]string{
+			"package.json":   `{"scripts":{"build":"vite build"},"devDependencies":{"vite":"^6.0.0"}}`,
+			"vite.config.ts": "export default defineConfig({ root: __dirname, build: { rollupOptions: { output: { manualChunks: {} } } } })\n",
+			"index.html":     "<div id=app></div>",
+		}, framework: "vite", output: "dist", port: 80, profile: ProfileStatic, confidence: ConfidenceHigh, spa: true},
+		{name: "vite outDir from an expression", files: map[string]string{
+			"package.json":   `{"scripts":{"build":"vite build"},"devDependencies":{"vite":"^6.0.0"}}`,
+			"vite.config.ts": "export default defineConfig({ build: { outDir: process.env.OUT ?? 'dist' } })\n",
+			"index.html":     "<div id=app></div>",
+		}, framework: "vite", output: "dist", port: 80, profile: ProfileStatic, confidence: ConfidenceMedium, spa: true, decision: "sets outDir from an expression"},
+		{name: "astro with rollup output options is still static", files: map[string]string{
+			"package.json":     `{"scripts":{"build":"astro build"},"dependencies":{"astro":"^5.4.0"}}`,
+			"astro.config.mjs": "export default defineConfig({ vite: { build: { rollupOptions: { output: { entryFileNames: 'a.js' } } } } });\n",
+		}, framework: "astro", output: "dist", port: 80, profile: ProfileStatic, confidence: ConfidenceHigh},
+		{name: "astro output from an expression", files: map[string]string{
+			"package.json":     `{"scripts":{"build":"astro build"},"dependencies":{"astro":"^5.4.0"}}`,
+			"astro.config.mjs": "export default defineConfig({ output: process.env.SSR ? 'server' : 'static' });\n",
+		}, framework: "astro", output: "dist", port: 80, profile: ProfileStatic, confidence: ConfidenceMedium, decision: "sets output from an expression"},
 		{name: "nest compiled beside prisma.config.ts", files: nest(map[string]string{"prisma.config.ts": "export default {}"}),
 			framework: "nestjs", start: "node dist/src/main", port: 3000, profile: ProfileWeb, confidence: ConfidenceHigh, finding: "nest_output_layout", evidence: "dist/src/main.js"},
 		{name: "nest with a seed under prisma/", files: nest(map[string]string{"prisma/seed.ts": "main()"}),
@@ -219,6 +261,9 @@ func TestNodeFrameworkCatalogueCoversTheLongTail(t *testing.T) {
 			"package.json":     `{"scripts":{"build":"medusa build","start":"medusa start","dev":"medusa develop"},"dependencies":{"@medusajs/medusa":"2.8.4","@medusajs/framework":"2.8.4"}}`,
 			"medusa-config.ts": "module.exports = defineConfig({})",
 		}, framework: "medusa", start: "cd .medusa/server && medusa db:migrate && medusa start", port: 9000, profile: ProfileWeb, confidence: ConfidenceHigh},
+		{name: "medusa 1 keeps its start script", files: map[string]string{
+			"package.json": `{"scripts":{"build":"tsc","start":"medusa migrations run && medusa start"},"dependencies":{"@medusajs/medusa":"1.20.6","express":"^4.17.2"}}`,
+		}, framework: "medusa", start: "npm run start", port: 9000, profile: ProfileWeb, confidence: ConfidenceMedium, decision: "Medusa 1 is started by its own start script"},
 		{name: "a medusa plugin is not the store", files: map[string]string{
 			"package.json": `{"name":"medusa-plugin-x","main":"dist/index.js","devDependencies":{"@medusajs/medusa":"2.8.4","@medusajs/framework":"2.8.4"}}`,
 		}, start: "node dist/index.js", profile: ProfileWorker, confidence: ConfidenceLow, decision: "serves HTTP"},
@@ -239,6 +284,12 @@ func TestNodeFrameworkCatalogueCoversTheLongTail(t *testing.T) {
 		{name: "vike with its own server", files: map[string]string{
 			"package.json": `{"scripts":{"dev":"vike dev","build":"vike build","prod":"cross-env NODE_ENV=production node ./dist/server/index.mjs"},"dependencies":{"vike":"^0.4.230","express":"^5.0.0"},"devDependencies":{"vite":"^6.0.0"}}`,
 		}, framework: "vike", start: "npm run prod", port: 3000, profile: ProfileWeb, confidence: ConfidenceHigh},
+		{name: "vike with bati's express server as its preview", files: map[string]string{
+			"package.json": `{"scripts":{"dev":"tsx ./express-entry.ts","build":"vike build","preview":"cross-env NODE_ENV=production tsx ./express-entry.ts"},"dependencies":{"vike":"^0.4.230","express":"^5.0.0","tsx":"^4.19.0"},"devDependencies":{"vite":"^6.0.0"}}`,
+		}, framework: "vike", start: "npm run preview", port: 3000, profile: ProfileWeb, confidence: ConfidenceHigh},
+		{name: "vike whose serving script runs another", files: map[string]string{
+			"package.json": `{"scripts":{"dev":"vike dev","build":"vike build","server":"node ./dist/server/index.mjs","prod":"npm run build && npm run server","start":"npm run server"},"dependencies":{"vike":"^0.4.230","express":"^5.0.0"},"devDependencies":{"vite":"^6.0.0"}}`,
+		}, framework: "vike", start: "npm run start", port: 3000, profile: ProfileWeb, confidence: ConfidenceHigh},
 		{name: "vike prerendered", files: map[string]string{
 			"package.json":   `{"scripts":{"dev":"vike dev","build":"vike build"},"dependencies":{"vike":"^0.4.230"},"devDependencies":{"vite":"^6.0.0"}}`,
 			"vite.config.ts": "export default { plugins: [vike({ prerender: true })] }",
@@ -310,7 +361,13 @@ func TestNodeStartScriptsThatRunADevelopmentServer(t *testing.T) {
 			"package.json": `{"scripts":{"prestart":"node migrate.js","start":"node --watch server.js"},"dependencies":{"koa":"^2.15.0"}}`,
 		}, framework: "koa", start: "npm run prestart && node server.js", port: 3000, profile: ProfileWeb, confidence: ConfidenceMedium},
 		{name: "a start that runs the dev script", files: map[string]string{
-			"package.json": `{"scripts":{"start":"npm run dev","dev":"nodemon app.js"},"dependencies":{"express":"^4.21.0"}}`,
+			"package.json": `{"main":"server.js","scripts":{"start":"npm run dev","dev":"nodemon app.js"},"dependencies":{"express":"^4.21.0"}}`,
+		}, framework: "express", start: "node app.js", port: 3000, profile: ProfileWeb, confidence: ConfidenceMedium, evidence: "the start script runs nodemon"},
+		{name: "a start that runs the dev script, after both pre scripts", files: map[string]string{
+			"package.json": `{"scripts":{"prestart":"node check.js","start":"yarn dev","predev":"node migrate.js","dev":"tsx watch src/index.ts"},"dependencies":{"express":"^4.21.0"},"devDependencies":{"tsx":"^4.19.0"}}`,
+		}, framework: "express", start: "npm run prestart && npm run predev && npx tsx src/index.ts", port: 3000, profile: ProfileWeb, confidence: ConfidenceMedium},
+		{name: "a start that passes the dev script arguments keeps the script", files: map[string]string{
+			"package.json": `{"scripts":{"start":"npm run dev -- --inspect","dev":"nodemon app.js"},"dependencies":{"express":"^4.21.0"}}`,
 		}, framework: "express", start: "npm run start", port: 3000, profile: ProfileWeb, confidence: ConfidenceMedium},
 		{name: "bun hono template with only a dev script", files: map[string]string{
 			"package.json": `{"name":"hono-app","scripts":{"dev":"bun run --hot src/index.ts"},"dependencies":{"hono":"^4.7.0"},"devDependencies":{"@types/bun":"latest"}}`,
@@ -337,6 +394,13 @@ func TestNodeStartScriptsThatRunADevelopmentServer(t *testing.T) {
 		{name: "vite only for tests beside a server", files: map[string]string{
 			"package.json": `{"main":"src/server.js","scripts":{"test":"vitest"},"dependencies":{"fastify":"^5.0.0"},"devDependencies":{"vite":"^6.0.0","vitest":"^3.0.0"}}`,
 		}, framework: "fastify", start: "node src/server.js", port: 3000, profile: ProfileWeb, confidence: ConfidenceMedium, evidence: "no index.html or vite.config"},
+		{name: "vite with no site beside a server", files: map[string]string{
+			"package.json": `{"main":"server.js","scripts":{"build":"vite build --ssr src/entry.js"},"dependencies":{"express":"^4.21.0"},"devDependencies":{"vite":"^6.0.0"}}`,
+		}, framework: "express", start: "node server.js", port: 3000, profile: ProfileWeb, confidence: ConfidenceMedium, decision: "confirm the start command of the express server"},
+		{name: "a typescript server entry without tsx", files: map[string]string{
+			"package.json": `{"dependencies":{"express":"^4.21.0"}}`,
+			"src/index.ts": "import express from 'express'\nconst app = express()\napp.listen(3000)\n",
+		}, framework: "express", start: "node src/index.ts", port: 3000, profile: ProfileWeb, confidence: ConfidenceMedium, decision: "install tsx, or build it to JavaScript"},
 		{name: "a vite spa beside an api dependency stays a site", files: map[string]string{
 			"package.json":   `{"scripts":{"build":"vite build","start":"vite preview"},"dependencies":{"express":"^4.21.0"},"devDependencies":{"vite":"^6.0.0"}}`,
 			"vite.config.ts": "export default {}",
