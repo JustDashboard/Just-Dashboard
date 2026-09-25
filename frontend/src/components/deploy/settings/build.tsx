@@ -12,6 +12,7 @@ import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentBuildEvidence,
   DeploymentConfiguration,
+  DeploymentDetectedSystemPackage,
   DeploymentDetectionChange,
   DeploymentDetectionProposal,
   DeploymentEnvironmentConfiguration,
@@ -134,6 +135,7 @@ const BUILD_FIELD_IDS: Record<string, string> = {
   "build.goVersion": "build-go-version",
   "build.goPackage": "build-go-package",
   "build.pythonVersion": "build-python-version",
+  "build.systemPackages": "build-system-packages",
   "build.spaFallback": "build-spa",
   "build.dockerfile": "build-dockerfile",
   "build.target": "build-target",
@@ -151,6 +153,7 @@ const FIELD_SECTION: Record<string, "build" | "commands" | "image"> = {
   "build-go-version": "build",
   "build-go-package": "build",
   "build-python-version": "build",
+  "build-system-packages": "build",
   "build-dockerfile": "build",
   "build-target": "build",
   "build-primary-service": "build",
@@ -195,7 +198,7 @@ const BUILDERS: Builder[] = [
     key: "python",
     label: RECIPE_SHORT.python,
     product: "python",
-    detail: "3.10–3.13",
+    detail: "3.10–3.14",
     method: "recipe",
     recipe: "python",
   },
@@ -275,7 +278,7 @@ const LOCKFILE_NAMES: Record<NodePackageManager, string> = {
   yarn: "yarn.lock",
 }
 
-const PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13"]
+const PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
 /** What a recipe falls back to when nothing in the draft or the last build names it. */
 const RECIPE_DEFAULT: Record<DeploymentRecipe, string> = {
@@ -663,6 +666,10 @@ function BuildForm({
       setFieldError({ id: "build-target", message: errors.target })
       return
     }
+    if (errors.systemPackages) {
+      setFieldError({ id: "build-system-packages", message: errors.systemPackages })
+      return
+    }
     const refusal = errors.buildMethod || errors.buildSecrets || errors.pythonVersion
     if (refusal) {
       setError(refusal)
@@ -753,9 +760,11 @@ function BuildForm({
         goVersion: next === "go" ? build.goVersion : undefined,
         goPackage: next === "go" ? build.goPackage : undefined,
         pythonVersion: next === "python" ? build.pythonVersion : undefined,
-        // The PHP recipe's asset stage installs through the same Node
-        // install, so the choice survives the move between the two.
-        packageManager: next === "node" || next === "php" ? build.packageManager : undefined,
+        systemPackages: next === "python" ? build.systemPackages : undefined,
+        // The PHP and Python recipes' asset stages install through the same
+        // Node install, so the choice survives the move between them.
+        packageManager:
+          next === "node" || next === "php" || next === "python" ? build.packageManager : undefined,
       })
       return
     }
@@ -770,6 +779,7 @@ function BuildForm({
       goVersion: undefined,
       goPackage: undefined,
       pythonVersion: undefined,
+      systemPackages: undefined,
       packageManager: undefined,
       spaFallback: choice.method === "static" ? build.spaFallback : undefined,
       target: choice.method === "dockerfile" ? build.target : undefined,
@@ -814,6 +824,7 @@ function BuildForm({
             "goVersion",
             "goPackage",
             "pythonVersion",
+            "systemPackages",
             "dockerfile",
             "target",
             "primaryService",
@@ -922,7 +933,7 @@ function BuildForm({
         {build.method === "recipe" && recipe === "python" && (
           <Field
             label="Python version"
-            hint="Auto reads .python-version, runtime.txt or pyproject.toml."
+            hint="Auto reads .python-version, runtime.txt, .tool-versions, Pipfile or pyproject.toml, and stays below a version a pinned package has no wheels for."
             error={errorFor("build-python-version")}
           >
             <Segments
@@ -949,6 +960,16 @@ function BuildForm({
               ]}
             />
           </Field>
+        )}
+
+        {build.method === "recipe" && recipe === "python" && (
+          <SystemPackagesField
+            value={build.systemPackages}
+            automatic={(detected?.systemPackages ?? []).filter((pkg) => pkg.automatic)}
+            canEdit={canEdit}
+            error={errorFor("build-system-packages")}
+            onChange={(systemPackages) => setBuild({ ...build, systemPackages })}
+          />
         )}
 
         {build.method === "recipe" && recipe === "go" && (
@@ -1554,5 +1575,71 @@ function ReleaseTasksForm({
         />
       </SettingSection>
     </SettingForm>
+  )
+}
+
+/**
+ * Debian packages the Python recipe installs before the dependencies, typed as
+ * a space-separated list. The text is kept as typed while it is edited, so a
+ * space before the next name is not swallowed by the round trip through the
+ * list the plan stores.
+ */
+function SystemPackagesField({
+  value,
+  automatic,
+  canEdit,
+  error,
+  onChange,
+}: {
+  value?: string[]
+  automatic: DeploymentDetectedSystemPackage[]
+  canEdit: boolean
+  error?: string
+  onChange: (next: string[] | undefined) => void
+}) {
+  const joined = (value ?? []).join(" ")
+  const [text, setText] = useState(joined)
+  const [synced, setSynced] = useState(joined)
+  if (joined !== synced) {
+    // The draft changed underneath (discarded, or a detection applied).
+    setSynced(joined)
+    if (
+      text
+        .split(/[\s,]+/)
+        .filter(Boolean)
+        .join(" ") !== joined
+    )
+      setText(joined)
+  }
+  const installed = automatic.map((pkg) => pkg.name)
+  return (
+    <Field
+      label="System packages"
+      htmlFor="build-system-packages"
+      hint={
+        installed.length
+          ? `Installed for the dependencies already: ${installed.join(", ")}. Add others the application needs, separated by spaces.`
+          : "Debian packages installed before the dependencies, separated by spaces, such as libpq-dev."
+      }
+      error={error}
+    >
+      <Input
+        id="build-system-packages"
+        value={text}
+        readOnly={!canEdit}
+        aria-invalid={Boolean(error)}
+        className="font-mono"
+        placeholder="none"
+        autoComplete="off"
+        spellCheck={false}
+        onChange={(event) => {
+          setText(event.target.value)
+          const names = event.target.value.split(/[\s,]+/).filter(Boolean)
+          const next = names.length ? names : undefined
+          setSynced((next ?? []).join(" "))
+          onChange(next)
+        }}
+      />
+    </Field>
   )
 }

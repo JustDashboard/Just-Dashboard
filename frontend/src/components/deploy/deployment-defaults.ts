@@ -11,7 +11,23 @@ import type {
 } from "@/lib/types"
 import type { EnvironmentRow } from "@/components/deploy/new-project/draft"
 
-export const PYTHON_VERSION = /^3\.(10|11|12|13)$/
+export const PYTHON_VERSION = /^3\.(10|11|12|13|14)$/
+/** A Debian package name, as the Python recipe's system packages are validated. */
+export const SYSTEM_PACKAGE = /^[a-z0-9][a-z0-9.+-]+$/
+export const MAX_SYSTEM_PACKAGES = 32
+
+/**
+ * The system packages a plan starts with: another platform's (an Aptfile's),
+ * which the recipe installs only while the plan names them. The packages the
+ * dependencies need are installed by the recipe itself and are not repeated.
+ */
+export function detectedSystemPackages(candidate?: DeploymentDetectionCandidate) {
+  if (candidate?.recipe !== "python") return undefined
+  const names = (candidate.systemPackages ?? [])
+    .filter((pkg) => !pkg.automatic && SYSTEM_PACKAGE.test(pkg.name))
+    .map((pkg) => pkg.name)
+  return names.length ? names.slice(0, MAX_SYSTEM_PACKAGES) : undefined
+}
 
 /** The request-body ceiling a route gets when the plan names none, and the most it may name. */
 export const DEFAULT_MAX_REQUEST_BODY_MB = 64
@@ -558,6 +574,7 @@ export function defaultConfiguration(
       dockerfile: method === "dockerfile" ? (candidate?.dockerfile ?? "Dockerfile") : undefined,
       target: method === "dockerfile" ? candidate?.dockerfileTarget : undefined,
       pythonVersion: candidate?.recipe === "python" ? candidate.pythonVersion : undefined,
+      systemPackages: detectedSystemPackages(candidate),
       goPackage: candidate?.recipe === "go" ? candidate.goPackage : undefined,
       spaFallback: packagedStatic && candidate?.spaFallback ? true : undefined,
       noCache: false,
@@ -1074,7 +1091,13 @@ export function validateConfiguration(
   const errors: WizardErrors = {}
   if (!configuration.build.method) errors.buildMethod = "Choose a build method."
   if (configuration.build.pythonVersion && !PYTHON_VERSION.test(configuration.build.pythonVersion))
-    errors.pythonVersion = "Use Python 3.10, 3.11, 3.12 or 3.13, or leave the version empty."
+    errors.pythonVersion = "Use Python 3.10, 3.11, 3.12, 3.13 or 3.14, or leave the version empty."
+  const systemPackages = configuration.build.systemPackages ?? []
+  if (systemPackages.length > MAX_SYSTEM_PACKAGES)
+    errors.systemPackages = `List at most ${MAX_SYSTEM_PACKAGES} system packages.`
+  else if (systemPackages.some((name) => !SYSTEM_PACKAGE.test(name)))
+    errors.systemPackages =
+      "Use Debian package names: lower-case letters, digits and . + - (for example libpq-dev)."
   if (configuration.build.target && !DOCKERFILE_STAGE.test(configuration.build.target))
     errors.target = "A stage name starts with a letter and has only letters, digits, . _ and -."
   for (const [name, value] of [
