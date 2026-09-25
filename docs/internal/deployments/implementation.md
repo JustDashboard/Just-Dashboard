@@ -306,8 +306,8 @@ only renderer/executor/validation authority for their feature.
   project builds from the directory that owns it (`PrepareWithin`, `prepared.contextDirectory`) and the
   candidate keeps `javaBuild`/`dotnetBuild` for preflight (`preflight_compiled.go`, which judges
   `build.javaVersion`/`build.dotnetVersion`). `detect_compiled_layout.go` sets aside library modules,
-  aggregator POMs, test projects and Aspire AppHosts before the repository-shape passes rank what is
-  left. A `Procfile`'s `web:`
+  aggregator POMs, Gradle build logic (`buildSrc`, `build-logic`, convention-plugin projects), test
+  projects and Aspire AppHosts before the repository-shape passes rank what is left. A `Procfile`'s `web:`
   process outranks every guess, and another platform's deployment file (`fly.toml`, `render.yaml`,
   `app.json`, Kamal's `config/deploy.yml`, …) outranks the framework's defaults. The candidate carries `spaFallback` (a client-routed site's nginx
   fallback), `pythonVersion`, `unpinnedDependencies` (a `dependencies_unpinned` preflight warning,
@@ -755,7 +755,10 @@ only renderer/executor/validation authority for their feature.
   keeps its cause (`registry_rate_limited`, `registry_unreachable` — DNS, TLS, refused and timed-out
   connections, Go's `Client.Timeout exceeded` and a resolver's `server misbehaving` —,
   `base_image_missing` — also Docker Hub's "repository does not exist or may require 'docker login'" —,
-  `registry_auth_failed`, `builder_missing`) with the daemon's own bounded reason in the transcript, and
+  `registry_auth_failed`, `builder_missing`) with the daemon's own bounded reason in the transcript — a
+  .NET SDK image a `global.json` pin names that was never published is `dotnet_sdk_pin_unavailable`
+  instead —, a JDK or .NET release the recipe refuses at prepare_context ends the run with preflight's
+  own code (`java_version_unsupported`, `gradle_wrapper_incompatible`, `dotnet_version_unsupported`), and
   a candidate's start names `runtime_port_in_use`, `image_missing` and `mount_invalid` from Docker's
   refusal without repeating it. A context deadline that reaches a step while its run is alive is
   `step_timeout`; only a cancelled context is a cancellation. The signature table and fixes are listed

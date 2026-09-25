@@ -1302,24 +1302,34 @@ A root with a `pom.xml` or a `build.gradle(.kts)` is read the way Maven and Grad
   directory it names the module to choose instead.
 - **Gradle** reads `settings.gradle(.kts)` — `include(…)` lists, `:a:b` meaning `a/b`, and
   `project(":x").projectDir` — and builds from that settings root by project path
-  (`./gradlew :app:bootJar`). `gradle/libs.versions.toml` resolves version-catalog aliases
-  (`libs.spring.boot.starter.web`, `alias(libs.plugins.ktor)`, bundles) to their coordinates and plugin ids
-  before anything matches a framework, and plugins applied through `buildSrc`, `build-logic` or an included
-  build's precompiled script plugins are followed to what they apply. `apply false` applies nothing.
+  (`./gradlew :app:bootJar`), wherever in the checkout it is. A composite build's `includeBuild(…)`
+  targets are read from the settings root too, so one outside it widens the build context to hold both,
+  and Gradle runs from the settings root with `-p` (`./backend/gradlew -p backend :app:installDist`).
+  `gradle/libs.versions.toml` resolves version-catalog aliases (`libs.spring.boot.starter.web`,
+  `alias(libs.plugins.ktor)`, bundles) to their coordinates and plugin ids before anything matches a
+  framework, and plugins applied through `buildSrc`, `build-logic` or an included build's precompiled
+  script plugins are followed to what they apply. `apply false` applies nothing.
+- The build's own logic is set aside as `tooling`, never a candidate: `buildSrc`, a `build-logic` build, a
+  build `pluginManagement { includeBuild(…) }` names, and any project applying `kotlin-dsl`,
+  `java-gradle-plugin` or `groovy-gradle-plugin` — a convention project that puts the Spring Boot plugin on
+  its classpath is not a Spring application.
 - A module or project that packages nothing — a library, a `java-library`, a POM aggregator — is set
   aside (`library`) when its build has an application, whose evidence names what it is built with; with
   several applications each is a candidate and the ranking decides. `java_module_selected` and
   `gradle_subproject_selected` name the choice and where it builds. A build none of whose modules packages
   anything keeps the aggregator, with a `recipeIssue` naming what would.
 - A Kotlin Multiplatform server that depends on a project applying the Android Gradle plugin cannot even
-  be configured without the Android SDK, which is its `recipeIssue` before Deploy; Android modules
-  themselves are set aside as mobile apps.
+  be configured without the Android SDK, which is its `recipeIssue` before Deploy — and since Gradle
+  configures every project of a build, so is any other project that applies it, unless
+  `gradle.properties` sets `org.gradle.configureondemand=true`. Android modules themselves are set aside as
+  mobile apps.
 
 The artifact follows the packaging plugin, and the task is the one that produces it — never `build`,
 which also runs checks and linters: Spring Boot `bootJar`/`bootWar` (Maven's `package` with
 spring-boot-maven-plugin; an executable war runs as `java -jar /app/app.war`), Quarkus `quarkusBuild`
 (the `quarkus-app/` directory, run as `java -jar /app/quarkus-app/quarkus-run.jar`, or the `*-runner.jar`
-when `quarkus.package.jar.type=uber-jar`), Ktor's `buildFatJar` and Shadow's `shadowJar` (`*-all.jar`),
+when `application.properties`, `gradle.properties` or a POM property sets
+`quarkus.package.jar.type=uber-jar`), Ktor's `buildFatJar` and Shadow's `shadowJar` (`*-all.jar`),
 the application plugin's (and Micronaut's) `installDist` (the distribution in `/app`, started by
 `/app/bin/app`), Maven shade, assembly's `jar-with-dependencies`, Micronaut and Vert.x fat jars, and a
 Helidon jar with its `libs/`. Jars are tried by name in that order (`-sources`, `-javadoc`, `-tests`,
@@ -1354,7 +1364,8 @@ newest one the wrapper runs on.
 Builds run on `maven:3-eclipse-temurin-<N>`, on `eclipse-temurin:<N>-jdk` with the committed wrapper (its
 Windows line endings stripped, made executable), or on `gradle:8-jdk<N>` (`gradle:9-jdk25` for 25) without
 one — also when `gradlew` is committed without `gradle/wrapper/gradle-wrapper.jar`, a `*.jar` ignore rule's
-doing, which is `gradle_wrapper_jar_missing`. A Maven wrapper pinning Maven 4 runs as `./mvnw`. The
+doing, which is `gradle_wrapper_jar_missing`. A Maven wrapper pinning Maven 4 runs as `./mvnw`; one pinning
+Maven 3 builds with the image's Maven 3.9 instead, the same major without a download. The
 artifact runs on `eclipse-temurin:<N>-jre` — Ubuntu, published for amd64 and arm64 for every release (the
 Alpine JREs of 8, 11 and 17 are amd64-only, and an arm64 server failed every such build after Deploy) — as
 the unprivileged `app` user with `-XX:MaxRAMPercentage=75`, so the heap follows the container's limit. A
@@ -1413,16 +1424,28 @@ for a developer too — then checks `/out/<AssemblyName>.dll`, the assembly name
 `dotnet_project_selected` names the project and the context.
 
 **The release and the SDK.** The target comes from `<TargetFramework>` or the newest supported portable
-entry of `<TargetFrameworks>` (net8.0, net9.0 and net10.0); restore and publish name it when there are
-several. `build.dotnetVersion` chooses the release instead, and retargets a project that declares another
-(`-p:TargetFramework`), which rescues a net6.0 or net7.0 project or one whose target the recipe cannot
-read; without it such a project is `dotnet_version_unsupported`. A `global.json` pin decides the SDK image
+entry of `<TargetFrameworks>` (net8.0, net9.0 and net10.0); publish names it (`--framework`) when there are
+several. `build.dotnetVersion` chooses the release instead, and retargets a project that declares another,
+which rescues a net6.0 or net7.0 project or one whose target the recipe cannot read; without it such a
+project is `dotnet_version_unsupported`. Restore resolves every framework the project declares, which are
+the frameworks its references are built for. Only a retarget, or a sibling the SDK image cannot restore —
+one needing a workload (`net9.0-android`, iOS, Mac Catalyst) or a newer SDK; Windows targets restore
+anywhere — holds restore to the published framework (`-p:TargetFramework`), and restore hands that
+framework to every project the published one references, which would then build for its own and fail
+with NETSDK1005. So a referenced project that does not declare it is `dotnet_version_unsupported` before
+Deploy, naming it: a net7.0 API that references a net7.0 library is fixed by its own
+`<TargetFramework>` — a net9.0 project references a net7.0 library, and restore then resolves each
+project's own — not by the setting. A `global.json` pin decides the SDK image
 by its `rollForward`: `latestPatch` (the default), `patch` and `disable` build with `sdk:<exact version>`,
 `feature` and `latestFeature` with the pin's own `sdk:<major.minor>`, and the minor and major policies with
 the newer of the pin's release and the target's. A pin that cannot build the target is
-`dotnet_version_unsupported` before Deploy, and one whose image does not exist fails as
-`base_image_missing` naming the tag. `.tool-versions` (`dotnet`, `dotnet-core`) and `mise.toml` pin the SDK
-the same way when there is no `global.json`. The runtime image always follows the target.
+`dotnet_version_unsupported` before Deploy. Microsoft publishes an exact SDK image only for each patch of
+the feature band that was newest when it shipped — `sdk:8.0.100` and `sdk:8.0.414`, never `sdk:8.0.119` —
+so a patch-level pin to an older band has none, and prepare_context ends the run as
+`dotnet_sdk_pin_unavailable`, naming the pin, its policy and the fix (`rollForward` `latestFeature`, or a
+pin that has an image); the check before Deploy resolves no image, so it cannot say so earlier.
+`.tool-versions` (`dotnet`, `dotnet-core`) and `mise.toml` pin the SDK the same way when there is no
+`global.json`. The runtime image always follows the target.
 
 `PublishAot`, `PublishSingleFile`, `PublishReadyToRun`, `SelfContained` and `PublishTrimmed`, in the
 project or its props, make publish need the AOT SDK image and write a native executable instead of the dll;
@@ -1433,6 +1456,9 @@ referenced `*.esproj` — gets Node in the SDK image: the Node recipe's install 
 lockfile, Node is copied from the catalogue's Debian image of that release (the SDK images are glibc; the
 plan's Corepack releases and Bun come with it), and the lockfile's install runs in the front end's
 directory before publish (`dotnet_spa_node`); a Node candidate in that directory ranks below the project.
+A front end whose install the planner refuses (competing lockfiles) still gets the Node release it asks
+for, and the project's own publish runs npm; a `package.json` the recipe cannot read — larger than 512
+KiB — is refused by name.
 An Aspire AppHost's `WithReference` wiring — another project's `services__<name>__http__0`, a resource's
 `ConnectionStrings__<name>` — is named on each service it starts as `dotnet_aspire_orchestration`:
 deployed on its own, nothing sets them.
@@ -1729,7 +1755,7 @@ names, with the remedy the evidence supports:
 | `build_lockfile_incompatible` | pnpm `ERR_PNPM_LOCKFILE_BREAKING_CHANGE`/`BROKEN_LOCKFILE`, Cargo lock version, Poetry/uv lock format, Bun lockfile version | — |
 | `build_package_manager_mismatch` | corepack `This project is configured to use X`, `ERR_PNPM_BAD_PM_VERSION` | the manager `packageManager` declares |
 | `build_lifecycle_script_blocked` | `ERR_PNPM_IGNORED_BUILDS`, Bun `Blocked N postinstalls` with a consequence | — |
-| `build_runtime_version` | EBADENGINE, `ERR_PNPM_UNSUPPORTED_ENGINE`, Yarn/Next engine lines, Go `GOTOOLCHAIN=local`, rustc `or newer`, Maven release, Gradle class version, a Gradle toolchain no JDK matches, NETSDK1045, `A compatible .NET SDK was not found`, Composer `requires php`, pip `requires a different Python`, uv/Poetry Python requirement, Ruby/Elixir/Hugo versions | a Go, Python, Java or .NET release the recipe offers |
+| `build_runtime_version` | EBADENGINE, `ERR_PNPM_UNSUPPORTED_ENGINE`, Yarn/Next engine lines, Go `GOTOOLCHAIN=local`, rustc `or newer`, Maven release, Gradle class version, a Gradle toolchain no JDK matches, NETSDK1045, `A compatible .NET SDK was not found`, NETSDK1005 (a referenced project restored for another framework than it builds for), Composer `requires php`, pip `requires a different Python`, uv/Poetry Python requirement, Ruby/Elixir/Hugo versions | a Go, Python, Java or .NET release the recipe offers |
 | `build_env_missing` | PrismaConfigEnvError, P1012, t3-env, SvelteKit `$env/static`, Astro, Rails `secret_key_base`, Phoenix, Django, `KeyError` on the environment | the variable, or its build scope (recipes only) |
 | `build_sqlx_offline` | sqlx `set DATABASE_URL to use query macros` / no cached data | `SQLX_OFFLINE=true` for the build |
 | `build_database_unreachable`, `build_prerender_failed` | Next prerender/collect-page-data errors, with or without a database error; `Can't reach database server`; a `*.jd.internal` address that does not resolve (a linked database is reachable only on the project network, which a build is not on); Django `OperationalError` | — |
@@ -1761,8 +1787,10 @@ whose first request reads its migrated table, a Streamlit script (its health end
 through its own static-serving setting) and a Gradio app (the value in the page's embedded config), an
 axum service, a Maven jar and a Gradle jar, a Spring Boot module of a Maven reactor on Java 17 and an
 application-plugin project of a multi-project Gradle build with a version catalog (each built from its
-build's root), an ASP.NET Core minimal API, a web project in a solution's `src/` with shared props, central
-package versions and a `global.json` pin, a Blazor WebAssembly app served as static files, an F# minimal API,
+build's root), a Gradle build whose settings root is below the checkout's and includes a build beside it,
+an ASP.NET Core minimal API, a web project in a solution's `src/` with shared props, central package
+versions and a `global.json` pin, a web project with two target frameworks that references a library with
+one, a Blazor WebAssembly app served as static files, an F# minimal API,
 an ASP.NET Core project whose publish runs npm for its front end, a Deno server, a minimal Laravel
 12 application (migrated, with the form's generated `APP_KEY`) and a plain `index.php`. The JVM and .NET
 fixtures are also detected and prepared without Docker (`TestCompiledLiveFixturesDetectAndPrepare`);
