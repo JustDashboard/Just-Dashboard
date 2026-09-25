@@ -1922,7 +1922,7 @@ func validateDetectedNodeInstall(candidate DetectedCandidate) error {
 			}
 			if finding.Code == "" || !text(finding.Code, 64) || !text(finding.Title, 512) || !text(finding.Measured, 512) ||
 				!text(finding.Means, 512) || !text(finding.Action, 512) || !text(finding.Owner, 64) ||
-				!text(finding.FieldID, 256) || finding.DeepLink != "" {
+				!text(finding.FieldID, 256) || finding.DeepLink != "" || finding.Fix != nil {
 				return malformed
 			}
 		}

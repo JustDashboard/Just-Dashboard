@@ -2433,7 +2433,13 @@ export type DeploymentFailureCause = {
  * `review` opens a field whose right value the output cannot prove.
  */
 export type DeploymentCauseFix = {
-  kind: "set_build" | "set_runtime" | "add_variable" | "variable_scope" | "review"
+  kind:
+    | "set_build"
+    | "set_runtime"
+    | "add_variable"
+    | "variable_scope"
+    | "remove_variable_scope"
+    | "review"
   /** `configuration.build.packageManager`, `runtime.internalPort`, `variables.NAME`, `dependencies`. */
   field: string
   value?: string
@@ -4069,6 +4075,8 @@ export type DeploymentPreflightFinding = {
   owner?: string
   fieldId?: string
   deepLink?: string
+  /** The one plan change the finding offers, when the check could compute it. */
+  fix?: DeploymentCauseFix
 }
 
 /**

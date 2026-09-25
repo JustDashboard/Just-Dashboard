@@ -329,6 +329,9 @@ type PreflightFinding struct {
 	Owner    string            `json:"owner,omitempty"`
 	FieldID  string            `json:"fieldId,omitempty"`
 	DeepLink string            `json:"deepLink,omitempty"`
+	// Fix is the one plan change the finding offers, applied from the screen
+	// that shows it, when the check can compute it.
+	Fix *CauseFix `json:"fix,omitempty"`
 }
 
 func stateSet[T ~string](states ...T) map[T]struct{} {

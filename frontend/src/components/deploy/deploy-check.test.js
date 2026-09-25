@@ -3,6 +3,7 @@ import {
   attentionFindings,
   cachedDeploymentCheck,
   confirmationSignature,
+  findingFixAction,
   needsConfirmation,
   rememberDeploymentCheck,
   settingsPathForField,
@@ -114,5 +115,24 @@ describe("the check a card reuses", () => {
     expect(cachedDeploymentCheck(91, 8, 2_000)).toBeUndefined()
     expect(cachedDeploymentCheck(91, 7, 1_000 + 5 * 60 * 1000 + 1)).toBeUndefined()
     expect(cachedDeploymentCheck(92, 7, 2_000)).toBeUndefined()
+  })
+})
+
+describe("a finding's computed plan change", () => {
+  test("opens the settings page on the change, and nothing without one", () => {
+    const opened = []
+    const action = findingFixAction(
+      9,
+      finding("build_database_unreachable", "warning", {
+        fix: { kind: "remove_variable_scope", field: "variables.DATABASE_URL", scope: "build" },
+      }),
+      (href) => opened.push(href),
+    )
+    expect(action.label).toBe("Remove DATABASE_URL's build scope")
+    action.onApply()
+    expect(opened).toEqual(["/deploy/9/settings/variables?variable=DATABASE_URL&without=build"])
+    expect(findingFixAction(9, finding("build_database_unreachable", "warning"), () => {})).toBe(
+      undefined,
+    )
   })
 })

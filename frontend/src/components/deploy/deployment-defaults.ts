@@ -402,6 +402,29 @@ export function withPersistentVariables(
 }
 
 /**
+ * The plan's variables with one scope taken from one variable — a finding's
+ * `remove_variable_scope` fix, such as a linked database's build scope no
+ * build-time read needs. A name only a typed value supplies is declared with
+ * the scopes it keeps, since an undeclared value reaches the build and the
+ * runtime; one left with no scope at all keeps the runtime's.
+ */
+export function variablesWithoutScope(
+  variables: DeploymentConfiguration["variables"],
+  name: string,
+  scope: string,
+): DeploymentConfiguration["variables"] {
+  const keep = (scopes: string[]) => {
+    const kept = scopes.filter((value) => value !== scope)
+    return kept.length > 0 ? kept : ["runtime"]
+  }
+  if (!variables.some((variable) => variable.name === name))
+    return [...variables, { name, sensitivity: "secret", scopes: keep(["runtime", "build"]) }]
+  return variables.map((variable) =>
+    variable.name === name ? { ...variable, scopes: keep(variable.scopes) } : variable,
+  )
+}
+
+/**
  * Moves the plan's commands to the package manager chosen, where `undefined`
  * is "from the lockfile" — the manager detection resolved, not the command's
  * old runner. A command that is still one detection proposed is swapped whole

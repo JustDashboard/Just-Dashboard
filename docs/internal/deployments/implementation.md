@@ -449,7 +449,11 @@ only renderer/executor/validation authority for their feature.
   lists only the rest), a prerendering framework's build-scoped database URL that points at a
   `db-N.jd.internal` alias or loopback, or a typed database reference (`build_database_unreachable` —
   BuildKit cannot join the environment's network, and `--network=host` would hand repository build code
-  the host's loopback services), and platform variables an operator's pasted `.env` sets
+  the host's loopback services; when no build-time read detection saw needs the variable — its phase
+  is not `build`, or `prisma.config` alone reads it and the recipe supplies that — the finding carries a
+  `fix` of kind `remove_variable_scope`, which Review applies to the draft's declaration and the check
+  before Deploy and the run page open in the variable editor with the build scope already cleared,
+  `?variable=NAME&without=build`), and platform variables an operator's pasted `.env` sets
   (`port_variable_mismatch`, `node_env_not_production`, `host_variable_loopback_hostname`; a loopback
   `HOST` is the environment check's `host_variable_loopback_host`). Values are compared, never echoed,
   except a port number, a `NODE_ENV` word and a host name.

@@ -187,13 +187,36 @@ func buildDatabaseFindings(candidate *DetectedCandidate, configuration PlanConfi
 		if measured == "" {
 			continue
 		}
-		findings = append(findings, finding("build_database_unreachable", PreflightWarning,
+		item := finding("build_database_unreachable", PreflightWarning,
 			"The build cannot reach the database", measured,
 			"The build runs apart from the environment's network, so a page the build prerenders that queries the database fails the build (\"Can't reach database server\", ENOTFOUND or ECONNREFUSED); pages rendered on request are unaffected.",
 			"Render pages that read the database on request (export const dynamic = \"force-dynamic\" or await connection() in Next.js), or remove "+variable.Name+"'s build scope if the build does not read it.",
-			"deploy", "variables."+variable.Name))
+			"deploy", "variables."+variable.Name)
+		if !buildReadNeedsValue(candidate, configuration, variable.Name) {
+			// Nothing detection saw reads it while the build runs, so the
+			// build scope only hands the build an address it cannot reach.
+			item.Action = "Nothing in the build reads " + variable.Name + ", so remove its build scope; if a page the build prerenders queries the database, render it on request instead (export const dynamic = \"force-dynamic\" or await connection() in Next.js)."
+			item.Fix = &CauseFix{Kind: fixRemoveVariableScope, Field: "variables." + variable.Name, Scope: "build"}
+		}
+		findings = append(findings, item)
 	}
 	return findings
+}
+
+// buildReadNeedsValue says whether the plan's build reads the variable
+// itself: detection saw a read while the build runs — a framework config
+// file, a static env import, a browser prefix — that the recipe does not
+// supply with a placeholder of its own.
+func buildReadNeedsValue(candidate *DetectedCandidate, configuration PlanConfiguration, name string) bool {
+	if slices.Contains(prismaRecipeSupplied(candidate, configuration), name) {
+		return false
+	}
+	for _, variable := range candidate.Variables {
+		if variable.Name == name {
+			return variable.Phase == "build" || variable.BrowserInlined
+		}
+	}
+	return false
 }
 
 // buildValueHost is the host of a URL-shaped value, empty for anything else.

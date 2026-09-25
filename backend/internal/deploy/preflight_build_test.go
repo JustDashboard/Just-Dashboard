@@ -161,7 +161,29 @@ func TestPreflightWarnsWhenThePrerenderCannotReachTheDatabase(t *testing.T) {
 			if strings.Contains(unreachable.Measured+unreachable.Means+unreachable.Action, "hunter2") {
 				t.Fatal("a value was echoed")
 			}
+			// Nothing reads DATABASE_URL while this build runs, so the
+			// finding offers to take the build scope away.
+			if fix := unreachable.Fix; fix == nil || fix.Kind != fixRemoveVariableScope || fix.Field != "variables.DATABASE_URL" || fix.Scope != "build" {
+				t.Fatalf("fix = %+v", unreachable.Fix)
+			}
 		})
+	}
+}
+
+// A build that reads the database variable itself — next.config — keeps its
+// build scope: the finding names the problem and offers no plan change.
+func TestUnreachableDatabaseKeepsTheBuildScopeABuildReadNeeds(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		"package.json": nextPrisma, "prisma/schema.prisma": prismaSchemaFor("postgresql"),
+		"next.config.js": "module.exports = { env: { DB_HOST: new URL(process.env.DATABASE_URL).host } }\n",
+	}
+	draft, _ := buildScopedDraft(t, files, map[string]string{"DATABASE_URL": "postgresql://app:hunter2@db-12.jd.internal:5432/app"})
+	configuration := nodeTestConfiguration(BuildPlanConfig{Method: BuildRecipe, Recipe: "node", BuildCommand: "npm run build", StartCommand: "npm run start"})
+	configuration.Variables = []PlannedVariable{{Name: "DATABASE_URL", Sensitivity: "secret", Scopes: []string{"runtime", "build"}}}
+	unreachable := findingByCode(preflightFindings(draft, configuration, dockerHost, false), "build_database_unreachable")
+	if unreachable == nil || unreachable.Fix != nil {
+		t.Fatalf("unreachable = %+v", unreachable)
 	}
 }
 

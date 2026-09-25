@@ -1,4 +1,5 @@
 import type { DeploymentCheckResult, DeploymentPreflightFinding } from "@/lib/types"
+import { fixTarget } from "@/components/deploy/failure-cause"
 
 /**
  * What the advisory check found, read the way a deployment will be.
@@ -112,6 +113,20 @@ export function settingsPathForField(fieldId: string | undefined) {
   return FIELD_PAGES.find(
     (entry) => fieldId === entry.prefix || fieldId.startsWith(`${entry.prefix}.`),
   )?.path
+}
+
+/**
+ * A finding's computed plan change as a project's settings apply it: the
+ * page that holds the field, opened on the change — the variable editor with
+ * the scope already taken away — for the operator to save.
+ */
+export function findingFixAction(
+  projectId: number,
+  finding: DeploymentPreflightFinding,
+  navigate: (href: string) => void,
+) {
+  const target = finding.fix && fixTarget(projectId, finding.fix)
+  return target ? { label: target.label, onApply: () => navigate(target.href) } : undefined
 }
 
 /**

@@ -209,6 +209,14 @@ export function failureCause(
   return { step, cause }
 }
 
+/** What a variable fix's button says: the variable, and the scope or value it changes. */
+export function variableFixLabel(fix: DeploymentCauseFix) {
+  const name = fix.field.replace(/^variables\./, "")
+  if (fix.kind === "variable_scope") return `Give ${name} the ${fix.scope ?? "needed"} scope`
+  if (fix.kind === "remove_variable_scope") return `Remove ${name}'s ${fix.scope ?? ""} scope`
+  return fix.value ? `Add ${name}=${fix.value}` : `Add ${name}`
+}
+
 /**
  * Where a fix is applied and what its button says: the settings page and
  * section that hold the field, with a variable's name, scope and computed
@@ -225,15 +233,9 @@ export function fixTarget(
   if (field.startsWith("variables.")) {
     const name = field.slice("variables.".length)
     const query = new URLSearchParams({ variable: name })
-    if (fix.scope) query.set("scope", fix.scope)
+    if (fix.scope) query.set(fix.kind === "remove_variable_scope" ? "without" : "scope", fix.scope)
     if (fix.kind === "add_variable" && fix.value) query.set("value", fix.value)
-    const label =
-      fix.kind === "variable_scope"
-        ? `Give ${name} the ${fix.scope ?? "needed"} scope`
-        : fix.value
-          ? `Add ${name}=${fix.value}`
-          : `Add ${name}`
-    return { href: `${base}/variables?${query}`, label }
+    return { href: `${base}/variables?${query}`, label: variableFixLabel(fix) }
   }
   if (field === "dependencies") return { href: `${base}/databases`, label: "Link a database" }
   if (field.startsWith("runtime.")) {
