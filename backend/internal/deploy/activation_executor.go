@@ -407,6 +407,9 @@ func (e *NormalizedStepExecutor) startCandidate(
 		return runtimeStepFailure(err, "runtime_record_failed", "the candidate started but its identity could not be recorded", recovery)
 	}
 	_ = stepLog(execution, "status", fmt.Sprintf("Started immutable candidate release #%d", release.Release.Number))
+	for _, variable := range webConcurrencyEnvironment(snapshot, variables) {
+		_ = stepLog(execution, "status", "WEB_CONCURRENCY="+variable.Value+": "+webConcurrencyReason(snapshot.Plan))
+	}
 	return StepResult{State: StepPassed, Evidence: mustJSON(startedStepEvidence{
 		ReleaseID: release.Release.ID, Runtime: *runtime, Target: started.Target,
 		PreviousStop: previousStop, ExpectedDowntime: release.Release.ExpectedDowntime,

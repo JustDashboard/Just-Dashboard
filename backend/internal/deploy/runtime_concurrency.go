@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"fmt"
 	"runtime"
 	"strconv"
 
@@ -24,6 +25,14 @@ func webConcurrencyEnvironment(snapshot runtimeReleaseSnapshot, variables map[st
 		return nil
 	}
 	return []dockerx.EnvVar{{Name: "WEB_CONCURRENCY", Value: strconv.Itoa(webConcurrency(snapshot.Plan, runtime.NumCPU()))}}
+}
+
+// webConcurrencyReason says how the worker count was sized, for the run log.
+func webConcurrencyReason(plan RuntimePlanConfig) string {
+	if plan.MemoryMB <= 0 {
+		return "the server's worker count, 2 since the plan sets no memory limit to size it by"
+	}
+	return fmt.Sprintf("the server's worker count, 2×CPU+1 within %d MiB of the %d MiB memory limit per worker", webConcurrencyWorkerMiB, plan.MemoryMB)
 }
 
 func webConcurrency(plan RuntimePlanConfig, hostCPUs int) int {

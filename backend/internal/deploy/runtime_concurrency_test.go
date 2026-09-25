@@ -1,6 +1,9 @@
 package deploy
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestWebConcurrencyIsSizedToTheContainer(t *testing.T) {
 	t.Parallel()
@@ -29,5 +32,12 @@ func TestWebConcurrencyIsSizedToTheContainer(t *testing.T) {
 	}
 	if env := webConcurrencyEnvironment(runtimeReleaseSnapshot{Plan: snapshot.Plan}, nil); len(env) != 0 {
 		t.Fatalf("an image the recipe did not mark: %+v", env)
+	}
+	// The run log says what the value was sized by.
+	if reason := webConcurrencyReason(snapshot.Plan); !strings.Contains(reason, "2×CPU+1") || !strings.Contains(reason, "1024 MiB") {
+		t.Fatalf("reason = %q", reason)
+	}
+	if reason := webConcurrencyReason(RuntimePlanConfig{}); !strings.Contains(reason, "no memory limit") {
+		t.Fatalf("reason = %q", reason)
 	}
 }
