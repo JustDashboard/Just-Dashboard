@@ -270,7 +270,7 @@ type RowProps = {
 /**
  * What can be done to an account, declared once and drawn by both row shapes.
  * Keys and the lock are the daily verbs and go inline; deleting an account is
- * rare and unrecoverable, so it lives in the menu with its sentence.
+ * rare and unrecoverable, so it lives in the menu.
  */
 function useUserVerbs({ user, pending, setLocked, remove, onKeys }: RowProps): Verb[] {
   const busy = Boolean(pending[user.username])
@@ -278,7 +278,6 @@ function useUserVerbs({ user, pending, setLocked, remove, onKeys }: RowProps): V
     {
       key: "keys",
       label: "SSH keys",
-      detail: "The keys that can sign in as this account, and a place to add one",
       icon: Key,
       inline: true,
       run: () => onKeys(user.username),
@@ -286,7 +285,6 @@ function useUserVerbs({ user, pending, setLocked, remove, onKeys }: RowProps): V
     {
       key: "lock",
       label: user.locked ? "Unlock" : "Lock",
-      detail: user.locked ? "Accept password sign-in again" : "Refuse password sign-in",
       icon: user.locked ? LockOpen : LockClosed,
       inline: true,
       disabled: busy,
@@ -295,7 +293,6 @@ function useUserVerbs({ user, pending, setLocked, remove, onKeys }: RowProps): V
     {
       key: "delete",
       label: "Delete account",
-      detail: "Removes the account from this host; the home directory stays",
       icon: Trash,
       danger: true,
       run: () => remove(user),

@@ -205,7 +205,6 @@ export function BackupsTab({ conn, confirm }: { conn: DbConnection; confirm: Con
                       {
                         key: "download",
                         label: "Download",
-                        detail: "A copy to your machine.",
                         icon: Download,
                         inline: true,
                         run: () => download(file.file),
@@ -215,7 +214,6 @@ export function BackupsTab({ conn, confirm }: { conn: DbConnection; confirm: Con
                             {
                               key: "restore",
                               label: "Restore",
-                              detail: "Loads it back over the live database.",
                               icon: CloudUpload,
                               danger: true,
                               run: () => restore(file),
@@ -223,7 +221,6 @@ export function BackupsTab({ conn, confirm }: { conn: DbConnection; confirm: Con
                             {
                               key: "delete",
                               label: "Delete",
-                              detail: "Removes the file from the server.",
                               icon: Trash,
                               danger: true,
                               run: () => remove(file),

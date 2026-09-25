@@ -8,6 +8,11 @@
       "summary": "The Git workspace could commit, branch, merge and push, and everything past that was a terminal. 0.7.0 brings the rest into the same three columns: conflicts resolved side by side, single lines staged, local history rebased behind a recovery branch, worktrees, submodules, LFS and patches, reviews on GitHub pull requests and on GitLab and Gitea requests. Every reviewed template now declares how its first sign-in works, the five that could not say are no longer offered, and nine new ones join the catalogue. New project opens on whatever is still unanswered and checks the plan the moment Review is reached. A deployment's Logs page answers from the requests the proxy actually served, with insights, marks on the chart and traffic alerts. A container, a compose stack and a backup job are pages of their own, every page remembers what you were doing on it, and the rail's top level is twelve rows instead of seventeen.",
       "changes": [
         {
+          "kind": "changed",
+          "text": "Action menus are one word to a line",
+          "detail": "Every overflow menu in the product — a deployment's, a container's, a process's, a branch's, a table's and the rest — drew a sentence of explanation under each verb, so a menu of eleven verbs stood taller than the card it opened from. The sentences are gone: each verb is its word, the menus are narrower and a third the height, and where a row carried a fact beside its word (a place's path, a saved command, a connection's host) the fact sits on the same line."
+        },
+        {
           "kind": "added",
           "text": "Databases opens on a control center of every database at once",
           "detail": "Five readings — how many, how many answer, what they take, sessions open, deployments fed — over an attention list (a server that refused, a port open to the internet, a database never dumped), the databases as cards drawn as their engines and ordered worst first, the servers found running on this machine but not yet connected, and a map of what each database feeds. Every connection is dialled, sized and counted in one request. Browse moved to its own page under the connection."

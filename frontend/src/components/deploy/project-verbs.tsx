@@ -55,7 +55,6 @@ import {
   isRetryable,
   projectState,
   runFailed,
-  runTitle,
   sourceLine,
   sourceProduct,
 } from "@/components/deploy/vocabulary"
@@ -296,13 +295,11 @@ export function useProjectVerbs(
   const runVerb = (
     key: ProjectOperation,
     label: string,
-    detail: string,
     icon: Verb["icon"],
     progressive: string,
   ): Verb => ({
     key,
     label,
-    detail,
     icon,
     progressive,
     group: RUNNING.has(key) ? "Running" : "Building",
@@ -334,7 +331,6 @@ export function useProjectVerbs(
     verbs.push({
       key: "visit",
       label: "Visit",
-      detail: "Open the live website in a new tab.",
       icon: External,
       inline: true,
       run: () => window.open(url, "_blank", "noopener,noreferrer"),
@@ -345,7 +341,6 @@ export function useProjectVerbs(
     verbs.push({
       key: "view",
       label: "View deployment",
-      detail: "Follow the run that is building and releasing now.",
       icon: ArrowRight,
       group: "Building",
       run: () => router.push(`${base}/runs/${active.id}`),
@@ -354,7 +349,6 @@ export function useProjectVerbs(
       verbs.push({
         key: "cancel",
         label: "Cancel deployment",
-        detail: "Stop this run before it goes live. The live release keeps serving.",
         icon: StopCircle,
         group: "Building",
         progressive: "Cancelling…",
@@ -364,39 +358,18 @@ export function useProjectVerbs(
     }
   } else if (control) {
     if (state === "stopped") {
-      verbs.push(
-        runVerb(
-          "start",
-          "Start",
-          "Start the stopped containers and check they answer.",
-          Play,
-          "Starting…",
-        ),
-      )
+      verbs.push(runVerb("start", "Start", Play, "Starting…"))
     } else if (!live || summary.pendingChanges || !normalized) {
       verbs.push(
         runVerb(
           "deploy",
           !live ? "Deploy" : summary.pendingChanges ? "Deploy changes" : "Redeploy",
-          !live
-            ? "Build the saved configuration and release it for the first time."
-            : summary.pendingChanges
-              ? "Build and release the saved changes."
-              : "Build and release the current source again.",
           live ? RefreshClockwise : Play,
           "Deploying…",
         ),
       )
     } else {
-      verbs.push(
-        runVerb(
-          "redeploy",
-          "Redeploy",
-          "Build and release the current source again.",
-          RefreshClockwise,
-          "Redeploying…",
-        ),
-      )
+      verbs.push(runVerb("redeploy", "Redeploy", RefreshClockwise, "Redeploying…"))
     }
   }
 
@@ -422,39 +395,19 @@ export function useProjectVerbs(
       })
       verbs.push(
         asking(
-          runVerb(
-            "restart",
-            "Restart",
-            "Stop and start the live release, then check it answers.",
-            RotateClockwise,
-            "Restarting…",
-          ),
+          runVerb("restart", "Restart", RotateClockwise, "Restarting…"),
           "restart",
           "The live release stops and starts again. Visitors get an error until it answers.",
         ),
         asking(
-          runVerb(
-            "stop",
-            "Stop",
-            "Stop the live containers. Visitors get an error until you start it again.",
-            StopCircle,
-            "Stopping…",
-          ),
+          runVerb("stop", "Stop", StopCircle, "Stopping…"),
           "stop",
           "The live containers stop. Visitors get an error until you start it again.",
         ),
       )
     }
     if (summary.pendingChanges) {
-      verbs.push(
-        runVerb(
-          "redeploy",
-          "Redeploy live release",
-          "Run the live release again, without the pending changes.",
-          RefreshClockwise,
-          "Redeploying…",
-        ),
-      )
+      verbs.push(runVerb("redeploy", "Redeploy live release", RefreshClockwise, "Redeploying…"))
     }
   }
   if (control && !active && last && runFailed(last.state) && isRetryable(last.state)) {
@@ -464,9 +417,6 @@ export function useProjectVerbs(
     verbs.push({
       key: "retry",
       label: stale ? "Retry with the settings it used" : "Retry",
-      detail: stale
-        ? `Run ${runTitle(last)} again with its own plan and variables; the settings saved since are not used.`
-        : `Run ${runTitle(last)} again from the start.`,
       icon: RotateCounterClockwise,
       group: "Building",
       progressive: "Retrying…",
@@ -475,21 +425,12 @@ export function useProjectVerbs(
     })
   }
   if (canRun) {
-    verbs.push(
-      runVerb(
-        "force_build",
-        "Rebuild without cache",
-        "Build a fresh image from the saved plan, ignoring the cache.",
-        Box,
-        "Rebuilding…",
-      ),
-    )
+    verbs.push(runVerb("force_build", "Rebuild without cache", Box, "Rebuilding…"))
   }
   if (canRun && summary.sourceKind === "git" && onVersion) {
     verbs.push({
       key: "version",
       label: "Deploy a specific version…",
-      detail: "Build a branch, a tag or a commit instead of the configured branch.",
       icon: GitTag,
       group: "Building",
       disabled: busy,
@@ -510,7 +451,6 @@ export function useProjectVerbs(
     verbs.push({
       key: "test-pull",
       label: "Test a pull request…",
-      detail: "Build an open pull request as a preview, reachable only on your tailnet.",
       icon: SourcePull,
       group: "Building",
       run: onTestPull,
@@ -524,7 +464,6 @@ export function useProjectVerbs(
       {
         key: "open",
         label: "Open",
-        detail: "The project overview.",
         icon: GridSquare,
         group: "Project",
         run: () => router.push(base),
@@ -532,7 +471,6 @@ export function useProjectVerbs(
       {
         key: "deployments",
         label: "Deployments",
-        detail: "Every release of this project.",
         icon: Layers,
         group: "Project",
         run: () => router.push(`${base}/deployments`),
@@ -540,7 +478,6 @@ export function useProjectVerbs(
       {
         key: "logs",
         label: "Logs",
-        detail: "Runtime logs and requests for the live release.",
         icon: Logs,
         group: "Project",
         run: () => router.push(`${base}/logs`),
@@ -548,7 +485,6 @@ export function useProjectVerbs(
       {
         key: "runtime",
         label: "Runtime",
-        detail: "Services, resources, domains and storage.",
         icon: Servers,
         group: "Project",
         run: () => router.push(`${base}/runtime`),
@@ -556,7 +492,6 @@ export function useProjectVerbs(
       {
         key: "settings",
         label: "Settings",
-        detail: "Build, runtime, variables and domains.",
         icon: SettingsGear,
         group: "Project",
         run: () => router.push(`${base}/settings/general`),
@@ -567,7 +502,6 @@ export function useProjectVerbs(
     verbs.push({
       key: "duplicate",
       label: "Duplicate project…",
-      detail: "Copy its source, build and runtime settings into a new draft.",
       icon: Copy,
       group: "Project",
       run: onDuplicate,
@@ -580,7 +514,6 @@ export function useProjectVerbs(
     verbs.push({
       key: "docker",
       label: "Open in Docker",
-      detail: "The live containers, as Docker sees them.",
       icon: DockerGlyph,
       group: "Project",
       run: () => router.push(`/docker/containers?${new URLSearchParams({ container })}`),
@@ -591,7 +524,6 @@ export function useProjectVerbs(
     verbs.push({
       key: "archive",
       label: "Archive deployment",
-      detail: "Disable automation and keep runtime and history.",
       icon: Archive,
       danger: true,
       progressive: "Archiving…",
@@ -603,7 +535,6 @@ export function useProjectVerbs(
     verbs.push({
       key: "purge",
       label: "Delete permanently",
-      detail: "Forget this deployment's configuration, variables and history.",
       icon: Trash,
       danger: true,
       run: () =>

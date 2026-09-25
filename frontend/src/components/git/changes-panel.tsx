@@ -283,33 +283,12 @@ export function ChangesPanel({
                             Discard all
                           </button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-72">
-                          <DropdownMenuItem
-                            className="items-start gap-2.5 py-1.5"
-                            onSelect={() => discardAll(false)}
-                          >
-                            <span className="min-w-0 flex-1">
-                              <span className="block text-body leading-tight font-medium">
-                                Discard tracked changes
-                              </span>
-                              <span className="mt-0.5 block text-hint leading-snug text-muted-foreground">
-                                Every edited file goes back to the last commit. New files stay.
-                              </span>
-                            </span>
+                        <DropdownMenuContent align="end" className="min-w-44">
+                          <DropdownMenuItem onSelect={() => discardAll(false)}>
+                            Discard tracked changes
                           </DropdownMenuItem>
-                          <DropdownMenuItem
-                            variant="destructive"
-                            className="items-start gap-2.5 py-1.5"
-                            onSelect={() => discardAll(true)}
-                          >
-                            <span className="min-w-0 flex-1">
-                              <span className="block text-body leading-tight font-medium">
-                                Discard everything
-                              </span>
-                              <span className="mt-0.5 block text-hint leading-snug text-muted-foreground">
-                                Edited files go back, and new files are deleted too.
-                              </span>
-                            </span>
+                          <DropdownMenuItem variant="destructive" onSelect={() => discardAll(true)}>
+                            Discard everything
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>

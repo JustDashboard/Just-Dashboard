@@ -134,8 +134,6 @@ export function AuthFilesPanel() {
                       {
                         key: "delete",
                         label: "Delete file",
-                        detail:
-                          "Remove the file. A site still pointing at it fails its next reload.",
                         icon: Trash,
                         danger: true,
                         run: () => removeFile(file),

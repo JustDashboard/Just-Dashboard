@@ -80,7 +80,6 @@ export function runVerbs({
     {
       key: "open",
       label: "Open deployment",
-      detail: "The build log and release status for this run.",
       icon: ArrowRight,
       run: on.open,
     },
@@ -89,7 +88,6 @@ export function runVerbs({
     verbs.push({
       key: "visit",
       label: "Visit",
-      detail: "Open the live site in a new tab.",
       icon: External,
       run: on.visit,
     })
@@ -98,7 +96,6 @@ export function runVerbs({
     verbs.push({
       key: "redeploy",
       label: "Redeploy",
-      detail: "Run this release again, unchanged.",
       icon: RefreshClockwise,
       run: on.redeploy,
     })
@@ -108,7 +105,6 @@ export function runVerbs({
       verbs.push({
         key: "deploy",
         label: "Deploy with current settings",
-        detail: "Deploy again with the plan and variables saved now.",
         icon: RefreshClockwise,
         progressive: "Starting…",
         disabled: working === "deploy",
@@ -118,9 +114,6 @@ export function runVerbs({
     verbs.push({
       key: "retry",
       label: stale ? "Retry with the settings it used" : "Retry",
-      detail: stale
-        ? "Run this deployment again with its own plan and variables, unchanged."
-        : "Run this deployment again from the same source.",
       icon: RefreshClockwise,
       progressive: "Starting…",
       disabled: working === "retry",
@@ -131,7 +124,6 @@ export function runVerbs({
     verbs.push({
       key: "cancel",
       label: "Cancel",
-      detail: "Stop this deployment before it finishes; its cleanup still runs.",
       icon: StopCircle,
       progressive: "Cancelling…",
       disabled: working === "cancel",
@@ -163,7 +155,6 @@ export function releaseVerbs({
     verbs.push({
       key: "changes",
       label: "What changed in this release",
-      detail: "Its source, variables and checks against the release before it.",
       icon: Notes,
       group,
       run: () => on.changes(release),
@@ -173,7 +164,6 @@ export function releaseVerbs({
     verbs.push({
       key: "compare",
       label: "Compare with live",
-      detail: "What changed between this release and the live one.",
       icon: ArrowLeftRight,
       group,
       run: () => on.compare(release),
@@ -183,7 +173,6 @@ export function releaseVerbs({
     verbs.push({
       key: "rollback",
       label: "Roll back to this release",
-      detail: "Make this retained release live again.",
       icon: RotateCounterClockwise,
       group,
       run: () => on.rollback(release),
@@ -193,9 +182,6 @@ export function releaseVerbs({
     verbs.push({
       key: "pin",
       label: release.pinned ? "Unpin release" : "Pin release",
-      detail: release.pinned
-        ? "Allow this release to be cleaned up automatically again."
-        : "Keep this release from being cleaned up automatically.",
       icon: Pin,
       progressive: release.pinned ? "Unpinning…" : "Pinning…",
       disabled: working === "pin",

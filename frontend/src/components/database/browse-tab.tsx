@@ -581,17 +581,6 @@ export function BrowseTab({
     setSelected(new Set())
     setOffset((clamped - 1) * PAGE)
   }
-  const exportHint = [
-    activeFilters.length > 0
-      ? `${plural(activeFilters.length, "condition")} applied`
-      : "The whole table",
-    sort ? `ordered by ${sort.column}` : null,
-    count !== null && count > EXPORT_CAP
-      ? `first ${EXPORT_CAP.toLocaleString()} of ${count.toLocaleString()} rows`
-      : `up to ${EXPORT_CAP.toLocaleString()} rows`,
-  ]
-    .filter(Boolean)
-    .join(", ")
 
   return (
     <Pane className="min-h-0 flex-1">
@@ -671,7 +660,6 @@ export function BrowseTab({
                   counting={counting}
                   onCount={fetchCount}
                   onExport={exportTable}
-                  exportHint={exportHint}
                   onImport={() => setDialog("import")}
                   onAddColumn={() => setDialog("addColumn")}
                   onCreateIndex={() => setDialog("createIndex")}

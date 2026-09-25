@@ -80,9 +80,8 @@ that does something.
   belongs there — deploy when the application is down. It opens with the same search box and state
   chips as the containers page, because "which of these is down" is the same question asked of the same
   server. A stack's own page follows the same rule as a container's: the compose verbs that are pressed
-  daily (deploy, restart) sit inline, and the rest are behind one overflow menu where each gets its word
-  and its sentence — the menu item's word-and-sentence body is `MenuItemBody` in
-  `container-actions.tsx`, shared with the container menu. Its services tab, the deploy preview's
+  daily (deploy, restart) sit inline, and the rest are behind one overflow menu, one word to a line,
+  drawn the same way as the container menu. Its services tab, the deploy preview's
   service rows and the deployment history are hairline lists the eye reads down, not stacks of bordered
   rows; the preview's verdict and the network panel's shape diagram are the two `Group tinted` fences
   the section keeps, and a diff or a captured compose file sits in a `Well`.

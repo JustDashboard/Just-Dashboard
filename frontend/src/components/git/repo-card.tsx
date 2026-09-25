@@ -139,8 +139,6 @@ export function RepoCard({
       verbs.push({
         key: "test",
         label: previewOutOfDate(built) ? "Update preview" : "Test this pull request",
-        detail:
-          "Build this exact commit as a preview environment of the project, reachable only on your tailnet.",
         icon: Play,
         run: () =>
           deployments.length === 1
@@ -155,7 +153,6 @@ export function RepoCard({
         verbs.push({
           key: "retry-cleanup",
           label: "Retry cleanup",
-          detail: "Run the failed removal again, so its containers and address are freed.",
           icon: RotateCounterClockwise,
           progressive: "Retrying…",
           disabled: retrying,
@@ -166,7 +163,6 @@ export function RepoCard({
       verbs.push({
         key: "merge",
         label: "Merge",
-        detail: "Merge it into its base branch on GitHub.",
         icon: SourceMerge,
         disabled: p.draft,
         run: () => setMerging(p),
@@ -175,7 +171,6 @@ export function RepoCard({
     verbs.push({
       key: "github",
       label: "Open on GitHub",
-      detail: "The request's own page, with the conversation and the review.",
       icon: External,
       run: () => window.open(p.url, "_blank", "noopener"),
     })

@@ -39,7 +39,7 @@ import { VerbActions, type Verb } from "@/components/verbs"
  * state a newcomer cannot get out of, so a remote branch offers "check out"
  * instead, which makes a local branch that tracks it.
  *
- * Every other verb sits behind one menu where it gets a sentence: merge into
+ * Every other verb sits behind one menu, by name: merge into
  * the current branch, compare, rename, delete here, delete on the remote.
  * Force delete is a separate item because the safe delete refuses to lose
  * unmerged commits and the force one exists to override exactly that.
@@ -148,7 +148,6 @@ export function BranchesPanel({
       verbs.push({
         key: "compare",
         label: `Compare with ${current}`,
-        detail: "The commits and files this branch would bring into the current one.",
         icon: ArrowLeftRight,
         run: () => onSelect({ kind: "compare", base: current, head: b.name }),
       })
@@ -158,8 +157,6 @@ export function BranchesPanel({
         verbs.push({
           key: "merge",
           label: `Merge into ${current}`,
-          detail:
-            "Bring this branch’s commits into the current one. Resolve any conflicts in Changes.",
           icon: SourceMerge,
           disabled: !!busy,
           run: () =>
@@ -189,7 +186,6 @@ export function BranchesPanel({
       verbs.push({
         key: "rename",
         label: "Rename",
-        detail: "Give the branch a new name. Its history and upstream come with it.",
         icon: Pencil,
         disabled: !!busy || !!b.worktree,
         run: () => setRenaming(b),
@@ -197,7 +193,6 @@ export function BranchesPanel({
       verbs.push({
         key: "upstream",
         label: "Set upstream",
-        detail: "Choose the branch this one pulls from and pushes to.",
         icon: ArrowLeftRight,
         disabled: !!busy,
         run: () => setTracking(b),
@@ -206,7 +201,6 @@ export function BranchesPanel({
         verbs.push({
           key: "untrack",
           label: "Stop tracking upstream",
-          detail: `Remove the link to ${b.upstream}; both branches keep their commits.`,
           icon: SourceBranch,
           disabled: !!busy,
           run: () => act("Upstream removed", "/git/upstream", { name: b.name, ref: "" }),
@@ -217,9 +211,6 @@ export function BranchesPanel({
         {
           key: "delete",
           label: "Delete branch",
-          detail: b.merged
-            ? "Every commit on it is already on the current branch, so nothing is lost."
-            : "Git refuses if it has commits not merged anywhere.",
           icon: Trash,
           danger: true,
           run: () => remove(b, false),
@@ -227,7 +218,6 @@ export function BranchesPanel({
         {
           key: "force",
           label: "Force delete",
-          detail: "Delete it even if its commits exist nowhere else.",
           icon: Trash,
           danger: true,
           run: () => remove(b, true),
@@ -238,7 +228,6 @@ export function BranchesPanel({
         verbs.push({
           key: "remote",
           label: `Delete on ${remote}`,
-          detail: `Remove ${rest.join("/")} from the remote as well.`,
           icon: Cross,
           danger: true,
           run: () => removeRemote(remote, rest.join("/")),
@@ -253,7 +242,6 @@ export function BranchesPanel({
       {
         key: "compare",
         label: `Compare with ${current}`,
-        detail: "The commits and files this branch would bring into the current one.",
         icon: ArrowLeftRight,
         run: () => onSelect({ kind: "compare", base: current, head: b.name }),
       },
@@ -262,7 +250,6 @@ export function BranchesPanel({
       verbs.push({
         key: "remote",
         label: `Delete on ${b.remoteName}`,
-        detail: "Remove the branch from the remote. Its commits stay wherever else they are.",
         icon: Trash,
         danger: true,
         run: () => removeRemote(b.remoteName!, b.local!),
@@ -277,7 +264,6 @@ export function BranchesPanel({
       verbs.push({
         key: "show",
         label: "Show the commit",
-        detail: "What the tagged commit changed.",
         icon: SourceBranch,
         run: () => onSelect({ kind: "commit", sha: t.commit! }),
       })
@@ -286,7 +272,6 @@ export function BranchesPanel({
       verbs.push({
         key: "push",
         label: "Push this tag",
-        detail: "Publish it to the remote. A tag is local until it is pushed.",
         icon: CloudUpload,
         disabled: !!busy,
         run: () => act(`Pushed ${t.name}`, "/git/push/tags", { ref: t.name }),
@@ -296,7 +281,6 @@ export function BranchesPanel({
       verbs.push({
         key: "delete",
         label: "Delete tag",
-        detail: "Remove the name here. The commit stays, and so does a pushed copy.",
         icon: Trash,
         danger: true,
         run: () => removeTag(t),

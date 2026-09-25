@@ -434,8 +434,7 @@ async function menuLabels(page: Page, rowName: string): Promise<string[]> {
   const row = page.getByRole("row", { name: new RegExp(rowName) }).first()
   await row.hover()
   await row.getByRole("button", { name: "More actions" }).click()
-  // The word, not the sentence under it.
-  const items = await page.locator("[role='menuitem'] span.font-medium").allInnerTexts()
+  const items = await page.locator("[role='menuitem']").allInnerTexts()
   await page.keyboard.press("Escape")
   return items
 }
@@ -583,7 +582,7 @@ test("PM2 says whether it survives a reboot and offers the housekeeping verbs", 
   await page.keyboard.press("Escape")
 
   await page.getByRole("button", { name: "Startup and bulk" }).click()
-  const bulk = await page.locator("[role='menuitem'] span.font-medium").allInnerTexts()
+  const bulk = await page.locator("[role='menuitem']").allInnerTexts()
   expect(bulk).toEqual(["Save startup list", "Reload all", "Restart all", "Stop all"])
 })
 

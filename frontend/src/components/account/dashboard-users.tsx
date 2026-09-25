@@ -285,7 +285,6 @@ export function DashboardUsersView({ users }: { users: ReturnType<typeof useDash
       {
         key: "edit",
         label: "Edit",
-        detail: "Rename the account or give it a new password.",
         icon: Pencil,
         run: () => setEditing(user),
       },
@@ -294,8 +293,6 @@ export function DashboardUsersView({ users }: { users: ReturnType<typeof useDash
             {
               key: "reset-totp",
               label: "Reset two-factor",
-              detail:
-                "For a lost authenticator: they sign in with a password until they enrol again.",
               icon: Fingerprint,
               run: () =>
                 confirm({
@@ -322,7 +319,6 @@ export function DashboardUsersView({ users }: { users: ReturnType<typeof useDash
             {
               key: "delete",
               label: "Delete",
-              detail: "They lose access at once, with every session and API key they hold.",
               icon: Trash,
               danger: true,
               run: () =>

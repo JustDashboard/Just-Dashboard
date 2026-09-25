@@ -582,9 +582,6 @@ export function NotificationsPage() {
         label: "Send test",
         // The server refuses every delivery to a paused channel, so the verb
         // is not offered as though it might work.
-        detail: channel.enabled
-          ? "Deliver a sample message to this channel right now."
-          : "Resume it first — a paused channel refuses every delivery.",
         icon: PaperAirplane,
         inline: true,
         progressive: "Sending test…",
@@ -594,16 +591,12 @@ export function NotificationsPage() {
       verbs.push({
         key: "edit",
         label: "Edit channel",
-        detail: "Change its name, delivery settings or events.",
         icon: Pencil,
         run: () => edit(channel),
       })
       verbs.push({
         key: "toggle",
         label: channel.enabled ? "Pause channel" : "Resume channel",
-        detail: channel.enabled
-          ? "Stop delivering messages without losing its history."
-          : "Start delivering messages again.",
         icon: channel.enabled ? Pause : Play,
         progressive: channel.enabled ? "Pausing…" : "Resuming…",
         run: () => void toggle(channel, !channel.enabled),
@@ -613,7 +606,6 @@ export function NotificationsPage() {
       verbs.push({
         key: "history",
         label: "Delivery history",
-        detail: "The last fifty attempts to reach this channel.",
         icon: ClockRewind,
         run: () => setHistoryId(channel.id),
       })
@@ -622,7 +614,6 @@ export function NotificationsPage() {
       verbs.push({
         key: "remove",
         label: "Remove channel",
-        detail: "Deployment events stop reaching it immediately.",
         icon: Trash,
         danger: true,
         run: () => remove(channel),

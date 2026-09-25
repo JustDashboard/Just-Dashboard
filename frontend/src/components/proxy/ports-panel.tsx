@@ -90,7 +90,6 @@ export function PortsPage() {
       verbs.push({
         key: "process",
         label: "Process",
-        detail: "Open it under Processes: connections, open files, parent chain, and its verbs.",
         icon: ListOrdered,
         inline: true,
         run: () => router.push(`/processes?pid=${l.pid}`),
@@ -100,8 +99,6 @@ export function PortsPage() {
       verbs.push({
         key: "firewall",
         label: "Firewall",
-        detail:
-          "Whether the firewall lets the internet reach this port, and the rule that decides.",
         icon: Shield,
         run: () => router.push("/security/firewall"),
       })

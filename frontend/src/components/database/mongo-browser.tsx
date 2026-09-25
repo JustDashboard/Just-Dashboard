@@ -24,7 +24,15 @@ import type { useConfirm } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Pane, PaneFooter, PaneHeader, Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
+import {
+  Pane,
+  PaneFooter,
+  PaneHeader,
+  Panel,
+  PanelBody,
+  PanelFooter,
+  PanelHeader,
+} from "@/components/panel"
 import { EmptyNote, EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { tabClasses } from "@/components/tabs"
 import {
@@ -256,7 +264,11 @@ export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
                   setSkip(0)
                 }}
               >
-                <SelectTrigger size="sm" className="h-7 w-full text-xs sm:h-7" aria-label="Database">
+                <SelectTrigger
+                  size="sm"
+                  className="h-7 w-full text-xs sm:h-7"
+                  aria-label="Database"
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -320,13 +332,9 @@ export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
                     Insert
                   </Button>
                 )}
-                {/* One verb inline, the rest behind one menu where each of
-                    them gets a sentence (§13). Five buttons across a pane
-                    header spelled "CSV" and "JSON" at each other and never
-                    said what either would contain. */}
+                {/* One verb inline, the rest behind one menu (§13). */}
                 <CollectionMenu
                   canWrite={canWrite}
-                  filtered={applied.trim() !== "" && applied.trim() !== "{}"}
                   onExport={exportDocs}
                   onImport={() => setImporting(true)}
                   onDrop={dropCollection}
@@ -428,45 +436,45 @@ export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
             <div className={cn("min-h-0 flex-1 overflow-y-auto", ringSafeScroll)}>
               {!collection && <EmptyState icon={CodeBracket} title="Select a collection" />}
               {info.data && (
-                  <>
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Name</TableHead>
-                          <TableHead>Keys</TableHead>
-                          <TableHead>Unique</TableHead>
+                <>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Keys</TableHead>
+                        <TableHead>Unique</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {info.data.indexes.map((ix) => (
+                        <TableRow key={ix.name}>
+                          <TableCell className="font-mono">
+                            {ix.name}
+                            {ix.primary && <Tag className="ml-1.5">_id</Tag>}
+                          </TableCell>
+                          <TableCell className="font-mono text-muted-foreground">
+                            {ix.columns.join(", ")}
+                          </TableCell>
+                          <TableCell>{ix.unique ? "yes" : "no"}</TableCell>
                         </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {info.data.indexes.map((ix) => (
-                          <TableRow key={ix.name}>
-                            <TableCell className="font-mono">
-                              {ix.name}
-                              {ix.primary && <Tag className="ml-1.5">_id</Tag>}
-                            </TableCell>
-                            <TableCell className="font-mono text-muted-foreground">
-                              {ix.columns.join(", ")}
-                            </TableCell>
-                            <TableCell>{ix.unique ? "yes" : "no"}</TableCell>
-                          </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  {info.data.stats && (
+                    <div className="border-t border-hairline p-4">
+                      <p className="mb-2 text-xs font-medium">Collection stats</p>
+                      <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
+                        {Object.entries(info.data.stats).map(([k, v]) => (
+                          <div key={k} className="flex justify-between gap-2">
+                            <span className="text-muted-foreground">{k}</span>
+                            <span className="font-mono">{String(v)}</span>
+                          </div>
                         ))}
-                      </TableBody>
-                    </Table>
-                    {info.data.stats && (
-                      <div className="border-t border-hairline p-4">
-                        <p className="mb-2 text-xs font-medium">Collection stats</p>
-                        <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
-                          {Object.entries(info.data.stats).map(([k, v]) => (
-                            <div key={k} className="flex justify-between gap-2">
-                              <span className="text-muted-foreground">{k}</span>
-                              <span className="font-mono">{String(v)}</span>
-                            </div>
-                          ))}
-                        </div>
                       </div>
-                    )}
-                  </>
-                )}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
 
@@ -528,19 +536,15 @@ export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
  */
 function CollectionMenu({
   canWrite,
-  filtered,
   onExport,
   onImport,
   onDrop,
 }: {
   canWrite: boolean
-  /** Whether a filter is applied — the export carries it, and says so. */
-  filtered: boolean
   onExport: (format: "csv" | "json") => void
   onImport: () => void
   onDrop: () => void
 }) {
-  const hint = `${filtered ? "What this filter matches" : "The whole collection"}, up to ${EXPORT_CAP.toLocaleString()} documents.`
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -551,36 +555,27 @@ function CollectionMenu({
       <DropdownMenuContent align="end" className="w-60">
         <DropdownMenuItem onClick={() => onExport("csv")}>
           <Download />
-          <Words title="Export as CSV" hint={hint} />
+          Export as CSV
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => onExport("json")}>
           <AcronymJson />
-          <Words title="Export as JSON" hint={hint} />
+          Export as JSON
         </DropdownMenuItem>
         {canWrite && (
           <>
             <DropdownMenuItem onClick={onImport}>
               <CloudUpload />
-              <Words title="Import documents…" hint="CSV or JSON, in one transaction." />
+              Import documents…
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onClick={onDrop}>
               <Trash />
-              <Words title="Drop collection…" hint="Deletes it and every document in it." />
+              Drop collection…
             </DropdownMenuItem>
           </>
         )}
       </DropdownMenuContent>
     </DropdownMenu>
-  )
-}
-
-function Words({ title, hint }: { title: string; hint: string }) {
-  return (
-    <span className="flex min-w-0 flex-col">
-      <span>{title}</span>
-      <span className="text-hint text-muted-foreground">{hint}</span>
-    </span>
   )
 }
 

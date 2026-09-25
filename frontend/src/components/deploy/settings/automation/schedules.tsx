@@ -329,7 +329,6 @@ export function Schedules({
           {
             key: "runs",
             label: "Runs",
-            detail: "The runs this schedule has produced, and when it fires next.",
             icon: Logs,
             inline: true,
             run: () => setOpenId(schedule.id),
@@ -338,9 +337,6 @@ export function Schedules({
     {
       key: "toggle",
       label: schedule.enabled ? "Pause" : "Enable",
-      detail: schedule.enabled
-        ? "Stop firing until it is enabled again."
-        : "Start firing on its clock again.",
       icon: schedule.enabled ? Pause : Play,
       inline: true,
       run: () => void toggle(schedule),
@@ -348,14 +344,12 @@ export function Schedules({
     {
       key: "edit",
       label: "Edit",
-      detail: "Change when it fires, in which zone, and what it runs.",
       icon: Pencil,
       run: () => sheet.openEdit(schedule),
     },
     {
       key: "remove",
       label: "Remove",
-      detail: "Delete this schedule; its past runs stay.",
       icon: Trash,
       danger: true,
       run: () => remove(schedule, fired),

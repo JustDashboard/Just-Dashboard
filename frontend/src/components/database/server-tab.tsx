@@ -497,8 +497,6 @@ function RolesPanel({
                       {
                         key: "password",
                         label: "Change password",
-                        detail:
-                          "Sets a new password; whatever signs in as this account has to be told.",
                         icon: Key,
                         run: () => setEditing({ role, mode: "password" }),
                       },
@@ -507,7 +505,6 @@ function RolesPanel({
                             {
                               key: "grant",
                               label: "Grant a database",
-                              detail: "Read, write, or everything on one database.",
                               icon: Plus,
                               run: () => setEditing({ role, mode: "grant" }),
                             },
@@ -516,7 +513,6 @@ function RolesPanel({
                       {
                         key: "drop",
                         label: "Drop account",
-                        detail: "Removes it from the server.",
                         icon: Trash,
                         danger: true,
                         disabled: role.system || role.name === conn.user,

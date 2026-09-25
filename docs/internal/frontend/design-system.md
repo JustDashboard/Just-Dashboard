@@ -901,9 +901,13 @@ newer image and rebuild this container with the same settings" to anybody who di
 The rule that fell out of the Docker pass, and which generalises:
 
 - **Two or three verbs inline, as icons.** The ones pressed daily, whose glyphs are conventional.
-- **Everything else behind one overflow menu**, where each verb carries its word *and* a line of
-  plain English underneath. The menu is not where things are hidden — it is where a verb gets a
-  sentence, which is the only form most of them are usable in.
+- **Everything else behind one overflow menu**, one word to a line, with no sentence under it. The
+  menu is not where things are hidden — it is where a verb gets its name, which is the only form
+  most of them are usable in. A verb that needs a sentence to be understood needs a better word, or
+  a confirmation that carries the sentence; a menu of two-line items read as a wall of captions
+  (§5), and every item cost twice the height it earned. Rows in a menu that carry a *fact* beside
+  the word — a place's path, a saved command, a connection's host — keep it on the same line, muted
+  and truncated, never underneath.
 - **The verbs themselves are declared once**, as data, and a surface decides only how many it has
   room to draw. `components/docker/container-actions.tsx` is the pattern: three surfaces used to hold
   three different answers to "what can I do to this container", and they disagreed about which
@@ -924,7 +928,7 @@ a project. A run's and its release's are declared once in `deploy/run-verbs.tsx`
 Deployments row's menu and by the run page's identity line, which is what keeps a finished run from
 being a dead end. A long menu is grouped: a `Verb` may name its `group` — Running, Building, Project,
 *Release #4* — and `VerbMenu` draws an eyebrow and a separator where the group changes, because
-eleven sentences in a row are a wall and the same eleven under three names are three short lists.
+eleven words in a row are a wall and the same eleven under three names are three short lists.
 Cancelling a run is not a danger verb, any more than Stop is: it is undone by deploying again, and
 the danger rule in front of it would have cut its group in two.
 

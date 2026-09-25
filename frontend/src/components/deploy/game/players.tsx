@@ -30,46 +30,37 @@ import { GameIdentity, useGameOverview } from "@/components/deploy/game/identity
 
 type PlayerAction = "op" | "deop" | "whitelist_add" | "whitelist_remove" | "kick" | "ban"
 
-/** What each action does to a player, for the menu's sentence and the toast after it. */
-const ACTIONS: Record<
-  PlayerAction,
-  { label: string; progressive: string; done: string; detail: string }
-> = {
+/** What each action does to a player, for the menu and the toast after it. */
+const ACTIONS: Record<PlayerAction, { label: string; progressive: string; done: string }> = {
   op: {
     label: "Make operator",
     progressive: "Promoting",
     done: "is now an operator",
-    detail: "Lets them run server commands from inside the game.",
   },
   deop: {
     label: "Remove operator",
     progressive: "Demoting",
     done: "is no longer an operator",
-    detail: "Takes server commands away from them.",
   },
   whitelist_add: {
     label: "Add to whitelist",
     progressive: "Whitelisting",
     done: "was added to the whitelist",
-    detail: "Lets them join while Whitelist only is on.",
   },
   whitelist_remove: {
     label: "Remove from whitelist",
     progressive: "Removing",
     done: "was removed from the whitelist",
-    detail: "They can no longer join while the whitelist is on.",
   },
   kick: {
     label: "Kick",
     progressive: "Kicking",
     done: "was kicked",
-    detail: "Disconnects them now; they can join again straight away.",
   },
   ban: {
     label: "Ban",
     progressive: "Banning",
     done: "was banned",
-    detail: "Disconnects them and refuses them until they are pardoned from the console.",
   },
 }
 
@@ -78,8 +69,7 @@ const ACTIONS: Record<
  * the product — initials in a hue picked by their name (§14), the same hue
  * their name takes in the game console's replies — with the moderation verbs
  * declared once (§13): kicking is the one pressed daily and stays inline, the
- * rest go behind one menu where each carries its sentence, and a ban asks
- * first. While an action is on its way the row says so in the present tense
+ * rest go behind one menu, and a ban asks first. While an action is on its way the row says so in the present tense
  * until the server's next answer lands.
  *
  * Player controls appear only when a tested adapter can actually report
@@ -136,7 +126,6 @@ export function GamePlayers({ projectId }: { projectId: number }) {
     const verb = (action: PlayerAction, icon: Verb["icon"], extra: Partial<Verb> = {}): Verb => ({
       key: action,
       label: ACTIONS[action].label,
-      detail: ACTIONS[action].detail,
       progressive: ACTIONS[action].progressive,
       icon,
       disabled: name in pending,
@@ -163,7 +152,8 @@ export function GamePlayers({ projectId }: { projectId: number }) {
                 </FormFact>
               ),
             },
-            description: ACTIONS.ban.detail,
+            description:
+              "Disconnects them and refuses them until they are pardoned from the console.",
             confirmLabel: "Ban",
             action: () => act("ban", name),
           }),

@@ -1168,10 +1168,7 @@ test("Test this pull request posts the head, the variables choice and the fork a
     .filter({ hasText: "Translate the checkout" })
     .getByRole("button", { name: "More actions for #45" })
     .click()
-  // Nothing built from #45 yet, so merging it closes no preview.
-  const merge = page.getByRole("menuitem", { name: /^Merge/ })
-  await expect(merge).toContainText("Production redeploys automatically.")
-  await expect(merge).not.toContainText("Its preview closes.")
+  await expect(page.getByRole("menuitem", { name: /^Merge/ })).toBeVisible()
   await page.getByRole("menuitem", { name: /Test this pull request/ }).click()
 
   const dialog = page.getByRole("dialog", { name: "Test #45" })
@@ -1219,11 +1216,6 @@ test("merging from the overview posts to the project's route, pins the head and 
   await expect(list.getByRole("listitem")).toHaveCount(1)
   const before = reads
   await list.getByRole("button", { name: "More actions for #42" }).click()
-  // The verb promises only what the listing says will happen: #42 has an
-  // open preview, and this project's auto-deploy is on.
-  await expect(page.getByRole("menuitem", { name: /^Merge/ })).toContainText(
-    "Its preview closes. Production redeploys automatically.",
-  )
   await page.getByRole("menuitem", { name: /^Merge/ }).click()
   const dialog = page.getByRole("dialog", { name: "Merge #42" })
   await dialog.getByRole("button", { name: "Merge on GitHub" }).click()

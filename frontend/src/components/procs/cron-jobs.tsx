@@ -294,7 +294,6 @@ function CronJobRow({
           ? {
               key: "enable",
               label: "Enable",
-              detail: "Uncomments the line. It runs at its next scheduled time.",
               icon: Play,
               inline: true,
               run: onToggle,
@@ -302,7 +301,6 @@ function CronJobRow({
           : {
               key: "disable",
               label: "Disable",
-              detail: "Comments the line out. It stays here and can be enabled again.",
               icon: Pause,
               inline: true,
               run: onToggle,
@@ -311,7 +309,6 @@ function CronJobRow({
       list.push({
         key: "edit",
         label: "Edit",
-        detail: "Change the schedule, the command or the note above it.",
         icon: Pencil,
         inline: true,
         run: onEdit,
@@ -320,7 +317,6 @@ function CronJobRow({
     list.push({
       key: "copy",
       label: "Copy command",
-      detail: "The command line exactly as cron runs it.",
       icon: Copy,
       run: () => void copyText(job.command, "Command copied"),
     })
@@ -328,7 +324,6 @@ function CronJobRow({
       list.push({
         key: "remove",
         label: "Remove",
-        detail: "Deletes the line from the crontab.",
         icon: Trash,
         danger: true,
         run: () =>

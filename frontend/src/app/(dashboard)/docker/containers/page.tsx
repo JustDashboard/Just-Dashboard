@@ -48,10 +48,10 @@ import { Button } from "@/components/ui/button"
  *   name on a narrow one — see `container-card.tsx` for why a list of places
  *   to go is cards rather than cells.
  *
- *   The row's verbs are a word and a sentence rather than five glyphs. Start,
- *   restart and stop stay as icons because they are pressed constantly and
- *   their shapes are universal; everything else — update, pause, shell, remove
- *   — moved into a menu where each one gets a line of plain English under it.
+ *   The row's verbs are words rather than five glyphs. Start, restart and
+ *   stop stay as icons because they are pressed constantly and their shapes
+ *   are universal; everything else — update, pause, shell, remove — moved
+ *   into a menu where each one is named.
  *   `ArrowCircleUp` is not a word that means "pull a newer image and rebuild
  *   this container with the same settings", and a control nobody dares press is
  *   a control that is not there.

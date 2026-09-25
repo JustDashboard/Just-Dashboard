@@ -625,7 +625,6 @@ function DatabasesBody({
                     {
                       key: "test",
                       label: "Test connection",
-                      detail: "Opens a connection to the engine and reports what it says.",
                       icon: Lightning,
                       inline: true,
                       disabled: busy === `ping-${id}`,
@@ -637,7 +636,6 @@ function DatabasesBody({
                       {
                         key: "copy",
                         label: "Copy application URL",
-                        detail: "The address and credentials the container receives. Audited.",
                         icon: Copy,
                         disabled: busy === `url-${id}`,
                         run: () => void copyApplicationURL(id),
@@ -645,7 +643,6 @@ function DatabasesBody({
                       {
                         key: "remove",
                         label: "Remove database",
-                        detail: "Unlinks it here. The container and its data are left alone.",
                         icon: Trash,
                         danger: true,
                         run: () => removeDatabase(dependency, index),
@@ -1336,7 +1333,6 @@ function BackupPolicy({
     verbs.push({
       key: "run",
       label: "Run now",
-      detail: "Takes a backup with this job now; progress appears in Backups.",
       icon: Play,
       inline: true,
       progressive: "Starting…",
@@ -1348,14 +1344,12 @@ function BackupPolicy({
       {
         key: "change",
         label: "Change job",
-        detail: "Gate this release on a different backup job.",
         icon: Pencil,
         run: onChangeJob,
       },
       {
         key: "remove",
         label: "Remove from the policy",
-        detail: "The release stops waiting for this job once saved.",
         icon: Trash,
         danger: true,
         run: onRemove,

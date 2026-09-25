@@ -8,7 +8,6 @@ import { notify } from "@/lib/toast"
 import {
   canTest,
   cleanupFailed,
-  mergeDetail,
   previewHeld,
   previewOutOfDate,
   previewStatus,
@@ -155,11 +154,6 @@ export function usePullRequestVerbs({
       verbs.push({
         key: "test",
         label: update ? "Update preview" : "Test this pull request",
-        detail: !canTest(pull)
-          ? "The listing has no head commit for it; open it on the Git page to test it."
-          : update
-            ? "Rebuild the preview at the pull request's newest commit."
-            : "Build its head as a preview, reachable only on your tailnet.",
         icon: update ? RefreshClockwise : SourcePull,
         disabled: !canTest(pull) || Boolean(busy),
         run: () => setTesting({ pull, preview }),
@@ -169,7 +163,6 @@ export function usePullRequestVerbs({
       verbs.push({
         key: "open-preview",
         label: "Open preview",
-        detail: "The preview's tailnet address, in a new tab.",
         icon: External,
         run: () => openPreview(preview),
       })
@@ -179,7 +172,6 @@ export function usePullRequestVerbs({
       verbs.push({
         key: "retry-cleanup",
         label: "Retry cleanup",
-        detail: "Run the failed removal again, so its containers and address are freed.",
         icon: RotateCounterClockwise,
         progressive: "Retrying…",
         disabled: Boolean(busy),
@@ -189,7 +181,6 @@ export function usePullRequestVerbs({
       verbs.push({
         key: "close-preview",
         label: "Close preview",
-        detail: "Remove its containers, storage and address. The pull request stays open.",
         icon: Cross,
         danger: true,
         progressive: "Closing…",
@@ -201,11 +192,6 @@ export function usePullRequestVerbs({
       verbs.push({
         key: "merge",
         label: "Merge",
-        detail: mergeDetail({
-          draft: pull.draft,
-          previewOpen: open,
-          automatic: info?.production.automatic ?? false,
-        }),
         icon: SourceMerge,
         disabled: pull.draft || Boolean(busy),
         run: () => setMerging(pull),
@@ -216,7 +202,6 @@ export function usePullRequestVerbs({
       verbs.push({
         key: "github",
         label: "Open on GitHub",
-        detail: "The request's own page, with the conversation and the review.",
         icon: External,
         run: () => window.open(pull.url, "_blank", "noopener"),
       })

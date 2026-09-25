@@ -143,7 +143,6 @@ export function JobPage() {
       {
         key: "log",
         label: "Log",
-        detail: "What the run wrote, and the evidence it left.",
         icon: Eye,
         inline: true,
         run: () => setSelectedId(run.id),
@@ -153,7 +152,6 @@ export function JobPage() {
     out.push({
       key: "browse",
       label: "Browse files",
-      detail: "List what the archive holds without unpacking it.",
       icon: FolderOpen,
       run: () => {
         setSelectedId(run.id)
@@ -164,7 +162,6 @@ export function JobPage() {
       out.push({
         key: "restore",
         label: "Restore files…",
-        detail: "Unpack into a directory, or put everything back where it came from.",
         icon: CloudDownload,
         run: () => setRestore({ run, paths: [] }),
       })
@@ -172,7 +169,6 @@ export function JobPage() {
         out.push({
           key: "restore-db",
           label: "Restore database…",
-          detail: "Load a native dump back into its connection, or into a drill database.",
           icon: Database,
           run: () => setRestoreDatabase(run),
         })
@@ -182,7 +178,6 @@ export function JobPage() {
       out.push({
         key: "verify",
         label: "Verify restore",
-        detail: "Restore a temporary copy and run the application's checker against it.",
         icon: ShieldCheck,
         disabled: verifying === run.id,
         run: () => void verify(run),
@@ -192,7 +187,6 @@ export function JobPage() {
       out.push({
         key: "download",
         label: "Download archive",
-        detail: "Save the verified .tar.gz to this computer.",
         icon: Download,
         run: () => window.open(downloadUrl(`/backups/runs/${run.id}/download`), "_blank"),
       })

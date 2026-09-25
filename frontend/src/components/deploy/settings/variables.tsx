@@ -604,7 +604,6 @@ function VariablesBody({
       {
         key: "reveal",
         label: isRevealed ? "Hide" : "Reveal",
-        detail: isRevealed ? "Hide the value again." : "Show the stored value once.",
         icon: isRevealed ? EyeOff : Eye,
         inline: true,
         disabled: Boolean(rowBusy),
@@ -615,14 +614,12 @@ function VariablesBody({
       verbs.push({
         key: "edit",
         label: "Edit",
-        detail: "Open it in the editor to change its value or who can read it.",
         icon: Pencil,
         run: () => loadIntoForm(variable),
       })
     verbs.push({
       key: "copy",
       label: "Copy value",
-      detail: "Reads the stored value once and copies it without showing it. Audited.",
       icon: Copy,
       disabled: Boolean(rowBusy),
       run: () => void copyValue(variable),
@@ -633,7 +630,6 @@ function VariablesBody({
       verbs.push({
         key: "database",
         label: "Open the database",
-        detail: "The linked database this value is read from, on Databases & backups.",
         icon: Database,
         run: () => router.push(`/deploy/${projectId}/settings/databases`),
       })
@@ -642,7 +638,6 @@ function VariablesBody({
         verbs.push({
           key: "rotate",
           label: "Rotate",
-          detail: "Replace the stored value with a freshly generated secret.",
           icon: RefreshClockwise,
           progressive: "Rotating…",
           disabled: Boolean(rowBusy),
@@ -651,7 +646,6 @@ function VariablesBody({
       verbs.push({
         key: "remove",
         label: "Remove",
-        detail: "Stop including this variable in the desired plan.",
         icon: Trash,
         danger: true,
         disabled: Boolean(rowBusy),
