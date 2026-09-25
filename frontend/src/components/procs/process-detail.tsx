@@ -14,6 +14,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Detail, DetailList } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
+import { ProductLogo, processProduct } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
 import { SidePanel } from "@/components/side-panel"
 import { EmptyNote, EmptyState, ErrorState, LoadingRows, Spinner } from "@/components/state"
@@ -61,7 +62,13 @@ export function ProcessDetailSheet({
     <SidePanel
       open={pid !== null}
       onOpenChange={onOpenChange}
-      title={row?.name ?? `PID ${pid ?? ""}`}
+      // The sheet opens on the thing itself: its mark, then its name.
+      title={
+        <>
+          <ProductLogo id={row ? processProduct(row.name) : undefined} size="sm" fallback={Cpu} />
+          <span className="min-w-0 truncate">{row?.name ?? `PID ${pid ?? ""}`}</span>
+        </>
+      }
       description={row ? `PID ${row.pid} · ${row.username || "unknown user"}` : "Process detail"}
       width="md"
       actions={

@@ -18,6 +18,9 @@ import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { IconAction, RowActions } from "@/components/icon-action"
 import { addressVerbs, blockAddress } from "@/components/security/address-verbs"
+import { Address } from "@/components/security/marks"
+import { InitialsMark } from "@/components/account/user-avatar"
+import { Meter } from "@/components/meter"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { VerbActions } from "@/components/verbs"
@@ -36,7 +39,10 @@ import {
  * The three halves of "who has been on this machine": a snapshot of the
  * interactive logins right now, who has been trying and failing — the
  * question that actually matters on an exposed host — and who got in, which
- * the host has been keeping in wtmp all along.
+ * the host has been keeping in wtmp all along. A person is drawn as their
+ * initials in the hue the users list gives them, an address as the network it
+ * is on, and an attacker's attempts against the most persistent one's as a
+ * meter, so the row worth blocking is found before its figure is read.
  */
 export function LoginsPanels() {
   const { can } = useAuth()
@@ -150,7 +156,12 @@ function CurrentSessions({ poll }: { poll: ReturnType<typeof usePoll<LoginSessio
                 <TableBody>
                   {sessions.map((session, i) => (
                     <TableRow key={`${session.user}-${session.tty}-${i}`} className="group">
-                      <TableCell className="text-body font-medium">{session.user}</TableCell>
+                      <TableCell className="text-body font-medium">
+                        <span className="inline-flex items-center gap-2">
+                          <InitialsMark name={session.user} size="xs" />
+                          {session.user}
+                        </span>
+                      </TableCell>
                       <TableCell>
                         <Tag>{session.isSsh ? "ssh" : "local"}</Tag>
                       </TableCell>
@@ -163,7 +174,13 @@ function CurrentSessions({ poll }: { poll: ReturnType<typeof usePoll<LoginSessio
                       <TableCell className="numeric hidden text-muted-foreground lg:table-cell">
                         {session.idle ?? "—"}
                       </TableCell>
-                      <TableCell className="font-mono">{session.from || "local"}</TableCell>
+                      <TableCell>
+                        {session.from ? (
+                          <Address ip={session.from} />
+                        ) : (
+                          <span className="font-mono">local</span>
+                        )}
+                      </TableCell>
                       <TableCell>
                         {can("system.admin") && session.pid ? (
                           <RowActions className="justify-end">
@@ -222,6 +239,7 @@ function AttackersPanel({ poll }: { poll: ReturnType<typeof usePoll<AttackSummar
   const [blocking, setBlocking] = useState<string | null>(null)
   const { data, error, loading, refresh } = poll
   const unavailable = error instanceof ApiError && error.code === "login_history_unavailable"
+  const most = Math.max(1, ...(data?.attackers ?? []).map((a) => a.attempts))
 
   const block = async (ip: string) => {
     setBlocking(ip)
@@ -294,15 +312,29 @@ function AttackersPanel({ poll }: { poll: ReturnType<typeof usePoll<AttackSummar
               <TableBody>
                 {data.attackers.map((attacker) => (
                   <TableRow key={attacker.address} className="group">
-                    <TableCell className="font-mono">{attacker.address}</TableCell>
                     <TableCell>
-                      <span
-                        className={cn(
-                          "numeric text-xs font-medium",
-                          attacker.attempts >= 50 ? "text-destructive" : "text-muted-foreground",
-                        )}
-                      >
-                        {attacker.attempts}
+                      <Address ip={attacker.address} />
+                    </TableCell>
+                    <TableCell>
+                      {/* Against the most persistent address on the page,
+                          so the shape of the list is read down the column
+                          before any figure is. */}
+                      <span className="flex w-28 items-center gap-2">
+                        <span
+                          className={cn(
+                            "numeric w-10 shrink-0 text-right text-xs font-medium",
+                            attacker.attempts >= 50 ? "text-destructive" : "text-muted-foreground",
+                          )}
+                        >
+                          {attacker.attempts}
+                        </span>
+                        <Meter
+                          value={(attacker.attempts / most) * 100}
+                          tone={attacker.attempts >= 50 ? "danger" : "default"}
+                          size="thin"
+                          className="min-w-0 flex-1"
+                          label={`${attacker.attempts} attempts`}
+                        />
                       </span>
                     </TableCell>
                     <TableCell className="hidden sm:table-cell">
@@ -483,7 +515,13 @@ function LoginHistoryPanel({ history }: { history: ReturnType<typeof usePoll<Log
                         (record.duration ?? record.ended ?? "—")
                       )}
                     </TableCell>
-                    <TableCell className="font-mono">{record.from || "local"}</TableCell>
+                    <TableCell>
+                      {record.from ? (
+                        <Address ip={record.from} />
+                      ) : (
+                        <span className="font-mono">local</span>
+                      )}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

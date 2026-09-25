@@ -11,7 +11,9 @@ import { bytes, relativeTime, timestamp } from "@/lib/format"
 import { useConfirm } from "@/components/confirm-dialog"
 import { LogViewer } from "@/components/log-viewer"
 import { Detail, DetailList } from "@/components/page"
+import { Servers } from "@/components/icons"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
+import { ProductLogo, unitProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -85,7 +87,13 @@ function UnitSheet({
     <SidePanel
       open={unit !== null}
       onOpenChange={onOpenChange}
-      title={unit ?? "Unit"}
+      // The sheet opens on the unit as the product it runs, then its name.
+      title={
+        <>
+          <ProductLogo id={unit ? unitProduct(unit) : undefined} size="sm" fallback={Servers} />
+          <span className="min-w-0 truncate">{unit ?? "Unit"}</span>
+        </>
+      }
       description="Service state, configuration and live journal"
       actions={
         service && (

@@ -3,6 +3,7 @@
 import { useMemo } from "react"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import {
+  FirewallCheck,
   LockClosed,
   Pencil,
   RotateCounterClockwise,
@@ -17,6 +18,7 @@ import type { FirewallRule, FirewallStatus, Posture, SecurityFinding } from "@/l
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { PageContext, SearchInput } from "@/components/page"
+import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
@@ -53,10 +55,13 @@ import {
  * firewall that drops silently leaves an incident with no record of what was
  * refused, and "off" should be a choice somebody made rather than inherited.
  *
- * So the page opens on those as readings — four tiles on the page's own
- * ground, the way the host Overview opens — and offers the controls that set
- * them, where this backend can be told to, in one plain block under the
- * tiles. The rules follow, as a table that bleeds to the page edge.
+ * So the page opens on the firewall itself — its backend named in one
+ * identity line, the way the host Overview names the machine, with whether it
+ * is enforcing and the switch that decides that at the line's right end —
+ * then on those two settings as readings, four tiles on the page's own
+ * ground, and offers the controls that set them, where this backend can be
+ * told to, in one plain block under the tiles. The rules follow, as a table
+ * that bleeds to the page edge, with the command that adds one in its header.
  */
 export function FirewallPanel({
   status,
@@ -111,11 +116,14 @@ export function FirewallPanel({
   const writable = admin && Boolean(status?.available) && caps.editable
 
   const header = <PageContext eyebrow="Security" title="Firewall" />
-  const controls = status?.available && (
+  // Whether the firewall is enforcing, and the switch that decides it, at the
+  // right end of the identity line: the control beside the fact it changes.
+  const enforcing = status?.available && (
     <span className="flex flex-wrap items-center gap-3">
       <Status
         verdict={status.enabled ? "ok" : "warning"}
         label={status.enabled ? "Active" : "Inactive"}
+        className="text-body"
       />
       {writable && caps.toggle && (
         <Switch
@@ -144,7 +152,6 @@ export function FirewallPanel({
           }
         />
       )}
-      {writable && <AddRuleDialog onDone={refresh} hasProfiles={caps.profiles} />}
     </span>
   )
 
@@ -221,6 +228,42 @@ export function FirewallPanel({
     <>
       {header}
 
+      {/* What the page is about, as its own row (§15 pass 8): the backend by
+          its own name, on the tile a product's mark takes — none of the three
+          has one, so it keeps the section's glyph — with whether it can be
+          told anything from here and, on firewalld, the zone its rules are
+          held in. */}
+      <HostIdentity
+        fallback={FirewallCheck}
+        title={status.backend}
+        facts={
+          <>
+            <span>{caps.editable ? "managed from here" : "read only from here"}</span>
+            {status.zone && (
+              <>
+                <FactDot />
+                <span>
+                  zone <span className="font-mono text-foreground">{status.zone}</span>
+                </span>
+              </>
+            )}
+            <FactDot />
+            <span className="numeric">
+              {allows} allow · {rules.length - allows} deny
+            </span>
+            {hidden > 0 && (
+              <>
+                <FactDot />
+                <span className="numeric">
+                  {hidden} IPv6 twin{hidden === 1 ? "" : "s"} folded away
+                </span>
+              </>
+            )}
+          </>
+        }
+        aside={enforcing}
+      />
+
       {caps.readOnlyReason && (
         <Notice icon={LockClosed} title={`${status.backend} can be read here, not changed`}>
           {caps.readOnlyReason}
@@ -240,9 +283,9 @@ export function FirewallPanel({
           hint={
             dangerous > 0
               ? `${dangerous} open${dangerous === 1 ? "s" : ""} a sensitive port to everyone`
-              : hidden > 0
-                ? `${allows} allow · ${hidden} IPv6 twin${hidden === 1 ? "" : "s"} folded away`
-                : `${allows} allow · ${rules.length - allows} deny`
+              : rules.length === 0
+                ? "everything is answered by the default"
+                : "one line each, read in order"
           }
         />
         <StatTile
@@ -334,16 +377,7 @@ export function FirewallPanel({
       <Panel>
         <PanelHeader
           title="Rules"
-          actions={
-            <span className="flex flex-wrap items-center gap-3">
-              {hidden > 0 && (
-                <span className="numeric text-hint text-muted-foreground">
-                  {hidden} IPv6 twin{hidden === 1 ? "" : "s"} folded away
-                </span>
-              )}
-              {controls}
-            </span>
-          }
+          actions={writable && <AddRuleDialog onDone={refresh} hasProfiles={caps.profiles} />}
         />
         <PanelToolbar>
           <SearchInput

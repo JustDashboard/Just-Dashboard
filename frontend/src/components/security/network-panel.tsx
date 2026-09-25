@@ -12,6 +12,8 @@ import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, ErrorState, LoadingPanel } from "@/components/state"
 import { Reach } from "@/components/security/reach"
+import { InterfaceMark, interfaceProduct } from "@/components/security/marks"
+import { ProductGlyph } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -35,6 +37,12 @@ const VIRTUAL = ["virtual", "bridge"]
  * operator has to take the dashboard's word for which one they have. The
  * routing table answers the other half: which interface carries the default
  * route is what "the internet reaches this box here" means.
+ *
+ * Every device is drawn as what made it — Tailscale's tunnel and Docker's
+ * bridges as their marks, a physical port as a glyph for its kind — so a list
+ * of nine devices is scanned for the two that are not the container network
+ * before a name is read. The devices, routes and resolvers are readings, so
+ * they stay tables.
  */
 export function NetworkPanel() {
   const [scope, setScope] = useViewState<"real" | "all">("security.network.devices", "real")
@@ -154,7 +162,8 @@ export function NetworkPanel() {
                   {interfaces.map((ifc) => (
                     <TableRow key={ifc.name} className={cn(!ifc.up && "opacity-60")}>
                       <TableCell>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2.5">
+                          <InterfaceMark device={ifc} />
                           <span className="font-mono text-xs font-medium">{ifc.name}</span>
                           <Tag>{ifc.kind}</Tag>
                           {!ifc.up && <Status state="stopped" label="down" />}
@@ -215,7 +224,12 @@ export function NetworkPanel() {
                         {route.gateway || "on-link"}
                       </TableCell>
                       <TableCell className="font-mono text-hint">
-                        {route.interface || "—"}
+                        <span className="inline-flex items-center gap-1.5">
+                          {route.interface && interfaceProduct(route.interface) && (
+                            <ProductGlyph id={interfaceProduct(route.interface)!} />
+                          )}
+                          {route.interface || "—"}
+                        </span>
                       </TableCell>
                       <TableCell className="numeric hidden text-hint text-muted-foreground sm:table-cell">
                         {route.metric || "—"}

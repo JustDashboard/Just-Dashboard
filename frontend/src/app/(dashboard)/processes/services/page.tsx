@@ -2,7 +2,7 @@
 
 import { Suspense, useMemo, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
-import { ListOrdered, RefreshClockwise } from "@/components/icons"
+import { ListOrdered, RefreshClockwise, Servers } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { SystemdUnit } from "@/lib/types"
@@ -13,6 +13,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { cn } from "@/lib/utils"
 import { Page, PageContext, RowLink, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { ProductGlyphs, ProductLogo, unitProduct } from "@/components/product-logo"
 import { ROW_BLEED } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { ChipCount, FilterChip } from "@/components/tabs"
@@ -68,7 +69,10 @@ export default function ServicesPage() {
  * The four figures answer the question the page is opened for — is anything
  * failed — before the table does, and "enabled on boot" is there because the
  * other morning-after question is whether the thing that is running now
- * would come back.
+ * would come back. Each unit is drawn as the product it runs (§14):
+ * `postgresql.service` is Postgres, `pm2-deploy.service` is PM2, and the
+ * Active and Failed tiles carry the marks of what they count after their
+ * figures, so "2 failed" says *what* failed before the table is read.
  */
 function Services() {
   const { can } = useAuth()
@@ -100,6 +104,20 @@ function Services() {
     }),
     [all],
   )
+  // What runs on this host, as the products the units are — the active ones
+  // and the failed ones, each once, most-numerous first.
+  const products = useMemo(() => {
+    const of = (state: string) => {
+      const counts = new Map<string, number>()
+      for (const u of all) {
+        if (u.activeState !== state) continue
+        const id = unitProduct(u.name)
+        if (id) counts.set(id, (counts.get(id) ?? 0) + 1)
+      }
+      return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id)
+    }
+    return { active: of("active"), failed: of("failed") }
+  }, [all])
   const visible = useMemo(() => {
     const needle = filter.trim().toLowerCase()
     return all.filter((u) => {
@@ -160,12 +178,20 @@ function Services() {
       {header}
 
       <StatGrid columns={4}>
-        <StatTile label="Active" value={counts.active} hint={`of ${counts.all} services`} />
+        <StatTile
+          label="Active"
+          value={counts.active}
+          hint={<TileHint products={products.active}>of {counts.all} services</TileHint>}
+        />
         <StatTile
           label="Failed"
           value={counts.failed}
           tone={counts.failed > 0 ? "danger" : "default"}
-          hint={counts.failed > 0 ? "listed first below" : "nothing has failed"}
+          hint={
+            <TileHint products={products.failed}>
+              {counts.failed > 0 ? "listed first below" : "nothing has failed"}
+            </TileHint>
+          }
         />
         <StatTile label="Inactive" value={counts.inactive} hint="installed, not running" />
         <StatTile
@@ -277,6 +303,21 @@ function Services() {
   )
 }
 
+/** The unit as the product it runs; one this cannot name keeps the page's glyph. */
+function UnitMark({ unit }: { unit: SystemdUnit }) {
+  return <ProductLogo id={unitProduct(unit.name)} size="sm" fallback={Servers} />
+}
+
+/** A tile's hint with the products it counts drawn bare after the words. */
+function TileHint({ products, children }: { products: string[]; children: React.ReactNode }) {
+  return (
+    <span className="inline-flex max-w-full min-w-0 items-center gap-2">
+      <span className="truncate">{children}</span>
+      <ProductGlyphs ids={products} />
+    </span>
+  )
+}
+
 type RowProps = {
   unit: SystemdUnit
   pending: PendingMap
@@ -291,9 +332,12 @@ function UnitRow({ unit, pending, confirm, act, onOpen }: RowProps) {
   return (
     <TableRow className="group" onActivate={() => onOpen(unit)}>
       <TableCell>
-        <div className="max-w-[30rem] min-w-0">
-          <RowLink onClick={() => onOpen(unit)}>{unit.name}</RowLink>
-          <p className="truncate text-hint text-muted-foreground">{unit.description}</p>
+        <div className="flex max-w-[30rem] min-w-0 items-center gap-3">
+          <UnitMark unit={unit} />
+          <div className="min-w-0">
+            <RowLink onClick={() => onOpen(unit)}>{unit.name}</RowLink>
+            <p className="truncate text-hint text-muted-foreground">{unit.description}</p>
+          </div>
         </div>
       </TableCell>
       <TableCell>
@@ -330,6 +374,7 @@ function UnitNarrowRow({ unit, pending, confirm, act, onOpen }: RowProps) {
         onOpen(unit)
       }}
     >
+      <UnitMark unit={unit} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-baseline gap-2">
           <RowLink onClick={() => onOpen(unit)}>{unit.name}</RowLink>

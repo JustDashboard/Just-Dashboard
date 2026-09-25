@@ -11,9 +11,11 @@ import { usePoll } from "@/hooks/use-poll"
 import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useConfirm } from "@/components/confirm-dialog"
 import { cn } from "@/lib/utils"
+import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
 import { Page, PageContext, RowLink, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
-import { ROW_BLEED } from "@/components/row-list"
+import { ProductLogo, pm2Product } from "@/components/product-logo"
+import { Row, RowList, ROW_BLEED } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { ChipCount, FilterChip } from "@/components/tabs"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
@@ -54,11 +56,17 @@ export default function PM2Page() {
 /**
  * What PM2 runs, and whether it would come back.
  *
- * The daemon facts under the title are the part the old page never said: a
- * daemon with three online applications and no saved list restores nothing
- * after a reboot, and no boot hook restores nothing even with one. Both are
- * facts about the account, so they are stated as a row, not hidden in a
- * tooltip on the Save button.
+ * The page opens on PM2 as the thing it is about — its own mark on the
+ * identity line the Overview gives the machine — and the daemon facts are
+ * that line's facts: the account, the Node it runs, the boot hook, and when
+ * the list was last saved, with the verdict at the right end. Those facts are
+ * the part the old page never said: a daemon with three online applications
+ * and no saved list restores nothing after a reboot, and no boot hook
+ * restores nothing even with one. With several accounts each daemon is a row
+ * of its own under the line, and the line carries the worst verdict.
+ *
+ * Every application is drawn as what runs it (§14): Node, Bun or Python by
+ * the interpreter PM2 reports, and a glyph for a binary.
  */
 function PM2Applications() {
   const { can } = useAuth()
@@ -74,6 +82,11 @@ function PM2Applications() {
   const processes = useMemo(() => inventory.data?.processes ?? [], [inventory.data])
   const daemons = useMemo(() => inventory.data?.daemons ?? [], [inventory.data])
   const daemonVerbs = useDaemonVerbs({ daemons, confirm, onChanged: inventory.refresh })
+  // The Node every application runs, as one fact when they agree.
+  const nodeVersions = useMemo(
+    () => [...new Set(processes.map((p) => p.nodeVersion).filter(Boolean))],
+    [processes],
+  )
 
   const counts = useMemo(
     () => ({
@@ -160,11 +173,53 @@ function PM2Applications() {
       {header}
 
       {daemons.length > 0 && (
-        <div className="flex min-w-0 flex-col gap-1">
-          {daemons.map((daemon) => (
-            <DaemonFacts key={daemon.account} daemon={daemon} several={daemons.length > 1} />
-          ))}
-        </div>
+        <HostIdentity
+          mark="pm2"
+          title="PM2"
+          facts={
+            daemons.length === 1 ? (
+              <DaemonFacts daemon={daemons[0]} nodeVersions={nodeVersions} />
+            ) : (
+              <>
+                <span className="numeric font-medium text-foreground">
+                  {daemons.length} daemons
+                </span>
+                <FactDot />
+                <span className="truncate">{daemons.map((d) => d.account).join(", ")}</span>
+                {nodeVersions.length > 0 && (
+                  <>
+                    <FactDot />
+                    <HostFact product="nodejs">Node {nodeVersions.join(", ")}</HostFact>
+                  </>
+                )}
+              </>
+            )
+          }
+          aside={<ResurrectVerdict daemons={daemons} />}
+        />
+      )}
+
+      {daemons.length > 1 && (
+        <Panel plain>
+          <PanelHeader title="Daemons" />
+          <PanelBody flush>
+            <RowList>
+              {daemons.map((daemon) => (
+                <Row
+                  key={daemon.account}
+                  title={daemon.account}
+                  subtitle={
+                    <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                      <DaemonFacts daemon={daemon} nodeVersions={[]} />
+                    </span>
+                  }
+                  trailing={<ResurrectVerdict daemons={[daemon]} />}
+                  className="py-2.5"
+                />
+              ))}
+            </RowList>
+          </PanelBody>
+        </Panel>
       )}
 
       <StatGrid columns={4}>
@@ -336,29 +391,25 @@ function PM2Applications() {
 }
 
 /**
- * Whether this account's applications survive a reboot, as one line: the
- * boot hook, and when the list was last saved. Amber where either is
- * missing, because that is the day-after-the-reboot surprise this page
- * exists to prevent.
+ * The facts about one account's daemon: whose it is, the Node it runs, the
+ * boot hook, and when the list was last saved. The hook and the save are the
+ * day-after-the-reboot surprise this page exists to prevent, so each is
+ * said plainly rather than hidden in a tooltip on the Save button.
  */
-function DaemonFacts({ daemon, several }: { daemon: PM2Daemon; several: boolean }) {
+function DaemonFacts({ daemon, nodeVersions }: { daemon: PM2Daemon; nodeVersions: string[] }) {
   const hook = Boolean(daemon.startupUnit)
   const saved = Boolean(daemon.dumpSavedAt)
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-body text-muted-foreground">
-      {several && (
+    <>
+      <span className="font-medium text-foreground">{daemon.account}</span>
+      {nodeVersions.length > 0 && (
         <>
-          <span className="font-medium text-foreground">{daemon.account}</span>
-          <Dot />
+          <FactDot />
+          <HostFact product="nodejs">Node {nodeVersions.join(", ")}</HostFact>
         </>
       )}
-      {hook && saved ? (
-        <Status state="active" label="Resurrects on boot" />
-      ) : (
-        <Status state="failed" label={hook ? "Startup list never saved" : "No boot hook"} />
-      )}
-      <Dot />
-      <span>
+      <FactDot />
+      <span className="truncate">
         {hook ? (
           <>
             hook <span className="font-mono">{daemon.startupUnit}</span>
@@ -369,14 +420,32 @@ function DaemonFacts({ daemon, several }: { daemon: PM2Daemon; several: boolean 
           </>
         )}
       </span>
-      <Dot />
+      <FactDot />
       <span>{saved ? `list saved ${relativeTime(daemon.dumpSavedAt)}` : "list not yet saved"}</span>
-    </div>
+    </>
   )
 }
 
-function Dot() {
-  return <span className="text-muted-foreground/40">·</span>
+/**
+ * Whether what PM2 runs survives a reboot, as the verdict at the line's end:
+ * red where a hook or a saved list is missing on any account, because a
+ * daemon with three online applications and no saved list restores nothing.
+ */
+function ResurrectVerdict({ daemons }: { daemons: PM2Daemon[] }) {
+  const noHook = daemons.filter((d) => !d.startupUnit)
+  const unsaved = daemons.filter((d) => d.startupUnit && !d.dumpSavedAt)
+  if (noHook.length === 0 && unsaved.length === 0) {
+    return <Status state="active" label="Resurrects on boot" className="text-body" />
+  }
+  const label =
+    daemons.length === 1
+      ? noHook.length > 0
+        ? "No boot hook"
+        : "Startup list never saved"
+      : noHook.length > 0
+        ? `No boot hook for ${noHook.map((d) => d.account).join(", ")}`
+        : `List never saved for ${unsaved.map((d) => d.account).join(", ")}`
+  return <Status state="failed" label={label} className="text-body" />
 }
 
 type RowProps = {
@@ -387,6 +456,11 @@ type RowProps = {
   act: Parameters<typeof usePM2Verbs>[0]["act"]
   onOpen: (process: PM2Process, tab?: string) => void
   onChanged: () => void
+}
+
+/** The application as what runs it — Node, Bun, Python — or a glyph for a binary. */
+function ApplicationMark({ process }: { process: PM2Process }) {
+  return <ProductLogo id={pm2Product(process.interpreter)} size="sm" fallback={ChartActivity} />
 }
 
 function modeLabel(process: PM2Process): string {
@@ -407,14 +481,17 @@ function PM2Row({ process, several, pending, confirm, act, onOpen, onChanged }: 
   return (
     <TableRow className="group" onActivate={() => onOpen(process)}>
       <TableCell>
-        <div className="max-w-[24rem] min-w-0">
-          <RowLink onClick={() => onOpen(process)}>{process.name}</RowLink>
-          <p
-            className="truncate font-mono text-hint text-muted-foreground"
-            title={process.scriptPath}
-          >
-            {process.scriptPath}
-          </p>
+        <div className="flex max-w-[24rem] min-w-0 items-center gap-3">
+          <ApplicationMark process={process} />
+          <div className="min-w-0">
+            <RowLink onClick={() => onOpen(process)}>{process.name}</RowLink>
+            <p
+              className="truncate font-mono text-hint text-muted-foreground"
+              title={process.scriptPath}
+            >
+              {process.scriptPath}
+            </p>
+          </div>
         </div>
       </TableCell>
       <TableCell>
@@ -473,6 +550,7 @@ function PM2NarrowRow({ process, several, pending, confirm, act, onOpen, onChang
         onOpen(process)
       }}
     >
+      <ApplicationMark process={process} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-baseline gap-2">
           <RowLink onClick={() => onOpen(process)}>{process.name}</RowLink>

@@ -13,9 +13,12 @@ import {
   imageProduct,
   issuerProduct,
   packageManagerProduct,
+  pm2Product,
   portProduct,
   processProduct,
+  programProduct,
   recipeProduct,
+  unitProduct,
   variableProduct,
   webhookProduct,
 } from "./product-logo"
@@ -335,8 +338,59 @@ test("portProduct names the services the attention list names by number", () => 
 
 test("processProduct does not draw the X server as the site", () => {
   expect(processProduct("X")).toBeUndefined()
-  expect(processProduct("java")).toBe("java")
-  expect(processProduct("postgres")).toBe("postgresql")
+  expect(seen(processProduct("java"))).toBe("java")
+  expect(seen(processProduct("postgres"))).toBe("postgresql")
+  // A node process is Node.js and a python3 one is Python; bash is nothing.
+  expect(seen(processProduct("node"))).toBe("nodejs")
+  expect(seen(processProduct("python3"))).toBe("python")
+  expect(seen(processProduct("php-fpm"))).toBe("php")
+  expect(processProduct("bash")).toBeUndefined()
+  expect(processProduct("kworker/0:1")).toBeUndefined()
+})
+
+// A unit is the product it runs: the suffix and an instance name are dropped,
+// the name is read as a process, then its first word is. What names nothing
+// keeps a glyph, as a process does.
+test("unitProduct reads a unit as the product it runs", () => {
+  expect(seen(unitProduct("postgresql.service"))).toBe("postgresql")
+  expect(seen(unitProduct("postgresql@16-main.service"))).toBe("postgresql")
+  expect(seen(unitProduct("nginx.service"))).toBe("nginx-static")
+  expect(seen(unitProduct("redis-server.service"))).toBe("redis")
+  expect(seen(unitProduct("pm2-deploy.service"))).toBe("pm2")
+  expect(seen(unitProduct("docker.socket"))).toBe("docker")
+  expect(seen(unitProduct("containerd.service"))).toBe("docker")
+  expect(seen(unitProduct("tailscaled.service"))).toBe("tailscale")
+  expect(seen(unitProduct("php8.3-fpm.service"))).toBe("php")
+  expect(seen(unitProduct("caddy.service"))).toBe("caddy")
+  expect(seen(unitProduct("grafana-server.service"))).toBe("grafana")
+  expect(seen(unitProduct("certbot.timer"))).toBe("lets-encrypt")
+  expect(unitProduct("apt-daily.timer")).toBeUndefined()
+  expect(unitProduct("ssh.service")).toBeUndefined()
+  expect(unitProduct("cron.service")).toBeUndefined()
+  expect(unitProduct("systemd-resolved.service")).toBeUndefined()
+  // A Compose stack run as a unit is Compose's, the way a stack is.
+  expect(seen(unitProduct("docker-compose@app.service"))).toBe("docker-compose")
+})
+
+// A PM2 application is what runs it, which is Node unless the ecosystem file
+// says otherwise; a binary is no product.
+test("pm2Product reads the interpreter", () => {
+  expect(seen(pm2Product(undefined))).toBe("nodejs")
+  expect(seen(pm2Product(""))).toBe("nodejs")
+  expect(seen(pm2Product("node"))).toBe("nodejs")
+  expect(seen(pm2Product("/usr/bin/bun"))).toBe("bun")
+  expect(seen(pm2Product("python3"))).toBe("python")
+  expect(pm2Product("none")).toBeUndefined()
+})
+
+// A cron line is drawn as the program its command starts.
+test("programProduct reads a cron command", () => {
+  expect(seen(programProduct("docker system prune -f"))).toBe("docker")
+  expect(seen(programProduct("/usr/bin/certbot renew --quiet"))).toBe("lets-encrypt")
+  expect(seen(programProduct("pg_dump -U app app > /backup/app.sql"))).toBe("postgresql")
+  expect(seen(programProduct("/usr/bin/php /var/www/artisan schedule:run"))).toBe("php")
+  expect(programProduct("/usr/local/bin/backup")).toBeUndefined()
+  expect(programProduct("cd / && run-parts --report /etc/cron.hourly")).toBeUndefined()
 })
 
 test("hasProductLogo", () => {

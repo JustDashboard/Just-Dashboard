@@ -107,6 +107,7 @@ const LOGOS: Record<string, string> = {
   ember: "ember.svg",
   express: "express.svg",
   facebook: "facebook.svg",
+  fail2ban: "fail2ban.webp",
   fastapi: "fastapi.svg",
   fastify: "fastify.svg",
   fedora: "fedora.svg",
@@ -334,8 +335,17 @@ const PROCESS_ALIASES: Record<string, string> = {
   "clickhouse-server": "clickhouse",
   "grafana-server": "grafana",
   tailscaled: "tailscale",
+  "fail2ban-server": "fail2ban",
+  "fail2ban-client": "fail2ban",
+  apache2: "apache",
+  httpd: "apache",
   "pm2 v5": "pm2",
   "pm2 v6": "pm2",
+  node: "nodejs",
+  python3: "python",
+  "php-fpm": "php",
+  influxd: "influxdb",
+  "typesense-server": "typesense",
 }
 
 /**
@@ -350,6 +360,40 @@ export function processProduct(name: string) {
   // Compose's mark is a stack's, not a program's, and a process called `X` is
   // the X server rather than the site whose mark shares its key.
   return id in LOGOS && id !== "docker-compose" && id !== "x" ? id : undefined
+}
+
+/**
+ * Which product a systemd unit runs, by its name: `postgresql.service` is
+ * Postgres, `pm2-deploy.service` is PM2, `php8.3-fpm.service` is PHP. The
+ * suffix and an instance name are dropped, then the name is read as a
+ * process, then its first word is — `redis-server` is an alias, `pm2-deploy`
+ * is PM2's own key in front of an account. `apt-daily`, `ssh` and `cron` name
+ * nothing and keep a glyph, which is the same argument `processProduct`
+ * makes about `bash`.
+ */
+export function unitProduct(unit: string) {
+  const base = unit
+    .toLowerCase()
+    .replace(/\.(service|timer|socket|target|mount|path|slice|scope)$/, "")
+    .replace(/@.*$/, "")
+  const word = base.replace(/^php\d+(\.\d+)?-fpm$/, "php-fpm").match(/^[a-z][a-z0-9_]*/)?.[0]
+  // A unit named for a program a terminal would run — certbot's timer is
+  // Let's Encrypt's renewal — is that program's product.
+  return (
+    processProduct(base) ??
+    programProduct(base) ??
+    (word ? (processProduct(word) ?? programProduct(word)) : undefined)
+  )
+}
+
+/**
+ * What runs a PM2 application: its interpreter, which is Node unless the
+ * ecosystem file says otherwise — Bun, Python, or `none` for a binary, which
+ * is no product and keeps a glyph.
+ */
+export function pm2Product(interpreter: string | undefined) {
+  const name = interpreter?.trim() || "node"
+  return name === "none" ? undefined : programProduct(name)
 }
 
 /**
@@ -424,6 +468,12 @@ const PROGRAMS: Record<string, string> = {
   nginx: "nginx-static",
   tailscale: "tailscale",
   pm2: "pm2",
+  certbot: "lets-encrypt",
+  php: "php",
+  ruby: "ruby",
+  java: "java",
+  cargo: "rust",
+  composer: "php",
 }
 
 export function programProduct(command: string | undefined) {
