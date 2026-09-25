@@ -69,7 +69,11 @@ empty (`dockerfile_arg_not_passed`, naming a browser-public one marked secret); 
 would replace the builder's own environment (`DOCKER_*`, `PATH`, …), never qualifies. A build argument
 stays in the image's history, which is why a secret is never one.
 
-Neither generated Dockerfiles nor command arguments contain variable values. Logs redact exact values.
+Neither generated Dockerfiles nor command arguments contain variable values. A build's log, its failure
+diagnosis and a builder error are redacted of the exact value of every secret build variable, and of a
+plain one whose value carries credential material anyway (a URL with a password, a private key, a
+`password=` assignment); any other plain value — `AUTH_TRUST_HOST=true`, a port, a public address — is
+left readable, as its own sensitivity says it may be (`buildLogRedactions`).
 An ephemeral mount does not prevent application build code from intentionally copying a value into its
 output. In particular, Next.js `NEXT_PUBLIC_` values and Vite `VITE_` values embedded in browser assets
 are public, even if encrypted in the dashboard. Quick setup labels such rows `public`, the variable

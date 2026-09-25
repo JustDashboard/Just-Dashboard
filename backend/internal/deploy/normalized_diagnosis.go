@@ -28,7 +28,7 @@ func (e *NormalizedStepExecutor) buildFailure(
 	execution StepExecution,
 	plan *StoredExecutionPlan,
 	prepared PreparedBuild,
-	variables map[string]string,
+	redacted map[string]string,
 	collector *buildOutputCollector,
 	err error,
 ) *StepResult {
@@ -37,7 +37,7 @@ func (e *NormalizedStepExecutor) buildFailure(
 		candidate: e.causeCandidate(ctx, execution.Run.ID, plan), variables: plan.Variables,
 		hostMemory: hostMemoryTotal(),
 	}
-	cause := buildFailureCause(err, collector, context, buildRedactor(variables))
+	cause := buildFailureCause(err, collector, context, buildRedactor(redacted))
 	if cause == nil {
 		return nil
 	}

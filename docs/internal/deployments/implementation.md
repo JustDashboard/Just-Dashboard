@@ -725,8 +725,10 @@ only renderer/executor/validation authority for their feature.
   `BuildError` with the failed RUN's command, exit code and step number, or BuildKit's own reason for
   a failure that was not a process exit;
   a build that reaches its 30-minute limit while the run is alive returns `ErrBuildTimeout`, which does
-  not wrap a context error and so is never recorded as a cancellation. The executor feeds the persisted,
-  already redacted transcript to a bounded collector (`build_output_cause.go`): a ring per open BuildKit
+  not wrap a context error and so is never recorded as a cancellation. The builder redacts the
+  transcript of the run's secret build values and of any plain one carrying credential material, never
+  of other plain values (`buildLogRedactions`, with the sensitivity `OpenRunScopedVariables` returns).
+  The executor feeds the persisted, already redacted transcript to a bounded collector (`build_output_cause.go`): a ring per open BuildKit
   step (400 lines, 64 KiB), one over the stream (64 KiB), BuildKit's replayed and Dockerfile-excerpt
   lines refused. A step that finishes (`DONE` or `CACHED`) is dropped from both: what a passing step
   printed on its way — npm retrying a request that hung up, a config probing for `git` — is never a
