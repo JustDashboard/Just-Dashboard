@@ -178,7 +178,7 @@ func readNxProject(files nodeFiles, directory string, plugins []string) (nxProje
 			if err != nil {
 				continue
 			}
-			text := jsWithoutComments(string(config))
+			text := string(jsBlankComments(config))
 			if match := viteOutDirRE.FindStringSubmatch(text); match != nil {
 				output := path.Join(directory, match[1])
 				if safeRelativePath(output) && nodeMemberPathRE.MatchString(output) {

@@ -13,7 +13,7 @@ func TestFrameworkConfigurationLiteralsAreReadAsText(t *testing.T) {
 		"module.exports = { experimental: { outputFileTracingRoot } }": "",
 		"const url = 'https://example.test/output: x'":                 "",
 	} {
-		if got := nextOutputMode(jsWithoutComments(text)); got != want {
+		if got := nextOutputMode(string(jsBlankComments([]byte(text)))); got != want {
 			t.Errorf("nextOutputMode(%q) = %q, want %q", text, got, want)
 		}
 	}
@@ -23,29 +23,18 @@ func TestFrameworkConfigurationLiteralsAreReadAsText(t *testing.T) {
 		"import node from '@sveltejs/adapter-node';\nimport staticAdapter from '@sveltejs/adapter-static';\nconst a = process.env.X ? node : staticAdapter": "",
 		"export default { kit: {} }": "",
 	} {
-		if got, _ := svelteAdapter(jsWithoutComments(text)); got != want {
+		if got, _ := svelteAdapter(string(jsBlankComments([]byte(text)))); got != want {
 			t.Errorf("svelteAdapter(%q) = %q, want %q", text, got, want)
 		}
 	}
 	if _, imported := svelteAdapter("import node from '@sveltejs/adapter-node';\nimport vercel from '@sveltejs/adapter-vercel';\nexport default { kit: { adapter: process.env.VERCEL ? vercel() : node() } }"); len(imported) != 2 {
 		t.Fatalf("adapters chosen by an expression = %q", imported)
 	}
-	for text, want := range map[string]string{
-		"basePath: '/docs'":   "/docs",
-		"basePath: '/docs/'":  "/docs",
-		"basePath: '/'":       "",
-		"basePath: '/../etc'": "",
-		"basePath: prefix":    "",
-	} {
-		if got := literalBasePath(basePathRE, text); got != want {
-			t.Errorf("literalBasePath(%q) = %q, want %q", text, got, want)
-		}
-	}
 	if got := literalRelativePath(nextDistDirRE, "distDir: '../outside'"); got != "" {
 		t.Fatalf("escaping distDir = %q", got)
 	}
-	if got := jsWithoutComments("const a = `// kept`; // dropped\n/* dropped */ const b = '/* kept */'"); got != "const a = `// kept`; \n  const b = '/* kept */'" {
-		t.Fatalf("jsWithoutComments = %q", got)
+	if got := string(jsBlankComments([]byte("const a = `// kept`; // dropped\n/* dropped */ const b = '/* kept */'"))); got != "const a = `// kept`;           \n              const b = '/* kept */'" {
+		t.Fatalf("jsBlankComments = %q", got)
 	}
 	if got := svelteKitAdapterNode("^2.0.0"); got != "3.0.3" {
 		t.Fatalf("kit ^2.0.0 = %q", got)

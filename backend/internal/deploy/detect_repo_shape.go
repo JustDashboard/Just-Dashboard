@@ -550,11 +550,13 @@ func (s *repoShapeScan) shapeCandidates(result *DetectionResult, context shapeCo
 		result.Truncated = true
 		result.TruncatedReason = boundedText("directory depth limit reached before "+s.depthManifests[0], 256)
 	}
+	s.applySiteGenerators(result, context)
 	s.applyEcosystems(result, context)
 	s.applyNotDeployable(result, context)
 	s.applyStaticShape(result, context)
 	s.applyPlatformManifests(result, context)
 	s.applyServerless(result, context)
+	s.applyStaticSiteFacts(result, context)
 	s.applyProcesses(result, context)
 	s.applyDecoys(result)
 	s.applyImportCase(result)
@@ -899,7 +901,9 @@ var frameworkDisplayNames = map[string]string{
 	"rust": "Rust", "java": "Java", "spring-boot": "Spring Boot", "dotnet": ".NET", "aspnet": "ASP.NET Core",
 	"deno": "Deno", "fresh": "Fresh", "php": "PHP", "laravel": "Laravel", "symfony": "Symfony", "slim": "Slim",
 	"rails": "Rails", "sinatra": "Sinatra", "hanami": "Hanami", "phoenix": "Phoenix", "elixir": "Elixir",
-	"ruby": "Ruby", "jekyll": "Jekyll", "hugo": "Hugo", "mkdocs": "MkDocs",
+	"ruby": "Ruby", "jekyll": "Jekyll", "hugo": "Hugo", "mkdocs": "MkDocs", "zola": "Zola", "mdbook": "mdBook",
+	"sphinx": "Sphinx", "pelican": "Pelican", "zensical": "Zensical", "lume": "Lume", "hexo": "Hexo",
+	"vuepress": "VuePress", "slidev": "Slidev",
 }
 
 // Decoys and documentation. A root under examples/, tests/ or a Storybook is
@@ -940,7 +944,7 @@ func hasApplication(candidates []DetectedCandidate) bool {
 
 var documentationFrameworks = map[string]bool{
 	"docusaurus": true, "vitepress": true, "mkdocs": true, "sphinx": true, "vuepress": true, "starlight": true,
-	"nextra": true, "hugo": true, "jekyll": true, "rspress": true,
+	"nextra": true, "hugo": true, "jekyll": true, "rspress": true, "mdbook": true, "zensical": true,
 }
 
 // documentationCandidate is a docs-site generator's candidate, or a static

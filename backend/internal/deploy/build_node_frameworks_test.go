@@ -34,14 +34,25 @@ func TestNodeRecipeRendersTheFrameworksServing(t *testing.T) {
 			avoid: []string{"next start"},
 		},
 		{
-			name: "an output directory the framework does not write keeps nginx's own configuration",
+			// The pages link under the base path wherever the build's files
+			// are copied, so the site is still served there.
+			name: "an output directory the framework does not write keeps the base path it was built for",
 			files: lock(map[string]string{
 				"package.json":    `{"scripts":{"build":"next build && cp -r out site"},"dependencies":{"next":"16.0.0"}}`,
 				"next.config.mjs": "export default { output: 'export', basePath: '/docs' }",
 			}),
 			config: BuildPlanConfig{BuildCommand: "npm run build", OutputDirectory: "site"},
-			want:   []string{"COPY --from=build /app/site/ /usr/share/nginx/html/"},
-			avoid:  []string{"/docs"},
+			want:   []string{"COPY --from=build /app/site/ /usr/share/nginx/html/docs/", "return 302 /docs/;"},
+		},
+		{
+			name: "an output directory the framework does not write has no framework fallback page",
+			files: lock(map[string]string{
+				"package.json":           `{"scripts":{"build":"react-router build && cp -r build/client site"},"dependencies":{"react-router":"^7.6.0"},"devDependencies":{"@react-router/dev":"^7.6.0"}}`,
+				"react-router.config.ts": "export default { ssr: false, prerender: ['/'] }",
+			}),
+			config: BuildPlanConfig{BuildCommand: "npm run build", OutputDirectory: "site", SPAFallback: true},
+			want:   []string{"try_files $uri $uri.html $uri/ /index.html;"},
+			avoid:  []string{"__spa-fallback.html"},
 		},
 		{
 			name: "vite base path single-page site",
@@ -50,7 +61,7 @@ func TestNodeRecipeRendersTheFrameworksServing(t *testing.T) {
 				"vite.config.js": "export default { base: '/app/' }",
 			}),
 			config: BuildPlanConfig{BuildCommand: "npm run build", OutputDirectory: "dist", SPAFallback: true},
-			want:   []string{"COPY --from=build /app/dist/ /usr/share/nginx/html/app/", "try_files $uri $uri/ /app/index.html;"},
+			want:   []string{"COPY --from=build /app/dist/ /usr/share/nginx/html/app/", "try_files $uri $uri.html $uri/ /app/index.html;"},
 		},
 		{
 			name: "sveltekit static adapter's 200.html fallback",
@@ -68,7 +79,7 @@ func TestNodeRecipeRendersTheFrameworksServing(t *testing.T) {
 				"react-router.config.ts": "export default { ssr: false, prerender: ['/'] }",
 			}),
 			config: BuildPlanConfig{BuildCommand: "npm run build", OutputDirectory: "build/client", SPAFallback: true},
-			want:   []string{"try_files $uri $uri/ /__spa-fallback.html /index.html;"},
+			want:   []string{"try_files $uri $uri.html $uri/ /__spa-fallback.html /index.html;"},
 		},
 		{
 			name: "next standalone started from its server.js",

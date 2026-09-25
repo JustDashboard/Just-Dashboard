@@ -116,6 +116,25 @@ var buildSignatures = []buildSignature{
 	signature("build_runtime_version", "hugo", "Hugo", `not available in your current Hugo version|requires Hugo (?:version )?(\S+)`),
 	signature("build_hugo_extended_required", "hugo", "", `TOCSS|you need the extended version|this feature is not available in this edition of Hugo`),
 
+	// Site generators: a theme the build does not have (a submodule left
+	// out, a gem or package not declared), a plugin, a template that fails.
+	signature("build_theme_missing", "hugo", "not found", `module "([^"\s]+)" not found in "[^"]*/themes/`),
+	signature("build_theme_missing", "zola", "Failed to load theme", `Failed to load theme (\S+)`),
+	signature("build_theme_missing", "jekyll", "theme could not be found", `The ([\w.-]+) theme could not be found`),
+	signature("build_theme_missing", "mkdocs", "Unrecognised theme name", `Unrecognised theme name: '([\w.-]+)'`),
+	signature("build_theme_missing", "sphinx", "no theme named", `no theme named '([\w.-]+)' found`),
+	signature("build_module_not_found", "sphinx", "Could not import extension", `Could not import extension ([\w.]+)`),
+	signature("build_module_not_found", "mkdocs", "plugin is not installed", `The "([\w.-]+)" plugin is not installed`),
+	signature("build_command_not_found", "mdbook", "wasn't found", "The command `([\\w.-]+)` wasn't found, is the `[\\w.-]+` (?:preprocessor|backend|renderer) installed"),
+	signature("build_site_render_failed", "hugo", "error building site", `error building site: (?:[\w ]+: )?"?(?:/project/)?([\w./-]+?)(?::\d+){0,2}"?: `),
+	signature("build_site_render_failed", "hugo", "execute of template failed", `(?:/project/)?([\w./-]+\.html):\d+:\d+.*execute of template failed`),
+	signature("build_site_render_failed", "jekyll", "Liquid Exception", `Liquid Exception: .* in /?([\w./-]+)`),
+	signature("build_site_render_failed", "zola", "Failed to build the site", `Failed to build the site`).collecting(`-->\s+([\w./-]+):\d+|Failed to render '([^']+)'`),
+	signature("build_site_render_failed", "eleventy", "Problem writing Eleventy templates", `\[11ty\] Problem writing Eleventy templates`).collecting(`rendering \w+ template (\S+)`),
+	signature("build_site_render_failed", "hexo", "Template render error", `Template render error`),
+	signature("build_site_render_failed", "mkdocs", "strict mode", `Aborted with \d+ warnings? in strict mode`),
+	signature("build_site_render_failed", "sphinx", "treated as error", `Warning, treated as error`),
+
 	// Variables the build reads and was not given.
 	signature("build_env_missing", "prisma", "environment variable", `(?:Missing required environment variable|Cannot resolve environment variable): ([A-Za-z_]\w*)`),
 	signature("build_env_missing", "prisma", "Environment variable not found", `Environment variable not found: ([A-Za-z_]\w*)`),

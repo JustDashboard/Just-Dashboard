@@ -644,11 +644,11 @@ func preflightFindings(
 		findings = append(findings, nodeFrameworkFindings(planned, configuration)...)
 	}
 	if planned != nil && planned.UnpinnedDependencies && configuration.Build.Method == BuildRecipe {
+		measured, action := unpinnedDependencyAdvice(planned)
 		findings = append(findings, finding("dependencies_unpinned", PreflightWarning,
-			"Dependencies are not pinned to exact versions", "unpinned entries in the dependency manifest",
+			"Dependencies are not pinned to exact versions", measured,
 			"Each build installs the newest versions the manifest allows, so a rebuild of this same commit can run different code.",
-			"Commit a lockfile (uv lock, poetry lock, or pip freeze > requirements.txt) when rebuilds must be identical; deploying as is works today.",
-			"deploy", "configuration.build"))
+			action, "deploy", "configuration.build"))
 	}
 	if planned != nil && planned.RecipeIssue != "" && configuration.Build.Method == BuildRecipe {
 		findings = append(findings, finding("recipe_unsupported", PreflightBlocked,
@@ -674,6 +674,7 @@ func preflightFindings(
 	// Whether detection chose, and what the source is (preflight_repo_shape.go).
 	findings = append(findings, detectionOutcomeFindings(detection, configuration)...)
 	findings = append(findings, repoShapeFindings(detection, configuration)...)
+	findings = append(findings, staticSiteFindings(draft.Data.Source, detection, configuration)...)
 	findings = append(findings, gitRequirementFindings(draft.Data.Source, detection, configuration, observation)...)
 	if detection.Compose != nil {
 		configuredVariables := map[string]bool{}

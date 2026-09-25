@@ -56,16 +56,17 @@ type nodeFrameworkDefaults struct {
 	// starts a development server.
 	StartScripts []string
 	// BuildScript is the script that builds when it is not "build", and
-	// Build the command that builds when the package has no such script.
+	// Build the command that builds when the package has no such script:
+	// the framework's own binary through the manager's runner, which is how
+	// Eleventy's and Hexo's documentation build a site.
 	BuildScript string
 	Build       string
 	// Fallback is the page a single-page site answers unknown paths with
-	// when it is not index.html (SvelteKit's 200.html); Base is the path the
-	// site is served under ("/docs"); CleanURLs serves /about from
-	// about.html, which Next.js export and SvelteKit's static adapter write.
-	Fallback  string
-	Base      string
-	CleanURLs bool
+	// when it is not index.html (SvelteKit's 200.html, React Router's
+	// __spa-fallback.html); nginx tries it as a file before index.html. The
+	// sub-path the site is served under and its clean URLs are the static
+	// server's own reading (build_static_serving.go).
+	Fallback string
 	// BuildEnv are values the build command's RUN gives a variable the
 	// build does not set (NITRO_PRESET), and BeforeBuild the steps that run
 	// between the install and the build (adapter-node for adapter-auto).
@@ -259,12 +260,9 @@ func sveltekitResolution(manifest nodeManifest, files nodeRootFiles, runner stri
 			if pages := literalRelativePath(sveltePagesRE, config.text); pages != "" {
 				output = pages
 			}
-			if match := svelteFallbackRE.FindStringSubmatch(config.text); match != nil {
-				fallback = match[1]
-			}
+			fallback = svelteKitFallbackPage(config.text)
 		}
 		resolution := static(output, fallback != "")
-		resolution.CleanURLs = true
 		if fallback != "" && fallback != "index.html" {
 			resolution.Fallback = fallback
 		}
@@ -324,8 +322,6 @@ func nextResolution(manifest nodeManifest, files nodeRootFiles, runner string) n
 			output = "out"
 		}
 		resolution = static(output, false)
-		resolution.CleanURLs = true
-		resolution.Base = literalBasePath(basePathRE, config.text)
 		resolution.note(config.name, "output: 'export' writes a static site to "+output+"/, which next start refuses to serve")
 		if files.nextImage != "" {
 			resolution.Findings = append(resolution.Findings, nodeFinding("next_export_images", PreflightWarning,
@@ -396,11 +392,7 @@ func astroResolution(manifest nodeManifest, files nodeRootFiles, _ string) nodeF
 		resolution.decide(ConfidenceLow, config.name+" sets output: 'server' without an adapter; add @astrojs/node, or build a static site")
 		return resolution
 	}
-	resolution := static("dist", false)
-	if configured {
-		resolution.Base = literalBasePath(jsBaseRE, config.text)
-	}
-	return resolution
+	return static("dist", false)
 }
 
 func nuxtResolution(manifest nodeManifest, files nodeRootFiles, runner string) nodeFrameworkResolution {
@@ -571,7 +563,6 @@ func qwikCityResolution(manifest nodeManifest, _ nodeRootFiles, _ string) nodeFr
 		}
 	}
 	resolution := static("dist", false)
-	resolution.CleanURLs = true
 	if !strings.Contains(adapterScript, "adapters/static/") {
 		resolution.decide(ConfidenceLow, "Qwik City has no server adapter; add one (npm run qwik add express) or the static adapter")
 	}
@@ -599,7 +590,6 @@ func vikeResolution(manifest nodeManifest, files nodeRootFiles, _ string) nodeFr
 	}
 	if config, ok := files.configText("vite"); ok && prerenderTrueRE.MatchString(config.text) {
 		resolution := static("dist/client", false)
-		resolution.CleanURLs = true
 		resolution.note(config.name, "Vike prerenders every page into dist/client")
 		return resolution
 	}
@@ -691,7 +681,6 @@ func viteResolution(_ nodeManifest, files nodeRootFiles, _ string) nodeFramework
 		resolution.Output = output
 		resolution.note(config.name, "the site is written to "+output)
 	}
-	resolution.Base = literalBasePath(jsBaseRE, config.text)
 	return resolution
 }
 
@@ -809,9 +798,9 @@ var nodeFrameworks = []nodeFramework{
 		},
 	},
 	{
-		Name: "vuepress", Label: "VuePress", Dependencies: []string{"vuepress", "@vuepress/cli"},
+		Name: "vuepress", Label: "VuePress", Dependencies: []string{"vuepress", "vuepress-vite", "vuepress-webpack", "@vuepress/cli"},
 		resolve: func(manifest nodeManifest, _ nodeRootFiles, _ string) nodeFrameworkResolution {
-			script, directory := docsBuild(manifest.Scripts, "vuepress build")
+			script, directory := docsBuild(manifest.Scripts, "vuepress build", "vuepress-vite build", "vuepress-webpack build")
 			resolution := static(path.Join(directory, ".vuepress", "dist"), false)
 			if script != "build" {
 				resolution.BuildScript = script
@@ -825,15 +814,33 @@ var nodeFrameworks = []nodeFramework{
 	},
 	{
 		Name: "eleventy", Label: "Eleventy", Dependencies: []string{"@11ty/eleventy"},
-		resolve: func(nodeManifest, nodeRootFiles, string) nodeFrameworkResolution { return static("_site", false) },
+		resolve: func(manifest nodeManifest, _ nodeRootFiles, runner string) nodeFrameworkResolution {
+			// The build script's --output wins over the configuration file's,
+			// which the shape pass reads (detect_site_generators.go).
+			output, _ := eleventyOutput(func(string) ([]byte, bool) { return nil, false }, manifest)
+			resolution := static(output, false)
+			// The binary's name, not the package's: `pnpm exec` and `yarn`
+			// run a binary, and only npx and bunx also resolve a package.
+			resolution.Build = nodeExecRunner(runner) + " eleventy"
+			return resolution
+		},
 	},
 	{
 		Name: "hexo", Label: "Hexo", Dependencies: []string{"hexo"},
-		resolve: func(nodeManifest, nodeRootFiles, string) nodeFrameworkResolution { return static("public", false) },
+		resolve: func(_ nodeManifest, _ nodeRootFiles, runner string) nodeFrameworkResolution {
+			resolution := static("public", false)
+			resolution.Build = nodeExecRunner(runner) + " hexo generate"
+			return resolution
+		},
 	},
 	{
+		// Slidev's slides are routes of one page: /2 is the second slide.
 		Name: "slidev", Label: "Slidev", Dependencies: []string{"@slidev/cli"},
-		resolve: func(nodeManifest, nodeRootFiles, string) nodeFrameworkResolution { return static("dist", true) },
+		resolve: func(_ nodeManifest, _ nodeRootFiles, runner string) nodeFrameworkResolution {
+			resolution := static("dist", true)
+			resolution.Build = nodeExecRunner(runner) + " slidev build"
+			return resolution
+		},
 	},
 	{
 		Name: "create-react-app", Label: "Create React App", Dependencies: []string{"react-scripts"},
@@ -1001,10 +1008,10 @@ func vitepressBuild(scripts map[string]string) (string, string) {
 	return docsBuild(scripts, "vitepress build")
 }
 
-// docsBuild finds the script that runs a documentation generator's build
-// command (`vitepress build docs`, `vuepress build docs`) and the docs
-// directory it names.
-func docsBuild(scripts map[string]string, command string) (string, string) {
+// docsBuild finds the script that runs one of a documentation generator's
+// build commands (`vitepress build docs`, `vuepress build docs`,
+// `vuepress-vite build docs`) and the docs directory it names.
+func docsBuild(scripts map[string]string, commands ...string) (string, string) {
 	names := make([]string, 0, len(scripts))
 	for name := range scripts {
 		names = append(names, name)
@@ -1024,24 +1031,26 @@ func docsBuild(scripts map[string]string, command string) (string, string) {
 		return rank(names[i]) < rank(names[j])
 	})
 	for _, name := range names {
-		_, after, found := strings.Cut(scripts[name], command)
-		if !found {
-			continue
-		}
-		directory := "."
-		for _, field := range strings.Fields(after) {
-			if strings.HasPrefix(field, "-") {
+		for _, command := range commands {
+			_, after, found := strings.Cut(scripts[name], command)
+			if !found {
 				continue
 			}
-			if field == "&&" || field == "||" || field == ";" {
+			directory := "."
+			for _, field := range strings.Fields(after) {
+				if strings.HasPrefix(field, "-") {
+					continue
+				}
+				if field == "&&" || field == "||" || field == ";" {
+					break
+				}
+				if safeRelativePath(field) {
+					directory = path.Clean(field)
+				}
 				break
 			}
-			if safeRelativePath(field) {
-				directory = field
-			}
-			break
+			return name, directory
 		}
-		return name, directory
 	}
 	return "build", "."
 }

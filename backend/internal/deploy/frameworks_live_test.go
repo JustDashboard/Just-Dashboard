@@ -42,10 +42,18 @@ func TestLiveDetectedFrameworkBuildAndServing(t *testing.T) {
 	// the Vite client its build writes, and a Hono starter with only a dev
 	// script, on Bun. react-router-spa prerenders "/" in SPA mode, so every
 	// other path must answer with the shell it writes beside index.html.
+	// The site generators build on their own images — Hugo, Zola and mdBook
+	// as themselves, Jekyll on Ruby, MkDocs on Python, Lume on Deno,
+	// Eleventy from its own binary with no build script — and nginx serves
+	// what they wrote with clean URLs and the site's own 404 page.
+	// static-rules is a plain site whose _redirects, _headers and
+	// netlify.toml repeat and overlap each other's rules, as a site moved
+	// between hosts carries them: nginx has to start on what they become.
 	for _, name := range []string{"vite", "next", "svelte-node", "svelte-static", "html", "containerfile", "go",
 		"astro", "nuxt", "react-router", "fastapi", "flask", "django", "rust", "java", "gradle", "dotnet", "deno", "laravel", "php",
 		"streamlit", "gradio", "next-pnpm", "express-yarn",
-		"next-export", "next-standalone", "svelte-auto", "express-vite", "hono-bun", "react-router-spa"} {
+		"next-export", "next-standalone", "svelte-auto", "express-vite", "hono-bun", "react-router-spa",
+		"hugo", "zola", "mdbook", "jekyll", "mkdocs", "lume", "eleventy", "static-rules"} {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 			defer cancel()
@@ -90,6 +98,10 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 			if config.Method == BuildRecipe {
 				config.Secrets = []BuildSecretConfig{{Variable: "PACKAGE_TOKEN", Step: "install"}}
 				variables = map[string]string{"PACKAGE_TOKEN": secret, "NEXT_PUBLIC_API_URL": value, "VITE_API_URL": value, "PUBLIC_API_URL": value}
+				if name == "mdbook" {
+					// mdBook reads its configuration from MDBOOK_ variables.
+					variables["MDBOOK_BOOK__TITLE"] = value
+				}
 			}
 			stamp := time.Now().UnixNano()
 			tag := fmt.Sprintf("jd-framework-test:%s-%d", name, stamp)
@@ -175,6 +187,25 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 			if !strings.Contains(content, value) {
 				t.Fatal("served application assets did not contain the configured build value")
 			}
+			// A site's other pages answer by their clean URLs, and a missing
+			// one with the site's own 404 page.
+			for _, path := range liveSitePaths[name] {
+				fetch(path)
+			}
+			if page, ok := liveSiteMissingPages[name]; ok {
+				response, err := httpClient.Get(base + "/no-such-page")
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+				_ = response.Body.Close()
+				if response.StatusCode != http.StatusNotFound || !strings.Contains(string(body), page) {
+					t.Fatalf("missing page: %d %q", response.StatusCode, body)
+				}
+			}
+			if name == "static-rules" {
+				assertLiveHostingRules(t, base)
+			}
 			if name == "go" && (!strings.Contains(content, "custom-start go1.26.8") || result.Prepared.GoVersion != "1.26.8") {
 				t.Fatalf("Go override/version behavior missing: %q", content)
 			}
@@ -196,7 +227,15 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 				name == "php" && candidate.Framework != "php" ||
 				name == "next-pnpm" && (candidate.StartCommand != "pnpm run start" || result.Prepared.Toolchain != "pnpm 10.34.5 (lockfileVersion 9.0)") ||
 				name == "express-yarn" && (candidate.Framework != "express" || candidate.StartCommand != "yarn run start" ||
-					result.Prepared.Install != "yarn install --frozen-lockfile") {
+					result.Prepared.Install != "yarn install --frozen-lockfile") ||
+				name == "hugo" && (candidate.Framework != "hugo" || result.Prepared.Toolchain != "hugo "+hugoDefaultVersion+" (extended)") ||
+				name == "zola" && result.Prepared.Toolchain != "zola "+zolaDefaultVersion ||
+				name == "mdbook" && (result.Prepared.Toolchain != "mdbook 0.5.4" || candidate.OutputDirectory != "book/html") ||
+				name == "jekyll" && result.Prepared.Toolchain != "jekyll on ruby "+jekyllDefaultRuby ||
+				name == "mkdocs" && (candidate.Recipe != "python" || candidate.Framework != "mkdocs") ||
+				name == "lume" && (candidate.Recipe != "deno" || candidate.Framework != "lume") ||
+				name == "eleventy" && (candidate.BuildCommand != "npx eleventy" || candidate.OutputDirectory != "dist") ||
+				name == "svelte-static" && !candidate.SPAFallback {
 				t.Fatalf("catalogue defaults for %s: %+v / %+v", name, candidate, result.Prepared)
 			}
 			switch {
@@ -223,6 +262,61 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 			}
 		})
 	}
+}
+
+// liveSitePaths are pages beyond the home page each static fixture serves:
+// a generator's pretty URL, an about.html answered as /about, the fallback
+// SvelteKit writes for routes it did not prerender.
+var liveSitePaths = map[string][]string{
+	"hugo": {"/about", "/robots.txt"}, "zola": {"/about"}, "mdbook": {"/chapter"}, "jekyll": {"/about"},
+	"mkdocs": {"/guide"}, "lume": {"/about"}, "eleventy": {"/contact"}, "svelte-static": {"/about", "/deep/link"},
+	"static-rules": {"/documentation", "/docs", "/old", "/deep/link", "/app/deep/link"},
+}
+
+// assertLiveHostingRules checks what the static-rules fixture's overlapping
+// rules became: one answer per path, each where the first rule put it.
+func assertLiveHostingRules(t *testing.T, base string) {
+	t.Helper()
+	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	get := func(path string) (int, http.Header, string) {
+		t.Helper()
+		response, err := client.Get(base + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+		return response.StatusCode, response.Header, string(body)
+	}
+	if status, header, _ := get("/docs"); status != http.StatusMovedPermanently || header.Get("Location") != "/documentation" ||
+		header.Get("X-Robots-Tag") != "noindex" || header.Get("X-Frame-Options") != "DENY" {
+		t.Fatalf("/docs = %d %v", status, header)
+	}
+	if status, header, body := get("/deep/link"); status != http.StatusOK || !strings.Contains(body, "static-rules app page") ||
+		len(header.Values("X-Frame-Options")) != 1 {
+		t.Fatalf("/deep/link = %d %v %q", status, header, body)
+	}
+	if status, header, body := get("/app/deep/link"); status != http.StatusOK || !strings.Contains(body, "static-rules sub app") ||
+		header.Get("Cache-Control") != "no-cache" {
+		t.Fatalf("/app/deep/link = %d %v %q", status, header, body)
+	}
+	if status, _, _ := get("/api/hello"); status != http.StatusNotFound {
+		t.Fatalf("/api/hello = %d", status)
+	}
+	if status, header, _ := get("/404.html"); status != http.StatusOK || header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("/404.html = %d %v", status, header)
+	}
+	for _, private := range []string{"/.private/notes.txt", "/_redirects", "/_headers"} {
+		if status, _, body := get(private); status == http.StatusOK || strings.Contains(body, "private notes") {
+			t.Fatalf("%s = %d %q", private, status, body)
+		}
+	}
+}
+
+// liveSiteMissingPages are what each site's own 404 page says.
+var liveSiteMissingPages = map[string]string{
+	"hugo": "hugo not found page", "zola": "zola not found", "jekyll": "jekyll not found", "eleventy": "eleventy not found",
+	"mdbook": "Page not found",
 }
 
 func copyFrameworkFixture(t *testing.T, name, destination string) {

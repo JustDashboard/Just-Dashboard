@@ -43,7 +43,6 @@ func TestEcosystemsWithoutARecipeAreNamed(t *testing.T) {
 		{"zig", "zig", "zig build", map[string]string{"build.zig": "const std = @import(\"std\");\n"}, ProfileService, 0},
 		{"r shiny", "shiny", "rocker/shiny", map[string]string{"app.R": "library(shiny)\n", "renv.lock": "{}"}, ProfileWeb, 3838},
 		{"c++", "cpp", "CMake", map[string]string{"CMakeLists.txt": "project(server)\n"}, ProfileService, 0},
-		{"hugo", "hugo", "hugo --minify", map[string]string{"hugo.toml": "baseURL = 'https://example.org/'\n", "layouts/index.html": "{{ .Title }}"}, ProfileStatic, 80},
 		{"dart frog", "dart_frog", "dart compile", map[string]string{"pubspec.yaml": "name: api\ndependencies:\n  dart_frog: ^1.0.0\n"}, ProfileWeb, 8080},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
@@ -290,7 +289,8 @@ func TestSecondaryProcessesAreDetected(t *testing.T) {
 }
 
 // A site generator's root package.json of Tailwind or PostCSS is its tooling,
-// not a Node worker that hides the generator.
+// not a Node worker that hides the generator: the generator's own recipe
+// builds the site and installs the package for it.
 func TestSiteGeneratorOwnsItsToolingPackage(t *testing.T) {
 	tooling := `{"name":"site","scripts":{"build:css":"tailwindcss -i assets/in.css -o assets/out.css"},"devDependencies":{"tailwindcss":"4","postcss":"8"}}`
 	for name, files := range map[string]map[string]string{
@@ -301,7 +301,8 @@ func TestSiteGeneratorOwnsItsToolingPackage(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			files["package.json"], files["package-lock.json"] = tooling, "{}"
 			result := detectShapeFixture(t, files)
-			if len(result.Candidates) != 1 || result.Candidates[0].Framework != name || result.Candidates[0].RecipeIssue == "" {
+			if len(result.Candidates) != 1 || result.Candidates[0].Framework != name || result.Candidates[0].RecipeIssue != "" ||
+				result.Candidates[0].Recipe == "" || result.Candidates[0].Profile != ProfileStatic {
 				t.Fatalf("candidates = %#v", result.Candidates)
 			}
 			if setAsideKind(result, "asset-pipeline") == nil {

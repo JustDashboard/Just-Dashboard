@@ -178,7 +178,7 @@ type Builder = {
 }
 
 /**
- * Every way a Git or local source can be built: the eight recipes the
+ * Every way a Git or local source can be built: the nine recipes the
  * backend's `validRecipe` accepts, then a Dockerfile of the project's own and
  * a static site. The detail is a word about the toolchain or what decides it,
  * short enough for the five-across grid at 1280, where a card has about 60px
@@ -250,6 +250,14 @@ const BUILDERS: Builder[] = [
     recipe: "php",
   },
   {
+    key: "site",
+    label: RECIPE_SHORT.site,
+    product: "nginx-static",
+    detail: "Hugo · Jekyll",
+    method: "recipe",
+    recipe: "site",
+  },
+  {
     key: "dockerfile",
     label: "Dockerfile",
     product: "docker",
@@ -290,6 +298,7 @@ const RECIPE_DEFAULT: Record<DeploymentRecipe, string> = {
   dotnet: ".NET SDK",
   deno: "deno.json",
   php: "Composer · FrankenPHP",
+  site: "its configuration decides",
 }
 
 // `validateConfiguration` wants the plan's variable shape (a value or

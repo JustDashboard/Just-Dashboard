@@ -34,6 +34,11 @@ var recipeInputNames = map[string]bool{
 	"deno.json": true, "deno.jsonc": true, "deno.lock": true,
 	"composer.json": true, "composer.lock": true, "artisan": true, "index.php": true, "index.html": true,
 	"prisma": true, "drizzle.config.ts": true, "drizzle.config.js": true,
+	// Site generators' configuration and the files their builds read.
+	"hugo.toml": true, "hugo.yaml": true, "hugo.yml": true, "hugo.json": true, "config.toml": true, ".hvm": true,
+	"book.toml": true, "_config.yml": true, "_config.yaml": true, "Gemfile": true, "Gemfile.lock": true,
+	".ruby-version": true, "mkdocs.yml": true, "mkdocs.yaml": true, "zensical.toml": true, "pelicanconf.py": true,
+	"publishconf.py": true, "_config.ts": true, "_config.js": true,
 }
 
 // recipeInputPrefixes are framework configuration files, named per tool.

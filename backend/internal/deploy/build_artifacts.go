@@ -55,6 +55,13 @@ var recipeBaseCatalogue = map[string][]string{
 	"deno":          {"denoland/deno:alpine"},
 	"php":           {"dunglas/frankenphp:1-php8.3-alpine"},
 	"php:composer":  {"composer:2"},
+	// Site generators (build_site.go): each project's official image, the
+	// reviewed release unless the site pins another; mdBook's release
+	// archive is checked against its digest on Alpine; Jekyll builds on Ruby.
+	"site:hugo":   {"ghcr.io/gohugoio/hugo:v" + hugoDefaultVersion},
+	"site:zola":   {"ghcr.io/getzola/zola:v" + zolaDefaultVersion, "alpine:3.22", "debian:bookworm-slim"},
+	"site:mdbook": {"alpine:3.22"},
+	"site:jekyll": {"ruby:" + jekyllDefaultRuby + "-slim"},
 }
 
 type ResolvedImage struct {
@@ -262,6 +269,9 @@ func (b *ArtifactBuilder) PrepareWithin(
 		if recipe.kind == "python" {
 			prepared.PythonVersion = recipe.pythonVersion
 			baseRefs[0] = "python:" + recipe.pythonVersion + "-slim"
+			if strings.TrimSpace(config.OutputDirectory) != "" {
+				baseRefs = append(baseRefs, recipeBaseCatalogue["static"]...)
+			}
 		}
 		switch recipe.kind {
 		case "rust":
@@ -284,6 +294,20 @@ func (b *ArtifactBuilder) PrepareWithin(
 			}
 		case "deno":
 			prepared.Toolchain = "deno"
+			if strings.TrimSpace(config.OutputDirectory) != "" {
+				baseRefs = append(baseRefs, recipeBaseCatalogue["static"]...)
+			}
+		case "site":
+			b.settleSiteImage(ctx, &recipe.site)
+			prepared.Toolchain = recipe.site.toolchain()
+			prepared.Notes = append(prepared.Notes, recipe.site.notes...)
+			if node := recipe.site.node; node != nil {
+				b.settleBunImage(ctx, node)
+				prepared.NodeVersion = node.node.label()
+				prepared.Install = node.installLine()
+				prepared.Notes = append(prepared.Notes, node.notes...)
+			}
+			baseRefs = recipe.site.bases()
 		case "php":
 			prepared.Toolchain = "php " + recipe.php.version
 			if recipe.php.assets != "" {
@@ -337,7 +361,7 @@ func (b *ArtifactBuilder) PrepareWithin(
 			return PreparedBuild{}, err
 		}
 		prepared.BaseImages = bases
-		content, err := renderStaticDockerfile(config, bases[0])
+		content, err := renderStaticDockerfile(config, readStaticServing(boundary, root, config, "", ""), bases[0])
 		if err != nil {
 			return PreparedBuild{}, err
 		}
@@ -608,6 +632,10 @@ type selectedRecipe struct {
 	member, contextDir         string
 	buildCommand, startCommand string
 	nodeInputs                 []string
+	// serving is how nginx serves static output; site is a site generator's
+	// build (build_site.go, build_static_serving.go).
+	serving staticServing
+	site    siteRecipe
 }
 
 func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe, error) {
@@ -660,6 +688,9 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 			kind: "node", catalogueKey: "node:" + manager, lockfile: plan.lockfile, node: framework,
 			nodeInstall: plan, member: source.member(), buildCommand: plan.build, startCommand: plan.start,
 			nodeInputs: source.installInputs(plan),
+		}
+		if strings.TrimSpace(config.OutputDirectory) != "" {
+			recipe.serving = readStaticServing(boundary, root, config, framework.name, framework.serving.page)
 		}
 		if source.context != source.dir {
 			recipe.contextDir = source.context
@@ -719,6 +750,14 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 		if err != nil {
 			return selectedRecipe{}, err
 		}
+		if strings.TrimSpace(config.OutputDirectory) != "" {
+			site, err := selectPythonSite(boundary, root, version, config)
+			if err != nil {
+				return selectedRecipe{}, err
+			}
+			return selectedRecipe{kind: "python", catalogueKey: "python", pythonVersion: version, site: site,
+				serving: readStaticServing(boundary, root, config, "", "")}, nil
+		}
 		install, err := selectPythonInstall(root, version)
 		if err != nil {
 			return selectedRecipe{}, err
@@ -760,7 +799,11 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 		if err != nil {
 			return selectedRecipe{}, err
 		}
-		return selectedRecipe{kind: "deno", catalogueKey: "deno", deno: deno}, nil
+		recipe := selectedRecipe{kind: "deno", catalogueKey: "deno", deno: deno}
+		if strings.TrimSpace(config.OutputDirectory) != "" {
+			recipe.serving = readStaticServing(boundary, root, config, "", "")
+		}
+		return recipe, nil
 	case "php":
 		php, err := selectPHPRecipe(boundary, root, config)
 		if err != nil {
@@ -771,6 +814,13 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 			recipe.nodeInputs = php.inputs
 		}
 		return recipe, nil
+	case "site":
+		site, err := selectSiteRecipe(boundary, root, config)
+		if err != nil {
+			return selectedRecipe{}, err
+		}
+		return selectedRecipe{kind: "site", catalogueKey: "site:" + site.generator.name, site: site,
+			nodeInputs: site.nodeInputs, serving: readStaticServing(boundary, root, config, "", "")}, nil
 	default:
 		return selectedRecipe{}, fmt.Errorf("%w: no supported automatic recipe was selected", ErrUnsupportedBuilder)
 	}
@@ -835,6 +885,14 @@ func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases
 			`RUN test -f /out/app && test -x /out/app || (echo 'Go build command must write an executable to /out/app' >&2; exit 1)`)
 		lines = append(lines, compiledRuntimeLines(bases[1], recipe.runtimeAssets, config.StartCommand)...)
 	case "python":
+		if strings.TrimSpace(config.OutputDirectory) != "" {
+			rendered, err := renderPythonSiteDockerfile(recipe.site, recipe.pythonVersion, config, recipe.serving, bases, installSecrets, buildSecrets)
+			if err != nil {
+				return "", err
+			}
+			lines = append(lines, rendered...)
+			break
+		}
 		base := immutableImageReference(bases[0])
 		lines = append(lines, "FROM "+base, "WORKDIR /app",
 			"ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore",
@@ -867,7 +925,18 @@ func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases
 			rendered, err = renderPHPDockerfile(recipe.php, config, bases, installSecrets, buildSecrets)
 		default:
 			rendered, err = renderDenoDockerfile(recipe.deno, config, bases, installSecrets, buildSecrets)
+			if err == nil && strings.TrimSpace(config.OutputDirectory) != "" {
+				var stage []string
+				stage, err = denoSiteStage(config, recipe.serving, bases)
+				rendered = append(rendered, stage...)
+			}
 		}
+		if err != nil {
+			return "", err
+		}
+		lines = append(lines, rendered...)
+	case "site":
+		rendered, err := renderSiteDockerfile(recipe.site, config, recipe.serving, bases, installSecrets, buildSecrets)
 		if err != nil {
 			return "", err
 		}
@@ -881,38 +950,15 @@ func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases
 	return strings.Join(lines, "\n") + "\n", nil
 }
 
-func renderStaticDockerfile(config BuildPlanConfig, base ResolvedImage) (string, error) {
+func renderStaticDockerfile(config BuildPlanConfig, serving staticServing, base ResolvedImage) (string, error) {
 	output := strings.TrimSpace(config.OutputDirectory)
 	if output == "" {
 		output = "."
 	} else if !validOutputDirectory(output) {
 		return "", fmt.Errorf("%w: static output directory is invalid", ErrUnsupportedBuilder)
 	}
-	lines := append([]string{"# syntax=docker/dockerfile:1.10", "FROM " + immutableImageReference(base)}, staticServerLines(config.SPAFallback)...)
-	lines = append(lines, "COPY "+filepath.ToSlash(output)+"/ /usr/share/nginx/html/")
+	lines := append([]string{"# syntax=docker/dockerfile:1.10"}, serving.stage(base, "", filepath.ToSlash(output)+"/")...)
 	return strings.Join(lines, "\n") + "\n", nil
-}
-
-// staticServerLines configures nginx the way its own default does — port 80,
-// index.html — and refuses every dot-path except .well-known, so a stray
-// .git/, .env or .htaccess in the published directory is never served. A
-// site whose client owns its routes also answers a path with no file behind
-// it with index.html, so a deep link into the application opens instead of
-// 404ing.
-func staticServerLines(spaFallback bool) []string {
-	conf := []string{
-		"server {", "    listen 80;", "    server_name _;", "    root /usr/share/nginx/html;",
-		"    index index.html index.htm;", `    location ~ /\.(?!well-known/) {`, "        deny all;", "    }",
-	}
-	if spaFallback {
-		conf = append(conf, "    location / {", "        try_files $uri $uri/ /index.html;", "    }")
-	}
-	conf = append(conf, "}")
-	quoted := make([]string, 0, len(conf))
-	for _, line := range conf {
-		quoted = append(quoted, "'"+line+"'")
-	}
-	return []string{"RUN printf '%s\\n' " + strings.Join(quoted, " ") + " > /etc/nginx/conf.d/default.conf"}
 }
 
 func (b *ArtifactBuilder) resolveBases(ctx context.Context, references []string) ([]ResolvedImage, error) {

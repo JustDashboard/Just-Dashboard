@@ -50,24 +50,29 @@ func TestRecipesRenderFrameworkEnvironmentsEntriesAndFallbacks(t *testing.T) {
 			want:   []string{"RUN test -f /app/build/index.js || (echo 'SvelteKit must produce build/index.js"},
 		},
 		{
-			name:   "single-page site falls back to index.html",
-			files:  map[string]string{"package.json": `{"scripts":{"build":"vite build"},"devDependencies":{"vite":"6"}}`, "package-lock.json": "{}"},
+			name: "single-page site falls back to index.html",
+			files: map[string]string{"package.json": `{"scripts":{"build":"vite build"},"devDependencies":{"vite":"6"}}`, "package-lock.json": "{}",
+				"api/hello.ts": "export default function handler() {}"},
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "node", BuildCommand: "npm run build", OutputDirectory: "dist", SPAFallback: true},
-			want: []string{"FROM nginx:1.29-alpine@sha256:", "try_files $uri $uri/ /index.html;", "> /etc/nginx/conf.d/default.conf",
+			want: []string{"FROM nginx:1.29-alpine@sha256:", "try_files $uri $uri.html $uri/ /index.html;", "> /etc/nginx/conf.d/default.conf",
+				// The fallback never answers a request for the functions
+				// another host ran beside the site.
+				`'    location ~ ^/api(?:/|$) {' '        try_files $uri $uri.html $uri/ =404;'`,
 				"COPY --from=build /app/dist/ /usr/share/nginx/html/"},
 		},
 		{
-			name:   "multi-page site serves files as they are, never dot-paths",
+			name:   "multi-page site serves clean URLs and its 404 page, never dot-paths",
 			files:  map[string]string{"package.json": `{"scripts":{"build":"astro build"},"dependencies":{"astro":"5"}}`, "package-lock.json": "{}"},
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "node", BuildCommand: "npm run build", OutputDirectory: "dist"},
-			want:   []string{`'    location ~ /\.(?!well-known/) {' '        deny all;'`, "> /etc/nginx/conf.d/default.conf"},
-			absent: []string{"try_files"},
+			want: []string{`'    location ~ /\.(?!well-known/) {' '        deny all;'`, "'    absolute_redirect off;'",
+				"'        try_files $uri $uri.html $uri/ =404;'", "'    error_page 404 /404.html;'", "'    gzip on;'", "> /etc/nginx/conf.d/default.conf"},
+			absent: []string{"/index.html;", "^/api"},
 		},
 		{
 			name:   "static files with the fallback",
 			files:  map[string]string{"public/index.html": "<h1>x</h1>"},
 			config: BuildPlanConfig{Method: BuildStatic, OutputDirectory: "public", SPAFallback: true},
-			want:   []string{"try_files $uri $uri/ /index.html;", "COPY public/ /usr/share/nginx/html/"},
+			want:   []string{"try_files $uri $uri.html $uri/ /index.html;", "COPY public/ /usr/share/nginx/html/"},
 		},
 		{
 			name:   "unpinned requirements install and the undeclared server is added",

@@ -177,14 +177,14 @@ func selectDenoRecipe(root string, config BuildPlanConfig) (denoRecipe, error) {
 	if !regularExists(root, "deno.json") && !regularExists(root, "deno.jsonc") {
 		return denoRecipe{}, fmt.Errorf("%w: Deno recipe requires deno.json or deno.jsonc", ErrUnsupportedBuilder)
 	}
-	if strings.TrimSpace(config.StartCommand) == "" {
+	if strings.TrimSpace(config.StartCommand) == "" && strings.TrimSpace(config.OutputDirectory) == "" {
 		return denoRecipe{}, fmt.Errorf("%w: Deno recipe requires a start command (deno task start, or deno run an entry file)", ErrUnsupportedBuilder)
 	}
 	return denoRecipe{locked: regularExists(root, "deno.lock")}, nil
 }
 
 func renderDenoDockerfile(recipe denoRecipe, config BuildPlanConfig, bases []ResolvedImage, installSecrets, buildSecrets string) ([]string, error) {
-	if len(bases) != 1 {
+	if len(bases) == 0 {
 		return nil, ErrBuilderUnavailable
 	}
 	install := "deno install"
@@ -192,13 +192,17 @@ func renderDenoDockerfile(recipe denoRecipe, config BuildPlanConfig, bases []Res
 		install += " --frozen"
 	}
 	lines := []string{
-		"FROM " + immutableImageReference(bases[0]),
+		"FROM " + immutableImageReference(bases[0]) + " AS build",
 		"WORKDIR /app",
 		"COPY . .",
 		"RUN " + installSecrets + install,
 	}
 	if command := strings.TrimSpace(config.BuildCommand); command != "" {
 		lines = append(lines, "RUN "+buildSecrets+command)
+	}
+	if strings.TrimSpace(config.OutputDirectory) != "" {
+		// A site generator's output is served by the stage that follows.
+		return lines, nil
 	}
 	lines = append(lines, shellCMD(config.StartCommand))
 	return lines, nil

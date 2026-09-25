@@ -1194,19 +1194,19 @@ export function dockerfileStageHint(stages?: string[]) {
 
 /**
  * Whether a recipe plan is missing the start command its recipe refuses to
- * build without: Python, Deno and PHP always run one, and a JavaScript build
- * runs one unless it has static output for nginx to serve. The screen that
- * owns the field says so, rather than preflight four screens later or the
- * build after Deploy.
+ * build without: PHP always runs one, and a JavaScript, Python or Deno build
+ * runs one unless it has static output for nginx to serve (a Vite site, MkDocs,
+ * Lume). The screen that owns the field says so, rather than preflight four
+ * screens later or the build after Deploy.
  */
 export function needsStartCommand(build: DeploymentConfiguration["build"]) {
   if (build.method !== "recipe" || build.startCommand?.trim()) return false
   switch (build.recipe) {
-    case "python":
-    case "deno":
     case "php":
       return true
     case "node":
+    case "python":
+    case "deno":
       return !build.outputDirectory?.trim()
     default:
       return false

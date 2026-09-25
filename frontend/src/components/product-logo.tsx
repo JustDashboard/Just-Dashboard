@@ -510,7 +510,7 @@ export function gitProviderProduct(provider: string | undefined): string | undef
   return provider && GIT_PROVIDERS.has(provider) ? provider : undefined
 }
 
-/** The language each automatic recipe builds. */
+/** The language each automatic recipe builds; a site generator's is the nginx that serves it. */
 const RECIPES: Record<string, string> = {
   node: "nodejs",
   go: "go",
@@ -520,6 +520,7 @@ const RECIPES: Record<string, string> = {
   dotnet: "dotnet",
   deno: "deno",
   php: "php",
+  site: "nginx-static",
 }
 
 /**
@@ -607,6 +608,14 @@ const FRAMEWORKS: Record<string, string> = {
   php: "php",
   laravel: "laravel",
   symfony: "symfony",
+  jekyll: "ruby",
+  mkdocs: "python",
+  zensical: "python",
+  sphinx: "python",
+  pelican: "python",
+  lume: "deno",
+  vuepress: "vuejs",
+  slidev: "vuejs",
 }
 
 export function frameworkProduct(framework: string | undefined): string | undefined {

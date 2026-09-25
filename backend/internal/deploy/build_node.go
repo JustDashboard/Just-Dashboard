@@ -342,9 +342,7 @@ func renderNodeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases [
 			lines = append(lines, packageRootSiteLine)
 			source = packageRootSite + "/"
 		}
-		lines = append(lines, "FROM "+immutableImageReference(static))
-		lines = append(lines, nodeStaticServerLines(serving.site)...)
-		return append(lines, "COPY --from=build "+source+" "+nodeStaticTarget(serving.site)), nil
+		return append(lines, recipe.serving.stage(static, "build", source)...), nil
 	}
 	if strings.TrimSpace(config.StartCommand) == "" {
 		return nil, fmt.Errorf("%w: Node service recipe requires a start command", ErrUnsupportedBuilder)

@@ -3307,7 +3307,7 @@ export type BuildSecretStep = "install" | "build" | "install_and_build"
 
 /** The automatic recipes the backend can build; `validRecipe` is its closed set. */
 export type DeploymentRecipe =
-  "node" | "go" | "python" | "rust" | "java" | "dotnet" | "deno" | "php"
+  "node" | "go" | "python" | "rust" | "java" | "dotnet" | "deno" | "php" | "site"
 
 /** An environment variable detection found the source reading. */
 export type DeploymentDetectedVariable = {
@@ -3504,6 +3504,21 @@ export type DeploymentDetectedPersistentPath = {
   reason: string
 }
 
+/** `DetectedStaticSite` (backend `detect_static_site.go`). */
+export type DeploymentStaticSite = {
+  generator?: string
+  version?: string
+  declared?: string
+  unpinned?: boolean
+  versionIssue?: string
+  basePath?: string
+  basePathSource?: string
+  basePathExpression?: boolean
+  themeSubmodule?: string
+  hostingRules?: number
+  hostingRulesLeftOut?: number
+}
+
 export type DeploymentDetectionCandidate = {
   dockerfile?: string
   goVersion?: string
@@ -3574,6 +3589,12 @@ export type DeploymentDetectionCandidate = {
   platformManifests?: DeploymentPlatformManifest[]
   /** Serverless or edge code a container build does not run. */
   serverlessCode?: { platform: string; paths: string[]; entry?: string; blocking?: boolean }[]
+  /**
+   * What a static site's own files say about its build and serving: the site
+   * generator and its release, the sub-path it was built for, the theme's Git
+   * submodule and the hosting rules the static server applies.
+   */
+  staticSite?: DeploymentStaticSite
   /** Imports that resolve only on a case-insensitive disk. */
   importCaseMismatches?: {
     file: string

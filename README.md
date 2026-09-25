@@ -30,7 +30,8 @@ It manages exactly one machine. There is no fleet view, no agents to enrol, no c
 - **Deploys from a repository, an image, a template or a Compose file.** Detection fills the
   form in — it picks the application out of a repository's examples, docs and tooling, plans a
   volume for the SQLite file, uploads or key ring an app would otherwise lose on its next release,
-  and says before you deploy what it will not run. Every deployment is checked against the commit it
+  builds a Hugo, Jekyll, MkDocs or other generator's site with that generator and serves it with its
+  own redirects and 404 page, and says before you deploy what it will not run. Every deployment is checked against the commit it
   builds before it builds, and what would stop it or deserves a look is shown before Deploy is
   pressed. Every release is immutable, so rollback reactivates what ran before. Web services get a
   health-gated cutover.

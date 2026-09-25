@@ -1,0 +1,7 @@
+---
+layout: default
+title: Home
+---
+<h1>jekyll home {{ site.api_url }}</h1>
+{% for post in site.posts %}<a href="{{ post.url | relative_url }}">{{ post.title }}</a>{% endfor %}
+<a href="{{ '/about/' | relative_url }}">about</a>

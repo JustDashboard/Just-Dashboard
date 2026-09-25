@@ -149,7 +149,7 @@ func readNodeRootFiles(files nodeFiles, manifest nodeManifest) nodeRootFiles {
 			if strings.HasSuffix(name, ".json") {
 				text = string(denoJSONWithoutComments([]byte(text)))
 			} else {
-				text = jsWithoutComments(text)
+				text = string(jsBlankComments([]byte(text)))
 			}
 			result.config[kind.kind] = nodeConfigText{name: name, text: text}
 			break
@@ -166,7 +166,7 @@ func readNodeRootFiles(files nodeFiles, manifest nodeManifest) nodeRootFiles {
 		}
 		result.entries = append(result.entries, entry)
 		if head, ok := readNodeHead(files, entry, nodeEntryHeadBytes); ok {
-			result.entryHeads[entry] = jsWithoutComments(head)
+			result.entryHeads[entry] = string(jsBlankComments([]byte(head)))
 		}
 	}
 	if manifest.has("@nestjs/core") {
@@ -337,50 +337,6 @@ func nodeSourceImporting(files nodeFiles, roots []string, importRE *regexp.Regex
 	return ""
 }
 
-// jsWithoutComments removes // and /* */ comments outside string and
-// template literals. Regular expression literals are not told apart from
-// division; a configuration file seldom holds one, and at worst a literal
-// is left unread, which keeps the default.
-func jsWithoutComments(text string) string {
-	var out strings.Builder
-	out.Grow(len(text))
-	quote := byte(0)
-	for index := 0; index < len(text); index++ {
-		c := text[index]
-		if quote != 0 {
-			out.WriteByte(c)
-			switch {
-			case c == '\\' && index+1 < len(text):
-				index++
-				out.WriteByte(text[index])
-			case c == quote:
-				quote = 0
-			}
-			continue
-		}
-		switch {
-		case c == '"' || c == '\'' || c == '`':
-			quote = c
-			out.WriteByte(c)
-		case c == '/' && index+1 < len(text) && text[index+1] == '/':
-			for index < len(text) && text[index] != '\n' {
-				index++
-			}
-			out.WriteByte('\n')
-		case c == '/' && index+1 < len(text) && text[index+1] == '*':
-			end := strings.Index(text[index+2:], "*/")
-			if end < 0 {
-				return out.String()
-			}
-			index += end + 3
-			out.WriteByte(' ')
-		default:
-			out.WriteByte(c)
-		}
-	}
-	return out.String()
-}
-
 // Literals the readers below look for. A value is a literal only when it is
 // quoted where the key is; anything computed is left unread.
 var (
@@ -389,17 +345,14 @@ var (
 	nextDistDirRE         = regexp.MustCompile(`(?:^|[\s{,])distDir\s*:\s*['"]([\w./-]+)['"]`)
 	nextUnoptimizedRE     = regexp.MustCompile(`(?:^|[\s{,])unoptimized\s*:\s*true\b`)
 	nextCustomLoaderRE    = regexp.MustCompile(`(?:^|[\s{,])(?:loader\s*:\s*['"]custom['"]|loaderFile\s*:)`)
-	basePathRE            = regexp.MustCompile(`(?:^|[\s{,])basePath\s*:\s*['"](/[\w./-]*)['"]`)
 	svelteAdapterImportRE = regexp.MustCompile(`import\s+(\w+)\s+from\s+['"]((?:@sveltejs/adapter-[\w-]+)|(?:svelte-adapter-[\w-]+)|(?:@[\w.-]+/svelte-adapter[\w-]*)|(?:svelte-kit-sst))['"]`)
 	svelteAdapterCallRE   = regexp.MustCompile(`(?:^|[\s{,])adapter\s*:\s*(\w+)\s*\(`)
-	svelteFallbackRE      = regexp.MustCompile(`(?:^|[\s{,])fallback\s*:\s*['"]([\w.-]+\.html)['"]`)
 	sveltePagesRE         = regexp.MustCompile(`(?:^|[\s{,])pages\s*:\s*['"]([\w./-]+)['"]`)
 	svelteNodeOutRE       = regexp.MustCompile(`(?:^|[\s{,(])out\s*:\s*['"]([\w./-]+)['"]`)
 	astroOutputRE         = regexp.MustCompile(`(?:^|[\s{,])output\s*:\s*['"](static|server|hybrid)['"]`)
 	astroOutputExprRE     = regexp.MustCompile(`(?:^|[\s{,])output\s*:\s*[A-Za-z_$(]`)
 	astroModeRE           = regexp.MustCompile(`(?:^|[\s{,(])mode\s*:\s*['"](standalone|middleware)['"]`)
 	astroAdapterRE        = regexp.MustCompile(`from\s+['"](@astrojs/(?:node|vercel|netlify|cloudflare|deno)(?:/[\w-]+)?|astro-sst|@deno/astro-adapter)['"]`)
-	jsBaseRE              = regexp.MustCompile(`(?:^|[\s{,])base\s*:\s*['"](/[\w./-]*)['"]`)
 	ssrFalseRE            = regexp.MustCompile(`(?:^|[\s{,])ssr\s*:\s*false\b`)
 	nitroPresetRE         = regexp.MustCompile(`(?:^|[\s{,])preset\s*:\s*['"]([\w-]+)['"]`)
 	viteOutDirRE          = regexp.MustCompile(`(?:^|[\s{,])outDir\s*:\s*['"]([\w./-]+)['"]`)
@@ -440,20 +393,6 @@ func literalRelativePath(re *regexp.Regexp, text string) string {
 		return ""
 	}
 	return path.Clean(value)
-}
-
-// literalBasePath is a base path a site is served under ("/docs"), or ""
-// for none or for the root.
-func literalBasePath(re *regexp.Regexp, text string) string {
-	match := re.FindStringSubmatch(text)
-	if match == nil {
-		return ""
-	}
-	base := "/" + strings.Trim(match[1], "/")
-	if base == "/" || !nodeMemberPathRE.MatchString(strings.TrimPrefix(base, "/")) || strings.Contains(base, "..") {
-		return ""
-	}
-	return base
 }
 
 // svelteAdapter is the adapter package svelte.config passes to kit.adapter:

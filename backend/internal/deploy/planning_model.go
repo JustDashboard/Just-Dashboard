@@ -276,6 +276,10 @@ type DetectedCandidate struct {
 	PlatformManifests    []DetectedPlatformManifest `json:"platformManifests,omitempty"`
 	ServerlessCode       []DetectedServerlessCode   `json:"serverlessCode,omitempty"`
 	ImportCaseMismatches []ImportCaseMismatch       `json:"importCaseMismatches,omitempty"`
+	// StaticSite is what a static site's own files say about its build and
+	// serving: the generator release, the sub-path, the hosting rules
+	// (detect_static_site.go).
+	StaticSite *DetectedStaticSite `json:"staticSite,omitempty"`
 	// Lockfiles are the JavaScript lockfiles committed for this package (or
 	// its workspace), each compared with package.json. NodeInstalls is what
 	// the recipe installs under each package manager an operator can choose,
@@ -1625,7 +1629,7 @@ func configContainsSecretLiteral(value any, key string) bool {
 // refused at planning so a plan never names a builder that does not exist.
 func validRecipe(name string) bool {
 	switch name {
-	case "node", "go", "python", "rust", "java", "dotnet", "deno", "php":
+	case "node", "go", "python", "rust", "java", "dotnet", "deno", "php", "site":
 		return true
 	}
 	return false
@@ -1799,6 +1803,9 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 			}
 		}
 		if err := validateDetectedNodeInstall(candidate); err != nil {
+			return err
+		}
+		if err := validateDetectedStaticSite(candidate); err != nil {
 			return err
 		}
 		for _, label := range []string{candidate.Name, candidate.Framework, candidate.Recipe} {

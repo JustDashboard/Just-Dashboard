@@ -8,9 +8,10 @@ import (
 
 // What the Node recipe renders around a framework's build for the commands
 // the plan runs: the entry the build must write, the steps after the build
-// that its server needs, the runtime environment, and how nginx serves a
-// static site. It is decided with the plan's own start command, so an
-// operator's start command gets the same treatment as a detected one.
+// that its server needs, the runtime environment, and the fallback page of a
+// static site, which the static server (build_static_serving.go) tries
+// first. It is decided with the plan's own start command, so an operator's
+// start command gets the same treatment as a detected one.
 
 // nodeServing is what the recipe adds for the configured commands.
 type nodeServing struct {
@@ -20,31 +21,23 @@ type nodeServing struct {
 	// lines of the server's runtime stage.
 	afterBuild []string
 	runtimeEnv []string
-	site       nodeStaticSite
-	notes      []nodeFrameworkNote
+	// page is the fallback page the framework writes into its static output
+	// when it is not index.html.
+	page  string
+	notes []nodeFrameworkNote
 }
 
-// nodeStaticSite is how nginx serves a framework's static output: which page
-// answers a path with no file behind it, the path the site lives under, and
-// whether /about is served from about.html.
-type nodeStaticSite struct {
-	spa       bool
-	fallback  string
-	base      string
-	cleanURLs bool
-}
-
-// planNodeServing decides nodeServing for a plan. A static output directory
-// is served as the framework writes it only when it is the framework's own
-// output; a server's entry is checked when the start command, or a package
-// script it runs, runs it.
+// planNodeServing decides nodeServing for a plan. A static output's fallback
+// page is the framework's only when the plan serves the framework's own
+// output directory, since another directory may not hold it; a server's
+// entry is checked when the start command, or a package script it runs,
+// runs it.
 func planNodeServing(manifest nodeManifest, framework nodeRecipeFramework, config BuildPlanConfig) nodeServing {
 	serving := nodeServing{}
 	resolution := framework.resolution
 	if output := strings.TrimSpace(config.OutputDirectory); output != "" {
-		serving.site = nodeStaticSite{spa: config.SPAFallback}
 		if framework.name != "" && path.Clean(output) == path.Clean(resolution.Output) {
-			serving.site.fallback, serving.site.base, serving.site.cleanURLs = resolution.Fallback, resolution.Base, resolution.CleanURLs
+			serving.page = resolution.Fallback
 		}
 		return serving
 	}
@@ -86,56 +79,6 @@ func nodeStandaloneServer(scripts map[string]string, start string) string {
 		}
 	}
 	return ""
-}
-
-// nodeStaticServerLines configures nginx for a framework's static output.
-// Output served at the root as nginx's default would is staticServerLines'
-// own; a base path, a fallback page other than index.html or pages written
-// as about.html get a server block that says so. The site is copied under
-// its base path (nodeStaticTarget) rather than aliased, since nginx's alias
-// and try_files do not combine reliably.
-func nodeStaticServerLines(site nodeStaticSite) []string {
-	if site.base == "" && site.fallback == "" && !site.cleanURLs {
-		return staticServerLines(site.spa)
-	}
-	fallback := "=404"
-	if site.spa {
-		// A fallback page other than index.html is tried as a file first:
-		// a framework writes it only in some of its modes (React Router's
-		// __spa-fallback.html when "/" is prerendered).
-		fallback = site.base + "/index.html"
-		if site.fallback != "" && site.fallback != "index.html" {
-			fallback = site.base + "/" + site.fallback + " " + fallback
-		}
-	}
-	tries := "$uri $uri/ " + fallback
-	if site.cleanURLs {
-		// about.html before about/: Next.js writes both for a page, and the
-		// directory holds only its data files.
-		tries = "$uri $uri.html $uri/ " + fallback
-	}
-	conf := []string{
-		"server {", "    listen 80;", "    server_name _;", "    root /usr/share/nginx/html;",
-		"    index index.html index.htm;", "    absolute_redirect off;", `    location ~ /\.(?!well-known/) {`, "        deny all;", "    }",
-	}
-	if site.base != "" {
-		conf = append(conf, "    location = / {", "        return 302 "+site.base+"/;", "    }")
-	}
-	conf = append(conf, "    location / {", "        try_files "+tries+";", "    }")
-	if !site.spa {
-		conf = append(conf, "    error_page 404 "+site.base+"/404.html;")
-	}
-	conf = append(conf, "}")
-	quoted := make([]string, 0, len(conf))
-	for _, line := range conf {
-		quoted = append(quoted, "'"+line+"'")
-	}
-	return []string{"RUN printf '%s\\n' " + strings.Join(quoted, " ") + " > /etc/nginx/conf.d/default.conf"}
-}
-
-// nodeStaticTarget is where the site is copied in the nginx image.
-func nodeStaticTarget(site nodeStaticSite) string {
-	return "/usr/share/nginx/html" + site.base + "/"
 }
 
 // nodeMeteorRefusal is why a Meteor application is not built by the recipe.
