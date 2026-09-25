@@ -2411,7 +2411,14 @@ because pub.dev refuses this repository's CI host, and were built there through 
 `PUB_HOSTED_URL`.
 Persistent state, schema tools, seeds and their
 findings are table-tested per stack in `detect_state_test.go`, `detect_schema_test.go`,
-`preflight_state_test.go` and `recipe_runtime_files_test.go`. Repository shape — ranking, decoys, static
+`preflight_state_test.go` and `recipe_runtime_files_test.go`. Where the recipes meet,
+`recipe_ecosystems_test.go` holds every recipe to the same contracts: its runtime stage runs as the user
+and from the working directory state detection assumes (`candidateStateLayout`), with a data directory
+that user owns and a committed .NET database seeding it; the proxy trust it writes is exactly what the
+runtime withdraws; one `.tool-versions` or `mise.toml` gives each recipe its own tool's line, Scala and
+Clojure reading the JDK the Java recipe reads; the Python, Java and .NET releases and the recipes that
+accept a package manager match the configure form; and a repository holding Django and Rails gets each
+framework's remedy for errors that never reach the log. Repository shape — ranking, decoys, static
 roots, split repositories, shapes that are not services, ecosystems without a recipe, processes, other
 platforms' files, submodules and LFS, case-mismatched imports and the preflight findings they raise — is
 covered by `detect_*_test.go` and `preflight_repo_shape_test.go` against written fixtures. JavaScript installs are covered by
