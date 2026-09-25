@@ -3,6 +3,7 @@ package deploy
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -267,5 +268,144 @@ func TestAspireAppHostIsSetAsideAndItsWiringNamed(t *testing.T) {
 	findings := compiledRecipeFindings(web, PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet"}})
 	if item := findingByCode(findings, "dotnet_aspire_orchestration"); item == nil || !strings.Contains(item.Measured, "ConnectionStrings__cache") {
 		t.Fatalf("findings = %+v", findings)
+	}
+}
+
+// A front end the recipe cannot plan an install for still gets Node for the
+// project's own publish, and one whose package.json it cannot read at all
+// is refused by name — neither reaches an image the catalogue lacks.
+func TestDotnetSPAWithoutAnInstallPlan(t *testing.T) {
+	t.Parallel()
+	web := `<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFramework>net8.0</TargetFramework><SpaRoot>ClientApp\</SpaRoot></PropertyGroup></Project>`
+	manifest := `{"name":"client","version":"1.0.0","scripts":{"build":"vite build"},"devDependencies":{"vite":"6.0.0"}}`
+	result, root := detectCompiled(t, map[string]string{
+		"Web.csproj": web, "ClientApp/package.json": manifest,
+		"ClientApp/package-lock.json": `{"name":"client","version":"1.0.0","lockfileVersion":3,"requires":true,"packages":{"":{"name":"client","version":"1.0.0","devDependencies":{"vite":"6.0.0"}},"node_modules/vite":{"version":"6.0.0"}}}`,
+		"ClientApp/pnpm-lock.yaml":    "lockfileVersion: '9.0'\n\nimporters:\n\n  .:\n    devDependencies:\n      vite:\n        specifier: 6.0.0\n        version: 6.0.0\n",
+	})
+	if candidate := compiledCandidate(result, "", "dotnet"); candidate == nil || candidate.RecipeIssue != "" {
+		t.Fatalf("candidates = %+v", result.Candidates)
+	}
+	prepared := prepareCompiled(t, root, "", BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet"})
+	assertCompiledDockerfile(t, prepared.DockerfilePreview, "FROM node:22-bookworm-slim@sha256:", "COPY --from=spa-node /usr/local/ /usr/local/")
+	if strings.Contains(prepared.DockerfilePreview, "WORKDIR /src/ClientApp") ||
+		!slices.ContainsFunc(prepared.Notes, func(note string) bool { return strings.Contains(note, "does not install the front end in ClientApp") }) {
+		t.Fatalf("prepared = %+v\n%s", prepared.Notes, prepared.DockerfilePreview)
+	}
+
+	oversized := `{"name":"client","description":"` + strings.Repeat("x", nodeManifestMax) + `"}`
+	result, root = detectCompiled(t, map[string]string{"Web.csproj": web, "ClientApp/package.json": oversized})
+	candidate := compiledCandidate(result, "", "dotnet")
+	if candidate == nil || !strings.Contains(candidate.RecipeIssue, "ClientApp/package.json") || !strings.Contains(candidate.RecipeIssue, "512 KiB") {
+		t.Fatalf("candidates = %+v", result.Candidates)
+	}
+	_, err := NewArtifactBuilder(&artifactBackendFake{}).Prepare(context.Background(), root, BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet"}, false, "t:1")
+	if !errors.Is(err, ErrUnsupportedBuilder) {
+		t.Fatalf("prepared: %v", err)
+	}
+}
+
+// Restore hands the framework it is held to to every project the published
+// one references, which then build for their own (NETSDK1005): a restore
+// is held to one framework only when it must be, and refused when a
+// referenced project does not declare it.
+func TestDotnetRestoreAndTheProjectsItReferences(t *testing.T) {
+	t.Parallel()
+	api := func(frameworks string) string {
+		return `<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFrameworks>` + frameworks + `</TargetFrameworks></PropertyGroup>` +
+			`<ItemGroup><ProjectReference Include="..\Core\Core.csproj" /></ItemGroup></Project>`
+	}
+	core := func(framework string) string {
+		return `<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>` + framework + `</TargetFramework></PropertyGroup></Project>`
+	}
+	// Several frameworks the image restores: every one is restored, and the
+	// net8.0 library builds against its own.
+	result, root := detectCompiled(t, map[string]string{"src/Api/Api.csproj": api("net8.0;net9.0"), "src/Core/Core.csproj": core("net8.0")})
+	candidate := compiledCandidate(result, "src/Api", "dotnet")
+	if candidate == nil || candidate.RecipeIssue != "" || len(candidate.DotnetBuild.References) != 1 ||
+		candidate.DotnetBuild.References[0] != (DetectedDotnetReference{Project: "src/Core/Core.csproj", Targets: "net8.0"}) {
+		t.Fatalf("candidates = %+v", result.Candidates)
+	}
+	prepared := prepareCompiled(t, root, "src/Api", BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet", RootDirectory: "src/Api"})
+	assertCompiledDockerfile(t, prepared.DockerfilePreview, "RUN dotnet restore Api.csproj\n", "--framework net9.0")
+
+	// Retargeting a project whose references declare their own framework
+	// is refused before Deploy, naming them.
+	result, root = detectCompiled(t, map[string]string{"src/Api/Api.csproj": strings.ReplaceAll(api("net7.0"), "TargetFrameworks", "TargetFramework"), "src/Core/Core.csproj": core("net7.0")})
+	candidate = compiledCandidate(result, "src/Api", "dotnet")
+	findings := compiledRecipeFindings(candidate, PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet"}})
+	if item := findingByCode(findings, "dotnet_version_unsupported"); item == nil || !strings.Contains(item.Measured, "change its <TargetFramework> (choosing the .NET version in the build settings would retarget the projects it references too: src/Core/Core.csproj)") {
+		t.Fatalf("findings = %+v", findings)
+	}
+	retarget := BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet", RootDirectory: "src/Api", DotnetVersion: "9.0"}
+	findings = compiledRecipeFindings(candidate, PlanConfiguration{Build: retarget})
+	if item := findingByCode(findings, "dotnet_version_unsupported"); item == nil || item.Severity != PreflightBlocked ||
+		!strings.Contains(item.Measured, "src/Core/Core.csproj would be restored for net9.0") || !strings.Contains(item.Measured, "NETSDK1005") ||
+		!strings.Contains(item.Measured, "set <TargetFramework>net9.0</TargetFramework> in Api.csproj itself") {
+		t.Fatalf("findings = %+v", findings)
+	}
+	_, err := NewArtifactBuilder(&artifactBackendFake{}).PrepareWithin(context.Background(), root, filepath.Join(root, "src/Api"), retarget, false, "t:1")
+	var refusal toolchainVersionError
+	if !errors.As(err, &refusal) || refusal.code != "dotnet_version_unsupported" {
+		t.Fatalf("retarget prepared: %v", err)
+	}
+	// A referenced project that declares the framework takes it.
+	_, root = detectCompiled(t, map[string]string{"src/Api/Api.csproj": strings.ReplaceAll(api("net7.0"), "TargetFrameworks", "TargetFramework"),
+		"src/Core/Core.csproj": strings.ReplaceAll(core("net7.0;net9.0"), "TargetFramework", "TargetFrameworks")})
+	prepared = prepareCompiled(t, root, "src/Api", retarget)
+	assertCompiledDockerfile(t, prepared.DockerfilePreview, "RUN dotnet restore Api.csproj -p:TargetFramework=net9.0\n", "--framework net9.0")
+
+	// A sibling that needs a workload holds the restore, which a
+	// netstandard library cannot take.
+	result, _ = detectCompiled(t, map[string]string{"src/Api/Api.csproj": api("net9.0;net9.0-android"), "src/Core/Core.csproj": core("netstandard2.0")})
+	candidate = compiledCandidate(result, "src/Api", "dotnet")
+	findings = compiledRecipeFindings(candidate, PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet", RootDirectory: "src/Api"}})
+	if item := findingByCode(findings, "dotnet_version_unsupported"); item == nil || !strings.Contains(item.Measured, "cannot restore its net9.0-android target") ||
+		!strings.Contains(item.Measured, "add net9.0 to their target frameworks") {
+		t.Fatalf("findings = %+v", findings)
+	}
+}
+
+// missingImageBackend is a registry without one image.
+type missingImageBackend struct {
+	artifactBackendFake
+	missing string
+}
+
+func (b *missingImageBackend) ResolveImage(ctx context.Context, reference, auth string) (ResolvedImage, error) {
+	if reference == b.missing {
+		return ResolvedImage{}, errors.New(`Error response from daemon: manifest unknown: manifest tagged by "8.0.119" is not found`)
+	}
+	return b.artifactBackendFake.ResolveImage(ctx, reference, auth)
+}
+
+// A patch-level global.json pin to a feature band Microsoft stopped
+// publishing images for is named by its pin and policy, and the run ends
+// with that code rather than a missing base image.
+func TestGlobalJSONPinWithoutAPublishedImageIsNamed(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeBuildFixture(t, root, "global.json", `{"sdk":{"version":"8.0.119"}}`)
+	writeBuildFixture(t, root, "Api.csproj", `<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>`)
+	build := BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet"}
+	_, err := NewArtifactBuilder(&missingImageBackend{missing: "mcr.microsoft.com/dotnet/sdk:8.0.119"}).Prepare(context.Background(), root, build, false, "t:1")
+	var refusal toolchainVersionError
+	if !errors.As(err, &refusal) || refusal.code != "dotnet_sdk_pin_unavailable" ||
+		!strings.Contains(err.Error(), "global.json pins .NET SDK 8.0.119 (rollForward latestPatch), and Microsoft publishes no mcr.microsoft.com/dotnet/sdk:8.0.119 image") ||
+		!strings.Contains(err.Error(), "latestFeature") {
+		t.Fatalf("prepared: %v", err)
+	}
+	if result := normalizedStepFailure(err); result.ErrorCode != "dotnet_sdk_pin_unavailable" || result.State != StepFailed || causeTitle(result.ErrorCode) == "" {
+		t.Fatalf("step = %+v", result)
+	}
+	// Any other base the registry lacks stays the builder's to name.
+	_, err = NewArtifactBuilder(&missingImageBackend{missing: "mcr.microsoft.com/dotnet/aspnet:8.0"}).Prepare(context.Background(), root, build, false, "t:1")
+	if errors.As(err, &refusal) || !errors.Is(err, ErrBuilderUnavailable) {
+		t.Fatalf("prepared: %v", err)
+	}
+	// Rolling forward across feature bands builds on the release's image.
+	writeBuildFixture(t, root, "global.json", `{"sdk":{"version":"8.0.119","rollForward":"latestFeature"}}`)
+	if _, err := NewArtifactBuilder(&missingImageBackend{missing: "mcr.microsoft.com/dotnet/sdk:8.0.119"}).Prepare(context.Background(), root, build, false, "t:1"); err != nil {
+		t.Fatal(err)
 	}
 }

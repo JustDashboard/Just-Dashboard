@@ -321,7 +321,13 @@ func TestRustDefaultRunSelectsTheApplicationInsteadOfTheFirstBinary(t *testing.T
 
 func TestDotnetMultiTargetBuildRestoresAndPublishesOneSupportedTarget(t *testing.T) {
 	t.Parallel()
-	for _, frameworks := range []string{"net8.0;net10.0", "net10.0;net8.0", "net6.0;net10.0-windows;net10.0"} {
+	// Restore resolves every framework the SDK image can; only a sibling
+	// that needs a workload or a newer SDK holds it to the published one.
+	for frameworks, restore := range map[string]string{
+		"net8.0;net10.0": "RUN dotnet restore Api.csproj\n", "net10.0;net8.0": "RUN dotnet restore Api.csproj\n",
+		"net6.0;net10.0-windows;net10.0": "RUN dotnet restore Api.csproj\n",
+		"net10.0;net10.0-android":        "RUN dotnet restore Api.csproj -p:TargetFramework=net10.0\n",
+	} {
 		t.Run(frameworks, func(t *testing.T) {
 			root := t.TempDir()
 			writeBuildFixture(t, root, "Api.csproj", `<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFrameworks>`+frameworks+`</TargetFrameworks></PropertyGroup></Project>`)
@@ -330,7 +336,7 @@ func TestDotnetMultiTargetBuildRestoresAndPublishesOneSupportedTarget(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, expected := range []string{"dotnet/sdk:10.0@sha256:", "dotnet restore Api.csproj -p:TargetFramework=net10.0",
+			for _, expected := range []string{"dotnet/sdk:10.0@sha256:", restore,
 				"dotnet publish Api.csproj -c Release --no-restore -o /out --framework net10.0", "dotnet/aspnet:10.0@sha256:"} {
 				if !strings.Contains(prepared.DockerfilePreview, expected) {
 					t.Fatalf("multi-target recipe missing %q:\n%s", expected, prepared.DockerfilePreview)

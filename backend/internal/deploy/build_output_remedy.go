@@ -64,6 +64,10 @@ var causeTitles = map[string]string{
 	"registry_unreachable":               "Registry unreachable",
 	"registry_auth_failed":               "Registry refused the server",
 	"base_image_missing":                 "Base image not found",
+	"java_version_unsupported":           "Java release unsupported",
+	"gradle_wrapper_incompatible":        "Gradle wrapper cannot run on the JDK",
+	"dotnet_version_unsupported":         ".NET release unsupported",
+	"dotnet_sdk_pin_unavailable":         ".NET SDK pin has no image",
 	"source_auth_failed":                 "Git credential refused",
 	"source_repository_missing":          "Repository not found",
 	"source_unreachable":                 "Git remote unreachable",
@@ -616,6 +620,11 @@ func (c *BuildCause) runtimeVersion(subject string) (string, string) {
 			return "the project targets .NET " + subject + ", newer than the build's SDK", "set the .NET version to " + fix.Value
 		}
 		return "the project targets .NET " + orDefault(subject, "a release") + ", newer than the build's SDK", "change the TargetFramework or global.json, or build with a Dockerfile"
+	case "dotnet-restore":
+		// A restore held to one framework hands it to every project the
+		// published one references, and each then builds for its own.
+		return "the restore resolved " + orDefault(subject, "a referenced project") + " for a framework it does not build for",
+			"give the published project and the projects it references a target framework in common, or build with a Dockerfile"
 	case "php":
 		return "composer.json requires PHP " + subject, "set `require.php` to a release the recipe offers, or build with a Dockerfile"
 	case "ruby":

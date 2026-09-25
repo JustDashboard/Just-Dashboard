@@ -12,6 +12,7 @@ import (
 func TestBuildFailureCauseNamesJVMAndDotnetFailures(t *testing.T) {
 	t.Parallel()
 	java := BuildPlanConfig{Method: BuildRecipe, Recipe: "java"}
+	dotnet := BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet"}
 	for _, test := range []buildCase{
 		{
 			name: "Maven repository refuses the credentials", command: "mvn -B -ntp -DskipTests package", exit: 1, build: java,
@@ -34,6 +35,11 @@ func TestBuildFailureCauseNamesJVMAndDotnetFailures(t *testing.T) {
 			lines: []string{"[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile (default-compile) on project api: Fatal error compiling: error: release version 24 not supported -> [Help 1]"},
 			want: BuildCause{Code: "build_runtime_version", Phase: phaseBuild, Command: "mvn -B -ntp -DskipTests package", ExitCode: 1, Detail: "java", Subjects: []string{"24"},
 				Fix: &CauseFix{Kind: fixSetBuild, Field: "configuration.build.javaVersion", Value: "25"}},
+		},
+		{
+			name: "restore held to another framework", command: "dotnet publish Api.csproj -c Release --no-restore -o /out --framework net9.0", exit: 1, build: dotnet,
+			lines: []string{"/usr/share/dotnet/sdk/9.0.318/Sdks/Microsoft.NET.Sdk/targets/Microsoft.PackageDependencyResolution.targets(266,5): error NETSDK1005: Assets file '/src/src/Core/obj/project.assets.json' doesn't have a target for 'net7.0'. Ensure that restore has run and that you have included 'net7.0' in the TargetFrameworks for your project. [/src/src/Core/Core.csproj]"},
+			want:  BuildCause{Code: "build_runtime_version", Phase: phaseBuild, Command: "dotnet publish Api.csproj -c Release --no-restore -o /out --framework net9.0", ExitCode: 1, Detail: "dotnet-restore", Subjects: []string{"Core"}},
 		},
 		{
 			name: "Android SDK", command: "gradle --no-daemon --console=plain :server:buildFatJar", exit: 1, build: java,

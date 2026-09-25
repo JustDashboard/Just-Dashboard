@@ -168,14 +168,21 @@ func (m *dotnetMarker) detected() *DetectedDotnetBuild {
 	if m.build.context != project.dir {
 		build.Context = contextLabel(displayDir(m.build.context))
 	}
+	for _, reference := range dotnetReferences(project, m.build.closure) {
+		build.References = append(build.References, DetectedDotnetReference{Project: reference.project, Targets: boundedEvidence(reference.targets)})
+	}
 	return build
 }
 
 // toolchainFacts turns what a candidate kept back into what the toolchain
 // plan reads.
 func (b *DetectedDotnetBuild) toolchainFacts() dotnetToolchainFacts {
-	return dotnetToolchainFacts{
+	facts := dotnetToolchainFacts{
 		project: path.Base(b.Project), targets: b.Targets, targetText: b.TargetText, multi: b.MultiTarget,
 		pin: b.SDKPin, pinFrom: b.SDKPinFrom, rollForward: b.RollForward,
 	}
+	for _, reference := range b.References {
+		facts.references = append(facts.references, dotnetReference{project: reference.Project, targets: reference.Targets})
+	}
+	return facts
 }

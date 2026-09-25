@@ -109,6 +109,7 @@ var buildSignatures = []buildSignature{
 	signature("build_runtime_version", "gradle-toolchain", "languageVersion=", `(?:No matching toolchains found for requested specification|Cannot find a Java installation on your machine matching this tasks requirements): \{languageVersion=(\d+)`),
 	signature("build_runtime_version", "dotnet", "NETSDK1045", `NETSDK1045: The current \.NET SDK does not support targeting \.NET ([\d.]+)`),
 	signature("build_runtime_version", "dotnet", "compatible .NET SDK", `A compatible \.NET SDK was not found`).collecting(`Requested SDK version: (\S+)`),
+	signature("build_runtime_version", "dotnet-restore", "NETSDK1005", `NETSDK1005: Assets file '(?:[^']*/)?([^/']+)/obj/project\.assets\.json' doesn't have a target for`),
 	signature("build_runtime_version", "php", "your php version", `requires php (\S+) -> your php version \([\d.]+\) does not satisfy that requirement|requires php (\S+) but your php version \([\d.]+\) does not satisfy`),
 	signature("build_runtime_version", "python", "requires a different Python", `requires a different Python: \S+ not in '([^']+)'`),
 	signature("build_runtime_version", "python", "Python", "(?:locked|project's) Python requirement: `([^`]+)`|does not satisfy Python(>=?[\\d.]+)|is not supported by the project \\(([^)]+)\\)"),

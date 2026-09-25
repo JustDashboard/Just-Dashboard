@@ -26,16 +26,30 @@ type dotnetToolchainFacts struct {
 	pin         string
 	pinFrom     string
 	rollForward string
+	// references are the projects it references, directly or through
+	// others, with the target frameworks each declares.
+	references []dotnetReference
+}
+
+// dotnetReference is a referenced project's checkout path and what its
+// <TargetFramework> or <TargetFrameworks> says.
+type dotnetReference struct {
+	project string
+	targets string
 }
 
 // dotnetToolchainPlan is planDotnetToolchain's decision: the release the
-// project is published for, whether the command line has to name it, and
-// the SDK image tag that builds it.
+// project is published for, whether publish has to name it and restore
+// has to be held to it, and the SDK image tag that builds it.
 type dotnetToolchainPlan struct {
 	target   string
 	explicit bool
+	scoped   bool
 	sdk      string
 	sdkFrom  string
+	// pinned names the pin that chose an exact SDK image, for a refusal
+	// when Microsoft never published it.
+	pinned string
 }
 
 func dotnetMajor(release string) int {
@@ -58,23 +72,69 @@ func planDotnetToolchain(facts dotnetToolchainFacts, override string) (dotnetToo
 			return plan, dotnetVersionRefusal(fmt.Sprintf("the .NET recipe builds net8.0, net9.0 and net10.0; the build settings ask for %s", override))
 		}
 		plan.target = override
-		plan.explicit = facts.multi || facts.targetText != "net"+override
 	case len(facts.targets) > 0:
 		plan.target = facts.targets[len(facts.targets)-1]
-		plan.explicit = facts.multi
 	case strings.TrimSpace(facts.targetText) == "" || strings.Contains(facts.targetText, "$("):
 		return plan, dotnetVersionRefusal(facts.project + " declares no <TargetFramework> the recipe can read; declare it, or choose the .NET version in the build settings to publish for")
+	case len(facts.references) > 0:
+		// A retarget would reach the projects it references too (below).
+		return plan, dotnetVersionRefusal("the .NET recipe builds portable net8.0, net9.0 and net10.0 targets; " + facts.project + " targets " + strings.TrimSpace(facts.targetText) +
+			" — change its <TargetFramework> (choosing the .NET version in the build settings would retarget the projects it references too: " +
+			dotnetReferenceList(facts.references) + "), or use a Dockerfile")
 	default:
 		return plan, dotnetVersionRefusal("the .NET recipe builds portable net8.0, net9.0 and net10.0 targets; " + facts.project + " targets " + strings.TrimSpace(facts.targetText) +
 			" — choose a .NET version in the build settings to retarget it, or use a Dockerfile")
 	}
+	framework := "net" + plan.target
+	declared := dotnetFrameworks(facts.targetText)
+	plan.explicit = facts.multi || !slices.Contains(declared, framework)
 	plan.sdk, plan.sdkFrom = plan.target, "the target framework"
-	if facts.pin == "" {
+	if facts.pin != "" {
+		if err := pinDotnetSDK(&plan, facts); err != nil {
+			return plan, err
+		}
+	}
+	// Restore resolves every framework a project declares, and those are
+	// the frameworks its references are built for. A framework it does not
+	// declare, or a sibling this image cannot restore — one that needs a
+	// workload or a newer SDK — holds the restore to the one it publishes,
+	// and restore hands that framework to every project it references.
+	reason, remedy := "", ""
+	if !slices.Contains(declared, framework) {
+		reason = "it declares " + strings.TrimSpace(facts.targetText)
+		remedy = "set <TargetFramework>" + framework + "</TargetFramework> in " + facts.project + " itself instead of choosing it in the build settings"
+	}
+	for _, sibling := range declared {
+		if reason == "" && sibling != framework && !dotnetRestorable(sibling, plan.sdk) {
+			reason = "the SDK image cannot restore its " + sibling + " target"
+			remedy = "add " + framework + " to their target frameworks"
+		}
+	}
+	if reason == "" {
 		return plan, nil
 	}
+	plan.scoped = true
+	var mismatched []dotnetReference
+	for _, reference := range facts.references {
+		// A framework the reader could not resolve is not held against it.
+		if frameworks := dotnetFrameworks(reference.targets); len(frameworks) > 0 && !strings.Contains(reference.targets, "$(") &&
+			!slices.Contains(frameworks, framework) {
+			mismatched = append(mismatched, reference)
+		}
+	}
+	if len(mismatched) > 0 {
+		return plan, dotnetVersionRefusal(fmt.Sprintf("the recipe restores %s for %s alone (%s), and restore gives that framework to every project it references: %s would be restored for %s and built for the frameworks they declare (NETSDK1005); %s, or use a Dockerfile",
+			facts.project, framework, reason, dotnetReferenceList(mismatched), framework, remedy))
+	}
+	return plan, nil
+}
+
+// pinDotnetSDK chooses the SDK image a global.json or version-manager pin
+// allows for the plan's target.
+func pinDotnetSDK(plan *dotnetToolchainPlan, facts dotnetToolchainFacts) error {
 	match := dotnetSDKVersionRE.FindStringSubmatch(facts.pin)
 	if match == nil {
-		return plan, nil
+		return nil
 	}
 	pinned := match[1] + "." + match[2]
 	sdk := facts.pin
@@ -92,14 +152,84 @@ func planDotnetToolchain(facts dotnetToolchainFacts, override string) (dotnetToo
 		sdk = pinned
 	}
 	if dotnetMajor(sdk) < dotnetMajor(plan.target) {
-		policy := facts.rollForward
-		if policy == "" {
-			policy = "latestPatch"
-		}
-		return plan, dotnetVersionRefusal(fmt.Sprintf("%s pins .NET SDK %s (rollForward %s), which cannot build net%s; raise the pin or set rollForward to latestMajor", facts.pinFrom, facts.pin, policy, plan.target))
+		return dotnetVersionRefusal(fmt.Sprintf("%s pins .NET SDK %s (rollForward %s), which cannot build net%s; raise the pin or set rollForward to latestMajor", facts.pinFrom, facts.pin, dotnetRollForward(facts.rollForward), plan.target))
 	}
 	plan.sdk, plan.sdkFrom = sdk, facts.pinFrom+" pins SDK "+facts.pin
-	return plan, nil
+	if sdk == facts.pin && match[3] != "" {
+		plan.pinned = fmt.Sprintf("%s pins .NET SDK %s (rollForward %s)", facts.pinFrom, facts.pin, dotnetRollForward(facts.rollForward))
+	}
+	return nil
+}
+
+// dotnetSDKPinUnavailable names a pin whose exact SDK image does not exist:
+// Microsoft publishes an image only for each patch of the feature band that
+// was newest when it shipped — sdk:8.0.100 and sdk:8.0.414, never 8.0.119 —
+// so a patch-level pin to an older band has none, and dotnet refuses every
+// newer band the image could carry.
+func dotnetSDKPinUnavailable(project dotnetProject, err error) error {
+	reference := "mcr.microsoft.com/dotnet/sdk:" + project.plan.sdk
+	text := strings.ToLower(err.Error())
+	if project.plan.pinned == "" || !strings.Contains(err.Error(), "resolve reviewed base image "+reference+":") ||
+		(!strings.Contains(text, "manifest unknown") && !strings.Contains(text, "not found")) {
+		return err
+	}
+	return toolchainVersionError{code: "dotnet_sdk_pin_unavailable", text: project.plan.pinned + ", and Microsoft publishes no " + reference +
+		" image (only each patch of the feature band that was newest when it shipped has one); set rollForward to latestFeature in global.json, or pin an SDK release that has an image"}
+}
+
+// dotnetRollForward is a global.json policy as the SDK applies it.
+func dotnetRollForward(policy string) string {
+	if policy == "" {
+		return "latestPatch"
+	}
+	return policy
+}
+
+// dotnetFrameworks are the target frameworks a <TargetFramework(s)> value
+// lists, lowercased.
+func dotnetFrameworks(text string) []string {
+	var frameworks []string
+	for _, framework := range strings.Split(strings.ToLower(text), ";") {
+		if framework = strings.TrimSpace(framework); framework != "" {
+			frameworks = append(frameworks, framework)
+		}
+	}
+	return frameworks
+}
+
+// dotnetRestorable says the SDK image restores a target framework: not one
+// newer than the SDK, and not one whose platform needs a workload
+// (android, ios, maccatalyst); Windows targets restore anywhere.
+func dotnetRestorable(framework, sdk string) bool {
+	release, platform, _ := strings.Cut(framework, "-")
+	if platform != "" && !strings.HasPrefix(platform, "windows") {
+		return false
+	}
+	match := dotnetVersionRE.FindStringSubmatch(release)
+	return match == nil || dotnetMajor(match[1]) <= dotnetMajor(sdk)
+}
+
+// dotnetReferences are the projects a project's build references, with the
+// frameworks they declare.
+func dotnetReferences(chosen *dotnetProjectFacts, closure []*dotnetProjectFacts) []dotnetReference {
+	var references []dotnetReference
+	for _, project := range closure {
+		if project != chosen && dotnetProjectFile(project.name) && len(references) < 64 {
+			references = append(references, dotnetReference{project: project.file, targets: project.targetText})
+		}
+	}
+	return references
+}
+
+func dotnetReferenceList(references []dotnetReference) string {
+	names := make([]string, 0, len(references))
+	for _, reference := range references {
+		names = append(names, reference.project)
+	}
+	if len(names) > 4 {
+		names = append(names[:4], fmt.Sprintf("%d more", len(references)-4))
+	}
+	return strings.Join(names, ", ")
 }
 
 func dotnetVersionRefusal(text string) error {
@@ -168,6 +298,7 @@ func selectDotnetRecipe(boundary, root string, config BuildPlanConfig) (dotnetPr
 	plan, err := planDotnetToolchain(dotnetToolchainFacts{
 		project: chosen.name, targets: chosen.targets, targetText: chosen.targetText, multi: chosen.multiTarget,
 		pin: build.sdk.version, pinFrom: build.sdk.source, rollForward: build.rollForward,
+		references: dotnetReferences(chosen, build.closure),
 	}, config.DotnetVersion)
 	if err != nil {
 		return dotnetProject{}, err
@@ -208,9 +339,16 @@ func dotnetSPAInstall(boundary, context, spaRoot, platform string) (*dotnetSPA, 
 	spa := &dotnetSPA{dir: dir}
 	source, err := readNodeInstallSource(filepath.Join(boundary, filepath.FromSlash(spaRoot)), "", nodeTargetArch(platform), newNodeReadBudget())
 	if err != nil {
-		return spa, nil
+		return nil, fmt.Errorf("%w: the .NET recipe reads %s to add the Node release the project's publish builds its front end with, and it is not a regular file of at most %d KiB; use a Dockerfile",
+			ErrUnsupportedBuilder, joinRootDir(spaRoot, "package.json"), nodeManifestMax>>10)
 	}
 	plan := planNodeInstall(source.facts, nodeInstallChoice{assets: true})
+	if plan.blocked != nil {
+		// A plan the recipe cannot install from stops before it chooses
+		// Node; the publish's own npm still runs on the release the front
+		// end asks for.
+		plan.node = nodeReleaseFor(source.facts)
+	}
 	plan.family = nodeFamilyGlibc
 	if plan.bun != "" {
 		plan.bun = bunImage(bunReleaseOf(plan.bun), nodeFamilyGlibc)
@@ -301,11 +439,11 @@ func renderDotnetDockerfile(project dotnetProject, config BuildPlanConfig, bases
 	restore := "dotnet restore " + project.file
 	framework := ""
 	if project.plan.explicit {
-		// Publishing several frameworks, or one the operator retargeted it
-		// to, requires an explicit target; restore the same target so an
-		// older or Windows-only sibling does not need a different SDK or
-		// workload inside this Linux recipe.
+		// A project with several frameworks, or retargeted to one it does
+		// not declare, is published for the one the plan chose.
 		framework = " --framework net" + project.version
+	}
+	if project.plan.scoped {
 		restore += " -p:TargetFramework=net" + project.version
 	}
 	native := ""
@@ -382,7 +520,7 @@ func dotnetRecipeNotes(project dotnetProject) []string {
 		notes = append(notes, "The project sets "+strings.Join(project.native, ", ")+"; the recipe publishes the framework-dependent dll instead")
 	}
 	if project.spa != nil && !project.spa.install {
-		notes = append(notes, "The front end in "+contextLabel(project.spa.dir)+" has no lockfile the recipe installs from; the project's own publish runs npm")
+		notes = append(notes, "The recipe does not install the front end in "+contextLabel(project.spa.dir)+" ("+strings.ToLower(project.spa.plan.blocked.Title)+"); the project's own publish runs npm")
 	}
 	return notes
 }

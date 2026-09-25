@@ -878,6 +878,7 @@ func normalizedStepFailure(err error) StepResult {
 	result := StepResult{State: StepFailed, ErrorCode: "internal_error", ErrorMessage: "deployment step failed"}
 	var sourceFailure *SourceFailure
 	var buildFailure *dockerx.BuildError
+	var release toolchainVersionError
 	switch {
 	case errors.As(err, &sourceFailure):
 		result.ErrorCode, result.ErrorMessage = sourceFailure.Code, sourceFailure.Error()
@@ -891,6 +892,10 @@ func normalizedStepFailure(err error) StepResult {
 		if buildFailure.ExitCode >= 0 {
 			result.ErrorMessage = fmt.Sprintf("a build step exited with code %d; its output is in the build log", buildFailure.ExitCode)
 		}
+	case errors.As(err, &release):
+		// A JDK or .NET release the recipe cannot build with is named by
+		// its own code, as preflight names it.
+		result.ErrorCode, result.ErrorMessage = release.code, err.Error()
 	case errors.Is(err, ErrUnsupportedBuilder):
 		result.ErrorCode, result.ErrorMessage = "unsupported_builder", err.Error()
 	case errors.Is(err, ErrBuilderUnavailable):

@@ -3665,6 +3665,8 @@ export type DeploymentDetectedDotnetBuild = {
   spaRoot?: string
   appHost?: string
   aspire?: string[]
+  /** The projects it references, with the frameworks each declares. */
+  references?: { project: string; targets?: string }[]
 }
 
 export type DeploymentDockerfileArg = {

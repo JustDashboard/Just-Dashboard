@@ -297,6 +297,9 @@ func (b *ArtifactBuilder) PrepareWithin(
 		}
 		bases, err := b.resolveBases(ctx, baseRefs)
 		if err != nil {
+			if recipe.kind == "dotnet" {
+				err = dotnetSDKPinUnavailable(recipe.dotnet, err)
+			}
 			return PreparedBuild{}, err
 		}
 		if err := requireBasePlatform(bases, prepared.TargetPlatform); err != nil {

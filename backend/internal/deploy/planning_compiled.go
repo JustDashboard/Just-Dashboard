@@ -76,6 +76,17 @@ type DetectedDotnetBuild struct {
 	// variables it wires into it (service discovery, connection strings).
 	AppHost string   `json:"appHost,omitempty"`
 	Aspire  []string `json:"aspire,omitempty"`
+	// References are the projects it references, directly or through
+	// others, with the frameworks they declare: a restore held to one
+	// framework hands it to each of them.
+	References []DetectedDotnetReference `json:"references,omitempty"`
+}
+
+// DetectedDotnetReference is a referenced project's checkout path and its
+// <TargetFramework> or <TargetFrameworks>.
+type DetectedDotnetReference struct {
+	Project string `json:"project"`
+	Targets string `json:"targets,omitempty"`
 }
 
 var (
@@ -113,9 +124,13 @@ func validateDetectedCompiledBuild(candidate DetectedCandidate) error {
 		}
 	}
 	if build := candidate.DotnetBuild; build != nil {
+		references := len(build.References) <= 64
+		for _, reference := range build.References {
+			references = references && reference.Project != "" && text(reference.Project, 4096) && text(reference.Targets, 512)
+		}
 		if !text(build.Project, 4096) || !text(build.Kind, 32) || !text(build.Context, 4096) || !list(build.Targets, 8, 16) ||
 			!text(build.TargetText, 512) || !text(build.SDKPin, 64) || !text(build.SDKPinFrom, 4096) || !text(build.RollForward, 32) ||
-			!list(build.Native, 8, 32) || !text(build.SPARoot, 4096) || !text(build.AppHost, 4096) || !list(build.Aspire, 16, 256) {
+			!list(build.Native, 8, 32) || !text(build.SPARoot, 4096) || !text(build.AppHost, 4096) || !list(build.Aspire, 16, 256) || !references {
 			return malformed
 		}
 	}
