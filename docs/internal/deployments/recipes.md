@@ -9,7 +9,9 @@ Detection reads manifests as data — `package.json`, `angular.json`, `requireme
 `uv.lock`, `poetry.lock`, `Cargo.toml`, `pom.xml`, `build.gradle(.kts)`, `*.csproj`, `deno.json(c)`, a
 `Procfile`, and for a JavaScript package its lockfiles, `.npmrc`, `.yarnrc.yml`, `bunfig.toml`,
 `pnpm-workspace.yaml` and the Node and Bun version files (`.nvmrc`, `.node-version`, `.tool-versions`,
-`.bun-version`) — and names a candidate per root with the framework, the build and start commands, the port,
+`.bun-version`), and the site generators' configuration (`hugo.toml`, Zola's `config.toml`, `book.toml`,
+Jekyll's `_config.yml` and `Gemfile`, `mkdocs.yml`, Sphinx's `conf.py`, `pelicanconf.py`, Lume's
+`_config.ts`) — and names a candidate per root with the framework, the build and start commands, the port,
 static output, the interpreter or toolchain release, and the environment variables and databases the
 source reads. Every default is a plan field the configure form and the Build settings can change. A
 detected framework that the recipe cannot serve automatically (a provider adapter, a workspace without a
@@ -527,8 +529,9 @@ a framework's Cloudflare adapter writes (`.open-next/`, `dist/_worker.js`, `.sve
 Vite app with `@cloudflare/vite-plugin` serves `dist/client`, where the plugin writes the client; and
 Vercel `api/`,
 `netlify/functions` or Cloudflare Pages `functions/` beside a static site are listed by route in
-`serverless_functions_dropped`. The static server's single-page fallback is unchanged, so those routes
-answer with `index.html`.
+`serverless_functions_dropped`. The static server's single-page fallback never answers `/api` or a path
+under it: those requests get a 404 rather than the application's page with a 200, so a client calling a
+function that did not deploy fails where it calls.
 
 When the Git remote is the upstream repository of an application the template catalogue packages —
 n8n, Gitea, Uptime Kuma — detection offers the reviewed template, and a workflow that publishes the
@@ -563,7 +566,8 @@ candidate records the file, the facts and which it took (`platformManifests`):
 | release command (`release_command`, `preDeployCommand`, `PRE_DEPLOY` job) | a `release` process; `fly.toml`'s and `render.yaml`'s are also the candidate's release command ([Release commands](#release-commands)), and one no release task runs is `release_process_not_run` |
 | volumes and `[[mounts]]` | evidence and `volumes`; no mount is created from them yet |
 | `Aptfile`, `aptPkgs` | `platform_system_packages_ignored` (warning) for a recipe build |
-| redirect rules other than the SPA rewrite | `static_redirects_unsupported` (warning) |
+| redirects, rewrites and headers (`_redirects`, `_headers`, `netlify.toml`, `vercel.json`) | rules the static server applies ([Static sites](#static-sites-and-site-generators)); `static_redirects_unsupported` (warning) counts those it leaves out |
+| `HUGO_VERSION`, `ZOLA_VERSION`, `NODE_VERSION` in a build environment | the Hugo or Zola release the site recipe builds with, and the Node release after the version files |
 
 Values are never imported from these files: a secret is a name to fill in or generate, and plain values
 become examples only when they are not shaped like a host, an address or a URL — `PHX_HOST` and a Kamal
@@ -605,12 +609,17 @@ which preflight's `recipe_unsupported` shows instead of "No deployable plan was 
 (`rails new` has generated a production Dockerfile since 7.1; older applications use `dockerfile-rails`),
 Hanami, Sinatra and Rack, Jekyll and Middleman; Phoenix (`mix phx.gen.release --docker`) and Elixir;
 Crystal, Haskell, Zig, Swift, Scala, Clojure, Gleam, F#, OCaml, Nim, Perl, Erlang, Dart, R Shiny and
-Plumber, C/C++ (CMake, Meson), Elm, Hugo, MkDocs and a Flutter web app. A web framework among the
+Plumber, C/C++ (CMake, Meson), Elm and a Flutter web app. Hugo, Zola, mdBook, Jekyll, MkDocs, Sphinx,
+Pelican and Lume have recipes ([Static sites](#static-sites-and-site-generators)). A web framework among the
 manifest's dependencies makes it a web service on its conventional port. A Rails, Hanami or Phoenix
 application owns its `package.json` (and `assets/package.json`): that asset pipeline is set aside rather
 than offered as a Node service — a CocoaPods or fastlane Gemfile beside a React Native app owns nothing.
-A site generator (Hugo, MkDocs, Jekyll, Middleman, Elm) owns a tooling-only `package.json` at its root
-the same way: a Hugo site with a Tailwind build used to be only a Node worker asking for a start command.
+A site generator (Middleman, Elm, and the generators with a recipe) owns a tooling-only `package.json` at
+its root the same way: a Hugo site with a Tailwind build used to be only a Node worker asking for a start
+command. A Flutter app's `web/` folder is a template `flutter build web` fills in, never a site: served
+raw it was a blank page that passed readiness, so it is set aside as the app's own files and the app is
+named with its build. There is no Flutter recipe: Flutter publishes no official image, and its SDK and
+packages are fetched from hosts a build cannot be proven against here.
 With a Dockerfile at the same root the Dockerfile is the candidate, and it takes the framework, the
 processes and the database drivers. Every other language is named only when nothing else at its root
 is a candidate, and C/C++ and MkDocs never inside another candidate's root, where they are that
@@ -630,7 +639,9 @@ the branch. Preflight's `git_submodules` is a decision only for a submodule on a
 when a same-host one is left off, and a pass when none is under the root; `git_lfs` warns that
 LFS-tracked files deploy as pointer files when LFS is off, and `git_lfs_unavailable` is blocked when LFS
 is on and this host has no `git-lfs`, which is where the release would otherwise stop at acquiring the
-source. Evidence recorded before this (no `submodulesChecked`/`lfsChecked`) keeps the old decisions.
+source. Evidence recorded before this (no `submodulesChecked`/`lfsChecked`) keeps the old decisions. A
+site generator whose configured theme is a submodule (`themes/<theme>` for Hugo and Zola) cannot build
+without it: `site_theme_in_submodule` is blocked while submodules are off, whichever host it is on.
 
 ## Case-mismatched imports
 
@@ -649,8 +660,22 @@ How dependencies install — which package manager, from which lockfile, frozen 
 release — is [JavaScript installs](#javascript-installs) below. Plain HTML uses the selected source directory as
 its public root; its output directory is empty, not the source directory repeated a second time.
 Packaged static output always serves on nginx port 80, regardless of a repository's development/start
-script port. nginx refuses every dot-path except `.well-known/` (`location ~ /\.(?!well-known/)`), so a
-stray `.git/`, `.env` or `.htaccess` in the published directory is never served. Quick setup and the wizard generate required HTTP readiness checks for that serving port.
+script port, with a configuration of the platform's own (`build_static_serving.go`) — nginx's stock one
+answered `/about` with 404 for every generator that writes `about.html`, redirected a directory to
+`http://` behind the TLS proxy and ignored the site's `404.html`:
+
+- `try_files $uri $uri.html $uri/`: `/about` is `about.html` (SvelteKit's adapter-static, VitePress's
+  clean URLs, Next's export, Astro's `build.format: 'file'`) before it is the directory `about/`;
+- `absolute_redirect off`, so the slash nginx adds to a directory is a relative `Location` that keeps
+  the scheme and host the browser used;
+- `error_page 404 /404.html`, answered from the site's own `404.html` when it has one and nginx's page
+  when it does not — never through the single-page fallback;
+- gzip for text, CSS, JavaScript, JSON, XML and SVG;
+- every dot-path except `.well-known/` refused (`location ~ /\.(?!well-known/)`), so a stray `.git/`,
+  `.env` or `.htaccess` in the published directory is never served, and a host's `_redirects` and
+  `_headers` files answer 404.
+
+Quick setup and the wizard generate required HTTP readiness checks for that serving port.
 
 The catalogue in `deploy/frameworks_node.go` is ordered and the first match wins, so a meta-framework
 built on Vite is recognised before Vite itself — every one of them lists `vite`, and reading that alone
@@ -669,7 +694,8 @@ missing is a low-confidence candidate that asks for one.
 | SolidStart, TanStack Start, Nitro | `@solidjs/start`, `@tanstack/*-start`, `nitropack` | server, 3000 | `node .output/server/index.mjs` (TanStack asks to confirm the entry) |
 | Angular | `@angular/core` (+ `@angular/ssr`) | site from `angular.json` (`dist/<app>/browser` with the application builder) / server, 4000 | `node dist/<app>/server/server.mjs` |
 | NestJS | `@nestjs/core` | server, 3000 | `start:prod` script, else `node dist/main` |
-| Gatsby, Docusaurus, VitePress, Eleventy | their packages | site `public`, `build`, `<docs>/.vitepress/dist`, `_site` | VitePress reads the docs directory from its build script (`docs:build`) |
+| Gatsby, Docusaurus, VitePress, Eleventy | their packages | site `public`, `build`, `<docs>/.vitepress/dist`, `_site` | VitePress reads the docs directory from its build script (`docs:build`); Eleventy's output is its build script's `--output`, else `dir.output` in its configuration, and with no build script it builds with `<runner> @11ty/eleventy` |
+| Hexo, VuePress, Slidev | `hexo`, `vuepress`/`vuepress-vite`/`@vuepress/cli`, `@slidev/cli` | site `_config.yml`'s `public_dir` (default `public`), `<docs>/.vuepress/dist`, `dist` (single-page) | Hexo builds with `<runner> hexo generate` and Slidev with `<runner> slidev build` when there is no build script; VuePress reads the docs directory from `vuepress build <dir>` |
 | Create React App, Vue CLI, Ember, Parcel, Vite | their packages | site `build` / `dist` | single-page fallback on by default |
 | Express, Fastify, Hono, Koa, Elysia, hapi | their packages | server, 3000 | the `start` script, else `node <main>` (`bun <main>` with a Bun lockfile) |
 
@@ -685,12 +711,14 @@ worker unless the manifest names an HTTP library; a bot or queue library answers
 it a worker without one, and a start script beside such a library no longer makes it a web service on
 3000 (see "Readiness, workers and start commands").
 
-A site whose client owns its routes — Vite, Create React App, Vue CLI, Ember, Parcel and Angular
-detections — carries `build.spaFallback`, which makes nginx answer any path with no file behind it with
-`index.html`; multi-page generators (Astro, Gatsby, Docusaurus, VitePress, Eleventy, SvelteKit static)
-serve files as they are, with the dot-path rule and no fallback. The switch is on the configure form and
-Build settings whenever there is static output, and is valid only with a static site or a recipe with an
-output directory.
+A site whose client owns its routes — Vite, Create React App, Vue CLI, Ember, Parcel, Angular and Slidev
+detections, a SvelteKit adapter-static whose configuration names a `fallback` page, and a host rule that
+rewrites every path to `/index.html` — carries `build.spaFallback`, which makes nginx answer any path with
+no file behind it with `index.html` (SvelteKit's `fallback` page, `200.html`, when it names one), except
+`/api` and the paths under it, which answer 404; multi-page generators (Astro, Gatsby, Docusaurus,
+VitePress, Eleventy, Hexo, SvelteKit static without a fallback) serve files by their clean URLs with no
+fallback. The switch is on the configure form and Build settings whenever there is static output, and is
+valid only with a static site or a recipe with an output directory.
 
 A service whose manifest depends on a recognised migration tool starts by applying its schema: the
 detected start command becomes `<runner> <schema command> && <start>`, in front of a start script or a
@@ -709,6 +737,94 @@ migrations instead (`prisma migrate dev`, `drizzle-kit generate`). When a push d
 readiness gate names it — `runtime_schema_push_refused`, from Prisma's `--accept-data-loss` message or Drizzle's
 rename and data-loss prompts — rather than a bare timeout. The tool must be installed by the lockfile; the
 runtime stage copies the build's `node_modules`, so a devDependency is available to the start command.
+
+## Static sites and site generators
+
+A site generator's root used to be read as something else: Hugo's `layouts/` a site serving
+`{{ .Content }}`, a Hugo Modules `go.mod` a Go service with no main package, MkDocs a Python service
+asking for a start command, a Jekyll `index.html` raw Liquid, Zola's `templates/` raw Tera, mdBook
+nothing at all. Detection now recognises each generator from its configuration, read as bounded data
+(`frameworks_site.go`, `detect_site_generators.go`), and the root becomes one candidate the generator
+builds and nginx serves. What stood in for it at that root is set aside with the reason: the templates
+and committed output (`index.html` under the root), a `go.mod` with no Go code beside it, a docs
+`requirements.txt` or a library's manifest with no server of its own, a `package.json` of PostCSS or
+Tailwind. Which generator builds is read again from the commit when the build is prepared, never from
+the plan.
+
+| Generator | Recognised by | Recipe and image | Build | Output |
+| --- | --- | --- | --- | --- |
+| Hugo | `hugo.toml`/`.yaml`/`.json`, `config/_default/`, or `config.toml` with `baseURL` or a theme beside `content/`, `layouts/`, `archetypes/` or `themes/` | `site`, `ghcr.io/gohugoio/hugo` (extended, as its own `hugo` user) | `hugo --gc --minify --baseURL "${HUGO_BASEURL:-/}"` | `publishDir`, default `public` |
+| Zola | `config.toml` with `base_url` beside `templates/`, `content/`, `themes/` or `sass/` | `site`, the binary of `ghcr.io/getzola/zola` on Alpine (0.23 and later, musl) or Debian slim (earlier, glibc) | `zola build --base-url /` | `output_dir`, default `public` |
+| mdBook | `book.toml` | `site`, the project's release archive on Alpine, checked against its digest | `mdbook build` | `build-dir`, default `book` (`book/html` with more than one renderer) |
+| Jekyll | `_config.yml` with a Gemfile naming `jekyll` or `github-pages`, or with `_posts/`, `_layouts/`, `_includes/` or a theme; never beside `.nojekyll` or Hexo's `package.json` | `site`, `ruby:<3.1–3.4>-slim` with `build-essential` | `bundle exec jekyll build --baseurl ""` | `destination`, default `_site` |
+| MkDocs, Zensical | `mkdocs.yml`, `zensical.toml` | `python` with an output directory | `mkdocs build`, `zensical build` | `site_dir`, default `site` |
+| Sphinx | `conf.py` in `docs/`, `doc/`, `docs/source/`… beside an `index.rst`, or where `.readthedocs.yaml` says | `python`, built from the project above its docs, where autodoc's code is | `sphinx-build -b html <docs> <docs>/_build/html` | `<docs>/_build/html` |
+| Pelican | `pelicanconf.py` | `python` | `pelican <PATH> -o <OUTPUT_PATH> -s publishconf.py` (`pelicanconf.py` without one) | `OUTPUT_PATH`, default `output` |
+| Lume | a `lume/` import in `deno.json` | `deno` with an output directory | `deno task build` | `_config.ts`'s `dest`, default `_site` |
+
+The Python and Deno recipes with an output directory build, then serve that directory from nginx the way
+the JavaScript recipe always has; they need no start command, and preflight asks for none. A Python site
+installs what `.readthedocs.yaml` lists for the documentation build, else a docs requirements file
+(`docs/requirements.txt`, `requirements-docs.txt`, …), else the root's manifest as any Python project does
+(with the generator's pinned release beside it when the manifest does not name it), else — nothing
+declared — the pinned releases its configuration needs: MkDocs and Material for MkDocs, the Sphinx theme
+and extensions `conf.py` names, Pelican with Markdown, and the plugins in `pythonSitePackages`. A plugin
+outside that table has no package the recipe can be sure of, so the plan is refused with the plugin named
+and a requirements file asked for. A plugin that dates pages from their commits brings `git` into the
+image.
+
+**Releases.** Hugo's release comes from `.hvm`, `HUGO_VERSION` in `netlify.toml`, `.tool-versions`, a
+workflow's `hugo-version:` or `HUGO_VERSION:`, or `hugo-extended` in `package.json`; Zola's from
+`ZOLA_VERSION`, `.tool-versions` or a workflow; mdBook's line (0.4 or 0.5) from a workflow or
+`.tool-versions`, else 0.4 for a book whose `book.toml` uses a setting 0.5 removed or whose `theme/`
+overrides the templates. A pin with an official image builds with that release; one older than any image
+(Hugo's start at 0.141.0) builds with the reviewed default and says so (`site_generator_version`,
+warning); a minimum (`module.hugoVersion.min`, a theme's `min_version`) is a floor, not a pin, and an
+unpinned Hugo site is `hugo_version_unpinned` (warning). A pinned release whose image the registry does
+not have when the build is prepared falls back to the default with a note in the run log. Jekyll builds
+on the Ruby `.ruby-version`, the Gemfile's `ruby` line or `Gemfile.lock` asks for, from 3.1 to 3.4
+(default 3.3); another release, or a Gemfile pin to one exact patch, is `jekyll_ruby_version` (warning).
+A `Gemfile.lock` installs frozen; one that lists no Linux platform gains `x86_64-linux` and
+`aarch64-linux` first. A site with no Gemfile gets one naming the `github-pages` gem, as GitHub Pages
+builds it, and `dependencies_unpinned` says how to lock it.
+
+**Building for the root it is served from.** Hugo, Zola, Jekyll and mdBook are built for `/`: a GitHub
+Pages project site's `baseURL`, `base_url`, `baseurl` or `site-url` names a sub-path this server does not
+serve it under. Hugo's base URL follows the planned domain through `HUGO_BASEURL`, a build variable
+detection declares with the domain template `{{scheme}}://{{hostname}}/`, so its sitemap and feeds name
+the site's own address. The GitHub Pages gem derives `url` from the repository's GitHub name, which a
+checkout here does not carry, and stops the build; a site whose `_config.yml` sets no `url` builds with a
+one-line override (`url: ""`) the recipe writes, and `PAGES_DISABLE_NETWORK=1` keeps the gem from asking
+GitHub's API while it builds.
+
+**Sub-paths.** A framework whose output is built for a sub-path — a literal `baseUrl` in
+`docusaurus.config.*`, `base` in `vite.config.*`, `astro.config.*`, `.vitepress/config.*` or
+`.vuepress/config.*`, SvelteKit's `paths.base`, Angular's `baseHref` or `--base-href`, Create React App's
+`homepage`, Vue CLI's `publicPath`, Gatsby's `pathPrefix` with `--prefix-paths`, Nuxt's `app.baseURL`, a
+`--base` flag in the build script — is served under that path, with `/` redirecting there (302, relative)
+and the fallback and 404 pages under it, and preflight's `static_base_path` (warning) says how to serve it
+at the root instead. A base the configuration computes (`base: process.env.BASE`) is served at the root
+and named (`static_base_path_computed`), since what it evaluates to here is not something reading can
+know. Only a plain path of letters, digits and `._~-` segments is ever written into the configuration.
+
+**Other hosts' rules.** `_redirects` and `_headers` (Netlify and Cloudflare Pages, at the root or in
+`public/` or `static/`, where a framework copies them into its output), `netlify.toml`'s `[[redirects]]`
+and `[[headers]]` (from the checkout's top too, when its `[build] base` is the site's root) and
+`vercel.json`'s `redirects`, `rewrites` and `headers` become nginx rules when the build is prepared:
+
+- an exact path or a `/dir/*` splat (Vercel's `:path*` and `(.*)` tails too), to a path or an http(s)
+  URL, with 301, 302, 303, 307 or 308, as a `return` that keeps the query string;
+- a 200 rewrite to a page of the site, and `/dir/* /dir/index.html 200` as a single-page application in
+  that directory; `/* /index.html 200` is the fallback switch;
+- a header for every path, a `/dir/*` prefix or one exact path, as `add_header … always`, repeated in a
+  location with headers of its own because nginx inherits none into it.
+
+Placeholders (`:slug`), conditions (country, language, role, query, `has`), a proxy to another host, a
+rewrite into its own prefix, `Basic-Auth` (a password, not a header), framing and transport headers and
+any value with a `"`, `\`, `$` or control character are left out and counted
+(`static_redirects_unsupported`, warning); what is applied is `static_hosting_rules` (pass). At most 100
+redirects and 64 header rules are written, and on a site built for a sub-path each rule's paths move
+under it. A rule applies whether or not a file exists at its path, as Netlify's forced rules do.
 
 ## Repository Dockerfiles and Compose files
 
@@ -812,7 +928,8 @@ that the rule is set aside; a JavaScript install input below the root is brought
 instead ([JavaScript installs](#javascript-installs)), and the run log names each rule set aside or
 overridden. Then it excludes `**/node_modules`, `.dockerignore` and the dashboard's own files. The static, PHP, Node and Deno images, which are served or copied whole, also exclude `.git`;
 recipes whose toolchains stamp or version builds from Git (Go, Python's setuptools-scm, Maven's
-git-commit-id, SourceLink) keep it. A static site also excludes `.env` and `.env.*`. Committed `.env`
+git-commit-id, SourceLink, Hugo's `enableGitInfo`, the MkDocs and Jekyll plugins that date pages from
+their commits) keep it; the site recipe's nginx stage copies only the output directory. A static site also excludes `.env` and `.env.*`. Committed `.env`
 files are otherwise left in: Next.js and Vite read public build values from them.
 
 ## JavaScript installs
@@ -1103,6 +1220,11 @@ a bare pyproject the standard library's `tomllib` reads `[project].dependencies`
 file rather than `pip install .`, which needs a build backend an application never set up (3.10 brings
 `tomli`). A process manager the start command runs that no manifest declares — `gunicorn`, `uvicorn` —
 is installed at the exact release `build_python.go` pins, into the same environment as the dependencies.
+With an output directory the recipe builds a site instead — MkDocs, Zensical, Sphinx, Pelican, or any
+build command that writes files — and nginx serves what it wrote
+([Static sites](#static-sites-and-site-generators)). `dependencies_unpinned` names each recipe's own way
+to pin: `composer.lock` for PHP, `deno.lock` for Deno, `Cargo.lock` for Rust, `Gemfile.lock` for Jekyll
+and a requirements file for a Python site that declared none.
 
 The interpreter family comes from `build.pythonVersion`, then `.python-version`, then Heroku-style
 `runtime.txt`, then pyproject's `requires-python` (or Poetry's `python` constraint): `>=3.11` picks the
@@ -1326,7 +1448,9 @@ parsed tasks.
 tasks; without a start task the conventional entry file (`main.ts`, `server.ts`, `mod.ts`, `main.js`,
 `server.js`, `main.tsx`, `index.ts`, `app.ts`, `src/main.ts`, `src/server.ts`, `src/index.ts`) is run with
 `--allow-all`. `deno install` (`--frozen` with a `deno.lock`) caches the imports on `denoland/deno:alpine`
-before the build task runs. A `fresh` import names the framework. The port is read from the start task
+before the build task runs. With an output directory — Lume, whose `lume/` import names it — the build
+task's output is served by nginx and there is no start command
+([Static sites](#static-sites-and-site-generators)). A `fresh` import names the framework. The port is read from the start task
 (`deno serve --port 3000`, else `deno serve`'s 8000) or the served file (`Deno.serve({ port: 3000 })`, Oak's
 `listen({ port })`, a `Deno.env.get("PORT")` read); with nothing readable it is `Deno.serve`'s default of
 8000, stated as evidence rather than asked as a question.
@@ -1593,8 +1717,9 @@ names, with the remedy the evidence supports:
 | `build_php_extension_missing` | `requires ext-X … it is missing from your system` | — |
 | `build_dependency_conflict`, `build_dependency_unavailable`, `build_dependency_local_path`, `build_dependency_advisory_blocked` | ERESOLVE, `ResolutionImpossible`, Composer/uv/Cargo/NuGet conflicts; ETARGET/E404, `No matching distribution`, NU1101, Maven artifacts, Go revisions, gems; conda `/croot/` paths; Composer advisories | — |
 | `build_registry_auth`, `build_registry_rate_limited`, `build_network` | E401/E403, `YN0041`, `terminal prompts disabled`; `toomanyrequests`; DNS, TLS and connection failures | — |
-| `build_command_not_found`, `build_script_missing` | `sh: X: not found` when the step exited 127 or a wrapper reports that status (`exit code 127`, `exited (127)`) — a caught probe prints the same line and carries on —, `executable file not found`, pip's `Cannot find command 'git'`, Laravel Wayfinder's `php artisan wayfinder:generate` in an asset stage without PHP; npm/pnpm/Bun/Yarn missing script | the build command with its runner moved to the image's package manager (the install planner's own rewrite, `nodeRunnerFor`), read from the install the build recorded |
-| `build_module_not_found`, `build_type_error`, `build_compile_error` | `Cannot find module`, `Can't resolve`, `No module named`, `no required module provides`; `Type error:`, `error TS…`; rustc, C#, javac/Kotlin, Go, Maven, Gradle, bundler and framework compile errors | — |
+| `build_command_not_found`, `build_script_missing` | `sh: X: not found` when the step exited 127 or a wrapper reports that status (`exit code 127`, `exited (127)`) — a caught probe prints the same line and carries on —, `executable file not found`, pip's `Cannot find command 'git'`, Laravel Wayfinder's `php artisan wayfinder:generate` in an asset stage without PHP, an mdBook preprocessor or renderer that is not installed; npm/pnpm/Bun/Yarn missing script | the build command with its runner moved to the image's package manager (the install planner's own rewrite, `nodeRunnerFor`), read from the install the build recorded |
+| `build_module_not_found`, `build_type_error`, `build_compile_error` | `Cannot find module`, `Can't resolve`, `No module named`, `no required module provides`, a Sphinx extension that does not import, an MkDocs plugin that is not installed; `Type error:`, `error TS…`; rustc, C#, javac/Kotlin, Go, Maven, Gradle, bundler and framework compile errors | — |
+| `build_theme_missing`, `build_site_render_failed` | a Hugo theme `module … not found in …/themes/`, Zola `Failed to load theme`, a Jekyll theme gem, MkDocs `Unrecognised theme name`, Sphinx `no theme named`; Hugo `error building site` and `execute of template failed`, Jekyll `Liquid Exception … in <file>`, Zola `Failed to build the site`, Eleventy `Problem writing Eleventy templates`, Hexo `Template render error`, MkDocs strict mode, Sphinx `-W` | — (a Hugo or Zola theme names the Source section's submodules switch) |
 | `build_output_missing`, `build_copy_source_missing`, `build_embed_source_missing`, `build_wrong_root` | the recipe's own guard, a missing `COPY` source, `go:embed` without files, a manifest the build cannot find | the detected output directory, else the field to review |
 | `build_out_of_memory`, `build_disk_full`, `build_timeout` | heap limits, exit 137 (which points at no line: the step's output only shows where it was), `OutOfMemoryError`; `no space left on device`; the 30-minute limit | `NODE_OPTIONS=--max-old-space-size=` three quarters of the server's memory (from 1 GiB, at most 8 GiB) |
 | `build_permission`, `build_script_crlf`, `build_wrapper_missing`, `build_dev_dependency_in_production`, `build_bundle_platform_missing`, `build_hugo_extended_required`, `build_base_image_missing`, `build_platform_unsupported`, `build_dockerfile_invalid` | exit 126, `\r` interpreters, the Gradle/Maven wrapper, Symfony dev bundles and Telescope, a Gemfile.lock without Linux, Hugo Pipes' Sass, a FROM that does not resolve, a manifest for another platform, a Dockerfile that does not parse | — |
@@ -1612,8 +1737,13 @@ own starters: Astro 7 (static), Nuxt 4 and React Router 8 (servers), FastAPI on 
 whose first request reads its migrated table, a Streamlit script (its health endpoint and a file served
 through its own static-serving setting) and a Gradio app (the value in the page's embedded config), an
 axum service, a Maven jar and a Gradle jar, an ASP.NET Core minimal API, a Deno server, a minimal Laravel
-12 application (migrated, with the form's generated `APP_KEY`) and a plain `index.php`. It checks
-readiness and served values without supplying build values at runtime; recipe fixtures also inspect logs,
+12 application (migrated, with the form's generated `APP_KEY`) and a plain `index.php`, and the site
+generators: Hugo (Sass through Hugo Pipes, the build value read with `getenv`), Zola, mdBook (two
+renderers, the title from `MDBOOK_BOOK__TITLE`), Jekyll 4 from its `Gemfile.lock` (a plugin reading the
+build value), MkDocs with Material, Lume and Eleventy with no build script and its output in its
+configuration, each also fetched by a clean URL and answering a missing page with the site's own
+`404.html`; the SvelteKit static fixture serves a prerendered `/about` as `about.html` and falls back to
+its `200.html`. It checks readiness and served values without supplying build values at runtime; recipe fixtures also inspect logs,
 metadata and saved image layers for private install credentials. The Go fixture proves generated code,
 custom startup and the selected toolchain through its HTTP response. These local adapter journeys
 complement the production-build browser gate; they do not constitute public provider/DNS/TLS or clean-VM
@@ -1635,4 +1765,11 @@ from every declaration, and the system packages each dependency adds), `build_no
 `prisma.config.ts` included), `build_node_build_test.go` (legacy OpenSSL, T3 Env, `--env-file`)
 and `preflight_build_test.go`; the rendered Dockerfiles for canvas on Alpine, a GitHub dependency,
 onnxruntime-node on Debian slim, Puppeteer with Alpine's Chromium, Prisma 7 on npm and on Bun with Node
-24, and a webpack-4-era build were built and run locally when they were written.
+24, and a webpack-4-era build were built and run locally when they were written. Static sites are covered
+by `build_static_serving_test.go` (the nginx configuration, hosting rules and the shell that writes
+them), `detect_site_generators_test.go`, `detect_static_site_test.go`, `build_site_test.go`,
+`preflight_static_site_test.go` and `build_output_cause_site_test.go`; beyond the live fixtures, Hugo
+Modules and Hugo with PostCSS, Zola 0.19 on Debian, mdBook 0.4, Jekyll on the github-pages gem with no
+Gemfile and with a macOS-only lock, Sphinx with autodoc, Pelican, Zensical, Hexo, VuePress 2 under a
+base path, Slidev, a Vite site with `_redirects`, `_headers` and a Vercel function, and a multi-page HTML
+site were built and served locally when the recipes were written.

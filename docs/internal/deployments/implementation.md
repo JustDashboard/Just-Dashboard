@@ -326,7 +326,9 @@ only renderer/executor/validation authority for their feature.
   `public_url_variable_missing`, `request_body_limit` and the rest, listed in the recipe guide), so a
   certain loopback bind is a blocker before Deploy rather than a readiness timeout after it. The closed
   recipe set is
-  `node`, `go`, `python`, `rust`, `java`, `dotnet`, `deno` (`validRecipe`), and `build.pythonVersion`
+  `node`, `go`, `python`, `rust`, `java`, `dotnet`, `deno`, `php` and `site` (`validRecipe`; `site`
+  builds Hugo, Zola, mdBook and Jekyll, and Python and Deno build a site generator's output when they
+  have an output directory), and `build.pythonVersion`
   and `build.spaFallback` are the two additive plan fields, bounded by `PlanConfiguration.Validate`.
   The contract per language is [the recipe guide](recipes.md). The framework detection recognised is
   recorded on the build plan when a draft commits (`build.framework` on the configuration read) —
@@ -383,7 +385,16 @@ only renderer/executor/validation authority for their feature.
   `source_publishes_image`, and `git_submodules`/`git_lfs`/`git_lfs_unavailable` judged per build root,
   with `git-lfs` observed on the host when LFS is included. One project still runs one process: a worker
   or a split repository's other half is a second project from the same repository, which the findings
-  name with its root and start command.
+  name with its root and start command. A static site's candidate also carries `staticSite`
+  (`detect_static_site.go`, validated by `validateDetectedStaticSite`): the generator, the release it
+  builds with and what the repository declared, the sub-path its framework built it for, the theme's Git
+  submodule, and how many of another host's redirect and header rules the static server applies or
+  leaves out. `preflight_static_site.go` turns it into `static_base_path`, `static_base_path_computed`,
+  `hugo_version_unpinned`, `site_generator_version`, `jekyll_ruby_version`, `site_theme_in_submodule`
+  (blocked while submodules are off), `static_redirects_unsupported` and `static_hosting_rules`. The
+  rules themselves, the base path and SvelteKit's fallback page are read again from the commit when the
+  build is prepared (`build_static_serving.go`) and written into nginx's configuration as literals that
+  pass a strict character check.
 - A detected Node service that declares a migration tool applies its schema before it serves. Detection
   records the tool (`schemaTool`), the command it chose (`schemaCommand`) and whether the package's own
   start script already runs it, and chains the step in front of the start command through the manager's
