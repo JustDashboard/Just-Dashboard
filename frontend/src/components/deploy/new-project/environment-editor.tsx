@@ -38,6 +38,7 @@ export function EnvironmentEditor({
   onRowsChange,
   dotenv,
   onDotenvChange,
+  platformSkipped = [],
   retainedKeys = [],
   onRemoveRetainedKey,
   onConnectDatabase,
@@ -50,6 +51,8 @@ export function EnvironmentEditor({
   onRowsChange: (rows: EnvironmentRow[]) => void
   dotenv: string
   onDotenvChange: (value: string) => void
+  /** Names the paste sets that the deployment sets itself, which are left out. */
+  platformSkipped?: string[]
   retainedKeys?: string[]
   onRemoveRetainedKey?: (key: string) => void
   onConnectDatabase: (
@@ -266,6 +269,13 @@ export function EnvironmentEditor({
             placeholder={"API_KEY=…\nNEXT_PUBLIC_SITE_URL=https://…"}
             className="font-mono sm:text-xs"
           />
+          {platformSkipped.length > 0 && (
+            <FormNote>
+              {platformSkipped.join(" and ")} {platformSkipped.length === 1 ? "is" : "are"} left
+              out: the deployment sets PORT to the internal port the proxy and the readiness check
+              connect to, and builds and runs in production.
+            </FormNote>
+          )}
         </Disclosure>
         <FormNote>
           Encrypted when saved. Available to the build command and at runtime. Values embedded into

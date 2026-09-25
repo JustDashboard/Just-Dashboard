@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { readDotenv } from "./dotenv"
+import { readDotenv, withoutPlatformVariables } from "./dotenv"
 
 // Each case is one the server's parseDotenvEntries answers the same way, so a
 // preview never lists what the import would refuse, or cut, or join.
@@ -46,5 +46,22 @@ describe("readDotenv", () => {
 
   test("a comment after a quoted value is allowed", () => {
     expect(readDotenv('A="x" # note\nB=2').entries.map((entry) => entry.value)).toEqual(["x", "2"])
+  })
+})
+
+describe("withoutPlatformVariables", () => {
+  test("leaves out PORT and NODE_ENV lines and keeps everything else as written", () => {
+    const { text, skipped } = withoutPlatformVariables(
+      "# local\nPORT=5173\nexport NODE_ENV=development\nAPI_URL=https://api.example.test\n",
+    )
+    expect(skipped).toEqual(["PORT", "NODE_ENV"])
+    expect(readDotenv(text).entries.map((entry) => entry.name)).toEqual(["API_URL"])
+    expect(text).toContain("# local")
+  })
+
+  test("a paste without them is returned untouched, and a value spanning lines is never cut", () => {
+    expect(withoutPlatformVariables("A=1\r\nB=2")).toEqual({ text: "A=1\r\nB=2", skipped: [] })
+    const multiline = 'PORT="3000\n4000"\nB=2'
+    expect(withoutPlatformVariables(multiline)).toEqual({ text: multiline, skipped: [] })
   })
 })

@@ -3966,7 +3966,8 @@ export type DeploymentDotenvImportPreview = {
   variables: {
     name: string
     line: number
-    change: "added" | "changed" | "unchanged" | "refused"
+    /** "skipped" is a name the request asked the import to leave out. */
+    change: "added" | "changed" | "unchanged" | "skipped" | "refused"
     reason?: "invalid_name" | "duplicate" | "invalid_value"
   }[]
 }

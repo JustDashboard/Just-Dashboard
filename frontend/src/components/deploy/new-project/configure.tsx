@@ -69,6 +69,7 @@ import {
   type EnvironmentRow,
   type FlowUpdate,
 } from "@/components/deploy/new-project/draft"
+import { withoutPlatformVariables } from "@/components/deploy/settings/dotenv"
 
 function asError(error: unknown) {
   return error instanceof Error ? error : new Error(String(error))
@@ -217,12 +218,18 @@ export function Configure({
   const [branch, setBranch] = useState(flow.source.ref ?? "main")
   const [branchBusy, setBranchBusy] = useState(false)
   const sentRows = environmentRowsToSend(envRows, flow.configuration.variables)
-  const text = environmentText(sentRows, dotenv)
+  // A pasted local .env's PORT and NODE_ENV are the deployment's to set; a
+  // Compose file may interpolate ${PORT} itself, so its paste is sent whole.
+  const pasted =
+    flow.configuration.build.method === "compose"
+      ? { text: dotenv, skipped: [] }
+      : withoutPlatformVariables(dotenv)
+  const text = environmentText(sentRows, pasted.text)
   const environmentNames = new Set([
     ...retainedKeys,
     ...sentRows.map((row) => row.name),
     ...Array.from(
-      dotenv.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/gm),
+      pasted.text.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/gm),
       (match) => match[1],
     ),
   ])
@@ -923,6 +930,7 @@ export function Configure({
                 onRowsChange={setEnvRows}
                 dotenv={dotenv}
                 onDotenvChange={setDotenv}
+                platformSkipped={pasted.skipped}
                 retainedKeys={retainedKeys}
                 onRemoveRetainedKey={removeRetainedKey}
                 suppliedVariables={[...environmentNames]}

@@ -126,3 +126,30 @@ export const REFUSAL_WORD: Record<DotenvRefusal, string> = {
   duplicate: "appears twice",
   invalid_value: "value too long",
 }
+
+/**
+ * The names a local .env sets for development that the deployment sets
+ * itself: PORT is the internal port the proxy and the readiness check connect
+ * to, and NODE_ENV the production mode the recipe builds and runs in. A paste
+ * that carried them moved the server off the port it is reached on and built
+ * the development variant, so an import leaves them out unless asked not to.
+ */
+export const PLATFORM_NAMES = ["PORT", "NODE_ENV"]
+
+/**
+ * A paste without its platform names' lines, for the new-project flow, which
+ * sends the paste as text: only a one-line assignment is removed, so a value
+ * spanning lines is never cut in half.
+ */
+export function withoutPlatformVariables(raw: string): { text: string; skipped: string[] } {
+  const reading = readDotenv(raw)
+  const lines = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n")
+  const skipped: string[] = []
+  for (const entry of reading.entries) {
+    if (!PLATFORM_NAMES.includes(entry.name) || entry.refused || entry.value.includes("\n"))
+      continue
+    lines[entry.line - 1] = ""
+    skipped.push(entry.name)
+  }
+  return skipped.length ? { text: lines.join("\n"), skipped } : { text: raw, skipped }
+}

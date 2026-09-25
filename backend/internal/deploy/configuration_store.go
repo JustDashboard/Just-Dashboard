@@ -50,10 +50,16 @@ type DotenvImportRequest struct {
 	Dotenv      string   `json:"dotenv"`
 	Sensitivity string   `json:"sensitivity"`
 	Scopes      []string `json:"scopes"`
+	// Skip names what the import leaves out: the settings page skips PORT
+	// and NODE_ENV by default, which a local .env sets for development and
+	// the deployment sets itself (the internal port the proxy and readiness
+	// check use, and the production mode the recipe builds in).
+	Skip []string `json:"skip,omitempty"`
 }
 
 // DotenvImportVerdict is what importing the same request would do to one name:
-// added, changed, unchanged or refused. Reason names a refusal (invalid_name,
+// added, changed, unchanged, skipped (a name the request leaves out) or
+// refused. Reason names a refusal (invalid_name,
 // duplicate or invalid_value) because one refused name refuses the whole
 // import, and the page has to point at the line to fix.
 type DotenvImportVerdict struct {
@@ -482,6 +488,13 @@ func (s *PlanningStore) ImportDotenv(
 	if err != nil {
 		return nil, err
 	}
+	skipped, err := dotenvSkipped(request.Skip)
+	if err != nil {
+		return nil, err
+	}
+	for name := range skipped {
+		delete(parsed, name)
+	}
 	if len(parsed) == 0 {
 		return nil, fmt.Errorf("%w: dotenv input is empty", ErrInvalidVariable)
 	}
@@ -524,6 +537,21 @@ func (s *PlanningStore) ImportDotenv(
 	return &VariableMutationResult{Variables: variables, DesiredRevision: desired}, nil
 }
 
+// dotenvSkipped is the set of names an import leaves out.
+func dotenvSkipped(names []string) (map[string]bool, error) {
+	if len(names) > 16 {
+		return nil, fmt.Errorf("%w: an import leaves out at most 16 names", ErrInvalidVariable)
+	}
+	skipped := map[string]bool{}
+	for _, name := range names {
+		if ValidateEnvKey(name) != nil {
+			return nil, fmt.Errorf("%w: skipped name %q is not a variable name", ErrInvalidVariable, name)
+		}
+		skipped[name] = true
+	}
+	return skipped, nil
+}
+
 // PreviewDotenvImport answers what ImportDotenv would do with the same request
 // and writes nothing. Values meet the stored ones only as digests, here on the
 // server, so the answer carries neither a value nor a digest of one. What the
@@ -542,6 +570,10 @@ func (s *PlanningStore) PreviewDotenvImport(
 	}
 	if len(entries) == 0 {
 		return nil, fmt.Errorf("%w: dotenv input is empty", ErrInvalidVariable)
+	}
+	skipped, err := dotenvSkipped(request.Skip)
+	if err != nil {
+		return nil, err
 	}
 	template := VariableWriteRequest{Value: new(string), Sensitivity: request.Sensitivity, Scopes: request.Scopes}
 	if _, err := validateVariableWrite(template); err != nil {
@@ -573,6 +605,10 @@ func (s *PlanningStore) PreviewDotenvImport(
 		case entry.refused != "":
 			verdict.Change, verdict.Reason = "refused", entry.refused
 			refused = true
+		case skipped[entry.name]:
+			verdict.Change = "skipped"
+			preview.Variables = append(preview.Variables, verdict)
+			continue
 		case !exists:
 			verdict.Change = "added"
 		case existing.valueDigest == digestBytes([]byte(entry.value)) &&
