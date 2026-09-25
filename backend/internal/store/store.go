@@ -149,6 +149,19 @@ CREATE TABLE IF NOT EXISTS db_diagram_layouts (
   PRIMARY KEY (connection_id, schema_name)
 );
 
+-- Boards live with the dashboard's other durable state, including embedded
+-- Excalidraw image data. Revision guards prevent a stale tab overwriting a
+-- newer save. A new table is additive for existing installations.
+CREATE TABLE IF NOT EXISTS boards (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL,
+  scene      TEXT NOT NULL DEFAULT '{"elements":[],"appState":{},"files":{}}',
+  revision   INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_boards_updated ON boards(updated_at DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS backup_jobs (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   name        TEXT NOT NULL UNIQUE,

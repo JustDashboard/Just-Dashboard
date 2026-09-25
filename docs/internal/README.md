@@ -37,6 +37,8 @@ strategy, and feature ownership behind those rules.
 - [`backend/databases-proxy-platform.md`](backend/databases-proxy-platform.md) — eight database engines,
   nginx/proxy/TLS/DNS, streaming, jobs, secrets, agent mode, configuration, releases, self-update, and the
   dashboard's own settings (restart, rebuild, rollback, Tailscale certificates).
+- [`boards.md`](boards.md) — Excalidraw integration, server-side board storage, save conflicts, resource
+  cards, and board route permissions.
 
 ## Deployments and frontend
 

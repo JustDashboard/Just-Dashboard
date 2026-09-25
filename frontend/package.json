@@ -3,8 +3,8 @@
   "version": "0.7.0",
   "private": true,
   "scripts": {
-    "dev": "node scripts/sync-monaco.mjs && next dev",
-    "build": "node scripts/sync-monaco.mjs && next build",
+    "dev": "node scripts/sync-monaco.mjs && node scripts/sync-excalidraw.mjs && next dev",
+    "build": "node scripts/sync-monaco.mjs && node scripts/sync-excalidraw.mjs && next build",
     "start": "next start",
     "lint": "eslint",
     "test": "bun test src",
@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.1.1",
+    "@excalidraw/excalidraw": "0.18.1",
     "@heroicons/react": "^2.2.0",
     "@mdi/js": "^7.4.47",
     "@monaco-editor/react": "^4.7.0",

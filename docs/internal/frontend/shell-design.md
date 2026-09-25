@@ -1,6 +1,6 @@
 # Frontend shell and design system
 
-The App Router currently has 76 `page.tsx` entry points, including nested database, Docker, proxy,
+The App Router currently has 85 `page.tsx` entry points, including nested database, Docker, proxy,
 security, and deployment workflows plus `/login`. Most page modules are client components; the three
 deployment detail/new wrappers remain server components and hand interaction to client components under
 `components/deploy/`.
@@ -73,7 +73,7 @@ row's slot made the heading read as one more row to press.
 
 The groups run in the order a day on the server runs, and the rail names each group:
 **Server** (Overview, and Monitoring: Metrics, Processes, Logs), **Apps** (Deployments first,
-then Databases, Docker), **Workspace** (Terminal, Files, Git), **Protection** (Security, Backups),
+then Databases, Docker), **Workspace** (Boards, Terminal, Files, Git), **Protection** (Security, Backups),
 **Advanced** (Server configuration: Proxy & TLS, Packages, System users, Audit log) and **System**
 (Settings). The top-level list is twelve rows rather than seventeen: the three monitoring pages answer
 one question, and the four configuration pages are opened to change the server rather than to use it.
