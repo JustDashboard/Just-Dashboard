@@ -184,15 +184,20 @@ disagree about order; every path is resolved before storing.
 
 A folder's **colour** is the same kind of fact and lives beside them (`files.colours`, a map from the
 entry's resolved path to one of nine names — blue, teal, green, yellow, orange, red, pink, purple,
-graphite), returned with the places as `colours`. `PUT /files/colours` (`file.write`, audited as
+graphite), returned with the places as `colours`. The strip's global choice is stored as
+`files.defaultColour` and returned as `defaultColour`; `PUT /files/colours/default` (`file.write`,
+audited as `file.colour.default`) sets it and clears individual labels in one transaction so every
+folder changes at once. New individual labels take precedence until the next global choice.
+`PUT /files/colours` (`file.write`, audited as
 `file.colour`) sets one path per request, or clears it with an empty colour, so two tabs labelling two
 folders cannot undo each other; a name outside the closed set is refused, and so is a path the roots
 refuse. The label follows its folder: a move (a rename is one) re-keys it and everything labelled under
 it, using `files.MoveEnds` to learn where the entry actually landed, and a delete drops it, so a new
-folder of the same name starts blue. Both are best-effort after the filesystem operation has succeeded.
+folder of the same name starts with the global colour, or blue if none was chosen. Both are best-effort
+after the filesystem operation has succeeded.
 
 Frontend `components/files/`: the page is **one framed workbench** with no page header above it — a
-strip across the top carrying where you are (the folder in its colour, which opens the colour menu, the
+strip across the top carrying where you are (a compact folder button for the global colour, the
 path and its star) and every page command (Find, content search, refresh, the view, arrange, the GitHub
 account, New, Upload, and the toggles for the two side columns), then a sidebar, the listing and an
 inspector as three flush columns with a hairline between each, resizable through `panel-size.ts`. The
@@ -205,13 +210,14 @@ not change as the listing walks into folders — the walking happens in the list
 place as what it is (`PlaceMark`: `/` as the host's distribution, a home as a folder with a house in it).
 `file-icon.tsx` is the vocabulary (~200 extensions, the files with none — Dockerfile, authorized_keys,
 lockfiles — and ~90 folders whose name says what they hold) and draws it itself rather than from an icon
-set: a folder is a two-tone folder in its colour (its label from `FolderColourProvider`, else graphite for
-build output and installed dependencies, else blue) with a product's Simple Icons mark
+set: a folder is a two-tone folder in its colour (its label from `FolderColourProvider`, else the
+chosen global colour, else graphite for build output and installed dependencies, else blue) with a product's Simple Icons mark
 (`public/logos/mono/`) or a Heroicons glyph pressed into its face; a file is a page with its corner
 folded, the format's own logo on it (`public/logos/`, devicon's language marks among them), and a band
 along its foot in the format's colour (`--language-*`, `--tag-*`) carrying the extension where the icon
-is large enough. `folder-colour.tsx` is the picker — swatches in the inspector, a menu behind the strip's
-folder — and `file-actions.tsx` offers the same choice as a submenu on every folder's menu and on the
+is large enough. `folder-colour.tsx` is the picker — swatches in the inspector for one folder, a menu
+behind the strip's small folder button for all folders — and `file-actions.tsx` offers the individual
+choice as a submenu on every folder's menu and on the
 background menu for the folder being browsed. The inspector (`preview-panel.tsx`) opens on the thing
 large — the picture, the video, or its folder or page — with its name, kind and colour under it, and
 describes the folder being browsed while nothing in it is chosen. `thumbnail.tsx` draws a picture as itself and a video as its first frame on a

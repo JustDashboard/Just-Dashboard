@@ -90,6 +90,7 @@ async function json(route: Route, body: unknown, status = 200) {
 async function mockFiles(
   page: Page,
   colours: Record<string, string> = { [`${home}/photos`]: "red" },
+  palette: { defaultColour?: string } = {},
 ) {
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url())
@@ -108,6 +109,7 @@ async function mockFiles(
         ],
         bookmarks: [{ path: `${home}/photos`, name: "photos" }],
         colours,
+        defaultColour: palette.defaultColour,
       })
     }
     if (path === "/files/list") {
@@ -175,6 +177,11 @@ async function mockFiles(
     }
     if (path === "/files/upload") {
       return json(route, { uploaded: ["x"], path: url.searchParams.get("path") }, 201)
+    }
+    if (path === "/files/colours/default") {
+      palette.defaultColour = route.request().postDataJSON().colour
+      for (const target of Object.keys(colours)) delete colours[target]
+      return json(route, { defaultColour: palette.defaultColour, colours })
     }
     if (path === "/files/colours") {
       const { path: target, colour } = route.request().postDataJSON()
@@ -267,6 +274,65 @@ test("a folder's colour is drawn everywhere it is and saved on the server", asyn
     /--folder-blue/,
   )
   expect(colours).toEqual({ [`${home}/photos`]: "red" })
+})
+
+test("the compact toolbar control colours all folders and individual colours still work", async ({
+  page,
+}) => {
+  const colours: Record<string, string> = { [`${home}/photos`]: "red" }
+  const palette: { defaultColour?: string } = {}
+  await mockFiles(page, colours, palette)
+  const sent: { url: string; body: { path?: string; colour: string } }[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/api/v1/files/colours")) {
+      sent.push({ url: request.url(), body: request.postDataJSON() })
+    }
+  })
+  await openFiles(page)
+
+  const button = page.getByRole("button", { name: "Colour all folders" })
+  const icon = button.locator("[data-folder]")
+  const buttonBox = await button.boundingBox()
+  const iconBox = await icon.boundingBox()
+  expect(iconBox!.width).toBeLessThanOrEqual(18)
+  expect(buttonBox!.width).toBeLessThanOrEqual(32)
+
+  await button.click()
+  await page.getByRole("menuitem", { name: "Yellow" }).click()
+  await expect(page.locator(`tr[data-entry-path='${home}/photos'] [data-folder]`)).toHaveAttribute(
+    "style",
+    /--folder-yellow/,
+  )
+  await expect(page.locator(`tr[data-entry-path='${home}/site'] [data-folder]`)).toHaveAttribute(
+    "style",
+    /--folder-yellow/,
+  )
+  await expect.poll(() => sent[0]?.body).toEqual({ colour: "yellow" })
+  expect(sent[0].url).toContain("/files/colours/default")
+  await expect.poll(() => palette.defaultColour).toBe("yellow")
+  expect(colours).toEqual({})
+
+  await page.locator(`tr[data-entry-path='${home}/site']`).click()
+  await page.getByRole("radio", { name: "Green" }).click()
+  await expect(page.locator(`tr[data-entry-path='${home}/site'] [data-folder]`)).toHaveAttribute(
+    "style",
+    /--folder-green/,
+  )
+  await expect(page.locator(`tr[data-entry-path='${home}/photos'] [data-folder]`)).toHaveAttribute(
+    "style",
+    /--folder-yellow/,
+  )
+  await expect.poll(() => sent[1]?.body).toEqual({ path: `${home}/site`, colour: "green" })
+
+  await page.reload()
+  await expect(page.locator(`tr[data-entry-path='${home}/site'] [data-folder]`)).toHaveAttribute(
+    "style",
+    /--folder-green/,
+  )
+  await expect(page.locator(`tr[data-entry-path='${home}/photos'] [data-folder]`)).toHaveAttribute(
+    "style",
+    /--folder-yellow/,
+  )
 })
 
 test("pictures are visible in the listing and Space opens the viewer", async ({ page }) => {

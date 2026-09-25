@@ -48,6 +48,7 @@ func (s *Server) mountFileRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/extract", s.handle(s.handleFileExtract))
 			r.Method(http.MethodPut, "/bookmarks", s.handle(s.handleFileBookmarks))
 			r.Method(http.MethodPut, "/colours", s.handle(s.handleFileColour))
+			r.Method(http.MethodPut, "/colours/default", s.handle(s.handleFileDefaultColour))
 		})
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))

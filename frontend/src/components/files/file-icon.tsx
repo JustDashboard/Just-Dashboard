@@ -99,31 +99,47 @@ export const FOLDER_COLOUR_NAMES: Record<FolderColour, string> = {
 }
 
 /**
- * The labels the operator gave folders on this server, by path.
+ * The labels the operator gave folders on this server, by path, and the
+ * default colour chosen for all of them.
  *
  * A context rather than a prop because a folder is drawn in seven places —
  * the rows, the tiles, the inspector, the strip, the sidebar, the finder, the
  * viewer — and a label that reached only the ones someone remembered to
  * thread it through is a folder that is red in the listing and blue beside it.
  */
-const FolderColours = createContext<Record<string, string>>({})
+const FolderColours = createContext<{
+  colours: Record<string, string>
+  defaultColour?: FolderColour
+}>({
+  colours: {},
+})
 
 export function FolderColourProvider({
   colours,
+  defaultColour,
   children,
 }: {
   colours: Record<string, string>
+  defaultColour?: string
   children: React.ReactNode
 }) {
-  return <FolderColours value={colours}>{children}</FolderColours>
+  return (
+    <FolderColours value={{ colours, defaultColour: validFolderColour(defaultColour) }}>
+      {children}
+    </FolderColours>
+  )
 }
 
-const isFolderColour = (value: string | undefined): value is FolderColour =>
-  (FOLDER_COLOURS as readonly string[]).includes(value ?? "")
+export const validFolderColour = (value: string | undefined): FolderColour | undefined =>
+  (FOLDER_COLOURS as readonly string[]).includes(value ?? "") ? (value as FolderColour) : undefined
 
-/** The colour a folder takes with no label: what its name suggests, else blue. */
-export function defaultFolderColour(name: string, path?: string): FolderColour {
-  return folderKind(name, path).colour ?? "blue"
+/** An unlabelled folder uses the global choice, then its kind, then blue. */
+export function defaultFolderColour(
+  name: string,
+  path?: string,
+  globalColour?: FolderColour,
+): FolderColour {
+  return globalColour ?? folderKind(name, path).colour ?? "blue"
 }
 
 /** The colour a folder is drawn in, given the labels: its own, else its default. */
@@ -131,13 +147,15 @@ export function folderColourOf(
   labelled: Record<string, string>,
   path: string | undefined,
   name: string,
+  globalColour?: FolderColour,
 ): FolderColour {
   const own = path ? labelled[path] : undefined
-  return isFolderColour(own) ? own : defaultFolderColour(name, path)
+  return validFolderColour(own) ?? defaultFolderColour(name, path, globalColour)
 }
 
 export function useFolderColour(path: string | undefined, name: string): FolderColour {
-  return folderColourOf(useContext(FolderColours), path, name)
+  const { colours, defaultColour } = useContext(FolderColours)
+  return folderColourOf(colours, path, name, defaultColour)
 }
 
 // ---- Kinds -----------------------------------------------------------------

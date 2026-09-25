@@ -1246,9 +1246,12 @@ already knows the format by is a legend they do not have to learn.
 A folder's colour is a **label**, and §3's tag argument is why it is the operator's: "the red one is
 production" is a fact about this server, so it is stored there (`files.colours`) and drawn wherever the
 folder is — the listing, the tiles, the sidebar, the inspector, the strip, the finder, the terminal's tree.
-Nine names (`--folder-*`, one value each; the tab and the pressed mark are mixed from the face in
-`[data-folder]`), blue until somebody says otherwise, graphite for build output and installed
-dependencies because nothing in them is yours to edit. The picker is the folder drawn in each colour,
+The strip's compact folder button sets one colour for every folder, stores it as `files.defaultColour`,
+and clears old individual labels. A folder can then be labelled on its own in its inspector or menu;
+that label takes precedence until another global choice. Nine names (`--folder-*`, one value each;
+the tab and the pressed mark are mixed from the face in `[data-folder]`), blue until somebody says
+otherwise, graphite for build output and installed dependencies until a global colour is picked
+because nothing in them is yours to edit. The picker is the folder drawn in each colour,
 the chosen one `bg-accent` like every selection. The Files page is a workbench and, like the terminal
 and a Git working copy, has no page header: its commands sit in the strip across the workbench, beside
 the folder they act on.

@@ -52,6 +52,8 @@ import {
   folderColourOf,
   FolderColourProvider,
   FolderIcon,
+  FolderSwatch,
+  validFolderColour,
   type FolderColour,
 } from "@/components/files/file-icon"
 import { FolderColourMenu } from "@/components/files/folder-colour"
@@ -279,9 +281,18 @@ export default function FilesPage() {
   const [colourEdits, setColourEdits] = useState<{
     over?: FilePlaces
     edits: Record<string, string>
+    defaultColour?: FolderColour
+    reset?: boolean
   }>({ edits: {} })
+  const defaultColour =
+    (colourEdits.over === places.data && colourEdits.defaultColour) ||
+    validFolderColour(places.data?.defaultColour)
   const colours = useMemo(() => {
-    const merged = { ...(places.data?.colours ?? {}) }
+    const merged = {
+      ...(colourEdits.over === places.data && colourEdits.reset
+        ? {}
+        : (places.data?.colours ?? {})),
+    }
     if (colourEdits.over === places.data) {
       for (const [p, colour] of Object.entries(colourEdits.edits)) {
         if (colour) merged[p] = colour
@@ -711,9 +722,11 @@ export default function FilesPage() {
 
   const setColour = async (target: Pick<FileEntry, "path" | "name">, colour: FolderColour) => {
     // A folder's default is no label at all, so choosing it clears the one it
-    // had rather than storing blue against a folder that would be blue anyway.
-    const value = colour === defaultFolderColour(target.name, target.path) ? "" : colour
+    // had rather than storing the default against a folder that already uses it.
+    const value =
+      colour === defaultFolderColour(target.name, target.path, defaultColour) ? "" : colour
     setColourEdits((prev) => ({
+      ...(prev.over === places.data ? prev : {}),
       over: places.data,
       edits: { ...(prev.over === places.data ? prev.edits : {}), [target.path]: value },
     }))
@@ -721,6 +734,15 @@ export default function FilesPage() {
       await put("/files/colours", { path: target.path, colour: value })
     } catch (err) {
       notify.error("Could not colour that folder", err)
+    }
+    places.refresh()
+  }
+  const setDefaultColour = async (colour: FolderColour) => {
+    setColourEdits({ over: places.data, edits: {}, defaultColour: colour, reset: true })
+    try {
+      await put("/files/colours/default", { colour })
+    } catch (err) {
+      notify.error("Could not colour all folders", err)
     }
     places.refresh()
   }
@@ -760,7 +782,7 @@ export default function FilesPage() {
     onEditImage: () => setEditingImage(entry.path),
     onToggleStar: () => toggleStar(entry.path, entry.name),
     starred: bookmarks.some((b) => b.path === entry.path),
-    colour: folderColourOf(colours, entry.path, entry.name),
+    colour: folderColourOf(colours, entry.path, entry.name, defaultColour),
     onColour: (colour) => void setColour(entry, colour),
   })
 
@@ -807,7 +829,7 @@ export default function FilesPage() {
             icon: starred ? StarFill : Star,
             onSelect: () => toggleStar(here.path, here.name),
           },
-          colourVerb(folderColourOf(colours, here.path, here.name), (colour) => {
+          colourVerb(folderColourOf(colours, here.path, here.name, defaultColour), (colour) => {
             void setColour(here, colour)
           }),
         ]
@@ -984,11 +1006,9 @@ export default function FilesPage() {
     ? (transfer: DataTransfer, dir: string) => void dropFiles(transfer, dir)
     : undefined
 
-  const hereColour = here ? folderColourOf(colours, here.path, here.name) : "blue"
-
   return (
     <Page fill className="gap-2 px-2 py-2 md:px-3 md:py-3">
-      <FolderColourProvider colours={colours}>
+      <FolderColourProvider colours={colours} defaultColour={defaultColour}>
         {/* One frame around the whole workbench: a strip across the top, then
             the sidebar, the listing and the inspector separated by a hairline
             each rather than by a gutter and three borders — three framed
@@ -1038,22 +1058,26 @@ export default function FilesPage() {
               </PlacesMenu>
             </div>
 
-            {/* Where you are: the folder, drawn in its colour — which is also
-                where its colour is changed — and the path to it. */}
+            {/* The strip's folder controls the colour of every folder; the
+                inspector and folder menus still label one folder at a time. */}
             <div className="flex min-w-0 flex-1 basis-56 items-center gap-1">
               {here &&
                 (canWrite ? (
-                  <FolderColourMenu value={hereColour} onPick={(c) => void setColour(here, c)}>
+                  <FolderColourMenu
+                    value={defaultColour ?? "blue"}
+                    onPick={(c) => void setDefaultColour(c)}
+                    label="Colour all folders"
+                  >
                     <button
                       type="button"
-                      aria-label="Colour this folder"
-                      className="shrink-0 rounded-md p-0.5 focus-ring transition-colors hover:bg-row-hover"
+                      aria-label="Colour all folders"
+                      className="inline-flex size-7 shrink-0 items-center justify-center rounded-md focus-ring transition-colors hover:bg-row-hover"
                     >
-                      <FolderIcon name={here.name} path={here.path} className="size-6" />
+                      <FolderSwatch colour={defaultColour ?? "blue"} className="size-4" />
                     </button>
                   </FolderColourMenu>
                 ) : (
-                  <FolderIcon name={here.name} path={here.path} className="size-6 p-0.5" />
+                  <FolderIcon name={here.name} path={here.path} className="size-4" />
                 ))}
               <PathBar
                 path={path ?? "/"}

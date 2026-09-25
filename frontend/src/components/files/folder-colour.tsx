@@ -66,16 +66,18 @@ export function FolderColourMenu({
   value,
   onPick,
   children,
+  label = "Colour this folder",
 }: {
   value: FolderColour
   onPick: (colour: FolderColour) => void
   children: React.ReactNode
+  label?: string
 }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-44">
-        <DropdownMenuLabel className="eyebrow py-1">Colour this folder</DropdownMenuLabel>
+        <DropdownMenuLabel className="eyebrow py-1">{label}</DropdownMenuLabel>
         {FOLDER_COLOURS.map((colour) => (
           <DropdownMenuItem key={colour} onSelect={() => onPick(colour)}>
             <FolderSwatch colour={colour} className="size-3.5" />

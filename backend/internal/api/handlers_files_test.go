@@ -289,6 +289,56 @@ func TestFolderColoursFollowTheFolder(t *testing.T) {
 	}
 }
 
+func TestDefaultFolderColourRecoloursEveryFolderAndKeepsIndividualChoice(t *testing.T) {
+	c, s := newClient(t)
+	root := fileFixture(t, s)
+	nginx := filepath.Join(root, "etc", "nginx")
+	putColour := func(path, colour string) *httptest.ResponseRecorder {
+		return c.do(http.MethodPut, "/api/v1/files/colours",
+			`{"path":"`+path+`","colour":"`+colour+`"}`, nil)
+	}
+	places := func() struct {
+		DefaultColour string            `json:"defaultColour"`
+		Colours       map[string]string `json:"colours"`
+	} {
+		t.Helper()
+		var result struct {
+			DefaultColour string            `json:"defaultColour"`
+			Colours       map[string]string `json:"colours"`
+		}
+		w := c.do(http.MethodGet, "/api/v1/files/places", "", nil)
+		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	if w := putColour(nginx, "red"); w.Code != http.StatusOK {
+		t.Fatalf("labelling a folder: %d %s", w.Code, w.Body.String())
+	}
+	if w := c.do(http.MethodPut, "/api/v1/files/colours/default", `{"colour":"yellow"}`, nil); w.Code != http.StatusOK {
+		t.Fatalf("setting the default: %d %s", w.Code, w.Body.String())
+	}
+	if got := places(); got.DefaultColour != "yellow" || len(got.Colours) != 0 {
+		t.Fatalf("global colour did not replace folder labels: %+v", got)
+	}
+	if w := putColour(nginx, "green"); w.Code != http.StatusOK {
+		t.Fatalf("labelling one folder after global choice: %d %s", w.Code, w.Body.String())
+	}
+	if got := places(); got.DefaultColour != "yellow" || got.Colours[nginx] != "green" {
+		t.Fatalf("individual colour did not survive: %+v", got)
+	}
+	if w := c.do(http.MethodPut, "/api/v1/files/colours/default", `{"colour":"chartreuse"}`, nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("unknown colour was accepted: %d", w.Code)
+	}
+	if got := places(); got.DefaultColour != "yellow" || got.Colours[nginx] != "green" {
+		t.Fatalf("invalid choice changed colours: %+v", got)
+	}
+	readonly := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "reader", auth.RoleReadOnly)}
+	if w := readonly.do(http.MethodPut, "/api/v1/files/colours/default", `{"colour":"blue"}`, nil); w.Code != http.StatusForbidden {
+		t.Fatalf("a reader recoloured folders: %d %s", w.Code, w.Body.String())
+	}
+}
+
 // The write verbs refuse to clobber unless told to. An upload used to
 // overwrite by default and a move replaced the destination through rename(2),
 // so "upload logo.png" and "move a.txt here" both quietly ate whatever held
