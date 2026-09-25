@@ -40,11 +40,12 @@ func TestLiveDetectedFrameworkBuildAndServing(t *testing.T) {
 	// under a base path, a standalone server started from its server.js, a
 	// SvelteKit app on adapter-auto built with adapter-node, Express serving
 	// the Vite client its build writes, and a Hono starter with only a dev
-	// script, on Bun.
+	// script, on Bun. react-router-spa prerenders "/" in SPA mode, so every
+	// other path must answer with the shell it writes beside index.html.
 	for _, name := range []string{"vite", "next", "svelte-node", "svelte-static", "html", "containerfile", "go",
 		"astro", "nuxt", "react-router", "fastapi", "flask", "django", "rust", "java", "gradle", "dotnet", "deno", "laravel", "php",
 		"streamlit", "gradio", "next-pnpm", "express-yarn",
-		"next-export", "next-standalone", "svelte-auto", "express-vite", "hono-bun"} {
+		"next-export", "next-standalone", "svelte-auto", "express-vite", "hono-bun", "react-router-spa"} {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 			defer cancel()
@@ -75,7 +76,8 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 				t.Fatalf("no unambiguous quick-setup candidate: %+v", detection.Candidates)
 			}
 			config := BuildPlanConfig{Method: candidate.BuildMethod, Recipe: candidate.Recipe, Dockerfile: candidate.Dockerfile,
-				BuildCommand: candidate.BuildCommand, StartCommand: candidate.StartCommand, OutputDirectory: candidate.OutputDirectory}
+				BuildCommand: candidate.BuildCommand, StartCommand: candidate.StartCommand, OutputDirectory: candidate.OutputDirectory,
+				SPAFallback: candidate.SPAFallback}
 			if name == "go" {
 				config.GoVersion, config.BuildCommand, config.StartCommand = "1.26.8", "go generate ./... && go build -o /out/app .", "/app custom-start"
 				candidate.Port = 8080
@@ -212,6 +214,9 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 				t.Fatalf("express serving vite: %+v", candidate)
 			case name == "hono-bun" && candidate.StartCommand != "bun src/index.ts":
 				t.Fatalf("hono dev-only start: %+v", candidate)
+			case name == "react-router-spa" && (candidate.OutputDirectory != "build/client" || !strings.Contains(html, "prerendered home") ||
+				!strings.Contains(fetch("/about"), "spa shell loading") || strings.Contains(fetch("/about"), "prerendered home")):
+				t.Fatalf("spa mode with a prerendered home: %+v", candidate)
 			}
 			if strings.Contains(content, secret) {
 				t.Fatal("install credential escaped into served assets")
