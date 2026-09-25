@@ -317,8 +317,11 @@ export function ApiKeysView({
         <PanelHeader
           title="In use"
           actions={
-            <span className="numeric text-hint text-muted-foreground">
-              {plural(usable.length, "key")}
+            <span className="flex items-center gap-3">
+              <span className="numeric text-hint text-muted-foreground">
+                {plural(usable.length, "key")}
+              </span>
+              <CreateApiKeyDialog onDone={refresh} />
             </span>
           }
         />

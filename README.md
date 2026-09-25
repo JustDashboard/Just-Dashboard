@@ -44,7 +44,8 @@ It manages exactly one machine. There is no fleet view, no agents to enrol, no c
   Qdrant, NocoDB and more, one click each — and every card says whether you create the first
   account yourself, sign in with a password this server generated, or find no sign-in page at all.
 - **Automatic Git deployments, previews and notifications.** Push to deploy, approved previews
-  per pull request, and every run reported to Discord, Slack, Telegram, e-mail, a webhook and
+  per pull request — test one from the Git page or a project's overview at an address only your
+  tailnet can reach — and every run reported to Discord, Slack, Telegram, e-mail, a webhook and
   the commit's status on GitHub.
 - **Backups that know what is not backed up.** Every volume, stack, deployment, repository and
   database listed, one press from a job, with writers frozen while the archive is taken.
@@ -144,7 +145,7 @@ or connect a GitLab/Gitea token for requests on those providers.
 
 ### Deployments
 
-![A project, with its website preview and what needs attention](docs/deployments.png)
+![A project with its website preview and live release](docs/deployments.png)
 
 Point it at a repository, an image, a template, a Compose stack or something already running. It
 says what it found, shows the plan, and runs it as a job with a permanent URL. Each project has
@@ -155,7 +156,7 @@ health checks and runtime limits remain editable before the first deployment.
 
 ### Databases
 
-![A database connection, with its connection string and the switch that opens it to the internet](docs/databases.png)
+![A database connection, with its connection string and the control that opens it to the internet](docs/databases.png)
 
 PostgreSQL, MySQL and MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis. Browse
 and edit rows, change the structure, run queries, draw the schema, and hand out the connection

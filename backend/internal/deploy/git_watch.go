@@ -99,8 +99,11 @@ func (a *HostSourceAnalyzer) ResolveGitRef(ctx context.Context, source DraftSour
 	// character asks ls-remote to match a pattern instead of the exact name
 	// the operator typed. validSourceRef's anchored, alphanumeric-first
 	// pattern excludes both, so this is refused before any git subprocess
-	// runs at all.
-	if !validSourceRef(ref) {
+	// runs at all. A pull request head is refused too, although a preview's
+	// stored source may name one: a manual run deploys a branch or tag, and
+	// a fork's commit reaches an environment only through the preview flow's
+	// approval of that exact commit.
+	if !validSourceRef(ref) || IsProviderPullRef(ref) {
 		return "", fmt.Errorf("%w: %q is not a valid branch or tag name", ErrInvalidRef, ref)
 	}
 	remote, _, err := remoteForSource(source)

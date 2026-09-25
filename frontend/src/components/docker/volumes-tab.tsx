@@ -47,10 +47,12 @@ export function VolumesTab({
   confirm,
   creating: externalCreating,
   onCreatingChange,
+  actions,
 }: {
   confirm: ConfirmFn
   creating?: boolean
   onCreatingChange?: (open: boolean) => void
+  actions?: React.ReactNode
 }) {
   const { can } = useAuth()
   // In the URL so a deployment can link straight at the volume it depends on.
@@ -110,6 +112,7 @@ export function VolumesTab({
           title="Volumes"
           actions={
             <>
+              {actions}
               {can("destructive") && (
                 <Button
                   size="sm"

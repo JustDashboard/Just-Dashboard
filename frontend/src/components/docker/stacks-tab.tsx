@@ -80,9 +80,11 @@ function needsAttention(stack: ComposeStack) {
 export function StacksTab({
   creating: externalCreating,
   onCreatingChange,
+  actions,
 }: {
   creating?: boolean
   onCreatingChange?: (open: boolean) => void
+  actions?: React.ReactNode
 }) {
   const { can } = useAuth()
   const router = useRouter()
@@ -156,6 +158,7 @@ export function StacksTab({
               <ExplainIcon name="stack" />
             </span>
           }
+          actions={actions}
         />
 
         {stacks.length > 0 && (

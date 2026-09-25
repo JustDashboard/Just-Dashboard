@@ -35,7 +35,7 @@ async function framedNonTables(page: Page) {
 
 test("the metrics page is readings on the page, not boxes", async ({ page }) => {
   await page.goto("/metrics")
-  await expect(page.getByRole("heading", { name: "Metrics" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Metrics" })).toHaveClass(/sr-only/)
   await expect(page.getByText("CPU peaked at 97%")).toBeVisible({ timeout: 20_000 })
 
   // Ten headline tiles, hairlines between, nothing around: the tenth is the
@@ -49,7 +49,7 @@ test("the metrics page is readings on the page, not boxes", async ({ page }) => 
   // charts and the findings are all on the page's own ground.
   expect(await framedNonTables(page), "a framed block that is not a table").toEqual([])
 
-  // What the machine is made of, as a row of facts under the title.
+  // What the machine is made of is the first visible row.
   await expect(page.getByText("AMD EPYC 7B13")).toBeVisible()
   await expect(page.getByText("sampled every 15s, kept 7d")).toBeVisible()
 
@@ -98,7 +98,7 @@ test("the window exports as a spreadsheet", async ({ page }) => {
 
 test("the live feed can be paused", async ({ page }) => {
   await page.goto("/metrics")
-  await expect(page.getByRole("heading", { name: "Metrics" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Metrics" })).toHaveClass(/sr-only/)
   await expect(page.getByRole("button", { name: "Pause live feed" })).toHaveCount(0)
 
   await page.getByRole("radio", { name: "Live" }).click()
@@ -126,3 +126,17 @@ for (const width of [1280, 1720]) {
     await page.screenshot({ path: `test-results/metrics-${width}.png`, fullPage: true })
   })
 }
+
+test("the controls stay reachable beside the machine facts on a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/metrics")
+  await expect(page.getByText("AMD EPYC 7B13")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Export CSV" })).toBeVisible()
+  await expect(page.getByRole("radio", { name: "1h" })).toBeVisible()
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    ),
+  ).toBe(false)
+  await page.screenshot({ path: "test-results/metrics-phone.png", fullPage: true })
+})

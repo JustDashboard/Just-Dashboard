@@ -245,7 +245,7 @@ only renderer/executor/validation authority for their feature.
   produce an actionable error instead of an attempted bind or a stopped server. Hostname suggestions
   use this same selector. `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDeploymentWebroot
   -count=1 -v` verifies real nginx routing, continued service and cleanup on an isolated loopback port.
-- The workspace header actions menu exposes **Archive deployment** for the destructive capability on both legacy and
+- The project context actions menu exposes **Archive deployment** for the destructive capability on both legacy and
   normalized projects, disabled during an active run. It uses the existing `DELETE /deploy/{id}` archive
   contract with ordinary confirmation, returns to the fleet after success, and keeps the dialog open
   on error. The confirmation explicitly states that history, runtime, routes and data are retained;
@@ -953,7 +953,7 @@ only renderer/executor/validation authority for their feature.
   `git ls-remote`. This works behind the dashboard's private network allowlist without public ingress
   or GitHub hook registration. Outages and slow Git reads can delay detection; it is polling, not an
   instantaneous push-delivery guarantee. Tags, local checkouts, legacy Compose and archived projects
-  are excluded. Monitoring status and access failures appear in the project header's identity line
+  are excluded. Monitoring status and access failures appear in the project identity line
   and on Settings → General's Automatic deployment section.
   `deploy_git_watches` persists the last observed revision, policy digest, decision reason and observation generation: restarts,
   failed runs, duplicate provider deliveries and a crash after enqueue cannot cause repeated builds;
@@ -967,8 +967,11 @@ only renderer/executor/validation authority for their feature.
   source is a remote Git repository may instead name `sourceRevision` (a 40- or 64-hex object id, frozen
   as-is) or `ref` (a branch or tag name, resolved through the same `git ls-remote` path
   `ResolveGitRevision` uses for the configured branch, `HostSourceAnalyzer.ResolveGitRef`) — never both.
-  Anything other than a remote Git source refuses either field with `400 ref_not_applicable`; a name the
-  remote does not have answers `400 ref_not_found` (git's own `ls-remote --exit-code` exit status 2, "read
+  Anything other than a remote Git source refuses either field with `400 ref_not_applicable`, and so
+  does a `ref` naming a pull request head (`refs/pull/N/head`, `refs/merge-requests/N/head`) on anything
+  but a preview environment, before git runs — the same name in `PUT …/source` outside a preview or in
+  a draft's source answers `400 invalid_ref`, since such a head is built only through "Test this pull
+  request"; a name the remote does not have answers `400 ref_not_found` (git's own `ls-remote --exit-code` exit status 2, "read
   the remote fine, no such ref"), and a remote that could not be read at all answers `502
   source_unavailable`. The configured branch's own resolution distinguishes the same exit status: a
   renamed or deleted branch is `ref_not_found` for enqueue, detection and the watcher alike. Every other
@@ -1051,6 +1054,53 @@ only renderer/executor/validation authority for their feature.
   generation; closing cancels queued/build work. Startup quarantines older unsafe previews, stops owned
   containers without deleting data, withdraws routes, and blocks old releases from activation. Failed
   isolation retries while the UI reports the block. See [preview isolation](preview-isolation.md).
+  A preview is also started from the dashboard without any delivery: `POST /deploy/{id}/pull-requests/{number}/preview`
+  (`system.admin`, session; `{revision, copyVariables, acceptFork}` → `202 {preview, runId, copied,
+  skipped, address, variablesFromProduction}`) is the administrator's approval of that exact head
+  (`RecordPreviewApproval`, audited `deploy.preview.test`), hung on a "Pull requests" trigger the route
+  makes per environment (`EnsurePullRequestTrigger`: GitHub, `preview: true`, quota 5, no domain, no
+  delivery; named "Pull requests (owner/name)" when an unrelated GitHub trigger holds the plain name,
+  `409 trigger_name_taken` when both are held), optionally copying production's non-reference variables
+  the preview has not set for itself into the preview
+  (`PlanningStore.CopyEnvironmentVariables`, refused for a fork with `400 preview_fork_variables`) and
+  allocating the preview a tailnet port (`AllocatePreviewAddress`, 21000–21999). The trigger's quota and
+  a free port are checked before the approval is written (`previewCapacity`: `409 preview_quota`, `409
+  preview_address_exhausted`), and the audit row is claimed before it too, so a refusal past that point
+  is recorded against the head it was for. The pull request's head, fork-ness and state are read through the GitHub
+  App's installation, else the dashboard's own gh login, never through a checkout (`api.pullRequests`,
+  identity cached two minutes, listings 30 s, four gh subprocesses at a time). `GET /deploy/{id}/pull-requests`
+  answers `{repository, host, available, reason?, identity?, checkoutPath?, pulls[] (each with its
+  preview), previews[], production {environmentId, automatic, intervalSeconds, awaitingFirstDeployment},
+  tailnet, compose, localCheckout, internalPort, releaseTasks}` — `reason` is one of `not_github`,
+  `sign_in_required`, `app_not_installed`, `not_installed`; `previews` lists the open ones and a closed
+  one only while its newest `preview_remove` run has not succeeded; a read GitHub refuses answers an
+  error (`429 github_rate_limited` for a quota refusal — a 429, or a 403 or gh's text saying rate limit,
+  never a bare number such as pull request #429; `502 pull_request_unreadable`; or gh's words) rather than
+  `available:false`, and the Overview hides the panel. `GET …/pull-requests/{number}/checks[?head=]`
+  answers `[]CheckRun`; `GET /deploy/pull-requests` answers `{projects: {<id>: {open, previews}}}` for
+  the fleet, one gh read per repository under a 20 s budget. `POST …/preview/close` is destructive
+  (session, no phrase; `202 {runId}`, `404 preview_not_found`; idempotent under
+  `pull-request-close:<preview>[:a<n>]`; audited `deploy.preview.close`). `POST …/merge` (`service.control`,
+  session; `{method, deleteBranch, headSha?}` → `200 {merged, previewRunId, production {automatic,
+  awaitingFirstDeployment}}`; `409 github_login_required` without the dashboard's own login) and
+  `POST …/comment` (`{body}`, on gh's stdin, `200 {ok}`) speak as the dashboard's own account and are
+  audited `github.pull.merge` and `github.pull.comment`; the merge reconciles the repository's previews
+  before answering. Storage: `deploy_preview_addresses` (`environment_id`, `kind`, `port`, `upstream_port`,
+  `url`, `published`, `updated_at`, `UNIQUE(kind, port)`) and the added columns `deploy_preview_refs.origin`,
+  `title`, `head_revision`, `variables_copied_revision` and `deploy_variable_revisions.copied_from_environment`,
+  all in `store.addedColumns`. The activation step publishes the tailnet address after the route is
+  verified and before the release pointer moves (`TailnetPublisher`, `selfcfg.TailnetServe`; step codes
+  `tailnet_unavailable`, `preview_port_missing`, `tailnet_publish_failed`, `tailnet_withdraw_failed`),
+  restores the predecessor's mapping on a failed activation while the predecessor runs and otherwise
+  withdraws its own and marks the row unpublished (`tailnetRestored`), and withdraws it on removal
+  (`addressWithdrawn`) — restore and removal touch only a mapping whose upstream the address row
+  vouches for; `SweepTailnet`, run before the engine starts (`Server.startDeployEngine`), withdraws
+  loopback mappings in the range the address table does not vouch for (a port no preview owns, or an
+  owned port serving another upstream; an operator's directory or funnel is never turned off) and
+  unpublishes addresses nothing serves, quietly when the serve config is unreadable and no published
+  tailnet address exists; `PreviewReconciler` reads every open preview's pull
+  request once a minute and closes the preview only on a decoded closed or merged state, recording a
+  moved head as out of date. All of it in [preview isolation](preview-isolation.md#previews-from-the-dashboard).
   Outbound notifications are delivered by engine run observers for every terminal outcome and for run
   start, through Discord, Slack, Telegram, e-mail or a signed webhook; a failed or cancelled run reaches
   the same channels as a successful one. Credentials are sealed and never listed, deliveries record only
@@ -1458,7 +1508,7 @@ reason, a live release failing its health check, and a site failing 5% or more o
 health reading of *unavailable* is not a finding. A card carries the project drawn as itself
 (`ProjectMark`), its address, its source as its forge, repository and branch, its last commit, its
 hour of traffic from `GET /deploy/traffic`, its last fourteen runs (`recentRuns`) and who started
-the last one, and the verbs the project header offers (`useProjectVerbs`); the list view carries
+the last one, and the verbs the project context row offers (`useProjectVerbs`); the list view carries
 the same readings in fixed columns from 1280. The fleet is read every five seconds and the traffic
 every thirty; the archive is read once, for the count beside its link, and again when a card
 archives its project, because each archived row costs the server a history read.
@@ -1516,7 +1566,20 @@ the operations diagnosis (`#attention`, which the header's verdict links to) —
 environment's newest run when that run failed and made nothing live (critical when nothing serves,
 a warning while an older release does), titled by its cause and linking to the run, and
 `auto_deploy_stopped` when the watcher could not read its branch for a named reason; the delivery
-insights; and the recent deployments beside the preview environments from `2xl`. A service with no
+insights; the recent deployments beside the preview environments from `2xl`; and, for a project deploying
+a github.com repository, a **Pull requests** panel (`GET /deploy/{id}/pull-requests`, polled once a
+minute; hidden when the read fails, since the panel is a window onto GitHub rather than a fact about the
+project) listing the open requests with the preview built from each — its address as a link once it is
+reachable, its state in the words `lib/pull-requests.ts` decides, "Out of date" when the head moved — then
+the previews whose request is no longer open, with **Test this pull request** / **Update preview**
+(held while the preview is Ready at this commit, Building, Closing or its cleanup failed, `previewHeld`),
+**Merge** (its detail promises the preview's close only when one is open and a redeploy only when
+auto-deploy is on, `mergeDetail`), **Close preview** and **Retry cleanup** (for a `preview_remove` run
+that ended short of success, cancelled and superseded included) as the row's verbs
+(`pull-request-verbs.tsx` for the Overview; the Git page's strip and workspace draw the same verbs under
+the same readings from `lib/pull-requests.ts`) and a link to the checkout on the Git page when one is
+under the roots. The header's verbs menu gains **Test a pull request…** for an administrator, which picks
+from the open requests (`pull-request-picker.tsx`). A service with no
 public address draws its product and where it answers inside Docker in the preview's place. Deploy
 a specific version picks from the commits the project's runs recorded, with no remote call, and
 Connect a database takes a saved connection by its row. `GET /deploy/{id}/preview-frame` is an
@@ -1531,7 +1594,7 @@ or use an insecure URL under an HTTPS dashboard may require the direct website l
 not a deployment health check and does not bypass the site's own framing policy.
 
 `GET /deploy/{id}/favicon` is the one request the backend makes to a deployed website, so a project
-card, the project header, the rail's scope head and the source end of the Notifications picture can
+card, the project identity line, the rail's scope head and the source end of the Notifications picture can
 carry the site's own icon (the dashboard's image policy allows only its own origin). It reads the recorded endpoint's page for `<link rel="icon">` (then
 `apple-touch-icon`), falling back to `/favicon.ico`, `/favicon.png` and `/apple-touch-icon.png`.
 Every request stays on the recorded scheme and host, port included: a declared icon or a redirect
@@ -1619,7 +1682,9 @@ and a picture of what deploys the project, and holds webhooks (each with its del
 the hook URL shown absolute, and a signed hook's secret shown once when it is made and when it is
 rotated), schedules (a builder in the schedule's own time zone, the server's check before saving,
 and each schedule's past firings and next five runs), previews (approve with a fork warning, reject,
-variables, deploy) and traffic alerts (the rule form in a sheet it shares with the Logs page,
+variables, deploy; a preview's row carries the address the engine published for it — a `tailnet` tag and
+the `https://<node>.<tailnet>.ts.net:<port>` link once it answers, the bare host until then — and a
+`production variables` tag while production's variables are copied into it) and traffic alerts (the rule form in a sheet it shares with the Logs page,
 removal confirmed), every block reading one set of polls (`useAutomation`); Danger zone holds Stop
 or Start, Archive or Restore, managed-resource removal — whose plan loads as soon as the project is
 archived — and permanent deletion, which asks for the project's name.

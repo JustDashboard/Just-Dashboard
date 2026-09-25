@@ -64,6 +64,7 @@ export function HostIdentity({
 }) {
   return (
     <div
+      data-slot="host-identity"
       className={cn(
         "flex min-w-0 flex-wrap items-center justify-between gap-x-10 gap-y-3 border-b border-hairline pb-6",
         className,

@@ -184,8 +184,7 @@ test("the empty state offers to start a project or clear the filters", async ({ 
   )
   await page.goto("/deploy")
   await expect(page.getByText("Deploy your first project", { exact: true })).toBeVisible()
-  // Two "New project" links exist at once here — the header's and the empty
-  // state's own — so the assertion scopes to the empty state's block.
+  // The empty fleet carries its own command, beside its next steps.
   const empty = page.locator('[data-slot="empty-state"]')
   await expect(empty.getByRole("link", { name: "New project", exact: true })).toBeVisible()
   await expect(
@@ -228,7 +227,8 @@ test("Credentials link sits beside Notifications and opens the credentials page"
   })
   await page.goto("/deploy")
   // Scoped to the page: the sidebar's Deployments panel names Credentials too,
-  // and this test is about the link in the page header.
+  // and this test is about the link in the page controls.
+  await page.screenshot({ path: "test-results/deploy-list-context-1280.png", fullPage: true })
   await page.getByRole("main").getByRole("link", { name: "Credentials", exact: true }).click()
   await expect(page).toHaveURL(/\/deploy\/credentials$/)
   await expect(page.getByRole("heading", { name: "Credentials", exact: true })).toBeVisible()
@@ -250,7 +250,7 @@ test("Credentials link is hidden for a read-only role, unlike Notifications", as
   await expect(rail.getByRole("link", { name: "Credentials", exact: true })).toHaveCount(0)
 })
 
-test("on a phone the header's pages sit behind one menu beside New project", async ({ page }) => {
+test("on a phone the related pages sit behind one menu beside New project", async ({ page }) => {
   await mockProject(page)
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto("/deploy")
@@ -409,6 +409,48 @@ test("a Compose deployment with more than one service reports how many", async (
   await page.goto("/deploy")
   await expect(page.getByText(/3 services/)).toBeVisible()
   await expect(page.getByText("docker-compose.yml", { exact: true })).toHaveCount(0)
+})
+
+test("a card says how many pull requests are open, and the chip narrows the fleet to them", async ({
+  page,
+}) => {
+  await mockProject(page)
+  await page.route("**/api/v1/deploy/?view=fleet", (route) =>
+    json(route, {
+      deployments: [
+        { ...deployment, id: 1, name: "storefront", activeRun: undefined },
+        { ...deployment, id: 2, name: "worker", activeRun: undefined },
+      ],
+      activeWork: [],
+      slots: { heavyUsed: 0, heavyCapacity: 2, lightUsed: 0, lightCapacity: 4 },
+    }),
+  )
+  await page.route("**/api/v1/deploy/pull-requests", (route) =>
+    json(route, { projects: { "1": { open: 3, previews: 1 } } }),
+  )
+  await page.setViewportSize({ width: 1280, height: 1000 })
+  await page.goto("/deploy")
+  const projects = page.getByRole("list", { name: "Deployment projects" })
+  await expect(projects.locator(":scope > li")).toHaveCount(2)
+  // A count in plain words on the source line, only where there is one.
+  const storefront = projects.locator(":scope > li").filter({ hasText: "storefront" })
+  await expect(storefront.getByText("3 pull requests · 1 preview", { exact: true })).toBeVisible()
+  await expect(
+    projects
+      .locator(":scope > li")
+      .filter({ hasText: "worker" })
+      .getByText(/pull request/),
+  ).toHaveCount(0)
+
+  const chip = page.getByRole("button", { name: /^Pull requests/ })
+  await expect(chip).toContainText("1")
+  await chip.click()
+  await expect(projects.locator(":scope > li")).toHaveCount(1)
+  await expect(projects.getByText("storefront", { exact: true })).toBeVisible()
+
+  // The list row's second line carries the same words.
+  await page.getByRole("button", { name: "List view" }).click()
+  await expect(projects.getByText("3 pull requests · 1 preview", { exact: true })).toBeVisible()
 })
 
 test("archived list can be permanently deleted with confirmation and errors remain reviewable", async ({

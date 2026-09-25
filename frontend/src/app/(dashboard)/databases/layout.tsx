@@ -10,7 +10,7 @@ import { plural, relativeTime } from "@/lib/format"
 import type { DbConnection, DbCredentialServer, DbDriverInfo, DbSyncResult } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { Page, PageHeader } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
 import { EmptyState, ErrorState, LoadingPanel, Spinner } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
@@ -259,7 +259,7 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
   if (connections.loading && !connections.data) {
     return (
       <Page>
-        <PageHeader eyebrow="Apps" title="Databases" />
+        <PageContext eyebrow="Apps" title="Databases" />
         <LoadingPanel />
       </Page>
     )
@@ -267,7 +267,7 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
   if (connections.error) {
     return (
       <Page>
-        <PageHeader eyebrow="Apps" title="Databases" />
+        <PageContext eyebrow="Apps" title="Databases" />
         <ErrorState error={connections.error} />
       </Page>
     )
@@ -275,10 +275,12 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
   if (list && list.length === 0) {
     return (
       <Page>
-        <PageHeader
-          eyebrow="Apps"
-          title="Databases"
-          actions={
+        <PageContext eyebrow="Apps" title="Databases" />
+        <EmptyState
+          icon={Database}
+          title="No databases yet"
+          description="Anything running on this server is connected automatically. Use New database to start one — it takes a free port, generates its own password and connects itself — or, from the same dialog, point the dashboard at a database somewhere else."
+          action={
             admin && (
               <Button size="sm" onClick={() => setNewOpen(true)}>
                 <Plus className="size-4" />
@@ -286,11 +288,6 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
               </Button>
             )
           }
-        />
-        <EmptyState
-          icon={Database}
-          title="No databases yet"
-          description="Anything running on this server is connected automatically. Use New database to start one — it takes a free port, generates its own password and connects itself — or, from the same dialog, point the dashboard at a database somewhere else."
         />
         {dialogs}
       </Page>
@@ -312,44 +309,23 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
       }}
     >
       <div className="flex h-full min-h-0 flex-col">
-        {/* The section's own header band: which connection you are working
-            in, as the title, and what it is, as a row of facts. Where you can
-            go is the rail's job — the strip of page links that used to close
-            this band said the same thing the rail now says on the left of it.
-            Plain ground and one hairline, like every page header. */}
+        <h1 className="sr-only">{conn ? `Database ${conn.name}` : "Databases"}</h1>
+        {/* The switcher and facts share one compact strip, the way the Files
+            workbench puts the current folder beside its commands. */}
         <div className="shrink-0 border-b border-hairline">
-          <div className="mx-auto w-full max-w-[1440px] px-5 md:px-8">
-            <div className="flex min-w-0 flex-wrap items-end justify-between gap-x-6 gap-y-3 pt-6 pb-3 md:pt-8">
-              <div className="min-w-0 space-y-1.5">
-                {/* The eyebrow names the nav group, the way every other page
-                    header in the product does — and the way this file's own
-                    loading, error and empty states already did. "Access" said
-                    nothing the sidebar had not, and said it in a word that
-                    appears nowhere else. */}
-                <p className="eyebrow">Apps</p>
-                {conn && (
-                  <ConnectionSwitcher
-                    connections={list ?? []}
-                    drivers={drivers.data ?? []}
-                    current={conn}
-                    onSelect={(id) => goto(pathname, { conn: id })}
-                    onNew={admin ? () => setNewOpen(true) : undefined}
-                    onConnect={admin ? () => setAddOpen(true) : undefined}
-                  />
-                )}
-              </div>
-              <div className="flex max-w-full shrink-0 flex-wrap items-center gap-3">
-                {conn && <ConnectionStatus id={conn.id} />}
-                {admin && (
-                  <Button size="sm" variant="outline" onClick={() => setNewOpen(true)}>
-                    <Plus className="size-4" />
-                    New database
-                  </Button>
-                )}
-              </div>
-            </div>
+          <div className="mx-auto flex w-full max-w-[1440px] min-w-0 flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3 md:px-8">
             {conn && (
-              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pb-3 text-body text-muted-foreground">
+              <ConnectionSwitcher
+                connections={list ?? []}
+                drivers={drivers.data ?? []}
+                current={conn}
+                onSelect={(id) => goto(pathname, { conn: id })}
+                onNew={admin ? () => setNewOpen(true) : undefined}
+                onConnect={admin ? () => setAddOpen(true) : undefined}
+              />
+            )}
+            {conn && (
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-body text-muted-foreground max-sm:order-3 max-sm:basis-full">
                 <span>{info?.label ?? conn.driver}</span>
                 <Dot />
                 <span className="font-mono text-xs">
@@ -372,6 +348,15 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
                 <span>added {relativeTime(conn.createdAt)}</span>
               </div>
             )}
+            <div className="ml-auto flex shrink-0 flex-wrap items-center gap-3 max-sm:order-2">
+              {conn && <ConnectionStatus id={conn.id} />}
+              {admin && (
+                <Button size="sm" variant="outline" onClick={() => setNewOpen(true)}>
+                  <Plus className="size-4" />
+                  New database
+                </Button>
+              )}
+            </div>
           </div>
         </div>
 

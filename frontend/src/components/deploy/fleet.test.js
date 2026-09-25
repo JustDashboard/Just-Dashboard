@@ -6,6 +6,7 @@ import {
   fleetHaystack,
   fleetLive,
   fleetTraffic,
+  matchesFilter,
   needsAttention,
   sortFleet,
 } from "./fleet"
@@ -75,7 +76,22 @@ describe("fleetCounts", () => {
       ],
       {},
     )
-    expect(counts).toEqual({ all: 3, deploying: 1, failed: 1, attention: 1, pending: 1 })
+    expect(counts).toEqual({ all: 3, deploying: 1, failed: 1, attention: 1, pending: 1, pulls: 0 })
+  })
+
+  test("the pull-request chip counts the projects with one open, from the fleet's own read", () => {
+    const fleet = [project({ id: 1 }), project({ id: 2 }), project({ id: 3 })]
+    const pulls = { 1: { open: 2, previews: 1 }, 2: { open: 0, previews: 1 } }
+    expect(fleetCounts(fleet, {}, pulls).pulls).toBe(1)
+    expect(matchesFilter(fleet[0], "pulls", {}, pulls)).toBe(true)
+    // A preview whose pull request has closed is not a pull request to look at.
+    expect(matchesFilter(fleet[1], "pulls", {}, pulls)).toBe(false)
+    expect(matchesFilter(fleet[2], "pulls", {}, pulls)).toBe(false)
+  })
+
+  test("before the pull-request read lands, nothing counts as having one", () => {
+    expect(fleetCounts([project()], {}).pulls).toBe(0)
+    expect(matchesFilter(project(), "pulls", {})).toBe(false)
   })
 })
 

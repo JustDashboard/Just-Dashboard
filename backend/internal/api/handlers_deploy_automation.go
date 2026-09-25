@@ -697,8 +697,15 @@ func mapAutomationError(err error) error {
 	if errors.Is(err, deploy.ErrInvalidNotification) {
 		return httpx.BadRequest("%v", err)
 	}
+	if errors.Is(err, deploy.ErrPullRequestRateLimited) || errors.Is(err, deploy.ErrPullRequestUnreadable) ||
+		errors.Is(err, deploy.ErrPreviewAddressExhausted) || errors.Is(err, deploy.ErrPreviewAddressMissing) {
+		return mapDeployError(err)
+	}
 	if errors.Is(err, deploy.ErrTriggerNotFound) {
 		return httpx.Err(http.StatusNotFound, "not_found", "automation resource not found")
+	}
+	if errors.Is(err, deploy.ErrTriggerNameTaken) {
+		return httpx.Err(http.StatusConflict, "trigger_name_taken", err.Error())
 	}
 	code, status := automationReason(err), http.StatusUnprocessableEntity
 	if errors.Is(err, deploy.ErrBadHookSignature) {

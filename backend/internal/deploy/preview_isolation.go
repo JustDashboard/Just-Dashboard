@@ -47,14 +47,11 @@ func (s *AutomationStore) requirePreviewApproval(ctx context.Context, trigger *T
 		return err
 	}
 	defer tx.Rollback()
-	// An outdated pending approval must not silently approve a new PR head.
-	if _, err := tx.ExecContext(ctx, `UPDATE deploy_preview_approvals SET state='superseded',updated_at=? WHERE trigger_id=? AND provider_ref=? AND revision<>? AND state IN ('pending','approved')`, now, trigger.ID, ref, event.Revision); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO deploy_preview_approvals(trigger_id,provider_ref,revision,event_json,created_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(trigger_id,provider_ref,revision) DO UPDATE SET state='pending',approved_by='',generation=deploy_preview_approvals.generation+1,event_json=excluded.event_json,updated_at=excluded.updated_at WHERE state IN ('closed','superseded')`, trigger.ID, ref, event.Revision, string(mustJSON(event)), now, now); err != nil {
+	if err := recordPreviewRevisionTx(ctx, tx, trigger.ID, ref, event, now); err != nil {
 		return err
 	}
 	var state string
+
 	if err := tx.QueryRowContext(ctx, `SELECT state FROM deploy_preview_approvals WHERE trigger_id=? AND provider_ref=? AND revision=?`, trigger.ID, ref, event.Revision).Scan(&state); err != nil {
 		return err
 	}

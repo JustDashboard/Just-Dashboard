@@ -33,7 +33,7 @@ import type {
   DeploymentSummary,
   GitHubAppInstallation,
 } from "@/lib/types"
-import { Page, PageHeader } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { StatGrid, StatTile } from "@/components/stat-tile"
@@ -563,21 +563,13 @@ export function CredentialsPage() {
 
   return (
     <Page>
-      <PageHeader
+      <PageContext
         eyebrow={
           <Link href="/deploy" className="rounded-sm focus-ring hover:underline">
             Deployments
           </Link>
         }
         title="Credentials"
-        actions={
-          admin && (
-            <Button size="sm" onClick={() => open(emptyDraft("git_bearer"))}>
-              <Plus className="size-3.5" />
-              Add credential
-            </Button>
-          )
-        }
       />
 
       {/* Nothing saved is said once, by the kinds below, not by four tiles
@@ -597,12 +589,19 @@ export function CredentialsPage() {
         <PanelHeader
           title="Saved credentials"
           actions={
-            list &&
-            list.length > 0 && (
-              <span className="numeric text-hint text-muted-foreground">
-                {plural(list.length, "credential")}
-              </span>
-            )
+            <span className="flex flex-wrap items-center gap-3">
+              {list && list.length > 0 && (
+                <span className="numeric text-hint text-muted-foreground">
+                  {plural(list.length, "credential")}
+                </span>
+              )}
+              {admin && (
+                <Button size="sm" onClick={() => open(emptyDraft("git_bearer"))}>
+                  <Plus className="size-3.5" />
+                  Add credential
+                </Button>
+              )}
+            </span>
           }
         />
         <PanelBody>

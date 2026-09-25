@@ -37,7 +37,7 @@ import type {
   NotificationEvent,
   NotificationOutcome,
 } from "@/lib/types"
-import { Page, PageHeader } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
 import { EmptyNote, ErrorState, LoadingPanel } from "@/components/state"
@@ -657,21 +657,13 @@ export function NotificationsPage() {
 
   return (
     <Page>
-      <PageHeader
+      <PageContext
         eyebrow={
           <Link href="/deploy" className="rounded-sm focus-ring hover:underline">
             Deployments
           </Link>
         }
         title="Notifications"
-        actions={
-          admin && (
-            <Button size="sm" onClick={() => add("discord")}>
-              <Plus className="size-3.5" />
-              Add channel
-            </Button>
-          )
-        }
       />
 
       {channels.error ? (
@@ -696,12 +688,20 @@ export function NotificationsPage() {
             <PanelHeader
               title="Channels"
               actions={
-                list.length > 0 && (
-                  <span className="numeric text-hint text-muted-foreground">
-                    {plural(list.length, "channel")}
-                    {paused > 0 && ` · ${paused} paused`}
-                  </span>
-                )
+                <span className="flex flex-wrap items-center gap-3">
+                  {list.length > 0 && (
+                    <span className="numeric text-hint text-muted-foreground">
+                      {plural(list.length, "channel")}
+                      {paused > 0 && ` · ${paused} paused`}
+                    </span>
+                  )}
+                  {admin && (
+                    <Button size="sm" onClick={() => add("discord")}>
+                      <Plus className="size-3.5" />
+                      Add channel
+                    </Button>
+                  )}
+                </span>
               }
             />
             <PanelBody>

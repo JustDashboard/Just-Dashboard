@@ -1,18 +1,15 @@
 "use client"
 
 import Link from "next/link"
-import { Plus } from "@/components/icons"
 import { get } from "@/lib/api"
 import { describeCron } from "@/lib/cron"
 import type { Crontab } from "@/lib/types"
-import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Page, PageHeader } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote } from "@/components/state"
-import { Button } from "@/components/ui/button"
 import {
   Table,
   TableBody,
@@ -32,7 +29,6 @@ import { cn } from "@/lib/utils"
  * manager.
  */
 export default function ScheduledPage() {
-  const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
   const [user, setUser] = useViewState("processes.cron.user", "root")
   const [adding, setAdding] = useSessionState("processes.cron.adding", false)
@@ -41,18 +37,7 @@ export default function ScheduledPage() {
 
   return (
     <Page className="animate-rise">
-      <PageHeader
-        eyebrow="Processes"
-        title="Scheduled"
-        actions={
-          can("system.admin") && (
-            <Button size="sm" onClick={() => setAdding(true)}>
-              <Plus className="size-3.5" />
-              Add job
-            </Button>
-          )
-        }
-      />
+      <PageContext eyebrow="Processes" title="Scheduled" />
 
       <CronJobsPanel
         user={user}

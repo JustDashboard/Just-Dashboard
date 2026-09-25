@@ -70,7 +70,10 @@ test.beforeEach(async ({ page }) => {
 
 test("the host is drawn as itself, and its facts are one line", async ({ page }) => {
   await page.goto("/")
-  await expect(page.getByRole("heading", { name: "atlas" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "atlas" })).toHaveClass(/sr-only/)
+  await expect(
+    page.locator('[data-slot="host-identity"]').getByText("atlas", { exact: true }),
+  ).toBeVisible()
   await expect(page.getByText(/^Ubuntu 24\.04 6\.8\.0-45-generic$/)).toBeVisible()
   // The distribution, the processor and the hypervisor, each its own mark.
   for (const logo of ["ubuntu", "amd", "qemu"]) {

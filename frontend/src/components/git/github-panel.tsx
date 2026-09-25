@@ -1,29 +1,54 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
-import { External, Plus } from "@/components/icons"
+import {
+  External,
+  PaperAirplane,
+  Play,
+  Plus,
+  RotateCounterClockwise,
+  StopCircle,
+} from "@/components/icons"
 import { errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
-import { relativeTime } from "@/lib/format"
+import { plural, relativeTime } from "@/lib/format"
+import {
+  canTest,
+  cleanupFailed,
+  previewHeld,
+  previewOutOfDate,
+  previewStatus,
+} from "@/lib/pull-requests"
 import { cn } from "@/lib/utils"
 import type {
+  DeploymentEngineRun,
+  DeploymentPreview,
   GitBranch,
   GitComparison,
+  GitHubIssue,
   GitHubRepo,
   GitHubStatus,
   GitHubWorkflowRun,
   GitPullRequest as PR,
+  GitPullRequestSummary,
 } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import type { ConfirmRequest } from "@/components/confirm-dialog"
+import { CommentDialog } from "@/components/git/comment-dialog"
 import { SourceBranch, SourceMerge, SourcePull } from "@/components/git/glyphs"
 import { MergePullDialog } from "@/components/git/merge-pull-dialog"
 import type { GitPreview } from "@/components/git/preview-panel"
+import { openPreview } from "@/components/git/pull-request-row"
 import type { GitRun } from "@/components/git/run"
+import { TestPullDialog } from "@/components/git/test-pull-dialog"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { Field, FormFacts, FormFact, OptionList, OptionRow } from "@/components/form"
 import { ChipCount, FilterChip } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
@@ -41,18 +66,25 @@ import { rowReveal } from "@/components/icon-action"
 import { VerbActions, type Verb } from "@/components/verbs"
 
 type PullState = "open" | "merged" | "closed"
+type Deployment = GitPullRequestSummary["repos"][number]["deployments"][number]
 
 /**
  * What GitHub knows about this repository: its pull requests, with their
- * review and check state on the row; the Actions runs on the current branch,
- * because "did CI pass on what I just pushed" is asked beside the push
- * button; and the button that opens a pull request from the branch that is
- * checked out.
+ * review and check state on the row and, where a deploy project builds
+ * previews from them, where the preview stands; the open issues, with a box
+ * to answer one; the Actions runs on the current branch, because "did CI
+ * pass on what I just pushed" is asked beside the push button; and the
+ * button that opens a pull request from the branch that is checked out.
  *
  * It is a tab beside Changes and History because that is the sequence the
  * work actually takes — stage, commit, push, propose, merge — and the last
  * steps used to be the ones that sent you to a browser tab and a different
  * mental model.
+ *
+ * The previews come from the pull-request summary rather than from gh's
+ * listing: gh knows nothing of deploy projects, and the summary is the one
+ * read that joins a checkout to the projects deploying it. Testing a pull
+ * request and closing its preview address those projects.
  */
 export function GitHubPanel({
   repoPath,
@@ -60,9 +92,12 @@ export function GitHubPanel({
   github,
   busy,
   canControl,
+  canAdmin,
   run,
+  confirm,
   onSelect,
   active,
+  activePull,
   onChanged,
 }: {
   repoPath: string
@@ -70,15 +105,26 @@ export function GitHubPanel({
   github?: GitHubStatus
   busy?: string
   canControl: boolean
+  canAdmin: boolean
   run: GitRun
+  confirm: (request: ConfirmRequest) => void
   onSelect: (p: GitPreview) => void
   active?: string
+  /** The pull request the address bar opened the workspace on: scrolled into view once listed. */
+  activePull?: number
   onChanged: () => void
 }) {
+  const router = useRouter()
   const [creating, setCreating] = useState(false)
   const [merging, setMerging] = useState<PR | null>(null)
+  const [testing, setTesting] = useState<{ pull: PR; deployment: Deployment }>()
+  const [choosing, setChoosing] = useState<PR>()
+  const [commenting, setCommenting] = useState<{ number: number; title: string }>()
+  // A cleanup retry in flight, so no row offers a second one until it answers.
+  const [retrying, setRetrying] = useState(false)
   const [state, setState] = useSessionState<PullState>("git.github.pulls", "open")
   const signedIn = Boolean(github?.available && github.account?.loggedIn)
+  const listRef = useRef<HTMLUListElement>(null)
 
   const repo = usePoll(
     (signal) => get<GitHubRepo>("/git/github/repo", { path: repoPath }, signal),
@@ -103,6 +149,33 @@ export function GitHubPanel({
     [repoPath, branch],
     { enabled: signedIn && Boolean(branch) },
   )
+  const summary = usePoll(
+    (signal) => get<GitPullRequestSummary>("/git/pull-requests", { path: repoPath }, signal),
+    60_000,
+    [repoPath],
+    { enabled: signedIn },
+  )
+  const issues = usePoll(
+    (signal) =>
+      get<GitHubIssue[]>(
+        "/git/github/issues",
+        { path: repoPath, state: "open", limit: 10 },
+        signal,
+      ),
+    120_000,
+    [repoPath],
+    { enabled: signedIn },
+  )
+
+  // The row the address bar named, brought into view once the list has it.
+  // Only that: the preview column already opened on it.
+  const listed = pulls.data?.some((p) => p.number === activePull) ?? false
+  useEffect(() => {
+    if (!activePull || !listed) return
+    listRef.current
+      ?.querySelector(`[data-pull="${activePull}"]`)
+      ?.scrollIntoView({ block: "nearest" })
+  }, [activePull, listed])
 
   // The sign-in state decides everything below it, so it is waited for rather
   // than guessed at: rendering "no open pull requests" while the answer is
@@ -132,19 +205,68 @@ export function GitHubPanel({
   const list = pulls.data ?? []
   const mine = state === "open" ? list.find((p) => p.head === branch) : undefined
   const q = { path: repoPath }
+  // The summary answers `[]` for a checkout gh cannot read, and one entry
+  // otherwise; either way it is the one place a preview and a project meet.
+  const joined = summary.data?.repos?.[0]
+  const deployments = joined?.deployments ?? []
+  const previewOf = (number: number): DeploymentPreview | undefined =>
+    joined?.pulls.find((p) => p.number === number)?.preview ?? undefined
+  const refreshPulls = () => {
+    pulls.refresh()
+    summary.refresh()
+  }
+
+  // A checkout deployed by several projects can only be acted on against the
+  // one the preview names; without it, the single project is the answer.
+  const projectOf = (preview: DeploymentPreview) =>
+    preview.projectId ?? (deployments.length === 1 ? deployments[0].projectId : undefined)
+
+  const closePreview = (p: PR, preview: DeploymentPreview) => {
+    const projectId = projectOf(preview)
+    if (!projectId) return
+    confirm({
+      title: `Close the preview of #${p.number}`,
+      description:
+        "Its container, volumes and tailnet address are removed and the variables copied from production are dropped. Production is untouched, and the pull request stays open.",
+      confirmLabel: "Close preview",
+      // The dialog says "… completed" itself once the post answers; a toast
+      // of this action's own announced the same close a second time.
+      action: async () => {
+        await post(`/deploy/${projectId}/pull-requests/${p.number}/preview/close`)
+      },
+      onDone: refreshPulls,
+    })
+  }
+
+  // A failed removal is retried as the run it was, through the run's own
+  // retry route, as the Overview retries it: the close route would only find
+  // the preview already closed and point back at this run.
+  const retryCleanup = async (
+    projectId: number,
+    previewRun: NonNullable<DeploymentPreview["lastRun"]>,
+  ) => {
+    setRetrying(true)
+    try {
+      const created = await post<DeploymentEngineRun>(
+        `/deploy/${projectId}/runs/${previewRun.id}/retry`,
+        {},
+      )
+      refreshPulls()
+      router.push(`/deploy/${projectId}/runs/${created.id}`)
+    } catch (error) {
+      notify.error("Could not retry the cleanup", error)
+      setRetrying(false)
+    }
+  }
 
   const verbsFor = (p: PR): Verb[] => {
-    const verbs: Verb[] = [
-      {
-        key: "open",
-        label: "Open on GitHub",
-        detail: "The request's own page, with the conversation and the review.",
-        icon: External,
-        run: () => window.open(p.url, "_blank", "noopener"),
-      },
-    ]
+    const preview = previewOf(p.number)
+    const verbs: Verb[] = []
+    // Merge first and the removal last: the order a menu is read in is the
+    // order the verbs are wanted in, and the one that takes something away
+    // sits behind its rule at the end.
     if (canControl && p.state === "open") {
-      verbs.unshift({
+      verbs.push({
         key: "merge",
         label: "Merge",
         detail: "Merge it into its base branch on GitHub.",
@@ -152,6 +274,54 @@ export function GitHubPanel({
         disabled: !!busy || p.draft,
         run: () => setMerging(p),
       })
+    }
+    // Held while its preview is ready at this commit, building, closing or
+    // waiting on a failed cleanup: the Overview's rule, so pressing it here
+    // never announces a build the route would not run.
+    if (canAdmin && deployments.length > 0 && canTest(p) && !previewHeld(preview)) {
+      verbs.push({
+        key: "test",
+        label: previewOutOfDate(preview) ? "Update preview" : "Test this pull request",
+        detail:
+          "Build this exact commit as a preview environment of the project, reachable only on your tailnet.",
+        icon: Play,
+        disabled: !!busy,
+        run: () =>
+          deployments.length === 1
+            ? setTesting({ pull: p, deployment: deployments[0] })
+            : setChoosing(p),
+      })
+    }
+    if (preview?.lastRun && cleanupFailed(preview) && canControl) {
+      const projectId = projectOf(preview)
+      const previewRun = preview.lastRun
+      if (projectId)
+        verbs.push({
+          key: "retry-cleanup",
+          label: "Retry cleanup",
+          detail: "Run the failed removal again, so its containers and address are freed.",
+          icon: RotateCounterClockwise,
+          disabled: !!busy || retrying,
+          run: () => void retryCleanup(projectId, previewRun),
+        })
+    }
+    if (preview?.state === "open" && preview.address?.published) {
+      verbs.push({
+        key: "preview",
+        label: "Open preview",
+        detail: "The preview environment built from it, on your tailnet.",
+        icon: External,
+        run: () => openPreview(preview),
+      })
+    }
+    verbs.push({
+      key: "open",
+      label: "Open on GitHub",
+      detail: "The request's own page, with the conversation and the review.",
+      icon: External,
+      run: () => window.open(p.url, "_blank", "noopener"),
+    })
+    if (canControl && p.state === "open") {
       verbs.push({
         key: "checkout",
         label: "Check out the branch",
@@ -166,6 +336,17 @@ export function GitHubPanel({
               ok: true,
             })),
           ).catch(() => undefined),
+      })
+    }
+    if (canAdmin && preview?.state === "open") {
+      verbs.push({
+        key: "close",
+        label: "Close preview",
+        detail: "Remove the preview environment. Production is untouched.",
+        icon: StopCircle,
+        danger: true,
+        disabled: !!busy,
+        run: () => closePreview(p, preview),
       })
     }
     return verbs
@@ -188,6 +369,15 @@ export function GitHubPanel({
             default <span className="font-mono">{repo.data.defaultBranch}</span>
           </span>
           {repo.data.permission && <Tag>{repo.data.permission.toLowerCase()}</Tag>}
+          {/* The projects built from this repository, as the way across to
+              them: the Overview links back here the same way. */}
+          {deployments.map((d) => (
+            <Tag key={d.projectId} asChild>
+              <Link href={`/deploy/${d.projectId}`} className="hover:text-foreground">
+                deployed as {d.name}
+              </Link>
+            </Tag>
+          ))}
         </div>
       )}
 
@@ -238,61 +428,142 @@ export function GitHubPanel({
           />
         )}
         {list.length > 0 && (
-          <ul className="animate-rise divide-y divide-hairline">
-            {list.map((p) => (
-              <li
-                key={p.number}
-                className={cn(
-                  "group flex min-w-0 items-start gap-2 py-1.5 pr-1.5 pl-3 transition-colors hover:bg-row-hover",
-                  active === `pull:${p.number}` && "bg-accent",
-                )}
-              >
-                <button
-                  type="button"
-                  aria-pressed={active === `pull:${p.number}`}
-                  onClick={() => onSelect({ kind: "pull", number: p.number, title: p.title })}
-                  className="min-w-0 flex-1 text-left focus-ring-inset"
+          <ul ref={listRef} className="animate-rise divide-y divide-hairline">
+            {list.map((p) => {
+              const reading = previewStatus(previewOf(p.number))
+              return (
+                <li
+                  key={p.number}
+                  data-pull={p.number}
+                  className={cn(
+                    "group flex min-w-0 items-start gap-2 py-1.5 pr-1.5 pl-3 transition-colors hover:bg-row-hover",
+                    active === `pull:${p.number}` && "bg-accent",
+                  )}
                 >
-                  <span className="flex min-w-0 items-center gap-1.5">
-                    <span className="truncate text-body">{p.title}</span>
-                    {p.draft && <Tag>draft</Tag>}
-                    {p.head === branch && <Tag tone="warning">this branch</Tag>}
-                  </span>
-                  <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-hint text-muted-foreground">
-                    <span className="truncate">
-                      #{p.number} · <span className="font-mono">{p.head}</span> →{" "}
-                      <span className="font-mono">{p.base}</span>
-                      {p.author ? ` · ${p.author}` : ""}
-                      {p.createdAt ? ` · ${relativeTime(p.createdAt)}` : ""}
+                  <button
+                    type="button"
+                    aria-pressed={active === `pull:${p.number}`}
+                    onClick={() => onSelect({ kind: "pull", number: p.number, title: p.title })}
+                    className="min-w-0 flex-1 text-left focus-ring-inset"
+                  >
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate text-body">{p.title}</span>
+                      {p.draft && <Tag>draft</Tag>}
+                      {p.head === branch && <Tag tone="warning">this branch</Tag>}
                     </span>
-                    {p.checks && (
-                      <Status
-                        className="text-hint"
-                        tone={
-                          p.checks === "success"
-                            ? "running"
-                            : p.checks === "failure"
-                              ? "danger"
-                              : "warning"
-                        }
-                        label={
-                          p.checks === "success"
-                            ? "checks passed"
-                            : p.checks === "failure"
-                              ? "checks failed"
-                              : "checks running"
-                        }
-                      />
-                    )}
-                    {p.review === "approved" && (
-                      <Status className="text-hint" tone="running" label="approved" />
-                    )}
-                    {p.review === "changes_requested" && (
-                      <Status className="text-hint" tone="danger" label="changes requested" />
-                    )}
+                    <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-hint text-muted-foreground">
+                      <span className="truncate">
+                        #{p.number} · <span className="font-mono">{p.head}</span> →{" "}
+                        <span className="font-mono">{p.base}</span>
+                        {p.author ? ` · ${p.author}` : ""}
+                        {p.createdAt ? ` · ${relativeTime(p.createdAt)}` : ""}
+                      </span>
+                      {p.checks && (
+                        <Status
+                          className="text-hint"
+                          tone={
+                            p.checks === "success"
+                              ? "running"
+                              : p.checks === "failure"
+                                ? "danger"
+                                : "warning"
+                          }
+                          label={
+                            p.checks === "success"
+                              ? "checks passed"
+                              : p.checks === "failure"
+                                ? "checks failed"
+                                : "checks running"
+                          }
+                        />
+                      )}
+                      {p.review === "approved" && (
+                        <Status className="text-hint" tone="running" label="approved" />
+                      )}
+                      {p.review === "changes_requested" && (
+                        <Status className="text-hint" tone="danger" label="changes requested" />
+                      )}
+                      {reading && (
+                        <Status
+                          className="text-hint"
+                          tone={reading.tone}
+                          label={`preview ${reading.label.toLowerCase()}`}
+                        />
+                      )}
+                    </span>
+                  </button>
+                  <VerbActions verbs={verbsFor(p)} reveal className="mt-0.5" />
+                </li>
+              )
+            })}
+          </ul>
+        )}
+
+        {/* What is open against the repository besides the pull requests.
+            A reading with two verbs, not a choice: there is no issue preview
+            to open, and its page on GitHub is one press away. */}
+        <div className="sticky top-0 z-10 flex h-8 items-center gap-1.5 border-y border-hairline bg-card px-3">
+          <span className="eyebrow">Issues</span>
+          {issues.data && (
+            <span className="numeric text-hint text-muted-foreground">{issues.data.length}</span>
+          )}
+        </div>
+        {issues.error && (
+          <p className="px-3 py-2 text-hint text-muted-foreground">
+            Could not list issues: {errorMessage(issues.error)}
+          </p>
+        )}
+        {issues.loading && !issues.data && <LoadingRows className="p-3" rows={2} />}
+        {issues.data && issues.data.length === 0 && (
+          <p className="px-3 py-3 text-hint text-muted-foreground">No open issues.</p>
+        )}
+        {issues.data && issues.data.length > 0 && (
+          <ul className="animate-rise divide-y divide-hairline">
+            {issues.data.map((issue) => (
+              <li
+                key={issue.number}
+                className="group flex min-w-0 items-start gap-2 py-1.5 pr-1.5 pl-3 transition-colors hover:bg-row-hover"
+              >
+                <div className="min-w-0 flex-1">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span className="truncate text-body">{issue.title}</span>
+                    {issue.labels?.slice(0, 3).map((label) => (
+                      <Tag key={label}>{label}</Tag>
+                    ))}
                   </span>
-                </button>
-                <VerbActions verbs={verbsFor(p)} reveal className="mt-0.5" />
+                  <span className="mt-0.5 block truncate text-hint text-muted-foreground">
+                    #{issue.number}
+                    {issue.author ? ` · ${issue.author}` : ""}
+                    {issue.updatedAt ? ` · ${relativeTime(issue.updatedAt)}` : ""}
+                    {issue.comments > 0 ? ` · ${plural(issue.comments, "comment")}` : ""}
+                  </span>
+                </div>
+                <VerbActions
+                  verbs={[
+                    ...(canControl
+                      ? [
+                          {
+                            key: "comment",
+                            label: "Comment",
+                            detail: "Say something on the issue, as your GitHub account.",
+                            icon: PaperAirplane,
+                            inline: true,
+                            run: () => setCommenting({ number: issue.number, title: issue.title }),
+                          } satisfies Verb,
+                        ]
+                      : []),
+                    {
+                      key: "open",
+                      label: "Open on GitHub",
+                      detail: "The issue's own page, with its conversation.",
+                      icon: External,
+                      inline: true,
+                      run: () => window.open(issue.url, "_blank", "noopener"),
+                    },
+                  ]}
+                  reveal
+                  className="mt-0.5"
+                />
               </li>
             ))}
           </ul>
@@ -365,7 +636,7 @@ export function GitHubPanel({
         repoPath={repoPath}
         branch={branch}
         onCreated={() => {
-          pulls.refresh()
+          refreshPulls()
           onChanged()
         }}
       />
@@ -375,10 +646,60 @@ export function GitHubPanel({
           onOpenChange={(o) => !o && setMerging(null)}
           repoPath={repoPath}
           pull={merging}
+          headSha={merging.headSha}
           onMerged={() => {
-            pulls.refresh()
+            refreshPulls()
             onChanged()
           }}
+        />
+      )}
+      {choosing && (
+        <Modal
+          open
+          onOpenChange={(o) => !o && setChoosing(undefined)}
+          title={`Which project tests #${choosing.number}?`}
+          description={`${deployments.length} projects deploy this repository.`}
+          size="sm"
+        >
+          <ChoiceList>
+            {deployments.map((d) => (
+              <ChoiceRow
+                key={d.projectId}
+                title={d.name}
+                verb={`Test in ${d.name}`}
+                description={`project ${d.projectId}`}
+                onSelect={() => {
+                  setTesting({ pull: choosing, deployment: d })
+                  setChoosing(undefined)
+                }}
+              />
+            ))}
+          </ChoiceList>
+        </Modal>
+      )}
+      {testing && (
+        <TestPullDialog
+          open
+          onOpenChange={(o) => !o && setTesting(undefined)}
+          projectId={testing.deployment.projectId}
+          projectName={testing.deployment.name}
+          pull={testing.pull}
+          preview={previewOf(testing.pull.number)}
+          onStarted={(runId) => {
+            refreshPulls()
+            router.push(`/deploy/${testing.deployment.projectId}/runs/${runId}`)
+          }}
+          onRefresh={refreshPulls}
+        />
+      )}
+      {commenting && (
+        <CommentDialog
+          open
+          onOpenChange={(o) => !o && setCommenting(undefined)}
+          repoPath={repoPath}
+          number={commenting.number}
+          title={commenting.title}
+          onCommented={() => issues.refresh()}
         />
       )}
     </div>

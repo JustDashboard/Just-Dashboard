@@ -218,3 +218,55 @@ func TestPreviewPlansReplaceAllProductionStorageAndOmitHostReleaseTasks(t *testi
 		}
 	}
 }
+
+// Approving a newer head from the dashboard supersedes the head the preview
+// is configured at: the queue refuses the old head from that moment, and the
+// preview builds again only once EnsurePreview has moved it to the new one.
+func TestLaterDashboardApprovalSupersedesTheConfiguredHeadUntilReconfigured(t *testing.T) {
+	ctx := t.Context()
+	f := newAutomationFixture(t)
+	trigger, err := f.automation.EnsurePullRequestTrigger(ctx, f.projectID, f.environmentID, "acme/app", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := ProviderEvent{PreviewNumber: 6, PreviewRef: "refs/pull/6/head", Revision: strings.Repeat("a", 40), Repository: "acme/app"}
+	if _, err := f.automation.RecordPreviewApproval(ctx, trigger, first, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	preview, _, err := f.automation.EnsurePreview(ctx, trigger, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := NewOrchestrationStore(f.store)
+	request := RunRequest{ProjectID: f.projectID, EnvironmentID: preview.EnvironmentID, PlanRevision: 1, Operation: OperationPreviewCreate, Trigger: TriggerPreview, Actor: "admin", RequestDigest: "first", SourceRevision: first.Revision}
+	if _, _, err := runs.Enqueue(ctx, request); err != nil {
+		t.Fatalf("approved head was refused: %v", err)
+	}
+
+	second := first
+	second.Revision = strings.Repeat("b", 40)
+	if _, err := f.automation.RecordPreviewApproval(ctx, trigger, second, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	if err := f.store.DB.QueryRow(`SELECT state FROM deploy_preview_approvals WHERE trigger_id=? AND provider_ref='6' AND revision=?`, trigger.ID, first.Revision).Scan(&state); err != nil || state != "superseded" {
+		t.Fatalf("earlier head state = %q, %v", state, err)
+	}
+	request.RequestDigest = "stale"
+	if _, _, err := runs.Enqueue(ctx, request); !errors.Is(err, ErrPreviewApproval) {
+		t.Fatalf("superseded head was admitted: %v", err)
+	}
+	request.SourceRevision, request.RequestDigest = "", "unpinned"
+	if _, _, err := runs.Enqueue(ctx, request); !errors.Is(err, ErrPreviewApproval) {
+		t.Fatalf("preview still at the superseded head was admitted: %v", err)
+	}
+
+	updated, created, err := f.automation.EnsurePreview(ctx, trigger, second)
+	if err != nil || created || updated.EnvironmentID != preview.EnvironmentID {
+		t.Fatalf("reconfigure = %#v, %v, %v", updated, created, err)
+	}
+	request.PlanRevision, request.SourceRevision, request.RequestDigest = 2, second.Revision, "second"
+	if _, _, err := runs.Enqueue(ctx, request); err != nil {
+		t.Fatalf("new head was refused after reconfiguration: %v", err)
+	}
+}

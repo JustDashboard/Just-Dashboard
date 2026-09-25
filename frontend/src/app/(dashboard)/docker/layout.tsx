@@ -3,7 +3,7 @@
 import { Box, RefreshClockwise } from "@/components/icons"
 import { get } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
-import { Page, PageHeader } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
 import { EmptyState, LoadingPanel } from "@/components/state"
 import { Button } from "@/components/ui/button"
 
@@ -27,7 +27,7 @@ export default function DockerLayout({ children }: { children: React.ReactNode }
   if (ping.loading) {
     return (
       <Page>
-        <PageHeader eyebrow="Server" title="Docker" />
+        <PageContext eyebrow="Server" title="Docker" />
         <LoadingPanel />
       </Page>
     )
@@ -36,7 +36,7 @@ export default function DockerLayout({ children }: { children: React.ReactNode }
   if (!ping.data?.available) {
     return (
       <Page>
-        <PageHeader eyebrow="Server" title="Docker" />
+        <PageContext eyebrow="Server" title="Docker" />
         <EmptyState
           icon={Box}
           title="Docker is not reachable"

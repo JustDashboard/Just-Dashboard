@@ -5,7 +5,7 @@ import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { Crosshair, Information } from "@/components/icons"
-import { PageHeader, SearchInput, Section, Toolbar } from "@/components/page"
+import { PageContext, SearchInput, Section, Toolbar } from "@/components/page"
 import { EmptyState, Notice } from "@/components/state"
 import { FilterChip } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
@@ -39,7 +39,10 @@ export function ToolsPanel() {
     const tool = params.get("tool")
     const target = params.get("target")
     if (!tool || !TOOL_GROUPS.some((g) => g.tools.some((t) => t.key === tool))) return null
-    return { tool, prefill: { target: target ?? undefined, record: params.get("record") ?? undefined } }
+    return {
+      tool,
+      prefill: { target: target ?? undefined, record: params.get("record") ?? undefined },
+    }
   }, [params])
   const [query, setQuery] = useSessionState("security.tools.query", "")
   const [group, setGroup] = useSessionState<string | null>("security.tools.group", null)
@@ -62,7 +65,7 @@ export function ToolsPanel() {
     })).filter((g) => (!group || g.title === group) && g.tools.length > 0)
   }, [query, group, focused])
 
-  const header = <PageHeader eyebrow="Security" title="Tools" />
+  const header = <PageContext eyebrow="Security" title="Tools" />
 
   if (!can("system.admin")) {
     return (

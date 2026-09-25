@@ -2,7 +2,7 @@
 
 import { useEffect } from "react"
 import { RotateClockwise } from "@/components/icons"
-import { Page, PageHeader } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { Button } from "@/components/ui/button"
 
@@ -40,7 +40,7 @@ export default function DashboardError({
 
   return (
     <Page>
-      <PageHeader eyebrow="Error" title="This page stopped rendering" />
+      <PageContext eyebrow="Error" title="This page stopped rendering" />
       <Panel>
         <PanelHeader
           title="Something in this page threw"

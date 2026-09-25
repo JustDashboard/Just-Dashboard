@@ -21,7 +21,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { JobConsole, RecentJobs, useJobConsole } from "@/components/job-console"
 import { InstallPanel } from "@/components/packages/install-panel"
 import { PackageSheet } from "@/components/packages/package-sheet"
-import { Page, PageHeader, RowLink, SearchInput } from "@/components/page"
+import { Page, PageContext, RowLink, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelToolbar } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
@@ -54,8 +54,8 @@ import {
  * meant the release notes for a root-equivalent panel lived under a table of
  * library versions.
  *
- * Drawn the way the host Overview is (design-system.md §15): a facts row
- * under the title, four figures as tiles, and three views under one strip of
+ * Drawn the way the host Overview is (design-system.md §15): a facts row,
+ * four figures as tiles, and three views under one strip of
  * tabs, each a plain panel — a toolbar, a hairline and a table that starts on
  * the page's own edge. The three things worth acting on before reading any
  * of that — security updates waiting, a reboot owed, an index too old to
@@ -212,71 +212,68 @@ export default function PackagesPage() {
   return (
     <Page>
       {dialog}
-      <PageHeader
-        eyebrow="Advanced"
-        title="Packages"
-        actions={
-          <>
-            <RecentJobs kinds={["updates.", "packages."]} onOpen={console_.open} />
-            {canRefresh && (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={applying}
-                onClick={() => void refreshIndex()}
-              >
-                <CloudDownload className="size-4" />
-                Refresh index
-              </Button>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={applying}
-              onClick={() => {
-                inventory.refresh()
-                updates.refresh()
-              }}
-            >
-              <RefreshClockwise className="size-4" />
-              Re-read
-            </Button>
-          </>
-        }
-      />
+      <PageContext eyebrow="Advanced" title="Packages" />
 
       {/* What manages this host and how fresh the answer is. These were the
           hints under two tiles, where a fact about the whole page sat under
           one figure; here they are the subject of the page, as its own row. */}
-      {data?.available && (
-        <div className="flex min-w-0 animate-rise flex-wrap items-center gap-x-2 gap-y-1 text-body text-muted-foreground">
-          <span className="font-medium text-foreground">{data.manager}</span>
-          {data.indexAge && (
-            <>
-              <Dot />
-              <span>index refreshed {relativeTime(data.indexAge)}</span>
-            </>
+      <div className="flex min-w-0 animate-rise flex-wrap items-center gap-x-4 gap-y-2">
+        {data?.available && (
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-body text-muted-foreground">
+            <span className="font-medium text-foreground">{data.manager}</span>
+            {data.indexAge && (
+              <>
+                <Dot />
+                <span>index refreshed {relativeTime(data.indexAge)}</span>
+              </>
+            )}
+            <Dot />
+            <span>read {relativeTime(data.readAt)}</span>
+            <Dot />
+            {report?.rebootRequired ? (
+              <Status verdict="warning" label="Reboot required" />
+            ) : securityCount > 0 ? (
+              <Status
+                verdict="warning"
+                label={`${securityCount} security update${securityCount === 1 ? "" : "s"}`}
+              />
+            ) : upgradeCount > 0 ? (
+              <Status
+                verdict="notice"
+                label={`${upgradeCount} update${upgradeCount === 1 ? "" : "s"} waiting`}
+              />
+            ) : (
+              <Status verdict="ok" label="Up to date" />
+            )}
+          </div>
+        )}
+        <div className="ml-auto flex max-w-full flex-wrap items-center gap-2">
+          <RecentJobs kinds={["updates.", "packages."]} onOpen={console_.open} />
+          {canRefresh && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={applying}
+              onClick={() => void refreshIndex()}
+            >
+              <CloudDownload className="size-4" />
+              Refresh index
+            </Button>
           )}
-          <Dot />
-          <span>read {relativeTime(data.readAt)}</span>
-          <Dot />
-          {report?.rebootRequired ? (
-            <Status verdict="warning" label="Reboot required" />
-          ) : securityCount > 0 ? (
-            <Status
-              verdict="warning"
-              label={`${securityCount} security update${securityCount === 1 ? "" : "s"}`}
-            />
-          ) : upgradeCount > 0 ? (
-            <Status
-              verdict="notice"
-              label={`${upgradeCount} update${upgradeCount === 1 ? "" : "s"} waiting`}
-            />
-          ) : (
-            <Status verdict="ok" label="Up to date" />
-          )}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={applying}
+            onClick={() => {
+              inventory.refresh()
+              updates.refresh()
+            }}
+          >
+            <RefreshClockwise className="size-4" />
+            Re-read
+          </Button>
         </div>
-      )}
+      </div>
 
       <StatGrid columns={4}>
         <StatTile
@@ -512,7 +509,7 @@ export default function PackagesPage() {
                     }
                   />
                 ) : (
-                  <div className="group-data-[plain]/panel:-mx-4 min-w-0">
+                  <div className="min-w-0 group-data-[plain]/panel:-mx-4">
                     <PackageTable packages={visible.slice(0, MAX_ROWS)} onInspect={setInspect} />
                   </div>
                 )}
@@ -571,7 +568,7 @@ export default function PackagesPage() {
                     }
                   />
                 ) : (
-                  <div className="group-data-[plain]/panel:-mx-4 min-w-0">
+                  <div className="min-w-0 group-data-[plain]/panel:-mx-4">
                     <Table containerClassName="max-h-[calc(100svh-30rem)]">
                       <TableHeader className={stickyTableHeader}>
                         <TableRow>

@@ -74,6 +74,8 @@ type WorkspaceProps = {
   leading?: React.ReactNode
   /** The source's facts, beside its name: its kind, path, size, state. */
   facts?: React.ReactNode
+  /** Commands for the source, at the end of the workbench strip. */
+  actions?: React.ReactNode
   className?: string
 }
 
@@ -154,6 +156,7 @@ export function LogWorkspace(props: WorkspaceProps) {
           <span className="truncate text-body font-medium">{source.label}</span>
           {props.facts}
         </div>
+        {props.actions && <div className="flex shrink-0 items-center gap-2">{props.actions}</div>}
         <nav aria-label="Log mode" className="flex shrink-0 items-stretch">
           <button
             type="button"

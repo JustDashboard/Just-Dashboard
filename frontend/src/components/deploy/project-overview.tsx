@@ -5,28 +5,30 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { ArrowRight } from "@/components/icons"
 import { get } from "@/lib/api"
-import { percent, relativeTime } from "@/lib/format"
+import { percent } from "@/lib/format"
+import { pullOfPreview, unavailableReason } from "@/lib/pull-requests"
 import { perMinute } from "@/lib/requests"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
+import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentDiagnosis,
   DeploymentPreview,
   DeploymentSummary,
+  GitPullRequest,
+  ProjectPullRequests,
   TrafficPulse,
 } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Row, RowList } from "@/components/row-list"
 import { EmptyNote } from "@/components/state"
 import { FindingList, type Finding } from "@/components/finding-list"
 import { ChoiceList } from "@/components/flow"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
-import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
-import { ProductLogo, buildMethodProduct, imageProduct } from "@/components/product-logo"
+import { buildMethodProduct, imageProduct } from "@/components/product-logo"
 import { TileTrend } from "@/components/metrics/sparkline"
-import { SourcePull } from "@/components/git/glyphs"
+import { PullRequestRow } from "@/components/git/pull-request-row"
 import { Button } from "@/components/ui/button"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { Confetti, type ConfettiRef } from "@/components/ui/confetti"
@@ -52,6 +54,7 @@ import { RunRow } from "@/components/deploy/run-row"
 import { UsageTiles } from "@/components/deploy/usage-tiles"
 import { BeforeYouDeploy } from "@/components/deploy/deploy-check"
 import { attentionFindings } from "@/components/deploy/deploy-check-state"
+import { usePullRequestVerbs } from "@/components/deploy/pull-request-verbs"
 
 /**
  * The project's front page, in the order a visitor asks: is something
@@ -71,8 +74,9 @@ import { attentionFindings } from "@/components/deploy/deploy-check-state"
  * Findings live here rather than on Runtime — Runtime is evidence, this is
  * the verdict — and the identity line's "needs attention" links to them. The
  * recent deployments are runs you open, drawn as the runs list draws them,
- * beside the preview environments. Each block arrives on its own beat, and a
- * block whose read settles later rises when it does (§11).
+ * beside the repository's pull requests, each with the preview built from it
+ * and the verbs that test, merge or close one. Each block arrives on its own
+ * beat, and a block whose read settles later rises when it does (§11).
  */
 export function ProjectOverview() {
   const project = useProject()
@@ -89,13 +93,25 @@ export function ProjectOverview() {
       : undefined
   const domain = opsDomains?.find((route) => route.hostname === hostOf(url))
 
-  const previews = usePoll(
+  // The repository's open pull requests, joined to the previews built from
+  // them, on the Git page's minute. Only a Git project has any, and a read
+  // that fails hides the block rather than drawing an error where a list
+  // would be: the panel is a window onto GitHub, not a fact about the
+  // project, and the page has nothing to say about it that the Git page
+  // does not say better.
+  const pullRequests = usePoll(
     (signal) =>
-      get<DeploymentPreview[]>(`/deploy/${project.projectId}/previews`, undefined, signal),
-    30000,
+      get<ProjectPullRequests>(`/deploy/${project.projectId}/pull-requests`, undefined, signal),
+    60000,
     [project.projectId],
-    { enabled: project.normalized && !project.archived },
+    { enabled: project.normalized && !project.archived && deployment.sourceKind === "git" },
   )
+  const pulls = usePullRequestVerbs({
+    projectId: project.projectId,
+    projectName: record.name,
+    info: pullRequests.data,
+    refresh: pullRequests.refresh,
+  })
 
   const findings = useFindings(project.operations?.diagnosis, router)
   const runs = project.runs.filter((run) => run.environmentId === project.environmentId)
@@ -267,13 +283,21 @@ export function ProjectOverview() {
   if (project.normalized)
     blocks.push(["delivery", <Insights key="delivery" projectId={project.projectId} />])
 
-  const hasPreviews = Boolean(previews.data && previews.data.length > 0)
+  const info = pullRequests.data
+  const previews = info?.previews ?? []
+  // Drawn while there is something to say: the listing, or the previews
+  // built before the listing stopped answering. Nothing drawn for a project
+  // whose repository is not on GitHub — not even for a webhook preview of
+  // one, which has no pull request here to be drawn under.
+  const hasPulls = Boolean(
+    info && info.reason !== "not_github" && (info.available || previews.length > 0),
+  )
   blocks.push([
     "history",
     <div
       key="history"
       className={
-        hasPreviews ? "grid min-w-0 gap-8 2xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]" : "min-w-0"
+        hasPulls ? "grid min-w-0 gap-8 2xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]" : "min-w-0"
       }
     >
       <Panel plain>
@@ -313,40 +337,23 @@ export function ProjectOverview() {
         </PanelBody>
       </Panel>
 
-      {hasPreviews && (
+      {info && hasPulls && (
         <Panel plain>
           <PanelHeader
-            title="Preview environments"
+            title="Pull requests"
             actions={
-              <Link
-                href={`/deploy/${project.projectId}/settings/automation`}
-                className="inline-flex items-center gap-1 rounded-sm text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-              >
-                Manage <ArrowRight className="size-3" />
-              </Link>
+              info.checkoutPath && (
+                <Link
+                  href={`/git?${new URLSearchParams({ repo: info.checkoutPath })}`}
+                  className="inline-flex items-center gap-1 rounded-sm text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
+                >
+                  Git page <ArrowRight className="size-3" />
+                </Link>
+              )
             }
           />
-          <PanelBody flush>
-            <RowList aria-label="Preview environments">
-              {previews.data?.map((preview) => (
-                <Row
-                  key={preview.id}
-                  leading={<ProductLogo size="sm" fallback={SourcePull} />}
-                  title={<span className="font-mono">{preview.environmentSlug}</span>}
-                  subtitle={`updated ${relativeTime(preview.updatedAt)}`}
-                  trailing={
-                    preview.isolationStatus === "quarantined" ? (
-                      <Status tone="danger" label="Quarantined" />
-                    ) : (
-                      <Status
-                        tone={preview.state === "open" ? "running" : "stopped"}
-                        label={preview.state === "open" ? "Open" : "Closed"}
-                      />
-                    )
-                  }
-                />
-              ))}
-            </RowList>
+          <PanelBody>
+            <PullRequestList info={info} verbsFor={pulls.verbsFor} previewOf={pulls.previewOf} />
           </PanelBody>
         </Panel>
       )}
@@ -372,6 +379,63 @@ export function ProjectOverview() {
         domains={domainHostnames}
       />
       <Confetti ref={celebrate} className="pointer-events-none fixed inset-0 z-50 size-full" />
+      {pulls.dialogs}
+    </div>
+  )
+}
+
+/**
+ * The open pull requests first, each with the preview built from it; then
+ * the previews whose pull request is no longer open — merged or closed on
+ * GitHub, or unreadable from here — each named by what the dashboard recorded
+ * when it was built, since GitHub no longer lists it. An unreadable listing
+ * says why, in the sentence that names the fix, above whatever previews it
+ * still holds.
+ */
+function PullRequestList({
+  info,
+  verbsFor,
+  previewOf,
+}: {
+  info: ProjectPullRequests
+  verbsFor: ReturnType<typeof usePullRequestVerbs>["verbsFor"]
+  previewOf: ReturnType<typeof usePullRequestVerbs>["previewOf"]
+}) {
+  const open = info.pulls.filter((pull) => pull.state === "open")
+  const listed = new Set(open.map((pull) => pull.number))
+  const orphans = info.previews.filter((preview) => !listed.has(preview.number))
+  const rows: { pull: GitPullRequest; preview?: DeploymentPreview | null }[] = [
+    ...open.map((pull) => ({ pull, preview: previewOf(pull) })),
+    ...orphans.map((preview) => ({ pull: pullOfPreview(preview, info), preview })),
+  ]
+  // The full row keeps its readings beside the title, and on a phone the two
+  // compete for the width until the title has none. The compact row keeps
+  // the title and the preview's state and drops the branches, which the
+  // dialog that tests the pull request names anyway.
+  const roomy = useMediaQuery("(min-width: 640px)")
+  return (
+    <div className="space-y-3">
+      {!info.available && (
+        <EmptyNote className="px-0 py-2 text-left">{unavailableReason(info)}</EmptyNote>
+      )}
+      {info.available && rows.length === 0 && (
+        <EmptyNote className="px-0 py-5 text-left">
+          No open pull requests on {info.repository}.
+        </EmptyNote>
+      )}
+      {rows.length > 0 && (
+        <ChoiceList aria-label="Pull requests">
+          {rows.map(({ pull, preview }) => (
+            <PullRequestRow
+              key={pull.number}
+              pull={pull}
+              preview={preview}
+              verbs={verbsFor(pull)}
+              compact={!roomy}
+            />
+          ))}
+        </ChoiceList>
+      )}
     </div>
   )
 }

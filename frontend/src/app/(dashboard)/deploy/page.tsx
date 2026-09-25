@@ -1,5 +1,5 @@
 import { Suspense } from "react"
-import { Page, PageHeader } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
 import { ArchivedSkeleton } from "@/components/deploy/archived-projects"
 import { FleetSkeleton, ProjectsPage } from "@/components/deploy/projects-page"
 
@@ -19,7 +19,7 @@ export default async function DeployPage({
           <ArchivedSkeleton />
         ) : (
           <Page>
-            <PageHeader eyebrow="Apps" title="Deployments" />
+            <PageContext eyebrow="Apps" title="Deployments" />
             <FleetSkeleton />
           </Page>
         )

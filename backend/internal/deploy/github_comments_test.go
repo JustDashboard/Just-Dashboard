@@ -40,6 +40,7 @@ func (p *recordingCommentPoster) all() []postedComment {
 func previewFixture(t *testing.T) (*automationFixture, *PreviewRef) {
 	t.Helper()
 	f := newAutomationFixture(t)
+	setSourceRemote(t, f, f.environmentID, "https://github.com/acme/app.git", "acme/app")
 	created, err := f.automation.CreateTrigger(t.Context(), f.projectID, f.environmentID, TriggerWrite{Name: "Review", Kind: TriggerGitHub, Provider: "github", Enabled: true, Config: TriggerConfig{Repository: "acme/app", Ref: "main", Preview: true, Delivery: DeliveryApp}})
 	if err != nil {
 		t.Fatal(err)

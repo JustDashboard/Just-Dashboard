@@ -1,12 +1,23 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 )
+
+// refusePullRequestHead answers a source ref that names a pull request's head
+// where no preview is being made. Such a ref reaches an environment only
+// through "Test this pull request", where an administrator approves the exact
+// commit; typed into a project's source it would build anyone's pull request
+// as production.
+func refusePullRequestHead(ref string) error {
+	return httpx.Err(http.StatusBadRequest, "invalid_ref",
+		fmt.Sprintf("%s is a pull request head; a project's source is a branch or tag, and a pull request is built as a preview from its page", ref))
+}
 
 // deploymentSourceUpdateRequest accepts the same DraftSourceConfig shape a
 // draft's source step uses, plus the desired-revision guard every other
@@ -51,6 +62,15 @@ func (s *Server) handleDeploymentSourceUpdate(w http.ResponseWriter, r *http.Req
 	source := request.DraftSourceConfig
 	if err := source.ValidateForDeployment(); err != nil {
 		return mapDeploymentPlanningError(err)
+	}
+	if deploy.IsProviderPullRef(source.Ref) {
+		target, err := s.modules.deployRuns.EnvironmentExecutionTarget(r.Context(), projectID, environmentID)
+		if err != nil {
+			return mapDeployError(err)
+		}
+		if target.Kind != deploy.EnvironmentPreview {
+			return refusePullRequestHead(source.Ref)
+		}
 	}
 	detection, err := s.modules.deploySources.Analyze(r.Context(), source)
 	if err != nil {

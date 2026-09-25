@@ -73,6 +73,10 @@ func (s *Server) handleDeploymentDraftSave(w http.ResponseWriter, r *http.Reques
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
 	}
+	// A draft becomes a production environment, never a preview.
+	if request.Source != nil && deploy.IsProviderPullRef(request.Source.Ref) {
+		return refusePullRequestHead(request.Source.Ref)
+	}
 	principal := httpx.MustPrincipal(r)
 	draft, err := s.modules.deployPlanning.Save(
 		r.Context(), chi.URLParam(r, "draft"), principal.UserID(),

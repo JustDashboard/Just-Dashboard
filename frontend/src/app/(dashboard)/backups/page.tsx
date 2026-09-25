@@ -11,7 +11,7 @@ import type { BackupJob, BackupResource, BackupResourceReport, Container } from 
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Page, PageHeader } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ChoiceList } from "@/components/flow"
 import { FindingList, type Finding } from "@/components/finding-list"
@@ -158,18 +158,7 @@ export default function BackupsPage() {
 
   return (
     <Page className="animate-rise">
-      <PageHeader
-        eyebrow="Protection"
-        title="Backups"
-        actions={
-          admin && (
-            <Button size="sm" onClick={() => setForm({})}>
-              <Plus className="size-4" />
-              New backup
-            </Button>
-          )
-        }
-      />
+      <PageContext eyebrow="Protection" title="Backups" />
 
       {/* Only what somebody has to act on: a run that failed, a job that has
           gone quiet. What is not covered is the Coverage list's to say — a
@@ -205,9 +194,17 @@ export default function BackupsPage() {
           <PanelHeader
             title="Jobs"
             actions={
-              <span className="numeric text-hint text-muted-foreground">
-                {plural(list.length, "job")}
-                {archives > 0 && ` · ${bytes(stored)} in ${plural(archives, "archive")}`}
+              <span className="flex items-center gap-3">
+                <span className="numeric text-hint text-muted-foreground">
+                  {plural(list.length, "job")}
+                  {archives > 0 && ` · ${bytes(stored)} in ${plural(archives, "archive")}`}
+                </span>
+                {admin && (
+                  <Button size="sm" onClick={() => setForm({})}>
+                    <Plus className="size-4" />
+                    New backup
+                  </Button>
+                )}
               </span>
             }
           />

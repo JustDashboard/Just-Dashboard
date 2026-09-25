@@ -56,6 +56,9 @@ func (s *Server) mountGitRoutes(r chi.Router) {
 		// and /branches rather than in the service.control group.
 		r.Method(http.MethodGet, "/graph", s.handle(s.handleGitGraph))
 		r.Method(http.MethodGet, "/diff", s.handle(s.handleGitDiff))
+		// Every GitHub-backed checkout's open pull requests, read as each
+		// checkout's owner the way this page reads everything else.
+		r.Method(http.MethodGet, "/pull-requests", s.handle(s.handleGitPullRequests))
 
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))

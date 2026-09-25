@@ -184,13 +184,13 @@ export function StatGrid({
         // A hairline between cells and only between them: a cell starting a
         // row draws no left edge and the first row draws no top one. Unframed,
         // the cell that starts a row also drops its left padding so the
-        // column of names lines up with the page title above it.
+        // column of names lines up with the page's content edge.
         //
         // Each padding rule is written twice: once for a tile that sits
         // inside the cell (a `StatLink`), once for a tile that *is* the cell.
         // The descendant form alone never matched the second — the child is
         // not its own descendant — so every grid of bare tiles started a
-        // step in from the title it was meant to line up with.
+        // step in from the content edge it was meant to line up with.
         "[&>*]:border-t [&>*]:border-hairline [&>*:first-child]:border-t-0",
         // Dense writes the two-up rules at the base width, where the default
         // writes them from `sm` over a one-up base.

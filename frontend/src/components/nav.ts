@@ -54,8 +54,8 @@ import type { Capability } from "@/lib/types"
 /**
  * Every destination in the product, once.
  *
- * The sidebar draws it, the command palette searches it, and a page header's
- * eyebrow names the group it came from. It used to live in `app-sidebar.tsx`
+ * The sidebar draws it and the command palette searches it. It used to live
+ * in `app-sidebar.tsx`
  * beside the markup that rendered it; it is a file of its own now because the
  * rail is no longer the only thing that walks it — a section opens a panel of
  * its own pages, a group opens a panel of sections, and the deployment section

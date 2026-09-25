@@ -6,7 +6,7 @@ import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Metric, MetricStrip, Page, PageHeader, RowLink, SearchInput } from "@/components/page"
+import { Metric, MetricStrip, Page, PageContext, RowLink, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { ROW_BLEED } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
@@ -148,21 +148,16 @@ export function LiveProcesses() {
 
   return (
     <Page className="animate-rise">
-      <PageHeader
-        eyebrow="Processes"
-        title="Live"
-        actions={
-          snapshot?.cpu &&
-          snapshot.memory && (
-            <MetricStrip>
-              <Metric label="CPU" value={percent(snapshot.cpu.totalPercent, 0)} />
-              <Metric label="Available" value={bytes(snapshot.memory.available)} />
-              <Metric label="Load" value={snapshot.cpu.loadAvg1.toFixed(2)} />
-              <Metric label="Uptime" value={duration(snapshot.uptimeSeconds)} />
-            </MetricStrip>
-          )
-        }
-      />
+      <PageContext eyebrow="Processes" title="Live" />
+
+      {snapshot?.cpu && snapshot.memory && (
+        <MetricStrip>
+          <Metric label="CPU" value={percent(snapshot.cpu.totalPercent, 0)} />
+          <Metric label="Available" value={bytes(snapshot.memory.available)} />
+          <Metric label="Load" value={snapshot.cpu.loadAvg1.toFixed(2)} />
+          <Metric label="Uptime" value={duration(snapshot.uptimeSeconds)} />
+        </MetricStrip>
+      )}
 
       {data && (
         <StatGrid columns={4} key="figures" className="animate-rise">
@@ -265,7 +260,7 @@ export function LiveProcesses() {
               {/* The outer columns take the gutter from their own cell padding,
                   so the first column starts in the title's column; the `-mx`
                   bleed that does the same on a plain panel is gated to it (§2). */}
-              <div className="group-data-[plain]/panel:-mx-4 hidden min-w-0 lg:block">
+              <div className="hidden min-w-0 group-data-[plain]/panel:-mx-4 lg:block">
                 <ProcessTableWide
                   rows={data.processes}
                   ratesReady={data.ratesReady}

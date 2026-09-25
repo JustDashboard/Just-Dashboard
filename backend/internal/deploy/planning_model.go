@@ -1036,15 +1036,33 @@ func validModeForKind(kind SourceKind, mode SourceMode) bool {
 
 var sourceRefRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/@+-]{0,254}$`)
 
+// providerPullRefRE names the one ref shape outside refs/heads and refs/tags a
+// source may point at: the read-only ref a forge publishes for a pull or
+// merge request's head. It is the ref a preview fetches from the base
+// repository, so a fork's commits arrive through the base repository's own
+// credential and never through the fork's.
+var providerPullRefRE = regexp.MustCompile(`^refs/(?:pull|merge-requests)/[0-9]+/head$`)
+
+// IsProviderPullRef reports whether ref is a forge's pull or merge request
+// head ref. Only the preview flow writes one, for a commit an administrator
+// approved; a ref taken from a request must never be one, or a name like
+// refs/pull/7/head would deploy an unreviewed fork commit wherever a branch
+// may be deployed.
+func IsProviderPullRef(ref string) bool { return providerPullRefRE.MatchString(ref) }
+
 func validSourceRef(ref string) bool {
 	if !sourceRefRE.MatchString(ref) || strings.Contains(ref, "..") || strings.Contains(ref, "@{") ||
 		strings.Contains(ref, "//") || strings.HasSuffix(ref, "/") || strings.HasSuffix(ref, ".") ||
 		ref == "HEAD" || ref == "FETCH_HEAD" {
 		return false
 	}
+	if providerPullRefRE.MatchString(ref) {
+		return true
+	}
 	name := ref
 	if strings.HasPrefix(ref, "refs/") {
 		if strings.HasPrefix(ref, "refs/heads/") {
+
 			name = strings.TrimPrefix(ref, "refs/heads/")
 		} else if strings.HasPrefix(ref, "refs/tags/") {
 			name = strings.TrimPrefix(ref, "refs/tags/")

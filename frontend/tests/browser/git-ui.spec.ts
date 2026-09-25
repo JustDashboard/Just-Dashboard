@@ -110,17 +110,67 @@ async function json(route: Route, body: unknown) {
 
 type Seen = { method: string; path: string; headers: Record<string, string> }
 
-async function mockGit(page: Page) {
+/** An open pull request as the summary lists one: enough for a card's strip. */
+const pr = (number: number, title: string) => ({
+  number,
+  title,
+  url: `https://github.com/acme/app/pull/${number}`,
+  state: "open",
+  draft: false,
+  head: `feature-${number}`,
+  base: "main",
+  author: "Ada",
+  createdAt: now,
+  comments: 0,
+  headSha: "a".repeat(40),
+  checks: "success",
+})
+
+/** A preview ready at #12's head, which holds "Test this pull request" back on its row. */
+const readyPreview = {
+  id: 1,
+  triggerId: 2,
+  providerRef: "12",
+  environmentId: 12,
+  environmentSlug: "pr-12",
+  state: "open",
+  updatedAt: now,
+  number: 12,
+  projectId: 4,
+  revision: "a".repeat(40),
+  headRevision: "a".repeat(40),
+  liveReleaseId: 3,
+  address: { kind: "tailnet", url: "https://vps.tail.ts.net:21000", port: 21000, published: true },
+}
+
+type Summary = { available: boolean; repos: ({ path: string } & Record<string, unknown>)[] }
+
+async function mockGit(page: Page, pulls: Summary = { available: true, repos: [] }) {
   const seen: Seen[] = []
   await page.route("**/api/v1/**", async (route) => {
     const req = route.request()
-    const path = new URL(req.url()).pathname.replace(/^\/api\/v1/, "")
+    const url = new URL(req.url())
+    const path = url.pathname.replace(/^\/api\/v1/, "")
     seen.push({ method: req.method(), path, headers: req.headers() })
     switch (path) {
       case "/auth/session":
         return json(route, user)
       case "/git/":
         return json(route, { available: true, repos: [app, lib] })
+      case "/git/pull-requests": {
+        // The workspace asks for its own checkout; the list asks for all.
+        const one = url.searchParams.get("path")
+        return json(
+          route,
+          one ? { ...pulls, repos: pulls.repos.filter((r) => r.path === one) } : pulls,
+        )
+      }
+      case "/git/github/pulls/12":
+        return json(route, pr(12, "Add caching"))
+      case "/git/github/pulls/12/files":
+        return json(route, { headSha: "a".repeat(40), hasMore: false, limited: false, files: [] })
+      case "/git/github/pulls/12/conversation":
+        return json(route, { entries: [], hasMore: false })
       case "/git/github/":
         return json(route, { available: true, account: { loggedIn: false, gitConfigured: false } })
       case "/git/status":
@@ -172,6 +222,85 @@ test("the list answers what is waiting before the rows are read", async ({ page 
   await page.getByRole("button", { name: "app", exact: true }).click()
   await expect(page).toHaveURL(/repo=%2Fsrv%2Fapp/)
   await expect(page.getByRole("button", { name: "Back to repositories" })).toBeVisible()
+})
+
+/**
+ * What GitHub says is waiting on a checkout sits on its card, and is a filter.
+ *
+ * The pull requests used to live one click and a tab away, inside the
+ * workspace, where the question the list page is opened with — is anything
+ * waiting — could not see them. Now a card carries up to three of them, each a
+ * choice of its own that opens the checkout *on* that request in one history
+ * entry, and the strip must not disturb what the card already promised: the
+ * repository's name is still the only button called that.
+ */
+test("open pull requests sit on the card and open the checkout on them", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockGit(page, {
+    available: true,
+    repos: [
+      {
+        path: "/srv/app",
+        repository: "acme/app",
+        pulls: [
+          { ...pr(12, "Add caching"), preview: readyPreview },
+          pr(13, "Fix login"),
+          pr(14, "Bump dependencies"),
+          pr(15, "Write docs"),
+        ],
+        deployments: [{ projectId: 4, name: "app", environmentId: 9 }],
+      },
+      {
+        path: "/srv/lib",
+        repository: "acme/lib",
+        pulls: [],
+        deployments: [],
+        error: "not signed in",
+      },
+    ],
+  })
+  await page.goto("/git")
+  await expect(page.getByRole("button", { name: "Pull requests 1" })).toBeVisible()
+
+  // Three on the card, and a word for the rest.
+  await expect(page.getByRole("button", { name: "Open pull request #12" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Open pull request #14" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Open pull request #15" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "and 1 more" })).toBeVisible()
+  // A checkout gh could not answer for says so in one quiet word.
+  await expect(page.getByText("pull requests unavailable")).toBeVisible()
+  // The strip adds no button named like a repository.
+  await expect(page.getByRole("button", { name: /^(app|lib)$/ })).toHaveCount(2)
+
+  // The strip's verbs follow the Overview's rule: a request whose preview is
+  // ready at this commit has nothing to test, and one without a preview has.
+  await page.getByRole("button", { name: "More actions for #12" }).click()
+  await expect(page.getByRole("menuitem", { name: /^Merge/ })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: /^Test this pull request/ })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await page.getByRole("button", { name: "More actions for #13" }).click()
+  await expect(page.getByRole("menuitem", { name: /^Test this pull request/ })).toBeVisible()
+  await page.keyboard.press("Escape")
+
+  // The chip narrows to the checkouts with something to merge, and the
+  // search box finds a pull request by its number.
+  await page.getByRole("button", { name: "Pull requests 1" }).click()
+  await expect(page.getByRole("button", { name: "lib", exact: true })).toHaveCount(0)
+  await page.getByPlaceholder("Filter by name, path, branch or pull request").fill("#13")
+  await expect(page.getByRole("button", { name: "app", exact: true })).toBeVisible()
+  await page.getByPlaceholder("Filter by name, path, branch or pull request").fill("#99")
+  await expect(page.getByRole("button", { name: "app", exact: true })).toHaveCount(0)
+  await page.getByPlaceholder("Filter by name, path, branch or pull request").fill("")
+
+  // A pull request opens the checkout on its GitHub tab, with the request in
+  // the preview column — one history entry, so Back leaves the workspace.
+  await page.getByRole("button", { name: "Open pull request #12" }).click()
+  await expect(page).toHaveURL(/\?repo=%2Fsrv%2Fapp&pull=12$/)
+  await expect(page.getByRole("tab", { name: "GitHub" })).toHaveAttribute("aria-selected", "true")
+  await expect(page.locator("[data-slot=git-preview]")).toContainText("Add caching")
+  await page.goBack()
+  await expect(page).toHaveURL(/\/git$/)
+  await expect(page.getByRole("button", { name: "Open pull request #12" })).toBeVisible()
 })
 
 test("a file staged and edited again is listed on both sides", async ({ page }) => {
@@ -281,7 +410,7 @@ for (const path of ["/git", "/git?repo=%2Fsrv%2Fapp"] as const) {
     await mockGit(page)
     await page.goto(path)
     await expect(
-      page.locator("[data-slot=page-header], [data-slot=pane-header]").first(),
+      page.getByRole("button", { name: path.includes("?") ? "Back to repositories" : "Rescan" }),
     ).toBeVisible()
 
     const unnamed = await page.evaluate(() => {

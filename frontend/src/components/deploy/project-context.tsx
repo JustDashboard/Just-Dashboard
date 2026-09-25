@@ -20,7 +20,7 @@ import type {
   DeployProject,
   DeploymentRunsPage,
 } from "@/lib/types"
-import { Page, PageHeader } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
 import { ErrorState, LoadingPanel } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -333,7 +333,7 @@ export function ProjectProvider({
   if (!valid || (detail.error && !detail.data)) {
     return (
       <Page>
-        <PageHeader eyebrow="Deployments" title="Deployment unavailable" />
+        <PageContext eyebrow="Deployments" title="Deployment unavailable" />
         {detail.error && <ErrorState error={detail.error} onRetry={detail.refresh} />}
         <Button variant="outline" size="sm" asChild className="w-fit">
           <Link href="/deploy">

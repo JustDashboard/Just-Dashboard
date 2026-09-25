@@ -16,7 +16,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { FormFact } from "@/components/form"
 import { DimActions } from "@/components/icon-action"
-import { Page, PageHeader, SearchInput } from "@/components/page"
+import { Page, PageContext, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelToolbar } from "@/components/panel"
 import { ProductGlyph } from "@/components/product-logo"
 import { EmptyState, ErrorState } from "@/components/state"
@@ -134,17 +134,7 @@ export function ArchivedProjects() {
 
   return (
     <Page className="animate-rise">
-      <PageHeader
-        eyebrow={BACK}
-        title="Archived"
-        actions={
-          result.data && (
-            <span className="numeric text-hint text-muted-foreground">
-              {plural(result.data.length, "project")}
-            </span>
-          )
-        }
-      />
+      <PageContext eyebrow={BACK} title="Archived" />
       <Panel plain>
         <PanelToolbar>
           <SearchInput
@@ -153,6 +143,11 @@ export function ArchivedProjects() {
             placeholder="Search archive"
             aria-label="Search archive"
           />
+          {result.data && (
+            <span className="numeric ml-auto text-hint text-muted-foreground">
+              {plural(result.data.length, "project")}
+            </span>
+          )}
         </PanelToolbar>
         <PanelBody flush className="pt-3">
           {result.error ? (
@@ -246,7 +241,7 @@ function ArchivedRows() {
 export function ArchivedSkeleton() {
   return (
     <Page>
-      <PageHeader eyebrow={BACK} title="Archived" />
+      <PageContext eyebrow={BACK} title="Archived" />
       <Panel plain>
         <PanelToolbar>
           <Skeleton aria-hidden className="h-10 w-full rounded-md sm:h-8 sm:w-72" />

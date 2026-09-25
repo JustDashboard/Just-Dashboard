@@ -891,6 +891,10 @@ func planningGitRef(ref string) (remoteRef, cloneRef string) {
 		return ref, strings.TrimPrefix(ref, "refs/heads/")
 	case strings.HasPrefix(ref, "refs/tags/"):
 		return ref, strings.TrimPrefix(ref, "refs/tags/")
+	case providerPullRefRE.MatchString(ref):
+		// A pull request head has no branch name of its own on the base
+		// repository; the fetch names the provider's ref as it is.
+		return ref, ref
 	default:
 		return "refs/heads/" + ref, ref
 	}

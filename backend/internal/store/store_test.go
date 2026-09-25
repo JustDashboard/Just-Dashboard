@@ -169,3 +169,99 @@ func TestReopenReleasesPreviouslyArchivedDeploymentNames(t *testing.T) {
 		t.Fatal("migration erased project history")
 	}
 }
+
+// Pull request previews added columns to two shipped tables and one new table.
+// An install that predates them must gain the columns with their defaults on
+// the next boot, with every existing preview and variable row left as it was.
+func TestOpenAddsPullRequestPreviewColumnsToAPreExistingDatabase(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, DatabaseFile)
+	old, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = old.Exec(`
+		CREATE TABLE deploy_preview_refs (
+		  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+		  trigger_id     INTEGER NOT NULL,
+		  provider_ref   TEXT NOT NULL,
+		  environment_id INTEGER NOT NULL,
+		  state          TEXT NOT NULL DEFAULT 'open',
+		  updated_at     INTEGER NOT NULL,
+		  UNIQUE(trigger_id, provider_ref)
+		);
+		INSERT INTO deploy_preview_refs (trigger_id, provider_ref, environment_id, state, updated_at) VALUES (3, '42', 9, 'open', 1700000000);
+		CREATE TABLE deploy_variable_revisions (
+		  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+		  environment_id INTEGER NOT NULL,
+		  key            TEXT NOT NULL,
+		  revision       INTEGER NOT NULL,
+		  sensitivity    TEXT NOT NULL DEFAULT 'secret',
+		  scopes         TEXT NOT NULL DEFAULT 'runtime',
+		  value_enc      TEXT NOT NULL,
+		  value_digest   TEXT NOT NULL DEFAULT '',
+		  active         INTEGER NOT NULL DEFAULT 1,
+		  created_by     TEXT NOT NULL DEFAULT 'migration',
+		  created_at     INTEGER NOT NULL,
+		  UNIQUE(environment_id, key, revision)
+		);
+		INSERT INTO deploy_variable_revisions (environment_id, key, revision, value_enc, created_at) VALUES (9, 'TOKEN', 1, 'sealed', 1700000000);`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := old.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open on a pre-existing database: %v", err)
+	}
+	defer st.Close()
+
+	ctx := context.Background()
+	previews, err := tableColumns(ctx, st.DB, "deploy_preview_refs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"origin", "title", "head_revision", "variables_copied_revision"} {
+		if !previews[want] {
+			t.Errorf("deploy_preview_refs.%s was not added to the existing table", want)
+		}
+	}
+	variables, err := tableColumns(ctx, st.DB, "deploy_variable_revisions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !variables["copied_from_environment"] {
+		t.Error("deploy_variable_revisions.copied_from_environment was not added to the existing table")
+	}
+	addresses, err := tableColumns(ctx, st.DB, "deploy_preview_addresses")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"environment_id", "kind", "port", "upstream_port", "url", "published", "updated_at"} {
+		if !addresses[want] {
+			t.Errorf("deploy_preview_addresses.%s is missing", want)
+		}
+	}
+
+	var state, origin, title, head, copiedRevision string
+	err = st.DB.QueryRow(
+		`SELECT state, origin, title, head_revision, variables_copied_revision FROM deploy_preview_refs WHERE provider_ref = '42'`).
+		Scan(&state, &origin, &title, &head, &copiedRevision)
+	if err != nil {
+		t.Fatalf("the pre-existing preview did not survive: %v", err)
+	}
+	if state != "open" || origin != "" || title != "" || head != "" || copiedRevision != "" {
+		t.Errorf("preview row = %q/%q/%q/%q/%q, want open and empty defaults", state, origin, title, head, copiedRevision)
+	}
+	var sealed string
+	var copiedFrom int64
+	if err := st.DB.QueryRow(`SELECT value_enc, copied_from_environment FROM deploy_variable_revisions WHERE key = 'TOKEN'`).Scan(&sealed, &copiedFrom); err != nil {
+		t.Fatalf("the pre-existing variable did not survive: %v", err)
+	}
+	if sealed != "sealed" || copiedFrom != 0 {
+		t.Errorf("variable row = %q/%d, want sealed/0", sealed, copiedFrom)
+	}
+}

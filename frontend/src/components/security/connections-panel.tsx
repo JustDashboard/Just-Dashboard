@@ -9,7 +9,7 @@ import type { Connections } from "@/lib/types"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { PageHeader, SearchInput } from "@/components/page"
+import { PageContext, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel } from "@/components/state"
@@ -17,7 +17,6 @@ import { Reach } from "@/components/security/reach"
 import { addressVerbs, blockAddress } from "@/components/security/address-verbs"
 import { AreaFindings } from "@/components/security/posture-panel"
 import { useSecurity } from "@/components/security/security-context"
-import { Status } from "@/components/status-dot"
 import { VerbActions } from "@/components/verbs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
@@ -64,22 +63,7 @@ export function ConnectionsPanel() {
   }, [data?.peers, scope, query])
   const fromInternet = (data?.peers ?? []).filter((p) => !p.private).length
 
-  const header = (
-    <PageHeader
-      eyebrow="Security"
-      title="Connections"
-      actions={
-        data && (
-          <Status
-            verdict={fromInternet > 0 ? "notice" : "ok"}
-            label={
-              fromInternet > 0 ? `${fromInternet} from the internet` : "none from the internet"
-            }
-          />
-        )
-      }
-    />
-  )
+  const header = <PageContext eyebrow="Security" title="Connections" />
 
   if (loading && !data) {
     return (
@@ -181,12 +165,14 @@ export function ConnectionsPanel() {
             ) : (
               <EmptyState
                 icon={NetworkDevice}
-                title={scope === "public" ? "Nothing connected from the internet" : "No connections"}
+                title={
+                  scope === "public" ? "Nothing connected from the internet" : "No connections"
+                }
                 className="mt-3"
               />
             )
           ) : (
-            <div className="group-data-[plain]/panel:-mx-4 min-w-0">
+            <div className="min-w-0 group-data-[plain]/panel:-mx-4">
               <Table containerClassName="max-h-[calc(100svh-28rem)]">
                 <TableHeader className={stickyTableHeader}>
                   <TableRow>
