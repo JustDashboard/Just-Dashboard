@@ -36,9 +36,18 @@ func TestLiveDetectedFrameworkBuildAndServing(t *testing.T) {
 	// next-pnpm and express-yarn are the same kind of server installed by
 	// pnpm (a toolchain release the start command runs offline) and by
 	// Yarn 1 (its real frozen install), started through the manager.
+	// java-reactor is a Spring Boot module of a Maven reactor on Java 17 and
+	// gradle-multiproject an application-plugin project of a Gradle build
+	// with a version catalog, each built from the build's root;
+	// dotnet-solution a web project in a solution's src/ with shared props,
+	// central package versions and a global.json pin; blazor-wasm a Blazor
+	// WebAssembly app served as static files; fsharp an F# minimal API; and
+	// dotnet-spa an ASP.NET Core project whose publish runs npm for its
+	// front end.
 	for _, name := range []string{"vite", "next", "svelte-node", "svelte-static", "html", "containerfile", "go",
 		"astro", "nuxt", "react-router", "fastapi", "flask", "django", "rust", "java", "gradle", "dotnet", "deno", "laravel", "php",
-		"streamlit", "gradio", "next-pnpm", "express-yarn"} {
+		"streamlit", "gradio", "next-pnpm", "express-yarn",
+		"java-reactor", "gradle-multiproject", "dotnet-solution", "blazor-wasm", "fsharp", "dotnet-spa"} {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 			defer cancel()
@@ -74,7 +83,7 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 				config.GoVersion, config.BuildCommand, config.StartCommand = "1.26.8", "go generate ./... && go build -o /out/app .", "/app custom-start"
 				candidate.Port = 8080
 			}
-			if name == "java" || name == "gradle" {
+			if name == "java" || name == "gradle" || name == "gradle-multiproject" {
 				candidate.Port = 8080
 			}
 			variables := map[string]string{}
@@ -87,7 +96,9 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 			tag := fmt.Sprintf("jd-framework-test:%s-%d", name, stamp)
 			t.Cleanup(func() { _, _ = liveDockerOutput(context.Background(), "image", "rm", "--force", tag) })
 			logs := []string{}
-			result := livePrepareAndBuild(t, builder, filepath.Join(root, candidate.Root), tag, config, variables, nil, func(line BuildLog) error { logs = append(logs, line.Text); return nil })
+			// Within the checkout, as prepare_context prepares it: a module
+			// or a solution's project builds from the root that owns it.
+			result := livePrepareAndBuildWithin(t, builder, root, candidate.Root, tag, config, variables, func(line BuildLog) error { logs = append(logs, line.Text); return nil })
 			if config.Method == BuildRecipe {
 				assertLiveArtifactSecretFree(t, tag, secret, result, logs)
 			}
@@ -176,6 +187,12 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 				name == "rust" && (candidate.Framework != "axum" || result.Prepared.Toolchain != "rust 1") ||
 				name == "java" && result.Prepared.Toolchain != "java 21 (maven)" ||
 				name == "gradle" && result.Prepared.Toolchain != "java 21 (gradle 8)" ||
+				name == "java-reactor" && (candidate.Root != "app" || candidate.Framework != "spring-boot" || result.Prepared.Toolchain != "java 17 (maven)" || result.Prepared.ContextDirectory != ".") ||
+				name == "gradle-multiproject" && (candidate.Root != "app" || result.Prepared.Toolchain != "java 21 (gradle 8)" || result.Prepared.ContextDirectory != ".") ||
+				name == "dotnet-solution" && (candidate.Root != "src/Shop.Api" || candidate.Framework != "aspnet" || result.Prepared.Toolchain != "dotnet 10.0" || result.Prepared.ContextDirectory != ".") ||
+				name == "blazor-wasm" && (candidate.Framework != "blazor-wasm" || candidate.Port != 80) ||
+				name == "fsharp" && (candidate.Framework != "aspnet" || result.Prepared.Toolchain != "dotnet 10.0") ||
+				name == "dotnet-spa" && (candidate.Framework != "aspnet" || !strings.Contains(result.Prepared.DockerfilePreview, "COPY --from=spa-node /usr/local/ /usr/local/")) ||
 				name == "streamlit" && (candidate.Framework != "streamlit" || candidate.Port != 8501) ||
 				name == "gradio" && (candidate.Framework != "gradio" || candidate.Port != 7860) ||
 				name == "dotnet" && (candidate.Framework != "aspnet" || result.Prepared.Toolchain != "dotnet 10.0") ||
