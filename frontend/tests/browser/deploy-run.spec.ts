@@ -36,18 +36,18 @@ test("renders the run identity, facts and release path for an active run", async
   await expect(page.getByRole("heading", { name: "Deployment #1" })).toBeVisible()
   const identity = page.locator('[data-slot="run-identity"]')
   await expect(identity.getByText("Verifying", { exact: true })).toBeVisible()
-  await expect(page.getByRole("link", { name: /api-production/ })).toHaveAttribute(
-    "href",
-    "/deploy/7",
-  )
+  // Nothing stands above the identity line: the run's verbs sit on it beside
+  // the state, and the way back to the project is the rail's panel and the
+  // menu's Open project rather than an eyebrow.
+  await expect(page.locator("[data-slot=page-context]")).toHaveCount(0)
+  await expect(
+    identity.getByRole("button", { name: "More actions for Deployment #1", exact: true }),
+  ).toBeVisible()
 
   // The identity line: the source as its forge, the repository as the title
   // (the run recorded no commit), and the run as a sentence of facts.
   await expect(identity.getByText("acme/api", { exact: true })).toBeVisible()
   await expect(page.getByText("Production", { exact: true })).toBeVisible()
-  // The fixture is run #1, so the page also carries the creation flow's spine
-  // and its last step is called "Deploy" too: the operation is read off the
-  // identity line rather than as the only "Deploy" on the page.
   await expect(identity.getByText("Deploy", { exact: true })).toBeVisible()
   await expect(page.getByText("by operator", { exact: true })).toBeVisible()
   await expect(page.getByText(/Sep 0?3, 2026/)).toBeVisible()
@@ -59,12 +59,9 @@ test("renders the run identity, facts and release path for an active run", async
   // The fixture's run plans no certificate: that stage is not part of it,
   // rather than waiting on it for ever.
   await expect(path.getByText("Not part of this run", { exact: true })).toHaveCount(1)
-  // A first run is the last step of the sequence that started on /deploy/new —
-  // the five screens done, this run the one in progress; a later one has no
-  // flow behind it and gets no spine.
-  const spine = page.getByRole("list", { name: "Progress" })
-  await expect(spine).toBeVisible()
-  await expect(spine.locator('[aria-current="step"]')).toHaveText("Deploy")
+  // The sequence on /deploy/new ended when the project was created: a first
+  // run is read like any other, with no spine claiming the screens before it.
+  await expect(page.getByRole("list", { name: "Progress" })).toHaveCount(0)
   // The path lights the stage at work; no second caption names it again.
   await expect(path.locator('[aria-current="step"]')).toContainText("Verify")
   await expect(page.getByRole("status")).toHaveCount(0)

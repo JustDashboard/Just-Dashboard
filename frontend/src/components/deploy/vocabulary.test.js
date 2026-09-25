@@ -1,7 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import {
-  CREATION_SPINE,
-  CREATION_STEPS,
   autoDeployReading,
   groupedState,
   projectProduct,
@@ -236,11 +234,4 @@ describe("sourceLine", () => {
     })
     expect(sourceLine(image).primary).toBe("ghcr.io/acme/api:1")
   })
-})
-
-test("the first run's spine is the flow walked, then the deployment", () => {
-  expect(CREATION_SPINE.map((step) => step.key)).toEqual([
-    ...CREATION_STEPS.map((step) => step.key),
-    "deploy",
-  ])
 })

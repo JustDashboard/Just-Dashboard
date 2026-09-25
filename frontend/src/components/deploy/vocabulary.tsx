@@ -1494,10 +1494,3 @@ export const CREATION_STEPS = [
   { key: "variables", label: "Variables" },
   { key: "review", label: "Review" },
 ]
-
-/**
- * The same walk from the far end: the first run's page draws the five screens
- * the reader came through, all done, and the deployment they are watching as
- * the step they are on — not "step 3 of 5" over a flow that has finished.
- */
-export const CREATION_SPINE = [...CREATION_STEPS, { key: "deploy", label: "Deploy" }]

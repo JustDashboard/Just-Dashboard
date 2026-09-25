@@ -128,13 +128,16 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   showing, read it, and close it — the list is the context you are using. A detail that holds a
   **stream, a terminal, or an editor** is not that. You stay in it for minutes, the list behind it is
   dead weight, and a sheet's `sm:max-w-3xl` is about ninety columns of terminal. Those are their own
-  destination with a breadcrumb back, built the way `deploy/run-page.tsx` is: `PageContext` with the
-  parent as an `eyebrow` link and the verbs in `actions`, then the resource name and state among the
-  page's facts — a `MetricStrip` on a container's and a stack's page, and on the run page,
-  since the 2026-09-24 pass, the `HostIdentity` line the host Overview opens on (the source as its
-  forge, the commit, who or what started the run, how long it has taken), because a run is one thing
-  described the way the product describes every thing. A container, a compose stack and a backup job
-  went that way on 2026-09-21; every other detail in the product is a `SidePanel` and should stay one.
+  destination with a breadcrumb back: `PageContext` with the parent as an `eyebrow` link and the
+  verbs in `actions`, then the resource name and state among the page's facts — a `MetricStrip` on
+  a container's and a stack's page. The run page (`deploy/run-page.tsx`) goes one step further:
+  since the 2026-09-24 pass it opens on the `HostIdentity` line the host Overview opens on (the
+  source as its forge, the commit, who or what started the run, how long it has taken), because a
+  run is one thing described the way the product describes every thing, and since 2026-09-25 that
+  line is the first thing on the page — its verbs sit at the line's end beside the run's state, and
+  the way back is the rail's panel and the menu's Open project rather than an eyebrow. A container,
+  a compose stack and a backup job went that way on 2026-09-21; every other detail in the product is
+  a `SidePanel` and should stay one.
 
   Their tabs stay **in** the page — they are views of one thing, which is what `tabClasses` is for.
   Do not reintroduce a route-level strip for them (see the `SectionNav` note below), and do not give
