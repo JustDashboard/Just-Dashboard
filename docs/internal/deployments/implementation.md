@@ -661,8 +661,9 @@ only renderer/executor/validation authority for their feature.
   programs print it as a warning and carry on: `SENTRY_DSN is not set` beside the port the server
   really took must name the port), and a single container that stopped with exit code 0 instead of
   serving (`runtime_start_exited`; several containers are a Compose stack, where a one-off service
-  exits 0 by design), and a Django candidate whose check was answered with an error while the output
-  holds no error at all (`runtime_errors_hidden`, a 400 read as `runtime_host_disallowed`: with DEBUG off
+  exits 0 by design), and a Django candidate whose check was answered with a 5xx while the output
+  holds no error at all (`runtime_errors_hidden`, a 400 read as `runtime_host_disallowed`, a 401, 403 or
+  404 left to the readiness classification: with DEBUG off
   and no `LOGGING`, Django mails request errors instead of printing them — the failed checks' status
   codes reach the classifier as `runtimeCauseContext.checks`). The cause is the step's code and the run's
   terminal code in place of `health_gate_failed`, with the health evidence kept; it carries identifiers
@@ -674,7 +675,9 @@ only renderer/executor/validation authority for their feature.
   to `WEB_CONCURRENCY`, and which loads no machine-learning model, is recorded as such
   (`PreparedBuild.webConcurrency`, copied into the runtime snapshot), and `startContainer` sets
   `WEB_CONCURRENCY` for it (`runtime_concurrency.go`: 2×CPU+1 within 256 MiB of the memory limit per
-  worker, 2 without a limit) unless the plan sets the variable. Compose and host-network applications keep their own environment conventions.
+  worker, 2 without a limit) unless the plan sets the variable; the start step's log states the value.
+  Detection gives a websocket application's generated uvicorn command `--workers 1`, so it is never
+  marked. Compose and host-network applications keep their own environment conventions.
   This keeps application startup aligned with Docker publication; the host port may still move. The
   recipes switch framework trust of the proxy's `X-Forwarded-*` headers on (`FORWARDED_ALLOW_IPS=*`,
   `ASPNETCORE_FORWARDEDHEADERS_ENABLED`, `SERVER_FORWARD_HEADERS_STRATEGY`, Quarkus proxy forwarding,

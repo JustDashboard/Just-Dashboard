@@ -1117,7 +1117,7 @@ the root above it rather than becoming a root of its own.
 | requirement file | `pip install --requirement <file>`: `requirements.txt`, else `requirements/production.txt`, `requirements/prod.txt`, `requirements-prod.txt`, `requirements/base.txt`, … or the only file that is not for development |
 | bare `pyproject.toml` | `tomllib` reads `[project].dependencies` into a requirement file (3.10 brings `tomli`) rather than `pip install .`, which needs a build backend an application never set up |
 | `setup.py`/`setup.cfg` | `pip install .` |
-| `environment.yml` | its `pip:` list and the conda packages a reviewed table maps to PyPI (`pandas=2.1` read as `pandas==2.1.*`), written into the image; a conda-only package is `recipe_unsupported` naming it |
+| `environment.yml` | the conda packages a reviewed table maps to PyPI (`pandas=2.1` read as `pandas==2.1.*`) and its `pip:` list as conda hands it to pip — markers, VCS references, index options and `-r` includes — written into `.jd-conda-requirements.txt` beside it, so includes resolve as they do under conda; a requirement file the list includes is the environment's, not an install of its own, unless the environment needs a conda-only package, when that file is installed instead. A conda-only package, a line the Dockerfile cannot carry inside single quotes (a quote outside a marker, a backslash, a literal credential, non-ASCII), or an include that leaves the root or is missing is `recipe_unsupported` naming it, never dropped |
 
 The tools are pinned (`build_python.go`), so two builds of one commit run the same resolver.
 Unpinned requirements are accepted — refusing them turned the most ordinary Python repository there is
@@ -1139,9 +1139,16 @@ nothing, and `python_dependencies_empty` warns — blocked when the code imports
 `manage.py`.
 
 `pip freeze` leftovers are rewritten inside the image before pip reads them, by generic `sed`
-expressions that name no line of the file: `name @ file:///croot/…` becomes `name`, and Windows or macOS
-packages (`pywin32`, `pywinpty`, `pyobjc-*`) and paths outside the checkout (`-e C:\…`) are commented out
-with their `--hash` continuation lines (`python_requirements_local_artifacts`). A pip install that pulls
+expressions that name no line of the file. A conda package build's `name @ file:///croot/…` (Anaconda's
+`/croot/` and `/tmp/build/`, conda-build's `/opt/conda/conda-bld/`, conda-forge's builders) becomes
+`name`: conda repackaged that PyPI distribution. Windows or macOS packages (`pywin32`, `pywinpty`,
+`pyobjc-*`) are commented out with their `--hash` continuation lines (`python_requirements_local_artifacts`).
+Any other `name @ file:` — a developer's own package — and a path outside the checkout (`-e C:\…`) are
+commented out too, never installed by name: an index could publish an unrelated or hostile package under
+it (`python_requirements_local_paths` names them; the application stops with `ModuleNotFoundError` if it
+imports one). A `file:` URL pip expands from a variable (PDM's `${PROJECT_ROOT}`) is left alone. A
+requirement file the install names is written unquoted into the install command, so one whose name a
+shell would split is `recipe_unsupported`. A pip install that pulls
 PyTorch in (`torch`, `sentence-transformers`, `ultralytics`, `openai-whisper`, …) with no index of its own
 adds PyTorch's CPU index to `PIP_EXTRA_INDEX_URL` for that one command: a deployment container is never
 given a GPU, and PyPI's Linux x86_64 torch brings gigabytes of CUDA libraries (`python_cpu_torch_selected`;
@@ -1155,7 +1162,9 @@ index or dependency URL is `credential_in_manifest`; a `git+ssh` dependency is t
 `python_private_git_dependency`, since the build has no SSH key.
 
 A uv workspace member (a directory a parent pyproject's `[tool.uv.workspace]` members cover, with the
-workspace's `uv.lock`) installs from the workspace root: the build context widens to it
+workspace's `uv.lock`) installs from the workspace root, which is ranked below its members when it
+declares no dependencies of its own (uv's own root has a `[project]` table with an empty list): the build
+context widens to it
 (`ContextDirectory`), `uv sync --locked --no-dev --package <member>` installs the member with its sibling
 packages, and the server runs from the member's directory. Both are written unquoted into the
 Dockerfile, so a member whose directory is not letters, digits and `. _ @ + - /`, or whose name is not a
@@ -1202,7 +1211,9 @@ first release with Linux wheels for each family, for the compiled distributions 
 (`build_python_wheels.go`, generated from PyPI's JSON). A few releases
 import a module a later Python removed (python-telegram-bot before 20, Django before 4.1, pydub without
 `audioop-lts`). An undeclared version then stays below the family those pins cannot use, with the pins as
-evidence (`python_version_limited`); a chosen one they cannot use is `python_version_wheels_missing`
+evidence (`python_version_limited`, and the run log's note) — the configure form seeds
+`build.pythonVersion` from detection, so a setting equal to the detected family is still the pins' choice,
+not an override; a chosen one they cannot use is `python_version_wheels_missing`
 (naming a family that works) or `python_native_build_unmapped` when none does. A family outside the
 declared range is `python_version_unsupported`: blocked on the uv and Poetry paths, which refuse it, a
 warning on pip.
@@ -1238,16 +1249,25 @@ An application object is found as applications keep it: `app = FastAPI()` or `fa
 module-level `app = create_app()` whose factory builds or is annotated with the framework's type, a Flask
 factory that takes a configuration used through the object a `wsgi.py` builds from it. A `src/` layout
 imports by package name with `--app-dir src` (uvicorn) or `--pythonpath src` (gunicorn), and installs the
-project itself (`pip install .`, Poetry without `--no-root`) when it declares a build system; an
+project itself (`pip install .`, Poetry without `--no-root`, `pip install --no-deps .` after a requirement
+file or a PDM export) when it declares a build system — as it does when the start command runs one of
+the project's console scripts. The entry files of the root's packages (`<pkg>/`, `src/<pkg>/`) are read
+after the walk whatever their depth, since a uv workspace member made by `uv init --package` keeps its
+application at `apps/api/src/api/main.py`; an
 application folder whose modules import their siblings by bare name (`app/main.py` importing `routers`)
 runs from inside it. A script or `manage.py` directory whose path a shell would split or expand (a space,
 a quote, a `$`, a leading dash) is never written into a proposed start command. `start_module_unresolved`
 warns when a start command's module is none of the root's importable names.
 
 A start command the repository declares outranks every guess: a `Procfile` web process, then a task
-runner's `start`/`serve` task (`[tool.pdm.scripts]`, `[tool.poe.tasks]`, `[tool.taskipy.tasks]`, Hatch's
-default scripts), with `pdm run`/`hatch run`/`poetry run`/`uv run` stripped; a composite task is not a
-command. A declared start answers the framework's questions (confidence high), and keeps what the
+runner's `start`, `serve`, `server`, `web` or `prod` task (`[tool.pdm.scripts]`, `[tool.poe.tasks]`,
+`[tool.taskipy.tasks]`, Hatch's default scripts), with `pdm run`/`hatch run`/`poetry run`/`uv run`
+stripped; a composite task is not a command, and `run` is not read. A task is as often what a developer
+runs, so one that starts a development server (`runserver`, `flask run`, `fastapi dev`, `--reload`),
+binds loopback where the recipe's environment does not move it (`hypercorn app:app`), or runs a script
+where the framework has a production server (Flask's `app.run()` in `python app.py`) leaves the
+framework's command in place; the Procfile, which a platform ran in production, is taken as written. A
+declared start answers the framework's questions (confidence high), and keeps what the
 platform it was written for would have done: Heroku's buildpack collects Django's static files at build
 time, so a Django web process gets `collectstatic` before it when WhiteNoise has a `STATIC_ROOT`. Its
 `release:` line is planned as described under [release commands](#release-commands).
@@ -1263,8 +1283,9 @@ WhiteNoise and a `STATIC_ROOT`: WhiteNoise without one is `django_static_root_mi
 without WhiteNoise `django_static_unserved`. With DEBUG off and no `LOGGING`, Django sends request errors
 to the admins' email, not to the output the dashboard shows: `django_errors_unlogged` warns with a
 console `LOGGING` snippet, the detected gunicorn commands write their access log (`--access-logfile -`),
-and a readiness failure that answered an error with no error in the output is named
-`runtime_errors_hidden` (a 400 is Django's host allowlist, `runtime_host_disallowed`).
+and a readiness failure that answered a 5xx with no error in the output is named
+`runtime_errors_hidden` (a 400 is Django's host allowlist, `runtime_host_disallowed`; a 401, 403 or 404
+is an answer the readiness classification names).
 
 The detected commands read `${PORT:-N}` rather than a fixed port, so changing the application port in
 Build settings moves the server with it. A Django project answers only the hosts its settings allow; the
@@ -1282,7 +1303,8 @@ JavaScript server with no static output. The configure form's first step refuses
 the same plans (`needsStartCommand`).
 
 A Django or Flask application whose `package.json` builds its CSS or JavaScript (a `build` script with
-Tailwind, Vite, webpack, esbuild, PostCSS or Sass, and no server of its own) at the root or in
+Tailwind, Vite, webpack, esbuild, PostCSS or Sass, and no server of its own — a `start` script that only
+watches, as django-tailwind's `"start": "npm run dev"` does, is not one) at the root or in
 django-tailwind's `theme/static_src` gets a Node stage: the same install planner as the JavaScript recipe
 installs and runs the build over a copy of the application, drops `node_modules`, and the Python image
 copies the result in place of the source (`python_assets_built`). The package is not offered as a site
@@ -1292,7 +1314,10 @@ gunicorn and uvicorn run one worker unless told otherwise, and both read `WEB_CO
 start command leaves the count to it and the application loads no machine-learning model, the build
 records that (`PreparedBuild.webConcurrency`) and the runtime sets it for the container
 (`runtime_concurrency.go`): 2×CPU+1 within 256 MiB of the memory limit per worker, and 2 when the plan
-sets no limit; an explicit variable always wins.
+sets no limit; an explicit variable always wins, and the start step's log states the value and how it
+was sized. A websocket application keeps its connections, and usually the list it broadcasts to, in the
+process, so a generated uvicorn command for one (a websocket route in an entry, Channels'
+`ProtocolTypeRouter`) runs `--workers 1`.
 
 Python migration tools are recognised the way the Node ones are, and share their preflight findings:
 Django (`python manage.py migrate --noinput`, already the default start's first step), Alembic
