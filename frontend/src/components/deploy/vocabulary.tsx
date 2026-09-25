@@ -768,6 +768,13 @@ const FRAMEWORK_LABELS: Record<string, string> = {
   laravel: "Laravel",
   symfony: "Symfony",
   slim: "Slim",
+  wordpress: "WordPress",
+  drupal: "Drupal",
+  cakephp: "CakePHP",
+  codeigniter: "CodeIgniter",
+  yii: "Yii",
+  mezzio: "Mezzio",
+  laminas: "Laminas",
   rails: "Rails",
   phoenix: "Phoenix",
 }

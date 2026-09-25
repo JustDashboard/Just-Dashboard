@@ -646,6 +646,7 @@ export function StepProject({
                         goPackage: recipe === "go" ? configuration.build.goPackage : undefined,
                         pythonVersion:
                           recipe === "python" ? configuration.build.pythonVersion : undefined,
+                        phpVersion: recipe === "php" ? configuration.build.phpVersion : undefined,
                         // The PHP recipe's asset stage installs through the
                         // same Node install, so the choice survives the move.
                         packageManager:

@@ -12,6 +12,7 @@ import type {
 import type { EnvironmentRow } from "@/components/deploy/new-project/draft"
 
 export const PYTHON_VERSION = /^3\.(10|11|12|13)$/
+export const PHP_VERSION = /^8\.[2-5]$/
 
 /** The request-body ceiling a route gets when the plan names none, and the most it may name. */
 export const DEFAULT_MAX_REQUEST_BODY_MB = 64
@@ -1075,6 +1076,8 @@ export function validateConfiguration(
   if (!configuration.build.method) errors.buildMethod = "Choose a build method."
   if (configuration.build.pythonVersion && !PYTHON_VERSION.test(configuration.build.pythonVersion))
     errors.pythonVersion = "Use Python 3.10, 3.11, 3.12 or 3.13, or leave the version empty."
+  if (configuration.build.phpVersion && !PHP_VERSION.test(configuration.build.phpVersion))
+    errors.phpVersion = "Use PHP 8.2, 8.3, 8.4 or 8.5, or leave the version empty."
   if (configuration.build.target && !DOCKERFILE_STAGE.test(configuration.build.target))
     errors.target = "A stage name starts with a letter and has only letters, digits, . _ and -."
   for (const [name, value] of [
