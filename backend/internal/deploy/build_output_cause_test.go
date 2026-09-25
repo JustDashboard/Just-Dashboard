@@ -269,12 +269,24 @@ func buildCases() []buildCase {
 		{
 			name: "psycopg2 without libpq", command: "pip install --no-cache-dir -r requirements.txt", exit: 1, build: pythonBuild,
 			lines: []string{"      Error: pg_config executable not found.", "      pg_config is required to build psycopg2 from source."},
-			want:  BuildCause{Code: "build_system_library_missing", Phase: phaseInstall, Command: "pip install --no-cache-dir -r requirements.txt", ExitCode: 1, Detail: "python", Subjects: []string{"pg_config"}},
+			want: BuildCause{Code: "build_system_library_missing", Phase: phaseInstall, Command: "pip install --no-cache-dir -r requirements.txt", ExitCode: 1, Detail: "python", Subjects: []string{"pg_config"},
+				Fix: &CauseFix{Kind: fixSetBuild, Field: "configuration.build.systemPackages", Value: "gcc libc6-dev libpq-dev"}},
 		},
 		{
 			name: "no compiler for a wheel", command: "pip install --no-cache-dir -r requirements.txt", exit: 1, build: pythonBuild,
 			lines: []string{"      error: command 'gcc' failed: No such file or directory", "  ERROR: Failed building wheel for uwsgi"},
-			want:  BuildCause{Code: "build_native_toolchain_missing", Phase: phaseInstall, Command: "pip install --no-cache-dir -r requirements.txt", ExitCode: 1, Detail: "python", Subjects: []string{"gcc"}},
+			want: BuildCause{Code: "build_native_toolchain_missing", Phase: phaseInstall, Command: "pip install --no-cache-dir -r requirements.txt", ExitCode: 1, Detail: "python", Subjects: []string{"gcc"},
+				Fix: &CauseFix{Kind: fixSetBuild, Field: "configuration.build.systemPackages", Value: "build-essential"}},
+		},
+		{
+			name: "a Windows package from a pip freeze", command: "pip install --no-cache-dir --requirement requirements.txt", exit: 1, build: pythonBuild,
+			lines: []string{"ERROR: Could not find a version that satisfies the requirement pywin32==306 (from versions: none)", "ERROR: No matching distribution found for pywin32==306"},
+			want:  BuildCause{Code: "build_dependency_os_only", Phase: phaseInstall, Command: "pip install --no-cache-dir --requirement requirements.txt", ExitCode: 1, Detail: "python", Subjects: []string{"pywin32==306"}},
+		},
+		{
+			name: "a stale Pipfile.lock", command: "pip install --no-cache-dir pipenv==2026.8.0 && pipenv install --system --deploy", exit: 1, build: pythonBuild,
+			lines: []string{"Your Pipfile.lock (87002f) is out of date. Expected: (a1b2c3).", "ERROR:: Aborting deploy"},
+			want:  BuildCause{Code: "build_lockfile_out_of_sync", Phase: phaseInstall, Command: "pip install --no-cache-dir pipenv==2026.8.0 && pipenv install --system --deploy", ExitCode: 1, Detail: "Pipfile.lock"},
 		},
 		{
 			name: "no distribution", command: "pip install --no-cache-dir -r requirements.txt", exit: 1, build: pythonBuild,
@@ -291,6 +303,14 @@ func buildCases() []buildCase {
 			lines: []string{"ERROR: Package 'legacy-app' requires a different Python: 3.13.1 not in '<3.12,>=3.10'"},
 			want: BuildCause{Code: "build_runtime_version", Phase: phaseInstall, Command: "pip install --no-cache-dir -r requirements.txt", ExitCode: 1, Detail: "python",
 				Subjects: []string{"<3.12,>=3.10"}, Fix: &CauseFix{Kind: fixSetBuild, Field: "configuration.build.pythonVersion", Value: "3.11"}},
+		},
+		{
+			// uv may use only the image's interpreter, so a floor above it
+			// fails here rather than downloading another.
+			name: "uv refuses the image's Python", command: "pip install --no-cache-dir uv==0.12.18 && uv sync --locked --no-dev --python /usr/local/bin/python", exit: 2, build: pythonBuild,
+			lines: []string{"error: The requested interpreter resolved to Python 3.13.15, which is incompatible with the project's Python requirement: `>=3.14`"},
+			want: BuildCause{Code: "build_runtime_version", Phase: phaseInstall, Command: "pip install --no-cache-dir uv==0.12.18 && uv sync --locked --no-dev --python /usr/local/bin/python", ExitCode: 2, Detail: "python",
+				Subjects: []string{">=3.14"}, Fix: &CauseFix{Kind: fixSetBuild, Field: "configuration.build.pythonVersion", Value: "3.14"}},
 		},
 		{
 			name: "Poetry lock stale", command: "poetry install --only main --no-root", exit: 1, build: pythonBuild,
@@ -377,7 +397,8 @@ func buildCases() []buildCase {
 		{
 			name: "Maven target release", command: "mvn -q -B -DskipTests package", exit: 1, build: BuildPlanConfig{Method: BuildRecipe, Recipe: "java"},
 			lines: []string{"[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile (default-compile) on project app: Fatal error compiling: error: invalid target release: 25 -> [Help 1]"},
-			want:  BuildCause{Code: "build_runtime_version", Phase: phaseBuild, Command: "mvn -q -B -DskipTests package", ExitCode: 1, Detail: "java", Subjects: []string{"25"}},
+			want: BuildCause{Code: "build_runtime_version", Phase: phaseBuild, Command: "mvn -q -B -DskipTests package", ExitCode: 1, Detail: "java", Subjects: []string{"25"},
+				Fix: &CauseFix{Kind: fixSetBuild, Field: "configuration.build.javaVersion", Value: "25"}},
 		},
 		{
 			name: "Gradle wrapper jar", command: "./gradlew --no-daemon bootJar", exit: 1, build: BuildPlanConfig{Method: BuildRecipe, Recipe: "java"},
@@ -392,7 +413,8 @@ func buildCases() []buildCase {
 		{
 			name: "NETSDK1045", command: "dotnet publish -c Release -o /out", exit: 1, build: BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet"},
 			lines: []string{"/usr/share/dotnet/sdk/8.0.404/Sdks/Microsoft.NET.Sdk/targets/Microsoft.NET.TargetFrameworkInference.targets(166,5): error NETSDK1045: The current .NET SDK does not support targeting .NET 10.0.  Either target .NET 8.0 or lower, or use a version of the .NET SDK that supports .NET 10.0."},
-			want:  BuildCause{Code: "build_runtime_version", Phase: phaseBuild, Command: "dotnet publish -c Release -o /out", ExitCode: 1, Detail: "dotnet", Subjects: []string{"10.0"}},
+			want: BuildCause{Code: "build_runtime_version", Phase: phaseBuild, Command: "dotnet publish -c Release -o /out", ExitCode: 1, Detail: "dotnet", Subjects: []string{"10.0"},
+				Fix: &CauseFix{Kind: fixSetBuild, Field: "configuration.build.dotnetVersion", Value: "10.0"}},
 		},
 		{
 			name: "C# compile error", command: "dotnet publish -c Release -o /out", exit: 1, build: BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet"},

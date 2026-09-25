@@ -138,6 +138,9 @@ type runtimeReleaseSnapshot struct {
 	// sets, which the runtime withdraws when the proxy does not front the
 	// release alone.
 	ProxyTrust []string `json:"proxyTrust,omitempty"`
+	// WebConcurrency says the image's server sizes its workers from
+	// WEB_CONCURRENCY (runtime_concurrency.go).
+	WebConcurrency bool `json:"webConcurrency,omitempty"`
 }
 
 func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExecution) StepResult {
@@ -406,7 +409,7 @@ func (e *NormalizedStepExecutor) analyzePlan(
 // plan left them open, and the release — or, for the Go main package, the
 // recipe — has nothing to proceed with until someone makes them.
 func executionDecisionMustBlock(code string) bool {
-	return code == "domain_link_missing" || code == "readiness_missing" || code == "go_main_ambiguous"
+	return code == "domain_link_missing" || code == "readiness_missing" || code == "go_main_ambiguous" || code == "rust_binary_ambiguous"
 }
 
 func (e *NormalizedStepExecutor) prepareContext(
@@ -563,6 +566,7 @@ func (e *NormalizedStepExecutor) renderRuntime(
 		PlanInputsHash: plan.PlanInputsDigest,
 		SourceIdentity: plan.SourceIdentity,
 		ProxyTrust:     imageProxyTrust(built.Result.Prepared),
+		WebConcurrency: built.Result.Prepared.WebConcurrency,
 	}
 	raw, err := json.Marshal(snapshot)
 	if err != nil {
@@ -878,6 +882,7 @@ func normalizedStepFailure(err error) StepResult {
 	result := StepResult{State: StepFailed, ErrorCode: "internal_error", ErrorMessage: "deployment step failed"}
 	var sourceFailure *SourceFailure
 	var buildFailure *dockerx.BuildError
+	var release toolchainVersionError
 	switch {
 	case errors.As(err, &sourceFailure):
 		result.ErrorCode, result.ErrorMessage = sourceFailure.Code, sourceFailure.Error()
@@ -891,6 +896,10 @@ func normalizedStepFailure(err error) StepResult {
 		if buildFailure.ExitCode >= 0 {
 			result.ErrorMessage = fmt.Sprintf("a build step exited with code %d; its output is in the build log", buildFailure.ExitCode)
 		}
+	case errors.As(err, &release):
+		// A JDK or .NET release the recipe cannot build with is named by
+		// its own code, as preflight names it.
+		result.ErrorCode, result.ErrorMessage = release.code, err.Error()
 	case errors.Is(err, ErrUnsupportedBuilder):
 		result.ErrorCode, result.ErrorMessage = "unsupported_builder", err.Error()
 	case errors.Is(err, ErrBuilderUnavailable):

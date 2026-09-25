@@ -36,6 +36,7 @@ var causeTitles = map[string]string{
 	"build_dependency_conflict":          "Dependency versions conflict",
 	"build_dependency_advisory_blocked":  "Dependency blocked by a security advisory",
 	"build_dependency_local_path":        "Dependency points at a local path",
+	"build_dependency_os_only":           "Dependency for another operating system",
 	"build_dependency_unavailable":       "Dependency not found",
 	"build_registry_auth":                "Registry refused the credentials",
 	"build_registry_rate_limited":        "Registry rate limit reached",
@@ -67,6 +68,10 @@ var causeTitles = map[string]string{
 	"registry_unreachable":               "Registry unreachable",
 	"registry_auth_failed":               "Registry refused the server",
 	"base_image_missing":                 "Base image not found",
+	"java_version_unsupported":           "Java release unsupported",
+	"gradle_wrapper_incompatible":        "Gradle wrapper cannot run on the JDK",
+	"dotnet_version_unsupported":         ".NET release unsupported",
+	"dotnet_sdk_pin_unavailable":         ".NET SDK pin has no image",
 	"source_auth_failed":                 "Git credential refused",
 	"source_repository_missing":          "Repository not found",
 	"source_unreachable":                 "Git remote unreachable",
@@ -99,23 +104,26 @@ func namedCauseTitle(code string) string {
 var lockfileManifests = map[string]string{
 	"package-lock.json": "package.json", "bun.lock": "package.json", "pnpm-lock.yaml": "package.json",
 	"yarn.lock": "package.json", "poetry.lock": "pyproject.toml", "uv.lock": "pyproject.toml",
-	"Cargo.lock": "Cargo.toml", "go.sum": "go.mod", "go.mod": "the code's imports",
+	"Cargo.lock": "Cargo.toml", "go.sum": "go.mod", "go.mod": "the code's imports", "vendor/modules.txt": "go.mod",
 	"composer.lock": "composer.json", "deno.lock": "deno.json and the code's imports", "Gemfile.lock": "Gemfile",
+	"Pipfile.lock": "Pipfile", "pdm.lock": "pyproject.toml",
 }
 
 var lockfileRegenerate = map[string]string{
 	"package-lock.json": "npm install", "bun.lock": "bun install", "pnpm-lock.yaml": "pnpm install",
 	"yarn.lock": "yarn install", "poetry.lock": "poetry lock", "uv.lock": "uv lock",
-	"Cargo.lock": "cargo update --workspace", "go.sum": "go mod tidy", "go.mod": "go mod tidy",
+	"Cargo.lock": "cargo update --workspace", "go.sum": "go mod tidy", "go.mod": "go mod tidy", "vendor/modules.txt": "go mod vendor",
 	"composer.lock": "composer update --lock", "deno.lock": "deno install", "Gemfile.lock": "bundle install",
+	"Pipfile.lock": "pipenv lock", "pdm.lock": "pdm lock",
 }
 
 var nodeManagerLockfiles = map[string]string{
 	"npm": "package-lock.json", "bun": "bun.lock", "pnpm": "pnpm-lock.yaml", "yarn": "yarn.lock",
 }
 
-// languageTools are commands that belong to a language the automatic recipes
-// never install, so "not found" means the repository needs its own Dockerfile.
+// languageTools are commands that belong to another language than the one
+// this build's image installs, so "not found" means the repository needs
+// that language's recipe, or a Dockerfile when it has none.
 var languageTools = map[string]string{
 	"bundle": "Ruby", "ruby": "Ruby", "rails": "Ruby", "rake": "Ruby", "mix": "Elixir", "elixir": "Elixir",
 	"dart": "Dart", "flutter": "Flutter", "swift": "Swift", "sbt": "Scala", "lein": "Clojure",
@@ -172,7 +180,7 @@ func buildCauseFix(cause *BuildCause, context causeContext) *CauseFix {
 		case "node":
 			// The subject is the range the failing package asks for; the
 			// newest catalogue major inside it is the one to choose.
-			if majors, known := nodeRangeMajors(cause.Subjects[0]); known && len(majors) > 0 && (build.Recipe == "node" || build.Recipe == "php") {
+			if majors, known := nodeRangeMajors(cause.Subjects[0]); known && len(majors) > 0 && slices.Contains(nodeInstallRecipes, build.Recipe) {
 				if version := strconv.Itoa(majors[len(majors)-1]); version != build.NodeVersion {
 					return &CauseFix{Kind: fixSetBuild, Field: "configuration.build.nodeVersion", Value: version}
 				}
@@ -181,6 +189,22 @@ func buildCauseFix(cause *BuildCause, context causeContext) *CauseFix {
 			version, err := choosePHPVersion("", "", []phpVersionRequirement{{"composer.lock", cause.Subjects[0]}})
 			if err == nil && build.Recipe == "php" && version != build.PHPVersion {
 				return &CauseFix{Kind: fixSetBuild, Field: "configuration.build.phpVersion", Value: version}
+			}
+		case "java", "gradle-toolchain":
+			// The JDK is older than the release the build compiles for: the
+			// catalogue's release at or above it builds it.
+			wanted := javaRelease(cause.Subjects[0])
+			for _, release := range javaRecipeReleases {
+				if wanted > 0 && release >= wanted {
+					if value := strconv.Itoa(release); value != build.JavaVersion && build.Recipe == "java" {
+						return &CauseFix{Kind: fixSetBuild, Field: "configuration.build.javaVersion", Value: value}
+					}
+					break
+				}
+			}
+		case "dotnet":
+			if version := cause.Subjects[0]; slices.Contains(dotnetRecipeVersions, version) && version != build.DotnetVersion && build.Recipe == "dotnet" {
+				return &CauseFix{Kind: fixSetBuild, Field: "configuration.build.dotnetVersion", Value: version}
 			}
 		}
 	case "build_env_missing":
@@ -242,8 +266,46 @@ func buildCauseFix(cause *BuildCause, context causeContext) *CauseFix {
 		return &CauseFix{Kind: fixReview, Field: "configuration.build.startCommand"}
 	case "build_wrong_root":
 		return &CauseFix{Kind: fixReview, Field: "configuration.build.rootDirectory"}
+	case "build_system_library_missing", "build_native_toolchain_missing":
+		if build.Recipe != "python" || !recipe {
+			return nil
+		}
+		subject := ""
+		if len(cause.Subjects) > 0 {
+			subject = cause.Subjects[0]
+		}
+		if packages := pythonPackagesFor(cause.Code, subject); packages != "" {
+			return &CauseFix{Kind: fixSetBuild, Field: "configuration.build.systemPackages", Value: packages}
+		}
+		return &CauseFix{Kind: fixReview, Field: "configuration.build.systemPackages"}
 	}
 	return nil
+}
+
+// pythonPackagesFor is the Debian packages a Python build failure names:
+// the development files of the library it compiles against, or a compiler.
+func pythonPackagesFor(code, subject string) string {
+	switch {
+	case subject == "pg_config":
+		return "gcc libc6-dev libpq-dev"
+	case subject == "mysql_config":
+		return "gcc libc6-dev pkg-config default-libmysqlclient-dev"
+	case code == "build_native_toolchain_missing" && subject == "rust":
+		return ""
+	case code == "build_native_toolchain_missing":
+		return "build-essential"
+	}
+	return pythonLibraryPackages[subject]
+}
+
+// pythonLibraryPackages are the trixie packages that provide the shared
+// libraries a Python wheel or extension most often fails to load.
+var pythonLibraryPackages = map[string]string{
+	"libGL.so.1": "libgl1", "libglib-2.0.so.0": "libglib2.0-0t64", "libgthread-2.0.so.0": "libglib2.0-0t64",
+	"libpq.so.5": "libpq5", "libpq": "libpq5", "libmagic.so.1": "libmagic1t64", "libzbar.so.0": "libzbar0t64",
+	"libodbc.so.2": "unixodbc", "libgomp.so.1": "libgomp1", "libsndfile.so.1": "libsndfile1", "libsm.so.6": "libsm6",
+	"libSM.so.6": "libsm6", "libXext.so.6": "libxext6", "libXrender.so.1": "libxrender1", "libgdal.so": "gdal-bin",
+	"libcairo.so.2": "libcairo2", "libpango-1.0.so.0": "libpango-1.0-0", "libvips.so.42": "libvips42t64",
 }
 
 // variableFix adds a variable, or adds a scope to one the run already had.
@@ -495,9 +557,20 @@ func (c *BuildCause) explain() (string, string) {
 		return "Composer refused a package version that has a known security advisory",
 			"update the affected package with `composer update <package>`, or set `config.audit.block-insecure` to false in composer.json"
 	case "build_dependency_local_path":
+		if c.Detail == "go" {
+			return "go.mod replaces a module with a directory the build does not have" + parenthesized(subject),
+				"keep the replaced module inside the repository, where the automatic build widens its context to it, or replace it with a published version"
+		}
 		return "a requirement points at a file that exists only on the machine that wrote it" + parenthesized(subject),
 			"regenerate requirements.txt with `pip list --format=freeze` from a virtual environment, not a conda environment"
+	case "build_dependency_os_only":
+		return orDefault(subject, "a dependency") + " installs only on Windows or macOS: a pip freeze from that system pinned it",
+			"add its marker (`; sys_platform == \"win32\"`) or remove it, and regenerate requirements.txt with pip-compile"
 	case "build_dependency_unavailable":
+		if c.Detail == "go" {
+			return orDefault(subjects, "a module") + " could not be fetched: the module proxy has no such version, or the module is private",
+				"check the version; for a private module from the source's own account, add a build variable " + goPrivateTokenVariable + " scoped to install, which the Go recipe fetches it directly with"
+		}
 		return orDefault(subjects, "a dependency") + " could not be found in its registry",
 			"check the name and version; a private package needs its registry token as a build variable scoped to install"
 	case "build_registry_auth":
@@ -515,8 +588,12 @@ func (c *BuildCause) explain() (string, string) {
 			return "a Composer repository asked for credentials the build does not have" + parenthesized(subject),
 				"set COMPOSER_AUTH (the http-basic, github-oauth or gitlab-token JSON auth.json holds) as a build variable scoped to install"
 		}
+		if c.Detail == "go" {
+			return "the go command fetched a private module with git, and git had no credentials for it",
+				"add a build variable " + goPrivateTokenVariable + " scoped to install, holding a token that can read the module's repository; the Go recipe fetches the source's account's modules with it"
+		}
 		return "the package registry refused the build's credentials",
-			"add the registry token as a build variable scoped to install (for npm, `NPM_TOKEN` read by an .npmrc)"
+			"add the registry token as a build variable scoped to install (for npm, `NPM_TOKEN` read by an .npmrc; for Maven, Gradle and NuGet, the variable settings.xml, the repository's credentials or NuGet.config name)"
 	case "build_registry_rate_limited", "registry_rate_limited":
 		return "the registry's rate limit for this server's address was reached",
 			"sign the server in to Docker Hub (`docker login`), or wait for the limit to reset and deploy again"
@@ -620,14 +697,37 @@ func (c *BuildCause) runtimeVersion(subject string) (string, string) {
 	case "rust":
 		return "the code requires Rust " + orDefault(subject, "a newer release"), "pin a newer toolchain in rust-toolchain.toml, or lower the dependency"
 	case "java", "gradle":
+		if fix != nil {
+			return "the project targets Java " + subject + ", newer than the build's JDK", "set the Java version to " + fix.Value
+		}
 		return "the project targets a Java release the build's JDK does not support" + parenthesized(subject),
 			"set the Java release in the build file to the JDK the recipe uses, upgrade the Gradle wrapper, or build with a Dockerfile"
+	case "gradle-toolchain":
+		if fix != nil {
+			return "the Gradle toolchain asks for Java " + subject + ", which the build image does not provide", "set the Java version to " + fix.Value
+		}
+		return "the Gradle toolchain asks for a JDK the build image does not provide" + parenthesized(subject),
+			"declare a toolchain the recipe carries (8, 11, 17, 21 or 25), or apply the foojay toolchain resolver in settings.gradle"
 	case "dotnet":
-		return "the project targets .NET " + orDefault(subject, "a release") + ", newer than the build's SDK", "change the TargetFramework, or build with a Dockerfile"
+		if fix != nil {
+			return "the project targets .NET " + subject + ", newer than the build's SDK", "set the .NET version to " + fix.Value
+		}
+		return "the project targets .NET " + orDefault(subject, "a release") + ", newer than the build's SDK", "change the TargetFramework or global.json, or build with a Dockerfile"
+	case "dotnet-restore":
+		// A restore held to one framework hands it to every project the
+		// published one references, and each then builds for its own.
+		return "the restore resolved " + orDefault(subject, "a referenced project") + " for a framework it does not build for",
+			"give the published project and the projects it references a target framework in common, or build with a Dockerfile"
 	case "php":
 		return "composer.json requires PHP " + subject, "set `require.php` to a release the recipe offers, or build with a Dockerfile"
 	case "ruby":
-		return "the Gemfile requires Ruby " + subject, "build with a Dockerfile that installs that release"
+		return "the Gemfile requires Ruby " + subject, "name that release in .ruby-version — the recipe builds 3.3, 3.4 and 4.0 — or build with a Dockerfile"
+	case "elixir":
+		return "a dependency supports only Elixir " + orDefault(subject, "another release"), "name a release it supports in .tool-versions — the recipe builds 1.17 to 1.20 — or build with a Dockerfile"
+	case "dart":
+		return "the project requires Dart SDK " + orDefault(subject, "another release"), "widen environment: sdk in pubspec.yaml to a release the recipe builds (3.9 to 3.13), or build with a Dockerfile"
+	case "gleam":
+		return "the project requires another Gleam release" + parenthesized(subject), "widen the gleam requirement in gleam.toml, or build with a Dockerfile"
 	}
 	return "the project requires a " + c.Detail + " release the build does not run" + parenthesized(subject),
 		"build with a Dockerfile that provides it"
@@ -653,18 +753,24 @@ func (c *BuildCause) themeMissing(subject string) (string, string) {
 
 func (c *BuildCause) systemLibrary(subject string) (string, string) {
 	switch {
+	case c.Detail == "android":
+		return "Gradle configures a project that applies the Android Gradle plugin, which needs the Android SDK the image does not have",
+			"keep Android modules out of what the server depends on, or build with a Dockerfile that installs the Android command-line tools"
 	case subject == "pg_config":
 		return "psycopg2 compiles against libpq, and the image has no libpq development files",
-			"depend on `psycopg[binary]` or `psycopg2-binary`, or build with a Dockerfile that installs libpq-dev"
+			"add gcc, libc6-dev and libpq-dev to the Python recipe's system packages, or depend on `psycopg[binary]` or `psycopg2-binary`"
 	case subject == "mysql_config":
 		return "mysqlclient compiles against the MySQL client library, and the image has none",
-			"use PyMySQL, or build with a Dockerfile that installs default-libmysqlclient-dev and pkg-config"
+			"add gcc, libc6-dev, pkg-config and default-libmysqlclient-dev to the Python recipe's system packages, or use PyMySQL"
 	case c.Detail == "prisma" || strings.HasPrefix(subject, "libssl"):
 		return "Prisma's engine needs OpenSSL, which the image does not have",
 			"install openssl in the image, or set the Prisma generator's binaryTargets for the image's OpenSSL"
 	case c.Detail == "musl":
 		return "a dependency ships a glibc binary, and the image is Alpine (musl)",
 			"use the dependency's musl build, or a Dockerfile on a glibc base image"
+	case c.Detail == "rust-static":
+		return "bindgen found libclang but could not load it: the crate's build script is linked statically against musl, and a static program cannot load a shared library",
+			"build with RUSTFLAGS=\"-C target-feature=-crt-static\", which the Rust recipe sets when Cargo.lock has bindgen or clang-sys, or on a glibc image"
 	case strings.HasSuffix(subject, "-sys"):
 		return "the Rust crate " + subject + " builds a C library the image does not have",
 			"enable the crate's vendored or rustls feature, or build with a Dockerfile that installs the library"
@@ -680,10 +786,10 @@ func (c *BuildCause) nativeToolchain(subject string) (string, string) {
 			"use a dependency with prebuilt binaries, or build with a Dockerfile that installs the toolchain"
 	case "python":
 		return orDefault(subject, "a dependency") + " has no prebuilt wheel for this Python and the image has no compiler",
-			"choose a Python version the package publishes wheels for, depend on a binary build, or build with a Dockerfile"
+			"choose a Python version the package publishes wheels for, depend on a binary build, or add build-essential to the Python recipe's system packages"
 	case "go":
-		return "a dependency uses cgo, and the Go recipe builds without a C compiler",
-			"switch to a pure-Go dependency (modernc.org/sqlite for mattn/go-sqlite3), or build with a Dockerfile"
+		return "the build compiles cgo code without a C compiler: the recipe installs one for the cgo modules it knows and for local cgo files, and neither named this one",
+			"set CGO_ENABLED=1 in the build command, which makes the recipe install gcc and musl-dev, switch to a pure-Go dependency, or build with a Dockerfile"
 	case "rust":
 		return "the Rust build could not link its native code", "build with a Dockerfile that installs the linker and libraries"
 	case "dotnet":
@@ -708,6 +814,10 @@ func (c *BuildCause) commandNotFound(subject string) (string, string) {
 	case fix != nil:
 		return "`" + subject + "` is not installed in the image this build runs on",
 			"run the command with the build's package manager: `" + fix.Value + "`"
+	case languageTools[subject] != "" && languageToolRecipe[languageTools[subject]] != "":
+		language := languageTools[subject]
+		return "`" + subject + "` belongs to " + language + ", which this build's image does not include",
+			"choose the " + language + " builder in Build settings, which builds with " + language
 	case languageTools[subject] != "":
 		return "`" + subject + "` belongs to " + languageTools[subject] + ", which this build's image does not include",
 			"build this part of the repository with a Dockerfile that installs " + languageTools[subject]

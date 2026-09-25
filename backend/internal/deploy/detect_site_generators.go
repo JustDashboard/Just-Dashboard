@@ -3,6 +3,7 @@ package deploy
 import (
 	"fmt"
 	"path"
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -237,11 +238,23 @@ func (s *repoShapeScan) siteCandidate(root string, generator siteGenerator, site
 		candidate.StaticSite.Unpinned = generator.unpinned && generator.name != "jekyll"
 		candidate.UnpinnedDependencies = generator.name == "jekyll" && generator.unpinned
 	case "python":
-		versionFile, _ := site.read(".python-version")
-		runtimeFile, _ := site.read("runtime.txt")
-		pyproject, _ := site.read("pyproject.toml")
-		version, err := choosePythonRecipeVersion("", string(versionFile), string(runtimeFile), string(pyproject))
-		if len(versionFile) == 0 && len(runtimeFile) == 0 && !pythonRequiresRE.Match(pyproject) && generator.pythonDeclared != "" {
+		// The declarations the Python recipe's build reads, as the site's
+		// root holds them.
+		read := func(name string) string {
+			content, _ := site.read(name)
+			return string(content)
+		}
+		manifests := map[string][]byte{}
+		for _, manifest := range []string{"requirements.txt", "pyproject.toml", "Pipfile"} {
+			if content, ok := site.read(manifest); ok {
+				manifests[manifest] = content
+			}
+		}
+		inputs := pythonVersionInputsFor("", pythonVersionFiles{pythonVersion: read(".python-version"), runtimeTxt: read("runtime.txt"),
+			toolVersions: read(".tool-versions"), mise: firstNonEmpty(read("mise.toml"), read(".mise.toml"))}, readPythonProject(manifests), runtime.GOARCH)
+		choice, err := resolvePythonVersion(inputs)
+		version := choice.version
+		if len(inputs.declared) == 0 && inputs.constraint == "" && generator.pythonDeclared != "" {
 			version, err = generator.pythonDeclared, nil
 			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(root, ".readthedocs.yaml"), Reason: "Python " + version + " from .readthedocs.yaml"})
 		}

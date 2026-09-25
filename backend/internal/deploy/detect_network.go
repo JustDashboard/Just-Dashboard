@@ -311,6 +311,8 @@ func (n *networkDetection) apply(marker *detectedMarkers, candidates []DetectedC
 			code.merge(n.dotnet(marker, c))
 		case c.BuildMethod == BuildRecipe && c.Recipe == "deno":
 			code.merge(n.deno(marker, c))
+		case c.BuildMethod == BuildRecipe && languageRecipe(c.Recipe):
+			languageStartListen(c)
 		case c.BuildMethod == BuildDockerfile:
 			n.dockerfile(marker, c, code)
 		}
@@ -651,7 +653,12 @@ var rocketPortRE = regexp.MustCompile(`(?m)^\s*port\s*=\s*(\d{2,5})\s*$`)
 func (n *networkDetection) rust(marker *detectedMarkers, c *DetectedCandidate) listenReport {
 	manifest := parseCargoManifest(marker.cargoToml)
 	files := []string{"src/main.rs"}
-	if binary := manifest.binary(); binary != "" && safeRelativePath(binary) && !strings.ContainsAny(binary, "/\\") {
+	binary := manifest.binary()
+	if c.Rust != nil && c.Rust.Binary != "" {
+		// The binary the recipe serves, as the Cargo pass chose it.
+		binary = c.Rust.Binary
+	}
+	if binary != "" && safeRelativePath(binary) && !strings.ContainsAny(binary, "/\\") {
 		files = append(files, "src/bin/"+binary+".rs", "src/bin/"+binary+"/main.rs")
 	}
 	var report listenReport

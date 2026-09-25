@@ -96,7 +96,12 @@ func applyPythonSchemaTool(candidate *DetectedCandidate, marker *detectedMarkers
 	switch {
 	case candidate.Framework == "django":
 		name, command = "django", djangoMigrate
-		evidence = DetectionEvidence{Path: joinRoot(view.root, "manage.py"), Reason: "Django migrations"}
+		manage := "manage.py"
+		if candidate.Python != nil && candidate.Python.Django != nil && candidate.Python.Django.ManageDir != "" {
+			manage = joinRoot(candidate.Python.Django.ManageDir, "manage.py")
+			command = "python " + manage + " migrate --noinput"
+		}
+		evidence = DetectionEvidence{Path: joinRoot(view.root, manage), Reason: "Django migrations"}
 	case deps.has("flask-migrate") && view.contents["migrations/alembic.ini"] != nil:
 		name, command = "flask-migrate", "flask db upgrade"
 		if module := flaskAppModule(candidate.StartCommand); module != "" {
@@ -150,9 +155,10 @@ func applyPythonSchemaTool(candidate *DetectedCandidate, marker *detectedMarkers
 		candidate.SchemaCommand = ""
 		evidence.Reason += "; env.py connects to the URL alembic.ini commits, so the start command does not run them"
 	case start == "":
-	case start == procfileWeb:
-		// The repository declared its own process; a missing step is the
-		// preflight warning's to name, not a command to rewrite.
+	case procfileWeb != "" && strings.HasSuffix(start, procfileWeb):
+		// The repository declared its own process (behind the static files
+		// Heroku would have collected); a missing step is the preflight
+		// warning's to name, not a command to rewrite.
 		evidence.Reason += "; the Procfile's web process does not apply them"
 	default:
 		candidate.StartCommand = command + " && " + start

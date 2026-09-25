@@ -144,11 +144,18 @@ func TestNodeVersionSettingOutranksTheRepository(t *testing.T) {
 	for _, invalid := range []BuildPlanConfig{
 		{Method: BuildRecipe, Recipe: "node", NodeVersion: "18"},
 		{Method: BuildRecipe, Recipe: "node", NodeVersion: "22.1"},
-		{Method: BuildRecipe, Recipe: "python", NodeVersion: "22"},
+		{Method: BuildRecipe, Recipe: "java", NodeVersion: "22"},
 		{Method: BuildDockerfile, NodeVersion: "22"},
 	} {
 		if err := nodeTestConfiguration(invalid).Validate(); err == nil {
 			t.Fatalf("Node version %+v was accepted", invalid)
+		}
+	}
+	// Every recipe that installs assets through the Node install takes the
+	// same choice as the package manager.
+	for _, recipe := range nodeInstallRecipes {
+		if err := nodeTestConfiguration(BuildPlanConfig{Method: BuildRecipe, Recipe: recipe, NodeVersion: "22"}).Validate(); err != nil {
+			t.Fatalf("Node version refused for the %s recipe: %v", recipe, err)
 		}
 	}
 

@@ -1,0 +1,10 @@
+{
+  "name": "jd-flask-assets",
+  "private": true,
+  "scripts": {
+    "build": "esbuild assets/app.js --bundle --minify --outfile=static/dist/app.js"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.2"
+  }
+}

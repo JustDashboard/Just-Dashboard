@@ -53,6 +53,7 @@ var outputCauseTitles = map[string]string{
 	"runtime_dotenv_missing":          ".env file missing",
 	"runtime_php_extension_missing":   "PHP extension missing at runtime",
 	"runtime_assets_missing":          "Front-end assets not built",
+	"runtime_errors_hidden":           "Application errors are not logged",
 	"release_migration_failed":        "Migration failed",
 	"release_migration_failed_before": "Earlier migration failed",
 	"release_database_not_empty":      "Database has an unmanaged schema",
@@ -110,6 +111,7 @@ var envMissingSignatures = []buildSignature{
 	signature("", "rails", "secret_key_base", "Missing .?secret_key_base.? for").naming("SECRET_KEY_BASE"),
 	signature("", "authjs", "MissingSecret", `\[auth\]\[error\] MissingSecret|MissingSecret: Please define a .secret.`).naming("AUTH_SECRET"),
 	signature("", "phoenix", "environment variable", `environment variable ([A-Z_][A-Z0-9_]*) is missing`),
+	signature("", "leptos", "LEPTOS_", `\b(LEPTOS_[A-Z_]+)\b[^\n]*(?:NotPresent|not (?:found|present|set)|is missing)`),
 }
 
 // genericEnvMissingSignatures are the sentences any program may print about a
@@ -163,7 +165,7 @@ var loopbackListenRE = regexp.MustCompile(`(?:Uvicorn|Hypercorn|Daphne) running 
 // listeningPortRE are the startup lines that name the port a server listens
 // on. Each is specific to a framework or server so a line about a database or
 // a cache the application connects to is never read as its own port.
-var listeningPortRE = regexp.MustCompile(`(?i)(?:^|\s)- Local:\s+https?://[^\s:/]+:(\d{2,5})|➜\s+Local:\s+https?://[^\s:/]+:(\d{2,5})|\blistening on (?:port )?:?(\d{2,5})\b|\blistening on:? (?:https?|tcp)://[^\s]*?:(\d{2,5})\b|(?:Uvicorn|Hypercorn|Daphne) running on https?://[^\s]*?:(\d{2,5})|Listening at: https?://[^\s]*?:(\d{2,5})|\* Running on https?://[^\s]*?:(\d{2,5})|(?:Tomcat|Netty|Jetty|Undertow) started on port(?:\(s\))?:? (\d{2,5})|Listening and serving HTTP on [^\s]*:(\d{2,5})|http server started on [^\s]*:(\d{2,5})|server (?:is )?(?:running|listening|started) (?:on|at) (?:port )?(?:https?://[^\s]*?:)?(\d{2,5})\b`)
+var listeningPortRE = regexp.MustCompile(`(?i)(?:^|\s)- Local:\s+https?://[^\s:/]+:(\d{2,5})|➜\s+Local:\s+https?://[^\s:/]+:(\d{2,5})|\blistening on (?:port )?:?(\d{2,5})\b|\blistening on:? (?:https?|tcp)://[^\s]*?:(\d{2,5})\b|(?:Uvicorn|Hypercorn|Daphne) running on https?://[^\s]*?:(\d{2,5})|Listening at: https?://[^\s]*?:(\d{2,5})|\* Running on https?://[^\s]*?:(\d{2,5})|(?:Tomcat|Netty|Jetty|Undertow) started on port(?:\(s\))?:? (\d{2,5})|Listening and serving HTTP on [^\s]*:(\d{2,5})|http server started on [^\s]*:(\d{2,5})|server (?:is )?(?:running|listening|started) (?:on|at) (?:port )?(?:https?://[^\s]*?:)?(\d{2,5})\b|with (?:Bandit|Cowboy) [\d.]+ at [^\s]*:(\d{2,5}) \(http|Listening for HTTP on [^\s]*:(\d{2,5})\b|\{HTTP/1\.1[^}]*\}\{[^}]*:(\d{2,5})\}`)
 
 var databasePorts = map[string]string{
 	"5432": "PostgreSQL", "3306": "MySQL", "6379": "Redis", "27017": "MongoDB", "5672": "RabbitMQ", "9200": "Elasticsearch",
@@ -175,6 +177,9 @@ type runtimeCauseContext struct {
 	runtime   RuntimePlanConfig
 	variables []ReleaseVariableSnapshot
 	compose   bool
+	// checks are the readiness checks that failed, whose answers say what
+	// an application that printed nothing refused.
+	checks []CheckEvidence
 }
 
 func applicationOutputCause(containers []ContainerDiagnostics, context runtimeCauseContext) *OutputCause {
@@ -246,6 +251,12 @@ func applicationOutputCause(containers []ContainerDiagnostics, context runtimeCa
 		case "runtime_origin_rejected":
 			cause.Subjects = []string{"PHX_HOST"}
 			cause.Fix = variableFix("PHX_HOST", "runtime", "", context.variables)
+		case "runtime_library_missing":
+			if context.build.Method == BuildRecipe && context.build.Recipe == "python" && len(cause.Subjects) > 0 {
+				if packages := pythonLibraryPackages[cause.Subjects[0]]; packages != "" {
+					cause.Fix = &CauseFix{Kind: fixSetBuild, Field: "configuration.build.systemPackages", Value: packages}
+				}
+			}
 		}
 		return cause
 	}
@@ -277,6 +288,9 @@ func applicationOutputCause(containers []ContainerDiagnostics, context runtimeCa
 	}
 	if match := classifyLines(genericEnvMissingSignatures, lines, -1); match != nil {
 		return envMissing(match)
+	}
+	if cause := djangoHiddenErrorCause(lines, context); cause != nil {
+		return cause
 	}
 	if startCommandExited(containers) {
 		return &OutputCause{Code: "runtime_start_exited", Fix: &CauseFix{Kind: fixReview, Field: "configuration.build.startCommand"}}
@@ -436,6 +450,8 @@ func (c *OutputCause) sentence() string {
 		return "the application listens " + where + ", which nothing outside its container can reach; bind it to 0.0.0.0 (or read the address from HOST) so the proxy and the readiness check can connect"
 	case "runtime_port_mismatch":
 		return "the application listens on port " + subject + ", not the configured internal port; set the internal port to " + subject + " or make the application listen on $PORT"
+	case "runtime_errors_hidden":
+		return "Django answered " + orDefault(subject, "an error") + " and logged nothing: with DEBUG off it sends errors to the admins' email, not to its output; add a LOGGING setting with a console handler to see the cause (the preflight finding django_errors_unlogged has one)"
 	case "runtime_start_exited":
 		return "the application's start command finished with exit code 0 instead of serving, so the container stopped; a start command must keep the server in the foreground — pm2 start, forever start, a trailing & and a one-off script all return at once (use pm2-runtime, or run the server directly)"
 	}
@@ -531,4 +547,39 @@ func (c *OutputCause) releaseSentence() string {
 // cause, whose message scanRunStep rebuilds from the health evidence.
 func outputCauseCode(code string) bool {
 	return code == "schema_missing" || (strings.HasPrefix(code, "runtime_") && outputCauseTitles[code] != "")
+}
+
+// applicationErrorLineRE is a line that says what failed: a traceback, an
+// exception, an error from Django's own loggers.
+var applicationErrorLineRE = regexp.MustCompile(`Traceback|Error|Exception|DisallowedHost|Invalid HTTP_HOST`)
+
+// djangoHiddenErrorCause names a Django candidate that answered the check
+// with an error and wrote nothing about it: with DEBUG off and no LOGGING
+// setting, Django routes request errors — a DisallowedHost 400, a 500 — to
+// mail_admins only. A 400 is its host allowlist and a 5xx an error it hid;
+// a 401, 403 or 404 is an answer, which the readiness classification names.
+func djangoHiddenErrorCause(lines []collectedLine, context runtimeCauseContext) *OutputCause {
+	if context.build.Framework != "django" {
+		return nil
+	}
+	status := 0
+	for _, check := range context.checks {
+		for _, attempt := range check.Attempts {
+			if attempt.StatusCode >= 400 {
+				status = attempt.StatusCode
+			}
+		}
+	}
+	if status == 0 || anyLineMatches(lines, applicationErrorLineRE) {
+		return nil
+	}
+	switch {
+	case status == 400 || status == 421:
+		return &OutputCause{Code: "runtime_host_disallowed", Detail: "django", Subjects: []string{strconv.Itoa(status)},
+			Fix: &CauseFix{Kind: fixReview, Field: "variables"}}
+	case status >= 500:
+		return &OutputCause{Code: "runtime_errors_hidden", Detail: "django", Subjects: []string{strconv.Itoa(status)},
+			Fix: &CauseFix{Kind: fixReview, Field: "configuration.build"}}
+	}
+	return nil
 }

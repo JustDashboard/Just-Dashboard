@@ -32,12 +32,18 @@ import {
   humanize,
 } from "@/components/deploy/vocabulary"
 import {
+  DOTNET_VERSIONS,
+  JAVA_VERSIONS,
   automaticPackageManagerHint,
   candidateBlocker,
   commandsForPackageManager,
   composeSourceForCandidate,
   dockerfileStageHint,
+  dotnetVersionReading,
+  GO_VERSIONS,
   goMainPackageList,
+  installsAssetsWithNode,
+  javaVersionReading,
   packageManagerOptions,
   packageManagerReading,
 } from "@/components/deploy/deployment-defaults"
@@ -644,17 +650,23 @@ export function StepProject({
                         recipe,
                         goVersion: recipe === "go" ? configuration.build.goVersion : undefined,
                         goPackage: recipe === "go" ? configuration.build.goPackage : undefined,
+                        cargoBin: recipe === "rust" ? configuration.build.cargoBin : undefined,
                         pythonVersion:
                           recipe === "python" ? configuration.build.pythonVersion : undefined,
                         phpVersion: recipe === "php" ? configuration.build.phpVersion : undefined,
-                        // The PHP recipe's asset stage installs through the
+                        javaVersion:
+                          recipe === "java" ? configuration.build.javaVersion : undefined,
+                        dotnetVersion:
+                          recipe === "dotnet" ? configuration.build.dotnetVersion : undefined,
+                        // The PHP and Python recipes' asset stages, and the
+                        // Ruby and Elixir builds' assets, install through the
                         // same Node install, so the choices survive the move.
                         nodeVersion:
-                          recipe === "node" || recipe === "php"
+                          recipe === "node" || installsAssetsWithNode(recipe)
                             ? configuration.build.nodeVersion
                             : undefined,
                         packageManager:
-                          recipe === "node" || recipe === "php"
+                          recipe === "node" || installsAssetsWithNode(recipe)
                             ? configuration.build.packageManager
                             : undefined,
                       })
@@ -680,7 +692,7 @@ export function StepProject({
               )}
               {configuration.build.method === "recipe" &&
                 (configuration.build.recipe === "node" ||
-                  (configuration.build.recipe === "php" &&
+                  (installsAssetsWithNode(configuration.build.recipe) &&
                     (flow.candidate?.nodeInstalls?.length ?? 0) > 0)) && (
                   <Field
                     label="Package manager"
@@ -698,10 +710,11 @@ export function StepProject({
                       onValueChange={(value) => {
                         const packageManager =
                           value === "lockfile" ? undefined : (value as NodePackageManager)
-                        // The PHP recipe's commands are PHP's; only the asset
-                        // stage follows the manager, and it names its own.
+                        // The PHP, Ruby and Elixir recipes' commands are
+                        // their own; only the asset install follows the
+                        // manager, and it names its own.
                         updateBuild(
-                          configuration.build.recipe === "php"
+                          installsAssetsWithNode(configuration.build.recipe)
                             ? { packageManager }
                             : {
                                 packageManager,
@@ -761,6 +774,29 @@ export function StepProject({
                   />
                 </Field>
               )}
+              {configuration.build.method === "recipe" &&
+                configuration.build.recipe === "rust" &&
+                (flow.candidate?.rust?.binaries?.length ?? 0) > 1 && (
+                  <Field
+                    label="Rust binary"
+                    htmlFor="cargo-bin"
+                    hint={
+                      flow.candidate?.rust?.binary
+                        ? `This crate builds ${flow.candidate.rust.binaries?.join(", ")}; ${flow.candidate.rust.binary} is served unless you choose another.`
+                        : `This crate builds ${flow.candidate?.rust?.binaries?.join(", ")}. Choose the one to serve.`
+                    }
+                  >
+                    <Input
+                      id="cargo-bin"
+                      value={configuration.build.cargoBin ?? ""}
+                      onChange={(event) =>
+                        updateBuild({ cargoBin: event.target.value.trim() || undefined })
+                      }
+                      placeholder={flow.candidate?.rust?.binary || "server"}
+                      className="font-mono"
+                    />
+                  </Field>
+                )}
               {configuration.build.method === "recipe" && configuration.build.recipe === "go" && (
                 <Field
                   label="Go version"
@@ -771,13 +807,13 @@ export function StepProject({
                     id="go-version"
                     value={configuration.build.goVersion ?? ""}
                     onChange={(event) => updateBuild({ goVersion: event.target.value })}
-                    placeholder="1.26"
+                    placeholder={GO_VERSIONS.at(-1)}
                   />
                 </Field>
               )}
               {configuration.build.method === "recipe" &&
                 ((configuration.build.recipe ?? "node") === "node" ||
-                  (configuration.build.recipe === "php" &&
+                  (installsAssetsWithNode(configuration.build.recipe) &&
                     (flow.candidate?.nodeInstalls?.length ?? 0) > 0)) && (
                   <Field
                     label="Node version"
@@ -804,7 +840,7 @@ export function StepProject({
                   <Field
                     label="Python version"
                     htmlFor="python-version"
-                    hint="Leave empty to use .python-version, runtime.txt or pyproject.toml."
+                    hint="Leave empty to use .python-version, runtime.txt, .tool-versions, Pipfile or pyproject.toml."
                     error={errors.pythonVersion}
                   >
                     <Input
@@ -813,6 +849,67 @@ export function StepProject({
                       onChange={(event) => updateBuild({ pythonVersion: event.target.value })}
                       placeholder="3.13"
                     />
+                  </Field>
+                )}
+              {configuration.build.method === "recipe" && configuration.build.recipe === "java" && (
+                <Field
+                  label="Java version"
+                  htmlFor="java-version"
+                  hint={
+                    javaVersionReading(flow.candidate) ??
+                    "Leave on the build files to use what pom.xml, the Gradle scripts or a version file declare."
+                  }
+                  error={errors.javaVersion}
+                >
+                  <Select
+                    value={configuration.build.javaVersion ?? "auto"}
+                    onValueChange={(value) =>
+                      updateBuild({ javaVersion: value === "auto" ? undefined : value })
+                    }
+                  >
+                    <SelectTrigger id="java-version" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">From the build files</SelectItem>
+                      {JAVA_VERSIONS.map((version) => (
+                        <SelectItem key={version} value={version}>
+                          Java {version}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
+              {configuration.build.method === "recipe" &&
+                configuration.build.recipe === "dotnet" && (
+                  <Field
+                    label=".NET version"
+                    htmlFor="dotnet-version"
+                    hint={
+                      dotnetVersionReading(flow.candidate) ??
+                      "Leave on the project to use its target framework and global.json."
+                    }
+                    error={errors.dotnetVersion}
+                  >
+                    <Select
+                      value={configuration.build.dotnetVersion ?? "auto"}
+                      onValueChange={(value) =>
+                        updateBuild({ dotnetVersion: value === "auto" ? undefined : value })
+                      }
+                    >
+                      <SelectTrigger id="dotnet-version" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">From the project</SelectItem>
+                        {DOTNET_VERSIONS.map((version) => (
+                          <SelectItem key={version} value={version}>
+                            .NET {version}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </Field>
                 )}
               {configuration.build.method === "dockerfile" && (

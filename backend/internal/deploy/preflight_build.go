@@ -42,6 +42,14 @@ func buildMemoryFindings(candidate *DetectedCandidate, configuration PlanConfigu
 		}
 	case "rust":
 		estimate, label = 2048, "a Rust release build"
+		if facts := candidate.Rust; facts != nil {
+			switch {
+			case facts.Fullstack == "leptos":
+				estimate, label = 3072, "a Leptos build (server and WebAssembly site)"
+			case facts.HeavyRelease != "":
+				estimate, label = 3072, "a Rust release build with "+facts.HeavyRelease
+			}
+		}
 	case "java":
 		estimate, label = 1536, "a Maven or Gradle build"
 	case "dotnet":
@@ -54,9 +62,19 @@ func buildMemoryFindings(candidate *DetectedCandidate, configuration PlanConfigu
 	return []PreflightFinding{finding("build_memory_low", PreflightWarning,
 		"The build may run out of memory",
 		fmt.Sprintf("%d MiB free (%d MiB memory, %d MiB swap); %s peaks around %d MiB", free>>20, observation.AvailableMemory>>20, observation.AvailableSwap>>20, label, estimate),
-		"The build can be killed part way through (exit 137) or stop with \"JavaScript heap out of memory\", and while it runs the services on this server have less memory.",
+		buildMemoryMeans(build.Recipe),
 		"Add swap (2 GiB is usually enough), stop other workloads while it builds, or build the image elsewhere and deploy it as an image.",
 		"metrics", "")}
+}
+
+// buildMemoryMeans is what running short does to the build, and what the
+// recipe already does about it.
+func buildMemoryMeans(recipe string) string {
+	means := "The build can be killed part way through (exit 137) or stop with \"JavaScript heap out of memory\", and while it runs the services on this server have less memory."
+	if recipe == "rust" {
+		means = "rustc can be killed part way through (exit 137), and while it runs the services on this server have less memory. The recipe runs as many compile jobs as whole gigabytes are free, which lowers the peak but not the link of the final binary."
+	}
+	return means
 }
 
 // buildValue reports whether the build command receives a variable: it is

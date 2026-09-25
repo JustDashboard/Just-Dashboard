@@ -377,6 +377,10 @@ func candidateStateLayout(candidate *DetectedCandidate, marker *detectedMarkers)
 			return stateLayout{workdir: "/app", dataDir: "/data", root: true}, true
 		case "go", "rust":
 			return stateLayout{workdir: compiledRuntimeHome, dataDir: compiledRuntimeHome + "/data"}, true
+		case "elixir", "gleam", "dart", "scala", "clojure":
+			// These run as the unprivileged app user from /app, whose data
+			// directory the image creates owned by it.
+			return stateLayout{workdir: "/app", dataDir: "/app/data"}, true
 		case "dotnet":
 			return stateLayout{workdir: "/app", dataDir: dotnetRuntimeDataDir}, true
 		case "java":
@@ -1559,13 +1563,13 @@ var (
 	elixirSQLiteDepRE = regexp.MustCompile(`\{\s*:ecto_sqlite3\b`)
 )
 
-// elixirStatePaths reads a Phoenix release built by its own Dockerfile
-// (there is no Elixir recipe) whose Ecto repository is SQLite: the file the
+// elixirStatePaths reads a Phoenix release, built by the Elixir recipe or by
+// its own Dockerfile, whose Ecto repository is SQLite: the file the
 // release's runtime.exs reads its location from, DATABASE_PATH in the
 // generator's own config.
 func elixirStatePaths(candidate *DetectedCandidate, view stateRoot, layout stateLayout) []DetectedPersistentPath {
 	_, mix := view.file("mix.exs")
-	if candidate.BuildMethod != BuildDockerfile || !elixirSQLiteDepRE.Match(mix) {
+	if (candidate.BuildMethod != BuildDockerfile && candidate.Recipe != "elixir") || !elixirSQLiteDepRE.Match(mix) {
 		return nil
 	}
 	source, runtime := view.file("config/runtime.exs")

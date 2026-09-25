@@ -2,18 +2,20 @@ package deploy
 
 import (
 	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 )
 
-// Ecosystems the builder has no automatic recipe for. Recognising one turns
-// "No deployable plan was detected" — or worse, an asset bundle's
-// package.json offered as the application — into a candidate that names the
-// language and says exactly what to commit. The recipes for several of these
-// are planned; an entry here is removed when its recipe lands, and until then
-// the candidate's RecipeIssue is what preflight's recipe_unsupported shows.
+// Ecosystems recognised by a manifest the root-marker pass does not read.
+// Recognising one turns "No deployable plan was detected" — or worse, an
+// asset bundle's package.json offered as the application — into a candidate
+// that names the language. Ruby, Elixir, Scala, Clojure, Dart and Gleam have
+// recipes, and their candidates are built from the recipe's own reading
+// (detect_languages.go); for the others the candidate's RecipeIssue says
+// exactly what to commit, which is what preflight's recipe_unsupported shows.
 
 type ecosystemMatch struct {
 	language  string
@@ -37,6 +39,9 @@ type ecosystemMatch struct {
 	evidence  []DetectionEvidence
 	// notDeployable sets the root aside instead of offering a candidate.
 	notDeployable string
+	// recipe names the automatic recipe that builds the ecosystem
+	// (detect_languages.go); without one the candidate says what to commit.
+	recipe string
 }
 
 var (
@@ -115,6 +120,9 @@ func rubyEcosystem(root string, s *repoShapeScan) *ecosystemMatch {
 	default:
 		return nil
 	}
+	if match.framework != "middleman" {
+		match.recipe = "ruby"
+	}
 	if has(gems, "jsbundling-rails", "cssbundling-rails", "vite_rails", "shakapacker", "webpacker", "hanami-assets") {
 		match.ownsAssets = true
 	}
@@ -159,7 +167,7 @@ func elixirEcosystem(root string, s *repoShapeScan) *ecosystemMatch {
 		deps[string(match[1])] = ""
 	}
 	match := &ecosystemMatch{language: "Elixir", marker: joinRoot(root, "mix.exs"), primary: true, owner: true,
-		framework: "elixir", label: "Elixir project", profile: ProfileService,
+		framework: "elixir", label: "Elixir project", profile: ProfileService, recipe: "elixir",
 		remedy: "commit a Dockerfile that builds a mix release"}
 	switch {
 	case has(deps, "phoenix"):
@@ -180,8 +188,8 @@ func elixirEcosystem(root string, s *repoShapeScan) *ecosystemMatch {
 // longTailEcosystems are named by one manifest each; the frameworks listed
 // make the candidate a web service on the framework's conventional port.
 var longTailEcosystems = []struct {
-	key, file, language, slug, remedy string
-	frameworks                        []struct {
+	key, file, language, slug, remedy, recipe string
+	frameworks                                []struct {
 		marker, name string
 		port         int
 	}
@@ -201,21 +209,18 @@ var longTailEcosystems = []struct {
 	{key: "package.swift", file: "Package.swift", language: "Swift", slug: "swift", profile: ProfileService,
 		remedy:     "commit a Dockerfile that builds with the swift image (swift build -c release) and runs the product",
 		frameworks: frameworksOf("vapor", "vapor", 8080, "hummingbird", "hummingbird", 8080)},
-	{key: "build.sbt", file: "build.sbt", language: "Scala", slug: "scala", profile: ProfileService,
+	{key: "build.sbt", file: "build.sbt", recipe: "scala", language: "Scala", slug: "scala", profile: ProfileService,
 		remedy:     "commit a Dockerfile that builds with sbt (sbt stage or sbt-native-packager) and runs on a JRE",
-		frameworks: frameworksOf("playframework", "play", 9000, "http4s", "http4s", 8080, "akka-http", "akka-http", 8080, "zio-http", "zio-http", 8080)},
-	{key: "project.clj", file: "project.clj", language: "Clojure", slug: "clojure", profile: ProfileService,
+		frameworks: frameworksOf("playframework", "play", 9000, "http4s", "http4s", 8080, "akka-http", "akka-http", 8080, "pekko-http", "pekko-http", 8080, "zio-http", "zio-http", 8080)},
+	{key: "project.clj", file: "project.clj", recipe: "clojure", language: "Clojure", slug: "clojure", profile: ProfileService,
 		remedy:     "commit a Dockerfile that builds an uberjar (lein uberjar) and runs it on a JRE",
 		frameworks: frameworksOf("ring", "ring", 3000, "compojure", "compojure", 3000, "pedestal", "pedestal", 8080)},
-	{key: "deps.edn", file: "deps.edn", language: "Clojure", slug: "clojure", profile: ProfileService,
+	{key: "deps.edn", file: "deps.edn", recipe: "clojure", language: "Clojure", slug: "clojure", profile: ProfileService,
 		remedy:     "commit a Dockerfile that builds an uberjar (clojure -T:build uber) and runs it on a JRE",
 		frameworks: frameworksOf("ring", "ring", 3000, "pedestal", "pedestal", 8080, "http-kit", "http-kit", 8080)},
-	{key: "gleam.toml", file: "gleam.toml", language: "Gleam", slug: "gleam", profile: ProfileService,
+	{key: "gleam.toml", file: "gleam.toml", recipe: "gleam", language: "Gleam", slug: "gleam", profile: ProfileService,
 		remedy:     "commit a Dockerfile that builds with gleam export erlang-shipment and runs it on an Erlang image",
 		frameworks: frameworksOf("wisp", "wisp", 8000, "mist", "mist", 8000)},
-	{key: ".fsproj", file: "*.fsproj", language: "F#", slug: "fsharp", profile: ProfileService,
-		remedy:     "commit a Dockerfile that publishes with mcr.microsoft.com/dotnet/sdk and runs on the aspnet image",
-		frameworks: frameworksOf("giraffe", "giraffe", 8080, "saturn", "saturn", 8080, "falco", "falco", 8080, "Microsoft.NET.Sdk.Web", "aspnet", 8080)},
 	{key: "dune-project", file: "dune-project", language: "OCaml", slug: "ocaml", profile: ProfileService,
 		remedy:     "commit a Dockerfile that builds with the ocaml/opam image (dune build) and copies the executable into a slim runtime",
 		frameworks: frameworksOf("dream", "dream", 8080)},
@@ -273,7 +278,7 @@ func otherEcosystem(root string, s *repoShapeScan) *ecosystemMatch {
 			return &ecosystemMatch{language: "Flutter", marker: joinRoot(root, "pubspec.yaml"), notDeployable: "mobile-app"}
 		}
 		match := &ecosystemMatch{language: "Dart", framework: "dart", label: "Dart project", marker: joinRoot(root, "pubspec.yaml"),
-			profile: ProfileService, primary: true, remedy: "commit a Dockerfile that runs dart compile exe and copies the executable into a slim runtime"}
+			profile: ProfileService, primary: true, recipe: "dart", remedy: "commit a Dockerfile that runs dart compile exe and copies the executable into a slim runtime"}
 		for _, server := range []string{"dart_frog", "shelf", "serverpod"} {
 			if strings.Contains(text, server+":") {
 				match.framework, match.label, match.profile, match.port = server, "Dart web server", ProfileWeb, 8080
@@ -304,7 +309,7 @@ func otherEcosystem(root string, s *repoShapeScan) *ecosystemMatch {
 			continue
 		}
 		match := &ecosystemMatch{language: entry.language, framework: entry.slug, label: entry.language + " project",
-			marker: joinRoot(root, entry.file), profile: entry.profile, remedy: entry.remedy,
+			marker: joinRoot(root, entry.file), profile: entry.profile, remedy: entry.remedy, recipe: entry.recipe,
 			primary: entry.slug != "cpp" && entry.slug != "mkdocs"}
 		if entry.profile == ProfileStatic {
 			match.label, match.port = entry.language+" site", 80
@@ -407,8 +412,11 @@ func (s *repoShapeScan) applyEcosystems(result *DetectionResult, context shapeCo
 				owned := candidate.Recipe == "node" && (candidate.Root == root || (match.ownsAssets && (candidate.Root == joinRoot(root, "assets") ||
 					candidate.Root == joinRoot(root, "frontend") || candidate.Root == joinRoot(root, "app/javascript"))))
 				if owned {
-					s.addSetAside(DetectionSetAside{Path: joinRoot(candidate.Root, "package.json"), Kind: "asset-pipeline",
-						Reason: "package.json builds the " + match.label + "'s assets; the application needs a " + match.language + " build"})
+					reason := "package.json builds the " + match.label + "'s assets; the application needs a " + match.language + " build"
+					if match.recipe != "" {
+						reason = "package.json builds the " + match.label + "'s assets, which the " + match.language + " recipe installs and builds"
+					}
+					s.addSetAside(DetectionSetAside{Path: joinRoot(candidate.Root, "package.json"), Kind: "asset-pipeline", Reason: reason})
 				}
 				return owned
 			})
@@ -428,6 +436,18 @@ func (s *repoShapeScan) applyEcosystems(result *DetectionResult, context shapeCo
 			candidate.Evidence = append(candidate.Evidence, evidence...)
 			candidate.Processes = appendProcesses(candidate.Processes, match.processes...)
 			candidate.Databases = appendDatabases(candidate.Databases, match.databases...)
+			if match.recipe == "ruby" {
+				lendRubyDockerfileFacts(candidate, filepath.Join(s.root, filepath.FromSlash(root)))
+			}
+			if match.recipe == "" {
+				continue
+			}
+		}
+		if match.recipe != "" {
+			// With a recipe the root is buildable as it is; a Dockerfile
+			// beside it is the other way to build it, and the ranking
+			// chooses between them.
+			s.addLanguageRecipeCandidate(result, root, match, context, evidence)
 			continue
 		}
 		if !match.primary && others > 0 {

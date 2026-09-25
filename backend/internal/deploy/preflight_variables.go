@@ -616,8 +616,9 @@ func databaseFindings(state environmentState, configuration PlanConfiguration, o
 				"Use MongoDB 4.4, or set the VM's CPU type to host so the instructions are exposed.", "databases", "dependencies"))
 		}
 	}
-	if start := state.candidate.StartCommand; (state.candidate.Framework == "laravel" || state.candidate.Framework == "symfony") &&
-		strings.Contains(start, "migrat") && !linked {
+	if start := state.candidate.StartCommand; (state.candidate.Framework == "laravel" || state.candidate.Framework == "symfony" ||
+		state.candidate.Framework == "rails" || state.candidate.Framework == "phoenix" || state.candidate.Framework == "hanami") &&
+		migrationStartRE.MatchString(start) && !linked {
 		relational := false
 		for _, database := range state.candidate.Databases {
 			relational = relational || database.Engine == "postgres" || database.Engine == "mysql" || database.Engine == "mariadb"

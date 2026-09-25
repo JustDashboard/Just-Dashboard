@@ -1493,7 +1493,7 @@ var (
 // project or a profile.
 var portFlagTools = map[string]bool{
 	"next": true, "nuxt": true, "nuxi": true, "serve": true, "http-server": true, "astro": true,
-	"daphne": true, "vite": true, "sirv": true,
+	"daphne": true, "vite": true, "sirv": true, "rails": true, "puma": true, "rackup": true, "unicorn": true,
 }
 
 // parseCommandListen reads a start command, following package scripts
@@ -1547,6 +1547,11 @@ func parseCommandListenDepth(command string, scripts map[string]string, depth in
 				fields = fields[2:]
 				continue
 			}
+		case "bundle":
+			if len(fields) > 1 && fields[1] == "exec" {
+				fields = fields[2:]
+				continue
+			}
 		}
 		break
 	}
@@ -1596,6 +1601,9 @@ func parseCommandListenDepth(command string, scripts map[string]string, depth in
 			}
 		case strings.HasPrefix(arg, "-Dserver.port="):
 			facts.setPort(strings.TrimPrefix(arg, "-Dserver.port="))
+		case strings.HasPrefix(arg, "-Dhttp.port="):
+			// Play's start script takes its port as a system property.
+			facts.setPort(strings.TrimPrefix(arg, "-Dhttp.port="))
 		case name == "--bind" || name == "-b":
 			bind := next()
 			// `0.0.0.0:${PORT:-8000}` splits at the colon before the

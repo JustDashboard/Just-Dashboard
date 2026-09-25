@@ -306,16 +306,32 @@ only renderer/executor/validation authority for their feature.
   adapter-auto, `NITRO_PRESET`, Next.js standalone assets, the fallback page a static site's framework
   writes, the entry check). An Nx workspace's application projects are candidates at its root
   (`frameworks_node_nx.go`), and a workspace member builds its workspace dependencies first
-  (`detect_node_start.go`). `frameworks_python.go` names Django, FastAPI, Flask, Streamlit and
-  Gradio from the manifests and finds the application object in the conventional entry files;
+  (`detect_node_start.go`). `frameworks_python.go` names Django, FastAPI, Litestar,
+  Starlette, Sanic, Quart, Falcon, Bottle, Flask, aiohttp, Tornado and the application frameworks
+  (Gradio, Chainlit, NiceGUI, Reflex, Mesop, Dash, Panel, Streamlit) from what the project itself
+  declares, and finds the application object in the conventional entry files, the root's other scripts
+  and the module a runner script imports its factory from; the manifests themselves (requirement
+  layouts and includes, pyproject, Pipfile, the uv/Poetry/PDM locks and their drift, setup files, conda
+  environments) are read by `detect_python_manifests.go`, `detect_python_lock.go` and
+  `detect_python_project.go`, and what the recipe needs beyond the framework is recorded on the
+  candidate as `python` (`detect_python.go`) and judged by `preflight_python.go`;
   `frameworks_rust.go`, `frameworks_java.go`, `frameworks_dotnet.go` and `frameworks_deno.go` read
-  `Cargo.toml`, `pom.xml`/`build.gradle(.kts)`, `*.csproj` and `deno.json(c)`; `detect_php.go` and
-  `detect_deno.go` read, after the walk and under budgets of their own, what those recipes decide from
-  beyond the manifest (the lock, the declared release, the code's extension calls, a WordPress tree's
-  shape) through one reader that detection and preparation share, and record it as the candidate's
-  `php` and `deno` facts for preflight; only a WordPress theme's or plugin's header at the top of the
-  checkout is read by the walk itself (at most 32 file heads), since nothing else names a block theme's
-  or a create-block plugin's directory. A `Procfile`'s `web:`
+  `Cargo.toml`, `pom.xml`/`build.gradle(.kts)`, `*.csproj`/`*.fsproj`/`*.vbproj` and `deno.json(c)`;
+  `detect_php.go` and `detect_deno.go` read, after the walk and under budgets of their own, what those
+  recipes decide from beyond the manifest (the lock, the declared release, the code's extension calls, a
+  WordPress tree's shape) through one reader that detection and preparation share, and record it as the
+  candidate's `php` and `deno` facts for preflight; only a WordPress theme's or plugin's header at the top
+  of the checkout is read by the walk itself (at most 32 file heads), since nothing else names a block
+  theme's or a create-block plugin's directory. The
+  JVM and .NET builds are read through one bounded, symlink-refusing reader over the checkout
+  (`build_files.go`) that detection and the recipe share — the Maven reactor and parents, the Gradle
+  settings root and version catalog, the .NET props chain, referenced projects and `global.json`
+  (`detect_maven.go`, `detect_gradle.go`, `detect_jvm.go`, `detect_dotnet.go`) — so a module or solution
+  project builds from the directory that owns it (`PrepareWithin`, `prepared.contextDirectory`) and the
+  candidate keeps `javaBuild`/`dotnetBuild` for preflight (`preflight_compiled.go`, which judges
+  `build.javaVersion`/`build.dotnetVersion`). `detect_compiled_layout.go` sets aside library modules,
+  aggregator POMs, Gradle build logic (`buildSrc`, `build-logic`, convention-plugin projects), test
+  projects and Aspire AppHosts before the repository-shape passes rank what is left. A `Procfile`'s `web:`
   process outranks every guess, and another platform's deployment file (`fly.toml`, `render.yaml`,
   `app.json`, Kamal's `config/deploy.yml`, …) outranks the framework's defaults. The candidate carries `spaFallback` (a client-routed site's nginx
   fallback), `pythonVersion`, `unpinnedDependencies` (a `dependencies_unpinned` preflight warning,
@@ -329,7 +345,11 @@ only renderer/executor/validation authority for their feature.
   dotenv load, an identity provider's callback, Rails credentials), `listen` (where the source says its
   server listens: a port it fixes, whether it reads PORT, a loopback bind, each naming its file and line
   — `detect_listen.go`, `detect_network.go`) and `networkVariables` (plain runtime variables the proxy
-  decides: `AUTH_TRUST_HOST`, `NEXTAUTH_URL` on a domain template, `HOST`). The form declares a set-up
+  decides: `AUTH_TRUST_HOST`, `NEXTAUTH_URL` on a domain template, `HOST`), and `go` and `rust` (how a
+  Go module or a Rust crate builds beyond its toolchain: its build context, cgo, dependency sources,
+  embeds and generated code; its Cargo workspace, binaries, native crates, sqlx and lockfile — from the
+  same `planGoBuild` and `readCargoCrate` the recipes run, bounded by `validateDetectedGoBuild` and
+  `validateDetectedRustBuild`). The form declares a set-up
   variable once: the classification's declaration first, then a network variable for a name it did not
   set up. The environment is described last for each root, after the state, readiness and network
   passes, so its classification sees the ports and frameworks they settled. A repository's container
@@ -343,10 +363,14 @@ only renderer/executor/validation authority for their feature.
   `public_url_variable_missing`, `request_body_limit` and the rest, listed in the recipe guide), so a
   certain loopback bind is a blocker before Deploy rather than a readiness timeout after it. The closed
   recipe set is
-  `node`, `go`, `python`, `rust`, `java`, `dotnet`, `deno`, `php` and `site` (`validRecipe`; `site`
-  builds Hugo, Zola, mdBook and Jekyll, and Python and Deno build a site generator's output when they
-  have an output directory), and `build.pythonVersion`, `build.phpVersion` and `build.spaFallback` are
-  additive plan fields, bounded by `PlanConfiguration.Validate`.
+  `node`, `go`, `python`, `rust`, `java`, `dotnet`, `deno`, `php`, `site`, `ruby`, `elixir`, `scala`,
+  `clojure`, `dart`, `gleam` (`validRecipe`; `site` builds Hugo, Zola, mdBook and Jekyll, and Python and
+  Deno build a site generator's output when they have an output directory), and `build.pythonVersion`
+  (3.10 to 3.14), `build.systemPackages` (at most 32 Debian names, Python recipe only),
+  `build.nodeVersion` (the recipes that run the Node install, `nodeInstallRecipes`), `build.phpVersion`,
+  `build.spaFallback`, `build.goPackage`, `build.cargoBin` (the binary a Rust recipe serves),
+  `build.javaVersion` and `build.dotnetVersion` are additive plan fields, bounded by
+  `PlanConfiguration.Validate`.
   The contract per language is [the recipe guide](recipes.md). The framework detection recognised is
   recorded on the build plan when a draft commits (`build.framework` on the configuration read) —
   the chosen candidate's, while the plan still builds that candidate's directory — so a later read,
@@ -413,7 +437,9 @@ only renderer/executor/validation authority for their feature.
   (`build_static_serving.go`), with the fallback page the framework's catalogue entry names (SvelteKit's
   `200.html`, React Router's `__spa-fallback.html`, tried before `index.html`), and written into nginx's
   configuration as literals that pass a strict character check, one location block per path so the
-  configuration always loads.
+  configuration always loads. Every static output is served by that one renderer (`staticServing`): a
+  JavaScript, site-generator, Python or Deno site, a plain static site, a Trunk site and a Blazor
+  WebAssembly app.
 - A detected Node service that declares a migration tool applies its schema before it serves. Detection
   records the tool (`schemaTool`), the command it chose (`schemaCommand`) and whether the package's own
   start script already runs it, and chains the step in front of the start command through the manager's
@@ -467,8 +493,9 @@ only renderer/executor/validation authority for their feature.
   plan excludes raw observed import material and accepts only typed secret references. The observer
   reads `MemAvailable` and `SwapFree`, and `build_memory_low` (warning, `preflight_build.go`) compares
   them with the selected recipe's estimated build peak (a Next.js, Nuxt, Angular, Gatsby, Docusaurus,
-  Strapi or Payload build ~2 GiB, other JavaScript frameworks ~1 GiB, Rust ~2 GiB, Maven/Gradle and .NET
-  ~1.5 GiB). The JavaScript recipe leaves V8's heap at its default rather than injecting
+  Strapi or Payload build ~2 GiB, other JavaScript frameworks ~1 GiB, Rust ~2 GiB, or ~3 GiB with fat
+  LTO, one codegen unit or Leptos, Maven/Gradle and .NET ~1.5 GiB); the Rust recipe also caps Cargo's
+  jobs at the gigabytes free when the step starts. The JavaScript recipe leaves V8's heap at its default rather than injecting
   `NODE_OPTIONS`, which every worker process of a build would inherit. The same file judges what the
   configuration gives a JavaScript build against what the candidate recorded (`nodeBuild`): an
   env-validation schema's variables without a build value (`build_env_validation_skipped`,
@@ -508,7 +535,7 @@ only renderer/executor/validation authority for their feature.
   whatever builds it (`rootDetectionCandidate`), since the same code runs either way. The step's evidence carries `candidate` and
   `findings`, which the run page draws as findings ("Checked before building"); a blocked finding — or
   one of the decisions a run cannot pass: `readiness_missing`, `domain_link_missing`,
-  `go_main_ambiguous` — stops the run with the finding's code as the terminal code and
+  `go_main_ambiguous`, `rust_binary_ambiguous` — stops the run with the finding's code as the terminal code and
   `title: measured. action` as the reason.
 - `POST /deploy/{id}/environments/{env}/check` answers the same evaluation for the environment's desired
   plan before Deploy is pressed. It carries the run request's capability (`service.control`), resolves
@@ -688,12 +715,23 @@ only renderer/executor/validation authority for their feature.
   programs print it as a warning and carry on: `SENTRY_DSN is not set` beside the port the server
   really took must name the port), and a single container that stopped with exit code 0 instead of
   serving (`runtime_start_exited`; several containers are a Compose stack, where a one-off service
-  exits 0 by design). The cause is the step's code and the run's terminal code in place of
-  `health_gate_failed`, with the health evidence kept; it carries identifiers only (a variable, a
-  port, a module, a listener) and, where the plan can supply one, a fix: the variable or its runtime
-  scope, the internal port, a start command bound to `0.0.0.0`.
+  exits 0 by design), and a Django candidate whose check was answered with a 5xx while the output
+  holds no error at all (`runtime_errors_hidden`, a 400 read as `runtime_host_disallowed`, a 401, 403 or
+  404 left to the readiness classification: with DEBUG off
+  and no `LOGGING`, Django mails request errors instead of printing them — the failed checks' status
+  codes reach the classifier as `runtimeCauseContext.checks`). The cause is the step's code and the run's
+  terminal code in place of `health_gate_failed`, with the health evidence kept; it carries identifiers
+  only (a variable, a port, a module, a listener) and, where the plan can supply one, a fix: the
+  variable or its runtime scope, the internal port, a start command bound to `0.0.0.0`, and for the
+  Python recipe the Debian package that provides a missing shared library (`build.systemPackages`).
 - Container applications receive `PORT` from the frozen internal-port setting unless a runtime variable
-  explicitly supplies it. Compose and host-network applications keep their own environment conventions.
+  explicitly supplies it. A Python recipe image whose gunicorn or uvicorn start leaves the worker count
+  to `WEB_CONCURRENCY`, and which loads no machine-learning model, is recorded as such
+  (`PreparedBuild.webConcurrency`, copied into the runtime snapshot), and `startContainer` sets
+  `WEB_CONCURRENCY` for it (`runtime_concurrency.go`: 2×CPU+1 within 256 MiB of the memory limit per
+  worker, 2 without a limit) unless the plan sets the variable; the start step's log states the value.
+  Detection gives a websocket application's generated uvicorn command `--workers 1`, so it is never
+  marked. Compose and host-network applications keep their own environment conventions.
   This keeps application startup aligned with Docker publication; the host port may still move. The
   recipes switch framework trust of the proxy's `X-Forwarded-*` headers on (`FORWARDED_ALLOW_IPS=*`,
   `ASPNETCORE_FORWARDEDHEADERS_ENABLED`, `SERVER_FORWARD_HEADERS_STRATEGY`, Quarkus proxy forwarding,
@@ -781,7 +819,10 @@ only renderer/executor/validation authority for their feature.
   keeps its cause (`registry_rate_limited`, `registry_unreachable` — DNS, TLS, refused and timed-out
   connections, Go's `Client.Timeout exceeded` and a resolver's `server misbehaving` —,
   `base_image_missing` — also Docker Hub's "repository does not exist or may require 'docker login'" —,
-  `registry_auth_failed`, `builder_missing`) with the daemon's own bounded reason in the transcript, and
+  `registry_auth_failed`, `builder_missing`) with the daemon's own bounded reason in the transcript — a
+  .NET SDK image a `global.json` pin names that was never published is `dotnet_sdk_pin_unavailable`
+  instead —, a JDK or .NET release the recipe refuses at prepare_context ends the run with preflight's
+  own code (`java_version_unsupported`, `gradle_wrapper_incompatible`, `dotnet_version_unsupported`), and
   a candidate's start names `runtime_port_in_use`, `image_missing` and `mount_invalid` from Docker's
   refusal without repeating it. A context deadline that reaches a step while its run is alive is
   `step_timeout`; only a cancelled context is a cancellation. The signature table and fixes are listed

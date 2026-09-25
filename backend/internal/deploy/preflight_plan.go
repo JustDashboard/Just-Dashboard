@@ -155,8 +155,7 @@ func plannedRecipeFindings(candidate *DetectedCandidate, build BuildPlanConfig) 
 	}
 	switch recipe {
 	case "go":
-		if _, err := chooseGoRecipeVersion(build.GoVersion, candidate.GoVersionFile,
-			goModuleForVersionCheck(candidate.GoMinimumVersion, candidate.GoToolchain)); err != nil {
+		if _, err := chooseGoRecipeVersion(build.GoVersion, candidate.GoVersionFile, goCandidateVersionModule(candidate)); err != nil {
 			measured := recipeRefusalText(err, "")
 			if pinned := goVersionPins(candidate, build); pinned != "" {
 				measured += " (" + pinned + ")"
@@ -171,6 +170,7 @@ func plannedRecipeFindings(candidate *DetectedCandidate, build BuildPlanConfig) 
 		if item, ok := pythonVersionFinding(candidate, build); ok {
 			findings = append(findings, item)
 		}
+		findings = append(findings, pythonRecipeFindings(candidate, build)...)
 	}
 	return findings
 }
@@ -188,6 +188,12 @@ func goVersionPins(candidate *DetectedCandidate, build BuildPlanConfig) string {
 	}
 	if candidate.GoToolchain != "" {
 		pins = append(pins, "toolchain "+candidate.GoToolchain)
+	}
+	if facts := candidate.Go; facts != nil && facts.WorkGo != "" {
+		pins = append(pins, "go.work go "+facts.WorkGo)
+	}
+	if facts := candidate.Go; facts != nil && facts.WorkToolchain != "" {
+		pins = append(pins, "go.work toolchain "+facts.WorkToolchain)
 	}
 	return strings.Join(pins, "; ")
 }
@@ -290,36 +296,6 @@ func pythonVersionSatisfies(version, constraint string) bool {
 	return true
 }
 
-// pythonDeclaredRange is the interpreter range pyproject declares, bounded
-// like any other detection text.
-func pythonDeclaredRange(files map[string][]byte) string {
-	match := pythonRequiresRE.FindStringSubmatch(string(files["pyproject.toml"]))
-	if match == nil || len(match[1]) > 128 || strings.ContainsAny(match[1], "\x00\r\n") {
-		return ""
-	}
-	return match[1]
-}
-
-// pythonInstallKind names the manifest the recipe installs from, in the
-// order selectPythonInstall reads them.
-func pythonInstallKind(files map[string][]byte) string {
-	pyproject, hasPyproject := files["pyproject.toml"]
-	switch _, uv := files["uv.lock"]; {
-	case uv:
-		return "uv.lock"
-	}
-	if _, poetry := files["poetry.lock"]; poetry || (hasPyproject && strings.Contains(string(pyproject), "[tool.poetry]")) {
-		return "poetry.lock"
-	}
-	if _, requirements := files["requirements.txt"]; requirements {
-		return "requirements.txt"
-	}
-	if hasPyproject {
-		return "pyproject.toml"
-	}
-	return ""
-}
-
 // startCommandFinding asks for the start command every server recipe needs
 // before the recipe is asked to render one it would refuse.
 func startCommandFinding(recipe string, candidate *DetectedCandidate, build BuildPlanConfig) (PreflightFinding, bool) {
@@ -344,6 +320,8 @@ func startCommandFinding(recipe string, candidate *DetectedCandidate, build Buil
 		example = "such as `deno task start` or `deno run -A main.ts`"
 	case "php":
 		example = "such as `frankenphp php-server --root public/`"
+	case "ruby":
+		example = "such as `bundle exec puma --port $PORT`"
 	default:
 		return PreflightFinding{}, false
 	}

@@ -263,22 +263,41 @@ func dotnetSQLiteSeeds(root string, project dotnetProject) []string {
 // safe to write unquoted into a COPY instruction.
 var runtimeAssetPathRE = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}(?:/[A-Za-z0-9_][A-Za-z0-9._-]{0,127}){0,7}$`)
 
+// compiledRuntime is what one compiled recipe's runtime stage carries: the
+// files the service reads at runtime (assets, copied from source, the
+// directory of the build stage they sit in), the system packages a
+// dynamically linked binary needs, the start command, and the recipe's own
+// ENV instructions, such as where the framework listens.
+type compiledRuntime struct {
+	assets   []string
+	source   string
+	packages []string
+	start    string
+	env      []string
+}
+
 // compiledRuntimeLines is the runtime stage the Go and Rust recipes share:
 // the binary at /app, run as an unprivileged user from its own home, with the
 // files the service reads at runtime owned by that user, and a data
-// directory it owns so a volume mounted there starts writable. env are the
-// recipe's own ENV instructions, such as where the framework listens.
-func compiledRuntimeLines(base ResolvedImage, assets []string, startCommand string, env ...string) []string {
+// directory it owns so a volume mounted there starts writable. Alpine carries
+// no zone database, so tzdata is installed for a TZ variable and a Rust
+// time-zone crate to find one; a Go binary also embeds its own.
+func compiledRuntimeLines(base ResolvedImage, runtime compiledRuntime) []string {
+	source := runtime.source
+	if source == "" {
+		source = "/src"
+	}
+	packages := append([]string{"tzdata"}, runtime.packages...)
 	lines := []string{
 		"FROM " + immutableImageReference(base),
-		"RUN adduser -D -u 10001 app",
+		"RUN apk add --no-cache " + strings.Join(packages, " ") + " && adduser -D -u 10001 app",
 		"USER app",
 		"WORKDIR " + compiledRuntimeHome,
 		"COPY --from=build /out/app /app",
 	}
 	linked := true
-	for _, asset := range assets {
-		lines = append(lines, "COPY --from=build --chown=app:app /src/"+asset+" "+compiledRuntimeHome+"/"+asset)
+	for _, asset := range runtime.assets {
+		lines = append(lines, "COPY --from=build --chown=app:app "+source+"/"+asset+" "+compiledRuntimeHome+"/"+asset)
 		linked = linked && asset != "app"
 	}
 	prepare := "RUN mkdir -p " + compiledRuntimeHome + "/data"
@@ -288,9 +307,9 @@ func compiledRuntimeLines(base ResolvedImage, assets []string, startCommand stri
 		prepare += " && ln -s /app " + compiledRuntimeHome + "/app"
 	}
 	lines = append(lines, prepare)
-	lines = append(lines, env...)
-	if strings.TrimSpace(startCommand) == "" {
+	lines = append(lines, runtime.env...)
+	if strings.TrimSpace(runtime.start) == "" {
 		return append(lines, `ENTRYPOINT ["/app"]`)
 	}
-	return append(lines, shellCMD(startCommand))
+	return append(lines, shellCMD(runtime.start))
 }

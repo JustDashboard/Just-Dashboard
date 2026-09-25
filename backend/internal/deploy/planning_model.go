@@ -310,6 +310,14 @@ type DetectedCandidate struct {
 	// GoLibrary says the module has no buildable main package at all, which
 	// no Go setting can fix: the recipe builds a command, not a library.
 	GoLibrary bool `json:"goLibrary,omitempty"`
+	// Go and Rust are what detection read about how the module or crate
+	// builds beyond its toolchain (detect_go.go, detect_rust.go).
+	Go   *DetectedGoBuild   `json:"go,omitempty"`
+	Rust *DetectedRustBuild `json:"rust,omitempty"`
+	// JavaBuild and DotnetBuild are what a JVM or .NET candidate's build
+	// says about building it (planning_compiled.go).
+	JavaBuild   *DetectedJavaBuild   `json:"javaBuild,omitempty"`
+	DotnetBuild *DetectedDotnetBuild `json:"dotnetBuild,omitempty"`
 	// PythonRequires is the interpreter range the source declares
 	// (requires-python, or Poetry's python constraint), and PythonInstall the
 	// manifest the recipe installs from; together they say whether a chosen
@@ -322,6 +330,14 @@ type DetectedCandidate struct {
 	// detect_deno.go).
 	PHP  *DetectedPHP  `json:"php,omitempty"`
 	Deno *DetectedDeno `json:"deno,omitempty"`
+	// SystemPackages are the Debian packages the source needs in its image,
+	// each with the dependency that needs it, and Python what detection read
+	// about a Python root beyond its framework (detect_python.go).
+	SystemPackages []DetectedSystemPackage `json:"systemPackages,omitempty"`
+	Python         *DetectedPython         `json:"python,omitempty"`
+	// Toolchain is what a Ruby, Elixir, Scala, Clojure, Dart or Gleam
+	// recipe read about the release it builds on (detect_languages.go).
+	Toolchain *DetectedToolchain `json:"toolchain,omitempty"`
 
 	// readingConfidence is what the source's own evidence supports when an
 	// unsettled package manager caps Confidence (packageCandidate). Ranking
@@ -528,6 +544,17 @@ type BuildPlanConfig struct {
 	// GoPackage is the main package a Go recipe builds, relative to the root
 	// directory; empty lets the recipe choose when the module has only one.
 	GoPackage string `json:"goPackage,omitempty"`
+	// SystemPackages are Debian packages the Python recipe installs beside
+	// the ones the dependencies need, which it always installs.
+	SystemPackages []string `json:"systemPackages,omitempty"`
+	// CargoBin is the binary target a Rust recipe serves; empty lets the
+	// recipe choose (default-run, the only one, the one that serves).
+	CargoBin string `json:"cargoBin,omitempty"`
+	// JavaVersion and DotnetVersion choose the JDK or .NET release a Java or
+	// .NET recipe builds and runs on; empty lets the build and version
+	// files decide (planning_compiled.go).
+	JavaVersion   string `json:"javaVersion,omitempty"`
+	DotnetVersion string `json:"dotnetVersion,omitempty"`
 }
 
 // BuildSecretConfig names a variable and the reviewed recipe stages in which
@@ -1180,33 +1207,47 @@ func (c PlanConfiguration) Validate() error {
 		return fmt.Errorf("a recipe is valid only for the automatic builder")
 	}
 	if c.Build.GoVersion != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "go" || !goRecipeVersionRE.MatchString(c.Build.GoVersion)) {
-		return fmt.Errorf("Go version must select stable Go 1.25 or 1.26 in a Go recipe; use a Dockerfile for other toolchains")
+		return fmt.Errorf("Go version must select stable Go %s in a Go recipe; use a Dockerfile for other toolchains", goRecipeVersionList())
 	}
 	if c.Build.GoPackage != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "go" || !validGoPackagePath(c.Build.GoPackage)) {
 		return fmt.Errorf("Go main package must be a directory inside the root, such as cmd/api, in a Go recipe")
 	}
-	// The PHP recipe installs its front-end assets through the same Node
-	// install, so the same choice applies to it.
-	if c.Build.PackageManager != "" && (c.Build.Method != BuildRecipe || (c.Build.Recipe != "node" && c.Build.Recipe != "php") || !validNodePackageManager(c.Build.PackageManager)) {
-		return fmt.Errorf("package manager must be bun, npm, pnpm or yarn in a JavaScript or PHP recipe")
+	if c.Build.CargoBin != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "rust" || !rustBinaryNameRE.MatchString(c.Build.CargoBin)) {
+		return invalidField("build.cargoBin", "the Rust binary names one binary target, such as server, in a Rust recipe")
+	}
+	// The PHP and Python asset stages and the Ruby and Elixir builds install
+	// their front-end assets through the same Node install, so the same
+	// choice applies to them (installsAssetsWithNode in the configure form).
+	if c.Build.PackageManager != "" && (c.Build.Method != BuildRecipe || !slices.Contains(nodeInstallRecipes, c.Build.Recipe) || !validNodePackageManager(c.Build.PackageManager)) {
+		return fmt.Errorf("package manager must be bun, npm, pnpm or yarn in a JavaScript, PHP, Python, Ruby or Elixir recipe")
 	}
 	if c.Build.PythonVersion != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "python" || !pythonRecipeVersionRE.MatchString(c.Build.PythonVersion)) {
-		return fmt.Errorf("Python version must select 3.10, 3.11, 3.12 or 3.13 in a Python recipe; use a Dockerfile for other interpreters")
+		return fmt.Errorf("Python version must select 3.10, 3.11, 3.12, 3.13 or 3.14 in a Python recipe; use a Dockerfile for other interpreters")
+	}
+	if len(c.Build.SystemPackages) > 0 {
+		if c.Build.Method != BuildRecipe || c.Build.Recipe != "python" || len(c.Build.SystemPackages) > 32 {
+			return invalidField("build.systemPackages", "system packages apply to the Python recipe, at most 32 of them")
+		}
+		for _, name := range c.Build.SystemPackages {
+			if !systemPackageRE.MatchString(name) || len(name) > 128 {
+				return invalidField("build.systemPackages", "%q is not a Debian package name", name)
+			}
+		}
+	}
+	if err := validateCompiledBuildSettings(c.Build); err != nil {
+		return err
 	}
 	// A Node major chosen in Build settings outranks what the repository
-	// declares; empty follows the repository. The PHP recipe's asset stage
-	// runs the same install, so the choice applies to it too.
-	if c.Build.NodeVersion != "" && (c.Build.Method != BuildRecipe || (c.Build.Recipe != "node" && c.Build.Recipe != "php") || !nodeRecipeVersionRE.MatchString(c.Build.NodeVersion)) {
-		return fmt.Errorf("Node version must select 20, 22 or 24 in a JavaScript or PHP recipe; use a Dockerfile for other releases")
+	// declares; empty follows the repository. The recipes that install
+	// assets through the same Node install take the choice too.
+	if c.Build.NodeVersion != "" && (c.Build.Method != BuildRecipe || !slices.Contains(nodeInstallRecipes, c.Build.Recipe) || !nodeRecipeVersionRE.MatchString(c.Build.NodeVersion)) {
+		return fmt.Errorf("Node version must select 20, 22 or 24 in a JavaScript, PHP, Python, Ruby or Elixir recipe; use a Dockerfile for other releases")
 	}
 	if c.Build.PHPVersion != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "php" || !slices.Contains(phpRecipeVersions, c.Build.PHPVersion)) {
 		return fmt.Errorf("PHP version must select 8.2, 8.3, 8.4 or 8.5 in a PHP recipe; use a Dockerfile for other releases")
 	}
 	if c.Build.SPAFallback && c.Build.Method != BuildRecipe && c.Build.Method != BuildStatic {
 		return fmt.Errorf("the single-page fallback applies only to a static site or a recipe with static output")
-	}
-	if c.Build.Recipe == "go" && cgoEnabledCommandRE.MatchString(c.Build.BuildCommand) {
-		return fmt.Errorf("the Go recipe builds without CGO; use a Dockerfile with the required C toolchain")
 	}
 	if c.Build.TargetPlatform != "" && !validPlatform(strings.ToLower(c.Build.TargetPlatform)) {
 		return fmt.Errorf("build target platform is malformed")
@@ -1636,11 +1677,17 @@ func configContainsSecretLiteral(value any, key string) bool {
 	return false
 }
 
+// nodeInstallRecipes are the recipes whose build runs the JavaScript
+// install planner: the Node recipe itself, and the recipes that install a
+// package's assets with it.
+var nodeInstallRecipes = []string{"node", "php", "python", "ruby", "elixir"}
+
 // validRecipe is the closed set of automatic recipes; a name outside it is
 // refused at planning so a plan never names a builder that does not exist.
 func validRecipe(name string) bool {
 	switch name {
-	case "node", "go", "python", "rust", "java", "dotnet", "deno", "php", "site":
+	case "node", "go", "python", "rust", "java", "dotnet", "deno", "php", "site",
+		"ruby", "elixir", "scala", "clojure", "dart", "gleam":
 		return true
 	}
 	return false
@@ -1822,6 +1869,15 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 		if err := validateDetectedPHPDeno(candidate); err != nil {
 			return err
 		}
+		if err := validateDetectedGoBuild(candidate); err != nil {
+			return err
+		}
+		if err := validateDetectedRustBuild(candidate); err != nil {
+			return err
+		}
+		if err := validateDetectedCompiledBuild(candidate); err != nil {
+			return err
+		}
 		for _, label := range []string{candidate.Name, candidate.Framework, candidate.Recipe} {
 			if rejectPlanSecretLiteral("detected label", label) != nil {
 				return fmt.Errorf("%w: detected candidate contains credential material", ErrInvalidPlan)
@@ -1876,6 +1932,12 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 			return err
 		}
 		if err := validateCandidateImageFacts(candidate); err != nil {
+			return err
+		}
+		if err := validateDetectedPython(candidate); err != nil {
+			return err
+		}
+		if err := validateDetectedToolchain(candidate.Toolchain); err != nil {
 			return err
 		}
 	}
@@ -1977,7 +2039,7 @@ func validGoPackagePath(pkg string) bool {
 
 func validPythonInstallKind(kind string) bool {
 	switch kind {
-	case "uv.lock", "poetry.lock", "requirements.txt", "pyproject.toml":
+	case "uv.lock", "poetry.lock", "pdm.lock", "Pipfile.lock", "Pipfile", "requirements.txt", "pyproject.toml", "setup.py", "environment.yml":
 		return true
 	}
 	return false

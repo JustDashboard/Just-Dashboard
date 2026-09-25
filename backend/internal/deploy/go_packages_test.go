@@ -222,7 +222,7 @@ func TestGoRecipeBuildsTheChosenMainPackage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(prepared.DockerfilePreview, "go build -trimpath -ldflags='-s -w' -o /out/app ./cmd/worker") {
+	if !strings.Contains(prepared.DockerfilePreview, "go build -trimpath -tags timetzdata -ldflags='-s -w' -o /out/app ./cmd/worker") {
 		t.Fatalf("the chosen package was not built:\n%s", prepared.DockerfilePreview)
 	}
 	config.GoPackage = "cmd/nothing"

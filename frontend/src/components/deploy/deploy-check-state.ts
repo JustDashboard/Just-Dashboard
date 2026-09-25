@@ -3,8 +3,8 @@ import type { DeploymentCheckResult, DeploymentPreflightFinding } from "@/lib/ty
 /**
  * What the advisory check found, read the way a deployment will be.
  *
- * `analyze_plan` stops a run on a blocked finding and on three decisions a
- * run cannot go past; every other decision and every warning lets the run
+ * `analyze_plan` stops a run on a blocked finding and on the decisions a run
+ * cannot go past; every other decision and every warning lets the run
  * continue. The "Ready to deploy?" dialog draws the same line: what stops the
  * deployment cannot be deployed past, what only warns is confirmed once.
  */
@@ -14,6 +14,7 @@ export const RUN_BLOCKING_DECISIONS = new Set([
   "domain_link_missing",
   "readiness_missing",
   "go_main_ambiguous",
+  "rust_binary_ambiguous",
 ])
 
 /** Whether a deployment would stop on this finding before it builds. */

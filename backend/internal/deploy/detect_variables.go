@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -259,6 +260,25 @@ var selfIssuedSecrets = []secretRule{
 		}
 		return ""
 	})},
+	{name: "APPLICATION_SECRET", format: "hex", length: 64, implied: true, gate: func(s rootStack, _ DetectedVariable) string {
+		for _, candidate := range s.candidates {
+			if candidate.Framework == "play" {
+				return "Play refuses to start in production without a secret of at least 256 bits; the recipe's start loads it from APPLICATION_SECRET"
+			}
+		}
+		return ""
+	}},
+	{name: "SESSION_SECRET", format: "hex", length: 128, gate: func(s rootStack, variable DetectedVariable) string {
+		if s.gemHas("sinatra") == "" {
+			return ""
+		}
+		for _, source := range variable.Sources {
+			if path.Ext(source) == ".rb" || path.Base(source) == "config.ru" {
+				return "Sinatra signs session cookies with it, and Rack wants at least 64 bytes (" + source + ")"
+			}
+		}
+		return ""
+	}},
 	{name: "SECRET_KEY", length: 50, gate: djangoSettingsGate},
 	{name: "DJANGO_SECRET_KEY", length: 50, gate: djangoSettingsGate},
 	{name: "SECRET_KEY", format: "hex", length: 64, gate: flaskGate},
@@ -562,6 +582,25 @@ func readRootStack(marker *detectedMarkers, scanner *envScanner, candidates []De
 		for _, match := range mixDepRE.FindAllSubmatch(mix, -1) {
 			stack.mix[string(match[1])] = true
 		}
+		// An umbrella's root declares no dependencies of its own; the
+		// applications its release runs do.
+		if match := mixUmbrellaRE.FindSubmatch(mix); match != nil {
+			prefix := path.Join(filepath.ToSlash(marker.root), string(match[1])) + "/"
+			for rel, content := range scanner.facts.files {
+				if child, ok := strings.CutPrefix(rel, prefix); ok && strings.Count(child, "/") == 1 && path.Base(child) == "mix.exs" {
+					for _, dependency := range mixDepRE.FindAllSubmatch(content, -1) {
+						stack.mix[string(dependency[1])] = true
+					}
+				}
+			}
+		}
+	}
+	// sbt, Leiningen and deps.edn name their JVM drivers the way a pom or a
+	// Gradle script does.
+	for _, name := range []string{"build.sbt", "project.clj", "deps.edn"} {
+		if content := own(name); content != nil {
+			stack.jvm += "\n" + string(content)
+		}
 	}
 	stack.railsApp = railsAppRE.Match(own("config/application.rb"))
 	stack.swift = string(marker.packageSwift)
@@ -690,6 +729,10 @@ func classifyVariable(stack rootStack, variable *DetectedVariable, context class
 		variable.Setup, variable.DefaultValue = "default", "true"
 		variable.SetupReason = "Puma runs Solid Queue's jobs only when it is set"
 		return
+	case variable.Name == "RAILS_LOG_TO_STDOUT" && railsLogsToFile(stack):
+		variable.Setup, variable.DefaultValue = "default", "1"
+		variable.SetupReason = railsLogToStdoutReason
+		return
 	case variable.Name == "AUTH_TRUST_HOST" && stack.authJS():
 		variable.Setup, variable.DefaultValue = "default", "true"
 		variable.SetupReason = "the managed proxy is the only way in and sets the Host header"
@@ -767,6 +810,10 @@ func withImpliedVariables(stack rootStack, variables []DetectedVariable, prefixe
 		add(DetectedVariable{Name: "AUTH_TRUST_HOST", Setup: "default", DefaultValue: "true",
 			SetupReason: "the managed proxy is the only way in and sets the Host header"}, "package.json")
 	}
+	if railsLogsToFile(stack) {
+		add(DetectedVariable{Name: "RAILS_LOG_TO_STDOUT", Setup: "default", DefaultValue: "1", SetupReason: railsLogToStdoutReason},
+			"config/environments/production.rb")
+	}
 	if solidQueueInPuma(stack) {
 		add(DetectedVariable{Name: "SOLID_QUEUE_IN_PUMA", Setup: "default", DefaultValue: "true",
 			SetupReason: "Puma runs Solid Queue's jobs only when it is set"}, "config/puma.rb")
@@ -798,8 +845,19 @@ func (s rootStack) manifestFor(name string) string {
 		return "config/application.rb"
 	case name == "SECRET_KEY_BASE" || name == "PHX_HOST":
 		return "mix.exs"
+	case name == "APPLICATION_SECRET":
+		return "build.sbt"
 	}
 	return "package.json"
+}
+
+const railsLogToStdoutReason = "production.rb logs to log/production.log, where nothing reads it, unless it is set"
+
+// railsLogsToFile is Rails 7.0 and earlier's production.rb, which writes
+// its log to a file unless RAILS_LOG_TO_STDOUT is set: a request that fails
+// readiness with a 500 would leave nothing in the container's output.
+func railsLogsToFile(stack rootStack) bool {
+	return stack.rails() && strings.Contains(string(stack.facts[path.Join(stack.root, "config/environments/production.rb")]), "RAILS_LOG_TO_STDOUT")
 }
 
 func solidQueueInPuma(stack rootStack) bool {

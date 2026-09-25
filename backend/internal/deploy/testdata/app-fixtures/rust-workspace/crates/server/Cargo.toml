@@ -1,0 +1,9 @@
+[package]
+name = "server"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+axum.workspace = true
+tokio = { workspace = true }
+greeting = { path = "../greeting" }

@@ -590,6 +590,8 @@ export function Configure({
         errors.pythonVersion ??
         errors.nodeVersion ??
         errors.phpVersion ??
+        errors.javaVersion ??
+        errors.dotnetVersion ??
         errors.target ??
         errors.startCommand ??
         errors.buildSecrets ??

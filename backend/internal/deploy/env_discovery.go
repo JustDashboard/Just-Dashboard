@@ -93,6 +93,11 @@ var (
 		regexp.MustCompile(`\bgetenv\(\s*['"]([A-Z][A-Z0-9_]+)['"]`),
 		regexp.MustCompile(`\$_ENV\[['"]([A-Z][A-Z0-9_]+)['"]\]`),
 		regexp.MustCompile(`\bENV(?:\.fetch\(|\[)\s*['"]([A-Z][A-Z0-9_]+)['"]`),
+		// Streamlit's st.secrets reads .streamlit/secrets.toml, which the
+		// Python recipe's start command writes from these variables.
+		regexp.MustCompile(`\bst\.secrets\[\s*['"]([A-Z][A-Z0-9_]+)['"]\s*\]`),
+		regexp.MustCompile(`\bst\.secrets\.get\(\s*['"]([A-Z][A-Z0-9_]+)['"]`),
+		regexp.MustCompile(`\bst\.secrets\.([A-Z][A-Z0-9_]+)\b`),
 	}
 	// importMetaEnvRE is Vite's read; a handful of its names are the
 	// bundler's own and are never set from the environment.

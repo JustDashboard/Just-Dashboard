@@ -29,9 +29,9 @@ type siteRecipe struct {
 	node       *nodeInstallPlan
 	nodeInputs []string
 	notes      []string
-	// Python sites: the install lines and the environment they need.
+	// pythonInstalls are a Python site's install lines; the environment
+	// they need is the Python recipe's install's (selectPythonSiteRecipe).
 	pythonInstalls []string
-	pythonEnv      []string
 }
 
 func (r siteRecipe) toolchain() string {
@@ -231,13 +231,32 @@ func renderSiteDockerfile(recipe siteRecipe, config BuildPlanConfig, serving sta
 	return append(lines, stage...), nil
 }
 
+// selectPythonSiteRecipe prepares a Python root whose plan serves an output
+// directory: the interpreter the source pins, the system packages its
+// dependencies and the plan name, and the site's install.
+func selectPythonSiteRecipe(boundary, root string, config BuildPlanConfig) (pythonRecipe, siteRecipe, error) {
+	project := readPythonProject(readPythonSourceFiles(root))
+	version, err := choosePythonBuildVersion(config.PythonVersion, readPythonVersionFiles(boundary, root), project, pythonBuildArch(config.TargetPlatform))
+	if err != nil {
+		return pythonRecipe{}, siteRecipe{}, err
+	}
+	python := pythonRecipe{version: version, systemPackages: mergeSystemPackages(project.systemPackages(""), config.SystemPackages)}
+	site, install, err := selectPythonSite(boundary, root, project, version.version, config)
+	if err != nil {
+		return pythonRecipe{}, siteRecipe{}, err
+	}
+	python.install = install
+	return python, site, nil
+}
+
 // selectPythonSite prepares the Python recipe's static output: the site's
 // own requirements when it has any, its documentation build's when Read the
 // Docs names them, and otherwise the pinned releases its configuration
 // needs. A root with no generator is a Python project that writes files: it
 // installs from its manifests like any other and serves what its build
-// command writes.
-func selectPythonSite(boundary, root, version string, config BuildPlanConfig) (siteRecipe, error) {
+// command writes. The install it returns is the project's own when the site
+// uses it, for its environment, tool release and notes.
+func selectPythonSite(boundary, root string, project pythonProject, version string, config BuildPlanConfig) (siteRecipe, pythonInstall, error) {
 	tree := containedSiteTree(boundary, root)
 	generator, known := readSiteGenerator(tree)
 	if known && generator.recipe != "python" {
@@ -245,7 +264,7 @@ func selectPythonSite(boundary, root, version string, config BuildPlanConfig) (s
 	}
 	recipe := siteRecipe{generator: generator}
 	if strings.TrimSpace(config.BuildCommand) == "" && !known {
-		return siteRecipe{}, fmt.Errorf("%w: the Python recipe serves the output directory its build command writes; set a build command", ErrUnsupportedBuilder)
+		return siteRecipe{}, pythonInstall{}, fmt.Errorf("%w: the Python recipe serves the output directory its build command writes; set a build command", ErrUnsupportedBuilder)
 	}
 	pip := "pip install --no-cache-dir "
 	if rtd, ok := readTheDocsConfig(tree); ok && known && (len(rtd.requirements) > 0 || len(rtd.packages) > 0) {
@@ -256,7 +275,7 @@ func selectPythonSite(boundary, root, version string, config BuildPlanConfig) (s
 			recipe.pythonInstalls = append(recipe.pythonInstalls, pip+"'"+target+"'")
 		}
 		recipe.generator.needsGit = generator.needsGit
-		return recipe, nil
+		return recipe, pythonInstall{}, nil
 	}
 	if known {
 		places := []string{}
@@ -266,7 +285,7 @@ func selectPythonSite(boundary, root, version string, config BuildPlanConfig) (s
 		for _, requirements := range append(places, pythonDocsRequirements...) {
 			if tree.file(requirements) {
 				recipe.pythonInstalls = append(recipe.pythonInstalls, pip+"--requirement "+requirements)
-				return recipe, nil
+				return recipe, pythonInstall{}, nil
 			}
 		}
 	}
@@ -276,13 +295,13 @@ func selectPythonSite(boundary, root, version string, config BuildPlanConfig) (s
 		declared = !known || strings.Contains(strings.ToLower(string(content)), generator.name)
 	}
 	if declared || !known {
-		install, err := selectPythonInstall(root, version)
+		install, err := planPythonInstall(project, pythonInstallChoice{version: version})
 		if err != nil {
-			return siteRecipe{}, err
+			return siteRecipe{}, pythonInstall{}, err
 		}
-		recipe.pythonInstalls, recipe.pythonEnv = []string{install.command}, install.env
+		recipe.pythonInstalls = []string{install.command}
 		switch {
-		case !known || len(generator.pythonPackages) == 0 || pythonMainDependency(tree, generator):
+		case !known || len(generator.pythonPackages) == 0 || pythonMainDependency(project, generator):
 		case install.kind == "uv.lock" && pythonManifestNames(tree, generator.name, "uv.lock"),
 			install.kind == "poetry.lock" && pythonManifestNames(tree, generator.name, "poetry.lock", "pyproject.toml"):
 			// A library declares its documentation tool in a dependency group
@@ -296,30 +315,37 @@ func selectPythonSite(boundary, root, version string, config BuildPlanConfig) (s
 			recipe.pythonInstalls = append(recipe.pythonInstalls, strings.TrimSuffix(install.serverInstall, " ")+" "+
 				strings.Join(pythonSitePackageList(generator.pythonPackages, version), " "))
 		}
-		return recipe, nil
+		return recipe, install, nil
 	}
 	if generator.issue != "" {
-		return siteRecipe{}, fmt.Errorf("%w: %s", ErrUnsupportedBuilder, generator.issue)
+		return siteRecipe{}, pythonInstall{}, fmt.Errorf("%w: %s", ErrUnsupportedBuilder, generator.issue)
 	}
 	recipe.pythonInstalls = []string{pip + strings.Join(pythonSitePackageList(generator.pythonPackages, version), " ")}
-	return recipe, nil
+	return recipe, pythonInstall{}, nil
 }
 
-func renderPythonSiteDockerfile(recipe siteRecipe, version string, config BuildPlanConfig, serving staticServing, bases []ResolvedImage, installSecrets, buildSecrets string) ([]string, error) {
+func renderPythonSiteDockerfile(recipe siteRecipe, python pythonRecipe, config BuildPlanConfig, serving staticServing, bases []ResolvedImage, installSecrets, buildSecrets string) ([]string, error) {
 	command := strings.TrimSpace(config.BuildCommand)
 	if command == "" {
 		command = recipe.generator.build
 	}
 	lines := []string{"FROM " + immutableImageReference(bases[0]) + " AS build", "WORKDIR /app",
 		"ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore"}
-	for _, env := range recipe.pythonEnv {
+	for _, env := range python.install.env {
 		lines = append(lines, "ENV "+env)
 	}
-	if recipe.generator.needsGit {
+	packages := python.systemPackages
+	if recipe.generator.needsGit && !slices.Contains(packages, "git") {
 		// A plugin that dates pages from their commits runs git.
-		lines = append(lines, "RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*")
+		packages = append(append([]string(nil), packages...), "git")
+	}
+	if len(packages) > 0 {
+		lines = append(lines, "RUN apt-get update && apt-get install -y --no-install-recommends "+strings.Join(packages, " ")+" && rm -rf /var/lib/apt/lists/*")
 	}
 	lines = append(lines, "COPY . .")
+	if sanitize := python.install.sanitizeLine(); sanitize != "" {
+		lines = append(lines, sanitize)
+	}
 	for _, install := range recipe.pythonInstalls {
 		lines = append(lines, "RUN "+installSecrets+install)
 	}
@@ -345,31 +371,21 @@ func denoSiteStage(config BuildPlanConfig, serving staticServing, bases []Resolv
 	return staticServingStage(bases, serving, "build", source)
 }
 
-// pythonInstallAllGroups are the lock installs of selectPythonInstall with
-// every dependency group, for a site whose generator is in one.
+// pythonInstallAllGroups are the lock installs of planPythonInstall, on the
+// same tool releases, with every dependency group, for a site whose
+// generator is in one.
 var pythonInstallAllGroups = map[string]string{
-	"uv.lock":     "pip install --no-cache-dir uv && uv sync --frozen --all-groups",
-	"poetry.lock": "pip install --no-cache-dir poetry && poetry install --all-groups --no-root --no-interaction",
+	"uv.lock":     "pip install --no-cache-dir uv==" + pythonUVRelease + " && uv sync --frozen --all-groups --python /usr/local/bin/python",
+	"poetry.lock": "pip install --no-cache-dir poetry==" + pythonPoetryRelease + " && poetry install --all-groups --no-root --no-interaction",
 }
 
-// pythonMainDependency says the project's own dependencies — requirements.txt,
-// or the main list of pyproject.toml, never a group — install the generator
-// or a theme or plugin that brings it.
-func pythonMainDependency(tree siteTree, generator siteGenerator) bool {
-	names := []string{}
-	if content, ok := tree.read("requirements.txt"); ok {
-		names = append(names, strings.Split(string(content), "\n")...)
-	}
-	if content, ok := tree.read("pyproject.toml"); ok {
-		names = append(names, pyprojectDependencies(string(content))...)
-	}
-	for _, requirement := range names {
-		match := pythonRequirementRE.FindStringSubmatch(strings.TrimSpace(requirement))
-		if match == nil {
-			continue
-		}
-		name := normalizePythonName(match[1])
-		if strings.Contains(name, generator.name) || slices.Contains(generator.pythonPackages, name) {
+// pythonMainDependency says the project's own dependencies — its requirement
+// file, or the main list of pyproject.toml, never a group — install the
+// generator or a theme or plugin that brings it.
+func pythonMainDependency(project pythonProject, generator siteGenerator) bool {
+	main := append(append(project.requirements.requirements(), project.pyproject.dependencies...), project.pyproject.poetryMain...)
+	for _, requirement := range main {
+		if strings.Contains(requirement.name, generator.name) || slices.Contains(generator.pythonPackages, requirement.name) {
 			return true
 		}
 	}

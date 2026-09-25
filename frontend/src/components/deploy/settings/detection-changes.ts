@@ -37,6 +37,9 @@ export function applyDetectionChanges(
       case "build.goPackage":
         next.build.goPackage = value
         break
+      case "build.cargoBin":
+        next.build.cargoBin = value
+        break
       case "build.target":
         next.build.target = value
         break

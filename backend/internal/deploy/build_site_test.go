@@ -240,7 +240,7 @@ func TestPythonAndDenoRecipesServeTheirSiteOutput(t *testing.T) {
 		{
 			name:  "mkdocs from its requirements",
 			files: map[string]string{"mkdocs.yml": "site_name: x\ntheme: material\n", "requirements.txt": "mkdocs-material==9.7.7\n", ".python-version": "3.12\n"},
-			want: []string{"FROM python:3.12-slim@sha256:", " AS build\n", "RUN pip install --no-cache-dir --requirement requirements.txt\n",
+			want: []string{"FROM python:3.12-slim-trixie@sha256:", " AS build\n", "RUN pip install --no-cache-dir --requirement requirements.txt\n",
 				"RUN mkdocs build\n", "FROM nginx:1.29-alpine@sha256:", "COPY --from=build /app/site/ /usr/share/nginx/html/\n"},
 			absent: []string{"CMD ", "gunicorn"},
 		},
@@ -263,7 +263,7 @@ func TestPythonAndDenoRecipesServeTheirSiteOutput(t *testing.T) {
 			files: map[string]string{"mkdocs.yml": "site_name: x\ntheme: material\n",
 				"pyproject.toml": "[project]\nname = \"lib\"\nversion = \"1.0\"\ndependencies = [\"requests>=2\"]\n\n[dependency-groups]\ndocs = [\"mkdocs-material>=9.5\"]\n",
 				"uv.lock":        "version = 1\n[[package]]\nname = \"mkdocs\"\nversion = \"1.6.1\"\n[[package]]\nname = \"mkdocs-material\"\nversion = \"9.7.7\"\n"},
-			want:   []string{"RUN pip install --no-cache-dir uv && uv sync --frozen --all-groups\n", "RUN mkdocs build\n"},
+			want:   []string{"RUN pip install --no-cache-dir uv==" + pythonUVRelease + " && uv sync --frozen --all-groups --python /usr/local/bin/python\n", "RUN mkdocs build\n"},
 			absent: []string{"--no-dev", "mkdocs==1.6.1"},
 		},
 		{
@@ -271,7 +271,7 @@ func TestPythonAndDenoRecipesServeTheirSiteOutput(t *testing.T) {
 			files: map[string]string{"mkdocs.yml": "site_name: x\n",
 				"pyproject.toml": "[tool.poetry]\nname = \"lib\"\n[tool.poetry.dependencies]\npython = \"^3.12\"\nrequests = \"^2\"\n[tool.poetry.group.docs.dependencies]\nmkdocs = \"^1.6\"\n",
 				"poetry.lock":    "[[package]]\nname = \"mkdocs\"\nversion = \"1.6.1\"\n"},
-			want:   []string{"RUN pip install --no-cache-dir poetry && poetry install --all-groups --no-root --no-interaction\n"},
+			want:   []string{"RUN pip install --no-cache-dir poetry==" + pythonPoetryRelease + " && poetry install --all-groups --no-root --no-interaction\n"},
 			absent: []string{"--only main", "mkdocs==1.6.1"},
 		},
 		{
@@ -279,7 +279,7 @@ func TestPythonAndDenoRecipesServeTheirSiteOutput(t *testing.T) {
 			files: map[string]string{"mkdocs.yml": "site_name: x\n",
 				"pyproject.toml": "[project]\nname = \"site\"\nversion = \"1.0\"\ndependencies = [\"mkdocs>=1.6\"]\n",
 				"uv.lock":        "version = 1\n[[package]]\nname = \"mkdocs\"\nversion = \"1.6.1\"\n"},
-			want:   []string{"RUN pip install --no-cache-dir uv && uv sync --frozen --no-dev\n"},
+			want:   []string{"RUN pip install --no-cache-dir uv==" + pythonUVRelease + " && uv sync --locked --no-dev --python /usr/local/bin/python\n"},
 			absent: []string{"--all-groups", "mkdocs==1.6.1"},
 		},
 		{

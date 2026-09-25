@@ -2,19 +2,54 @@ import type {
   DeploymentBuildMethod,
   DeploymentConfiguration,
   DeploymentDetection,
+  DeploymentDetectedJavaBuild,
   DeploymentDetectedReadiness,
   DeploymentDetectionCandidate,
   DeploymentDraftSource,
+  DeploymentRecipe,
   DeploymentSourceMode,
   NodePackageManager,
   WorkloadProfile,
 } from "@/lib/types"
 import type { EnvironmentRow } from "@/components/deploy/new-project/draft"
 
-export const PYTHON_VERSION = /^3\.(10|11|12|13)$/
+export const PYTHON_VERSION = /^3\.(10|11|12|13|14)$/
 /** The Node majors the JavaScript recipe builds on (build_node_runtime.go nodeMajors). */
 export const NODE_VERSION = /^(20|22|24)$/
 export const PHP_VERSION = /^8\.[2-5]$/
+/** A Debian package name, as the Python recipe's system packages are validated. */
+export const SYSTEM_PACKAGE = /^[a-z0-9][a-z0-9.+-]+$/
+export const MAX_SYSTEM_PACKAGES = 32
+
+/**
+ * The system packages a plan starts with: another platform's (an Aptfile's),
+ * which the recipe installs only while the plan names them. The packages the
+ * dependencies need are installed by the recipe itself and are not repeated.
+ */
+export function detectedSystemPackages(candidate?: DeploymentDetectionCandidate) {
+  if (candidate?.recipe !== "python") return undefined
+  const names = (candidate.systemPackages ?? [])
+    .filter((pkg) => !pkg.automatic && SYSTEM_PACKAGE.test(pkg.name))
+    .map((pkg) => pkg.name)
+  return names.length ? names.slice(0, MAX_SYSTEM_PACKAGES) : undefined
+}
+
+/**
+ * The Go releases the recipe builds with, oldest first: `goRecipeFamilies` in
+ * the backend's build_go.go, which a Go test keeps equal to this list. The
+ * oldest is past upstream support, so it builds only when pinned.
+ */
+export const GO_VERSIONS = ["1.25", "1.26", "1.27"]
+export const GO_VERSION = new RegExp(
+  `^1\\.(${GO_VERSIONS.map((family) => family.slice(2)).join("|")})(\\.[0-9]{1,3})?$`,
+)
+
+/** The JDK releases the Java recipe builds and runs on, as `planning_compiled.go` accepts them. */
+export const JAVA_VERSIONS = ["8", "11", "17", "21", "25"]
+export const JAVA_VERSION = /^(8|11|17|21|25)$/
+/** The .NET releases the .NET recipe publishes for. */
+export const DOTNET_VERSIONS = ["8.0", "9.0", "10.0"]
+export const DOTNET_VERSION = /^(8|9|10)\.0$/
 
 /** The request-body ceiling a route gets when the plan names none, and the most it may name. */
 export const DEFAULT_MAX_REQUEST_BODY_MB = 64
@@ -33,7 +68,7 @@ export const DEFAULT_REQUEST_BODY_LIMIT = `${DEFAULT_MAX_REQUEST_BODY_MB} MB on 
  * API key from a provider it cannot.
  */
 export const SELF_ISSUED_SECRET =
-  /(^|_)(APP_KEY|APP_KEYS|APP_SECRET|SECRET_KEY|SECRET_KEY_BASE|SESSION_SECRET|JWT_SECRET|AUTH_SECRET|NEXTAUTH_SECRET|BETTER_AUTH_SECRET|PAYLOAD_SECRET|ENCRYPTION_KEY|COOKIE_SECRET|CSRF_SECRET|TOKEN_SECRET|SIGNING_SECRET|SIGNING_KEY|HASH_SALT|TOKEN_SALT)$/
+  /(^|_)(APP_KEY|APP_KEYS|APP_SECRET|APPLICATION_SECRET|SECRET_KEY|SECRET_KEY_BASE|SESSION_SECRET|JWT_SECRET|AUTH_SECRET|NEXTAUTH_SECRET|BETTER_AUTH_SECRET|PAYLOAD_SECRET|ENCRYPTION_KEY|COOKIE_SECRET|CSRF_SECRET|TOKEN_SECRET|SIGNING_SECRET|SIGNING_KEY|HASH_SALT|TOKEN_SALT)$/
 
 /**
  * Names a provider issues even though they end like a self-issued secret:
@@ -567,6 +602,7 @@ export function defaultConfiguration(
       dockerfile: method === "dockerfile" ? (candidate?.dockerfile ?? "Dockerfile") : undefined,
       target: method === "dockerfile" ? candidate?.dockerfileTarget : undefined,
       pythonVersion: candidate?.recipe === "python" ? candidate.pythonVersion : undefined,
+      systemPackages: detectedSystemPackages(candidate),
       goPackage: candidate?.recipe === "go" ? candidate.goPackage : undefined,
       spaFallback: packagedStatic && candidate?.spaFallback ? true : undefined,
       noCache: false,
@@ -1083,11 +1119,21 @@ export function validateConfiguration(
   const errors: WizardErrors = {}
   if (!configuration.build.method) errors.buildMethod = "Choose a build method."
   if (configuration.build.pythonVersion && !PYTHON_VERSION.test(configuration.build.pythonVersion))
-    errors.pythonVersion = "Use Python 3.10, 3.11, 3.12 or 3.13, or leave the version empty."
+    errors.pythonVersion = "Use Python 3.10, 3.11, 3.12, 3.13 or 3.14, or leave the version empty."
   if (configuration.build.nodeVersion && !NODE_VERSION.test(configuration.build.nodeVersion))
     errors.nodeVersion = "Use Node 20, 22 or 24, or leave the version to the repository."
   if (configuration.build.phpVersion && !PHP_VERSION.test(configuration.build.phpVersion))
     errors.phpVersion = "Use PHP 8.2, 8.3, 8.4 or 8.5, or leave the version empty."
+  const systemPackages = configuration.build.systemPackages ?? []
+  if (systemPackages.length > MAX_SYSTEM_PACKAGES)
+    errors.systemPackages = `List at most ${MAX_SYSTEM_PACKAGES} system packages.`
+  else if (systemPackages.some((name) => !SYSTEM_PACKAGE.test(name)))
+    errors.systemPackages =
+      "Use Debian package names: lower-case letters, digits and . + - (for example libpq-dev)."
+  if (configuration.build.javaVersion && !JAVA_VERSION.test(configuration.build.javaVersion))
+    errors.javaVersion = "Use Java 8, 11, 17, 21 or 25, or let the build files decide."
+  if (configuration.build.dotnetVersion && !DOTNET_VERSION.test(configuration.build.dotnetVersion))
+    errors.dotnetVersion = "Use .NET 8.0, 9.0 or 10.0, or let the project decide."
   if (configuration.build.target && !DOCKERFILE_STAGE.test(configuration.build.target))
     errors.target = "A stage name starts with a letter and has only letters, digits, . _ and -."
   for (const [name, value] of [
@@ -1196,16 +1242,27 @@ export function dockerfileStageHint(stages?: string[]) {
 }
 
 /**
+ * Whether a recipe installs a JavaScript package for its assets through the
+ * Node recipe's install — the PHP and Python asset stages, and the Node
+ * toolchain the Ruby and Elixir builds borrow — so the package manager choice
+ * applies to it while its build and start commands stay the language's own.
+ */
+export function installsAssetsWithNode(recipe: DeploymentRecipe | undefined) {
+  return recipe === "php" || recipe === "python" || recipe === "ruby" || recipe === "elixir"
+}
+
+/**
  * Whether a recipe plan is missing the start command its recipe refuses to
- * build without: PHP always runs one, and a JavaScript, Python or Deno build
- * runs one unless it has static output for nginx to serve (a Vite site, MkDocs,
- * Lume). The screen that owns the field says so, rather than preflight four
- * screens later or the build after Deploy.
+ * build without: PHP and Ruby always run one, and a JavaScript, Python or Deno
+ * build runs one unless it has static output for nginx to serve (a Vite site,
+ * MkDocs, Lume). The screen that owns the field says so, rather than preflight
+ * four screens later or the build after Deploy.
  */
 export function needsStartCommand(build: DeploymentConfiguration["build"]) {
   if (build.method !== "recipe" || build.startCommand?.trim()) return false
   switch (build.recipe) {
     case "php":
+    case "ruby":
       return true
     case "node":
     case "python":
@@ -1226,4 +1283,64 @@ export function goMainPackageList(candidate: DeploymentDetectionCandidate | unde
   const shown = mains.slice(0, 8).map((main) => (main === "." ? "." : `./${main}`))
   const more = mains.length - shown.length + (candidate?.goMainPackagesOmitted ?? 0)
   return shown.join(", ") + (more > 0 ? ` and ${more} more` : "")
+}
+
+/**
+ * What decides a Java build's release while the setting is automatic, and
+ * where the build runs from: "pom.xml java.version declares Java 17 · builds
+ * :app from .". Undefined for a candidate detected before builds were read.
+ */
+export function javaVersionReading(candidate: DeploymentDetectionCandidate | undefined) {
+  const build = candidate?.javaBuild
+  if (!build) return undefined
+  const parts: string[] = []
+  if (build.pinned) parts.push(`${build.pinnedFrom} pins Java ${build.pinned}`)
+  if (build.release)
+    parts.push(
+      `${build.releaseFrom} declares Java ${build.release}${build.toolchain ? " as a Gradle toolchain" : ""}`,
+    )
+  if (!parts.length) {
+    const release = javaDefaultRelease(build)
+    parts.push(
+      release === 21
+        ? "Nothing declares a release; the recipe builds on Java 21"
+        : `Nothing declares a release; the recipe builds on Java ${release}, the newest Gradle ${build.wrapper} runs on`,
+    )
+  }
+  if (build.context)
+    parts.push(`builds ${build.module || "the root project"} from ${build.context}`)
+  return parts.join(" · ")
+}
+
+/**
+ * The release a Java build without a declared one builds on — the backend's
+ * planJavaToolchain: Java 21, unless the committed Gradle wrapper is older
+ * than the 8.5 that runs on it.
+ */
+function javaDefaultRelease(build: DeploymentDetectedJavaBuild) {
+  if (!build.wrapperUsable || !build.wrapper) return 21
+  const [major = 0, minor = 0] = build.wrapper.split(".").map(Number)
+  const atLeast = (wantMajor: number, wantMinor: number) =>
+    major > wantMajor || (major === wantMajor && minor >= wantMinor)
+  if (atLeast(8, 5)) return 21
+  if (atLeast(7, 3)) return 17
+  if (atLeast(5, 0)) return 11
+  return 8
+}
+
+/**
+ * What decides a .NET project's release and SDK while the setting is
+ * automatic: its target frameworks and the SDK global.json pins.
+ */
+export function dotnetVersionReading(candidate: DeploymentDetectionCandidate | undefined) {
+  const build = candidate?.dotnetBuild
+  if (!build) return undefined
+  const parts = [
+    build.targetText
+      ? `${build.project} targets ${build.targetText}`
+      : `${build.project} declares no target framework`,
+  ]
+  if (build.sdkPin) parts.push(`${build.sdkPinFrom} pins SDK ${build.sdkPin}`)
+  if (build.context) parts.push(`published from ${build.context}`)
+  return parts.join(" · ")
 }

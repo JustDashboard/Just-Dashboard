@@ -93,10 +93,21 @@ type detectedMarkers struct {
 	// node is the package's install inputs, read after the walk under
 	// their own budget.
 	node *nodeInstallSource
-
 	// wordpressHeader: a file at the top of the checkout, or a theme under
 	// its themes/, carries WordPress's header (wordpressRootHeader).
 	wordpressHeader bool
+	// python is a Python root's sources beyond its manifests, and
+	// pythonAssets says this package.json is a Python application's asset
+	// build (readPythonSources).
+	python       *pythonSource
+	pythonAssets bool
+	// rust is the crate the Cargo pass read at this root (frameworks_rust.go).
+	rust *rustMarker
+	// jvm and dotnet are the root's build as its tools read it, from the
+	// reactor, settings or solution folder that owns it
+	// (readCompiledProjects).
+	jvm    *jvmProject
+	dotnet *dotnetMarker
 }
 
 // phpOwnsAssets says the PHP recipe builds this root's package.json itself:
@@ -318,6 +329,28 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			if !envSourceExtensions[filepath.Ext(name)] && !scanner.factFile(filepath.ToSlash(rel), name) {
 				return nil
 			}
+		}
+		if owner, key, ok := pythonManifestTarget(filepath.ToSlash(rel)); ok {
+			// Python manifests beyond the four marker files — a Pipfile, a
+			// requirements/ folder, setup.cfg — belong to the root beside
+			// them, which a requirements/ folder is not.
+			content, n, err := readMarkerFile(path, limits.MaxFileBytes)
+			result.ScannedBytes += n
+			if result.ScannedBytes > limits.MaxReadBytes {
+				result.Truncated, result.TruncatedReason = true, "read-byte limit reached"
+				return stop
+			}
+			ownerKey := filepath.FromSlash(owner)
+			if markers[ownerKey] == nil {
+				markers[ownerKey] = &detectedMarkers{root: ownerKey, pythonFiles: map[string][]byte{}, csprojs: map[string][]byte{}}
+			}
+			switch {
+			case err == nil:
+				markers[ownerKey].pythonFiles[key] = shape.manifest(filepath.ToSlash(rel), content)
+			case strings.HasSuffix(key, ".lock"):
+				markers[ownerKey].pythonFiles[key] = []byte("locked")
+			}
+			return nil
 		}
 		interesting := detectionInterestingName(name)
 		if denoEntryNames[name] && len(denoEntryPaths) < 64 {
@@ -563,7 +596,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 				return stop
 			}
 		}
-		if strings.HasSuffix(name, ".csproj") && len(marker.csprojs) < 8 {
+		if dotnetProjectFile(name) && len(marker.csprojs) < 8 {
 			content, ok := readMarker(limits.MaxFileBytes)
 			if result.Truncated {
 				return stop
@@ -585,6 +618,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	tree := openDetectionTree(root)
 	defer tree.close()
 	addSkippedBuildDockerfiles(tree, markers, skippedBuild, limits, &result)
+	readPythonSources(tree, markers, pythonEntries)
 
 	roots := make([]string, 0, len(markers))
 	packageRoots := []string{}
@@ -613,6 +647,8 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	readNodeInstalls(root, markers)
 	readPHPProjects(root, markers)
 	readDenoProjects(root, markers)
+	readCargoCrates(root, markers)
+	readCompiledProjects(root, markers)
 	for _, candidateRoot := range roots {
 		marker := markers[candidateRoot]
 		root := filepath.ToSlash(marker.root)
@@ -671,6 +707,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			return detectDatabases(&detectedMarkers{root: root}, variables, prismaProviders)
 		},
 	}
+	settleCompiledLayouts(&result, markers, shape)
 	shape.shapeCandidates(&result, shapeRun)
 	// A root's candidates, recipe and container alike, are refined together
 	// against the root's files. State settles first: the schema step it
@@ -696,6 +733,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		refineServing(group.candidates, marker, readiness, root, allRoots)
 		network.apply(marker, group.candidates, rootPythonEntries, goRoots, jvmRoots)
 		describeRootEnvironment(marker, scanner, prismaProviders, group.candidates)
+		applyPythonEnvironment(marker, group.candidates)
 		for index := range group.candidates {
 			candidate := &group.candidates[index]
 			if len(suggested[index]) > 0 {
@@ -706,6 +744,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		group.store(result.Candidates)
 	}
 	annotateImageFacts(tree, markers, result.Candidates)
+	goSums := int64(goDetectionSumBytes)
 	for index := range result.Candidates {
 		candidate := &result.Candidates[index]
 		if candidate.Recipe == "go" {
@@ -718,6 +757,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 				candidate.RecipeIssue = recipeRefusalText(err, root)
 			} else {
 				applyGoModulePackages(candidate, packages, markers[filepath.FromSlash(candidate.Root)])
+				applyGoBuildFacts(root, candidate, packages, markers[filepath.FromSlash(candidate.Root)], result.Candidates, &goSums)
 			}
 			if goSources.truncated {
 				candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(candidate.Root, "go.mod"),
@@ -751,9 +791,9 @@ func detectionInterestingName(name string) bool {
 		name == "runtime.txt" || name == ".python-version" ||
 		name == "cargo.toml" || name == "cargo.lock" || name == "rust-toolchain" || name == "rust-toolchain.toml" ||
 		name == "pom.xml" || name == "build.gradle" || name == "build.gradle.kts" || name == "gradlew" ||
-		name == ".java-version" || strings.HasSuffix(name, ".csproj") ||
+		name == ".java-version" || dotnetProjectFile(name) ||
 		name == "deno.json" || name == "deno.jsonc" || name == "deno.lock" ||
-		name == "composer.json" || name == "composer.lock" || name == "index.php"
+		name == "composer.json" || name == "composer.lock" || name == "index.php" || pythonManifestName(name)
 }
 
 func readDetectionFile(path string, max int64) ([]byte, int64, error) {
@@ -773,12 +813,7 @@ func readDetectionFile(path string, max int64) ([]byte, int64, error) {
 }
 
 func (m *detectedMarkers) hasPythonManifest() bool {
-	for _, name := range []string{"requirements.txt", "pyproject.toml", "uv.lock", "poetry.lock"} {
-		if _, ok := m.pythonFiles[name]; ok {
-			return true
-		}
-	}
-	return false
+	return len(m.pythonFiles) > 0 && readPythonProject(m.pythonFiles).hasManifest()
 }
 
 // pythonEntriesUnderRoot keeps the entries that belong to one Python root,
@@ -804,7 +839,7 @@ func candidatesForMarkers(marker *detectedMarkers, schemaPaths []string, pythonE
 	if rootLabel == "" {
 		rootLabel = "."
 	}
-	if len(marker.packageJSON) > 0 && !marker.phpOwnsAssets() {
+	if len(marker.packageJSON) > 0 && !marker.phpOwnsAssets() && !marker.pythonAssets {
 		packages := packageCandidate(marker, schemaPaths)
 		demoteNodeForDeno(marker, packages)
 		result = append(result, packages...)
@@ -836,7 +871,9 @@ func candidatesForMarkers(marker *detectedMarkers, schemaPaths []string, pythonE
 		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, pythonCandidate(marker, pythonEntries, rootLabel)))
 	}
 	if len(marker.cargoToml) > 0 {
-		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, rustCandidate(marker, rootLabel)))
+		if candidate, ok := rustCandidate(marker, rootLabel); ok {
+			result = append(result, newDetectedCandidate(marker.root, BuildRecipe, candidate))
+		}
 	}
 	if len(marker.pomXML) > 0 || len(marker.gradleBuild) > 0 {
 		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, javaCandidate(marker, rootLabel)))
@@ -850,7 +887,7 @@ func candidatesForMarkers(marker *detectedMarkers, schemaPaths []string, pythonE
 	if len(marker.composerJSON) > 0 || marker.phpIndex || marker.phpPublicIndex || marker.phpDocroot != "" || marker.wordpressHeader {
 		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, phpCandidate(marker, rootLabel)))
 	}
-	if marker.staticFile != "" && len(marker.packageJSON) == 0 {
+	if marker.staticFile != "" && len(marker.packageJSON) == 0 && !marker.trunkSource() {
 		// There is no public directory left to confirm. A marker's root is the
 		// directory its files were found in, so this candidate's root is
 		// already the one holding the index.html — at the top of the checkout,

@@ -167,14 +167,15 @@ func pythonRecipeNetworkEnv() string {
 // javaRuntimeStart is the default start command of a framework that reads
 // its port from configuration: the environment variable that outranks
 // application.properties is set from the PORT the runtime injects, and exec
-// keeps java as PID 1 so it receives SIGTERM. Frameworks without such a
+// keeps the JVM as PID 1 so it receives SIGTERM. launch is how the recipe
+// starts the artifact it built (build_java.go). Frameworks without such a
 // variable run as before.
-func javaRuntimeStart(framework string) string {
+func javaRuntimeStart(framework, launch string) string {
 	bridge := jvmPortBridge[framework]
 	if bridge == "" {
 		return ""
 	}
-	return "exec env " + bridge + "=${PORT:-8080} java -jar /app/app.jar"
+	return "exec env " + bridge + "=${PORT:-8080} " + launch
 }
 
 // Rocket's default address is 127.0.0.1. ROCKET_ADDRESS is image

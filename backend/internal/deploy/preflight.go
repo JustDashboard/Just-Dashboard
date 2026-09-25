@@ -639,17 +639,20 @@ func preflightFindings(
 	}
 	findings = append(findings, plannedRecipeFindings(planned, configuration.Build)...)
 	if planned != nil && configuration.Build.Method == BuildRecipe &&
-		(planned.Recipe == "node" || (planned.Recipe == "php" && len(planned.NodeInstalls) > 0)) {
+		(planned.Recipe == "node" || (planned.Recipe != "" && len(planned.NodeInstalls) > 0)) {
 		findings = append(findings, nodeInstallFindings(planned, configuration)...)
 		findings = append(findings, nodeFrameworkFindings(planned, configuration)...)
 	}
+	findings = append(findings, compiledRecipeFindings(planned, configuration)...)
 	if planned != nil && planned.UnpinnedDependencies && configuration.Build.Method == BuildRecipe {
 		measured, means, action := unpinnedDependencyAdvice(planned)
 		findings = append(findings, finding("dependencies_unpinned", PreflightWarning,
 			"Dependencies are not pinned to exact versions", measured, means, action, "deploy", "configuration.build"))
 	}
 	findings = append(findings, phpDenoFindings(planned, configuration)...)
-	if planned != nil && planned.RecipeIssue != "" && configuration.Build.Method == BuildRecipe {
+	findings = append(findings, compiledBuildFindings(planned, configuration, draft.Data.Source)...)
+	findings = append(findings, languageRecipeFindings(planned, configuration, observation)...)
+	if planned != nil && planned.RecipeIssue != "" && configuration.Build.Method == BuildRecipe && !refusalNamed(findings) {
 		findings = append(findings, finding("recipe_unsupported", PreflightBlocked,
 			"Source needs a different build plan", planned.RecipeIssue,
 			"The automatic recipe cannot satisfy the detected source requirements.",

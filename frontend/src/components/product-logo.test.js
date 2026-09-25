@@ -94,9 +94,24 @@ test("gitProviderProduct names the four forges and nothing else", () => {
 describe("recipeProduct", () => {
   test("every recipe is drawn as the language it builds", () => {
     expect(seen(recipeProduct("node"))).toBe("nodejs")
-    for (const recipe of ["go", "python", "rust", "java", "dotnet", "deno", "php"]) {
+    for (const recipe of [
+      "go",
+      "python",
+      "rust",
+      "java",
+      "dotnet",
+      "deno",
+      "php",
+      "ruby",
+      "elixir",
+      "scala",
+      "dart",
+    ]) {
       expect(seen(recipeProduct(recipe))).toBe(recipe)
     }
+    // Clojure and Gleam have no mark in the bundle, so their tile keeps its glyph.
+    expect(recipeProduct("clojure")).toBeUndefined()
+    expect(recipeProduct("gleam")).toBeUndefined()
   })
 
   test("a Node project on Bun is Bun", () => {

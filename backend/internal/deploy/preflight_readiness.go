@@ -73,8 +73,13 @@ func readinessPreflightFindings(draft *Draft, configuration PlanConfiguration) [
 			findings = append(findings, finding("readiness_redirects_to_https", PreflightWarning,
 				"The application redirects every plain-HTTP request to HTTPS, and this plan serves no HTTPS domain", readiness.HTTPSRedirect,
 				"Readiness and visitors reach the application over plain HTTP, and each request is sent to an https address this plan never serves.",
-				"Add a domain with HTTPS, or stop the application redirecting when TLS ends before it (Rails: config.assume_ssl = true; Django: SECURE_SSL_REDIRECT = False).",
+				"Add a domain with HTTPS, or stop the application redirecting when TLS ends before it (Rails: config.assume_ssl = true; Django: SECURE_SSL_REDIRECT = False; Phoenix: remove force_ssl).",
 				"deploy", "domains"))
+		case readiness.HTTPSRedirectIgnoresProxy && strings.HasPrefix(readiness.HTTPSRedirect, "force_ssl"):
+			findings = append(findings, finding("readiness_redirects_to_https", PreflightWarning,
+				"The application redirects to HTTPS without trusting the proxy's X-Forwarded-Proto", readiness.HTTPSRedirect+" without rewrite_on",
+				"TLS ends at the proxy, so Phoenix sees every request as plain HTTP and redirects it to HTTPS again: a loop for visitors.",
+				"Set force_ssl: [rewrite_on: [:x_forwarded_proto]] on the endpoint.", "deploy", "domains"))
 		case readiness.HTTPSRedirectIgnoresProxy:
 			findings = append(findings, finding("readiness_redirects_to_https", PreflightWarning,
 				"The application redirects to HTTPS without trusting the proxy's X-Forwarded-Proto", readiness.HTTPSRedirect+" without SECURE_PROXY_SSL_HEADER",

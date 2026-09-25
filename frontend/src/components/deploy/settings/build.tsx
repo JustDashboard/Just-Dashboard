@@ -12,6 +12,7 @@ import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentBuildEvidence,
   DeploymentConfiguration,
+  DeploymentDetectedSystemPackage,
   DeploymentDetectionChange,
   DeploymentDetectionProposal,
   DeploymentEnvironmentConfiguration,
@@ -50,11 +51,20 @@ import {
   BROWSER_PREFIX,
   NODE_VERSION,
   PHP_VERSION,
+  DOTNET_VERSION,
+  DOTNET_VERSIONS,
+  GO_VERSION,
+  GO_VERSIONS,
+  JAVA_VERSION,
+  JAVA_VERSIONS,
   PYTHON_VERSION,
   automaticPackageManagerHint,
   commandsForPackageManager,
   dockerfileStageHint,
+  dotnetVersionReading,
   goMainPackageList,
+  installsAssetsWithNode,
+  javaVersionReading,
   packageManagerOptions,
   packageManagerReading,
   validateConfiguration,
@@ -135,9 +145,13 @@ const BUILD_FIELD_IDS: Record<string, string> = {
   "build.rootDirectory": "build-root",
   "build.goVersion": "build-go-version",
   "build.goPackage": "build-go-package",
+  "build.cargoBin": "build-cargo-bin",
   "build.pythonVersion": "build-python-version",
   "build.nodeVersion": "build-node-version",
   "build.phpVersion": "build-php-version",
+  "build.systemPackages": "build-system-packages",
+  "build.javaVersion": "build-java-version",
+  "build.dotnetVersion": "build-dotnet-version",
   "build.spaFallback": "build-spa",
   "build.dockerfile": "build-dockerfile",
   "build.target": "build-target",
@@ -154,7 +168,11 @@ const FIELD_SECTION: Record<string, "build" | "commands" | "image"> = {
   "build-package-manager": "build",
   "build-go-version": "build",
   "build-go-package": "build",
+  "build-cargo-bin": "build",
   "build-python-version": "build",
+  "build-system-packages": "build",
+  "build-java-version": "build",
+  "build-dotnet-version": "build",
   "build-dockerfile": "build",
   "build-target": "build",
   "build-primary-service": "build",
@@ -166,9 +184,7 @@ const FIELD_SECTION: Record<string, "build" | "commands" | "image"> = {
   "build-platform": "image",
 }
 
-/** The Go releases the recipe builds with, as `build_go.go`'s own pattern states them. */
-const GO_VERSION = /^1\.(25|26)(\.[0-9]{1,3})?$/
-const GO_ERROR = "Use Go 1.25 or 1.26, or leave empty to follow go.mod."
+const GO_ERROR = `Use Go ${GO_VERSIONS.slice(0, -1).join(", ")} or ${GO_VERSIONS.at(-1)}, or leave empty to follow go.mod.`
 
 type Builder = {
   key: string
@@ -180,7 +196,7 @@ type Builder = {
 }
 
 /**
- * Every way a Git or local source can be built: the nine recipes the
+ * Every way a Git or local source can be built: the fifteen recipes the
  * backend's `validRecipe` accepts, then a Dockerfile of the project's own and
  * a static site. The detail is a word about the toolchain or what decides it,
  * short enough for the five-across grid at 1280, where a card has about 60px
@@ -199,7 +215,7 @@ const BUILDERS: Builder[] = [
     key: "python",
     label: RECIPE_SHORT.python,
     product: "python",
-    detail: "3.10–3.13",
+    detail: "3.10–3.14",
     method: "recipe",
     recipe: "python",
   },
@@ -207,7 +223,7 @@ const BUILDERS: Builder[] = [
     key: "go",
     label: RECIPE_SHORT.go,
     product: "go",
-    detail: "1.25 · 1.26",
+    detail: `${GO_VERSIONS[0]}–${GO_VERSIONS.at(-1)}`,
     method: "recipe",
     recipe: "go",
   },
@@ -260,6 +276,54 @@ const BUILDERS: Builder[] = [
     recipe: "site",
   },
   {
+    key: "ruby",
+    label: RECIPE_SHORT.ruby,
+    product: "ruby",
+    detail: "Bundler",
+    method: "recipe",
+    recipe: "ruby",
+  },
+  {
+    key: "elixir",
+    label: RECIPE_SHORT.elixir,
+    product: "elixir",
+    detail: "mix release",
+    method: "recipe",
+    recipe: "elixir",
+  },
+  {
+    key: "scala",
+    label: RECIPE_SHORT.scala,
+    product: "scala",
+    detail: "sbt",
+    method: "recipe",
+    recipe: "scala",
+  },
+  {
+    key: "clojure",
+    label: RECIPE_SHORT.clojure,
+    product: "clojure",
+    detail: "uberjar",
+    method: "recipe",
+    recipe: "clojure",
+  },
+  {
+    key: "dart",
+    label: RECIPE_SHORT.dart,
+    product: "dart",
+    detail: "AOT exe",
+    method: "recipe",
+    recipe: "dart",
+  },
+  {
+    key: "gleam",
+    label: RECIPE_SHORT.gleam,
+    product: "gleam",
+    detail: "BEAM",
+    method: "recipe",
+    recipe: "gleam",
+  },
+  {
     key: "dockerfile",
     label: "Dockerfile",
     product: "docker",
@@ -287,7 +351,7 @@ const LOCKFILE_NAMES: Record<NodePackageManager, string> = {
   yarn: "yarn.lock",
 }
 
-const PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13"]
+const PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13", "3.14"]
 const NODE_VERSIONS = ["20", "22", "24"]
 const PHP_VERSIONS = ["8.2", "8.3", "8.4", "8.5"]
 
@@ -302,6 +366,12 @@ const RECIPE_DEFAULT: Record<DeploymentRecipe, string> = {
   deno: "deno.json",
   php: "Composer · FrankenPHP",
   site: "its configuration decides",
+  ruby: ".ruby-version decides",
+  elixir: ".tool-versions decides",
+  scala: "sbt stage or assembly",
+  clojure: "Leiningen or tools.build",
+  dart: "pubspec.yaml decides",
+  gleam: "gleam.toml",
 }
 
 // `validateConfiguration` wants the plan's variable shape (a value or
@@ -438,9 +508,13 @@ function builderReading(
             ? (build.goVersion ?? RECIPE_DEFAULT.go)
             : recipe === "php" && build.phpVersion
               ? `php ${build.phpVersion}`
-              : prepared?.recipe === recipe && prepared.toolchain
-                ? prepared.toolchain
-                : RECIPE_DEFAULT[recipe]
+              : recipe === "java" && build.javaVersion
+                ? `Java ${build.javaVersion}`
+                : recipe === "dotnet" && build.dotnetVersion
+                  ? `.NET ${build.dotnetVersion}`
+                  : prepared?.recipe === recipe && prepared.toolchain
+                    ? prepared.toolchain
+                    : RECIPE_DEFAULT[recipe]
     return {
       value: RECIPE_SHORT[recipe],
       detail: framework ? `${frameworkLabel(framework)} · ${detail}` : detail,
@@ -680,12 +754,18 @@ function BuildForm({
       setFieldError({ id: "build-target", message: errors.target })
       return
     }
+    if (errors.systemPackages) {
+      setFieldError({ id: "build-system-packages", message: errors.systemPackages })
+      return
+    }
     const refusal =
       errors.buildMethod ||
       errors.buildSecrets ||
       errors.pythonVersion ||
       errors.nodeVersion ||
-      errors.phpVersion
+      errors.phpVersion ||
+      errors.javaVersion ||
+      errors.dotnetVersion
     if (refusal) {
       setError(refusal)
       return
@@ -746,7 +826,9 @@ function BuildForm({
     setBuild({
       ...build,
       packageManager,
-      ...(recipe === "php" ? {} : commandsForPackageManager(detected, build, packageManager)),
+      ...(installsAssetsWithNode(recipe)
+        ? {}
+        : commandsForPackageManager(detected, build, packageManager)),
     })
   // What the last build did is said only while the draft still builds the
   // same way: a Node toolchain or a Node Dockerfile under a Python recipe
@@ -774,12 +856,19 @@ function BuildForm({
         secrets: build.method === "recipe" ? build.secrets : [],
         goVersion: next === "go" ? build.goVersion : undefined,
         goPackage: next === "go" ? build.goPackage : undefined,
+        cargoBin: next === "rust" ? build.cargoBin : undefined,
         pythonVersion: next === "python" ? build.pythonVersion : undefined,
         phpVersion: next === "php" ? build.phpVersion : undefined,
-        // The PHP recipe's asset stage installs through the same Node
-        // install, so the choices survive the move between the two.
-        nodeVersion: next === "node" || next === "php" ? build.nodeVersion : undefined,
-        packageManager: next === "node" || next === "php" ? build.packageManager : undefined,
+        systemPackages: next === "python" ? build.systemPackages : undefined,
+        javaVersion: next === "java" ? build.javaVersion : undefined,
+        dotnetVersion: next === "dotnet" ? build.dotnetVersion : undefined,
+        // The PHP and Python recipes' asset stages, and the Ruby and Elixir
+        // builds' assets, install through the same Node install, so the
+        // choices survive the move between them.
+        nodeVersion:
+          next === "node" || installsAssetsWithNode(next) ? build.nodeVersion : undefined,
+        packageManager:
+          next === "node" || installsAssetsWithNode(next) ? build.packageManager : undefined,
       })
       return
     }
@@ -793,9 +882,13 @@ function BuildForm({
       secrets: [],
       goVersion: undefined,
       goPackage: undefined,
+      cargoBin: undefined,
       pythonVersion: undefined,
       nodeVersion: undefined,
       phpVersion: undefined,
+      systemPackages: undefined,
+      javaVersion: undefined,
+      dotnetVersion: undefined,
       packageManager: undefined,
       spaFallback: choice.method === "static" ? build.spaFallback : undefined,
       target: choice.method === "dockerfile" ? build.target : undefined,
@@ -839,9 +932,13 @@ function BuildForm({
             "packageManager",
             "goVersion",
             "goPackage",
+            "cargoBin",
             "pythonVersion",
             "nodeVersion",
             "phpVersion",
+            "systemPackages",
+            "javaVersion",
+            "dotnetVersion",
             "dockerfile",
             "target",
             "primaryService",
@@ -904,7 +1001,7 @@ function BuildForm({
 
         {build.method === "recipe" &&
           (recipe === "node" ||
-            (recipe === "php" && (detected?.nodeInstalls?.length ?? 0) > 0)) && (
+            (installsAssetsWithNode(recipe) && (detected?.nodeInstalls?.length ?? 0) > 0)) && (
             <Field
               label="Package manager"
               hint={
@@ -949,7 +1046,7 @@ function BuildForm({
 
         {build.method === "recipe" &&
           (recipe === "node" ||
-            (recipe === "php" && (detected?.nodeInstalls?.length ?? 0) > 0)) && (
+            (installsAssetsWithNode(recipe) && (detected?.nodeInstalls?.length ?? 0) > 0)) && (
             <Field
               label="Node version"
               hint={
@@ -986,7 +1083,7 @@ function BuildForm({
         {build.method === "recipe" && recipe === "python" && (
           <Field
             label="Python version"
-            hint="Auto reads .python-version, runtime.txt or pyproject.toml."
+            hint="Auto reads .python-version, runtime.txt, .tool-versions, Pipfile or pyproject.toml, and stays below a version a pinned package has no wheels for."
             error={errorFor("build-python-version")}
           >
             <Segments
@@ -1041,6 +1138,78 @@ function BuildForm({
           </Field>
         )}
 
+        {build.method === "recipe" && recipe === "python" && (
+          <SystemPackagesField
+            value={build.systemPackages}
+            automatic={(detected?.systemPackages ?? []).filter((pkg) => pkg.automatic)}
+            canEdit={canEdit}
+            error={errorFor("build-system-packages")}
+            onChange={(systemPackages) => setBuild({ ...build, systemPackages })}
+          />
+        )}
+
+        {build.method === "recipe" && recipe === "java" && (
+          <Field
+            label="Java version"
+            hint={
+              javaVersionReading(detected) ??
+              "Auto reads the build files, .java-version, .sdkmanrc, .tool-versions and mise.toml."
+            }
+            error={errorFor("build-java-version")}
+          >
+            <Segments
+              id="build-java-version"
+              label="Java version"
+              fill
+              value={build.javaVersion ?? "auto"}
+              disabled={!canEdit}
+              onChange={(next) =>
+                setBuild({ ...build, javaVersion: next === "auto" ? undefined : next })
+              }
+              options={[
+                { value: "auto", label: "Auto" },
+                ...JAVA_VERSIONS.map((version) => ({ value: version, label: version, mono: true })),
+                ...(build.javaVersion && !JAVA_VERSION.test(build.javaVersion)
+                  ? [{ value: build.javaVersion, label: build.javaVersion, mono: true }]
+                  : []),
+              ]}
+            />
+          </Field>
+        )}
+
+        {build.method === "recipe" && recipe === "dotnet" && (
+          <Field
+            label=".NET version"
+            hint={
+              dotnetVersionReading(detected) ??
+              "Auto reads the project's target framework and the SDK global.json pins."
+            }
+            error={errorFor("build-dotnet-version")}
+          >
+            <Segments
+              id="build-dotnet-version"
+              label=".NET version"
+              fill
+              value={build.dotnetVersion ?? "auto"}
+              disabled={!canEdit}
+              onChange={(next) =>
+                setBuild({ ...build, dotnetVersion: next === "auto" ? undefined : next })
+              }
+              options={[
+                { value: "auto", label: "Auto" },
+                ...DOTNET_VERSIONS.map((version) => ({
+                  value: version,
+                  label: version,
+                  mono: true,
+                })),
+                ...(build.dotnetVersion && !DOTNET_VERSION.test(build.dotnetVersion)
+                  ? [{ value: build.dotnetVersion, label: build.dotnetVersion, mono: true }]
+                  : []),
+              ]}
+            />
+          </Field>
+        )}
+
         {build.method === "recipe" && recipe === "go" && (
           <Field
             label="Go main package"
@@ -1074,6 +1243,34 @@ function BuildForm({
                 }
               />
             </InputGroup>
+          </Field>
+        )}
+
+        {build.method === "recipe" && recipe === "rust" && (
+          <Field
+            label="Rust binary"
+            htmlFor="build-cargo-bin"
+            hint={
+              proposedFor("build.cargoBin") ??
+              ((proposal?.candidate?.rust?.binaries?.length ?? 0) > 1 && !proposal?.elsewhere
+                ? `Binaries: ${proposal?.candidate?.rust?.binaries?.join(", ")}.`
+                : "The binary target to serve; empty lets the recipe choose (default-run, or the one that starts a server).")
+            }
+            error={errorFor("build-cargo-bin")}
+          >
+            <Input
+              id="build-cargo-bin"
+              value={build.cargoBin ?? ""}
+              readOnly={!canEdit}
+              aria-invalid={Boolean(errorFor("build-cargo-bin"))}
+              className="font-mono"
+              placeholder={proposal?.candidate?.rust?.binary || "recipe chooses"}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) =>
+                setBuild({ ...build, cargoBin: event.target.value.trim() || undefined })
+              }
+            />
           </Field>
         )}
 
@@ -1644,5 +1841,71 @@ function ReleaseTasksForm({
         />
       </SettingSection>
     </SettingForm>
+  )
+}
+
+/**
+ * Debian packages the Python recipe installs before the dependencies, typed as
+ * a space-separated list. The text is kept as typed while it is edited, so a
+ * space before the next name is not swallowed by the round trip through the
+ * list the plan stores.
+ */
+function SystemPackagesField({
+  value,
+  automatic,
+  canEdit,
+  error,
+  onChange,
+}: {
+  value?: string[]
+  automatic: DeploymentDetectedSystemPackage[]
+  canEdit: boolean
+  error?: string
+  onChange: (next: string[] | undefined) => void
+}) {
+  const joined = (value ?? []).join(" ")
+  const [text, setText] = useState(joined)
+  const [synced, setSynced] = useState(joined)
+  if (joined !== synced) {
+    // The draft changed underneath (discarded, or a detection applied).
+    setSynced(joined)
+    if (
+      text
+        .split(/[\s,]+/)
+        .filter(Boolean)
+        .join(" ") !== joined
+    )
+      setText(joined)
+  }
+  const installed = automatic.map((pkg) => pkg.name)
+  return (
+    <Field
+      label="System packages"
+      htmlFor="build-system-packages"
+      hint={
+        installed.length
+          ? `Installed for the dependencies already: ${installed.join(", ")}. Add others the application needs, separated by spaces.`
+          : "Debian packages installed before the dependencies, separated by spaces, such as libpq-dev."
+      }
+      error={error}
+    >
+      <Input
+        id="build-system-packages"
+        value={text}
+        readOnly={!canEdit}
+        aria-invalid={Boolean(error)}
+        className="font-mono"
+        placeholder="none"
+        autoComplete="off"
+        spellCheck={false}
+        onChange={(event) => {
+          setText(event.target.value)
+          const names = event.target.value.split(/[\s,]+/).filter(Boolean)
+          const next = names.length ? names : undefined
+          setSynced((next ?? []).join(" "))
+          onChange(next)
+        }}
+      />
+    </Field>
   )
 }

@@ -331,6 +331,7 @@ func (o *DockerRuntimeOwner) startContainer(
 	plan := request.Snapshot.Plan
 	environment, variableNames := containerRuntimeEnvironment(plan, request.RuntimeVariables)
 	environment = append(environment, withdrawnProxyTrust(request.Snapshot, request.RuntimeVariables)...)
+	environment = append(environment, webConcurrencyEnvironment(request.Snapshot, request.RuntimeVariables)...)
 	mounts := make([]dockerx.MountSpec, 0, len(plan.Mounts))
 	for _, planned := range plan.Mounts {
 		kind := "volume"

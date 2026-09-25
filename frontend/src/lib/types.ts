@@ -3307,7 +3307,21 @@ export type BuildSecretStep = "install" | "build" | "install_and_build"
 
 /** The automatic recipes the backend can build; `validRecipe` is its closed set. */
 export type DeploymentRecipe =
-  "node" | "go" | "python" | "rust" | "java" | "dotnet" | "deno" | "php" | "site"
+  | "node"
+  | "go"
+  | "python"
+  | "rust"
+  | "java"
+  | "dotnet"
+  | "deno"
+  | "php"
+  | "site"
+  | "ruby"
+  | "elixir"
+  | "scala"
+  | "clojure"
+  | "dart"
+  | "gleam"
 
 /** An environment variable detection found the source reading. */
 export type DeploymentDetectedVariable = {
@@ -3635,9 +3649,138 @@ export type DeploymentDetectionCandidate = {
   goPackage?: string
   /** A Go module with no main package: nothing for the recipe to run. */
   goLibrary?: boolean
+  /** How the Go module builds beyond its toolchain (detect_go.go). */
+  go?: {
+    context?: string
+    workspace?: boolean
+    localReplaces?: string[]
+    replacesOutside?: string[]
+    cgoModules?: string[]
+    cgoLocal?: string[]
+    cgoPackages?: string[]
+    cgoRuntime?: string[]
+    cgoUnknown?: string[]
+    vendored?: boolean
+    sumMissing?: boolean
+    sumStale?: string[]
+    ownerModules?: string[]
+    embeds?: {
+      pattern: string
+      path: string
+      present?: boolean
+      frontend?: string
+      framework?: string
+    }[]
+    codegen?: string
+    codegenMissing?: string[]
+    subcommand?: string
+    /** The go and toolchain lines of the go.work that uses the module. */
+    workGo?: string
+    workToolchain?: string
+  }
+  /** How the Rust crate builds: its workspace, binaries and native crates (detect_rust.go). */
+  rust?: {
+    workspace?: string
+    package?: string
+    /** The crate's binary targets, and the one the recipe serves unless the plan names another. */
+    binaries?: string[]
+    binary?: string
+    binaryReason?: string
+    nativePackages?: string[]
+    nativeCrates?: string[]
+    /** What the runtime image installs when the binary links dynamically (bindgen). */
+    nativeRuntime?: string[]
+    nativeUnmapped?: string[]
+    sqlxMacros?: boolean
+    sqlxOffline?: boolean
+    /** Where the offline query data is: a .sqlx directory or sqlx-data.json. */
+    sqlxOfflineData?: string
+    sqlxMigrate?: boolean
+    lockVersion?: number
+    lockStale?: string[]
+    toolchain?: string
+    heavyRelease?: string
+    fullstack?: "leptos" | "trunk" | "dioxus" | "shuttle"
+  }
   /** The interpreter range pyproject declares, and the manifest the recipe installs from. */
   pythonRequires?: string
-  pythonInstall?: "uv.lock" | "poetry.lock" | "requirements.txt" | "pyproject.toml"
+  pythonInstall?:
+    | "uv.lock"
+    | "poetry.lock"
+    | "pdm.lock"
+    | "Pipfile.lock"
+    | "Pipfile"
+    | "requirements.txt"
+    | "pyproject.toml"
+    | "setup.py"
+    | "environment.yml"
+  /**
+   * Debian packages the source needs in its image. `automatic` ones the Python
+   * recipe installs by itself; the others (another platform's Aptfile) seed
+   * `build.systemPackages`.
+   */
+  systemPackages?: DeploymentDetectedSystemPackage[]
+  /** What a Maven or Gradle build says about building it. */
+  javaBuild?: DeploymentDetectedJavaBuild
+  /** What a .NET project says about publishing it. */
+  dotnetBuild?: DeploymentDetectedDotnetBuild
+}
+
+export type DeploymentDetectedSystemPackage = {
+  name: string
+  reason?: string
+  source?: string
+  automatic?: boolean
+}
+
+/**
+ * A JVM candidate's build: the reactor or settings root it builds from and
+ * the module it selects there, how it packages, and the Java release its
+ * build files declare (`toolchain` for an exact Gradle toolchain) and its
+ * version files pin.
+ */
+export type DeploymentDetectedJavaBuild = {
+  tool: "maven" | "gradle"
+  context?: string
+  module?: string
+  packaging?: string
+  runnable?: boolean
+  library?: boolean
+  aggregator?: boolean
+  release?: number
+  releaseFrom?: string
+  toolchain?: boolean
+  pinned?: number
+  pinnedFrom?: string
+  wrapper?: string
+  wrapperUsable?: boolean
+  wrapperJarMissing?: boolean
+  foojay?: boolean
+  profiles?: string[]
+  vaadinDevMode?: boolean
+}
+
+/**
+ * A .NET candidate's project: the directory it publishes from, the targets
+ * it declares, the SDK global.json pins, and what the recipe changes about
+ * publishing it.
+ */
+export type DeploymentDetectedDotnetBuild = {
+  project: string
+  kind: string
+  context?: string
+  targets?: string[]
+  targetText?: string
+  multiTarget?: boolean
+  sdkPin?: string
+  sdkPinFrom?: string
+  rollForward?: string
+  native?: string[]
+  spaRoot?: string
+  appHost?: string
+  aspire?: string[]
+  /** The projects it references, with the frameworks each declares. */
+  references?: { project: string; targets?: string }[]
 }
 
 export type DeploymentDockerfileArg = {
@@ -3864,14 +4007,22 @@ export type DeploymentConfiguration = {
     goVersion?: string
     /** The main package a Go recipe builds, relative to the root directory; empty lets it choose. */
     goPackage?: string
+    /** The binary target a Rust recipe serves; empty lets it choose. */
+    cargoBin?: string
     pythonVersion?: string
     /**
-     * The Node major a JavaScript recipe (or a PHP recipe's asset stage) builds and runs on;
-     * empty follows the repository.
+     * The Node major a JavaScript recipe builds and runs on, or the one the PHP, Python, Ruby
+     * or Elixir recipe installs front-end assets with; empty follows the repository.
      */
     nodeVersion?: string
     /** The PHP release a PHP recipe builds on; empty lets composer.json and composer.lock decide. */
     phpVersion?: string
+    /** Debian packages the Python recipe installs beside the ones its dependencies need. */
+    systemPackages?: string[]
+    /** The JDK release a Java recipe builds and runs on; empty lets the build and version files decide. */
+    javaVersion?: string
+    /** The .NET release a .NET recipe publishes for; empty lets the project and global.json decide. */
+    dotnetVersion?: string
     packageManager?: NodePackageManager
     rootDirectory?: string
     dockerfile?: string

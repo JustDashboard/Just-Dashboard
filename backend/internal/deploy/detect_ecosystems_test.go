@@ -26,25 +26,11 @@ func TestEcosystemsWithoutARecipeAreNamed(t *testing.T) {
 		profile                 WorkloadProfile
 		port                    int
 	}{
-		{"phoenix", "phoenix", "mix phx.gen.release --docker", map[string]string{
-			"mix.exs":             "defp deps do\n  [{:phoenix, \"~> 1.7\"}, {:postgrex, \">= 0.0.0\"}]\nend\n",
-			"assets/package.json": `{"name":"assets","scripts":{"deploy":"esbuild js/app.js"},"devDependencies":{"esbuild":"0.24"}}`,
-		}, ProfileWeb, 4000},
-		{"rails with jsbundling", "rails", "commit it", map[string]string{
-			"Gemfile": "source 'https://rubygems.org'\ngem 'rails'\ngem 'jsbundling-rails'\ngem 'sidekiq'\n", "Gemfile.lock": railsGemfileLock,
-			"package.json": `{"name":"app","scripts":{"build":"esbuild app/javascript/*.* --bundle --outdir=app/assets/builds"},"devDependencies":{"esbuild":"0.24"}}`,
-			"yarn.lock":    "",
-		}, ProfileWeb, 3000},
-		{"rails with importmap", "rails", "dockerfile", map[string]string{
-			"Gemfile": "gem 'rails', '~> 6.1'\n", "config.ru": "run Rails.application\n",
-		}, ProfileWeb, 3000},
-		{"sinatra", "sinatra", "rackup", map[string]string{"Gemfile": "gem 'sinatra'\n", "config.ru": "run App\n"}, ProfileWeb, 4567},
 		{"haskell", "servant", "haskell image", map[string]string{"stack.yaml": "resolver: lts-22.0\n", "package.yaml": "dependencies:\n- servant-server\n"}, ProfileWeb, 8080},
 		{"crystal", "kemal", "crystallang/crystal", map[string]string{"shard.yml": "dependencies:\n  kemal:\n    github: kemalcr/kemal\n"}, ProfileWeb, 3000},
 		{"zig", "zig", "zig build", map[string]string{"build.zig": "const std = @import(\"std\");\n"}, ProfileService, 0},
 		{"r shiny", "shiny", "rocker/shiny", map[string]string{"app.R": "library(shiny)\n", "renv.lock": "{}"}, ProfileWeb, 3838},
 		{"c++", "cpp", "CMake", map[string]string{"CMakeLists.txt": "project(server)\n"}, ProfileService, 0},
-		{"dart frog", "dart_frog", "dart compile", map[string]string{"pubspec.yaml": "name: api\ndependencies:\n  dart_frog: ^1.0.0\n"}, ProfileWeb, 8080},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			result := detectShapeFixture(t, fixture.files)
@@ -69,7 +55,8 @@ func TestAssetPipelinesBelongToTheirApplication(t *testing.T) {
 		"mix.exs":             "[{:phoenix, \"~> 1.7\"}]",
 		"assets/package.json": `{"devDependencies":{"esbuild":"0.24"}}`, "assets/package-lock.json": "{}",
 	})
-	if len(phoenix.Candidates) != 1 || phoenix.Candidates[0].Framework != "phoenix" || setAsideKind(phoenix, "asset-pipeline") == nil {
+	if len(phoenix.Candidates) != 1 || phoenix.Candidates[0].Framework != "phoenix" || phoenix.Candidates[0].Recipe != "elixir" ||
+		setAsideKind(phoenix, "asset-pipeline") == nil {
 		t.Fatalf("phoenix = %#v", phoenix)
 	}
 	withDockerfile := detectShapeFixture(t, map[string]string{
@@ -77,16 +64,19 @@ func TestAssetPipelinesBelongToTheirApplication(t *testing.T) {
 		"package.json": `{"devDependencies":{"esbuild":"0.24"}}`, "yarn.lock": "",
 		"Dockerfile": "FROM ruby:3.3\nEXPOSE 80\n",
 	})
+	// The Dockerfile and the Ruby recipe are two ways to build the same
+	// application; the repository's own Dockerfile is chosen.
 	selected := selectedOf(withDockerfile)
-	if len(withDockerfile.Candidates) != 1 || selected == nil || selected.BuildMethod != BuildDockerfile || selected.Framework != "rails" ||
-		len(selected.Processes) != 1 || selected.Processes[0].Command != "bundle exec sidekiq" {
+	if len(withDockerfile.Candidates) != 2 || selected == nil || selected.BuildMethod != BuildDockerfile || selected.Framework != "rails" ||
+		len(selected.Processes) != 1 || selected.Processes[0].Command != "bundle exec sidekiq" ||
+		candidateAtRoot(withDockerfile, "", BuildRecipe) == nil || candidateAtRoot(withDockerfile, "", BuildRecipe).Recipe != "ruby" {
 		t.Fatalf("rails with Dockerfile = %#v", withDockerfile.Candidates)
 	}
 	hanami := detectShapeFixture(t, map[string]string{
 		"Gemfile": "gem 'hanami', '~> 2.1'\ngem 'hanami-assets'\n", "config.ru": "run Hanami.app\n",
 		"package.json": `{"name":"assets","dependencies":{"hanami-assets":"2"}}`, "package-lock.json": "{}",
 	})
-	if len(hanami.Candidates) != 1 || hanami.Candidates[0].Framework != "hanami" {
+	if len(hanami.Candidates) != 1 || hanami.Candidates[0].Framework != "hanami" || hanami.Candidates[0].Recipe != "ruby" {
 		t.Fatalf("hanami = %#v", hanami.Candidates)
 	}
 	cocoapods := detectShapeFixture(t, map[string]string{

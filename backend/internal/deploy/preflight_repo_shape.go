@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -379,7 +380,7 @@ func repoShapeFindings(detection *DetectionResult, configuration PlanConfigurati
 			"Rename the import (or the file) so the case matches exactly, and commit the change.", "deploy", "configuration.build"))
 	}
 	for _, manifest := range selected.PlatformManifests {
-		if len(manifest.SystemPackages) > 0 && method == BuildRecipe {
+		if len(manifest.SystemPackages) > 0 && method == BuildRecipe && !platformPackagesPlanned(manifest.SystemPackages, configuration.Build) {
 			findings = append(findings, finding("platform_system_packages_ignored", PreflightWarning,
 				"The repository asks for system packages the recipe does not install", boundedText(strings.Join(manifest.SystemPackages, ", "), 512),
 				manifest.File+" installs them on its platform; the automatic recipe's image carries only its language toolchain.",
@@ -457,3 +458,21 @@ func solidQueueRunsInPuma(candidate DetectedCandidate, configuration PlanConfigu
 }
 
 var solidQueueCommandRE = regexp.MustCompile(`(?:^|[\s/])bin/jobs\b|\bsolid_queue:start\b`)
+
+// platformPackagesPlanned says the Python recipe installs every system
+// package another platform's file asks for: the plan carries them, under
+// the name Debian trixie gives each.
+func platformPackagesPlanned(packages []string, build BuildPlanConfig) bool {
+	if build.Recipe != "python" {
+		return false
+	}
+	for _, name := range packages {
+		if renamed := aptTrixieNames[name]; renamed != "" {
+			name = renamed
+		}
+		if !slices.Contains(build.SystemPackages, name) {
+			return false
+		}
+	}
+	return true
+}

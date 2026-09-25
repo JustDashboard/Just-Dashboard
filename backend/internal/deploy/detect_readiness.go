@@ -318,6 +318,12 @@ func recipeReadiness(candidate *DetectedCandidate, marker *detectedMarkers, fact
 		case "dotnet":
 			readiness = declaredOrCodeReadiness(facts, "ASP.NET Core", "dotnet", "dotnet")
 		case "go":
+			if marker != nil && strings.Contains(string(marker.goModContent), "github.com/pocketbase/pocketbase") {
+				// PocketBase answers its own health endpoint before any
+				// collection exists, and / is an admin redirect.
+				readiness = strictReadiness("/api/health", readinessFromFramework, "PocketBase health endpoint /api/health")
+				break
+			}
 			readiness = declaredOrCodeReadiness(facts, "the Go service", "", "go")
 		case "rust":
 			label := "the Rust service"
@@ -333,6 +339,8 @@ func recipeReadiness(candidate *DetectedCandidate, marker *detectedMarkers, fact
 			}
 		case "php":
 			readiness = phpReadiness(candidate, facts)
+		case "ruby", "elixir", "scala", "clojure", "dart", "gleam":
+			readiness = languageReadiness(candidate, facts)
 		}
 	}
 	if readiness == nil {
@@ -840,7 +848,7 @@ func dockerfileReadiness(candidate *DetectedCandidate, marker *detectedMarkers, 
 
 // migrationStartRE recognises a start command that applies a schema before
 // the server listens.
-var migrationStartRE = regexp.MustCompile(`\bmigrate\b|\bdb:prepare\b|\bdb:migrate\b|\balembic\s+upgrade\b|\bdb\s+push\b|\bmigration:run\b|\bmigration:up\b`)
+var migrationStartRE = regexp.MustCompile(`\bmigrate\b|\bdb:prepare\b|\bdb:migrate\b|\balembic\s+upgrade\b|\bdb\s+push\b|\bmigration:run\b|\bmigration:up\b|\bEcto\.Migrator\b`)
 
 var pythonModelDistributions = []string{
 	"transformers", "diffusers", "sentence-transformers", "torch", "openai-whisper", "faster-whisper",
@@ -857,7 +865,8 @@ func applyReadinessBudget(readiness *DetectedReadiness, candidate *DetectedCandi
 			attempts, interval, readiness.SlowStart = a, i, reason
 		}
 	}
-	jvm := candidate.Recipe == "java" || (candidate.BuildMethod == BuildDockerfile && (len(marker.pomXML) > 0 || len(marker.gradleBuild) > 0))
+	jvm := candidate.Recipe == "java" || candidate.Recipe == "scala" || candidate.Recipe == "clojure" ||
+		(candidate.BuildMethod == BuildDockerfile && (len(marker.pomXML) > 0 || len(marker.gradleBuild) > 0))
 	if jvm {
 		slow("a JVM service can take minutes to start on a small server", readinessSlowAttempts, readinessDefaultInterval)
 	}

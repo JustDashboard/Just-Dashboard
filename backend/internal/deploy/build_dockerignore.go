@@ -3,6 +3,7 @@ package deploy
 import (
 	"os"
 	"path"
+	"slices"
 	"strings"
 )
 
@@ -34,11 +35,34 @@ var recipeInputNames = map[string]bool{
 	"deno.json": true, "deno.jsonc": true, "deno.lock": true,
 	"composer.json": true, "composer.lock": true, "artisan": true, "index.php": true, "index.html": true,
 	"prisma": true, "drizzle.config.ts": true, "drizzle.config.js": true,
-	// Site generators' configuration and the files their builds read.
-	"hugo.toml": true, "hugo.yaml": true, "hugo.yml": true, "hugo.json": true, "config.toml": true, ".hvm": true,
-	"book.toml": true, "_config.yml": true, "_config.yaml": true, "Gemfile": true, "Gemfile.lock": true,
-	".ruby-version": true, "mkdocs.yml": true, "mkdocs.yaml": true, "zensical.toml": true, "pelicanconf.py": true,
-	"publishconf.py": true, "_config.ts": true, "_config.js": true,
+}
+
+// jvmVersionFiles are the files a JDK pin is read from (javaVersionPin)
+// besides .java-version, which every recipe keeps.
+var jvmVersionFiles = []string{".sdkmanrc", ".tool-versions", "system.properties", "mise.toml", ".mise.toml"}
+
+// languageRecipeInputs are the root files a recipe reads by name, kept for
+// that recipe alone: a rule leaving out a directory called project/, a
+// manifest.toml or a .tool-versions means nothing to a Node or static
+// build, which would then copy or serve the file.
+var languageRecipeInputs = map[string][]string{
+	"java": append([]string{"gradle.properties", "buildSrc", "build-logic"}, jvmVersionFiles...),
+	"dotnet": {"Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props", "global.json",
+		"NuGet.Config", "nuget.config", "NuGet.config", ".tool-versions", "mise.toml", ".mise.toml"},
+	"ruby":    {"Gemfile", "Gemfile.lock", ".ruby-version", ".tool-versions", "config.ru", "Rakefile"},
+	"elixir":  {"mix.exs", "mix.lock", ".tool-versions", ".elixir-version", "elixir_buildpack.config"},
+	"scala":   append([]string{"build.sbt", "project"}, jvmVersionFiles...),
+	"clojure": append([]string{"project.clj", "deps.edn", "build.clj"}, jvmVersionFiles...),
+	"dart":    {"pubspec.yaml", "pubspec.lock"},
+	"gleam":   {"gleam.toml", "manifest.toml"},
+	// Site generators' configuration and the files their builds read: Hugo,
+	// Zola, mdBook and Jekyll on their own recipe, MkDocs, Zensical and
+	// Pelican on Python's, Lume on Deno's and Hexo on the JavaScript one.
+	"site": {"hugo.toml", "hugo.yaml", "hugo.yml", "hugo.json", "config.toml", ".hvm", "book.toml",
+		"_config.yml", "_config.yaml", "Gemfile", "Gemfile.lock", ".ruby-version"},
+	"python": {"mkdocs.yml", "mkdocs.yaml", "zensical.toml", "pelicanconf.py", "publishconf.py"},
+	"deno":   {"_config.ts", "_config.js"},
+	"node":   {"_config.yml", "_config.yaml"},
 }
 
 // recipeInputPrefixes are framework configuration files, named per tool.
@@ -57,7 +81,8 @@ func recipeInput(name string) bool {
 			return true
 		}
 	}
-	return strings.HasSuffix(name, ".csproj") || strings.HasSuffix(name, ".fsproj") || strings.HasSuffix(name, ".sln")
+	return strings.HasSuffix(name, ".csproj") || strings.HasSuffix(name, ".fsproj") || strings.HasSuffix(name, ".vbproj") ||
+		strings.HasSuffix(name, ".sln") || strings.HasSuffix(name, ".slnx")
 }
 
 // recipeDockerignore renders the ignore file for a generated Dockerfile of
@@ -70,7 +95,7 @@ func recipeDockerignore(repository []byte, rootNames []string, kind string, inst
 	rules := parseDockerignore(repository)
 	inputs := []string{}
 	for _, name := range rootNames {
-		if recipeInput(name) {
+		if recipeInput(name) || slices.Contains(languageRecipeInputs[kind], name) {
 			inputs = append(inputs, name)
 		}
 	}
@@ -131,7 +156,7 @@ func recipeDockerignore(repository []byte, rootNames []string, kind string, inst
 	// These come last so that no repository rule can bring them back.
 	lines = append(lines, "**/node_modules", ".dockerignore", ".just-dashboard", ".just-dashboard-build-metadata-*")
 	switch kind {
-	case "static", "php", "node", "deno":
+	case "static", "php", "node", "deno", "ruby":
 		// Served or copied whole into the runtime image; the history and
 		// remote a checkout carries are nobody's business there. Toolchains
 		// that stamp or version builds from Git (Go, Python's setuptools-scm,

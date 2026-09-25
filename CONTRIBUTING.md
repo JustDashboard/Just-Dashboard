@@ -90,7 +90,10 @@ carries no licensing question at all.
 - Changes to deployment builders or artifact handling also run the opt-in Docker boundary on a release
   host: `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveC4ArtifactAdapters -count=1 -v`.
   Recipe/detection/default changes also run
-  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveDetectedFrameworkBuildAndServing -count=1 -v`.
+  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveDetectedFrameworkBuildAndServing -count=1 -v`,
+  and changes to a recipe's base images
+  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveRecipeBaseCatalogueRunsOnAmd64AndArm64 -count=1 -v`,
+  which resolves (without pulling) every catalogue image and requires it for amd64 and arm64.
   Changes to build-failure diagnosis (the BuildKit reader in `dockerx`, the collector or the signature
   table) also run `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveBuildFailureIsNamedFromBuildKit -count=1 -v`,
   which builds an npm project whose lockfile no longer matches package.json and checks the cause is
@@ -100,14 +103,22 @@ carries no licensing question at all.
   test needs `git-lfs` on PATH (it is included in the backend image); it touches only a temporary
   repository. Provider fixture tests do not publish live comments or reviews. See
   [the Git workspace contract](docs/internal/backend/git-workspace-expansion.md) for limits and setup.
-  Forty fixtures: the locked Node starters (installed by Bun, pnpm and Yarn 1), a Next.js static export
-  and a standalone server, SvelteKit on adapter-auto, Express serving a Vite client, a Hono dev-only
-  starter on Bun, React Router in SPA mode with a prerendered home, FastAPI, Flask, Django, Streamlit,
-  Gradio, Go, axum, Maven, Gradle, ASP.NET Core, Deno, Laravel, Laravel with Vite and Wayfinder (assets
-  built with PHP and vendor/, served behind a forwarded HTTPS), Symfony with AssetMapper (a committed
-  `.env` that says dev) and plain PHP, the site generators Hugo, Zola, mdBook, Jekyll, MkDocs, Lume and
-  Eleventy, and a plain site whose `_redirects`, `_headers` and `netlify.toml` repeat and overlap each
-  other's rules.
+  Sixty-four fixtures: the locked Node starters (installed by Bun, pnpm and Yarn 1), a Next.js static
+  export and a standalone server, SvelteKit on adapter-auto, Express serving a Vite client, a Hono
+  dev-only starter on Bun, React Router in SPA mode with a prerendered home, FastAPI, Flask, Django,
+  Streamlit, Gradio, the Python install shapes (PDM, Pipenv, uv on Python 3.14, a nested Django project
+  with a `requirements/` folder and psycopg2, a Flask app with a Node asset stage), Go, a `go.work`
+  member, a Go server embedding its Vite build with cgo SQLite and templ, axum, a Cargo workspace member,
+  Leptos with hashed file names, Trunk, Maven, Gradle, the JVM and .NET layouts (a Maven reactor module, a
+  multi-project and a composite Gradle build, a solution's web project, a multi-target project with a
+  library, Blazor WebAssembly, F#, an ASP.NET Core project publishing an npm front end), ASP.NET Core,
+  Deno, Laravel, Laravel with Vite and Wayfinder (assets built with PHP and vendor/, served behind a
+  forwarded HTTPS), Symfony with AssetMapper (a committed `.env` that says dev) and plain PHP, Rails,
+  Sinatra, Phoenix, Play, a Leiningen uberjar and Gleam, the site generators Hugo, Zola, mdBook, Jekyll,
+  MkDocs, Lume and Eleventy, and a plain site whose `_redirects`, `_headers` and `netlify.toml` repeat
+  and overlap each other's rules. The Leptos and Trunk builds install their tool from source, so give
+  the run `-timeout 90m`; `TestLiveGoRecipeCatalogueResolves` checks every Go and Rust base image
+  resolves.
 - The blueprint catalogue sweep pulls every deployable definition's pinned image, starts it through the
   real runtime owner with generated secrets and runs its own readiness checks (`JD_BLUEPRINT_ONLY=a,b`
   narrows it; images it pulled are removed again):

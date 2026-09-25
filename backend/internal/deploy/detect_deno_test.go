@@ -111,18 +111,6 @@ func TestDenoRuntimeVersionPinned(t *testing.T) {
 	}
 }
 
-type missingImageBackend struct {
-	artifactBackendFake
-	missing string
-}
-
-func (b *missingImageBackend) ResolveImage(ctx context.Context, reference, platform string) (ResolvedImage, error) {
-	if reference == b.missing {
-		return ResolvedImage{}, errors.New("manifest unknown")
-	}
-	return b.artifactBackendFake.ResolveImage(ctx, reference, platform)
-}
-
 // Fresh 1's start task is its development server; the preview task, or the
 // main.ts it runs, serves what the build task wrote.
 func TestDenoFresh1StartsThePreview(t *testing.T) {

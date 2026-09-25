@@ -47,6 +47,12 @@ func nodeInstallFindings(candidate *DetectedCandidate, configuration PlanConfigu
 			"The PHP recipe's asset stage runs these before copying public/build into the image.", "", "deploy", "configuration.build.packageManager"))
 		return append(findings, registryCredentialFindings(candidate, configuration)...)
 	}
+	if candidate.Recipe != "node" {
+		findings = append(findings, finding("build_commands", PreflightPass,
+			"Front-end assets install", install.Install,
+			"The "+recipeLabel(candidate.Recipe)+" recipe installs these in its build stage, where the asset pipeline's own step runs the package manager.", "", "deploy", "configuration.build.packageManager"))
+		return append(findings, registryCredentialFindings(candidate, configuration)...)
+	}
 	commands := []struct{ label, field, saved string }{
 		{"build", "configuration.build.buildCommand", build.BuildCommand},
 		{"start", "configuration.build.startCommand", build.StartCommand},

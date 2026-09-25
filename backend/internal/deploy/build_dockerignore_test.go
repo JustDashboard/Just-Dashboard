@@ -52,6 +52,32 @@ func TestRecipeDockerignoreKeepsRepositoryRulesButNotRecipeInputs(t *testing.T) 
 			t.Errorf("a static site would publish %s", path)
 		}
 	}
+	// sbt's project/ is an input of the Scala recipe alone; a Node build
+	// keeps the repository's rule leaving a directory of that name out.
+	for kind, kept := range map[string]bool{"scala": true, "node": false} {
+		content, _ := recipeDockerignore([]byte("project\n"), []string{"build.sbt", "package.json", "project"}, kind, nil)
+		if excluded, _ := dockerignoreExcludes(parseDockerignore([]byte(content)), "project/plugins.sbt"); excluded == kept {
+			t.Errorf("%s: project/ excluded = %v\n%s", kind, excluded, content)
+		}
+	}
+	// The JVM and .NET recipes' version and MSBuild files are theirs alone
+	// too: a static site keeps its repository's rule and does not serve them.
+	for _, fixture := range []struct {
+		kind, input string
+		kept        bool
+	}{
+		{"java", ".tool-versions", true}, {"scala", ".sdkmanrc", true}, {"java", "gradle.properties", true},
+		{"dotnet", "global.json", true}, {"dotnet", "Directory.Build.props", true},
+		{"static", ".tool-versions", false}, {"static", "global.json", false}, {"node", "gradle.properties", false},
+		// A site generator's configuration belongs to the recipe that runs it.
+		{"site", "config.toml", true}, {"site", "Gemfile", true}, {"python", "mkdocs.yml", true}, {"deno", "_config.ts", true},
+		{"static", "_config.yml", false}, {"static", "hugo.toml", false}, {"go", "config.toml", false},
+	} {
+		content, _ := recipeDockerignore([]byte(fixture.input+"\n"), []string{fixture.input, "index.html"}, fixture.kind, nil)
+		if excluded, _ := dockerignoreExcludes(parseDockerignore([]byte(content)), fixture.input); excluded == fixture.kept {
+			t.Errorf("%s: %s excluded = %v\n%s", fixture.kind, fixture.input, excluded, content)
+		}
+	}
 	// Toolchains that stamp builds from Git keep the repository metadata.
 	golang, _ := recipeDockerignore(nil, []string{"go.mod"}, "go", nil)
 	if excluded, _ := dockerignoreExcludes(parseDockerignore([]byte(golang)), ".git/HEAD"); excluded {

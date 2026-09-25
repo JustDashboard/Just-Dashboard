@@ -117,6 +117,15 @@ func detectionProposal(
 			compare("build.goPackage", "Go main package", build.GoPackage, fresh.GoPackage,
 				func(c *DetectedCandidate) string { return c.GoPackage })
 		}
+		if build.CargoBin != "" && fresh.Rust != nil && fresh.Rust.Binary != "" {
+			compare("build.cargoBin", "Rust binary", build.CargoBin, fresh.Rust.Binary,
+				func(c *DetectedCandidate) string {
+					if c.Rust == nil {
+						return ""
+					}
+					return c.Rust.Binary
+				})
+		}
 	}
 	if fresh.BuildMethod == BuildDockerfile && fresh.DockerfileTarget != "" {
 		// A Dockerfile whose last stage is a development one names the stage
