@@ -304,6 +304,14 @@ func buildCases() []buildCase {
 				Subjects: []string{"<3.12,>=3.10"}, Fix: &CauseFix{Kind: fixSetBuild, Field: "configuration.build.pythonVersion", Value: "3.11"}},
 		},
 		{
+			// uv may use only the image's interpreter, so a floor above it
+			// fails here rather than downloading another.
+			name: "uv refuses the image's Python", command: "pip install --no-cache-dir uv==0.12.18 && uv sync --locked --no-dev --python /usr/local/bin/python", exit: 2, build: pythonBuild,
+			lines: []string{"error: The requested interpreter resolved to Python 3.13.15, which is incompatible with the project's Python requirement: `>=3.14`"},
+			want: BuildCause{Code: "build_runtime_version", Phase: phaseInstall, Command: "pip install --no-cache-dir uv==0.12.18 && uv sync --locked --no-dev --python /usr/local/bin/python", ExitCode: 2, Detail: "python",
+				Subjects: []string{">=3.14"}, Fix: &CauseFix{Kind: fixSetBuild, Field: "configuration.build.pythonVersion", Value: "3.14"}},
+		},
+		{
 			name: "Poetry lock stale", command: "poetry install --only main --no-root", exit: 1, build: pythonBuild,
 			lines: []string{"pyproject.toml changed significantly since poetry.lock was last generated. Run `poetry lock` to fix the lock file."},
 			want:  BuildCause{Code: "build_lockfile_out_of_sync", Phase: phaseInstall, Command: "poetry install --only main --no-root", ExitCode: 1, Detail: "poetry.lock"},

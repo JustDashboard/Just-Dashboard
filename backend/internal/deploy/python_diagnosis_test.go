@@ -24,6 +24,13 @@ func TestDjangoErrorsHiddenByItsLoggingAreNamed(t *testing.T) {
 	if cause == nil || cause.Code != "runtime_host_disallowed" || cause.Detail != "django" {
 		t.Fatalf("400 = %+v", cause)
 	}
+	// A route that is not there, or one behind a login, is an answer.
+	for _, status := range []int{401, 403, 404} {
+		if cause := applicationOutputCause(quiet, runtimeCauseContext{build: django, checks: checks(status)}); cause != nil &&
+			(cause.Code == "runtime_errors_hidden" || cause.Code == "runtime_host_disallowed") {
+			t.Fatalf("%d = %+v", status, cause)
+		}
+	}
 	loud := []ContainerDiagnostics{{State: "running", Lines: []RuntimeLogLine{{Text: "Traceback (most recent call last):"}, {Text: "ZeroDivisionError: division by zero"}}}}
 	if cause := applicationOutputCause(loud, runtimeCauseContext{build: django, checks: checks(500)}); cause != nil && cause.Code == "runtime_errors_hidden" {
 		t.Fatalf("a logged error is not hidden: %+v", cause)

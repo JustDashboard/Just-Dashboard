@@ -533,7 +533,8 @@ var applicationErrorLineRE = regexp.MustCompile(`Traceback|Error|Exception|Disal
 // djangoHiddenErrorCause names a Django candidate that answered the check
 // with an error and wrote nothing about it: with DEBUG off and no LOGGING
 // setting, Django routes request errors — a DisallowedHost 400, a 500 — to
-// mail_admins only. A 400 is its host allowlist; anything else is hidden.
+// mail_admins only. A 400 is its host allowlist and a 5xx an error it hid;
+// a 401, 403 or 404 is an answer, which the readiness classification names.
 func djangoHiddenErrorCause(lines []collectedLine, context runtimeCauseContext) *OutputCause {
 	if context.build.Framework != "django" {
 		return nil
@@ -549,10 +550,13 @@ func djangoHiddenErrorCause(lines []collectedLine, context runtimeCauseContext) 
 	if status == 0 || anyLineMatches(lines, applicationErrorLineRE) {
 		return nil
 	}
-	if status == 400 || status == 421 {
+	switch {
+	case status == 400 || status == 421:
 		return &OutputCause{Code: "runtime_host_disallowed", Detail: "django", Subjects: []string{strconv.Itoa(status)},
 			Fix: &CauseFix{Kind: fixReview, Field: "variables"}}
+	case status >= 500:
+		return &OutputCause{Code: "runtime_errors_hidden", Detail: "django", Subjects: []string{strconv.Itoa(status)},
+			Fix: &CauseFix{Kind: fixReview, Field: "configuration.build"}}
 	}
-	return &OutputCause{Code: "runtime_errors_hidden", Detail: "django", Subjects: []string{strconv.Itoa(status)},
-		Fix: &CauseFix{Kind: fixReview, Field: "configuration.build"}}
+	return nil
 }
