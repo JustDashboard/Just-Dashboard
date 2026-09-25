@@ -13,6 +13,13 @@ import type { EnvironmentRow } from "@/components/deploy/new-project/draft"
 
 export const PYTHON_VERSION = /^3\.(10|11|12|13)$/
 
+/** The JDK releases the Java recipe builds and runs on, as `planning_compiled.go` accepts them. */
+export const JAVA_VERSIONS = ["8", "11", "17", "21", "25"]
+export const JAVA_VERSION = /^(8|11|17|21|25)$/
+/** The .NET releases the .NET recipe publishes for. */
+export const DOTNET_VERSIONS = ["8.0", "9.0", "10.0"]
+export const DOTNET_VERSION = /^(8|9|10)\.0$/
+
 /** The request-body ceiling a route gets when the plan names none, and the most it may name. */
 export const DEFAULT_MAX_REQUEST_BODY_MB = 64
 export const MAX_REQUEST_BODY_MB = 10240
@@ -1075,6 +1082,10 @@ export function validateConfiguration(
   if (!configuration.build.method) errors.buildMethod = "Choose a build method."
   if (configuration.build.pythonVersion && !PYTHON_VERSION.test(configuration.build.pythonVersion))
     errors.pythonVersion = "Use Python 3.10, 3.11, 3.12 or 3.13, or leave the version empty."
+  if (configuration.build.javaVersion && !JAVA_VERSION.test(configuration.build.javaVersion))
+    errors.javaVersion = "Use Java 8, 11, 17, 21 or 25, or let the build files decide."
+  if (configuration.build.dotnetVersion && !DOTNET_VERSION.test(configuration.build.dotnetVersion))
+    errors.dotnetVersion = "Use .NET 8.0, 9.0 or 10.0, or let the project decide."
   if (configuration.build.target && !DOCKERFILE_STAGE.test(configuration.build.target))
     errors.target = "A stage name starts with a letter and has only letters, digits, . _ and -."
   for (const [name, value] of [
@@ -1213,4 +1224,41 @@ export function goMainPackageList(candidate: DeploymentDetectionCandidate | unde
   const shown = mains.slice(0, 8).map((main) => (main === "." ? "." : `./${main}`))
   const more = mains.length - shown.length + (candidate?.goMainPackagesOmitted ?? 0)
   return shown.join(", ") + (more > 0 ? ` and ${more} more` : "")
+}
+
+/**
+ * What decides a Java build's release while the setting is automatic, and
+ * where the build runs from: "pom.xml java.version declares Java 17 · builds
+ * :app from .". Undefined for a candidate detected before builds were read.
+ */
+export function javaVersionReading(candidate: DeploymentDetectionCandidate | undefined) {
+  const build = candidate?.javaBuild
+  if (!build) return undefined
+  const parts: string[] = []
+  if (build.pinned) parts.push(`${build.pinnedFrom} pins Java ${build.pinned}`)
+  if (build.release)
+    parts.push(
+      `${build.releaseFrom} declares Java ${build.release}${build.toolchain ? " as a Gradle toolchain" : ""}`,
+    )
+  if (!parts.length) parts.push("Nothing declares a release; the recipe builds on Java 21")
+  if (build.context)
+    parts.push(`builds ${build.module || "the root project"} from ${build.context}`)
+  return parts.join(" · ")
+}
+
+/**
+ * What decides a .NET project's release and SDK while the setting is
+ * automatic: its target frameworks and the SDK global.json pins.
+ */
+export function dotnetVersionReading(candidate: DeploymentDetectionCandidate | undefined) {
+  const build = candidate?.dotnetBuild
+  if (!build) return undefined
+  const parts = [
+    build.targetText
+      ? `${build.project} targets ${build.targetText}`
+      : `${build.project} declares no target framework`,
+  ]
+  if (build.sdkPin) parts.push(`${build.sdkPinFrom} pins SDK ${build.sdkPin}`)
+  if (build.context) parts.push(`published from ${build.context}`)
+  return parts.join(" · ")
 }

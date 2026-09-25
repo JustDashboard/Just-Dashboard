@@ -516,7 +516,15 @@ function RuntimeFact({
   const mark = hasProductLogo(product) ? <ProductGlyph id={product} /> : undefined
   if (method === "recipe" && recipe) {
     const version =
-      recipe === "python" ? build?.pythonVersion : recipe === "go" ? build?.goVersion : undefined
+      recipe === "python"
+        ? build?.pythonVersion
+        : recipe === "go"
+          ? build?.goVersion
+          : recipe === "java"
+            ? build?.javaVersion
+            : recipe === "dotnet"
+              ? build?.dotnetVersion
+              : undefined
     const language = [RECIPE_SHORT[recipe], version].filter(Boolean).join(" ")
     return (
       <Fact mark={mark}>

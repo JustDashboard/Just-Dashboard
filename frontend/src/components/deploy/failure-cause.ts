@@ -265,6 +265,16 @@ export function fixTarget(
         href: `${base}/build#build`,
         label: fix.value ? `Use Python ${fix.value}` : "Choose the Python version",
       }
+    case "javaVersion":
+      return {
+        href: `${base}/build#build`,
+        label: fix.value ? `Use Java ${fix.value}` : "Choose the Java version",
+      }
+    case "dotnetVersion":
+      return {
+        href: `${base}/build#build`,
+        label: fix.value ? `Use .NET ${fix.value}` : "Choose the .NET version",
+      }
     case "buildCommand":
       return {
         href: commands,
