@@ -568,11 +568,11 @@ candidate records the file, the facts and which it took (`platformManifests`):
 | publish directory (`publish`, `outputDirectory`, `staticPublishPath`, `output_dir`, hosting `public`) and a rewrite of every path to `/index.html` | the output directory and the single-page fallback of a static candidate |
 | health check path | evidence and `healthPath`; readiness detection reads the same files for the check ([Readiness](#readiness-workers-and-start-commands)) |
 | `generateValue`, `generator: "secret"` | a variable set up to be generated on the server when the project is created (`setup: generate`), unless the environment classification knows the framework's own shape for it |
-| secret env names, `sync: false`, `required` | a variable row that must be set |
+| secret env names, `sync: false`, `required` | a variable detection marks `required`, which the form declares required in the plan, so preflight asks for its value (`variable_required_*`) |
 | accessories, add-ons, `fromDatabase`, `databases:` | a database suggestion on the declared variable |
 | worker, cron, Kamal roles, `[processes]` | [processes](#background-processes) |
 | release command (`release_command`, `preDeployCommand`, `PRE_DEPLOY` job) | a `release` process; `fly.toml`'s and `render.yaml`'s are also the candidate's release command ([Release commands](#release-commands)), and one no release task runs is `release_process_not_run` |
-| volumes and `[[mounts]]` | evidence and `volumes`; no mount is created from them yet |
+| volumes: fly `[[mounts]]` `destination`, `render.yaml`'s `disk.mountPath`, Railway's `requiredMountPath`, Kamal `volumes:` | evidence, `volumes`, and state to keep at the same path (`persistentPaths`, kind `storage`), which the form plans as a managed volume: the application names the absolute path itself. A volume state detection already planned there, or under it, is not planned twice, and state found under it without a directory of its own takes it. A runtime that is not root gets a volume only where it can write one (its data directory, or a committed directory under a Dockerfile's workdir); elsewhere the path is only named, and preflight warns `persistent_path_unmounted` |
 | `Aptfile`, `aptPkgs` | `platform_system_packages_ignored` (warning) for a recipe build |
 | redirect rules other than the SPA rewrite | `static_redirects_unsupported` (warning) |
 
@@ -1523,6 +1523,7 @@ reported instead.
 | A Phoenix release built by its own Dockerfile with `ecto_sqlite3` | the file `runtime.exs` reads from `DATABASE_PATH` | `/data/<app>.db` through it when the image runs as root; reported under `USER nobody` |
 | ASP.NET cookie auth, Identity, Razor Pages, MVC views, antiforgery or Blazor without `PersistKeysTo*` | the Data Protection key ring | volume at `/home/app/.aspnet/DataProtection-Keys` |
 | Dockerfile `VOLUME` (final stage, inherited from an earlier stage), a local image's declared volumes | the declared path | a volume on it; scratch space (`/tmp`, `/var/tmp`, `/run`, `/var/run`, `/var/cache`, `/dev/shm`) is left anonymous |
+| Another platform's volume ([Other platforms' deployment files](#other-platforms-deployment-files)) | the path it mounts | a volume on the same path, where the process can write one |
 
 A variable holds one value, so detection keeps one entry per variable — the reader that read it more
 closely wins (Django's `MEDIA_ROOT` from the settings, not from the generic upload-variable list).

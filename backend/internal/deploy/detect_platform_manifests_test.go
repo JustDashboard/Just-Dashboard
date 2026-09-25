@@ -427,3 +427,93 @@ func TestPlatformStartCommandIsWhatThePassesRead(t *testing.T) {
 		t.Fatalf("listen = %#v, want the platform command's loopback bind", candidate.Listen)
 	}
 }
+
+// What another platform's file says the application keeps and needs is
+// planned, not only listed: its volumes become state to keep where that
+// platform kept it, and the values it asks for at creation are required.
+func TestPlatformVolumesAndRequiredVariablesReachThePlan(t *testing.T) {
+	t.Parallel()
+	storageAt := func(candidate *DetectedCandidate, location string) *DetectedPersistentPath {
+		for index := range candidate.PersistentPaths {
+			if candidate.PersistentPaths[index].Path == location {
+				return &candidate.PersistentPaths[index]
+			}
+		}
+		return nil
+	}
+	t.Run("fly mounts", func(t *testing.T) {
+		t.Parallel()
+		candidate := selectedOf(detectShapeFixture(t, map[string]string{
+			"package.json": expressManifest, "package-lock.json": "{}", "server.js": "require('express')().listen(process.env.PORT)\n",
+			"fly.toml": "[[mounts]]\n  source = \"data\"\n  destination = \"/data\"\n",
+		}))
+		entry := storageAt(candidate, "/data")
+		if entry == nil || entry.Kind != PersistentStorage || entry.Target != "/data" || entry.Source != "fly.toml" ||
+			!strings.Contains(entry.Reason, "fly.toml mounts a volume at /data") {
+			t.Fatalf("persistent paths = %+v", candidate.PersistentPaths)
+		}
+	})
+	t.Run("render disk and sync false", func(t *testing.T) {
+		t.Parallel()
+		candidate := selectedOf(detectShapeFixture(t, map[string]string{
+			"requirements.txt": "fastapi==0.115\nuvicorn==0.30\n", "main.py": "from fastapi import FastAPI\napp = FastAPI()\n",
+			"render.yaml": "services:\n  - type: web\n    name: api\n    runtime: python\n    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT\n" +
+				"    disk:\n      name: data\n      mountPath: /var/data\n      sizeGB: 1\n    envVars:\n      - key: STRIPE_KEY\n        sync: false\n      - key: LOG_LEVEL\n        value: info\n",
+		}))
+		if entry := storageAt(candidate, "/var/data"); entry == nil || entry.Target != "/var/data" {
+			t.Fatalf("persistent paths = %+v", candidate.PersistentPaths)
+		}
+		if stripe := candidateVariable(candidate, "STRIPE_KEY"); stripe == nil || !stripe.Required {
+			t.Fatalf("STRIPE_KEY = %+v", stripe)
+		}
+		if level := candidateVariable(candidate, "LOG_LEVEL"); level == nil || level.Required {
+			t.Fatalf("LOG_LEVEL = %+v", level)
+		}
+	})
+	t.Run("railway required mount path and app.json required", func(t *testing.T) {
+		t.Parallel()
+		candidate := selectedOf(detectShapeFixture(t, map[string]string{
+			"package.json": expressManifest, "package-lock.json": "{}", "server.js": "require('express')().listen(process.env.PORT)\n",
+			"railway.json": `{"deploy":{"startCommand":"node server.js","requiredMountPath":"/app/storage"}}`,
+			"app.json":     `{"env":{"API_KEY":{"required":true},"WEB_CONCURRENCY":{"value":"2"}}}`,
+		}))
+		if entry := storageAt(candidate, "/app/storage"); entry == nil || entry.Target != "/app/storage" || entry.Source != "railway.json" {
+			t.Fatalf("persistent paths = %+v", candidate.PersistentPaths)
+		}
+		if key := candidateVariable(candidate, "API_KEY"); key == nil || !key.Required {
+			t.Fatalf("API_KEY = %+v", key)
+		}
+	})
+	t.Run("a volume already planned there is not planned twice", func(t *testing.T) {
+		t.Parallel()
+		candidate := selectedOf(detectShapeFixture(t, map[string]string{
+			"Dockerfile": "FROM node:22\nWORKDIR /app\nCOPY . .\nVOLUME /data\nCMD [\"node\", \"server.js\"]\n",
+			"fly.toml":   "[[mounts]]\n  source = \"data\"\n  destination = \"/data\"\n",
+		}))
+		targets := 0
+		for _, entry := range candidate.PersistentPaths {
+			if entry.Target == "/data" {
+				targets++
+			}
+		}
+		if targets != 1 {
+			t.Fatalf("persistent paths = %+v", candidate.PersistentPaths)
+		}
+	})
+	t.Run("an unprivileged runtime cannot write a volume the image does not prepare", func(t *testing.T) {
+		t.Parallel()
+		candidate := selectedOf(detectShapeFixture(t, map[string]string{
+			"go.mod": "module example.com/api\n\ngo 1.25\n", "main.go": "package main\n\nfunc main() {}\n",
+			"fly.toml": "[[mounts]]\n  source = \"data\"\n  destination = \"/data\"\n",
+		}))
+		entry := storageAt(candidate, "/data")
+		if entry == nil || entry.Target != "" {
+			t.Fatalf("persistent paths = %+v", candidate.PersistentPaths)
+		}
+		// Named, so preflight still says what the platform kept there.
+		findings := persistentStateFindings(candidate, PlanConfiguration{}, nil)
+		if len(findings) == 0 || findings[0].Code != "persistent_path_unmounted" {
+			t.Fatalf("findings = %+v", findings)
+		}
+	})
+}

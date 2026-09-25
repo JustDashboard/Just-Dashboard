@@ -306,7 +306,10 @@ type renderService struct {
 	PreDeployCommand  string `yaml:"preDeployCommand"`
 	StaticPublishPath string `yaml:"staticPublishPath"`
 	Schedule          string `yaml:"schedule"`
-	Routes            []struct {
+	Disk              struct {
+		MountPath string `yaml:"mountPath"`
+	} `yaml:"disk"`
+	Routes []struct {
 		Type        string `yaml:"type"`
 		Source      string `yaml:"source"`
 		Destination string `yaml:"destination"`
@@ -370,6 +373,9 @@ func renderTargets(root string, content []byte) []platformTarget {
 			manifest.BuildCommand = cleanPlatformCommand(service.BuildCommand, true)
 			manifest.HealthPath = service.HealthCheckPath
 			manifest.Dockerfile = strings.TrimPrefix(service.DockerfilePath, "./")
+			if mount := service.Disk.MountPath; strings.HasPrefix(mount, "/") && len(mount) <= 256 && len(manifest.Volumes) < 32 {
+				manifest.Volumes = append(manifest.Volumes, mount)
+			}
 			if release := cleanPlatformCommand(service.PreDeployCommand, false); release != "" {
 				manifest.ReleaseCommand = release
 				target.processes = append(target.processes, DetectedProcess{Name: "release", Kind: "release", Command: release,
@@ -430,7 +436,7 @@ func renderTargets(root string, content []byte) []platformTarget {
 func railwayTarget(root, name string, content []byte) platformTarget {
 	file := joinRoot(root, name)
 	target := platformTarget{root: root, manifest: DetectedPlatformManifest{File: file, Platform: "railway"}}
-	var build, start, health, dockerfile, release string
+	var build, start, health, dockerfile, release, mount string
 	if name == "railway.json" {
 		var document struct {
 			Build struct {
@@ -438,15 +444,17 @@ func railwayTarget(root, name string, content []byte) platformTarget {
 				DockerfilePath string `json:"dockerfilePath"`
 			} `json:"build"`
 			Deploy struct {
-				StartCommand     string          `json:"startCommand"`
-				HealthcheckPath  string          `json:"healthcheckPath"`
-				PreDeployCommand json.RawMessage `json:"preDeployCommand"`
+				StartCommand      string          `json:"startCommand"`
+				HealthcheckPath   string          `json:"healthcheckPath"`
+				PreDeployCommand  json.RawMessage `json:"preDeployCommand"`
+				RequiredMountPath string          `json:"requiredMountPath"`
 			} `json:"deploy"`
 		}
 		if json.Unmarshal(manifestText(content), &document) != nil {
 			return platformTarget{}
 		}
 		build, start, health, dockerfile = document.Build.BuildCommand, document.Deploy.StartCommand, document.Deploy.HealthcheckPath, document.Build.DockerfilePath
+		mount = document.Deploy.RequiredMountPath
 		var single string
 		var many []string
 		if json.Unmarshal(document.Deploy.PreDeployCommand, &single) == nil {
@@ -458,6 +466,7 @@ func railwayTarget(root, name string, content []byte) platformTarget {
 		entries := readTOML(content)
 		build, start, health = tomlText(entries, "build", "buildCommand"), tomlText(entries, "deploy", "startCommand"), tomlText(entries, "deploy", "healthcheckPath")
 		dockerfile = tomlText(entries, "build", "dockerfilePath")
+		mount = tomlText(entries, "deploy", "requiredMountPath")
 		if value, ok := tomlLookup(entries, "deploy", "preDeployCommand"); ok {
 			release = value.text
 			if value.isList {
@@ -470,6 +479,11 @@ func railwayTarget(root, name string, content []byte) platformTarget {
 	manifest.StartCommand = cleanPlatformCommand(start, false)
 	manifest.HealthPath = health
 	manifest.Dockerfile = strings.TrimPrefix(dockerfile, "./")
+	// A Railway volume is attached in its dashboard; the config names only
+	// the path a deployment refuses to start without.
+	if strings.HasPrefix(mount, "/") && len(mount) <= 256 {
+		manifest.Volumes = append(manifest.Volumes, mount)
+	}
 	if release = cleanPlatformCommand(release, false); release != "" {
 		manifest.ReleaseCommand = release
 		target.processes = append(target.processes, DetectedProcess{Name: "release", Kind: "release", Command: release,
@@ -1122,6 +1136,16 @@ func applyPlatformTarget(candidate *DetectedCandidate, target platformTarget, ma
 	for _, name := range append(append([]string(nil), manifest.GeneratedVariables...), manifest.RequiredVariables...) {
 		if variable, ok := variableFrom(name, manifest.File, ""); ok {
 			candidate.Variables = mergeDetectedVariable(candidate.Variables, variable)
+		}
+	}
+	// A value the platform asks for at creation (render.yaml sync: false,
+	// app.json's required) is one the application cannot run without, so
+	// the plan declares it required and preflight asks for it.
+	for _, name := range manifest.RequiredVariables {
+		for index := range candidate.Variables {
+			if candidate.Variables[index].Name == name {
+				candidate.Variables[index].Required = true
+			}
 		}
 	}
 	// The platform mints these itself (render.yaml generateValue, app.json

@@ -474,11 +474,65 @@ func applyStateDetection(marker *detectedMarkers, candidates []DetectedCandidate
 				})
 			}
 		}
+		found = platformVolumePaths(candidate, found, view, layout)
 		candidate.PersistentPaths = mergePersistentPaths(found)
 		for _, entry := range candidate.PersistentPaths {
 			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: entry.Source, Reason: persistentEvidence(entry)})
 		}
 	}
+}
+
+// platformVolumePaths adds the volumes another platform's file mounts for
+// the candidate — fly.toml's [[mounts]], render.yaml's disk, Railway's
+// volumes — as state to keep where that platform kept it. The application
+// names the absolute path itself, so the volume stands at the same one. A
+// volume already planned there, or state detection found under it without
+// a volume, takes that platform's directory instead of a second entry. The
+// directory needs a volume the process can write: anywhere for a process
+// running as root, otherwise only where the image prepares one.
+func platformVolumePaths(candidate *DetectedCandidate, found []DetectedPersistentPath, view stateRoot, layout stateLayout) []DetectedPersistentPath {
+	for _, manifest := range candidate.PlatformManifests {
+		for _, volume := range manifest.Volumes {
+			volume = path.Clean(volume)
+			if !path.IsAbs(volume) || volume == "/" || volume == layout.workdir || strings.HasPrefix(layout.workdir, volume+"/") {
+				continue
+			}
+			nested := func(a, b string) bool { return a == b || strings.HasPrefix(a, b+"/") }
+			target := platformVolumeTarget(volume, view, layout)
+			planned := false
+			for index := range found {
+				entry := &found[index]
+				switch {
+				case entry.Target != "" && (nested(entry.Target, volume) || nested(volume, entry.Target)):
+					planned = true
+				case entry.Target == "" && entry.Variable == "" && target != "" && nested(entry.Path, volume):
+					entry.Target, planned = target, true
+				}
+			}
+			if planned {
+				continue
+			}
+			found = append(found, DetectedPersistentPath{
+				Kind: PersistentStorage, Path: volume, Target: target, Source: manifest.File,
+				Reason: platformNames[manifest.Platform] + " mounts a volume at " + volume,
+			})
+		}
+	}
+	return found
+}
+
+// platformVolumeTarget is where a volume can stand for a platform's mount:
+// the same path, when the process can write a volume there.
+func platformVolumeTarget(volume string, view stateRoot, layout stateLayout) string {
+	switch {
+	case layout.root, volume == layout.dataDir:
+		return volume
+	case layout.repoDirsOnly && strings.HasPrefix(volume, layout.workdir+"/"):
+		if dir := strings.TrimPrefix(volume, layout.workdir+"/"); view.committed[dir] {
+			return volume
+		}
+	}
+	return ""
 }
 
 func persistentEvidence(entry DetectedPersistentPath) string {
