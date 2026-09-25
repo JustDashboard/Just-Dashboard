@@ -35,6 +35,11 @@ type nxProject struct {
 	viteOutput     string
 	viteSPAOff     bool
 	configurations []string
+	// bundle is the file esbuild writes: outputFileName, else main's name
+	// as JavaScript. ssr says an Angular application build also writes its
+	// server (options.ssr set, outputMode not static).
+	bundle string
+	ssr    bool
 }
 
 // nxMaxProjects bounds how many project.json files one workspace reads.
@@ -146,6 +151,14 @@ func readNxProject(files nodeFiles, directory string, plugins []string) (nxProje
 			}
 		}
 		project.target = option(build.Options, "target")
+		if name := path.Base(option(build.Options, "outputFileName")); nodeScriptFile(name) && !strings.HasSuffix(name, ".ts") {
+			project.bundle = name
+		} else if main := path.Base(option(build.Options, "main")); nodeScriptFile(main) {
+			project.bundle = strings.TrimSuffix(main, path.Ext(main)) + ".js"
+		}
+		if raw, ok := build.Options["ssr"]; ok && string(raw) != "false" && string(raw) != "null" && option(build.Options, "outputMode") != "static" {
+			project.ssr = true
+		}
 		for name := range build.Configurations {
 			project.configurations = append(project.configurations, name)
 		}
@@ -249,9 +262,20 @@ func (p nxProject) candidate(runner string) nxCandidate {
 		result.framework, result.output, result.spa = "", output, true
 		result.evidence = p.executor + " writes " + p.name + "'s site to " + output
 	case executor == "webpack:webpack", executor == "esbuild:esbuild", executor == "node:build", executor == "node:webpack":
+		// webpack names its bundle after the entry chunk, main; esbuild
+		// after the main file, unless outputFileName says otherwise.
+		bundle := "main.js"
+		if executor == "esbuild:esbuild" && p.bundle != "" {
+			bundle = p.bundle
+		}
 		result.port = 3000
-		result.start = "node " + path.Join(output, "main.js")
-		result.evidence = p.executor + " bundles " + p.name + " into " + path.Join(output, "main.js")
+		result.start = "node " + path.Join(output, bundle)
+		result.evidence = p.executor + " bundles " + p.name + " into " + path.Join(output, bundle)
+	case strings.HasSuffix(p.executor, ":application") && p.ssr:
+		entry := path.Join(output, "server", "server.mjs")
+		result.framework, result.port = "angular", 4000
+		result.start = "node " + entry
+		result.evidence = p.executor + " writes " + p.name + "'s server to " + entry
 	case strings.HasSuffix(p.executor, ":application") || strings.HasSuffix(p.executor, ":browser-esbuild") || strings.HasSuffix(p.executor, ":browser"):
 		result.framework, result.spa = "angular", true
 		result.output = output

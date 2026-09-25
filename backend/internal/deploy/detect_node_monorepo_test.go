@@ -97,6 +97,8 @@ func TestNxApplicationProjectsAreTheCandidates(t *testing.T) {
 		"apps/admin/vite.config.ts": "export default defineConfig({ build: { outDir: '../../dist/apps/admin' } })",
 		"apps/api/project.json":     `{"name":"api","projectType":"application","targets":{"build":{"executor":"@nx/esbuild:esbuild","options":{"outputPath":"dist/apps/api","main":"apps/api/src/main.ts"},"configurations":{"development":{},"production":{}}},"serve":{"executor":"@nx/js:node"}}}`,
 		"apps/legacy/project.json":  `{"name":"legacy","projectType":"application","targets":{"build":{"executor":"@acme/custom:build"}}}`,
+		"apps/gateway/project.json": `{"name":"gateway","projectType":"application","targets":{"build":{"executor":"@nx/esbuild:esbuild","options":{"outputPath":"dist/apps/gateway","main":"apps/gateway/src/server.ts"}}}}`,
+		"apps/shop/project.json":    `{"name":"shop","projectType":"application","targets":{"build":{"executor":"@angular-devkit/build-angular:application","options":{"outputPath":"dist/apps/shop","browser":"apps/shop/src/main.ts","server":"apps/shop/src/main.server.ts","ssr":{"entry":"apps/shop/src/server.ts"}}}}}`,
 		"libs/ui/project.json":      `{"name":"ui","projectType":"library"}`,
 	})
 	byName := map[string]DetectedCandidate{}
@@ -106,7 +108,7 @@ func TestNxApplicationProjectsAreTheCandidates(t *testing.T) {
 		}
 		byName[candidate.Name] = candidate
 	}
-	if _, ok := byName["@org/source"]; ok || len(byName) != 4 {
+	if _, ok := byName["@org/source"]; ok || len(byName) != 6 {
 		t.Fatalf("candidates = %+v", result.Candidates)
 	}
 	for name, want := range map[string]struct{ framework, build, start, output string }{
@@ -114,6 +116,10 @@ func TestNxApplicationProjectsAreTheCandidates(t *testing.T) {
 		"admin":  {"vite", "NX_DAEMON=false NX_NO_CLOUD=true npx nx run admin:build", "", "dist/apps/admin"},
 		"api":    {"express", "NX_DAEMON=false NX_NO_CLOUD=true npx nx run api:build --configuration=production", "node dist/apps/api/main.js", ""},
 		"legacy": {"", "NX_DAEMON=false NX_NO_CLOUD=true npx nx run legacy:build", "", ""},
+		// esbuild names the bundle after the main file; an Angular
+		// application with ssr writes its server beside the browser files.
+		"gateway": {"express", "NX_DAEMON=false NX_NO_CLOUD=true npx nx run gateway:build", "node dist/apps/gateway/server.js", ""},
+		"shop":    {"angular", "NX_DAEMON=false NX_NO_CLOUD=true npx nx run shop:build", "node dist/apps/shop/server/server.mjs", ""},
 	} {
 		got := byName[name]
 		if got.Framework != want.framework || got.BuildCommand != want.build || got.StartCommand != want.start || got.OutputDirectory != want.output {
@@ -129,8 +135,23 @@ func TestNxApplicationProjectsAreTheCandidates(t *testing.T) {
 	if admin := byName["admin"]; admin.Profile != ProfileStatic || !admin.SPAFallback {
 		t.Fatalf("admin = %+v", admin)
 	}
-	// The recipe prepares each of them from the workspace root.
+	if shop := byName["shop"]; shop.Profile != ProfileWeb || shop.Port != 4000 {
+		t.Fatalf("shop = %+v", shop)
+	}
+	// Every application shares the workspace root and the method, so a
+	// saved plan, which carries no selection, is matched to its
+	// application by the commands it runs, then by its build command.
 	for _, name := range []string{"web", "api", "admin"} {
+		want := byName[name]
+		build := BuildPlanConfig{Method: BuildRecipe, Recipe: "node", BuildCommand: want.BuildCommand, StartCommand: want.StartCommand}
+		for _, stored := range []BuildPlanConfig{build, {Method: BuildRecipe, Recipe: "node", BuildCommand: want.BuildCommand, StartCommand: "node custom.js"}} {
+			if planned := plannedDetectionCandidate(&DetectionResult{Candidates: result.Candidates}, stored); planned == nil || planned.Name != name {
+				t.Fatalf("the plan for %s was judged by %+v", name, planned)
+			}
+		}
+	}
+	// The recipe prepares each of them from the workspace root.
+	for _, name := range []string{"web", "api", "admin", "gateway", "shop"} {
 		candidate := byName[name]
 		if candidate.RecipeIssue != "" {
 			t.Fatalf("%s recipe issue: %s", name, candidate.RecipeIssue)
