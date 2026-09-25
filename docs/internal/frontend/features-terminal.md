@@ -136,8 +136,8 @@ under the domain field because "the name does not point here yet" causes most ce
 certbot reports it as "challenge failed". `tls-report.tsx` says out loud what `unknown` means for a
 protocol row.
 
-The security section is eight pages of one shape, the host Overview's: a page header carrying the
-area's verdict, a run of `StatTile` readings on the page's own ground, the findings about that area
+The security section is eight pages of one shape, the host Overview's: compact contextual state and
+controls, a run of `StatTile` readings on the page's own ground, the findings about that area
 under them (`AreaFindings`, plain), then the detail as plain tables that bleed to the page edge. The
 overview opens on how this browser reaches the panel — the exposure grade, the allowlist, the tunnel
 interfaces and **the address you arrived from** (`Exposure.client`) as a row of facts — then five

@@ -33,7 +33,7 @@ import {
   windowStatSum,
   type WindowStat,
 } from "@/lib/metrics-summary"
-import { Page, PageHeader, PageState, Section } from "@/components/page"
+import { Page, PageContext, PageState, Section } from "@/components/page"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { utilisationTone } from "@/components/meter"
 import { ChartPanel } from "@/components/metrics/chart-panel"
@@ -288,31 +288,7 @@ export default function MetricsPage() {
 
   return (
     <Page className="animate-rise">
-      <PageHeader
-        eyebrow="Server"
-        title="Metrics"
-        actions={
-          <>
-            {live && (
-              <IconAction
-                label={paused ? "Resume live feed" : "Pause live feed"}
-                onClick={() =>
-                  setFrozen(paused ? null : { live, rows: liveChartRows, storage: liveStorage })
-                }
-              >
-                {paused ? <Play /> : <Pause />}
-              </IconAction>
-            )}
-            {/* Exactly the window and resolution on screen, peaks included —
-                the numbers a chart is the wrong way to hand to somebody. */}
-            <Button variant="outline" size="sm" disabled={rows.length === 0} onClick={exportCsv}>
-              <Download />
-              Export CSV
-            </Button>
-            <RangePicker controls={controls} />
-          </>
-        }
-      />
+      <PageContext title="Metrics" />
 
       {/* What this machine is made of. The Overview's line says what it
           runs; this one says what it runs on, drawn as the processor itself,
@@ -354,7 +330,27 @@ export default function MetricsPage() {
             )}
           </>
         }
-        aside={health && <HealthVerdict status={health.status} className="text-body" />}
+        aside={
+          <div className="flex max-w-full flex-wrap items-center gap-2">
+            {health && <HealthVerdict status={health.status} className="text-body" />}
+            {live && (
+              <IconAction
+                label={paused ? "Resume live feed" : "Pause live feed"}
+                onClick={() =>
+                  setFrozen(paused ? null : { live, rows: liveChartRows, storage: liveStorage })
+                }
+              >
+                {paused ? <Play /> : <Pause />}
+              </IconAction>
+            )}
+            {/* Export the exact window and resolution on screen, peaks included. */}
+            <Button variant="outline" size="sm" disabled={rows.length === 0} onClick={exportCsv}>
+              <Download />
+              Export CSV
+            </Button>
+            <RangePicker controls={controls} />
+          </div>
+        }
       />
 
       <Readings

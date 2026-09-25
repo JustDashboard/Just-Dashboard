@@ -1,8 +1,8 @@
 "use client"
 
 import { useAuth } from "@/hooks/use-auth"
-import { Page, PageHeader } from "@/components/page"
-import { ApiKeysView, CreateApiKeyDialog, useApiKeys } from "@/components/account/api-keys"
+import { Page, PageContext } from "@/components/page"
+import { ApiKeysView, useApiKeys } from "@/components/account/api-keys"
 import { useDashboardUsers } from "@/components/account/dashboard-users"
 
 /**
@@ -23,11 +23,7 @@ export default function AccountKeysPage() {
   const users = useDashboardUsers(can("system.admin"))
   return (
     <Page className="animate-rise">
-      <PageHeader
-        eyebrow="Account"
-        title="API keys"
-        actions={keys.data?.length ? <CreateApiKeyDialog onDone={keys.refresh} /> : undefined}
-      />
+      <PageContext eyebrow="Account" title="API keys" />
       <ApiKeysView keys={keys} users={users.data ?? undefined} />
     </Page>
   )

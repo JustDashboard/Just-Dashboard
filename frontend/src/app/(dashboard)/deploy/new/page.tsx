@@ -1,5 +1,5 @@
 import { Suspense } from "react"
-import { Page, PageHeader } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
 import { LoadingPanel } from "@/components/state"
 import { NewProject } from "@/components/deploy/new-project"
 
@@ -25,7 +25,7 @@ export default async function NewProjectPage({
     <Suspense
       fallback={
         <Page>
-          <PageHeader eyebrow="Deployments" title="New project" />
+          <PageContext eyebrow="Deployments" title="New project" />
           <LoadingPanel rows={5} />
         </Page>
       }

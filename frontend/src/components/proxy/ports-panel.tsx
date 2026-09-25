@@ -8,7 +8,7 @@ import { get } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type { Listener } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { Page, PageHeader, SearchInput } from "@/components/page"
+import { Page, PageContext, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { ROW_BLEED } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
@@ -108,7 +108,7 @@ export function PortsPage() {
     return verbs
   }
 
-  const header = <PageHeader eyebrow="Proxy" title="Listening ports" />
+  const header = <PageContext eyebrow="Proxy" title="Listening ports" />
 
   if (loading && !data) {
     return (
@@ -182,7 +182,7 @@ export function PortsPage() {
             <EmptyState icon={Router} title="No sockets match" className="mt-4" />
           ) : (
             <>
-              <div className="group-data-[plain]/panel:-mx-4 hidden min-w-0 md:block">
+              <div className="hidden min-w-0 group-data-[plain]/panel:-mx-4 md:block">
                 <Table containerClassName="max-h-[calc(100svh-24rem)]">
                   <TableHeader className={stickyTableHeader}>
                     <TableRow>

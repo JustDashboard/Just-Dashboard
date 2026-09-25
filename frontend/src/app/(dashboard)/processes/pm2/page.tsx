@@ -11,7 +11,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useConfirm } from "@/components/confirm-dialog"
 import { cn } from "@/lib/utils"
-import { Page, PageHeader, RowLink, SearchInput } from "@/components/page"
+import { Page, PageContext, RowLink, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { ROW_BLEED } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
@@ -124,34 +124,7 @@ function PM2Applications() {
     selectKey(pm2Key(process))
   }
 
-  const header = (
-    <PageHeader
-      eyebrow="Processes"
-      title="PM2"
-      actions={
-        inventory.data?.available && (
-          <>
-            {can("system.admin") && daemons.length > 0 && (
-              <Button size="sm" onClick={() => setStarting(true)}>
-                <Plus className="size-3.5" />
-                Start application
-              </Button>
-            )}
-            {daemonVerbs.length > 0 && (
-              <VerbMenu
-                verbs={daemonVerbs}
-                trigger={
-                  <Button size="sm" variant="outline">
-                    Startup and bulk
-                  </Button>
-                }
-              />
-            )}
-          </>
-        )
-      }
-    />
-  )
+  const header = <PageContext eyebrow="Processes" title="PM2" />
 
   if (inventory.loading && !inventory.data) {
     return (
@@ -231,7 +204,29 @@ function PM2Applications() {
       </StatGrid>
 
       <Panel>
-        <PanelHeader title="Applications" />
+        <PanelHeader
+          title="Applications"
+          actions={
+            <span className="flex flex-wrap items-center gap-2">
+              {can("system.admin") && daemons.length > 0 && (
+                <Button size="sm" onClick={() => setStarting(true)}>
+                  <Plus className="size-3.5" />
+                  Start application
+                </Button>
+              )}
+              {daemonVerbs.length > 0 && (
+                <VerbMenu
+                  verbs={daemonVerbs}
+                  trigger={
+                    <Button size="sm" variant="outline">
+                      Startup and bulk
+                    </Button>
+                  }
+                />
+              )}
+            </span>
+          }
+        />
         <PanelToolbar>
           <SearchInput
             value={filter}
@@ -270,7 +265,7 @@ function PM2Applications() {
             <EmptyState icon={ChartActivity} title="No applications match" className="mt-4" />
           ) : (
             <>
-              <div className="group-data-[plain]/panel:-mx-4 hidden min-w-0 lg:block">
+              <div className="hidden min-w-0 group-data-[plain]/panel:-mx-4 lg:block">
                 <Table containerClassName="max-h-[calc(100svh-24rem)]">
                   <TableHeader className={stickyTableHeader}>
                     <TableRow>

@@ -56,7 +56,7 @@ import {
 import { FileBrowser } from "@/components/files/inline-browser"
 import { ProductLogo, imageProduct } from "@/components/product-logo"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Detail, DetailList, Metric, MetricStrip, Page, PageHeader } from "@/components/page"
+import { Detail, DetailList, Metric, MetricStrip, Page, PageContext } from "@/components/page"
 import { Group, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { ROW_BLEED } from "@/components/row-list"
 import { Tag } from "@/components/tag"
@@ -180,7 +180,7 @@ function ContainerDetailPanel({
   return (
     <Page fill>
       <div className="flex min-w-0 shrink-0 flex-col gap-4">
-        <PageHeader
+        <PageContext
           eyebrow={
             <Link
               href="/docker/containers"
@@ -189,24 +189,15 @@ function ContainerDetailPanel({
               <ArrowLeft className="size-3" /> Containers
             </Link>
           }
-          title={
-            <span className="inline-flex max-w-full min-w-0 items-center gap-3">
-              {/* The product it runs, the mark the containers list found it by. */}
-              {detail && <ProductLogo id={imageProduct(detail.image)} />}
-              <span className="truncate">{detail?.name ?? "Container"}</span>
-              {detail && (
+          title={detail?.name ?? "Container"}
+          actions={
+            detail && (
+              <>
                 <Status
                   state={detail.state}
                   live={detail.state === "running"}
                   label={statusWord(detail)}
-                  className="shrink-0"
                 />
-              )}
-            </span>
-          }
-          actions={
-            detail && (
-              <>
                 {/* Start, stop and restart were reachable from the table and
                     nowhere else, so opening a container to look at why it is
                     unhappy meant closing it again to do anything about it. */}
@@ -227,8 +218,17 @@ function ContainerDetailPanel({
             a container has, and it used to need the Overview tab. */}
         {detail && (
           <MetricStrip className="animate-rise">
+            <Metric
+              label="Container"
+              value={
+                <span className="inline-flex items-center gap-2">
+                  <ProductLogo id={imageProduct(detail.image)} />
+                  {detail.name}
+                </span>
+              }
+            />
             <Metric label="Image" value={detail.image} />
-            <Metric label="Container" value={detail.id.slice(0, 12)} />
+            <Metric label="ID" value={detail.id.slice(0, 12)} />
             {detail.composeStack && (
               <Metric
                 label="Compose stack"

@@ -12,7 +12,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { ProductLogo, ProductLogos, imageProduct, imageProducts } from "@/components/product-logo"
-import { Page, PageHeader, PageState } from "@/components/page"
+import { Page, PageContext, PageState } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
@@ -109,38 +109,7 @@ export default function DockerOverviewPage() {
     // The page rises once, when its first container list lands — the same
     // arrival the host Overview makes.
     <Page className="animate-rise">
-      <PageHeader
-        eyebrow="Server"
-        title={
-          <span className="inline-flex items-center gap-2">
-            Docker
-            {/*
-              The one word on this page that has to be understood before any of
-              the others, and the section's front page never said what it was.
-              A hover card rather than a paragraph: an operator who knows Docker
-              never sees it, and somebody who does not is one gesture from an
-              answer written for them.
-            */}
-            <ExplainIcon name="docker" className="translate-y-0.5" />
-          </span>
-        }
-        /*
-          The page's one command (§15 pass 6). New containers come from the
-          Deploy pages — there is no standalone create flow here — so the way
-          *on* to this server is the only thing the overview asks you to press,
-          and everything else on it is a reading or a way through to one. It
-          used to appear only on an empty server, which left a populated Docker
-          page with no brand ink anywhere on it and nothing that looked like
-          the action.
-        */
-        actions={
-          can("service.control") && (
-            <Button size="sm" asChild>
-              <Link href="/deploy">Open Deploy</Link>
-            </Button>
-          )
-        }
-      />
+      <PageContext title="Docker" />
 
       {/*
         Four readings, four destinations. Every one of them is a link now: three
@@ -237,7 +206,7 @@ export default function DockerOverviewPage() {
       {/* A server with nothing on it is not an error state, and it is the one
           moment where the page should be teaching rather than reporting. */}
       {containers.length === 0 && detected.length === 0 ? (
-        <FirstRun />
+        <FirstRun canDeploy={can("service.control")} />
       ) : (
         <>
           {/*
@@ -302,12 +271,19 @@ export default function DockerOverviewPage() {
                 </span>
               }
               actions={
-                <Link
-                  href="/docker/stacks"
-                  className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-                >
-                  Manage <ArrowRight className="size-3" />
-                </Link>
+                <span className="flex flex-wrap items-center gap-3">
+                  <Link
+                    href="/docker/stacks"
+                    className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
+                  >
+                    Manage <ArrowRight className="size-3" />
+                  </Link>
+                  {can("service.control") && (
+                    <Button size="sm" asChild>
+                      <Link href="/deploy">Open Deploy</Link>
+                    </Button>
+                  )}
+                </span>
               }
             />
             <PanelBody flush>
@@ -459,18 +435,26 @@ function IdleRow({
  * panel opens with, stated here because this is where the question is actually
  * asked.
  *
- * The way out is the page header's own command and is not repeated here: two
- * brand faces on one screen is the "one, not two" failure §16 names, and on an
- * empty server this panel and that button were nine inches apart saying the
- * same word.
+ * Open Deploy sits with this explanation on an empty server, so the command
+ * appears where the reader learns what to start. The routes below offer the
+ * more specific starting points.
  */
-function FirstRun() {
+function FirstRun({ canDeploy }: { canDeploy: boolean }) {
   return (
     // Plain, and the three routes are rows rather than three framed cards in
     // a framed panel: on a page that draws no other box, the first thing a
     // new server showed was four of them.
     <Panel plain className="animate-rise">
-      <PanelHeader title="Nothing is running on this server yet" />
+      <PanelHeader
+        title="Nothing is running on this server yet"
+        actions={
+          canDeploy && (
+            <Button size="sm" asChild>
+              <Link href="/deploy">Open Deploy</Link>
+            </Button>
+          )
+        }
+      />
       <PanelBody className="space-y-4">
         <p className="max-w-prose text-body leading-relaxed text-muted-foreground">
           A <b className="font-medium text-foreground">container</b> is one application packaged

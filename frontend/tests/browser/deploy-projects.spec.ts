@@ -184,8 +184,7 @@ test("the empty state offers to start a project or clear the filters", async ({ 
   )
   await page.goto("/deploy")
   await expect(page.getByText("Deploy your first project", { exact: true })).toBeVisible()
-  // Two "New project" links exist at once here — the header's and the empty
-  // state's own — so the assertion scopes to the empty state's block.
+  // The empty fleet carries its own command, beside its next steps.
   const empty = page.locator('[data-slot="empty-state"]')
   await expect(empty.getByRole("link", { name: "New project", exact: true })).toBeVisible()
   await expect(
@@ -228,7 +227,8 @@ test("Credentials link sits beside Notifications and opens the credentials page"
   })
   await page.goto("/deploy")
   // Scoped to the page: the sidebar's Deployments panel names Credentials too,
-  // and this test is about the link in the page header.
+  // and this test is about the link in the page controls.
+  await page.screenshot({ path: "test-results/deploy-list-context-1280.png", fullPage: true })
   await page.getByRole("main").getByRole("link", { name: "Credentials", exact: true }).click()
   await expect(page).toHaveURL(/\/deploy\/credentials$/)
   await expect(page.getByRole("heading", { name: "Credentials", exact: true })).toBeVisible()
@@ -250,7 +250,7 @@ test("Credentials link is hidden for a read-only role, unlike Notifications", as
   await expect(rail.getByRole("link", { name: "Credentials", exact: true })).toHaveCount(0)
 })
 
-test("on a phone the header's pages sit behind one menu beside New project", async ({ page }) => {
+test("on a phone the related pages sit behind one menu beside New project", async ({ page }) => {
   await mockProject(page)
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto("/deploy")

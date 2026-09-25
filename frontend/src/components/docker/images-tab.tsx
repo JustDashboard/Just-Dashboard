@@ -70,12 +70,14 @@ export function ImagesTab({
   onPullingChange,
   building: externalBuilding,
   onBuildingChange,
+  actions,
 }: {
   confirm: ConfirmFn
   pulling?: string | null
   onPullingChange?: (ref: string | null) => void
   building?: boolean
   onBuildingChange?: (open: boolean) => void
+  actions?: React.ReactNode
 }) {
   const { can } = useAuth()
   const [filter, setFilter] = useSessionState("docker.images.query", "")
@@ -167,6 +169,7 @@ export function ImagesTab({
           title="Images"
           actions={
             <>
+              {actions}
               <IconAction
                 label="Check the registries for newer versions"
                 onClick={recheck}

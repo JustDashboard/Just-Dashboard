@@ -21,7 +21,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Page, PageHeader, SearchInput } from "@/components/page"
+import { Page, PageContext, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { ChipCount, FilterChip } from "@/components/tabs"
 import { ChoiceList, GroupRule } from "@/components/flow"
@@ -365,7 +365,7 @@ export default function ContainersPage() {
     <Page className="animate-rise">
       {/* Containers are deployed from the Deploy pages — there is no standalone
           create flow here anymore. */}
-      <PageHeader eyebrow="Docker" title="Containers" />
+      <PageContext eyebrow="Docker" title="Containers" />
 
       {/*
         Runtime first, then everything else. They are separate panels because

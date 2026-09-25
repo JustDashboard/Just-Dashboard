@@ -14,7 +14,7 @@ import { LogoGlyph } from "@/components/logo"
 import { ProductGlyph } from "@/components/product-logo"
 import { ReleaseTimeline } from "@/components/update/release-timeline"
 import { UpdateProgress } from "@/components/update/update-progress"
-import { Page, PageHeader, PageState, SearchInput } from "@/components/page"
+import { Page, PageContext, PageState, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, EmptyState, ErrorState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -33,8 +33,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
  * upgrading a root-equivalent panel — had nowhere to live but a sheet over
  * the top of a package table.
  *
- * The page is its history. A header whose actions are the two commands, one
- * line saying what this install is, the update while one is running, then the
+ * The page is its history. The two commands sit with the install's identity,
+ * then the update while one is running and the
  * releases as a timeline. The check itself needs no button to happen: opening
  * this page is what asks (see SelfUpdateProvider), which is why "checked" is
  * usually seconds old.
@@ -47,7 +47,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
  * with how many releases ahead) and the first entry of the history, tagged.
  * *Checked* is the hint under that status, and a failed check turns the
  * status itself amber. What the tiles did beyond saying those numbers — put
- * "there is an update" first — the brand-faced button in the header does, and
+ * "there is an update" first — the brand-faced button in the page controls does, and
  * did already.
  */
 export default function DashboardVersionPage() {
@@ -127,9 +127,10 @@ export default function DashboardVersionPage() {
   return (
     <Page className="animate-rise">
       {dialog}
-      <PageHeader
-        eyebrow="Settings"
-        title="Version"
+      <PageContext eyebrow="Settings" title="Version" />
+
+      <Identity
+        report={report}
         actions={
           <>
             <Button
@@ -152,8 +153,6 @@ export default function DashboardVersionPage() {
           </>
         }
       />
-
-      <Identity report={report} />
 
       {error && <ErrorState error={error} />}
 
@@ -241,7 +240,7 @@ export default function DashboardVersionPage() {
  * because it is the one place outside this machine the dashboard reaches, and
  * a reader deciding whether to trust an update wants to know where from.
  */
-function Identity({ report }: { report: SelfUpdateReport }) {
+function Identity({ report, actions }: { report: SelfUpdateReport; actions: React.ReactNode }) {
   const behind = report.releases.length
   const status = report.available
     ? { tone: "notice" as const, label: `${report.latest} available` }
@@ -316,7 +315,7 @@ function Identity({ report }: { report: SelfUpdateReport }) {
         </div>
       </div>
 
-      <div className="min-w-0 space-y-1 sm:text-right">
+      <div className="min-w-0 space-y-2 sm:text-right">
         {report.check.error ? (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -333,6 +332,7 @@ function Identity({ report }: { report: SelfUpdateReport }) {
           <Status tone={status.tone} label={status.label} className="text-body font-medium" />
         )}
         {hint && <p className="text-hint text-muted-foreground">{hint}</p>}
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">{actions}</div>
       </div>
     </div>
   )

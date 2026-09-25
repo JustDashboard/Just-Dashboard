@@ -1,6 +1,6 @@
 # Frontend shell and design system
 
-The App Router currently has 48 `page.tsx` entry points, including nested database, Docker, proxy,
+The App Router currently has 76 `page.tsx` entry points, including nested database, Docker, proxy,
 security, and deployment workflows plus `/login`. Most page modules are client components; the three
 deployment detail/new wrappers remain server components and hand interaction to client components under
 `components/deploy/`.
@@ -70,8 +70,8 @@ height, a project's favicon or product (`ProjectMark size="xs"`), a connection's
 so it is derived from the same data as the title and caption. A scope carries no `icon`: a glyph in a
 row's slot made the heading read as one more row to press.
 
-The groups run in the order a day on the server runs, and a page's header eyebrow is its group's
-label: **Server** (Overview, and Monitoring: Metrics, Processes, Logs), **Apps** (Deployments first,
+The groups run in the order a day on the server runs, and the rail names each group:
+**Server** (Overview, and Monitoring: Metrics, Processes, Logs), **Apps** (Deployments first,
 then Databases, Docker), **Workspace** (Terminal, Files, Git), **Protection** (Security, Backups),
 **Advanced** (Server configuration: Proxy & TLS, Packages, System users, Audit log) and **System**
 (Settings). The top-level list is twelve rows rather than seventeen: the three monitoring pages answer
@@ -96,7 +96,9 @@ A small set of files defines the visual language, and pages compose them rather 
 layout. [`design-system.md`](design-system.md) states the rules in full; this is the map.
 
 - `components/page.tsx` — `Page` (one measure, gutter and rhythm; `fill` for terminal and logs, whose
-  content *is* the viewport), `PageHeader`, `PageState`, `Section`, `Toolbar`, `SearchInput`,
+  content *is* the viewport), `PageContext` (an accessible page name, plus a linked parent and verbs
+  on detail pages, with no visual page title; list commands live in their section or workbench),
+  `PageState`, `Section`, `Toolbar`, `SearchInput`,
   `Metric`/`MetricStrip`, `DetailList`/`Detail`, `RowLink` (`SearchInput` is 40px and a line of its
   own below `sm`; `MetricStrip` is two-up on a phone — §8). **None of the heading primitives takes a
   `description`** — see rule 5 in [`design-system.md`](design-system.md).
@@ -125,9 +127,9 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   showing, read it, and close it — the list is the context you are using. A detail that holds a
   **stream, a terminal, or an editor** is not that. You stay in it for minutes, the list behind it is
   dead weight, and a sheet's `sm:max-w-3xl` is about ninety columns of terminal. Those are their own
-  destination with a breadcrumb back, built the way `deploy/run-page.tsx` is: `PageHeader` with the
-  parent as an `eyebrow` link, the name and a `Status` as the title, the verbs in `actions`, and what
-  the thing *is* under it — a `MetricStrip` on a container's and a stack's page, and on the run page,
+  destination with a breadcrumb back, built the way `deploy/run-page.tsx` is: `PageContext` with the
+  parent as an `eyebrow` link and the verbs in `actions`, then the resource name and state among the
+  page's facts — a `MetricStrip` on a container's and a stack's page, and on the run page,
   since the 2026-09-24 pass, the `HostIdentity` line the host Overview opens on (the source as its
   forge, the commit, who or what started the run, how long it has taken), because a run is one thing
   described the way the product describes every thing. A container, a compose stack and a backup job

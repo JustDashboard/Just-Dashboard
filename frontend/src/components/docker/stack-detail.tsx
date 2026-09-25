@@ -38,7 +38,7 @@ import {
 import { CodeEditor } from "@/components/code-editor"
 import { LogViewer } from "@/components/log-viewer"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Metric, MetricStrip, Page, PageHeader } from "@/components/page"
+import { Metric, MetricStrip, Page, PageContext } from "@/components/page"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { FileBrowser } from "@/components/files/inline-browser"
 import { ProductLogo, ProductLogos, imageProduct, imageProducts } from "@/components/product-logo"
@@ -136,7 +136,7 @@ function StackBody({ name }: { name: string }) {
   return (
     <Page fill>
       <div className="flex min-w-0 shrink-0 flex-col gap-4">
-        <PageHeader
+        <PageContext
           eyebrow={
             <Link
               href="/docker/stacks"
@@ -145,21 +145,29 @@ function StackBody({ name }: { name: string }) {
               <ArrowLeft className="size-3" /> Stacks
             </Link>
           }
-          title={
-            <span className="inline-flex max-w-full min-w-0 items-center gap-3">
-              {data && <StackLogos stack={data} />}
-              <span className="truncate">{name}</span>
-              {data && <StackStateBadge stack={data} />}
-            </span>
-          }
+          title={name}
           actions={
-            data && <StackActions data={data} run={run} confirmRun={confirmRun} runner={runner} />
+            data && (
+              <>
+                <StackStateBadge stack={data} />
+                <StackActions data={data} run={run} confirmRun={confirmRun} runner={runner} />
+              </>
+            )
           }
         />
-        {/* What the stack is, as data under the title rather than the sentence
+        {/* What the stack is, as data in the page rather than the sentence
             the panel read to a screen reader and drew nowhere (§15 pass 8). */}
         {data && (
           <MetricStrip className="animate-rise">
+            <Metric
+              label="Stack"
+              value={
+                <span className="inline-flex items-center gap-2">
+                  <StackLogos stack={data} />
+                  {name}
+                </span>
+              }
+            />
             <Metric label="Services" value={data.summary} />
             <Metric label="Directory" value={data.workingDir} />
           </MetricStrip>
@@ -224,7 +232,7 @@ function StackBody({ name }: { name: string }) {
               ) : (
                 /* Cards, because each service is its container to open — the
                    same lit edge the containers list gives the same container
-                   (§16). A tab panel under a page header needs no frame of its
+                   (§16). A tab panel below the stack facts needs no frame of its
                    own around them. */
                 <ChoiceList aria-label="Services" className="animate-rise">
                   {data.services.map((svc) => (

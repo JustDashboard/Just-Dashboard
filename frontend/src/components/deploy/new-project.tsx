@@ -18,7 +18,7 @@ import { notify } from "@/lib/toast"
 import { useMemoryState, useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentDraftSummary } from "@/lib/types"
-import { Page, PageHeader, PageState } from "@/components/page"
+import { Page, PageContext, PageState } from "@/components/page"
 import { ChoiceList, ChoiceRow, FlowHeader, FlowSteps } from "@/components/flow"
 import { DimActions, IconAction } from "@/components/icon-action"
 import { ErrorState } from "@/components/state"
@@ -327,7 +327,7 @@ export function NewProject({
   if (resumeError)
     return (
       <Page>
-        <PageHeader eyebrow={Eyebrow} title="New project" />
+        <PageContext eyebrow={Eyebrow} title="New project" />
         <ErrorState error={resumeError} />
       </Page>
     )

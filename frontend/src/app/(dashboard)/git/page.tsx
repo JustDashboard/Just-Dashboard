@@ -9,7 +9,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useGitHubAccount } from "@/hooks/use-github"
 import { useQuerySelection } from "@/hooks/use-query-selection"
-import { Page, PageHeader, SearchInput, Toolbar } from "@/components/page"
+import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
 import { ChipCount, FilterChip } from "@/components/tabs"
 import { GroupRule } from "@/components/flow"
 import { CloneDialog } from "@/components/git/clone-dialog"
@@ -151,31 +151,27 @@ export default function GitPage() {
           { key: "settled", label: "Up to date", repos: settled },
         ]
 
+  const controls = (
+    <span className="ml-auto flex max-w-full flex-wrap items-center gap-2">
+      {/* The connected identity matters before a repository is chosen too. */}
+      <GitHubAccountControl status={github} />
+      <GitHelp />
+      {canClone && repos.data?.available && (
+        <Button size="sm" variant="outline" onClick={() => setCloning(true)}>
+          <CloudDownload className="size-4" />
+          Add repository
+        </Button>
+      )}
+      <Button variant="outline" size="sm" onClick={() => repos.refresh()}>
+        <RefreshClockwise className="size-4" />
+        Rescan
+      </Button>
+    </span>
+  )
+
   return (
     <Page className="animate-rise">
-      <PageHeader
-        eyebrow="Workspace"
-        title="Git"
-        actions={
-          <>
-            {/* Who this dashboard is to GitHub, before a repository is chosen:
-                the question "will my push be mine" is asked here as often as
-                inside a checkout. */}
-            <GitHubAccountControl status={github} />
-            <GitHelp />
-            {canClone && repos.data?.available && (
-              <Button size="sm" variant="outline" onClick={() => setCloning(true)}>
-                <CloudDownload className="size-4" />
-                Add repository
-              </Button>
-            )}
-            <Button variant="outline" size="sm" onClick={() => repos.refresh()}>
-              <RefreshClockwise className="size-4" />
-              Rescan
-            </Button>
-          </>
-        }
-      />
+      <PageContext eyebrow="Workspace" title="Git" />
 
       {selected && repos.data && !active && (
         <ErrorState
@@ -186,7 +182,7 @@ export default function GitPage() {
           }
         />
       )}
-      {repos.error && <ErrorState error={repos.error} />}
+      {repos.error && <ErrorState error={repos.error} onRetry={repos.refresh} />}
       {repos.loading && !repos.data && <LoadingPanel />}
 
       {repos.data && !repos.data.available && (
@@ -194,6 +190,7 @@ export default function GitPage() {
           icon={GitHubMark}
           title="git is not installed on this host"
           description="Install git to manage repositories from here."
+          action={controls}
         />
       )}
 
@@ -203,14 +200,7 @@ export default function GitPage() {
             icon={GitHubMark}
             title="No repositories found"
             description="Nothing under the configured git roots. Clone one here, or set JD_GIT_ROOTS to point at where your projects live."
-            action={
-              canClone && (
-                <Button size="sm" onClick={() => setCloning(true)}>
-                  <CloudDownload className="size-4" />
-                  Add repository
-                </Button>
-              )
-            }
+            action={controls}
           />
         ) : (
           <div className="flex min-w-0 flex-col gap-4">
@@ -245,6 +235,7 @@ export default function GitPage() {
                   ) : null,
                 )}
               </div>
+              {controls}
             </Toolbar>
 
             {visible.length === 0 ? (

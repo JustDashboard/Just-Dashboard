@@ -8,7 +8,7 @@ import { ApiError, get } from "@/lib/api"
 import type { Certificate, CertbotState, Listener, StreamStatus, VHost } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { Page, PageHeader, PageState } from "@/components/page"
+import { Page, PageContext, PageState } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { BarList, type BarListItem } from "@/components/bar-list"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
@@ -124,9 +124,14 @@ export default function ProxyOverviewPage() {
 
   return (
     <Page className="animate-rise">
-      <PageHeader
-        eyebrow="Advanced"
-        title="Proxy & TLS"
+      <PageContext title="Proxy & TLS" />
+
+      <EngineFacts
+        status={status}
+        unit={engine.unit}
+        fetchedAt={engine.fetchedAt}
+        certbotVersion={certbot.data?.version}
+        renewSource={certbot.data ? (certbot.data.renewSource ?? null) : undefined}
         actions={
           admin &&
           hasEngine && (
@@ -138,14 +143,6 @@ export default function ProxyOverviewPage() {
             />
           )
         }
-      />
-
-      <EngineFacts
-        status={status}
-        unit={engine.unit}
-        fetchedAt={engine.fetchedAt}
-        certbotVersion={certbot.data?.version}
-        renewSource={certbot.data ? (certbot.data.renewSource ?? null) : undefined}
       />
 
       <StatGrid columns={4}>

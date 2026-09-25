@@ -1,7 +1,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
 
 /**
- * The databases section, after its redesign: the connection is the title, the
+ * The databases section, after its redesign: the connection is the workbench location, the
  * schema-editing forms show their statement, a server found on the host is
  * offered by its engine's name (it used to be offered as the literal text
  * "{server.driver}"), and the diagram remembers what was done to it — on the
@@ -294,13 +294,17 @@ async function mockDatabases(
   })
 }
 
-test("the connection is the section's title and the tables are on the rail", async ({ page }) => {
+test("the connection sits in the compact workbench strip and the tables are on the rail", async ({
+  page,
+}) => {
   await mockDatabases(page, { layout: null, puts: [] })
   await page.goto("/databases")
 
   await expect(
     page.getByRole("button", { name: "Connection: shop. Switch connection" }),
   ).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Database shop" })).toHaveClass(/sr-only/)
+  await page.screenshot({ path: "test-results/database-context-1280.png", fullPage: true })
   // The section's pages are the sidebar's, not a strip above the page, and
   // every one of them carries the connection it was opened with.
   const rail = page.getByRole("navigation", { name: "Sidebar" })
@@ -313,6 +317,22 @@ test("the connection is the section's title and the tables are on the rail", asy
   await page.getByRole("button", { name: /^users/ }).click()
   await expect(page.getByText("ada@example.com")).toBeVisible()
   await expect(page.getByRole("button", { name: "Insert" })).toBeVisible()
+})
+
+test("the connection strip wraps without sideways scrolling on a phone", async ({ page }) => {
+  await mockDatabases(page, { layout: null, puts: [] })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/databases")
+  await expect(
+    page.getByRole("button", { name: "Connection: shop. Switch connection" }),
+  ).toBeVisible()
+  await expect(page.getByRole("button", { name: "New database" })).toBeVisible()
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    ),
+  ).toBe(false)
+  await page.screenshot({ path: "test-results/database-context-phone.png", fullPage: true })
 })
 
 /**
@@ -550,6 +570,10 @@ test("the connection string is masked, shown on request, and the public one name
   page,
 }) => {
   await mockDatabases(page, { layout: null, puts: [] })
+  await page.route("**/api/v1/databases/sync", (route) =>
+    json(route, { added: [], already: [], needsCredentials: [] }),
+  )
+  await page.setViewportSize({ width: 1696, height: 992 })
   await page.goto("/databases/connection?conn=1")
 
   const local = page.getByText("On this server", { exact: true }).locator("..")
@@ -566,6 +590,11 @@ test("the connection string is masked, shown on request, and the public one name
     page.getByText("Not reachable from outside this server", { exact: false }),
   ).toBeVisible()
   await expect(page.getByRole("button", { name: "Open up…" })).toBeVisible()
+  await page.screenshot({
+    path: "test-results/database-docs.png",
+    fullPage: true,
+    animations: "disabled",
+  })
   // A database running here is re-added by the sync, so there is nothing to
   // forget: the Remove row is not drawn.
   await expect(page.getByRole("button", { name: "Remove" })).toHaveCount(0)

@@ -1,7 +1,7 @@
 "use client"
 
-import { Page, PageHeader } from "@/components/page"
-import { SessionsView, SignOutOthersButton, useSessions } from "@/components/account/sessions"
+import { Page, PageContext } from "@/components/page"
+import { SessionsView, useSessions } from "@/components/account/sessions"
 
 /**
  * Where this account is signed in, read to answer one question: is every one
@@ -15,11 +15,7 @@ export default function AccountSessionsPage() {
   const sessions = useSessions()
   return (
     <Page className="animate-rise">
-      <PageHeader
-        eyebrow="Account"
-        title="Sessions"
-        actions={<SignOutOthersButton sessions={sessions} />}
-      />
+      <PageContext eyebrow="Account" title="Sessions" />
       <SessionsView sessions={sessions} />
     </Page>
   )

@@ -21,7 +21,7 @@ import {
   OptionList,
   OptionRow,
 } from "@/components/form"
-import { Page, PageHeader, PageState } from "@/components/page"
+import { Page, PageContext, PageState } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
@@ -240,21 +240,19 @@ export default function DashboardConfigurationPage() {
   return (
     <Page className="animate-rise">
       {dialog}
-      <PageHeader
-        eyebrow="Settings"
-        title="Configuration"
-        actions={<ReadOnlyNote supported={report.supported} admin={admin} running={running} />}
-      />
+      <PageContext eyebrow="Settings" title="Configuration" />
 
       <Panel plain>
         <PanelHeader
           title="Stack"
           actions={
-            running ? (
-              <Status tone="running" label={restarting ? "Restarting" : "Working"} />
-            ) : (
-              <Status tone="running" label="Running" />
-            )
+            <span className="flex flex-wrap items-center gap-3">
+              <ReadOnlyNote supported={report.supported} admin={admin} running={running} />
+              <Status
+                tone="running"
+                label={running ? (restarting ? "Restarting" : "Working") : "Running"}
+              />
+            </span>
           }
         />
         <PanelBody className="space-y-5">

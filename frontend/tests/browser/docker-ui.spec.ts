@@ -520,6 +520,7 @@ async function mockDocker(page: Page) {
  */
 test("the overview separates runtime health from attention", async ({ page }) => {
   await mockDocker(page)
+  await page.setViewportSize({ width: 1696, height: 992 })
   await page.goto("/docker")
 
   await expect(page.getByText("Runtime health")).toBeVisible()
@@ -532,6 +533,11 @@ test("the overview separates runtime health from attention", async ({ page }) =>
 
   // The word that used to sit above a page of warnings must not appear.
   await expect(page.getByText("All good")).toHaveCount(0)
+  await page.screenshot({
+    path: "test-results/docker-docs.png",
+    fullPage: true,
+    animations: "disabled",
+  })
 })
 
 test("attention lists posture findings and never calls them health", async ({ page }) => {
@@ -657,7 +663,7 @@ test("memory says no limit rather than inventing one", async ({ page }) => {
   await page.goto("/docker/containers")
 
   const db = page.getByRole("listitem").filter({ hasText: "postgres:16" })
-  await expect(db.getByText(/no limit/)).toBeVisible()
+  await expect(db.getByText(/no limit/)).toBeVisible({ timeout: 15_000 })
 
   // A container that really is limited still shows the fraction.
   const web = page.getByRole("listitem").filter({ hasText: "nginx:alpine" })

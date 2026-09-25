@@ -76,9 +76,8 @@ export function EngineStatus({
 
 /**
  * What this host's proxy is, as data: the engine and its version, the
- * directory it reads, whether certbot is here, who renews. The page header's
- * description slot used to carry a sentence about the section; these are the
- * facts a person opens the page to check.
+ * directory it reads, whether certbot is here, who renews. These are the
+ * facts a person opens the page to check, with the service commands beside them.
  */
 export function EngineFacts({
   status,
@@ -86,45 +85,50 @@ export function EngineFacts({
   fetchedAt,
   certbotVersion,
   renewSource,
+  actions,
 }: {
   status: ProxyStatus
   unit: SystemdUnit | undefined
   fetchedAt?: number
   certbotVersion?: string
   renewSource?: string | null
+  actions?: React.ReactNode
 }) {
   const engine = status.nginx || status.caddy
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-body text-muted-foreground">
-      <span className={engine ? "text-foreground" : undefined}>{engineLabel(status)}</span>
-      {unit && (
-        <>
-          <Dot />
-          <EngineStatus unit={unit} fetchedAt={fetchedAt} />
-        </>
-      )}
-      {engine && (
-        <>
-          <Dot />
-          <Tag mono>{status.nginx ? status.nginxDir : status.caddyFile}</Tag>
-        </>
-      )}
-      {status.ingressContainer && (
-        <>
-          <Dot />
-          <span>
-            ingress <Tag mono>{status.ingressContainer}</Tag>
-          </span>
-        </>
-      )}
-      <Dot />
-      <span>{status.certbot ? (certbotVersion ?? "certbot") : "no certbot"}</span>
-      {renewSource !== undefined && status.certbot && (
-        <>
-          <Dot />
-          <span>{renewSource ? `renews via ${renewSource}` : "renewal not scheduled"}</span>
-        </>
-      )}
+    <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-hairline pb-4 text-body text-muted-foreground">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+        <span className={engine ? "text-foreground" : undefined}>{engineLabel(status)}</span>
+        {unit && (
+          <>
+            <Dot />
+            <EngineStatus unit={unit} fetchedAt={fetchedAt} />
+          </>
+        )}
+        {engine && (
+          <>
+            <Dot />
+            <Tag mono>{status.nginx ? status.nginxDir : status.caddyFile}</Tag>
+          </>
+        )}
+        {status.ingressContainer && (
+          <>
+            <Dot />
+            <span>
+              ingress <Tag mono>{status.ingressContainer}</Tag>
+            </span>
+          </>
+        )}
+        <Dot />
+        <span>{status.certbot ? (certbotVersion ?? "certbot") : "no certbot"}</span>
+        {renewSource !== undefined && status.certbot && (
+          <>
+            <Dot />
+            <span>{renewSource ? `renews via ${renewSource}` : "renewal not scheduled"}</span>
+          </>
+        )}
+      </div>
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
   )
 }

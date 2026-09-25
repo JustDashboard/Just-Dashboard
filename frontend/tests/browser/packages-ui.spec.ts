@@ -242,9 +242,7 @@ async function mockHost(page: Page) {
  */
 async function framedNonTables(page: Page) {
   return page.evaluate(() =>
-    Array.from(
-      document.querySelectorAll("[data-slot=page] [data-slot=panel]:not([data-plain])"),
-    )
+    Array.from(document.querySelectorAll("[data-slot=page] [data-slot=panel]:not([data-plain])"))
       .filter((el) => !el.querySelector("[data-slot=table-container]"))
       .map((el) => el.outerHTML.slice(0, 120)),
   )
@@ -255,8 +253,8 @@ test("the page reads the host as facts and figures, with nothing framed", async 
   await page.goto("/packages")
   await page.waitForLoadState("networkidle")
 
-  // The manager and the index age are a row under the title, not a caption.
-  const facts = page.locator("[data-slot='page'] > div").nth(1)
+  // The manager and index age sit beside the actions as page facts.
+  const facts = page.locator("[data-slot='page'] > div").first()
   await expect(facts).toContainText("apt")
   await expect(facts).toContainText("index refreshed")
   await expect(facts).toContainText("1 security update")

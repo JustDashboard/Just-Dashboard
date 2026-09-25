@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
-import { Clock, Copy, Pause, Pencil, Play, Trash } from "@/components/icons"
+import { Clock, Copy, Pause, Pencil, Play, Plus, Trash } from "@/components/icons"
 import { get, put } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import {
@@ -111,6 +111,12 @@ export function CronJobsPanel({
           title="Cron jobs"
           actions={
             <>
+              {admin && (
+                <Button size="sm" onClick={() => onAddingChange(true)}>
+                  <Plus className="size-3.5" />
+                  Add job
+                </Button>
+              )}
               <Select value={user} onValueChange={onUserChange}>
                 <SelectTrigger size="sm" className="w-40" aria-label="Crontab account">
                   <SelectValue />

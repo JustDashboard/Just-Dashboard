@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils"
 import type { FirewallRule, FirewallStatus, Posture, SecurityFinding } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { PageHeader, SearchInput } from "@/components/page"
+import { PageContext, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
@@ -110,49 +110,42 @@ export function FirewallPanel({
   }
   const writable = admin && Boolean(status?.available) && caps.editable
 
-  const header = (
-    <PageHeader
-      eyebrow="Security"
-      title="Firewall"
-      actions={
-        status?.available && (
-          <>
-            <Status
-              verdict={status.enabled ? "ok" : "warning"}
-              label={status.enabled ? "Active" : "Inactive"}
-            />
-            {writable && caps.toggle && (
-              <Switch
-                aria-label="Firewall enabled"
-                checked={status.enabled}
-                onCheckedChange={(enabled) =>
-                  confirm({
-                    title: enabled ? "Enable firewall" : "Disable firewall",
-                    phrase: enabled ? "enable firewall" : "disable firewall",
-                    confirmLabel: enabled ? "Enable" : "Disable",
-                    description: enabled ? (
-                      <p className="text-destructive">
-                        {status.backend} applies its default-deny policy immediately. If the port
-                        this dashboard listens on is not already allowed, you will lose access.
-                      </p>
-                    ) : (
-                      <p className="text-destructive">
-                        Every rule stops being enforced and the host is left unfiltered.
-                      </p>
-                    ),
-                    action: async (c) => {
-                      await post("/firewall/enabled", { enabled }, { confirm: c })
-                      refresh()
-                    },
-                  })
-                }
-              />
-            )}
-            {writable && <AddRuleDialog onDone={refresh} hasProfiles={caps.profiles} />}
-          </>
-        )
-      }
-    />
+  const header = <PageContext eyebrow="Security" title="Firewall" />
+  const controls = status?.available && (
+    <span className="flex flex-wrap items-center gap-3">
+      <Status
+        verdict={status.enabled ? "ok" : "warning"}
+        label={status.enabled ? "Active" : "Inactive"}
+      />
+      {writable && caps.toggle && (
+        <Switch
+          aria-label="Firewall enabled"
+          checked={status.enabled}
+          onCheckedChange={(enabled) =>
+            confirm({
+              title: enabled ? "Enable firewall" : "Disable firewall",
+              phrase: enabled ? "enable firewall" : "disable firewall",
+              confirmLabel: enabled ? "Enable" : "Disable",
+              description: enabled ? (
+                <p className="text-destructive">
+                  {status.backend} applies its default-deny policy immediately. If the port this
+                  dashboard listens on is not already allowed, you will lose access.
+                </p>
+              ) : (
+                <p className="text-destructive">
+                  Every rule stops being enforced and the host is left unfiltered.
+                </p>
+              ),
+              action: async (c) => {
+                await post("/firewall/enabled", { enabled }, { confirm: c })
+                refresh()
+              },
+            })
+          }
+        />
+      )}
+      {writable && <AddRuleDialog onDone={refresh} hasProfiles={caps.profiles} />}
+    </span>
   )
 
   if (loading && !status) {
@@ -280,7 +273,11 @@ export function FirewallPanel({
         <StatTile
           label="Logging"
           value={logging}
-          hint={logging === "off" ? "a silent drop leaves no record" : "refused connections are recorded"}
+          hint={
+            logging === "off"
+              ? "a silent drop leaves no record"
+              : "refused connections are recorded"
+          }
         />
       </StatGrid>
 
@@ -338,11 +335,14 @@ export function FirewallPanel({
         <PanelHeader
           title="Rules"
           actions={
-            hidden > 0 ? (
-              <span className="numeric text-hint text-muted-foreground">
-                {hidden} IPv6 twin{hidden === 1 ? "" : "s"} folded away
-              </span>
-            ) : undefined
+            <span className="flex flex-wrap items-center gap-3">
+              {hidden > 0 && (
+                <span className="numeric text-hint text-muted-foreground">
+                  {hidden} IPv6 twin{hidden === 1 ? "" : "s"} folded away
+                </span>
+              )}
+              {controls}
+            </span>
           }
         />
         <PanelToolbar>
@@ -400,7 +400,7 @@ export function FirewallPanel({
               Nothing in these {rules.length} rules contains &ldquo;{query.trim()}&rdquo;.
             </EmptyNote>
           ) : (
-            <div className="group-data-[plain]/panel:-mx-4 min-w-0">
+            <div className="min-w-0 group-data-[plain]/panel:-mx-4">
               <Table containerClassName="max-h-[calc(100svh-26rem)]">
                 <TableHeader className={stickyTableHeader}>
                   <TableRow>
@@ -438,7 +438,9 @@ export function FirewallPanel({
                             {rule.action}
                           </Tag>
                           {rule.direction && (
-                            <span className="text-hint text-muted-foreground">{rule.direction}</span>
+                            <span className="text-hint text-muted-foreground">
+                              {rule.direction}
+                            </span>
                           )}
                         </span>
                       </TableCell>
@@ -523,8 +525,7 @@ export function FirewallPanel({
             <span className="min-w-0">
               A rule that would block the address you are connected from is refused before it is
               applied, and so is an inbound default of deny on a host with no allow rule at all. A
-              deny written for one address goes in front of the rules it would otherwise sit
-              behind.
+              deny written for one address goes in front of the rules it would otherwise sit behind.
             </span>
           </PanelFooter>
         )}

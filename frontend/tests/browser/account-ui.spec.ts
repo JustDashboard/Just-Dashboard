@@ -228,6 +228,11 @@ test("sessions are the browser, the system and the network each came from", asyn
   await expect(script).toContainText("internet")
   await expect(page.getByRole("button", { name: "Sign out curl from 203.0.113.7" })).toBeVisible()
   await expect(page.getByRole("button", { name: "Sign out other sessions" })).toBeEnabled()
+  await expect(
+    page
+      .locator("[data-slot=panel]", { hasText: "Other sessions" })
+      .getByRole("button", { name: "Sign out other sessions" }),
+  ).toBeEnabled()
 })
 
 test("keys are read as credentials and drawn as what holds them", async ({ page }) => {
@@ -245,6 +250,11 @@ test("keys are read as credentials and drawn as what holds them", async ({ page 
   await expect(page.locator("[data-slot=row]", { hasText: "grafana" })).toContainText("Maria Rusu")
   await expect(page.getByRole("heading", { name: "Revoked or expired" })).toBeVisible()
   await expect(page.getByText(/Authorization: Bearer vpsd_…/)).toBeVisible()
+  await expect(
+    page
+      .locator("[data-slot=panel]", { hasText: "In use" })
+      .getByRole("button", { name: "New key" }),
+  ).toBeVisible()
 
   await page.getByRole("button", { name: "New key" }).click()
   await page.getByLabel("Name").fill("uptime-kuma")
@@ -268,6 +278,11 @@ test("users are cards drawn by their faces, opening their editor", async ({ page
   await expect(cards.first()).toContainText("Ion Moisei")
   await expect(cards.nth(1)).toContainText("Maria Rusu")
   await expect(cards.filter({ hasText: "Deploy bot" })).toContainText("never signed in")
+  await expect(
+    page.locator("[data-slot=panel]", { hasText: "Accounts" }).getByRole("button", {
+      name: "New user",
+    }),
+  ).toBeVisible()
 
   // Changing the role from its picker does not open the editor behind it.
   await page.getByRole("button", { name: "Edit Maria Rusu" }).click()

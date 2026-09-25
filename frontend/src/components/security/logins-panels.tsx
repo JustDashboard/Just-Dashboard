@@ -12,7 +12,7 @@ import type { AttackSummary, LoginRecord, LoginSession } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { PageHeader, SearchInput } from "@/components/page"
+import { PageContext, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
@@ -45,10 +45,7 @@ export function LoginsPanels() {
     (signal) => get<LoginSession[]>("/ssh-sessions", undefined, signal),
     10000,
   )
-  const history = usePoll(
-    (signal) => get<LoginRecord[]>("/logins", { limit: 100 }, signal),
-    60000,
-  )
+  const history = usePoll((signal) => get<LoginRecord[]>("/logins", { limit: 100 }, signal), 60000)
   // Failed attempts are admin-only: btmp records whatever was typed at a
   // login prompt, and what people type at a login prompt is sometimes their
   // password in the username field.
@@ -66,22 +63,7 @@ export function LoginsPanels() {
 
   return (
     <>
-      <PageHeader
-        eyebrow="Security"
-        title="Logins"
-        actions={
-          sessions.data && (
-            <Status
-              verdict={remote > 0 ? "notice" : "ok"}
-              label={
-                list.length === 0
-                  ? "nobody logged in"
-                  : `${list.length} session${list.length === 1 ? "" : "s"}${remote > 0 ? `, ${remote} over ssh` : ""}`
-              }
-            />
-          )
-        }
-      />
+      <PageContext eyebrow="Security" title="Logins" />
 
       <StatGrid columns={4}>
         <StatTile
@@ -152,7 +134,7 @@ function CurrentSessions({ poll }: { poll: ReturnType<typeof usePoll<LoginSessio
               className="mt-3"
             />
           ) : (
-            <div className="group-data-[plain]/panel:-mx-4 min-w-0">
+            <div className="min-w-0 group-data-[plain]/panel:-mx-4">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -172,7 +154,9 @@ function CurrentSessions({ poll }: { poll: ReturnType<typeof usePoll<LoginSessio
                       <TableCell>
                         <Tag>{session.isSsh ? "ssh" : "local"}</Tag>
                       </TableCell>
-                      <TableCell className="hidden font-mono sm:table-cell">{session.tty}</TableCell>
+                      <TableCell className="hidden font-mono sm:table-cell">
+                        {session.tty}
+                      </TableCell>
                       <TableCell className="hidden whitespace-nowrap text-muted-foreground md:table-cell">
                         {session.loginTime ? timestamp(session.loginTime) : "—"}
                       </TableCell>
@@ -270,7 +254,11 @@ function AttackersPanel({ poll }: { poll: ReturnType<typeof usePoll<AttackSummar
       />
       <PanelBody flush>
         {unavailable ? (
-          <Notice tone="default" title="This host cannot read its failed-login record" className="mt-3">
+          <Notice
+            tone="default"
+            title="This host cannot read its failed-login record"
+            className="mt-3"
+          >
             <code className="font-mono">lastb</code> reads btmp and comes from{" "}
             <code className="font-mono">util-linux-extra</code>, which minimal cloud images leave
             out. Install it and this fills in.
@@ -291,7 +279,7 @@ function AttackersPanel({ poll }: { poll: ReturnType<typeof usePoll<AttackSummar
             className="mt-3"
           />
         ) : (
-          <div className="group-data-[plain]/panel:-mx-4 min-w-0">
+          <div className="min-w-0 group-data-[plain]/panel:-mx-4">
             <Table containerClassName="max-h-[28rem]">
               <TableHeader className={stickyTableHeader}>
                 <TableRow>
@@ -433,15 +421,15 @@ function LoginHistoryPanel({ history }: { history: ReturnType<typeof usePoll<Log
           <Notice tone="default" title="This host cannot read its login record" className="mt-3">
             <div className="space-y-1.5">
               <p>
-                <code className="font-mono">last</code> and{" "}
-                <code className="font-mono">lastb</code> are what read wtmp and btmp, and they
-                come from <code className="font-mono">util-linux-extra</code> — which minimal
-                cloud images leave out. Install it and this fills in; the records themselves have
-                been there all along.
+                <code className="font-mono">last</code> and <code className="font-mono">lastb</code>{" "}
+                are what read wtmp and btmp, and they come from{" "}
+                <code className="font-mono">util-linux-extra</code> — which minimal cloud images
+                leave out. Install it and this fills in; the records themselves have been there all
+                along.
               </p>
               <p>
-                Until then this page has no answer, which is not the same as a host nobody has
-                tried to log in to.
+                Until then this page has no answer, which is not the same as a host nobody has tried
+                to log in to.
               </p>
             </div>
           </Notice>
@@ -460,7 +448,7 @@ function LoginHistoryPanel({ history }: { history: ReturnType<typeof usePoll<Log
             />
           )
         ) : (
-          <div className="group-data-[plain]/panel:-mx-4 min-w-0">
+          <div className="min-w-0 group-data-[plain]/panel:-mx-4">
             <Table containerClassName="max-h-[28rem]">
               <TableHeader className={stickyTableHeader}>
                 <TableRow>

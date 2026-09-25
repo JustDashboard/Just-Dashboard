@@ -12,7 +12,7 @@ import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
-import { Page, PageHeader, RowLink, SearchInput } from "@/components/page"
+import { Page, PageContext, RowLink, SearchInput } from "@/components/page"
 import { Pane, Panel, PanelBody, PanelHeader, PanelToolbar, Well } from "@/components/panel"
 import { ROW_BLEED } from "@/components/row-list"
 import { SidePanel } from "@/components/side-panel"
@@ -204,21 +204,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     onDelete: remove,
   }
 
-  const header = (
-    <PageHeader
-      eyebrow="Proxy"
-      title="Sites"
-      actions={
-        admin &&
-        hasNginx && (
-          <Button size="sm" onClick={() => openForm(null)}>
-            <Plus className="size-4" />
-            New site
-          </Button>
-        )
-      }
-    />
-  )
+  const header = <PageContext eyebrow="Proxy" title="Sites" />
 
   if (loading && !data) {
     return (
@@ -273,7 +259,18 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
       </StatGrid>
 
       <Panel>
-        <PanelHeader title="Sites" />
+        <PanelHeader
+          title="Sites"
+          actions={
+            admin &&
+            hasNginx && (
+              <Button size="sm" onClick={() => openForm(null)}>
+                <Plus className="size-4" />
+                New site
+              </Button>
+            )
+          }
+        />
         <PanelToolbar>
           <SearchInput
             value={filter}
@@ -314,7 +311,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
             <EmptyState icon={Globe} title="No sites match" className="mt-4" />
           ) : (
             <>
-              <div className="group-data-[plain]/panel:-mx-4 hidden min-w-0 lg:block">
+              <div className="hidden min-w-0 group-data-[plain]/panel:-mx-4 lg:block">
                 <Table containerClassName="max-h-[calc(100svh-24rem)]">
                   <TableHeader className={stickyTableHeader}>
                     <TableRow>

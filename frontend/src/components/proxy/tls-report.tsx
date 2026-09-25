@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils"
 import type { TLSScan } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { Detail, DetailList, Page, PageHeader } from "@/components/page"
+import { Detail, DetailList, Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
@@ -67,7 +67,7 @@ export function TLSReportPage() {
 
   return (
     <Page className="animate-rise">
-      <PageHeader eyebrow="Proxy" title="TLS report" />
+      <PageContext eyebrow="Proxy" title="TLS report" />
 
       <Panel plain>
         <PanelHeader

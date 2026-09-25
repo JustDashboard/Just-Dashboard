@@ -11,7 +11,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { JobConsole, RecentJobs, useJobConsole } from "@/components/job-console"
-import { PageHeader } from "@/components/page"
+import { PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Row, ROW_BLEED, RowList } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
@@ -79,32 +79,7 @@ export function SSHPanel({
   const dirty = useMemo(() => Object.keys(pending).length > 0, [pending])
   const insecure = data?.settings.filter((s) => !s.secure).length ?? 0
 
-  const header = (
-    <PageHeader
-      eyebrow="Security"
-      title="SSH"
-      actions={
-        data?.available && (
-          <>
-            {data.hasMatchBlocks && (
-              <Tag
-                tone="warning"
-                icon={Warning}
-                title="Some values are overridden for particular users or addresses. What is shown here is the unconditional configuration; the conditional parts are not editable from this page."
-              >
-                match blocks
-              </Tag>
-            )}
-            <RecentJobs kinds={["ssh."]} onOpen={console_.open} />
-            <Status
-              verdict={insecure === 0 ? "ok" : "warning"}
-              label={insecure === 0 ? "Hardened" : `${insecure} below recommendation`}
-            />
-          </>
-        )
-      }
-    />
-  )
+  const header = <PageContext eyebrow="Security" title="SSH" />
 
   if (!admin) {
     return (
@@ -254,9 +229,9 @@ export function SSHPanel({
           control rather than in a footnote. */}
       {noKeys && (
         <Notice tone="warning" icon={Key} title="No account on this host has an SSH key">
-          Password authentication cannot safely be turned off until one does — with no key
-          anywhere, doing so would leave nobody a way in, and the server refuses the change for
-          that reason. Add a key from the Users page first.
+          Password authentication cannot safely be turned off until one does — with no key anywhere,
+          doing so would leave nobody a way in, and the server refuses the change for that reason.
+          Add a key from the Users page first.
         </Notice>
       )}
 
@@ -265,11 +240,27 @@ export function SSHPanel({
           title="Settings"
           advanced
           actions={
-            data.socket?.unit ? (
-              <Tag mono title="The systemd socket that holds the listener">
-                {data.socket.unit}
-              </Tag>
-            ) : undefined
+            <span className="flex flex-wrap items-center gap-3">
+              {data.socket?.unit && (
+                <Tag mono title="The systemd socket that holds the listener">
+                  {data.socket.unit}
+                </Tag>
+              )}
+              {data.hasMatchBlocks && (
+                <Tag
+                  tone="warning"
+                  icon={Warning}
+                  title="Some values are overridden for particular users or addresses. What is shown here is the unconditional configuration; the conditional parts are not editable from this page."
+                >
+                  match blocks
+                </Tag>
+              )}
+              <RecentJobs kinds={["ssh."]} onOpen={console_.open} />
+              <Status
+                verdict={insecure === 0 ? "ok" : "warning"}
+                label={insecure === 0 ? "Hardened" : `${insecure} below recommendation`}
+              />
+            </span>
           }
         />
         <PanelToolbar>

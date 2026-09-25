@@ -8,7 +8,7 @@ import { timestamp } from "@/lib/format"
 import type { BanEvent, Fail2banJail } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { PageHeader, SearchInput } from "@/components/page"
+import { PageContext, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { StatGrid, StatTile } from "@/components/stat-tile"
@@ -51,20 +51,7 @@ export function IntrusionPanels() {
   const failingNow = jails.reduce((n, j) => n + j.currentlyFailed, 0)
   const bansTotal = jails.reduce((n, j) => n + j.totalBanned, 0)
 
-  const header = (
-    <PageHeader
-      eyebrow="Security"
-      title="Intrusion prevention"
-      actions={
-        data?.running && (
-          <Status
-            verdict={bannedNow > 0 ? "notice" : "ok"}
-            label={bannedNow > 0 ? `${bannedNow} banned now` : "nobody banned"}
-          />
-        )
-      }
-    />
-  )
+  const header = <PageContext eyebrow="Security" title="Intrusion prevention" />
 
   if (loading && !data) {
     return (
@@ -126,7 +113,11 @@ export function IntrusionPanels() {
           tone={bannedNow > 0 ? "warning" : "default"}
           hint="held this instant — bans expire"
         />
-        <StatTile label="Failing now" value={failingNow} hint="attempts inside the current window" />
+        <StatTile
+          label="Failing now"
+          value={failingNow}
+          hint="attempts inside the current window"
+        />
         <StatTile label="Bans in total" value={bansTotal} hint="since fail2ban last started" />
       </StatGrid>
 
@@ -233,7 +224,7 @@ function BanHistoryPanel() {
             className="mt-3"
           />
         ) : (
-          <div className="group-data-[plain]/panel:-mx-4 min-w-0">
+          <div className="min-w-0 group-data-[plain]/panel:-mx-4">
             <Table containerClassName="max-h-[24rem]">
               <TableHeader className={stickyTableHeader}>
                 <TableRow>
