@@ -483,8 +483,7 @@ the verbs that change something step forward in weight.
 ## Verification
 
 ```bash
-cd backend && go build ./... && go vet ./... && go test ./...
-cd ../frontend && bun run lint && bun run build && bun run test:browser
+scripts/test-changed.sh
 ```
 
 `internal/accesslog` covers both formats, the junk that is not either, the filter, nearest-rank

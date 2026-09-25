@@ -1408,8 +1408,8 @@ The passes, in order. Each one is a diff you can review on its own.
    is its own row.
 9. **Alignment.** Tiles top-align so a row of names is a row; hints truncate rather than wrap; the
    first column starts at the page gutter.
-10. **Verify.** `bun run lint`, `bun run build`, `bun run test:browser` (at least
-    `tests/browser/design-system.spec.ts`), then a screenshot at 1280 and 1720 wide against a mocked
+10. **Verify.** `scripts/test-changed.sh` (it runs `tests/browser/design-system.spec.ts` for any
+    UI change), then a screenshot at 1280 and 1720 wide against a mocked
     API in the pattern `mockShell` uses, and look at it: a scrollbar where none belongs, a label a
     line lower than its neighbours, a figure at the wrong size, are things the checks do not catch.
 
@@ -1659,5 +1659,5 @@ palette, and a reading page must not grow a use for them.
    column. Below `xl` the columns stack and the page scrolls as every other page does — a phone is not
    a window to hold. `deploy-new.spec.ts` asserts the shell does not scroll at 1280×800 on every source
    and every Configure step.
-9. **Verify.** `bun run lint`, `bun run build`, `bun run test:browser`, then screenshots at 1280 and
+9. **Verify.** `scripts/test-changed.sh`, then screenshots at 1280 and
    1720 — and look at them. The failure this register exists to catch is one no assertion sees.

@@ -298,11 +298,10 @@ cd frontend && bun install && bun dev  # UI on :3000
 ```
 
 Set `NEXT_PUBLIC_WS_BASE=http://localhost:8080` for WebSockets and `JD_ALLOWED_ORIGINS=http://localhost:3000`
-on the backend. Before a pull request:
+on the backend. Before a pull request, run the checks your change can reach:
 
 ```bash
-cd backend  && go build ./... && go vet ./... && go test ./...
-cd frontend && bun run lint && bun run build && bun run test:browser
+scripts/test-changed.sh
 ```
 
 Without the installer: `cp .env.example .env`, set `JD_MASTER_KEY` (`openssl rand -hex 32`),
