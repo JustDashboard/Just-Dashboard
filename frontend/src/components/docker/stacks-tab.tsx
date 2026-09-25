@@ -28,7 +28,6 @@ import { ProductLogos, imageProducts } from "@/components/product-logo"
 import { ChipCount, FilterChip } from "@/components/tabs"
 import { cn } from "@/lib/utils"
 import { PortLink } from "@/components/docker/shared"
-import { MenuItemBody } from "@/components/docker/container-actions"
 import { StackSummary, stackTone } from "@/components/docker/stack-state"
 import { ExplainIcon, Field, Term } from "@/components/docker/explain"
 import { Modal } from "@/components/modal"
@@ -416,36 +415,29 @@ function StackRowMenu({ stack, onOpen }: { stack: ComposeStack; onOpen: () => vo
           <MoreHorizontal />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-68">
+      <DropdownMenuContent align="end" className="min-w-44">
         <DropdownMenuItem
-          className="items-start gap-2.5 py-1.5"
           onSelect={(event) => {
             event.preventDefault()
             onOpen()
           }}
         >
-          <Code className="mt-0.5 size-3.5 shrink-0" />
-          <MenuItemBody
-            label="View"
-            detail="Services, the compose file, deploy history and the merged log feed."
-          />
+          <Code className="size-3.5" />
+          View
         </DropdownMenuItem>
         {stack.workingDir && (
-          <DropdownMenuItem asChild className="items-start gap-2.5 py-1.5">
+          <DropdownMenuItem asChild>
             <Link href={`/files?path=${encodeURIComponent(stack.workingDir)}`}>
-              <FolderOpen className="mt-0.5 size-3.5 shrink-0" />
-              <MenuItemBody label="Files" detail="The stack's directory in the file manager." />
+              <FolderOpen className="size-3.5" />
+              Files
             </Link>
           </DropdownMenuItem>
         )}
         {stack.workingDir && can("terminal") && (
-          <DropdownMenuItem asChild className="items-start gap-2.5 py-1.5">
+          <DropdownMenuItem asChild>
             <Link href={`/terminal?cwd=${encodeURIComponent(stack.workingDir)}`}>
-              <Terminal className="mt-0.5 size-3.5 shrink-0" />
-              <MenuItemBody
-                label="Open shell"
-                detail="A terminal opened in the stack's directory."
-              />
+              <Terminal className="size-3.5" />
+              Open shell
             </Link>
           </DropdownMenuItem>
         )}

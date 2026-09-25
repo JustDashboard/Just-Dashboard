@@ -287,9 +287,6 @@ export function Webhooks({
     {
       key: "toggle",
       label: trigger.enabled ? "Disable" : "Enable",
-      detail: trigger.enabled
-        ? "Stop accepting deliveries until re-enabled."
-        : "Start accepting deliveries again.",
       icon: trigger.enabled ? StopCircle : Play,
       inline: true,
       run: () => void toggle(trigger),
@@ -300,7 +297,6 @@ export function Webhooks({
           {
             key: "deliveries",
             label: "Deliveries",
-            detail: "The events this webhook received and what happened to each.",
             icon: Logs,
             run: () => setOpenId(trigger.id),
           },
@@ -308,7 +304,6 @@ export function Webhooks({
     {
       key: "edit",
       label: "Edit",
-      detail: "Change its name, repository, branch, paths or previews.",
       icon: Pencil,
       run: () => sheet.openEdit(trigger),
     },
@@ -321,7 +316,6 @@ export function Webhooks({
           {
             key: "copy",
             label: "Copy payload URL",
-            detail: "The address the sender posts to, with this dashboard's origin.",
             icon: Copy,
             run: () =>
               void copyText(
@@ -332,7 +326,6 @@ export function Webhooks({
           {
             key: "rotate-secret",
             label: "Rotate secret",
-            detail: "Issue a new signing secret; the old one stops working immediately.",
             icon: Key,
             run: () => rotate(trigger),
           },
@@ -340,7 +333,6 @@ export function Webhooks({
     {
       key: "remove",
       label: "Remove",
-      detail: "Delete this webhook and its secret.",
       icon: Trash,
       danger: true,
       run: () => remove(trigger),

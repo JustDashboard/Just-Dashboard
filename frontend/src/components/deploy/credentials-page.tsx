@@ -501,7 +501,6 @@ export function CredentialsPage() {
       {
         key: "test",
         label: "Test",
-        detail: "Check that the server can use it right now.",
         icon: Lightning,
         inline: true,
         progressive: "Testing…",
@@ -515,7 +514,6 @@ export function CredentialsPage() {
       verbs.push({
         key: "installation",
         label: "Show its installation",
-        detail: "The account on GitHub whose installation mints it.",
         icon: GitHubMark,
         run: () => window.open(installation.htmlUrl, "_blank", "noreferrer"),
       })
@@ -523,7 +521,6 @@ export function CredentialsPage() {
       verbs.push({
         key: "edit",
         label: "Edit credential",
-        detail: "Change its name, host, username or secret.",
         icon: Pencil,
         run: () => edit(credential),
       })
@@ -532,7 +529,6 @@ export function CredentialsPage() {
       verbs.push({
         key: "remove",
         label: "Remove credential",
-        detail: "Refused while a project's source reads through it.",
         icon: Trash,
         danger: true,
         run: () => remove(credential),

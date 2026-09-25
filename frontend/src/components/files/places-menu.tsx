@@ -104,17 +104,17 @@ export function PlacesMenu({
           <DropdownMenuItem
             key={place.path}
             onSelect={() => onPick(place.path)}
-            className="items-start gap-2.5 py-1.5"
+            className="gap-2.5"
           >
-            <PlaceMark place={place} className="mt-0.5 size-4" />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-body">{placeName(place)}</span>
-              <span className="block truncate font-mono text-hint text-muted-foreground">
-                {placeHint(place)}
+            <PlaceMark place={place} className="size-4" />
+            <span className="min-w-0 flex-1 truncate text-body">{placeName(place)}</span>
+            {placeName(place) !== place.path && (
+              <span className="max-w-[45%] shrink truncate font-mono text-hint text-muted-foreground">
+                {place.path}
               </span>
-            </span>
+            )}
             {place.path === current && (
-              <span className="mt-1 size-1.5 shrink-0 rounded-full bg-brand" aria-hidden />
+              <span className="size-1.5 shrink-0 rounded-full bg-brand" aria-hidden />
             )}
           </DropdownMenuItem>
         ))}

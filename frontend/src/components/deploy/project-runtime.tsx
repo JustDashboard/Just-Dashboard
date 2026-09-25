@@ -671,14 +671,12 @@ function ServiceCard({
     {
       key: "logs",
       label: "Logs",
-      detail: "This service's runtime logs.",
       icon: Logs,
       run: () => router.push(`/deploy/${projectId}/logs?service=${service.containerId}`),
     },
     {
       key: "console",
       label: "Console",
-      detail: "Open a shell inside this container.",
       icon: Terminal,
       disabled: service.state !== "running",
       run: () => router.push(`/deploy/${projectId}/console?service=${service.containerId}`),
@@ -688,7 +686,6 @@ function ServiceCard({
     verbs.push({
       key: "stack",
       label: "Open stack",
-      detail: "The Compose stack this service belongs to.",
       icon: Layers,
       run: () => router.push(`/docker/stacks/${service.stack}`),
     })
@@ -696,7 +693,6 @@ function ServiceCard({
   verbs.push({
     key: "docker",
     label: "Open in Docker",
-    detail: "This container, as Docker sees it.",
     icon: External,
     run: () => router.push(`/docker/containers/${service.containerId}`),
   })
@@ -896,7 +892,6 @@ function DomainCard({
     {
       key: "visit",
       label: "Visit",
-      detail: "Open the site in a new tab.",
       icon: External,
       inline: true,
       run: () => window.open(url, "_blank", "noopener,noreferrer"),
@@ -907,7 +902,6 @@ function DomainCard({
     verbs.push({
       key: "certificate",
       label: "Open the certificate",
-      detail: "The certificate this name is served with, and when it renews.",
       icon: LockClosed,
       run: () => router.push(certificate),
     })
@@ -916,14 +910,12 @@ function DomainCard({
     {
       key: "copy",
       label: "Copy the address",
-      detail: url,
       icon: Copy,
       run: () => void copyText(url, "Address copied"),
     },
     {
       key: "settings",
       label: "Domain settings",
-      detail: "The names this deployment answers on, and how each is served.",
       icon: SettingsSliders,
       run: () => router.push(`/deploy/${projectId}/settings/domains`),
     },

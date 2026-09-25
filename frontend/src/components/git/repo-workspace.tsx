@@ -248,9 +248,6 @@ export function RepoWorkspace({
       {
         key: "stash",
         label: "Stash changes",
-        detail: clean
-          ? "Nothing to set aside — the working tree is clean."
-          : "Set every uncommitted change aside and get a clean checkout back.",
         icon: Archive,
         disabled: clean || !!busy,
         run: () =>
@@ -261,10 +258,6 @@ export function RepoWorkspace({
       {
         key: "pop",
         label: "Pop the latest stash",
-        detail:
-          stashCount > 0
-            ? `${stashCount} stashed — bring the most recent one back into the working tree.`
-            : "Nothing is stashed.",
         icon: CornerUpLeft,
         disabled: stashCount === 0 || !!busy,
         run: () =>
@@ -275,7 +268,6 @@ export function RepoWorkspace({
       {
         key: "tags",
         label: "Push all tags",
-        detail: "Publish every local tag to the remote. A tag is local until it is pushed.",
         icon: CloudUpload,
         disabled: !!busy,
         run: () =>
@@ -286,7 +278,6 @@ export function RepoWorkspace({
       {
         key: "identity",
         label: "Who commits here",
-        detail: "The name and address recorded on every commit made from this page.",
         icon: UserSettings,
         run: () => setIdentityOpen(true),
       },
@@ -295,21 +286,18 @@ export function RepoWorkspace({
   more.push({
     key: "remotes",
     label: "Remotes",
-    detail: "Where this repository pushes to and fetches from.",
     icon: LinkIcon,
     run: () => setRemotesOpen(true),
   })
   more.push({
     key: "worktrees",
     label: "Worktrees",
-    detail: "Work on branches in separate folders, each with its own changes.",
     icon: SourceBranch,
     run: () => setWorktreesOpen(true),
   })
   more.push({
     key: "recovery",
     label: "Recovery timeline",
-    detail: "Find an earlier branch position and rescue its commits.",
     icon: ClockRewind,
     run: () => setPreview({ kind: "recovery" }),
   })
@@ -317,7 +305,6 @@ export function RepoWorkspace({
     more.push({
       key: "rebase",
       label: "Edit local history",
-      detail: "Reorder, squash, reword or drop local commits with a recovery branch.",
       icon: ClockRewind,
       disabled: !!busy || !!status.data?.operation,
       run: () => setPreview({ kind: "rebase" }),
@@ -325,7 +312,6 @@ export function RepoWorkspace({
   more.push({
     key: "files",
     label: "Open in Files",
-    detail: "The same folder in the file manager.",
     icon: FolderOpen,
     run: () => router.push(`/files?path=${encodeURIComponent(repo.path)}`),
   })
@@ -333,28 +319,23 @@ export function RepoWorkspace({
     {
       kind: "forge" as const,
       label: "GitLab and Gitea",
-      detail: "Connect a provider account and manage pull or merge requests.",
     },
     {
       kind: "submodules" as const,
       label: "Submodules",
-      detail: "Initialize, update or remove repositories pinned inside this checkout.",
     },
     {
       kind: "lfs" as const,
       label: "Git LFS",
-      detail: "Inspect large files, track patterns and download objects.",
     },
     {
       kind: "exchange" as const,
       label: "Patch exchange",
-      detail: "Export changes or check and import a patch.",
     },
   ])
     more.push({
       key: item.kind,
       label: item.label,
-      detail: item.detail,
       icon: SourceBranch,
       run: () => setPreview({ kind: item.kind }),
     })
@@ -362,7 +343,6 @@ export function RepoWorkspace({
     more.push({
       key: "shell",
       label: "Open a shell here",
-      detail: "A terminal with its working directory in this repository.",
       icon: Terminal,
       run: () => router.push(`/terminal?cwd=${encodeURIComponent(repo.path)}`),
     })

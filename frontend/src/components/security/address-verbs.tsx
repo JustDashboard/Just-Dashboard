@@ -58,7 +58,6 @@ export function addressVerbs({
     verbs.push({
       key: "block",
       label: blocking ? "Blocking…" : "Block at the firewall",
-      detail: "A deny rule in front of every allow. Unlike a ban, it does not expire.",
       icon: Slash,
       inline: true,
       danger: true,
@@ -70,21 +69,18 @@ export function addressVerbs({
     {
       key: "owner",
       label: "Who owns this address",
-      detail: "Autonomous system, prefix, country and registry.",
       icon: Globe,
       run: () => navigate(toolHref("asn", ip)),
     },
     {
       key: "ptr",
       label: "Reverse lookup",
-      detail: "The name the address resolves back to, if it has one.",
       icon: Inspect,
       run: () => navigate(toolHref("dns", ip, "PTR")),
     },
     {
       key: "trace",
       label: "Trace the route to it",
-      detail: "What sits between this host and the address.",
       icon: Route,
       run: () => navigate(toolHref("traceroute", ip)),
     },

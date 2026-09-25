@@ -269,7 +269,6 @@ export function GitHubPanel({
       verbs.push({
         key: "merge",
         label: "Merge",
-        detail: "Merge it into its base branch on GitHub.",
         icon: SourceMerge,
         disabled: !!busy || p.draft,
         run: () => setMerging(p),
@@ -282,8 +281,6 @@ export function GitHubPanel({
       verbs.push({
         key: "test",
         label: previewOutOfDate(preview) ? "Update preview" : "Test this pull request",
-        detail:
-          "Build this exact commit as a preview environment of the project, reachable only on your tailnet.",
         icon: Play,
         disabled: !!busy,
         run: () =>
@@ -299,7 +296,6 @@ export function GitHubPanel({
         verbs.push({
           key: "retry-cleanup",
           label: "Retry cleanup",
-          detail: "Run the failed removal again, so its containers and address are freed.",
           icon: RotateCounterClockwise,
           disabled: !!busy || retrying,
           run: () => void retryCleanup(projectId, previewRun),
@@ -309,7 +305,6 @@ export function GitHubPanel({
       verbs.push({
         key: "preview",
         label: "Open preview",
-        detail: "The preview environment built from it, on your tailnet.",
         icon: External,
         run: () => openPreview(preview),
       })
@@ -317,7 +312,6 @@ export function GitHubPanel({
     verbs.push({
       key: "open",
       label: "Open on GitHub",
-      detail: "The request's own page, with the conversation and the review.",
       icon: External,
       run: () => window.open(p.url, "_blank", "noopener"),
     })
@@ -325,7 +319,6 @@ export function GitHubPanel({
       verbs.push({
         key: "checkout",
         label: "Check out the branch",
-        detail: `Fetch ${p.head} and switch this working tree to it.`,
         icon: SourceBranch,
         disabled: !!busy,
         run: () =>
@@ -342,7 +335,6 @@ export function GitHubPanel({
       verbs.push({
         key: "close",
         label: "Close preview",
-        detail: "Remove the preview environment. Production is untouched.",
         icon: StopCircle,
         danger: true,
         disabled: !!busy,
@@ -545,7 +537,6 @@ export function GitHubPanel({
                           {
                             key: "comment",
                             label: "Comment",
-                            detail: "Say something on the issue, as your GitHub account.",
                             icon: PaperAirplane,
                             inline: true,
                             run: () => setCommenting({ number: issue.number, title: issue.title }),
@@ -555,7 +546,6 @@ export function GitHubPanel({
                     {
                       key: "open",
                       label: "Open on GitHub",
-                      detail: "The issue's own page, with its conversation.",
                       icon: External,
                       inline: true,
                       run: () => window.open(issue.url, "_blank", "noopener"),

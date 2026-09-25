@@ -7,7 +7,6 @@ import type { BackupJob } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import type { useConfirm } from "@/components/confirm-dialog"
 import type { Verb } from "@/components/verbs"
-import { scheduleLabel } from "@/components/backups/shared"
 
 /**
  * Take a backup outside the schedule.
@@ -97,7 +96,6 @@ export function useJobVerbs({
       out.push({
         key: "run",
         label: "Run now",
-        detail: "Take a backup outside the schedule.",
         icon: Play,
         inline: true,
         progressive: "Running…",
@@ -110,7 +108,6 @@ export function useJobVerbs({
         {
           key: "edit",
           label: "Edit",
-          detail: "Sources, destination, schedule, retention and checks.",
           icon: Pencil,
           inline: true,
           run: () => onEdit(job),
@@ -119,16 +116,12 @@ export function useJobVerbs({
           ? {
               key: "pause",
               label: "Pause schedule",
-              detail: "Stops the schedule. Run now still works and archives stay put.",
               icon: Pause,
               run: () => void setEnabled(job, false),
             }
           : {
               key: "resume",
               label: "Resume schedule",
-              detail: job.schedule
-                ? `Starts firing again: ${scheduleLabel(job.schedule).toLowerCase()}.`
-                : "The job has no schedule; set one under Edit.",
               icon: Play,
               disabled: !job.schedule,
               run: () => void setEnabled(job, true),
@@ -136,14 +129,12 @@ export function useJobVerbs({
         {
           key: "test",
           label: "Test destination",
-          detail: "Checks the directory is writable or the bucket answers.",
           icon: CloudUpload,
           run: () => void testTarget(job),
         },
         {
           key: "delete",
           label: "Delete job",
-          detail: "Removes the schedule and history. Archives already taken are kept.",
           icon: Trash,
           danger: true,
           run: () => void remove(job),

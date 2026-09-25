@@ -3,7 +3,7 @@
 import { Check, ChevronDown, Database, Linked, Plus } from "@/components/icons"
 import { ProductLogo } from "@/components/product-logo"
 import { cn } from "@/lib/utils"
-import type { DbConnection, DbDriverInfo } from "@/lib/types"
+import type { DbConnection } from "@/lib/types"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,7 +24,6 @@ import {
  */
 export function ConnectionSwitcher({
   connections,
-  drivers,
   current,
   onSelect,
   onNew,
@@ -32,7 +31,6 @@ export function ConnectionSwitcher({
   className,
 }: {
   connections: DbConnection[]
-  drivers: DbDriverInfo[]
   current: DbConnection
   onSelect: (id: number) => void
   /** Offered only to an administrator, who is the only one who may add. */
@@ -40,7 +38,6 @@ export function ConnectionSwitcher({
   onConnect?: () => void
   className?: string
 }) {
-  const label = (c: DbConnection) => drivers.find((d) => d.id === c.driver)?.label ?? c.driver
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -60,7 +57,7 @@ export function ConnectionSwitcher({
           <ChevronDown className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground group-data-[state=open]:text-foreground" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-80">
+      <DropdownMenuContent align="start" className="w-72">
         <DropdownMenuLabel className="text-hint font-medium text-muted-foreground">
           Connections
         </DropdownMenuLabel>
@@ -71,14 +68,14 @@ export function ConnectionSwitcher({
             className="items-center gap-2.5"
           >
             <ProductLogo id={c.driver} size="sm" fallback={Database} />
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate text-body font-medium">{c.name}</span>
-              <span className="truncate text-hint text-muted-foreground">
-                {label(c)}
-                {c.host ? ` · ${c.host}${c.port ? `:${c.port}` : ""}` : ""}
-                {c.database ? ` · ${c.database}` : ""}
+            <span className="min-w-0 flex-1 truncate">{c.name}</span>
+            {(c.host || c.database) && (
+              <span className="max-w-[50%] shrink truncate font-mono text-hint text-muted-foreground">
+                {[c.host ? `${c.host}${c.port ? `:${c.port}` : ""}` : null, c.database]
+                  .filter(Boolean)
+                  .join(" · ")}
               </span>
-            </span>
+            )}
             {c.id === current.id && <Check className="size-3.5 text-foreground" />}
           </DropdownMenuItem>
         ))}

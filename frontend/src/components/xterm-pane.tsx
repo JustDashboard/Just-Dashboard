@@ -1576,13 +1576,11 @@ function SnippetMenu({
         <DropdownMenuLabel className="text-xs">Send a command</DropdownMenuLabel>
         <DropdownMenuSeparator />
         {snippets.map((snippet) => (
-          <DropdownMenuItem
-            key={snippet.id}
-            className="flex-col items-start gap-0 text-xs"
-            onSelect={() => onSend(snippet.command)}
-          >
-            <span>{snippet.label}</span>
-            <span className="font-mono text-micro text-muted-foreground">{snippet.command}</span>
+          <DropdownMenuItem key={snippet.id} onSelect={() => onSend(snippet.command)}>
+            <span className="min-w-0 flex-1 truncate">{snippet.label}</span>
+            <span className="max-w-[50%] shrink truncate font-mono text-hint text-muted-foreground">
+              {snippet.command}
+            </span>
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

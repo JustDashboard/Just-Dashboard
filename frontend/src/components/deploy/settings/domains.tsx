@@ -318,7 +318,6 @@ function DomainsForm({
       verbs.push({
         key: "site",
         label: "Open the serving site",
-        detail: `The proxy site that answers for ${domain.hostname}.`,
         icon: Globe,
         run: () => router.push(route.deepLink!),
       })
@@ -326,7 +325,6 @@ function DomainsForm({
       verbs.push({
         key: "certificate",
         label: "Open the certificate",
-        detail: "Its issuer, its expiry and the names it covers, on Proxy.",
         icon: LockClosed,
         run: () => router.push(route.certificateLink!),
       })
@@ -334,7 +332,6 @@ function DomainsForm({
       verbs.push({
         key: "remove",
         label: "Remove",
-        detail: "Stops routing this name once saved and deployed.",
         icon: Trash,
         danger: true,
         run: () => setDomains(domains.filter((_, i) => i !== index)),

@@ -121,7 +121,6 @@ export function ArchivedProjects() {
             {
               key: "purge",
               label: "Delete permanently",
-              detail: "Forget this deployment's configuration, variables and history.",
               icon: Trash,
               danger: true,
               run: () => remove(project),

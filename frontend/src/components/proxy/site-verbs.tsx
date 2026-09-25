@@ -83,7 +83,6 @@ export function useSiteVerbs({
     verbs.push({
       key: "edit",
       label: "Edit",
-      detail: "Open the site in the form that writes its nginx config.",
       icon: Pencil,
       inline: true,
       disabled: Boolean(busy),
@@ -94,9 +93,6 @@ export function useSiteVerbs({
     verbs.push({
       key: "raw",
       label: admin ? "Raw config" : "View config",
-      detail: admin
-        ? "Edit the file itself. Tested with the server's own parser before it takes effect."
-        : "Read the configuration file as it is on disk.",
       icon: Code,
       inline: true,
       run: () => onRaw(vhost),
@@ -106,7 +102,6 @@ export function useSiteVerbs({
     verbs.push({
       key: "open",
       label: "Open site",
-      detail: `Visit ${url} in a new tab.`,
       icon: External,
       run: () => window.open(url, "_blank", "noopener,noreferrer"),
     })
@@ -115,7 +110,6 @@ export function useSiteVerbs({
     verbs.push({
       key: "scan",
       label: "TLS report",
-      detail: "Grade what a visitor actually gets: protocols, chain, redirect and headers.",
       icon: Inspect,
       run: () => router.push(`/proxy/tls?domain=${encodeURIComponent(domain)}`),
     })
@@ -124,7 +118,6 @@ export function useSiteVerbs({
     verbs.push({
       key: "log",
       label: "Access log",
-      detail: "The requests this site served, in the log viewer.",
       icon: Logs,
       run: () => router.push(`/logs?source=${encodeURIComponent(log)}`),
     })
@@ -133,7 +126,6 @@ export function useSiteVerbs({
     verbs.push({
       key: "duplicate",
       label: "Duplicate",
-      detail: "Start a new site from this one's settings, with a different name and domains.",
       icon: Copy,
       run: () => onDuplicate(vhost),
     })
@@ -147,7 +139,6 @@ export function useSiteVerbs({
         ? {
             key: "disable",
             label: "Disable",
-            detail: "Stop serving it and reload. The file stays on disk.",
             icon: Slash,
             progressive: "Disabling",
             disabled: Boolean(busy),
@@ -156,7 +147,6 @@ export function useSiteVerbs({
         : {
             key: "enable",
             label: "Enable",
-            detail: "Link it into sites-enabled and reload nginx.",
             icon: CheckCircle,
             progressive: "Enabling",
             disabled: Boolean(busy),
@@ -168,7 +158,6 @@ export function useSiteVerbs({
     verbs.push({
       key: "delete",
       label: "Delete",
-      detail: "Remove the file and its link, then reload. The previous content is kept as a .bak.",
       icon: Trash,
       danger: true,
       disabled: Boolean(busy),

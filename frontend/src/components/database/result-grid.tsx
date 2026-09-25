@@ -271,11 +271,9 @@ export function ResultGrid({
                                 onClick={() => onFollowReference(ref, rowRecord(row))}
                               >
                                 <External className="size-3.5" />
-                                <span className="flex min-w-0 flex-col">
-                                  <span className="truncate">{ref.table}</span>
-                                  <span className="truncate text-hint text-muted-foreground">
-                                    where {ref.fk.columns[0]} is this row
-                                  </span>
+                                <span className="min-w-0 flex-1 truncate">{ref.table}</span>
+                                <span className="max-w-[45%] shrink truncate font-mono text-hint text-muted-foreground">
+                                  {ref.fk.columns[0]}
                                 </span>
                               </DropdownMenuItem>
                             ))}

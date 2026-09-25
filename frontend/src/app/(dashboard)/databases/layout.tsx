@@ -316,7 +316,6 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
             {conn && (
               <ConnectionSwitcher
                 connections={list ?? []}
-                drivers={drivers.data ?? []}
                 current={conn}
                 onSelect={(id) => goto(pathname, { conn: id })}
                 onNew={admin ? () => setNewOpen(true) : undefined}

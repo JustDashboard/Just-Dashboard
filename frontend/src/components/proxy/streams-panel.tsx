@@ -92,7 +92,6 @@ export function StreamsPage() {
     {
       key: "edit",
       label: "Edit",
-      detail: "Change where the port goes, who may reach it, or the timeout.",
       icon: Pencil,
       inline: true,
       run: () => open(stream),
@@ -100,7 +99,6 @@ export function StreamsPage() {
     {
       key: "delete",
       label: "Delete",
-      detail: "Remove the forward and reload. The previous file is kept as a .bak.",
       icon: Trash,
       danger: true,
       run: () => remove(stream),

@@ -855,9 +855,9 @@ test("a container's actions are reachable on a touch screen", async ({ page }) =
  * pause — mean nothing without already knowing what they do, and a control
  * nobody dares press is a control that is not there. Start, restart and stop
  * stay as icons because they are pressed constantly; everything else moved into
- * a menu where each verb carries a line of plain English.
+ * a menu where each verb is named.
  */
-test("the destructive verbs are words with a sentence, not glyphs", async ({ page }) => {
+test("the destructive verbs are words, not glyphs", async ({ page }) => {
   await mockDocker(page)
   await page.goto("/docker/containers")
 
@@ -873,9 +873,7 @@ test("the destructive verbs are words with a sentence, not glyphs", async ({ pag
   await row.getByRole("button", { name: "More actions" }).click()
   const menu = page.getByRole("menu")
   await expect(menu.getByText("Update to a newer image")).toBeVisible()
-  await expect(menu.getByText(/Pulls a newer nginx:alpine/)).toBeVisible()
   await expect(menu.getByText("Remove")).toBeVisible()
-  await expect(menu.getByText(/Named volumes and their data are kept/)).toBeVisible()
 })
 
 /**

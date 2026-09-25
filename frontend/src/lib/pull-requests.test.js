@@ -3,7 +3,6 @@ import {
   canTest,
   cleanupFailed,
   heldReason,
-  mergeDetail,
   previewHeld,
   previewOutOfDate,
   previewStatus,
@@ -196,28 +195,6 @@ describe("why a listing could not be read", () => {
       /not a GitHub repository/,
     )
     expect(unavailableReason({ reason: "", repository: "acme/app" })).toMatch(/could not be read/)
-  })
-})
-
-describe("what the Merge verb promises", () => {
-  test("a preview closes only when there is one, and production only redeploys when it would", () => {
-    expect(mergeDetail({ draft: false, previewOpen: true, automatic: true })).toBe(
-      "Merge it into its base branch on GitHub. Its preview closes. Production redeploys automatically.",
-    )
-    expect(mergeDetail({ draft: false, previewOpen: false, automatic: true })).toBe(
-      "Merge it into its base branch on GitHub. Production redeploys automatically.",
-    )
-    expect(mergeDetail({ draft: false, previewOpen: true, automatic: false })).toBe(
-      "Merge it into its base branch on GitHub. Its preview closes. Auto-deploy is off — deploy production afterwards.",
-    )
-    expect(mergeDetail({ draft: false, previewOpen: false, automatic: false })).toBe(
-      "Merge it into its base branch on GitHub. Auto-deploy is off — deploy production afterwards.",
-    )
-  })
-  test("a draft cannot be merged at all", () => {
-    expect(mergeDetail({ draft: true, previewOpen: true, automatic: true })).toBe(
-      "A draft cannot be merged until it is marked ready on GitHub.",
-    )
   })
 })
 

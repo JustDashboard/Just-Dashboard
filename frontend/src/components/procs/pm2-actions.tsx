@@ -112,7 +112,6 @@ export function usePM2Verbs({
           key: "start",
           progressive: "Starting",
           label: "Start",
-          detail: "Runs it again with the settings it was registered with.",
           icon: Play,
           inline: true,
           run: () => void act(process, "start", "Starting").catch(() => undefined),
@@ -122,9 +121,6 @@ export function usePM2Verbs({
           key: "reload",
           progressive: "Reloading",
           label: "Reload",
-          detail: cluster
-            ? "Replaces the workers one at a time, so nothing stops serving."
-            : "Starts the new process before stopping the old one where it can.",
           icon: RotateClockwise,
           inline: true,
           run: () => void act(process, "reload", "Reloading").catch(() => undefined),
@@ -137,7 +133,6 @@ export function usePM2Verbs({
         key: "restart",
         progressive: "Restarting",
         label: "Restart",
-        detail: "Stops it and starts it again. Whatever it serves is interrupted.",
         icon: RefreshClockwise,
         inline: true,
         run: () =>
@@ -158,7 +153,6 @@ export function usePM2Verbs({
           key: "stop",
           progressive: "Stopping",
           label: "Stop",
-          detail: "Stops it. It stays in PM2's list and can be started again.",
           icon: StopCircle,
           inline: true,
           run: () =>
@@ -180,7 +174,6 @@ export function usePM2Verbs({
       verbs.push({
         key: "logs",
         label: "Logs",
-        detail: "stdout and stderr, merged and live. The first place to look.",
         icon: Logs,
         run: () => onOpenTab("logs"),
       })
@@ -190,7 +183,6 @@ export function usePM2Verbs({
       verbs.push({
         key: "scale",
         label: "Scale…",
-        detail: `${process.instances || 1} ${process.instances === 1 ? "instance" : "instances"} now. Add or remove workers without a restart.`,
         icon: ArrowUpDown,
         run: onScale,
       })
@@ -200,7 +192,6 @@ export function usePM2Verbs({
       verbs.push({
         key: "reset",
         label: "Reset restart counter",
-        detail: `Back to zero from ${process.restarts}, so the next crash is not lost in old history.`,
         icon: Backspace,
         run: () => void act(process, "reset", "Resetting").catch(() => undefined),
       })
@@ -210,7 +201,6 @@ export function usePM2Verbs({
       verbs.push({
         key: "flush",
         label: "Flush logs",
-        detail: "Empties its stdout and stderr files. What was in them is gone.",
         icon: Trash,
         run: () =>
           confirm({
@@ -231,7 +221,6 @@ export function usePM2Verbs({
       verbs.push({
         key: "cwd",
         label: "Open working directory",
-        detail: process.cwd,
         icon: FolderOpen,
         run: () => router.push(`/files?path=${encodeURIComponent(process.cwd)}`),
       })
@@ -240,7 +229,6 @@ export function usePM2Verbs({
       verbs.push({
         key: "copy-script",
         label: "Copy script path",
-        detail: process.scriptPath,
         icon: Copy,
         run: () => void copyText(process.scriptPath, "Script path copied"),
       })
@@ -250,7 +238,6 @@ export function usePM2Verbs({
       verbs.push({
         key: "delete",
         label: "Delete from PM2",
-        detail: "Stops it and forgets it. Files on disk are untouched.",
         icon: Trash,
         danger: true,
         run: () =>
@@ -304,7 +291,6 @@ export function useDaemonVerbs({
       verbs.push({
         key: "save",
         label: "Save startup list",
-        detail: "Writes what runs now as what comes back after a reboot, for every account.",
         icon: FloppyDisk,
         run: () =>
           void post("/pm2/save")
@@ -318,7 +304,6 @@ export function useDaemonVerbs({
         verbs.push({
           key: `reload-all:${daemon.account}`,
           label: `Reload all${suffix(daemon)}`,
-          detail: "Every application, workers replaced one at a time where the mode allows.",
           icon: RotateClockwise,
           run: () =>
             void post(`/pm2/daemons/${encodeURIComponent(daemon.account)}/reload`)
@@ -335,7 +320,6 @@ export function useDaemonVerbs({
         verbs.push({
           key: `restart-all:${daemon.account}`,
           label: `Restart all${suffix(daemon)}`,
-          detail: "Every application stops and starts again. Everything is interrupted.",
           icon: RefreshClockwise,
           run: () =>
             confirm({
@@ -365,7 +349,6 @@ export function useDaemonVerbs({
         verbs.push({
           key: `stop-all:${daemon.account}`,
           label: `Stop all${suffix(daemon)}`,
-          detail: "Every application stops. They stay in the list and can be started again.",
           icon: StopCircle,
           danger: true,
           run: () =>

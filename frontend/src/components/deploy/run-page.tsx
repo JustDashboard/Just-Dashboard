@@ -490,9 +490,6 @@ export function RunPage() {
           {
             key: "retry",
             label: commitGone ? "Retry the recorded commit" : "Retry with the settings it used",
-            detail: commitGone
-              ? "Try the commit this run recorded again, in case the remote has it back."
-              : "Run this deployment again with its own plan and variables, unchanged.",
             icon: RefreshClockwise,
             progressive: "Starting…",
             disabled: working === "retry",
@@ -503,14 +500,12 @@ export function RunPage() {
     {
       key: "project",
       label: "Open project",
-      detail: "Its overview, the live site and every other deployment.",
       icon: ArrowUpRight,
       run: () => router.push(`/deploy/${projectId}`),
     },
     {
       key: "link",
       label: "Copy link",
-      detail: "This deployment's address, to send to someone.",
       icon: LinkGlyph,
       run: () => void copyText(window.location.href, "Link copied"),
     },

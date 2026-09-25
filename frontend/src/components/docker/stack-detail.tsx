@@ -301,8 +301,8 @@ function StackActions({
    * `Up` and `Down` are precise and mean nothing without the compose reference
    * — and `Down` is the worst of the two, because it sounds like the opposite
    * of `Up` and is not: it deletes the containers and the project network. Two
-   * are pressed often enough to sit inline; the rest are behind one menu, where
-   * each gets its word and its sentence. Every confirmation still carries both
+   * are pressed often enough to sit inline; the rest are behind one menu, one
+   * word to a line. Every confirmation still carries both
    * the blast radius and the exact command being run, so an operator who knows
    * compose can check the translation.
    */
@@ -326,7 +326,6 @@ function StackActions({
     verbs.push({
       key: "update",
       label: COMPOSE_ACTIONS.update.label,
-      detail: "Pulls newer images and replaces the containers using them.",
       icon: ArrowCircleUp,
       run: () => act("update"),
     })
@@ -335,7 +334,6 @@ function StackActions({
     verbs.push({
       key: "build",
       label: COMPOSE_ACTIONS.build.label,
-      detail: "Rebuilds the images this stack builds from source. Nothing restarts yet.",
       icon: Wrench,
       run: () => act("build"),
     })
@@ -344,7 +342,6 @@ function StackActions({
     verbs.push({
       key: "down",
       label: COMPOSE_ACTIONS.down.label,
-      detail: "Stops and deletes the containers and the project network. Volumes are kept.",
       icon: StopCircle,
       danger: true,
       run: () =>

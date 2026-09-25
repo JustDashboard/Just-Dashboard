@@ -38,7 +38,7 @@ const PAGE = 100
  * file, and paged rather than capped — the two hundredth commit used to be
  * the last one anybody could reach.
  *
- * Each commit carries its verbs behind one menu, where each gets a sentence:
+ * Each commit carries its verbs behind one menu, by name:
  * branch or tag from here, copy the id, cherry-pick or revert it, and — for
  * anyone with the destructive capability — undo the branch back to it. That
  * last one is the recoverable half of reset (mixed): the working tree is
@@ -173,7 +173,6 @@ export function HistoryPanel({
       {
         key: "copy",
         label: "Copy SHA",
-        detail: "Put the full commit id on the clipboard.",
         icon: Copy,
         run: () => void copyText(c.sha, "Commit id copied"),
       },
@@ -183,21 +182,18 @@ export function HistoryPanel({
         {
           key: "branch",
           label: "Branch from here",
-          detail: "Start a new branch at this commit and switch to it.",
           icon: SourceBranch,
           run: () => setNaming({ kind: "branch", commit: c }),
         },
         {
           key: "tag",
           label: "Tag this commit",
-          detail: "Pin a name to this commit — a release, a point to come back to.",
           icon: GitTag,
           run: () => setNaming({ kind: "tag", commit: c }),
         },
         {
           key: "cherry",
           label: `Cherry-pick onto ${branch}`,
-          detail: "Copy this one commit onto the current branch.",
           icon: CornerUpLeft,
           disabled: !!busy,
           run: () =>
@@ -212,8 +208,6 @@ export function HistoryPanel({
         {
           key: "revert",
           label: "Revert this commit",
-          detail:
-            "Record a new commit that undoes this one. History keeps both, so it is safe after a push.",
           icon: RotateCounterClockwise,
           disabled: !!busy,
           run: () =>
@@ -245,8 +239,6 @@ export function HistoryPanel({
         {
           key: "undo",
           label: "Undo to here, keep changes",
-          detail:
-            "Move the branch back to this commit; the later edits stay as uncommitted changes.",
           icon: ClockRewind,
           danger: true,
           run: () => resetTo(c, false),
@@ -254,8 +246,6 @@ export function HistoryPanel({
         {
           key: "hard",
           label: "Reset hard to here",
-          detail:
-            "Move the branch back and overwrite every file to match. Nothing after it survives.",
           icon: Warning,
           danger: true,
           run: () => resetTo(c, true),

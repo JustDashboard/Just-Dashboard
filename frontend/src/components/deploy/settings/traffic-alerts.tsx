@@ -223,28 +223,24 @@ export function TrafficAlerts({
     {
       key: "test",
       label: "Send test",
-      detail: "Deliver this rule as if it had just fired.",
       icon: PaperAirplane,
       run: () => void test(rule),
     },
     {
       key: "edit",
       label: "Edit",
-      detail: "Change the limit, the window or the channels.",
       icon: Pencil,
       run: () => setEditing({ rule }),
     },
     {
       key: rule.enabled ? "pause" : "resume",
       label: rule.enabled ? "Pause" : "Resume",
-      detail: rule.enabled ? "Keep the rule, stop watching." : "Watch again.",
       icon: rule.enabled ? Pause : Play,
       run: () => void toggle(rule, !rule.enabled),
     },
     {
       key: "remove",
       label: "Remove",
-      detail: "Delete the rule. Nothing else changes.",
       icon: Trash,
       danger: true,
       run: () => remove(rule),

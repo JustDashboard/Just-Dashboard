@@ -268,12 +268,11 @@ function Fleet() {
   }
 
   // Behind a menu on a phone, where three links and the command broke into
-  // two ragged rows; each page gets its word and a line (§13).
+  // two ragged rows; each page is its word (§13).
   const pages: Verb[] = [
     {
       key: "notifications",
       label: "Notifications",
-      detail: "Where run outcomes are sent: Discord, Slack, Telegram, e-mail or a webhook.",
       icon: Bell,
       run: () => router.push("/deploy/notifications"),
     },
@@ -285,7 +284,6 @@ function Fleet() {
           {
             key: "credentials",
             label: "Credentials",
-            detail: "Git tokens, SSH keys and registry logins the projects use.",
             icon: Key,
             run: () => router.push("/deploy/credentials"),
           },
@@ -294,10 +292,6 @@ function Fleet() {
     {
       key: "archived",
       label: "Archived",
-      detail:
-        archivedCount > 0
-          ? `${plural(archivedCount, "project")} taken out of the fleet. Their history is kept.`
-          : "Projects taken out of the fleet, with their history.",
       icon: Archive,
       run: () => router.push("/deploy?view=archived"),
     },

@@ -269,7 +269,6 @@ export function Previews({
             {
               key: "deploy",
               label: "Deploy preview",
-              detail: "Build and start this pull request's revision in its own environment.",
               icon: Play,
               inline: true,
               disabled: deploying !== undefined || isolation.blocked,
@@ -282,7 +281,6 @@ export function Previews({
             {
               key: "variables",
               label: "Variables",
-              detail: "The values this preview runs with, apart from production's.",
               icon: Key,
               inline: true,
               run: () => setVariablesFor(preview),
@@ -294,7 +292,6 @@ export function Previews({
             {
               key: "pull-request",
               label: "Open pull request",
-              detail: `PR ${preview.providerRef} on its forge, in a new tab.`,
               icon: External,
               run: () => void window.open(url, "_blank", "noopener"),
             },

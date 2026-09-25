@@ -355,10 +355,7 @@ test("exporting carries the conditions and the order the grid is under", async (
   await page.getByRole("textbox", { name: "Value" }).fill("ada@example.com")
 
   await page.getByRole("button", { name: "More table actions" }).click()
-  const csv = page.getByRole("menuitem", { name: /Export as CSV/ })
-  await expect(csv).toContainText("condition applied")
-  await expect(csv).toContainText("ordered by email")
-  await csv.click()
+  await page.getByRole("menuitem", { name: /Export as CSV/ }).click()
 
   await expect.poll(() => exports.length).toBeGreaterThan(0)
   const query = exports[exports.length - 1]
@@ -379,8 +376,9 @@ test("a row says which tables reference it, and following one lands filtered", a
 
   await page.getByRole("button", { name: /^users/ }).click()
   await page.getByRole("button", { name: "More row actions" }).first().click()
+  // The row names the table and, beside it, the column that points here.
   const reference = page.getByRole("menuitem", { name: /orders/ })
-  await expect(reference).toContainText("where customer_id is this row")
+  await expect(reference).toContainText("customer_id")
   await reference.click()
 
   // It is the same navigation the rail does, plus a filter: the orders table,

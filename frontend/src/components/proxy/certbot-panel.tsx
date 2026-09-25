@@ -111,7 +111,6 @@ export function CertbotLineages({
     {
       key: "renew",
       label: "Renew",
-      detail: "Renew now if it is due. certbot refuses one that is not.",
       icon: RefreshClockwise,
       inline: true,
       disabled: busy === name,
@@ -120,8 +119,6 @@ export function CertbotLineages({
     {
       key: "dry-run",
       label: "Dry run",
-      detail:
-        "The whole exchange against the staging authority, changing nothing. The only safe way to find out whether renewal will work before the day it has to.",
       icon: ShieldCheck,
       disabled: busy === name,
       run: () => onRenew(name, true),
@@ -129,8 +126,6 @@ export function CertbotLineages({
     {
       key: "force",
       label: "Force renewal",
-      detail:
-        "Renew even though it is not due. Spends one of the five duplicate certificates Let's Encrypt allows per week.",
       icon: Warning,
       disabled: busy === name,
       run: () =>
@@ -150,8 +145,6 @@ export function CertbotLineages({
     {
       key: "revoke",
       label: "Revoke and delete",
-      detail:
-        "The authority publishes that this certificate is no longer to be trusted and the files are deleted. No undo.",
       icon: Trash,
       danger: true,
       disabled: busy === name,
@@ -328,8 +321,6 @@ export function DnsProvidersPanel({
                       {
                         key: "remove",
                         label: "Remove credentials",
-                        detail:
-                          "Delete the saved token. Renewals through this provider fail until a new one is saved.",
                         icon: Trash,
                         danger: true,
                         run: () =>

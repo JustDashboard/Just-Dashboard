@@ -203,7 +203,6 @@ export function EngineActions({
       verbs.push({
         key: "start",
         label: `Start ${engine}`,
-        detail: "It is not running, which is why nothing is being served.",
         icon: Play,
         run: () =>
           control("start")
@@ -214,8 +213,6 @@ export function EngineActions({
     verbs.push({
       key: "restart",
       label: `Restart ${engine}`,
-      detail:
-        "A full stop and start. Every site is briefly unreachable; a reload is usually enough.",
       icon: RefreshClockwise,
       danger: true,
       run: () =>
@@ -235,7 +232,6 @@ export function EngineActions({
       verbs.push({
         key: "stop",
         label: `Stop ${engine}`,
-        detail: "Takes every site on this host offline until it is started again.",
         icon: Stop,
         danger: true,
         run: () =>
@@ -252,7 +248,6 @@ export function EngineActions({
     verbs.push({
       key: "unit",
       label: "Service details",
-      detail: "The unit's journal, restarts and startup setting, under Processes.",
       icon: ListOrdered,
       run: () => router.push(`/processes/services?unit=${encodeURIComponent(unitName)}`),
     })

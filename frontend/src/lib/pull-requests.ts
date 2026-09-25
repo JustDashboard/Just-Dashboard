@@ -165,33 +165,6 @@ export function unavailableReason(info: Pick<ProjectPullRequests, "reason" | "re
 }
 
 /**
- * What merging from a deploy project does, as the verb's own line: the same
- * two facts the toast reads back afterwards — whether there is a preview to
- * close, and whether production follows the merge on its own — so the line
- * never promises a redeploy that auto-deploy is not going to make.
- */
-export function mergeDetail({
-  draft,
-  previewOpen,
-  automatic,
-}: {
-  draft: boolean
-  previewOpen: boolean
-  automatic: boolean
-}): string {
-  if (draft) return "A draft cannot be merged until it is marked ready on GitHub."
-  return [
-    "Merge it into its base branch on GitHub.",
-    previewOpen && "Its preview closes.",
-    automatic
-      ? "Production redeploys automatically."
-      : "Auto-deploy is off — deploy production afterwards.",
-  ]
-    .filter(Boolean)
-    .join(" ")
-}
-
-/**
  * A preview's pull request as the row draws one, from what the dashboard
  * recorded of it: its title, author, branch and head at the time it was
  * approved. Closed when the listing is trusted and does not have it — the

@@ -403,7 +403,6 @@ function CommitPreview({
   verbs.push({
     key: "copy",
     label: "Copy SHA",
-    detail: "Put the full commit id on the clipboard.",
     icon: Copy,
     inline: true,
     run: () => void copyText(sha, "Commit id copied"),
@@ -412,21 +411,18 @@ function CommitPreview({
     verbs.push({
       key: "branch",
       label: "Branch here",
-      detail: "Start a new branch from this commit and switch to it.",
       icon: SourceBranch,
       run: () => setNaming("branch"),
     })
     verbs.push({
       key: "tag",
       label: "Tag this commit",
-      detail: "Pin a name to this commit — a release, a point to come back to.",
       icon: GitTag,
       run: () => setNaming("tag"),
     })
     verbs.push({
       key: "cherry",
       label: "Cherry-pick onto " + ctx.branch,
-      detail: "Copy this one commit onto the current branch.",
       icon: CornerUpLeft,
       disabled: !!ctx.busy,
       run: () =>
@@ -443,8 +439,6 @@ function CommitPreview({
     verbs.push({
       key: "revert",
       label: "Revert this commit",
-      detail:
-        "Record a new commit that undoes this one. History keeps both, so it is safe after a push.",
       icon: RotateCounterClockwise,
       disabled: !!ctx.busy,
       run: () =>
@@ -711,7 +705,6 @@ function StashPreview({
     verbs.push({
       key: "apply",
       label: "Apply",
-      detail: "Bring these changes back into the working tree and keep the stash.",
       icon: CornerUpLeft,
       inline: true,
       disabled: !!ctx.busy,
@@ -726,7 +719,6 @@ function StashPreview({
     verbs.push({
       key: "pop",
       label: "Pop",
-      detail: "Bring the changes back and drop the stash once they have applied cleanly.",
       icon: RotateCounterClockwise,
       inline: true,
       disabled: !!ctx.busy,
@@ -743,7 +735,6 @@ function StashPreview({
     verbs.push({
       key: "drop",
       label: "Drop",
-      detail: "Throw the stash away. The changes in it exist nowhere else.",
       icon: Cross,
       danger: true,
       disabled: !!ctx.busy,
@@ -1008,7 +999,6 @@ function PullPreview({
     {
       key: "open",
       label: "Open on GitHub",
-      detail: "The request's own page, with the conversation and the review.",
       icon: External,
       inline: true,
       run: () => window.open(p?.url, "_blank", "noopener"),
@@ -1018,7 +1008,6 @@ function PullPreview({
     verbs.push({
       key: "comment",
       label: "Comment",
-      detail: "Say something on the pull request, as your GitHub account.",
       icon: PaperAirplane,
       inline: true,
       run: () => setCommenting(true),
@@ -1028,7 +1017,6 @@ function PullPreview({
     verbs.unshift({
       key: "merge",
       label: "Merge",
-      detail: "Merge it into its base branch on GitHub, the way the button on its page does.",
       icon: SourceMerge,
       inline: true,
       disabled: !!ctx.busy || p.draft || p.mergeable === "conflicting",
@@ -1037,7 +1025,6 @@ function PullPreview({
     verbs.push({
       key: "checkout",
       label: "Check out the branch",
-      detail: `Fetch ${p.head} and switch this working tree to it, to try the change here.`,
       icon: SourceBranch,
       disabled: !!ctx.busy,
       run: () =>

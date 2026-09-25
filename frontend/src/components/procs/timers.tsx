@@ -132,7 +132,6 @@ function TimerRow({
       list.push({
         key: "run",
         label: "Run now",
-        detail: `Starts ${timer.activates} straight away, without waiting for the timer.`,
         icon: Lightning,
         inline: true,
         run: () =>
@@ -158,7 +157,6 @@ function TimerRow({
         key: "start",
         progressive: "Starting",
         label: "Start timer",
-        detail: "Arms it. It fires on its schedule from now on.",
         icon: Play,
         run: () => void act(unit, "start", "Starting").catch(() => undefined),
       })
@@ -168,7 +166,6 @@ function TimerRow({
         key: "stop",
         progressive: "Stopping",
         label: "Stop timer",
-        detail: "Disarms it until started again. What it activates is not touched.",
         icon: StopCircle,
         run: () =>
           confirm({
@@ -193,14 +190,12 @@ function TimerRow({
           ? {
               key: "disable",
               label: "Disable on boot",
-              detail: "Not armed after the next reboot. Unchanged until then.",
               icon: Slash,
               run: () => void act(unit, "disable", "Disabling").catch(() => undefined),
             }
           : {
               key: "enable",
               label: "Enable on boot",
-              detail: "Armed after every reboot. Does not start it now.",
               icon: Lightning,
               run: () => void act(unit, "enable", "Enabling").catch(() => undefined),
             },

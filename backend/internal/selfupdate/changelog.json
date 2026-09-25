@@ -8,6 +8,11 @@
       "summary": "The Git workspace could commit, branch, merge and push, and everything past that was a terminal. 0.7.0 brings the rest into the same three columns: conflicts resolved side by side, single lines staged, local history rebased behind a recovery branch, worktrees, submodules, LFS and patches, reviews on GitHub pull requests and on GitLab and Gitea requests. Every reviewed template now declares how its first sign-in works, the five that could not say are no longer offered, and nine new ones join the catalogue. New project opens on whatever is still unanswered and checks the plan the moment Review is reached. A deployment's Logs page answers from the requests the proxy actually served, with insights, marks on the chart and traffic alerts. A container, a compose stack and a backup job are pages of their own, every page remembers what you were doing on it, and the rail's top level is twelve rows instead of seventeen.",
       "changes": [
         {
+          "kind": "changed",
+          "text": "Action menus are one word to a line",
+          "detail": "Every overflow menu in the product — a deployment's, a container's, a process's, a branch's, a table's and the rest — drew a sentence of explanation under each verb, so a menu of eleven verbs stood taller than the card it opened from. The sentences are gone: each verb is its word, the menus are narrower and a third the height, and where a row carried a fact beside its word (a place's path, a saved command, a connection's host) the fact sits on the same line."
+        },
+        {
           "kind": "added",
           "text": "Resolve a conflict side by side, and stage single lines",
           "detail": "Merge, cherry-pick and revert started from the workspace keep their conflicts instead of aborting, and each conflicted file opens on its base, current, incoming and working result: edit the result, or take one side whole, then continue or abort. Taking a whole side and aborting discard work, so both ask for a typed phrase. The changes panel stages or unstages chosen hunks or individual changed lines, rebuilt on the server from its own snapshot of the diff and refused if the file moved underneath it. Binary files, symlinks and very large diffs keep the whole-file action."

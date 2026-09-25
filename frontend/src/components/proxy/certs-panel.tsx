@@ -412,7 +412,6 @@ export function CertificatesPage() {
                               {
                                 key: "scan",
                                 label: "TLS report",
-                                detail: "Grade what a visitor gets: protocols, chain and headers.",
                                 icon: Inspect,
                                 inline: true,
                                 run: () =>
@@ -423,7 +422,6 @@ export function CertificatesPage() {
                               {
                                 key: "remove",
                                 label: "Stop watching",
-                                detail: "Drop it from the list. Nothing on the host changes.",
                                 icon: Trash,
                                 danger: true,
                                 run: async () => {
@@ -485,7 +483,6 @@ function CertTable({
       {
         key: "copy",
         label: "Copy path",
-        detail: "The certificate's path on disk, for a site's TLS field.",
         icon: Copy,
         inline: true,
         run: () => void copyText(cert.path, "Path copied"),
@@ -495,7 +492,6 @@ function CertTable({
       verbs.push({
         key: "scan",
         label: "TLS report",
-        detail: `Grade what a visitor to ${domain} actually gets.`,
         icon: Inspect,
         run: () => onScan(domain),
       })

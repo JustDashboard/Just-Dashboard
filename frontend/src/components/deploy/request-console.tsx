@@ -468,7 +468,7 @@ function Took({
  * data rather than strings — the code with its word, the time with where it
  * sits in the window, the lock that says whether it was encrypted, the site
  * it came from as that site. The three questions a request raises are named
- * buttons; everything else is one menu, each verb with its sentence (§13).
+ * buttons; everything else is one menu (§13).
  */
 function RequestDetail({
   entry,
@@ -579,7 +579,6 @@ function RequestDetail({
           {
             key: "client",
             label: "Show every request from this client",
-            detail: "Narrow the rows and the insights to this address.",
             icon: Filter,
             run: () => onFilterClient(ip),
           },
@@ -588,7 +587,6 @@ function RequestDetail({
     {
       key: "json",
       label: "Copy as JSON",
-      detail: "The whole record, as the server sent it.",
       icon: Copy,
       run: () => void copyText(JSON.stringify(entry, null, 2), "Request copied"),
     },
@@ -597,7 +595,6 @@ function RequestDetail({
           {
             key: "curl",
             label: "Copy as curl",
-            detail: "The same request again from a shell — method, host, path and agent.",
             icon: Terminal,
             run: () => void copyText(curl, "Copied as curl"),
           },
@@ -610,7 +607,6 @@ function RequestDetail({
             // A deny takes a round trip, and a verb that sits still while it
             // runs is pressed twice — which writes the rule twice (§13).
             label: blocking === ip ? "Blocking…" : "Block this address",
-            detail: "Put a deny rule in front of every allow. It does not expire.",
             icon: Slash,
             danger: true,
             disabled: blocking === ip,

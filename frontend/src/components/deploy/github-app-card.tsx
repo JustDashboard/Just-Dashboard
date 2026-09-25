@@ -617,16 +617,15 @@ export function GitHubAppPanel({
     (installation) => (credentialOf(installation, credentials)?.usedBy ?? 0) > 0,
   )
 
-  // Declared once, and drawn by the header's menu: each verb with its sentence
-  // (§13). The copy button beside the server's address stays, because that is
-  // where the address is read.
+  // Declared once, and drawn by the header's menu (§13). The copy button
+  // beside the server's address stays, because that is where the address is
+  // read.
   const verbs: Verb[] = []
   if (data?.app) {
     const htmlUrl = data.app.htmlUrl
     verbs.push({
       key: "open",
       label: "Open on GitHub",
-      detail: "The App's settings page on GitHub.",
       icon: External,
       run: () => window.open(htmlUrl, "_blank", "noreferrer"),
     })
@@ -636,7 +635,6 @@ export function GitHubAppPanel({
     verbs.push({
       key: "install",
       label: "Install on another account",
-      detail: "GitHub asks which repositories it may read.",
       icon: Plus,
       run: () => window.open(installUrl, "_blank", "noreferrer"),
     })
@@ -646,7 +644,6 @@ export function GitHubAppPanel({
     verbs.push({
       key: "copy",
       label: "Copy webhook address",
-      detail: "Where GitHub sends every push.",
       icon: Copy,
       run: () => void copyText(webhookUrl, "Webhook address copied"),
     })
@@ -655,7 +652,6 @@ export function GitHubAppPanel({
     verbs.push({
       key: "disconnect",
       label: "Disconnect",
-      detail: "Forget the App's key and secrets on this server.",
       icon: Trash,
       danger: true,
       run: disconnect,
