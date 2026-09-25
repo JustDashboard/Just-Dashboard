@@ -133,6 +133,8 @@ var runtimeSignatures = []buildSignature{
 	signature("runtime_host_disallowed", "django", "", `Invalid HTTP_HOST header: '([^':]+)|DisallowedHost`),
 	signature("runtime_host_disallowed", "vite", "Blocked request", `Blocked request\. This host \("([^"]+)"\) is not allowed`),
 	signature("runtime_host_disallowed", "play", "Host not allowed", `Host not allowed`),
+	signature("runtime_entry_missing", "next-export", "output: export", `"next start" does not work with "output: export"`),
+	signature("runtime_entry_missing", "nestjs", "/dist/main", `Cannot find module '(/[^']*/dist/main(?:\.js)?)'`),
 	signature("runtime_entry_missing", "", "", `Could not find a production build in the '([^']+)' directory|Failed to find attribute '(\w+)' in '[\w.]+'|Error loading ASGI app\.|no main manifest attribute, in (\S+)|Unable to access jarfile (\S+)|can't open file '([^']+)': \[Errno 2\]|Cannot find module '(/[^']+)'|Module not found "(file:///[^"]+)"`),
 	signature("runtime_library_missing", "", "cannot open shared object file", `(lib[\w+.-]+\.so[\d.]*): cannot open shared object file`),
 	// psycopg 3 without its binary extra loads libpq itself; its import error
@@ -228,6 +230,9 @@ func applicationOutputCause(containers []ContainerDiagnostics, context runtimeCa
 			cause.Fix = &CauseFix{Kind: fixReview, Field: "dependencies"}
 		case "runtime_entry_missing":
 			cause.Fix = &CauseFix{Kind: fixReview, Field: "configuration.build.startCommand"}
+			if cause.Detail == "next-export" {
+				cause.Fix = &CauseFix{Kind: fixSetBuild, Field: "configuration.build.outputDirectory", Value: "out"}
+			}
 		case "runtime_master_key_invalid":
 			cause.Fix = variableFix("RAILS_MASTER_KEY", "runtime", "", context.variables)
 		case "runtime_auth_untrusted_host":
@@ -376,6 +381,12 @@ func (c *OutputCause) sentence() string {
 	case "runtime_host_disallowed":
 		return "the application refused the request's Host header" + parenthesized(subject) + "; allow the deployment's hostname and the readiness check's address (for Django, ALLOWED_HOSTS)"
 	case "runtime_entry_missing":
+		switch c.Detail {
+		case "next-export":
+			return "next.config sets output: 'export', which writes a static site that next start refuses to serve; set the output directory to out, which nginx serves"
+		case "nestjs":
+			return "nest build did not write dist/main.js: a TypeScript file outside src/ (prisma.config.ts, a seed) makes tsc write dist/src/main.js; start with `node dist/src/main`, or add \"include\": [\"src\"] to tsconfig.build.json"
+		}
 		return "the start command runs a file or object the image does not contain" + parenthesized(subject) + "; set the start command to what the build produced"
 	case "runtime_module_missing":
 		return "the application imports " + orDefault(subject, "a module") + ", which the image does not have installed; add it to the project's dependencies"

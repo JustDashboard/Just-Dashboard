@@ -411,7 +411,8 @@ func nodeSourceFiles(entry string, manifest nodeManifest) (primary, fallback []s
 // through the framework rather than the application's own code.
 func nodeFrameworkServes(c *DetectedCandidate) bool {
 	switch c.Framework {
-	case "", "express", "fastify", "hono", "koa", "elysia", "hapi", "nestjs":
+	case "", "express", "fastify", "hono", "koa", "elysia", "hapi", "nestjs",
+		"h3", "polka", "restify", "apollo", "graphql-yoga", "trpc", "socket.io", "ws":
 		return false
 	}
 	return true

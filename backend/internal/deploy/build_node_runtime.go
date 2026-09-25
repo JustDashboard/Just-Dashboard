@@ -743,6 +743,29 @@ func planNodeImage(facts nodeInstallFacts, plan *nodeInstallPlan, glibc []string
 		plan.findings = append(plan.findings, nodeFinding("native_addon_toolchain", PreflightPass,
 			"Native addons can compile", strings.Join(addons, ", "), means, "", "configuration.build"))
 	}
+	// Alpine has no bash; a command or script that calls it by name gets it
+	// in the stage that runs it.
+	if family == nodeFamilyAlpine {
+		reached := []string{}
+		for _, command := range []struct {
+			text           string
+			stage          map[string]bool
+			run, lifecycle bool
+		}{{plan.build, build, true, true}, {plan.start, runtime, !assets, false}} {
+			for _, segment := range nodeReachedSegments(facts.manifest.Scripts, []string{command.text}, command.lifecycle) {
+				if words := nodeSegmentWords(segment); len(words) > 0 && path.Base(words[0]) == "bash" && command.run && command.text != "" {
+					command.stage["bash"] = true
+					reached = append(reached, boundedEvidence(segment))
+					break
+				}
+			}
+		}
+		if len(reached) > 0 {
+			plan.findings = append(plan.findings, nodeFinding("bash_installed", PreflightPass,
+				"bash is installed for the commands that call it", strings.Join(reached, "; "),
+				"The Alpine image has only sh; the stage that runs these commands installs bash.", "", "configuration.build"))
+		}
+	}
 	if names, ssh := facts.gitDependencies(); len(names) > 0 {
 		add(build, nodeGit)
 		plan.findings = append(plan.findings, nodeFinding("git_dependencies", PreflightPass,

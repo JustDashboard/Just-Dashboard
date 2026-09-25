@@ -59,11 +59,14 @@ func nodeInstallFindings(candidate *DetectedCandidate, configuration PlanConfigu
 			"The build installs with "+nodeManagerLabel(manager)+", so a command still naming another manager's runner is run through "+manager+" instead.",
 			"Save the command with "+manager+"'s runner, or choose the package manager it names.", "deploy", command.field))
 	}
-	if nodeCommandTools(nil, []string{runs["build"], runs["start"]})["deno"] {
-		return append(findings, finding("command_runner_missing", PreflightBlocked,
-			"A command needs a runtime the Node image does not have", "deno",
-			"The build or start command calls deno, which the Node recipe does not install.",
-			"Use a Dockerfile, or change the command to one the Node image runs.", "deploy", "configuration.build.buildCommand"))
+	for _, command := range commands {
+		tools := nodeCommandTools(nil, []string{runs[command.label]})
+		if runner := slices.IndexFunc(nodeForeignRunners, func(name string) bool { return tools[name] && name != "python3" }); runner >= 0 {
+			return append(findings, finding("command_runner_missing", PreflightBlocked,
+				"A command needs a runtime the Node image does not have", nodeForeignRunners[runner],
+				"The "+command.label+" command calls "+nodeForeignRunners[runner]+", which the Node recipe does not install.",
+				"Use a Dockerfile, or change the command to one the Node image runs.", "deploy", command.field))
+		}
 	}
 	for _, segment := range nodeInstallSegments(runs["build"]) {
 		if !slices.ContainsFunc(findings, func(item PreflightFinding) bool { return item.Code == "install_in_build_command" }) {

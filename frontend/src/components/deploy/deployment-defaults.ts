@@ -258,6 +258,12 @@ export function withPackageManagerRunner(command: string, manager?: NodePackageM
   return segments
     .map((segment) => {
       const [, assignments, body] = /^((?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*)(.*)$/.exec(segment)!
+      // Bun running a JavaScript file (SvelteKit's `bun ./build/index.js`)
+      // runs on Node the same way; a TypeScript file stays with Bun, whose
+      // APIs it may use, and is not a package script.
+      const bunFile = /^bun (?:run )?(\.?\/?[\w./@-]+\.(?:js|mjs|cjs))$/.exec(body)
+      if (bunFile) return manager === "bun" ? segment : `${assignments}node ${bunFile[1]}`
+      if (/^bun run \S+\.(?:ts|tsx|mts|cts|jsx)$/.test(body)) return segment
       const script = /^(?:bun|npm|pnpm|yarn) run (\S+)$/.exec(body)
       if (script) return `${assignments}${manager} run ${script[1]}`
       const shorthand = /^(npm|pnpm|yarn) (start|test)$/.exec(body)

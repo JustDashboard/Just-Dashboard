@@ -199,6 +199,16 @@ describe("package manager runner", () => {
     expect(withPackageManagerRunner("npm run build", undefined)).toBe("npm run build")
     expect(withPackageManagerRunner("yarn build", "bun")).toBe("yarn build")
   })
+  test("a file Bun runs moves to node, a TypeScript file stays with Bun", () => {
+    expect(withPackageManagerRunner("bun ./build/index.js", "npm")).toBe("node ./build/index.js")
+    expect(withPackageManagerRunner("bun run dist/server.mjs", "pnpm")).toBe("node dist/server.mjs")
+    expect(withPackageManagerRunner("bun src/index.ts", "npm")).toBe("bun src/index.ts")
+    expect(withPackageManagerRunner("bun run src/index.ts", "npm")).toBe("bun run src/index.ts")
+    expect(withPackageManagerRunner("bun ./build/index.js", "bun")).toBe("bun ./build/index.js")
+    expect(
+      withPackageManagerRunner("npx prisma migrate deploy && bun build/index.js", "yarn"),
+    ).toBe("yarn prisma migrate deploy && node build/index.js")
+  })
   test("a detected schema step follows the manager with the start script", () => {
     expect(withPackageManagerRunner("npx prisma migrate deploy && npm run start", "bun")).toBe(
       "bunx prisma migrate deploy && bun run start",

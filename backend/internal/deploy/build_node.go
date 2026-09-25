@@ -31,6 +31,10 @@ func validNodePackageManager(manager string) bool {
 type nodeInstallSource struct {
 	facts        nodeInstallFacts
 	context, dir string
+	// files are the framework files beside the package's own package.json,
+	// and workspace says the package declares a workspace of its own.
+	files     nodeRootFiles
+	workspace bool
 }
 
 // member is the package's path under its install context, "" when the
@@ -61,6 +65,10 @@ func readNodeInstallSourceIn(root *os.Root, dir, arch string, budget *nodeReadBu
 		source.context = ancestor
 		member = strings.TrimPrefix(strings.TrimPrefix(dir, ancestor), "/")
 	}
+	var parsed nodeManifest
+	parseNodeManifest(manifest, &parsed)
+	source.files = readNodeRootFiles(files, parsed)
+	source.workspace = member == "" && len(nodeWorkspacePatterns(files)) > 0
 	source.facts = readNodeInstallFacts(nodeFiles{root: root, dir: source.context, budget: budget}, member, manifest, arch)
 	return source, nil
 }
@@ -186,11 +194,13 @@ func nodeTargetArch(platform string) string {
 // nodeRecipeFramework is what the recipe knows about a matched framework at
 // build time: its catalogue name and the defaults its production build has,
 // re-read from the manifest so the generated Dockerfile can check the build
-// produced the server entry and give that server the environment it needs.
+// produced the server entry and give that server the environment it needs,
+// and serving, what the recipe adds for the plan's own commands.
 type nodeRecipeFramework struct {
 	name       string
 	label      string
 	resolution nodeFrameworkResolution
+	serving    nodeServing
 }
 
 func validateNodeRecipeContent(content []byte, files nodeRootFiles, config BuildPlanConfig) (nodeRecipeFramework, error) {
@@ -198,25 +208,30 @@ func validateNodeRecipeContent(content []byte, files nodeRootFiles, config Build
 	if !parseNodeManifest(content, &manifest) {
 		return nodeRecipeFramework{}, fmt.Errorf("%w: package.json is malformed", ErrUnsupportedBuilder)
 	}
-	framework := matchNodeFramework(manifest)
-	if framework == nil {
-		return nodeRecipeFramework{}, nil
+	if files.has(".meteor/release") {
+		return nodeRecipeFramework{}, fmt.Errorf("%w: %s", ErrUnsupportedBuilder, nodeMeteorRefusal)
 	}
 	runner := config.PackageManager
 	if runner == "" {
 		runner = "npm"
 	}
-	result := nodeRecipeFramework{name: framework.Name, label: framework.Label, resolution: framework.resolve(manifest, files, runner)}
-	if framework.Name != "sveltekit" {
+	result := nodeRecipeFramework{}
+	framework, _ := resolveNodeFramework(manifest, files, config.StartCommand)
+	if framework != nil {
+		result = nodeRecipeFramework{name: framework.Name, label: framework.Label, resolution: framework.resolve(manifest, files, runner)}
+	}
+	result.serving = planNodeServing(manifest, result, config)
+	if result.name != "sveltekit" {
 		return result, nil
 	}
-	if manifest.has("@sveltejs/adapter-node") == manifest.has("@sveltejs/adapter-static") {
+	resolution := result.resolution
+	if resolution.Output == "" && resolution.Start == "" {
 		return nodeRecipeFramework{}, fmt.Errorf("%w: SvelteKit requires one of adapter-node or adapter-static; configure one supported adapter or use a Dockerfile", ErrUnsupportedBuilder)
 	}
 	if strings.TrimSpace(config.BuildCommand) == "" {
 		return nodeRecipeFramework{}, fmt.Errorf("%w: SvelteKit needs a build command", ErrUnsupportedBuilder)
 	}
-	if manifest.has("@sveltejs/adapter-static") {
+	if resolution.Output != "" {
 		if strings.TrimSpace(config.OutputDirectory) == "" {
 			return nodeRecipeFramework{}, fmt.Errorf("%w: SvelteKit adapter-static needs its generated output directory (normally build)", ErrUnsupportedBuilder)
 		}
@@ -296,15 +311,26 @@ func renderNodeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases [
 	if plan.prisma.generate != "" {
 		lines = append(lines, nodeRunWith(buildSecrets, plan.prisma.defaults, plan.prisma.generate))
 	}
+	defaults := recipe.node.resolution.nodeFrameworkDefaults
+	serving := recipe.node.serving
+	// A framework's own steps before the build install packages (SvelteKit's
+	// adapter-node), so they see what the install sees.
+	for _, step := range defaults.BeforeBuild {
+		lines = append(lines, nodeRunWith(installSecrets, nil, step))
+	}
 	if command := strings.TrimSpace(config.BuildCommand); command != "" {
+		plan.buildEnv.framework = defaults.BuildEnv
 		lines = append(lines, plan.buildRun(buildSecrets, command, boundToBuild(config.Secrets)))
 	}
-	defaults := recipe.node.resolution.nodeFrameworkDefaults
-	if strings.TrimSpace(config.OutputDirectory) == "" && defaults.Entry != "" && frameworkDefaultStart(config.StartCommand, defaults.Start) {
-		// The framework's own entrypoint is what the start command runs, so
-		// a build that did not write it is a wrong output path, and that
-		// is a build failure with a name rather than a readiness timeout.
-		lines = append(lines, "RUN test -f "+workdir+"/"+defaults.Entry+" || (echo '"+recipe.node.label+" must produce "+defaults.Entry+"; configure its output and start command together' >&2; exit 1)")
+	if serving.entry != "" {
+		// The start command runs the framework's entry, so a build that did
+		// not write it is a wrong output path, and that is a build failure
+		// with a name rather than a readiness timeout.
+		label := orDefault(recipe.node.label, "The build")
+		lines = append(lines, "RUN test -f "+workdir+"/"+serving.entry+" || (echo '"+label+" must produce "+serving.entry+"; configure its output and start command together' >&2; exit 1)")
+	}
+	for _, step := range serving.afterBuild {
+		lines = append(lines, "RUN "+step)
 	}
 	if output := strings.TrimSpace(config.OutputDirectory); output != "" {
 		static, err := resolveCatalogueImage(bases, recipeBaseCatalogue["static"][0])
@@ -317,8 +343,8 @@ func renderNodeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases [
 			source = packageRootSite + "/"
 		}
 		lines = append(lines, "FROM "+immutableImageReference(static))
-		lines = append(lines, staticServerLines(config.SPAFallback)...)
-		return append(lines, "COPY --from=build "+source+" /usr/share/nginx/html/"), nil
+		lines = append(lines, nodeStaticServerLines(serving.site)...)
+		return append(lines, "COPY --from=build "+source+" "+nodeStaticTarget(serving.site)), nil
 	}
 	if strings.TrimSpace(config.StartCommand) == "" {
 		return nil, fmt.Errorf("%w: Node service recipe requires a start command", ErrUnsupportedBuilder)
@@ -333,7 +359,7 @@ func renderNodeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases [
 		lines = append(lines, "ENV COREPACK_ENABLE_NETWORK=0")
 	}
 	lines = append(lines, "ENV PATH="+binPath+":$PATH")
-	for _, env := range append(append([]string(nil), plan.image.runtimeEnv...), nodeServerRuntimeEnv(recipe.node.name, defaults.Env)...) {
+	for _, env := range append(append(append([]string(nil), plan.image.runtimeEnv...), nodeServerRuntimeEnv(recipe.node.name, defaults.Env)...), serving.runtimeEnv...) {
 		lines = append(lines, "ENV "+env)
 	}
 	lines = append(lines, "COPY --from=build /app /app")
@@ -419,6 +445,15 @@ func readNodeInstalls(checkout string, markers map[string]*detectedMarkers) {
 			members[source.context] = append(members[source.context], source.facts.manifest.Name)
 		}
 	}
+	manifests := map[string]map[string]nodeInstallManifest{}
+	for _, dir := range dirs {
+		if source := markers[dir].node; source != nil && source.member() != "" && source.facts.manifest.Name != "" {
+			if manifests[source.context] == nil {
+				manifests[source.context] = map[string]nodeInstallManifest{}
+			}
+			manifests[source.context][source.facts.manifest.Name] = source.facts.manifest
+		}
+	}
 	for _, dir := range dirs {
 		if source := markers[dir].node; source != nil && source.member() != "" {
 			for _, name := range members[source.context] {
@@ -426,6 +461,7 @@ func readNodeInstalls(checkout string, markers map[string]*detectedMarkers) {
 					source.facts.workspacePackages = append(source.facts.workspacePackages, name)
 				}
 			}
+			source.facts.workspaceBuilds = nodeWorkspaceBuildOrder(source.facts.manifest, manifests[source.context])
 		}
 	}
 }
@@ -460,7 +496,12 @@ func refreshNodeInstalls(candidates []DetectedCandidate, markers map[string]*det
 		candidate.NodeInstalls = marker.node.facts.detectedInstalls(candidate.PackageManager, false, func(manager string) (string, string) {
 			return nodeRunnerFor(build, manager), nodeRunnerFor(start, manager)
 		})
-		candidate.NodeBuild = detectedNodeBuild(marker.node.facts, candidate.Framework, build)
+		var findings []PreflightFinding
+		var devScripts map[string]string
+		if candidate.NodeBuild != nil {
+			findings, devScripts = candidate.NodeBuild.Findings, candidate.NodeBuild.DevScripts
+		}
+		candidate.NodeBuild = withNodeFrameworkFacts(detectedNodeBuild(marker.node.facts, candidate.Framework, build), findings, devScripts)
 	}
 }
 

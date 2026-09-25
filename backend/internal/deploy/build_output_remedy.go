@@ -23,6 +23,7 @@ var causeTitles = map[string]string{
 	"build_sqlx_offline":                 "sqlx has no offline query data",
 	"build_database_unreachable":         "Database unreachable during build",
 	"build_prerender_failed":             "Page failed to prerender",
+	"build_next_image_export":            "next/image in a static export",
 	"build_prisma_client_missing":        "Prisma Client not generated",
 	"build_platform_binary_missing":      "Platform binary missing from the lockfile",
 	"build_legacy_openssl":               "Build tool needs legacy OpenSSL",
@@ -434,6 +435,9 @@ func (c *BuildCause) explain() (string, string) {
 			what = "page " + subject + " queries the database while the build prerenders it, and the database is reachable only from the running application"
 		}
 		return what, "render that page at request time (in Next.js, `export const dynamic = 'force-dynamic'`), or move database steps into the start command or a release task"
+	case "build_next_image_export":
+		return "next/image's default loader optimises images on a server, and next.config exports a static site with none",
+			"set images: { unoptimized: true } in next.config, or give next/image a custom loader"
 	case "build_prerender_failed":
 		return "page " + orDefault(subject, "a page") + " threw while the build prerendered it",
 			"its error is in the build log just above; if it needs runtime data, render it at request time"
@@ -481,6 +485,10 @@ func (c *BuildCause) explain() (string, string) {
 			// that does not exist alike, so the sentence names both.
 			return "the registry refused it: the image does not exist, or it is private and no valid credential was given",
 				"check the image reference and, for a private image, the source's registry credential"
+		}
+		if c.Detail == "npmrc" && subject != "" {
+			return ".npmrc authenticates the registry with " + subject + ", which the install was not given",
+				"add " + subject + " as a build variable mapped to the install step"
 		}
 		return "the package registry refused the build's credentials",
 			"add the registry token as a build variable scoped to install (for npm, `NPM_TOKEN` read by an .npmrc)"

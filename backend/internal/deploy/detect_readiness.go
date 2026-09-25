@@ -370,7 +370,8 @@ func declaredOrCodeReadiness(facts rootFacts, label, declaredBy, stack string) *
 // package runs is treated as an API.
 var nodePageFrameworks = map[string]bool{
 	"nextjs": true, "sveltekit": true, "astro": true, "nuxt": true, "remix": true, "react-router": true,
-	"solid-start": true, "tanstack-start": true, "angular": true,
+	"solid-start": true, "tanstack-start": true, "angular": true, "qwik-city": true, "analog": true,
+	"vike": true, "waku": true, "redwood": true,
 }
 
 // nodeHostedSignIn are the authentication SDKs whose middleware sends an

@@ -276,6 +276,15 @@ var selfIssuedSecrets = []secretRule{
 	{name: "JWT_SECRET", length: 64, gate: dependencyGate("tokens are signed with it (%s)", func(s rootStack) string { return s.jwtLibrary() })},
 }
 
+func medusaGate(reason string) func(rootStack, DetectedVariable) string {
+	return func(stack rootStack, _ DetectedVariable) string {
+		if stack.nodeHas("@medusajs/medusa") != "" {
+			return reason
+		}
+		return ""
+	}
+}
+
 func strapiGate(stack rootStack, _ DetectedVariable) string {
 	if stack.nodeHas("@strapi/strapi") != "" {
 		return "Strapi requires it (@strapi/strapi)"
@@ -354,6 +363,11 @@ var publicURLRules = []publicURLRule{
 		}
 		return ""
 	}},
+	// Medusa's admin is served by the same server, so its origin is the
+	// deployment's own; a storefront elsewhere is added to STORE_CORS by hand.
+	{name: "ADMIN_CORS", template: "{{scheme}}://{{hostname}}", implied: true, gate: medusaGate("Medusa refuses its admin's requests from any other origin")},
+	{name: "AUTH_CORS", template: "{{scheme}}://{{hostname}}", implied: true, gate: medusaGate("Medusa refuses sign-in requests from any other origin")},
+	{name: "STORE_CORS", template: "{{scheme}}://{{hostname}}", gate: medusaGate("Medusa accepts storefront requests only from these origins")},
 	{name: "APP_URL", template: "{{scheme}}://{{hostname}}", gate: func(s rootStack, _ DetectedVariable) string {
 		if s.laravel() {
 			return "Laravel generates absolute URLs from it"

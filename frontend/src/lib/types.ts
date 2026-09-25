@@ -3599,6 +3599,10 @@ export type DeploymentDetectionCandidate = {
     memoryMiB?: number
     /** Names `prisma.config` reads that the recipe gives a placeholder while `prisma generate` runs. */
     prismaEnv?: string[]
+    /** What the framework's configuration made the recipe do, said before Deploy. */
+    findings?: DeploymentPreflightFinding[]
+    /** Package scripts that start a development server or a watcher, with what they start. */
+    devScripts?: Record<string, string>
   }
   /** go.mod's toolchain line and the .go-version pin, judged against the plan's Go version. */
   goToolchain?: string
