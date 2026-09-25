@@ -20,7 +20,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { JobConsole, RecentJobs, useJobConsole } from "@/components/job-console"
-import { Page, PageHeader } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
@@ -180,28 +180,7 @@ export function CertificatesPage() {
 
   return (
     <Page className="animate-rise">
-      <PageHeader
-        eyebrow="Proxy"
-        title="Certificates"
-        actions={
-          admin && (
-            <>
-              <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
-                <CloudUpload className="size-3.5" />
-                Import
-              </Button>
-              {!certbotGone && (
-                <Button
-                  size="sm"
-                  onClick={() => setIssue({ open: true, domains: undefined, staging: true })}
-                >
-                  Issue certificate
-                </Button>
-              )}
-            </>
-          )
-        }
-      />
+      <PageContext eyebrow="Proxy" title="Certificates" />
 
       <StatGrid columns={4}>
         <StatTile
@@ -274,6 +253,14 @@ export function CertificatesPage() {
             admin && (
               <>
                 <RecentJobs kinds={["certbot."]} onOpen={console_.open} />
+                {!certbotGone && (
+                  <Button
+                    size="sm"
+                    onClick={() => setIssue({ open: true, domains: undefined, staging: true })}
+                  >
+                    Issue certificate
+                  </Button>
+                )}
                 {certbot.data && certbot.data.certs.length > 0 && (
                   <Button
                     size="sm"
@@ -312,14 +299,24 @@ export function CertificatesPage() {
       </Panel>
 
       <Panel>
-        <PanelHeader title="Installed certificates" />
+        <PanelHeader
+          title="Installed certificates"
+          actions={
+            admin && (
+              <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
+                <CloudUpload className="size-3.5" />
+                Import
+              </Button>
+            )
+          }
+        />
         <PanelBody flush>
           {certs.loading ? (
             <LoadingRows rows={3} />
           ) : certs.error ? (
             <ErrorState error={certs.error} />
           ) : certs.data && certs.data.length > 0 ? (
-            <div className="group-data-[plain]/panel:-mx-4 min-w-0 animate-rise">
+            <div className="min-w-0 animate-rise group-data-[plain]/panel:-mx-4">
               <CertTable
                 certs={certs.data}
                 onScan={(d) => router.push(`/proxy/tls?domain=${encodeURIComponent(d)}`)}
@@ -376,7 +373,7 @@ export function CertificatesPage() {
               minutes, which is what catches a certificate renewed on disk and never reloaded.
             </p>
           ) : (
-            <div className="group-data-[plain]/panel:-mx-4 min-w-0 animate-rise">
+            <div className="min-w-0 animate-rise group-data-[plain]/panel:-mx-4">
               <Table>
                 <TableHeader>
                   <TableRow>

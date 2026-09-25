@@ -11,7 +11,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
 import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
-import { Page, PageHeader, RowLink } from "@/components/page"
+import { Page, PageContext, RowLink } from "@/components/page"
 import { Pane, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
@@ -107,29 +107,7 @@ export function StreamsPage() {
     },
   ]
 
-  const header = (
-    <PageHeader
-      eyebrow="Proxy"
-      title="Streams"
-      actions={
-        admin &&
-        data && (
-          // Kept enabled when nginx is not reading the directory yet:
-          // staging the forward before editing nginx.conf is a reasonable
-          // order to work in. What it must not do is look like the thing
-          // that makes the port live, so it says which of the two it is.
-          <Button
-            size="sm"
-            variant={data.included ? "default" : "outline"}
-            onClick={() => open(null)}
-          >
-            <Plus className="size-4" />
-            {data.included ? "New stream" : "Prepare a stream"}
-          </Button>
-        )
-      }
-    />
-  )
+  const header = <PageContext eyebrow="Proxy" title="Streams" />
 
   if (loading && !data) {
     return (
@@ -197,7 +175,22 @@ export function StreamsPage() {
       )}
 
       <Panel>
-        <PanelHeader title="Port forwarding" />
+        <PanelHeader
+          title="Port forwarding"
+          actions={
+            admin && (
+              // Staging a forward is still useful before nginx reads the directory.
+              <Button
+                size="sm"
+                variant={data.included ? "default" : "outline"}
+                onClick={() => open(null)}
+              >
+                <Plus className="size-4" />
+                {data.included ? "New stream" : "Prepare a stream"}
+              </Button>
+            )
+          }
+        />
         <PanelBody flush>
           {data.streams.length === 0 ? (
             <EmptyState
@@ -207,7 +200,7 @@ export function StreamsPage() {
               className="mt-2"
             />
           ) : (
-            <div className="group-data-[plain]/panel:-mx-4 min-w-0 animate-rise">
+            <div className="min-w-0 animate-rise group-data-[plain]/panel:-mx-4">
               <Table>
                 <TableHeader>
                   <TableRow>

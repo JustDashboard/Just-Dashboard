@@ -140,6 +140,24 @@ const PROJECT_SURFACES = [
   "/deploy/7/settings/danger",
 ] as const
 
+test("reading pages begin with content while retaining an accessible page name", async ({
+  page,
+}) => {
+  await mockShell(page)
+
+  for (const path of ["/audit", "/account", "/deploy"]) {
+    await page.goto(path)
+    const surface = page.locator("[data-slot=page]").first()
+    await expect(surface).toBeVisible()
+    await expect(surface.locator("[data-slot=page-header]")).toHaveCount(0)
+    await expect(surface.locator("[data-slot=page-context]")).toHaveCount(0)
+    await expect(surface.getByRole("heading", { level: 1 })).toHaveClass(/sr-only/)
+    if (path === "/deploy") {
+      await page.screenshot({ path: "test-results/page-context-deploy-1280.png", fullPage: true })
+    }
+  }
+})
+
 /** Every visible button with no text of its own and no name from anywhere else. */
 function unnamedControls(page: Page) {
   return page.evaluate(() => {
@@ -477,6 +495,7 @@ test("every page declares one register, and only a flow page has a foreground", 
   for (const path of SURFACES) {
     await page.goto(path)
     await page.waitForLoadState("networkidle")
+    await expect(page.locator("[data-slot=page]").first()).toBeVisible({ timeout: 15_000 })
     expectOneRegister(path, await registers(page))
   }
 })
@@ -493,6 +512,7 @@ test("the deployment pages are reading pages with no foreground", async ({ page 
   for (const path of PROJECT_SURFACES) {
     await page.goto(path)
     await page.waitForLoadState("networkidle")
+    await expect(page.locator("[data-slot=page]").first()).toBeVisible({ timeout: 15_000 })
     const seen = await registers(page)
     expectOneRegister(path, seen)
     expect(seen.registers, `${path} is not a reading page`).not.toContain("flow")

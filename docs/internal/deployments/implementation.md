@@ -225,7 +225,7 @@ only renderer/executor/validation authority for their feature.
   produce an actionable error instead of an attempted bind or a stopped server. Hostname suggestions
   use this same selector. `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDeploymentWebroot
   -count=1 -v` verifies real nginx routing, continued service and cleanup on an isolated loopback port.
-- The workspace header actions menu exposes **Archive deployment** for the destructive capability on both legacy and
+- The project context actions menu exposes **Archive deployment** for the destructive capability on both legacy and
   normalized projects, disabled during an active run. It uses the existing `DELETE /deploy/{id}` archive
   contract with ordinary confirmation, returns to the fleet after success, and keeps the dialog open
   on error. The confirmation explicitly states that history, runtime, routes and data are retained;
@@ -479,7 +479,7 @@ only renderer/executor/validation authority for their feature.
   `git ls-remote`. This works behind the dashboard's private network allowlist without public ingress
   or GitHub hook registration. Outages and slow Git reads can delay detection; it is polling, not an
   instantaneous push-delivery guarantee. Tags, local checkouts, legacy Compose and archived projects
-  are excluded. Monitoring status and access failures appear in the project header's identity line
+  are excluded. Monitoring status and access failures appear in the project identity line
   and on Settings → General's Automatic deployment section.
   `deploy_git_watches` persists the last observed revision, policy digest, decision reason and observation generation: restarts,
   failed runs, duplicate provider deliveries and a crash after enqueue cannot cause repeated builds;
@@ -1019,7 +1019,7 @@ reason, a live release failing its health check, and a site failing 5% or more o
 health reading of *unavailable* is not a finding. A card carries the project drawn as itself
 (`ProjectMark`), its address, its source as its forge, repository and branch, its last commit, its
 hour of traffic from `GET /deploy/traffic`, its last fourteen runs (`recentRuns`) and who started
-the last one, and the verbs the project header offers (`useProjectVerbs`); the list view carries
+the last one, and the verbs the project context row offers (`useProjectVerbs`); the list view carries
 the same readings in fixed columns from 1280. The fleet is read every five seconds and the traffic
 every thirty; the archive is read once, for the count beside its link, and again when a card
 archives its project, because each archived row costs the server a history read.
@@ -1101,7 +1101,7 @@ or use an insecure URL under an HTTPS dashboard may require the direct website l
 not a deployment health check and does not bypass the site's own framing policy.
 
 `GET /deploy/{id}/favicon` is the one request the backend makes to a deployed website, so a project
-card, the project header, the rail's scope head and the source end of the Notifications picture can
+card, the project identity line, the rail's scope head and the source end of the Notifications picture can
 carry the site's own icon (the dashboard's image policy allows only its own origin). It reads the recorded endpoint's page for `<link rel="icon">` (then
 `apple-touch-icon`), falling back to `/favicon.ico`, `/favicon.png` and `/apple-touch-icon.png`.
 Every request stays on the recorded scheme and host, port included: a declared icon or a redirect

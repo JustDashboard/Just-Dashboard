@@ -26,7 +26,15 @@ import type {
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Detail, DetailList, Page, PageHeader, SearchInput } from "@/components/page"
+import {
+  Detail,
+  DetailList,
+  Metric,
+  MetricStrip,
+  Page,
+  PageContext,
+  SearchInput,
+} from "@/components/page"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { StatGrid, StatTile } from "@/components/stat-tile"
@@ -195,7 +203,7 @@ export function JobPage() {
   return (
     <>
       <Page>
-        <PageHeader
+        <PageContext
           eyebrow={
             <Link
               href="/backups"
@@ -204,13 +212,15 @@ export function JobPage() {
               <ArrowLeft className="size-3" /> Backups
             </Link>
           }
-          title={
-            <span className="inline-flex max-w-full min-w-0 items-center gap-3">
-              <span className="truncate">{job?.name ?? "Backup"}</span>
-              {job && !job.enabled && <Tag>paused</Tag>}
-            </span>
+          title={job?.name ?? "Backup"}
+          actions={
+            job && (
+              <>
+                {!job.enabled && <Tag>paused</Tag>}
+                <VerbBar verbs={verbs} menuLabel={`More actions for ${job.name}`} />
+              </>
+            )
           }
-          actions={job && <VerbBar verbs={verbs} menuLabel={`More actions for ${job.name}`} />}
         />
 
         {jobPoll.error && !job && <ErrorState error={jobPoll.error} />}
@@ -218,6 +228,10 @@ export function JobPage() {
 
         {job && (
           <>
+            <MetricStrip className="animate-rise">
+              <Metric label="Job" value={job.name} />
+              <Metric label="Schedule" value={scheduleLabel(job.schedule)} />
+            </MetricStrip>
             {/*
               What the job holds and when it next fires, as figures (§15 pass 2).
               The sheet had all four as clauses inside two `Detail` rows — a

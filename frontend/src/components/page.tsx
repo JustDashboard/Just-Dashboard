@@ -72,20 +72,13 @@ export function Page({
 }
 
 /**
- * The title band at the top of a page: where it sits in the product, what it
- * is called, and what you can do to it.
+ * The accessible name and contextual controls of a reading page.
  *
- * The eyebrow repeats the nav group rather than the page name, so the band
- * answers "where am I" without restating the sidebar item directly above it.
- *
- * There is no description. Every page carried a sentence under its heading
- * explaining what the page was, which is a caption for a title the reader has
- * already read and understood — it pushed the first real row of every page a
- * line and a half down the screen and was never looked at twice. What a page
- * actually needs said goes in a `Notice`, where it is a fact rather than a
- * subtitle; what it does not need said goes nowhere.
+ * The rail identifies the page visually. A repeated title above the content
+ * used a full row without adding context, so only a linked parent and controls
+ * are drawn here. The h1 still names the page for assistive technology.
  */
-export function PageHeader({
+export function PageContext({
   eyebrow,
   title,
   actions,
@@ -96,22 +89,28 @@ export function PageHeader({
   actions?: React.ReactNode
   className?: string
 }) {
+  const back = typeof eyebrow === "string" ? null : eyebrow
+
   return (
-    <div
-      data-slot="page-header"
-      className={cn("flex min-w-0 flex-wrap items-end justify-between gap-x-6 gap-y-3", className)}
-    >
-      <div className="min-w-0 space-y-1.5">
-        {eyebrow && <p className="eyebrow">{eyebrow}</p>}
-        {/* The largest type on the page, by a clear step: the title is the one
-            thing that has to be found without reading, and at 20px it sat two
-            pixels from the panel titles it was meant to rank above. */}
-        <h1 className="truncate text-2xl leading-tight font-semibold tracking-tight">{title}</h1>
-      </div>
-      {actions && (
-        <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">{actions}</div>
+    <>
+      <h1 className="sr-only">{title}</h1>
+      {(back || actions) && (
+        <div
+          data-slot="page-context"
+          className={cn(
+            "flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2",
+            className,
+          )}
+        >
+          {back && <div className="text-body text-muted-foreground">{back}</div>}
+          {actions && (
+            <div className={cn("flex max-w-full flex-wrap items-center gap-2", back && "ml-auto")}>
+              {actions}
+            </div>
+          )}
+        </div>
       )}
-    </div>
+    </>
   )
 }
 
@@ -352,7 +351,7 @@ export function PageState({
 }) {
   return (
     <Page>
-      <PageHeader eyebrow={eyebrow} title={title} />
+      <PageContext eyebrow={eyebrow} title={title} />
       {error ? <ErrorState error={error} onRetry={onRetry} /> : (skeleton ?? <LoadingPanel />)}
     </Page>
   )

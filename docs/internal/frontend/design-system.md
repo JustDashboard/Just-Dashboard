@@ -46,11 +46,11 @@ above its Services row and none in it — see §15 for what that took. Three kin
 taking a frame:
 
 - a run of figures — `StatGrid` draws hairlines *between* tiles and nothing around them, and the
-  first column starts on the page's own edge, in line with the title (`framed` restores the box for
+  first column starts on the page's own content edge (`framed` restores the box for
   the one case a run sits inside another surface). The first-column rule is written twice, for a tile
   inside a `StatLink` and for a tile that *is* the cell: the descendant form alone never matched the
-  second, so until the Security pass every grid of bare tiles started a step in from the title it was
-  meant to line up with. The Overview's Services row is one of these too:
+  second, so until the Security pass every grid of bare tiles started a step in from the content it
+  was meant to line up with. The Overview's Services row is one of these too:
   a module's headline figure is a reading, and eight framed cards under a page that had just stopped
   drawing boxes were eight boxes. Each is a `StatLink`, so the arrow says it goes somewhere;
 - a list that is the whole of a section — `Panel plain` keeps the panel's anatomy (header, toolbar,
@@ -285,7 +285,7 @@ union. A component that declares its own tone names is the drift this file exist
 
 ## 5. No descriptions under titles
 
-**`PageHeader`, `Section`, `PanelHeader` and `ChartPanel` have no `description`.** They have no `icon`
+**`PageContext`, `Section`, `PanelHeader` and `ChartPanel` have no `description`.** They have no `icon`
 either — that is §14.
 
 Every page carried a sentence under its heading explaining what the page was — a caption for a title
@@ -384,7 +384,7 @@ all containers.** Each of the nine was a stack of framed cards — a title strip
 holding Save — on the argument that things filled in one at a time read best as bordered boxes,
 which is the wrong shape for a page that *is* a form. `settings/setting-card.tsx` draws them now.
 `SettingsPage` reads the configuration, then draws what is saved but not live yet (a strip with no
-button: the project header already carries the one "Deploy changes", and a second brand face a
+button: the project context row already carries the one "Deploy changes", and a second brand face a
 hundred and fifty pixels under it was two commands on one surface), the page's readings, and its
 forms in one run of rail sections. `SettingForm` is one `<form>` and one save, and may span several
 sections, because what one PUT writes is what one Save means — Runtime is five. `SettingSection`
@@ -574,12 +574,11 @@ says so.
 `SidePanel`. It was `text-body` on the first two, which put a panel's name at the size of the rows
 underneath it — legible only because a tinted icon square was sitting in front of it doing the
 separating. With the square gone (§14) the title has to be the thing that reads as a heading, and two
-pixels is the whole of what that takes: `text-title` is a step the ladder already had, so the ranks
-now run page (24, `text-2xl`) → section (16, `text-base`) → surface (15) → body (13) with nothing
-invented in between. The page title went from 20 to 24 in 0.6.7: at 20 it sat five pixels from the
-panel titles it ranks above, and on the darker ground the page needed one thing that is plainly the
-largest. A `StatTile`'s figure is the same 24, because a headline number is the other thing a reader
-finds without reading.
+pixels is the whole of what that takes: `text-title` is a step the ladder already had, so the visible
+ranks run a flow question (24, `text-2xl`) or a reading (24) → section (16, `text-base`) → surface
+(15) → body (13) with nothing invented in between. The reading page title went from 20 to 24 in
+0.6.7, then left the visual layout when the rail became the visible page location. A `StatTile`'s
+figure stays at 24 because a headline number is what a reader finds without reading.
 
 Weight carries hierarchy where size cannot. The sidebar is the one surface dense enough to need
 three: group labels in the eyebrow's small caps, resting entries `font-normal` so the column reads as
@@ -618,8 +617,8 @@ section, not only `/deploy`.
 
 A **view strip** — the underlined tabs that switch between two readings of the *same* page — is
 `text-body`. It was `text-xs` while the page title was 20px and the strip sat within two pixels of both
-the title and the panel titles; with the title at 24 the strip has a rank of its own again, and 12px
-chrome under a 24px title read as an afterthought. There is no route-level strip to size: since 0.6.7
+the title and the panel titles; the earlier 24px title gave the strip a rank of its own, and 12px
+chrome under it read as an afterthought. There is no route-level strip to size: since 0.6.7
 the sidebar drills into a section and lists its pages, and a tab that changes the URL is not a thing
 this product has.
 
@@ -916,9 +915,9 @@ The rule that fell out of the Docker pass, and which generalises:
   named buttons in the sheet and words in the row's menu.
 
 The deployment section declares its two sets the same way. A project's verbs are declared once in
-`deploy/project-verbs.tsx` and drawn by the project header — whose one brand command,
+`deploy/project-verbs.tsx` and drawn by the project context row — whose one brand command,
 `projectCommand`, is the first of View, Start, Deploy and Redeploy the list holds — by a fleet
-card's menu and by a fleet row, so a card and the header cannot disagree about what can be done to
+card's menu and by a fleet row, so a card and the context row cannot disagree about what can be done to
 a project. A run's and its release's are declared once in `deploy/run-verbs.tsx` and drawn by a
 Deployments row's menu and by the run page's header, which is what keeps a finished run from being
 a dead end. A long menu is grouped: a `Verb` may name its `group` — Running, Building, Project,
@@ -1030,7 +1029,7 @@ an image and a stack's service are drawn as the product their image is (`imagePr
 last segment of the reference; anything it cannot name is Docker's whale), a stack as its services'
 products overlapping (`ProductLogos`, the way a group of avatars overlaps; Compose's own mark when
 none has a logo), a volume as the product of the container that keeps its data there, and a
-database connection as its engine — in the section title's switcher and in every engine picker,
+database connection as its engine — in the workbench switcher and in every engine picker,
 which are one `EngineCard` (`choice-card.tsx`) rather than three shapes that had already drifted.
 Networks have no product and keep a glyph on the same tile, so their titles line up with the rest.
 
@@ -1088,7 +1087,7 @@ favicon carries the framework or language as a badge in the corner, the session 
 browser-over-system shape; a template's or an image's favicon already is its product, and the badge
 would be one logo twice. It is one tile rather than `ProductLogos`, because a column of titles has
 to line up — a stack's services are drawn after its words instead. The fleet card, the rail's
-scope head, the project header and the notification picture's source all draw it; the archive
+scope head, the project identity line and the notification picture's source all draw it; the archive
 draws the product alone, at a step of opacity — a project at rest, the way Backups dims a paused
 job.
 
@@ -1306,7 +1305,7 @@ The passes, in order. Each one is a diff you can review on its own.
    the session it is read through, with the count of the rest on their header.
 
    Three deployment pages took it in the same pass. A project's General settings did because the
-   project header's facts line already is that page's reading line: each figure of the old Project
+   project identity line already is that page's reading line: each figure of the old Project
    card went beside the control that sets it, and the page's doc comment names where. Variables took the
    `/git` exit exactly — every count (all, pending, secret, config, reaching the build, the runtime
    or a release task, holding a reference) is a filter chip over the list, where it also narrows
@@ -1335,8 +1334,9 @@ The passes, in order. Each one is a diff you can review on its own.
    stay are wayfinding — the sidebar entry and a module tile's mark, drawn as a 12px `text-brand`
    glyph inline before the tile's eyebrow — and the ones that *are* the message: a `Status`, a
    `Notice`, an `EmptyState`, a verb on a button.
-5. **Type on the ladder.** Page 24 → section 16 → surface 15 → body 13 → hint 11 → micro 10, and a
-   headline figure 24. Anything in between is deleted, not rounded to the nearest.
+5. **Type on the ladder.** A flow question or headline figure 24 → section 16 → surface 15 → body
+   13 → hint 11 → micro 10. Reading page names are accessible but not drawn. Anything in between is
+   deleted, not rounded to the nearest.
 6. **Colour by role.** Brand blue is a command's face or a location mark. Amber, red and green arrive
    only attached to a reading — a figure's `tone`, a `Status` dot and word, a `Notice`. Selection is
    `bg-accent`; hover is `bg-row-hover` on a row or tile and a border step on a framed destination;
@@ -1347,20 +1347,33 @@ The passes, in order. Each one is a diff you can review on its own.
    `Status`, a hint on a tile, or a `Notice`. What the page *is* — a hostname, a kernel, a platform —
    is its own row.
 9. **Alignment.** Tiles top-align so a row of names is a row; hints truncate rather than wrap; the
-   first column starts where the page title starts.
+   first column starts at the page gutter.
 10. **Verify.** `bun run lint`, `bun run build`, `bun run test:browser` (at least
     `tests/browser/design-system.spec.ts`), then a screenshot at 1280 and 1720 wide against a mocked
     API in the pattern `mockShell` uses, and look at it: a scrollbar where none belongs, a label a
     line lower than its neighbours, a figure at the wrong size, are things the checks do not catch.
 
-**What the Overview looks like after these passes**, as a checklist for the page you are on: a page
-header with an eyebrow and a 24px title; the machine's identity line under it (`HostIdentity` — its
-distribution drawn as itself, the processor and hypervisor as bare marks among its facts, the verdict
-at the right end); a five-tile `StatGrid` of readings, the four that move carrying their last hour in
+**What the Overview looks like after these passes**, as a checklist for the page you are on: the
+machine's identity line first (`HostIdentity` — its distribution drawn as itself, the processor and
+hypervisor as bare marks among its facts, the verdict and Metrics link at the right end); a five-tile
+`StatGrid` of readings, the four that move carrying their last hour in
 the tile's `trend` slot where a meter would be and the one that fills keeping its meter; a plain
 `Health` list beside a plain activity list; and a `Section` holding a `StatGrid` of eight `StatLink`
 tiles, one per module, each naming what it counts with the products themselves. No frame anywhere on
 the page. Everything that arrived, rose.
+
+Reading pages now keep their page name in a screen-reader-only `h1` through `PageContext`. The rail
+provides the visible location. A linked parent remains as a compact way back, while pages without
+one begin directly with their content. Put a control beside the data it changes: list commands in
+their section header or filter bar, workbench commands in the workbench strip, and empty-list commands
+in the empty state. The Metrics range, pause and export controls sit in the machine identity line;
+the proxy service verbs sit with the engine facts. Detail pages keep their verbs beside the way back
+and their resource name in the first facts or identity row. The deployment fleet puts its related
+pages and create command with the list filters; an empty fleet has its create command in the empty
+state.
+The Databases workbench keeps the connection switcher, facts, status and New command in one compact
+strip. Flow pages keep their visible question as the `h1`, since the question is the work on that
+screen (§16).
 
 The 0.7.0 pass took two things off it that had been saying the same figure twice: a `MetricStrip`
 of uptime, processes and cores in the header's corner (facts about the machine, now in its identity
@@ -1387,7 +1400,7 @@ doesn't look good" — was right.
 **But not because the page had no readings.** It had four: the draft count, the App's repositories,
 the identity count, and "N of M repositories". Every one was rendered at `text-hint` inside a
 `PanelHeader`'s actions. §15 pass 2 names counts explicitly, and `deploy/credentials-page.tsx` — the
-same section, also a page you configure rather than read — runs its `PageHeader` straight into a
+same section, also a page you configure rather than read — ran its page heading straight into a
 `StatGrid` of `StatTile`s. So the first half of the failure was §15 pass 2 skipped, not §15 being
 inapplicable; the HEAD commit that ran the pass audited itself against passes 3, 7 and 9 and never
 mentioned 2.

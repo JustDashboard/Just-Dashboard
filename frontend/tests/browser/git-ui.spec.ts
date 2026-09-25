@@ -410,7 +410,7 @@ for (const path of ["/git", "/git?repo=%2Fsrv%2Fapp"] as const) {
     await mockGit(page)
     await page.goto(path)
     await expect(
-      page.locator("[data-slot=page-header], [data-slot=pane-header]").first(),
+      page.getByRole("button", { name: path.includes("?") ? "Back to repositories" : "Rescan" }),
     ).toBeVisible()
 
     const unnamed = await page.evaluate(() => {

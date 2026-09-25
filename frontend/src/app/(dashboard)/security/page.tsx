@@ -1,20 +1,14 @@
 "use client"
 
 import { useMemo } from "react"
-import {
-  Bug,
-  FirewallCheck,
-  NetworkDevice,
-  SecureConnection,
-  SignIn,
-} from "@/components/icons"
+import { Bug, FirewallCheck, NetworkDevice, SecureConnection, SignIn } from "@/components/icons"
 import { get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { Connections, Fail2banJail, LoginSession, SecurityFinding } from "@/lib/types"
 import type { Tone } from "@/components/tone"
 import { usePoll } from "@/hooks/use-poll"
-import { Metric, MetricStrip, Page, PageHeader } from "@/components/page"
+import { Metric, MetricStrip, Page, PageContext } from "@/components/page"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { Notice } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -37,10 +31,7 @@ type Fail2banReply = { available: boolean; running: boolean; jails: Fail2banJail
 export default function SecurityOverviewPage() {
   const { posture, postureLoading, firewall, exposure, applyFix } = useSecurity()
 
-  const fail2ban = usePoll<Fail2banReply>(
-    (signal) => get("/fail2ban/", undefined, signal),
-    20_000,
-  )
+  const fail2ban = usePoll<Fail2banReply>((signal) => get("/fail2ban/", undefined, signal), 20_000)
   const connections = usePoll<Connections>(
     (signal) => get("/connections", undefined, signal),
     10_000,
@@ -59,23 +50,7 @@ export default function SecurityOverviewPage() {
 
   return (
     <Page className="animate-rise">
-      <PageHeader
-        eyebrow="Protection"
-        title="Security"
-        actions={
-          posture && (
-            <MetricStrip>
-              <Metric label="Checks" value={posture.checks} />
-              <Metric
-                label="Not checked"
-                value={posture.skipped.length}
-                hint={posture.skipped.length > 0 ? posture.skipped.join(", ") : undefined}
-              />
-              <Metric label="Checked" value={relativeTime(posture.checkedAt)} />
-            </MetricStrip>
-          )
-        }
-      />
+      <PageContext eyebrow="Protection" title="Security" />
 
       {/* What this machine is, from a security point of view: how the panel
           is reachable, and from where this reader is reaching it. This was a
@@ -83,6 +58,18 @@ export default function SecurityOverviewPage() {
           the grade is a reading and its inputs are facts, so they sit in the
           row the host Overview keeps its platform and kernel in. */}
       <ExposureFacts exposure={exposure} />
+
+      {posture && (
+        <MetricStrip>
+          <Metric label="Checks" value={posture.checks} />
+          <Metric
+            label="Not checked"
+            value={posture.skipped.length}
+            hint={posture.skipped.length > 0 ? posture.skipped.join(", ") : undefined}
+          />
+          <Metric label="Checked" value={relativeTime(posture.checkedAt)} />
+        </MetricStrip>
+      )}
 
       {/* The recommendation only where no finding already carries it: a
           public or open allowlist is a finding below, and saying it twice on
@@ -106,7 +93,9 @@ export default function SecurityOverviewPage() {
                   ? firewall.backend
                   : "Not enabled"
           }
-          tone={!firewall || !firewall.available ? "warning" : firewall.enabled ? "default" : "danger"}
+          tone={
+            !firewall || !firewall.available ? "warning" : firewall.enabled ? "default" : "danger"
+          }
           hint={
             !firewall || !firewall.available
               ? "install ufw or firewalld"

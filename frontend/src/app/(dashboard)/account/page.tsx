@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { DesktopDevice, Key, Shield, Users, type Icon } from "@/components/icons"
 import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
-import { Page, PageHeader, PageState, Section } from "@/components/page"
+import { Page, PageContext, PageState, Section } from "@/components/page"
 import { ProductGlyphs, ProductLogo } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
@@ -63,7 +63,7 @@ export default function ProfilePage() {
 
   return (
     <Page className="animate-rise">
-      <PageHeader eyebrow="Account" title={name} />
+      <PageContext eyebrow="Account" title={name} />
 
       <HostIdentity
         logo={<UserAvatar key={user.avatarVersion} user={user} size="lg" />}

@@ -1,6 +1,6 @@
 "use client"
 
-import { Page, PageHeader } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
 import { FormSections } from "@/components/form"
 import {
   PasswordSection,
@@ -20,7 +20,7 @@ export default function AccountSecurityPage() {
   const sessions = useSessions()
   return (
     <Page className="animate-rise">
-      <PageHeader eyebrow="Account" title="Security" />
+      <PageContext eyebrow="Account" title="Security" />
       <FormSections>
         <TwoFactorSection />
         <PasswordSection />

@@ -47,10 +47,12 @@ export function NetworksTab({
   confirm,
   creating: externalCreating,
   onCreatingChange,
+  actions,
 }: {
   confirm: ConfirmFn
   creating?: boolean
   onCreatingChange?: (open: boolean) => void
+  actions?: React.ReactNode
 }) {
   const { can } = useAuth()
   const [selected, setSelected] = useSessionState<string | null>("docker.networks.selected", null)
@@ -106,6 +108,7 @@ export function NetworksTab({
           title="Networks"
           actions={
             <>
+              {actions}
               {/* POST /docker/networks/prune has existed since this tab did and
                   nothing ever called it. A network left behind by a removed
                   stack is invisible clutter that also holds a subnet out of the

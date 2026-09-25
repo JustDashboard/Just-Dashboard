@@ -11,7 +11,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useConfirm } from "@/components/confirm-dialog"
 import { cn } from "@/lib/utils"
-import { Page, PageHeader, RowLink, SearchInput } from "@/components/page"
+import { Page, PageContext, RowLink, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { ROW_BLEED } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
@@ -128,26 +128,7 @@ function Services() {
     }
   }
 
-  const header = (
-    <PageHeader
-      eyebrow="Processes"
-      title="Services"
-      actions={
-        units.data?.available &&
-        can("system.admin") && (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={reloading}
-            onClick={() => void daemonReload()}
-          >
-            <RefreshClockwise className="size-3.5" />
-            {reloading ? "Reloading…" : "Reload unit files"}
-          </Button>
-        )
-      }
-    />
-  )
+  const header = <PageContext eyebrow="Processes" title="Services" />
 
   if (units.loading && !units.data) {
     return (
@@ -195,7 +176,23 @@ function Services() {
       </StatGrid>
 
       <Panel>
-        <PanelHeader title="Units" advanced />
+        <PanelHeader
+          title="Units"
+          advanced
+          actions={
+            can("system.admin") && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={reloading}
+                onClick={() => void daemonReload()}
+              >
+                <RefreshClockwise className="size-3.5" />
+                {reloading ? "Reloading…" : "Reload unit files"}
+              </Button>
+            )
+          }
+        />
         <PanelToolbar>
           <SearchInput
             value={filter}
@@ -228,7 +225,7 @@ function Services() {
             <EmptyState icon={ListOrdered} title="No units match" className="mt-4" />
           ) : (
             <>
-              <div className="group-data-[plain]/panel:-mx-4 hidden min-w-0 lg:block">
+              <div className="hidden min-w-0 group-data-[plain]/panel:-mx-4 lg:block">
                 <Table containerClassName="max-h-[calc(100svh-24rem)]">
                   <TableHeader className={stickyTableHeader}>
                     <TableRow>

@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Page, PageHeader, RowLink, SearchInput } from "@/components/page"
+import { Page, PageContext, RowLink, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Field, FieldRow, FormFact, FormFacts, FormNote } from "@/components/form"
 import { Row, ROW_BLEED, RowList } from "@/components/row-list"
@@ -126,11 +126,7 @@ export default function SystemUsersPage() {
 
   return (
     <Page className="animate-rise">
-      <PageHeader
-        eyebrow="Advanced"
-        title="System users"
-        actions={<CreateUserDialog onDone={refresh} />}
-      />
+      <PageContext eyebrow="Advanced" title="System users" />
 
       {data && (
         <StatGrid columns={4} key="figures" className="animate-rise">
@@ -176,7 +172,7 @@ export default function SystemUsersPage() {
           where the data ends (§2). The readings above it stay plain, which is
           what the frame is read against. */}
       <Panel>
-        <PanelHeader title="Accounts" />
+        <PanelHeader title="Accounts" actions={<CreateUserDialog onDone={refresh} />} />
         <PanelToolbar>
           <SearchInput
             value={query}
@@ -196,7 +192,7 @@ export default function SystemUsersPage() {
               {/* The outer columns take the gutter from their own cell padding,
                   so the first column starts in the title's column; the `-mx`
                   bleed that does the same on a plain panel is gated to it (§2). */}
-              <div className="group-data-[plain]/panel:-mx-4 hidden min-w-0 lg:block">
+              <div className="hidden min-w-0 group-data-[plain]/panel:-mx-4 lg:block">
                 <Table containerClassName="max-h-[calc(100svh-24rem)]">
                   <TableHeader className={stickyTableHeader}>
                     <TableRow>

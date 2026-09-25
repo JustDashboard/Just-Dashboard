@@ -26,7 +26,7 @@ function snapshot(
   return { run: { ...run, ...overrides }, steps: stepList }
 }
 
-test("renders the header, facts and release path for an active run", async ({ page }) => {
+test("renders the run identity, facts and release path for an active run", async ({ page }) => {
   await mockProject(page)
   await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
     socket.send(JSON.stringify({ type: "snapshot", data: snapshot(), ts: Date.now() }))
@@ -34,8 +34,8 @@ test("renders the header, facts and release path for an active run", async ({ pa
   await page.goto("/deploy/7/runs/84")
 
   await expect(page.getByRole("heading", { name: "Deployment #1" })).toBeVisible()
-  const header = page.locator('[data-slot="page-header"]')
-  await expect(header.getByText("Verifying", { exact: true })).toBeVisible()
+  const identity = page.locator('[data-slot="run-identity"]')
+  await expect(identity.getByText("Verifying", { exact: true })).toBeVisible()
   await expect(page.getByRole("link", { name: /api-production/ })).toHaveAttribute(
     "href",
     "/deploy/7",
@@ -43,7 +43,6 @@ test("renders the header, facts and release path for an active run", async ({ pa
 
   // The identity line: the source as its forge, the repository as the title
   // (the run recorded no commit), and the run as a sentence of facts.
-  const identity = page.locator('[data-slot="run-identity"]')
   await expect(identity.getByText("acme/api", { exact: true })).toBeVisible()
   await expect(page.getByText("Production", { exact: true })).toBeVisible()
   // The fixture is run #1, so the page also carries the creation flow's spine
@@ -237,8 +236,8 @@ test("a resync event replaces the snapshot instead of merging into it", async ({
   // Only reachable by replacing state wholesale: applyEvent's incremental path
   // has no case for "resync" and would have left the run "running".
   await expect(page.getByText("Your release is ready", { exact: true })).toBeVisible()
-  const header = page.locator('[data-slot="page-header"]')
-  await expect(header.getByText("Ready", { exact: true })).toBeVisible()
+  const identity = page.locator('[data-slot="run-identity"]')
+  await expect(identity.getByText("Ready", { exact: true })).toBeVisible()
 })
 
 test("a step in Details opens to its evidence, and only a step with output leads to the console", async ({
@@ -349,8 +348,8 @@ test("cancel requests cancellation and shows the toast and notice", async ({ pag
   await expect(
     page.getByText("The current operation will stop safely and run its cleanup."),
   ).toBeVisible()
-  const header = page.locator('[data-slot="page-header"]')
-  await expect(header.getByText("Cancelling", { exact: true })).toBeVisible()
+  const identity = page.locator('[data-slot="run-identity"]')
+  await expect(identity.getByText("Cancelling", { exact: true })).toBeVisible()
 })
 
 test("retry navigates to the run it created", async ({ page }) => {

@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { FolderPlus } from "@/components/icons"
 import { useAuth } from "@/hooks/use-auth"
-import { Page, PageHeader } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
 import { StacksTab } from "@/components/docker/stacks-tab"
 import { Button } from "@/components/ui/button"
 
@@ -12,9 +12,10 @@ export default function DockerStacksPage() {
   const [creating, setCreating] = useState(false)
   return (
     <Page>
-      <PageHeader
-        eyebrow="Docker"
-        title="Stacks"
+      <PageContext eyebrow="Docker" title="Stacks" />
+      <StacksTab
+        creating={creating}
+        onCreatingChange={setCreating}
         actions={
           can("system.admin") &&
           can("file.write") && (
@@ -25,7 +26,6 @@ export default function DockerStacksPage() {
           )
         }
       />
-      <StacksTab creating={creating} onCreatingChange={setCreating} />
     </Page>
   )
 }

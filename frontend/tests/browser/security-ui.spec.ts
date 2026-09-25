@@ -19,7 +19,14 @@ const admin = {
   needsTotp: false,
   needsEnrollment: false,
   require2fa: false,
-  capabilities: ["read", "service.control", "file.write", "terminal", "destructive", "system.admin"],
+  capabilities: [
+    "read",
+    "service.control",
+    "file.write",
+    "terminal",
+    "destructive",
+    "system.admin",
+  ],
   user: {
     id: 1,
     username: "operator",
@@ -84,10 +91,48 @@ const firewall = {
     profiles: true,
   },
   rules: [
-    { number: 1, action: "ALLOW", direction: "IN", to: "22/tcp", from: "Anywhere", port: "22", protocol: "tcp", service: "SSH", raw: "22/tcp ALLOW IN Anywhere" },
-    { number: 2, action: "ALLOW", direction: "IN", to: "443/tcp", from: "Anywhere", port: "443", protocol: "tcp", service: "HTTPS", raw: "443/tcp ALLOW IN Anywhere" },
-    { number: 3, action: "DENY", direction: "IN", to: "Anywhere", from: "203.0.113.9", comment: "repeat offender", raw: "Anywhere DENY IN 203.0.113.9 # repeat offender" },
-    { number: 4, action: "ALLOW", direction: "IN", to: "22/tcp", from: "Anywhere", port: "22", protocol: "tcp", ipv6: true, raw: "22/tcp (v6) ALLOW IN Anywhere (v6)" },
+    {
+      number: 1,
+      action: "ALLOW",
+      direction: "IN",
+      to: "22/tcp",
+      from: "Anywhere",
+      port: "22",
+      protocol: "tcp",
+      service: "SSH",
+      raw: "22/tcp ALLOW IN Anywhere",
+    },
+    {
+      number: 2,
+      action: "ALLOW",
+      direction: "IN",
+      to: "443/tcp",
+      from: "Anywhere",
+      port: "443",
+      protocol: "tcp",
+      service: "HTTPS",
+      raw: "443/tcp ALLOW IN Anywhere",
+    },
+    {
+      number: 3,
+      action: "DENY",
+      direction: "IN",
+      to: "Anywhere",
+      from: "203.0.113.9",
+      comment: "repeat offender",
+      raw: "Anywhere DENY IN 203.0.113.9 # repeat offender",
+    },
+    {
+      number: 4,
+      action: "ALLOW",
+      direction: "IN",
+      to: "22/tcp",
+      from: "Anywhere",
+      port: "22",
+      protocol: "tcp",
+      ipv6: true,
+      raw: "22/tcp (v6) ALLOW IN Anywhere (v6)",
+    },
   ],
 }
 
@@ -143,18 +188,55 @@ const connections = {
   listening: 6,
   loopback: 4,
   peers: [
-    { address: "203.0.113.50", count: 3, established: 3, ports: [443], processes: ["caddy"], private: false, service: "HTTPS" },
-    { address: "100.110.34.9", count: 2, established: 1, ports: [8443], processes: ["caddy"], private: true },
+    {
+      address: "203.0.113.50",
+      count: 3,
+      established: 3,
+      ports: [443],
+      processes: ["caddy"],
+      private: false,
+      service: "HTTPS",
+    },
+    {
+      address: "100.110.34.9",
+      count: 2,
+      established: 1,
+      ports: [8443],
+      processes: ["caddy"],
+      private: true,
+    },
   ],
 }
 
 const sessions = [
-  { user: "ubuntu", tty: "pts/0", from: "100.110.34.9", loginTime: iso(40), idle: "active", pid: 4242, isSsh: true },
+  {
+    user: "ubuntu",
+    tty: "pts/0",
+    from: "100.110.34.9",
+    loginTime: iso(40),
+    idle: "active",
+    pid: 4242,
+    isSsh: true,
+  },
 ]
 
 const logins = [
-  { kind: "login", user: "ubuntu", tty: "pts/0", from: "100.110.34.9", loginTime: iso(40), active: true },
-  { kind: "boot", user: "reboot", tty: "", from: "6.14.0-37-generic", loginTime: iso(60 * 24), duration: "1 day" },
+  {
+    kind: "login",
+    user: "ubuntu",
+    tty: "pts/0",
+    from: "100.110.34.9",
+    loginTime: iso(40),
+    active: true,
+  },
+  {
+    kind: "boot",
+    user: "reboot",
+    tty: "",
+    from: "6.14.0-37-generic",
+    loginTime: iso(60 * 24),
+    duration: "1 day",
+  },
 ]
 
 const attackers = {
@@ -164,21 +246,85 @@ const attackers = {
   capped: false,
   since: iso(60 * 24 * 6),
   attackers: [
-    { address: "203.0.113.9", attempts: 2200, users: ["root", "admin", "ubuntu"], first: iso(60 * 24 * 6), last: iso(12) },
-    { address: "198.51.100.4", attempts: 112, users: ["deploy"], first: iso(60 * 8), last: iso(70) },
+    {
+      address: "203.0.113.9",
+      attempts: 2200,
+      users: ["root", "admin", "ubuntu"],
+      first: iso(60 * 24 * 6),
+      last: iso(12),
+    },
+    {
+      address: "198.51.100.4",
+      attempts: 112,
+      users: ["deploy"],
+      first: iso(60 * 8),
+      last: iso(70),
+    },
   ],
 }
 
 const network = {
   interfaces: [
-    { name: "eth0", addresses: ["203.0.113.20/24"], mtu: 1500, up: true, loopback: false, kind: "physical", bytesSent: 1e9, bytesRecv: 4e9, public: true },
-    { name: "tailscale0", addresses: ["100.110.34.31/32"], mtu: 1280, up: true, loopback: false, kind: "tunnel", bytesSent: 1e7, bytesRecv: 2e7, public: false },
-    { name: "docker0", addresses: ["172.17.0.1/16"], mtu: 1500, up: true, loopback: false, kind: "bridge", bytesSent: 0, bytesRecv: 0, public: false },
-    { name: "veth1a2b", addresses: [], mtu: 1500, up: true, loopback: false, kind: "virtual", bytesSent: 0, bytesRecv: 0, public: false },
+    {
+      name: "eth0",
+      addresses: ["203.0.113.20/24"],
+      mtu: 1500,
+      up: true,
+      loopback: false,
+      kind: "physical",
+      bytesSent: 1e9,
+      bytesRecv: 4e9,
+      public: true,
+    },
+    {
+      name: "tailscale0",
+      addresses: ["100.110.34.31/32"],
+      mtu: 1280,
+      up: true,
+      loopback: false,
+      kind: "tunnel",
+      bytesSent: 1e7,
+      bytesRecv: 2e7,
+      public: false,
+    },
+    {
+      name: "docker0",
+      addresses: ["172.17.0.1/16"],
+      mtu: 1500,
+      up: true,
+      loopback: false,
+      kind: "bridge",
+      bytesSent: 0,
+      bytesRecv: 0,
+      public: false,
+    },
+    {
+      name: "veth1a2b",
+      addresses: [],
+      mtu: 1500,
+      up: true,
+      loopback: false,
+      kind: "virtual",
+      bytesSent: 0,
+      bytesRecv: 0,
+      public: false,
+    },
   ],
   routes: [
-    { destination: "default", gateway: "203.0.113.1", interface: "eth0", metric: "100", family: "ipv4", raw: "default via 203.0.113.1 dev eth0 metric 100" },
-    { destination: "172.17.0.0/16", interface: "docker0", family: "ipv4", raw: "172.17.0.0/16 dev docker0" },
+    {
+      destination: "default",
+      gateway: "203.0.113.1",
+      interface: "eth0",
+      metric: "100",
+      family: "ipv4",
+      raw: "default via 203.0.113.1 dev eth0 metric 100",
+    },
+    {
+      destination: "172.17.0.0/16",
+      interface: "docker0",
+      family: "ipv4",
+      raw: "172.17.0.0/16 dev docker0",
+    },
   ],
   resolvers: ["127.0.0.53"],
   search: ["example.internal"],
@@ -193,17 +339,68 @@ const sshd = {
   hasMatchBlocks: false,
   socket: { unit: "ssh.socket", ports: ["22"] },
   settings: [
-    { key: "permitrootlogin", label: "Root login", value: "prohibit-password", recommended: "prohibit-password", secure: true, detail: "Whether root may log in over SSH at all.", options: ["no", "prohibit-password", "forced-commands-only", "yes"], kind: "choice" },
-    { key: "passwordauthentication", label: "Password authentication", value: "yes", recommended: "no", secure: false, detail: "Whether a password alone is enough to get a shell.", risk: "With this on, your server's security is whatever the weakest password on it is.", options: ["no", "yes"], kind: "choice" },
-    { key: "maxauthtries", label: "Attempts per connection", value: "6", recommended: "3 or fewer", secure: false, detail: "How many guesses one connection gets.", risk: "Six passwords per handshake instead of one.", kind: "number" },
-    { key: "port", label: "Port", value: "22", recommended: "any", secure: true, detail: "Where sshd listens.", kind: "number" },
-    { key: "allowusers", label: "Only these accounts may log in", value: "", recommended: "", secure: true, detail: "A space-separated list.", kind: "list" },
+    {
+      key: "permitrootlogin",
+      label: "Root login",
+      value: "prohibit-password",
+      recommended: "prohibit-password",
+      secure: true,
+      detail: "Whether root may log in over SSH at all.",
+      options: ["no", "prohibit-password", "forced-commands-only", "yes"],
+      kind: "choice",
+    },
+    {
+      key: "passwordauthentication",
+      label: "Password authentication",
+      value: "yes",
+      recommended: "no",
+      secure: false,
+      detail: "Whether a password alone is enough to get a shell.",
+      risk: "With this on, your server's security is whatever the weakest password on it is.",
+      options: ["no", "yes"],
+      kind: "choice",
+    },
+    {
+      key: "maxauthtries",
+      label: "Attempts per connection",
+      value: "6",
+      recommended: "3 or fewer",
+      secure: false,
+      detail: "How many guesses one connection gets.",
+      risk: "Six passwords per handshake instead of one.",
+      kind: "number",
+    },
+    {
+      key: "port",
+      label: "Port",
+      value: "22",
+      recommended: "any",
+      secure: true,
+      detail: "Where sshd listens.",
+      kind: "number",
+    },
+    {
+      key: "allowusers",
+      label: "Only these accounts may log in",
+      value: "",
+      recommended: "",
+      secure: true,
+      detail: "A space-separated list.",
+      kind: "list",
+    },
   ],
 }
 
 const services = [
   { key: "ssh", name: "SSH", port: "22", protocol: "tcp", detail: "Remote shell." },
-  { key: "redis", name: "Redis", port: "6379", protocol: "tcp", detail: "Cache.", danger: "Never open this to the world." },
+  {
+    key: "redis",
+    name: "Redis",
+    port: "6379",
+    protocol: "tcp",
+    detail: "Cache.",
+    danger: "Never open this to the world.",
+  },
 ]
 
 async function json(route: Route, body: unknown, status = 200) {
@@ -242,7 +439,14 @@ async function mockSecurity(page: Page, mutations: Mutation[] = []) {
       case "/fail2ban/history":
         return json(route, history)
       case "/fail2ban/sshd/config":
-        return json(route, { name: "sshd", banTime: 600, findTime: 600, maxRetry: 5, ignoreIp: ["127.0.0.0/8"], actions: ["iptables-multiport"] })
+        return json(route, {
+          name: "sshd",
+          banTime: 600,
+          findTime: 600,
+          maxRetry: 5,
+          ignoreIp: ["127.0.0.0/8"],
+          actions: ["iptables-multiport"],
+        })
       case "/connections":
         return json(route, connections)
       case "/ssh-sessions":
@@ -290,9 +494,7 @@ const PAGES = [
  */
 async function framedNonTables(page: Page) {
   return page.evaluate(() =>
-    Array.from(
-      document.querySelectorAll("[data-slot=page] [data-slot=panel]:not([data-plain])"),
-    )
+    Array.from(document.querySelectorAll("[data-slot=page] [data-slot=panel]:not([data-plain])"))
       .filter((el) => !el.querySelector("[data-slot=table-container]"))
       .map((el) => el.outerHTML.slice(0, 120)),
   )
@@ -480,7 +682,9 @@ test("the network page leads with what faces the internet", async ({ page }) => 
   await page.waitForLoadState("networkidle")
 
   await expect(page.locator("[data-slot=stat-grid]")).toContainText("eth0")
-  await expect(page.getByText("1 on a public address")).toBeVisible()
+  await expect(
+    page.locator("[data-slot=stat-tile]").filter({ hasText: "Public addresses" }),
+  ).toContainText("eth0")
   // Docker's devices are folded away until asked for.
   await expect(page.getByRole("row").filter({ hasText: "veth1a2b" })).toHaveCount(0)
   await page.getByRole("radio", { name: /Everything/ }).click()
@@ -490,7 +694,11 @@ test("the network page leads with what faces the internet", async ({ page }) => 
 test.describe("with no hover available", () => {
   test.use({ hasTouch: true, viewport: { width: 390, height: 844 } })
 
-  for (const path of ["/security/connections", "/security/logins", "/security/intrusion"] as const) {
+  for (const path of [
+    "/security/connections",
+    "/security/logins",
+    "/security/intrusion",
+  ] as const) {
     test(`row controls on ${path} are reachable without a pointer`, async ({ page }) => {
       await mockSecurity(page)
       await page.goto(path)

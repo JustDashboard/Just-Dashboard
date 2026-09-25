@@ -893,7 +893,7 @@ test("overview, logs and runtime read cleanly at phone and desktop widths", asyn
   }
 })
 
-test("the header describes the project as itself and leads from its state to what needs attention", async ({
+test("the identity line describes the project as itself and leads from its state to what needs attention", async ({
   page,
 }) => {
   // The showcase's run in flight, ended: a project at rest leads to its findings.

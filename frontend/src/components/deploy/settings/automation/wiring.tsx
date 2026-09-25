@@ -264,7 +264,7 @@ export function AutomationWiring({
           align="center"
           mark={<ProjectMark deployment={deployment} size="lg" />}
           title={deployment.name}
-          // The commit spelled as the page header spells it.
+          // The commit spelled as the project identity line spells it.
           hint={
             <span className="font-mono">
               {(deployment.liveReleaseId &&

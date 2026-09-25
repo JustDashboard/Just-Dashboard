@@ -9,7 +9,7 @@ import { relativeTime, timestamp } from "@/lib/format"
 import type { AuditEntry } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
-import { Metric, MetricStrip, Page, PageHeader, SearchInput } from "@/components/page"
+import { Page, PageContext, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { ROW_BLEED } from "@/components/row-list"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
@@ -67,24 +67,7 @@ export default function AuditPage() {
 
   return (
     <Page className="animate-rise">
-      <PageHeader
-        eyebrow="Advanced"
-        title="Audit log"
-        actions={
-          total !== undefined && (
-            <MetricStrip>
-              <Metric
-                label={filtered ? "Matching" : "Recorded"}
-                value={
-                  <span key={total} className="inline-block animate-rise">
-                    {total.toLocaleString()}
-                  </span>
-                }
-              />
-            </MetricStrip>
-          )
-        }
-      />
+      <PageContext eyebrow="Advanced" title="Audit log" />
 
       {/* The table is the whole of the page, and it is framed: a grid that owns
           its own scrolling takes an edge, or a row whose actions sit past the
@@ -92,7 +75,19 @@ export default function AuditPage() {
           mounted across a filter change so the box being typed into never
           loses its caret to a skeleton. */}
       <Panel>
-        <PanelHeader title="Recorded requests" />
+        <PanelHeader
+          title="Recorded requests"
+          actions={
+            total !== undefined && (
+              <span className="text-hint text-muted-foreground">
+                {filtered ? "Matching" : "Recorded"}{" "}
+                <span key={total} className="numeric inline-block animate-rise text-foreground">
+                  {total.toLocaleString()}
+                </span>
+              </span>
+            )
+          }
+        />
         <PanelToolbar>
           <SearchInput
             containerClassName="sm:w-48"
@@ -131,7 +126,7 @@ export default function AuditPage() {
               {/* The outer columns take the gutter from their own cell padding,
                   so the first column starts in the title's column; the `-mx`
                   bleed that does the same on a plain panel is gated to it (§2). */}
-              <div className="group-data-[plain]/panel:-mx-4 hidden min-w-0 lg:block">
+              <div className="hidden min-w-0 group-data-[plain]/panel:-mx-4 lg:block">
                 <Table containerClassName="max-h-[calc(100svh-22rem)]">
                   <TableHeader className={stickyTableHeader}>
                     <TableRow>

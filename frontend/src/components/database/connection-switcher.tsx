@@ -14,14 +14,13 @@ import {
 } from "@/components/ui/dropdown-menu"
 
 /**
- * The connection, as the page's title.
+ * The connection, as the workbench's location control.
  *
  * The section used to open with a select box beside a status dot, and no
  * title at all: the one thing every page under it is about had the visual
- * weight of a filter. The name is the title now, at the page's own size, and
- * pressing it lists the others — the same gesture a repository switcher
- * makes, and the reason a chevron sits after the name rather than a box
- * around it.
+ * weight of a filter. The name stays beside its engine mark in the workbench
+ * strip, and pressing it lists the others — the same gesture a repository
+ * switcher makes.
  */
 export function ConnectionSwitcher({
   connections,
@@ -49,16 +48,16 @@ export function ConnectionSwitcher({
           type="button"
           aria-label={`Connection: ${current.name}. Switch connection`}
           className={cn(
-            "group flex max-w-full min-w-0 items-center gap-2.5 rounded-md text-left text-2xl leading-tight font-semibold tracking-tight focus-ring",
+            "group flex max-w-full min-w-0 items-center gap-2 rounded-md text-left text-sm font-medium focus-ring",
             className,
           )}
         >
           {/* The engine's own logo in front of the name: which of Postgres,
               Redis or Mongo this is decides what every page under it can do,
               and it is recognised before "shop" is read. */}
-          <ProductLogo id={current.driver} fallback={Database} />
+          <ProductLogo id={current.driver} size="sm" fallback={Database} />
           <span className="truncate">{current.name}</span>
-          <ChevronDown className="size-5 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground group-data-[state=open]:text-foreground" />
+          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground group-data-[state=open]:text-foreground" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-80">

@@ -12,7 +12,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePanelSize } from "@/lib/panel-size"
 import { useSessionState, useViewState } from "@/lib/view-state"
-import { Page, PageHeader } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
 import { EmptyState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -149,18 +149,7 @@ export default function LogsPage() {
 
   return (
     <Page fill className="gap-4 md:gap-5">
-      <PageHeader
-        eyebrow="Server"
-        title="Logs"
-        // The counts that stood here — sources, units, archives — were the
-        // rail's own header and rows said again above them. The export is
-        // the one thing the header can do that the workbench cannot.
-        actions={
-          sourceId && (
-            <ExportDialog sourceId={sourceId} source={selected} filter={filter} boot={boot} />
-          )
-        }
-      />
+      <PageContext eyebrow="Server" title="Logs" />
 
       {/* One frame around the whole workbench. The rail and the lines are
           separated by a hairline rather than by a gutter and two borders: two
@@ -224,6 +213,9 @@ export default function LogsPage() {
             flush
             leading={railToggle}
             facts={<SourceFacts source={selected} />}
+            actions={
+              <ExportDialog sourceId={sourceId} source={selected} filter={filter} boot={boot} />
+            }
             source={selected}
             sourceId={sourceId}
             units={sources.data?.units ?? []}

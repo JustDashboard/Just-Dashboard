@@ -139,7 +139,7 @@ or connect a GitLab/Gitea token for requests on those providers.
 
 ### Deployments
 
-![A project, with its website preview and what needs attention](docs/deployments.png)
+![A project with its website preview and live release](docs/deployments.png)
 
 Point it at a repository, an image, a template, a Compose stack or something already running. It
 says what it found, shows the plan, and runs it as a job with a permanent URL. Each project has
@@ -150,7 +150,7 @@ health checks and runtime limits remain editable before the first deployment.
 
 ### Databases
 
-![A database connection, with its connection string and the switch that opens it to the internet](docs/databases.png)
+![A database connection, with its connection string and the control that opens it to the internet](docs/databases.png)
 
 PostgreSQL, MySQL and MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis. Browse
 and edit rows, change the structure, run queries, draw the schema, and hand out the connection

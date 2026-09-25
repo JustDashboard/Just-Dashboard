@@ -88,8 +88,11 @@ export function OtherSessions({ sessions }: { sessions: ReturnType<typeof useSes
       <PanelHeader
         title="Other sessions"
         actions={
-          <span className="numeric text-hint text-muted-foreground">
-            {plural(others.length, "session")}
+          <span className="flex items-center gap-3">
+            <span className="numeric text-hint text-muted-foreground">
+              {plural(others.length, "session")}
+            </span>
+            <SignOutOthersButton sessions={sessions} />
           </span>
         }
       />
@@ -167,7 +170,7 @@ export function SessionsView({ sessions }: { sessions: ReturnType<typeof useSess
   )
 }
 
-/** The header's one command: everywhere but here. */
+/** The other sessions list's command: everywhere but here. */
 export function SignOutOthersButton({ sessions }: { sessions: ReturnType<typeof useSessions> }) {
   const others = (sessions.data ?? []).filter((s) => !s.current).length
   return (

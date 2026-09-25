@@ -36,7 +36,7 @@ import { useMetrics } from "@/hooks/use-metrics"
 import { useHealth, useMetricEvents, useMetricsHistory } from "@/hooks/use-metrics-history"
 import { useSelfUpdate } from "@/hooks/use-self-update"
 import type { MetricsWindow } from "@/lib/metrics-range"
-import { Page, PageHeader, PageState, Section } from "@/components/page"
+import { Page, PageContext, PageState, Section } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
@@ -146,18 +146,7 @@ export default function OverviewPage() {
 
   return (
     <Page className="animate-rise">
-      <PageHeader
-        eyebrow="Server"
-        title={host.hostname}
-        actions={
-          <Button variant="outline" asChild>
-            <Link href="/metrics">
-              <ChartActivity />
-              Metrics
-            </Link>
-          </Button>
-        }
-      />
+      <PageContext title={host.hostname} />
 
       {/* What this machine is, in one line: the distribution drawn as
           itself, then what it runs on. The uptime, process count and cores
@@ -176,6 +165,8 @@ export default function OverviewPage() {
         }
         facts={
           <>
+            <span className="font-medium text-foreground">{host.hostname}</span>
+            <FactDot />
             <HostFact product={cpuProduct(host.cpuModel, host.kernelArch)}>
               {host.cpuModel || host.kernelArch}
             </HostFact>
@@ -195,7 +186,17 @@ export default function OverviewPage() {
             <span className="numeric">{snapshot.procs?.total || host.processes} processes</span>
           </>
         }
-        aside={health && <HealthVerdict status={health.status} className="text-body" />}
+        aside={
+          <div className="flex flex-wrap items-center gap-2">
+            {health && <HealthVerdict status={health.status} className="text-body" />}
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/metrics">
+                <ChartActivity />
+                Metrics
+              </Link>
+            </Button>
+          </div>
+        }
       />
 
       {/* Each reading carries its last hour where a meter would be, for the

@@ -19,7 +19,7 @@ export const EXPOSURE_GRADE: Record<Exposure["grade"], { label: string; verdict:
  * install day. On screen it stays true: a machine that quietly became
  * reachable from the internet says so here instead of waiting to be found.
  *
- * A row of facts under the page title rather than a framed panel, the way the
+ * A row of facts at the start of the page rather than a framed panel, the way the
  * host Overview states its platform and kernel: the grade is a reading, the
  * allowlist and the interfaces are what it was read from, and the address this
  * browser arrived from is the one every lockout guard on these pages compares

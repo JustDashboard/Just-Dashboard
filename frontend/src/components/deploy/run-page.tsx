@@ -36,7 +36,7 @@ import type {
 } from "@/lib/types"
 import type { ProjectDetail } from "@/components/deploy/project-context"
 import { FlowSteps } from "@/components/flow"
-import { Page, PageHeader } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
 import { ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { StatusDot } from "@/components/status-dot"
 import { ChipCount, tabClasses } from "@/components/tabs"
@@ -289,7 +289,7 @@ export function RunPage() {
   if (initial.loading && !snapshot) {
     return (
       <Page>
-        <PageHeader eyebrow="Deployments" title={`Deployment #${route.run}`} />
+        <PageContext eyebrow="Deployments" title={`Deployment #${route.run}`} />
         <LoadingPanel rows={7} plain />
       </Page>
     )
@@ -297,7 +297,7 @@ export function RunPage() {
   if (initial.error || !snapshot) {
     return (
       <Page>
-        <PageHeader eyebrow="Deployments" title="Deployment unavailable" />
+        <PageContext eyebrow="Deployments" title="Deployment unavailable" />
         {initial.error && <ErrorState error={initial.error} />}
         <Button variant="outline" size="sm" asChild className="w-fit">
           <Link href={`/deploy/${projectId}`}>
@@ -452,7 +452,7 @@ export function RunPage() {
     <Page className="animate-rise">
       <Confetti ref={confetti} className="pointer-events-none fixed inset-0 z-50 size-full" />
       <div className="flex min-w-0 flex-col gap-4">
-        <PageHeader
+        <PageContext
           eyebrow={
             <Link
               href={`/deploy/${projectId}`}
@@ -461,12 +461,7 @@ export function RunPage() {
               <ArrowLeft className="size-3" /> {deployment?.name || "Deployment"}
             </Link>
           }
-          title={
-            <span className="inline-flex max-w-full min-w-0 items-center gap-3">
-              <span className="truncate">Deployment #{run.runNumber}</span>
-              <RunStatus state={run.state} live className="shrink-0" />
-            </span>
-          }
+          title={`Deployment #${run.runNumber}`}
           actions={
             <>
               {canRun && isCancellable(run.state) && !run.cancelRequested && (
@@ -843,6 +838,7 @@ function RunIdentity({
         title={<span className={cn(titleIsLiteral && "font-mono text-body")}>{title}</span>}
         facts={
           <>
+            <span className="numeric font-medium text-foreground">Deployment #{run.runNumber}</span>
             {git && title !== branch && <BranchChip branch={branch} className="max-w-48" />}
             {git ? (
               <ShortSha sha={shortRevision(revision)} />
@@ -910,6 +906,7 @@ function RunIdentity({
         }
         aside={
           <div className="min-w-0 sm:text-right">
+            <RunStatus state={run.state} live className="mb-2" />
             <p className="eyebrow">{unclaimed ? "Queued for" : active ? "Running for" : "Took"}</p>
             <p className="numeric text-2xl leading-tight font-semibold tracking-tight">
               {formatDuration(seconds)}

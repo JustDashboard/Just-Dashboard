@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import type { NetworkInfo } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
-import { Detail, DetailList, PageHeader } from "@/components/page"
+import { Detail, DetailList, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, ErrorState, LoadingPanel } from "@/components/state"
@@ -57,22 +57,7 @@ export function NetworkPanel() {
   }, [data?.interfaces, scope])
 
   const exposed = data?.interfaces.filter((i) => i.public && i.up) ?? []
-  const header = (
-    <PageHeader
-      eyebrow="Security"
-      title="Network"
-      actions={
-        data && (
-          <Status
-            verdict={exposed.length > 0 ? "warning" : "ok"}
-            label={
-              exposed.length > 0 ? `${exposed.length} on a public address` : "no public address"
-            }
-          />
-        )
-      }
-    />
-  )
+  const header = <PageContext eyebrow="Security" title="Network" />
 
   if (loading && !data) {
     return (
@@ -154,7 +139,7 @@ export function NetworkPanel() {
           {interfaces.length === 0 ? (
             <EmptyNote>No devices match.</EmptyNote>
           ) : (
-            <div className="group-data-[plain]/panel:-mx-4 min-w-0">
+            <div className="min-w-0 group-data-[plain]/panel:-mx-4">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -203,7 +188,7 @@ export function NetworkPanel() {
         <Panel>
           <PanelHeader title="Routes" />
           <PanelBody flush>
-            <div className="group-data-[plain]/panel:-mx-4 min-w-0">
+            <div className="min-w-0 group-data-[plain]/panel:-mx-4">
               <Table containerClassName="max-h-[22rem]">
                 <TableHeader>
                   <TableRow>
@@ -229,7 +214,9 @@ export function NetworkPanel() {
                       <TableCell className="font-mono text-hint text-muted-foreground">
                         {route.gateway || "on-link"}
                       </TableCell>
-                      <TableCell className="font-mono text-hint">{route.interface || "—"}</TableCell>
+                      <TableCell className="font-mono text-hint">
+                        {route.interface || "—"}
+                      </TableCell>
                       <TableCell className="numeric hidden text-hint text-muted-foreground sm:table-cell">
                         {route.metric || "—"}
                       </TableCell>

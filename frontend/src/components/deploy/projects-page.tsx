@@ -44,7 +44,7 @@ import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { FindingList } from "@/components/finding-list"
 import { IconAction } from "@/components/icon-action"
 import { TileTrend } from "@/components/metrics/sparkline"
-import { Page, PageHeader, SearchInput, Toolbar } from "@/components/page"
+import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyphs, ProductLogo, ProductLogos } from "@/components/product-logo"
 import { StatGrid, StatTile } from "@/components/stat-tile"
@@ -92,8 +92,8 @@ import {
  * The fleet: every project, what it is, and what is happening to it now.
  *
  * `?view=archived` switches the same route to the archived list — a query
- * flag rather than a second page, because it is the same destination with the
- * same header actions one click away.
+ * flag rather than a second page, because it is the same destination with its
+ * controls in the list toolbar.
  */
 export function ProjectsPage() {
   const archived = useSearchParams().get("view") === "archived"
@@ -337,66 +337,12 @@ function Fleet() {
 
   return (
     <Page>
-      <PageHeader
-        eyebrow="Apps"
-        title="Deployments"
-        actions={
-          <>
-            {roomy ? (
-              <>
-                <Button variant="ghost" size="sm" asChild>
-                  <Link href="/deploy/notifications">Notifications</Link>
-                </Button>
-                {admin && (
-                  <Button variant="ghost" size="sm" asChild>
-                    <Link href="/deploy/credentials">Credentials</Link>
-                  </Button>
-                )}
-                <Button variant="ghost" size="sm" asChild>
-                  {/* Named without its count, so the link is "Archived"
-                      whatever is in it. */}
-                  <Link href="/deploy?view=archived" aria-label="Archived">
-                    Archived
-                    {archivedCount > 0 && (
-                      <span aria-hidden className="numeric text-micro text-muted-foreground">
-                        {archivedCount}
-                      </span>
-                    )}
-                  </Link>
-                </Button>
-              </>
-            ) : (
-              // Opens from its own left edge: the trigger sits on the page's
-              // gutter, and a menu hung from its right end ran off the screen.
-              <VerbMenu
-                align="start"
-                verbs={pages}
-                trigger={
-                  <Button variant="outline" size="sm">
-                    Pages
-                    <ChevronDown className="size-3.5" />
-                  </Button>
-                }
-              />
-            )}
-            {/* An empty fleet's own state offers the same command, and a
-                surface has one (§3). */}
-            {admin && !empty && (
-              <Button size="sm" asChild>
-                <Link href="/deploy/new">
-                  <Plus className="size-3.5" />
-                  New project
-                </Link>
-              </Button>
-            )}
-          </>
-        }
-      />
+      <PageContext title="Deployments" />
 
       {fleet.loading && !fleet.data && <FleetSkeleton layout={layout} />}
       {fleet.error && !fleet.data && <ErrorState error={fleet.error} onRetry={fleet.refresh} />}
 
-      {/* Everything under the header rises once, when the first snapshot
+      {/* The fleet rises once, when the first snapshot
           lands (§11), with the page's own rhythm between its blocks. */}
       {fleet.data && (
         <div className="flex min-w-0 animate-rise flex-col gap-6 md:gap-8">
@@ -491,6 +437,50 @@ function Fleet() {
                   )}
                 </ChipStrip>
                 {wide && layoutControls}
+                <div className="flex w-full flex-wrap items-center gap-2 xl:w-auto">
+                  {roomy ? (
+                    <>
+                      <Button variant="ghost" size="sm" asChild>
+                        <Link href="/deploy/notifications">Notifications</Link>
+                      </Button>
+                      {admin && (
+                        <Button variant="ghost" size="sm" asChild>
+                          <Link href="/deploy/credentials">Credentials</Link>
+                        </Button>
+                      )}
+                      <Button variant="ghost" size="sm" asChild>
+                        {/* The count annotates the link without changing its name. */}
+                        <Link href="/deploy?view=archived" aria-label="Archived">
+                          Archived
+                          {archivedCount > 0 && (
+                            <span aria-hidden className="numeric text-micro text-muted-foreground">
+                              {archivedCount}
+                            </span>
+                          )}
+                        </Link>
+                      </Button>
+                    </>
+                  ) : (
+                    <VerbMenu
+                      align="start"
+                      verbs={pages}
+                      trigger={
+                        <Button variant="outline" size="sm">
+                          Pages
+                          <ChevronDown className="size-3.5" />
+                        </Button>
+                      }
+                    />
+                  )}
+                  {admin && (
+                    <Button size="sm" asChild>
+                      <Link href="/deploy/new">
+                        <Plus className="size-3.5" />
+                        New project
+                      </Link>
+                    </Button>
+                  )}
+                </div>
               </Toolbar>
 
               {filtered.length === 0 ? (

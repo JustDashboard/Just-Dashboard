@@ -350,7 +350,13 @@ export function DashboardUsersView({ users }: { users: ReturnType<typeof useDash
   if (error && !data) return <ErrorState error={error} onRetry={refresh} />
   if (!data) return null
   if (data.length === 0) {
-    return <EmptyState icon={Users} title="No dashboard users" />
+    return (
+      <EmptyState
+        icon={Users}
+        title="No dashboard users"
+        action={<CreateDashboardUserDialog onDone={refresh} />}
+      />
+    )
   }
 
   // Administrators first, then the rest by name: the accounts that can do
@@ -368,8 +374,11 @@ export function DashboardUsersView({ users }: { users: ReturnType<typeof useDash
         <PanelHeader
           title="Accounts"
           actions={
-            <span className="numeric text-hint text-muted-foreground">
-              {plural(data.length, "account")}
+            <span className="flex items-center gap-3">
+              <span className="numeric text-hint text-muted-foreground">
+                {plural(data.length, "account")}
+              </span>
+              <CreateDashboardUserDialog onDone={refresh} />
             </span>
           }
         />

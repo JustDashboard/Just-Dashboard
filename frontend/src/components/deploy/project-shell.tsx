@@ -23,7 +23,7 @@ import type {
   DeployProject,
   BlueprintDetail,
 } from "@/lib/types"
-import { Page, PageHeader } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
 import { Status, type Verdict } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
@@ -66,10 +66,10 @@ import {
  * scrolled sideways — so the rail drills into the project instead, which is
  * where the section above it already goes. What this registers is that list,
  * with a mark on each settings page that holds a change not yet live; what it
- * draws is the header over whichever of those pages you picked.
+ * draws is the project context over whichever of those pages you picked.
  *
- * Nothing here is framed. The name and the command sit in the page header the
- * way every page's do. Under them is the identity line the host Overview,
+ * Nothing here is framed. The back link and command sit in the compact context
+ * row. The identity line below is the one the host Overview,
  * Metrics and the account pages open on (`HostIdentity`), so a project is
  * described the way the machine is: the project drawn as itself on the tile —
  * its site's icon, else the product it is — then where it answers, with the
@@ -124,7 +124,7 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
 
   return (
     <Page>
-      <PageHeader
+      <PageContext
         eyebrow={
           <Link
             href="/deploy"
