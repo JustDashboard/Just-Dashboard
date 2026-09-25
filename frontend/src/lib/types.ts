@@ -5127,7 +5127,7 @@ export type AttackSummary = {
   since?: string
 }
 
-/** One named, filed in-memory workspace containing one or more direct PTYs. */
+/** One session: a named workspace containing one or more direct PTYs. */
 export type TerminalWorkspace = {
   id: string
   title: string
@@ -5181,12 +5181,6 @@ export type TerminalWindowSummary = {
   /** Whether the operator named the window rather than it carrying a default. */
   named?: boolean
 } & Partial<TerminalActivity>
-
-/** A server-backed folder reconciled with live workspace membership. */
-export type TerminalFolder = {
-  name: string
-  collapsed?: boolean
-}
 
 /** An independent direct PTY shown as a window tab inside one session. */
 export type TerminalWindow = TerminalWindowSummary & {

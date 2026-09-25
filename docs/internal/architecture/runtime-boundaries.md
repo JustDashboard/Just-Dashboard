@@ -20,7 +20,10 @@ rather than swallowed in construction. It starts the metrics recorder (here, not
 purpose is to have been running while nobody was looking), the Docker event log, the self-update check,
 the backup scheduler, `selfupdate.Installer.Reconcile`, `selfcfg.Applier.Reconcile` and the Tailscale
 certificate keeper. `Shutdown` releases what outlives a request:
-sampler, scheduler, live PTYs, database pools, Docker client.
+sampler, scheduler, live PTYs, database pools, Docker client. A held terminal session is let go rather
+than ended — its holder is a systemd unit of its own on the host — and module setup takes every
+running holder back before the first request
+([`processes-terminal-github.md`](../backend/processes-terminal-github.md#sessions-outlive-the-dashboard)).
 
 The deployment engine also starts automatic production Git branch monitoring after its recovery.
 The monitor makes bounded outbound ref reads every five seconds and queues immutable source revisions;

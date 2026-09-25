@@ -229,13 +229,27 @@ test("names windows after their work and remembers where you were", async ({ pag
   await expect(rowA).not.toHaveAttribute("data-working", "true")
   await expect(tabA.locator("[data-activity=idle] > span")).toHaveClass(/bg-warning/)
   await expect(rowA.locator("[data-activity=idle] > span")).toHaveClass(/bg-warning/)
+  // The dot sits at the end of the tab, beside its close, where the rail puts
+  // it on a row.
+  const dot = (await tabA.locator("[data-activity]").boundingBox())!
+  const name = (await tabA.getByText("claude", { exact: true }).boundingBox())!
+  const close = (await tabA.getByRole("button", { name: /^Close window/ }).boundingBox())!
+  expect(dot.x).toBeGreaterThanOrEqual(name.x + name.width)
+  expect(dot.x + dot.width).toBeLessThanOrEqual(close.x)
+  // A session is opened and closed, and that is all: nothing to file it in,
+  // rename it or pin it with.
+  await expect(page.getByRole("button", { name: "New folder" })).toHaveCount(0)
+  await expect(rowA.getByRole("button", { name: /^More for/ })).toHaveCount(0)
+  await expect(tabA.getByRole("button", { name: /^Rename/ })).toHaveCount(0)
+  await tabA.getByRole("button", { name: "claude", exact: true }).dblclick()
+  await expect(page.getByLabel("Terminal windows").locator("input")).toHaveCount(0)
   // It names itself and starts working: the title wins over the process, the
   // glyph the agent spins in front of its name is dropped — the mark says
   // that — and the tab and the row are marked.
   state({ busy: true, process: "claude", title: "✳ Claude Code", working: true })
   // The mark's label joins the button's accessible name, which is what a
   // screen reader should hear.
-  await expect(tabA.getByRole("button", { name: "Working Claude Code", exact: true })).toBeVisible()
+  await expect(tabA.getByRole("button", { name: "Claude Code Working", exact: true })).toBeVisible()
   await expect(tabA).not.toContainText("✳")
   await expect(rowA).toContainText("Claude Code")
   await expect(rowA).not.toContainText("✳")
@@ -284,7 +298,8 @@ test("names windows after their work and remembers where you were", async ({ pag
 })
 
 // A window whose socket in this browser drops is red on its tab and on its
-// session's row, and stops being red once it is attached again.
+// session's row, goes back to its session by itself — the session is still
+// running on the server — and stops being red once it is attached again.
 test("a dropped connection is red until it is back", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const { connections, errors } = await terminalFixture(page, "dom")
@@ -301,8 +316,11 @@ test("a dropped connection is red until it is back", async ({ page }) => {
     "true",
   )
 
-  // The server sends the window's state the moment a socket attaches.
-  await page.getByRole("button", { name: "Reconnect", exact: true }).click()
+  await expect(
+    page.getByText("Connection lost. The session is still running on the server — reconnecting."),
+  ).toBeVisible()
+  // Nobody presses anything. The server sends the window's state the moment a
+  // socket attaches.
   await expect.poll(() => connections.get("window-a")?.length).toBe(2)
   connections
     .get("window-a")![1]

@@ -81,10 +81,11 @@ a failed detection.
 
 `internal/term` runs direct PTYs. Three properties are load-bearing:
 
-**Every window is a direct PTY.** There is no persistent-session choice and no pane/split layer. A
-dashboard session is an in-memory workspace grouping independent PTYs as windows; each window therefore
-keeps native terminal capability negotiation and ends with the dashboard process. Closing a session ends
-all of its windows, while closing one window leaves its siblings running.
+**Every window is a direct PTY.** There is no multiplexer and no pane/split layer. A dashboard session
+is a workspace grouping independent PTYs as windows; each window therefore keeps native terminal
+capability negotiation. Where the host allows it, each PTY is held on the host rather than by this
+process, so it outlives the dashboard (below). Closing a session ends all of its windows, while closing
+one window leaves its siblings running.
 
 **`su -l` cannot open a shell in a chosen directory**, because login *is* chdir-to-home; tmux's `-c` is
 not enough, since su walks straight back out. `loginArgv(shell, keepCWD)` moves the chdir off su onto the
@@ -102,9 +103,11 @@ was looking at, falling back to the workspace's first window and then home; beca
 validated, a stale directory can only send the new window home, never kill it.
 
 **Session organisation is intentionally lightweight.** `GET /terminal/` groups live `Session` values by
-`WorkspaceID`; naming, folder membership and pinning are copied across the workspace's windows in memory.
-Folders remain the dashboard's ordered record (`handlers_terminal_folders.go`, settings key
-`terminal.folders`), while membership stays on each workspace. There is no session/window colour model.
+`WorkspaceID`; naming, folder membership and pinning are copied across the workspace's windows in memory
+(and to each window's holder). Folders remain the dashboard's ordered record (`handlers_terminal_folders.go`,
+settings key `terminal.folders`), while membership stays on each workspace. The terminal page no longer
+offers folders, renaming or pinning — a session is opened and closed — but the routes remain. There is
+no session/window colour model.
 Renaming a folder moves every matching workspace in one request. Window routes use opaque PTY ids and
 support create, rename, reorder and close. Selecting a window is client state, remembered per browser:
 the page keeps each visited window's emulator and socket alive while hidden, preserving the complete
@@ -114,6 +117,43 @@ A new browser attachment still receives only the bounded best-effort history, no
 snapshot. Unnamed sessions and windows are "Terminal", numbered from 2 when that is taken (`freeName`);
 `SessionMeta.Named` and the window's `named` record whether the operator chose the name, because a chosen
 name is shown as given while a default gives way to what the window is doing.
+
+### Sessions outlive the dashboard
+
+A PTY ends when the last descriptor on its master closes, and the dashboard used to hold every one: each
+restart — an upgrade, a settings change, a rebuild, a crash — closed them all, and the kernel's hangup
+killed the shell and whatever ran in it, an agent included. The shells were never inside the container
+(su hands each to logind, which gives it a session scope of its own); the descriptor was the whole
+problem. So `internal/ptyhold` holds it instead. `term.HoldSessions` (called by module setup after
+`SetupShell`) copies `jd-terminal-holder` from beside the dashboard binary into `<JD_DATA_DIR>/terminal/`
+(root-only, 0700; an identical copy is left alone, because every running holder pins the file it was
+started from), checks the host can run it there, and from then on `Create` starts each window as
+`systemd-run --unit jd-terminal-<id> --collect --property KillMode=process -- <holder> <socket>` through
+`hostexec`. The holder listens on `<id>.sock`, receives the login argv, directory, size and environment
+over the socket (never on its command line, which any host account can read), starts the shell on a PTY,
+and answers with the master itself over `SCM_RIGHTS`. Input, resizes and `TIOCGPGRP` therefore go
+straight to the kernel as before; only output passes through the holder, which is the one reader, keeps
+reading while nobody is attached (so a program never blocks on a full terminal) and keeps the last
+128 KiB. The environment is built, not inherited — `PATH`, the account's identity, `LANG` and the
+terminal variables — so the dashboard's own environment, secrets included, never reaches a held shell.
+
+The holder also keeps an opaque record for the dashboard (`heldMeta`: workspace, window name and order,
+title, owner, shell, account, created). At boot `adopt` attaches to every socket in the directory,
+restores each window from its record, seeds the scrollback with what the holder kept — read as part of
+the handshake, so the first browser to attach already gets it — and resumes reading; a socket nobody
+answers (a holder killed outright, a host reboot) is removed. `Shutdown` only lets go. Closing a window
+sends a hangup and drops the dashboard's copy of the master, the holder closes its own and the kernel
+hangs the terminal up; a shell still there after three seconds is killed, then the holder tells the
+dashboard and exits, and the unit is collected. `KillMode=process` makes the unit ending the holder
+ending: anything the operator deliberately left running (`nohup`, `disown`) survives as it would an ssh
+session closing. Held sessions are never reaped for idleness — they exist so work can run with nobody
+watching. Protocol: SOCK_SEQPACKET, one packet per message whose first byte is its kind, versioned by
+`ptyhold.Version`, which a newer dashboard must keep speaking to the holders already running.
+
+Where holding is impossible — not root, a host without systemd, a data directory the host does not see at
+the same path, a path too long for a socket — `HoldSessions` says why in the log and the terminal works as
+before, each PTY in this process and ending with it; the listing's `persistent` is then false and the
+page says so. A server that reboots ends every session either way.
 
 **What a window is doing is read off the PTY, not asked of the shell** (`activity.go`). Two facts, both
 available without touching the account's shell configuration. The title is parsed out of the byte stream

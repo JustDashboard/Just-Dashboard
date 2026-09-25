@@ -35,6 +35,11 @@ type Manager struct {
 	accountErr error
 	clipboard  *clipboardStore
 	shellDir   string
+	// holders is the directory of held sessions' sockets, and launch starts
+	// a holder for one; both are unset when sessions end with this process.
+	// See held.go.
+	holders string
+	launch  func(ctx context.Context, id, socket string) error
 }
 
 // reserve takes one of the session slots, or reports that none are free. The
@@ -201,25 +206,33 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (*Session, err
 		// too late for Codex, Claude and any login shell already running there.
 		argv = tmuxNewSessionArgv(sess.TmuxName, startDir, argv)
 	}
-	// CommandOnHost always crosses into the host's namespaces, even though
-	// this image happens to ship bash and tmux of its own. That is the whole
-	// point: the operator's tools, dotfiles and processes live out there, and
-	// a shell in here would be a convincing imitation of their server rather
-	// than their server.
-	cmd := hostexec.CommandOnHostInDir(context.Background(), cmdDir, argv[0], argv[1:]...)
-	// A login resets the environment anyway; these are the two variables that
-	// survive it and that the terminal on the other end depends on to render
-	// colour and cursor keys correctly.
-	cmd.Env = terminalEnv(os.Environ(), id)
+	if m.Holding() {
+		// The holder runs on the host already, so the directory is its own
+		// to start in and needs no crossing.
+		if err := m.spawnHeld(ctx, sess, argv, startDir); err != nil {
+			return nil, err
+		}
+	} else {
+		// CommandOnHost always crosses into the host's namespaces, even though
+		// this image happens to ship bash and tmux of its own. That is the
+		// whole point: the operator's tools, dotfiles and processes live out
+		// there, and a shell in here would be a convincing imitation of their
+		// server rather than their server.
+		cmd := hostexec.CommandOnHostInDir(context.Background(), cmdDir, argv[0], argv[1:]...)
+		// A login resets the environment anyway; these are the two variables
+		// that survive it and that the terminal on the other end depends on to
+		// render colour and cursor keys correctly.
+		cmd.Env = terminalEnv(os.Environ(), id)
 
-	f, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: opts.Rows, Cols: opts.Cols})
-	if err != nil {
-		return nil, err
-	}
-	sess.pty = f
-	sess.cmd = cmd
-	if cmd.Process != nil {
-		sess.PID = cmd.Process.Pid
+		f, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: opts.Rows, Cols: opts.Cols})
+		if err != nil {
+			return nil, err
+		}
+		sess.pty = f
+		sess.cmd = cmd
+		if cmd.Process != nil {
+			sess.PID = cmd.Process.Pid
+		}
 	}
 
 	m.mu.Lock()
@@ -230,6 +243,12 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (*Session, err
 	}
 	m.sessions[id] = sess
 	m.mu.Unlock()
+	if sess.holder != nil {
+		// The position is only known now, and the holder has the rest.
+		m.remember(sess)
+		go sess.readHolder(func() { m.remove(id) })
+		return sess, nil
+	}
 
 	// Written onto the tmux session so it outlives this process. A session
 	// that comes back after a restart with its own name on it is the whole
@@ -424,6 +443,7 @@ func (m *Manager) NewDirectWindow(ctx context.Context, workspaceID, name, cwd st
 		return nil, err
 	}
 	created.setMeta(meta)
+	m.remember(created)
 	return created, nil
 }
 
@@ -435,15 +455,17 @@ func (m *Manager) RenameDirectWindow(workspaceID, windowID, name string) error {
 		return errors.New("a window name is required")
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	sess, ok := m.sessions[windowID]
 	if !ok || sess.TmuxName != "" || sess.WorkspaceID != workspaceID {
+		m.mu.Unlock()
 		return ErrNotFound
 	}
 	sess.WindowName = name
 	sess.mu.Lock()
 	sess.windowNamed = true
 	sess.mu.Unlock()
+	m.mu.Unlock()
+	m.remember(sess)
 	return nil
 }
 
@@ -472,10 +494,11 @@ func (m *Manager) MoveDirectWindow(workspaceID, windowID string, position int) e
 	copy(windows[position+1:], windows[position:])
 	windows[position] = moving
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	for i, sess := range windows {
 		sess.WindowOrder = i
 	}
+	m.mu.Unlock()
+	m.remember(windows...)
 	return nil
 }
 
@@ -524,12 +547,13 @@ func (m *Manager) remove(id string) {
 	m.mu.Unlock()
 	if ok {
 		// Close called before the read loop reached here means the manager is
-		// shutting down. A persisted tmux session is still running in that
-		// case, so its temporary files stay available and the TTL owns them.
-		// A read loop that ended on its own means the PTY truly exited.
+		// shutting down. A persisted tmux session or a held one is still
+		// running in that case, so its temporary files stay available and the
+		// TTL owns them. A read loop that ended on its own means the PTY truly
+		// exited.
 		wasClosed := sess.isClosed()
 		sess.Close()
-		if m.clipboard != nil && (!sess.Persisted || !wasClosed) {
+		if m.clipboard != nil && (!(sess.Persisted || sess.holder != nil) || !wasClosed) {
 			m.clipboard.removeSession(id)
 		}
 	}
@@ -547,6 +571,11 @@ func (m *Manager) Kill(ctx context.Context, id string) error {
 	}
 	if sess.TmuxName != "" {
 		hostexec.CommandOnHost(ctx, "tmux", "kill-session", "-t", sess.TmuxName).Run()
+	}
+	if sess.holder != nil {
+		// Close, next, drops this process's copy of the master, which is the
+		// other half of the hangup the holder is being asked for.
+		sess.holder.Hangup()
 	}
 	err := sess.Close()
 	if m.clipboard != nil {
@@ -899,9 +928,11 @@ func terminalEnv(base []string, sessionID string) []string {
 }
 
 // reap closes sessions nobody is attached to and that have seen no output for
-// an hour. A forgotten root shell is a standing risk, so it is not left open
+// idleDetach. A forgotten root shell is a standing risk, so it is not left open
 // indefinitely; tmux-backed sessions survive this because closing them only
-// detaches.
+// detaches. A held session is never reaped: it is there precisely so work can
+// run with nobody watching — an agent waiting a night for its next message —
+// and it ends when the operator closes it.
 func (m *Manager) reap() {
 	t := time.NewTicker(5 * time.Minute)
 	for range t.C {
@@ -915,7 +946,7 @@ func (m *Manager) reap() {
 		}
 		cutoff := time.Now().Add(-idleDetach)
 		for _, s := range sessions {
-			if s.Attached() > 0 || !s.LastActive().Before(cutoff) {
+			if s.holder != nil || s.Attached() > 0 || !s.LastActive().Before(cutoff) {
 				continue
 			}
 			if s.Persisted {

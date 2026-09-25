@@ -8,6 +8,16 @@
       "summary": "The Git workspace could commit, branch, merge and push, and everything past that was a terminal. 0.7.0 brings the rest into the same three columns: conflicts resolved side by side, single lines staged, local history rebased behind a recovery branch, worktrees, submodules, LFS and patches, reviews on GitHub pull requests and on GitLab and Gitea requests. Every reviewed template now declares how its first sign-in works, the five that could not say are no longer offered, and nine new ones join the catalogue. New project opens on whatever is still unanswered and checks the plan the moment Review is reached. A deployment's Logs page answers from the requests the proxy actually served, with insights, marks on the chart and traffic alerts. A container, a compose stack and a backup job are pages of their own, every page remembers what you were doing on it, and the rail's top level is twelve rows instead of seventeen.",
       "changes": [
         {
+          "kind": "added",
+          "text": "Terminal sessions keep running when the dashboard restarts",
+          "detail": "A terminal's shell used to end whenever the dashboard restarted — an upgrade, a settings change, a rebuild — taking whatever ran in it along, an agent included. Each session's terminal is now held on the server by a small process of its own, so a session keeps running with every browser closed and across restarts and upgrades, and the dashboard picks it back up, with what it printed meanwhile, when it comes back. A session ends when you close it or its shell exits. A dropped connection reconnects by itself instead of waiting for a click."
+        },
+        {
+          "kind": "changed",
+          "text": "The terminal's sessions are opened and closed, and nothing else",
+          "detail": "The sessions rail has no folders, no renaming, no pinning and no menu on a row any more: a session is named after what it is running, so it is opened and closed. A window tab has no rename either, and its state dot sits at the end beside the close, where a session row has it."
+        },
+        {
           "kind": "changed",
           "text": "Action menus are one word to a line",
           "detail": "Every overflow menu in the product — a deployment's, a container's, a process's, a branch's, a table's and the rest — drew a sentence of explanation under each verb, so a menu of eleven verbs stood taller than the card it opened from. The sentences are gone: each verb is its word, the menus are narrower and a third the height, and where a row carried a fact beside its word (a place's path, a saved command, a connection's host) the fact sits on the same line."

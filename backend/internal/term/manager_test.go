@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/ptyhold"
 	"github.com/creack/pty"
 )
 
@@ -28,6 +29,15 @@ import (
 // tmux takes its socket directory from TMUX_TMPDIR, and every `tmux` this
 // package runs is a child of this process, so setting it here is enough.
 func TestMain(m *testing.M) {
+	// The test binary doubles as the terminal holder, so the held-session tests
+	// run one as a process of its own, the way the host does.
+	if socket := os.Getenv("JD_TEST_HOLDER"); socket != "" {
+		if err := ptyhold.Run(socket); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	// A parent tmux session overrides TMUX_TMPDIR unless cleared first.
 	if err := os.Unsetenv("TMUX"); err != nil {
 		fmt.Fprintln(os.Stderr, "clear inherited tmux server:", err)

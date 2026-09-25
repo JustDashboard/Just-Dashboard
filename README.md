@@ -122,7 +122,9 @@ Stacks deploy, rebuild and roll back with the compose diff shown first.
 ![A terminal window, with the Files companion beside it](docs/terminal.png)
 
 A real PTY into a host account. Sessions group windows, each named after what it is running,
-and they survive the tab closing. Files and Git sit beside the shell.
+and they keep running on the server until you close them — with the tab closed, and across
+dashboard restarts and upgrades — so an agent left working is still working when you come back.
+Files and Git sit beside the shell.
 
 ### Files
 

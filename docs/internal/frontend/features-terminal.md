@@ -205,16 +205,17 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   tall — so only one of the two is up at a time (`useMediaQuery` in `page.tsx` decides), picking a
   session puts the rail away, and each carries its own hide button while it is an overlay — and only
   then: beside the emulator, the strip's two toggles are the one way to hide either panel.
-- `session-rail.tsx` is a plain column: a "Sessions" strip with the two new-buttons, then the list. A row
-  is one line — the session's label and, at the end, the activity mark (below). Rows carry no terminal
-  glyph (every row is a terminal) and no directory line under the title (the label carries the
-  directory at a prompt). Rows are plain rounded rows with no fence or divider between them; the
-  active one is `bg-accent` and the others take the row hover, and that is the whole difference —
-  no brand bar or other colour on the active row. The filter box
-  appears only once there are more than five sessions — a filter over one session is a box with
-  nothing to do. Folder headers are plain disclosure rows: chevron and explanatory name only, with no
-  folder icon, count, nested container or empty invitation. Pinning still sorts a session to the top
-  of its folder.
+- `session-rail.tsx` is a plain column: a "Sessions" strip with the new-session button, then the
+  list, newest first. A row is one line — the program mark, the session's label and, at the end, the
+  activity mark (below), with the close button after it under the pointer (`rowReveal`). That is
+  everything a row offers: the operator asked for folders, renaming, pinning and the row's `⋯` menu to
+  go, because sessions that name themselves after what they run need no filing system — a session is
+  opened and closed. Rows carry no directory line under the title (the label carries the directory at
+  a prompt). Rows are plain rounded rows with no fence or divider between them; the active one is
+  `bg-accent` and the others take the row hover, and that is the whole difference — no brand bar or
+  other colour on the active row. The filter box appears only once there are more than five
+  sessions — a filter over one session is a box with nothing to do. The backend's folder, pin and
+  rename routes remain; the page no longer calls them.
 - **Names follow the shell.** An unnamed session or window is "Terminal" (numbered from 2 when that is
   taken), and that default is only a fallback. A tab is labelled the way a desktop terminal's title
   bar is: the title the foreground program set through OSC 0/2, the program's name when it set none,
@@ -223,8 +224,8 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   (`plainTitle`): saying "working" is the activity mark's job, and a label that carried both said it
   twice. A session is labelled after its
   *current* window — the one last on screen in any browser (the pane sends a `focus` frame), or
-  failing that the newest. A name the operator typed, for a session or a window, is shown as typed
-  (`named` in the API), so renaming still works as it did. `lib/terminal-activity.ts` holds the rule
+  failing that the newest. The page offers no renaming; a name given through the API (`named`) is
+  still shown as given. `lib/terminal-activity.ts` holds the rule
   once for the strip and the rail. The state arrives two ways: polled with the window list and the
   session listing (every five seconds), and pushed over each visited window's attach socket as a
   `state` frame the moment it changes, which is what makes a tab's mark and title move with the
@@ -235,9 +236,9 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   it is *working*, and **orange** when it is idle. Nothing on it moves and there is no "finished"
   state: a breathing dot while working and a green finish held for a while after made an agent at its
   prompt, whose odd redraw the server used to read as work, cycle orange, green and back all day. It
-  is drawn on every window tab and, for the
-  session, on its row in the rail; a row is red when any window of it that this browser attached has
-  dropped. The mark's box is one fixed size, so a tab does not change width as its state changes.
+  is drawn at the end of every window tab and, for the session, at the end of its row in the rail —
+  the same place in both, beside the close; a row is red when any window of it that this browser
+  attached has dropped. The mark's box is one fixed size, so a tab does not change width as its state changes.
   Working is the server's word for "output has been arriving for a second and still is, or the job is
   burning CPU": an agent streaming an answer, a build, a test run. A program that is merely open — an
   editor, Claude Code or Codex waiting for the next message — holds the terminal and is idle, because
@@ -261,9 +262,10 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   the way pressing it moves the panel (`SidebarLeftOpen`/`Close`, `SidebarRightOpen`/`Close`). The strip
   is embedded in the emulator's own title bar; there is no separate workspace bar or
   working-directory/shell title.
-  A tab is its label with the activity mark in front of it: rename and close sit on the tab but appear under the pointer (`rowReveal`), the
-  way a browser's do; the active tab keeps its close visible. Double-click renames. There are no split,
-  layout or colour actions. Closing the last window closes its session through the session endpoint.
+  A tab reads as a rail row does: the program mark, the label, then the activity mark beside the close.
+  Close appears under the pointer (`rowReveal`), the way a browser's does; the active tab keeps it
+  visible. There is no rename (double-click only selects) and no split, layout or colour action.
+  Closing the last window closes its session through the session endpoint.
 - The control-key row under the emulator is a run of monospace words on the footer strip, not framed
   keycaps.
 - `workspace-tools.tsx` is the Files/Diff companion. Its header is two section tabs (`tabClasses`, the
@@ -327,10 +329,20 @@ split matters — the pane is reused by the compose runner and knows nothing abo
 
 In `xterm-pane.tsx` and the page, load-bearing and easy to undo:
 
-- **New session always opens a direct PTY.** A session is still nameable, pinnable and fileable because
-  those properties belong to its in-memory workspace. New window creates a sibling direct PTY and the
-  browser connects each visited window's emulator to that window's opaque id. There is no persistent
-  option, detach/reattach path or pane model in the terminal API.
+- **New session always opens a direct PTY, held on the host.** New window creates a sibling direct PTY
+  and the browser connects each visited window's emulator to that window's opaque id. Where the host
+  runs systemd each PTY is owned by a holder rather than by the dashboard
+  ([`processes-terminal-github.md`](../backend/processes-terminal-github.md#sessions-outlive-the-dashboard)),
+  so a session keeps running — an agent included — with every browser closed and across dashboard
+  restarts, until it is closed or its shell exits. The listing's `persistent` says which, and the empty
+  state says so before anybody relies on it. There is still no pane model and no multiplexer.
+- **A dropped socket reconnects by itself.** A terminal-page pane whose socket closes (the dashboard
+  restarting, a laptop waking, the network) retries on its own, backing off from one second to ten,
+  and the banner says the session is still running and that it is reconnecting; Reconnect only skips
+  the wait. A window that has really ended leaves the next listing, which unmounts the pane and ends the
+  retrying. The compose runner, which shares the pane, never retries: re-issuing its GET runs the
+  command again. A failing listing poll no longer replaces the workbench with an error once it has
+  loaded, so a restart does not take the panes down with it.
 - **Visited windows keep their emulator and socket while hidden.** A TUI updates the screen incrementally;
   remounting xterm on each window/session switch loses its parser, alternate buffer and unchanged cells.
   The server's last 128 KiB of raw output is not a screen snapshot and may start inside an escape sequence.
@@ -357,8 +369,10 @@ In `xterm-pane.tsx` and the page, load-bearing and easy to undo:
   `preventDefault`: returning false from `attachCustomKeyEventHandler` stops xterm, not the browser, so
   without it the confirmation opened *and* the native paste went through.
 - **Direct PTY reconnect uses best-effort shell-history replay.** A direct PTY has no independent screen
-  model, so the handler subscribes before resizing and then sends its bounded output suffix. The replay
-  protocol below prevents terminal capability replies from being typed into the current prompt.
+  model, so the handler subscribes before resizing and then sends its bounded output suffix — after a
+  dashboard restart, the suffix the holder kept, including what was printed while nobody was attached.
+  The replay protocol below prevents terminal capability replies from being typed into the current
+  prompt.
 - **Replies are suppressed while direct-PTY scrollback is replayed.** `CSI c` and friends are the shell asking the
   terminal a question, and xterm answers down the channel a keystroke uses — so replaying a buffer
   containing one typed `1;2c0;276` at whatever prompt exists now and left a column of "command not found".
@@ -400,13 +414,13 @@ In `xterm-pane.tsx` and the page, load-bearing and easy to undo:
 server's replay limit, ANSI/UTF-8 split across messages, background terminal replies, resize while hidden,
 window/session switching, screen preservation, input routing and cleanup when windows/sessions close.
 
-**Open-shell links are consumed once.** The page removes `cwd` and `folder` from the current history
+**Open-shell links are consumed once.** The page removes `cwd` from the current history
 entry before creating the session, preserving other query parameters and the hash. A refresh cannot
 replay a launch or recreate a closed session; a later explicit Open shell link can still launch anew.
 The link gives the session no title: the prompt names the directory, and a title would have pinned the
 row to the folder the shell started in.
 
 **The page has no separate header or workspace bar.** A terminal is the one screen whose content *is* the
-viewport. "New session" sits in the rail beside "New folder"; the emulator title bar contains the two
+viewport. "New session" sits alone in the rail's strip; the emulator title bar contains the two
 panel toggles and window tabs, with no shell, user or working-directory title. The one banner that stays
 is a missing login account — a broken feature rather than information.

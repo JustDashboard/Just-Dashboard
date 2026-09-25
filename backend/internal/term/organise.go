@@ -105,6 +105,7 @@ func (m *Manager) SetMeta(ctx context.Context, tmuxName string, meta SessionMeta
 		for _, sess := range windows {
 			sess.setMeta(clean)
 		}
+		m.remember(windows...)
 		return nil
 	}
 	if !m.useTmux || tmuxName == "" {

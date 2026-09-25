@@ -18,7 +18,9 @@ fields.
 ## Backend entry point and packages
 
 `backend/cmd/server` loads configuration, opens the store, creates the API server, starts background
-services, handles signals, and supports the isolated self-update worker mode. The 29 packages under
+services, handles signals, and supports the isolated self-update worker mode. `backend/cmd/terminal-holder`
+is the terminal holder (`ptyhold`), shipped beside it in the image and copied to the data directory
+for the host to run. The 29 packages under
 `backend/internal/` are:
 
 | Package | Responsibility | Detailed reference |
@@ -44,13 +46,14 @@ services, handles signals, and supports the isolated self-update worker mode. Th
 | `metrics` | Persistent host/container samples, history, events, and health assessment | [`../backend/observability-security.md`](../backend/observability-security.md#metrics-saturation-health) |
 | `netsec` | Exposure, posture, listeners, sessions/logins, firewall, fail2ban, sshd, and diagnostic probes | [`../backend/observability-security.md`](../backend/observability-security.md) |
 | `procs` | Process inventory, signals, PM2, systemd, and cron | [`../backend/processes-terminal-github.md`](../backend/processes-terminal-github.md#processes) |
+| `ptyhold` | The terminal holder: owns one session's PTY on the host, keeps its recent output, and hands the master to the dashboard over a unix socket so sessions outlive dashboard restarts; built as its own binary, `cmd/terminal-holder` | [`../backend/processes-terminal-github.md`](../backend/processes-terminal-github.md#sessions-outlive-the-dashboard) |
 | `proxysvc` | nginx sites/streams, certificates, DNS/TLS checks, ports, htpasswd, and deployment routes | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#proxy) |
 | `safepath` | Symlink-safe archive extraction boundary | [`../architecture/runtime-boundaries.md`](../architecture/runtime-boundaries.md#reaching-the-host-and-containing-paths) |
 | `selfcfg` | The dashboard's own settings: `.env` reading/writing, validation, restart and rebuild in a sibling container with automatic rollback, Tailscale certificate issuance/renewal, and `tailscale serve` publication of preview environments on the node's ports 21000–21999 (`tailscale_serve.go`) | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#the-dashboards-own-settings) |
 | `selfupdate` | Release checks, changelog, installer state, reconciliation, and updater | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#configuration-version-release-self-update) |
 | `store` | SQLite schema, additive columns, deployment migration, and connection lifecycle | [`../architecture/runtime-boundaries.md`](../architecture/runtime-boundaries.md#auth-secrets-state) |
 | `sysinfo` | Host metrics, disk/device statistics, pressure, sockets, and capacity | [`../backend/observability-security.md`](../backend/observability-security.md#metrics-saturation-health) |
-| `term` | Direct PTY sessions, replay, organization, clipboard uploads, and bundled shell setup | [`../backend/processes-terminal-github.md`](../backend/processes-terminal-github.md#the-terminal) |
+| `term` | Direct PTY sessions, holding and adopting them through `ptyhold`, replay, organization, clipboard uploads, and bundled shell setup | [`../backend/processes-terminal-github.md`](../backend/processes-terminal-github.md#the-terminal) |
 | `updates` | Six package-manager adapters, catalogue, upgrades, reboot state, and usage summaries | [`../backend/observability-security.md`](../backend/observability-security.md#packages-six-managers-one-interface) |
 | `version` | Build/release version normalization | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#configuration-version-release-self-update) |
 | `wsx` | WebSocket origin validation, upgrade, and shared socket behavior | [`../architecture/request-lifecycle.md`](../architecture/request-lifecycle.md) |

@@ -352,10 +352,12 @@ export function XtermPane({
   // pane can carry that says what this terminal is *doing* rather than what it
   // was called when it was opened.
   const [shellTitle, setShellTitle] = useState("")
-  // Connection generation. Reconnecting is a deliberate act here — see the
-  // socket effect — so it is a counter the effect depends on rather than
-  // anything automatic.
+  // Connection generation, a counter the socket effect depends on: the
+  // Reconnect button bumps it, and so does a dashboard session's own retry.
   const [generation, setGeneration] = useState(0)
+  // How many reconnects in a row have failed, which is what the retry backs
+  // off by. An open socket starts it over.
+  const retriesRef = useRef(0)
   const settings = useTerminalSettings()
   const snippets = useSnippets()
   const map = useKeymap()
@@ -677,6 +679,7 @@ export function XtermPane({
 
       socket.onopen = () => {
         if (disposed) return
+        retriesRef.current = 0
         setState("open")
         setError(undefined)
         sendResize()
@@ -743,12 +746,24 @@ export function XtermPane({
           scheduleCopySync()
         })
       }
+      let retry: ReturnType<typeof setTimeout> | undefined
       socket.onclose = () => {
         if (disposed) return
         setState("closed")
         if (terminalDebug) console.debug("terminal WebSocket disconnected")
         term.writeln("\r\n\x1b[90m— disconnected —\x1b[0m")
         onExit?.()
+        // A dashboard session is still running when its socket drops — the
+        // dashboard restarting, the laptop asleep, the network gone — so the
+        // pane goes back to it on its own, backing off while nothing answers.
+        // A window that has really ended is taken off the page by the next
+        // listing, which ends the retrying with it. The compose runner never
+        // retries: re-issuing its request runs the command again.
+        if (terminalSessionId) {
+          const delay = Math.min(1000 * 2 ** retriesRef.current, 10_000)
+          retriesRef.current++
+          retry = setTimeout(() => setGeneration((g) => g + 1), delay)
+        }
       }
       socket.onerror = () => {
         if (!disposed) setState("closed")
@@ -928,6 +943,7 @@ export function XtermPane({
       void document.fonts?.ready.then(scheduleResize)
 
       cleanup = () => {
+        clearTimeout(retry)
         observer.disconnect()
         cancelAnimationFrame(resizeFrame)
         document.removeEventListener("visibilitychange", onVisibility)
@@ -1328,16 +1344,17 @@ export function XtermPane({
       </div>
 
       {/*
-        A dropped socket is not retried on its own. Reconnecting re-issues the
-        GET, and for a session the dashboard is holding that is harmless — but
-        the same component drives the compose runner, where re-issuing the GET
-        runs the command again. So the retry is a button, and it says what it
-        will do.
+        A dashboard session's dropped socket is retried on its own (see the
+        socket effect) and the button only skips the wait. The compose
+        runner's is not: re-issuing its GET runs the command again, so there
+        the retry is the button alone.
       */}
       {state === "closed" && (
         <div className="flex items-center gap-2 border-b border-hairline bg-muted/40 px-3 py-1.5 text-xs">
           <span className="flex-1 text-muted-foreground">
-            The connection to this session ended. It is still running on the server.
+            {terminalSessionId
+              ? "Connection lost. The session is still running on the server — reconnecting."
+              : "The connection to this session ended. It is still running on the server."}
           </span>
           <Button size="xs" variant="outline" onClick={() => setGeneration((g) => g + 1)}>
             <RotateClockwise className="size-3" />
