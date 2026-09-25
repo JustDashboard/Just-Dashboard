@@ -175,7 +175,7 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 			if name == "astro" && candidate.Profile != ProfileStatic || name == "nuxt" && candidate.Port != 3000 || name == "react-router" && candidate.Framework != "react-router" ||
 				name == "rust" && (candidate.Framework != "axum" || result.Prepared.Toolchain != "rust 1") ||
 				name == "java" && result.Prepared.Toolchain != "java 21 (maven)" ||
-				name == "gradle" && result.Prepared.Toolchain != "java 21 (gradle)" ||
+				name == "gradle" && result.Prepared.Toolchain != "java 21 (gradle 8)" ||
 				name == "streamlit" && (candidate.Framework != "streamlit" || candidate.Port != 8501) ||
 				name == "gradio" && (candidate.Framework != "gradio" || candidate.Port != 7860) ||
 				name == "dotnet" && (candidate.Framework != "aspnet" || result.Prepared.Toolchain != "dotnet 10.0") ||

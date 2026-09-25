@@ -321,7 +321,7 @@ func repoShapeFileName(name string) bool {
 	if _, ok := repoShapeFiles[name]; ok {
 		return true
 	}
-	for _, suffix := range []string{".cabal", ".nimble", ".fsproj"} {
+	for _, suffix := range []string{".cabal", ".nimble"} {
 		if strings.HasSuffix(name, suffix) {
 			return true
 		}
@@ -373,7 +373,7 @@ func shapeFileTarget(rel, lowerName string, depth int) (root, key string, limit 
 	}
 	limit, known := repoShapeFiles[lowerName]
 	if !known {
-		for _, suffix := range []string{".cabal", ".nimble", ".fsproj"} {
+		for _, suffix := range []string{".cabal", ".nimble"} {
 			if strings.HasSuffix(lowerName, suffix) {
 				return directory, suffix, 16 << 10, true
 			}

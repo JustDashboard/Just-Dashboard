@@ -172,7 +172,7 @@ func TestDotnetRecipeSeedsTheDataDirectoryWithACommittedDatabase(t *testing.T) {
 		writeBuildFixture(t, dir, "Data/app.db", "SQLite format 3\x00")
 		writeBuildFixture(t, dir, "audit.db", "SQLite format 3\x00")
 		setup(dir)
-		project, err := selectDotnetRecipe(dir)
+		project, err := selectDotnetRecipe(dir, dir, BuildPlanConfig{})
 		if err != nil {
 			t.Fatal(err)
 		}

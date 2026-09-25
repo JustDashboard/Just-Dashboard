@@ -306,6 +306,10 @@ type DetectedCandidate struct {
 	// GoLibrary says the module has no buildable main package at all, which
 	// no Go setting can fix: the recipe builds a command, not a library.
 	GoLibrary bool `json:"goLibrary,omitempty"`
+	// JavaBuild and DotnetBuild are what a JVM or .NET candidate's build
+	// says about building it (planning_compiled.go).
+	JavaBuild   *DetectedJavaBuild   `json:"javaBuild,omitempty"`
+	DotnetBuild *DetectedDotnetBuild `json:"dotnetBuild,omitempty"`
 	// PythonRequires is the interpreter range the source declares
 	// (requires-python, or Poetry's python constraint), and PythonInstall the
 	// manifest the recipe installs from; together they say whether a chosen
@@ -509,6 +513,11 @@ type BuildPlanConfig struct {
 	// GoPackage is the main package a Go recipe builds, relative to the root
 	// directory; empty lets the recipe choose when the module has only one.
 	GoPackage string `json:"goPackage,omitempty"`
+	// JavaVersion and DotnetVersion choose the JDK or .NET release a Java or
+	// .NET recipe builds and runs on; empty lets the build and version
+	// files decide (planning_compiled.go).
+	JavaVersion   string `json:"javaVersion,omitempty"`
+	DotnetVersion string `json:"dotnetVersion,omitempty"`
 }
 
 // BuildSecretConfig names a variable and the reviewed recipe stages in which
@@ -1174,6 +1183,9 @@ func (c PlanConfiguration) Validate() error {
 	if c.Build.PythonVersion != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "python" || !pythonRecipeVersionRE.MatchString(c.Build.PythonVersion)) {
 		return fmt.Errorf("Python version must select 3.10, 3.11, 3.12 or 3.13 in a Python recipe; use a Dockerfile for other interpreters")
 	}
+	if err := validateCompiledBuildSettings(c.Build); err != nil {
+		return err
+	}
 	if c.Build.SPAFallback && c.Build.Method != BuildRecipe && c.Build.Method != BuildStatic {
 		return fmt.Errorf("the single-page fallback applies only to a static site or a recipe with static output")
 	}
@@ -1786,6 +1798,9 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 			}
 		}
 		if err := validateDetectedNodeInstall(candidate); err != nil {
+			return err
+		}
+		if err := validateDetectedCompiledBuild(candidate); err != nil {
 			return err
 		}
 		for _, label := range []string{candidate.Name, candidate.Framework, candidate.Recipe} {

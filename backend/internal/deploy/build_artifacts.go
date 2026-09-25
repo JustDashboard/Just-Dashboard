@@ -49,8 +49,8 @@ var recipeBaseCatalogue = map[string][]string{
 	"python":        {"python:3.13-slim"},
 	"static":        {"nginx:1.29-alpine"},
 	"rust":          {"rust:1-alpine", "alpine:3.22"},
-	"java:maven":    {"maven:3-eclipse-temurin-21", "eclipse-temurin:21-jre-alpine"},
-	"java:gradle":   {"gradle:8-jdk21", "eclipse-temurin:21-jre-alpine"},
+	"java:maven":    {"maven:3-eclipse-temurin-21", "eclipse-temurin:21-jre"},
+	"java:gradle":   {"gradle:8-jdk21", "eclipse-temurin:21-jre"},
 	"dotnet":        {"mcr.microsoft.com/dotnet/sdk:8.0", "mcr.microsoft.com/dotnet/aspnet:8.0"},
 	"deno":          {"denoland/deno:alpine"},
 	"php":           {"dunglas/frankenphp:1-php8.3-alpine"},
@@ -268,20 +268,13 @@ func (b *ArtifactBuilder) PrepareWithin(
 			prepared.Toolchain = "rust " + recipe.rust.version
 			baseRefs[0] = "rust:" + recipe.rust.version + "-alpine"
 		case "java":
-			prepared.Toolchain = "java " + recipe.java.version + " (" + recipe.java.tool + ")"
-			if recipe.java.tool == "maven" {
-				baseRefs[0] = "maven:3-eclipse-temurin-" + recipe.java.version
-			} else {
-				baseRefs[0] = "gradle:8-jdk" + recipe.java.version
-			}
-			baseRefs[1] = "eclipse-temurin:" + recipe.java.version + "-jre-alpine"
+			prepared.Toolchain = javaToolchainLabel(recipe.java)
+			prepared.Notes = append(prepared.Notes, javaRecipeNotes(recipe.java)...)
+			baseRefs = javaRecipeBases(recipe.java)
 		case "dotnet":
-			prepared.Toolchain = "dotnet " + recipe.dotnet.version
-			baseRefs[0] = "mcr.microsoft.com/dotnet/sdk:" + recipe.dotnet.version
-			baseRefs[1] = "mcr.microsoft.com/dotnet/aspnet:" + recipe.dotnet.version
-			if !recipe.dotnet.web {
-				baseRefs[1] = "mcr.microsoft.com/dotnet/runtime:" + recipe.dotnet.version
-			}
+			prepared.Toolchain = dotnetToolchainLabel(recipe.dotnet)
+			prepared.Notes = append(prepared.Notes, dotnetRecipeNotes(recipe.dotnet)...)
+			baseRefs = dotnetRecipeBases(recipe.dotnet)
 		case "deno":
 			prepared.Toolchain = "deno"
 		case "php":
@@ -304,6 +297,9 @@ func (b *ArtifactBuilder) PrepareWithin(
 		}
 		bases, err := b.resolveBases(ctx, baseRefs)
 		if err != nil {
+			return PreparedBuild{}, err
+		}
+		if err := requireBasePlatform(bases, prepared.TargetPlatform); err != nil {
 			return PreparedBuild{}, err
 		}
 		prepared.BaseImages = bases
@@ -624,7 +620,7 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 			requested = "rust"
 		case regularExists(root, "pom.xml") || regularExists(root, "build.gradle") || regularExists(root, "build.gradle.kts"):
 			requested = "java"
-		case len(listContainedFiles(root, ".csproj")) > 0:
+		case len(listContainedFiles(root, ".csproj"))+len(listContainedFiles(root, ".fsproj"))+len(listContainedFiles(root, ".vbproj")) > 0:
 			requested = "dotnet"
 		case regularExists(root, "deno.json") || regularExists(root, "deno.jsonc"):
 			requested = "deno"
@@ -750,18 +746,28 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 		rust.assets = compiledRuntimeAssets(root, ".rs")
 		return selectedRecipe{kind: "rust", catalogueKey: "rust", rust: rust, emptyDotenv: dotenvFileRequired(root, "rust")}, nil
 	case "java":
-		java, err := selectJavaRecipe(root)
+		java, err := selectJavaRecipe(boundary, root, config)
 		if err != nil {
 			return selectedRecipe{}, err
 		}
-		return selectedRecipe{kind: "java", catalogueKey: "java:" + java.tool, java: java}, nil
+		recipe := selectedRecipe{kind: "java", catalogueKey: "java:" + java.project.tool, java: java}
+		if java.member != "" {
+			recipe.contextDir, recipe.nodeInputs = java.project.context, []string{relativeBuildPath(java.project.context, java.project.buildFile)}
+		}
+		return recipe, nil
 	case "dotnet":
-		project, err := selectDotnetRecipe(root)
+		project, err := selectDotnetRecipe(boundary, root, config)
 		if err != nil {
 			return selectedRecipe{}, err
 		}
 		project.seeds = dotnetSQLiteSeeds(root, project)
-		return selectedRecipe{kind: "dotnet", catalogueKey: "dotnet", dotnet: project}, nil
+		recipe := selectedRecipe{kind: "dotnet", catalogueKey: "dotnet", dotnet: project}
+		if project.member != "" {
+			recipe.contextDir, recipe.nodeInputs = project.context, []string{project.member + "/" + project.file}
+			project.seeds = withoutContextIgnored(filepath.Join(boundary, filepath.FromSlash(project.context)), project.member, project.seeds)
+			recipe.dotnet = project
+		}
+		return recipe, nil
 	case "deno":
 		deno, err := selectDenoRecipe(root, config)
 		if err != nil {
@@ -935,6 +941,23 @@ func (b *ArtifactBuilder) resolveBases(ctx context.Context, references []string)
 		resolved = append(resolved, image)
 	}
 	return resolved, nil
+}
+
+// requireBasePlatform refuses a build for a platform one of its bases does
+// not publish, naming both, instead of letting BuildKit fail with "no match
+// for platform in manifest". A base whose manifest lists no platforms (a
+// preflight placeholder) is not judged.
+func requireBasePlatform(bases []ResolvedImage, platform string) error {
+	if platform == "" {
+		return nil
+	}
+	for _, base := range bases {
+		if len(base.Platforms) > 0 && !platformListContains(base.Platforms, platform) {
+			return fmt.Errorf("%w: the reviewed base %s has no image for %s (it publishes %s); build for another platform or use a Dockerfile",
+				ErrUnsupportedBuilder, base.Reference, platform, strings.Join(base.Platforms, ", "))
+		}
+	}
+	return nil
 }
 
 func buildPreviewArgv(prepared PreparedBuild, tag string) []string {
