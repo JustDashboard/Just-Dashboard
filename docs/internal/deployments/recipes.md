@@ -831,7 +831,10 @@ the `package.json` of every workspace it records, the way that manager's frozen 
 from `package.json` but still locked is drift for Bun, pnpm and Yarn, while `npm ci` leaves it out and
 installs, so npm's reading stays `in_sync` and lists it under `extra`; pnpm and Yarn also compare the range
 text, while npm and Bun accept a changed range the locked version still satisfies (npm's range grammar is
-evaluated as data, `node_semver.go`). Yarn 1 is read from its entry headers, Berry from its workspace
+evaluated as data, `node_semver.go`). npm and Bun record a package's peer dependencies too, and so does
+pnpm when the lock's `settings.autoInstallPeers` is on (pnpm 8's default): a peer the package does not
+also depend on is then expected among its locked dependencies, as in a Turborepo UI package that
+declares `react` as a peer. Yarn 1 is read from its entry headers, Berry from its workspace
 blocks, pnpm up to its package list (only the bytes read are charged to the budget), npm entry by entry,
 Bun's text lock as JSONC; `bun.lockb` is binary and can only prove a name missing. A lockfile and the
 workspace manifests it is compared with are parsed once per detection, whichever member is compared, so a

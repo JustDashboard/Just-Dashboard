@@ -117,6 +117,23 @@ func TestNodeLockfileReadingsFollowEachManagersFrozenCheck(t *testing.T) {
 			content: "lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies:\n      left-pad:\n        specifier: ^1.3.0\n        version: 1.3.0\n      zod:\n        specifier: ^3\n        version: 3.24.0\n    devDependencies:\n      is-number:\n        specifier: 7.0.0\n        version: 7.0.0\n",
 		},
 		{
+			// pnpm-lock.yaml as pnpm 9 and 10 write it for a package that
+			// declares a peer: the peer joins its dependencies.
+			name: "pnpm records the peers it installs", lockfile: "pnpm-lock.yaml", state: LockfileInSync,
+			manifest: `{"peerDependencies":{"react":"^19","is-number":"^7"},"dependencies":{"left-pad":"^1.3.0"},"devDependencies":{"is-number":"7.0.0"}}`,
+			content:  "lockfileVersion: '9.0'\n\nsettings:\n  autoInstallPeers: true\n  excludeLinksFromLockfile: false\n\nimporters:\n\n  .:\n    dependencies:\n      left-pad:\n        specifier: ^1.3.0\n        version: 1.3.0\n      react:\n        specifier: ^19\n        version: 19.2.8\n    devDependencies:\n      is-number:\n        specifier: 7.0.0\n        version: 7.0.0\n\npackages:\n\n  left-pad@1.3.0: {}\n",
+		},
+		{
+			name: "pnpm expects an installed peer in the lock", lockfile: "pnpm-lock.yaml", state: LockfileStale, missing: []string{"react"},
+			manifest: `{"peerDependencies":{"react":"^19"},"dependencies":{"left-pad":"^1.3.0"},"devDependencies":{"is-number":"7.0.0"}}`,
+			content:  "lockfileVersion: '9.0'\nsettings:\n  autoInstallPeers: true\nimporters:\n  .:\n    dependencies:\n      left-pad:\n        specifier: ^1.3.0\n        version: 1.3.0\n    devDependencies:\n      is-number:\n        specifier: 7.0.0\n        version: 7.0.0\n",
+		},
+		{
+			name: "pnpm leaves peers out without autoInstallPeers", lockfile: "pnpm-lock.yaml", state: LockfileInSync,
+			manifest: `{"peerDependencies":{"react":"^19"},"dependencies":{"left-pad":"^1.3.0"},"devDependencies":{"is-number":"7.0.0"}}`,
+			content:  "lockfileVersion: '9.0'\nsettings:\n  autoInstallPeers: false\nimporters:\n  .:\n    dependencies:\n      left-pad:\n        specifier: ^1.3.0\n        version: 1.3.0\n    devDependencies:\n      is-number:\n        specifier: 7.0.0\n        version: 7.0.0\n",
+		},
+		{
 			name: "pnpm 8 single project", lockfile: "pnpm-lock.yaml", state: LockfileInSync,
 			content: "lockfileVersion: '6.0'\n\ndependencies:\n  left-pad:\n    specifier: ^1.3.0\n    version: 1.3.0\n\ndevDependencies:\n  is-number:\n    specifier: 7.0.0\n    version: 7.0.0\n\npackages:\n\n  /left-pad@1.3.0:\n    dev: false\n",
 		},

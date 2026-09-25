@@ -213,7 +213,8 @@ func nodeLockfileManager(name string) string {
 type nodeDependencySpecs map[string]string
 
 // nodeManifestSpecs reads the dependency kinds a manager records for a
-// workspace. Peer dependencies are recorded by npm and Bun only.
+// workspace. Peer dependencies are recorded by npm and Bun, and by pnpm when
+// its lockfile says it installs them.
 func nodeManifestSpecs(content []byte, withPeers bool) (nodeDependencySpecs, bool) {
 	var manifest struct {
 		Dependencies         map[string]string `json:"dependencies"`
@@ -1033,9 +1034,15 @@ func readPNPMLockfile(files nodeFiles) nodeLockfileComparer {
 		return nodeFixedReading(nodeReadFailure("pnpm-lock.yaml", "pnpm", err))
 	}
 	var lock struct {
-		LockfileVersion yaml.Node               `yaml:"lockfileVersion"`
-		Importers       map[string]pnpmImporter `yaml:"importers"`
-		pnpmImporter    `yaml:",inline"`
+		LockfileVersion yaml.Node `yaml:"lockfileVersion"`
+		// autoInstallPeers (pnpm 8's default) records each peer a package
+		// does not also depend on among its dependencies, and the frozen
+		// check then expects them there.
+		Settings struct {
+			AutoInstallPeers bool `yaml:"autoInstallPeers"`
+		} `yaml:"settings"`
+		Importers    map[string]pnpmImporter `yaml:"importers"`
+		pnpmImporter `yaml:",inline"`
 	}
 	if scanner.Err() != nil || yaml.Unmarshal(head.Bytes(), &lock) != nil || lock.LockfileVersion.Value == "" {
 		return nodeFixedReading(nodeUnreadLockfile("pnpm-lock.yaml", "pnpm", "pnpm-lock.yaml is not a readable pnpm lockfile"))
@@ -1063,7 +1070,7 @@ func readPNPMLockfile(files nodeFiles) nodeLockfileComparer {
 		}
 		comparison := nodeLockComparison{}
 		for _, importer := range orderedImporters(slices.Clone(names), own) {
-			manifest, ok := importerManifest(files, importer, false)
+			manifest, ok := importerManifest(files, importer, lock.Settings.AutoInstallPeers)
 			if !ok {
 				comparison.unknown = true
 				continue
