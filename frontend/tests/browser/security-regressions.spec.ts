@@ -187,7 +187,13 @@ test("slow polling has only one request in flight", async ({ page }) => {
   const pending: Route[] = []
   let initial = true
   await page.route("**/api/v1/**", async (route) => {
-    const path = new URL(route.request().url()).pathname.slice(7)
+    const url = new URL(route.request().url())
+    const path = url.pathname.slice(7)
+    // The last day's readings poll on their own cadence; the trail's own
+    // request is the one this is about.
+    if (path === "/audit/" && url.searchParams.has("since")) {
+      return fulfill(route, { entries: [], total: 0 })
+    }
     if (path === "/audit/") {
       if (initial) {
         initial = false

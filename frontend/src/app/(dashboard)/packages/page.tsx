@@ -13,22 +13,32 @@ import { get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { bytes, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import type { InstalledPackage, Job, PackageInventory, UpdateReport } from "@/lib/types"
+import type { HostInfo, InstalledPackage, Job, PackageInventory, UpdateReport } from "@/lib/types"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { JobConsole, RecentJobs, useJobConsole } from "@/components/job-console"
+import { FactDot, HostIdentity, platformName } from "@/components/metrics/host-identity"
 import { InstallPanel } from "@/components/packages/install-panel"
+import {
+  OriginFact,
+  PackageMark,
+  VersionTo,
+  managerProduct,
+  packageProduct,
+} from "@/components/packages/marks"
 import { PackageSheet } from "@/components/packages/package-sheet"
 import { Page, PageContext, RowLink, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelToolbar } from "@/components/panel"
+import { ProductGlyphs, platformProduct } from "@/components/product-logo"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { ChipCount, FilterChip, tabClasses } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
+import { NumberTicker } from "@/components/ui/number-ticker"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   stickyTableHeader,
@@ -54,13 +64,22 @@ import {
  * meant the release notes for a root-equivalent panel lived under a table of
  * library versions.
  *
- * Drawn the way the host Overview is (design-system.md §15): a facts row,
- * four figures as tiles, and three views under one strip of
- * tabs, each a plain panel — a toolbar, a hairline and a table that starts on
- * the page's own edge. The three things worth acting on before reading any
- * of that — security updates waiting, a reboot owed, an index too old to
- * trust — are notices, each carrying its own button, rather than a framed box
- * with a header and nothing in it.
+ * Drawn the way the host Overview is (design-system.md §15): the host's
+ * identity line — its distribution as the mark, the manager beside the name,
+ * the index's age as a fact and whether anything is owed as the verdict, with
+ * the index's verbs at its end — four figures as tiles, and three views under
+ * one strip of tabs, each a toolbar, a hairline and a framed table. The three
+ * things worth acting on before reading any of that — security updates
+ * waiting, a reboot owed, an index too old to trust — are notices, each
+ * carrying its own button, rather than a framed box with a header and nothing
+ * in it.
+ *
+ * Every package is drawn as the software it is (§14, `packages/marks.tsx`):
+ * `postgresql-16` as PostgreSQL, `python3-requests` as Python, the kernel as
+ * Linux, and a library no product names as its section's glyph. The tiles
+ * carry the products they count after their words, an upgrade's origin is the
+ * archive that published it, and the part of a version an upgrade changes is
+ * in ink beside the part it keeps.
  */
 
 /** Rows rendered at once. See the footer below for why there is a cap at all. */
@@ -145,6 +164,28 @@ export default function PackagesPage() {
     [data],
   )
 
+  // The software the tiles count, as the products it is — what was asked for
+  // and what is behind — each once, in the inventory's order.
+  const products = useMemo(() => {
+    const of = (list: InstalledPackage[]) => [
+      ...new Set(list.map((p) => packageProduct(p.name)).filter((id) => id !== undefined)),
+    ]
+    const list = data?.packages ?? []
+    return {
+      explicit: of(list.filter((p) => p.explicit)),
+      behind: of(list.filter((p) => p.upgradable)),
+    }
+  }, [data])
+  // The upgrade report names no section, so its rows borrow the inventory's.
+  const sections = useMemo(
+    () => new Map((data?.packages ?? []).map((p) => [p.name, p.section])),
+    [data],
+  )
+
+  // Read once: which distribution the manager belongs to does not change
+  // while the page is open.
+  const host = usePoll((signal) => get<HostInfo>("/system/host", undefined, signal), 0).data
+
   const upgrade = (securityOnly: boolean) =>
     confirm({
       title: securityOnly ? "Install security updates" : "Upgrade all packages",
@@ -214,73 +255,97 @@ export default function PackagesPage() {
       {dialog}
       <PageContext eyebrow="Advanced" title="Packages" />
 
-      {/* What manages this host and how fresh the answer is. These were the
-          hints under two tiles, where a fact about the whole page sat under
-          one figure; here they are the subject of the page, as its own row. */}
-      <div className="flex min-w-0 animate-rise flex-wrap items-center gap-x-4 gap-y-2">
-        {data?.available && (
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-body text-muted-foreground">
-            <span className="font-medium text-foreground">{data.manager}</span>
-            {data.indexAge && (
-              <>
-                <Dot />
-                <span>index refreshed {relativeTime(data.indexAge)}</span>
-              </>
-            )}
-            <Dot />
-            <span>read {relativeTime(data.readAt)}</span>
-            <Dot />
-            {report?.rebootRequired ? (
-              <Status verdict="warning" label="Reboot required" />
-            ) : securityCount > 0 ? (
-              <Status
-                verdict="warning"
-                label={`${securityCount} security update${securityCount === 1 ? "" : "s"}`}
-              />
-            ) : upgradeCount > 0 ? (
-              <Status
-                verdict="notice"
-                label={`${upgradeCount} update${upgradeCount === 1 ? "" : "s"} waiting`}
-              />
-            ) : (
-              <Status verdict="ok" label="Up to date" />
-            )}
-          </div>
-        )}
-        <div className="ml-auto flex max-w-full flex-wrap items-center gap-2">
-          <RecentJobs kinds={["updates.", "packages."]} onOpen={console_.open} />
-          {canRefresh && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={applying}
-              onClick={() => void refreshIndex()}
-            >
-              <CloudDownload className="size-4" />
-              Refresh index
-            </Button>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={applying}
-            onClick={() => {
-              inventory.refresh()
-              updates.refresh()
-            }}
-          >
-            <RefreshClockwise className="size-4" />
-            Re-read
-          </Button>
-        </div>
-      </div>
+      {/* What manages this host and how fresh the answer is, as the line the
+          Overview opens on: the distribution the manager belongs to as the
+          mark, the manager beside its name, the index's age and the read as
+          facts, and whether anything is owed as the verdict — with the
+          index's verbs beside it, because they change what the line says. */}
+      {data?.available && (
+        <HostIdentity
+          className="animate-rise"
+          mark={platformProduct(host?.platform) ?? managerProduct(data.manager)}
+          fallback={Puzzle}
+          title={
+            <>
+              {host?.platform ? platformName(host) : data.manager}{" "}
+              {host?.platform && (
+                <span className="font-mono text-body font-normal text-muted-foreground">
+                  {data.manager}
+                </span>
+              )}
+            </>
+          }
+          facts={
+            <>
+              <span className="numeric font-medium text-foreground">
+                {data.packages.length.toLocaleString()} packages
+              </span>
+              {data.indexAge && (
+                <>
+                  <FactDot />
+                  <span className={cn(indexStale && "text-warning")}>
+                    index refreshed {relativeTime(data.indexAge)}
+                  </span>
+                </>
+              )}
+              <FactDot />
+              <span>read {relativeTime(data.readAt)}</span>
+            </>
+          }
+          aside={
+            <div className="flex max-w-full flex-wrap items-center gap-2">
+              <span className="mr-2 text-body">
+                {report?.rebootRequired ? (
+                  <Status verdict="warning" label="Reboot required" />
+                ) : securityCount > 0 ? (
+                  <Status
+                    verdict="warning"
+                    label={`${securityCount} security update${securityCount === 1 ? "" : "s"}`}
+                  />
+                ) : upgradeCount > 0 ? (
+                  <Status
+                    verdict="notice"
+                    label={`${upgradeCount} update${upgradeCount === 1 ? "" : "s"} waiting`}
+                  />
+                ) : (
+                  <Status verdict="ok" label="Up to date" />
+                )}
+              </span>
+              <RecentJobs kinds={["updates.", "packages."]} onOpen={console_.open} />
+              {canRefresh && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={applying}
+                  onClick={() => void refreshIndex()}
+                >
+                  <CloudDownload className="size-4" />
+                  Refresh index
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={applying}
+                onClick={() => {
+                  inventory.refresh()
+                  updates.refresh()
+                }}
+              >
+                <RefreshClockwise className="size-4" />
+                Re-read
+              </Button>
+            </div>
+          }
+        />
+      )}
 
       <StatGrid columns={4}>
         <StatTile
           label="Installed"
           value={
             <Figure settled={Boolean(data)}>
-              {data?.available ? data.packages.length.toLocaleString() : "—"}
+              {data?.available ? <NumberTicker value={data.packages.length} /> : "—"}
             </Figure>
           }
           hint={
@@ -297,20 +362,24 @@ export default function PackagesPage() {
           label="Installed by hand"
           value={
             <Figure settled={Boolean(data)}>
-              {knowsExplicit ? data!.explicitCount.toLocaleString() : "—"}
+              {knowsExplicit ? <NumberTicker value={data!.explicitCount} /> : "—"}
             </Figure>
           }
           hint={
-            knowsExplicit
-              ? "asked for, not pulled in"
-              : data?.available
-                ? `${data.manager} does not record this`
-                : undefined
+            knowsExplicit ? (
+              <ProductsHint products={products.explicit}>asked for, not pulled in</ProductsHint>
+            ) : data?.available ? (
+              `${data.manager} does not record this`
+            ) : undefined
           }
         />
         <StatTile
           label="Updates"
-          value={<Figure settled={Boolean(data)}>{data?.available ? upgradeCount : "—"}</Figure>}
+          value={
+            <Figure settled={Boolean(data)}>
+              {data?.available ? <NumberTicker value={upgradeCount} /> : "—"}
+            </Figure>
+          }
           tone={
             securityCount > 0
               ? "warning"
@@ -321,15 +390,17 @@ export default function PackagesPage() {
                   : "default"
           }
           hint={
-            data?.available
-              ? securityCount > 0
-                ? `${securityCount} security`
-                : upgradeCount > 0
-                  ? report?.securityFiltering
-                    ? "none are security updates"
-                    : `${data.manager} publishes no advisory data`
-                  : "everything is current"
-              : undefined
+            data?.available ? (
+              <ProductsHint products={products.behind}>
+                {securityCount > 0
+                  ? `${securityCount} security`
+                  : upgradeCount > 0
+                    ? report?.securityFiltering
+                      ? "none are security updates"
+                      : `${data.manager} publishes no advisory data`
+                    : "everything is current"}
+              </ProductsHint>
+            ) : undefined
           }
         />
         <StatTile
@@ -583,27 +654,23 @@ export default function PackagesPage() {
                         {report.packages.map((p) => (
                           <TableRow key={p.name} onActivate={() => setInspect(p.name)}>
                             <TableCell>
-                              <RowLink
-                                mono
-                                className="text-body"
-                                onClick={() => setInspect(p.name)}
-                              >
-                                {p.name}
-                              </RowLink>
+                              <PackageName
+                                name={p.name}
+                                section={sections.get(p.name)}
+                                onInspect={setInspect}
+                              />
                             </TableCell>
                             <TableCell className="font-mono text-muted-foreground">
                               {p.current || "—"}
                             </TableCell>
-                            <TableCell className={cn("font-mono", p.security && "text-warning")}>
-                              {p.candidate}
+                            <TableCell>
+                              <VersionTo from={p.current} to={p.candidate} security={p.security} />
                             </TableCell>
                             <TableCell className="hidden md:table-cell">
-                              <p
-                                className="max-w-[18rem] truncate font-mono text-hint text-muted-foreground"
-                                title={p.origin}
-                              >
-                                {p.origin || "—"}
-                              </p>
+                              <OriginFact
+                                origin={p.origin}
+                                className="max-w-[18rem] text-hint text-muted-foreground"
+                              />
                             </TableCell>
                             <TableCell className="text-right">
                               {p.security && <Tag tone="warning">security</Tag>}
@@ -634,8 +701,34 @@ export default function PackagesPage() {
   )
 }
 
-function Dot() {
-  return <span className="text-muted-foreground/40">·</span>
+/** A tile's hint with the products it counts drawn bare after the words. */
+function ProductsHint({ products, children }: { products: string[]; children: React.ReactNode }) {
+  return (
+    <span className="inline-flex max-w-full min-w-0 items-center gap-2">
+      <span className="truncate">{children}</span>
+      <ProductGlyphs ids={products} />
+    </span>
+  )
+}
+
+/** A package as the software it is, then its name — the one control on its row. */
+function PackageName({
+  name,
+  section,
+  onInspect,
+}: {
+  name: string
+  section?: string
+  onInspect: (name: string) => void
+}) {
+  return (
+    <div className="flex max-w-[22rem] min-w-0 items-center gap-3">
+      <PackageMark name={name} section={section} />
+      <RowLink mono className="text-body" onClick={() => onInspect(name)}>
+        {name}
+      </RowLink>
+    </div>
+  )
 }
 
 /**
@@ -677,9 +770,7 @@ function PackageTable({
         {packages.map((p) => (
           <TableRow key={p.name} onActivate={() => onInspect(p.name)}>
             <TableCell>
-              <RowLink mono className="text-body" onClick={() => onInspect(p.name)}>
-                {p.name}
-              </RowLink>
+              <PackageName name={p.name} section={p.section} onInspect={onInspect} />
             </TableCell>
             <TableCell>
               <p className="max-w-[38rem] truncate text-xs text-muted-foreground">
@@ -687,13 +778,14 @@ function PackageTable({
               </p>
             </TableCell>
             <TableCell className="font-mono text-muted-foreground">{p.version}</TableCell>
-            {/* The pending version beside the installed one, coloured only
-                where it is a security fix: a column that is amber for every
-                behind package says nothing about which ones matter. */}
-            <TableCell
-              className={cn("hidden font-mono md:table-cell", p.security && "text-warning")}
-            >
-              {p.upgradable}
+            {/* The pending version beside the installed one, its changed part
+                in ink and amber only where it is a security fix: a column that
+                is amber for every behind package says nothing about which
+                ones matter. */}
+            <TableCell className="hidden md:table-cell">
+              {p.upgradable && (
+                <VersionTo from={p.version} to={p.upgradable} security={p.security} />
+              )}
             </TableCell>
             <TableCell className="numeric hidden text-right text-muted-foreground md:table-cell">
               {p.size ? bytes(p.size) : "—"}

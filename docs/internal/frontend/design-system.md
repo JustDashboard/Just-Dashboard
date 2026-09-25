@@ -107,10 +107,11 @@ taking a frame:
   a hairline under four `StatTile` readings (Scheduled's are what fires next across cron and the
   timers together, the account's jobs, the timers armed and what the packages run), with a detail
   sheet built from plain panels that opens on the thing's own mark — and the
-  two System pages follow the same shape: the accounts table on System users under four readings
-  (accounts, who can sign in, who is locked, the last sign-in), with its SSH-keys sheet a plain list
-  of rows and a plain form, and the audit log's table under its filters, where a request's outcome
-  is a `Status` dot and the code rather than a wash across the row; and
+  two System pages follow the same shape: on System users four readings (accounts, administrators,
+  who can sign in, the last sign-in) over the accounts as lit cards in a plain list, because each
+  opens its keys, with its SSH-keys sheet a plain list of rows and a plain form, and on the audit
+  log four readings of the last day over its table and filters, where a request's outcome is a
+  `Status` dot and the code in its family's colour rather than a wash across the row; and
   both of the dashboard's own pages — on Version the identity line, the update in flight and the
   history (a timeline: the version in a sticky column, a rail with a mark per release, the notes at
   a readable measure), and on Configuration the stack (its checkout and three services as a
@@ -125,9 +126,10 @@ taking a frame:
   sessions and keys as rows under plain panels where a framed table used to be, the users as cards
   in a `ChoiceList`, and Security as `FormSection aside`s in a rail; and the three views on
   Packages — the installed and updates tables and the software search, under one underlined strip
-  (`tabClasses`) rather than a filled tab list — each a toolbar, a hairline and rows on the page's own
-  edge, with what needs acting on (security updates waiting, a reboot owed, a stale index) said as a
-  `Notice` that carries its own button rather than as a framed block with a header and nothing in it, and the Git page's repository list under its four readings (its workspace is one framed
+  (`tabClasses`) rather than a filled tab list, beneath the host's identity line — each a toolbar
+  and a hairline over a framed table or, for the search, rows on the page's own edge, with what
+  needs acting on (security updates waiting, a reboot owed, a stale index) said as a `Notice` that
+  carries its own button rather than as a framed block with a header and nothing in it, and the Git page's repository list under its four readings (its workspace is one framed
   workbench of three `Pane flush` columns with a strip across the top, the way the terminal page is
   drawn);
   its Browse, Structure and Diagram tabs are each one `Pane` — a working region sized to the window,
@@ -744,7 +746,8 @@ above:
   `index`, a beat each and uncapped. `NumberTicker` counts a figure up to its value once it lands:
   the fleet's live and build-slot figures, the Credentials and Notifications readings, the
   Overview's requests, the delivery insights, the run page's traffic after activation, Automation's
-  revisions awaiting review and alerts firing, and the live usage tiles. A figure that follows a
+  revisions awaiting review and alerts firing, the live usage tiles, and the readings on
+  Packages, System users and the audit log. A figure that follows a
   draft as it is typed — Build's and Runtime's settings readings — does not count, because it would
   count again on every keystroke; it rises once when it lands instead;
 - *live* — `AnimatedBeam`'s pulse on a line, `BorderBeam` running around anything whose work is in
@@ -777,7 +780,7 @@ list with nothing to say it had not been there a moment ago, so a list that gain
 exactly like one that had merely re-rendered; only the run transcript let its new lines rise.
 `useArrivals(keys)` returns the keys that were not in the list the last time it changed, and those
 rows take `animate-rise` once — the live request rows, the lifecycle feed's events, a channel's and
-a webhook's deliveries, a game's players. It is empty on the first render, because the page's own
+a webhook's deliveries, a game's players, the audit trail's entries. It is empty on the first render, because the page's own
 rise covers what arrived with it and forty rows rising at once are not forty arrivals, and its
 answer is held until the keys change again, so a re-render halfway through a rise does not cut it
 short. A list whose rows already stagger in on mount — the runs, keyed by id — does not take it as
@@ -861,7 +864,11 @@ because there is no header over it; below, they go beneath the name at the card'
 shape is drawn is chosen once by the page (`useMediaQuery`) rather than by `hidden`/`xl:block` twins,
 because a reading that exists in a hidden copy is two answers to every query a test or a screen
 reader makes. The list around the cards is a plain panel — a frame around framed cards is two nested
-frames, which is the stacking this section refuses.
+frames, which is the stacking this section refuses. System users took the same argument in 0.7.0:
+every account opened its keys, so the eight-column table became cards (`AccountCard` on the page),
+their groups, last sign-in, keys and state beside the name from `lg` and beneath it below. The audit
+log is the counter-example on the next page of the same section: an entry opens nothing, so its
+trail stays a table.
 
 **The deployment section's rows took the same rule, and it moved the breakpoint twice more.** A run
 (`deploy/run-row.tsx`), a runtime service and a channel set their readings beside the name in fixed
@@ -1133,6 +1140,30 @@ from the process name first and the port second, so `postgres` on an odd port is
 watched domains and sockets are readings with verbs and stay rows, with how much of its term a
 certificate has left drawn as a meter under its verdict (`CertLife`).
 
+**What a host has installed, who is on it and what they changed are products too.** Packages
+draws a package as the software its name says it is (`packageProduct`, `components/packages/marks.tsx`:
+`postgresql-16` and `libpq5` are PostgreSQL, `python3-requests` Python, `linux-image-*` the kernel's
+Tux, `python3-certbot-nginx` Let's Encrypt) and a name that says nothing as its archive section's
+glyph on the same tile (`sectionGlyph`: a library as layers, a tool as a wrench), so `libc6` is never
+drawn as a guess. The page opens on the host's identity line with its distribution as the mark and the
+manager beside the name, an upgrade's origin is the archive that published it (`originProduct`:
+Ubuntu's security pocket, `apt.postgresql.org`, a `pgdg16` repository), and the version an upgrade
+lands on keeps the part it shares with the installed one stepped back and the part it changes in ink
+(`VersionTo`, cut at the last field both versions end), amber only for a security fix. System users
+draws a person as their initials in the hue their name has everywhere else — the host's `ion` and the
+dashboard's `ion` are one colour — and an account a package made for its daemon as the product that
+runs under it (`accountProduct`, `components/system-users/marks.tsx`: `postgres`, `redis`,
+`gitlab-runner`), with `www-data`, which is nginx's on one host and Apache's on the next, left as a
+glyph; an administrator's group is drawn first behind a shield and `docker` behind Docker's mark,
+because a member of either can become root. The audit log draws each entry with the mark of the part
+of the product it touched (`auditSection`, `components/audit/marks.tsx`: Docker's whale, Git's and
+GitHub's marks, PM2's, fail2ban's, the terminal's, Let's Encrypt's for an issued or renewed
+certificate, the dashboard's own for its settings, and the sidebar's glyph for every section that is
+no product), the action's first word in its `LANES` hue the way the log console draws a program, the
+route's method and path in the request log's hues, and who acted as their face — an API key's use
+with a key in the tile's corner, a webhook as the webhook's mark and the dashboard's reconcilers as
+the dashboard.
+
 **A project is drawn as its website, else as what it is.** `ProjectMark` tries three things in
 order, all on `ProductLogo`'s tile so a card does not change shape when an icon arrives: the icon
 the site declares (read through the dashboard's origin), then the product the project is
@@ -1363,6 +1394,14 @@ The passes, in order. Each one is a diff you can review on its own.
    The account's Security page took it for the same reason — the second factor's state and how many
    sessions are signed in are the rail heads of the sections that change them — and Sessions opens on
    the session it is read through, with the count of the rest on their header.
+
+   System users kept its four and changed one: the Locked count became a filter chip over the
+   cards beside who can sign in and who administers the host, where it also narrows the list, and
+   its tile went to the administrators — the members of `sudo`, `wheel` or `admin`, amber while one
+   of them needs no password. The audit log, which had no figures at all, gained four readings of
+   the last day read from their own query so a filter narrows the trail without narrowing them:
+   the changes with their hours as a trend, the failures, the people as their faces and the
+   sign-ins with the refused ones.
 
    Three deployment pages took it in the same pass. A project's General settings did because the
    project identity line already is that page's reading line: each figure of the old Project
