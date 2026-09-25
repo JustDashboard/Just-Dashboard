@@ -100,8 +100,11 @@ type siteGenerator struct {
 	// Jekyll: the Ruby release, whether a Gemfile and lock are committed,
 	// and whether the lock has to gain a Linux platform first.
 	ruby, rubyDeclared string
-	gemfile, gemLock   bool
-	addLinuxPlatform   bool
+	// rubyExact is the one patch release a Gemfile pins, which the image
+	// has to be.
+	rubyExact        string
+	gemfile, gemLock bool
+	addLinuxPlatform bool
 	// mdBook: which of the two catalogued release lines builds.
 	mdbookLine string
 	// Python sites: what a root with no requirements installs, and whether
@@ -675,6 +678,8 @@ func mdbookSite(tree siteTree) (siteGenerator, bool) {
 var (
 	rubyVersionLineRE   = regexp.MustCompile(`(?m)^\s*ruby\s+['"]([0-9]+\.[0-9]+(?:\.[0-9]+)?)['"]`)
 	rubyVersionFileRE   = regexp.MustCompile(`([0-9]+\.[0-9]+)(\.[0-9]+)?`)
+	rubyExactRE         = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
+	rubyFileLineRE      = regexp.MustCompile(`(?m)^\s*ruby\s+file:\s*['"]\.ruby-version['"]`)
 	gemLockRubyRE       = regexp.MustCompile(`(?m)^RUBY VERSION\s*\n\s*ruby ([0-9]+\.[0-9]+(?:\.[0-9]+)?)`)
 	gemLockPlatformRE   = regexp.MustCompile(`(?m)^PLATFORMS\s*\n((?:  \S+\s*\n)+)`)
 	jekyllThemeRE       = regexp.MustCompile(`(?m)^(?:remote_)?theme\s*:`)
@@ -731,39 +736,53 @@ func jekyllSite(tree siteTree) (siteGenerator, bool) {
 			generator.themes = append(generator.themes, theme)
 		}
 	}
-	// The Ruby release: .ruby-version, the Gemfile's ruby line, the lock's.
+	// The Ruby release: the Gemfile's exact pin, which Bundler holds the
+	// interpreter to, then .ruby-version, the Gemfile's ruby line, the lock's.
+	var rubyFile string
+	if version, ok := tree.read(".ruby-version"); ok {
+		rubyFile = firstVersionLine(string(version))
+	}
+	gemfileRuby := rubyVersionLineRE.FindSubmatch(gemfile)
 	switch {
-	case tree.file(".ruby-version"):
-		version, _ := tree.read(".ruby-version")
-		if match := rubyVersionFileRE.FindStringSubmatch(firstVersionLine(string(version))); match != nil {
-			generator.rubyDeclared = match[0] + " (.ruby-version)"
-			generator.ruby = match[1]
-		}
-	case rubyVersionLineRE.Match(gemfile):
-		match := rubyVersionLineRE.FindSubmatch(gemfile)
-		generator.rubyDeclared = string(match[1]) + " (Gemfile)"
-		generator.ruby = rubyVersionFileRE.FindStringSubmatch(string(match[1]))[1]
-		if strings.Count(string(match[1]), ".") == 2 {
-			generator.versionIssue = "the Gemfile requires Ruby " + string(match[1]) + " exactly, and the image runs the newest " +
-				generator.ruby + " release, which Bundler refuses unless they match"
-		}
+	case gemfileRuby != nil && strings.Count(string(gemfileRuby[1]), ".") == 2:
+		generator.rubyDeclared, generator.rubyExact = string(gemfileRuby[1])+" (Gemfile)", string(gemfileRuby[1])
+	case rubyFileLineRE.Match(gemfile) && rubyExactRE.MatchString(rubyFile):
+		generator.rubyDeclared, generator.rubyExact = rubyFile+" (.ruby-version, which the Gemfile's ruby line reads)", rubyFile
+	case rubyVersionFileRE.MatchString(rubyFile):
+		match := rubyVersionFileRE.FindStringSubmatch(rubyFile)
+		generator.rubyDeclared = match[0] + " (.ruby-version)"
+		generator.ruby = match[1]
+	case gemfileRuby != nil:
+		generator.rubyDeclared = string(gemfileRuby[1]) + " (Gemfile)"
+		generator.ruby = rubyVersionFileRE.FindStringSubmatch(string(gemfileRuby[1]))[1]
 	case gemLockRubyRE.Match(lock):
 		match := gemLockRubyRE.FindSubmatch(lock)
 		generator.rubyDeclared = string(match[1]) + " (Gemfile.lock)"
 		generator.ruby = rubyVersionFileRE.FindStringSubmatch(string(match[1]))[1]
+	}
+	if generator.rubyExact != "" {
+		// Bundler refuses any other patch release than the one the Gemfile
+		// pins, so the image is that release's.
+		generator.ruby = rubyVersionFileRE.FindStringSubmatch(generator.rubyExact)[1]
 	}
 	switch {
 	case generator.ruby == "":
 		generator.ruby = jekyllDefaultRuby
 	case !slices.Contains(jekyllRubyVersions, generator.ruby):
 		generator.versionIssue = generator.rubyDeclared + " asks for Ruby " + generator.ruby + "; the Jekyll recipe builds with Ruby 3.1 to 3.4, so it uses " + jekyllDefaultRuby
-		generator.ruby = jekyllDefaultRuby
+		if generator.rubyExact != "" {
+			generator.versionIssue += ", which Bundler refuses unless the Gemfile's ruby line matches it"
+		}
+		generator.ruby, generator.rubyExact = jekyllDefaultRuby, ""
 	}
 	generator.version = generator.ruby
+	if generator.rubyExact != "" {
+		generator.version = generator.rubyExact
+	}
 	if generator.versionIssue != "" {
 		generator.note(name, generator.versionIssue)
 	} else {
-		generator.note(name, "Ruby "+generator.ruby+" builds the site")
+		generator.note(name, "Ruby "+generator.version+" builds the site")
 	}
 	if hasLock {
 		if match := gemLockPlatformRE.FindSubmatch(lock); match != nil {

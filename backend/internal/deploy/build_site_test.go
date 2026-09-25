@@ -119,6 +119,15 @@ func TestSiteRecipeRendersEachGenerator(t *testing.T) {
 			absent: []string{"BUNDLE_FROZEN"},
 		},
 		{
+			// Bundler refuses any other patch release than a Gemfile's exact
+			// pin, so the image is that release's.
+			name:      "a Gemfile's exact Ruby pin builds on that release",
+			files:     map[string]string{"Gemfile": "source 'https://rubygems.org'\nruby \"3.3.0\"\ngem 'jekyll'\n", "_config.yml": "title: x\n", "_posts/a.md": ""},
+			toolchain: "jekyll on ruby 3.3.0",
+			want:      []string{"FROM ruby:3.3.0-slim@sha256:"},
+			absent:    []string{"ruby:3.3-slim"},
+		},
+		{
 			name: "a lock written on a Mac gains Linux before installing",
 			files: map[string]string{"Gemfile": "gem 'jekyll'\n", "_config.yml": "title: x\n", "_layouts/default.html": "",
 				"Gemfile.lock": "GEM\n  specs:\n    jekyll (4.4.1)\n\nPLATFORMS\n  arm64-darwin-23\n\nDEPENDENCIES\n  jekyll\n"},
@@ -171,6 +180,19 @@ func TestSiteRecipeFallsBackWhenAPinnedReleaseHasNoImage(t *testing.T) {
 	if prepared.Toolchain != "hugo "+hugoDefaultVersion+" (extended)" || len(prepared.Notes) == 0 ||
 		!strings.Contains(prepared.Notes[0], "Hugo 0.149.0 has no official image") ||
 		!strings.Contains(prepared.DockerfilePreview, "FROM ghcr.io/gohugoio/hugo:v"+hugoDefaultVersion+"@") {
+		t.Fatalf("prepared = %+v\n%s", prepared, prepared.DockerfilePreview)
+	}
+}
+
+func TestJekyllFallsBackWhenAPinnedRubyHasNoImage(t *testing.T) {
+	t.Parallel()
+	backend := &resolveRefusing{missing: map[string]bool{"ruby:3.2.9-slim": true}}
+	prepared, _, err := prepareSite(t, map[string]string{"Gemfile": "ruby '3.2.9'\ngem 'jekyll'\n", "_config.yml": "title: x\n", "_posts/a.md": ""}, backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.Toolchain != "jekyll on ruby 3.2" || len(prepared.Notes) == 0 || !strings.Contains(prepared.Notes[0], "Ruby 3.2.9 has no official image") ||
+		!strings.Contains(prepared.DockerfilePreview, "FROM ruby:3.2-slim@") {
 		t.Fatalf("prepared = %+v\n%s", prepared, prepared.DockerfilePreview)
 	}
 }

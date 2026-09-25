@@ -39,7 +39,7 @@ func (r siteRecipe) toolchain() string {
 	case "hugo":
 		return "hugo " + r.generator.version + " (extended)"
 	case "jekyll":
-		return "jekyll on ruby " + r.generator.ruby
+		return "jekyll on ruby " + r.generator.version
 	}
 	return r.generator.name + " " + r.generator.version
 }
@@ -77,7 +77,7 @@ func selectSiteRecipe(boundary, root string, config BuildPlanConfig) (siteRecipe
 	case "mdbook":
 		recipe.image = recipeBaseCatalogue["site:mdbook"][0]
 	case "jekyll":
-		recipe.image = "ruby:" + generator.ruby + "-slim"
+		recipe.image = "ruby:" + generator.version + "-slim"
 	}
 	return recipe, nil
 }
@@ -107,7 +107,8 @@ func (r siteRecipe) bases() []string {
 
 // settleSiteImage keeps a declared generator release only when its official
 // image exists; one that is missing (Hugo skips publishing the odd release)
-// builds with the reviewed default, and the run log says so.
+// builds with the reviewed default, and the run log says so. A Ruby patch
+// release with no image of its own builds on its minor line's newest.
 func (b *ArtifactBuilder) settleSiteImage(ctx context.Context, recipe *siteRecipe) {
 	var fallback string
 	switch recipe.generator.name {
@@ -115,6 +116,8 @@ func (b *ArtifactBuilder) settleSiteImage(ctx context.Context, recipe *siteRecip
 		fallback = recipeBaseCatalogue["site:hugo"][0]
 	case "zola":
 		fallback = recipeBaseCatalogue["site:zola"][0]
+	case "jekyll":
+		fallback = "ruby:" + recipe.generator.ruby + "-slim"
 	default:
 		return
 	}
@@ -125,6 +128,12 @@ func (b *ArtifactBuilder) settleSiteImage(ctx context.Context, recipe *siteRecip
 		return
 	}
 	declared := recipe.generator.version
+	if recipe.generator.name == "jekyll" {
+		recipe.image, recipe.generator.version = fallback, recipe.generator.ruby
+		recipe.notes = append(recipe.notes, "Ruby "+declared+" has no official image; building with Ruby "+recipe.generator.ruby+
+			", which Bundler refuses unless the Gemfile's ruby line allows it")
+		return
+	}
 	recipe.image = fallback
 	recipe.generator.version = strings.TrimPrefix(fallback[strings.LastIndex(fallback, ":")+1:], "v")
 	if recipe.generator.name == "zola" {

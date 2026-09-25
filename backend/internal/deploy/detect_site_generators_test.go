@@ -218,6 +218,14 @@ func TestJekyllSitesAreBuiltByJekyll(t *testing.T) {
 		!evidenceMentions(pinned, "no Linux platform") || pinned.UnpinnedDependencies {
 		t.Fatalf("pinned = %#v", pinned)
 	}
+	_, exact := siteCandidate(t, map[string]string{"Gemfile": "ruby '3.3.0'\ngem 'jekyll'\n", "_config.yml": "title: x\n", "_posts/a.md": "", ".ruby-version": "3.2.4\n"})
+	if exact.StaticSite.Version != "3.3.0" || exact.StaticSite.VersionIssue != "" {
+		t.Fatalf("exact = %#v", exact.StaticSite)
+	}
+	_, file := siteCandidate(t, map[string]string{"Gemfile": "ruby file: \".ruby-version\"\ngem 'jekyll'\n", "_config.yml": "title: x\n", "_posts/a.md": "", ".ruby-version": "3.4.1\n"})
+	if file.StaticSite.Version != "3.4.1" {
+		t.Fatalf("ruby file: = %#v", file.StaticSite)
+	}
 	// .nojekyll says the site is served as it is; Hexo's _config.yml is Hexo's.
 	nojekyll := detectShapeFixture(t, map[string]string{"_config.yml": "theme: minima\n", ".nojekyll": "", "index.html": "<h1>x</h1>"})
 	if selectedOf(nojekyll) == nil || selectedOf(nojekyll).BuildMethod != BuildStatic {

@@ -51,8 +51,12 @@ func TestPreflightSaysWhatASiteGeneratorNeeds(t *testing.T) {
 		t.Fatalf("an old pin = %+v", findings)
 	}
 	findings, _ = siteFindings(t, map[string]string{"Gemfile": "ruby '3.0.6'\ngem 'jekyll'\n", "_config.yml": "title: x\n", "_posts/a.md": ""}, false)
-	if ruby := findingByCode(findings, "jekyll_ruby_version"); ruby == nil || ruby.Severity != PreflightWarning {
+	if ruby := findingByCode(findings, "jekyll_ruby_version"); ruby == nil || ruby.Severity != PreflightWarning || !strings.Contains(ruby.Measured, "Bundler refuses") {
 		t.Fatalf("ruby = %+v", findings)
+	}
+	findings, _ = siteFindings(t, map[string]string{"Gemfile": "ruby '3.3.0'\ngem 'jekyll'\n", "_config.yml": "title: x\n", "_posts/a.md": ""}, false)
+	if ruby := findingByCode(findings, "jekyll_ruby_version"); ruby != nil {
+		t.Fatalf("an exact pin the image matches = %+v", ruby)
 	}
 	if unpinned := findingByCode(findings, "dependencies_unpinned"); unpinned == nil || !strings.Contains(unpinned.Action, "bundle lock") ||
 		strings.Contains(unpinned.Action, "uv lock") {
