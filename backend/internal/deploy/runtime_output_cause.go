@@ -108,6 +108,7 @@ var envMissingSignatures = []buildSignature{
 	signature("", "rails", "secret_key_base", "Missing .?secret_key_base.? for").naming("SECRET_KEY_BASE"),
 	signature("", "authjs", "MissingSecret", `\[auth\]\[error\] MissingSecret|MissingSecret: Please define a .secret.`).naming("AUTH_SECRET"),
 	signature("", "phoenix", "environment variable", `environment variable ([A-Z_][A-Z0-9_]*) is missing`),
+	signature("", "leptos", "LEPTOS_", `\b(LEPTOS_[A-Z_]+)\b[^\n]*(?:NotPresent|not (?:found|present|set)|is missing)`),
 }
 
 // genericEnvMissingSignatures are the sentences any program may print about a
