@@ -325,7 +325,7 @@ func renderDotnetDockerfile(project dotnetProject, config BuildPlanConfig, bases
 		output := strings.TrimSpace(config.OutputDirectory)
 		if output == "" {
 			output = "wwwroot"
-		} else if !validOutputDirectory(output) {
+		} else if !validOutputDirectory(output) || (output != "." && !recipePath(output)) {
 			return nil, fmt.Errorf("%w: static output directory is invalid", ErrUnsupportedBuilder)
 		}
 		published := path.Join("/out", output)

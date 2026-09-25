@@ -539,3 +539,29 @@ func TestRecipeRefusesABaseWithoutTheTargetPlatform(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Where preflight has the tree, the recipe's own dry run outvotes the
+// release findings detection's facts raise, and says nothing twice.
+func TestCompiledReleaseFindingsGiveWayToTheDryRun(t *testing.T) {
+	t.Parallel()
+	facts := javaToolchainFacts{tool: "gradle", declared: 21, declaredFrom: "build.gradle", wrapper: "8.4", wrapperUsable: true}
+	_, refusal := planJavaToolchain(facts, "")
+	build := BuildPlanConfig{Method: BuildRecipe, Recipe: "java"}
+	findings := javaPlanFindings(&DetectedJavaBuild{Tool: "gradle", Release: 21, ReleaseFrom: "build.gradle", Wrapper: "8.4", WrapperUsable: true}, build)
+	merged := applyDryRunVerdict(findings, refusal, build)
+	if findingByCode(merged, "gradle_wrapper_incompatible") == nil || findingByCode(merged, "recipe_unsupported") != nil {
+		t.Fatalf("merged = %+v", merged)
+	}
+	if merged := applyDryRunVerdict(findings, nil, build); findingByCode(merged, "gradle_wrapper_incompatible") != nil {
+		t.Fatalf("a dry run that prepared left the finding: %+v", merged)
+	}
+	for text, field := range map[string]string{
+		refusal.Error(): "configuration.build.javaVersion",
+		dotnetVersionRefusal("Api.csproj declares no <TargetFramework> the recipe can read").Error():                           "configuration.build.dotnetVersion",
+		dotnetVersionRefusal("global.json pins .NET SDK 8.0.100 (rollForward latestPatch), which cannot build net9.0").Error(): "configuration.build.dotnetVersion",
+	} {
+		if got := recipeRefusalField(recipeRefusalText(errors.New(text), "")); got != field {
+			t.Errorf("%q points at %s, want %s", text, got, field)
+		}
+	}
+}
