@@ -1,7 +1,7 @@
 "use client"
 
 import { useId, useState } from "react"
-import { Copy, Key } from "@/components/icons"
+import { Copy, Key, Sparkles } from "@/components/icons"
 import { errorMessage, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { copyText } from "@/lib/clipboard"
@@ -11,7 +11,17 @@ import { Input } from "@/components/ui/input"
 import { Notice } from "@/components/state"
 import { Modal } from "@/components/modal"
 import { Well } from "@/components/panel"
-import { Field, FieldRow, FormFact, FormFacts, FormNote } from "@/components/form"
+import {
+  Field,
+  FieldRow,
+  FormFact,
+  FormFacts,
+  FormNote,
+  OptionList,
+  OptionRow,
+} from "@/components/form"
+import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
+import { suggestPassword } from "@/components/database/server-tab"
 
 /**
  * Connecting a database that is installed on the server rather than running in
@@ -23,8 +33,15 @@ import { Field, FieldRow, FormFact, FormFacts, FormNote } from "@/components/for
  * dashboard reads them; a Postgres that apt installed keeps its passwords in
  * its own catalogue, and no amount of reading the machine reveals them.
  *
- * So this asks for exactly that, and the request it makes **dials before it
- * saves**. The version before it filled a connection string into the general
+ * So this asks for exactly that — or, since the dashboard has a root shell on
+ * this machine, *makes* one: the second card runs the engine's own client as
+ * its system account over the Unix socket, where peer authentication needs
+ * no password, creates (or resets) an account with a password generated
+ * here, and connects with that. It is the way in for the commonest case,
+ * a server installed with apt an hour ago whose `postgres` role has never
+ * been given a password at all.
+ *
+ * Either way the request **dials before it saves**. The version before it filled a connection string into the general
  * form with the password left out, which could be saved as it stood: the
  * result was a connection that existed, looked connected, and answered
  * "password authentication failed for user postgres" to everything asked of it
@@ -42,6 +59,9 @@ const resetHint: Record<string, string> = {
   postgres: `sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'choose-one'"`,
   mysql: `sudo mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY 'choose-one'"`,
 }
+
+/** The engines whose account can be made from the host's own shell. */
+const CAN_GRANT = new Set(["postgres", "mysql", "mongodb", "clickhouse", "redis"])
 
 const engineLabel: Record<string, string> = {
   postgres: "PostgreSQL",
@@ -64,27 +84,46 @@ export function HostConnectDialog({
   onConnected: (name: string) => void
 }) {
   const id = useId()
+  const grantable = CAN_GRANT.has(server.driver)
+  const [mode, setMode] = useState<"password" | "grant">(grantable ? "grant" : "password")
   const [name, setName] = useState(server.name)
   const [user, setUser] = useState(server.user ?? "")
   const [password, setPassword] = useState("")
   const [database, setDatabase] = useState(server.database ?? "")
+  // The account the dashboard makes for itself, and the password it gives it.
+  const [account, setAccount] = useState("just_dashboard")
+  const [accountPassword, setAccountPassword] = useState(suggestPassword)
+  const [superuser, setSuperuser] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const label = engineLabel[server.driver] ?? server.driver
+  const redis = server.driver === "redis"
 
   const connect = async () => {
     setBusy(true)
     setError(undefined)
     try {
-      const conn = await post<DbConnection>("/databases/host", {
-        driver: server.driver as DbDriver,
-        host: server.host,
-        port: server.port,
-        user,
-        password,
-        database,
-        name: name.trim(),
-      })
+      const conn =
+        mode === "grant"
+          ? await post<DbConnection>("/databases/host/grant", {
+              driver: server.driver as DbDriver,
+              host: server.host,
+              port: server.port,
+              user: redis ? "" : account,
+              password: redis ? "" : accountPassword,
+              database,
+              name: name.trim(),
+              superuser,
+            })
+          : await post<DbConnection>("/databases/host", {
+              driver: server.driver as DbDriver,
+              host: server.host,
+              port: server.port,
+              user,
+              password,
+              database,
+              name: name.trim(),
+            })
       notify.success(`Connected ${conn.name}`)
       onConnected(conn.name)
       onOpenChange(false)
@@ -106,9 +145,17 @@ export function HostConnectDialog({
           <Button variant="ghost" disabled={busy} onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button disabled={busy || !name.trim()} onClick={connect} pending={busy}>
-            <Key />
-            Connect
+          <Button
+            disabled={
+              busy ||
+              !name.trim() ||
+              (mode === "grant" && !redis && (!account.trim() || accountPassword.length < 8))
+            }
+            onClick={connect}
+            pending={busy}
+          >
+            {mode === "grant" ? <Sparkles /> : <Key />}
+            {mode === "grant" ? "Make the account and connect" : "Connect"}
           </Button>
         </>
       }
@@ -131,49 +178,155 @@ export function HostConnectDialog({
           </Notice>
         )}
 
-        <FieldRow>
-          <Field label="User" htmlFor={`${id}-user`}>
-            <Input
-              id={`${id}-user`}
-              value={user}
-              onChange={(e) => setUser(e.target.value)}
-              className="font-mono"
-              autoComplete="off"
+        {grantable && (
+          <ChoiceGrid columns={2}>
+            <ChoiceCard
+              verb="Make an account from this server"
+              selected={mode === "grant"}
+              onClick={() => setMode("grant")}
+              mark={Sparkles}
+              title={
+                redis ? "Read its password from the server" : "Make an account from this server"
+              }
+              description={
+                redis
+                  ? "The dashboard reads requirepass out of the server's configuration file as root and connects with it."
+                  : "The dashboard runs the engine's own client as its system account over the socket, where no password is needed, and creates one there."
+              }
             />
-          </Field>
-          <Field label="Database" htmlFor={`${id}-db`} hint="Empty for the server's default.">
-            <Input
-              id={`${id}-db`}
-              value={database}
-              onChange={(e) => setDatabase(e.target.value)}
-              className="font-mono"
+            <ChoiceCard
+              verb="I know a password"
+              selected={mode === "password"}
+              onClick={() => setMode("password")}
+              mark={Key}
+              title="I know a password"
+              description="Sign in with an account that already has one."
             />
-          </Field>
-        </FieldRow>
-        <Field
-          label="Password"
-          htmlFor={`${id}-password`}
-          hint="Nothing is saved until this connects. The password is sealed on the server with the same key as every other stored one, and never sent back."
-        >
-          <Input
-            id={`${id}-password`}
-            type="password"
-            autoFocus
-            autoComplete="off"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !busy) void connect()
-            }}
-            className="font-mono"
-          />
-        </Field>
-        {/* The commonest reason somebody is stuck here is that the account has
+          </ChoiceGrid>
+        )}
+
+        {mode === "grant" && !redis && (
+          <>
+            <FieldRow>
+              <Field
+                label="Account to make"
+                htmlFor={`${id}-account`}
+                hint="Created if missing; its password is reset if it exists."
+              >
+                <Input
+                  id={`${id}-account`}
+                  value={account}
+                  onChange={(e) => setAccount(e.target.value)}
+                  className="font-mono"
+                  autoComplete="off"
+                />
+              </Field>
+              <Field label="Database" htmlFor={`${id}-gdb`} hint="Empty for the server's default.">
+                <Input
+                  id={`${id}-gdb`}
+                  value={database}
+                  onChange={(e) => setDatabase(e.target.value)}
+                  className="font-mono"
+                />
+              </Field>
+            </FieldRow>
+            <Field
+              label="Its password"
+              htmlFor={`${id}-gpw`}
+              hint="Generated here, sealed on the server with every other stored one, and never shown again — copy it now if something else will use this account."
+              trailing={
+                <span className="flex items-center gap-1">
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => setAccountPassword(suggestPassword())}
+                  >
+                    Generate
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => void copyText(accountPassword, "Password copied")}
+                  >
+                    <Copy />
+                    Copy
+                  </Button>
+                </span>
+              }
+            >
+              <Input
+                id={`${id}-gpw`}
+                value={accountPassword}
+                onChange={(e) => setAccountPassword(e.target.value)}
+                className="font-mono"
+                autoComplete="new-password"
+              />
+            </Field>
+            <OptionList>
+              <OptionRow
+                title="Administrator of the whole server"
+                hint="What the Server page needs to manage accounts, databases and extensions. Off makes a plain login that can be granted databases later."
+                checked={superuser}
+                onCheckedChange={setSuperuser}
+              />
+            </OptionList>
+          </>
+        )}
+
+        {mode === "grant" && redis && (
+          <FormNote>
+            Redis has one password rather than accounts. It is read from the server&apos;s
+            configuration on this machine; an open server connects as it is.
+          </FormNote>
+        )}
+
+        {mode === "password" && (
+          <>
+            <FieldRow>
+              <Field label="User" htmlFor={`${id}-user`}>
+                <Input
+                  id={`${id}-user`}
+                  value={user}
+                  onChange={(e) => setUser(e.target.value)}
+                  className="font-mono"
+                  autoComplete="off"
+                />
+              </Field>
+              <Field label="Database" htmlFor={`${id}-db`} hint="Empty for the server's default.">
+                <Input
+                  id={`${id}-db`}
+                  value={database}
+                  onChange={(e) => setDatabase(e.target.value)}
+                  className="font-mono"
+                />
+              </Field>
+            </FieldRow>
+            <Field
+              label="Password"
+              htmlFor={`${id}-password`}
+              hint="Nothing is saved until this connects. The password is sealed on the server with the same key as every other stored one, and never sent back."
+            >
+              <Input
+                id={`${id}-password`}
+                type="password"
+                autoFocus
+                autoComplete="off"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !busy) void connect()
+                }}
+                className="font-mono"
+              />
+            </Field>
+            {/* The commonest reason somebody is stuck here is that the account has
             no password at all — both engines ship authenticating local
             connections by the operating-system user instead, so there has
             never been one to know. The way out is one line in a shell, and
             naming it is the difference between a dialog and a dead end. */}
-        {resetHint[server.driver] && (
+          </>
+        )}
+        {mode === "password" && resetHint[server.driver] && (
           <div className="space-y-1.5">
             <div className="flex items-center justify-between gap-3">
               <p className="eyebrow">Don&apos;t know it?</p>

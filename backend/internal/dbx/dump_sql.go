@@ -965,3 +965,21 @@ func identifierQuotes(driver Driver) map[byte]byte {
 		return map[byte]byte{'"': '"'}
 	}
 }
+
+// DSNForDatabase is dsnForDatabase for callers outside the package: the same
+// connection pointed at another database on the same server, or the string
+// unchanged on the engines whose connection cannot name one.
+func DSNForDatabase(driver Driver, dsn, database string) string {
+	return dsnForDatabase(driver, dsn, database)
+}
+
+// OpenDatabase opens a short-lived pool to another database on the same
+// server, for the one statement that has to run from inside it. The caller
+// closes it.
+func OpenDatabase(ctx context.Context, driver Driver, dsn, database string) (*sql.DB, error) {
+	d, err := DialectFor(driver)
+	if err != nil {
+		return nil, err
+	}
+	return openForDump(ctx, d, dsnForDatabase(driver, dsn, database))
+}

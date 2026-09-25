@@ -151,7 +151,7 @@ async function databaseFixture(page: Page) {
     }
     await fulfill(route, body)
   })
-  await page.goto("/databases?conn=1&schema=public&table=items")
+  await page.goto("/databases/browse?conn=1&schema=public&table=items")
   await expect(page.getByRole("checkbox", { name: "Select row 1", exact: true })).toBeVisible()
   return { mutations, held }
 }
@@ -387,7 +387,7 @@ test("Redis scan cursors retain all unsigned 64-bit digits in requests", async (
     }
     await fulfill(route, body)
   })
-  await page.goto("/databases?conn=1")
+  await page.goto("/databases/browse?conn=1")
   await expect(page.getByRole("button", { name: /example/ })).toBeVisible()
   await page.getByRole("button", { name: "Next", exact: true }).click()
   await expect.poll(() => cursors).toEqual(["0", cursor])

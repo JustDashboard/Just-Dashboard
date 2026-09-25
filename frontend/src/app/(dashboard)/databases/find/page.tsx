@@ -13,7 +13,7 @@ export default function FindPage() {
         <SearchTab
           conn={conn}
           schema={selection.schema}
-          onOpenTable={(schema, table) => goto("/databases", { schema, table })}
+          onOpenTable={(schema, table) => goto("/databases/browse", { schema, table })}
         />
       </div>
     </Page>

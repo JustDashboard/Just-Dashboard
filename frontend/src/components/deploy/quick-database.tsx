@@ -266,7 +266,7 @@ export function DatabaseQuickDeploy({
         </PanelBody>
         <Foot className="justify-between">
           <Button variant="outline" asChild>
-            <Link href={`/databases?conn=${connection.id}`}>Open in Databases</Link>
+            <Link href={`/databases/browse?conn=${connection.id}`}>Open in Databases</Link>
           </Button>
           {onConnect ? (
             <Button
