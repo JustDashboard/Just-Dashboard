@@ -921,8 +921,8 @@ The deployment section declares its two sets the same way. A project's verbs are
 `projectCommand`, is the first of View, Start, Deploy and Redeploy the list holds — by a fleet
 card's menu and by a fleet row, so a card and the context row cannot disagree about what can be done to
 a project. A run's and its release's are declared once in `deploy/run-verbs.tsx` and drawn by a
-Deployments row's menu and by the run page's header, which is what keeps a finished run from being
-a dead end. A long menu is grouped: a `Verb` may name its `group` — Running, Building, Project,
+Deployments row's menu and by the run page's identity line, which is what keeps a finished run from
+being a dead end. A long menu is grouped: a `Verb` may name its `group` — Running, Building, Project,
 *Release #4* — and `VerbMenu` draws an eyebrow and a separator where the group changes, because
 eleven sentences in a row are a wall and the same eleven under three names are three short lists.
 Cancelling a run is not a danger verb, any more than Stop is: it is undone by deploying again, and
@@ -1488,7 +1488,7 @@ the reader through it.
 | `/deploy/new` — the source chooser | **Flow** | Step one of three, and the screen is asking a question. |
 | Any page with a run of *choices* on it | either | The register is about the page; the lit choice is about the thing. A reading page with an engine picker in a dialog gets the edge on that picker and changes in no other way. |
 | `/deploy/new` — Configure | **Flow** | Step two of three, ending in the one command that creates the project. |
-| A run in progress (`/deploy/[id]/runs/[run]`) | Reading | You are *watching*, not deciding. A project's first deploy carries the spine the reader walked on `/deploy/new` with one step more, *Deploy* — current while it builds, done once it goes live — so the sequence still reads as one, and nothing else changes. |
+| A run in progress (`/deploy/[id]/runs/[run]`) | Reading | You are *watching*, not deciding. The page opens on the run's identity line with its verbs — Cancel, Retry, Redeploy, Visit, the release's menu — at the line's end beside its state, and nothing above it: the sequence on `/deploy/new` ended when the project was created, so a first run is read the same way as the fortieth, with no spine claiming the screens before it. |
 | Deploy settings, credentials, notifications | Reading | Editable readings of state, not a sequence with an end. |
 | Sign-in, first-run setup | **Flow** | A sequence with an outcome. |
 
