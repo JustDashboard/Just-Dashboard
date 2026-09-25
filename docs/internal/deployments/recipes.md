@@ -6,7 +6,7 @@ on the host. Generated Dockerfiles use root-relative, exclusive writes so a chec
 redirect output outside the build context. Detection ignores this generated directory.
 
 Detection reads manifests as data — `package.json`, `angular.json`, `requirements.txt`, `pyproject.toml`,
-`uv.lock`, `poetry.lock`, `Cargo.toml`, `pom.xml`, `build.gradle(.kts)`, `*.csproj`, `deno.json(c)`, a
+`uv.lock`, `poetry.lock`, `go.mod`, `go.sum`, `go.work`, `Cargo.toml`, `Cargo.lock`, `.cargo/config.toml`, `pom.xml`, `build.gradle(.kts)`, `*.csproj`, `deno.json(c)`, a
 `Procfile`, and for a JavaScript package its lockfiles, `.npmrc`, `.yarnrc.yml`, `bunfig.toml`,
 `pnpm-workspace.yaml` and the Node and Bun version files (`.nvmrc`, `.node-version`, `.tool-versions`,
 `.bun-version`) — and names a candidate per root with the framework, the build and start commands, the port,
@@ -38,8 +38,9 @@ pointing at the setting it names), `build_root_missing` when the root directory 
 
 Where it ran, it replaces the candidate's `recipeIssue`, which was decided with detection's settings
 rather than the plan's; a refusal already named by a more precise finding (`package_manager_*`,
-`go_version_unsupported`, `go_main_*`, `python_version_unsupported`, `start_command_missing`) is not
-reported twice. Without a tree — an image, a pasted Compose file, a commit that could not be fetched —
+`go_version_unsupported`, `go_main_*`, `go_cgo_library_unknown`, `go_embed_missing`,
+`go_local_replace_outside_root`, `rust_binary_*`, `python_version_unsupported`, `start_command_missing`)
+is not reported twice, and neither is a candidate's `recipeIssue` without a tree. Without a tree — an image, a pasted Compose file, a commit that could not be fetched —
 the same checks run from the candidate's stored facts.
 
 ## Build values
@@ -815,6 +816,12 @@ recipes whose toolchains stamp or version builds from Git (Go, Python's setuptoo
 git-commit-id, SourceLink) keep it. A static site also excludes `.env` and `.env.*`. Committed `.env`
 files are otherwise left in: Next.js and Vite read public build values from them.
 
+The context is the build root unless the build reads above it: a JavaScript workspace member installs
+from its workspace root ([JavaScript installs](#javascript-installs)), a Go module that a `go.work` above it
+uses, or whose local `replace` targets sit beside it, builds from the directory that holds them all, and
+a Cargo workspace member builds from its workspace root ([Go](#go), [Rust](#rust)). Preparation names the
+wider directory (`prepared.contextDirectory`), and the build and the generated Dockerfile use it.
+
 ## JavaScript installs
 
 `deploy/build_node_install.go` plans a JavaScript package's dependency install once, from files read as
@@ -1156,12 +1163,21 @@ and a linked database raises `schema_step_missing` with the change `env.py` need
 
 ## Go
 
-The Go recipe supports stable 1.25 and 1.26 toolchains. `build.goVersion` optionally pins a language
-family or patch version. Without it, `.go-version` takes precedence over the `toolchain` and `go`
-directives in `go.mod`; an older module language minimum uses the maintained 1.26 default. A selected
-version cannot be older than the module requires. Resolved image digests, selected Go version and the
-generated Dockerfile are recorded in build evidence. `GOTOOLCHAIN=local` prevents an unrecorded automatic
-toolchain download inside the build. See the [Go toolchain rules](https://go.dev/doc/toolchain).
+The Go recipe builds with the families in `goRecipeFamilies` (`deploy/build_go.go`): Go 1.26 and 1.27,
+which upstream supports, and 1.25, which it no longer does. That one table is the version pattern plans
+are validated against, the default (the newest), the refusal text, and the Build settings field
+(`GO_VERSIONS` in `deployment-defaults.ts`, kept equal by `TestGoRecipeCatalogueMatchesTheBuildSettings`);
+a release joins it when `golang:<family>-alpine` is published, and `TestLiveGoRecipeCatalogueResolves`
+resolves every family's image. `build.goVersion` pins a family or an exact patch, and so does
+`.go-version`; both are built exactly, and a 1.25 pin builds with the warning `go_version_eol`. What
+`go.mod` says is a minimum: `go 1.26.0` builds on `golang:1.26-alpine`, the family's newest patch with the
+security fixes the .0 lacks, never on the unpatched release it names (the pass finding
+`go_version_family` and the run log say so). The `toolchain` line is a preference: a maintained family it names is followed, one
+newer than the catalogue builds with the newest family and the warning `go_toolchain_downgraded`
+(`GOTOOLCHAIN=local` keeps a module that really needs the newer release a build error, "requires go >="),
+and a `go` line newer than every family is refused. A minimum older than the maintained families builds
+with the default. Resolved image digests, the chosen version, why it was chosen and the generated
+Dockerfile are recorded in build evidence. See the [Go toolchain rules](https://go.dev/doc/toolchain).
 
 Which toolchain builds the module is a setting, so detection keeps the facts — `goMinimumVersion`, the
 `toolchain` line (`goToolchain`) and the `.go-version` pin (`goVersionFile`) — rather than a refusal.
@@ -1231,33 +1247,156 @@ A binary that loads `.env` and treats a missing file as fatal — `godotenv.Load
 `/home/app`, created before the stage drops to its user. It carries no value, and godotenv never overrides a variable
 already in the environment, so the dashboard's values still win.
 
-This recipe uses `CGO_ENABLED=0`. A local file importing `C` that the build would compile — one whose
-constraints do not already restrict it to cgo builds, beside a `!cgo` fallback — produces the refusal,
-as do unsupported source versions and explicit CGO-enabling commands. Dependencies needing CGO or more
-complex native-library/workspace arrangements require a Dockerfile; source scanning does not certify
-all transitive dependencies. The dashboard's own required Go toolchain remains 1.26.8.
+What the module needs beyond its main package is read by `planGoBuild` (`deploy/build_go_recipe.go`),
+which detection and the recipe both run, so the candidate's `go` facts are what the build does and each
+refusal is a named finding before Deploy (`preflight_go.go`):
+
+- **cgo.** The recipe compiles C when a dependency is a cgo binding with no pure-Go path —
+  `github.com/mattn/go-sqlite3` (which `gorm.io/driver/sqlite` pulls in), `mutecomm/go-sqlcipher`,
+  `confluentinc/confluent-kafka-go` (built with `-tags musl`, its bundled librdkafka), `h2non/bimg` and
+  `davidbyttow/govips` (libvips), `gographics/imagick.v3` (ImageMagick 7), `otiai10/gosseract`
+  (Tesseract) — when `go.mod` requires it directly or indirectly, when a local file imports `"C"` with no
+  pure-Go twin beside it (a file built only under `!cgo`; a twinned file builds pure Go), or when the
+  build command sets `CGO_ENABLED=1`. Built with `CGO_ENABLED=0`, go-sqlite3 compiles a stub whose first
+  query fails ("Binary was compiled with 'CGO_ENABLED=0'"). The build stage installs `gcc musl-dev`
+  and the Alpine packages mapped from the libraries the bindings and the local files' `#cgo pkg-config:`
+  and `#cgo LDFLAGS: -l` lines name for linux; the binary is linked statically
+  (`-linkmode external -extldflags "-static"`) onto the usual `alpine:3.22` runtime unless a library
+  is only a shared object (libvips, ImageMagick, Tesseract, libpq, librdkafka, libzmq, libpcap, libwebp,
+  libheif), in which case it links dynamically and both stages are Alpine `3.24`
+  (`golang:<family>-alpine3.24`, `alpine:3.24` with the runtime packages), because a binary must run on
+  the release it was linked against. `go_cgo_enabled` (warning) names why cgo is on, and for a binding
+  with a pure-Go replacement (modernc.org/sqlite, glebarez/sqlite for GORM, franz-go) suggests it; a
+  library no package is known for is `go_cgo_library_unknown` (blocked) and the recipe's refusal.
+- **Where dependencies come from.** A committed `vendor/modules.txt` builds with `GOFLAGS=-mod=vendor`
+  and downloads nothing, so a vendored private module still builds (`go_vendored`). Without vendoring,
+  `go.sum` is compared with every requirement of `go.mod` (a replacement's own version for a replaced
+  module, none for a directory): an absent `go.sum` is `go_sum_missing` (warning) and one without an
+  entry `go.mod` requires is `lockfile_out_of_sync` (warning); both build with `-mod=mod`, recording the
+  checksums of what they download instead of stopping at "missing go.sum entry". Requirements from the
+  module's own account (`github.com/acme/…` for `github.com/acme/app`) are `go_private_module` when the
+  source is fetched with a credential: proxy.golang.org cannot see a private module. With a build
+  variable `GIT_TOKEN` mapped to the install step, the recipe installs git, sets
+  `GOPRIVATE=<host>/<owner>` and runs `go mod download` with git's URL for that host rewritten through
+  `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_0`/`GIT_CONFIG_VALUE_0` in that one command's environment — the
+  value lives in the step's secret mount and nowhere in the Dockerfile, a layer or git's configuration.
+- **Workspaces and local replacements.** A module a `go.work` above it `use`s builds from the go.work's
+  directory (the build context widens there, `WORKDIR` is the module); a module whose `replace`
+  directives point at local directories builds from the nearest directory holding it and every target,
+  with `GOWORK=off`. The runtime files are copied from the module's own directory. A replacement
+  outside the checkout, or at an absolute path, is `go_local_replace_outside_root` (blocked) and the
+  recipe's refusal; a module that is only a library is already `Go library` at low confidence, so the
+  service in the workspace is selected.
+- **Generated code.** `.templ` components without their `_templ.go` are generated before the build:
+  `go tool templ generate` when `go.mod` has the `tool github.com/a-h/templ/cmd/templ` directive, else
+  `go run github.com/a-h/templ/cmd/templ@<the required version> generate`, so the generator and the
+  runtime agree. Files the repository's own scripts write and the recipe does not — the CSS a
+  `tailwindcss … -o <file>` in a Makefile, Taskfile, justfile or package.json writes, sqlc's `out`
+  directory — are `go_codegen_missing` (warning) when the commit lacks them.
+- **Embedded front ends.** A `//go:embed` pattern whose directory the commit lacks, or holds only
+  dotfiles (`dist/.gitkeep`), is built first when a package.json with a build script contains it, or
+  its Vite `outDir` writes it: a Node stage runs that package's lockfile-driven install and `build`
+  script with the JavaScript recipe's own planner (`go_embed_frontend`, pass), and the output is copied
+  into the Go stage before `go build`; the package's own candidate is demoted, so the server is selected
+  rather than a site without its API. Nothing builds it and no build command is set:
+  `go_embed_missing` (blocked).
+- **Command-line applications.** A module on cobra or urfave/cli whose commands include `serve`,
+  `server` or `start` starts `/app <that subcommand>` (`go_start_subcommand`, a warning to confirm it),
+  since the binary run bare prints its help and exits. PocketBase's start command, port and data volume
+  are the persistent-state defaults below; its readiness is `/api/health`.
+
+The default build is `go build -trimpath -tags timetzdata -ldflags='-s -w' -o /out/app ./<package>`:
+`timetzdata` embeds the zone database, so `time.LoadLocation` works on any runtime image. The runtime
+stage installs `tzdata` as well (alpine carries none), for a `TZ` variable and anything that reads
+`/usr/share/zoneinfo`; `ca-certificates-bundle` is already in the image. Source scanning does not
+certify every transitive dependency: a cgo package outside the catalogue still builds without cgo, and
+its failure names the compiler (`build_native_toolchain_missing`). The dashboard's own required Go
+toolchain remains 1.26.8.
 
 ## Rust
 
-`Cargo.toml` names the package (or the first `[[bin]]`) whose release binary becomes `/app` on an
-`alpine` runtime as an unprivileged user; the build runs on `rust:1-alpine` (or `rust:<version>-alpine`
-when `rust-toolchain(.toml)` pins a stable release — nightly and beta need a Dockerfile) with
-`musl-dev`, `pkgconfig` and static OpenSSL installed so the usual crates link. `cargo fetch` is its own
-layer under the install secret mount; the build is `cargo build --release`, `--locked` when `Cargo.lock`
-is committed (its absence is the unpinned warning). A custom build command runs in its place and must
-still leave `target/release/<binary>`. `loco-rs` (5150, recognised before the axum it
-is built on), `axum` (3000), `actix-web` (8080), `rocket` (8000), `warp` (3030), `poem` (3000) and `salvo`
-(5800) mark a web service with the framework's conventional port. The served binary's `src/main.rs` (or
-`src/bin/<binary>.rs`) and `Rocket.toml` are read for the port and bind; the "confirm the port" decision
-stays only when none of them names one. Rocket, whose default address is 127.0.0.1, runs as
-`exec env ROCKET_PORT=${PORT:-8000} /app` with `ROCKET_ADDRESS=0.0.0.0` (both outrank `Rocket.toml`);
-Loco starts with `/app start --binding 0.0.0.0 --port ${PORT:-5150}`. A crate with no framework is a
-worker that asks. A workspace without a root package is a
-`recipe_unsupported` finding: set the root directory to the member crate.
+`Cargo.toml` is read as data (`readCargoFile`, `deploy/detect_rust.go`), dotted and inline keys alike:
+`axum.workspace = true` and `web = { package = "axum" }` are axum. The build runs on `rust:1-alpine`
+(or `rust:<version>-alpine` when `rust-toolchain(.toml)` pins a stable release — nightly and beta need a
+Dockerfile) and the binary runs on `alpine:3.22` as an unprivileged user. A custom build command runs in
+place of the default one and must still leave the binary where Cargo writes it.
 
-When `package.default-run` is declared, it selects the served binary ahead of that fallback, including
-automatically discovered `src/bin` targets. This keeps a maintenance command from being launched in
-place of the HTTP service just because its `[[bin]]` appears first.
+**Workspaces.** A crate that a `[workspace]` above it lists (a `members` glob it matches and no `exclude`
+covers, or a path dependency of the root package) builds within that workspace: the build context is the
+workspace root, where its `Cargo.lock`, `rust-toolchain` and `.cargo/config.toml` are, and the build is
+`cargo build --release --locked -p <package> --bin <binary>`; `x.workspace = true` dependencies resolve
+through `[workspace.dependencies]`, so a member's framework and port are read. Each member with a package
+is a candidate (`cargo_workspace_member`, pass) and a workspace root with no package of its own is none
+once the walk found its members, so the ranking chooses among the members — a service over a library,
+a tie as the usual choice between candidates. A crate that an ancestor workspace does not list builds
+on its own, as it always did.
+
+**The served binary** is chosen from Cargo's own targets: declared `[[bin]]`s whose `required-features`
+the default features enable, and, unless `autobins = false`, `src/main.rs` as the package's binary and
+each `src/bin/*.rs` and `src/bin/*/main.rs`. `package.default-run` wins, then the only binary, then the
+only one whose source starts a server (`axum::serve`, `HttpServer::new`, `rocket::build`/`#[launch]`,
+`warp::serve`, poem, salvo, Loco's CLI), then the one named after the package or `server`/`api`/`web`/
+`app`/`serve`. A tie asks — the decision `rust_binary_ambiguous` on `build.cargoBin`, which a run cannot go
+past — and `build.cargoBin` names the binary to serve (`rust_binary_missing` when it is not a target).
+The recipe always builds `--bin <binary>`, and reads it from `target/release`, from
+`target/<triple>/release` when `.cargo/config.toml` sets `[build] target`, or from its `target-dir`.
+
+**Native crates.** The build stage, which the runtime image leaves behind, always installs `musl-dev
+pkgconfig openssl-dev openssl-libs-static perl make` (perl and make are what OpenSSL's vendored build and
+jemalloc need). `Cargo.lock`'s packages (the lock resolves every feature of the workspace) add: `cmake`
+→ `cmake g++ linux-headers`; `cxx`/`link-cplusplus` → `g++`; `bindgen`/`clang-sys` → `clang-dev`;
+`prost-build`/`tonic-build`/`protobuf-codegen` without `protoc-bin-vendored`/`protobuf-src` → `protoc
+protobuf-dev`; `pq-sys` without `pq-src` → `libpq-dev`, linked statically (`PQ_LIB_STATIC=1` and the
+archives libpq needs after it on the link line, through `RUSTFLAGS`, which replaces a
+`.cargo/config` `build.rustflags`); `mysqlclient-sys` without `mysqlclient-src` → `mariadb-connector-c-dev
+mariadb-static zlib-static zstd-static` with `MYSQLCLIENT_STATIC=1 PKG_CONFIG_ALL_STATIC=1`;
+`libsqlite3-sys` → `sqlite-dev sqlite-static`; `libz-sys` → `zlib-dev zlib-static`; `rdkafka-sys` → `bash
+g++ linux-headers`. Every binary stays static. `rust_native_dependency` (pass) lists what was added and
+why; a GUI or hardware binding the lock resolves (gtk, webkit2gtk, alsa, udev) is
+`rust_native_dependency_unmapped` (warning).
+
+**sqlx.** A committed `.sqlx` (at the crate or the workspace root) builds with `SQLX_OFFLINE=true`, so a
+`DATABASE_URL` in a committed `.env` or the build's variables never sends the query macros to a database
+the build cannot reach (`sqlx_offline`, pass). The query macros (`query!`, `query_as!`, …) with no
+`.sqlx` are `sqlx_offline_data_missing` — blocked, with `cargo sqlx prepare`; a warning when a build-scoped
+`DATABASE_URL` is configured, since that compiles against a database the build can reach only if it is
+not a linked one. `sqlx::migrate!()` is `sqlx_migrations`: the application applies them at start.
+
+**The lockfile.** `Cargo.lock` is compared with the manifests: a dependency it does not resolve, or
+resolves at no version the requirement accepts (Cargo's caret, tilde, exact and comparator rules), is
+`lockfile_out_of_sync` (warning) and the build runs without `--locked` rather than stopping at "the lock
+file needs to be updated". A `version = 4` lock with a toolchain pinned before 1.78, which cannot read it,
+builds on `rust:1-alpine` (`rust_lock_newer_than_toolchain`). A missing lock is the unpinned warning, whose
+action is `cargo generate-lockfile`.
+
+**Memory.** The build runs as many compile jobs as whole gigabytes are free when it starts
+(`CARGO_BUILD_JOBS`, read from `/proc/meminfo` inside the step, so the Dockerfile is the same on every
+host), and `build_memory_low` estimates 2 GiB for a release build and 3 GiB with fat LTO, one codegen
+unit, or Leptos.
+
+**Frameworks.** `loco-rs` (5150, recognised before the axum it is built on), `axum` (3000), `actix-web`
+(8080), `rocket` (8000), `warp` (3030), `poem` (3000) and `salvo` (5800) mark a web service with the
+framework's conventional port. The served binary's source and `Rocket.toml` are read for the port and
+bind; the "confirm the port" decision stays only when none of them names one. Rocket, whose default
+address is 127.0.0.1, runs as `exec env ROCKET_PORT=${PORT:-8000} /app` with `ROCKET_ADDRESS=0.0.0.0`
+(both outrank `Rocket.toml`); Loco starts with `/app start --binding 0.0.0.0 --port ${PORT:-5150}` from
+its `<app>-cli` default-run binary. A crate with no framework is a worker that asks. Three build a
+browser side:
+
+- **Leptos** (`[package.metadata.leptos]`, or the `[[workspace.metadata.leptos]]` project whose
+  `bin-package` the crate is) builds on `rust:<version>-bookworm`, because cargo-leptos downloads glibc
+  helpers (wasm-bindgen, dart-sass): `rustup target add wasm32-unknown-unknown`, `cargo install
+  cargo-leptos --locked --version 0.3.9`, then `cargo leptos build --release` (`--project` for a
+  workspace member). The server binary and `target/site` (its `site-root`) run on `debian:bookworm-slim`
+  with `LEPTOS_SITE_ROOT=site`, `LEPTOS_ENV=PROD` and `LEPTOS_OUTPUT_NAME` (its `output-name`, else the
+  project's name), started as `exec env LEPTOS_SITE_ADDR=0.0.0.0:${PORT:-<site-addr port>} /app`, since
+  `site-addr` is a development address; the port is the `site-addr`'s.
+- **Trunk** (a `Trunk.toml`, or an `index.html` with `data-trunk` links, beside yew, leptos, dioxus-web,
+  sycamore or seed) is a static site: `cargo install trunk --locked --version 0.21.14`, `trunk build
+  --release --dist /out/dist`, served by nginx with the single-page fallback. The `index.html` is its
+  source, so it is not a static-site candidate of its own.
+- **Dioxus** (it bundles with `dx`) and **Shuttle** (`shuttle-runtime` starts `main` on Shuttle's own
+  runtime) are `recipe_unsupported` with that reason: a Dockerfile builds them.
 
 A binary whose `src/main.rs` or `src/bin` entry calls `dotenvy::dotenv()` with `.expect`, `.unwrap()` or
 `?` gets the same empty `.env` as a Go one.
@@ -1385,7 +1524,8 @@ the one the source declares (`detect_readiness.go`), strongest first:
    Astro endpoints.
 4. A health route registered in code (`app.get('/healthz')`, `@app.get("/health")`, a NestJS
    `@Controller('health')` under a literal global prefix, `HandleFunc("/healthz")`, axum/actix/warp
-   routes, `@GetMapping("/health")`, `MapGet("/health")`). A router can mount it under a prefix
+   routes, `@GetMapping("/health")`, `MapGet("/health")`). PocketBase's `/api/health` is declared by
+   the framework, so it is probed expecting a 2xx. A router can mount it under a prefix
    detection cannot see, so it is probed accepting any answer; a JVM route is put under the context
    path the configuration sets.
 5. The convention: a page framework (Next.js, Nuxt, SvelteKit, Astro, Remix, React Router, Angular SSR,
@@ -1577,7 +1717,7 @@ names, with the remedy the evidence supports:
 
 | Code | Recognised from | Fix computed |
 |------|-----------------|--------------|
-| `build_lockfile_out_of_sync` | npm `EUSAGE … are in sync` (subjects from `Missing:`/`Invalid:`), Bun `lockfile had changes, but lockfile is frozen`, `ERR_PNPM_OUTDATED_LOCKFILE`, Yarn `YN0028` and Yarn 1 `--frozen-lockfile`, Poetry `changed significantly`, uv `--locked`, Cargo `--locked was passed`, Go `missing go.sum entry` / `updates to go.mod needed`, Composer lock errors, Deno `The lockfile is out of date`, Bundler deployment mode | the package manager whose lockfile the detected candidate reads as in sync |
+| `build_lockfile_out_of_sync` | npm `EUSAGE … are in sync` (subjects from `Missing:`/`Invalid:`), Bun `lockfile had changes, but lockfile is frozen`, `ERR_PNPM_OUTDATED_LOCKFILE`, Yarn `YN0028` and Yarn 1 `--frozen-lockfile`, Poetry `changed significantly`, uv `--locked`, Cargo `--locked was passed`, Go `missing go.sum entry` / `updates to go.mod needed` / `inconsistent vendoring`, Composer lock errors, Deno `The lockfile is out of date`, Bundler deployment mode | the package manager whose lockfile the detected candidate reads as in sync |
 | `build_lockfile_incompatible` | pnpm `ERR_PNPM_LOCKFILE_BREAKING_CHANGE`/`BROKEN_LOCKFILE`, Cargo lock version, Poetry/uv lock format, Bun lockfile version | — |
 | `build_package_manager_mismatch` | corepack `This project is configured to use X`, `ERR_PNPM_BAD_PM_VERSION` | the manager `packageManager` declares |
 | `build_lifecycle_script_blocked` | `ERR_PNPM_IGNORED_BUILDS`, Bun `Blocked N postinstalls` with a consequence | — |
@@ -1588,14 +1728,14 @@ names, with the remedy the evidence supports:
 | `build_prisma_client_missing` | `@prisma/client did not initialize yet` | `prisma generate` before the build command, unless the recipe already runs it (the `prisma` CLI is a dependency); otherwise the sentence says to add the CLI |
 | `build_platform_binary_missing` | rollup/esbuild/SWC/lightningcss/oxide/sharp Linux binaries missing | — |
 | `build_legacy_openssl` | `0308010C`, `ERR_OSSL_EVP_UNSUPPORTED` | `NODE_OPTIONS=--openssl-legacy-provider` |
-| `build_system_library_missing`, `build_native_toolchain_missing` | `pg_config`, `mysql_config`, pkg-config, `cannot find -l`, `*-sys` crates, headers, Prisma libssl, glibc on musl; `gyp ERR!`, a missing compiler (a shell's `make: not found` only with exit 127 or a wrapper reporting 127), `Failed building wheel`, cgo, `linking with cc`, `protoc`, perl, NativeAOT's clang | — |
+| `build_system_library_missing`, `build_native_toolchain_missing` | `pg_config`, `mysql_config`, pkg-config, `cannot find -l`, `*-sys` crates, bindgen's `Unable to find libclang`, headers, Prisma libssl, glibc on musl; `gyp ERR!`, a missing compiler (a shell's `make: not found` only with exit 127 or a wrapper reporting 127), `Failed building wheel`, cgo the recipe did not detect, `linking with cc`, `protoc`, `` is `cmake` not installed ``, perl, NativeAOT's clang | — |
 | `build_install_script_failed` | npm `error path /app/node_modules/X` with `command failed`, Yarn `YN0009` | — |
 | `build_php_extension_missing` | `requires ext-X … it is missing from your system` | — |
-| `build_dependency_conflict`, `build_dependency_unavailable`, `build_dependency_local_path`, `build_dependency_advisory_blocked` | ERESOLVE, `ResolutionImpossible`, Composer/uv/Cargo/NuGet conflicts; ETARGET/E404, `No matching distribution`, NU1101, Maven artifacts, Go revisions, gems; conda `/croot/` paths; Composer advisories | — |
-| `build_registry_auth`, `build_registry_rate_limited`, `build_network` | E401/E403, `YN0041`, `terminal prompts disabled`; `toomanyrequests`; DNS, TLS and connection failures | — |
+| `build_dependency_conflict`, `build_dependency_unavailable`, `build_dependency_local_path`, `build_dependency_advisory_blocked` | ERESOLVE, `ResolutionImpossible`, Composer/uv/Cargo/NuGet conflicts; ETARGET/E404, `No matching distribution`, NU1101, Maven artifacts, Go revisions and the proxy's or checksum database's 404/410 for a private module (the sentence names `GIT_TOKEN`), gems; conda `/croot/` paths, Go's `replacement directory … does not exist`; Composer advisories | — |
+| `build_registry_auth`, `build_registry_rate_limited`, `build_network` | E401/E403, `YN0041`, `terminal prompts disabled` (from the go command's git fetch: a private module without `GIT_TOKEN`); `toomanyrequests`; DNS, TLS and connection failures | — |
 | `build_command_not_found`, `build_script_missing` | `sh: X: not found` when the step exited 127 or a wrapper reports that status (`exit code 127`, `exited (127)`) — a caught probe prints the same line and carries on —, `executable file not found`, pip's `Cannot find command 'git'`, Laravel Wayfinder's `php artisan wayfinder:generate` in an asset stage without PHP; npm/pnpm/Bun/Yarn missing script | the build command with its runner moved to the image's package manager (the install planner's own rewrite, `nodeRunnerFor`), read from the install the build recorded |
 | `build_module_not_found`, `build_type_error`, `build_compile_error` | `Cannot find module`, `Can't resolve`, `No module named`, `no required module provides`; `Type error:`, `error TS…`; rustc, C#, javac/Kotlin, Go, Maven, Gradle, bundler and framework compile errors | — |
-| `build_output_missing`, `build_copy_source_missing`, `build_embed_source_missing`, `build_wrong_root` | the recipe's own guard, a missing `COPY` source, `go:embed` without files, a manifest the build cannot find | the detected output directory, else the field to review |
+| `build_output_missing`, `build_copy_source_missing`, `build_embed_source_missing`, `build_wrong_root` | the recipe's own guard, a missing `COPY` source, `go:embed` without files, a manifest the build cannot find, a module a `go.work` does not list | the detected output directory, else the field to review |
 | `build_out_of_memory`, `build_disk_full`, `build_timeout` | heap limits, exit 137 (which points at no line: the step's output only shows where it was), `OutOfMemoryError`; `no space left on device`; the 30-minute limit | `NODE_OPTIONS=--max-old-space-size=` three quarters of the server's memory (from 1 GiB, at most 8 GiB) |
 | `build_permission`, `build_script_crlf`, `build_wrapper_missing`, `build_dev_dependency_in_production`, `build_bundle_platform_missing`, `build_hugo_extended_required`, `build_base_image_missing`, `build_platform_unsupported`, `build_dockerfile_invalid` | exit 126, `\r` interpreters, the Gradle/Maven wrapper, Symfony dev bundles and Telescope, a Gemfile.lock without Linux, Hugo Pipes' Sass, a FROM that does not resolve, a manifest for another platform, a Dockerfile that does not parse | — |
 
@@ -1612,13 +1752,25 @@ own starters: Astro 7 (static), Nuxt 4 and React Router 8 (servers), FastAPI on 
 whose first request reads its migrated table, a Streamlit script (its health endpoint and a file served
 through its own static-serving setting) and a Gradio app (the value in the page's embedded config), an
 axum service, a Maven jar and a Gradle jar, an ASP.NET Core minimal API, a Deno server, a minimal Laravel
-12 application (migrated, with the form's generated `APP_KEY`) and a plain `index.php`. It checks
+12 application (migrated, with the form's generated `APP_KEY`) and a plain `index.php`. The compiled
+shapes beyond one module or crate are built from their own fixtures too: a `go.work` member serving a
+template it reads at runtime with a value from its sibling module; a Go server embedding its Vite build,
+answering with cgo SQLite's version, a `Europe/Bucharest` zone and a generated templ component; a Cargo
+workspace member beside a maintenance binary; a Leptos (cargo-leptos) application, its site's scripts
+fetched; and a Trunk (yew) site, its WebAssembly module fetched. The WebAssembly builds install their tool
+from source and take several minutes each, so run them with `-timeout 90m`.
+`TestLiveGoRecipeCatalogueResolves` resolves every Go family's image, the Alpine pair a dynamically linked
+Go build uses, and the Debian images of the Leptos and Trunk builds, for amd64 and arm64. It checks
 readiness and served values without supplying build values at runtime; recipe fixtures also inspect logs,
 metadata and saved image layers for private install credentials. The Go fixture proves generated code,
 custom startup and the selected toolchain through its HTTP response. These local adapter journeys
 complement the production-build browser gate; they do not constitute public provider/DNS/TLS or clean-VM
 acceptance. The remaining catalogue entries are covered by rendered-Dockerfile and detection tests
-(`frameworks_*_test.go`, `build_recipes_test.go`). Persistent state, schema tools, seeds and their
+(`frameworks_*_test.go`, `build_recipes_test.go`); the Go and Rust builds beyond a single module or crate —
+toolchain families, cgo, vendoring, `go.sum`, private modules, templ, embedded front ends, workspaces and
+replacements, command-line subcommands, Cargo workspaces, binary selection, native crates, sqlx, the lockfile,
+Leptos, Trunk, Dioxus and Shuttle — by `build_go_test.go`, `build_go_recipe_test.go` and `build_rust_test.go`,
+and their failure signatures by `build_output_cause_compiled_test.go`. Persistent state, schema tools, seeds and their
 findings are table-tested per stack in `detect_state_test.go`, `detect_schema_test.go`,
 `preflight_state_test.go` and `recipe_runtime_files_test.go`. Repository shape — ranking, decoys, static
 roots, split repositories, shapes that are not services, ecosystems without a recipe, processes, other
