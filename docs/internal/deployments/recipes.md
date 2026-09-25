@@ -291,7 +291,7 @@ Phoenix release whose migrate overlay nothing runs
 (`migrations_not_run`). No finding repeats a secret value.
 
 When a candidate still fails its checks, its own output names the environment cause beside a missing
-table (`runtime_variable_cause.go`): a secret it stops without (Rails' `secret_key_base`, Django's
+table (`runtime_output_cause.go`): a secret it stops without (Rails' `secret_key_base`, Django's
 `SECRET_KEY`, Auth.js's `MissingSecret`), Rails credentials it cannot decrypt, Auth.js's
 `UntrustedHost`, Phoenix refusing a socket origin or a `runtime.exs` variable, a missing `.env`, and a
 connection refused on loopback, by port — never the line it was read from.

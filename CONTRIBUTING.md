@@ -98,11 +98,6 @@ carries no licensing question at all.
   table) also run `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveBuildFailureIsNamedFromBuildKit -count=1 -v`,
   which builds an npm project whose lockfile no longer matches package.json and checks the cause is
   named from buildx's own output; it creates no image.
-- Git workspace changes also exercise `internal/gitx`, `internal/ghx` and `internal/forgex`, including
-  race checks, plus `git-features.spec.ts`, `git-ui.spec.ts` and `design-system.spec.ts`. The LFS lifecycle
-  test needs `git-lfs` on PATH (it is included in the backend image); it touches only a temporary
-  repository. Provider fixture tests do not publish live comments or reviews. See
-  [the Git workspace contract](docs/internal/backend/git-workspace-expansion.md) for limits and setup.
   Sixty-four fixtures: the locked Node starters (installed by Bun, pnpm and Yarn 1), a Next.js static
   export and a standalone server, SvelteKit on adapter-auto, Express serving a Vite client, a Hono
   dev-only starter on Bun, React Router in SPA mode with a prerendered home, FastAPI, Flask, Django,
@@ -119,6 +114,11 @@ carries no licensing question at all.
   and overlap each other's rules. The Leptos and Trunk builds install their tool from source, so give
   the run `-timeout 90m`; `TestLiveGoRecipeCatalogueResolves` checks every Go and Rust base image
   resolves.
+- Git workspace changes also exercise `internal/gitx`, `internal/ghx` and `internal/forgex`, including
+  race checks, plus `git-features.spec.ts`, `git-ui.spec.ts` and `design-system.spec.ts`. The LFS lifecycle
+  test needs `git-lfs` on PATH (it is included in the backend image); it touches only a temporary
+  repository. Provider fixture tests do not publish live comments or reviews. See
+  [the Git workspace contract](docs/internal/backend/git-workspace-expansion.md) for limits and setup.
 - The blueprint catalogue sweep pulls every deployable definition's pinned image, starts it through the
   real runtime owner with generated secrets and runs its own readiness checks (`JD_BLUEPRINT_ONLY=a,b`
   narrows it; images it pulled are removed again):
