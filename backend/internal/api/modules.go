@@ -79,23 +79,27 @@ type moduleSet struct {
 	// jobs runs the operations that take longer than a request should:
 	// certbot, package upgrades, sshd applies. They outlive the request that
 	// started them and are watched by id rather than by the socket.
-	jobs             *jobs.Manager
-	backupStore      *backups.Store
-	backupRunner     *backups.Runner
-	backupSched      *backups.Scheduler
-	deployStore      *deploy.Store
-	deployer         *deploy.Deployer
-	deployRuns       *deploy.OrchestrationStore
-	deployEngine     *deploy.Engine
-	deployPlanning   *deploy.PlanningStore
-	deploySources    *deploy.HostSourceAnalyzer
-	deployPreflight  *deploy.HostPreflightObserver
+	jobs            *jobs.Manager
+	backupStore     *backups.Store
+	backupRunner    *backups.Runner
+	backupSched     *backups.Scheduler
+	deployStore     *deploy.Store
+	deployer        *deploy.Deployer
+	deployRuns      *deploy.OrchestrationStore
+	deployEngine    *deploy.Engine
+	deployPlanning  *deploy.PlanningStore
+	deploySources   *deploy.HostSourceAnalyzer
+	deployPreflight *deploy.HostPreflightObserver
+	// deployChecker answers the advisory check and Detect again with the
+	// evaluation analyze_plan runs before every build.
+	deployChecker    *deploy.DeploymentChecker
 	deployArtifacts  *deploy.ArtifactBuilder
 	deployAutomation *deploy.AutomationStore
 	deploySchedule   *deploy.AutomationScheduler
 	deployGit        *deploy.GitWatcher
 	deployDatabases  *deploymentDatabaseNetworks
 	deployPreviews   *deploy.PreviewQuarantineController
+	deployRuntime    *deploy.DockerRuntimeOwner
 	// deployExecutor is the normalized release path, kept for the tailnet
 	// sweep Start runs once the engine is up.
 	deployExecutor *deploy.NormalizedStepExecutor
@@ -228,10 +232,14 @@ func (s *Server) initModules() {
 		s.modules.proxy,
 	).WithFirewall(s.modules.netsec).WithDependencies(newDeploymentDependencyObserver(
 		s.Store, s.modules.backupStore, s.modules.docker,
-	))
+	).withExtensionProbe(s.databaseExtensions))
+	s.modules.deployChecker = deploy.NewDeploymentChecker(
+		s.modules.deployRuns, s.modules.deployPlanning, s.modules.deploySources, s.modules.deployPreflight,
+	)
 	artifactBackend := deploy.NewDockerArtifactBackend(s.modules.docker)
 	s.modules.deployArtifacts = deploy.NewArtifactBuilder(artifactBackend)
 	runtimeOwner := deploy.NewDockerRuntimeOwner(s.modules.docker).WithNetworks(s.modules.deployDatabases)
+	s.modules.deployRuntime = runtimeOwner
 	s.modules.deployPreviews = deploy.NewPreviewQuarantineController(s.modules.deployRuns, runtimeOwner, s.modules.proxy,
 		func(ctx context.Context, environmentID int64, phase string, success bool) {
 			s.Audit.Record(ctx, audit.Entry{Actor: "system", Action: "deploy.preview.quarantine." + phase, Target: strconv.FormatInt(environmentID, 10), Success: success})

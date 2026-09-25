@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -242,6 +243,10 @@ func (o *deploymentDatabaseNetworks) attachDatabase(ctx context.Context, network
 
 func (o *deploymentDatabaseNetworks) ResolveVariable(ctx context.Context, environmentID int64, revision int, target string) (string, error) {
 	var id int64
+	format, database := "", ""
+	if match := databaseReferenceShapeRE.FindStringSubmatch(target); match != nil {
+		target, format, database = match[1], match[2], match[3]
+	}
 	for _, candidate := range []string{target, strings.TrimSuffix(target, ".url")} {
 		if parsed, err := strconv.ParseInt(candidate, 10, 64); err == nil && parsed > 0 {
 			id = parsed
@@ -269,11 +274,23 @@ func (o *deploymentDatabaseNetworks) ResolveVariable(ctx context.Context, enviro
 	if json.Unmarshal([]byte(raw), &plan) != nil {
 		return "", deploy.ErrInvalidPlan
 	}
-	if plan.HostNetwork {
-		return dsn, nil
+	if !plan.HostNetwork {
+		dsn, err = o.server.databaseApplicationURL(ctx, conn, dsn)
+		if err != nil {
+			return "", err
+		}
 	}
-	return o.server.databaseApplicationURL(ctx, conn, dsn)
+	if format != "" && format != "url" || database != "" {
+		return deploy.ConnectionStringForFormat(dsn, format, database)
+	}
+	return dsn, nil
 }
+
+// databaseReferenceShapeRE reads a database reference that asks for a
+// connection shape, and optionally another database on the same server:
+// 5.jdbc, 5.adonet, 5.url.app_cache. Only a numeric id takes a suffix, so a
+// connection name that contains dots is never misread.
+var databaseReferenceShapeRE = regexp.MustCompile(`^([0-9]+)\.(url|jdbc-mariadb|jdbc|adonet|mysql2)(?:\.([A-Za-z0-9_]{1,63}))?$`)
 
 // markUnavailable records why a binding could not be repaired, beside the
 // status the settings page already reads.

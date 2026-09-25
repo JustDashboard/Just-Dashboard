@@ -396,7 +396,8 @@ func (e *NormalizedStepExecutor) startCandidate(
 	}, func(line BuildLog) error { return stepLog(execution, line.Stream, line.Text) })
 	if err != nil {
 		recovery := e.restorePrevious(ctx, execution, release.Release, snapshot.Plan)
-		return runtimeStepFailure(err, "candidate_start_failed", "the candidate runtime did not start", recovery)
+		code, message := candidateStartFailure(err)
+		return runtimeStepFailure(err, code, message, recovery)
 	}
 	runtime, err := e.store.RecordCandidateRuntime(ctx, execution.Run, execution.ClaimToken, started.Input)
 	if err != nil {
@@ -408,6 +409,9 @@ func (e *NormalizedStepExecutor) startCandidate(
 		return runtimeStepFailure(err, "runtime_record_failed", "the candidate started but its identity could not be recorded", recovery)
 	}
 	_ = stepLog(execution, "status", fmt.Sprintf("Started immutable candidate release #%d", release.Release.Number))
+	for _, variable := range webConcurrencyEnvironment(snapshot, variables) {
+		_ = stepLog(execution, "status", "WEB_CONCURRENCY="+variable.Value+": "+webConcurrencyReason(snapshot.Plan))
+	}
 	return StepResult{State: StepPassed, Evidence: mustJSON(startedStepEvidence{
 		ReleaseID: release.Release.ID, Runtime: *runtime, Target: started.Target,
 		PreviousStop: previousStop, ExpectedDowntime: release.Release.ExpectedDowntime,
@@ -508,10 +512,19 @@ func (e *NormalizedStepExecutor) verifyChecks(
 		// Read the candidate's own account of itself before compensation
 		// removes it. This is the difference between "could not connect" and
 		// "Error: DATABASE_URL is not set".
-		diagnostics := e.captureRuntimeDiagnostics(ctx, execution, release.Release, *runtime)
+		diagnostics := e.captureRuntimeDiagnostics(ctx, execution, release.Release, *runtime, runtimeCauseContext{
+			build: plan.Build, runtime: snapshot.Plan, variables: snapshot.Variables, compose: snapshot.Compose != nil, checks: checks,
+			manager: e.releaseNodeManager(ctx, execution.Run.ID, plan),
+		})
 		message := checkFailureMessage(phase, outcome, checks...) + diagnosticsSuffix(diagnostics)
+		// A cause the output proves is the run's terminal code, so every
+		// surface that reads the code names it; the health evidence stays.
+		failedCode := "health_gate_failed"
+		if diagnostics != nil && diagnostics.Cause != nil {
+			failedCode = diagnostics.Cause.Code
+		}
 		if operationTargetsLiveRelease(execution.Run.Operation) {
-			state, code := StepFailed, "health_gate_failed"
+			state, code := StepFailed, failedCode
 			if ctx.Err() != nil {
 				state, code, message = StepCancelled, "cancelled", "health verification was cancelled"
 			}
@@ -519,7 +532,7 @@ func (e *NormalizedStepExecutor) verifyChecks(
 				Evidence: mustJSON(map[string]any{"health": evidence, "diagnostics": diagnostics})}
 		}
 		recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, nil)
-		state, code := StepFailed, "health_gate_failed"
+		state, code := StepFailed, failedCode
 		if ctx.Err() != nil {
 			state, code, message = StepCancelled, "cancelled", "health verification was cancelled"
 		}
@@ -570,6 +583,7 @@ func (e *NormalizedStepExecutor) activate(
 			return StepResult{State: StepUnavailable, ErrorCode: "proxy_unavailable", ErrorMessage: "a managed domain requires an available HTTP proxy", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 		}
 		routeValue := deploymentRoute(release.Release.EnvironmentID, snapshot.Domains, runtime.Host, runtime.Port)
+		routeValue.MaxBodyMB = snapshot.Plan.MaxRequestBodyMB
 		if routeValue.TLS {
 			resolver, ok := e.proxy.(interface {
 				ResolveDeploymentCertificate(context.Context, []string) (string, string, error)
@@ -1218,6 +1232,28 @@ func (e *NormalizedStepExecutor) runtimeVariablesForRelease(
 	return e.variablesForScope(ctx, release.Release.RunID, release.Release.EnvironmentID, "runtime")
 }
 
+// releaseNodeManager is the JavaScript package manager the release's image
+// carries: the one this run's build installed with, else the plan's, else
+// the one detection resolved for a plan left to the lockfile.
+func (e *NormalizedStepExecutor) releaseNodeManager(ctx context.Context, runID int64, plan *StoredExecutionPlan) string {
+	if plan.Build.Method != BuildRecipe || plan.Build.Recipe != "node" {
+		return ""
+	}
+	var prepared preparedStepEvidence
+	if e.latestStepEvidence(ctx, runID, StepPrepareContext, &prepared) == nil {
+		if manager := preparedNodeManager(prepared.Prepared); manager != "" {
+			return manager
+		}
+	}
+	if plan.Build.PackageManager != "" {
+		return plan.Build.PackageManager
+	}
+	if candidate := e.causeCandidate(ctx, runID, plan); candidate != nil {
+		return candidate.PackageManager
+	}
+	return ""
+}
+
 func runtimeFromInput(input ReleaseRuntimeInput) ReleaseRuntime {
 	return ReleaseRuntime{
 		ReleaseID: input.ReleaseID, Kind: input.Kind, RuntimeID: input.RuntimeID, Name: input.Name,
@@ -1266,6 +1302,7 @@ func (e *NormalizedStepExecutor) captureRuntimeDiagnostics(
 	execution StepExecution,
 	release Release,
 	runtime ReleaseRuntime,
+	causeContext runtimeCauseContext,
 ) *runtimeDiagnosticsEvidence {
 	diagnoser, ok := e.runtime.(RuntimeDiagnoser)
 	if !ok || runtime.RuntimeID == "" {
@@ -1306,8 +1343,11 @@ func (e *NormalizedStepExecutor) captureRuntimeDiagnostics(
 	if evidence.Lines == 0 {
 		_ = stepLog(execution, "status", "The application printed no output before the check failed.")
 	}
-	if cause := applicationOutputCause(result.Containers); cause != nil {
+	if cause := applicationOutputCause(result.Containers, causeContext); cause != nil {
 		cause.Table = redact.sanitize(cause.Table)
+		for index, subject := range cause.Subjects {
+			cause.Subjects[index] = redact.sanitize(subject)
+		}
 		evidence.Cause = cause
 		_ = stepLog(execution, "status", "Diagnosis: "+cause.sentence())
 	}

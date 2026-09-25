@@ -5,10 +5,12 @@ import { Disclosure } from "@/components/form"
 import { Notice } from "@/components/state"
 import { VariableReferences } from "@/components/deploy/new-project/configure-advanced"
 import { EnvironmentEditor } from "@/components/deploy/new-project/environment-editor"
-import type {
-  ConfigureFlow,
-  EnvironmentRow,
-  FlowUpdate,
+import { detectedVariableDeclarations } from "@/components/deploy/deployment-defaults"
+import {
+  railsDatabaseRows,
+  type ConfigureFlow,
+  type EnvironmentRow,
+  type FlowUpdate,
 } from "@/components/deploy/new-project/draft"
 import { SECTION_IDS } from "@/components/deploy/new-project/plan-sections"
 
@@ -31,6 +33,7 @@ export function StepVariables({
   onRowsChange,
   dotenv,
   onDotenvChange,
+  platformSkipped,
   retainedKeys,
   onRemoveRetainedKey,
   suppliedVariables,
@@ -42,6 +45,8 @@ export function StepVariables({
   onRowsChange: (next: EnvironmentRow[] | ((rows: EnvironmentRow[]) => EnvironmentRow[])) => void
   dotenv: string
   onDotenvChange: (value: string) => void
+  /** Names the paste sets that the deployment sets itself, which are left out. */
+  platformSkipped: string[]
   retainedKeys: string[]
   onRemoveRetainedKey: (key: string) => void
   suppliedVariables: string[]
@@ -89,21 +94,55 @@ export function StepVariables({
     setConfiguration(next)
   }
 
+  // What each set-up row falls back to: the address it follows, or its default.
+  const planned = Object.fromEntries(
+    configuration.variables
+      .filter((variable) => variable.sensitivity === "plain" && variable.value)
+      .map((variable) => [variable.name, variable.value ?? ""]),
+  )
+  // Removing a detected row removes what the plan would have supplied for it
+  // too, so a secret the operator deleted is not generated behind their back.
+  const detectedNames = new Set(
+    detectedVariableDeclarations(flow.candidate, flow.profile).map((variable) => variable.name),
+  )
+  const changeRows = (next: EnvironmentRow[]) => {
+    const kept = new Set(next.map((row) => row.name))
+    const removed = rows
+      .filter((row) => row.detected && detectedNames.has(row.name) && !kept.has(row.name))
+      .map((row) => row.name)
+    onRowsChange(next)
+    if (removed.length)
+      setConfiguration({
+        ...configuration,
+        variables: configuration.variables.filter((variable) => !removed.includes(variable.name)),
+      })
+  }
+
   return (
     <>
       <EnvironmentEditor
         rows={rows}
-        onRowsChange={onRowsChange}
+        onRowsChange={changeRows}
         dotenv={dotenv}
         onDotenvChange={onDotenvChange}
+        platformSkipped={platformSkipped}
         retainedKeys={retainedKeys}
         onRemoveRetainedKey={onRemoveRetainedKey}
         hostNetwork={configuration.runtime.hostNetwork}
         databases={flow.candidate?.databases}
-        onConnectDatabase={(connection, url, variable) => {
+        planned={planned}
+        browserPrefixes={flow.candidate?.browserPrefixes}
+        onConnectDatabase={(connection, url, variable, database) => {
+          // Rails 8 reads a URL per database — cache, queue, cable — on the
+          // same server; each follows the link as its own database name.
+          const extras = url.startsWith("${{database.")
+            ? railsDatabaseRows(connection.id, connection.database, database?.alsoVariables)
+            : []
+          const replaced = new Set([variable, ...extras.map((row) => row.name)])
           onRowsChange((current) => [
-            ...current.filter((row) => row.name && row.name !== variable),
+            ...current.filter((row) => row.name && !replaced.has(row.name)),
             { name: variable, value: url },
+            ...extras,
           ])
           setConfiguration({
             ...configuration,

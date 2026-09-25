@@ -71,8 +71,11 @@ func observeRuntimeServices(ctx context.Context, owner RuntimeObserver, environm
 	result.Status = "available"
 	result.ObservedAt = time.Now().UTC()
 	for _, item := range containers {
+		// A release task's one-shot container carries its release's labels
+		// but is not one of the release's services.
 		if item.Labels["io.just-dashboard.managed"] != "true" ||
-			item.Labels["io.just-dashboard.environment-id"] != labels["io.just-dashboard.environment-id"] {
+			item.Labels["io.just-dashboard.environment-id"] != labels["io.just-dashboard.environment-id"] ||
+			item.Labels[releaseTaskLabel] != "" {
 			continue
 		}
 		releaseID, err := strconv.ParseInt(item.Labels["io.just-dashboard.release-id"], 10, 64)

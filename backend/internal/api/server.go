@@ -106,6 +106,11 @@ func (s *Server) Start(ctx context.Context) error {
 	if err := s.modules.backupRunner.RecoverRestoreChecks(cleanupCtx); err != nil {
 		s.Log.Warn("backup restore verification cleanup needs attention", "err", err)
 	}
+	// Before the engine resumes any run: a release task this process's
+	// predecessor was running has nobody reading its output or its exit.
+	if err := s.modules.deployRuntime.RemoveOrphanedReleaseTasks(cleanupCtx); err != nil {
+		s.Log.Warn("release task containers left by a previous start could not be removed", "err", err)
+	}
 	cleanupCancel()
 	// The metrics recorder is started here rather than lazily on the first
 	// request precisely because nothing may ever request it: its whole

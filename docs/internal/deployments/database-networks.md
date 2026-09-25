@@ -5,6 +5,19 @@ connection as a dependency. Execution resolves that identity through Databases u
 encrypted credentials. The explicit admin URL read remains audited and non-cacheable. It is read-only:
 it does not create a network, publish a port, or change the saved host DSN.
 
+`GET /databases/{id}/url` takes `format` (`url`, `jdbc`, `jdbc-mariadb`, `adonet`, `mysql2`) and
+`database` (another database on the same server) for an application that parses JDBC (credentials as
+query parameters; `jdbc-mariadb` writes MariaDB Connector/J's own `jdbc:mariadb://` scheme, since quick
+setup's MariaDB records a `mysql://` address), ADO.NET keywords or Rails' `mysql2://`, and for Rails 8's
+cache, queue and cable databases. The typed
+reference records both after the numeric id — `${{database.5.jdbc}}`, `${{database.5.url.app_cache}}`
+— and the release resolves the same shape from the container URL. Only a numeric id takes a suffix, so
+a connection name containing dots is never misread. Relinking a variable from Settings → Databases
+keeps the shape its previous reference asked for. Quick setup also offers PostgreSQL 16 with pgvector
+(`pgvector/pgvector:pg16`) or PostGIS (`postgis/postgis:16-3.5-alpine`, offered and accepted only on
+x86-64, the one architecture that image is published for), which Databases already recognises, and
+refuses MongoDB 7 on a CPU without AVX or ARMv8.2 atomics before pulling it.
+
 Creation stages entered variables in the draft's encrypted environment column before preflight and
 commits them with the initial project transaction. A required connection can therefore be satisfied by
 a managed database reference or an external provider URL before the first run. The browser receives

@@ -15,6 +15,18 @@ import { SECTION_IDS } from "@/components/deploy/new-project/plan-sections"
 import { synchronizePrimaryDomain } from "@/components/deploy/new-project/domain-bindings"
 
 /**
+ * Where the port came from, when detection read it: the file and line that
+ * fix it, or that the server takes the PORT the runtime injects.
+ */
+function portHint(candidate: ConfigureFlow["candidate"]) {
+  if (candidate?.listen?.portFrom) return `Read from ${candidate.listen.portFrom}.`
+  if (candidate?.listen?.readsPort)
+    return "The server listens on the PORT the runtime sets, so any port works."
+  if (candidate?.port) return "Read from the source's own configuration."
+  return "What the container serves on, not the host port."
+}
+
+/**
  * Step two: **how it runs, and where it answers.**
  *
  * The port and the public address are the whole of it in the open, because
@@ -63,6 +75,7 @@ export function StepRuntime({
     [
       runtime.memoryMb ? `${runtime.memoryMb} MB` : undefined,
       runtime.cpus ? `${runtime.cpus} CPU` : undefined,
+      runtime.maxRequestBodyMb ? `${runtime.maxRequestBodyMb} MB uploads` : undefined,
       runtime.strategy === "blue_green" ? "candidate first" : "stop first",
     ]
       .filter(Boolean)
@@ -100,11 +113,7 @@ export function StepRuntime({
             htmlFor="internal-port"
             className="sm:max-w-xs"
             error={errors.internalPort}
-            hint={
-              flow.candidate?.port
-                ? "Read from the source's own configuration."
-                : "What the container serves on, not the host port."
-            }
+            hint={portHint(flow.candidate)}
           >
             <Input
               id="internal-port"
@@ -117,7 +126,12 @@ export function StepRuntime({
                 setConfiguration({
                   ...configuration,
                   runtime: { ...runtime, internalPort },
-                  checks: checksForRuntime(configuration.checks, flow.profile, internalPort),
+                  checks: checksForRuntime(
+                    configuration.checks,
+                    flow.profile,
+                    internalPort,
+                    flow.candidate?.readiness,
+                  ),
                 })
               }}
               className="font-mono"

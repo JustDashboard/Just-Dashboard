@@ -199,10 +199,12 @@ type DetectedCandidate struct {
 	// SchemaTool names the migration tool the source declares. SchemaCommand
 	// is how the detected start command applies its schema; it is empty when
 	// the tool needs a decision, and SchemaInStart says the package's own
-	// start script already runs it.
-	SchemaTool    string `json:"schemaTool,omitempty"`
-	SchemaCommand string `json:"schemaCommand,omitempty"`
-	SchemaInStart bool   `json:"schemaInStart,omitempty"`
+	// start script already runs it. SchemaInRelease says ReleaseCommand runs
+	// it — itself or through the scripts it runs — so the start does not.
+	SchemaTool      string `json:"schemaTool,omitempty"`
+	SchemaCommand   string `json:"schemaCommand,omitempty"`
+	SchemaInStart   bool   `json:"schemaInStart,omitempty"`
+	SchemaInRelease bool   `json:"schemaInRelease,omitempty"`
 	// SPAFallback says the site's client owns its routes, so nginx answers
 	// any path it has no file for with index.html.
 	SPAFallback   bool   `json:"spaFallback,omitempty"`
@@ -214,6 +216,172 @@ type DetectedCandidate struct {
 	Databases            []DetectedDatabase  `json:"databases,omitempty"`
 	Evidence             []DetectionEvidence `json:"evidence"`
 	NeedsDecision        []string            `json:"needsDecision"`
+
+	// Readiness is how the candidate proves it is serving, read from what the
+	// source declares (detect_readiness.go); nil keeps the plan's GET / check.
+	Readiness *DetectedReadiness `json:"readiness,omitempty"`
+	// BackgroundWorker names the library that makes the candidate a process
+	// that never listens, such as a chat bot or a queue consumer.
+	BackgroundWorker *DetectedBackgroundWorker `json:"backgroundWorker,omitempty"`
+	// StartDetaches is a start command that puts the application in the
+	// background, which detection could not rewrite into a foreground one.
+	StartDetaches *DetectedStartDetach `json:"startDetaches,omitempty"`
+	// Listen is what the source says about where its server listens — a
+	// port it fixes, whether it reads PORT, a loopback bind — for preflight
+	// to re-check against the plan without the source tree.
+	Listen *DetectedListen `json:"listen,omitempty"`
+	// NetworkVariables are plain runtime variables the deployment's place
+	// behind the managed proxy decides (AUTH_TRUST_HOST, NEXTAUTH_URL, HOST).
+	NetworkVariables []DetectedNetworkVariable `json:"networkVariables,omitempty"`
+	// PersistentPaths is state the application writes to its own filesystem
+	// (detect_state.go); SeedCommand loads its seed data, SeedResets says the
+	// seed clears tables first, and SchemaPush says the schema step pushes the
+	// declared model instead of applying committed migrations.
+	PersistentPaths []DetectedPersistentPath `json:"persistentPaths,omitempty"`
+	SeedCommand     string                   `json:"seedCommand,omitempty"`
+	SeedResets      bool                     `json:"seedResets,omitempty"`
+	SchemaPush      bool                     `json:"schemaPush,omitempty"`
+	// BrowserPrefixes are the variable prefixes this root's framework
+	// compiles into the JavaScript every visitor downloads (NEXT_PUBLIC_,
+	// VITE_, …), so a value under one is build input and public.
+	BrowserPrefixes []string `json:"browserPrefixes,omitempty"`
+	// EnvironmentNotes are facts about the source's configuration that
+	// preflight turns into findings; see EnvironmentNote.
+	EnvironmentNotes []EnvironmentNote `json:"environmentNotes,omitempty"`
+	// The repository's own Dockerfile, read as data (detector_dockerfile.go):
+	// what its name, place or command says it was written for, the stage to
+	// build, its build arguments by name, and the platforms it pins.
+	DockerfileRole      string          `json:"dockerfileRole,omitempty"`
+	DockerfileTarget    string          `json:"dockerfileTarget,omitempty"`
+	DockerfileArgs      []DockerfileArg `json:"dockerfileArgs,omitempty"`
+	DockerfilePlatforms []string        `json:"dockerfilePlatforms,omitempty"`
+	// DockerfileStages are the named stages a configured target must be one of.
+	DockerfileStages []string `json:"dockerfileStages,omitempty"`
+	// ImageBuildIssues are what detection proved about how this candidate's
+	// image would build — a refused line, a missing COPY source, a script
+	// without its executable bit — so preflight says so before Deploy.
+	ImageBuildIssues []ImageBuildIssue `json:"imageBuildIssues,omitempty"`
+	// ReleaseCommand is the one-off command the repository declares must run
+	// before each release starts (Procfile release:, fly.toml, render.yaml).
+	ReleaseCommand string `json:"releaseCommand,omitempty"`
+	// Repository shape (detect_repo_shape.go). Demotion says why a candidate
+	// is offered but never chosen over the application (an example, a docs
+	// site, the frontend of an API); NotDeployable names a shape nothing can
+	// serve (a library, an extension, a mobile app). Companions are the other
+	// roots of a split frontend and API; Processes are what the source runs
+	// besides this candidate's own process.
+	Demotion             string                     `json:"demotion,omitempty"`
+	NotDeployable        string                     `json:"notDeployable,omitempty"`
+	DesktopShell         string                     `json:"desktopShell,omitempty"`
+	Companions           []string                   `json:"companions,omitempty"`
+	Processes            []DetectedProcess          `json:"processes,omitempty"`
+	PlatformManifests    []DetectedPlatformManifest `json:"platformManifests,omitempty"`
+	ServerlessCode       []DetectedServerlessCode   `json:"serverlessCode,omitempty"`
+	ImportCaseMismatches []ImportCaseMismatch       `json:"importCaseMismatches,omitempty"`
+	// StaticSite is what a static site's own files say about its build and
+	// serving: the generator release, the sub-path, the hosting rules
+	// (detect_static_site.go).
+	StaticSite *DetectedStaticSite `json:"staticSite,omitempty"`
+	// Lockfiles are the JavaScript lockfiles committed for this package (or
+	// its workspace), each compared with package.json. NodeInstalls is what
+	// the recipe installs under each package manager an operator can choose,
+	// computed by the same planner the build runs, so preflight can judge a
+	// choice without reading the source again. NodeVersion is the Node major
+	// the recipe builds on and where it came from.
+	Lockfiles    []DetectedLockfile    `json:"lockfiles,omitempty"`
+	NodeInstalls []DetectedNodeInstall `json:"nodeInstalls,omitempty"`
+	NodeVersion  string                `json:"nodeVersion,omitempty"`
+	// NodeBuild is what the build reads that preflight judges against the
+	// configuration and the host.
+	NodeBuild *DetectedNodeBuild `json:"nodeBuild,omitempty"`
+
+	// GoToolchain and GoVersionFile are the go.mod toolchain line and the
+	// .go-version pin, kept as facts rather than folded into RecipeIssue: which
+	// toolchain builds the module is an operator setting, so preflight decides
+	// it against the plan's Go version instead of against detection's default.
+	GoToolchain   string `json:"goToolchain,omitempty"`
+	GoVersionFile string `json:"goVersionFile,omitempty"`
+	// GoMainPackages are the module's buildable main packages, relative to
+	// the candidate root ("." for the root itself); GoPackage is the one the
+	// ranking chose, empty when the ranking tied or there is none.
+	// GoMainPackagesOmitted counts the mains past the list's bound, so a
+	// package missing from a list that is not whole is not called absent.
+	GoMainPackages        []string `json:"goMainPackages,omitempty"`
+	GoMainPackagesOmitted int      `json:"goMainPackagesOmitted,omitempty"`
+	GoPackage             string   `json:"goPackage,omitempty"`
+	// GoLibrary says the module has no buildable main package at all, which
+	// no Go setting can fix: the recipe builds a command, not a library.
+	GoLibrary bool `json:"goLibrary,omitempty"`
+	// Go and Rust are what detection read about how the module or crate
+	// builds beyond its toolchain (detect_go.go, detect_rust.go).
+	Go   *DetectedGoBuild   `json:"go,omitempty"`
+	Rust *DetectedRustBuild `json:"rust,omitempty"`
+	// JavaBuild and DotnetBuild are what a JVM or .NET candidate's build
+	// says about building it (planning_compiled.go).
+	JavaBuild   *DetectedJavaBuild   `json:"javaBuild,omitempty"`
+	DotnetBuild *DetectedDotnetBuild `json:"dotnetBuild,omitempty"`
+	// PythonRequires is the interpreter range the source declares
+	// (requires-python, or Poetry's python constraint), and PythonInstall the
+	// manifest the recipe installs from; together they say whether a chosen
+	// family can run the project and how loudly the install would refuse it.
+	PythonRequires string `json:"pythonRequires,omitempty"`
+	PythonInstall  string `json:"pythonInstall,omitempty"`
+	// PHP and Deno are what those recipes read beyond their manifests — the
+	// release, the extensions, what the lock says about the manifest — for
+	// preflight to judge a plan without the tree (detect_php.go,
+	// detect_deno.go).
+	PHP  *DetectedPHP  `json:"php,omitempty"`
+	Deno *DetectedDeno `json:"deno,omitempty"`
+	// SystemPackages are the Debian packages the source needs in its image,
+	// each with the dependency that needs it, and Python what detection read
+	// about a Python root beyond its framework (detect_python.go).
+	SystemPackages []DetectedSystemPackage `json:"systemPackages,omitempty"`
+	Python         *DetectedPython         `json:"python,omitempty"`
+	// Toolchain is what a Ruby, Elixir, Scala, Clojure, Dart or Gleam
+	// recipe read about the release it builds on (detect_languages.go).
+	Toolchain *DetectedToolchain `json:"toolchain,omitempty"`
+
+	// readingConfidence is what the source's own evidence supports when an
+	// unsettled package manager caps Confidence (packageCandidate). Ranking
+	// compares roots by it: which manager installs is a question of building
+	// the application, not of what the repository is for. Detection only.
+	readingConfidence DetectionConfidence
+}
+
+// EnvironmentNote is a fact detection read from the source's configuration
+// that preflight answers before the first build: a committed Django secret
+// key, a .env file the process refuses to start without, an identity
+// provider whose callback allowlist must name the planned domain. Detail and
+// Path are evidence; a note never carries a variable's value.
+type EnvironmentNote struct {
+	Code   string `json:"code"`
+	Detail string `json:"detail,omitempty"`
+	Path   string `json:"path,omitempty"`
+}
+
+// DetectedNodeBuild is what a JavaScript build reads beyond its install:
+// the env-validation schema it imports (EnvSchema, read as text) with the
+// server and client variables it requires and whether it honours
+// SKIP_ENV_VALIDATION, the memory the build is estimated to peak at, and
+// the names prisma.config reads that the recipe gives a placeholder while
+// a step only generates the client (PrismaEnv), with the package scripts
+// that migrate or push instead (PrismaConnectScripts), so a build command
+// that runs one is known to need the real database.
+type DetectedNodeBuild struct {
+	EnvSchema            string   `json:"envSchema,omitempty"`
+	EnvServer            []string `json:"envServer,omitempty"`
+	EnvClient            []string `json:"envClient,omitempty"`
+	EnvSkippable         bool     `json:"envSkippable,omitempty"`
+	MemoryMiB            int      `json:"memoryMiB,omitempty"`
+	PrismaEnv            []string `json:"prismaEnv,omitempty"`
+	PrismaConnectScripts []string `json:"prismaConnectScripts,omitempty"`
+	// Findings are what the framework's configuration made the recipe do
+	// that the repository could say itself (adapter-node for adapter-auto,
+	// a Nitro preset replaced); DevScripts names each package script that
+	// starts a development server or a watcher, with what it starts, so a
+	// start command written later is judged without the source.
+	Findings   []PreflightFinding `json:"findings,omitempty"`
+	DevScripts map[string]string  `json:"devScripts,omitempty"`
 }
 
 // DetectedVariable is an environment variable the source reads, found in an
@@ -224,6 +392,69 @@ type DetectedVariable struct {
 	Name    string   `json:"name"`
 	Example string   `json:"example,omitempty"`
 	Sources []string `json:"sources"`
+	// Setup is how the dashboard supplies the value when the operator types
+	// none: "generate" mints a self-issued secret at commit in
+	// GenerateFormat, "domain" binds it to the planned domain through
+	// DomainTemplate, "default" applies DefaultValue, a harmless documented
+	// setting, and "paste" marks a secret only the operator holds (Rails'
+	// master key) that must never be generated. SetupReason is the evidence.
+	Setup          string `json:"setup,omitempty"`
+	SetupReason    string `json:"setupReason,omitempty"`
+	GenerateLength int    `json:"generateLength,omitempty"`
+	GenerateFormat string `json:"generateFormat,omitempty"`
+	DomainTemplate string `json:"domainTemplate,omitempty"`
+	DefaultValue   string `json:"defaultValue,omitempty"`
+	// Phase "build" says the value is read while the build runs — a
+	// framework config file, a static env import, a browser prefix — so it
+	// needs build scope; empty means it is read at runtime.
+	Phase string `json:"phase,omitempty"`
+	// BrowserInlined says the framework compiles the value into client
+	// JavaScript, which makes it public whatever its sensitivity.
+	BrowserInlined bool `json:"browserInlined,omitempty"`
+	// Required is a read with no default at a position that runs as the
+	// application starts or builds; RequiredRead is the same form somewhere
+	// that may only run on one path, which is a warning rather than a gate.
+	Required     bool `json:"required,omitempty"`
+	RequiredRead bool `json:"requiredRead,omitempty"`
+	// BuildSources are the files that read it while the build runs, the
+	// reads its build Phase comes from.
+	BuildSources []string `json:"buildSources,omitempty"`
+	// LocalhostIn names a committed file whose value for this variable
+	// points at loopback, which inside the container is the app itself.
+	LocalhostIn string `json:"localhostIn,omitempty"`
+	// Step "install" marks a registry credential a package manager's
+	// configuration reads, which only the dependency install needs;
+	// InstallRequired says the install fails without it.
+	Step            string `json:"step,omitempty"`
+	InstallRequired bool   `json:"installRequired,omitempty"`
+}
+
+// DetectedLockfile is one committed JavaScript lockfile compared, as data,
+// with the package.json of every workspace it records. State is in_sync,
+// stale (the manager's frozen install would refuse it) or unknown; the name
+// lists are capped and Note is the sentence an operator reads.
+type DetectedLockfile struct {
+	Path    string   `json:"path"`
+	Manager string   `json:"manager"`
+	State   string   `json:"state"`
+	Missing []string `json:"missing,omitempty"`
+	Extra   []string `json:"extra,omitempty"`
+	Changed []string `json:"changed,omitempty"`
+	Note    string   `json:"note,omitempty"`
+}
+
+// DetectedNodeInstall is the dependency install the recipe runs when Manager
+// is chosen: the lockfile it installs from, the exact command, the manager
+// release, the build and start commands detection proposes for that runner,
+// and the preflight findings that choice carries.
+type DetectedNodeInstall struct {
+	Manager      string             `json:"manager"`
+	Lockfile     string             `json:"lockfile,omitempty"`
+	Install      string             `json:"install,omitempty"`
+	Toolchain    string             `json:"toolchain,omitempty"`
+	BuildCommand string             `json:"buildCommand,omitempty"`
+	StartCommand string             `json:"startCommand,omitempty"`
+	Findings     []PreflightFinding `json:"findings,omitempty"`
 }
 
 // DetectedDatabase is a database engine the source's dependencies or example
@@ -233,6 +464,21 @@ type DetectedDatabase struct {
 	Engine   string `json:"engine"`
 	Variable string `json:"variable"`
 	Evidence string `json:"evidence"`
+	// Format is the connection string the consumer parses when it is not a
+	// URL: "jdbc" (Spring, Quarkus), "jdbc-mariadb" (the same over MariaDB
+	// Connector/J, which refuses jdbc:mysql://), "adonet" (.NET) or "mysql2"
+	// (Rails before 7.2, which has no mysql:// adapter alias).
+	Format string `json:"format,omitempty"`
+	// Extensions are the Postgres extensions the schema needs (vector,
+	// postgis); the official image ships neither.
+	Extensions []string `json:"extensions,omitempty"`
+	// Hosted names a driver that only speaks a provider's own protocol
+	// (neon-http, vercel-postgres, planetscale-http, prisma-accelerate,
+	// upstash-rest), which no database created here can answer.
+	Hosted string `json:"hosted,omitempty"`
+	// AlsoVariables are further databases on the same server the framework
+	// reads by name — Rails 8's CACHE_, QUEUE_ and CABLE_DATABASE_URL.
+	AlsoVariables []string `json:"alsoVariables,omitempty"`
 }
 
 type DetectionResult struct {
@@ -246,11 +492,27 @@ type DetectionResult struct {
 	TruncatedReason string              `json:"truncatedReason,omitempty"`
 	Unavailable     string              `json:"unavailable,omitempty"`
 	GitRequirements GitRequirements     `json:"gitRequirements"`
+	// SetAside lists what detection recognised and deliberately did not
+	// offer; Alternatives a template or published image of the same
+	// application (detect_repo_shape.go).
+	SetAside     []DetectionSetAside    `json:"setAside,omitempty"`
+	Alternatives []DetectionAlternative `json:"alternatives,omitempty"`
+
+	// SelectionReason says why SelectedID won, or why nothing did.
+	SelectionReason string `json:"selectionReason,omitempty"`
 }
 
 type GitRequirements struct {
 	Submodules bool `json:"submodules"`
 	LFS        bool `json:"lfs"`
+	// SubmoduleList and the LFS file list say which build roots need them;
+	// the Checked flags distinguish "none under the root" from evidence
+	// recorded before detection read them (detect_git_extras.go).
+	SubmoduleList     []GitSubmodule `json:"submoduleList,omitempty"`
+	SubmodulesChecked bool           `json:"submodulesChecked,omitempty"`
+	LFSChecked        bool           `json:"lfsChecked,omitempty"`
+	LFSFiles          int            `json:"lfsFiles,omitempty"`
+	LFSPaths          []string       `json:"lfsPaths,omitempty"`
 }
 
 type BuildPlanConfig struct {
@@ -258,6 +520,8 @@ type BuildPlanConfig struct {
 	Recipe          string      `json:"recipe,omitempty"`
 	GoVersion       string      `json:"goVersion,omitempty"`
 	PythonVersion   string      `json:"pythonVersion,omitempty"`
+	NodeVersion     string      `json:"nodeVersion,omitempty"`
+	PHPVersion      string      `json:"phpVersion,omitempty"`
 	PackageManager  string      `json:"packageManager,omitempty"`
 	RootDirectory   string      `json:"rootDirectory,omitempty"`
 	Dockerfile      string      `json:"dockerfile,omitempty"`
@@ -277,10 +541,34 @@ type BuildPlanConfig struct {
 	// forward only while the build still describes that candidate, and it is
 	// left out of the plan's digest because it is a name, not a build input.
 	Framework string `json:"framework,omitempty"`
+	// Target is the Dockerfile stage to build, for a file whose last stage
+	// is a development one.
+	Target string `json:"target,omitempty"`
+	// PrimaryService is the Compose service the operator chose for readiness
+	// and the release's container identity; empty keeps the analysis's own
+	// choice (composePrimaryService).
+	PrimaryService string `json:"primaryService,omitempty"`
+	// GoPackage is the main package a Go recipe builds, relative to the root
+	// directory; empty lets the recipe choose when the module has only one.
+	GoPackage string `json:"goPackage,omitempty"`
+	// SystemPackages are Debian packages the Python recipe installs beside
+	// the ones the dependencies need, which it always installs.
+	SystemPackages []string `json:"systemPackages,omitempty"`
+	// CargoBin is the binary target a Rust recipe serves; empty lets the
+	// recipe choose (default-run, the only one, the one that serves).
+	CargoBin string `json:"cargoBin,omitempty"`
+	// JavaVersion and DotnetVersion choose the JDK or .NET release a Java or
+	// .NET recipe builds and runs on; empty lets the build and version
+	// files decide (planning_compiled.go).
+	JavaVersion   string `json:"javaVersion,omitempty"`
+	DotnetVersion string `json:"dotnetVersion,omitempty"`
 }
 
-// BuildSecretConfig names a variable and the single reviewed recipe stage in
-// which BuildKit may expose it. Values never enter this plan or process argv.
+// BuildSecretConfig names a variable and the reviewed recipe stages in which
+// BuildKit may expose it: "install", "build", or "install_and_build" for a
+// value both the dependency install and the build command read — a root
+// package's own postinstall runs inside the install. Values never enter this
+// plan or process argv.
 type BuildSecretConfig struct {
 	Variable string `json:"variable"`
 	Step     string `json:"step"`
@@ -295,6 +583,10 @@ type ReleaseTaskConfig struct {
 	WorkingDirectory string   `json:"workingDirectory,omitempty"`
 	TimeoutSeconds   int      `json:"timeoutSeconds"`
 	Env              []string `json:"env"`
+	// Runner is where the command runs: "image" is one throwaway container
+	// of the release's own image, with the application's toolchain and
+	// variables; empty is the historical shell over the unbuilt checkout.
+	Runner string `json:"runner,omitempty"`
 }
 
 type RuntimePlanConfig struct {
@@ -322,6 +614,9 @@ type RuntimePlanConfig struct {
 	CPUs          float64 `json:"cpus,omitempty"`
 	PidsLimit     int64   `json:"pidsLimit,omitempty"`
 	RestartPolicy string  `json:"restartPolicy,omitempty"`
+	// MaxRequestBodyMB is the largest request body the managed route lets
+	// through, in megabytes. Zero is DefaultMaxRequestBodyMB.
+	MaxRequestBodyMB int `json:"maxRequestBodyMb,omitempty"`
 }
 
 // PublishedPort is a container port published on the host next to the routed
@@ -399,6 +694,9 @@ type PlannedVariable struct {
 	// instead of accepting a value. It is how a blueprint's declared secrets
 	// exist on this host without ever appearing in a plan or a request.
 	Generate int `json:"generate,omitempty"`
+	// GenerateFormat shapes the generated secret the way its framework
+	// reads it; see GeneratedSecretFormats. Empty is alphanumeric.
+	GenerateFormat string `json:"generateFormat,omitempty"`
 }
 
 // Bounds for generated secrets: long enough to be a real credential, short
@@ -934,27 +1232,64 @@ func (c PlanConfiguration) Validate() error {
 		return fmt.Errorf("a recipe is valid only for the automatic builder")
 	}
 	if c.Build.GoVersion != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "go" || !goRecipeVersionRE.MatchString(c.Build.GoVersion)) {
-		return fmt.Errorf("Go version must select stable Go 1.25 or 1.26 in a Go recipe; use a Dockerfile for other toolchains")
+		return fmt.Errorf("Go version must select stable Go %s in a Go recipe; use a Dockerfile for other toolchains", goRecipeVersionList())
 	}
-	if c.Build.PackageManager != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "node" || !validNodePackageManager(c.Build.PackageManager)) {
-		return fmt.Errorf("package manager must be bun, npm, pnpm or yarn in a JavaScript recipe")
+	if c.Build.GoPackage != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "go" || !validGoPackagePath(c.Build.GoPackage)) {
+		return fmt.Errorf("Go main package must be a directory inside the root, such as cmd/api, in a Go recipe")
+	}
+	if c.Build.CargoBin != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "rust" || !rustBinaryNameRE.MatchString(c.Build.CargoBin)) {
+		return invalidField("build.cargoBin", "the Rust binary names one binary target, such as server, in a Rust recipe")
+	}
+	// The PHP and Python asset stages and the Ruby and Elixir builds install
+	// their front-end assets through the same Node install, so the same
+	// choice applies to them (installsAssetsWithNode in the configure form).
+	if c.Build.PackageManager != "" && (c.Build.Method != BuildRecipe || !slices.Contains(nodeInstallRecipes, c.Build.Recipe) || !validNodePackageManager(c.Build.PackageManager)) {
+		return fmt.Errorf("package manager must be bun, npm, pnpm or yarn in a JavaScript, PHP, Python, Ruby or Elixir recipe")
 	}
 	if c.Build.PythonVersion != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "python" || !pythonRecipeVersionRE.MatchString(c.Build.PythonVersion)) {
-		return fmt.Errorf("Python version must select 3.10, 3.11, 3.12 or 3.13 in a Python recipe; use a Dockerfile for other interpreters")
+		return fmt.Errorf("Python version must select 3.10, 3.11, 3.12, 3.13 or 3.14 in a Python recipe; use a Dockerfile for other interpreters")
+	}
+	if len(c.Build.SystemPackages) > 0 {
+		if c.Build.Method != BuildRecipe || c.Build.Recipe != "python" || len(c.Build.SystemPackages) > 32 {
+			return invalidField("build.systemPackages", "system packages apply to the Python recipe, at most 32 of them")
+		}
+		for _, name := range c.Build.SystemPackages {
+			if !systemPackageRE.MatchString(name) || len(name) > 128 {
+				return invalidField("build.systemPackages", "%q is not a Debian package name", name)
+			}
+		}
+	}
+	if err := validateCompiledBuildSettings(c.Build); err != nil {
+		return err
+	}
+	// A Node major chosen in Build settings outranks what the repository
+	// declares; empty follows the repository. The recipes that install
+	// assets through the same Node install take the choice too.
+	if c.Build.NodeVersion != "" && (c.Build.Method != BuildRecipe || !slices.Contains(nodeInstallRecipes, c.Build.Recipe) || !nodeRecipeVersionRE.MatchString(c.Build.NodeVersion)) {
+		return fmt.Errorf("Node version must select 20, 22 or 24 in a JavaScript, PHP, Python, Ruby or Elixir recipe; use a Dockerfile for other releases")
+	}
+	if c.Build.PHPVersion != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "php" || !slices.Contains(phpRecipeVersions, c.Build.PHPVersion)) {
+		return fmt.Errorf("PHP version must select 8.2, 8.3, 8.4 or 8.5 in a PHP recipe; use a Dockerfile for other releases")
 	}
 	if c.Build.SPAFallback && c.Build.Method != BuildRecipe && c.Build.Method != BuildStatic {
 		return fmt.Errorf("the single-page fallback applies only to a static site or a recipe with static output")
 	}
-	if c.Build.Recipe == "go" && cgoEnabledCommandRE.MatchString(c.Build.BuildCommand) {
-		return fmt.Errorf("the Go recipe builds without CGO; use a Dockerfile with the required C toolchain")
-	}
 	if c.Build.TargetPlatform != "" && !validPlatform(strings.ToLower(c.Build.TargetPlatform)) {
 		return fmt.Errorf("build target platform is malformed")
 	}
-	for _, path := range []string{c.Build.RootDirectory, c.Build.Dockerfile, c.Build.OutputDirectory} {
+	if c.Build.Target != "" && (c.Build.Method != BuildDockerfile || !dockerfileStageNameRE.MatchString(c.Build.Target)) {
+		return fmt.Errorf("a build target names one stage of a custom Dockerfile")
+	}
+	if c.Build.PrimaryService != "" && (c.Build.Method != BuildCompose || !validComposeServiceName(c.Build.PrimaryService)) {
+		return invalidField("build.primaryService", "a primary service names one service of a Compose stack")
+	}
+	for _, path := range []string{c.Build.RootDirectory, c.Build.Dockerfile} {
 		if path != "" && !safeRelativePath(path) {
 			return fmt.Errorf("build paths must remain inside the source root")
 		}
+	}
+	if c.Build.OutputDirectory != "" && !validOutputDirectory(c.Build.OutputDirectory) {
+		return fmt.Errorf("build paths must remain inside the source root")
 	}
 	if len(c.Build.BuildCommand) > 4096 || len(c.Build.StartCommand) > 4096 {
 		return fmt.Errorf("build or start command exceeds 4096 bytes")
@@ -1038,6 +1373,9 @@ func (c PlanConfiguration) Validate() error {
 	}
 	if c.Runtime.PidsLimit != 0 && (c.Runtime.PidsLimit < MinRuntimePids || c.Runtime.PidsLimit > MaxRuntimePids) {
 		return fmt.Errorf("runtime PID limit must be between %d and %d, or zero for no limit", MinRuntimePids, MaxRuntimePids)
+	}
+	if c.Runtime.MaxRequestBodyMB < 0 || c.Runtime.MaxRequestBodyMB > MaxRequestBodyMB {
+		return invalidField("runtime.maxRequestBodyMb", "request body limit must be between 1 and %d MB, or zero for the %d MB default", MaxRequestBodyMB, DefaultMaxRequestBodyMB)
 	}
 	if !validRestartPolicy(c.Runtime.RestartPolicy) {
 		return fmt.Errorf("runtime restart policy must be one of %s", strings.Join(RestartPolicies, ", "))
@@ -1134,6 +1472,9 @@ func (c PlanConfiguration) Validate() error {
 				return invalidField(variable.Name, "generated length for %s must be between %d and %d", variable.Name, MinGeneratedSecretLength, MaxGeneratedSecretLength)
 			}
 		}
+		if variable.GenerateFormat != "" && (variable.Generate == 0 || !validGeneratedSecretFormat(variable.GenerateFormat)) {
+			return invalidField(variable.Name, "generated format for %s is invalid", variable.Name)
+		}
 	}
 	variableReferences := make(map[string]string, len(c.Variables))
 	for _, variable := range c.Variables {
@@ -1144,9 +1485,9 @@ func (c PlanConfiguration) Validate() error {
 	}
 	seenBuildSecrets := map[string]bool{}
 	for _, secret := range c.Build.Secrets {
-		if ValidateEnvKey(secret.Variable) != nil || (secret.Step != "install" && secret.Step != "build") ||
+		if ValidateEnvKey(secret.Variable) != nil || !validBuildSecretStep(secret.Step) ||
 			seenBuildSecrets[secret.Variable] || !variableScopes[secret.Variable]["build"] {
-			return fmt.Errorf("build secret %q must name one build-scoped variable and install or build step", secret.Variable)
+			return fmt.Errorf("build secret %q must name one build-scoped variable and the install, build or install_and_build step", secret.Variable)
 		}
 		seenBuildSecrets[secret.Variable] = true
 	}
@@ -1156,13 +1497,19 @@ func (c PlanConfiguration) Validate() error {
 	seenTasks := map[string]bool{}
 	for index, task := range c.Build.ReleaseTasks {
 		field := fmt.Sprintf("build.releaseTasks[%d]", index)
-		if !releaseTaskNameRE.MatchString(task.Name) || seenTasks[task.Name] || task.Command == "" ||
+		if !releaseTaskNameRE.MatchString(task.Name) || seenTasks[task.Name] || strings.TrimSpace(task.Command) == "" ||
 			len(task.Command) > 16<<10 || task.TimeoutSeconds < 1 || task.TimeoutSeconds > 3600 ||
 			(task.WorkingDirectory != "" && !safeRelativePath(task.WorkingDirectory)) || len(task.Env) > 64 {
 			return invalidField(field, "release task %q is invalid", task.Name)
 		}
 		if err := rejectPlanSecretLiteral("release task command", task.Command); err != nil {
 			return invalidField(field, "%v", err)
+		}
+		if task.Runner != "" && task.Runner != ReleaseTaskRunnerImage {
+			return invalidField(field, "release task %q runner must be image or the host shell", task.Name)
+		}
+		if task.Runner == ReleaseTaskRunnerImage && (c.Build.Method == BuildNone || c.Build.Method == BuildLegacyCompose) {
+			return invalidField(field, "release task %q runs in the release image, and this build produces none", task.Name)
 		}
 		if secretCommandFlagRE.MatchString(task.Command) {
 			return invalidField(field, "release task %q passes credential material through argv; use its scoped environment", task.Name)
@@ -1355,14 +1702,36 @@ func configContainsSecretLiteral(value any, key string) bool {
 	return false
 }
 
+// nodeInstallRecipes are the recipes whose build runs the JavaScript
+// install planner: the Node recipe itself, and the recipes that install a
+// package's assets with it.
+var nodeInstallRecipes = []string{"node", "php", "python", "ruby", "elixir"}
+
 // validRecipe is the closed set of automatic recipes; a name outside it is
 // refused at planning so a plan never names a builder that does not exist.
 func validRecipe(name string) bool {
 	switch name {
-	case "node", "go", "python", "rust", "java", "dotnet", "deno", "php":
+	case "node", "go", "python", "rust", "java", "dotnet", "deno", "php", "site",
+		"ruby", "elixir", "scala", "clojure", "dart", "gleam":
 		return true
 	}
 	return false
+}
+
+// validBuildSecretStep is the closed set of recipe stages a build value can
+// be mounted in.
+func validBuildSecretStep(step string) bool {
+	switch step {
+	case "install", "build", "install_and_build":
+		return true
+	}
+	return false
+}
+
+// buildSecretReaches says whether a value mapped to mapped is mounted in the
+// recipe stage step.
+func buildSecretReaches(mapped, step string) bool {
+	return mapped == step || mapped == "install_and_build"
 }
 
 // validDetectedDatabaseEngine is the closed set of engines quick setup can
@@ -1493,17 +1862,46 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 			len(candidate.Dockerfile) > 4096 || (candidate.Dockerfile != "" && !safeRelativePath(candidate.Dockerfile)) ||
 			len(candidate.GoVersion) > 32 || (candidate.GoVersion != "" && !goRecipeVersionRE.MatchString(candidate.GoVersion)) || len(candidate.RecipeIssue) > 512 ||
 			len(candidate.GoMinimumVersion) > 32 || (candidate.GoMinimumVersion != "" && !stableGoVersionRE.MatchString(candidate.GoMinimumVersion)) ||
+			len(candidate.GoToolchain) > 32 || strings.ContainsAny(candidate.GoToolchain, "\x00\r\n ") ||
+			len(candidate.GoVersionFile) > 32 || strings.ContainsAny(candidate.GoVersionFile, "\x00\r\n") ||
+			len(candidate.GoMainPackages) > goMainPackagesKept || slices.ContainsFunc(candidate.GoMainPackages, func(pkg string) bool { return !validGoPackagePath(pkg) }) ||
+			candidate.GoMainPackagesOmitted < 0 ||
+			(candidate.GoPackage != "" && !validGoPackagePath(candidate.GoPackage)) ||
+			len(candidate.PythonRequires) > 128 || strings.ContainsAny(candidate.PythonRequires, "\x00\r\n") ||
+			(candidate.PythonInstall != "" && !validPythonInstallKind(candidate.PythonInstall)) ||
 			(candidate.PackageManager != "" && !validNodePackageManager(candidate.PackageManager)) || len(candidate.PackageManagers) > 4 ||
 			slices.ContainsFunc(candidate.PackageManagers, func(manager string) bool { return !validNodePackageManager(manager) }) ||
-			(candidate.OutputDirectory != "" && !safeRelativePath(candidate.OutputDirectory)) ||
+			(candidate.OutputDirectory != "" && !validOutputDirectory(candidate.OutputDirectory)) ||
 			candidate.Port < 0 || candidate.Port > 65535 ||
 			len(candidate.Evidence) > 128 || len(candidate.NeedsDecision) > 128 {
 			return fmt.Errorf("%w: detected candidate is malformed", ErrInvalidPlan)
 		}
-		for _, command := range []string{candidate.BuildCommand, candidate.StartCommand, candidate.RecipeIssue} {
+		if !validPersistentPaths(candidate.PersistentPaths) || len(candidate.SeedCommand) > 512 ||
+			strings.ContainsAny(candidate.SeedCommand, "\x00\r\n") {
+			return fmt.Errorf("%w: detected candidate state is malformed", ErrInvalidPlan)
+		}
+		for _, command := range []string{candidate.BuildCommand, candidate.StartCommand, candidate.RecipeIssue, candidate.SeedCommand} {
 			if rejectPlanSecretLiteral("detected command", command) != nil {
 				return fmt.Errorf("%w: detected candidate contains credential material", ErrInvalidPlan)
 			}
+		}
+		if err := validateDetectedNodeInstall(candidate); err != nil {
+			return err
+		}
+		if err := validateDetectedStaticSite(candidate); err != nil {
+			return err
+		}
+		if err := validateDetectedPHPDeno(candidate); err != nil {
+			return err
+		}
+		if err := validateDetectedGoBuild(candidate); err != nil {
+			return err
+		}
+		if err := validateDetectedRustBuild(candidate); err != nil {
+			return err
+		}
+		if err := validateDetectedCompiledBuild(candidate); err != nil {
+			return err
 		}
 		for _, label := range []string{candidate.Name, candidate.Framework, candidate.Recipe} {
 			if rejectPlanSecretLiteral("detected label", label) != nil {
@@ -1523,12 +1921,13 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 		}
 		for _, variable := range candidate.Variables {
 			if ValidateEnvKey(variable.Name) != nil || len(variable.Example) > 256 ||
+				(variable.Step != "" && variable.Step != "install") ||
 				strings.ContainsAny(variable.Example, "\x00\r\n") ||
 				rejectPlanSecretLiteral("detected variable example", variable.Example) != nil ||
-				len(variable.Sources) > 8 {
+				len(variable.Sources) > 8 || len(variable.BuildSources) > 8 {
 				return fmt.Errorf("%w: detected variable is malformed", ErrInvalidPlan)
 			}
-			for _, source := range variable.Sources {
+			for _, source := range slices.Concat(variable.Sources, variable.BuildSources) {
 				if source == "" || len(source) > 4096 || strings.ContainsAny(source, "\x00\r\n") {
 					return fmt.Errorf("%w: detected variable is malformed", ErrInvalidPlan)
 				}
@@ -1537,9 +1936,13 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 		for _, database := range candidate.Databases {
 			if !validDetectedDatabaseEngine(database.Engine) || ValidateEnvKey(database.Variable) != nil ||
 				len(database.Evidence) > 512 || strings.ContainsAny(database.Evidence, "\x00\r\n") ||
-				rejectPlanSecretLiteral("detected database evidence", database.Evidence) != nil {
+				rejectPlanSecretLiteral("detected database evidence", database.Evidence) != nil ||
+				validateDetectedDatabaseDetails(database) != nil {
 				return fmt.Errorf("%w: detected database is malformed", ErrInvalidPlan)
 			}
+		}
+		if err := validateDetectedEnvironment(candidate); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalidPlan, err)
 		}
 		for _, decision := range candidate.NeedsDecision {
 			if decision == "" || len(decision) > 512 || strings.ContainsAny(decision, "\x00\r\n") ||
@@ -1547,14 +1950,130 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 				return fmt.Errorf("%w: detection decision is malformed", ErrInvalidPlan)
 			}
 		}
+		if err := validateDetectedServing(candidate); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalidPlan, err)
+		}
+		if err := validateNetworkFacts(candidate); err != nil {
+			return err
+		}
+		if err := validateCandidateImageFacts(candidate); err != nil {
+			return err
+		}
+		if err := validateDetectedPython(candidate); err != nil {
+			return err
+		}
+		if err := validateDetectedToolchain(candidate.Toolchain); err != nil {
+			return err
+		}
+	}
+	if len(detection.SelectionReason) > 512 || strings.ContainsAny(detection.SelectionReason, "\x00\r\n") ||
+		rejectPlanSecretLiteral("selection reason", detection.SelectionReason) != nil {
+		return fmt.Errorf("%w: detection selection reason is malformed", ErrInvalidPlan)
 	}
 	if !selected {
 		return fmt.Errorf("%w: selected detection candidate does not exist", ErrInvalidPlan)
 	}
+	return validateRepoShapeEvidence(detection)
+}
+
+// validateDetectedNodeInstall bounds the lockfile readings and install
+// plans a saved draft carries, the way every other detected field is: they
+// are stored, revalidated when the draft returns, and shown to operators.
+func validateDetectedNodeInstall(candidate DetectedCandidate) error {
+	malformed := fmt.Errorf("%w: detected Node install is malformed", ErrInvalidPlan)
+	text := func(value string, limit int) bool {
+		return len(value) <= limit && !strings.ContainsAny(value, "\x00\r\n") &&
+			rejectPlanSecretLiteral("detected install", value) == nil
+	}
+	names := func(list []string) bool {
+		if len(list) > nodeListedNames {
+			return false
+		}
+		for _, name := range list {
+			if name == "" || !text(name, 512) {
+				return false
+			}
+		}
+		return true
+	}
+	if len(candidate.Lockfiles) > len(nodeLockfileNames) || len(candidate.NodeInstalls) > len(nodeManagerOrder) || !text(candidate.NodeVersion, 64) {
+		return malformed
+	}
+	if build := candidate.NodeBuild; build != nil {
+		if !text(build.EnvSchema, 256) || len(build.EnvServer) > 64 || len(build.EnvClient) > 64 || len(build.PrismaEnv) > 16 ||
+			len(build.PrismaConnectScripts) > 16 || build.MemoryMiB < 0 || build.MemoryMiB > 65536 {
+			return malformed
+		}
+		for _, script := range build.PrismaConnectScripts {
+			if !nodeScriptNameRE.MatchString(script) {
+				return malformed
+			}
+		}
+		for _, name := range slices.Concat(build.EnvServer, build.EnvClient, build.PrismaEnv) {
+			if ValidateEnvKey(name) != nil {
+				return malformed
+			}
+		}
+		if len(build.Findings) > 8 || len(build.DevScripts) > 32 || !validDetectedFindings(build.Findings, text) {
+			return malformed
+		}
+		for name, label := range build.DevScripts {
+			if !nodeScriptNameRE.MatchString(name) || len(name) > 64 || !text(label, 64) {
+				return malformed
+			}
+		}
+	}
+	for _, lockfile := range candidate.Lockfiles {
+		if nodeLockfileManager(lockfile.Path) == "" || nodeLockfileManager(lockfile.Path) != lockfile.Manager ||
+			(lockfile.State != LockfileInSync && lockfile.State != LockfileStale && lockfile.State != LockfileUnknown) ||
+			!names(lockfile.Missing) || !names(lockfile.Extra) || !names(lockfile.Changed) || !text(lockfile.Note, 512) {
+			return malformed
+		}
+	}
+	for _, install := range candidate.NodeInstalls {
+		if !validNodePackageManager(install.Manager) || (install.Lockfile != "" && nodeLockfileManager(install.Lockfile) == "") ||
+			!text(install.Install, 1024) || !text(install.Toolchain, 256) ||
+			!text(install.BuildCommand, 4096) || !text(install.StartCommand, 4096) || len(install.Findings) > 32 ||
+			!validDetectedFindings(install.Findings, text) {
+			return malformed
+		}
+	}
 	return nil
 }
 
+// validDetectedFindings bounds findings detection recorded on a candidate
+// the way a saved draft revalidates them.
+func validDetectedFindings(findings []PreflightFinding, text func(string, int) bool) bool {
+	for _, finding := range findings {
+		switch finding.Severity {
+		case PreflightPass, PreflightWarning, PreflightDecision, PreflightBlocked, PreflightUnavailable:
+		default:
+			return false
+		}
+		if finding.Code == "" || !text(finding.Code, 64) || !text(finding.Title, 512) || !text(finding.Measured, 512) ||
+			!text(finding.Means, 512) || !text(finding.Action, 512) || !text(finding.Owner, 64) ||
+			!text(finding.FieldID, 256) || finding.DeepLink != "" || finding.Fix != nil {
+			return false
+		}
+	}
+	return true
+}
+
 var contentDigestRE = regexp.MustCompile(`^[a-z0-9][a-z0-9+._-]{0,31}:[0-9a-f]{32,128}$`)
+
+// validGoPackagePath accepts a main package as the recipe names it: "." for
+// the root, or a relative directory that stays inside it.
+func validGoPackagePath(pkg string) bool {
+	return pkg == "." || (len(pkg) <= 512 && safeRelativePath(pkg) && !strings.Contains(pkg, "\\"))
+}
+
+func validPythonInstallKind(kind string) bool {
+	switch kind {
+	case "uv.lock", "poetry.lock", "pdm.lock", "Pipfile.lock", "Pipfile", "requirements.txt", "pyproject.toml", "setup.py", "environment.yml":
+		return true
+	}
+	return false
+}
 
 func validDetectionConfidence(confidence DetectionConfidence) bool {
 	return confidence == ConfidenceHigh || confidence == ConfidenceMedium || confidence == ConfidenceLow
@@ -1596,7 +2115,7 @@ func validateComposeAnalysis(analysis ComposeAnalysis, identity SourceIdentity) 
 		}
 	}
 	sort.Strings(services)
-	if !equalStrings(services, identity.Services) {
+	if !equalStrings(services, identity.Services) || !validComposeBuildEvidence(analysis) {
 		return false
 	}
 	for _, variable := range analysis.Variables {
@@ -1681,6 +2200,14 @@ func sameSourceLocation(left, right DraftSourceConfig) bool {
 }
 
 func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
+	// A stage belongs to the Dockerfile it was detected in; switching the
+	// build method away must not leave a plan that validation refuses.
+	if c.Build.Method != BuildDockerfile {
+		c.Build.Target = ""
+	}
+	if c.Build.Method != BuildCompose {
+		c.Build.PrimaryService = ""
+	}
 	if c.Build.Secrets == nil {
 		c.Build.Secrets = []BuildSecretConfig{}
 	}

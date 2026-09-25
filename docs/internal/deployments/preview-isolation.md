@@ -56,7 +56,7 @@ untracked endpoints and outbound network access remain an administrator trust bo
 Container previews use a dedicated Docker bridge with owner labels and loopback publication through the
 existing ingress owner. Docker does not publish ports on containers attached only to an internal network;
 the dedicated bridge permits outbound traffic and is not a hostile-code sandbox. Administrator code
-review remains required. Host network, privileged mode, devices, added capabilities, host release tasks,
+review remains required. Host network, privileged mode, devices, added capabilities, any release task,
 fixed host ports, production mounts and Compose preview plans are refused at admission and execution.
 Dockerfile instructions run only after approval; an approved Dockerfile is trusted executable code.
 

@@ -726,19 +726,65 @@ const FRAMEWORK_LABELS: Record<string, string> = {
   "vue-cli": "Vue CLI",
   ember: "Ember",
   parcel: "Parcel",
+  strapi: "Strapi",
+  medusa: "Medusa",
+  directus: "Directus",
+  keystone: "KeystoneJS",
+  adonisjs: "AdonisJS",
+  redwood: "RedwoodJS",
+  "qwik-city": "Qwik City",
+  analog: "Analog",
+  vike: "Vike",
+  waku: "Waku",
+  vuepress: "VuePress",
+  rspress: "Rspress",
+  hexo: "Hexo",
+  slidev: "Slidev",
+  rsbuild: "Rsbuild",
+  rspack: "Rspack",
+  farm: "Farm",
+  webpack: "webpack",
+  meteor: "Meteor",
   express: "Express",
   fastify: "Fastify",
   hono: "Hono",
   koa: "Koa",
   elysia: "Elysia",
   hapi: "hapi",
+  h3: "h3",
+  polka: "Polka",
+  restify: "restify",
+  apollo: "Apollo Server",
+  "graphql-yoga": "GraphQL Yoga",
+  trpc: "tRPC",
+  "socket.io": "Socket.IO",
+  ws: "ws",
   go: "Go",
+  gin: "Gin",
+  echo: "Echo",
+  fiber: "Fiber",
+  chi: "chi",
+  gorilla: "Gorilla",
   python: "Python",
   django: "Django",
   fastapi: "FastAPI",
   flask: "Flask",
   streamlit: "Streamlit",
   gradio: "Gradio",
+  litestar: "Litestar",
+  starlette: "Starlette",
+  sanic: "Sanic",
+  quart: "Quart",
+  falcon: "Falcon",
+  bottle: "Bottle",
+  aiohttp: "aiohttp",
+  tornado: "Tornado",
+  dash: "Dash",
+  panel: "Panel",
+  chainlit: "Chainlit",
+  nicegui: "NiceGUI",
+  reflex: "Reflex",
+  mesop: "Mesop",
   rust: "Rust",
   axum: "axum",
   "actix-web": "Actix Web",
@@ -746,6 +792,11 @@ const FRAMEWORK_LABELS: Record<string, string> = {
   warp: "warp",
   poem: "Poem",
   salvo: "Salvo",
+  loco: "Loco",
+  leptos: "Leptos",
+  trunk: "Trunk",
+  dioxus: "Dioxus",
+  shuttle: "Shuttle",
   java: "Java",
   "spring-boot": "Spring Boot",
   quarkus: "Quarkus",
@@ -756,12 +807,53 @@ const FRAMEWORK_LABELS: Record<string, string> = {
   vertx: "Vert.x",
   dotnet: ".NET",
   aspnet: "ASP.NET Core",
+  "blazor-wasm": "Blazor WebAssembly",
   deno: "Deno",
   fresh: "Fresh",
   php: "PHP",
   laravel: "Laravel",
   symfony: "Symfony",
   slim: "Slim",
+  wordpress: "WordPress",
+  drupal: "Drupal",
+  cakephp: "CakePHP",
+  codeigniter: "CodeIgniter",
+  yii: "Yii",
+  mezzio: "Mezzio",
+  laminas: "Laminas",
+  ruby: "Ruby",
+  rails: "Rails",
+  hanami: "Hanami",
+  sinatra: "Sinatra",
+  elixir: "Elixir",
+  phoenix: "Phoenix",
+  hugo: "Hugo",
+  zola: "Zola",
+  mdbook: "mdBook",
+  jekyll: "Jekyll",
+  mkdocs: "MkDocs",
+  zensical: "Zensical",
+  sphinx: "Sphinx",
+  pelican: "Pelican",
+  lume: "Lume",
+  scala: "Scala",
+  play: "Play",
+  http4s: "http4s",
+  "akka-http": "Akka HTTP",
+  "pekko-http": "Pekko HTTP",
+  "zio-http": "ZIO HTTP",
+  clojure: "Clojure",
+  ring: "Ring",
+  compojure: "Compojure",
+  pedestal: "Pedestal",
+  "http-kit": "http-kit",
+  dart: "Dart",
+  dart_frog: "Dart Frog",
+  shelf: "shelf",
+  serverpod: "Serverpod",
+  gleam: "Gleam",
+  wisp: "Wisp",
+  mist: "Mist",
 }
 
 /** The Language select, in the order a reader expects to find their stack. */
@@ -774,6 +866,13 @@ export const RECIPE_LABELS: [DeploymentRecipe, string][] = [
   ["dotnet", ".NET"],
   ["deno", "Deno"],
   ["php", "PHP (Composer, FrankenPHP)"],
+  ["site", "Site generator (Hugo, Zola, mdBook, Jekyll)"],
+  ["ruby", "Ruby (Rails, Hanami, Sinatra, Rack)"],
+  ["elixir", "Elixir (Phoenix, mix release)"],
+  ["scala", "Scala (sbt)"],
+  ["clojure", "Clojure (Leiningen or tools.build)"],
+  ["dart", "Dart (Dart Frog, shelf)"],
+  ["gleam", "Gleam (Erlang shipment)"],
 ]
 
 /**
@@ -790,6 +889,13 @@ export const RECIPE_SHORT: Record<DeploymentRecipe, string> = {
   dotnet: ".NET",
   deno: "Deno",
   php: "PHP",
+  site: "Site generator",
+  ruby: "Ruby",
+  elixir: "Elixir",
+  scala: "Scala",
+  clojure: "Clojure",
+  dart: "Dart",
+  gleam: "Gleam",
 }
 
 /** How a project is built, in the word a reading uses beside its product. */
@@ -809,10 +915,22 @@ export function frameworkLabel(value: string) {
 
 export const DATABASE_ENGINE_LABELS: Record<string, string> = {
   postgres: "PostgreSQL",
+  pgvector: "PostgreSQL + pgvector",
+  postgis: "PostgreSQL + PostGIS",
   mysql: "MySQL",
   mariadb: "MariaDB",
   redis: "Redis",
   mongodb: "MongoDB",
+}
+
+/** The hosted protocols a driver may speak instead of its engine's own. */
+export const HOSTED_DATABASE_LABELS: Record<string, string> = {
+  "neon-http": "Neon's HTTP protocol",
+  "neon-ws": "Neon's WebSocket protocol",
+  "vercel-postgres": "Vercel Postgres's pooled protocol",
+  "planetscale-http": "PlanetScale's HTTP protocol",
+  "prisma-accelerate": "Prisma Accelerate's prisma:// protocol",
+  "upstash-rest": "Upstash's REST protocol",
 }
 
 export function humanize(value: string) {
@@ -942,6 +1060,20 @@ export function deploymentName(raw: string) {
   return cleaned || "app"
 }
 
+function autoDeployStopped(watch: DeploymentGitWatch) {
+  switch (watch.reason) {
+    case "ref_not_found":
+      return `Auto-deploy stopped: ${watch.branch ?? "the branch"} no longer exists`
+    case "source_auth_failed":
+      return "Auto-deploy stopped: the credential was refused"
+    case "source_repository_missing":
+      return "Auto-deploy stopped: repository not found"
+    case "source_unreachable":
+      return "Auto-deploy paused: the Git remote is unreachable"
+  }
+  return undefined
+}
+
 /**
  * Whether a repository deploys itself, as one reading. The project header and
  * the overview's wiring each had their own copy, and they had already drifted:
@@ -955,7 +1087,9 @@ export function autoDeployReading(
   if (watch.status === "not_applicable") return undefined
   const automatic = watch.policy?.automatic ?? watch.automatic
   if (["unavailable", "stale", "policy_conflict"].includes(watch.status)) {
-    return { tone: "warning", label: "Auto-deploy needs attention" }
+    // A branch the watcher could not read says why when git's answer did.
+    const stopped = watch.status === "unavailable" ? autoDeployStopped(watch) : undefined
+    return { tone: "warning", label: stopped ?? "Auto-deploy needs attention" }
   }
   if (!automatic) return { tone: "stopped", label: "Manual deployments" }
   if (watch.status === "awaiting_first_deployment") {
@@ -1194,7 +1328,7 @@ export const LINK_STATUS: Record<
 export const RELEASE_GROUPS = [
   { label: "Source", keys: ["resolve_source", "acquire_source", "analyze_plan"] },
   { label: "Build", keys: ["prepare_context", "build_artifact"] },
-  { label: "Release", keys: ["render_runtime", "release_task", "backup_gate"] },
+  { label: "Release", keys: ["render_runtime", "backup_gate", "release_task"] },
   // Its own node rather than a detail of Release: a deployment publishing a
   // name for the first time spends real seconds here talking to a certificate
   // authority, and a progress line that reads "Release" throughout looks stuck.

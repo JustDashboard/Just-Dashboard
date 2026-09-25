@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,7 +28,9 @@ func TestDetectorIsDeterministicBoundedAndDoesNotFollowSymlinks(t *testing.T) {
 	writePlanningFixture(t, filepath.Join(root, "apps", "web", "package.json"), `{
   "name":"web","scripts":{"build":"vite build"},"devDependencies":{"vite":"6.0.0"}
 }`)
+	writePlanningFixture(t, filepath.Join(root, "apps", "web", "bun.lock"), "{}")
 	writePlanningFixture(t, filepath.Join(root, "services", "api", "go.mod"), "module example.test/api\n")
+	writePlanningFixture(t, filepath.Join(root, "services", "api", "main.go"), "package main\n\nfunc main() {}\n")
 	writePlanningFixture(t, filepath.Join(root, ".gitmodules"), "[submodule \"shared\"]\n  path = shared\n")
 	writePlanningFixture(t, filepath.Join(root, ".gitattributes"), "assets/** filter=lfs diff=lfs merge=lfs -text\n")
 	outside := t.TempDir()
@@ -51,13 +54,20 @@ func TestDetectorIsDeterministicBoundedAndDoesNotFollowSymlinks(t *testing.T) {
 	if string(firstJSON) != string(secondJSON) {
 		t.Fatalf("detection is not deterministic:\n%s\n%s", firstJSON, secondJSON)
 	}
-	if len(first.Candidates) != 2 || first.SelectedID != "" {
+	if len(first.Candidates) != 2 || first.SelectedID != "" ||
+		first.Candidates[0].Confidence != ConfidenceHigh || first.Candidates[1].Confidence != ConfidenceHigh {
 		t.Fatalf("monorepo detection = %#v, want two ambiguous high-confidence candidates", first)
+	}
+	// The declared submodule and LFS pattern lie outside both build roots,
+	// so they are recorded as evidence and owe neither candidate a decision.
+	if !first.GitRequirements.Submodules || !first.GitRequirements.LFS || len(first.GitRequirements.SubmoduleList) != 1 ||
+		first.GitRequirements.SubmoduleList[0].Path != "shared" || first.GitRequirements.LFSFiles != 0 {
+		t.Fatalf("Git requirements = %#v", first.GitRequirements)
 	}
 	for _, candidate := range first.Candidates {
 		decisions := strings.Join(candidate.NeedsDecision, " ")
-		if !strings.Contains(decisions, "submodules") || !strings.Contains(decisions, "Git LFS") {
-			t.Fatalf("candidate lacks bounded Git dependency evidence: %#v", candidate)
+		if strings.Contains(decisions, "submodule") || strings.Contains(decisions, "LFS") {
+			t.Fatalf("candidate owes a Git decision for paths outside its root: %#v", candidate)
 		}
 		for _, evidence := range candidate.Evidence {
 			if strings.Contains(evidence.Path, "linked-outside") {
@@ -1361,7 +1371,10 @@ type planningDockerFake struct {
 	imageDetail        *dockerx.ImageDetail
 	container          *dockerx.ContainerSpec
 	stacks             []dockerx.ComposeStack
-	registryAuth       string
+	// registryAuth is written by the Compose analysis' concurrent image
+	// lookups (resolveComposeImagePlatforms), so writes hold mu.
+	mu           sync.Mutex
+	registryAuth string
 }
 
 func (f *planningDockerFake) Ping(context.Context) dockerx.Availability {
@@ -1369,7 +1382,9 @@ func (f *planningDockerFake) Ping(context.Context) dockerx.Availability {
 }
 
 func (f *planningDockerFake) ResolveDistributionImage(_ context.Context, _ string, auth string) (*dockerx.DistributionImage, error) {
+	f.mu.Lock()
 	f.registryAuth = auth
+	f.mu.Unlock()
 	if f.image == nil {
 		return nil, errors.New("image missing")
 	}
@@ -1692,9 +1707,9 @@ func TestCanonicalConfigurationOrdering(t *testing.T) {
 }
 
 // A Node project's detected commands have to name the package manager its
-// lockfile locks to. The recipe picks its base image from that same lockfile,
-// and oven/bun carries no npm: "npm run build" was a build that installed
-// cleanly and then died on `npm: not found`, with the configuration screen
+// lockfile locks to. The recipe provisions its toolchain from that same
+// lockfile, and a runner the image lacked was a build that installed cleanly
+// and then died on `<runner>: not found`, with the configuration screen
 // showing nothing wrong.
 func TestDetectedJavaScriptCommandsFollowTheLockfile(t *testing.T) {
 	manifest := `{"name":"site","scripts":{"build":"next build","start":"next start"},"dependencies":{"next":"16.2.10"}}`
@@ -1730,9 +1745,10 @@ func TestDetectedJavaScriptCommandsFollowTheLockfile(t *testing.T) {
 	}
 }
 
-// With no lockfile, or with several, the recipe refuses to build at all — so
-// the detected command only has to be the one that fails legibly rather than
-// the one that happens to match a package manager nobody pinned.
+// With several lockfiles nothing resolves until a package manager is
+// chosen, and the build refuses until then — so the detected command only
+// has to be the one that fails legibly rather than the one that happens to
+// match a package manager nobody pinned.
 func TestDetectedJavaScriptCommandsFallBackToNpm(t *testing.T) {
 	root := t.TempDir()
 	writePlanningFixture(t, filepath.Join(root, "package.json"),

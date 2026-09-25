@@ -43,11 +43,16 @@ func (b *DockerArtifactBackend) BuildImage(
 	for _, secret := range invocation.Secrets {
 		secrets = append(secrets, dockerx.BuildxSecret{ID: secret.ID, Value: secret.Value})
 	}
+	buildArgs := make([]dockerx.BuildxArg, 0, len(invocation.BuildArgs))
+	for _, arg := range invocation.BuildArgs {
+		buildArgs = append(buildArgs, dockerx.BuildxArg{Name: arg.Name, Value: arg.Value})
+	}
 	image, err := consumeDockerBuildLogs(ctx, emit, func(child context.Context, output chan<- dockerx.LogLine) (dockerx.ImmutableImage, error) {
 		return b.docker.BuildImmutable(child, dockerx.ImmutableBuildOptions{
 			Dir: invocation.ContextDir, Dockerfile: invocation.Dockerfile,
 			Tag: invocation.Tag, Platform: invocation.Platform,
 			NoCache: invocation.NoCache, Pull: invocation.Pull, Secrets: secrets,
+			Target: invocation.Target, BuildArgs: buildArgs,
 		}, output)
 	})
 	if err != nil {

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 )
 
 // TestAcquireSourceRecordsCommitMetadataOnTheRun exercises the acquire_source
@@ -171,5 +173,57 @@ func TestAcquireSourceWarningReachesTheTranscriptAndLaterLinesFollow(t *testing.
 	}
 	if !warned || !followed {
 		t.Fatalf("transcript warned=%v followed=%v: %#v", warned, followed, events)
+	}
+}
+
+// A workspace member prepares from its workspace root: the build context the
+// artifact step receives widens to the root that holds the lockfile, and the
+// decisions preparation made reach the run's transcript.
+func TestPrepareContextBuildsAWorkspaceMemberFromItsWorkspaceRoot(t *testing.T) {
+	t.Parallel()
+	repository := t.TempDir()
+	runPlanningGitFixture(t, repository, "init")
+	runPlanningGitFixture(t, repository, "config", "user.email", "fixture@example.test")
+	runPlanningGitFixture(t, repository, "config", "user.name", "Release Author")
+	writeBuildFixture(t, repository, "package.json", `{"name":"root","private":true}`)
+	writeBuildFixture(t, repository, "pnpm-workspace.yaml", "packages:\n  - apps/*\n")
+	writeBuildFixture(t, repository, "pnpm-lock.yaml", "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n\n  apps/web:\n    dependencies:\n      left-pad:\n        specifier: 1.3.0\n        version: 1.3.0\n")
+	writeBuildFixture(t, repository, "apps/web/package.json", `{"name":"web","scripts":{"start":"node index.js"},"dependencies":{"left-pad":"1.3.0"}}`)
+	runPlanningGitFixture(t, repository, "add", ".")
+	runPlanningGitFixture(t, repository, "commit", "-m", "Workspace")
+	revision := strings.TrimSpace(runPlanningGitOutput(t, repository, "rev-parse", "HEAD"))
+
+	fixture := newOrchestrationFixture(t)
+	environmentID := fixture.addEnvironment(t, "production", EnvironmentProduction)
+	run := fixture.enqueue(t, environmentID)
+	sealer, err := auth.NewSealer(strings.Repeat("9a", 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &NormalizedStepExecutor{
+		store: fixture.runs, variables: NewPlanningStore(fixture.store, sealer, []string{"/srv"}),
+		sources: NewHostSourceAnalyzer([]string{repository}, nil, t.TempDir(), nil, nil),
+		builder: NewArtifactBuilder(&artifactBackendFake{}), workspaceRoot: t.TempDir(),
+	}
+	plan := &StoredExecutionPlan{
+		SourceConfig:   DraftSourceConfig{Kind: SourceLocal, Mode: SourceModeLocalCheckout, LocalPath: repository},
+		SourceIdentity: SourceIdentity{Kind: SourceLocal, LocalPath: repository, Revision: revision},
+		Build: BuildPlanConfig{Method: BuildRecipe, Recipe: "node", RootDirectory: "apps/web",
+			BuildCommand: "", StartCommand: "npm run start", Secrets: []BuildSecretConfig{}, ReleaseTasks: []ReleaseTaskConfig{}},
+	}
+	output := &recordingStepOutput{}
+	result := executor.prepareContext(context.Background(), StepExecution{Run: *run, Output: output}, plan)
+	if result.State != StepPassed {
+		t.Fatalf("prepareContext = %#v", result)
+	}
+	var evidence preparedStepEvidence
+	if err := json.Unmarshal(result.Evidence, &evidence); err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Prepared.ContextDirectory != "." || evidence.BuildRoot != evidence.Source.Root {
+		t.Fatalf("build root = %q (source %q, context %q)", evidence.BuildRoot, evidence.Source.Root, evidence.Prepared.ContextDirectory)
+	}
+	if !strings.Contains(output.joined(), "Start command runs with pnpm: `pnpm run start` (saved: `npm run start`)") {
+		t.Fatalf("transcript = %s", output.joined())
 	}
 }

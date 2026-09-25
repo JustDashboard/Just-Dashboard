@@ -29,17 +29,23 @@ func TestEnvironmentDiscoveryReadsTemplatesAndCode(t *testing.T) {
 		t.Fatalf("detect: %+v, %v", result, err)
 	}
 	got := result.Candidates[0].Variables
+	// A Next.js root binds its site URL to the planned domain and compiles
+	// it into the browser; LOG_LEVEL takes the documented default; a read
+	// with no default outside a module that runs at start-up is a warning.
 	want := []DetectedVariable{
 		{Name: "DATABASE_URL", Sources: []string{".env.example", "scripts/seed.py"}},
 		{Name: "SESSION_SECRET", Example: "change me", Sources: []string{".env.example"}},
-		{Name: "NEXT_PUBLIC_SITE_URL", Example: "https://example.test", Sources: []string{".env.example"}},
-		{Name: "LOG_LEVEL", Example: "info", Sources: []string{".env.example", ".env"}},
+		{Name: "NEXT_PUBLIC_SITE_URL", Example: "https://example.test", Sources: []string{".env.example"},
+			Setup: "domain", SetupReason: "the application's own address", DomainTemplate: "{{scheme}}://{{hostname}}",
+			Phase: "build", BrowserInlined: true},
+		{Name: "LOG_LEVEL", Example: "info", Sources: []string{".env.example", ".env"},
+			Setup: "default", SetupReason: "documented in .env.example", DefaultValue: "info"},
 		{Name: "STRIPE_KEY", Sources: []string{".env"}},
-		{Name: "ADMIN_EMAIL", Sources: []string{"scripts/seed.py"}},
+		{Name: "ADMIN_EMAIL", Sources: []string{"scripts/seed.py"}, RequiredRead: true},
 		{Name: "GO_FLAG", Sources: []string{"tools/main.go"}},
 		{Name: "MAIL_FROM", Sources: []string{"src/lib/mail.ts"}},
 		{Name: "RESEND_API_KEY", Sources: []string{"src/lib/mail.ts"}},
-		{Name: "SEED_TOKEN", Sources: []string{"scripts/seed.py"}},
+		{Name: "SEED_TOKEN", Sources: []string{"scripts/seed.py"}, RequiredRead: true},
 		{Name: "VITE_ANALYTICS_ID", Sources: []string{"src/lib/mail.ts"}},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -188,10 +194,19 @@ func TestEnvTemplateFileNamesAndExampleValues(t *testing.T) {
 	t.Parallel()
 	for name, want := range map[string]bool{
 		".env.example": true, ".env.sample": true, ".env.template": true, ".env.dist": true, ".env.local.example": true,
-		"example.env": true, ".env": true, ".env.production": false, "env.d.ts": false, ".envrc": false, "environment.ts": false,
+		"example.env": true, ".env": true, ".env.production": true, ".env.local": true, ".env.development": false,
+		"env.d.ts": false, ".envrc": false, "environment.ts": false,
 	} {
 		if got := envTemplateFile(name); got != want {
 			t.Fatalf("envTemplateFile(%q) = %v", name, got)
+		}
+	}
+	// The files a framework loads with real values contribute names only.
+	for name, want := range map[string]bool{
+		".env": true, ".env.local": true, ".env.production": true, ".env.production.local": true, ".env.example": false, ".env.local.example": false,
+	} {
+		if got := envRealFile(name); got != want {
+			t.Fatalf("envRealFile(%q) = %v", name, got)
 		}
 	}
 	for raw, want := range map[string]string{

@@ -4,10 +4,12 @@ import Link from "next/link"
 import { FormFact, FormFacts, FormNote, FormSection } from "@/components/form"
 import { Group } from "@/components/panel"
 import { Status } from "@/components/status-dot"
+import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import type { DeploymentConfiguration, DeploymentPreflightFinding } from "@/lib/types"
 import { FindingRow, findingRemedy } from "@/components/deploy/deployment-findings"
+import { variableFixLabel } from "@/components/deploy/failure-cause"
 import { WORKLOAD_LABELS } from "@/components/deploy/vocabulary"
 import { AutomaticDeployment } from "@/components/deploy/new-project/automatic-deployment"
 import type { ConfigureFlow, DraftGitPolicy } from "@/components/deploy/new-project/draft"
@@ -54,6 +56,8 @@ export function StepReview({
   onAcknowledgedChange,
   onOpenRemedy,
   canOpenRemedy,
+  onApplyFix,
+  onInspectAgain,
 }: {
   flow: ConfigureFlow
   branch?: string
@@ -72,12 +76,32 @@ export function StepReview({
   onAcknowledgedChange: (codes: string[]) => void
   onOpenRemedy: (finding: DeploymentPreflightFinding) => void
   canOpenRemedy: (finding: DeploymentPreflightFinding) => boolean
+  /**
+   * Applies a finding's computed plan change to the plan this screen holds,
+   * which the check then answers again; how it reads comes from
+   * `variableFixLabel`.
+   */
+  onApplyFix?: (finding: DeploymentPreflightFinding) => void
+  /**
+   * Reads the source again at the branch's newer commit, keeping the chosen
+   * candidate — `source_moved`'s remedy, since accepting the warning deploys
+   * the commit this screen checked instead.
+   */
+  onInspectAgain?: () => void
 }) {
   const isGitSource = flow.source.kind === "git" || flow.source.kind === "local"
   const configuration = flow.configuration
   const declared = configuration.variables
   const generated = declared.filter(
     (variable) => (variable.generate ?? 0) > 0 && !suppliedVariables.includes(variable.name),
+  )
+  // Plain values the plan carries itself — an address that follows the
+  // domain, a documented default — read back so none of them is a surprise.
+  const settled = declared.filter(
+    (variable) =>
+      variable.sensitivity === "plain" &&
+      variable.value &&
+      !suppliedVariables.includes(variable.name),
   )
   const mounts = configuration.runtime.mounts ?? []
   const readiness = configuration.checks.filter((check) => check.phase === "readiness")
@@ -146,7 +170,7 @@ export function StepReview({
                 <span className="font-mono text-foreground">{variable.name}</span>
                 <span className="text-muted-foreground">
                   {" — "}
-                  {variable.generate} characters, made when this plan is saved
+                  {secretShape(variable)}, made when this plan is saved
                 </span>
               </li>
             ))}
@@ -157,6 +181,23 @@ export function StepReview({
             Each is minted from this server&apos;s own randomness, stored sealed, and never shipped
             with the source. Back them up with the data they protect.
           </FormNote>
+        </FormSection>
+      )}
+
+      {settled.length > 0 && (
+        <FormSection title="Values set in the plan">
+          <ul className="min-w-0 space-y-1 text-hint">
+            {settled.map((variable) => (
+              <li key={variable.name} className="min-w-0 break-all">
+                <span className="font-mono text-foreground">{variable.name}</span>
+                <span className="text-muted-foreground">
+                  {" — "}
+                  <span className="font-mono">{variable.value}</span>
+                  {variable.domainTemplate ? ", follows the domain" : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
         </FormSection>
       )}
 
@@ -214,6 +255,11 @@ export function StepReview({
                 index={index}
                 onOpenRemedy={onOpenRemedy}
                 canOpenRemedy={canOpenRemedy(finding)}
+                fixAction={
+                  finding.fix && onApplyFix
+                    ? { label: variableFixLabel(finding.fix), onApply: () => onApplyFix(finding) }
+                    : undefined
+                }
               />
             ))}
           </div>
@@ -261,6 +307,36 @@ export function StepReview({
                         )}
                       </span>
                     )}
+                    {finding.fix && onApplyFix && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="xs"
+                        className="mt-1.5"
+                        onClick={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          onApplyFix(finding)
+                        }}
+                      >
+                        {variableFixLabel(finding.fix)}
+                      </Button>
+                    )}
+                    {finding.code === "source_moved" && onInspectAgain && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="xs"
+                        className="mt-1.5"
+                        onClick={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          onInspectAgain()
+                        }}
+                      >
+                        Inspect again
+                      </Button>
+                    )}
                   </span>
                 </Label>
               ))}
@@ -294,6 +370,13 @@ function PassedChecks({
   // Said by the Address node and by the sections above respectively; a pass
   // whose whole content is already on screen is noise at the foot of it.
   const covered = new Set(["dns_verified", "domain_ownership", "detection_selected"])
+  // A pass whose measurement is the answer, not a restatement of its title:
+  // which lockfile was chosen and why, and the commands the build will run.
+  const readings = new Set([
+    "build_commands",
+    "package_manager_resolved",
+    "package_manager_version",
+  ])
   const passed = findings.filter(
     (finding) => finding.severity === "pass" && !covered.has(finding.code),
   )
@@ -311,6 +394,11 @@ function PassedChecks({
         {passed.map((finding, index) => (
           <li key={`${finding.code}:${index}`} className="min-w-0">
             <Status verdict="ok" label={finding.title} className="font-normal" />
+            {readings.has(finding.code) && finding.measured && (
+              <p className="pl-3 font-mono text-hint break-words text-muted-foreground">
+                {finding.measured}
+              </p>
+            )}
           </li>
         ))}
       </ul>
@@ -334,10 +422,31 @@ function variablesFact(declared: number, typed: number) {
   return parts.length === 0 ? "None" : parts.join(" · ")
 }
 
+/** A generated secret's shape, in the words its framework's own generator would use. */
+function secretShape(variable: DeploymentConfiguration["variables"][number]) {
+  switch (variable.generateFormat) {
+    case "hex":
+      return `${variable.generate} hex characters`
+    case "base64":
+      return `${variable.generate} random bytes, base64`
+    case "laravel":
+      return `a Laravel base64: key over ${variable.generate} random bytes`
+    case "keylist":
+      return `four keys of ${variable.generate} random bytes each`
+  }
+  return `${variable.generate} characters`
+}
+
 /** What a check actually asks — a path, a command, or a port. */
 function checkTarget(check: DeploymentConfiguration["checks"][number]) {
-  const config = (check.config ?? {}) as { path?: string; command?: string[]; port?: number }
-  if (config.path) return `GET ${config.path}`
+  const config = (check.config ?? {}) as {
+    path?: string
+    command?: string[]
+    port?: number
+    acceptAnyAnswer?: boolean
+  }
+  if (config.path) return `GET ${config.path}${config.acceptAnyAnswer ? " (any answer)" : ""}`
+  if (check.kind === "docker_health") return "the image's HEALTHCHECK"
   if (config.command?.length) return config.command.join(" ")
   if (config.port) return `a connection on ${config.port}`
   return check.kind

@@ -9,6 +9,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useMemoryState, useSessionState } from "@/lib/view-state"
 import type {
   DeploymentDraft,
+  DeploymentDraftSource,
   DeploymentPreflight,
   DeploymentPreflightFinding,
   WorkloadProfile,
@@ -22,9 +23,13 @@ import { DEPLOYMENT_NAME } from "@/components/deploy/vocabulary"
 import { blockingFindings, warningFindings } from "@/components/deploy/deployment-findings"
 import {
   checksForRuntime,
+  composeSourceForCandidate,
   discoveredEnvironmentRows,
+  environmentRowsToSend,
   mergeDiscoveredRows,
+  releaseStrategy,
   validateConfiguration,
+  variablesWithoutScope,
 } from "@/components/deploy/deployment-defaults"
 import { PlanWiring } from "@/components/deploy/new-project/plan-wiring"
 import { StepProject } from "@/components/deploy/new-project/step-project"
@@ -42,11 +47,13 @@ import {
   adoptImport,
   commitDraft,
   configurationForSave,
+  withHeldDomainVariables,
   declaredVariablesNeedReview,
   enqueueDeploy,
   environmentText,
   loadDraft,
   preflightDraft,
+  firstDeployRevision,
   reinspect,
   redetectedConfiguration,
   saveConfiguration,
@@ -63,6 +70,7 @@ import {
   type EnvironmentRow,
   type FlowUpdate,
 } from "@/components/deploy/new-project/draft"
+import { withoutPlatformVariables } from "@/components/deploy/settings/dotenv"
 
 function asError(error: unknown) {
   return error instanceof Error ? error : new Error(String(error))
@@ -135,7 +143,7 @@ export function Configure({
     () =>
       discoveredEnvironmentRows(flow.candidate).map((row) =>
         flow.draft.environmentKeys?.includes(row.name)
-          ? { ...row, value: "", generated: false }
+          ? { ...row, value: "", generated: false, note: undefined }
           : row,
       ),
     [flow.candidate, flow.draft.environmentKeys],
@@ -195,7 +203,9 @@ export function Configure({
     setEnvironment((current) => {
       const mine = current?.draftId === draftId ? current : null
       const found = discoveredEnvironmentRows(flow.candidate).map((row) =>
-        mine?.retainedKeys.includes(row.name) ? { ...row, value: "", generated: false } : row,
+        mine?.retainedKeys.includes(row.name)
+          ? { ...row, value: "", generated: false, note: undefined }
+          : row,
       )
       const rows = mine?.rows ?? discoveredEnvironmentRows(previous)
       return {
@@ -208,13 +218,20 @@ export function Configure({
   }, [flow.candidate, draftId, setEnvironment])
   const [branch, setBranch] = useState(flow.source.ref ?? "main")
   const [branchBusy, setBranchBusy] = useState(false)
-  const sentRows = envRows.filter((row) => row.name.trim() && (!row.detected || row.value))
-  const text = environmentText(sentRows, dotenv)
+  const sentRows = environmentRowsToSend(envRows, flow.configuration.variables)
+  // A pasted local .env's PORT and development NODE_ENV are not the
+  // deployment's; a Compose file may interpolate ${PORT} itself, so its paste
+  // is sent whole.
+  const pasted =
+    flow.configuration.build.method === "compose"
+      ? { text: dotenv, skipped: [] }
+      : withoutPlatformVariables(dotenv)
+  const text = environmentText(sentRows, pasted.text)
   const environmentNames = new Set([
     ...retainedKeys,
     ...sentRows.map((row) => row.name),
     ...Array.from(
-      dotenv.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/gm),
+      pasted.text.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/gm),
       (match) => match[1],
     ),
   ])
@@ -231,7 +248,7 @@ export function Configure({
       name: flow.name,
       profile: flow.profile,
       source: flow.source,
-      configuration: configurationForSave(configuration),
+      configuration: configurationForSave(configuration, flow.source),
       dotenv: text,
       retainedKeys,
     })
@@ -333,15 +350,14 @@ export function Configure({
   // the environment lives in memory and the step in the session store, so a
   // reload used to land back on Review reading "3 values" with none to send.
 
-  const changeBranch = async (nextRef: string) => {
-    const ref = nextRef.trim()
-    setBranch(ref)
-    if (!ref || ref === flow.source.ref || mutating.current) return
+  // A branch or a clone option is part of the saved source, so changing one
+  // saves it again and detects again.
+  const resaveSource = async (nextSource: DeploymentDraftSource) => {
+    if (mutating.current) return
     mutating.current = true
     setBranchBusy(true)
     setFailure(undefined)
     try {
-      const nextSource = { ...flow.source, ref }
       const result = await reinspect(flow.draft, flow.profile, nextSource)
       const profile =
         flow.profile === flow.candidate?.profile
@@ -375,6 +391,17 @@ export function Configure({
     }
   }
 
+  const changeBranch = async (nextRef: string) => {
+    const ref = nextRef.trim()
+    setBranch(ref)
+    if (!ref || ref === flow.source.ref) return
+    await resaveSource({ ...flow.source, ref })
+  }
+
+  const changeCloneOptions = (
+    options: Pick<DeploymentDraftSource, "includeSubmodules" | "includeLfs">,
+  ) => void resaveSource({ ...flow.source, ...options })
+
   const changeProfile = (profile: WorkloadProfile) => {
     const internalPort =
       profile === "worker"
@@ -387,8 +414,12 @@ export function Configure({
     // readiness gate, for a web or static profile. Choosing one and leaving
     // the plan stop-first with nothing verifying it would answer half the
     // question the operator just answered.
-    const gated = profile === "web" || profile === "static"
-    const checks = checksForRuntime(configuration.checks, profile, internalPort)
+    const checks = checksForRuntime(
+      configuration.checks,
+      profile,
+      internalPort,
+      flow.candidate?.readiness,
+    )
     return onFlowChange({
       ...flow,
       profile,
@@ -407,8 +438,9 @@ export function Configure({
           ...configuration.runtime,
           internalPort,
           // Blue/green needs a candidate to stand beside the live one, which
-          // preflight refuses for anything but a web or static profile.
-          strategy: gated ? "blue_green" : "stop_first",
+          // preflight refuses for anything but a web or static profile, and
+          // for a plan whose volume two releases would write at once.
+          strategy: releaseStrategy(profile, configuration.runtime.mounts),
         },
       },
     })
@@ -433,6 +465,37 @@ export function Configure({
               detection: result.detection,
               profile: result.candidate?.profile ?? current.profile,
               configuration: redetectedConfiguration(flow, result),
+            }
+          : current,
+      )
+    } catch (error) {
+      setFailure(asError(error))
+    } finally {
+      mutating.current = false
+      setBusy("")
+    }
+  }
+
+  // `compose_analysis_missing`'s remedy: the same repository, branch and
+  // files, read as a Compose source so its services are analysed and built.
+  const deployAsCompose = async () => {
+    const nextSource = composeSourceForCandidate(flow.source, flow.candidate)
+    if (!nextSource || mutating.current) return
+    mutating.current = true
+    setFailure(undefined)
+    setBusy("detect")
+    try {
+      const result = await reinspect(flow.draft, "compose", nextSource)
+      onFlowChange((current) =>
+        current
+          ? {
+              ...current,
+              source: nextSource,
+              profile: "compose",
+              draft: result.draft,
+              candidate: result.candidate,
+              detection: result.detection,
+              configuration: result.configuration,
             }
           : current,
       )
@@ -500,6 +563,27 @@ export function Configure({
     if (section) openSection(section)
   }
 
+  // A finding's computed change is applied to the plan on this screen; the
+  // plan it changes is a new one, which Review checks again on its own.
+  const applyFindingFix = (finding: DeploymentPreflightFinding) => {
+    const fix = finding.fix
+    if (fix?.kind !== "remove_variable_scope" || !fix.scope || !fix.field.startsWith("variables."))
+      return
+    const name = fix.field.slice("variables.".length)
+    const scope = fix.scope
+    onFlowChange((current) =>
+      current
+        ? {
+            ...current,
+            configuration: {
+              ...current.configuration,
+              variables: variablesWithoutScope(current.configuration.variables, name, scope),
+            },
+          }
+        : current,
+    )
+  }
+
   /**
    * What stops this step from being finished, said in the words the reader
    * can act on.
@@ -524,7 +608,16 @@ export function Configure({
       )
         return "Set the output directory for your static website, such as dist or out."
       return (
-        errors.buildMethod ?? errors.pythonVersion ?? errors.buildSecrets ?? errors.releaseTasks
+        errors.buildMethod ??
+        errors.pythonVersion ??
+        errors.nodeVersion ??
+        errors.phpVersion ??
+        errors.javaVersion ??
+        errors.dotnetVersion ??
+        errors.target ??
+        errors.startCommand ??
+        errors.buildSecrets ??
+        errors.releaseTasks
       )
     }
     if (target === "runtime") {
@@ -535,7 +628,7 @@ export function Configure({
         (configuration.runtime.internalPort ?? 0) === 0
       )
         return "Set the port your application listens on inside the container."
-      return errors.internalPort ?? errors.hostPort
+      return errors.internalPort ?? errors.hostPort ?? errors.maxRequestBodyMb
     }
     if (target === "variables") {
       if (
@@ -588,7 +681,7 @@ export function Configure({
     try {
       // Readiness follows the runtime publication, which may differ from the
       // container port when Docker allocates a free host port.
-      const toSave = configurationForSave(configuration)
+      const toSave = configurationForSave(configuration, flow.source)
       let working = flow.draft
       const savePlan = async (draft: DeploymentDraft) => {
         working = draft
@@ -613,7 +706,10 @@ export function Configure({
       }
       // The server seals visitor passwords and records staged variable scopes.
       // Keeping the submitted copy would lose those values on reload.
-      const canonical = saved.data.configuration ?? toSave
+      const canonical = withHeldDomainVariables(
+        saved.data.configuration ?? toSave,
+        configuration.variables,
+      )
       onFlowChange((current) =>
         current ? { ...current, draft: saved, configuration: canonical } : current,
       )
@@ -648,7 +744,16 @@ export function Configure({
       })
 
       if (operation === "deploy" && !isImport) {
-        const run = await enqueueDeploy(commit.projectId, commit.environmentId)
+        const run = await enqueueDeploy(
+          commit.projectId,
+          commit.environmentId,
+          // The commit the check above read, which is the one it passed.
+          firstDeployRevision(
+            flow.source,
+            checkedDraft.draft.data.detection,
+            checkedDraft.preflight.findings,
+          ),
+        )
         router.push(`/deploy/${commit.projectId}/runs/${run.id}`)
         return
       }
@@ -701,6 +806,46 @@ export function Configure({
     // is what the `preflight` guard is there to make unnecessary.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current, preflight, busy, created, draftId, planSignature])
+
+  /**
+   * `source_moved`'s remedy: the branch has moved past the commit Review
+   * checked, so detection reads the newer one — keeping the candidate the
+   * reader chose where it still exists — and Review asks again. The plan may
+   * come out the same, so the answer about the old commit is dropped rather
+   * than left standing for an unchanged signature.
+   */
+  const inspectAgain = async () => {
+    if (mutating.current) return
+    mutating.current = true
+    setFailure(undefined)
+    setBusy("detect")
+    try {
+      const selected = flow.detection?.selectedId
+      const result = selected
+        ? await selectCandidate(flow.draft, flow.profile, flow.source, selected).catch(() =>
+            reinspect(flow.draft, flow.profile, flow.source),
+          )
+        : await reinspect(flow.draft, flow.profile, flow.source)
+      onFlowChange((current) =>
+        current
+          ? {
+              ...current,
+              draft: result.draft,
+              candidate: result.candidate,
+              detection: result.detection,
+              configuration: redetectedConfiguration(flow, result),
+            }
+          : current,
+      )
+      setReview(null)
+      autoChecked.current = undefined
+    } catch (error) {
+      setFailure(asError(error))
+    } finally {
+      mutating.current = false
+      setBusy("")
+    }
+  }
 
   if (created)
     return (
@@ -782,8 +927,10 @@ export function Configure({
                 branchBusy={branchBusy}
                 branches={branches.data ?? []}
                 onChangeBranch={(ref) => void changeBranch(ref)}
+                onChangeCloneOptions={changeCloneOptions}
                 onEditBranch={setBranch}
                 onPickCandidate={(id) => void pickCandidate(id)}
+                onDeployAsCompose={() => void deployAsCompose()}
                 busy={busy}
                 nameTouched={nameTouched}
                 onNameTouched={() => setNameTouched(true)}
@@ -809,6 +956,7 @@ export function Configure({
                 onRowsChange={setEnvRows}
                 dotenv={dotenv}
                 onDotenvChange={setDotenv}
+                platformSkipped={pasted.skipped}
                 retainedKeys={retainedKeys}
                 onRemoveRetainedKey={removeRetainedKey}
                 suppliedVariables={[...environmentNames]}
@@ -836,6 +984,8 @@ export function Configure({
                 onAcknowledgedChange={setAcknowledged}
                 onOpenRemedy={openRemedyField}
                 canOpenRemedy={(finding) => Boolean(sectionForField(finding.fieldId))}
+                onApplyFix={applyFindingFix}
+                onInspectAgain={() => void inspectAgain()}
               />
             )}
           </FlowPanelBody>

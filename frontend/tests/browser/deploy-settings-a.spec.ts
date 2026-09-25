@@ -156,9 +156,10 @@ test.describe("Build settings", () => {
     const buildCard = page.getByRole("form", { name: "Build" })
 
     // Every recipe the backend builds is offered — the select this replaced
-    // had three of eight — and the saved one is the lit card.
+    // had three of eight — and the saved one is the lit card: fifteen
+    // recipes, a Dockerfile and a static site.
     const builder = buildCard.getByRole("group", { name: "Builder" })
-    await expect(builder.getByRole("button")).toHaveCount(10)
+    await expect(builder.getByRole("button")).toHaveCount(17)
     await expect(builder.getByRole("button", { name: /^Node\.js/ })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -229,6 +230,8 @@ test.describe("Build settings", () => {
     await expect(page.getByText("Release tasks saved")).toBeVisible()
 
     const saved = writes.at(-1) as { build: { releaseTasks: unknown } }
+    // A build that makes an image runs a new task in it, where the
+    // application's toolchain is.
     expect(saved.build.releaseTasks).toEqual([
       {
         name: "Migrate database",
@@ -236,6 +239,7 @@ test.describe("Build settings", () => {
         workingDirectory: "",
         timeoutSeconds: 300,
         env: [],
+        runner: "image",
       },
     ])
   })

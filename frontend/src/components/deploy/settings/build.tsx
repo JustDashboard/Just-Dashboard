@@ -3,7 +3,7 @@
 import { useState } from "react"
 import type { FormEvent } from "react"
 import { Copy, LockClosed } from "@/components/icons"
-import { ApiError, get, refusedIndex } from "@/lib/api"
+import { ApiError, get, post, refusedIndex } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -12,6 +12,9 @@ import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentBuildEvidence,
   DeploymentConfiguration,
+  DeploymentDetectedSystemPackage,
+  DeploymentDetectionChange,
+  DeploymentDetectionProposal,
   DeploymentEnvironmentConfiguration,
   DeploymentRecipe,
   DeploymentRunSnapshot,
@@ -45,9 +48,26 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { useProject } from "@/components/deploy/project-context"
 import {
+  NODE_VERSION,
+  PHP_VERSION,
+  DOTNET_VERSION,
+  DOTNET_VERSIONS,
+  GO_VERSION,
+  GO_VERSIONS,
+  JAVA_VERSION,
+  JAVA_VERSIONS,
   PYTHON_VERSION,
+  automaticPackageManagerHint,
+  commandsForPackageManager,
+  dockerfileStageHint,
+  dotnetVersionReading,
+  goMainPackageList,
+  installsAssetsWithNode,
+  javaVersionReading,
+  packageManagerOptions,
+  packageManagerReading,
+  publicBuildVariable,
   validateConfiguration,
-  withPackageManagerRunner,
 } from "@/components/deploy/deployment-defaults"
 import {
   BUILD_METHOD_SHORT,
@@ -64,6 +84,12 @@ import {
 } from "@/components/deploy/settings/setting-card"
 import { ReleaseTasks, spoken, type ReleaseTask } from "@/components/deploy/settings/release-tasks"
 import { Segments } from "@/components/deploy/settings/segments"
+import { DetectionProposalPanel } from "@/components/deploy/settings/detection-proposal"
+import {
+  applyDetectionChanges,
+  buildFieldChange,
+  proposedValue,
+} from "@/components/deploy/settings/detection-changes"
 
 /**
  * How the release is built — which toolchain, from which directory, into
@@ -118,9 +144,18 @@ const BUILD_FIELD_IDS: Record<string, string> = {
   "build.packageManager": "build-package-manager",
   "build.rootDirectory": "build-root",
   "build.goVersion": "build-go-version",
+  "build.goPackage": "build-go-package",
+  "build.cargoBin": "build-cargo-bin",
   "build.pythonVersion": "build-python-version",
+  "build.nodeVersion": "build-node-version",
+  "build.phpVersion": "build-php-version",
+  "build.systemPackages": "build-system-packages",
+  "build.javaVersion": "build-java-version",
+  "build.dotnetVersion": "build-dotnet-version",
   "build.spaFallback": "build-spa",
   "build.dockerfile": "build-dockerfile",
+  "build.target": "build-target",
+  "build.primaryService": "build-primary-service",
   "build.buildCommand": "build-command",
   "build.startCommand": "build-start",
   "build.outputDirectory": "build-output",
@@ -132,8 +167,15 @@ const FIELD_SECTION: Record<string, "build" | "commands" | "image"> = {
   "build-method": "build",
   "build-package-manager": "build",
   "build-go-version": "build",
+  "build-go-package": "build",
+  "build-cargo-bin": "build",
   "build-python-version": "build",
+  "build-system-packages": "build",
+  "build-java-version": "build",
+  "build-dotnet-version": "build",
   "build-dockerfile": "build",
+  "build-target": "build",
+  "build-primary-service": "build",
   "build-root": "commands",
   "build-command": "commands",
   "build-start": "commands",
@@ -142,12 +184,7 @@ const FIELD_SECTION: Record<string, "build" | "commands" | "image"> = {
   "build-platform": "image",
 }
 
-/** The Go releases the recipe builds with, as `build_go.go`'s own pattern states them. */
-const GO_VERSION = /^1\.(25|26)(\.[0-9]{1,3})?$/
-const GO_ERROR = "Use Go 1.25 or 1.26, or leave empty to follow go.mod."
-
-/** Prefixes whose variables a front-end build inlines into the JavaScript it serves. */
-const BROWSER_PREFIX = /^(NEXT_PUBLIC_|VITE_|PUBLIC_|NUXT_PUBLIC_|REACT_APP_|EXPO_PUBLIC_)/
+const GO_ERROR = `Use Go ${GO_VERSIONS.slice(0, -1).join(", ")} or ${GO_VERSIONS.at(-1)}, or leave empty to follow go.mod.`
 
 type Builder = {
   key: string
@@ -159,7 +196,7 @@ type Builder = {
 }
 
 /**
- * Every way a Git or local source can be built: the eight recipes the
+ * Every way a Git or local source can be built: the fifteen recipes the
  * backend's `validRecipe` accepts, then a Dockerfile of the project's own and
  * a static site. The detail is a word about the toolchain or what decides it,
  * short enough for the five-across grid at 1280, where a card has about 60px
@@ -178,7 +215,7 @@ const BUILDERS: Builder[] = [
     key: "python",
     label: RECIPE_SHORT.python,
     product: "python",
-    detail: "3.10–3.13",
+    detail: "3.10–3.14",
     method: "recipe",
     recipe: "python",
   },
@@ -186,7 +223,7 @@ const BUILDERS: Builder[] = [
     key: "go",
     label: RECIPE_SHORT.go,
     product: "go",
-    detail: "1.25 · 1.26",
+    detail: `${GO_VERSIONS[0]}–${GO_VERSIONS.at(-1)}`,
     method: "recipe",
     recipe: "go",
   },
@@ -231,6 +268,62 @@ const BUILDERS: Builder[] = [
     recipe: "php",
   },
   {
+    key: "site",
+    label: RECIPE_SHORT.site,
+    product: "nginx-static",
+    detail: "Hugo · Jekyll",
+    method: "recipe",
+    recipe: "site",
+  },
+  {
+    key: "ruby",
+    label: RECIPE_SHORT.ruby,
+    product: "ruby",
+    detail: "Bundler",
+    method: "recipe",
+    recipe: "ruby",
+  },
+  {
+    key: "elixir",
+    label: RECIPE_SHORT.elixir,
+    product: "elixir",
+    detail: "mix release",
+    method: "recipe",
+    recipe: "elixir",
+  },
+  {
+    key: "scala",
+    label: RECIPE_SHORT.scala,
+    product: "scala",
+    detail: "sbt",
+    method: "recipe",
+    recipe: "scala",
+  },
+  {
+    key: "clojure",
+    label: RECIPE_SHORT.clojure,
+    product: "clojure",
+    detail: "uberjar",
+    method: "recipe",
+    recipe: "clojure",
+  },
+  {
+    key: "dart",
+    label: RECIPE_SHORT.dart,
+    product: "dart",
+    detail: "AOT exe",
+    method: "recipe",
+    recipe: "dart",
+  },
+  {
+    key: "gleam",
+    label: RECIPE_SHORT.gleam,
+    product: "gleam",
+    detail: "BEAM",
+    method: "recipe",
+    recipe: "gleam",
+  },
+  {
     key: "dockerfile",
     label: "Dockerfile",
     product: "docker",
@@ -246,15 +339,21 @@ const BUILDERS: Builder[] = [
   },
 ]
 
-const MANAGERS: { key?: NodePackageManager; label: string; detail: string }[] = [
-  { label: "Lockfile", detail: "decides" },
-  { key: "bun", label: "Bun", detail: "bun.lock" },
-  { key: "npm", label: "npm", detail: "package-lock" },
-  { key: "pnpm", label: "pnpm", detail: "pnpm-lock" },
-  { key: "yarn", label: "Yarn", detail: "yarn.lock" },
-]
+/**
+ * Each manager's lockfile by name, for a project whose saved evidence predates
+ * detection reading them; with it, each card says whether its lockfile
+ * matches package.json.
+ */
+const LOCKFILE_NAMES: Record<NodePackageManager, string> = {
+  bun: "bun.lock",
+  npm: "package-lock",
+  pnpm: "pnpm-lock",
+  yarn: "yarn.lock",
+}
 
-const PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13"]
+const PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13", "3.14"]
+const NODE_VERSIONS = ["20", "22", "24"]
+const PHP_VERSIONS = ["8.2", "8.3", "8.4", "8.5"]
 
 /** What a recipe falls back to when nothing in the draft or the last build names it. */
 const RECIPE_DEFAULT: Record<DeploymentRecipe, string> = {
@@ -266,6 +365,13 @@ const RECIPE_DEFAULT: Record<DeploymentRecipe, string> = {
   dotnet: ".NET SDK",
   deno: "deno.json",
   php: "Composer · FrankenPHP",
+  site: "its configuration decides",
+  ruby: ".ruby-version decides",
+  elixir: ".tool-versions decides",
+  scala: "sbt stage or assembly",
+  clojure: "Leiningen or tools.build",
+  dart: "pubspec.yaml decides",
+  gleam: "gleam.toml",
 }
 
 // `validateConfiguration` wants the plan's variable shape (a value or
@@ -400,9 +506,15 @@ function builderReading(
           ? (build.pythonVersion ?? RECIPE_DEFAULT.python)
           : recipe === "go"
             ? (build.goVersion ?? RECIPE_DEFAULT.go)
-            : prepared?.recipe === recipe && prepared.toolchain
-              ? prepared.toolchain
-              : RECIPE_DEFAULT[recipe]
+            : recipe === "php" && build.phpVersion
+              ? `php ${build.phpVersion}`
+              : recipe === "java" && build.javaVersion
+                ? `Java ${build.javaVersion}`
+                : recipe === "dotnet" && build.dotnetVersion
+                  ? `.NET ${build.dotnetVersion}`
+                  : prepared?.recipe === recipe && prepared.toolchain
+                    ? prepared.toolchain
+                    : RECIPE_DEFAULT[recipe]
     return {
       value: RECIPE_SHORT[recipe],
       detail: framework ? `${frameworkLabel(framework)} · ${detail}` : detail,
@@ -420,7 +532,7 @@ function builderReading(
   const product = buildMethodProduct(build.method, { image })
   const detail =
     build.method === "dockerfile"
-      ? build.dockerfile || "Dockerfile"
+      ? `${build.dockerfile || "Dockerfile"}${build.target ? ` · stage ${build.target}` : ""}`
       : build.method === "static"
         ? "served by nginx"
         : build.method === "image"
@@ -475,7 +587,7 @@ function BuildReadings({
   )
   const secret = buildVariables.filter((variable) => variable.sensitivity === "secret")
   const exposed = secret.find(
-    (variable) => BROWSER_PREFIX.test(variable.name) && !installOnly.has(variable.name),
+    (variable) => publicBuildVariable(variable.name) && !installOnly.has(variable.name),
   )
 
   return (
@@ -569,7 +681,8 @@ function BuildForm({
 }) {
   const { can } = useAuth()
   const canEdit = can("system.admin")
-  const { deployment } = useProject().detail
+  const project = useProject()
+  const { deployment } = project.detail
   const draft = useBuildDraft(projectId, configuration)
   const build = draft.value
   const setBuild = (next: BuildDraft) => draft.set(next)
@@ -579,6 +692,40 @@ function BuildForm({
   const errorFor = (id: string) => (fieldError?.id === id ? fieldError.message : undefined)
   const refusedIn = (section: string) =>
     fieldError !== undefined && FIELD_SECTION[fieldError.id] === section
+
+  // Detect again: the source read now, compared with the saved plan. Only the
+  // build fields are this form's to apply, into the draft; a field already
+  // matching what detection proposes has nothing left to offer.
+  const [proposal, setProposal] = useState<DeploymentDetectionProposal>()
+  const [detecting, setDetecting] = useState(false)
+  const detect = async () => {
+    setDetecting(true)
+    try {
+      setProposal(
+        await post<DeploymentDetectionProposal>(
+          `/deploy/${projectId}/environments/${project.environmentId}/detect`,
+          {},
+        ),
+      )
+    } catch (caught) {
+      notify.error("Could not read the source again", caught)
+    } finally {
+      setDetecting(false)
+    }
+  }
+  const draftValue = (field: string) =>
+    field === "build.spaFallback"
+      ? String(Boolean(build.spaFallback))
+      : String(build[field.slice("build.".length) as keyof BuildDraft] ?? "")
+  const proposed = (proposal?.changes ?? [])
+    .filter(buildFieldChange)
+    .filter((change) => draftValue(change.field) !== change.detected)
+  const proposedFor = (field: string) => {
+    const change = proposed.find((one) => one.field === field)
+    return change && `Detection proposes ${proposedValue(change, change.detected)}.`
+  }
+  const applyProposed = (changes: DeploymentDetectionChange[]) =>
+    setBuild(applyDetectionChanges(build, configuration.runtime, changes).build)
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -603,7 +750,22 @@ function BuildForm({
       { ...configuration, build: next, variables: planVariables(configuration) },
       deployment.profile,
     )
-    const refusal = errors.buildMethod || errors.buildSecrets || errors.pythonVersion
+    if (errors.target) {
+      setFieldError({ id: "build-target", message: errors.target })
+      return
+    }
+    if (errors.systemPackages) {
+      setFieldError({ id: "build-system-packages", message: errors.systemPackages })
+      return
+    }
+    const refusal =
+      errors.buildMethod ||
+      errors.buildSecrets ||
+      errors.pythonVersion ||
+      errors.nodeVersion ||
+      errors.phpVersion ||
+      errors.javaVersion ||
+      errors.dotnetVersion
     if (refusal) {
       setError(refusal)
       return
@@ -654,6 +816,20 @@ function BuildForm({
   const bunLastBuild = evidence?.prepared?.baseImages?.some((base) =>
     base.reference.startsWith("oven/bun"),
   )
+  // What detection read for the code this build still describes; absent
+  // once the build moved to a directory or recipe detection did not read.
+  const detected = configuration.detected
+  // "Lockfile" resolves to the manager detection chose, so a command left on
+  // another manager's runner moves with it instead of staying behind on an
+  // image that lacks that runner.
+  const choosePackageManager = (packageManager: NodePackageManager | undefined) =>
+    setBuild({
+      ...build,
+      packageManager,
+      ...(installsAssetsWithNode(recipe)
+        ? {}
+        : commandsForPackageManager(detected, build, packageManager)),
+    })
   // What the last build did is said only while the draft still builds the
   // same way: a Node toolchain or a Node Dockerfile under a Python recipe
   // would be a stale fact dressed as a current one.
@@ -679,8 +855,20 @@ function BuildForm({
         recipe: next,
         secrets: build.method === "recipe" ? build.secrets : [],
         goVersion: next === "go" ? build.goVersion : undefined,
+        goPackage: next === "go" ? build.goPackage : undefined,
+        cargoBin: next === "rust" ? build.cargoBin : undefined,
         pythonVersion: next === "python" ? build.pythonVersion : undefined,
-        packageManager: next === "node" ? build.packageManager : undefined,
+        phpVersion: next === "php" ? build.phpVersion : undefined,
+        systemPackages: next === "python" ? build.systemPackages : undefined,
+        javaVersion: next === "java" ? build.javaVersion : undefined,
+        dotnetVersion: next === "dotnet" ? build.dotnetVersion : undefined,
+        // The PHP and Python recipes' asset stages, and the Ruby and Elixir
+        // builds' assets, install through the same Node install, so the
+        // choices survive the move between them.
+        nodeVersion:
+          next === "node" || installsAssetsWithNode(next) ? build.nodeVersion : undefined,
+        packageManager:
+          next === "node" || installsAssetsWithNode(next) ? build.packageManager : undefined,
       })
       return
     }
@@ -693,9 +881,17 @@ function BuildForm({
       recipe: undefined,
       secrets: [],
       goVersion: undefined,
+      goPackage: undefined,
+      cargoBin: undefined,
       pythonVersion: undefined,
+      nodeVersion: undefined,
+      phpVersion: undefined,
+      systemPackages: undefined,
+      javaVersion: undefined,
+      dotnetVersion: undefined,
       packageManager: undefined,
       spaFallback: choice.method === "static" ? build.spaFallback : undefined,
+      target: choice.method === "dockerfile" ? build.target : undefined,
     })
   }
 
@@ -724,6 +920,7 @@ function BuildForm({
           asLastBuilt &&
           evidence?.prepared?.toolchain && (
             <span className="block truncate font-mono">
+              {evidence.prepared.nodeVersion && `node ${evidence.prepared.nodeVersion} · `}
               {evidence.prepared.toolchain} · last build
             </span>
           )
@@ -734,12 +931,46 @@ function BuildForm({
             "recipe",
             "packageManager",
             "goVersion",
+            "goPackage",
+            "cargoBin",
             "pythonVersion",
+            "nodeVersion",
+            "phpVersion",
+            "systemPackages",
+            "javaVersion",
+            "dotnetVersion",
             "dockerfile",
+            "target",
+            "primaryService",
           ]),
           refused: refusedIn("build") || Boolean(error),
         })}
+        actions={
+          canEdit &&
+          picks && (
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              onClick={() => void detect()}
+              pending={detecting}
+            >
+              Detect again
+            </Button>
+          )
+        }
       >
+        {proposal && (
+          <DetectionProposalPanel
+            projectId={projectId}
+            title="Detection proposes"
+            proposal={proposal}
+            changes={proposed}
+            canEdit={canEdit}
+            onApply={applyProposed}
+            onDismiss={() => setProposal(undefined)}
+          />
+        )}
         {picks ? (
           <Field label="Builder" error={errorFor("build-method")}>
             <ChoiceGrid id="build-method" columns="compact" role="group" aria-label="Builder">
@@ -768,49 +999,91 @@ function BuildForm({
           />
         )}
 
-        {build.method === "recipe" && recipe === "node" && (
-          <Field
-            label="Package manager"
-            hint="Pick one when the repository has more than one lockfile."
-            error={errorFor("build-package-manager")}
-          >
-            <ChoiceGrid
-              id="build-package-manager"
-              columns="compact"
-              role="group"
-              aria-label="Package manager"
+        {build.method === "recipe" &&
+          (recipe === "node" ||
+            (installsAssetsWithNode(recipe) && (detected?.nodeInstalls?.length ?? 0) > 0)) && (
+            <Field
+              label="Package manager"
+              hint={
+                proposedFor("build.packageManager") ??
+                packageManagerReading(detected, build.packageManager) ??
+                "Pick one when the repository has more than one lockfile."
+              }
+              error={errorFor("build-package-manager")}
             >
-              {MANAGERS.map((manager) => (
+              <ChoiceGrid
+                id="build-package-manager"
+                columns="compact"
+                role="group"
+                aria-label="Package manager"
+              >
                 <ProductCard
-                  key={manager.label}
-                  product={manager.key}
                   fallback={LockClosed}
-                  label={manager.label}
-                  detail={!manager.key && bunLastBuild ? "bun last build" : manager.detail}
-                  selected={build.packageManager === manager.key}
-                  disabled={!canEdit}
-                  onClick={() =>
-                    setBuild({
-                      ...build,
-                      packageManager: manager.key,
-                      buildCommand:
-                        build.buildCommand &&
-                        withPackageManagerRunner(build.buildCommand, manager.key),
-                      startCommand:
-                        build.startCommand &&
-                        withPackageManagerRunner(build.startCommand, manager.key),
-                    })
+                  label="Lockfile"
+                  detail={
+                    automaticPackageManagerHint(detected) ||
+                    (bunLastBuild ? "bun last build" : "decides")
                   }
+                  selected={build.packageManager === undefined}
+                  disabled={!canEdit}
+                  onClick={() => choosePackageManager(undefined)}
                 />
-              ))}
-            </ChoiceGrid>
-          </Field>
-        )}
+                {packageManagerOptions(detected).map((option) => (
+                  <ProductCard
+                    key={option.value}
+                    product={option.value}
+                    fallback={LockClosed}
+                    label={option.label}
+                    detail={option.hint || LOCKFILE_NAMES[option.value]}
+                    selected={build.packageManager === option.value}
+                    disabled={!canEdit || option.disabled}
+                    onClick={() => choosePackageManager(option.value)}
+                  />
+                ))}
+              </ChoiceGrid>
+            </Field>
+          )}
+
+        {build.method === "recipe" &&
+          (recipe === "node" ||
+            (installsAssetsWithNode(recipe) && (detected?.nodeInstalls?.length ?? 0) > 0)) && (
+            <Field
+              label="Node version"
+              hint={
+                detected?.nodeVersion
+                  ? `Auto builds on Node ${detected.nodeVersion}; a version here outranks the repository.`
+                  : "Auto reads .nvmrc, .node-version, .tool-versions, volta and engines.node."
+              }
+              error={errorFor("build-node-version")}
+            >
+              <Segments
+                id="build-node-version"
+                label="Node version"
+                fill
+                value={build.nodeVersion ?? "auto"}
+                disabled={!canEdit}
+                onChange={(next) =>
+                  setBuild({ ...build, nodeVersion: next === "auto" ? undefined : next })
+                }
+                options={[
+                  { value: "auto", label: "Auto" },
+                  ...NODE_VERSIONS.map((version) => ({
+                    value: version,
+                    label: version,
+                    mono: true,
+                  })),
+                  ...(build.nodeVersion && !NODE_VERSION.test(build.nodeVersion)
+                    ? [{ value: build.nodeVersion, label: build.nodeVersion, mono: true }]
+                    : []),
+                ]}
+              />
+            </Field>
+          )}
 
         {build.method === "recipe" && recipe === "python" && (
           <Field
             label="Python version"
-            hint="Auto reads .python-version, runtime.txt or pyproject.toml."
+            hint="Auto reads .python-version, runtime.txt, .tool-versions, Pipfile or pyproject.toml, and stays below a version a pinned package has no wheels for."
             error={errorFor("build-python-version")}
           >
             <Segments
@@ -835,6 +1108,168 @@ function BuildForm({
                   ? [{ value: build.pythonVersion, label: build.pythonVersion, mono: true }]
                   : []),
               ]}
+            />
+          </Field>
+        )}
+
+        {build.method === "recipe" && recipe === "php" && (
+          <Field
+            label="PHP version"
+            hint="Auto reads composer.json, config.platform.php and what composer.lock's packages accept."
+            error={errorFor("build-php-version")}
+          >
+            <Segments
+              id="build-php-version"
+              label="PHP version"
+              fill
+              value={build.phpVersion ?? "auto"}
+              disabled={!canEdit}
+              onChange={(next) =>
+                setBuild({ ...build, phpVersion: next === "auto" ? undefined : next })
+              }
+              options={[
+                { value: "auto", label: "Auto" },
+                ...PHP_VERSIONS.map((version) => ({ value: version, label: version, mono: true })),
+                ...(build.phpVersion && !PHP_VERSION.test(build.phpVersion)
+                  ? [{ value: build.phpVersion, label: build.phpVersion, mono: true }]
+                  : []),
+              ]}
+            />
+          </Field>
+        )}
+
+        {build.method === "recipe" && recipe === "python" && (
+          <SystemPackagesField
+            value={build.systemPackages}
+            automatic={(detected?.systemPackages ?? []).filter((pkg) => pkg.automatic)}
+            canEdit={canEdit}
+            error={errorFor("build-system-packages")}
+            onChange={(systemPackages) => setBuild({ ...build, systemPackages })}
+          />
+        )}
+
+        {build.method === "recipe" && recipe === "java" && (
+          <Field
+            label="Java version"
+            hint={
+              javaVersionReading(detected) ??
+              "Auto reads the build files, .java-version, .sdkmanrc, .tool-versions and mise.toml."
+            }
+            error={errorFor("build-java-version")}
+          >
+            <Segments
+              id="build-java-version"
+              label="Java version"
+              fill
+              value={build.javaVersion ?? "auto"}
+              disabled={!canEdit}
+              onChange={(next) =>
+                setBuild({ ...build, javaVersion: next === "auto" ? undefined : next })
+              }
+              options={[
+                { value: "auto", label: "Auto" },
+                ...JAVA_VERSIONS.map((version) => ({ value: version, label: version, mono: true })),
+                ...(build.javaVersion && !JAVA_VERSION.test(build.javaVersion)
+                  ? [{ value: build.javaVersion, label: build.javaVersion, mono: true }]
+                  : []),
+              ]}
+            />
+          </Field>
+        )}
+
+        {build.method === "recipe" && recipe === "dotnet" && (
+          <Field
+            label=".NET version"
+            hint={
+              dotnetVersionReading(detected) ??
+              "Auto reads the project's target framework and the SDK global.json pins."
+            }
+            error={errorFor("build-dotnet-version")}
+          >
+            <Segments
+              id="build-dotnet-version"
+              label=".NET version"
+              fill
+              value={build.dotnetVersion ?? "auto"}
+              disabled={!canEdit}
+              onChange={(next) =>
+                setBuild({ ...build, dotnetVersion: next === "auto" ? undefined : next })
+              }
+              options={[
+                { value: "auto", label: "Auto" },
+                ...DOTNET_VERSIONS.map((version) => ({
+                  value: version,
+                  label: version,
+                  mono: true,
+                })),
+                ...(build.dotnetVersion && !DOTNET_VERSION.test(build.dotnetVersion)
+                  ? [{ value: build.dotnetVersion, label: build.dotnetVersion, mono: true }]
+                  : []),
+              ]}
+            />
+          </Field>
+        )}
+
+        {build.method === "recipe" && recipe === "go" && (
+          <Field
+            label="Go main package"
+            htmlFor="build-go-package"
+            hint={
+              proposedFor("build.goPackage") ??
+              (proposal?.candidate?.goMainPackages?.length && !proposal.elsewhere
+                ? `Main packages: ${goMainPackageList(proposal.candidate)}.`
+                : "The directory of the command to build, such as cmd/api; empty lets the recipe choose.")
+            }
+            error={errorFor("build-go-package")}
+          >
+            <InputGroup>
+              <InputGroupAddon align="inline-start">
+                <InputGroupText className="font-mono">./</InputGroupText>
+              </InputGroupAddon>
+              <InputGroupInput
+                id="build-go-package"
+                value={build.goPackage ?? ""}
+                readOnly={!canEdit}
+                aria-invalid={Boolean(errorFor("build-go-package"))}
+                className="font-mono"
+                placeholder="recipe chooses"
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(event) =>
+                  setBuild({
+                    ...build,
+                    goPackage: event.target.value.replace(/^\.\//, "") || undefined,
+                  })
+                }
+              />
+            </InputGroup>
+          </Field>
+        )}
+
+        {build.method === "recipe" && recipe === "rust" && (
+          <Field
+            label="Rust binary"
+            htmlFor="build-cargo-bin"
+            hint={
+              proposedFor("build.cargoBin") ??
+              ((proposal?.candidate?.rust?.binaries?.length ?? 0) > 1 && !proposal?.elsewhere
+                ? `Binaries: ${proposal?.candidate?.rust?.binaries?.join(", ")}.`
+                : "The binary target to serve; empty lets the recipe choose (default-run, or the one that starts a server).")
+            }
+            error={errorFor("build-cargo-bin")}
+          >
+            <Input
+              id="build-cargo-bin"
+              value={build.cargoBin ?? ""}
+              readOnly={!canEdit}
+              aria-invalid={Boolean(errorFor("build-cargo-bin"))}
+              className="font-mono"
+              placeholder={proposal?.candidate?.rust?.binary || "recipe chooses"}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) =>
+                setBuild({ ...build, cargoBin: event.target.value.trim() || undefined })
+              }
             />
           </Field>
         )}
@@ -878,9 +1313,53 @@ function BuildForm({
                 aria-invalid={Boolean(errorFor("build-dockerfile"))}
                 className="font-mono"
                 placeholder="Dockerfile"
-                onChange={(event) => setBuild({ ...build, dockerfile: event.target.value })}
+                // A stage belongs to the file it was read from; another file
+                // keeping it would fail with "not a stage".
+                onChange={(event) =>
+                  setBuild({ ...build, dockerfile: event.target.value, target: undefined })
+                }
               />
             </InputGroup>
+          </Field>
+        )}
+        {build.method === "compose" && (
+          <Field
+            label="Primary service"
+            htmlFor="build-primary-service"
+            hint="The service readiness and the release's container follow. Leave empty for the one detection chose: it builds or publishes a port, never a database."
+            error={errorFor("build-primary-service")}
+          >
+            <Input
+              id="build-primary-service"
+              value={build.primaryService ?? ""}
+              readOnly={!canEdit}
+              aria-invalid={Boolean(errorFor("build-primary-service"))}
+              className="font-mono"
+              placeholder="web"
+              onChange={(event) =>
+                setBuild({ ...build, primaryService: event.target.value.trim() || undefined })
+              }
+            />
+          </Field>
+        )}
+        {build.method === "dockerfile" && (
+          <Field
+            label="Stage"
+            htmlFor="build-target"
+            hint={proposedFor("build.target") ?? dockerfileStageHint()}
+            error={errorFor("build-target")}
+          >
+            <Input
+              id="build-target"
+              value={build.target ?? ""}
+              readOnly={!canEdit}
+              aria-invalid={Boolean(errorFor("build-target"))}
+              className="font-mono"
+              placeholder="the last stage"
+              onChange={(event) =>
+                setBuild({ ...build, target: event.target.value.trim() || undefined })
+              }
+            />
           </Field>
         )}
       </SettingSection>
@@ -943,6 +1422,7 @@ function BuildForm({
                   id="build-command"
                   label="Build command"
                   value={build.buildCommand ?? ""}
+                  hint={proposedFor("build.buildCommand")}
                   error={errorFor("build-command")}
                   readOnly={!canEdit}
                   onChange={(buildCommand) => setBuild({ ...build, buildCommand })}
@@ -954,6 +1434,7 @@ function BuildForm({
                     id="build-command"
                     label="Build command"
                     value={build.buildCommand ?? ""}
+                    hint={proposedFor("build.buildCommand")}
                     error={errorFor("build-command")}
                     readOnly={!canEdit}
                     onChange={(buildCommand) => setBuild({ ...build, buildCommand })}
@@ -962,6 +1443,7 @@ function BuildForm({
                     id="build-start"
                     label="Start command"
                     value={build.startCommand ?? ""}
+                    hint={proposedFor("build.startCommand")}
                     error={errorFor("build-start")}
                     readOnly={!canEdit}
                     onChange={(startCommand) => setBuild({ ...build, startCommand })}
@@ -971,6 +1453,7 @@ function BuildForm({
               <Field
                 label="Output directory"
                 htmlFor="build-output"
+                hint={proposedFor("build.outputDirectory")}
                 error={errorFor("build-output")}
               >
                 <InputGroup>
@@ -1112,8 +1595,8 @@ function BuildForm({
               const product = variableProduct(variable.name)
               const ships =
                 variable.sensitivity === "secret" &&
-                stage === "build" &&
-                BROWSER_PREFIX.test(variable.name)
+                stage !== "install" &&
+                publicBuildVariable(variable.name)
               return (
                 <li key={variable.name} className="min-w-0 py-2 first:pt-0 last:pb-0">
                   <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
@@ -1148,15 +1631,15 @@ function BuildForm({
                             ...(build.secrets ?? []).filter(
                               (binding) => binding.variable !== variable.name,
                             ),
-                            ...(step === "install"
-                              ? [{ variable: variable.name, step: "install" as const }]
-                              : []),
+                            // "build" is what an unmapped build value already gets.
+                            ...(step === "build" ? [] : [{ variable: variable.name, step }]),
                           ],
                         })
                       }
                       options={[
                         { value: "build", label: "Build" },
                         { value: "install", label: "Install only" },
+                        { value: "install_and_build", label: "Both" },
                       ]}
                     />
                   </div>
@@ -1170,7 +1653,10 @@ function BuildForm({
               )
             })}
           </ul>
-          <FormNote>Install only keeps a private registry token out of the build command.</FormNote>
+          <FormNote>
+            Install only keeps a private registry token out of the build command. Both also mounts
+            the value in the install, for a postinstall script that reads it.
+          </FormNote>
         </SettingSection>
       )}
     </SettingForm>
@@ -1182,6 +1668,7 @@ function CommandField({
   id,
   label,
   value,
+  hint,
   error,
   readOnly,
   onChange,
@@ -1189,12 +1676,13 @@ function CommandField({
   id: string
   label: string
   value: string
+  hint?: string
   error?: string
   readOnly: boolean
   onChange: (value: string) => void
 }) {
   return (
-    <Field label={label} htmlFor={id} error={error}>
+    <Field label={label} htmlFor={id} hint={hint} error={error}>
       <InputGroup>
         <InputGroupAddon align="inline-start">
           <InputGroupText className="font-mono">$</InputGroupText>
@@ -1346,11 +1834,78 @@ function ReleaseTasksForm({
         <ReleaseTasks
           tasks={tasks}
           variables={configuration.variables}
+          buildMethod={configuration.build.method}
           disabled={!canEdit}
           onChange={(next) => draft.set(next)}
           rowError={(index) => (rowError?.index === index ? rowError.message : undefined)}
         />
       </SettingSection>
     </SettingForm>
+  )
+}
+
+/**
+ * Debian packages the Python recipe installs before the dependencies, typed as
+ * a space-separated list. The text is kept as typed while it is edited, so a
+ * space before the next name is not swallowed by the round trip through the
+ * list the plan stores.
+ */
+function SystemPackagesField({
+  value,
+  automatic,
+  canEdit,
+  error,
+  onChange,
+}: {
+  value?: string[]
+  automatic: DeploymentDetectedSystemPackage[]
+  canEdit: boolean
+  error?: string
+  onChange: (next: string[] | undefined) => void
+}) {
+  const joined = (value ?? []).join(" ")
+  const [text, setText] = useState(joined)
+  const [synced, setSynced] = useState(joined)
+  if (joined !== synced) {
+    // The draft changed underneath (discarded, or a detection applied).
+    setSynced(joined)
+    if (
+      text
+        .split(/[\s,]+/)
+        .filter(Boolean)
+        .join(" ") !== joined
+    )
+      setText(joined)
+  }
+  const installed = automatic.map((pkg) => pkg.name)
+  return (
+    <Field
+      label="System packages"
+      htmlFor="build-system-packages"
+      hint={
+        installed.length
+          ? `Installed for the dependencies already: ${installed.join(", ")}. Add others the application needs, separated by spaces.`
+          : "Debian packages installed before the dependencies, separated by spaces, such as libpq-dev."
+      }
+      error={error}
+    >
+      <Input
+        id="build-system-packages"
+        value={text}
+        readOnly={!canEdit}
+        aria-invalid={Boolean(error)}
+        className="font-mono"
+        placeholder="none"
+        autoComplete="off"
+        spellCheck={false}
+        onChange={(event) => {
+          setText(event.target.value)
+          const names = event.target.value.split(/[\s,]+/).filter(Boolean)
+          const next = names.length ? names : undefined
+          setSynced((next ?? []).join(" "))
+          onChange(next)
+        }}
+      />
+    </Field>
   )
 }

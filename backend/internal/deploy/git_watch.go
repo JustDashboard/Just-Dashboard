@@ -63,7 +63,13 @@ func (a *HostSourceAnalyzer) ResolveGitRevision(ctx context.Context, source Draf
 	defer cancel()
 	out, err := runPlanningGit(resolveCtx, "", environment, "ls-remote", "--exit-code", "--refs", remote, remoteRef)
 	if err != nil {
-		return "", fmt.Errorf("%w: Git branch could not be read", ErrSourceUnavailable)
+		// Exit 2 is ls-remote having read the remote and found no such ref:
+		// a renamed or deleted branch, which no retry will bring back.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 2 {
+			return "", fmt.Errorf("%w: branch %q no longer exists on the remote", ErrRefNotFound, ref)
+		}
+		return "", sourceFailure(err, "Git branch could not be read")
 	}
 	fields := strings.Fields(out)
 	if len(fields) != 2 || fields[1] != remoteRef || !validGitObjectID(fields[0]) {
@@ -123,7 +129,7 @@ func (a *HostSourceAnalyzer) ResolveGitRef(ctx context.Context, source DraftSour
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 2 {
 			return "", fmt.Errorf("%w: %q has no matching branch or tag", ErrRefNotFound, ref)
 		}
-		return "", fmt.Errorf("%w: Git remote could not be read", ErrSourceUnavailable)
+		return "", sourceFailure(err, "Git remote could not be read")
 	}
 	fields := strings.Fields(out)
 	if len(fields) != 2 || fields[1] != remoteRef || !validGitObjectID(fields[0]) {
@@ -446,7 +452,7 @@ func (w *GitWatcher) evaluate(ctx context.Context, target GitWatchTarget, expect
 	defer cancel()
 	revision, resolveErr := w.sources.ResolveGitRevision(ctx, target.Source)
 	if resolveErr != nil || !validGitObjectID(revision) {
-		d.Reason, d.unavailable = "source_unavailable", true
+		d.Reason, d.unavailable = gitWatchReason(resolveErr), true
 		return d, nil
 	}
 	if expectedRevision != "" && expectedRevision != revision {

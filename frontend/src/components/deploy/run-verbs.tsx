@@ -21,6 +21,8 @@ export type RunVerbHandlers = {
   redeploy: () => void
   retry: () => void
   cancel: () => void
+  /** Deploy again with the settings saved now, for a run whose plan they replaced. */
+  deploy?: () => void
 }
 
 /** What pressing each of a release's verbs does. */
@@ -55,6 +57,7 @@ export function runVerbs({
   url,
   can,
   working,
+  stale,
   on,
 }: {
   run: DeploymentEngineRun
@@ -65,6 +68,11 @@ export function runVerbs({
   url?: string
   can: (capability: Capability) => boolean
   working?: RunVerbKey
+  /**
+   * The settings were saved again since this run was planned, so a retry
+   * would replay what it failed with: the current settings come first.
+   */
+  stale?: boolean
   on: RunVerbHandlers
 }): Verb[] {
   const isLive = Boolean(release) && release!.id === liveReleaseId
@@ -96,10 +104,23 @@ export function runVerbs({
     })
   }
   if (isRetryable(run.state) && can("service.control")) {
+    if (stale && on.deploy) {
+      verbs.push({
+        key: "deploy",
+        label: "Deploy with current settings",
+        detail: "Deploy again with the plan and variables saved now.",
+        icon: RefreshClockwise,
+        progressive: "Starting…",
+        disabled: working === "deploy",
+        run: on.deploy,
+      })
+    }
     verbs.push({
       key: "retry",
-      label: "Retry",
-      detail: "Run this deployment again from the same source.",
+      label: stale ? "Retry with the settings it used" : "Retry",
+      detail: stale
+        ? "Run this deployment again with its own plan and variables, unchanged."
+        : "Run this deployment again from the same source.",
       icon: RefreshClockwise,
       progressive: "Starting…",
       disabled: working === "retry",
@@ -186,4 +207,13 @@ export function releaseVerbs({
 }
 
 export type RunVerbKey =
-  "open" | "visit" | "redeploy" | "retry" | "cancel" | "changes" | "compare" | "rollback" | "pin"
+  | "open"
+  | "visit"
+  | "redeploy"
+  | "retry"
+  | "deploy"
+  | "cancel"
+  | "changes"
+  | "compare"
+  | "rollback"
+  | "pin"

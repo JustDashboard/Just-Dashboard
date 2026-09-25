@@ -311,10 +311,12 @@ test.describe("Databases & backups", () => {
     )
     await expect.poll(() => variablePuts.length).toBe(1)
     expect(variablePuts[0].url).toContain("/variables/DATABASE_URL")
+    // A new variable reaches the build too, the way a database linked while
+    // creating the project does: a static env import or Prisma's config reads it there.
     expect(variablePuts[0].body).toMatchObject({
       value: "${{database.9}}",
       sensitivity: "secret",
-      scopes: ["runtime"],
+      scopes: ["runtime", "build"],
     })
 
     const orders = page.getByRole("link", { name: "orders-db", exact: true })

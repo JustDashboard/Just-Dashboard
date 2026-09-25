@@ -267,17 +267,8 @@ func (a *HostSourceAnalyzer) materializeRemoteGit(
 	if err := ensurePlanningMirror(ctx, mirror, remote, environment); err != nil {
 		return err
 	}
-	if _, err := runPlanningGit(ctx, mirror, environment, "cat-file", "-e", identity.Revision+"^{commit}"); err != nil {
-		remoteRef, _ := planningGitRef(source.Ref)
-		releaseRef := "refs/just-dashboard/releases/" + identity.Revision
-		if _, fetchErr := runPlanningGit(ctx, mirror, environment,
-			"fetch", "--force", "--no-tags", "origin", "+"+remoteRef+":"+releaseRef); fetchErr != nil {
-			return fmt.Errorf("%w: recorded Git object is no longer available", ErrSourceUnavailable)
-		}
-		resolved, resolveErr := runPlanningGit(ctx, mirror, environment, "rev-parse", releaseRef)
-		if resolveErr != nil || strings.TrimSpace(resolved) != identity.Revision {
-			return fmt.Errorf("%w: source ref moved after preflight; refusing a different revision", ErrSourceUnavailable)
-		}
+	if err := fetchReleaseRevision(ctx, mirror, environment, source.Ref, identity.Revision); err != nil {
+		return err
 	}
 	if err := fetchExactGit(ctx, mirror, remote, target, identity.Revision, nil); err != nil {
 		return err
@@ -303,6 +294,51 @@ func (a *HostSourceAnalyzer) materializeLocalGit(
 	}
 	return materializeGitExtras(ctx, target, nil, source)
 }
+
+// fetchReleaseRevision makes sure the release mirror holds the recorded
+// commit and names it with its own release ref, so the workspace fetch asks
+// for a ref tip and the mirror keeps the commit for later releases. The
+// branch usually still points at it. When it has moved on — a push in
+// between, a first deployment pinned to the commit Review checked, a
+// specific earlier version — the commit normally arrives with the branch,
+// behind its new head; one the branch no longer contains is asked for by
+// id, which most hosts serve. Either way the commit built is exactly the
+// recorded one: the workspace is verified against it, so a moved branch can
+// never stand in for it. Only a commit neither fetch brings is gone, as
+// after a force-push — unless the remote could not be read at all, which is
+// its own cause.
+func fetchReleaseRevision(ctx context.Context, mirror string, environment []string, ref, revision string) error {
+	present := func() bool {
+		_, err := runPlanningGit(ctx, mirror, environment, "cat-file", "-e", revision+"^{commit}")
+		return err == nil
+	}
+	releaseRef := "refs/just-dashboard/releases/" + revision
+	if !present() {
+		remoteRef, _ := planningGitRef(ref)
+		_, branchErr := runPlanningGit(ctx, mirror, environment,
+			"fetch", "--force", "--no-tags", "origin", "+"+remoteRef+":"+releaseRef)
+		if !present() {
+			_, _ = runPlanningGit(ctx, mirror, environment,
+				"fetch", "--force", "--no-tags", "origin", "+"+revision+":"+releaseRef)
+		}
+		if !present() {
+			var failure *SourceFailure
+			if branchErr != nil && errors.As(sourceFailure(branchErr, ""), &failure) {
+				return failure
+			}
+			return &SourceFailure{Code: "source_revision_unavailable", Message: revisionRewrittenMessage}
+		}
+	}
+	if _, err := runPlanningGit(ctx, mirror, environment, "update-ref", releaseRef, revision); err != nil {
+		return fmt.Errorf("%w: managed Git mirror is unavailable", ErrSourceUnavailable)
+	}
+	return nil
+}
+
+// revisionRewrittenMessage is the recorded commit missing from everything the
+// branch holds now and refused by its id, which git itself did not complain
+// about.
+const revisionRewrittenMessage = "the recorded commit is no longer on the remote: the branch's history does not hold it and the remote does not serve it by its id, as after a force-push"
 
 // fetchExactGit materializes exactly one revision into a fresh workspace
 // repository. Cloning is deliberately avoided: `git clone --local` silently
@@ -332,7 +368,7 @@ func fetchExactGit(
 		"+"+revision+":"+releaseWorkspaceRef)
 	cancelFetch()
 	if err != nil {
-		return fmt.Errorf("%w: exact release fetch failed", ErrSourceUnavailable)
+		return sourceFailure(err, "exact release fetch failed")
 	}
 	checkoutCtx, cancelCheckout := context.WithTimeout(ctx, 10*time.Minute)
 	_, err = runPlanningGit(checkoutCtx, target, environment, "checkout", "--detach", "--force", revision)

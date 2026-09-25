@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
@@ -146,6 +148,13 @@ type runtimeReleaseSnapshot struct {
 	Domains        []PlannedDomain           `json:"domains"`
 	PlanInputsHash string                    `json:"planInputsDigest"`
 	SourceIdentity SourceIdentity            `json:"sourceIdentity"`
+	// ProxyTrust names the forwarded-header trust settings the recipe image
+	// sets, which the runtime withdraws when the proxy does not front the
+	// release alone.
+	ProxyTrust []string `json:"proxyTrust,omitempty"`
+	// WebConcurrency says the image's server sizes its workers from
+	// WEB_CONCURRENCY (runtime_concurrency.go).
+	WebConcurrency bool `json:"webConcurrency,omitempty"`
 }
 
 func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExecution) StepResult {
@@ -327,6 +336,11 @@ func notificationEventSelected(events []string, want string) bool {
 	return false
 }
 
+// analyzePlan is preflight at the last moment before a build: the saved plan
+// against a fresh, data-only detection of the commit acquire_source
+// materialized, with the recipe asked whether it would prepare it. Every
+// trigger passes through here, so a blocked finding stops the run before a
+// build slot is spent, whether or not anyone saw the advisory check.
 func (e *NormalizedStepExecutor) analyzePlan(
 	ctx context.Context,
 	execution StepExecution,
@@ -343,47 +357,60 @@ func (e *NormalizedStepExecutor) analyzePlan(
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
-	candidate := newDetectedCandidate(plan.Build.RootDirectory, plan.Build.Method, DetectedCandidate{
-		Name: "recorded-plan", Profile: profile, Confidence: ConfidenceHigh,
-		Evidence: []DetectionEvidence{}, NeedsDecision: []string{},
-	})
-	source := plan.SourceConfig
-	draft := &Draft{Data: DraftData{
-		Intent: &DraftIntentConfig{Name: "recorded-plan", Profile: profile},
-		Source: &source,
-		Detection: &DetectionResult{
-			Source: plan.SourceIdentity, Candidates: []DetectedCandidate{candidate}, SelectedID: candidate.ID,
-			Compose: plan.BuildEvidence.Compose, GitRequirements: plan.BuildEvidence.GitRequirements,
-		},
-		Configuration: &configuration,
-	}}
-	request := preflightObservationRequest(draft, configuration)
-	request.ExistingProxySite = deploymentRouteName(execution.Run.EnvironmentID)
+	deployment := deploymentPlan{
+		Source: plan.SourceConfig, Identity: plan.SourceIdentity, Profile: profile,
+		Configuration: configuration, Evidence: plan.BuildEvidence,
+		BuildVariables: buildScopedNames(plan.Variables),
+		ProxySite:      deploymentRouteName(execution.Run.EnvironmentID),
+	}
 	live, liveErr := e.store.LiveRelease(ctx, execution.Run.EnvironmentID)
 	if liveErr == nil {
 		runtime, runtimeErr := e.store.RuntimeForRelease(ctx, live.Release.ID)
 		if runtimeErr != nil {
 			return normalizedStepFailure(runtimeErr)
 		}
-		request.ExistingRuntimeID, request.ExistingRuntimeKind = runtime.RuntimeID, runtime.Kind
+		deployment.RuntimeID, deployment.RuntimeKind = runtime.RuntimeID, runtime.Kind
 	} else if !errors.Is(liveErr, ErrArtifactMissing) {
 		return normalizedStepFailure(liveErr)
 	}
-	observation, err := e.preflight.Observe(ctx, request)
+	reading := sourceReading{}
+	if sourceHasTree(plan.SourceConfig) {
+		// acquire_source has already materialized this exact commit; the
+		// workspace's marker makes this a lookup, not a second checkout. A
+		// workspace that cannot be read is prepare_context's to fail on;
+		// preflight judges what it can from the stored evidence meanwhile.
+		reading.unavailable = "the materialized commit could not be read"
+		if e.sources != nil {
+			if source, err := e.sources.Materialize(ctx, plan.SourceConfig, plan.SourceIdentity, execution.Run.ID, e.workspaceRoot); err == nil {
+				reading = readDeploymentSource(ctx, source.Root, deployment)
+			}
+		}
+	}
+	evaluation, err := evaluateDeployment(ctx, deployment, reading, e.preflight)
 	if err != nil {
 		return StepResult{State: StepUnavailable, ErrorCode: "preflight_unavailable", ErrorMessage: "deployment host evidence could not be refreshed"}
 	}
-	findings := preflightFindings(draft, configuration, observation, true)
-	evidence := mustJSON(map[string]any{
-		"sourceDigest": plan.SourceDigest, "buildDigest": plan.BuildDigest,
-		"runtimeDigest": plan.RuntimeDigest, "planRevision": execution.Run.PlanRevision,
-		"findings": findings,
-	})
+	record := func(candidate DetectedCandidate) json.RawMessage {
+		return mustJSON(map[string]any{
+			"sourceDigest": plan.SourceDigest, "buildDigest": plan.BuildDigest,
+			"runtimeDigest": plan.RuntimeDigest, "planRevision": execution.Run.PlanRevision,
+			"candidate": candidate, "candidateSource": evaluation.CandidateSource,
+			"findings": evaluation.Findings,
+		})
+	}
+	evidence := record(evaluation.Candidate)
+	if len(evidence) > maxEventBytes/2 {
+		// A step's evidence is bounded; the candidate's own evidence list is
+		// the part that can grow, and the facts beside it are what is read.
+		compact := evaluation.Candidate
+		compact.Evidence = []DetectionEvidence{}
+		evidence = record(compact)
+	}
 	state := StepPassed
-	for _, finding := range findings {
+	for _, finding := range evaluation.Findings {
 		if finding.Severity == PreflightBlocked ||
 			(finding.Severity == PreflightDecision && executionDecisionMustBlock(finding.Code)) {
-			return StepResult{State: StepFailed, ErrorCode: finding.Code, ErrorMessage: finding.Title, Evidence: evidence}
+			return StepResult{State: StepFailed, ErrorCode: finding.Code, ErrorMessage: findingSentence(finding), Evidence: evidence}
 		}
 		if finding.Severity != PreflightPass {
 			state = StepWarning
@@ -392,8 +419,11 @@ func (e *NormalizedStepExecutor) analyzePlan(
 	return StepResult{State: state, Evidence: evidence}
 }
 
+// executionDecisionMustBlock names the decisions a run cannot go past: the
+// plan left them open, and the release — or, for the Go main package, the
+// recipe — has nothing to proceed with until someone makes them.
 func executionDecisionMustBlock(code string) bool {
-	return code == "domain_link_missing" || code == "readiness_missing"
+	return code == "domain_link_missing" || code == "readiness_missing" || code == "go_main_ambiguous" || code == "rust_binary_ambiguous"
 }
 
 func (e *NormalizedStepExecutor) prepareContext(
@@ -401,7 +431,7 @@ func (e *NormalizedStepExecutor) prepareContext(
 	execution StepExecution,
 	plan *StoredExecutionPlan,
 ) StepResult {
-	buildVariables, err := e.variablesForScope(ctx, execution.Run.ID, execution.Run.EnvironmentID, "build")
+	buildVariables, secret, err := e.buildScopeVariables(ctx, execution.Run)
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
@@ -410,15 +440,39 @@ func (e *NormalizedStepExecutor) prepareContext(
 		return normalizedStepFailure(err)
 	}
 	tag := releaseImageTag(execution.Run.EnvironmentID, execution.Run.ID)
-	prepared, err := e.builder.Prepare(ctx, buildRoot, plan.Build, execution.Run.Operation == OperationForceBuild, tag, buildVariableNames(buildVariables)...)
+	names := buildVariableNames(buildVariables)
+	if plan.Build.Method == BuildDockerfile {
+		// A custom Dockerfile never binds names as secrets; the names it is
+		// handed are the plain values it may receive as build arguments.
+		if names, err = e.plainBuildVariableNames(ctx, execution.Run); err != nil {
+			return normalizedStepFailure(err)
+		}
+	}
+	prepared, err := e.builder.PrepareWithin(ctx, source.Root, buildRoot, plan.Build, execution.Run.Operation == OperationForceBuild, tag, names...)
 	if err != nil {
 		cleaned, cleanupErr := source.Cleanup()
 		result := normalizedStepFailure(err)
+		if errors.Is(err, ErrBuilderUnavailable) {
+			result = builderUnavailableFailure(err)
+			// The daemon's own words are the only record of why, and nothing
+			// else writes them down before the step ends.
+			_ = stepLog(execution, "stderr", builderUnavailableDetail(err, buildRedactor(buildLogRedactions(buildVariables, secret))))
+		}
 		result.Cleanup = mustJSON(map[string]any{"workspaceRemoved": cleaned, "error": safeCleanupError(cleanupErr)})
 		return result
 	}
+	if prepared.ContextDirectory != "" {
+		// A workspace member builds from its workspace root, where its
+		// lockfile and the generated Dockerfile are.
+		buildRoot = filepath.Join(source.Root, filepath.FromSlash(prepared.ContextDirectory))
+	}
 	if err := stepLog(execution, "status", "Prepared "+string(plan.Build.Method)+" artifact plan with "+prepared.CachePolicy+" cache policy"); err != nil {
 		return normalizedStepFailure(err)
+	}
+	for _, note := range prepared.Notes {
+		if err := stepLog(execution, "status", note); err != nil {
+			return normalizedStepFailure(err)
+		}
 	}
 	return StepResult{State: StepPassed, Evidence: mustJSON(preparedStepEvidence{
 		Source: *source, BuildRoot: buildRoot, Prepared: prepared,
@@ -434,9 +488,16 @@ func (e *NormalizedStepExecutor) buildArtifact(
 	if err := e.latestStepEvidence(ctx, execution.Run.ID, StepPrepareContext, &preparedEvidence); err != nil {
 		return normalizedStepFailure(err)
 	}
-	buildVariables, err := e.variablesForScope(ctx, execution.Run.ID, execution.Run.EnvironmentID, "build")
+	buildVariables, secret, err := e.buildScopeVariables(ctx, execution.Run)
 	if err != nil {
 		return normalizedStepFailure(err)
+	}
+	if plan.Build.Method == BuildCompose {
+		// A Compose build receives values only as the file's own build
+		// arguments (build_dockerfile_args.go).
+		if buildVariables, err = e.composeBuildValues(ctx, execution.Run, plan.BuildEvidence.Compose); err != nil {
+			return normalizedStepFailure(err)
+		}
 	}
 	registryAuth := ""
 	if plan.SourceKind == SourceImage || plan.SourceKind == SourceBlueprint {
@@ -445,23 +506,37 @@ func (e *NormalizedStepExecutor) buildArtifact(
 			return normalizedStepFailure(err)
 		}
 	}
+	// The collector reads the transcript as it is persisted, after the
+	// builder has redacted it, so a failure can be named from its own output.
+	collector := newBuildOutputCollector(func() int64 { return lastLogSeq(execution.Output) })
 	result, err := e.builder.Build(
 		ctx, preparedEvidence.BuildRoot,
 		releaseImageTag(execution.Run.EnvironmentID, execution.Run.ID),
-		plan.Build, preparedEvidence.Prepared, buildVariables, registryAuth,
+		plan.Build, preparedEvidence.Prepared, buildVariables, secret, registryAuth,
 		plan.SourceIdentity, plan.BuildEvidence.Compose,
-		func(line BuildLog) error { return stepLog(execution, line.Stream, line.Text) },
+		func(line BuildLog) error {
+			if err := stepLog(execution, line.Stream, line.Text); err != nil {
+				return err
+			}
+			collector.observe(line)
+			return nil
+		},
 	)
 	if err != nil {
 		cleaned, cleanupErr := preparedEvidence.Source.Cleanup()
+		cleanup := map[string]any{"workspaceRemoved": cleaned, "error": safeCleanupError(cleanupErr)}
 		if ctx.Err() != nil {
 			return StepResult{
 				State: StepCancelled, ErrorCode: "cancelled", ErrorMessage: "artifact build cancelled",
-				Cleanup: mustJSON(map[string]any{"workspaceRemoved": cleaned, "error": safeCleanupError(cleanupErr)}),
+				Cleanup: mustJSON(cleanup),
 			}
 		}
+		if failure := e.buildFailure(ctx, execution, plan, preparedEvidence.Prepared, buildLogRedactions(buildVariables, secret), collector, err); failure != nil {
+			failure.Cleanup = mustJSON(buildFailureCleanup(cleanup, err))
+			return *failure
+		}
 		failure := normalizedStepFailure(err)
-		failure.Cleanup = mustJSON(map[string]any{"workspaceRemoved": cleaned, "error": safeCleanupError(cleanupErr)})
+		failure.Cleanup = mustJSON(cleanup)
 		return failure
 	}
 	return StepResult{State: StepPassed, Evidence: mustJSON(builtStepEvidence{Result: result})}
@@ -504,6 +579,8 @@ func (e *NormalizedStepExecutor) renderRuntime(
 		Domains:        domains,
 		PlanInputsHash: plan.PlanInputsDigest,
 		SourceIdentity: plan.SourceIdentity,
+		ProxyTrust:     imageProxyTrust(built.Result.Prepared),
+		WebConcurrency: built.Result.Prepared.WebConcurrency,
 	}
 	raw, err := json.Marshal(snapshot)
 	if err != nil {
@@ -549,29 +626,53 @@ func (e *NormalizedStepExecutor) runReleaseTasks(
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
+	image, imageRunner, err := e.releaseTaskImageRequest(ctx, execution, plan)
+	if err != nil {
+		_, _ = source.Cleanup()
+		return normalizedStepFailure(err)
+	}
 	evidence := []ReleaseTaskEvidence{}
 	var cleanupResults []any
-	for _, task := range plan.Build.ReleaseTasks {
+	for index, task := range plan.Build.ReleaseTasks {
 		if err := stepLog(execution, "status", "Running release task "+task.Name); err != nil {
 			return normalizedStepFailure(err)
 		}
-		taskEvidence, group, taskErr := runStoredReleaseTask(
-			ctx, source.Root, task, values,
-			func(line BuildLog) error { return stepLog(execution, line.Stream, line.Text) },
-		)
+		output := newLineRing(outputRingLines, outputRingBytes)
+		emit := func(line BuildLog) error {
+			if err := stepLog(execution, line.Stream, line.Text); err != nil {
+				return err
+			}
+			output.add(collectedLine{text: truncateUTF8Prefix(line.Text, collectedLineBytes), seq: lastLogSeq(execution.Output)})
+			return nil
+		}
+		var taskEvidence ReleaseTaskEvidence
+		var taskErr error
+		if task.Runner == ReleaseTaskRunnerImage {
+			request := image
+			request.Task, request.Index = task, index
+			var container any
+			taskEvidence, container, taskErr = runImageReleaseTask(ctx, imageRunner, request, values, emit)
+			cleanupResults = append(cleanupResults, container)
+		} else {
+			var group any
+			taskEvidence, group, taskErr = runStoredReleaseTask(ctx, source.Root, task, values, emit)
+			cleanupResults = append(cleanupResults, group)
+		}
 		evidence = append(evidence, taskEvidence)
-		cleanupResults = append(cleanupResults, group)
 		if taskErr != nil {
 			cleaned, cleanupErr := source.Cleanup()
 			state := StepFailed
-			code := "release_task_failed"
+			code, message, cause := releaseTaskFailure(task, taskEvidence, taskErr, output.lines, plan.Variables)
 			if ctx.Err() != nil {
-				state, code = StepCancelled, "cancelled"
+				state, code, message, cause = StepCancelled, "cancelled", "release task "+task.Name+" did not complete", nil
+			}
+			if cause != nil {
+				_ = stepLog(execution, "status", "Diagnosis: "+cause.releaseSentence())
 			}
 			return StepResult{
 				State: state, ErrorCode: code,
-				ErrorMessage: "release task " + task.Name + " did not complete",
-				Evidence:     mustJSON(map[string]any{"tasks": evidence}),
+				ErrorMessage: message,
+				Evidence:     mustJSON(releaseTaskStepEvidence(evidence, cause)),
 				Cleanup: mustJSON(map[string]any{
 					"processGroups": cleanupResults, "workspaceRemoved": cleaned,
 					"error": safeCleanupError(cleanupErr),
@@ -655,6 +756,24 @@ func (e *NormalizedStepExecutor) variablesForScope(
 		result[value.Name] = value.Value
 	}
 	return result, nil
+}
+
+// buildScopeVariables are the run's build values and which of them are
+// secret, which is what the build's transcript is redacted of.
+func (e *NormalizedStepExecutor) buildScopeVariables(ctx context.Context, run EngineRun) (map[string]string, map[string]bool, error) {
+	if e.variables == nil {
+		return nil, nil, fmt.Errorf("%w: variable store is unavailable", ErrArtifactMissing)
+	}
+	scoped, err := e.variables.OpenRunScopedVariables(ctx, run.ID, run.EnvironmentID, "build")
+	if err != nil {
+		return nil, nil, err
+	}
+	values, secret := make(map[string]string, len(scoped)), map[string]bool{}
+	for _, value := range scoped {
+		values[value.Name] = value.Value
+		secret[value.Name] = value.Sensitivity != "plain"
+	}
+	return values, secret, nil
 }
 
 func validateImmutableExecutionSource(plan *StoredExecutionPlan) error {
@@ -793,19 +912,43 @@ func (s *OrchestrationStore) deploymentProfile(ctx context.Context, projectID in
 
 func normalizedStepFailure(err error) StepResult {
 	result := StepResult{State: StepFailed, ErrorCode: "internal_error", ErrorMessage: "deployment step failed"}
+	var sourceFailure *SourceFailure
+	var buildFailure *dockerx.BuildError
+	var release toolchainVersionError
 	switch {
+	case errors.As(err, &sourceFailure):
+		result.ErrorCode, result.ErrorMessage = sourceFailure.Code, sourceFailure.Error()
+	case errors.Is(err, dockerx.ErrBuildTimeout):
+		result.ErrorCode, result.ErrorMessage = "build_timeout", "the build exceeded its 30-minute limit"
+	case errors.As(err, &buildFailure):
+		// The command is left out: without the run's variables at hand it
+		// cannot be redacted, and buildFailure names it where they are.
+		result.ErrorCode = "build_failed"
+		result.ErrorMessage = "a build step failed; its output is in the build log"
+		if buildFailure.ExitCode >= 0 {
+			result.ErrorMessage = fmt.Sprintf("a build step exited with code %d; its output is in the build log", buildFailure.ExitCode)
+		}
+	case errors.As(err, &release):
+		// A JDK or .NET release the recipe cannot build with is named by
+		// its own code, as preflight names it.
+		result.ErrorCode, result.ErrorMessage = release.code, err.Error()
 	case errors.Is(err, ErrUnsupportedBuilder):
 		result.ErrorCode, result.ErrorMessage = "unsupported_builder", err.Error()
 	case errors.Is(err, ErrBuilderUnavailable):
-		result.State, result.ErrorCode, result.ErrorMessage = StepUnavailable, "builder_unavailable", "BuildKit or a reviewed base image is unavailable"
+		result = builderUnavailableFailure(err)
 	case errors.Is(err, ErrArtifactMissing):
 		result.ErrorCode, result.ErrorMessage = "artifact_missing", err.Error()
 	case errors.Is(err, ErrInvalidPlan):
 		result.ErrorCode, result.ErrorMessage = "invalid_plan", err.Error()
 	case errors.Is(err, ErrInvalidSource), errors.Is(err, ErrInvalidRef), errors.Is(err, ErrSourceUnavailable):
 		result.ErrorCode, result.ErrorMessage = "invalid_source", err.Error()
-	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+	case errors.Is(err, context.Canceled):
 		result.State, result.ErrorCode, result.ErrorMessage = StepCancelled, "cancelled", "deployment step cancelled"
+	case errors.Is(err, context.DeadlineExceeded):
+		// The engine turns a step into a cancellation itself whenever the run's
+		// own context ended; a deadline that reaches here expired while the run
+		// was alive, which nobody cancelled.
+		result.ErrorCode, result.ErrorMessage = "step_timeout", "an operation in this step ran out of time"
 	default:
 		result.ErrorMessage = err.Error()
 	}

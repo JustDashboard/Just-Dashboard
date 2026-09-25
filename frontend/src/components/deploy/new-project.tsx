@@ -145,6 +145,8 @@ export function NewProject({
   draftId,
   repo,
   repoRef,
+  template,
+  image,
 }: {
   source?: string
   profile?: string
@@ -153,11 +155,14 @@ export function NewProject({
   /** A clone URL to arrive with, from a deploy link outside the dashboard. */
   repo?: string
   repoRef?: string
+  /** A blueprint or image to arrive with chosen. */
+  template?: string
+  image?: string
 }) {
   const [lastTab, setTab] = useSessionState<SourceTabKey>(
     "deploy.new.tab",
     "git",
-    arrivalTab(source, profile),
+    arrivalTab(source ?? (template ? "template" : image ? "image" : undefined), profile),
   )
   // The store outlives the strip: a tab open when Existing workload was still
   // a source comes back naming it, and a key no button carries is a page with
@@ -192,7 +197,9 @@ export function NewProject({
   // A link into the chooser — a README's deploy link, a `?source=` — asks for
   // a new setup: it opens the chooser over a remembered flow, which stays
   // remembered until something is inspected in its place.
-  const [linkArrived, setLinkArrived] = useState(Boolean(source || profile || repo))
+  const [linkArrived, setLinkArrived] = useState(
+    Boolean(source || profile || repo || template || image),
+  )
   // Inspecting a second source is a different project, not a revision of the
   // first: the setup being walked away from is thrown away rather than left
   // to expire, which is what turned three attempts at one repository into
@@ -204,7 +211,7 @@ export function NewProject({
     // Arrival parameters choose a source once. Leaving them in the address
     // bar would reopen that chooser over the completed setup on every reload.
     const address = new URL(window.location.href)
-    for (const key of ["source", "profile", "repo", "ref", "draft"])
+    for (const key of ["source", "profile", "repo", "ref", "draft", "template", "image"])
       address.searchParams.delete(key)
     window.history.replaceState(
       window.history.state,
@@ -394,8 +401,12 @@ export function NewProject({
             {tab === "git" && (
               <SourceGit key="git" onInspected={inspected} initialUrl={repo} initialRef={repoRef} />
             )}
-            {tab === "image" && <SourceImage key="image" onInspected={inspected} />}
-            {tab === "template" && <SourceTemplate key="template" onInspected={inspected} />}
+            {tab === "image" && (
+              <SourceImage key="image" onInspected={inspected} initialReference={image} />
+            )}
+            {tab === "template" && (
+              <SourceTemplate key="template" onInspected={inspected} initialTemplate={template} />
+            )}
             {tab === "database" && <SourceDatabase key="database" />}
             {tab === "compose" && <SourceCompose key="compose" onInspected={inspected} />}
           </div>

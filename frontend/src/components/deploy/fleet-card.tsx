@@ -95,7 +95,9 @@ type ProjectProps = {
  * greyed verbs with no reason each made a menu taller than a laptop's window.
  */
 function useFleetVerbs(deployment: DeploymentSummary, confirm: Confirm, refresh: () => void) {
-  const { start, starting } = useProjectStart(deployment, refresh)
+  // The check the project page last made, when it made one: a card asks
+  // "Ready to deploy?" on what that page found, and otherwise builds at once.
+  const { start, starting, gate } = useProjectStart(deployment, refresh)
   const all = useProjectVerbs(deployment, {
     confirm,
     refresh,
@@ -104,7 +106,7 @@ function useFleetVerbs(deployment: DeploymentSummary, confirm: Confirm, refresh:
     navigation: true,
   })
   const progressive = starting ? all.find((verb) => verb.key === starting)?.progressive : undefined
-  return { verbs: all.filter((verb) => !verb.disabled), progressive }
+  return { verbs: all.filter((verb) => !verb.disabled), progressive, gate }
 }
 
 function FleetStatus({
@@ -460,7 +462,7 @@ export function ProjectCard({
   index,
 }: ProjectProps & { index: number }) {
   const router = useRouter()
-  const { verbs, progressive } = useFleetVerbs(deployment, confirm, refresh)
+  const { verbs, progressive, gate } = useFleetVerbs(deployment, confirm, refresh)
   // The address under the name is already the way to the site, so a card
   // keeps Visit in its menu, first of the ways into the project, rather than
   // drawing a second glyph for it beside the arrow.
@@ -555,6 +557,7 @@ export function ProjectCard({
           </div>
         </SpotlightBorder>
       </BlurFade>
+      {gate}
     </li>
   )
 }
@@ -580,7 +583,7 @@ export function ProjectRow({
   wide,
   roomy,
 }: ProjectProps & { wide: boolean; roomy: boolean }) {
-  const { verbs, progressive } = useFleetVerbs(deployment, confirm, refresh)
+  const { verbs, progressive, gate } = useFleetVerbs(deployment, confirm, refresh)
   const now = useNow(1000, Boolean(deployment.activeRun))
   const recent = deployment.recentRuns ?? []
   const traffic = pulse?.status === "available" ? pulse : undefined
@@ -612,7 +615,7 @@ export function ProjectRow({
   const pending = deployment.pendingChanges && !run && (
     <Status tone="warning" label="Changes pending" />
   )
-  return (
+  const row = (
     <ChoiceRow
       href={`/deploy/${deployment.id}`}
       verb={`Open ${deployment.name}`}
@@ -664,5 +667,15 @@ export function ProjectRow({
         </div>
       )}
     </ChoiceRow>
+  )
+  // Beside the row rather than inside it: a press in the dialog would reach
+  // the row's own handler through React's tree and open the project.
+  return gate ? (
+    <>
+      {row}
+      {gate}
+    </>
+  ) : (
+    row
   )
 }

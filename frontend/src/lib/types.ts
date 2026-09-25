@@ -2392,6 +2392,8 @@ export type DeploymentBuildEvidence = {
       recipeVersion?: string
       /** The language release the recipe built with: "rust 1.85", "java 21 (maven)". */
       toolchain?: string
+      /** The Node major a JavaScript build ran on and what chose it: "22 (.nvmrc)". */
+      nodeVersion?: string
       baseImages?: { reference: string; digest: string }[]
       dockerfilePreview?: string
       dockerfileDigest?: string
@@ -2399,6 +2401,70 @@ export type DeploymentBuildEvidence = {
       cachePolicy?: string
     }
   }
+}
+
+/**
+ * What a failed step's own output proved about why it failed, read from its
+ * evidence: `cause` on a failed build or release task, `diagnostics.cause` on
+ * a failed health gate. The code is also the step's error code and the run's
+ * terminal code; the subjects are identifiers the output named, never a line
+ * of it, and `lineSeq` is the transcript line that proves it.
+ */
+export type DeploymentFailureCause = {
+  code: string
+  phase?: "install" | "build" | "output_check" | "setup" | "dockerfile" | "base_image" | "pull"
+  command?: string
+  exitCode?: number
+  subjects?: string[]
+  /** What the code is about when it covers several tools: "package-lock.json", "go". */
+  detail?: string
+  lineSeq?: number
+  /** The Compose service whose build failed. */
+  service?: string
+  /** A schema_missing cause names its table here. */
+  table?: string
+  fix?: DeploymentCauseFix
+}
+
+/**
+ * The one plan change a cause's evidence supports. `set_build` and
+ * `set_runtime` replace the field with `value`; `add_variable` creates the
+ * variable in `scope`; `variable_scope` adds `scope` to an existing one;
+ * `review` opens a field whose right value the output cannot prove.
+ */
+export type DeploymentCauseFix = {
+  kind:
+    | "set_build"
+    | "set_runtime"
+    | "add_variable"
+    | "variable_scope"
+    | "remove_variable_scope"
+    | "review"
+  /** `configuration.build.packageManager`, `runtime.internalPort`, `variables.NAME`, `dependencies`. */
+  field: string
+  value?: string
+  scope?: string
+}
+
+/** What changed in the environment's settings since a run was planned. */
+export type DeploymentRunSettingsDrift = {
+  runId: number
+  planRevision: number
+  desiredRevision: number
+  changed: boolean
+  changes: DeploymentSettingsChange[]
+}
+
+/**
+ * One changed setting. `before`/`after` are plan values that are not secret
+ * — a package manager, a port, a command — or, for a variable, its scopes.
+ */
+export type DeploymentSettingsChange = {
+  kind: "build" | "runtime" | "source" | "variable"
+  field: string
+  change: "changed" | "added" | "removed" | "scope"
+  before?: string
+  after?: string
 }
 
 export type DeploymentRunSnapshot = {
@@ -3304,9 +3370,30 @@ export type DeploymentDraftSource = {
 
 export type NodePackageManager = "bun" | "npm" | "pnpm" | "yarn"
 
+/**
+ * The recipe stage a build variable is mounted in: the dependency install, the
+ * build command, or both — a root package's own postinstall runs inside the
+ * install. `validBuildSecretStep` is the server's closed set.
+ */
+export type BuildSecretStep = "install" | "build" | "install_and_build"
+
 /** The automatic recipes the backend can build; `validRecipe` is its closed set. */
 export type DeploymentRecipe =
-  "node" | "go" | "python" | "rust" | "java" | "dotnet" | "deno" | "php"
+  | "node"
+  | "go"
+  | "python"
+  | "rust"
+  | "java"
+  | "dotnet"
+  | "deno"
+  | "php"
+  | "site"
+  | "ruby"
+  | "elixir"
+  | "scala"
+  | "clojure"
+  | "dart"
+  | "gleam"
 
 /** An environment variable detection found the source reading. */
 export type DeploymentDetectedVariable = {
@@ -3314,13 +3401,210 @@ export type DeploymentDetectedVariable = {
   /** The example file's own value, when it had one and it was not credential-shaped. */
   example?: string
   sources: string[]
+  /**
+   * How the dashboard supplies the value when nothing is typed: a self-issued
+   * secret minted at commit, the planned domain, a harmless documented default,
+   * or a secret only the operator holds and has to paste.
+   */
+  setup?: DeploymentVariableSetup
+  /** The evidence behind `setup`, e.g. "Auth.js signs and encrypts sessions with it". */
+  setupReason?: string
+  generateLength?: number
+  generateFormat?: DeploymentGeneratedSecretFormat
+  domainTemplate?: string
+  defaultValue?: string
+  /** "build" when the value is read while the build runs. */
+  phase?: "build"
+  /** Compiled into the JavaScript every visitor downloads. */
+  browserInlined?: boolean
+  /** Read with no default where the application starts or builds. */
+  required?: boolean
+  /** Read with no default on a path that may not always run. */
+  requiredRead?: boolean
+  /** The files that read it while the build runs, which its build phase comes from. */
+  buildSources?: string[]
+  /** A committed file whose value for this name points at loopback. */
+  localhostIn?: string
+  /**
+   * "install" for a registry credential a package manager's configuration
+   * (.npmrc, .yarnrc.yml, bunfig.toml) names: only the dependency install
+   * reads it. `installRequired` says the install fails without it.
+   */
+  step?: "install"
+  installRequired?: boolean
 }
+
+/** A committed JavaScript lockfile, compared as data with package.json. */
+export type DeploymentDetectedLockfile = {
+  path: string
+  manager: NodePackageManager
+  /** `stale` is what the manager's frozen install would refuse. */
+  state: "in_sync" | "stale" | "unknown"
+  missing?: string[]
+  extra?: string[]
+  changed?: string[]
+  /** The sentence an operator reads: "package-lock.json is missing 15 dependencies (…)". */
+  note?: string
+}
+
+/**
+ * What the recipe installs when `manager` is chosen, computed by the same
+ * planner the build runs. An empty `install` with a blocked finding is a
+ * choice the build would refuse.
+ */
+export type DeploymentDetectedNodeInstall = {
+  manager: NodePackageManager
+  lockfile?: string
+  install?: string
+  toolchain?: string
+  /** Detection's commands for this manager's runner. */
+  buildCommand?: string
+  startCommand?: string
+  findings?: DeploymentPreflightFinding[]
+}
+
+export type DeploymentVariableSetup = "generate" | "domain" | "default" | "paste"
+
+/**
+ * A database address in the shape its consumer parses: JDBC (Spring,
+ * Quarkus), JDBC over MariaDB Connector/J, which accepts only
+ * `jdbc:mariadb://`, ADO.NET (.NET), or Rails' `mysql2://`.
+ */
+export type DeploymentDatabaseConnectionFormat = "jdbc" | "jdbc-mariadb" | "adonet" | "mysql2"
+
+export type DeploymentGeneratedSecretFormat = "" | "hex" | "base64" | "laravel" | "keylist"
 
 /** A database engine detection found the source connecting to. */
 export type DeploymentDetectedDatabase = {
   engine: string
   variable: string
   evidence: string
+  /** The connection shape the consumer parses when it is not a URL. */
+  format?: DeploymentDatabaseConnectionFormat
+  /** Postgres extensions the schema needs; the official image ships neither. */
+  extensions?: ("vector" | "postgis")[]
+  /** A driver that only speaks its hosted provider's protocol. */
+  hosted?:
+    | "neon-http"
+    | "neon-ws"
+    | "vercel-postgres"
+    | "planetscale-http"
+    | "prisma-accelerate"
+    | "upstash-rest"
+  /** Further databases on the same server the framework reads by name. */
+  alsoVariables?: string[]
+}
+
+/** A fact about the source's configuration that preflight answers. */
+export type DeploymentEnvironmentNote = {
+  code: string
+  detail?: string
+  path?: string
+}
+
+/**
+ * How detection proposes a release proves it serves (`DetectedReadiness`):
+ * the check `defaultChecks` builds, where it came from, and what the source
+ * says about hosts and HTTPS that preflight turns into findings.
+ */
+export type DeploymentDetectedReadiness = {
+  kind: "http" | "docker_health"
+  path?: string
+  /** Any answer below 500 (but 400 and 421) counts as ready. */
+  acceptAnyAnswer?: boolean
+  attempts?: number
+  intervalSeconds?: number
+  source: "healthcheck" | "platform" | "framework" | "code" | "convention"
+  evidence: string
+  slowStart?: string
+  modelDownload?: string
+  modelCache?: string
+  rootRoute?: "routed" | "unrouted"
+  httpsRedirect?: string
+  httpsRedirectIgnoresProxy?: boolean
+  allowedHosts?: string[]
+  allowedHostsSource?: string
+}
+
+/** The library that makes a candidate a process that never listens. */
+export type DeploymentDetectedBackgroundWorker = {
+  library: string
+  kind: string
+  evidence: string
+}
+
+/** A start command that backgrounds the application, which detection could not rewrite. */
+export type DeploymentDetectedStartDetach = {
+  command: string
+  script?: string
+  source: string
+  effect: "exits" | "backgrounds"
+  reason: string
+  action: string
+}
+
+/**
+ * What the source says about where its server listens: a port it fixes
+ * whatever PORT says, whether it reads PORT, and a loopback bind nothing
+ * outside the container reaches. Preflight re-checks these against the plan.
+ */
+export type DeploymentDetectedListen = {
+  port?: number
+  portFrom?: string
+  readsPort?: boolean
+  readsPortFrom?: string
+  loopback?: string
+  loopbackFrom?: string
+  loopbackCertain?: boolean
+  loopbackRecipeFix?: string
+  loopbackVariable?: string
+  unbridged?: string
+}
+
+/**
+ * A plain runtime variable the deployment's place behind the proxy decides:
+ * AUTH_TRUST_HOST, NEXTAUTH_URL (following the primary domain), HOST.
+ */
+export type DeploymentNetworkVariable = {
+  name: string
+  value?: string
+  domainTemplate?: string
+  reason: string
+}
+
+/**
+ * State the application writes to its own filesystem, which a new release
+ * would start without. `target` is where a managed volume can stand without
+ * hiding code (absent when none can); `variable` and `value` move the state
+ * under it; a server database linked through `databaseVariable` replaces the
+ * file altogether, and `connectionVariable` set to any driver but sqlite
+ * takes the file out of use (Laravel's DB_CONNECTION).
+ */
+export type DeploymentDetectedPersistentPath = {
+  kind: "sqlite" | "uploads" | "storage" | "volume" | "keys"
+  path: string
+  target?: string
+  variable?: string
+  value?: string
+  databaseVariable?: string
+  connectionVariable?: string
+  source: string
+  reason: string
+}
+
+/** `DetectedStaticSite` (backend `detect_static_site.go`). */
+export type DeploymentStaticSite = {
+  generator?: string
+  version?: string
+  declared?: string
+  unpinned?: boolean
+  versionIssue?: string
+  basePath?: string
+  basePathSource?: string
+  basePathExpression?: boolean
+  themeSubmodule?: string
+  hostingRules?: number
+  hostingRulesLeftOut?: number
 }
 
 export type DeploymentDetectionCandidate = {
@@ -3344,13 +3628,293 @@ export type DeploymentDetectionCandidate = {
   schemaTool?: string
   schemaCommand?: string
   schemaInStart?: boolean
+  /** The repository's release command applies the schema, so the start command does not. */
+  schemaInRelease?: boolean
   spaFallback?: boolean
   pythonVersion?: string
   unpinnedDependencies?: boolean
+  listen?: DeploymentDetectedListen
+  networkVariables?: DeploymentNetworkVariable[]
   variables?: DeploymentDetectedVariable[]
   databases?: DeploymentDetectedDatabase[]
+  persistentPaths?: DeploymentDetectedPersistentPath[]
+  /** Loads the project's seed data; `seedResets` says it clears tables first. */
+  seedCommand?: string
+  seedResets?: boolean
+  /** The schema step pushes the declared model instead of applying migrations. */
+  schemaPush?: boolean
+  /** Variable prefixes this root's framework compiles into browser code. */
+  browserPrefixes?: string[]
+  environmentNotes?: DeploymentEnvironmentNote[]
   evidence: { path: string; reason: string }[]
   needsDecision: string[]
+  readiness?: DeploymentDetectedReadiness
+  backgroundWorker?: DeploymentDetectedBackgroundWorker
+  startDetaches?: DeploymentDetectedStartDetach
+  /** What the Dockerfile's name, place or command says it was written for. */
+  dockerfileRole?: "production" | "development"
+  /** The Dockerfile stage to build when its last stage is a development one. */
+  dockerfileTarget?: string
+  /** The Dockerfile's build arguments, by name only. */
+  dockerfileArgs?: DeploymentDockerfileArg[]
+  /** Literal `FROM --platform=` values the Dockerfile pins. */
+  dockerfilePlatforms?: string[]
+  /** The Dockerfile's named stages, which a configured stage must be one of. */
+  dockerfileStages?: string[]
+  /** What detection proved about how this candidate's image would build. */
+  imageBuildIssues?: DeploymentImageBuildIssue[]
+  /** The command the repository declares runs once before each release. */
+  releaseCommand?: string
+  /** Why this candidate is offered but never chosen over the application: an example, a docs site, the frontend of an API. */
+  demotion?: string
+  /** A shape nothing on this server can serve. */
+  notDeployable?: DeploymentNotDeployableKind
+  /** The desktop shell (tauri, wails) whose frontend this is. */
+  desktopShell?: string
+  /** The other roots of a repository split into a frontend and an API. */
+  companions?: string[]
+  /** What the source runs besides this candidate's own process. */
+  processes?: DeploymentDetectedProcess[]
+  /** What other platforms' deployment files declare for this candidate. */
+  platformManifests?: DeploymentPlatformManifest[]
+  /** Serverless or edge code a container build does not run. */
+  serverlessCode?: { platform: string; paths: string[]; entry?: string; blocking?: boolean }[]
+  /**
+   * What a static site's own files say about its build and serving: the site
+   * generator and its release, the sub-path it was built for, the theme's Git
+   * submodule and the hosting rules the static server applies.
+   */
+  staticSite?: DeploymentStaticSite
+  /** Imports that resolve only on a case-insensitive disk. */
+  importCaseMismatches?: {
+    file: string
+    line: number
+    specifier: string
+    actual: string
+    language: "javascript" | "php"
+  }[]
+  lockfiles?: DeploymentDetectedLockfile[]
+  nodeInstalls?: DeploymentDetectedNodeInstall[]
+  /** The Node major the recipe builds on and where it came from, e.g. "22 (.nvmrc)". */
+  nodeVersion?: string
+  /**
+   * What the build reads that preflight judges against the configuration and
+   * the host: the env-validation schema it imports and the memory it is
+   * estimated to peak at.
+   */
+  nodeBuild?: {
+    envSchema?: string
+    envServer?: string[]
+    envClient?: string[]
+    envSkippable?: boolean
+    memoryMiB?: number
+    /** Names `prisma.config` reads that the recipe gives a placeholder while `prisma generate` runs. */
+    prismaEnv?: string[]
+    /** What the framework's configuration made the recipe do, said before Deploy. */
+    findings?: DeploymentPreflightFinding[]
+    /** Package scripts that start a development server or a watcher, with what they start. */
+    devScripts?: Record<string, string>
+    /** Package scripts that migrate or push, so a build that runs one needs the real database. */
+    prismaConnectScripts?: string[]
+  }
+  /** go.mod's toolchain line and the .go-version pin, judged against the plan's Go version. */
+  goToolchain?: string
+  goVersionFile?: string
+  /** The module's buildable main packages ("." is the root) and the one detection chose. */
+  goMainPackages?: string[]
+  /** How many main packages the bounded list above leaves out. */
+  goMainPackagesOmitted?: number
+  goPackage?: string
+  /** A Go module with no main package: nothing for the recipe to run. */
+  goLibrary?: boolean
+  /** How the Go module builds beyond its toolchain (detect_go.go). */
+  go?: {
+    context?: string
+    workspace?: boolean
+    localReplaces?: string[]
+    replacesOutside?: string[]
+    cgoModules?: string[]
+    cgoLocal?: string[]
+    cgoPackages?: string[]
+    cgoRuntime?: string[]
+    cgoUnknown?: string[]
+    vendored?: boolean
+    sumMissing?: boolean
+    sumStale?: string[]
+    ownerModules?: string[]
+    embeds?: {
+      pattern: string
+      path: string
+      present?: boolean
+      frontend?: string
+      framework?: string
+    }[]
+    codegen?: string
+    codegenMissing?: string[]
+    subcommand?: string
+    /** The go and toolchain lines of the go.work that uses the module. */
+    workGo?: string
+    workToolchain?: string
+  }
+  /** How the Rust crate builds: its workspace, binaries and native crates (detect_rust.go). */
+  rust?: {
+    workspace?: string
+    package?: string
+    /** The crate's binary targets, and the one the recipe serves unless the plan names another. */
+    binaries?: string[]
+    binary?: string
+    binaryReason?: string
+    nativePackages?: string[]
+    nativeCrates?: string[]
+    /** What the runtime image installs when the binary links dynamically (bindgen). */
+    nativeRuntime?: string[]
+    nativeUnmapped?: string[]
+    sqlxMacros?: boolean
+    sqlxOffline?: boolean
+    /** Where the offline query data is: a .sqlx directory or sqlx-data.json. */
+    sqlxOfflineData?: string
+    sqlxMigrate?: boolean
+    lockVersion?: number
+    lockStale?: string[]
+    toolchain?: string
+    heavyRelease?: string
+    fullstack?: "leptos" | "trunk" | "dioxus" | "shuttle"
+  }
+  /** The interpreter range pyproject declares, and the manifest the recipe installs from. */
+  pythonRequires?: string
+  pythonInstall?:
+    | "uv.lock"
+    | "poetry.lock"
+    | "pdm.lock"
+    | "Pipfile.lock"
+    | "Pipfile"
+    | "requirements.txt"
+    | "pyproject.toml"
+    | "setup.py"
+    | "environment.yml"
+  /**
+   * Debian packages the source needs in its image. `automatic` ones the Python
+   * recipe installs by itself; the others (another platform's Aptfile) seed
+   * `build.systemPackages`.
+   */
+  systemPackages?: DeploymentDetectedSystemPackage[]
+  /** What a Maven or Gradle build says about building it. */
+  javaBuild?: DeploymentDetectedJavaBuild
+  /** What a .NET project says about publishing it. */
+  dotnetBuild?: DeploymentDetectedDotnetBuild
+}
+
+export type DeploymentDetectedSystemPackage = {
+  name: string
+  reason?: string
+  source?: string
+  automatic?: boolean
+}
+
+/**
+ * A JVM candidate's build: the reactor or settings root it builds from and
+ * the module it selects there, how it packages, and the Java release its
+ * build files declare (`toolchain` for an exact Gradle toolchain) and its
+ * version files pin.
+ */
+export type DeploymentDetectedJavaBuild = {
+  tool: "maven" | "gradle"
+  context?: string
+  module?: string
+  packaging?: string
+  runnable?: boolean
+  library?: boolean
+  aggregator?: boolean
+  release?: number
+  releaseFrom?: string
+  toolchain?: boolean
+  pinned?: number
+  pinnedFrom?: string
+  wrapper?: string
+  wrapperUsable?: boolean
+  wrapperJarMissing?: boolean
+  foojay?: boolean
+  profiles?: string[]
+  vaadinDevMode?: boolean
+}
+
+/**
+ * A .NET candidate's project: the directory it publishes from, the targets
+ * it declares, the SDK global.json pins, and what the recipe changes about
+ * publishing it.
+ */
+export type DeploymentDetectedDotnetBuild = {
+  project: string
+  kind: string
+  context?: string
+  targets?: string[]
+  targetText?: string
+  multiTarget?: boolean
+  sdkPin?: string
+  sdkPinFrom?: string
+  rollForward?: string
+  native?: string[]
+  spaRoot?: string
+  appHost?: string
+  aspire?: string[]
+  /** The projects it references, with the frameworks each declares. */
+  references?: { project: string; targets?: string }[]
+}
+
+export type DeploymentDockerfileArg = {
+  name: string
+  hasDefault?: boolean
+  usedInFrom?: boolean
+  consumed?: boolean
+}
+
+export type DeploymentImageBuildIssue = {
+  code: string
+  severity: "blocked" | "warning"
+  line?: number
+  subject?: string
+  detail: string
+}
+
+export type DeploymentNotDeployableKind =
+  | "library"
+  | "cli"
+  | "editor-extension"
+  | "browser-extension"
+  | "github-action"
+  | "desktop-app"
+  | "mobile-app"
+  | "notebook"
+  | "windows-only"
+
+/** A process the source runs besides its main one: a queue worker, a scheduler, a release command. */
+export type DeploymentDetectedProcess = {
+  name: string
+  kind: "worker" | "scheduler" | "release" | "web"
+  command?: string
+  source: string
+  reason: string
+}
+
+/** Facts another platform's file (fly.toml, render.yaml, app.json, …) declares, and which were taken. */
+export type DeploymentPlatformManifest = {
+  file: string
+  platform: string
+  startCommand?: string
+  buildCommand?: string
+  outputDirectory?: string
+  port?: number
+  healthPath?: string
+  spaFallback?: boolean
+  dockerfile?: string
+  releaseCommand?: string
+  generatedVariables?: string[]
+  requiredVariables?: string[]
+  volumes?: string[]
+  systemPackages?: string[]
+  redirects?: number
+  toolchains?: string[]
+  applied?: string[]
 }
 
 export type DeploymentDetection = {
@@ -3380,20 +3944,47 @@ export type DeploymentDetection = {
       ports: string[]
       mounts: string[]
       advanced: string[]
+      buildTarget?: string
+      buildArgs?: { name: string; value?: string; fromEnvironment?: boolean }[]
+      platform?: string
+      imagePlatforms?: string[]
+      envFiles?: { path: string; required: boolean; missing?: boolean }[]
+      buildContextMissing?: boolean
+      dockerfileIssues?: DeploymentImageBuildIssue[]
     }[]
     variables: string[]
     warnings: string[]
     unsupported: string[]
     preview: string
     digest: string
+    /** The service readiness and the release's container follow. */
+    primaryService?: string
+    /** Variables the file interpolates with a default; never required. */
+    optionalVariables?: { name: string; default?: string }[]
   }
   selectedId?: string
+  /** Why `selectedId` won, or why nothing did. */
+  selectionReason?: string
   scannedFiles: number
   scannedBytes: number
   truncated: boolean
   truncatedReason?: string
   unavailable?: string
-  gitRequirements: { submodules: boolean; lfs: boolean }
+  gitRequirements: {
+    submodules: boolean
+    lfs: boolean
+    /** Each declared submodule, and whether the source's own access fetches it. */
+    submoduleList?: { path: string; sameSource: boolean }[]
+    submodulesChecked?: boolean
+    lfsChecked?: boolean
+    /** How many files LFS tracks, and (bounded) which. */
+    lfsFiles?: number
+    lfsPaths?: string[]
+  }
+  /** What detection recognised and deliberately did not offer, and why. */
+  setAside?: { path: string; reason: string; kind: string }[]
+  /** A reviewed template or the project's own published image of the same application. */
+  alternatives?: { kind: "template" | "image"; ref: string; label: string; evidence: string }[]
 }
 
 export type DeploymentBuildMethod =
@@ -3492,7 +4083,24 @@ export type DeploymentConfiguration = {
      */
     framework?: string
     goVersion?: string
+    /** The main package a Go recipe builds, relative to the root directory; empty lets it choose. */
+    goPackage?: string
+    /** The binary target a Rust recipe serves; empty lets it choose. */
+    cargoBin?: string
     pythonVersion?: string
+    /**
+     * The Node major a JavaScript recipe builds and runs on, or the one the PHP, Python, Ruby
+     * or Elixir recipe installs front-end assets with; empty follows the repository.
+     */
+    nodeVersion?: string
+    /** The PHP release a PHP recipe builds on; empty lets composer.json and composer.lock decide. */
+    phpVersion?: string
+    /** Debian packages the Python recipe installs beside the ones its dependencies need. */
+    systemPackages?: string[]
+    /** The JDK release a Java recipe builds and runs on; empty lets the build and version files decide. */
+    javaVersion?: string
+    /** The .NET release a .NET recipe publishes for; empty lets the project and global.json decide. */
+    dotnetVersion?: string
     packageManager?: NodePackageManager
     rootDirectory?: string
     dockerfile?: string
@@ -3501,14 +4109,20 @@ export type DeploymentConfiguration = {
     outputDirectory?: string
     spaFallback?: boolean
     targetPlatform?: string
+    /** The Dockerfile stage to build (custom Dockerfiles only). */
+    target?: string
+    /** The Compose service readiness and the release's container follow; empty keeps detection's. */
+    primaryService?: string
     noCache?: boolean
-    secrets?: { variable: string; step: "install" | "build" }[]
+    secrets?: { variable: string; step: BuildSecretStep }[]
     releaseTasks?: {
       name: string
       command: string
       workingDirectory?: string
       timeoutSeconds: number
       env: string[]
+      /** "image" runs it in the release's own image; absent is the host shell. */
+      runner?: "image"
     }[]
   }
   runtime: {
@@ -3528,6 +4142,8 @@ export type DeploymentConfiguration = {
     cpus?: number
     pidsLimit?: number
     restartPolicy?: DeploymentRestartPolicy
+    /** The largest request body the route lets through, in MB; empty is 64. */
+    maxRequestBodyMb?: number
     mounts?: {
       source: string
       target: string
@@ -3547,6 +4163,8 @@ export type DeploymentConfiguration = {
     domainTemplate?: string
     // Length of a secret the server generates when the deployment is saved.
     generate?: number
+    /** The shape of that generated secret; empty is alphanumeric. */
+    generateFormat?: DeploymentGeneratedSecretFormat
   }[]
   dependencies: {
     kind: string
@@ -3603,7 +4221,8 @@ export type DeploymentDotenvImportPreview = {
   variables: {
     name: string
     line: number
-    change: "added" | "changed" | "unchanged" | "refused"
+    /** "skipped" is a name the request asked the import to leave out. */
+    change: "added" | "changed" | "unchanged" | "skipped" | "refused"
     reason?: "invalid_name" | "duplicate" | "invalid_value"
   }[]
 }
@@ -3631,6 +4250,8 @@ export type DeploymentEnvironmentConfiguration = Omit<DeploymentConfiguration, "
   /** Present once the backend fills it in; until then the Source card falls back to the summary. */
   source?: DeploymentDraftSource
   identity?: SourceIdentity
+  /** The detected candidate this build still describes, from the evidence saved with the plan. */
+  detected?: DeploymentDetectionCandidate
 }
 
 /**
@@ -3704,6 +4325,51 @@ export type DeploymentPreflightFinding = {
   owner?: string
   fieldId?: string
   deepLink?: string
+  /** The one plan change the finding offers, when the check could compute it. */
+  fix?: DeploymentCauseFix
+}
+
+/**
+ * POST /deploy/{id}/environments/{env}/check: preflight for the saved plan
+ * against the commit a deployment would build now — what analyze_plan runs
+ * before every build, asked before Deploy is pressed.
+ */
+export type DeploymentCheckResult = {
+  findings: DeploymentPreflightFinding[]
+  planRevision: number
+  sourceRevision?: string
+  checkedAt: string
+}
+
+/** One plan field whose saved value differs from what detection proposes now. */
+export type DeploymentDetectionChange = {
+  /** The plan field: `build.packageManager`, `runtime.internalPort`. */
+  field: string
+  label: string
+  saved: string
+  detected: string
+  /** What detection proposed when the plan was saved. */
+  previous?: string
+  /** Detection's answer moved since the plan was saved; false is an edit made on purpose. */
+  changed: boolean
+}
+
+/** Fresh detection of a project's source, compared with its saved plan (`.../detect`, a source change). */
+export type DeploymentDetectionProposal = {
+  /** The desired revision it was computed against — the guard an Apply saves with. */
+  revision: number
+  sourceRevision?: string
+  candidate?: DeploymentDetectionCandidate
+  /**
+   * Detection found nothing at the plan's root that builds the plan's way:
+   * `candidate` is what it selected instead, for information, and no field
+   * is compared with it.
+   */
+  elsewhere?: boolean
+  changes: DeploymentDetectionChange[]
+  variables: DeploymentDetectedVariable[]
+  newVariables: string[]
+  databases: DeploymentDetectedDatabase[]
 }
 
 export type DeploymentDraft = {

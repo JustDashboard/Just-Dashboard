@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,11 +50,26 @@ type HostObservation struct {
 	OS              string                         `json:"os"`
 	Architecture    string                         `json:"architecture"`
 	AvailableMemory int64                          `json:"availableMemoryBytes"`
-	AvailableDisk   int64                          `json:"availableDiskBytes"`
-	CPUCount        int                            `json:"cpuCount,omitempty"`
-	Domains         []DomainObservation            `json:"domains"`
-	Firewall        FirewallObservation            `json:"firewall"`
-	Dependencies    []DependencyObservation        `json:"dependencies"`
+	// AvailableSwap is free swap, which a build can page into when memory
+	// runs short.
+	AvailableSwap int64                   `json:"availableSwapBytes,omitempty"`
+	AvailableDisk int64                   `json:"availableDiskBytes"`
+	CPUCount      int                     `json:"cpuCount,omitempty"`
+	Domains       []DomainObservation     `json:"domains"`
+	Firewall      FirewallObservation     `json:"firewall"`
+	Dependencies  []DependencyObservation `json:"dependencies"`
+	// ReplacesRuntime says a live release is being replaced, so the data a
+	// plan keeps already exists; only a first release starts it empty.
+	ReplacesRuntime bool `json:"replacesRuntime,omitempty"`
+
+	// CPUFeatures are the instruction-set flags a database image may require
+	// (avx, atomics); nil when /proc/cpuinfo could not be read.
+	CPUFeatures []string `json:"cpuFeatures,omitempty"`
+
+	// Emulators are the architectures binfmt_misc can run here, when
+	// EmulationObserved says /proc could be read at all (preflight_image.go).
+	Emulators         []string `json:"emulators,omitempty"`
+	EmulationObserved bool     `json:"emulationObserved,omitempty"`
 }
 
 type DomainObservation struct {
@@ -93,10 +107,18 @@ type DependencyObservation struct {
 	Status   string `json:"status,omitempty"`
 	Detail   string `json:"detail,omitempty"`
 	DeepLink string `json:"deepLink,omitempty"`
+
+	// Extensions are the schema extensions a linked PostgreSQL server
+	// offers among those detection asks about; nil when it was not asked.
+	Extensions []string `json:"extensions,omitempty"`
 }
 
 type ObservationRequest struct {
-	NeedsGit     bool
+	NeedsGit bool
+	// NeedsGitLFS asks whether git-lfs is installed, for a source that
+	// downloads LFS objects: without it the release stops at acquiring the
+	// source.
+	NeedsGitLFS  bool
 	NeedsDocker  bool
 	NeedsBuildx  bool
 	NeedsCompose bool
@@ -111,6 +133,11 @@ type ObservationRequest struct {
 	Domains             []PlannedDomain
 	Dependencies        []PlannedDependency
 	NeedsFirewall       bool
+	// DatabaseExtensions are the schema extensions detection says a linked
+	// PostgreSQL must offer; only then is each linked server asked.
+	DatabaseExtensions []string
+	// ReleaseTaskTools are the programs host release tasks run.
+	ReleaseTaskTools []string
 }
 
 // PreflightObserver is intentionally read-only. A test double can prove
@@ -136,6 +163,14 @@ type PlanningFirewall interface {
 
 type PlanningDependencies interface {
 	ObserveDependencies(context.Context, []PlannedDependency) ([]DependencyObservation, error)
+}
+
+// PlanningDatabaseExtensions is the optional half of PlanningDependencies
+// that asks a linked database which of the wanted schema extensions it
+// offers. Each question is a connection to that database, so preflight asks
+// only when detection says the schema needs one.
+type PlanningDatabaseExtensions interface {
+	DatabaseExtensions(ctx context.Context, resourceID string, wanted []string) ([]string, error)
 }
 
 type PlanningProxy interface {
@@ -170,9 +205,13 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 	observation := HostObservation{
 		Facilities: map[string]FacilityObservation{}, Paths: []PathObservation{}, Ports: []PortObservation{},
 		Domains: []DomainObservation{}, Dependencies: []DependencyObservation{}, OS: runtime.GOOS, Architecture: runtime.GOARCH,
+		ReplacesRuntime: request.ExistingRuntimeID != "",
 	}
 	if request.NeedsGit {
 		observation.Facilities["git"] = FacilityObservation{Available: hostexec.Available("git")}
+	}
+	if request.NeedsGitLFS {
+		observation.Facilities["git-lfs"] = FacilityObservation{Available: hostexec.Available("git-lfs")}
 	}
 	if request.NeedsDocker || request.NeedsCompose {
 		facility := FacilityObservation{}
@@ -199,6 +238,10 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 		cancel()
 		observation.Facilities["compose"] = FacilityObservation{Available: available}
 	}
+	if request.NeedsBuildx || request.NeedsCompose {
+		observation.Emulators, observation.EmulationObserved = observeEmulators()
+	}
+	observeReleaseTaskTools(request.ReleaseTaskTools, observation.Facilities)
 	if len(request.Domains) > 0 {
 		proxyAvailable := false
 		certificateAutomation := false
@@ -336,13 +379,26 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 	if len(request.Dependencies) > 0 && o.resources != nil {
 		dependencyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		observed, err := o.resources.ObserveDependencies(dependencyCtx, request.Dependencies)
+		if prober, ok := o.resources.(PlanningDatabaseExtensions); ok && err == nil && len(request.DatabaseExtensions) > 0 {
+			for index := range observed {
+				if observed[index].ResourceKind != "database_connection" || !observed[index].Available {
+					continue
+				}
+				// Unknown is not a refusal: a server that cannot be asked
+				// leaves the finding to the first migration.
+				if available, probeErr := prober.DatabaseExtensions(dependencyCtx, observed[index].ResourceID, request.DatabaseExtensions); probeErr == nil {
+					observed[index].Extensions = available
+				}
+			}
+		}
 		cancel()
 		if err == nil {
 			observation.Dependencies = observed
 		}
 	}
-	observation.AvailableMemory = availableMemory()
+	observation.AvailableMemory, observation.AvailableSwap = hostMemory()
 	observation.CPUCount = runtime.NumCPU()
+	observation.CPUFeatures = HostCPUFeatures()
 	diskRoot := o.volumeRoot
 	if diskRoot == "" {
 		diskRoot = "/"
@@ -408,6 +464,19 @@ func PreflightDraft(
 	observer PreflightObserver,
 	advancedAllowed bool,
 ) (*PreflightResult, error) {
+	return PreflightDraftWithSource(ctx, draft, observer, nil, advancedAllowed)
+}
+
+// PreflightDraftWithSource is PreflightDraft that also reads the commit the
+// draft's detection reviewed — asking the recipe whether it would prepare the
+// plan from it — and says when the branch has moved past that commit.
+func PreflightDraftWithSource(
+	ctx context.Context,
+	draft *Draft,
+	observer PreflightObserver,
+	inspector SourceInspector,
+	advancedAllowed bool,
+) (*PreflightResult, error) {
 	if draft == nil || draft.Data.Intent == nil || draft.Data.Source == nil ||
 		draft.Data.Detection == nil || draft.Data.Configuration == nil {
 		return nil, ErrDraftIncomplete
@@ -435,6 +504,7 @@ func PreflightDraft(
 		}
 	}
 	findings := preflightFindings(draft, configuration, observation, advancedAllowed)
+	findings = withDraftSourceChecks(ctx, draft, configuration, inspector, findings)
 	plan := exactPlan(draft, configuration)
 	preview, err := json.MarshalIndent(plan, "", "  ")
 	if err != nil {
@@ -451,6 +521,7 @@ func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) 
 	source := draft.Data.Source
 	request := ObservationRequest{
 		NeedsGit:     source.Kind == SourceGit || source.Kind == SourceLocal || source.Mode == SourceModeComposeGit,
+		NeedsGitLFS:  source.IncludeLFS && (source.Kind == SourceGit || source.Kind == SourceLocal || source.Mode == SourceModeComposeGit),
 		NeedsDocker:  configuration.Build.Method != BuildNone,
 		NeedsBuildx:  buildMethodNeedsBuildx(configuration.Build.Method, draft.Data.Detection.Compose),
 		NeedsCompose: configuration.Build.Method == BuildCompose || configuration.Build.Method == BuildLegacyCompose,
@@ -490,8 +561,18 @@ func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) 
 			}
 		}
 	}
+	if candidate := rootDetectionCandidate(draft.Data.Detection, configuration.Build); candidate != nil {
+		extensions := []string{}
+		for _, database := range candidate.Databases {
+			extensions = append(extensions, database.Extensions...)
+		}
+		if len(extensions) > 0 {
+			request.DatabaseExtensions = uniqueSorted(extensions)
+		}
+	}
 	request.Paths = uniqueSorted(request.Paths)
 	request.Ports = uniquePorts(request.Ports)
+	request.ReleaseTaskTools = releaseTaskHostTools(configuration.Build.ReleaseTasks)
 	request.NeedsFirewall = publicRuntimeBind(configuration.Runtime) && len(request.Ports) > 0
 	return request
 }
@@ -550,38 +631,30 @@ func preflightFindings(
 		}
 	}
 	selected := selectedDetectionCandidate(detection)
-	if selected != nil && selected.Recipe == "go" && configuration.Build.Method == BuildRecipe && configuration.Build.GoVersion != "" {
-		if _, err := chooseGoRecipeVersion(configuration.Build.GoVersion, "", []byte("go "+selected.GoMinimumVersion)); err != nil {
-			findings = append(findings, finding("go_version_unsupported", PreflightBlocked,
-				"Selected Go version cannot build this source", err.Error(),
-				"The toolchain must satisfy the module's declared language requirement.",
-				"Choose a compatible Go version or use a Dockerfile.", "deploy", "configuration.build.goVersion"))
-		}
+	// The recipe checks read the candidate at the plan's own root and method,
+	// which is the selected one until the root is edited after detection.
+	planned := plannedDetectionCandidate(detection, configuration.Build)
+	if mismatch, ok := detectionRootMismatchFinding(detection, configuration.Build, planned); ok {
+		findings = append(findings, mismatch)
 	}
-	if selected != nil && selected.Recipe == "node" && configuration.Build.Method == BuildRecipe {
-		switch chosen := configuration.Build.PackageManager; {
-		case chosen != "" && len(selected.PackageManagers) > 0 && !slices.Contains(selected.PackageManagers, chosen):
-			findings = append(findings, finding("package_manager_lockfile_missing", PreflightBlocked,
-				"Selected package manager has no lockfile", chosen+"; lockfiles for "+strings.Join(selected.PackageManagers, ", "),
-				"A frozen install needs the selected manager's own lockfile.",
-				"Choose a package manager whose lockfile is committed, or commit its lockfile.", "deploy", "configuration.build.packageManager"))
-		case chosen == "" && selected.PackageManager == "" && len(selected.PackageManagers) > 1:
-			findings = append(findings, finding("package_manager_ambiguous", PreflightBlocked,
-				"Competing lockfiles need a package manager", strings.Join(selected.PackageManagers, ", "),
-				"Installing from a lockfile the project no longer maintains builds untested dependency versions.",
-				"Choose the package manager, declare packageManager in package.json, or delete the stale lockfile.", "deploy", "configuration.build.packageManager"))
-		}
+	findings = append(findings, plannedRecipeFindings(planned, configuration.Build)...)
+	if planned != nil && configuration.Build.Method == BuildRecipe &&
+		(planned.Recipe == "node" || (planned.Recipe != "" && len(planned.NodeInstalls) > 0)) {
+		findings = append(findings, nodeInstallFindings(planned, configuration)...)
+		findings = append(findings, nodeFrameworkFindings(planned, configuration)...)
 	}
-	if selected != nil && selected.UnpinnedDependencies && configuration.Build.Method == BuildRecipe {
+	findings = append(findings, compiledRecipeFindings(planned, configuration)...)
+	if planned != nil && planned.UnpinnedDependencies && configuration.Build.Method == BuildRecipe {
+		measured, means, action := unpinnedDependencyAdvice(planned)
 		findings = append(findings, finding("dependencies_unpinned", PreflightWarning,
-			"Dependencies are not pinned to exact versions", "unpinned entries in the dependency manifest",
-			"Each build installs the newest versions the manifest allows, so a rebuild of this same commit can run different code.",
-			"Commit a lockfile (uv lock, poetry lock, or pip freeze > requirements.txt) when rebuilds must be identical; deploying as is works today.",
-			"deploy", "configuration.build"))
+			"Dependencies are not pinned to exact versions", measured, means, action, "deploy", "configuration.build"))
 	}
-	if selected != nil && selected.RecipeIssue != "" && configuration.Build.Method == BuildRecipe {
+	findings = append(findings, phpDenoFindings(planned, configuration)...)
+	findings = append(findings, compiledBuildFindings(planned, configuration, draft.Data.Source)...)
+	findings = append(findings, languageRecipeFindings(planned, configuration, observation)...)
+	if planned != nil && planned.RecipeIssue != "" && configuration.Build.Method == BuildRecipe && !refusalNamed(findings) {
 		findings = append(findings, finding("recipe_unsupported", PreflightBlocked,
-			"Source needs a different build plan", selected.RecipeIssue,
+			"Source needs a different build plan", planned.RecipeIssue,
 			"The automatic recipe cannot satisfy the detected source requirements.",
 			"Use a Dockerfile or correct the source adapter/toolchain and run detection again.", "deploy", "configuration.build"))
 	}
@@ -599,39 +672,12 @@ func preflightFindings(
 			"The selected evidence proposes "+string(selected.BuildMethod)+" for this source.",
 			action, "deploy", "configuration.build.method"))
 	}
-	if len(detection.Candidates) == 0 {
-		findings = append(findings, finding("detection_empty", PreflightBlocked,
-			"No deployable plan was detected", "", "There is no build/runtime candidate to review.",
-			"Choose a build method and configuration.", "deploy", "configuration.build.method"))
-	} else if detection.SelectedID == "" {
-		findings = append(findings, finding("detection_ambiguous", PreflightDecision,
-			"Choose one detected candidate", fmt.Sprintf("%d candidates", len(detection.Candidates)),
-			"Multiple equally strong roots or methods were found.", "Select the intended root and method.",
-			"deploy", "detection.selectedId"))
-	} else {
-		findings = append(findings, finding("detection_selected", PreflightPass,
-			"Detected plan selected", detection.SelectedID, "The build plan has explicit evidence.", "", "deploy", "detection"))
-	}
-	if detection.GitRequirements.Submodules {
-		severity := PreflightDecision
-		action := "Choose whether required submodules should be fetched."
-		if draft.Data.Source.IncludeSubmodules {
-			severity, action = PreflightPass, ""
-		}
-		findings = append(findings, finding("git_submodules", severity,
-			"Repository declares Git submodules", fmt.Sprintf("included: %t", draft.Data.Source.IncludeSubmodules),
-			"Bounded detection does not fetch submodule repositories or their credentials.", action, "git", "source.includeSubmodules"))
-	}
-	if detection.GitRequirements.LFS {
-		severity := PreflightDecision
-		action := "Choose whether required Git LFS objects should be fetched."
-		if draft.Data.Source.IncludeLFS {
-			severity, action = PreflightPass, ""
-		}
-		findings = append(findings, finding("git_lfs", severity,
-			"Repository declares Git LFS objects", fmt.Sprintf("included: %t", draft.Data.Source.IncludeLFS),
-			"Bounded detection skips LFS object downloads.", action, "git", "source.includeLfs"))
-	}
+	findings = append(findings, imageBuildFindings(draft, configuration, observation)...)
+	// Whether detection chose, and what the source is (preflight_repo_shape.go).
+	findings = append(findings, detectionOutcomeFindings(detection, configuration)...)
+	findings = append(findings, repoShapeFindings(detection, configuration)...)
+	findings = append(findings, staticSiteFindings(draft.Data.Source, detection, configuration)...)
+	findings = append(findings, gitRequirementFindings(draft.Data.Source, detection, configuration, observation)...)
 	if detection.Compose != nil {
 		configuredVariables := map[string]bool{}
 		for _, variable := range configuration.Variables {
@@ -639,7 +685,7 @@ func preflightFindings(
 		}
 		for _, variable := range detection.Compose.Variables {
 			if !configuredVariables[variable] {
-				findings = append(findings, finding("compose_variable_"+strings.ToLower(variable), PreflightDecision,
+				findings = append(findings, finding(variableFindingCode("compose_variable_", variable), PreflightDecision,
 					"Compose variable needs a scoped value", variable,
 					"Planning validation used an inert placeholder and did not inherit the dashboard environment.",
 					"Add the variable with build/runtime scope or revise the Compose source.", "deploy", "variables."+variable))
@@ -660,7 +706,7 @@ func preflightFindings(
 	}
 	if detection.Truncated {
 		findings = append(findings, finding("detection_truncated", PreflightWarning,
-			"Repository scan reached a bound", detection.TruncatedReason,
+			"Repository scan reached a bound", fmt.Sprintf("%s; %d candidate(s) found before it", detection.TruncatedReason, len(detection.Candidates)),
 			"Results are deterministic but may not include a deeper candidate.",
 			"Confirm the selected root or narrow the source subdirectory.", "deploy", "source.subdirectory"))
 	}
@@ -902,7 +948,7 @@ func preflightFindings(
 		// A literal value or a generation request satisfies a required
 		// variable as well as a typed reference or sealed draft input does.
 		if variable.Required && resolvedVariables[variable.Name] == "" {
-			findings = append(findings, finding("variable_required_"+strings.ToLower(variable.Name), PreflightDecision,
+			findings = append(findings, finding(variableFindingCode("variable_required_", variable.Name), PreflightDecision,
 				"Required variable needs a value", variable.Name, "The runtime would receive an empty required value.",
 				"Set or reference the variable.", "deploy", "variables."+variable.Name))
 		}
@@ -912,15 +958,26 @@ func preflightFindings(
 			"Variable references resolve without cycles", fmt.Sprintf("%d masked variable(s)", len(configuration.Variables)),
 			"Only typed reference identities were inspected; secret leaves remain masked.", "", "deploy", "variables"))
 	}
-	if selected := selectedDetectionCandidate(detection); selected != nil && selected.SchemaTool != "" &&
-		configuration.Build.Method == BuildRecipe && hasDatabaseDependency(configuration.Dependencies) {
-		findings = append(findings, schemaStepFinding(selected, configuration.Build))
+	findings = append(findings, environmentFindings(draft, configuration, observation)...)
+	if planned != nil && planned.SchemaTool != "" && configuration.Build.Method == BuildRecipe {
+		// A pushed schema is a warning whether or not the database is linked
+		// here; it takes the place of the step's pass.
+		if push := schemaPushFinding(planned, configuration.Build); push != nil {
+			findings = append(findings, *push)
+		} else if hasDatabaseDependency(configuration.Dependencies) {
+			findings = append(findings, schemaStepFinding(planned, configuration.Build))
+		} else if sqliteOnVolume(planned, configuration, resolvedVariables) {
+			findings = append(findings, sqliteSchemaStepFinding(planned, configuration.Build))
+		}
 	}
+	findings = append(findings, stateFindings(rootDetectionCandidate(detection, configuration.Build), configuration, resolvedVariables, !observation.ReplacesRuntime)...)
 	if (draft.Data.Intent.Profile == ProfileWeb || draft.Data.Intent.Profile == ProfileStatic) && !hasReadinessCheck(configuration.Checks) {
 		findings = append(findings, finding("readiness_missing", PreflightDecision,
 			"Choose a readiness check", "", "Traffic must not move to an unverified candidate.",
 			"Add HTTP, TCP, or Docker-health readiness.", "deploy", "checks"))
 	}
+	findings = append(findings, readinessPreflightFindings(draft, configuration)...)
+	findings = withoutSupersededHostFindings(append(findings, networkFindings(draft, configuration)...))
 	persistentStorage := len(configuration.Runtime.Mounts)
 	if detection.Compose != nil {
 		for _, service := range detection.Compose.Services {
@@ -1007,6 +1064,12 @@ func preflightFindings(
 			fmt.Sprintf("%s CPU requested, %d available", strconv.FormatFloat(limit, 'f', -1, 64), observation.CPUCount),
 			"Docker caps the container at the host's CPU count; the extra allowance has no effect.",
 			"Lower the limit to at most the host CPU count.", "metrics", "runtime.cpus"))
+	}
+	findings = append(findings, buildMemoryFindings(planned, configuration, observation)...)
+	findings = append(findings, platformVariableFindings(configuration, resolvedVariables)...)
+	if planned != nil && configuration.Build.Method == BuildRecipe && configuration.Build.Recipe == "node" {
+		findings = append(findings, buildEnvValidationFindings(planned, configuration, resolvedVariables)...)
+		findings = append(findings, buildDatabaseFindings(planned, configuration, resolvedVariables)...)
 	}
 	if observation.AvailableMemory > 0 && observation.AvailableMemory < 256<<20 {
 		findings = append(findings, finding("host_memory_low", PreflightWarning,
@@ -1274,10 +1337,15 @@ func cloneComposeAnalysis(source *ComposeAnalysis) *ComposeAnalysis {
 	copy.Warnings = append([]string(nil), source.Warnings...)
 	copy.Unsupported = append([]string(nil), source.Unsupported...)
 	copy.Services = append([]ComposeServicePlan(nil), source.Services...)
+	copy.OptionalVariables = append([]ComposeOptionalVariable(nil), source.OptionalVariables...)
 	for index := range copy.Services {
 		copy.Services[index].Ports = append([]string(nil), source.Services[index].Ports...)
 		copy.Services[index].Mounts = append([]string(nil), source.Services[index].Mounts...)
 		copy.Services[index].Advanced = append([]string(nil), source.Services[index].Advanced...)
+		copy.Services[index].BuildArgs = append([]ComposeBuildArg(nil), source.Services[index].BuildArgs...)
+		copy.Services[index].EnvFiles = append([]ComposeEnvFile(nil), source.Services[index].EnvFiles...)
+		copy.Services[index].ImagePlatforms = append([]string(nil), source.Services[index].ImagePlatforms...)
+		copy.Services[index].DockerfileIssues = append([]ImageBuildIssue(nil), source.Services[index].DockerfileIssues...)
 	}
 	return &copy
 }
@@ -1336,6 +1404,9 @@ func schemaStepFinding(candidate *DetectedCandidate, build BuildPlanConfig) Pref
 			"", "deploy", "build.startCommand")
 	}
 	action := "Choose how the " + label + " schema reaches the linked database before the application starts."
+	if tool := schemaToolByName(candidate.SchemaTool); tool != nil && tool.advice != "" {
+		action = tool.advice
+	}
 	if candidate.SchemaCommand != "" {
 		action = "Run " + candidate.SchemaCommand + " in the start command before the server starts, or apply the schema another way."
 	}
@@ -1389,21 +1460,29 @@ func listeningTCPPorts() map[int]bool {
 	return result
 }
 
-func availableMemory() int64 {
+// hostMemory reads the memory available to a new workload and the free
+// swap, in bytes.
+func hostMemory() (available, swap int64) {
 	file, err := os.Open("/proc/meminfo")
 	if err != nil {
-		return 0
+		return 0, 0
 	}
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
-		if len(fields) >= 2 && fields[0] == "MemAvailable:" {
-			value, _ := strconv.ParseInt(fields[1], 10, 64)
-			return value * 1024
+		if len(fields) < 2 {
+			continue
+		}
+		value, _ := strconv.ParseInt(fields[1], 10, 64)
+		switch fields[0] {
+		case "MemAvailable:":
+			available = value * 1024
+		case "SwapFree:":
+			swap = value * 1024
 		}
 	}
-	return 0
+	return available, swap
 }
 
 func stableFindingCodes(findings []PreflightFinding) []string {

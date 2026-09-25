@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -51,6 +53,9 @@ type HostSourceAnalyzer struct {
 	cacheRoot    string
 	detector     Detector
 	gitMu        sync.Mutex
+	// inspectMu serializes copies of local checkouts made for inspection,
+	// which request handlers ask for on a page's arrival.
+	inspectMu sync.Mutex
 }
 
 func NewHostSourceAnalyzer(
@@ -171,13 +176,41 @@ func (a *HostSourceAnalyzer) analyzeLocal(ctx context.Context, source DraftSourc
 }
 
 func (a *HostSourceAnalyzer) analyzeRemoteGit(ctx context.Context, source DraftSourceConfig) (DetectionResult, error) {
+	var result DetectionResult
+	err := a.inspectRemoteGit(ctx, source, "", func(root string, identity SourceIdentity) error {
+		var err error
+		if source.Mode == SourceModeComposeGit {
+			result, err = a.analyzeComposeAtPath(ctx, source, root, identity)
+		} else {
+			result, err = a.detector.DetectPath(ctx, root, identity)
+		}
+		return err
+	})
+	return result, err
+}
+
+// inspectRemoteGit checks one revision of a remote repository out into a
+// temporary worktree of the bounded planning mirror and hands its root —
+// the source subdirectory applied — to inspect, removing the worktree after.
+// An empty pinned revision inspects what the ref points at now; a pinned one
+// is fetched by object id when the ref has moved past it, for checking a
+// specific version before it is deployed.
+func (a *HostSourceAnalyzer) inspectRemoteGit(
+	ctx context.Context,
+	source DraftSourceConfig,
+	pinned string,
+	inspect func(root string, identity SourceIdentity) error,
+) error {
+	if pinned != "" && !validGitObjectID(pinned) {
+		return fmt.Errorf("%w: inspected revision is not an immutable Git object id", ErrInvalidRef)
+	}
 	remote, repository, err := remoteForSource(source)
 	if err != nil {
-		return DetectionResult{}, err
+		return err
 	}
 	cacheRoot, cleanupCache, err := a.planningCacheRoot()
 	if err != nil {
-		return DetectionResult{}, err
+		return err
 	}
 	defer cleanupCache()
 	ref := source.Ref
@@ -186,7 +219,7 @@ func (a *HostSourceAnalyzer) analyzeRemoteGit(ctx context.Context, source DraftS
 	}
 	environment, cleanupCredential, err := a.gitEnvironment(ctx, cacheRoot, remote, source.CredentialID)
 	if err != nil {
-		return DetectionResult{}, fmt.Errorf("%w: %w: credential is unavailable", ErrSourceUnavailable, ErrGitUnavailable)
+		return fmt.Errorf("%w: %w: credential is unavailable", ErrSourceUnavailable, ErrGitUnavailable)
 	}
 	defer cleanupCredential()
 
@@ -198,55 +231,85 @@ func (a *HostSourceAnalyzer) analyzeRemoteGit(ctx context.Context, source DraftS
 	defer a.gitMu.Unlock()
 
 	remoteRef, _ := planningGitRef(ref)
-	resolveCtx, cancelResolve := context.WithTimeout(ctx, 10*time.Second)
-	out, err := runPlanningGit(resolveCtx, "", environment,
-		"ls-remote", "--exit-code", "--refs", remote, remoteRef)
-	cancelResolve()
-	if err != nil {
-		return DetectionResult{}, fmt.Errorf("%w: %w: Git ref could not be resolved: %v", ErrSourceUnavailable, ErrGitUnavailable, err)
-	}
-	fields := strings.Fields(out)
-	if len(fields) != 2 || fields[1] != remoteRef || !validGitObjectID(fields[0]) {
-		return DetectionResult{}, fmt.Errorf("%w: %w: Git returned no immutable revision", ErrSourceUnavailable, ErrGitUnavailable)
+	revision := pinned
+	if revision == "" {
+		resolveCtx, cancelResolve := context.WithTimeout(ctx, 10*time.Second)
+		out, err := runPlanningGit(resolveCtx, "", environment,
+			"ls-remote", "--exit-code", "--refs", remote, remoteRef)
+		cancelResolve()
+		if err != nil {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) && exitErr.ExitCode() == 2 {
+				return fmt.Errorf("%w: %q has no matching branch or tag", ErrRefNotFound, ref)
+			}
+			var command *gitCommandError
+			if errors.As(err, &command) && sourceFailureMessages[command.code] != "" {
+				return sourceFailure(err, "")
+			}
+			return fmt.Errorf("%w: %w: Git ref could not be resolved: %v", ErrSourceUnavailable, ErrGitUnavailable, err)
+		}
+		fields := strings.Fields(out)
+		if len(fields) != 2 || fields[1] != remoteRef || !validGitObjectID(fields[0]) {
+			return fmt.Errorf("%w: %w: Git returned no immutable revision", ErrSourceUnavailable, ErrGitUnavailable)
+		}
+		revision = fields[0]
 	}
 	identity := SourceIdentity{
 		Kind: source.Kind, Remote: remote, Repository: repository, Ref: ref,
-		Revision: fields[0], CredentialID: source.CredentialID,
+		Revision: revision, CredentialID: source.CredentialID,
 		IncludeSubmodules: source.IncludeSubmodules, IncludeLFS: source.IncludeLFS,
 	}
 	mirrorRoot := filepath.Join(cacheRoot, "git-mirrors")
 	worktreeRoot := filepath.Join(cacheRoot, "git-worktrees")
 	if err := makePrivateDirectory(mirrorRoot); err != nil {
-		return DetectionResult{}, err
+		return err
 	}
 	if err := makePrivateDirectory(worktreeRoot); err != nil {
-		return DetectionResult{}, err
+		return err
 	}
 	mirrorName := strings.TrimPrefix(digestBytes([]byte(remote)), "sha256:") + ".git"
 	mirror := filepath.Join(mirrorRoot, mirrorName)
 	if err := ensurePlanningMirror(ctx, mirror, remote, environment); err != nil {
-		return DetectionResult{}, fmt.Errorf("%w: %w: managed Git mirror is unavailable: %v", ErrSourceUnavailable, ErrGitUnavailable, err)
+		return fmt.Errorf("%w: %w: managed Git mirror is unavailable: %v", ErrSourceUnavailable, ErrGitUnavailable, err)
 	}
 	localRef := "refs/just-dashboard/planning/" + strings.TrimPrefix(digestBytes([]byte(remoteRef)), "sha256:")
-	fetchCtx, cancelFetch := context.WithTimeout(ctx, 10*time.Second)
+	// Bounded, but for a large repository on a slow link: ten seconds failed
+	// the inspection of exactly the monorepos detection most needs to see.
+	fetchCtx, cancelFetch := context.WithTimeout(ctx, 60*time.Second)
 	_, err = runPlanningGit(fetchCtx, mirror, environment,
 		"fetch", "--force", "--depth=1", "--filter=blob:limit=1048576", "--no-tags",
 		"origin", "+"+remoteRef+":"+localRef)
 	cancelFetch()
 	if err != nil {
-		return DetectionResult{}, fmt.Errorf("%w: %w: bounded Git mirror refresh failed: %v", ErrSourceUnavailable, ErrGitUnavailable, err)
+		return fmt.Errorf("%w: %w: bounded Git mirror refresh failed: %v", ErrSourceUnavailable, ErrGitUnavailable, err)
 	}
 	resolvedRevision, err := runPlanningGit(ctx, mirror, environment, "rev-parse", localRef)
+	if pinned != "" && (err != nil || strings.TrimSpace(resolvedRevision) != pinned) {
+		// The ref has moved past the version being checked. Servers that allow
+		// fetching a reachable commit by id hand it over the same bounded way;
+		// one that does not leaves this version uninspectable here, which the
+		// caller reports rather than guessing at another tree.
+		pinnedRef := "refs/just-dashboard/planning/pinned"
+		pinCtx, cancelPin := context.WithTimeout(ctx, 10*time.Second)
+		_, err = runPlanningGit(pinCtx, mirror, environment,
+			"fetch", "--force", "--depth=1", "--filter=blob:limit=1048576", "--no-tags",
+			"origin", "+"+pinned+":"+pinnedRef)
+		cancelPin()
+		if err != nil {
+			return fmt.Errorf("%w: %w: the requested revision could not be fetched for inspection", ErrSourceUnavailable, ErrGitUnavailable)
+		}
+		resolvedRevision, err = runPlanningGit(ctx, mirror, environment, "rev-parse", pinnedRef)
+	}
 	if err != nil || strings.TrimSpace(resolvedRevision) != identity.Revision {
-		return DetectionResult{}, fmt.Errorf("%w: %w: Git ref moved during inspection", ErrSourceUnavailable, ErrGitUnavailable)
+		return fmt.Errorf("%w: %w: Git ref moved during inspection", ErrSourceUnavailable, ErrGitUnavailable)
 	}
 
 	temporary, err := os.MkdirTemp(worktreeRoot, "inspect-")
 	if err != nil {
-		return DetectionResult{}, err
+		return err
 	}
 	if err := os.Remove(temporary); err != nil {
-		return DetectionResult{}, err
+		return err
 	}
 	worktreeAdded := false
 	defer func() {
@@ -258,28 +321,25 @@ func (a *HostSourceAnalyzer) analyzeRemoteGit(ctx context.Context, source DraftS
 		}
 		_ = os.RemoveAll(temporary)
 	}()
-	worktreeCtx, cancelWorktree := context.WithTimeout(ctx, 10*time.Second)
+	worktreeCtx, cancelWorktree := context.WithTimeout(ctx, 30*time.Second)
 	_, err = runPlanningGit(worktreeCtx, mirror, environment,
 		"worktree", "add", "--detach", "--force", "--", temporary, identity.Revision)
 	cancelWorktree()
 	if err != nil {
-		return DetectionResult{}, fmt.Errorf("%w: %w: bounded Git worktree failed: %v", ErrSourceUnavailable, ErrGitUnavailable, err)
+		return fmt.Errorf("%w: %w: bounded Git worktree failed: %v", ErrSourceUnavailable, ErrGitUnavailable, err)
 	}
 	worktreeAdded = true
 	verifyCtx, cancelVerify := context.WithTimeout(ctx, 5*time.Second)
 	inspectedRevision, err := runPlanningGit(verifyCtx, temporary, environment, "rev-parse", "HEAD")
 	cancelVerify()
 	if err != nil || strings.TrimSpace(inspectedRevision) != identity.Revision {
-		return DetectionResult{}, fmt.Errorf("%w: %w: Git ref moved during inspection", ErrSourceUnavailable, ErrGitUnavailable)
+		return fmt.Errorf("%w: %w: Git ref moved during inspection", ErrSourceUnavailable, ErrGitUnavailable)
 	}
 	root, err := detectionSubdirectory(temporary, source.Subdirectory)
 	if err != nil {
-		return DetectionResult{}, err
+		return err
 	}
-	if source.Mode == SourceModeComposeGit {
-		return a.analyzeComposeAtPath(ctx, source, root, identity)
-	}
-	return a.detector.DetectPath(ctx, root, identity)
+	return inspect(root, identity)
 }
 
 func (a *HostSourceAnalyzer) planningCacheRoot() (string, func(), error) {
@@ -412,6 +472,7 @@ func (a *HostSourceAnalyzer) analyzeImage(ctx context.Context, source DraftSourc
 	candidate := newDetectedCandidate("", BuildImage, DetectedCandidate{
 		Name: reference, Profile: ProfileImage, Confidence: ConfidenceHigh,
 		Port: port, Evidence: evidence, NeedsDecision: decisions,
+		PersistentPaths: imagePersistentPaths(reference, a.imageDeclaredVolumes(ctx, reference)),
 	})
 	return DetectionResult{Source: identity, Candidates: []DetectedCandidate{candidate}, SelectedID: candidate.ID}, nil
 }
@@ -532,13 +593,17 @@ func (a *HostSourceAnalyzer) analyzeCompose(
 		Kind: SourceCompose, Digest: analysis.Digest, ComposeFiles: analysis.Files,
 		Services: serviceNames, CredentialID: source.CredentialID,
 	}
+	if projectDirectory != "" {
+		analyzeComposeTree(projectDirectory, &analysis)
+	}
 	needs := append([]string{}, analysis.Unsupported...)
 	needs = append(needs, analysis.Warnings...)
 	candidate := newDetectedCandidate("", BuildCompose, DetectedCandidate{
 		Name:    fmt.Sprintf("Compose stack (%d services)", len(serviceNames)),
 		Profile: ProfileCompose, Confidence: ConfidenceHigh,
-		Evidence:      []DetectionEvidence{{Path: strings.Join(analysis.Files, ", "), Reason: analysis.Digest}},
+		Evidence:      composeSourceEvidence(analysis),
 		NeedsDecision: needs,
+		Variables:     composeOptionalDetectedVariables(analysis),
 	})
 	result := DetectionResult{
 		Source: identity, Candidates: []DetectedCandidate{candidate}, SelectedID: candidate.ID,
@@ -551,7 +616,7 @@ func (a *HostSourceAnalyzer) analyzeCompose(
 		return result, nil
 	}
 	inputs := make([]dockerx.ComposeInput, 0, len(documents))
-	for _, document := range documents {
+	for _, document := range composeValidationDocuments(documents, analysis) {
 		inputs = append(inputs, dockerx.ComposeInput{Path: document.Path, Content: document.Content})
 	}
 	validation, err := a.docker.ValidateComposePlan(ctx, projectDirectory, inputs, analysis.Variables)
@@ -561,6 +626,7 @@ func (a *HostSourceAnalyzer) analyzeCompose(
 	if !validation.Valid {
 		return DetectionResult{}, fmt.Errorf("%w: %s", ErrInvalidCompose, validation.Error)
 	}
+	resolveComposeImagePlatforms(ctx, a.docker, &analysis)
 	return result, nil
 }
 
@@ -1029,8 +1095,12 @@ func runPlanningGit(ctx context.Context, dir string, environment []string, args 
 		// Remote-controlled stderr may reflect an Authorization header or
 		// credential helper response. Preserve bounded output for successful
 		// machine-readable commands, but never propagate failure output into an
-		// API error, audit detail, or process log.
-		return output.String(), fmt.Errorf("git %s failed: %w", strings.Join(redactedGitArgs(args), " "), err)
+		// API error, audit detail, or process log; only the code read from it
+		// against a fixed table leaves this function.
+		return output.String(), &gitCommandError{
+			code: gitFailureCode(output.String(), err),
+			err:  fmt.Errorf("git %s failed: %w", strings.Join(redactedGitArgs(args), " "), err),
+		}
 	}
 	return output.String(), nil
 }
@@ -1321,6 +1391,9 @@ func configurationFromDetection(result DetectionResult) PlanConfiguration {
 		Method: selected.BuildMethod, RootDirectory: selected.Root,
 		BuildCommand: selected.BuildCommand, StartCommand: selected.StartCommand,
 		OutputDirectory: selected.OutputDirectory,
+	}
+	if selected.BuildMethod == BuildDockerfile {
+		configuration.Build.Dockerfile, configuration.Build.Target = selected.Dockerfile, selected.DockerfileTarget
 	}
 	configuration.Runtime.InternalPort = selected.Port
 	return configuration

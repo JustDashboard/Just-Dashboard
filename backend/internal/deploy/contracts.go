@@ -216,9 +216,11 @@ const (
 	StepLegacyPipeline       StepKey = "legacy_pipeline"
 )
 
+// The backup gate runs before release tasks: a migration must never change a
+// database whose required backup has not been verified.
 var DefaultStepKeys = []StepKey{
 	StepResolveSource, StepAcquireSource, StepAnalyzePlan, StepPrepareContext,
-	StepBuildArtifact, StepRenderRuntime, StepReleaseTask, StepBackupGate,
+	StepBuildArtifact, StepRenderRuntime, StepBackupGate, StepReleaseTask,
 	StepProvisionCertificate, StepStartCandidate, StepVerifyReadiness, StepVerifySmoke,
 	StepActivate, StepRetirePrevious, StepRecordRelease, StepNotify,
 }
@@ -327,6 +329,9 @@ type PreflightFinding struct {
 	Owner    string            `json:"owner,omitempty"`
 	FieldID  string            `json:"fieldId,omitempty"`
 	DeepLink string            `json:"deepLink,omitempty"`
+	// Fix is the one plan change the finding offers, applied from the screen
+	// that shows it, when the check can compute it.
+	Fix *CauseFix `json:"fix,omitempty"`
 }
 
 func stateSet[T ~string](states ...T) map[T]struct{} {

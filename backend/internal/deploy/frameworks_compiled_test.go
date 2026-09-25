@@ -75,20 +75,6 @@ func TestRustDetectionAndRecipe(t *testing.T) {
 
 func TestJavaDetectionAndRecipe(t *testing.T) {
 	t.Parallel()
-	for _, fixture := range []struct{ name, versionFile, pom, gradle, want string }{
-		{"default", "", "", "", "21"},
-		{"pom property", "", "<properties><java.version>17</java.version></properties>", "", "17"},
-		{"pom legacy source", "", "<maven.compiler.source>1.8</maven.compiler.source>", "", ""},
-		{"gradle toolchain", "", "", "java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }", "25"},
-		{"gradle compatibility", "", "", "sourceCompatibility = '11'", "11"},
-		{"kotlin jvm toolchain", "", "", "kotlin { jvmToolchain(21) }", "21"},
-		{"version file wins", "17\n", "<java.version>21</java.version>", "", "17"},
-	} {
-		got, err := chooseJavaRecipeVersion(fixture.versionFile, fixture.pom, fixture.gradle)
-		if (fixture.want == "") != (err != nil) || got != fixture.want {
-			t.Fatalf("%s: version %q, %v", fixture.name, got, err)
-		}
-	}
 	for _, fixture := range []struct {
 		name      string
 		files     map[string]string
@@ -100,7 +86,7 @@ func TestJavaDetectionAndRecipe(t *testing.T) {
 		{"spring boot maven", map[string]string{"pom.xml": "<project><parent><artifactId>spring-boot-starter-parent</artifactId></parent><properties><java.version>21</java.version></properties></project>"}, "spring-boot", ProfileWeb, 8080, ""},
 		{"quarkus gradle", map[string]string{"build.gradle.kts": "plugins { id(\"io.quarkus\") }\njava { toolchain { languageVersion = JavaLanguageVersion.of(21) } }\n", "gradlew": "#!/bin/sh\n"}, "quarkus", ProfileWeb, 8080, ""},
 		{"plain maven", map[string]string{"pom.xml": "<project><artifactId>tool</artifactId></project>"}, "java", ProfileWorker, 0, ""},
-		{"multi-module", map[string]string{"pom.xml": "<project><modules><module>api</module></modules></project>"}, "java", ProfileWorker, 0, "multi-module"},
+		{"aggregator without an application module", map[string]string{"pom.xml": "<project><packaging>pom</packaging><modules><module>api</module></modules></project>"}, "java", ProfileWorker, 0, "no module of this Maven build"},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			t.Parallel()
@@ -114,7 +100,7 @@ func TestJavaDetectionAndRecipe(t *testing.T) {
 			}
 			candidate := result.Candidates[0]
 			if candidate.Recipe != "java" || candidate.Framework != fixture.framework || candidate.Profile != fixture.profile ||
-				candidate.Port != fixture.port || !strings.Contains(candidate.RecipeIssue, fixture.issue) {
+				candidate.Port != fixture.port || !strings.Contains(candidate.RecipeIssue, fixture.issue) || candidate.JavaBuild == nil {
 				t.Fatalf("candidate = %+v", candidate)
 			}
 		})
@@ -125,8 +111,8 @@ func TestJavaDetectionAndRecipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"FROM maven:3-eclipse-temurin-17@sha256:", "mvn -q -B -DskipTests package", "ls target/*.jar", "FROM eclipse-temurin:17-jre-alpine@sha256:",
-		`ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75"`, `CMD ["java","-jar","/app/app.jar"]`} {
+	for _, want := range []string{"FROM maven:3-eclipse-temurin-17@sha256:", "mvn -B -ntp -DskipTests package", "RUN cd /src/target && (for f in *.jar;",
+		"FROM eclipse-temurin:17-jre@sha256:", "useradd --uid 10001", `ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75"`, `CMD ["java","-jar","/app/app.jar"]`} {
 		if !strings.Contains(prepared.DockerfilePreview, want) {
 			t.Fatalf("Dockerfile missing %q:\n%s", want, prepared.DockerfilePreview)
 		}
@@ -134,17 +120,20 @@ func TestJavaDetectionAndRecipe(t *testing.T) {
 	root = t.TempDir()
 	writeBuildFixture(t, root, "build.gradle", "plugins { id 'org.springframework.boot' }\n")
 	writeBuildFixture(t, root, "gradlew", "#!/bin/sh\n")
+	writeBuildFixture(t, root, "gradle/wrapper/gradle-wrapper.properties", "distributionUrl=https\\://services.gradle.org/distributions/gradle-8.14.3-bin.zip\n")
+	writeBuildFixture(t, root, "gradle/wrapper/gradle-wrapper.jar", "PK")
 	prepared, err = NewArtifactBuilder(&artifactBackendFake{}).Prepare(context.Background(), root, BuildPlanConfig{Method: BuildRecipe, Recipe: "java", StartCommand: "java -Xmx256m -jar /app/app.jar"}, false, "t:1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"FROM gradle:8-jdk21@sha256:", "chmod +x ./gradlew && ./gradlew --no-daemon -q build -x test", "ls build/libs/*.jar", "-e '-plain'", `"java -Xmx256m -jar /app/app.jar"`} {
+	for _, want := range []string{"FROM eclipse-temurin:21-jdk@sha256:", `RUN sed -i 's/\r$//' gradlew && chmod +x gradlew`, "RUN ./gradlew --no-daemon --console=plain :bootJar",
+		"RUN cd /src/build/libs && (for f in *.jar;", "-plain.jar", `"java -Xmx256m -jar /app/app.jar"`} {
 		if !strings.Contains(prepared.DockerfilePreview, want) {
 			t.Fatalf("Dockerfile missing %q:\n%s", want, prepared.DockerfilePreview)
 		}
 	}
-	if prepared.Toolchain != "java 21 (gradle)" {
-		t.Fatalf("toolchain = %q", prepared.Toolchain)
+	if prepared.Toolchain != "java 21 (gradle 8.14.3)" || strings.Contains(prepared.DockerfilePreview, " build -x test") {
+		t.Fatalf("toolchain = %q:\n%s", prepared.Toolchain, prepared.DockerfilePreview)
 	}
 }
 
@@ -164,7 +153,9 @@ func TestDotnetDetectionAndRecipe(t *testing.T) {
 		{"web api", map[string]string{"Api.csproj": web}, "aspnet", ProfileWeb, 8080, ""},
 		{"worker", map[string]string{"Worker.csproj": worker}, "dotnet", ProfileWorker, 0, ""},
 		{"web among several", map[string]string{"Api.csproj": web, "Core.csproj": library}, "aspnet", ProfileWeb, 8080, ""},
-		{"old target", map[string]string{"Old.csproj": `<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFramework>net6.0</TargetFramework></PropertyGroup></Project>`}, "dotnet", ProfileWorker, 0, "net6.0"},
+		// The release is a setting, judged by preflight against the plan's
+		// own .NET version, so an old target is not a refusal of the source.
+		{"old target", map[string]string{"Old.csproj": `<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFramework>net6.0</TargetFramework></PropertyGroup></Project>`}, "aspnet", ProfileWeb, 8080, ""},
 		{"two web projects", map[string]string{"A.csproj": web, "B.csproj": web}, "dotnet", ProfileWorker, 0, "several .NET projects"},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
@@ -250,7 +241,7 @@ func TestDenoDetectionAndRecipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"FROM denoland/deno:alpine@sha256:", "RUN deno install --frozen", "RUN deno task build", `CMD ["/bin/sh","-c","deno task start"]`} {
+	for _, want := range []string{"FROM denoland/deno:alpine-2.9.7@sha256:", "RUN deno install --frozen", "RUN deno task build", `CMD ["/bin/sh","-c","deno task start"]`} {
 		if !strings.Contains(prepared.DockerfilePreview, want) {
 			t.Fatalf("Dockerfile missing %q:\n%s", want, prepared.DockerfilePreview)
 		}
@@ -330,7 +321,13 @@ func TestRustDefaultRunSelectsTheApplicationInsteadOfTheFirstBinary(t *testing.T
 
 func TestDotnetMultiTargetBuildRestoresAndPublishesOneSupportedTarget(t *testing.T) {
 	t.Parallel()
-	for _, frameworks := range []string{"net8.0;net10.0", "net10.0;net8.0", "net6.0;net10.0-windows;net10.0"} {
+	// Restore resolves every framework the SDK image can; only a sibling
+	// that needs a workload or a newer SDK holds it to the published one.
+	for frameworks, restore := range map[string]string{
+		"net8.0;net10.0": "RUN dotnet restore Api.csproj\n", "net10.0;net8.0": "RUN dotnet restore Api.csproj\n",
+		"net6.0;net10.0-windows;net10.0": "RUN dotnet restore Api.csproj\n",
+		"net10.0;net10.0-android":        "RUN dotnet restore Api.csproj -p:TargetFramework=net10.0\n",
+	} {
 		t.Run(frameworks, func(t *testing.T) {
 			root := t.TempDir()
 			writeBuildFixture(t, root, "Api.csproj", `<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFrameworks>`+frameworks+`</TargetFrameworks></PropertyGroup></Project>`)
@@ -339,7 +336,7 @@ func TestDotnetMultiTargetBuildRestoresAndPublishesOneSupportedTarget(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, expected := range []string{"dotnet/sdk:10.0@sha256:", "dotnet restore Api.csproj -p:TargetFramework=net10.0",
+			for _, expected := range []string{"dotnet/sdk:10.0@sha256:", restore,
 				"dotnet publish Api.csproj -c Release --no-restore -o /out --framework net10.0", "dotnet/aspnet:10.0@sha256:"} {
 				if !strings.Contains(prepared.DockerfilePreview, expected) {
 					t.Fatalf("multi-target recipe missing %q:\n%s", expected, prepared.DockerfilePreview)
@@ -348,7 +345,9 @@ func TestDotnetMultiTargetBuildRestoresAndPublishesOneSupportedTarget(t *testing
 		})
 	}
 	for _, framework := range []string{"net8.0-windows", "net10.0-android", "net10.0;net8.0"} {
-		_, err := parseDotnetProject("Api.csproj", []byte(`<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFramework>`+framework+`</TargetFramework></PropertyGroup></Project>`))
+		root := t.TempDir()
+		writeBuildFixture(t, root, "Api.csproj", `<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup><TargetFramework>`+framework+`</TargetFramework></PropertyGroup></Project>`)
+		_, err := NewArtifactBuilder(&artifactBackendFake{}).Prepare(context.Background(), root, BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet"}, false, "t:1")
 		if !errors.Is(err, ErrUnsupportedBuilder) {
 			t.Fatalf("unsupported single target %s was accepted: %v", framework, err)
 		}

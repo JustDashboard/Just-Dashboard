@@ -450,7 +450,12 @@ type storeStepOutput struct {
 	stepID     int64
 	claimToken string
 	err        error
+	// lastSeq is the sequence of the line Log last persisted, so a step can
+	// point at the one line of its output that proves why it failed.
+	lastSeq int64
 }
+
+func (o *storeStepOutput) LastSeq() int64 { return o.lastSeq }
 
 func (o *storeStepOutput) Log(stream, text string) error {
 	if o.err != nil {
@@ -460,7 +465,8 @@ func (o *storeStepOutput) Log(stream, text string) error {
 	if ctx.Err() != nil {
 		ctx = context.WithoutCancel(ctx)
 	}
-	_, o.err = o.store.AppendLog(ctx, o.runID, o.stepID, o.claimToken, stream, text)
+	event, err := o.store.AppendLog(ctx, o.runID, o.stepID, o.claimToken, stream, text)
+	o.err, o.lastSeq = err, event.Seq
 	return o.err
 }
 

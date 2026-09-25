@@ -3,7 +3,10 @@ package deploy
 import (
 	"encoding/json"
 	"path"
+	"regexp"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -12,6 +15,7 @@ import (
 // evaluated on the dashboard host.
 type nodeManifest struct {
 	Name            string            `json:"name"`
+	Type            string            `json:"type"`
 	Main            string            `json:"main"`
 	Module          string            `json:"module"`
 	Scripts         map[string]string `json:"scripts"`
@@ -20,7 +24,7 @@ type nodeManifest struct {
 }
 
 func parseNodeManifest(content []byte, manifest *nodeManifest) bool {
-	return json.Unmarshal(content, manifest) == nil
+	return json.Unmarshal(manifestText(content), manifest) == nil
 }
 
 func (m nodeManifest) has(name string) bool {
@@ -32,13 +36,6 @@ func (m nodeManifest) version(name string) string {
 		return version
 	}
 	return m.DevDependencies[name]
-}
-
-// nodeRootFiles are the files beside package.json a framework's defaults can
-// depend on. Both are read as data: angular.json is JSON, a Procfile is lines.
-type nodeRootFiles struct {
-	angularJSON []byte
-	procfile    []byte
 }
 
 // nodeFrameworkDefaults is what a build of a recognised framework produces on
@@ -55,10 +52,26 @@ type nodeFrameworkDefaults struct {
 	Env    []string
 	Entry  string
 	// StartScripts names the package scripts that serve a production build,
-	// in order of preference; a present one wins over Start.
+	// in order of preference; a present one wins over Start unless it
+	// starts a development server.
 	StartScripts []string
-	// BuildScript is the script that builds when it is not "build".
+	// BuildScript is the script that builds when it is not "build", and
+	// Build the command that builds when the package has no such script:
+	// the framework's own binary through the manager's runner, which is how
+	// Eleventy's and Hexo's documentation build a site.
 	BuildScript string
+	Build       string
+	// Fallback is the page a single-page site answers unknown paths with
+	// when it is not index.html (SvelteKit's 200.html, React Router's
+	// __spa-fallback.html); nginx tries it as a file before index.html. The
+	// sub-path the site is served under and its clean URLs are the static
+	// server's own reading (build_static_serving.go).
+	Fallback string
+	// BuildEnv are values the build command's RUN gives a variable the
+	// build does not set (NITRO_PRESET), and BeforeBuild the steps that run
+	// between the install and the build (adapter-node for adapter-auto).
+	BuildEnv    []nodeEnvDefault
+	BeforeBuild []string
 }
 
 type nodeFrameworkResolution struct {
@@ -66,6 +79,33 @@ type nodeFrameworkResolution struct {
 	// Confidence is the detection confidence for this match; empty is high.
 	Confidence DetectionConfidence
 	Decisions  []string
+	// Notes are what the framework's configuration decided, as evidence
+	// with the file (relative to the package) that said it; Findings are
+	// what preflight says about it before Deploy.
+	Notes    []nodeFrameworkNote
+	Findings []PreflightFinding
+	// Schema is the migration step of a framework that owns its
+	// migrations, which detection chains and preflight judges like any
+	// schema tool's.
+	Schema *nodeFrameworkSchema
+}
+
+// nodeFrameworkSchema names a schema tool (schema_tools.go), the command
+// that applies it for this build, and the file that proves there is
+// something to apply.
+type nodeFrameworkSchema struct{ tool, command, file string }
+
+type nodeFrameworkNote struct{ file, reason string }
+
+func (r *nodeFrameworkResolution) note(file, reason string) {
+	r.Notes = append(r.Notes, nodeFrameworkNote{file: file, reason: reason})
+}
+
+func (r *nodeFrameworkResolution) decide(confidence DetectionConfidence, decision string) {
+	if confidenceRank(confidence) < confidenceRank(r.Confidence) || r.Confidence == "" {
+		r.Confidence = confidence
+	}
+	r.Decisions = append(r.Decisions, decision)
 }
 
 // nodeFramework is one catalogue entry: how a manifest names the framework
@@ -73,11 +113,12 @@ type nodeFrameworkResolution struct {
 // first match wins, so a meta-framework built on Vite (Remix, SvelteKit,
 // SolidStart) is recognised before Vite itself — every one of them lists
 // `vite` as a dependency, and reading that alone made a Remix server a
-// static site.
+// static site. when narrows a match beyond the dependency.
 type nodeFramework struct {
 	Name         string
 	Label        string
 	Dependencies []string
+	when         func(nodeManifest) bool
 	resolve      func(manifest nodeManifest, files nodeRootFiles, runner string) nodeFrameworkResolution
 }
 
@@ -95,148 +136,646 @@ func nitroServer() nodeFrameworkResolution {
 	return server("node .output/server/index.mjs", 3000, ".output/server/index.mjs")
 }
 
+// nitroPresetServer is a Nitro server whose configuration names a preset:
+// Nitro writes no Node server for a provider's preset (vercel, netlify,
+// cloudflare), so the build runs with NITRO_PRESET=node-server, which
+// outranks the configuration file's preset.
+func nitroPresetServer(config nodeConfigText, label string) nodeFrameworkResolution {
+	match := nitroPresetRE.FindStringSubmatch(config.text)
+	if match == nil {
+		return nitroServer()
+	}
+	switch preset := match[1]; preset {
+	case "node-server", "node", "node_server", "node-cluster", "node_cluster":
+		return nitroServer()
+	case "static", "github-pages", "github_pages":
+		resolution := static(".output/public", false)
+		resolution.note(config.name, "nitro preset "+preset+": a static site in .output/public")
+		return resolution
+	default:
+		resolution := nitroServer()
+		resolution.BuildEnv = []nodeEnvDefault{{"NITRO_PRESET", "node-server"}}
+		resolution.note(config.name, "nitro preset "+preset+" writes no Node server; the build runs with NITRO_PRESET=node-server")
+		resolution.Findings = append(resolution.Findings, nodeFinding("nitro_preset_overridden", PreflightWarning,
+			label+"'s deployment preset is replaced for this server", config.name+": preset "+preset,
+			"The "+preset+" preset writes the application for that provider's platform, with no server a container can run; the build sets NITRO_PRESET=node-server, which outranks the configuration, and serves .output/server/index.mjs.",
+			"Remove the preset from "+config.name+", or set it only in that provider's build environment, so the repository builds the same way everywhere.", "configuration.build"))
+		return resolution
+	}
+}
+
+// svelteKitAdapterNode is the adapter-node release a SvelteKit major is
+// built with when its configuration names another adapter, pinned like a
+// base image: adapter-node 5 needs Kit 2.4 or later.
+func svelteKitAdapterNode(kit string) string {
+	switch semverMajor(kit) {
+	case "1":
+		return "1.3.1"
+	case "2":
+		if interval, ok := nodeRangeInterval(strings.TrimSpace(strings.Split(kit, "||")[0])); ok && interval.low.set &&
+			interval.low.v.less(nodeVersion{2, 4, 0}) {
+			return "3.0.3"
+		}
+		return "5.5.7"
+	}
+	return ""
+}
+
+// nodeAddCommand installs one exact package into the build stage without
+// the install's lockfile check: the lockfile is changed only inside the
+// image, never in the repository.
+func nodeAddCommand(runner, spec string) string {
+	switch runner {
+	case "pnpm":
+		return "pnpm add -D " + spec
+	case "yarn":
+		return "yarn add -D " + spec
+	case "bun":
+		return "bun add -d " + spec
+	}
+	return "npm install --no-save --no-audit --no-fund --legacy-peer-deps " + spec
+}
+
+// svelteKitAdapterWrapper moves the repository's svelte config aside and
+// writes svelte.config.js, the file SvelteKit loads, importing it and setting
+// kit.adapter to adapter-node; the original keeps its preprocessors, aliases
+// and every other option.
+func svelteKitAdapterWrapper(config string) string {
+	extension := path.Ext(config)
+	user := strings.TrimSuffix(config, extension) + ".user" + extension
+	return `mv ` + config + ` ` + user + ` && printf '%s\n' ` +
+		`"import config from './` + user + `';" ` +
+		`"import adapter from '@sveltejs/adapter-node';" ` +
+		`"export default { ...config, kit: { ...config.kit, adapter: adapter() } };" > svelte.config.js`
+}
+
+// svelteKitWrappable says the wrapper can import the repository's config:
+// svelte.config.js, or svelte.config.mjs in a package whose .js files are
+// modules too. A TypeScript config needs a loader SvelteKit's does not have.
+func svelteKitWrappable(config string, manifest nodeManifest) bool {
+	return config == "svelte.config.js" || (config == "svelte.config.mjs" && manifest.Type == "module")
+}
+
+func sveltekitResolution(manifest nodeManifest, files nodeRootFiles, runner string) nodeFrameworkResolution {
+	config, configured := files.configText("svelte")
+	adapter, imported := "", []string(nil)
+	if configured {
+		adapter, imported = svelteAdapter(config.text)
+	}
+	node, staticAdapter := manifest.has("@sveltejs/adapter-node"), manifest.has("@sveltejs/adapter-static")
+	if adapter == "" && node != staticAdapter {
+		adapter = "@sveltejs/adapter-node"
+		if staticAdapter {
+			adapter = "@sveltejs/adapter-static"
+		}
+	}
+	start := "node build"
+	if runner == "bun" {
+		start = "bun ./build/index.js"
+	}
+	switch adapter {
+	case "@sveltejs/adapter-node":
+		out := ""
+		if configured {
+			out = literalRelativePath(svelteNodeOutRE, config.text)
+		}
+		if out != "" && out != "build" {
+			start = "node " + out
+			if runner == "bun" {
+				start = "bun ./" + out + "/index.js"
+			}
+		}
+		resolution := server(start, 3000, path.Join(orDefault(out, "build"), "index.js"))
+		// SvelteKit's own `start` script is not a convention; the
+		// adapter's entrypoint is what serves a production build.
+		resolution.StartScripts = nil
+		if out != "" && out != "build" {
+			resolution.note(config.name, "adapter-node writes the server to "+out)
+		}
+		return resolution
+	case "@sveltejs/adapter-static":
+		output := "build"
+		fallback := ""
+		if configured {
+			if pages := literalRelativePath(sveltePagesRE, config.text); pages != "" {
+				output = pages
+			}
+			fallback = svelteKitFallbackPage(config.text)
+		}
+		resolution := static(output, fallback != "")
+		if fallback != "" && fallback != "index.html" {
+			resolution.Fallback = fallback
+		}
+		if fallback != "" && configured {
+			resolution.note(config.name, "adapter-static fallback "+fallback+": a single-page site")
+		}
+		return resolution
+	case "":
+		if len(imported) > 1 {
+			resolution := static("", false)
+			resolution.decide(ConfidenceLow, config.name+" imports several adapters ("+strings.Join(imported, ", ")+") and chooses one by an expression; set adapter-node or adapter-static for this server")
+			return resolution
+		}
+		if configured || (node && staticAdapter) {
+			resolution := static("", false)
+			resolution.decide(ConfidenceLow, "choose adapter-node or adapter-static in "+orDefault(config.name, "svelte.config.js")+"; it names neither")
+			return resolution
+		}
+	}
+	version := svelteKitAdapterNode(manifest.version("@sveltejs/kit"))
+	if version == "" || (configured && !svelteKitWrappable(config.name, manifest)) {
+		resolution := static("", false)
+		resolution.decide(ConfidenceLow, "select adapter-node or adapter-static for this server; "+strings.TrimPrefix(orDefault(adapter, "no adapter"), "@sveltejs/")+" needs a repository change the recipe cannot make here")
+		return resolution
+	}
+	resolution := server(start, 3000, "build/index.js")
+	resolution.StartScripts = nil
+	if !node {
+		resolution.BeforeBuild = append(resolution.BeforeBuild, nodeAddCommand(runner, "@sveltejs/adapter-node@"+version))
+	}
+	if configured {
+		resolution.BeforeBuild = append(resolution.BeforeBuild, svelteKitAdapterWrapper(config.name))
+	} else {
+		resolution.BeforeBuild = append(resolution.BeforeBuild, `printf '%s\n' "import adapter from '@sveltejs/adapter-node';" "export default { kit: { adapter: adapter() } };" > svelte.config.js`)
+	}
+	named := strings.TrimPrefix(orDefault(adapter, "no adapter"), "@sveltejs/")
+	file := orDefault(config.name, "package.json")
+	resolution.note(file, named+" builds for another platform; the build uses @sveltejs/adapter-node "+version+" and serves build/index.js")
+	resolution.Findings = append(resolution.Findings, nodeFinding("sveltekit_adapter_substituted", PreflightWarning,
+		"SvelteKit is built with adapter-node for this server", file+": "+named,
+		named+" writes the application for a hosting provider, or nothing at all outside one; the build installs @sveltejs/adapter-node "+version+" inside the image and wraps "+orDefault(config.name, "svelte.config.js")+" so kit.adapter is adapter(), then serves build/index.js. The repository is not changed.",
+		"To build the same way everywhere, run `npm i -D @sveltejs/adapter-node` and import adapter from '@sveltejs/adapter-node' in "+orDefault(config.name, "svelte.config.js")+".", "configuration.build"))
+	return resolution
+}
+
+func nextResolution(manifest nodeManifest, files nodeRootFiles, runner string) nodeFrameworkResolution {
+	config, configured := files.configText("next")
+	mode := ""
+	if configured {
+		mode = nextOutputMode(config.text)
+	}
+	var resolution nodeFrameworkResolution
+	switch mode {
+	case "export":
+		output := literalRelativePath(nextDistDirRE, config.text)
+		if output == "" {
+			output = "out"
+		}
+		resolution = static(output, false)
+		resolution.note(config.name, "output: 'export' writes a static site to "+output+"/, which next start refuses to serve")
+		if files.nextImage != "" {
+			resolution.Findings = append(resolution.Findings, nodeFinding("next_export_images", PreflightWarning,
+				"next/image cannot optimise images in a static export", files.nextImage+" imports next/image; "+config.name+" does not set images.unoptimized",
+				"The default image loader needs a server, so next build stops with \"Image Optimization using the default loader is not compatible with export\".",
+				"Set images: { unoptimized: true } in "+config.name+", or give next/image a custom loader.", "configuration.build"))
+		}
+	case "unknown":
+		resolution = server(nodeExecRunner(runner)+" next start", 3000, "")
+		resolution.decide(ConfidenceMedium, config.name+" sets output from an expression; confirm whether it exports a static site (output directory out) or runs next start")
+	default:
+		resolution = server(nodeExecRunner(runner)+" next start", 3000, "")
+	}
+	if manifest.has("payload") && manifest.has("@payloadcms/next") {
+		resolution.note("package.json", "Payload runs inside Next.js (payload with @payloadcms/next)")
+	}
+	return resolution
+}
+
+func astroResolution(manifest nodeManifest, files nodeRootFiles, _ string) nodeFrameworkResolution {
+	config, configured := files.configText("astro")
+	adapter := ""
+	output := ""
+	if configured {
+		if match := astroAdapterRE.FindStringSubmatch(config.text); match != nil {
+			adapter = match[1]
+		}
+		if match := astroOutputRE.FindStringSubmatch(config.text); match != nil {
+			output = match[1]
+		}
+	}
+	if adapter == "" && manifest.has("@astrojs/node") {
+		adapter = "@astrojs/node"
+	}
+	if configured && output == "" && adapter == "" && astroOutputExprRE.MatchString(config.text) {
+		resolution := static("dist", false)
+		resolution.decide(ConfidenceMedium, config.name+" sets output from an expression; confirm whether it builds a static site in dist or a server, which needs @astrojs/node")
+		return resolution
+	}
+	if adapter == "" {
+		for _, provider := range []string{"@astrojs/vercel", "@astrojs/netlify", "@astrojs/cloudflare", "@astrojs/deno"} {
+			if manifest.has(provider) {
+				adapter = provider
+				break
+			}
+		}
+	}
+	switch {
+	case adapter == "@astrojs/node":
+		resolution := server("node ./dist/server/entry.mjs", 4321, "dist/server/entry.mjs")
+		// The standalone Node adapter binds to localhost unless told
+		// otherwise, which inside a container is a server nobody can
+		// reach.
+		resolution.Env = []string{"HOST=0.0.0.0"}
+		if configured {
+			if match := astroModeRE.FindStringSubmatch(config.text); match != nil && match[1] == "middleware" {
+				resolution.decide(ConfidenceMedium, "Astro's Node adapter is in middleware mode, which exports a handler for another server; set mode: 'standalone' or give the start command of the server that mounts it")
+				resolution.note(config.name, "@astrojs/node mode: 'middleware'")
+			}
+		}
+		return resolution
+	case adapter != "":
+		resolution := static("dist", false)
+		resolution.decide(ConfidenceLow, "Astro is configured for "+strings.TrimPrefix(adapter, "@astrojs/")+"; use @astrojs/node on this server, or a static build")
+		return resolution
+	case output == "server":
+		resolution := static("dist", false)
+		resolution.decide(ConfidenceLow, config.name+" sets output: 'server' without an adapter; add @astrojs/node, or build a static site")
+		return resolution
+	}
+	return static("dist", false)
+}
+
+func nuxtResolution(manifest nodeManifest, files nodeRootFiles, runner string) nodeFrameworkResolution {
+	build := manifest.Scripts["build"]
+	if strings.Contains(build, "nuxt generate") || strings.Contains(build, "nuxi generate") {
+		return static(".output/public", false)
+	}
+	if major := semverMajor(manifest.version("nuxt")); major == "2" {
+		// Nuxt 2 serves from .nuxt through its own binary; there is
+		// no standalone server entry to point node at.
+		resolution := server(nodeExecRunner(runner)+" nuxt start", 3000, "")
+		resolution.Confidence = ConfidenceMedium
+		return resolution
+	}
+	if config, ok := files.configText("nuxt"); ok {
+		return nitroPresetServer(config, "Nuxt")
+	}
+	return nitroServer()
+}
+
+// reactRouterResolution serves React Router's framework mode, or Remix,
+// which it succeeded: its own server package when installed, the start
+// script of a custom server (Express in the Epic Stack) when there is one,
+// and the client build as a single-page site in SPA mode (ssr: false).
+func reactRouterResolution(label, serve, binary string) func(nodeManifest, nodeRootFiles, string) nodeFrameworkResolution {
+	return func(manifest nodeManifest, files nodeRootFiles, runner string) nodeFrameworkResolution {
+		for _, kind := range []string{"react-router", "vite"} {
+			config, ok := files.configText(kind)
+			if !ok || !ssrFalseRE.MatchString(config.text) || (kind == "vite" && !strings.Contains(config.text, "remix(")) {
+				continue
+			}
+			resolution := static("build/client", true)
+			resolution.note(config.name, "ssr: false builds a single-page site in build/client")
+			if label == "React Router" {
+				// With "/" prerendered, index.html is that page and the shell
+				// every other path hydrates from is __spa-fallback.html; nginx
+				// answers with it when the build wrote it, else index.html.
+				resolution.Fallback = "__spa-fallback.html"
+			}
+			return resolution
+		}
+		entry := "build/server/index.js"
+		if files.has("remix.config.js") && label == "Remix" {
+			entry = "build/index.js"
+		}
+		if manifest.has(serve) {
+			return server(nodeExecRunner(runner)+" "+binary+" ./"+entry, 3000, entry)
+		}
+		resolution := server("", 3000, "")
+		if nodeServingScript(manifest.Scripts, []string{"start"}) == "" {
+			resolution.decide(ConfidenceMedium, label+" has no "+serve+"; confirm the start command of its custom server")
+		}
+		return resolution
+	}
+}
+
+func angularResolution(manifest nodeManifest, files nodeRootFiles, _ string) nodeFrameworkResolution {
+	name, output, ok := angularOutput(files.angularJSON)
+	mode := ""
+	if ok {
+		mode = angularOutputMode(files.angularJSON, name)
+	}
+	if manifest.has("@angular/ssr") && mode != "static" {
+		if !ok {
+			resolution := server("", 4000, "")
+			resolution.StartScripts = nil
+			resolution.decide(ConfidenceMedium, "angular.json names no application project; confirm the server start command")
+			return resolution
+		}
+		entry := path.Join(path.Dir(output), "server", "server.mjs")
+		if name != "" && path.Base(output) != "browser" {
+			entry = path.Join(output, "server", "server.mjs")
+		}
+		resolution := server("node "+entry, 4000, entry)
+		// The CLI's `start` is `ng serve`, the development server; the
+		// script it writes for the production server is serve:ssr:<name>.
+		resolution.StartScripts = nil
+		for _, script := range []string{"serve:ssr:" + name, "serve:ssr"} {
+			if nodeScriptRunsEntry(manifest.Scripts[script], entry) {
+				resolution.StartScripts = []string{script}
+				break
+			}
+		}
+		return resolution
+	}
+	if !ok {
+		resolution := static("dist", true)
+		resolution.decide(ConfidenceMedium, "angular.json names no application project; confirm the output directory")
+		return resolution
+	}
+	resolution := static(output, true)
+	if mode == "static" {
+		resolution.note("angular.json", "outputMode static: prerendered pages in "+output)
+	}
+	return resolution
+}
+
+func nestResolution(manifest nodeManifest, files nodeRootFiles, _ string) nodeFrameworkResolution {
+	layout := nestEntry(files)
+	start := "node " + strings.TrimSuffix(layout.entry, ".js")
+	resolution := server(start, 3000, layout.entry)
+	resolution.StartScripts = []string{"start:prod"}
+	if layout.entry == "dist/main.js" {
+		return resolution
+	}
+	resolution.note(orDefault(files.config["nest-cli"].name, "tsconfig.json"), "nest build writes "+layout.entry+": "+layout.reason)
+	if body := manifest.Scripts["start:prod"]; body != "" && !nodeScriptRunsEntry(body, layout.entry) {
+		resolution.StartScripts = nil
+		resolution.Findings = append(resolution.Findings, nodeFinding("nest_output_layout", PreflightWarning,
+			"NestJS writes its entry where start:prod does not look", "start:prod runs `"+boundedEvidence(body)+"`; the build writes "+layout.entry,
+			layout.reason+"; the start command runs "+start+" instead of the script, which would stop with \"Cannot find module\".",
+			`Add "include": ["src"] to tsconfig.build.json so the build writes dist/main.js, or change start:prod to `+start+".", "configuration.build.startCommand"))
+	}
+	return resolution
+}
+
+// adonisResolution serves AdonisJS from what `node ace build` writes: the
+// compiled application in build/, whose package.json carries the #imports
+// map, started from the package root so node_modules resolves. The
+// template's `start` script is written to run inside build/, so it is not
+// the start command here.
+func adonisResolution(manifest nodeManifest, files nodeRootFiles, _ string) nodeFrameworkResolution {
+	// AdonisJS 5 writes its ace launcher without an extension.
+	entry, ace := "build/bin/server.js", "build/ace.js"
+	if semverMajor(manifest.version("@adonisjs/core")) == "5" {
+		entry, ace = "build/server.js", "build/ace"
+	}
+	resolution := server("node "+entry, 3333, entry)
+	resolution.StartScripts = nil
+	if manifest.has("@adonisjs/lucid") && files.has("database/migrations") {
+		resolution.Schema = &nodeFrameworkSchema{tool: "lucid", command: "node " + ace + " migration:run --force", file: "database/migrations"}
+	}
+	resolution.note("package.json", "AdonisJS serves "+entry+" from what node ace build writes")
+	return resolution
+}
+
+// medusaResolution runs Medusa v2 the way its deployment guide does: from
+// the .medusa/server directory `medusa build` writes, after applying its
+// migrations. The build's package.json there names the same dependencies as
+// the root's, which the image already installed, and the medusa binary is on
+// PATH from node_modules/.bin. Medusa 1 has no .medusa/server; its own start
+// script serves it.
+func medusaResolution(manifest nodeManifest, _ nodeRootFiles, _ string) nodeFrameworkResolution {
+	if major, err := strconv.Atoi(semverMajor(manifest.version("@medusajs/medusa"))); err == nil && major < 2 && !manifest.has("@medusajs/framework") {
+		resolution := server("", 9000, "")
+		resolution.decide(ConfidenceMedium, "Medusa "+strconv.Itoa(major)+" is started by its own start script; confirm the start command, with medusa migrations run before it")
+		return resolution
+	}
+	resolution := server("cd .medusa/server && medusa db:migrate && medusa start", 9000, ".medusa/server/package.json")
+	resolution.StartScripts = nil
+	resolution.Schema = &nodeFrameworkSchema{tool: "medusa", command: "(cd .medusa/server && medusa db:migrate)", file: "package.json"}
+	resolution.note("medusa-config.ts", "Medusa serves .medusa/server after medusa db:migrate")
+	return resolution
+}
+
+// qwikCityResolution serves the adapter the build.server script builds with.
+func qwikCityResolution(manifest nodeManifest, _ nodeRootFiles, _ string) nodeFrameworkResolution {
+	adapterScript := manifest.Scripts["build.server"]
+	for _, adapter := range []string{"express", "fastify", "node-server"} {
+		if strings.Contains(adapterScript, "adapters/"+adapter+"/") {
+			entry := "server/entry." + adapter + ".js"
+			resolution := server("node server/entry."+adapter, 3000, entry)
+			resolution.StartScripts = nil
+			if nodeScriptRunsEntry(manifest.Scripts["serve"], entry) {
+				resolution.StartScripts = []string{"serve"}
+			}
+			return resolution
+		}
+	}
+	resolution := static("dist", false)
+	if !strings.Contains(adapterScript, "adapters/static/") {
+		resolution.decide(ConfidenceLow, "Qwik City has no server adapter; add one (npm run qwik add express) or the static adapter")
+	}
+	return resolution
+}
+
+// vikeResolution serves a Vike application through the server its own
+// scripts start — Bati's templates name it preview — or its prerendered
+// pages. A script that builds first is not a start.
+func vikeResolution(manifest nodeManifest, files nodeRootFiles, _ string) nodeFrameworkResolution {
+	for _, name := range []string{"start", "prod", "serve", "production", "preview"} {
+		if strings.TrimSpace(manifest.Scripts[name]) == "" || nodeScriptDevServer(manifest.Scripts, name) != "" {
+			continue
+		}
+		segments := nodeReachedSegments(manifest.Scripts, []string{"npm run " + name}, false)
+		builds := slices.ContainsFunc(segments, func(segment string) bool {
+			words := nodeProgramWords(segment)
+			return len(words) > 1 && (words[1] == "build" || (words[1] == "run" && len(words) > 2 && words[2] == "build"))
+		})
+		if !builds && nodeRunsFile(strings.Join(segments, " && ")) {
+			resolution := server("", 3000, "")
+			resolution.StartScripts = []string{name}
+			return resolution
+		}
+	}
+	if config, ok := files.configText("vite"); ok && prerenderTrueRE.MatchString(config.text) {
+		resolution := static("dist/client", false)
+		resolution.note(config.name, "Vike prerenders every page into dist/client")
+		return resolution
+	}
+	resolution := server("", 3000, "")
+	resolution.StartScripts = nil
+	resolution.decide(ConfidenceMedium, "Vike renders through a server the project provides; give its start command, or enable prerendering")
+	return resolution
+}
+
+// tanstackResolution reads where TanStack Start writes its server: Nitro's
+// .output when its Vite plugin (or the older vinxi app.config) builds it.
+func tanstackResolution(_ nodeManifest, files nodeRootFiles, _ string) nodeFrameworkResolution {
+	if config, ok := files.configText("app"); ok {
+		return nitroPresetServer(config, "TanStack Start")
+	}
+	if config, ok := files.configText("vite"); ok && nitroVitePluginRE.MatchString(config.text) {
+		resolution := nitroPresetServer(config, "TanStack Start")
+		resolution.note(config.name, "the Nitro Vite plugin writes .output/server/index.mjs")
+		return resolution
+	}
+	resolution := nitroServer()
+	resolution.decide(ConfidenceMedium, "confirm the server entry TanStack Start writes for this version")
+	return resolution
+}
+
+// siteBundler is a single-page site a bundler writes to the directory its
+// configuration names, dist by default.
+func siteBundler(kind string, outputRE ...*regexp.Regexp) func(nodeManifest, nodeRootFiles, string) nodeFrameworkResolution {
+	return func(_ nodeManifest, files nodeRootFiles, _ string) nodeFrameworkResolution {
+		output := "dist"
+		if config, ok := files.configText(kind); ok {
+			for _, re := range outputRE {
+				if match := re.FindStringSubmatch(config.text); match != nil {
+					if value := strings.TrimSuffix(strings.TrimPrefix(match[1], "./"), "/"); safeRelativePath(value) && nodeMemberPathRE.MatchString(value) {
+						output = value
+						break
+					}
+				}
+			}
+		}
+		resolution := static(output, true)
+		resolution.Confidence = ConfidenceMedium
+		return resolution
+	}
+}
+
+var (
+	viteRootRE           = regexp.MustCompile(`(?:^|[\s{,])root\s*:\s*['"]([\w./-]+)['"]`)
+	viteRootResolvedRE   = regexp.MustCompile(`(?:^|[\s{,])root\s*:\s*path\.(?:resolve|join)\(\s*(?:__dirname|import\.meta\.dirname)\s*,\s*['"]([\w./-]+)['"]\s*\)`)
+	viteRootKeyRE        = regexp.MustCompile(`(?:^|[\s{,])root\s*:`)
+	viteRootPackageRE    = regexp.MustCompile(`(?:^|[\s{,])root\s*:\s*(?:__dirname|import\.meta\.dirname|process\.cwd\(\))\s*[,}\n]`)
+	viteOutDirKeyRE      = regexp.MustCompile(`(?:^|[\s{,])outDir\s*:`)
+	viteOutDirResolvedRE = regexp.MustCompile(`(?:^|[\s{,])outDir\s*:\s*path\.(?:resolve|join)\(\s*(?:__dirname|import\.meta\.dirname)\s*,\s*['"]([\w./-]+)['"]\s*\)`)
+)
+
+// viteResolution is a Vite site: the directory vite.config writes (outDir,
+// under its root), served under its base. A root or outDir computed some
+// other way leaves the output directory to confirm.
+func viteResolution(_ nodeManifest, files nodeRootFiles, _ string) nodeFrameworkResolution {
+	resolution := static("dist", true)
+	config, ok := files.configText("vite")
+	if !ok {
+		return resolution
+	}
+	root := literalRelativePath(viteRootRE, config.text)
+	if match := viteRootResolvedRE.FindStringSubmatch(config.text); match != nil {
+		root = strings.TrimSuffix(strings.TrimPrefix(match[1], "./"), "/")
+	}
+	unread := ""
+	if root == "" && viteRootKeyRE.MatchString(config.text) && !viteRootPackageRE.MatchString(config.text) {
+		unread = "root"
+	}
+	output := "dist"
+	if match := viteOutDirResolvedRE.FindStringSubmatch(config.text); match != nil {
+		// path.resolve(__dirname, "dist/public") names it from the package.
+		output, root, unread = strings.TrimSuffix(strings.TrimPrefix(match[1], "./"), "/"), "", ""
+	} else if match := viteOutDirRE.FindStringSubmatch(config.text); match != nil {
+		output = strings.TrimSuffix(strings.TrimPrefix(match[1], "./"), "/")
+	} else if viteOutDirKeyRE.MatchString(config.text) {
+		unread = "outDir"
+	}
+	if unread != "" {
+		resolution.decide(ConfidenceMedium, config.name+" sets "+unread+" from an expression; confirm the output directory the build writes")
+	}
+	if root != "" {
+		output = path.Join(root, output)
+	}
+	if output = path.Clean(output); safeRelativePath(output) && nodeMemberPathRE.MatchString(output) && output != "dist" {
+		resolution.Output = output
+		resolution.note(config.name, "the site is written to "+output)
+	}
+	return resolution
+}
+
 var nodeFrameworks = []nodeFramework{
 	{
-		Name: "nextjs", Label: "Next.js", Dependencies: []string{"next"},
+		// Headless CMS and commerce stacks come first: their own servers
+		// serve an admin that Next.js or Vite merely builds.
+		Name: "strapi", Label: "Strapi", Dependencies: []string{"@strapi/strapi"},
 		resolve: func(_ nodeManifest, _ nodeRootFiles, runner string) nodeFrameworkResolution {
-			return server(nodeExecRunner(runner)+" next start", 3000, "")
-		},
-	},
-	{
-		Name: "sveltekit", Label: "SvelteKit", Dependencies: []string{"@sveltejs/kit"},
-		resolve: func(manifest nodeManifest, _ nodeRootFiles, runner string) nodeFrameworkResolution {
-			switch {
-			case manifest.has("@sveltejs/adapter-node") && !manifest.has("@sveltejs/adapter-static"):
-				start := "node build"
-				if runner == "bun" {
-					start = "bun ./build/index.js"
-				}
-				resolution := server(start, 3000, "build/index.js")
-				// SvelteKit's own `start` script is not a convention; the
-				// adapter's entrypoint is what serves a production build.
-				resolution.StartScripts = nil
-				return resolution
-			case manifest.has("@sveltejs/adapter-static") && !manifest.has("@sveltejs/adapter-node"):
-				return static("build", false)
-			}
-			resolution := static("", false)
-			resolution.Confidence = ConfidenceLow
-			resolution.Decisions = []string{"select adapter-node or adapter-static for this server; adapter-auto and provider adapters require a Dockerfile"}
+			resolution := server(nodeExecRunner(runner)+" strapi start", 1337, "")
+			// The admin panel is built for production only when the build
+			// runs with NODE_ENV=production.
+			resolution.BuildEnv = []nodeEnvDefault{{"NODE_ENV", "production"}}
 			return resolution
 		},
 	},
 	{
-		Name: "astro", Label: "Astro", Dependencies: []string{"astro"},
-		resolve: func(manifest nodeManifest, _ nodeRootFiles, _ string) nodeFrameworkResolution {
-			if manifest.has("@astrojs/node") {
-				resolution := server("node ./dist/server/entry.mjs", 4321, "dist/server/entry.mjs")
-				// The standalone Node adapter binds to localhost unless told
-				// otherwise, which inside a container is a server nobody can
-				// reach.
-				resolution.Env = []string{"HOST=0.0.0.0"}
-				return resolution
-			}
-			for _, adapter := range []string{"@astrojs/vercel", "@astrojs/netlify", "@astrojs/cloudflare", "@astrojs/deno"} {
-				if manifest.has(adapter) {
-					resolution := static("dist", false)
-					resolution.Confidence = ConfidenceLow
-					resolution.Decisions = []string{"Astro is configured for " + strings.TrimPrefix(adapter, "@astrojs/") + "; use @astrojs/node on this server, or a static build"}
-					return resolution
-				}
-			}
-			return static("dist", false)
+		Name: "medusa", Label: "Medusa", Dependencies: []string{"@medusajs/medusa"},
+		when:    func(manifest nodeManifest) bool { return manifest.Dependencies["@medusajs/medusa"] != "" },
+		resolve: medusaResolution,
+	},
+	{
+		Name: "directus", Label: "Directus", Dependencies: []string{"directus"},
+		resolve: func(_ nodeManifest, _ nodeRootFiles, runner string) nodeFrameworkResolution {
+			// bootstrap installs or migrates the database and is safe to run
+			// on every start; start alone refuses an uninitialised one.
+			exec := nodeExecRunner(runner)
+			resolution := server(exec+" directus bootstrap && "+exec+" directus start", 8055, "")
+			resolution.StartScripts = nil
+			return resolution
 		},
 	},
 	{
-		Name: "nuxt", Label: "Nuxt", Dependencies: []string{"nuxt"},
-		resolve: func(manifest nodeManifest, _ nodeRootFiles, runner string) nodeFrameworkResolution {
-			build := manifest.Scripts["build"]
-			if strings.Contains(build, "nuxt generate") || strings.Contains(build, "nuxi generate") {
-				return static(".output/public", false)
+		Name: "keystone", Label: "KeystoneJS", Dependencies: []string{"@keystone-6/core"},
+		resolve: func(_ nodeManifest, _ nodeRootFiles, runner string) nodeFrameworkResolution {
+			exec := nodeExecRunner(runner)
+			resolution := server(exec+" keystone start --with-migrations", 3000, "")
+			resolution.StartScripts = nil
+			resolution.Build = exec + " keystone build"
+			resolution.Schema = &nodeFrameworkSchema{tool: "keystone", command: "keystone prisma migrate deploy", file: "package.json"}
+			return resolution
+		},
+	},
+	{Name: "adonisjs", Label: "AdonisJS", Dependencies: []string{"@adonisjs/core"}, resolve: adonisResolution},
+	{
+		Name: "redwood", Label: "RedwoodJS", Dependencies: []string{"@redwoodjs/core"},
+		resolve: func(_ nodeManifest, files nodeRootFiles, runner string) nodeFrameworkResolution {
+			exec := nodeExecRunner(runner)
+			resolution := server(exec+" rw serve", 8910, "")
+			if files.has("api/db/migrations") {
+				resolution.Schema = &nodeFrameworkSchema{tool: "redwood-prisma", command: "rw prisma migrate deploy", file: "api/db/migrations"}
 			}
-			if major := semverMajor(manifest.version("nuxt")); major == "2" {
-				// Nuxt 2 serves from .nuxt through its own binary; there is
-				// no standalone server entry to point node at.
-				resolution := server(nodeExecRunner(runner)+" nuxt start", 3000, "")
-				resolution.Confidence = ConfidenceMedium
-				return resolution
+			resolution.StartScripts = nil
+			resolution.Build = exec + " rw build"
+			resolution.Confidence = ConfidenceMedium
+			return resolution
+		},
+	},
+	{Name: "nextjs", Label: "Next.js", Dependencies: []string{"next"}, resolve: nextResolution},
+	{Name: "sveltekit", Label: "SvelteKit", Dependencies: []string{"@sveltejs/kit"}, resolve: sveltekitResolution},
+	{Name: "astro", Label: "Astro", Dependencies: []string{"astro"}, resolve: astroResolution},
+	{Name: "nuxt", Label: "Nuxt", Dependencies: []string{"nuxt"}, resolve: nuxtResolution},
+	{Name: "remix", Label: "Remix", Dependencies: []string{"@remix-run/dev"}, resolve: reactRouterResolution("Remix", "@remix-run/serve", "remix-serve")},
+	{Name: "react-router", Label: "React Router", Dependencies: []string{"@react-router/dev"}, resolve: reactRouterResolution("React Router", "@react-router/serve", "react-router-serve")},
+	{
+		Name: "solid-start", Label: "SolidStart", Dependencies: []string{"@solidjs/start"},
+		resolve: func(_ nodeManifest, files nodeRootFiles, _ string) nodeFrameworkResolution {
+			if config, ok := files.configText("app"); ok {
+				return nitroPresetServer(config, "SolidStart")
 			}
 			return nitroServer()
 		},
 	},
-	{
-		Name: "remix", Label: "Remix", Dependencies: []string{"@remix-run/dev"},
-		resolve: func(manifest nodeManifest, _ nodeRootFiles, runner string) nodeFrameworkResolution {
-			if manifest.has("@remix-run/serve") {
-				return server(nodeExecRunner(runner)+" remix-serve ./build/server/index.js", 3000, "build/server/index.js")
-			}
-			resolution := server("", 3000, "")
-			resolution.Confidence = ConfidenceMedium
-			resolution.Decisions = []string{"Remix has no @remix-run/serve; confirm the start command of its custom server"}
-			return resolution
-		},
-	},
-	{
-		Name: "react-router", Label: "React Router", Dependencies: []string{"@react-router/dev"},
-		resolve: func(manifest nodeManifest, _ nodeRootFiles, runner string) nodeFrameworkResolution {
-			if manifest.has("@react-router/serve") {
-				return server(nodeExecRunner(runner)+" react-router-serve ./build/server/index.js", 3000, "build/server/index.js")
-			}
-			resolution := server("", 3000, "")
-			resolution.Confidence = ConfidenceMedium
-			resolution.Decisions = []string{"React Router has no @react-router/serve; confirm the start command of its custom server"}
-			return resolution
-		},
-	},
-	{
-		Name: "solid-start", Label: "SolidStart", Dependencies: []string{"@solidjs/start"},
-		resolve: func(nodeManifest, nodeRootFiles, string) nodeFrameworkResolution { return nitroServer() },
-	},
-	{
-		Name: "tanstack-start", Label: "TanStack Start", Dependencies: []string{"@tanstack/react-start", "@tanstack/solid-start", "@tanstack/start"},
-		resolve: func(nodeManifest, nodeRootFiles, string) nodeFrameworkResolution {
-			resolution := nitroServer()
-			resolution.Confidence = ConfidenceMedium
-			resolution.Decisions = []string{"confirm the server entry TanStack Start writes for this version"}
-			return resolution
-		},
-	},
+	{Name: "tanstack-start", Label: "TanStack Start", Dependencies: []string{"@tanstack/react-start", "@tanstack/solid-start", "@tanstack/start"}, resolve: tanstackResolution},
 	{
 		Name: "nitro", Label: "Nitro", Dependencies: []string{"nitropack", "nitro"},
 		resolve: func(nodeManifest, nodeRootFiles, string) nodeFrameworkResolution { return nitroServer() },
 	},
+	{Name: "qwik-city", Label: "Qwik City", Dependencies: []string{"@builder.io/qwik-city", "@qwik.dev/router"}, resolve: qwikCityResolution},
 	{
-		Name: "angular", Label: "Angular", Dependencies: []string{"@angular/core"},
-		resolve: func(manifest nodeManifest, files nodeRootFiles, _ string) nodeFrameworkResolution {
-			name, output, ok := angularOutput(files.angularJSON)
-			if manifest.has("@angular/ssr") {
-				if !ok {
-					resolution := server("", 4000, "")
-					resolution.Confidence = ConfidenceMedium
-					resolution.Decisions = []string{"angular.json names no application project; confirm the server start command"}
-					return resolution
-				}
-				entry := path.Join(path.Dir(output), "server", "server.mjs")
-				if name != "" && path.Base(output) != "browser" {
-					entry = path.Join(output, "server", "server.mjs")
-				}
-				return server("node "+entry, 4000, entry)
+		Name: "analog", Label: "Analog", Dependencies: []string{"@analogjs/platform"},
+		resolve: func(_ nodeManifest, files nodeRootFiles, _ string) nodeFrameworkResolution {
+			if config, ok := files.configText("vite"); ok && ssrFalseRE.MatchString(config.text) {
+				return static("dist/analog/public", true)
 			}
-			if !ok {
-				resolution := static("dist", true)
-				resolution.Confidence = ConfidenceMedium
-				resolution.Decisions = []string{"angular.json names no application project; confirm the output directory"}
-				return resolution
-			}
-			return static(output, true)
+			return server("node dist/analog/server/index.mjs", 3000, "dist/analog/server/index.mjs")
 		},
 	},
+	{Name: "angular", Label: "Angular", Dependencies: []string{"@angular/core"}, resolve: angularResolution},
+	{Name: "nestjs", Label: "NestJS", Dependencies: []string{"@nestjs/core"}, resolve: nestResolution},
+	{Name: "vike", Label: "Vike", Dependencies: []string{"vike", "vite-plugin-ssr"}, resolve: vikeResolution},
 	{
-		Name: "nestjs", Label: "NestJS", Dependencies: []string{"@nestjs/core"},
-		resolve: func(nodeManifest, nodeRootFiles, string) nodeFrameworkResolution {
-			resolution := server("node dist/main", 3000, "dist/main.js")
-			resolution.StartScripts = []string{"start:prod"}
-			return resolution
+		Name: "waku", Label: "Waku", Dependencies: []string{"waku"},
+		resolve: func(_ nodeManifest, _ nodeRootFiles, runner string) nodeFrameworkResolution {
+			return server(nodeExecRunner(runner)+" waku start", 8080, "")
 		},
 	},
 	{
@@ -250,7 +789,7 @@ var nodeFrameworks = []nodeFramework{
 	{
 		Name: "vitepress", Label: "VitePress", Dependencies: []string{"vitepress"},
 		resolve: func(manifest nodeManifest, _ nodeRootFiles, _ string) nodeFrameworkResolution {
-			script, directory := vitepressBuild(manifest.Scripts)
+			script, directory := docsBuild(manifest.Scripts, "vitepress build")
 			resolution := static(path.Join(directory, ".vitepress", "dist"), false)
 			if script != "build" {
 				resolution.BuildScript = script
@@ -259,8 +798,49 @@ var nodeFrameworks = []nodeFramework{
 		},
 	},
 	{
+		Name: "vuepress", Label: "VuePress", Dependencies: []string{"vuepress", "vuepress-vite", "vuepress-webpack", "@vuepress/cli"},
+		resolve: func(manifest nodeManifest, _ nodeRootFiles, _ string) nodeFrameworkResolution {
+			script, directory := docsBuild(manifest.Scripts, "vuepress build", "vuepress-vite build", "vuepress-webpack build")
+			resolution := static(path.Join(directory, ".vuepress", "dist"), false)
+			if script != "build" {
+				resolution.BuildScript = script
+			}
+			return resolution
+		},
+	},
+	{
+		Name: "rspress", Label: "Rspress", Dependencies: []string{"rspress", "@rspress/core"},
+		resolve: func(nodeManifest, nodeRootFiles, string) nodeFrameworkResolution { return static("doc_build", false) },
+	},
+	{
 		Name: "eleventy", Label: "Eleventy", Dependencies: []string{"@11ty/eleventy"},
-		resolve: func(nodeManifest, nodeRootFiles, string) nodeFrameworkResolution { return static("_site", false) },
+		resolve: func(manifest nodeManifest, _ nodeRootFiles, runner string) nodeFrameworkResolution {
+			// The build script's --output wins over the configuration file's,
+			// which the shape pass reads (detect_site_generators.go).
+			output, _ := eleventyOutput(func(string) ([]byte, bool) { return nil, false }, manifest)
+			resolution := static(output, false)
+			// The binary's name, not the package's: `pnpm exec` and `yarn`
+			// run a binary, and only npx and bunx also resolve a package.
+			resolution.Build = nodeExecRunner(runner) + " eleventy"
+			return resolution
+		},
+	},
+	{
+		Name: "hexo", Label: "Hexo", Dependencies: []string{"hexo"},
+		resolve: func(_ nodeManifest, _ nodeRootFiles, runner string) nodeFrameworkResolution {
+			resolution := static("public", false)
+			resolution.Build = nodeExecRunner(runner) + " hexo generate"
+			return resolution
+		},
+	},
+	{
+		// Slidev's slides are routes of one page: /2 is the second slide.
+		Name: "slidev", Label: "Slidev", Dependencies: []string{"@slidev/cli"},
+		resolve: func(_ nodeManifest, _ nodeRootFiles, runner string) nodeFrameworkResolution {
+			resolution := static("dist", true)
+			resolution.Build = nodeExecRunner(runner) + " slidev build"
+			return resolution
+		},
 	},
 	{
 		Name: "create-react-app", Label: "Create React App", Dependencies: []string{"react-scripts"},
@@ -278,25 +858,54 @@ var nodeFrameworks = []nodeFramework{
 		Name: "parcel", Label: "Parcel", Dependencies: []string{"parcel"},
 		resolve: func(nodeManifest, nodeRootFiles, string) nodeFrameworkResolution { return static("dist", true) },
 	},
+	{Name: "rsbuild", Label: "Rsbuild", Dependencies: []string{"@rsbuild/core"}, resolve: siteBundler("rsbuild", rsbuildDistRootRE)},
+	{Name: "rspack", Label: "Rspack", Dependencies: []string{"@rspack/cli"}, resolve: siteBundler("rspack", webpackOutputPathRE)},
+	{Name: "farm", Label: "Farm", Dependencies: []string{"@farmfe/core"}, resolve: siteBundler("farm", farmOutputPathRE)},
 	{
-		Name: "vite", Label: "Vite", Dependencies: []string{"vite"},
-		resolve: func(nodeManifest, nodeRootFiles, string) nodeFrameworkResolution { return static("dist", true) },
+		// webpack is also a dependency of tools that are not the build, so
+		// only a build script that runs it makes it the site's bundler.
+		Name: "webpack", Label: "webpack", Dependencies: []string{"webpack-cli", "webpack"},
+		when: func(manifest nodeManifest) bool {
+			for _, segment := range nodeReachedSegments(manifest.Scripts, []string{"npm run build"}, false) {
+				if words := nodeProgramWords(segment); len(words) > 0 && (words[0] == "webpack" || words[0] == "webpack-cli") {
+					return true
+				}
+			}
+			return false
+		},
+		resolve: siteBundler("webpack", webpackOutputPathRE),
 	},
+	{Name: "vite", Label: "Vite", Dependencies: []string{"vite"}, resolve: viteResolution},
+}
+
+// nodeSiteBuilders are the frameworks that only build a site: a package that
+// also serves it from its own server library is that server, not a site.
+var nodeSiteBuilders = map[string]bool{
+	"vite": true, "parcel": true, "create-react-app": true, "vue-cli": true, "webpack": true,
+	"rsbuild": true, "rspack": true, "farm": true,
 }
 
 // nodeServerLibraries are the HTTP frameworks a plain Node service is built
 // on. They name the workload for the operator; the package's own start
-// script or main file says how it runs.
+// script or main file says how it runs. Earlier entries win, so a server
+// framework is named before the socket or GraphQL library mounted on it.
 var nodeServerLibraries = []struct{ dependency, name string }{
 	{"@hapi/hapi", "hapi"}, {"express", "express"}, {"fastify", "fastify"},
-	{"hono", "hono"}, {"koa", "koa"}, {"elysia", "elysia"},
+	{"hono", "hono"}, {"@hono/node-server", "hono"}, {"koa", "koa"}, {"elysia", "elysia"},
+	{"vite-express", "express"}, {"h3", "h3"}, {"polka", "polka"}, {"restify", "restify"},
+	{"@apollo/server", "apollo"}, {"apollo-server", "apollo"}, {"apollo-server-express", "apollo"},
+	{"graphql-yoga", "graphql-yoga"}, {"@trpc/server", "trpc"}, {"socket.io", "socket.io"}, {"ws", "ws"},
 }
 
 func matchNodeFramework(manifest nodeManifest) *nodeFramework {
 	for index := range nodeFrameworks {
-		for _, dependency := range nodeFrameworks[index].Dependencies {
+		framework := &nodeFrameworks[index]
+		if framework.when != nil && !framework.when(manifest) {
+			continue
+		}
+		for _, dependency := range framework.Dependencies {
 			if manifest.has(dependency) {
-				return &nodeFrameworks[index]
+				return framework
 			}
 		}
 	}
@@ -321,6 +930,47 @@ func matchNodeServerLibrary(manifest nodeManifest) string {
 	return ""
 }
 
+// nodeRuntimeServerLibrary is the server library the package runs in
+// production: one in dependencies, not only a devDependency (vitest's
+// vite, a mock server).
+func nodeRuntimeServerLibrary(manifest nodeManifest) string {
+	for _, library := range nodeServerLibraries {
+		if manifest.Dependencies[library.dependency] != "" {
+			return library.name
+		}
+	}
+	return ""
+}
+
+// resolveNodeFramework is the framework a package's build and start serve.
+// A site builder beside a server library the package runs in production,
+// with a start command that runs a file (Express or Fastify serving a Vite
+// client: the Replit template), is that server; so is a package that lists
+// Vite only for its tests, with no index.html or vite.config to build a site
+// from. Detection and the recipe both decide through here, the recipe with
+// the plan's start command. confirm is the decision a server chosen without
+// a start command that runs it leaves open.
+func resolveNodeFramework(manifest nodeManifest, files nodeRootFiles, start string) (framework *nodeFramework, setAside, confirm string) {
+	framework = matchNodeFramework(manifest)
+	if framework == nil || !nodeSiteBuilders[framework.Name] {
+		return framework, "", ""
+	}
+	library := nodeRuntimeServerLibrary(manifest)
+	if library != "" && start != "" && nodeRunsFile(strings.Join(nodeReachedSegments(manifest.Scripts, []string{start}, false), " && ")) {
+		return nil, strings.ToLower(framework.Label) + " builds the client; the start command serves it with " + library, ""
+	}
+	if framework.Name == "vite" && library != "" && !files.has("index.html") {
+		if _, configured := files.configText("vite"); !configured {
+			// vitest brings vite for the tests, which says what it is for.
+			if !manifest.has("vitest") {
+				confirm = "vite builds no site here; confirm the start command of the " + library + " server"
+			}
+			return nil, "vite has no index.html or vite.config here to build a site from; " + library + " serves the package", confirm
+		}
+	}
+	return framework, "", ""
+}
+
 // frameworkDefaultStart reports whether the configured start command still
 // ends in the framework's own entrypoint command, with or without a schema
 // step chained in front of it. Only then does the recipe check that the
@@ -329,6 +979,10 @@ func matchNodeServerLibrary(manifest nodeManifest) string {
 func frameworkDefaultStart(command, start string) bool {
 	if start == "" {
 		return false
+	}
+	command = strings.TrimSpace(command)
+	if command == start || strings.HasSuffix(command, "&& "+start) {
+		return true
 	}
 	segments := strings.Split(command, "&&")
 	return strings.TrimSpace(segments[len(segments)-1]) == start
@@ -351,6 +1005,13 @@ func semverMajor(version string) string {
 // directory it names, since VitePress writes its site under that directory
 // rather than under the package root.
 func vitepressBuild(scripts map[string]string) (string, string) {
+	return docsBuild(scripts, "vitepress build")
+}
+
+// docsBuild finds the script that runs one of a documentation generator's
+// build commands (`vitepress build docs`, `vuepress build docs`,
+// `vuepress-vite build docs`) and the docs directory it names.
+func docsBuild(scripts map[string]string, commands ...string) (string, string) {
 	names := make([]string, 0, len(scripts))
 	for name := range scripts {
 		names = append(names, name)
@@ -370,24 +1031,26 @@ func vitepressBuild(scripts map[string]string) (string, string) {
 		return rank(names[i]) < rank(names[j])
 	})
 	for _, name := range names {
-		_, after, found := strings.Cut(scripts[name], "vitepress build")
-		if !found {
-			continue
-		}
-		directory := "."
-		for _, field := range strings.Fields(after) {
-			if strings.HasPrefix(field, "-") {
+		for _, command := range commands {
+			_, after, found := strings.Cut(scripts[name], command)
+			if !found {
 				continue
 			}
-			if field == "&&" || field == "||" || field == ";" {
+			directory := "."
+			for _, field := range strings.Fields(after) {
+				if strings.HasPrefix(field, "-") {
+					continue
+				}
+				if field == "&&" || field == "||" || field == ";" {
+					break
+				}
+				if safeRelativePath(field) {
+					directory = path.Clean(field)
+				}
 				break
 			}
-			if safeRelativePath(field) {
-				directory = field
-			}
-			break
+			return name, directory
 		}
-		return name, directory
 	}
 	return "build", "."
 }

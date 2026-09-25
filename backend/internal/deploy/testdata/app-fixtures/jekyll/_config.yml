@@ -1,0 +1,4 @@
+title: Jekyll fixture
+baseurl: "/blog"
+url: "https://user.github.io"
+exclude: [Gemfile, Gemfile.lock]

@@ -7,6 +7,7 @@ import { get } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import type {
+  DeploymentBuildMethod,
   DeploymentConfiguration,
   DeploymentRunSnapshot,
   DeploymentVariable,
@@ -28,11 +29,48 @@ import { Textarea } from "@/components/ui/textarea"
 import { RELEASE_GROUPS } from "@/components/deploy/vocabulary"
 import { StageStrip } from "@/components/deploy/run-pipeline"
 import { useProject } from "@/components/deploy/project-context"
+import {
+  buildsReleaseImage,
+  defaultReleaseTaskRunner,
+} from "@/components/deploy/deployment-defaults"
+import { isReleaseTaskFailure } from "@/components/deploy/failure-cause"
 
 export type ReleaseTask = NonNullable<DeploymentConfiguration["build"]["releaseTasks"]>[number]
 
 /** What a run recorded for each task it ran. */
 type TaskEvidence = { name: string; durationMs: number; exitCode: number; variableNames?: string[] }
+
+/**
+ * Where a task runs, said as a place: the release's own image, with the
+ * application's toolchain, variables and volumes, or the dashboard's shell over the
+ * source as committed — which has none of the application's dependencies, so
+ * `npx`, `python manage.py` or `bundle exec` can only fail there.
+ */
+const RUNNERS: { runner: ReleaseTask["runner"]; label: string; hint: string }[] = [
+  {
+    runner: "image",
+    label: "Release image",
+    hint: "Runs once in the release's own image, with its volumes, its runtime variables and the ones below, before it starts.",
+  },
+  {
+    runner: undefined,
+    label: "Dashboard shell",
+    hint: "Runs in the dashboard's shell over the unbuilt source, without the application's dependencies.",
+  },
+]
+
+/**
+ * A Compose release's image task runs the primary service's image on its
+ * own, outside the stack — which is what preflight's
+ * `release_task_outside_compose_stack` says before Deploy.
+ */
+const COMPOSE_IMAGE_HINT =
+  "Runs once in the primary service's image, with the runtime variables and the ones below — outside the Compose stack, so its network and the service's own environment: entries do not apply."
+
+function runnerHint(runner: ReleaseTask["runner"], buildMethod?: DeploymentBuildMethod) {
+  if (runner === "image" && buildMethod === "compose") return COMPOSE_IMAGE_HINT
+  return RUNNERS.find((option) => option.runner === runner)?.hint
+}
 
 /**
  * Named, timed gates that run after the artifact is built and before the new
@@ -55,12 +93,15 @@ type TaskEvidence = { name: string; durationMs: number; exitCode: number; variab
 export function ReleaseTasks({
   tasks,
   variables,
+  buildMethod,
   disabled,
   onChange,
   rowError,
 }: {
   tasks: ReleaseTask[]
   variables: DeploymentVariable[]
+  /** Whether the build makes an image a task can run in, and where that image runs. */
+  buildMethod?: DeploymentBuildMethod
   disabled?: boolean
   onChange: (tasks: ReleaseTask[]) => void
   /** The message a save refused for this task, when it named the task but no sub-field. */
@@ -73,7 +114,7 @@ export function ReleaseTasks({
   const failedOnTask = project.runs.find(
     (run) =>
       run.environmentId === project.environmentId &&
-      run.terminalCode === "release_task_failed" &&
+      isReleaseTaskFailure(run.terminalCode) &&
       run.id > (liveRun?.id ?? 0),
   )
   const lastRun = failedOnTask ?? liveRun
@@ -222,10 +263,31 @@ export function ReleaseTasks({
                       </InputGroup>
                     </Field>
                   </FieldRow>
+                  <Field label="Runs in">
+                    <div className="flex flex-wrap gap-1.5">
+                      {RUNNERS.map((option) => (
+                        <FilterChip
+                          key={option.label}
+                          selected={task.runner === option.runner}
+                          disabled={
+                            disabled ||
+                            (option.runner === "image" && !buildsReleaseImage(buildMethod))
+                          }
+                          onClick={() => update(index, { runner: option.runner })}
+                          className={cn(
+                            "h-8 font-normal disabled:opacity-60 sm:h-7",
+                            task.runner !== option.runner && "border-border",
+                          )}
+                        >
+                          {option.label}
+                        </FilterChip>
+                      ))}
+                    </div>
+                  </Field>
                   <Field
                     label="Command"
                     htmlFor={`${id}-task-${index}-command`}
-                    hint="Run by the shell in the built source, with the environment below."
+                    hint={runnerHint(task.runner, buildMethod)}
                   >
                     <Textarea
                       id={`${id}-task-${index}-command`}
@@ -242,7 +304,10 @@ export function ReleaseTasks({
                   <Disclosure
                     quiet
                     summary="Working directory"
-                    facts={task.workingDirectory?.trim() || "source root"}
+                    facts={
+                      task.workingDirectory?.trim() ||
+                      (task.runner === "image" ? "the image's own" : "source root")
+                    }
                   >
                     <Input
                       aria-label={`Release task ${n} working directory`}
@@ -318,7 +383,14 @@ export function ReleaseTasks({
           onClick={() => {
             onChange([
               ...tasks,
-              { name: "", command: "", workingDirectory: "", timeoutSeconds: 300, env: [] },
+              {
+                name: "",
+                command: "",
+                workingDirectory: "",
+                timeoutSeconds: 300,
+                env: [],
+                runner: defaultReleaseTaskRunner(buildMethod),
+              },
             ])
             // A task just added takes the keyboard at its name, the field it
             // cannot do without — once it has been drawn.

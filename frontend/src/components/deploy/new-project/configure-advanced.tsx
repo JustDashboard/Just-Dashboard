@@ -20,8 +20,19 @@ import { humanize } from "@/components/deploy/vocabulary"
 import { MountRows } from "@/components/deploy/settings/mounts"
 import { imageProduct } from "@/components/product-logo"
 import { EmptyNote } from "@/components/state"
-import type { DeploymentConfiguration, DeploymentRestartPolicy } from "@/lib/types"
-import type { WizardErrors } from "@/components/deploy/deployment-defaults"
+import type {
+  BuildSecretStep,
+  DeploymentBuildMethod,
+  DeploymentConfiguration,
+  DeploymentRestartPolicy,
+} from "@/lib/types"
+import {
+  buildsReleaseImage,
+  DEFAULT_REQUEST_BODY_LIMIT,
+  defaultReleaseTaskRunner,
+  MAX_REQUEST_BODY_MB,
+  type WizardErrors,
+} from "@/components/deploy/deployment-defaults"
 
 type Check = DeploymentConfiguration["checks"][number]
 type Mount = NonNullable<DeploymentConfiguration["runtime"]["mounts"]>[number]
@@ -175,6 +186,26 @@ export function RuntimeLimits({
             min={0}
             value={configuration.runtime.pidsLimit ?? 0}
             onChange={(event) => updateRuntime({ pidsLimit: Number(event.target.value) || 0 })}
+            className="font-mono"
+          />
+        </Field>
+      </FieldRow>
+      <FieldRow columns={3}>
+        <Field
+          label="Largest upload (MB)"
+          htmlFor="adv-max-body"
+          hint={`0 keeps the proxy's default: ${DEFAULT_REQUEST_BODY_LIMIT}. A set limit is refused with 413 on both.`}
+          error={errors.maxRequestBodyMb}
+        >
+          <Input
+            id="adv-max-body"
+            type="number"
+            min={0}
+            max={MAX_REQUEST_BODY_MB}
+            value={configuration.runtime.maxRequestBodyMb ?? 0}
+            onChange={(event) =>
+              updateRuntime({ maxRequestBodyMb: Number(event.target.value) || undefined })
+            }
             className="font-mono"
           />
         </Field>
@@ -401,6 +432,7 @@ export function BuildExtras({
         <ReleaseTaskEditor
           tasks={configuration.build.releaseTasks ?? []}
           variables={configuration.variables}
+          buildMethod={configuration.build.method}
           error={errors.releaseTasks}
           onChange={(releaseTasks) => updateBuild({ releaseTasks })}
         />
@@ -527,6 +559,20 @@ function CheckFields({
             />
           </Field>
         </FieldRow>
+      )}
+      {check.kind === "http" && (
+        <OptionRow
+          title="Any answer counts"
+          hint="Anything below 500 except 400 and 421 passes, for an API with no page at this path. Off, only a 2xx passes."
+          checked={Boolean(config.acceptAnyAnswer)}
+          onCheckedChange={(acceptAnyAnswer) =>
+            updateConfig(
+              acceptAnyAnswer
+                ? { acceptAnyAnswer: true, expectedStatus: undefined }
+                : { acceptAnyAnswer: undefined },
+            )
+          }
+        />
       )}
       {check.kind === "tcp" && (
         <FieldRow columns={2}>
@@ -843,7 +889,7 @@ function BuildSecretEditor({
                 onValueChange={(step) =>
                   onChange(
                     secrets.map((item, i) =>
-                      i === index ? { ...item, step: step as "install" | "build" } : item,
+                      i === index ? { ...item, step: step as BuildSecretStep } : item,
                     ),
                   )
                 }
@@ -857,6 +903,7 @@ function BuildSecretEditor({
                 <SelectContent>
                   <SelectItem value="install">Install step</SelectItem>
                   <SelectItem value="build">Build step</SelectItem>
+                  <SelectItem value="install_and_build">Install and build</SelectItem>
                 </SelectContent>
               </Select>
               <IconAction
@@ -895,11 +942,13 @@ function BuildSecretEditor({
 function ReleaseTaskEditor({
   tasks,
   variables,
+  buildMethod,
   error,
   onChange,
 }: {
   tasks: ReleaseTask[]
   variables: Variable[]
+  buildMethod: DeploymentBuildMethod
   error?: string
   onChange: (tasks: ReleaseTask[]) => void
 }) {
@@ -952,6 +1001,23 @@ function ReleaseTaskEditor({
                 rows={3}
                 className="font-mono sm:text-xs"
               />
+              <Label className="flex min-h-9 items-center gap-2 text-body">
+                <Checkbox
+                  checked={task.runner === "image"}
+                  disabled={!buildsReleaseImage(buildMethod)}
+                  onCheckedChange={(checked) =>
+                    update(index, { runner: checked ? "image" : undefined })
+                  }
+                />
+                {/* Unticked it runs in the dashboard's shell over the unbuilt
+                    source, where the application's dependencies are not. A
+                    Compose release's image runs outside the stack. */}
+                <span>
+                  {buildMethod === "compose"
+                    ? "Run in the primary service's image, outside the Compose stack"
+                    : "Run in the release image, with the application's variables"}
+                </span>
+              </Label>
               <div>
                 <p className="text-hint text-muted-foreground">Release task environment</p>
                 {releaseVariables.length === 0 ? (
@@ -997,7 +1063,14 @@ function ReleaseTaskEditor({
         onClick={() =>
           onChange([
             ...tasks,
-            { name: "", command: "", workingDirectory: "", timeoutSeconds: 300, env: [] },
+            {
+              name: "",
+              command: "",
+              workingDirectory: "",
+              timeoutSeconds: 300,
+              env: [],
+              runner: defaultReleaseTaskRunner(buildMethod),
+            },
           ])
         }
       >

@@ -31,7 +31,8 @@ only renderer/executor/validation authority for their feature.
 - Deployment-selected paths use a dedicated `files.Service` scoped to `JD_DEPLOY_ROOTS`; Git, Docker,
   Compose and builder argv use `hostexec.CommandInDir`. The sole shell boundary remains an immutable,
   admin-authored stored release task (including migrated pre/post commands) with a resolved working
-  directory and explicit scoped environment.
+  directory and explicit scoped environment; a task with `runner: "image"` runs that command inside a
+  throwaway container of the release's own image rather than in the dashboard's shell.
 - Creation is a revisioned, owner-scoped server draft. `GET /deploy/drafts` (session) lists the caller's
   own uncommitted, unexpired drafts newest first — id, name from intent, a one-line source summary,
   `currentStep`, `updatedAt`, `expiresAt` — so the new-project page can offer to resume one instead of
@@ -59,7 +60,8 @@ only renderer/executor/validation authority for their feature.
   fallback shelf for a blueprint the frontend does not name), a database and a Compose stack (paste,
   upload, Git, local). Choosing a
   source creates a draft, saves the intent and source, and runs detection in one action; when
-  detection is ambiguous the candidates are offered as a choice that re-runs detection with
+  detection finds more than one candidate they are offered ranked, each saying why it ranks where it
+  does (an example, a docs site, not a service), as a choice that re-runs detection with
   `selectedId`. The configure screen draws the plan beside the form — source → build → runtime →
   address, in the same `wire.tsx` vocabulary the project overview uses for a deployment that already
   exists, with a dashed ring for a step not yet decided and nothing pulsing, because a pulse means
@@ -85,8 +87,12 @@ only renderer/executor/validation authority for their feature.
   for no readiness gate), a Deno project (the port is `Deno.serve`'s own default) and a static site
   (a marker's root is the directory its files were found in, so the candidate's root *is* the one
   holding the `index.html`, which is what an empty output directory serves) record evidence instead;
-  a Dockerfile naming no port or several, an image this host holds no copy of, and a Compose file
-  spotted in a Git checkout but never parsed still owe one. Everything else that is open is carried by the plan
+  a Dockerfile naming no port or several, an image this host holds no copy of, a Compose file in a
+  Git checkout that is a deployment of its own (it is read for its services' shape only, and built only
+  as a Compose source), and a submodule on another host still owe one — a submodule on the
+  repository's own host and LFS files under the build root switch themselves on at inspection, in the
+  Source section beside the branch. A source that is not a service, or the upstream repository of an
+  application the template catalogue packages, also opens the project screen. Everything else that is open is carried by the plan
   rather than by prose, which is what lets it open the screen that owns the field: an unset
   `internalPort` opens the runtime screen (and the port field seeds the readiness check a gated
   profile needs, the way choosing the type does); a required plan variable with no reference, value
@@ -139,12 +145,23 @@ only renderer/executor/validation authority for their feature.
   save credentials. Required-variable and reference-graph checks use the same effective values as commit.
   The environment section opens with the variables detection found the source reading — the template's
   example as the placeholder, the file it was read from beside the key — and a detected row left empty
-  is skipped at submit rather than set to nothing; each database the source connects to is one button
-  that opens the database sheet on that engine and variable. The framework is named as its own
+  and set up by nothing is skipped at submit rather than set to nothing. A row detection set up says
+  how the plan answers it (`detectedVariableDeclarations`): a secret generated when the project is
+  created (never shown in the browser), an address that follows the domain (held out of each save until
+  a domain is planned, and put back into the plan the server hands back — `withHeldDomainVariables` —
+  so a domain added after Review's check still binds it), a documented default, or a secret to paste; a required name is declared required, a browser-compiled name is tagged `public`,
+  and a typed value pointing at localhost is flagged under the field. Review lists the generated
+  secrets by shape and the plain values the plan carries. Each database the source connects to is one
+  button that opens the database sheet on that engine (PostgreSQL with pgvector or PostGIS when the
+  schema needs one) and variable, in the connection shape the application parses; a hosted-only driver
+  asks for its provider's connection string instead, and a suggestion stays offered while the variable
+  holds only a localhost value. The framework is named as its own
   documentation spells it (`frameworkLabel`), a Python recipe shows its interpreter field, and static
   output shows the single-page switch. `?repo=<clone url>&ref=<branch>` arrives on the Git tab with
   the URL filled in (only an `https://`, `ssh://` or `git@` URL is accepted), which is what a deploy
-  link in a README points at.
+  link in a README points at. `?template=<blueprint id>` (only an identifier's shape is taken) and
+  `?image=<reference>` arrive on those tabs with the blueprint chosen or the reference filled in, which
+  is where the project step sends the upstream repository of an application the catalogue packages.
   Reviewed blueprints deploy as image releases (below); game-server blueprints and blueprints that
   install configuration files or downloaded artifacts stay preview-only, the catalogue names the
   reason per blueprint, and direct API calls are refused with the same reason before deployment work
@@ -152,7 +169,10 @@ only renderer/executor/validation authority for their feature.
   one flow relies on cannot be missing from the other, and a refused plan reads identically in both.
   Detected web and static plans carry a required HTTP readiness check: preflight raises
   `readiness_missing` as a *decision* for those profiles, so an empty check list made the most
-  ordinary deployment there is unsavable over a control the operator was never shown.
+  ordinary deployment there is unsavable over a control the operator was never shown. The check is the
+  candidate's detected `readiness` — its path, whether any answer counts, Docker health for a
+  Dockerfile `HEALTHCHECK` command, and a slow start's budget (recipes.md, "Readiness, workers and
+  start commands") — and GET `/` expecting a 2xx only when detection found nothing.
 - A draft route distinguishes why an id did not answer: `403 draft_forbidden` for another user's draft,
   `410 draft_expired` for one past `expiresAt`, and `404 draft_not_found` only for an id that names
   nothing at all — the first two used to collapse into the third, which hid an ownership refusal behind
@@ -245,59 +265,357 @@ only renderer/executor/validation authority for their feature.
   instead of being silently discarded. Setup saves a typed database reference; activation joins an owned
   environment network and reconciliation repairs the DNS alias after a matching container replacement.
   Existing literal IP variables require reconnecting once. See [database networks](database-networks.md).
-- Detected JavaScript commands name the package manager the checkout's lockfile locks to
-  (`bun`/`pnpm`/`yarn`/`npm run …`). Competing lockfiles resolve only through the explicit build setting
-  or `package.json` `packageManager`; changing the setting in the UI rewrites plain `<manager> run
-  <script>` commands to the new runner. The recipe picks its base image from that same lockfile, and
-  `oven/bun` carries no npm, so a hardcoded `npm run build` was a build that installed cleanly and then
-  died on `npm: not found`.
-- Detection is a catalogue, not a handful of special cases. `deploy/frameworks_node.go` names Next.js,
-  SvelteKit, Astro, Nuxt, Remix, React Router, SolidStart, TanStack Start, Nitro, Angular, NestJS,
-  Gatsby, Docusaurus, VitePress, Eleventy, Create React App, Vue CLI, Ember, Parcel and Vite, in an
-  order where a meta-framework built on Vite is read before Vite itself, each with its serving mode
-  (site output or server start command), port, runtime environment and the entry file the generated
-  Dockerfile checks after the build. `frameworks_python.go` names Django, FastAPI, Flask, Streamlit and
-  Gradio from the manifests and finds the application object in the conventional entry files;
+- A JavaScript package's install is one plan (`deploy/build_node_install.go`) that detection,
+  preflight and the recipe share, computed from lockfiles and package-manager configuration read as data
+  under their own budget (`build_node_lockfile.go`), each lockfile and workspace manifest parsed once per
+  detection however many members compare against it. Detection records each committed lockfile compared
+  with `package.json` (`lockfiles`: `in_sync`/`stale`/`unknown` with the drift named), the plan under each
+  of the four managers with that manager's build and start commands and its preflight findings
+  (`nodeInstalls`), and the Node release (`nodeVersion`: the nearest version file or the `package.json`
+  volta/devEngines/engines field, on the digest-pinned `node:20`/`22`/`24` catalogue, 22 by default —
+  `build_node_runtime.go` — which the plan's `build.nodeVersion` outranks); competing lockfiles resolve through the build
+  setting, the manifest's declaration, the one lockfile a frozen install accepts, the one in sync, then
+  manager-exclusive files, and only a tie is `package_manager_ambiguous`. Preflight
+  (`preflight_node.go`) judges `configuration.build.packageManager` — or the resolved manager when it is
+  empty — from that record, so a stale chosen lockfile is `lockfile_out_of_sync` before Deploy, and the
+  recipe installs unfrozen instead of failing a frozen install. pnpm and Yarn Berry releases are pinned
+  (declaration, or `nodeManagerReleases` keyed by lockfile format) into a `toolchain` stage the server's
+  runtime stage shares, Bun is copied beside Node rather than replacing it, and a workspace member
+  prepares from its workspace root (`ArtifactBuilder.PrepareWithin`, `prepared.contextDirectory`;
+  `workspace_lockfile` names it before Deploy, and a member directory the Dockerfile cannot carry unquoted
+  is `workspace_member_path_unsupported`). The
+  UI swaps whole commands between managers from `nodeInstalls`, "From the lockfile" follows the resolved
+  manager, and at build time a saved command whose plain runner names another manager runs through the
+  resolved one with a logged note (`prepared.notes`, `prepared.buildCommand`/`startCommand`) and a
+  `runner_mismatch` preflight warning. The configuration read carries `detected`, the stored candidate
+  the build still describes, so Build settings show which lockfile matches. The contract is
+  [the recipe guide](recipes.md#javascript-installs).
+- Detection is a catalogue, not a handful of special cases. `deploy/frameworks_node.go` names Strapi,
+  Medusa, Directus, KeystoneJS, AdonisJS, RedwoodJS, Next.js, SvelteKit, Astro, Nuxt, Remix, React Router,
+  SolidStart, TanStack Start, Nitro, Qwik City, Analog, Angular, NestJS, Vike, Waku, Gatsby, Docusaurus,
+  VitePress, VuePress, Rspress, Eleventy, Hexo, Slidev, Create React App, Vue CLI, Ember, Parcel, Rsbuild,
+  Rspack, Farm, webpack and Vite, in an order where a meta-framework built on Vite is read before Vite
+  itself, each with its serving mode (site output or server start command), port, runtime environment
+  and the entry file the generated Dockerfile checks after the build. Each resolution reads the
+  framework's configuration as text (`frameworks_node_config.go`: next.config's output, the adapter
+  svelte.config imports, Astro's output and mode, `ssr: false`, a Nitro preset, Vite's base and outDir,
+  Nest's layout), passes over a start script that runs a development server
+  (`frameworks_node_scripts.go`), and says what it decided as evidence and, for preflight, as
+  `nodeBuild.findings` (with `nodeBuild.devScripts`, the scripts that start a development server);
+  `build_node_frameworks.go` renders what the plan's own commands need around the build (adapter-node for
+  adapter-auto, `NITRO_PRESET`, Next.js standalone assets, the fallback page a static site's framework
+  writes, the entry check). An Nx workspace's application projects are candidates at its root
+  (`frameworks_node_nx.go`), and a workspace member builds its workspace dependencies first
+  (`detect_node_start.go`). `frameworks_python.go` names Django, FastAPI, Litestar,
+  Starlette, Sanic, Quart, Falcon, Bottle, Flask, aiohttp, Tornado and the application frameworks
+  (Gradio, Chainlit, NiceGUI, Reflex, Mesop, Dash, Panel, Streamlit) from what the project itself
+  declares, and finds the application object in the conventional entry files, the root's other scripts
+  and the module a runner script imports its factory from; the manifests themselves (requirement
+  layouts and includes, pyproject, Pipfile, the uv/Poetry/PDM locks and their drift, setup files, conda
+  environments) are read by `detect_python_manifests.go`, `detect_python_lock.go` and
+  `detect_python_project.go`, and what the recipe needs beyond the framework is recorded on the
+  candidate as `python` (`detect_python.go`) and judged by `preflight_python.go`;
   `frameworks_rust.go`, `frameworks_java.go`, `frameworks_dotnet.go` and `frameworks_deno.go` read
-  `Cargo.toml`, `pom.xml`/`build.gradle(.kts)`, `*.csproj` and `deno.json(c)`. A `Procfile`'s `web:`
-  process outranks every guess. The candidate carries `spaFallback` (a client-routed site's nginx
+  `Cargo.toml`, `pom.xml`/`build.gradle(.kts)`, `*.csproj`/`*.fsproj`/`*.vbproj` and `deno.json(c)`;
+  `detect_php.go` and `detect_deno.go` read, after the walk and under budgets of their own, what those
+  recipes decide from beyond the manifest (the lock, the declared release, the code's extension calls, a
+  WordPress tree's shape) through one reader that detection and preparation share, and record it as the
+  candidate's `php` and `deno` facts for preflight; only a WordPress theme's or plugin's header at the top
+  of the checkout is read by the walk itself (at most 32 file heads), since nothing else names a block
+  theme's or a create-block plugin's directory. The
+  JVM and .NET builds are read through one bounded, symlink-refusing reader over the checkout
+  (`build_files.go`) that detection and the recipe share — the Maven reactor and parents, the Gradle
+  settings root and version catalog, the .NET props chain, referenced projects and `global.json`
+  (`detect_maven.go`, `detect_gradle.go`, `detect_jvm.go`, `detect_dotnet.go`) — so a module or solution
+  project builds from the directory that owns it (`PrepareWithin`, `prepared.contextDirectory`) and the
+  candidate keeps `javaBuild`/`dotnetBuild` for preflight (`preflight_compiled.go`, which judges
+  `build.javaVersion`/`build.dotnetVersion`). `detect_compiled_layout.go` sets aside library modules,
+  aggregator POMs, Gradle build logic (`buildSrc`, `build-logic`, convention-plugin projects), test
+  projects and Aspire AppHosts before the repository-shape passes rank what is left. A `Procfile`'s `web:`
+  process outranks every guess, and another platform's deployment file (`fly.toml`, `render.yaml`,
+  `app.json`, Kamal's `config/deploy.yml`, …) outranks the framework's defaults. The candidate carries `spaFallback` (a client-routed site's nginx
   fallback), `pythonVersion`, `unpinnedDependencies` (a `dependencies_unpinned` preflight warning,
-  never a refusal), `variables` (the environment names the source reads, with example values and
-  where each was read — `env_discovery.go`) and `databases` (the engines its dependencies and
-  documented URLs name, each with the variable the connection belongs in). The closed recipe set is
-  `node`, `go`, `python`, `rust`, `java`, `dotnet`, `deno` (`validRecipe`), and `build.pythonVersion`
-  and `build.spaFallback` are the two additive plan fields, bounded by `PlanConfiguration.Validate`.
+  never a refusal), `variables` (the environment names the source reads, with example values, where
+  each was read, and how each is supplied and read — `setup`, `generateFormat`, `domainTemplate`,
+  `defaultValue`, `phase`, `browserInlined`, `required`, `requiredRead`, `localhostIn`;
+  `env_discovery.go`, `env_discovery_languages.go`, `detect_variables.go`), `databases` (the engines
+  its manifests and documented URLs name, each with the variable the connection belongs in and its
+  `format`, `extensions`, `hosted` driver and Rails `alsoVariables`; `detect_databases.go`),
+  `browserPrefixes` and `environmentNotes` (facts preflight answers: a committed Django key, a fatal
+  dotenv load, an identity provider's callback, Rails credentials), `listen` (where the source says its
+  server listens: a port it fixes, whether it reads PORT, a loopback bind, each naming its file and line
+  — `detect_listen.go`, `detect_network.go`) and `networkVariables` (plain runtime variables the proxy
+  decides: `AUTH_TRUST_HOST`, `NEXTAUTH_URL` on a domain template, `HOST`), and `go` and `rust` (how a
+  Go module or a Rust crate builds beyond its toolchain: its build context, cgo, dependency sources,
+  embeds and generated code; its Cargo workspace, binaries, native crates, sqlx and lockfile — from the
+  same `planGoBuild` and `readCargoCrate` the recipes run, bounded by `validateDetectedGoBuild` and
+  `validateDetectedRustBuild`). The form declares a set-up
+  variable once: the classification's declaration first, then a network variable for a name it did not
+  set up. The environment is described last for each root, after the state, readiness and network
+  passes, so its classification sees the ports and frameworks they settled. A repository's container
+  candidates go through the same passes beside the recipe candidates of their build context, each
+  reading its own Dockerfile only through the stage it builds (`attachBuiltDockerfiles`), so a
+  development stage after it never supplies the health check, volumes or command. A Dockerfile candidate at a
+  Rails or Phoenix root is named that framework, and Phoenix's release image gets port 4000 when neither
+  its `EXPOSE` nor its source names one. `validateDetectedEnvironment` bounds every added field like the
+  rest of a saved detection. Preflight re-checks `listen` against the plan (`preflight_network.go`:
+  `listen_loopback`, `port_hardcoded`, `proxy_headers_trusted`, `forwarded_headers_untrusted`,
+  `public_url_variable_missing`, `request_body_limit` and the rest, listed in the recipe guide), so a
+  certain loopback bind is a blocker before Deploy rather than a readiness timeout after it. The closed
+  recipe set is
+  `node`, `go`, `python`, `rust`, `java`, `dotnet`, `deno`, `php`, `site`, `ruby`, `elixir`, `scala`,
+  `clojure`, `dart`, `gleam` (`validRecipe`; `site` builds Hugo, Zola, mdBook and Jekyll, and Python and
+  Deno build a site generator's output when they have an output directory), and `build.pythonVersion`
+  (3.10 to 3.14), `build.systemPackages` (at most 32 Debian names, Python recipe only),
+  `build.nodeVersion` (the recipes that run the Node install, `nodeInstallRecipes`), `build.phpVersion`,
+  `build.spaFallback`, `build.goPackage`, `build.cargoBin` (the binary a Rust recipe serves),
+  `build.javaVersion` and `build.dotnetVersion` are additive plan fields, bounded by
+  `PlanConfiguration.Validate`.
   The contract per language is [the recipe guide](recipes.md). The framework detection recognised is
   recorded on the build plan when a draft commits (`build.framework` on the configuration read) —
   the chosen candidate's, while the plan still builds that candidate's directory — so a later read,
   a fleet card or the Build settings, names it without detecting again. The server owns it: a value
   the browser sends in a draft or a configuration save is never kept. A save carries it forward only
-  while the method, recipe and root directory stay the same, and a source change that moves the code
-  — another repository, directory or image, though not a new branch or credential — drops it,
-  because detection named the code that used to be there. It is left out of the plan's digest
+  while the method, recipe and root directory stay the same. A source change records the framework the
+  fresh detection finds at the plan's root with its method, and drops it when detection finds nothing
+  there and the code moved — another repository, directory or image, though not a new branch or
+  credential. It is left out of the plan's digest
   (`buildPlanDigest`, which every path that writes a build plan uses), so recording or dropping a
   name never shows as a pending build change. Projects created before it was kept have none.
+- A repository's own container definitions are candidates read as data, with the same bounds as the
+  rest of detection (the walk's file and byte limits, `os.Root` reads of the checkout that a symlink
+  cannot redirect). Dockerfile candidates carry `dockerfileRole`, `dockerfileTarget`, `dockerfileArgs`
+  (names and whether each has a default, is used in `FROM`, is consumed), `dockerfilePlatforms`,
+  `imageBuildIssues` (`{code, severity, line, subject, detail}`, text that names lines, paths and
+  variables but never a value) and `releaseCommand`; the result carries `selectionReason`, the sentence
+  saying which rule decided. Selection (`detect_ranking.go`) ranks a directory's candidates by whether
+  each may be chosen on its own, its standing, buildability, confidence and intent, and directories by
+  their best candidate's selectability, standing and confidence, then a monorepo's application area and
+  the shallower root — never by which one builds — and lists the winner first. Preflight's `imageBuildFindings`
+  (`preflight_image.go`) turns the evidence of the candidate the configuration still builds — same
+  method, root and Dockerfile — into one finding per code; a Dockerfile detection never read is the
+  warning `dockerfile_unchecked`. Compose sources gain build targets and arguments, optional variables,
+  env files, platform evidence and a primary service (`compose_build.go`). The contract is in
+  [the recipe guide](recipes.md#repository-dockerfiles-and-compose-files).
+- Detection reads the repository's shape as well as each root (`detect_*.go`; the contract is
+  [repository shape](recipes.md#repository-shape-and-candidate-selection)). Manifests are read
+  breadth-first before any source and the file bound counts only files opened, so bulk assets or
+  generated Go cannot hide the root manifest. The shape pass runs twice around the per-root passes:
+  first (`shapeCandidates`) it applies what the repository as a whole says — ecosystems, shapes that are
+  not services, static roots, other platforms' files, processes, decoys — so the state, readiness,
+  network and environment passes read each candidate as it will be offered, with another platform's
+  start command and port; last (`rankDetection`) it pairs a split frontend and API by the ports and
+  profiles those passes settled, and ranks. Candidates are ranked — a service above one ranked down
+  (`demotion`: an example, a docs site beside an app, static files inside a code root, a split
+  repository's frontend, a desktop shell's frontend), above one that is not a service
+  (`notDeployable`: a library, a CLI, an extension, a mobile or desktop app, notebooks, a GitHub
+  Action, a Windows-only program), by the ranking above — and `SelectedID` names the one that outranks
+  every other; ties are still the operator's. A candidate also carries `companions` (the other root of a split frontend and
+  API), `processes` (workers, schedulers, release commands, second servers), `platformManifests`,
+  `serverlessCode` and `importCaseMismatches`; a result carries `setAside` (what was recognised and not
+  offered, and why) and `alternatives` (a reviewed template or the project's published image), and
+  `gitRequirements` lists each submodule and the LFS-tracked files. All of it is bounded and
+  credential-screened by `validateRepoShapeEvidence` (anything it would refuse is dropped first by
+  `keepValidShape`, so one odd file never fails the import, and a verdict drawn from a file's absence
+  needs a walk that saw the whole root), and preflight turns it into findings before Deploy
+  (`preflight_repo_shape.go`): `source_not_a_service`, `static_candidate_nested`,
+  `selected_candidate_demoted`, `companion_service_not_deployed`, `desktop_frontend_only`,
+  `secondary_process_not_deployed_<name>`, `release_process_not_run`, `edge_runtime_code_not_deployed`,
+  `serverless_functions_dropped`, `import_case_mismatch`, `committed_virtualenv`,
+  `platform_system_packages_ignored`, `static_redirects_unsupported`, `source_has_packaged_release`,
+  `source_publishes_image`, and `git_submodules`/`git_lfs`/`git_lfs_unavailable` judged per build root,
+  with `git-lfs` observed on the host when LFS is included. One project still runs one process: a worker
+  or a split repository's other half is a second project from the same repository, which the findings
+  name with its root and start command. A static site's candidate also carries `staticSite`
+  (`detect_static_site.go`, validated by `validateDetectedStaticSite`): the generator, the release it
+  builds with and what the repository declared, the sub-path its framework built it for, the theme's Git
+  submodule, and how many of another host's redirect and header rules the static server applies or
+  leaves out. `preflight_static_site.go` turns it into `static_base_path`, `static_base_path_computed`,
+  `hugo_version_unpinned`, `site_generator_version`, `jekyll_ruby_version`, `site_theme_in_submodule`
+  (blocked while submodules are off), `static_redirects_unsupported` and `static_hosting_rules`. The
+  rules themselves and the base path are read again from the commit when the build is prepared
+  (`build_static_serving.go`), with the fallback page the framework's catalogue entry names (SvelteKit's
+  `200.html`, React Router's `__spa-fallback.html`, tried before `index.html`), and written into nginx's
+  configuration as literals that pass a strict character check, one location block per path so the
+  configuration always loads. Every static output is served by that one renderer (`staticServing`): a
+  JavaScript, site-generator, Python or Deno site, a plain static site, a Trunk site and a Blazor
+  WebAssembly app.
 - A detected Node service that declares a migration tool applies its schema before it serves. Detection
   records the tool (`schemaTool`), the command it chose (`schemaCommand`) and whether the package's own
   start script already runs it, and chains the step in front of the start command through the manager's
   binary runner (`npx`/`bunx`/`pnpm exec`/`yarn`). Prisma and Drizzle deploy committed migrations and
   otherwise push the declared model; Knex, Sequelize and MikroORM run their migration command; TypeORM
   is recorded as a decision because its data source cannot be guessed. The rule set lives in
-  `deploy/schema_tools.go`. Preflight adds `schema_step_missing` (warning, on the start command) when a
-  database is linked and neither the start command, a release task nor the start script runs the tool,
-  and `schema_step` (pass) when one does; no linked database means no finding. Changing the package
-  manager rewrites the chained binary runner with the script runner.
+  `deploy/schema_tools.go`; Prisma's schema path follows `package.json`'s `prisma.schema` and
+  `prisma.config.*`'s `schema:`/`migrations.path`, and the recipe generates the Prisma client itself with
+  placeholders for the names `prisma.config.*` reads through `env()` (`build_node_prisma.go`). The Python
+  tools (Django, Alembic, Flask-Migrate, Aerich) and EF Core are in `deploy/detect_schema.go` and share
+  the same lookup. Preflight adds `schema_step_missing` (warning, on
+  the start command) when a database is linked and neither the start command, a release task nor the
+  start script runs the tool, and `schema_step` (pass) when one does; no linked database means no
+  finding. A step that pushes the declared model (`prisma db push`, `drizzle-kit push`, recorded as
+  `schemaPush` when the package's own start script does it) is `schema_push_unversioned` (warning)
+  instead of a pass, linked database or not, and a refused push is named `runtime_schema_push_refused` by the
+  failed gate's output classifier. Changing the package manager swaps the whole start command for
+  detection's command for that manager, chained step included; detection records each manager's commands
+  after every pass that rewrites them (`refreshNodeInstalls`), so a settled detaching start or a preview
+  bound to every interface moves with the runner.
+- Detection records the state an application writes to its own filesystem as `persistentPaths`
+  (`deploy/detect_state.go`, [the recipe guide](recipes.md#persistent-state)): SQLite files, upload
+  directories, framework storage, Dockerfile and image `VOLUME`s and ASP.NET's Data Protection key ring,
+  each with the directory a managed volume can stand on without hiding code and, when the location is
+  read from a variable, the value that moves it there. The walk hands every file to a state scanner with
+  its own budgets (configuration apart from source, so a large tree cannot crowd out the schema); it reads
+  text only. Per root it runs before the readiness and network passes: the schema step it chains into a
+  Python start command is what readiness budgets a slow start for — nothing is chained when the release
+  command the repository declares (read per root before any candidate is made) applies it — and the start command it gives
+  PocketBase is the one network reads a listener from. The server database it offers in place of a
+  Python SQLite default is added after the environment pass, which replaces the root's databases. The
+  configure form plans one managed named volume per target with a storage dependency, named per draft,
+  declares the moving variable (plain, runtime and release-task scopes, and build when detection saw
+  the build read it) and releases stop-first; preflight (`deploy/preflight_state.go`) compares the state with the plan's writable mounts
+  and planned values — never echoing a value — and warns per kind (`sqlite_ephemeral`,
+  `uploads_ephemeral`, `persistent_path_unmounted`, `declared_volume_unmounted`,
+  `dotnet_data_protection_ephemeral`) or passes `persistent_state_kept`; SQLite on a volume also has its
+  schema step checked. Detection also records a seed (`seedCommand`, `seedResets`); `seed_available` warns
+  when a linked database or a new SQLite volume would start without it, on a first release only — the
+  observation's `replacesRuntime` says a live runtime is being replaced.
+- A managed Docker volume belongs to one project (`deploy/planning_volume_owner.go`). `SavePreflight`
+  adds `storage_owned_by_other_project` (blocked, naming the owner) for a planned managed mount or storage
+  dependency another project's desired plan already manages, since only the store knows the owners, and
+  `Commit` checks again inside its transaction, refusing with `ErrInvalidPlan` a volume taken in between.
+  Linked and bind mounts are never owned.
 - Deployment preflight depends on a read-only observer: filesystem/proc capacity, listener inventory,
-  Docker/Compose availability, proxy inventory and bounded DNS lookups. It cannot build, pull, start,
-  stop, write proxy/firewall configuration, modify a checkout or enqueue a backup. The persisted exact
-  plan excludes raw observed import material and accepts only typed secret references.
+  Docker/Compose availability, proxy inventory, bounded DNS lookups, the CPU's `avx`/`atomics` flags
+  from `/proc/cpuinfo`, and — for a linked PostgreSQL, only when detection says the schema needs
+  pgvector or PostGIS — one bounded `pg_available_extensions` read through the dashboard's own pool
+  (`PlanningDatabaseExtensions`). It cannot build, pull, start, stop, write proxy/firewall
+  configuration, modify a checkout or enqueue a backup. The persisted exact
+  plan excludes raw observed import material and accepts only typed secret references. The observer
+  reads `MemAvailable` and `SwapFree`, and `build_memory_low` (warning, `preflight_build.go`) compares
+  them with the selected recipe's estimated build peak (a Next.js, Nuxt, Angular, Gatsby, Docusaurus,
+  Strapi or Payload build ~2 GiB, other JavaScript frameworks ~1 GiB, Rust ~2 GiB, or ~3 GiB with fat
+  LTO, one codegen unit or Leptos, Maven/Gradle and .NET ~1.5 GiB); the Rust recipe also caps Cargo's
+  jobs at the gigabytes free when the step starts. The JavaScript recipe leaves V8's heap at its default rather than injecting
+  `NODE_OPTIONS`, which every worker process of a build would inherit. The same file judges what the
+  configuration gives a JavaScript build against what the candidate recorded (`nodeBuild`): an
+  env-validation schema's variables without a build value (`build_env_validation_skipped`,
+  `build_env_missing`, `build_env_client_missing` — when the recipe runs the build past a schema that
+  honours `SKIP_ENV_VALIDATION`, the environment check does not also refuse those names as
+  `build_variable_missing_*`, and without the skip it refuses them per field and the schema's summary
+  lists only the rest), a prerendering framework's build-scoped database URL that points at a
+  `db-N.jd.internal` alias or loopback, or a typed database reference (`build_database_unreachable` —
+  BuildKit cannot join the environment's network, and `--network=host` would hand repository build code
+  the host's loopback services; when no build-time read detection saw needs the variable — its phase
+  is not `build`, or `prisma.config` alone reads it and the recipe supplies that — the finding carries a
+  `fix` of kind `remove_variable_scope`, which Review applies to the draft's declaration and the check
+  before Deploy and the run page open in the variable editor with the build scope already cleared,
+  `?variable=NAME&without=build`), and platform variables an operator's pasted `.env` sets
+  (`port_variable_mismatch`, `node_env_not_production`, `host_variable_loopback_hostname`; a loopback
+  `HOST` is the environment check's `host_variable_loopback_host`). Values are compared, never echoed,
+  except a port number, a `NODE_ENV` word and a host name.
+- **Preflight runs before every deployment, against the commit it builds** (`deploy/deployment_check.go`).
+  A plan was reviewed against the commit detection read when it was saved; a deployment can build a
+  later one (a push, a specific version) of a plan edited since. `analyze_plan` therefore reads the commit
+  `acquire_source` materialized (the workspace's marker makes this a lookup): a fresh, bounded, data-only
+  `DetectPath` — the same detector the wizard runs, so every detection-backed finding (image build
+  issues, where the server listens, readiness, variables, state, the JavaScript install) is judged
+  against this commit — and the recipe's own dry run (see [the recipe guide](recipes.md)), which
+  prepares within the checkout the way `prepare_context` does, a workspace member from its workspace
+  root, and writes nothing. The plan is judged
+  against the fresh candidate at its root with its method (and, for a Dockerfile, the plan's
+  Dockerfile: a root can hold several), else the candidate stored with the plan, else
+  — only for a source with no files, an image or a Compose file — the plan's own shape
+  (`candidateSource` `detected`/`recorded`/`plan`). Wizard-only findings are dropped at run time
+  (`detection_selected`, `detection_ambiguous`, `detection_empty`, `detection_truncated`,
+  `detection_root_mismatch`, a passing `build_method_changed`, and what the repository's shape says
+  about the choice: `selected_candidate_demoted`, `static_candidate_nested`, `desktop_frontend_only`,
+  `companion_service_not_deployed`), and `plan_drift_*` warnings compare the
+  stored and fresh candidates where the plan still carries the old answer: the lockfile set or the manager
+  it resolves (`plan_drift_package_manager`), the framework, the output directory, and names the commit
+  reads that nothing sets and no other finding names (`plan_drift_variables` leaves out a read without
+  a default, a generated or domain-bound value and a registry credential, which the environment and
+  install checks name on their own). The candidate's recipe checks read the planned candidate; its
+  source facts — where it listens, what it reads and writes — read the candidate at the plan's root
+  whatever builds it (`rootDetectionCandidate`), since the same code runs either way. The step's evidence carries `candidate` and
+  `findings`, which the run page draws as findings ("Checked before building"); a blocked finding — or
+  one of the decisions a run cannot pass: `readiness_missing`, `domain_link_missing`,
+  `go_main_ambiguous`, `rust_binary_ambiguous` — stops the run with the finding's code as the terminal code and
+  `title: measured. action` as the reason.
+- `POST /deploy/{id}/environments/{env}/check` answers the same evaluation for the environment's desired
+  plan before Deploy is pressed. It carries the run request's capability (`service.control`), resolves
+  the commit exactly as the run request does (`sourceRevision`, `ref` via `ResolveGitRef`, else
+  `ResolveGitRevision`; a local checkout's recorded commit), reads it through a temporary planning
+  worktree (`HostSourceAnalyzer.InspectRevision`: the bounded, blob-filtered planning mirror, fetching a
+  pinned commit by id when the branch has moved past it; a local checkout's commit is fetched at depth
+  one, never its working tree, one inspection at a time, within a minute, and only after its tree
+  listing shows at most 20,000 files and 256 MiB — a larger commit is `source_inspection_unavailable`
+  and left to the deployment's own read) and returns `{findings, planRevision, sourceRevision, checkedAt}`. An
+  answer is kept for three minutes per environment, plan revision and commit. It is advisory — a
+  warning never gates `/runs`, and analyze_plan stays the gate every trigger passes, git watch, hooks,
+  schedules and previews included — and, being a read, it is kept out of the audit log
+  (`httpx.SkipAudit`); a refused attempt is still recorded. A commit that cannot be read is a
+  `source_inspection_unavailable` finding, and the evaluation falls back to the stored evidence.
+- The project page asks the check on arrival and after each settings save that leaves changes waiting
+  (`useDeploymentCheck`), and draws what it found in the pending-changes strip and as "Before you
+  deploy" on the Overview, each finding opening the settings page that holds its `fieldId`
+  (`settingsPathForField`). Every build a page starts — the header's Deploy, Deploy changes and Rebuild
+  without cache, a fleet card's Deploy (from the check the project page last made, for the revision
+  the card shows, while recent), and Deploy a specific version (which checks that version itself) —
+  opens "Ready to deploy?" when the check found something that stops the deployment, which keeps the
+  command disabled, or warnings not yet confirmed in this tab; confirming deploys, and the same warnings
+  are not asked again this session. With no answer yet, or a clean one, Deploy stays one press.
+- A draft's preflight reads the commit its detection reviewed (`PreflightDraftWithSource`): the recipe's
+  dry run replaces what detection alone could say about the plan, a root directory edited to one
+  detection found nothing in is `detection_root_mismatch` (a decision without a tree, a warning once the
+  recipe prepares that directory; the configure form picks the candidate detection found at a typed
+  root on its own), and a remote branch that has moved past the reviewed commit is `source_moved`
+  (warning, "Inspect again" reads the newer commit keeping the chosen candidate). The first deployment
+  of a new remote Git project is pinned to the commit the check before it read (`sourceRevision`) —
+  not when that check could not read it (`source_inspection_unavailable`), which leaves the branch
+  head as before; later ones follow the branch. Materializing a pinned commit the branch has moved past
+  takes it from the branch fetch, behind the new head, or by its id when the branch no longer contains
+  it, and names it with its own release ref in the mirror; the workspace is verified against that
+  commit, so a moved branch never stands in for it. The configure form's pick of the candidate at a
+  typed root happens only when the root or builder was edited away from the picked candidate (the
+  plan's recipe first at that root); a candidate picked at its own root is never swapped for another
+  sharing it.
+- Detection is refreshed for a project that exists. A source change (`PUT …/source`) saves what the
+  inspection read — candidates, Compose analysis and Git requirements — as the new revision's
+  evidence, rather than copying the old source's forward (a Compose-from-Git source moved to another
+  branch builds the new service list), and returns a `proposal`: field by field (package manager when
+  set explicitly, build and start commands, output directory, single-page fallback, Go main package,
+  a Dockerfile's stage, port), what the plan saves, what detection proposes now, what it proposed when the plan was saved and
+  whether it `changed`, plus the variables and databases the source reads that the plan does not set.
+  Only the candidate at the plan's root building the plan's way is compared; when there is none the
+  proposal names what detection selected instead with `elsewhere` and offers no field (its commands
+  describe another directory or builder). A command detection could not tell is never proposed as
+  clearing the plan's. Settings → Source shows the changed fields as "Detection changed", each applied
+  onto the configuration the proposal was compared with under the proposal's `revision`, so a plan
+  saved since refuses the apply. `POST …/detect` (a settings write's capability, audited as
+  `deploy.source.detect`) reads the source again without writing, and Build settings' **Detect again**
+  shows the same proposal, marks each field that differs and applies into the form's draft.
 - Normalized build execution uses the project-owned versioned recipe set or an explicit Dockerfile,
   static, immutable-image, or Compose adapter. Reviewed base tags are resolved before rendering and every
   generated `FROM` is digest-pinned. Build secrets are BuildKit environment-backed secret mounts and
-  never argv/build args; custom Dockerfiles with requested secrets or obvious embedded credentials fail
-  closed because their layer history cannot be guaranteed.
+  never argv/build args; custom Dockerfiles with requested secrets, or a secret-named literal in an
+  `ENV`/`ARG`, shell assignment, flag or heredoc (read over logical instructions, so a continuation line
+  cannot hide one and `SECRET_KEY_BASE_DUMMY=1` is not one), fail closed because their layer history
+  cannot be guaranteed — and detection runs the same check, so preflight says so before Deploy. A custom
+  Dockerfile build receives `--target` for its chosen stage and `--build-arg NAME` only for plain,
+  browser-public build variables it declares, with values in buildx's environment; a Compose service
+  build receives its own `target` and `args` the same way, interpolated from the plain runtime and build
+  variables only, and refuses an argument or target that reads a secret (`composeBuildArgValues`), so no
+  secret ever becomes a build argument or argv. A browser-public value typed into a new project is
+  stored plain (`suppliedVariableSensitivity`); every other typed value is stored secret. Recipe and static builds write a
+  generated `Dockerfile.dockerignore` beside the generated Dockerfile, so repository metadata and
+  dashboard files stay out of the image whatever the repository's own ignore file says.
   Recipe build scope now supplies values automatically, with explicit install-stage restrictions for
-  package credentials. Serving defaults per framework, the Python install shapes and interpreter
+  package credentials and an `install_and_build` mapping that mounts one value in both RUN steps; a
+  registry credential detected in `.npmrc`, `.yarnrc.yml` or `bunfig.toml` is declared with build scope
+  alone and mapped to the install step when a draft supplies it (`Draft.withEnvironmentMetadata`), and
+  `registry_token_missing` names one that cannot reach the install, for the PHP asset stage too. Preparation logs its install decisions (an unfrozen install, a moved runner, a
+  `.dockerignore` exception) to the run transcript from `prepared.notes`. Serving defaults per framework, the Python install shapes and interpreter
   selection, the Rust, Java, .NET and Deno recipes, the single-page fallback and Go version/command
   behavior are defined in [the recipe contract](recipes.md), including the exact limits of live
   framework verification.
@@ -305,10 +623,47 @@ only renderer/executor/validation authority for their feature.
   exists for an empty set, digests are checked before variable decryption, and retry copies the original
   snapshots instead of observing later rotations. Release runtime snapshots store the actual secret-free
   JSON bytes and verified digest, not a pointer back to mutable desired configuration.
-- Release tasks are named, bounded shell gates over the immutable source workspace. Only variables
-  explicitly declared with `release_task` scope enter their environment; output is exact-value and
-  credential-pattern redacted before persistence. Interrupted tasks stop for operator review because
-  their side effects cannot be inferred safely.
+- Release tasks are named, bounded shell gates that run after the backup gate and before the candidate
+  starts (`DefaultStepKeys` puts `backup_gate` first, so a migration never changes a database whose
+  required backup is unverified). A task with `runner: "image"` — the default for new tasks and for a
+  release command detection read — runs once in a throwaway container of the candidate release's image
+  (a Compose release's primary service image) through the runtime owner (`release_task_image.go`,
+  `dockerx.RunToCompletion`): the runtime variables the release starts with plus the task's
+  `release_task`-scoped ones as container environment, on the project's database networks (and the
+  preview network for an isolated preview) or on the host's network when the release runs there, with
+  the release's resource limits and the plan's mounts (its volumes and binds, read-only where the plan
+  says so, recorded in the task evidence as `mounts`) — a Heroku or Render release phase that sees the
+  application's own data, so a migration or seed of SQLite on a volume reaches the file the release then
+  opens — but no ports, devices, capabilities or privilege, the image's entrypoint replaced by the
+  command, and the container removed however the task ends. The task runs while the live release still
+  serves from the same volume; a stop-first release stops it only when the candidate starts. The mounts
+  are the frozen runtime plan's own — a bind source was resolved and authorised when the plan was saved,
+  a preview's are its own preview volumes (and a preview plans no task) — so a task gains no path the
+  release it precedes does not already have. The container carries
+  `io.just-dashboard.release-task`, so runtime observation leaves it out; `Server.Start` removes any a
+  previous process left before the engine resumes runs, a task removes a stale one of its own name
+  before it starts, and the step's cleanup records whether removal succeeded. A blank command is
+  refused by validation and, stored before that, fails the task instead of the executor. A Compose
+  release's image task runs outside the stack, which preflight names
+  (`release_task_outside_compose_stack`, blocked when the stack runs its own backing services). A task without a runner is the historical `/bin/sh` over the immutable source workspace in
+  the dashboard's container, which has none of an application's dependencies; preflight refuses one
+  that runs a tool only installed dependencies provide, or a program a PATH lookup in the dashboard
+  does not find (`release_task_tool_missing`, a lookup that executes nothing). Output is redacted of
+  the task's own values and every secret runtime value before persistence. Interrupted tasks stop for
+  operator review because their side effects cannot be inferred safely. A failed task's own redacted
+  output (the last 400 lines / 64 KiB) is classified before the step ends: Prisma's P3009, P3018,
+  P3005, P1000 and P1001, a variable the task was not given, and a program where the task ran does
+  not have (the shell's line, or exit status 127 without it) become `release_migration_failed_before`,
+  `release_migration_failed`, `release_database_not_empty`, `release_database_auth_failed`,
+  `release_database_unreachable`, `release_env_missing` and `release_task_command_not_found`; a task
+  past its limit is `release_task_timeout`, anything else stays `release_task_failed`. A missing
+  program and an unreachable database are worded for where the task ran: in the release image, which
+  joins the database's networks, the image lacks the program or the database is down; in the
+  dashboard's shell, the fix is running the task in the release image. A generic "`X_Y` is not set /
+  must be set / is required" sentence is read only after every other signature here, and never from a
+  line that calls itself a warning. The code is the step's and the run's terminal code, the sentence
+  joins the message, and the step evidence carries the cause (identifiers only) beside the task
+  evidence.
 - Artifact retention keeps the live release, five prior successful rollback releases, candidates, pins,
   retain-until windows, recent failed diagnostics, shared physical digests, and every environment under
   an active deployment lease. Cleanup reports the reason for every retained row and removes a mutable
@@ -321,7 +676,9 @@ only renderer/executor/validation authority for their feature.
 - Runtime activation consumes only an immutable release snapshot. Direct containers use the recorded
   config digest (or repository plus manifest digest); Compose uses an explicit stable project, the exact
   source file list, and a generated `0600` override that pins every service image with `pull_policy:
-  never`. Compose interpolation receives only the frozen runtime scope through a temporary `0600` env
+  never`. The release's container identity and readiness target is the primary service — the one the
+  operator chose (`build.primaryService`), else the analysis's, which builds or publishes a port and is
+  never a database — and a snapshot recorded before there was one keeps its first service. Compose interpolation receives only the frozen runtime scope through a temporary `0600` env
   file which is deleted on every exit path.
 - Archived projects keep their original display name in additive `archived_name` storage while the
   unique database name becomes an internal tombstone. Archiving and upgrading previously archived
@@ -341,10 +698,69 @@ only renderer/executor/validation authority for their feature.
   The tail is written to the run transcript after redaction of every runtime variable value; step
   evidence records state and counts, never output. Compensation runs afterwards, so the operator reads
   why the application never listened instead of only "could not connect". The step message points at the
-  transcript when output was captured.
+  transcript when output was captured. A running candidate's listening sockets are read too, by
+  `cat /proc/net/tcp /proc/net/tcp6` inside its own container through the check runner's closed-argv
+  exec (bounded output, only parsed addresses kept). `applicationOutputCause`
+  (`runtime_output_cause.go`, the one table of runtime and release-task causes) then names one cause,
+  most specific first: the container's own OOM flag (`runtime_oom`), a missing table
+  (`schema_missing`), a refused schema push (`runtime_schema_push_refused`: Prisma's
+  `--accept-data-loss` and "changes that cannot be executed", Drizzle's rename and data-loss prompts),
+  a SQLite file it cannot open or write (`runtime_sqlite_not_writable`), a variable the application
+  reads and was not given (Prisma P1012 and config errors, t3-env, Django, Rails, Phoenix, Auth.js's
+  MissingSecret, pydantic-settings, `KeyError` on the environment — `runtime_env_missing`), Rails
+  credentials `RAILS_MASTER_KEY` cannot decrypt, an Auth.js host it does not trust (fixed with
+  `AUTH_TRUST_HOST=true`), a missing `.env` it exits over, a database address on localhost (Node,
+  libpq, Go, MySQL and Rust wordings), Prisma's engine on Alpine, a disallowed Host, a missing entry
+  file or app object (with its own sentence for `next start` refusing a static export, whose fix is the
+  output directory `out`, and for NestJS's `dist/main` written as `dist/src/main.js`), a missing module
+  or shared library (psycopg's `libpq library not found` among them), a PHP extension a call needs
+  (`Call to undefined function mysqli_connect()`, `Class "Redis" not found`, WordPress's missing MySQL
+  extension — `runtime_php_extension_missing`, naming the `ext-` requirement that installs it), front-end
+  assets a page renders and the image lacks (Laravel's Vite manifest, `Mix manifest does not exist` —
+  `runtime_assets_missing`), a cgo-less binary, an architecture mismatch, a runner that is not installed
+  (`runtime_command_not_found`), Phoenix's origin
+  check (fixed with `PHX_HOST`), Play's PID file, a server that prints a loopback bind (uvicorn,
+  gunicorn, werkzeug, puma, Kestrel — not Next.js, which prints `localhost` whatever it binds) or whose
+  every listening socket is on loopback (`runtime_loopback_bind`, named in the step message even when
+  the application printed nothing, with the listener as its subject), a port other than the plan's
+  printed by a framework's own startup line, then any program's generic "`X_Y` is not set / must be
+  set / is required" (read this late, and never from a line that calls itself a warning, because
+  programs print it as a warning and carry on: `SENTRY_DSN is not set` beside the port the server
+  really took must name the port), and a single container that stopped with exit code 0 instead of
+  serving (`runtime_start_exited`; several containers are a Compose stack, where a one-off service
+  exits 0 by design), and a Django candidate whose check was answered with a 5xx while the output
+  holds no error at all (`runtime_errors_hidden`, a 400 read as `runtime_host_disallowed`, a 401, 403 or
+  404 left to the readiness classification: with DEBUG off
+  and no `LOGGING`, Django mails request errors instead of printing them — the failed checks' status
+  codes reach the classifier as `runtimeCauseContext.checks`). The cause is the step's code and the run's
+  terminal code in place of `health_gate_failed`, with the health evidence kept; it carries identifiers
+  only (a variable, a port, a module, a listener) and, where the plan can supply one, a fix: the
+  variable or its runtime scope, the internal port, a start command bound to `0.0.0.0`, for the
+  Python recipe the Debian package that provides a missing shared library (`build.systemPackages`),
+  or — for a Node recipe whose start runs a package manager the image lacks — the start command moved to
+  the manager the image carries (`nodeRunnerFor`, the install planner's own rewrite: `bun run start` in
+  an npm image is `npm run start`). That manager is the one this run's build installed with (its
+  prepared install line), else the plan's, else the one detection resolved; a start the rewrite cannot
+  carry (a file Bun ran as a script, the image's own manager missing, a Dockerfile's start) is left to
+  review.
 - Container applications receive `PORT` from the frozen internal-port setting unless a runtime variable
-  explicitly supplies it. Compose and host-network applications keep their own environment conventions.
-  This keeps application startup aligned with Docker publication; the host port may still move.
+  explicitly supplies it. A Python recipe image whose gunicorn or uvicorn start leaves the worker count
+  to `WEB_CONCURRENCY`, and which loads no machine-learning model, is recorded as such
+  (`PreparedBuild.webConcurrency`, copied into the runtime snapshot), and `startContainer` sets
+  `WEB_CONCURRENCY` for it (`runtime_concurrency.go`: 2×CPU+1 within 256 MiB of the memory limit per
+  worker, 2 without a limit) unless the plan sets the variable; the start step's log states the value.
+  Detection gives a websocket application's generated uvicorn command `--workers 1`, so it is never
+  marked. Compose and host-network applications keep their own environment conventions.
+  This keeps application startup aligned with Docker publication; the host port may still move. The
+  recipes switch framework trust of the proxy's `X-Forwarded-*` headers on (`FORWARDED_ALLOW_IPS=*`,
+  `ASPNETCORE_FORWARDEDHEADERS_ENABLED`, `SERVER_FORWARD_HEADERS_STRATEGY`, Quarkus proxy forwarding,
+  SvelteKit's header variables), which is safe only while the proxy fronts the release alone. The
+  release's runtime snapshot records which of those settings the recipe image's final stage sets
+  (`proxyTrust`, read from the rendered Dockerfile by `imageProxyTrust`); a repository Dockerfile, a
+  pulled image or an adopted container records none. When the release has no route, or its port is
+  reachable directly (a `0.0.0.0`/`::` bind, host networking, or the application's port published again
+  on every interface), `startContainer` writes the withdrawn value of each recorded setting unless the
+  plan sets the variable itself (`network_trust.go`). Nothing is written over a user's own image.
 - HTTP/TCP readiness checks follow the recorded runtime publication when a saved check refers to the
   primary service's original internal or requested host port. Explicit unrelated ports, remote hosts
   and full URLs retain their configured targets. Quick deploy leaves the check port unset to follow
@@ -354,14 +770,27 @@ only renderer/executor/validation authority for their feature.
   timeouts and bounded retries. Persisted evidence contains status/state/error codes and a digest of
   bounded command output, never response bodies, command output, URL credentials/queries or runtime
   variable values. Disabled, unavailable, warning, passed and failed remain distinct outcomes.
-  Default HTTP checks require a final 2xx response and follow at most four redirects on the same
-  origin. External redirects and loops fail, so a candidate cannot pass by redirecting to the old
-  public release or to a page that returns 500. Explicit expected-status lists retain exact-status,
-  no-redirect behavior.
+  An HTTP check against the candidate introduces itself as the proxy does when the release has a
+  domain — `Host`/`X-Forwarded-Host` the first domain that is not a wildcard, `X-Forwarded-Proto` its
+  scheme, `X-Forwarded-For 127.0.0.1`, a browser's `Accept` — while connecting only to the candidate.
+  Default HTTP checks require a final 2xx response and follow at most four redirects that stay on the
+  candidate's address or name one of the release's own domains; the latter are re-asked of the
+  candidate, never of the domain. Redirects elsewhere are never requested and fail with their origin
+  in the message (`redirect_off_origin`), as do loops (`redirect_loop`), so a candidate cannot pass by
+  redirecting to the old public release or to a page that returns 500. `acceptAnyAnswer` checks accept
+  the first answer below 500 other than 400 and 421 (what host allowlists answer); explicit
+  expected-status lists retain exact-status, no-redirect behavior, and a check cannot set both.
 - Blue/green is limited to stateless proxy-owned HTTP candidates without fixed ports, host networking or
   writable mounts; dynamic candidate ports are loopback-leased. Fixed-port, Compose, game and exclusive
   writable-storage plans are honest `stop_first` deployments and advertise expected downtime. A route
   moves only after required readiness/smoke checks pass.
+- A managed route lets request bodies up to `runtime.maxRequestBodyMb` through (1–10240). Zero is each
+  proxy's deployment default, which differs: nginx's own default is 1 MB, which refused a phone photo
+  before the application saw it, so an nginx route always writes `client_max_body_size` (64 MB unless the
+  plan names a limit); Caddy has no default limit, so a Caddy route writes `request_body { max_size }`
+  only when the plan names one and otherwise stays unlimited, as before. The project's Runtime settings
+  (Where it listens) and the new-project limits fold edit it; preflight's `request_body_limit` pass and
+  release comparison state it, zero as "64 MB on nginx, no limit on Caddy".
 - Deployment-owned nginx cutover is serialized and snapshots the prior bytes, mode and exact symlink
   target. Apply/reload/verification failure restores, reloads and verifies that exact snapshot before a
   run may report recovery. The snapshot content is held only for compensation; persisted activation
@@ -376,6 +805,49 @@ only renderer/executor/validation authority for their feature.
   stop-first failure restarts the predecessor from its exact immutable runtime spec. Cancellation between
   persisted steps removes an uncommitted candidate, or finishes predecessor retirement after a committed
   cutover, and records sequenced cleanup evidence.
+- A failed build names its cause instead of `internal_error` and exec's `exit status 1`. `dockerx`
+  reads buildx's plain progress as it streams (over `os.Pipe`s read to EOF, because a `StdoutPipe` is
+  closed by `Wait` and dropped BuildKit's closing lines; once buildx has exited a read waits at most
+  five seconds for more, since a process it left behind can hold the pipes open) and returns a
+  `BuildError` with the failed RUN's command, exit code and step number, or BuildKit's own reason for
+  a failure that was not a process exit;
+  a build that reaches its 30-minute limit while the run is alive returns `ErrBuildTimeout`, which does
+  not wrap a context error and so is never recorded as a cancellation. The builder redacts the
+  transcript of the run's secret build values and of any plain one carrying credential material, never
+  of other plain values (`buildLogRedactions`, with the sensitivity `OpenRunScopedVariables` returns).
+  The executor feeds the persisted, already redacted transcript to a bounded collector (`build_output_cause.go`): a ring per open BuildKit
+  step (400 lines, 64 KiB), one over the stream (64 KiB), BuildKit's replayed and Dockerfile-excerpt
+  lines refused. A step that finishes (`DONE` or `CACHED`) is dropped from both: what a passing step
+  printed on its way — npm retrying a request that hung up, a config probing for `git` — is never a
+  later step's cause. The failed step's lines are read first against one ordered signature table
+  (`build_output_signatures.go`), then the stream's, which by then holds only the steps still unfinished
+  and BuildKit's closing replay; the phase comes from which rendered instruction failed (the recipe's
+  install line, the plan's build command, the output guard, a setup line, or any step of a custom
+  Dockerfile). The resulting `BuildCause` — code, phase, command
+  (redacted, 160 characters), exit code, at most five validated identifiers, the transcript line that
+  proves it and a fix — is the step's evidence `cause`; its code is the step's and the run's terminal
+  code (`build_failed` when nothing matched) and its sentence the message, also written to the
+  transcript as `Diagnosis:`. The fix is computed from analyze_plan's recorded `candidate` when present,
+  else the plan's stored candidate for the same root and method (told apart by the plan's build and
+  start commands when several share them, as an Nx workspace's applications do), and the run's variable names and
+  scopes: the package manager whose lockfile is in sync, a variable or its build scope, a rewritten
+  runner, a Go or Python release the recipe offers, `NODE_OPTIONS` sized to three quarters of the
+  server's memory, `prisma generate` before the build, the detected output directory. A Compose
+  service's build is announced on the status stream so its steps are read apart and named with the
+  service; an image or Compose pull failure is named from the registry's error, including a refusal the
+  daemon returns before the pull's stream starts (`dockerx` prefixes it `pull image:` like one inside
+  the stream; only an unreachable daemon keeps its own error). A base image that cannot be resolved
+  keeps its cause (`registry_rate_limited`, `registry_unreachable` — DNS, TLS, refused and timed-out
+  connections, Go's `Client.Timeout exceeded` and a resolver's `server misbehaving` —,
+  `base_image_missing` — also Docker Hub's "repository does not exist or may require 'docker login'" —,
+  `registry_auth_failed`, `builder_missing`) with the daemon's own bounded reason in the transcript — a
+  .NET SDK image a `global.json` pin names that was never published is `dotnet_sdk_pin_unavailable`
+  instead —, a JDK or .NET release the recipe refuses at prepare_context ends the run with preflight's
+  own code (`java_version_unsupported`, `gradle_wrapper_incompatible`, `dotnet_version_unsupported`), and
+  a candidate's start names `runtime_port_in_use`, `image_missing` and `mount_invalid` from Docker's
+  refusal without repeating it. A context deadline that reaches a step while its run is alive is
+  `step_timeout`; only a cancelled context is a cancellation. The signature table and fixes are listed
+  in [the recipe contract](recipes.md#failure-diagnosis).
 - Deploy and force-build resolve the current desired revision (force-build disables cache); redeploy and
   rollback clone only available immutable artifacts and traverse the same checks/cutover path; restart
   stops and starts the existing live runtime without creating a release, then verifies the plan's
@@ -421,8 +893,10 @@ only renderer/executor/validation authority for their feature.
   `POST …/variables/import?dryRun=1` (the import's own tier: `system.admin`, session) takes the
   import's body and writes nothing: it answers one verdict per name, in the order the names were
   written, with the line — `added`, `changed` (the value, sensitivity or scopes differ), `unchanged`,
-  or `refused` with `invalid_name`, `duplicate` or `invalid_value` — so the import sheet can say what
-  pressing Import will do before it is pressed. Values meet the stored ones only as digests, on the
+  `skipped` (a name the body's `skip` list leaves out: the sheet sends `PORT` and `NODE_ENV`, which the
+  deployment sets itself, unless the operator keeps them), or `refused` with `invalid_name`,
+  `duplicate` or `invalid_value` — so the import sheet can say what pressing Import will do before it
+  is pressed. The import leaves out the same names. Values meet the stored ones only as digests, on the
   server, and the answer carries neither a value nor a digest. It is audited under an action of its
   own, `deploy.variable.import_preview` (the name count, sensitivity and scopes), rather than as the
   import it did not perform. What the import refuses as a whole — a
@@ -436,7 +910,7 @@ only renderer/executor/validation authority for their feature.
   Backups and Databases. Deployments store typed ownership links and use read-only owner observations for
   domain conflicts, DNS, existing certificate pairs, ports, public binds, firewall policy and dependency
   availability. A deploy re-runs those host observations from its frozen configuration in `analyze_plan`
-  before build or backup work; only its exact managed proxy site and exact live Docker runtime may be
+  — alongside the source checks above — before build or backup work; only its exact managed proxy site and exact live Docker runtime may be
   treated as reusable ownership. HTTPS activation resolves an already-issued certificate/key pair through
   Proxy and fails closed if it no longer exists; deployment activation never invents certificate paths or
   performs issuance itself.
@@ -499,29 +973,40 @@ only renderer/executor/validation authority for their feature.
   a draft's source answers `400 invalid_ref`, since such a head is built only through "Test this pull
   request"; a name the remote does not have answers `400 ref_not_found` (git's own `ls-remote --exit-code` exit status 2, "read
   the remote fine, no such ref"), and a remote that could not be read at all answers `502
-  source_unavailable`. The resolved revision and, when given, the requested ref name are recorded as
-  `{"requestedRevision", "requestedRef"}` in the run's metadata so the UI can say "Deploy of v1.4.2". This
-  never touches `deploy_git_watches`: that cursor is written only by the watcher's own poll/webhook path,
-  so a manual deploy of an older commit cannot make the watcher believe the branch lives there and
-  suppress its next real push. Retries copy it, while redeploy/rollback reuse their selected
-  release's identity. Old runs keep their saved plan identity. The deprecated draft `autoDeploy` input
-  remains accepted for compatibility but has no effect; draft commit no longer creates a hook without
-  a secret or provider registration. Automatic runs are audited as `deploy.git.change` and use the
-  same persistent queue, configuration/variable snapshots, checks and activation as manual runs.
-  For a Git source, `acquire_source` additionally reads the frozen revision's subject, author and date
-  with one `git log` against whichever repository it already has open — the materialized workspace, or
-  a local checkout — and folds a `commit` object (`sha`, `subject` capped at 200 characters, `author`,
-  `authoredAt`) into the run's metadata through `OrchestrationStore.MergeRunMetadata`, the one path that
-  mutates `deploy_runs.metadata_json` after enqueue. An unreadable history logs a transcript line and
-  leaves the field absent rather than failing the step. That line goes to `stderr`: the transcript
-  accepts only `stdout`, `stderr` and `status`, and the `warning` stream it was first written on was
-  refused, which failed the append and silenced every line the step logged after it. A retry's
-  wholesale metadata copy, plus every
-  run independently re-deriving the same commit from the same frozen revision, is what carries it
-  forward through a retry, redeploy or rollback. `GET /deploy/{id}/commits` still reads a legacy
-  project's local checkout only; a normalized Git-URL project's private release mirror keeps only
-  narrow per-revision snapshot refs, not a maintained branch tip, so listing its history cheaply from
-  that mirror remains open.
+  source_unavailable`. The configured branch's own resolution distinguishes the same exit status: a
+  renamed or deleted branch is `ref_not_found` for enqueue, detection and the watcher alike. Every other
+  git failure is classified inside `runPlanningGit` from its bounded output against a fixed substring
+  table (`source_failure.go`) and only the code crosses the boundary — git's stderr is remote-controlled
+  and still never reaches an error, an audit detail or a log: `source_auth_failed`,
+  `source_repository_missing`, `source_unreachable` (also any fetch that timed out) and
+  `source_revision_unavailable` (a recorded commit a force-push or deleted branch removed; the release
+  mirror names it only when a full fetch of the branch no longer contains the commit, since a branch
+  that merely moved on still holds it as an ancestor and the release builds it) each carry a fixed
+  sentence as `SourceFailure`, which unwraps to `ErrSourceUnavailable`. The API answers them `502` with
+  the code; the run's `acquire_source` step and terminal code carry it; the watcher records it as its
+  cursor reason, which the header's auto-deploy reading and the diagnosis (`auto_deploy_stopped`,
+  linking to the source settings or Credentials) name. The resolved revision and, when given, the
+  requested ref name are recorded as `{"requestedRevision", "requestedRef"}` in the run's metadata so
+  the UI can say "Deploy of v1.4.2". This never touches `deploy_git_watches`: that cursor is written
+  only by the watcher's own poll/webhook path, so a manual deploy of an older commit cannot make the
+  watcher believe the branch lives there and suppress its next real push. Retries copy it, while
+  redeploy/rollback reuse their selected release's identity. Old runs keep their saved plan identity.
+  The deprecated draft `autoDeploy` input remains accepted for compatibility but has no effect; draft
+  commit no longer creates a hook without a secret or provider registration. Automatic runs are audited
+  as `deploy.git.change` and use the same persistent queue, configuration/variable snapshots, checks
+  and activation as manual runs. For a Git source, `acquire_source` additionally reads the frozen
+  revision's subject, author and date with one `git log` against whichever repository it already has
+  open — the materialized workspace, or a local checkout — and folds a `commit` object (`sha`,
+  `subject` capped at 200 characters, `author`, `authoredAt`) into the run's metadata through
+  `OrchestrationStore.MergeRunMetadata`, the one path that mutates `deploy_runs.metadata_json` after
+  enqueue. An unreadable history logs a transcript line and leaves the field absent rather than failing
+  the step. That line goes to `stderr`: the transcript accepts only `stdout`, `stderr` and `status`,
+  and the `warning` stream it was first written on was refused, which failed the append and silenced
+  every line the step logged after it. A retry's wholesale metadata copy, plus every run independently
+  re-deriving the same commit from the same frozen revision, is what carries it forward through a
+  retry, redeploy or rollback. `GET /deploy/{id}/commits` still reads a legacy project's local checkout
+  only; a normalized Git-URL project's private release mirror keeps only narrow per-revision snapshot
+  refs, not a maintained branch tip, so listing its history cheaply from that mirror remains open.
 - Additional automation provider hooks verify each provider's exact raw-body signature before parsing and then fence
   event, repository, ref and delivery identity. The delivery row is reserved before preview or queue side
   effects, while legacy HMAC and scoped generic hooks retain their existing contracts. Environment branch/
@@ -741,8 +1226,12 @@ only renderer/executor/validation authority for their feature.
   (refused for secrets and for anything shaped like a reference). A `secret` input is deferred to the
   Variables screen as a required secret variable, never accepted in `blueprintInputs`; Mongo Express
   uses this for its MongoDB URI and offers the MongoDB connection sheet. Declared generated secrets become
-  `PlannedVariable.generate` (16–128 characters, secret only) and commit produces each value from
-  `crypto/rand` so it exists only sealed, revealed through the audited reveal route. Preflight accepts a
+  `PlannedVariable.generate` (16–128, secret only) with an optional `generateFormat` (`hex`, `base64`,
+  `laravel`, `keylist`; empty is alphanumeric, and the length counts random bytes for the base64
+  shapes), and commit produces each value from `crypto/rand` so it exists only sealed, revealed through
+  the audited reveal route. A detected self-issued secret is declared the same way, and Generate or
+  Rotate in the Variables settings keeps the shape the environment's recorded detection gives the
+  name, so a rotated Laravel `APP_KEY` keeps its `base64:` prefix. Preflight accepts a
   literal, generated, referenced or encrypted draft value for a required variable, and a managed `docker_volume` that Docker has not
   created yet passes as `storage_pending_creation` (Docker creates it on first start); a linked or
   uninspectable volume still blocks. Default automation presets that need a backup job arrive paused so
@@ -1072,7 +1561,11 @@ with automatic deployments, the live release with who deployed it, the runtime's
 health, domains with their certificates), each drawn as its product, over four readings (requests
 a minute, the failing share, processor and memory, each carrying its last hour and each a way to
 the page that has the rest); first sign-in, for a template that declares one; the findings from
-the operations diagnosis (`#attention`, which the header's verdict links to); the delivery
+the operations diagnosis (`#attention`, which the header's verdict links to) — among them
+`last_deploy_failed`, which diagnosis raises before its no-live-release silence from the
+environment's newest run when that run failed and made nothing live (critical when nothing serves,
+a warning while an older release does), titled by its cause and linking to the run, and
+`auto_deploy_stopped` when the watcher could not read its branch for a named reason; the delivery
 insights; the recent deployments beside the preview environments from `2xl`; and, for a project deploying
 a github.com repository, a **Pull requests** panel (`GET /deploy/{id}/pull-requests`, polled once a
 minute; hidden when the read fails, since the panel is a window onto GitHub rather than a fact about the
@@ -1119,9 +1612,14 @@ grouped under In progress and then by day, narrowed by counted chips. A run is o
 (`run-row.tsx`): who started it as a face or a product, `#N Deploy` and the commit subject, then
 branch (or the requested tag or commit) · sha · author · trigger, and its state, duration and time in
 fixed columns, the duration with a bar that turns amber past twice the median of at least five
-finished runs listed. Its verbs are declared once in `run-verbs.tsx` and shared with the run page's
-header: Redeploy (live), Retry (only a `failed` or `cancelled` run), Cancel (never during activation
-or a rollback) and, under the release's own name, What changed in this release (a comparison with
+finished runs listed. A failed run's row names its cause's title rather than its step. Its verbs are
+declared once in `run-verbs.tsx` and shared with the run page's header: Redeploy (live), Retry (only a
+`failed` or `cancelled` run — and, once the settings moved on since it, preceded by Deploy with current
+settings and relabelled "Retry with the settings it used", since Retry replays the run's own plan and
+variable snapshots; the list reads the settings drift of its newest run when that run can be retried,
+so a variable given another scope counts, and goes by the plan revision alone for older rows, as the
+project header's and the fleet's Retry does), Cancel (never during activation or a rollback) and,
+under the release's own name, What changed in this release (a comparison with
 the release before it), Compare with live (a sheet), Roll back to this release (a retained release,
 through a two-step dialog that names the domains, draws the swap and says what a rollback does not
 restore) and Pin or Unpin. Older runs load on request through the `before` cursor. Runtime draws the
@@ -1136,7 +1634,8 @@ Logs offers the activation window of the live run when the run's log handoff nam
 Settings are nine pages — General, Build, Runtime, Environment variables, Domains, Storage, Databases
 & backups, Automation, Danger zone — drawn in one frame (`settings/setting-card.tsx`): what is saved
 but not live yet at the top, as a strip that names each change and links to its page but carries no
-command (the header's is the one), then the page's readings, then its forms with their heads in a rail
+command (the header's is the one), then, on the page that holds it, the newest failed deployment's
+fix while that failure is still the news (`settings/last-failure.tsx`), then the page's readings, then its forms with their heads in a rail
 from `xl`. Each form saves the whole configuration with the revision it read, keeps its draft keyed on
 a digest of its own saved value (`useSettingDraft`) so a save of the form beside it no longer throws
 the draft away, and ends in a foot with when the change applies, Discard and Save; a refusal that
@@ -1195,7 +1694,22 @@ The deployment page (`/deploy/[id]/runs/[run]`) keeps the sequence-based stream,
 started the run and where, and how long it has taken — then, on a project's first deploy, the
 creation spine with *Deploy* as its last step, the release path (a stage the run did not include
 drawn dashed), and how the run ended: a failure in words with the engine's code beside it and a way to
-the failing step, the live address, or which release is live now. The build console paints its lines
+the failing step, the live address, or which release is live now. A failure is titled from the cause
+the failed step recorded (`failure-cause.ts` reads a build's or release task's `cause` and a health
+gate's `diagnostics.cause`), lists the identifiers it named, and offers its fix — to an administrator —
+as a button that opens the field it targets: the Build section for a package manager or version, the
+commands for a command, the output or the root, Runtime for the port or memory, Databases for a
+localhost database, and Variables with the editor opened on the variable (`?variable=NAME&scope=…`,
+plus `&value=…` for a computed flag) with the scope it lacked. "Show the line" selects the failing
+step and scrolls the console to the transcript line the cause points at, clearing a search or the
+errors filter that could hide it. When `GET /deploy/{id}/runs/{run}/settings-drift` says the plan or
+the variables changed since the run — the plan revision's fields and the variables' names, digests
+and scopes, never a value — the header's command becomes Deploy with current settings (the run's own
+commit for a remote Git source whose drift names no source change, a plain deploy otherwise — a source
+moved to another branch or repository is never asked for the old commit), Retry moves to the menu as
+"Retry with the settings it used", and one line under the failure says what changed. A run that failed
+with `source_revision_unavailable` offers Deploy the branch head the same way, since its commit cannot
+be fetched again. The build console paints its lines
 through the painter the dashboard's own transcripts use (`components/transcript-line.tsx`), numbers
 them, strips terminal escapes, groups each step's lines under a sticky rule, filters by stage and
 errors (with a count), shows the time since the run began, wraps, follows, copies and downloads

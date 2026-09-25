@@ -17,7 +17,7 @@ import { DatabaseQuickDeploy } from "@/components/deploy/quick-database"
 import { DATABASE_ENGINE_LABELS } from "@/components/deploy/vocabulary"
 import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
-import type { DbConnection } from "@/lib/types"
+import type { DbConnection, DeploymentDatabaseConnectionFormat } from "@/lib/types"
 
 /** The keys applications read a connection string from, one press each. */
 const VARIABLES = ["DATABASE_URL", "REDIS_URL", "MONGODB_URL"]
@@ -51,6 +51,7 @@ export function ProjectDatabase({
   label = "Add database",
   initialEngine,
   initialVariable = "DATABASE_URL",
+  format,
 }: {
   target?: "host" | "container"
   onConnect: (connection: DbConnection, url: string, variable: string) => void
@@ -58,6 +59,8 @@ export function ProjectDatabase({
   label?: string
   initialEngine?: string
   initialVariable?: string
+  /** The connection shape the application parses when it is not a URL: JDBC, ADO.NET, mysql2. */
+  format?: DeploymentDatabaseConnectionFormat
 }) {
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState<"create" | "existing">("create")
@@ -103,7 +106,7 @@ export function ProjectDatabase({
     try {
       const result = await get<{ url: string; reference?: string }>(
         `/databases/${connection.id}/url`,
-        { target },
+        { target, format },
         controller.signal,
       )
       if (!controller.signal.aborted) connect(connection, result.reference || result.url)
@@ -224,6 +227,7 @@ export function ProjectDatabase({
               resume={started}
               onStarted={setStarted}
               initialEngine={initialEngine}
+              format={format}
             />
           ) : (
             <div className="space-y-3">

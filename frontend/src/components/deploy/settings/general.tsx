@@ -10,6 +10,8 @@ import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type {
+  DeploymentDetectionChange,
+  DeploymentDetectionProposal,
   DeployProject,
   DeploymentDraftSource,
   DeploymentEnvironmentConfiguration,
@@ -54,6 +56,8 @@ import {
 } from "@/components/deploy/settings/setting-card"
 import { SettingPicture } from "@/components/deploy/settings/setting-picture"
 import { CredentialSelect } from "@/components/deploy/credentials-page"
+import { DetectionProposalPanel } from "@/components/deploy/settings/detection-proposal"
+import { applyDetectionChanges } from "@/components/deploy/settings/detection-changes"
 
 /**
  * What the project is called, where it is built from, and — for a Git
@@ -417,6 +421,54 @@ function SourceForm({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [formError, setFormError] = useState<string>()
   const [saving, setSaving] = useState(false)
+  // What detection read at the source just saved, where it answers a build
+  // field differently than it did when the plan was saved: the plan keeps
+  // the old answer until one is applied.
+  const [proposal, setProposal] = useState<DeploymentDetectionProposal>()
+  const [applying, setApplying] = useState(false)
+  const detectionChanges = (proposal?.changes ?? []).filter((change) => change.changed)
+  // Applied onto the plan detection was compared with, under that plan's
+  // revision: a plan saved since — another tab, another reader — refuses
+  // the save rather than taking values compared with a plan that is gone.
+  const applyDetection = async (changes: DeploymentDetectionChange[]) => {
+    if (!proposal) return
+    setApplying(true)
+    try {
+      const path = `/deploy/${projectId}/environments/${environmentId}/configuration`
+      const compared = await get<DeploymentEnvironmentConfiguration>(path)
+      if (compared.revision !== proposal.revision)
+        throw new Error(
+          "The settings changed after detection read the source. Use Detect again in Build settings to compare with them.",
+        )
+      const next = applyDetectionChanges(compared.build, compared.runtime, changes)
+      const saved = await put<DeploymentEnvironmentConfiguration>(path, {
+        revision: proposal.revision,
+        build: next.build,
+        runtime: next.runtime,
+        dependencies: compared.dependencies,
+        checks: compared.checks,
+        domains: compared.domains,
+      })
+      // The rest of the proposal was compared with the plan this save
+      // started from, which it changed only where it applied.
+      setProposal(
+        (current) =>
+          current && {
+            ...current,
+            revision: saved.revision,
+            changes: current.changes.filter((change) => !changes.includes(change)),
+          },
+      )
+      notify.success(changes.length === 1 ? `${changes[0].label} applied` : "Detection applied", {
+        description: "The next deployment builds with it.",
+      })
+      onSaved()
+    } catch (caught) {
+      notify.error("Could not apply what detection found", caught)
+    } finally {
+      setApplying(false)
+    }
+  }
 
   // Absent entirely (the backend has not shipped it yet) or missing the one
   // field this kind actually identifies itself by — either way, the value on
@@ -465,7 +517,11 @@ function SourceForm({
               credentialId: value.credentialId,
             }
     try {
-      await put(`/deploy/${projectId}/environments/${environmentId}/source`, body)
+      const updated = await put<{ proposal?: DeploymentDetectionProposal }>(
+        `/deploy/${projectId}/environments/${environmentId}/source`,
+        body,
+      )
+      setProposal(updated.proposal)
       // The fields went out trimmed; the draft takes what was sent, or a
       // trailing space would read as an edit the save did not make.
       patch({
@@ -558,6 +614,18 @@ function SourceForm({
           notLive: pending.changes.some((change) => change.kind === "source"),
         })}
       >
+        {proposal && (
+          <DetectionProposalPanel
+            projectId={projectId}
+            title="Detection changed"
+            proposal={proposal}
+            changes={detectionChanges}
+            canEdit={canEdit}
+            applying={applying}
+            onApply={(changes) => void applyDetection(changes)}
+            onDismiss={() => setProposal(undefined)}
+          />
+        )}
         {isGit ? (
           <>
             <Field

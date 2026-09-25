@@ -93,6 +93,8 @@ export function TranscriptRow({
   tokens,
   stamp,
   trailing,
+  anchor,
+  marked,
 }: {
   line: TranscriptLine
   wrap: boolean
@@ -112,6 +114,10 @@ export function TranscriptRow({
   stamp?: React.ReactNode
   /** After the line's own text — the engine's note that it cut a long chunk short. */
   trailing?: React.ReactNode
+  /** The row's element id, for a surface that scrolls to one line. */
+  anchor?: string
+  /** The line a diagnosis points at: held out from the ones around it. */
+  marked?: boolean
 }) {
   if (line.kind === "blank") return <li aria-hidden className="h-3" />
   const lane = laneFor(line.service)
@@ -226,10 +232,13 @@ export function TranscriptRow({
 
   return (
     <li
+      id={anchor}
+      aria-current={marked ? "true" : undefined}
       // Long runs are a few thousand rows; the ones off screen are not laid out.
       style={{ contentVisibility: "auto", containIntrinsicSize: "auto 24px" }}
       className={cn(
         "relative flex min-w-0 gap-3 px-3 hover:bg-row-hover sm:px-4",
+        marked && "scroll-mt-10 ring-1 ring-destructive/60 ring-inset",
         line.kind === "error" && "bg-wash-danger hover:bg-wash-danger",
         line.kind === "warning" && "bg-wash-warning hover:bg-wash-warning",
         line.kind === "command" && "mt-1 border-t border-hairline pt-1",

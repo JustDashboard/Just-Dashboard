@@ -37,10 +37,21 @@ function referenceMark(reference: string) {
  * read, so those are offered first; the free-text field is for anything in a
  * registry that is not here yet.
  */
-export function SourceImage({ onInspected }: { onInspected: (flow: ConfigureFlow) => void }) {
+export function SourceImage({
+  onInspected,
+  initialReference,
+}: {
+  onInspected: (flow: ConfigureFlow) => void
+  /** An image reference from the address, filled in on arrival. */
+  initialReference?: string
+}) {
   const images = usePoll((signal) => get<DockerImage[]>("/docker/images", undefined, signal), 0)
   const [filter, setFilter] = useSessionState("deploy.new.image.filter", "")
-  const [reference, setReference] = useSessionState("deploy.new.image.reference", "")
+  const [reference, setReference] = useSessionState(
+    "deploy.new.image.reference",
+    "",
+    initialReference,
+  )
   const [credentialId, setCredentialId] = useSessionState<number | undefined>(
     "deploy.new.image.credential",
     undefined,

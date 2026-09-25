@@ -2,8 +2,14 @@ import { del, get, post, put } from "@/lib/api"
 import { forgetMemoryState, forgetSessionState } from "@/lib/view-state"
 import {
   defaultConfiguration,
+  detectedVariableDeclarations,
   discoveredEnvironmentRows,
+  rowNeedsOperator,
 } from "@/components/deploy/deployment-defaults"
+import {
+  domainValue,
+  synchronizePrimaryDomain,
+} from "@/components/deploy/new-project/domain-bindings"
 import { DEPLOYMENT_NAME } from "@/components/deploy/vocabulary"
 import type {
   DeploymentConfiguration,
@@ -13,6 +19,8 @@ import type {
   DeploymentDraftSource,
   DeploymentHostnameSuggestion,
   DeploymentPreflight,
+  DeploymentPreflightFinding,
+  DeploymentVariableSetup,
   WorkloadProfile,
 } from "@/lib/types"
 
@@ -187,10 +195,70 @@ export async function importEnvironment(
   )
 }
 
-export async function enqueueDeploy(projectId: number, environmentId: number) {
+export async function enqueueDeploy(
+  projectId: number,
+  environmentId: number,
+  sourceRevision?: string,
+) {
   return post<{ id: number }>(`/deploy/${projectId}/environments/${environmentId}/runs`, {
     operation: "deploy",
+    ...(sourceRevision ? { sourceRevision } : {}),
   })
+}
+
+/**
+ * The commit a new project's first deployment builds: the one Review checked,
+ * for a remote Git repository, rather than whatever the branch points at by
+ * the time Deploy lands. A draft resumed days later was reviewed against its
+ * detection's commit, and building the branch head instead would ship a plan
+ * nobody looked at. Every later deployment follows the branch.
+ *
+ * Only a remote Git source can be pinned — the run request refuses a
+ * revision for a local checkout, an image or a Compose file — and only when
+ * the check that just passed read that commit: one it could not read says
+ * nothing about it, and the branch head is what a deployment built before.
+ */
+export function firstDeployRevision(
+  source: DeploymentDraftSource,
+  detection: DeploymentDetection | undefined,
+  findings: DeploymentPreflightFinding[],
+) {
+  const revision = detection?.source.revision
+  const remote =
+    source.kind === "git" && (source.mode === "git_url" || source.mode === "connected_repository")
+  const read = !findings.some((finding) => finding.code === "source_inspection_unavailable")
+  return remote && read && revision && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(revision)
+    ? revision
+    : undefined
+}
+
+/**
+ * The candidate to pick after the root directory or builder was edited away
+ * from the picked one: the one detection found at the typed root that builds
+ * the plan's way — the plan's recipe first, then detection's own choice — so
+ * preflight judges that root by its facts, not another directory's.
+ *
+ * A picked candidate already at that root and builder stays picked. Two
+ * candidates can share a root (a Django app and its asset package.json), and
+ * which of them to build is detection's or the reader's choice, not an edit's.
+ */
+export function rootEditCandidate(
+  detection: DeploymentDetection | undefined,
+  picked: DeploymentDetectionCandidate | undefined,
+  build: Pick<DeploymentConfiguration["build"], "rootDirectory" | "method" | "recipe">,
+) {
+  if (!picked) return undefined
+  const root = (build.rootDirectory ?? "").trim().replace(/^\/+|\/+$/g, "")
+  if (picked.root === root && picked.buildMethod === build.method) return undefined
+  const here =
+    detection?.candidates.filter(
+      (candidate) => candidate.root === root && candidate.buildMethod === build.method,
+    ) ?? []
+  return (
+    here.find((candidate) => build.method === "recipe" && candidate.recipe === build.recipe) ??
+    here.find((candidate) => candidate.id === detection?.selectedId) ??
+    here[0]
+  )
 }
 
 /** What a source tab hands to Configure once it has inspected. */
@@ -305,6 +373,11 @@ export function landingStep(flow: ConfigureFlow, advanced = false): ConfigureSte
   if (
     (detection?.candidates?.length ?? 0) > 1 ||
     (candidate?.needsDecision?.length ?? 0) > 0 ||
+    // What the repository is, or a better way to run it, is this screen's
+    // to say: a library is not a plan to review, and a reviewed template of
+    // the same application is offered beside the source.
+    Boolean(candidate?.notDeployable) ||
+    (detection?.alternatives?.length ?? 0) > 0 ||
     Boolean(detection?.unavailable) ||
     !DEPLOYMENT_NAME.test(flow.name) ||
     // The name was asked about while the source was inspected, so a collision
@@ -328,7 +401,7 @@ export function landingStep(flow: ConfigureFlow, advanced = false): ConfigureSte
   // is the one thing nobody else can answer.
   if (
     declaredVariablesNeedReview(flow) ||
-    discoveredEnvironmentRows(candidate).some((row) => row.detected && !row.value)
+    discoveredEnvironmentRows(candidate).some(rowNeedsOperator)
   )
     return "variables"
   return "review"
@@ -399,21 +472,82 @@ function effectiveConfiguration(
   // A blueprint's plan is rendered by the server from the reviewed definition;
   // the browser only offers it for review, never recomputes it.
   if (source.mode === "blueprint" && draft.data.configuration) return draft.data.configuration
-  return defaultConfiguration(candidate?.profile ?? fallbackProfile, candidate, source, detection)
+  return defaultConfiguration(
+    candidate?.profile ?? fallbackProfile,
+    candidate,
+    source,
+    detection,
+    draft.data.intent?.name,
+    draft.id,
+  )
 }
 
-/** Match the saved plan so pruning an empty address never triggers another preflight. */
+type PlannedVariable = DeploymentConfiguration["variables"][number]
+
+/**
+ * An address that follows the domain has nothing to follow until one is
+ * planned. Committed empty, it would be set to "" — which an application
+ * reads as a value, unlike an unset variable: the runtime would inject
+ * `NEXTAUTH_URL=`, on which next-auth 4 fails every sign-in request — so it
+ * waits in the form, and preflight names it while it is missing.
+ */
+function awaitsDomain(variable: PlannedVariable) {
+  return Boolean(
+    variable.domainTemplate &&
+    !variable.value &&
+    !variable.reference &&
+    !variable.generate &&
+    !variable.required,
+  )
+}
+
+/**
+ * Match the saved plan so pruning an empty address never triggers another
+ * preflight. A blueprint's variables are its reviewed definition's, kept as
+ * rendered.
+ */
 export function configurationForSave(
   configuration: DeploymentConfiguration,
+  source?: DeploymentDraftSource,
 ): DeploymentConfiguration {
+  const blueprint = source?.kind === "blueprint" || source?.mode === "blueprint"
   return {
     ...configuration,
     domains: configuration.domains.filter((domain) => domain.hostname.trim()),
+    variables: blueprint
+      ? configuration.variables
+      : configuration.variables.filter((variable) => !awaitsDomain(variable)),
     checks: configuration.checks.map((check) =>
       check.phase === "readiness" && check.kind === "http"
         ? { ...check, config: { ...(check.config ?? {}), port: undefined } }
         : check,
     ),
+  }
+}
+
+/**
+ * Puts the addresses `configurationForSave` held back into a plan the server
+ * handed back, bound to whatever domain it plans. The saved copy never has
+ * them, and without them a domain added after Review's automatic check has
+ * nothing to bind: AUTH_URL or ORIGIN would reach the release unset while
+ * its row still read "Follows the project's domain".
+ */
+export function withHeldDomainVariables(
+  configuration: DeploymentConfiguration,
+  held: PlannedVariable[],
+): DeploymentConfiguration {
+  const present = new Set(configuration.variables.map((variable) => variable.name))
+  const missing = held.filter((variable) => awaitsDomain(variable) && !present.has(variable.name))
+  if (!missing.length) return configuration
+  return {
+    ...configuration,
+    variables: [
+      ...configuration.variables,
+      ...missing.map((variable) => ({
+        ...variable,
+        value: domainValue(variable.domainTemplate ?? "", configuration.domains[0]),
+      })),
+    ],
   }
 }
 
@@ -437,10 +571,11 @@ export function withSuggestedHostname(
     hostname.method === "none"
   )
     return configuration
-  return {
-    ...configuration,
-    domains: [{ hostname: hostname.hostname.toLowerCase(), https: true, ownership: "managed" }],
-  }
+  // Through the same binding a typed domain goes through, so the addresses
+  // detection bound to the domain follow the suggested one from the start.
+  return synchronizePrimaryDomain(configuration, [
+    { hostname: hostname.hostname.toLowerCase(), https: true, ownership: "managed" },
+  ])
 }
 
 /** Re-detection updates defaults; an explicit edit remains the operator's choice. */
@@ -587,10 +722,20 @@ export async function fetchHostnameSuggestion(name: string) {
 export async function inspectAndPrepare(
   name: string,
   profile: WorkloadProfile,
-  source: DeploymentDraftSource,
+  initialSource: DeploymentDraftSource,
   extra: { sourceLabel: string; githubRepo?: string; importPreview?: ImportPreview },
 ): Promise<ConfigureFlow> {
-  const result = await inspectSource(name, profile, source)
+  let source = initialSource
+  let result = await inspectSource(name, profile, source)
+  // A theme submodule on the repository's own host, or images the build root
+  // keeps in LFS, are part of what gets built: turning them on here is
+  // answering a question detection already answered, the way the Source
+  // section's switches would. A submodule on another host is still asked.
+  const clone = automaticCloneOptions(result.detection, result.candidate, source)
+  if (clone) {
+    source = { ...source, ...clone }
+    result = await reinspect(result.draft, profile, source)
+  }
   const hostname = await fetchHostnameSuggestion(name)
   const effectiveProfile = result.candidate?.profile ?? profile
   // HTTPS is offered by default because it is what anyone wants, but a
@@ -678,6 +823,11 @@ export async function resumeFlow(draft: DeploymentDraft): Promise<ConfigureFlow>
   const hostname = await fetchHostnameSuggestion(intent.name)
   if (!draft.data.configuration)
     configuration = withSuggestedHostname(configuration, profile, source, hostname)
+  else if (source.kind !== "blueprint")
+    configuration = withHeldDomainVariables(
+      configuration,
+      detectedVariableDeclarations(candidate, profile),
+    )
   return {
     name: intent.name,
     // A saved configuration records the operator's profile choice; detection
@@ -747,6 +897,17 @@ export type EnvironmentRow = {
   detected?: boolean
   /** The value was minted here rather than typed or copied from anywhere. */
   generated?: boolean
+  /** Why the value was filled in, said under it. */
+  note?: string
+  /** How the plan answers the row when nothing is typed, and why (`DeploymentDetectedVariable.setup`). */
+  setup?: DeploymentVariableSetup
+  reason?: string
+  /** The application cannot start without it. */
+  required?: boolean
+  /** Compiled into the browser bundle, so its value is public. */
+  browser?: boolean
+  /** A committed file gives it a loopback value when nothing is set here. */
+  localhostIn?: string
 }
 
 /** The typed rows and the pasted block, joined into one .env document. */
@@ -759,4 +920,107 @@ export function environmentText(rows: EnvironmentRow[], dotenv: string) {
   ]
     .filter(Boolean)
     .join("\n")
+}
+
+/** The further database URLs a Rails 8 application reads, as references to the linked server. */
+export function railsDatabaseRows(
+  connectionId: number,
+  database: string | undefined,
+  names: string[] = [],
+): EnvironmentRow[] {
+  if (!database || !/^[A-Za-z0-9_]+$/.test(database)) return []
+  return names.map((name) => ({
+    name,
+    value: `\${{database.${connectionId}.url.${database}_${name.replace(/_DATABASE_URL$/, "").toLowerCase()}}}`,
+  }))
+}
+
+// ---------------------------------------------------------------------------
+// Repository shape
+// ---------------------------------------------------------------------------
+
+function underRoot(path: string, root: string) {
+  return !root || path === root || path.startsWith(`${root}/`)
+}
+
+/**
+ * The declared submodules a build root needs: those inside it, and the one
+ * it is itself inside. Preflight judges them the same way.
+ */
+export function submodulesForRoot(
+  requirements: DeploymentDetection["gitRequirements"] | undefined,
+  root: string,
+) {
+  return (requirements?.submoduleList ?? []).filter(
+    (submodule) => underRoot(submodule.path, root) || underRoot(root, submodule.path),
+  )
+}
+
+/**
+ * How many LFS-tracked files a build root holds. The repository root's count
+ * is exact; a nested root is counted from the listed paths, and when the
+ * list was cut short the count is unknown rather than zero.
+ */
+export function lfsFilesForRoot(
+  requirements: DeploymentDetection["gitRequirements"] | undefined,
+  root: string,
+): number | undefined {
+  if (!root) return requirements?.lfsFiles ?? 0
+  const paths = requirements?.lfsPaths ?? []
+  const listed = paths.filter((path) => underRoot(path, root)).length
+  if (listed === 0 && (requirements?.lfsFiles ?? 0) > paths.length) return undefined
+  return listed
+}
+
+/**
+ * The clone options detection has already answered for the chosen root: its
+ * submodules when every one it holds is on the repository's own host, and
+ * Git LFS when files under it are tracked by LFS. Nothing when the source
+ * already includes them, when a submodule needs access to another host, or
+ * when the source is not a Git checkout.
+ */
+export function automaticCloneOptions(
+  detection: DeploymentDetection | undefined,
+  candidate: DeploymentDetectionCandidate | undefined,
+  source: DeploymentDraftSource,
+): Pick<DeploymentDraftSource, "includeSubmodules" | "includeLfs"> | undefined {
+  if (!detection || (source.kind !== "git" && source.kind !== "local")) return undefined
+  const root = candidate?.root ?? ""
+  const requirements = detection.gitRequirements
+  const options: Pick<DeploymentDraftSource, "includeSubmodules" | "includeLfs"> = {}
+  const submodules = submodulesForRoot(requirements, root)
+  if (
+    requirements.submodulesChecked &&
+    !source.includeSubmodules &&
+    submodules.length > 0 &&
+    submodules.every((submodule) => submodule.sameSource)
+  )
+    options.includeSubmodules = true
+  const lfsFiles = lfsFilesForRoot(requirements, root)
+  if (requirements.lfsChecked && !source.includeLfs && lfsFiles) options.includeLfs = true
+  return Object.keys(options).length ? options : undefined
+}
+
+const NOT_DEPLOYABLE: Record<string, string> = {
+  library: "a library",
+  cli: "a command-line tool",
+  "editor-extension": "an editor extension",
+  "browser-extension": "a browser extension",
+  "github-action": "a GitHub Action",
+  "desktop-app": "a desktop app",
+  "mobile-app": "a mobile app",
+  notebook: "notebooks",
+  "windows-only": "Windows-only",
+}
+
+/**
+ * What the candidate chooser says about a candidate beyond its confidence:
+ * that it is not a service, or why it ranks below the application.
+ */
+export function candidateStanding(candidate: DeploymentDetectionCandidate) {
+  if (candidate.notDeployable)
+    return `Not a service: ${NOT_DEPLOYABLE[candidate.notDeployable] ?? candidate.notDeployable}`
+  if (candidate.demotion) return candidate.demotion
+  if (candidate.recipeIssue && !candidate.recipe) return "No automatic recipe"
+  return undefined
 }

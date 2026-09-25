@@ -1,0 +1,10 @@
+/*
+  X-Frame-Options: DENY
+/docs
+  X-Robots-Tag: noindex
+/404.html
+  Cache-Control: no-store
+/app/*
+  Cache-Control: no-cache
+/.private/*
+  X-Leak: yes

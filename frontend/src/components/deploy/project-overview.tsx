@@ -52,6 +52,8 @@ import { ProjectWiring } from "@/components/deploy/project-wiring"
 import { Insights } from "@/components/deploy/insights"
 import { RunRow } from "@/components/deploy/run-row"
 import { UsageTiles } from "@/components/deploy/usage-tiles"
+import { BeforeYouDeploy } from "@/components/deploy/deploy-check"
+import { attentionFindings } from "@/components/deploy/deploy-check-state"
 import { usePullRequestVerbs } from "@/components/deploy/pull-request-verbs"
 
 /**
@@ -228,6 +230,25 @@ export function ProjectOverview() {
       </PanelBody>
     </Panel>,
   ])
+
+  // What a deployment of the saved plan would stop on, or should be
+  // confirmed, from the check the project made when it opened — here, before
+  // the header's Deploy is pressed, rather than on the run page after.
+  if (
+    project.check &&
+    !deployment.activeRun &&
+    attentionFindings(project.check.findings).length > 0
+  )
+    blocks.push([
+      "before-you-deploy",
+      <BeforeYouDeploy
+        key="before-you-deploy"
+        projectId={project.projectId}
+        result={project.check}
+        checking={project.checking}
+        onRecheck={project.recheck}
+      />,
+    ])
 
   if (access)
     blocks.push([

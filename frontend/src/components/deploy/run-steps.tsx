@@ -3,7 +3,12 @@
 import { Logs } from "@/components/icons"
 import { plural, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import type { DeploymentStep } from "@/lib/types"
+import { useRouter } from "next/navigation"
+import type {
+  DeploymentDetectionCandidate,
+  DeploymentPreflightFinding,
+  DeploymentStep,
+} from "@/lib/types"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { Well } from "@/components/panel"
 import { Detail, DetailList } from "@/components/page"
@@ -18,10 +23,17 @@ import { Button } from "@/components/ui/button"
 import {
   StepMark,
   formatDuration,
+  frameworkLabel,
   stepName,
   stepSeconds,
   stepStateLabel,
 } from "@/components/deploy/vocabulary"
+import { FindingRow } from "@/components/deploy/deployment-findings"
+import {
+  attentionFindings,
+  findingFixAction,
+  settingsPathForField,
+} from "@/components/deploy/deploy-check-state"
 
 /** Where a step sits in the run's time, as start and end in milliseconds. */
 function stepSpan(step: DeploymentStep, now: number) {
@@ -68,11 +80,14 @@ const FILL: Partial<Record<DeploymentStep["state"], string>> = {
  * line whether a step passed (a tick) or is waiting (a ring).
  */
 export function RunSteps({
+  projectId,
   steps,
   now,
   lineCounts,
   onSelectStep,
 }: {
+  /** The project, so a preflight finding can open the settings page holding its field. */
+  projectId?: number
   steps: DeploymentStep[]
   now: number
   /** How many lines each step wrote to the build log; a step that wrote none is absent. */
@@ -110,7 +125,8 @@ export function RunSteps({
       >
         {steps.map((step, index) => {
           const seconds = stepSeconds(step, now)
-          const facts = evidenceFacts(step.evidence)
+          const preflight = step.key === "analyze_plan" ? preflightOf(step.evidence) : undefined
+          const facts = evidenceFacts(preflight ? preflight.rest : step.evidence)
           const reading = step.errorMessage ?? readingOf(step.evidence)
           const lines = lineCounts.get(step.id) ?? 0
           const place = spans[index]
@@ -191,7 +207,8 @@ export function RunSteps({
                         </Detail>
                       ))}
                     </DetailList>
-                    {facts.length === 0 && !step.errorCode && (
+                    {preflight && <PreflightChecks projectId={projectId} {...preflight} />}
+                    {facts.length === 0 && !step.errorCode && !preflight && (
                       <p className="text-hint text-muted-foreground">
                         The engine kept no evidence for this step.
                       </p>
@@ -249,6 +266,108 @@ function Waterfall({
         />
       )}
     </span>
+  )
+}
+
+type Preflight = {
+  findings: DeploymentPreflightFinding[]
+  candidate?: DeploymentDetectionCandidate
+  candidateSource?: string
+  rest: Record<string, unknown>
+}
+
+/**
+ * analyze_plan's evidence: what preflight found, and the candidate it judged
+ * the plan against, apart from the digests the step also keeps — the
+ * findings are drawn as findings rather than as a well of JSON.
+ */
+function preflightOf(evidence: Record<string, unknown> | undefined): Preflight | undefined {
+  if (!evidence || !Array.isArray(evidence.findings)) return undefined
+  return {
+    findings: evidence.findings as DeploymentPreflightFinding[],
+    candidate: evidence.candidate as DeploymentDetectionCandidate | undefined,
+    candidateSource:
+      typeof evidence.candidateSource === "string" ? evidence.candidateSource : undefined,
+    rest: Object.fromEntries(
+      Object.entries(evidence).filter(
+        ([key]) => key !== "findings" && key !== "candidate" && key !== "candidateSource",
+      ),
+    ),
+  }
+}
+
+/** What the candidate was, as a line: the framework and the package manager. */
+function candidateLine(candidate: DeploymentDetectionCandidate) {
+  const parts = [
+    candidate.framework ? frameworkLabel(candidate.framework) : candidate.name,
+    candidate.packageManager,
+    candidate.root ? `in ${candidate.root}` : undefined,
+  ].filter(Boolean)
+  return parts.join(" · ")
+}
+
+/**
+ * "Checked before building": the step's findings, each with what to do and
+ * the way to its field, and what the plan was judged against — the commit's
+ * own detection, or the evidence saved with the plan when the commit could
+ * not be read.
+ */
+function PreflightChecks({
+  projectId,
+  findings,
+  candidate,
+  candidateSource,
+}: Preflight & { projectId?: number }) {
+  const router = useRouter()
+  const attention = attentionFindings(findings)
+  const counts = (["blocked", "decision", "warning", "unavailable"] as const)
+    .map(
+      (severity) =>
+        [severity, attention.filter((item) => item.severity === severity).length] as const,
+    )
+    .filter(([, count]) => count > 0)
+    .map(([severity, count]) =>
+      severity === "blocked"
+        ? `${count} blocked`
+        : severity === "decision"
+          ? plural(count, "decision")
+          : severity === "warning"
+            ? plural(count, "warning")
+            : `${count} unavailable`,
+    )
+  const judged =
+    candidate && candidateSource === "detected"
+      ? `read from this commit: ${candidateLine(candidate)}`
+      : candidate && candidateSource === "recorded"
+        ? `read from the evidence saved with the plan: ${candidateLine(candidate)}`
+        : undefined
+  return (
+    <section aria-label="Checked before building" className="space-y-2">
+      <p className="text-hint text-muted-foreground">
+        Checked before building:{" "}
+        {counts.length
+          ? counts.join(", ")
+          : `every one of ${plural(findings.length, "check")} passed`}
+        {judged && ` · ${judged}`}
+      </p>
+      {attention.map((finding, index) => (
+        <FindingRow
+          key={`${finding.code}:${finding.fieldId ?? index}`}
+          finding={finding}
+          index={index}
+          canOpenRemedy={projectId !== undefined && Boolean(settingsPathForField(finding.fieldId))}
+          onOpenRemedy={(item) => {
+            const path = settingsPathForField(item.fieldId)
+            if (projectId !== undefined && path) router.push(`/deploy/${projectId}${path}`)
+          }}
+          fixAction={
+            projectId === undefined
+              ? undefined
+              : findingFixAction(projectId, finding, (href) => router.push(href))
+          }
+        />
+      ))}
+    </section>
   )
 }
 

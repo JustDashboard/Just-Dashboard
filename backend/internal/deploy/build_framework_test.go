@@ -176,3 +176,68 @@ func TestCommittedFrameworkIsCarriedUntilTheSourceMoves(t *testing.T) {
 		t.Fatalf("moved source kept the framework: %#v preview %s", moved.Build, movedPreview)
 	}
 }
+
+// Build settings read the candidate the build still describes, with its
+// lockfiles and per-manager installs, from the evidence saved at commit; a
+// build moved to another directory no longer describes it.
+func TestConfigurationReadCarriesTheDescribedCandidate(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	fixture := newPlanningStoreFixture(t)
+	draft, err := fixture.plans.Create(ctx, 41, "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft = saveCompletePlanningDraft(t, fixture.plans, draft)
+	candidate := newDetectedCandidate("", BuildNone, DetectedCandidate{
+		Name: "web", Profile: ProfileWorker, Confidence: ConfidenceHigh, PackageManager: "bun", PackageManagers: []string{"bun", "npm"},
+		Lockfiles: []DetectedLockfile{
+			{Path: "bun.lock", Manager: "bun", State: LockfileInSync, Note: "bun.lock matches package.json"},
+			{Path: "package-lock.json", Manager: "npm", State: LockfileStale, Missing: []string{"zod"}, Note: "package-lock.json is missing 1 dependency (zod)"},
+		},
+		Evidence: []DetectionEvidence{{Path: "package.json", Reason: "fixture"}}, NeedsDecision: []string{},
+	})
+	draft, err = fixture.plans.SaveDetection(ctx, draft.ID, 41, true, draft.Revision, DetectionResult{
+		Source: draft.Data.Detection.Source, Candidates: []DetectedCandidate{candidate}, SelectedID: candidate.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err = fixture.plans.Save(ctx, draft.ID, 41, true, DraftSaveRequest{
+		Revision: draft.Revision, Step: DraftConfiguration, Configuration: draft.Data.Configuration,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preflight, err := PreflightDraft(ctx, draft, &preflightObserverFake{observation: HostObservation{
+		Facilities: map[string]FacilityObservation{"git": {Available: true}}, Paths: []PathObservation{}, Ports: []PortObservation{},
+	}}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draft, err = fixture.plans.SavePreflight(ctx, draft.ID, 41, true, draft.Revision, preflight); err != nil {
+		t.Fatal(err)
+	}
+	committed, err := fixture.plans.Commit(ctx, draft.ID, 41, true, DraftCommitRequest{Revision: draft.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, err := fixture.plans.EnvironmentConfiguration(ctx, committed.ProjectID, committed.EnvironmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.Detected == nil || read.Detected.ID != candidate.ID || len(read.Detected.Lockfiles) != 2 || read.Detected.Lockfiles[1].State != LockfileStale {
+		t.Fatalf("detected = %+v", read.Detected)
+	}
+	moved := read.Build
+	moved.RootDirectory = "services/api"
+	saved, err := fixture.plans.SaveEnvironmentConfiguration(ctx, committed.ProjectID, committed.EnvironmentID, ConfigurationWriteRequest{
+		Revision: read.Revision, Build: moved, Runtime: read.Runtime, Dependencies: read.Dependencies, Checks: read.Checks, Domains: read.Domains,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Detected != nil {
+		t.Fatalf("a build in another directory kept the old candidate: %+v", saved.Detected)
+	}
+}

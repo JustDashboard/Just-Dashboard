@@ -28,8 +28,14 @@ It manages exactly one machine. There is no fleet view, no agents to enrol, no c
 ## What it does
 
 - **Deploys from a repository, an image, a template or a Compose file.** Detection fills the
-  form in; every release is immutable, so rollback reactivates what ran before. Web services get
-  a health-gated cutover.
+  form in for Node, Bun and Deno, Python, PHP, Go, Rust, Java and Kotlin, .NET, Ruby, Elixir, Scala,
+  Clojure, Dart, Gleam and static site generators: it picks the application out of a repository's
+  examples, docs and tooling, reads lockfiles to choose the package manager and runtime, plans a
+  volume for the SQLite file, uploads or key ring an app would otherwise lose on its next release, and
+  says before you deploy what it will not run. Every deployment is checked against the commit it
+  builds before it builds, what would stop it or deserves a look is shown before Deploy is pressed,
+  and a build that still fails names its cause and the setting that fixes it. Every release is
+  immutable, so rollback reactivates what ran before. Web services get a health-gated cutover.
 - **Databases you can hand out.** Eight engines browsed, queried and diagrammed from one place. A
   database started here gets a connection string, and one press opens it to the internet or
   closes it again.

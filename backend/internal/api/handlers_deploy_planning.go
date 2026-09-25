@@ -128,6 +128,9 @@ func (s *Server) handleDeploymentDraftDetect(w http.ResponseWriter, r *http.Requ
 			return mapDeploymentPlanningError(fmt.Errorf(
 				"%w: selected candidate %q was not among the detected candidates", deploy.ErrInvalidPlan, request.SelectedID))
 		}
+		if detection.SelectedID != request.SelectedID {
+			detection.SelectionReason = "chosen on the project step"
+		}
 		detection.SelectedID = request.SelectedID
 	}
 	principal := httpx.MustPrincipal(r)
@@ -159,8 +162,8 @@ func (s *Server) handleDeploymentDraftPreflight(w http.ResponseWriter, r *http.R
 		return mapDeploymentPlanningError(deploy.ErrDraftRevision)
 	}
 	principal := httpx.MustPrincipal(r)
-	preflight, err := deploy.PreflightDraft(
-		r.Context(), draft, s.modules.deployPreflight, principal.Can(auth.CapSystemAdmin),
+	preflight, err := deploy.PreflightDraftWithSource(
+		r.Context(), draft, s.modules.deployPreflight, s.deploymentSourceInspector(), principal.Can(auth.CapSystemAdmin),
 	)
 	if err != nil {
 		return mapDeploymentPlanningError(err)
@@ -306,6 +309,15 @@ func sameStringSet(expected, actual []string) bool {
 	return true
 }
 
+// deploymentSourceInspector is the analyzer as a SourceInspector, or none: a
+// typed nil pointer would read as an inspector and fail on first use.
+func (s *Server) deploymentSourceInspector() deploy.SourceInspector {
+	if s.modules.deploySources == nil {
+		return nil
+	}
+	return s.modules.deploySources
+}
+
 func (s *Server) deploymentDraftForPrincipal(r *http.Request) (*deploy.Draft, error) {
 	draft, err := s.modules.deployPlanning.Get(r.Context(), chi.URLParam(r, "draft"))
 	if err != nil {
@@ -390,6 +402,10 @@ func mapDeploymentPlanningError(err error) error {
 		return httpx.Err(http.StatusBadRequest, "invalid_compose", err.Error())
 	case errors.Is(err, deploy.ErrUnsupportedSource):
 		return httpx.Err(http.StatusUnprocessableEntity, "unsupported_source", err.Error())
+	case errors.Is(err, deploy.ErrRefNotFound):
+		return httpx.Err(http.StatusBadRequest, "ref_not_found", err.Error())
+	case errors.As(err, new(*deploy.SourceFailure)):
+		return httpx.Err(http.StatusBadGateway, sourceFailureCode(err), err.Error())
 	case errors.Is(err, deploy.ErrGitUnavailable):
 		return httpx.Err(http.StatusServiceUnavailable, "git_unavailable", "Git source evidence is unavailable")
 	case errors.Is(err, deploy.ErrDockerUnavailable):

@@ -7,6 +7,7 @@ import { FormNote, FormSection, FormSections } from "@/components/form"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { PendingChanges } from "@/components/deploy/settings/pending-changes"
+import { LastFailureRemedy } from "@/components/deploy/settings/last-failure"
 import {
   ConfigurationState,
   type useConfiguration,
@@ -78,6 +79,7 @@ export function SettingsPage({
       {(configuration) => (
         <div className="min-w-0 animate-rise space-y-8">
           <PendingChanges pending={configuration.pending} pageKinds={pageKinds} />
+          <LastFailureRemedy />
           {readings?.(configuration)}
           <FormSections railFrom="xl">{children(configuration)}</FormSections>
         </div>
