@@ -133,8 +133,17 @@ func (p *jvmProject) detected() *DetectedJavaBuild {
 		Foojay: p.toolchain.foojay, Profiles: p.profiles, VaadinDevMode: p.vaadinDevMode,
 		Aggregator: p.aggregator,
 	}
-	if p.context != p.root || p.module != "" && p.module != ":" {
-		build.Context, build.Module = contextLabel(displayDir(p.context)), p.module
+	// Gradle is named by the settings root it runs from, which a composite
+	// build's wider context holds.
+	where := p.context
+	if p.tool == "gradle" {
+		where = p.reactor
+	}
+	if where != p.root || p.module != "" && p.module != ":" {
+		build.Context = contextLabel(displayDir(where))
+		if p.module != ":" {
+			build.Module = p.module
+		}
 	}
 	return build
 }

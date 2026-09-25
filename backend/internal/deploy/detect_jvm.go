@@ -108,10 +108,12 @@ type javaToolchainFacts struct {
 type jvmProject struct {
 	tool string
 	root string
-	// context is the directory the build runs from: the Maven reactor or
-	// Gradle settings root that owns root, or root itself. reactor is the
-	// aggregator POM's directory, module how the build selects root there:
-	// a Maven -pl selector, or a Gradle project path.
+	// context is the directory the build's files are all under: the Maven
+	// reactor with its in-repository parents, or the Gradle settings root
+	// with the builds it includes. reactor is the directory the build runs
+	// from — the aggregator POM's, the settings root — and module how the
+	// build selects root there: a Maven -pl selector, or a Gradle project
+	// path.
 	context   string
 	reactor   string
 	module    string
@@ -133,6 +135,9 @@ type jvmProject struct {
 	// androidApp says the project itself applies the Android Gradle
 	// plugin: an app module, which the not-deployable pass sets aside.
 	androidApp bool
+	// buildLogic says why a Gradle project builds the build's own plugins
+	// (buildSrc, build-logic): tooling, never a deployment.
+	buildLogic string
 	toolchain  javaToolchainFacts
 	// profiles are activated for a production build: -P for Maven, -P
 	// properties for Gradle. vaadinDevMode says Vaadin would be built in
@@ -222,26 +227,33 @@ func (r *jvmReader) mavenProject(root string, pom *pomFile) *jvmProject {
 var mavenArtifactRE = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$`)
 
 func (r *jvmReader) gradleProject(root, script, file string) *jvmProject {
-	project := &jvmProject{tool: "gradle", root: root, buildFile: file, context: root, module: ":"}
+	project := &jvmProject{tool: "gradle", root: root, buildFile: file, reactor: root, module: ":"}
 	settings := r.gradleSettingsFor(root)
 	if settings != nil {
 		if projectPath := settings.projectPath(root); projectPath != "" {
-			project.context, project.module = settings.dir, projectPath
+			project.reactor, project.module = settings.dir, projectPath
 		} else {
 			// The nearest settings belong to another build; this directory
 			// builds on its own, from its own files.
 			settings = nil
 		}
 	}
+	// Gradle runs from the settings root; a composite build's included
+	// builds are read from there too, so the context holds them wherever
+	// they are.
+	project.context = project.reactor
+	if settings != nil {
+		project.context = commonDir(append([]string{settings.dir}, settings.includedBuilds...))
+	}
 	project.member = project.module != ":"
 	project.aggregator = settings != nil && settings.dir == root && len(settings.projects) > 0
-	catalog := r.gradleCatalogFor(project.context)
+	catalog := r.gradleCatalogFor(project.reactor)
 	conventions := r.gradleConventionScripts(settings)
 	ids, conventionTexts := gradleApplied(script, catalog, conventions)
 	if project.member {
 		// A legacy multi-project build applies its plugins to every
 		// subproject from the root script's subprojects {} or allprojects {}.
-		if rootScript, _ := r.gradleProjectScript(project.context); rootScript != "" {
+		if rootScript, _ := r.gradleProjectScript(project.reactor); rootScript != "" {
 			inherited := gradleInheritedBlocks(rootScript, project.module)
 			for _, id := range gradlePluginIDs(inherited, catalog) {
 				if !slices.Contains(ids, id) {
@@ -258,17 +270,23 @@ func (r *jvmReader) gradleProject(root, script, file string) *jvmProject {
 		project.text += "\n// resolved: " + strings.Join(resolved, " ") + "\n"
 	}
 	project.packaging, project.packagingBy = gradlePackaging(ids, own)
+	if project.packaging == javaPackagingQuarkus && r.quarkusUberJar(root, nil) {
+		project.packaging, project.packagingBy = javaPackagingQuarkusUber, "the Quarkus plugin's uber-jar"
+	}
 	project.library = project.packaging == "" && pluginApplied(ids, "java-library")
 	project.androidApp = gradleAndroid(ids)
-	if settings != nil && project.member {
-		project.evidence = append(project.evidence, DetectionEvidence{Path: settings.file,
-			Reason: "project " + project.module + " of the Gradle build in " + contextLabel(displayDir(settings.dir)) + "; built from there with its settings, catalog and sibling projects"})
+	project.buildLogic = r.gradleBuildLogic(project, ids)
+	if settings != nil {
+		if project.member {
+			project.evidence = append(project.evidence, DetectionEvidence{Path: settings.file,
+				Reason: "project " + project.module + " of the Gradle build in " + contextLabel(displayDir(settings.dir)) + "; built from there with its settings, catalog and sibling projects"})
+		}
 		project.android = r.gradleAndroidDependency(project.module, own, settings, catalog, conventions)
 	}
 	release, toolchain := gradleJavaRelease(own, catalog)
 	from := file
 	if release == 0 && project.member {
-		if rootScript, rootFile := r.gradleProjectScript(project.context); rootFile != "" {
+		if rootScript, rootFile := r.gradleProjectScript(project.reactor); rootFile != "" {
 			release, toolchain = gradleJavaRelease(rootScript, catalog)
 			from = rootFile
 		}
@@ -298,16 +316,16 @@ func (r *jvmReader) gradleProject(root, script, file string) *jvmProject {
 	if release > 0 {
 		facts.declaredFrom = from
 	}
-	facts.pinned, facts.pinnedFrom = r.javaPin(root, project.context)
-	if content, ok := r.files.read(joinRootDir(project.context, "gradle/wrapper/gradle-wrapper.properties"), 16<<10); ok &&
-		r.files.regular(joinRootDir(project.context, "gradlew")) {
+	facts.pinned, facts.pinnedFrom = r.javaPin(root, project.reactor)
+	if content, ok := r.files.read(joinRootDir(project.reactor, "gradle/wrapper/gradle-wrapper.properties"), 16<<10); ok &&
+		r.files.regular(joinRootDir(project.reactor, "gradlew")) {
 		facts.wrapper = gradleWrapperVersion(content)
-		facts.wrapperUsable = r.files.regular(joinRootDir(project.context, "gradle/wrapper/gradle-wrapper.jar"))
+		facts.wrapperUsable = r.files.regular(joinRootDir(project.reactor, "gradle/wrapper/gradle-wrapper.jar"))
 		project.wrapperJarMissing = !facts.wrapperUsable
 	}
 	facts.foojay = settings != nil && settings.foojay
 	project.toolchain = facts
-	jhipster := r.jhipster(project.context, project.text)
+	jhipster := r.jhipster(project.reactor, project.text)
 	switch {
 	case jhipster:
 		project.profiles, project.profilesBy = []string{"prod"}, "JHipster's prod build"
@@ -328,6 +346,28 @@ func (r *jvmReader) gradleProject(root, script, file string) *jvmProject {
 	return project
 }
 
+// gradlePluginDevelopment are the plugins a project applies to build Gradle
+// plugins: convention plugins the build applies to itself.
+var gradlePluginDevelopment = []string{"java-gradle-plugin", "groovy-gradle-plugin", "kotlin-dsl", "org.gradle.kotlin.kotlin-dsl"}
+
+// gradleBuildLogic says why a Gradle project is the build's own logic
+// rather than something it builds to run: buildSrc, a build-logic build,
+// a build pluginManagement includes, or a project that builds plugins.
+func (r *jvmReader) gradleBuildLogic(project *jvmProject, ids []string) string {
+	if slices.Contains(strings.Split(project.root, "/"), "buildSrc") {
+		return "Gradle build logic: buildSrc holds the convention plugins the build applies to itself, not an application"
+	}
+	if id := slices.IndexFunc(ids, func(id string) bool { return slices.Contains(gradlePluginDevelopment, id) }); id >= 0 {
+		return "Gradle build logic: applies " + ids[id] + " to build the convention plugins the build applies, not an application"
+	}
+	for _, ancestor := range ancestorDirs(project.reactor)[1:] {
+		if settings := r.gradleSettingsAt(ancestor); settings != nil && slices.Contains(settings.pluginBuilds, project.reactor) {
+			return "Gradle build logic: " + settings.file + " includes it in pluginManagement for the plugins it provides, not as an application"
+		}
+	}
+	return ""
+}
+
 var gradleVaadinProductionRE = regexp.MustCompile(`productionMode\s*(?:=|\.set\()\s*true`)
 
 func gradleVaadinProduction(text string) bool {
@@ -339,11 +379,20 @@ func gradleVaadinProduction(text string) bool {
 	return false
 }
 
-// gradleAndroidDependency names the project an application depends on
-// that applies the Android Gradle plugin: Gradle configures every project
-// a task needs, and configuring one of those needs the Android SDK — the
-// Kotlin Multiplatform wizard's server beside its shared module.
+// gradleAndroidDependency names a project of the build that applies the
+// Android Gradle plugin, which Gradle cannot configure without the Android
+// SDK: one the application depends on — the Kotlin Multiplatform wizard's
+// shared module — or, since Gradle configures every project of a build
+// unless configure-on-demand is on, any other.
 func (r *jvmReader) gradleAndroidDependency(projectPath, script string, settings *gradleSettings, catalog *gradleCatalog, conventions map[string]string) string {
+	android := func(path string) (string, []string, bool) {
+		dependency, file := r.gradleProjectScript(settings.projects[path])
+		if file == "" {
+			return "", nil, false
+		}
+		ids, texts := gradleApplied(dependency, catalog, conventions)
+		return file, append([]string{dependency}, texts...), gradleAndroid(ids)
+	}
 	seen := map[string]bool{projectPath: true}
 	pending := gradleProjectRefs(script, settings)
 	for len(pending) > 0 && len(seen) < 32 {
@@ -353,18 +402,32 @@ func (r *jvmReader) gradleAndroidDependency(projectPath, script string, settings
 			continue
 		}
 		seen[next] = true
-		dependency, file := r.gradleProjectScript(settings.projects[next])
-		if file == "" {
-			continue
-		}
-		ids, texts := gradleApplied(dependency, catalog, conventions)
-		if gradleAndroid(ids) {
+		file, texts, applies := android(next)
+		if applies {
 			return next + " (" + file + ") applies the Android Gradle plugin, and Gradle cannot configure it without the Android SDK"
 		}
-		pending = append(pending, gradleProjectRefs(strings.Join(append([]string{dependency}, texts...), "\n"), settings)...)
+		pending = append(pending, gradleProjectRefs(strings.Join(texts, "\n"), settings)...)
+	}
+	if properties, ok := r.files.read(joinRootDir(settings.dir, "gradle.properties"), 64<<10); ok && gradleConfigureOnDemandRE.Match(properties) {
+		return ""
+	}
+	paths := make([]string, 0, len(settings.projects))
+	for path := range settings.projects {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		if path == projectPath {
+			continue
+		}
+		if file, _, applies := android(path); applies {
+			return path + " (" + file + ") applies the Android Gradle plugin, and Gradle configures every project of the build, which it cannot do for that one without the Android SDK"
+		}
 	}
 	return ""
 }
+
+var gradleConfigureOnDemandRE = regexp.MustCompile(`(?m)^\s*org\.gradle\.configureondemand\s*[=:]\s*true\s*$`)
 
 // javaPin is the release the nearest version file pins, looking from the
 // project's directory up to the build's.

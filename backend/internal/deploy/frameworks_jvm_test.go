@@ -332,9 +332,16 @@ func TestKotlinMultiplatformServerNamesTheAndroidSDKItNeeds(t *testing.T) {
 			t.Fatalf("%q is still a candidate: %+v", root, result.Candidates)
 		}
 	}
-	// Without an Android target the shared module builds on the JVM, and
-	// the server is Ktor's fat jar.
+	// Without an Android target the shared module builds on the JVM, but
+	// Gradle still configures the Android app beside the server.
 	files["shared/build.gradle.kts"] = "plugins {\n    alias(libs.plugins.kotlinMultiplatform)\n}\nkotlin {\n    jvm()\n}\n"
+	result, _ = detectCompiled(t, files)
+	server = compiledCandidate(result, "server", "java")
+	if server == nil || !strings.Contains(server.RecipeIssue, ":composeApp") || !strings.Contains(server.RecipeIssue, "configures every project") {
+		t.Fatalf("server = %+v", server)
+	}
+	// Configuring on demand leaves it out, and the server is Ktor's fat jar.
+	files["gradle.properties"] = "org.gradle.jvmargs=-Xmx2048M\norg.gradle.configureondemand=true\n"
 	result, root := detectCompiled(t, files)
 	server = compiledCandidate(result, "server", "java")
 	if server == nil || server.RecipeIssue != "" || server.Confidence != ConfidenceHigh || result.SelectedID != server.ID {
@@ -581,4 +588,142 @@ func TestGradleSubprojectsInheritTheRootScriptsPlugins(t *testing.T) {
 	}
 	prepared := prepareCompiled(t, root, "web", BuildPlanConfig{Method: BuildRecipe, Recipe: "java", RootDirectory: "web"})
 	assertCompiledDockerfile(t, prepared.DockerfilePreview, "FROM gradle:8-jdk11@", "RUN gradle --no-daemon --console=plain :web:bootJar", "FROM eclipse-temurin:11-jre@")
+}
+
+// A Gradle build below the checkout root builds from its own directory:
+// a standalone project, one with its own settings, and a multi-project
+// build whose settings root is a subdirectory.
+func TestGradleBuildBelowTheCheckoutRoot(t *testing.T) {
+	t.Parallel()
+	spring := "plugins {\n    java\n    id(\"org.springframework.boot\") version \"3.5.0\"\n}\n\njava { toolchain { languageVersion = JavaLanguageVersion.of(21) } }\n\n" +
+		"dependencies {\n    implementation(\"org.springframework.boot:spring-boot-starter-web\")\n}\n"
+	for _, fixture := range []struct {
+		name    string
+		files   map[string]string
+		root    string
+		context string
+		command string
+		copy    string
+	}{
+		{"standalone", map[string]string{"server/build.gradle.kts": spring}, "server", "", "RUN gradle --no-daemon --console=plain :bootJar", "RUN cd /src/build/libs && "},
+		{"own settings", map[string]string{"server/settings.gradle.kts": "rootProject.name = \"server\"\n", "server/build.gradle.kts": spring,
+			"server/gradlew": "#!/bin/sh\n", "server/gradle/wrapper/gradle-wrapper.jar": "PK",
+			"server/gradle/wrapper/gradle-wrapper.properties": "distributionUrl=https\\://services.gradle.org/distributions/gradle-8.14.3-bin.zip\n"},
+			"server", "", "RUN ./gradlew --no-daemon --console=plain :bootJar", "RUN cd /src/build/libs && "},
+		{"multi-project settings root", map[string]string{"backend/settings.gradle.kts": "rootProject.name = \"shop\"\ninclude(\"app\", \"domain\")\n",
+			"backend/app/build.gradle.kts":    strings.Replace(spring, "dependencies {\n", "dependencies {\n    implementation(project(\":domain\"))\n", 1),
+			"backend/domain/build.gradle.kts": "plugins { `java-library` }\n"},
+			"backend/app", "backend", "RUN gradle --no-daemon --console=plain :app:bootJar", "RUN cd /src/app/build/libs && "},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			t.Parallel()
+			result, root := detectCompiled(t, fixture.files)
+			app := compiledCandidate(result, fixture.root, "java")
+			if len(result.Candidates) != 1 || app == nil || app.Confidence != ConfidenceHigh || app.RecipeIssue != "" || app.Framework != "spring-boot" || result.SelectedID != app.ID {
+				t.Fatalf("candidates = %+v", result.Candidates)
+			}
+			prepared := prepareCompiled(t, root, fixture.root, BuildPlanConfig{Method: BuildRecipe, Recipe: "java", RootDirectory: fixture.root})
+			if want := contextLabel(fixture.context); fixture.context != "" && (app.JavaBuild.Context != want || app.JavaBuild.Module != ":app") {
+				t.Fatalf("build = %+v", app.JavaBuild)
+			}
+			if prepared.ContextDirectory != fixture.context || !strings.HasPrefix(prepared.Toolchain, "java 21 (gradle") {
+				t.Fatalf("prepared = %+v", prepared)
+			}
+			assertCompiledDockerfile(t, prepared.DockerfilePreview, fixture.command, fixture.copy)
+			if fixture.context != "" && !regularExists(filepath.Join(root, fixture.context), ".just-dashboard/Dockerfile") {
+				t.Fatal("the generated Dockerfile is not at the settings root")
+			}
+		})
+	}
+}
+
+// Build logic — buildSrc, a build-logic build pluginManagement includes, a
+// project that builds convention plugins — is tooling the build applies to
+// itself, never a deployment of its own.
+func TestGradleBuildLogicIsSetAside(t *testing.T) {
+	t.Parallel()
+	conventions := "buildSrc/src/main/kotlin/"
+	result, root := detectCompiled(t, map[string]string{
+		"settings.gradle.kts":                                              gradleInitSettings,
+		"buildSrc/settings.gradle.kts":                                     "dependencyResolutionManagement {\n    versionCatalogs { create(\"libs\") { from(files(\"../gradle/libs.versions.toml\")) } }\n}\n",
+		"buildSrc/build.gradle.kts":                                        "plugins {\n    `kotlin-dsl`\n}\n\nrepositories {\n    gradlePluginPortal()\n}\n",
+		conventions + "buildlogic.java-common-conventions.gradle.kts":      "plugins {\n    java\n}\njava { toolchain { languageVersion = JavaLanguageVersion.of(17) } }\n",
+		conventions + "buildlogic.java-application-conventions.gradle.kts": "plugins {\n    id(\"buildlogic.java-common-conventions\")\n    application\n}\n",
+		conventions + "buildlogic.java-library-conventions.gradle.kts":     "plugins {\n    id(\"buildlogic.java-common-conventions\")\n    `java-library`\n}\n",
+		"gradle/libs.versions.toml":                                        gradleInitCatalog,
+		"app/build.gradle.kts": "plugins {\n    id(\"buildlogic.java-application-conventions\")\n}\n\ndependencies {\n    implementation(project(\":utilities\"))\n}\n\n" +
+			"application {\n    mainClass = \"org.example.app.App\"\n}\n",
+		"utilities/build.gradle.kts": "plugins {\n    id(\"buildlogic.java-library-conventions\")\n}\n",
+	})
+	app := compiledCandidate(result, "app", "java")
+	if len(result.Candidates) != 1 || app == nil || app.Confidence != ConfidenceMedium || app.RecipeIssue != "" || app.JavaBuild.Packaging != javaPackagingApplication ||
+		app.JavaBuild.Release != 17 || result.SelectedID != app.ID {
+		t.Fatalf("candidates = %+v", result.Candidates)
+	}
+	if !slices.ContainsFunc(result.SetAside, func(item DetectionSetAside) bool {
+		return item.Path == "buildSrc" && item.Kind == "tooling" && strings.Contains(item.Reason, "build logic")
+	}) {
+		t.Fatalf("set aside = %+v", result.SetAside)
+	}
+	prepared := prepareCompiled(t, root, "app", BuildPlanConfig{Method: BuildRecipe, Recipe: "java", RootDirectory: "app"})
+	assertCompiledDockerfile(t, prepared.DockerfilePreview, "FROM gradle:8-jdk17@", "RUN gradle --no-daemon --console=plain :app:installDist")
+
+	// A build-logic build's convention project names the Spring Boot
+	// plugin it puts on the classpath; it is not a Spring application.
+	result, _ = detectCompiled(t, map[string]string{
+		"settings.gradle.kts":                                                       "pluginManagement {\n    includeBuild(\"build-logic\")\n}\nrootProject.name = \"shop\"\ninclude(\":app\")\n",
+		"build-logic/settings.gradle.kts":                                           "rootProject.name = \"build-logic\"\ninclude(\"convention\")\n",
+		"build-logic/convention/build.gradle.kts":                                   "plugins {\n    `kotlin-dsl`\n}\n\ndependencies {\n    implementation(\"org.springframework.boot:spring-boot-gradle-plugin:3.5.0\")\n}\n",
+		"build-logic/convention/src/main/kotlin/shop.spring-conventions.gradle.kts": "plugins {\n    java\n    id(\"org.springframework.boot\")\n}\n",
+		"app/build.gradle.kts":                                                      "plugins {\n    id(\"shop.spring-conventions\")\n}\n\ndependencies {\n    implementation(\"org.springframework.boot:spring-boot-starter-web\")\n}\n",
+	})
+	app = compiledCandidate(result, "app", "java")
+	if len(result.Candidates) != 1 || app == nil || app.Framework != "spring-boot" || app.Confidence != ConfidenceHigh || app.JavaBuild.Packaging != javaPackagingSpringBoot {
+		t.Fatalf("candidates = %+v", result.Candidates)
+	}
+	if !slices.ContainsFunc(result.SetAside, func(item DetectionSetAside) bool {
+		return item.Path == "build-logic/convention" && item.Kind == "tooling"
+	}) {
+		t.Fatalf("set aside = %+v", result.SetAside)
+	}
+}
+
+// A composite build's included builds are read from its settings root, so
+// the context holds one outside it and Gradle runs from the settings root.
+func TestGradleCompositeBuildContextHoldsItsIncludedBuilds(t *testing.T) {
+	t.Parallel()
+	result, root := detectCompiled(t, map[string]string{
+		"backend/settings.gradle.kts": "rootProject.name = \"api\"\nincludeBuild(\"../shared\")\n",
+		"backend/build.gradle.kts":    "plugins {\n    application\n}\n\ndependencies {\n    implementation(\"com.acme:shared\")\n}\n\napplication {\n    mainClass = \"com.acme.Api\"\n}\n",
+		"backend/gradlew":             "#!/bin/sh\r\n", "backend/gradle/wrapper/gradle-wrapper.jar": "PK",
+		"backend/gradle/wrapper/gradle-wrapper.properties": "distributionUrl=https\\://services.gradle.org/distributions/gradle-8.14.3-bin.zip\n",
+		"shared/settings.gradle.kts":                       "rootProject.name = \"shared\"\n",
+		"shared/build.gradle.kts":                          "plugins {\n    `java-library`\n}\ngroup = \"com.acme\"\n",
+	})
+	api := compiledCandidate(result, "backend", "java")
+	if api == nil || api.RecipeIssue != "" || api.JavaBuild.Packaging != javaPackagingApplication || !api.JavaBuild.WrapperUsable ||
+		api.JavaBuild.Context != "" || api.JavaBuild.Module != "" {
+		t.Fatalf("candidates = %+v", result.Candidates)
+	}
+	prepared := prepareCompiled(t, root, "backend", BuildPlanConfig{Method: BuildRecipe, Recipe: "java", RootDirectory: "backend"})
+	if prepared.ContextDirectory != "." {
+		t.Fatalf("prepared = %+v", prepared)
+	}
+	assertCompiledDockerfile(t, prepared.DockerfilePreview, `RUN sed -i 's/\r$//' backend/gradlew && chmod +x backend/gradlew`,
+		"RUN ./backend/gradlew --no-daemon --console=plain -p backend :installDist", "RUN cd /src/backend/build/install && ")
+}
+
+func TestGradleQuarkusUberJar(t *testing.T) {
+	t.Parallel()
+	result, root := detectCompiled(t, map[string]string{
+		"settings.gradle.kts":                       "rootProject.name = \"code-with-quarkus\"\n",
+		"build.gradle.kts":                          "plugins {\n    java\n    id(\"io.quarkus\")\n}\n\ndependencies {\n    implementation(enforcedPlatform(\"io.quarkus.platform:quarkus-bom:3.26.0\"))\n    implementation(\"io.quarkus:quarkus-rest\")\n}\n",
+		"src/main/resources/application.properties": "quarkus.package.jar.type=uber-jar\n",
+	})
+	if build := result.Candidates[0].JavaBuild; build == nil || build.Packaging != javaPackagingQuarkusUber {
+		t.Fatalf("build = %+v", build)
+	}
+	prepared := prepareCompiled(t, root, "", BuildPlanConfig{Method: BuildRecipe, Recipe: "java"})
+	assertCompiledDockerfile(t, prepared.DockerfilePreview, "RUN gradle --no-daemon --console=plain :quarkusBuild",
+		"RUN cd /src/build && (for f in *-runner.jar;", "java -jar /app/app.jar")
 }

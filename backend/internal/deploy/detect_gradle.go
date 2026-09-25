@@ -27,8 +27,10 @@ type gradleSettings struct {
 	// Gradle download a toolchain JDK the image does not carry.
 	foojay bool
 	// includedBuilds are directories of builds the settings include, where
-	// convention plugins usually live.
+	// convention plugins usually live; pluginBuilds are the ones
+	// pluginManagement includes, which only ever provide plugins.
 	includedBuilds []string
+	pluginBuilds   []string
 }
 
 var (
@@ -177,6 +179,13 @@ func parseGradleSettings(dir, file, content string) *gradleSettings {
 	for _, match := range gradleIncludeBuildRE.FindAllStringSubmatch(text, 16) {
 		if included, ok := joinBuildPath(dir, match[1]); ok {
 			settings.includedBuilds = append(settings.includedBuilds, included)
+		}
+	}
+	for _, block := range gradleBlocks(text, "pluginManagement") {
+		for _, match := range gradleIncludeBuildRE.FindAllStringSubmatch(block, 16) {
+			if included, ok := joinBuildPath(dir, match[1]); ok {
+				settings.pluginBuilds = append(settings.pluginBuilds, included)
+			}
 		}
 	}
 	return settings
@@ -370,7 +379,7 @@ func gradlePluginIDs(script string, catalog *gradleCatalog) []string {
 }
 
 var (
-	gradleCorePluginRE  = regexp.MustCompile(`^(?:java|java-library|application|war|groovy|scala|java-platform|distribution)$`)
+	gradleCorePluginRE  = regexp.MustCompile(`^(?:java|java-library|application|war|groovy|scala|java-platform|distribution|java-gradle-plugin|groovy-gradle-plugin|kotlin-dsl)$`)
 	gradleApplyPluginRE = regexp.MustCompile(`apply\s*\(?\s*plugin\s*(?::|=)\s*["']([\w.-]+)["']`)
 )
 
@@ -579,26 +588,28 @@ func (r *jvmReader) gradleProjectScript(dir string) (string, string) {
 // one at or above it, as Gradle's own search does.
 func (r *jvmReader) gradleSettingsFor(dir string) *gradleSettings {
 	for _, ancestor := range ancestorDirs(dir) {
-		if cached, ok := r.settings[ancestor]; ok {
-			if cached != nil {
-				return cached
-			}
-			continue
-		}
-		var found *gradleSettings
-		for _, name := range []string{"settings.gradle.kts", "settings.gradle"} {
-			file := joinRootDir(ancestor, name)
-			if content, ok := r.files.read(file, 128<<10); ok {
-				found = parseGradleSettings(ancestor, file, string(content))
-				break
-			}
-		}
-		r.settings[ancestor] = found
-		if found != nil {
+		if found := r.gradleSettingsAt(ancestor); found != nil {
 			return found
 		}
 	}
 	return nil
+}
+
+// gradleSettingsAt is the settings file in dir itself, or nil.
+func (r *jvmReader) gradleSettingsAt(dir string) *gradleSettings {
+	if cached, ok := r.settings[dir]; ok {
+		return cached
+	}
+	var found *gradleSettings
+	for _, name := range []string{"settings.gradle.kts", "settings.gradle"} {
+		file := joinRootDir(dir, name)
+		if content, ok := r.files.read(file, 128<<10); ok {
+			found = parseGradleSettings(dir, file, string(content))
+			break
+		}
+	}
+	r.settings[dir] = found
+	return found
 }
 
 // gradleCatalogFor is the settings root's default version catalog.

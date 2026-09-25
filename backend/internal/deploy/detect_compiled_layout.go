@@ -149,7 +149,17 @@ func settleJVMLayouts(result *DetectionResult, markers map[string]*detectedMarke
 		if marker == nil || marker.jvm == nil {
 			continue
 		}
+		if marker.jvm.buildLogic != "" {
+			drop[candidate.ID] = true
+			shape.addSetAside(DetectionSetAside{Path: rootLabelOf(candidate.Root), Kind: "tooling", Reason: boundedText(marker.jvm.buildLogic, 512)})
+			continue
+		}
+		// A Gradle build is its settings root's; a composite's context
+		// may be wider and hold other builds.
 		context := marker.jvm.context
+		if marker.jvm.tool == "gradle" {
+			context = marker.jvm.reactor
+		}
 		if groups[context] == nil {
 			contexts = append(contexts, context)
 		}

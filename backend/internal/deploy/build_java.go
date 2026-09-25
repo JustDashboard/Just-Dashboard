@@ -15,8 +15,11 @@ type javaRecipe struct {
 	project jvmProject
 	plan    javaToolchainPlan
 	// member is the project's directory under the build context, "" when
-	// the build runs from the project itself.
-	member string
+	// the build runs from the project itself, and reactor the directory
+	// under it the build runs from: the aggregator POM's, the settings
+	// root's.
+	member  string
+	reactor string
 }
 
 func selectJavaRecipe(boundary, root string, config BuildPlanConfig) (javaRecipe, error) {
@@ -36,8 +39,8 @@ func selectJavaRecipe(boundary, root string, config BuildPlanConfig) (javaRecipe
 	if project.android != "" {
 		return javaRecipe{}, fmt.Errorf("%w: %s; use a Dockerfile that installs the Android command-line tools", ErrUnsupportedBuilder, project.android)
 	}
-	recipe := javaRecipe{project: *project, member: relativeBuildPath(project.context, project.root)}
-	for _, written := range []string{recipe.member, relativeBuildPath(project.context, project.reactor), project.mavenSettings} {
+	recipe := javaRecipe{project: *project, member: relativeBuildPath(project.context, project.root), reactor: relativeBuildPath(project.context, project.reactor)}
+	for _, written := range []string{recipe.member, recipe.reactor, project.mavenSettings} {
 		if written != "" && !recipePath(written) {
 			return javaRecipe{}, fmt.Errorf("%w: the Java recipe writes %q into the Dockerfile, and it holds characters it does not quote; rename the directory or use a Dockerfile", ErrUnsupportedBuilder, written)
 		}
@@ -123,8 +126,8 @@ func javaBuildCommand(recipe javaRecipe) string {
 		if project.mavenSettings != "" {
 			parts = append(parts, "-s", project.mavenSettings)
 		}
-		if reactor := relativeBuildPath(project.context, project.reactor); reactor != "" {
-			parts = append(parts, "-f", reactor+"/pom.xml")
+		if recipe.reactor != "" {
+			parts = append(parts, "-f", recipe.reactor+"/pom.xml")
 		} else if project.reactor == project.root && recipe.member != "" {
 			parts = append(parts, "-f", recipe.member+"/pom.xml")
 		}
@@ -135,9 +138,12 @@ func javaBuildCommand(recipe javaRecipe) string {
 	}
 	runner := "gradle"
 	if project.toolchain.wrapperUsable {
-		runner = "./gradlew"
+		runner = "./" + gradleWrapperPath(recipe)
 	}
 	parts := []string{runner, "--no-daemon", "--console=plain"}
+	if recipe.reactor != "" {
+		parts = append(parts, "-p", recipe.reactor)
+	}
 	if recipe.plan.provide > 0 {
 		parts = append(parts, "-Porg.gradle.java.installations.paths=/opt/jdk-"+strconv.Itoa(recipe.plan.provide))
 	}
@@ -151,6 +157,14 @@ func javaBuildCommand(recipe javaRecipe) string {
 		task = project.module + ":" + task
 	}
 	return strings.Join(append(parts, task), " ")
+}
+
+// gradleWrapperPath is the settings root's gradlew under the build context.
+func gradleWrapperPath(recipe javaRecipe) string {
+	if recipe.reactor == "" {
+		return "gradlew"
+	}
+	return recipe.reactor + "/gradlew"
 }
 
 // javaArtifactDir is where a packaging's artifact lands, under the
@@ -257,7 +271,8 @@ func renderJavaDockerfile(recipe javaRecipe, config BuildPlanConfig, bases []Res
 	// as "sh\r: not found"; the CR is stripped before it is used.
 	switch {
 	case project.tool == "gradle" && project.toolchain.wrapperUsable:
-		lines = append(lines, `RUN sed -i 's/\r$//' gradlew && chmod +x gradlew`)
+		wrapper := gradleWrapperPath(recipe)
+		lines = append(lines, `RUN sed -i 's/\r$//' `+wrapper+` && chmod +x `+wrapper)
 	case project.tool == "maven" && project.mavenWrapper:
 		lines = append(lines, `RUN sed -i 's/\r$//' mvnw && chmod +x mvnw`)
 	}
