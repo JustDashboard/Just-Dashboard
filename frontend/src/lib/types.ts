@@ -3335,6 +3335,8 @@ export type DeploymentDetectedVariable = {
   required?: boolean
   /** Read with no default on a path that may not always run. */
   requiredRead?: boolean
+  /** The files that read it while the build runs, which its build phase comes from. */
+  buildSources?: string[]
   /** A committed file whose value for this name points at loopback. */
   localhostIn?: string
   /**
@@ -3601,6 +3603,8 @@ export type DeploymentDetectionCandidate = {
     memoryMiB?: number
     /** Names `prisma.config` reads that the recipe gives a placeholder while `prisma generate` runs. */
     prismaEnv?: string[]
+    /** Package scripts that migrate or push, so a build that runs one needs the real database. */
+    prismaConnectScripts?: string[]
   }
   /** go.mod's toolchain line and the .go-version pin, judged against the plan's Go version. */
   goToolchain?: string

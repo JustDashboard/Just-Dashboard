@@ -123,7 +123,7 @@ the engine its scheme names.
 
 Each variable carries how it was read. `phase: build` marks a value read while the build runs — a
 framework config file (`next.config.*`, `vite.config.*`, `prisma.config.*`, …), a static env import, a
-compile-time macro, a browser prefix. `browserInlined` marks a value the framework compiles into the
+compile-time macro, a browser prefix — and `buildSources` lists the files whose reads made it one. `browserInlined` marks a value the framework compiles into the
 JavaScript every visitor downloads: the prefix the root's own framework inlines (`NEXT_PUBLIC_`,
 `VITE_`, SvelteKit's and Astro's `PUBLIC_`, `REACT_APP_`, `NUXT_PUBLIC_`, `EXPO_PUBLIC_`, `GATSBY_`,
 `VUE_APP_`, listed on the candidate as `browserPrefixes`), or a Vite `define` / `next.config` `env`
@@ -1065,9 +1065,15 @@ runs `prisma migrate` or `prisma db` gets no placeholder, since it needs the rea
 value is never widened to the install on its own — the install also runs every dependency's install
 script — unless the variable is mapped to `install_and_build` (`prisma_config_env`). Environment
 discovery reads the same `env()` calls as build-time reads; detection records the names the placeholder
-covers as `nodeBuild.prismaEnv` (none when the detected build command connects), and for a Node recipe
-build the environment check does not refuse them as `build_variable_missing_*`, since the build runs
-without them. A repository Dockerfile gets no placeholder, so there they stay build-time reads.
+covers as `nodeBuild.prismaEnv`, the package scripts that migrate or push (through the scripts and hooks
+they run) as `nodeBuild.prismaConnectScripts`, and for each variable the files that read it while the
+build runs (`buildSources`). A Node recipe plan's environment check does not refuse such a name as
+`build_variable_missing_*` only when `prisma.config` is its sole build-time read — no `next.config`, static
+env import or browser prefix reads it too — and the plan's own build command, as saved, neither runs
+`prisma migrate`/`prisma db` nor one of those scripts: then every step that loads the config gets the
+placeholder and the build runs without a value (`prismaRecipeSupplied`). An edited build that migrates
+is asked for the real value again. A repository Dockerfile gets no placeholder, so there they stay
+build-time reads.
 
 **The build command's RUN** (`build_node_build.go`) leaves V8's heap at its own default (a quarter of
 physical memory, at most about 4 GiB). `NODE_OPTIONS` is inherited by every `node` process a build starts —

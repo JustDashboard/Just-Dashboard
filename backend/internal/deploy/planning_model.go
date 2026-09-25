@@ -338,15 +338,17 @@ type EnvironmentNote struct {
 // server and client variables it requires and whether it honours
 // SKIP_ENV_VALIDATION, the memory the build is estimated to peak at, and
 // the names prisma.config reads that the recipe gives a placeholder while
-// the build runs `prisma generate` (PrismaEnv, empty when the build
-// command connects to the database).
+// a step only generates the client (PrismaEnv), with the package scripts
+// that migrate or push instead (PrismaConnectScripts), so a build command
+// that runs one is known to need the real database.
 type DetectedNodeBuild struct {
-	EnvSchema    string   `json:"envSchema,omitempty"`
-	EnvServer    []string `json:"envServer,omitempty"`
-	EnvClient    []string `json:"envClient,omitempty"`
-	EnvSkippable bool     `json:"envSkippable,omitempty"`
-	MemoryMiB    int      `json:"memoryMiB,omitempty"`
-	PrismaEnv    []string `json:"prismaEnv,omitempty"`
+	EnvSchema            string   `json:"envSchema,omitempty"`
+	EnvServer            []string `json:"envServer,omitempty"`
+	EnvClient            []string `json:"envClient,omitempty"`
+	EnvSkippable         bool     `json:"envSkippable,omitempty"`
+	MemoryMiB            int      `json:"memoryMiB,omitempty"`
+	PrismaEnv            []string `json:"prismaEnv,omitempty"`
+	PrismaConnectScripts []string `json:"prismaConnectScripts,omitempty"`
 }
 
 // DetectedVariable is an environment variable the source reads, found in an
@@ -381,6 +383,9 @@ type DetectedVariable struct {
 	// that may only run on one path, which is a warning rather than a gate.
 	Required     bool `json:"required,omitempty"`
 	RequiredRead bool `json:"requiredRead,omitempty"`
+	// BuildSources are the files that read it while the build runs, the
+	// reads its build Phase comes from.
+	BuildSources []string `json:"buildSources,omitempty"`
 	// LocalhostIn names a committed file whose value for this variable
 	// points at loopback, which inside the container is the app itself.
 	LocalhostIn string `json:"localhostIn,omitempty"`
@@ -1811,10 +1816,10 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 				(variable.Step != "" && variable.Step != "install") ||
 				strings.ContainsAny(variable.Example, "\x00\r\n") ||
 				rejectPlanSecretLiteral("detected variable example", variable.Example) != nil ||
-				len(variable.Sources) > 8 {
+				len(variable.Sources) > 8 || len(variable.BuildSources) > 8 {
 				return fmt.Errorf("%w: detected variable is malformed", ErrInvalidPlan)
 			}
-			for _, source := range variable.Sources {
+			for _, source := range slices.Concat(variable.Sources, variable.BuildSources) {
 				if source == "" || len(source) > 4096 || strings.ContainsAny(source, "\x00\r\n") {
 					return fmt.Errorf("%w: detected variable is malformed", ErrInvalidPlan)
 				}
@@ -1882,8 +1887,13 @@ func validateDetectedNodeInstall(candidate DetectedCandidate) error {
 	}
 	if build := candidate.NodeBuild; build != nil {
 		if !text(build.EnvSchema, 256) || len(build.EnvServer) > 64 || len(build.EnvClient) > 64 || len(build.PrismaEnv) > 16 ||
-			build.MemoryMiB < 0 || build.MemoryMiB > 65536 {
+			len(build.PrismaConnectScripts) > 16 || build.MemoryMiB < 0 || build.MemoryMiB > 65536 {
 			return malformed
+		}
+		for _, script := range build.PrismaConnectScripts {
+			if !nodeScriptNameRE.MatchString(script) {
+				return malformed
+			}
 		}
 		for _, name := range slices.Concat(build.EnvServer, build.EnvClient, build.PrismaEnv) {
 			if ValidateEnvKey(name) != nil {
