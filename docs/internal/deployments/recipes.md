@@ -2159,4 +2159,7 @@ binaries), `detect_site_generators_test.go`, `detect_static_site_test.go`, `buil
 Modules and Hugo with PostCSS, Zola 0.19 on Debian, mdBook 0.4, Jekyll on the github-pages gem with no
 Gemfile and with a macOS-only lock, Sphinx with autodoc, Pelican, Zensical, Hexo, VuePress 2 under a
 base path, Slidev, a Vite site with `_redirects`, `_headers` and a Vercel function, and a multi-page HTML
-site were built and served locally when the recipes were written.
+site were built and served locally when the recipes were written. `frameworks_php_assets_test.go` follows a Laravel
+application whose build script runs `php artisan` through the PHP recipe's asset stage (the Node plan's
+pnpm release and Node major on the vendor stage, and the Build settings' Node version), the same script
+refused in a Node recipe, and Lume built on the Deno release `.dvmrc` declares and served as a site.

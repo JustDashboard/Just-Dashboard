@@ -367,11 +367,12 @@ func renderNodeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases [
 	return append(lines, shellCMD(config.StartCommand)), nil
 }
 
-// nodeInstallStage renders what the Node recipe and the PHP recipe's asset
-// stage share, so the two cannot install differently: the toolchain stage
-// when the plan needs one, then a stage that copies the source and runs the
-// planned install. base is what a later stage starts from to have the same
-// tools.
+// nodeInstallStage renders what the Node recipe and a site generator's
+// dependency stage (build_site.go) share, so the two cannot install
+// differently: the toolchain stage when the plan needs one, then a stage that
+// copies the source and runs the planned install. base is what a later stage
+// starts from to have the same tools. The PHP recipe's asset stage runs the
+// same plan's install on its vendor stage instead (phpAssetStage).
 func nodeInstallStage(plan nodeInstallPlan, node ResolvedImage, bases []ResolvedImage, toolchainStage, stage, installSecrets string) ([]string, string, error) {
 	bun := ""
 	if plan.bun != "" {
