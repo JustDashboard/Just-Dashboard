@@ -430,9 +430,6 @@ func readNodeInstalls(checkout string, markers map[string]*detectedMarkers) {
 	}
 }
 
-// withInstallVariables adds the registry credentials a package manager's
-// configuration names to the variables the source reads, marking a name
-// both list as needed by the install.
 // refreshNodeInstalls records each manager's commands again for a
 // JavaScript candidate whose commands a pass after packageCandidate
 // rewrote — a detaching start settled, a preview bound to every interface,
@@ -464,6 +461,9 @@ func refreshNodeInstalls(candidates []DetectedCandidate, markers map[string]*det
 	}
 }
 
+// withInstallVariables adds the registry credentials a package manager's
+// configuration names to the variables the source reads, marking a name
+// both list as needed by the install.
 func withInstallVariables(variables, install []DetectedVariable) []DetectedVariable {
 	result := append([]DetectedVariable(nil), variables...)
 	for _, variable := range install {
