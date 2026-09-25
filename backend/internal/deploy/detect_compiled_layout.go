@@ -87,6 +87,28 @@ func settleCompiledLayouts(result *DetectionResult, markers map[string]*detected
 	settleDotnetLayouts(result, markers, shape, drop)
 	removeCandidates(result, func(candidate DetectedCandidate) bool { return drop[candidate.ID] })
 	offerSpringProfiles(result, markers)
+	addCargoRegistryCredentials(result, markers, shape.root)
+}
+
+// addCargoRegistryCredentials gives a Rust candidate the tokens of the
+// private registries its .cargo/config declares, which the recipe's cargo
+// fetch reads under the install's secret mount.
+func addCargoRegistryCredentials(result *DetectionResult, markers map[string]*detectedMarkers, checkout string) {
+	var files *buildFiles
+	for index := range result.Candidates {
+		candidate := &result.Candidates[index]
+		marker := markers[filepath.FromSlash(candidate.Root)]
+		if candidate.Recipe != "rust" || marker == nil || len(marker.cargoToml) == 0 {
+			continue
+		}
+		if files == nil {
+			files = newBuildFiles(checkout)
+			defer files.close()
+		}
+		if variables := cargoRegistryCredentials(files, checkoutRoot(candidate.Root), marker.cargoToml); len(variables) > 0 {
+			candidate.Variables = withInstallVariables(candidate.Variables, variables)
+		}
+	}
 }
 
 // offerSpringProfiles adds SPRING_PROFILES_ACTIVE, empty, to a Spring Boot

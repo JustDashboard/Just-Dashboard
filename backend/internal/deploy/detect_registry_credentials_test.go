@@ -140,3 +140,28 @@ func TestNuGetConfigCredentialsAreInstallVariables(t *testing.T) {
 		t.Fatalf("evidence = %+v", api.Evidence)
 	}
 }
+
+func TestCargoRegistryTokensAreInstallVariables(t *testing.T) {
+	t.Parallel()
+	result, root := detectCompiled(t, map[string]string{
+		".cargo/config.toml": "[registries.acme-crates]\nindex = \"sparse+https://crates.acme.test/index/\"\n\n[registries]\npublish-only = { index = \"sparse+https://publish.acme.test/\" }\n",
+		"Cargo.toml":         "[package]\nname = \"api\"\nversion = \"0.1.0\"\n\n[dependencies]\naxum = \"0.8\"\nacme-auth = { version = \"1\", registry = \"acme-crates\" }\n",
+		"Cargo.lock":         "version = 4\n",
+		"src/main.rs":        "fn main() {}\n",
+	})
+	candidate := compiledCandidate(result, "", "rust")
+	token, publish := compiledInstallVariable(candidate, "CARGO_REGISTRIES_ACME_CRATES_TOKEN"), compiledInstallVariable(candidate, "CARGO_REGISTRIES_PUBLISH_ONLY_TOKEN")
+	if token == nil || token.Step != "install" || !token.InstallRequired || publish == nil || publish.InstallRequired {
+		t.Fatalf("variables = %+v", candidate.Variables)
+	}
+	findings := compiledRecipeFindings(candidate, PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe, Recipe: "rust"}})
+	if item := findingByCode(findings, "registry_token_missing"); item == nil || item.Severity != PreflightBlocked || item.Measured != "CARGO_REGISTRIES_ACME_CRATES_TOKEN" {
+		t.Fatalf("findings = %+v", findings)
+	}
+	config := BuildPlanConfig{Method: BuildRecipe, Recipe: "rust", Secrets: []BuildSecretConfig{{Variable: "CARGO_REGISTRIES_ACME_CRATES_TOKEN", Step: "install"}}}
+	prepared, err := NewArtifactBuilder(&artifactBackendFake{}).Prepare(t.Context(), root, config, false, "t:1", "CARGO_REGISTRIES_ACME_CRATES_TOKEN")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCompiledDockerfile(t, prepared.DockerfilePreview, "RUN --mount=type=secret,id=CARGO_REGISTRIES_ACME_CRATES_TOKEN,env=CARGO_REGISTRIES_ACME_CRATES_TOKEN,required=true cargo fetch --locked")
+}

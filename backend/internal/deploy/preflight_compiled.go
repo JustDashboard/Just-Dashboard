@@ -9,8 +9,8 @@ import (
 // compiledRecipeFindings judge a JVM or .NET plan from the facts detection
 // kept (DetectedJavaBuild, DetectedDotnetBuild): the release the plan's own
 // settings choose, which module or project the build selects and from
-// where, what the recipe changes about publishing, and the registry
-// credentials the install needs. Where preflight has the tree, the recipe's
+// where, what the recipe changes about publishing, and — for Rust too — the
+// registry credentials the install needs. Where preflight has the tree, the recipe's
 // own dry run outvotes the release findings (recipe_preflight.go).
 func compiledRecipeFindings(candidate *DetectedCandidate, configuration PlanConfiguration) []PreflightFinding {
 	build := configuration.Build
@@ -27,6 +27,8 @@ func compiledRecipeFindings(candidate *DetectedCandidate, configuration PlanConf
 		findings = javaPlanFindings(candidate.JavaBuild, build)
 	case recipe == "dotnet" && candidate.DotnetBuild != nil:
 		findings = dotnetPlanFindings(candidate.DotnetBuild, build)
+	case recipe == "rust":
+		// A private Cargo registry's token is read by cargo fetch.
 	default:
 		return nil
 	}

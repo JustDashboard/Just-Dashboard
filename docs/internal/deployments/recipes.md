@@ -62,8 +62,9 @@ BuildKit still receives one secret. Build settings expose this choice for each b
 mapped to install automatically when a draft gives it a value (see
 [JavaScript installs](#javascript-installs)); so is a credential a Maven `settings.xml` (`${env.X}`), a
 Gradle repository's `credentials { … System.getenv("X") }` or `credentials(PasswordCredentials::class)`,
-or a `NuGet.config`'s `packageSourceCredentials` (`%X%`) names (see [Java and Kotlin](#java-and-kotlin) and
-[.NET](#net)). Maven and Gradle resolve dependencies as the build runs rather than in a step of their own,
+a `NuGet.config`'s `packageSourceCredentials` (`%X%`) or a `.cargo/config.toml` registry
+(`CARGO_REGISTRIES_<NAME>_TOKEN`) names (see [Java and Kotlin](#java-and-kotlin), [.NET](#net) and
+[Rust](#rust)). Maven and Gradle resolve dependencies as the build runs rather than in a step of their own,
 so a variable mapped to install is mounted on their build step; .NET restores in its own step. Nothing maps a database URL to the install on its own:
 the install also runs every dependency's install script, and Prisma's `generate` does not connect (see
 [JavaScript runtime and toolchain](#javascript-runtime-and-toolchain)).
@@ -1279,6 +1280,12 @@ place of the HTTP service just because its `[[bin]]` appears first.
 
 A binary whose `src/main.rs` or `src/bin` entry calls `dotenvy::dotenv()` with `.expect`, `.unwrap()` or
 `?` gets the same empty `.env` as a Go one.
+
+A private registry a `.cargo/config.toml` (or `.cargo/config`) at or above the crate declares
+(`[registries.<name>]`) is read with `CARGO_REGISTRIES_<NAME>_TOKEN`, a detected variable with step
+`install` that reaches `cargo fetch` through the install's secret mount. It is required, and
+`registry_token_missing` blocks without it, when a dependency names that registry, it is the default
+registry, or it replaces crates.io.
 
 ## Java and Kotlin
 

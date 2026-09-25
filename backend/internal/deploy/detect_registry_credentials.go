@@ -11,10 +11,11 @@ import (
 	"strings"
 )
 
-// A private Maven, Gradle or NuGet registry is authenticated by variables
-// the build's own configuration names: ${env.X} in a Maven settings.xml,
-// System.getenv("X") in a Gradle repository's credentials, %X% in a
-// NuGet.config's packageSourceCredentials. Each name is a detected variable
+// A private Maven, Gradle, NuGet or Cargo registry is authenticated by
+// variables the build's own configuration names: ${env.X} in a Maven
+// settings.xml, System.getenv("X") in a Gradle repository's credentials, %X%
+// in a NuGet.config's packageSourceCredentials, and the
+// CARGO_REGISTRIES_<NAME>_TOKEN a .cargo/config registry is read with. Each name is a detected variable
 // with step "install", so a value given for it reaches only the step that
 // downloads dependencies, through a BuildKit secret mount, and preflight
 // asks for the ones the build cannot restore without (registry_token_missing).
@@ -260,7 +261,7 @@ func nugetRegistryCredentials(files *buildFiles, configs []string) []DetectedVar
 // script's repository block, a NuGet.config — which only the dependency
 // install reads, so the running application never receives the value.
 func registryConfigSource(source string) bool {
-	if strings.HasPrefix(source, "convention plugin ") {
+	if strings.HasPrefix(source, "convention plugin ") || strings.HasSuffix(source, ".cargo/config.toml") || strings.HasSuffix(source, ".cargo/config") {
 		return true
 	}
 	name := path.Base(source)
@@ -269,4 +270,48 @@ func registryConfigSource(source string) bool {
 		return true
 	}
 	return slices.Contains(nodeRegistryConfigFiles, name) || slices.Contains(nugetConfigNames, name)
+}
+
+var cargoRegistryRefRE = regexp.MustCompile(`\bregistry\s*=\s*"([A-Za-z0-9_-]+)"`)
+
+// cargoRegistryCredentials reads the private registries the .cargo/config
+// files at and above a crate declare ([registries.<name>]), whose tokens
+// Cargo takes from CARGO_REGISTRIES_<NAME>_TOKEN. A registry the manifest's
+// dependencies name, the default registry, or a replacement for crates.io
+// is required; one only declared may serve publishing alone.
+func cargoRegistryCredentials(files *buildFiles, root string, manifest []byte) []DetectedVariable {
+	required := map[string]bool{}
+	for _, match := range cargoRegistryRefRE.FindAllStringSubmatch(string(manifest), 64) {
+		required[match[1]] = true
+	}
+	type registry struct{ name, source string }
+	var registries []registry
+	for _, dir := range ancestorDirs(root) {
+		for _, name := range []string{".cargo/config.toml", ".cargo/config"} {
+			file := joinRootDir(dir, name)
+			content, ok := files.read(file, 64<<10)
+			if !ok {
+				continue
+			}
+			for _, entry := range readTOML(content) {
+				switch {
+				case strings.HasPrefix(entry.table, "registries.") && entry.key == "index":
+					registries = append(registries, registry{name: strings.TrimPrefix(entry.table, "registries."), source: file})
+				case entry.table == "registries" && strings.HasSuffix(entry.key, ".index"):
+					registries = append(registries, registry{name: strings.TrimSuffix(entry.key, ".index"), source: file})
+				case entry.table == "registry" && entry.key == "default",
+					strings.HasPrefix(entry.table, "source.") && entry.key == "replace-with":
+					required[entry.value.text] = true
+				}
+			}
+		}
+	}
+	var variables []DetectedVariable
+	for _, found := range registries {
+		name := "CARGO_REGISTRIES_" + strings.ToUpper(strings.ReplaceAll(found.name, "-", "_")) + "_TOKEN"
+		if variable, ok := registryVariable(name, found.source, required[found.name]); ok {
+			variables = append(variables, variable)
+		}
+	}
+	return mergeRegistryVariables(variables)
 }
