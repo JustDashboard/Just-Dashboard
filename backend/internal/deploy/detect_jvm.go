@@ -238,6 +238,19 @@ func (r *jvmReader) gradleProject(root, script, file string) *jvmProject {
 	catalog := r.gradleCatalogFor(project.context)
 	conventions := r.gradleConventionScripts(settings)
 	ids, conventionTexts := gradleApplied(script, catalog, conventions)
+	if project.member {
+		// A legacy multi-project build applies its plugins to every
+		// subproject from the root script's subprojects {} or allprojects {}.
+		if rootScript, _ := r.gradleProjectScript(project.context); rootScript != "" {
+			inherited := gradleInheritedBlocks(rootScript, project.module)
+			for _, id := range gradlePluginIDs(inherited, catalog) {
+				if !slices.Contains(ids, id) {
+					ids = append(ids, id)
+				}
+			}
+			conventionTexts = append(conventionTexts, inherited)
+		}
+	}
 	own := strings.Join(append([]string{script}, conventionTexts...), "\n")
 	resolved := append(append([]string(nil), ids...), catalog.resolve(stripGradleComments(own))...)
 	project.text = script

@@ -565,3 +565,20 @@ func TestCompiledReleaseFindingsGiveWayToTheDryRun(t *testing.T) {
 		}
 	}
 }
+
+func TestGradleSubprojectsInheritTheRootScriptsPlugins(t *testing.T) {
+	t.Parallel()
+	result, root := detectCompiled(t, map[string]string{
+		"settings.gradle": "rootProject.name = 'legacy'\ninclude 'web', 'model'\n",
+		"build.gradle": "buildscript {\n  dependencies { classpath 'org.springframework.boot:spring-boot-gradle-plugin:2.7.18' }\n}\n" +
+			"subprojects {\n  apply plugin: 'java'\n  sourceCompatibility = '11'\n}\nproject(':web') {\n  apply plugin: 'org.springframework.boot'\n}\n",
+		"web/build.gradle":   "apply plugin: 'org.springframework.boot'\ndependencies {\n  implementation project(':model')\n  implementation 'org.springframework.boot:spring-boot-starter-web'\n}\n",
+		"model/build.gradle": "dependencies { }\n",
+	})
+	web := compiledCandidate(result, "web", "java")
+	if len(result.Candidates) != 1 || web == nil || web.Framework != "spring-boot" || web.JavaBuild.Packaging != javaPackagingSpringBoot || web.JavaBuild.Release != 11 {
+		t.Fatalf("candidates = %+v", result.Candidates)
+	}
+	prepared := prepareCompiled(t, root, "web", BuildPlanConfig{Method: BuildRecipe, Recipe: "java", RootDirectory: "web"})
+	assertCompiledDockerfile(t, prepared.DockerfilePreview, "FROM gradle:8-jdk11@", "RUN gradle --no-daemon --console=plain :web:bootJar", "FROM eclipse-temurin:11-jre@")
+}

@@ -81,7 +81,7 @@ func stripGradleComments(text string) string {
 // gradleBlockREs open the blocks the readers look into, by name.
 var gradleBlockREs = func() map[string]*regexp.Regexp {
 	patterns := map[string]*regexp.Regexp{}
-	for _, name := range []string{"plugins", "pluginManagement", "repositories", "credentials", "publishing", "vaadin", "maven"} {
+	for _, name := range []string{"plugins", "pluginManagement", "repositories", "credentials", "publishing", "vaadin", "maven", "subprojects", "allprojects"} {
 		patterns[name] = regexp.MustCompile(`(?:^|[^\w.])` + name + `\s*(?:\([^)]*\))?\s*\{`)
 	}
 	return patterns
@@ -90,31 +90,52 @@ var gradleBlockREs = func() map[string]*regexp.Regexp {
 // gradleBlocks returns the bodies of every `name {` block in a script,
 // matched by braces outside strings.
 func gradleBlocks(text, name string) []string {
-	pattern := gradleBlockREs[name]
 	var blocks []string
-	for _, loc := range pattern.FindAllStringIndex(text, 64) {
-		start := loc[1]
-		depth, quote := 1, byte(0)
-		for index := start; index < len(text); index++ {
-			character := text[index]
-			switch {
-			case quote != 0:
-				if character == '\\' {
-					index++
-				} else if character == quote || character == '\n' {
-					quote = 0
-				}
-			case character == '"' || character == '\'':
-				quote = character
-			case character == '{':
-				depth++
-			case character == '}':
-				depth--
-				if depth == 0 {
-					blocks = append(blocks, text[start:index])
-					index = len(text)
-				}
+	for _, loc := range gradleBlockREs[name].FindAllStringIndex(text, 64) {
+		if body, ok := gradleBlockBody(text, loc[1]); ok {
+			blocks = append(blocks, body)
+		}
+	}
+	return blocks
+}
+
+// gradleBlockBody is the text from start to the brace that closes the block
+// opened just before it.
+func gradleBlockBody(text string, start int) (string, bool) {
+	depth, quote := 1, byte(0)
+	for index := start; index < len(text); index++ {
+		character := text[index]
+		switch {
+		case quote != 0:
+			if character == '\\' {
+				index++
+			} else if character == quote || character == '\n' {
+				quote = 0
 			}
+		case character == '"' || character == '\'':
+			quote = character
+		case character == '{':
+			depth++
+		case character == '}':
+			depth--
+			if depth == 0 {
+				return text[start:index], true
+			}
+		}
+	}
+	return "", false
+}
+
+var gradleProjectBlockRE = regexp.MustCompile(`(?:^|[^\w.])project\(\s*["'](:[^"'\n]*)["']\s*\)\s*\{`)
+
+// gradleProjectBlocks are the root script's project(':x') { … } blocks, the
+// configuration it gives one project, by project path.
+func gradleProjectBlocks(text string) map[string][]string {
+	blocks := map[string][]string{}
+	for _, match := range gradleProjectBlockRE.FindAllStringSubmatchIndex(text, 64) {
+		if body, ok := gradleBlockBody(text, match[1]); ok {
+			path := text[match[2]:match[3]]
+			blocks[path] = append(blocks[path], body)
 		}
 	}
 	return blocks
@@ -296,7 +317,14 @@ func (c *gradleCatalog) resolve(script string) []string {
 // and `apply plugin:` lines. A plugin declared `apply false` is only put on
 // the classpath for another project, and is not applied here.
 func gradlePluginIDs(script string, catalog *gradleCatalog) []string {
-	text := stripGradleComments(script)
+	// What a root script applies to its subprojects, or to one project by
+	// path, is not applied to the root project itself.
+	text := withoutGradleBlocks(stripGradleComments(script), "subprojects")
+	for _, blocks := range gradleProjectBlocks(text) {
+		for _, block := range blocks {
+			text = strings.Replace(text, block, strings.Repeat(" ", len(block)), 1)
+		}
+	}
 	seen := map[string]bool{}
 	var ids []string
 	add := func(id string) {
@@ -345,6 +373,15 @@ var (
 	gradleCorePluginRE  = regexp.MustCompile(`^(?:java|java-library|application|war|groovy|scala|java-platform|distribution)$`)
 	gradleApplyPluginRE = regexp.MustCompile(`apply\s*\(?\s*plugin\s*(?::|=)\s*["']([\w.-]+)["']`)
 )
+
+// gradleInheritedBlocks is what a root script's subprojects {} and
+// allprojects {} blocks configure for every project of the build, and its
+// project(':x') {} block for this one.
+func gradleInheritedBlocks(rootScript, projectPath string) string {
+	text := stripGradleComments(rootScript)
+	blocks := append(gradleBlocks(text, "subprojects"), gradleBlocks(text, "allprojects")...)
+	return strings.Join(append(blocks, gradleProjectBlocks(text)[projectPath]...), "\n")
+}
 
 // gradleWrapperVersion is the Gradle release gradle-wrapper.properties
 // downloads, or "".
