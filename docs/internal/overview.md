@@ -17,8 +17,10 @@ enrolled one (`JD_REQUIRE_2FA` decides whether enrolling is compulsory; it is no
 ## Commands
 
 ```bash
+# repository root
+scripts/test-changed.sh              # the checks, specs and Go tests the diff reaches
+
 # backend/
-go build ./... && go vet ./... && go test ./...
 go test ./internal/gitx -run TestBranchParse -v
 go run ./cmd/server                  # needs JD_MASTER_KEY and a writable JD_DATA_DIR
 
@@ -26,7 +28,7 @@ go run ./cmd/server                  # needs JD_MASTER_KEY and a writable JD_DAT
 bun install && bun dev               # :3000, proxies /api to 127.0.0.1:8080
 bun run lint && bun run build
 bun run test:browser:install         # once per machine/cache: release Chromium
-bun run test:browser                 # Playwright Chromium journey gate
+bunx playwright test tests/browser/docker-ui.spec.ts   # one spec
 
 # whole stack
 sudo ./install.sh                    # interactive first install; re-runnable, keeps .env
@@ -36,8 +38,8 @@ docker compose logs backend | grep "bootstrap admin"   # generated password, pri
 scripts/release.sh 0.6               # see backend/databases-proxy-platform.md#cutting-a-release
 ```
 
-CONTRIBUTING requires backend build/vet/tests and frontend lint/build/browser journeys to pass before a
-PR.
+CONTRIBUTING requires `scripts/test-changed.sh` to pass before a PR. It runs only what the diff can
+reach; the whole browser suite and `go test ./...` are not run locally.
 
 The browser gate serves the latest `bun run build` output on `127.0.0.1:43117`; it does not reuse a
 development server or an unrelated dashboard on port 3000. Rebuild after frontend edits before running

@@ -46,14 +46,14 @@ carries no licensing question at all.
 
 ## Before you open a pull request
 
-- Run the checks: `cd backend && go build ./... && go vet ./... && go test ./...`, then
-  `cd ../frontend && bun run lint && bun test src && bun run build && bun run test:browser`. Install the required
-  Chromium build once with `bun run test:browser:install`.
+- Run the checks with `scripts/test-changed.sh`. It runs only what your diff can reach: Prettier and
+  ESLint on the changed frontend files, `tsc --noEmit`, `bun test src`, `go build`/`go vet` and the
+  Go tests beside each changed file, and the browser specs that open a page the change renders. Do not
+  run the whole browser suite or `go test ./...` locally. Install the required Chromium build once
+  with `bun run test:browser:install`.
   Browser tests reuse a running production frontend on loopback port 43117 locally. Start one from
   the worktree under test and rebuild/restart it after source changes. `JD_BROWSER_BASE_URL` selects
   an explicitly managed frontend on another port when worktrees run alongside one another.
-  For the inner loop, also run `bunx tsc --noEmit` and the affected browser spec plus
-  `tests/browser/design-system.spec.ts` for UI changes.
 - **`bun run build` is the final frontend type-check gate.** `frontend/Dockerfile`
   sets `JD_IMAGE_BUILD=1`, which tells `next.config.ts` to skip the type-check pass and the
   prerender source maps. That is deliberate: install and update are both

@@ -44,39 +44,31 @@ architecture and security model; detailed guidance is indexed in [`docs/internal
 
 ## Required checks
 
-**Per change**, run the gate for the surface you touched. This is seconds, not minutes, and it is
-meant to be run repeatedly while working:
+**Never run the whole browser suite or `go test ./...`.** They take minutes to report on pages and
+packages the change never touched. Run what the change can reach:
 
 ```bash
-cd frontend && bun run lint && bunx tsc --noEmit && bun test src
-bunx playwright test tests/browser/<the-spec-for-what-you-changed>.spec.ts
-cd ../backend && go build ./... && go vet ./... && go test ./<changed package>/...
+scripts/test-changed.sh          # against the branch this one started from, or name a base
 ```
 
-`bun test src` is the fast layer over the pure logic in `src/lib` and
-`src/components`, usually in well under a second. Anything expressible there belongs there rather than
-in a browser spec. `bunx tsc --noEmit` is the inner loop's type check; `bun run build` is slower and
-says the same thing until you are about to ship.
+It reads the diff (committed, staged, unstaged and untracked) and runs Prettier and ESLint on the
+changed frontend files, `tsc --noEmit`, `bun test src`, `go build ./...` and `go vet` on the changed
+packages, the Go tests beside each changed file, and the browser specs that open a page the change
+renders, with `design-system.spec.ts` for any UI change. The header of the script says how each is
+picked. Use it while working and again before a pull request. There is no separate full gate.
 
-**Run the browser suite against a server you already have up.** `playwright.config.ts` reuses one on
-port 43117 rather than booting its own, so:
+`bun test src` is the fast layer over the pure logic in `src/lib` and `src/components`, usually in well
+under a second. Anything expressible there belongs there rather than in a browser spec.
+
+**Browser specs run against a server you already have up**, built from the tree under test:
 
 ```bash
-cd frontend && bun run build && bun run start --hostname 127.0.0.1 --port 43117   # once
-bunx playwright test tests/browser/docker-ui.spec.ts                              # ~30s per spec
+cd frontend && bun run build && bun run start --hostname 127.0.0.1 --port 43117   # once per build
 ```
 
-Cold, each invocation paid a fresh production server before the first assertion — which is why the
-whole suite was five to ten minutes and nobody ran it during a change. Specs run in parallel
-locally and, sharded six ways, on CI. A UI change also runs `tests/browser/design-system.spec.ts`
-(`design-system.md` §15 pass 10).
-
-**Before a pull request**, the full gate:
-
-```bash
-cd backend && go build ./... && go vet ./... && go test ./...
-cd ../frontend && bun run lint && bun test src && bun run build && bun run test:browser
-```
+Rebuild and restart it after a source change, or the specs test the old build. `JD_BROWSER_BASE_URL`
+points them at a server on another port when worktrees run side by side. To iterate on one spec, run
+it directly: `bunx playwright test tests/browser/docker-ui.spec.ts` (~30s).
 
 Install the browser once with `bun run test:browser:install`. Deployment changes have additional live,
 race, and browser requirements in [`CONTRIBUTING.md`](CONTRIBUTING.md). `go.mod` requires Go 1.26.8.
