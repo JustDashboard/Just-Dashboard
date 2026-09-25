@@ -8,6 +8,9 @@ architecture and security model; detailed guidance is indexed in [`docs/internal
 
 - Inspect the worktree before editing. Preserve unrelated user changes and never use destructive Git
   commands to discard work.
+- Always assume other agents are working in this repository. Create a separate Git worktree and task
+  branch from the active branch before editing. Run commands in that worktree and leave other agents'
+  worktrees untouched.
 - Read the relevant sections of [`docs/internal/README.md`](docs/internal/README.md) before changing
   architecture, security, backend features, frontend behavior, releases, or deployment code. For the
   deployment subsystem, follow [`docs/internal/deployments/`](docs/internal/deployments/README.md).
@@ -29,9 +32,10 @@ architecture and security model; detailed guidance is indexed in [`docs/internal
 - **Every change, however small, goes through its own branch and pull request.** Start a new branch
   from the branch that is currently checked out (the active branch — a release branch such as
   `patch/0.7.0`, not `main`, unless `main` is what is checked out), commit the change there, push it,
-  and open a pull request back into that active branch. This needs no separate go-ahead. **Merging the
-  pull request and deleting the branch do**: ask the operator every time, unless they said to merge in
-  the same request.
+  and open a pull request back into that active branch. This needs no separate go-ahead. After filing
+  the pull request, watch its checks and review, fix failures or conflicts on the task branch, and keep
+  it ready for operator review. **Merging the pull request and deleting the branch do** require the
+  operator's permission every time, unless they said to merge in the same request.
 - **Before every push, documentation review is mandatory.** Compare the complete diff with
   `docs/internal/`, `AGENTS.md`, `README.md`, and `CONTRIBUTING.md`. Update every document affected by
   changes to behavior, architecture, security, configuration, commands, tests, or workflow in the same
