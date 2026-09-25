@@ -12,6 +12,8 @@ import type {
 import type { EnvironmentRow } from "@/components/deploy/new-project/draft"
 
 export const PYTHON_VERSION = /^3\.(10|11|12|13)$/
+/** The Node majors the JavaScript recipe builds on (build_node_runtime.go nodeMajors). */
+export const NODE_VERSION = /^(20|22|24)$/
 
 /** The request-body ceiling a route gets when the plan names none, and the most it may name. */
 export const DEFAULT_MAX_REQUEST_BODY_MB = 64
@@ -1081,6 +1083,8 @@ export function validateConfiguration(
   if (!configuration.build.method) errors.buildMethod = "Choose a build method."
   if (configuration.build.pythonVersion && !PYTHON_VERSION.test(configuration.build.pythonVersion))
     errors.pythonVersion = "Use Python 3.10, 3.11, 3.12 or 3.13, or leave the version empty."
+  if (configuration.build.nodeVersion && !NODE_VERSION.test(configuration.build.nodeVersion))
+    errors.nodeVersion = "Use Node 20, 22 or 24, or leave the version to the repository."
   if (configuration.build.target && !DOCKERFILE_STAGE.test(configuration.build.target))
     errors.target = "A stage name starts with a letter and has only letters, digits, . _ and -."
   for (const [name, value] of [

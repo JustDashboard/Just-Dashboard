@@ -487,6 +487,7 @@ type BuildPlanConfig struct {
 	Recipe          string      `json:"recipe,omitempty"`
 	GoVersion       string      `json:"goVersion,omitempty"`
 	PythonVersion   string      `json:"pythonVersion,omitempty"`
+	NodeVersion     string      `json:"nodeVersion,omitempty"`
 	PackageManager  string      `json:"packageManager,omitempty"`
 	RootDirectory   string      `json:"rootDirectory,omitempty"`
 	Dockerfile      string      `json:"dockerfile,omitempty"`
@@ -1180,6 +1181,11 @@ func (c PlanConfiguration) Validate() error {
 	}
 	if c.Build.PythonVersion != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "python" || !pythonRecipeVersionRE.MatchString(c.Build.PythonVersion)) {
 		return fmt.Errorf("Python version must select 3.10, 3.11, 3.12 or 3.13 in a Python recipe; use a Dockerfile for other interpreters")
+	}
+	// A Node major chosen in Build settings outranks what the repository
+	// declares; empty follows the repository.
+	if c.Build.NodeVersion != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "node" || !nodeRecipeVersionRE.MatchString(c.Build.NodeVersion)) {
+		return fmt.Errorf("Node version must select 20, 22 or 24 in a JavaScript recipe; use a Dockerfile for other releases")
 	}
 	if c.Build.SPAFallback && c.Build.Method != BuildRecipe && c.Build.Method != BuildStatic {
 		return fmt.Errorf("the single-page fallback applies only to a static site or a recipe with static output")

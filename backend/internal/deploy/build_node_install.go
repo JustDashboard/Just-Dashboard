@@ -846,6 +846,8 @@ type nodeInstallChoice struct {
 	build, start        string
 	assets              bool
 	fieldPackageManager string
+	// nodeVersion is the plan's Node major, which outranks the source.
+	nodeVersion string
 }
 
 func nodeFinding(code string, severity PreflightSeverity, title, measured, means, action, field string) PreflightFinding {
@@ -903,6 +905,9 @@ func planNodeInstall(facts nodeInstallFacts, choice nodeInstallChoice) nodeInsta
 	var glibc []string
 	plan.family, glibc = nodeImageFamily(facts, choice.assets)
 	plan.node = nodeReleaseFor(facts)
+	if major, err := strconv.Atoi(choice.nodeVersion); err == nil && slices.Contains(nodeMajors, major) {
+		plan.node = nodeRelease{major: major, source: "Build settings", exact: true}
+	}
 	// A saved command still naming another manager's runner — detected when
 	// a different lockfile resolved, or left behind by a later commit that
 	// switched managers — would run a program the image may not have.

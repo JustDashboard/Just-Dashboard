@@ -48,6 +48,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useProject } from "@/components/deploy/project-context"
 import {
   BROWSER_PREFIX,
+  NODE_VERSION,
   PYTHON_VERSION,
   automaticPackageManagerHint,
   commandsForPackageManager,
@@ -134,6 +135,7 @@ const BUILD_FIELD_IDS: Record<string, string> = {
   "build.goVersion": "build-go-version",
   "build.goPackage": "build-go-package",
   "build.pythonVersion": "build-python-version",
+  "build.nodeVersion": "build-node-version",
   "build.spaFallback": "build-spa",
   "build.dockerfile": "build-dockerfile",
   "build.target": "build-target",
@@ -276,6 +278,7 @@ const LOCKFILE_NAMES: Record<NodePackageManager, string> = {
 }
 
 const PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13"]
+const NODE_VERSIONS = ["20", "22", "24"]
 
 /** What a recipe falls back to when nothing in the draft or the last build names it. */
 const RECIPE_DEFAULT: Record<DeploymentRecipe, string> = {
@@ -663,7 +666,8 @@ function BuildForm({
       setFieldError({ id: "build-target", message: errors.target })
       return
     }
-    const refusal = errors.buildMethod || errors.buildSecrets || errors.pythonVersion
+    const refusal =
+      errors.buildMethod || errors.buildSecrets || errors.pythonVersion || errors.nodeVersion
     if (refusal) {
       setError(refusal)
       return
@@ -753,6 +757,7 @@ function BuildForm({
         goVersion: next === "go" ? build.goVersion : undefined,
         goPackage: next === "go" ? build.goPackage : undefined,
         pythonVersion: next === "python" ? build.pythonVersion : undefined,
+        nodeVersion: next === "node" ? build.nodeVersion : undefined,
         // The PHP recipe's asset stage installs through the same Node
         // install, so the choice survives the move between the two.
         packageManager: next === "node" || next === "php" ? build.packageManager : undefined,
@@ -770,6 +775,7 @@ function BuildForm({
       goVersion: undefined,
       goPackage: undefined,
       pythonVersion: undefined,
+      nodeVersion: undefined,
       packageManager: undefined,
       spaFallback: choice.method === "static" ? build.spaFallback : undefined,
       target: choice.method === "dockerfile" ? build.target : undefined,
@@ -814,6 +820,7 @@ function BuildForm({
             "goVersion",
             "goPackage",
             "pythonVersion",
+            "nodeVersion",
             "dockerfile",
             "target",
             "primaryService",
@@ -918,6 +925,36 @@ function BuildForm({
               </ChoiceGrid>
             </Field>
           )}
+
+        {build.method === "recipe" && recipe === "node" && (
+          <Field
+            label="Node version"
+            hint={
+              detected?.nodeVersion
+                ? `Auto builds on Node ${detected.nodeVersion}; a version here outranks the repository.`
+                : "Auto reads .nvmrc, .node-version, .tool-versions, volta and engines.node."
+            }
+            error={errorFor("build-node-version")}
+          >
+            <Segments
+              id="build-node-version"
+              label="Node version"
+              fill
+              value={build.nodeVersion ?? "auto"}
+              disabled={!canEdit}
+              onChange={(next) =>
+                setBuild({ ...build, nodeVersion: next === "auto" ? undefined : next })
+              }
+              options={[
+                { value: "auto", label: "Auto" },
+                ...NODE_VERSIONS.map((version) => ({ value: version, label: version, mono: true })),
+                ...(build.nodeVersion && !NODE_VERSION.test(build.nodeVersion)
+                  ? [{ value: build.nodeVersion, label: build.nodeVersion, mono: true }]
+                  : []),
+              ]}
+            />
+          </Field>
+        )}
 
         {build.method === "recipe" && recipe === "python" && (
           <Field

@@ -166,6 +166,14 @@ func buildCauseFix(cause *BuildCause, context causeContext) *CauseFix {
 			if slices.Contains(pythonRecipeVersions, version) && version != build.PythonVersion {
 				return &CauseFix{Kind: fixSetBuild, Field: "configuration.build.pythonVersion", Value: version}
 			}
+		case "node":
+			// The subject is the range the failing package asks for; the
+			// newest catalogue major inside it is the one to choose.
+			if majors, known := nodeRangeMajors(cause.Subjects[0]); known && len(majors) > 0 && build.Recipe == "node" {
+				if version := strconv.Itoa(majors[len(majors)-1]); version != build.NodeVersion {
+					return &CauseFix{Kind: fixSetBuild, Field: "configuration.build.nodeVersion", Value: version}
+				}
+			}
 		}
 	case "build_env_missing":
 		if len(cause.Subjects) == 0 || !recipe {
@@ -587,8 +595,11 @@ func (c *BuildCause) runtimeVersion(subject string) (string, string) {
 		}
 		return "the project requires Python " + subject + ", which the recipe's releases do not satisfy", "build with a Dockerfile, or relax the requirement"
 	case "node":
+		if fix != nil {
+			return "the project requires Node " + subject, "set the Node version to " + fix.Value
+		}
 		return "the project requires Node " + orDefault(subject, "a different release"),
-			"declare the release it needs (`engines.node` in package.json or .nvmrc), or build with a Dockerfile"
+			"choose the release it needs as the Node version in Build settings, or declare it (`engines.node` in package.json or .nvmrc)"
 	case "rust":
 		return "the code requires Rust " + orDefault(subject, "a newer release"), "pin a newer toolchain in rust-toolchain.toml, or lower the dependency"
 	case "java", "gradle":

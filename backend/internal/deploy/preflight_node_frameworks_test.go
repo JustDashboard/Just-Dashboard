@@ -1,6 +1,9 @@
 package deploy
 
 import (
+	"context"
+	"errors"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -66,6 +69,66 @@ func TestPreflightJudgesFrameworkFactsAgainstThePlan(t *testing.T) {
 	if item := findingByCode(preflightFindings(nodeDraft(result), nodeTestConfiguration(nest), dockerHost, false), "nest_output_layout"); item != nil {
 		t.Fatalf("the operator's own start command was judged by start:prod: %+v", item)
 	}
+}
+
+// The Node major chosen in Build settings replaces what detection read from
+// the repository, and the recipe builds on it.
+func TestNodeVersionSettingOutranksTheRepository(t *testing.T) {
+	t.Parallel()
+	result, candidate := detectNodeTree(t, withLockfile(map[string]string{
+		"package.json": `{"scripts":{"start":"node server.js"},"dependencies":{"express":"^4.21.0"}}`,
+		".nvmrc":       "22\n",
+	}))
+	if candidate.NodeVersion != "22 (.nvmrc)" {
+		t.Fatalf("detected version = %q", candidate.NodeVersion)
+	}
+	plan := BuildPlanConfig{Method: BuildRecipe, Recipe: "node", StartCommand: candidate.StartCommand, NodeVersion: "20"}
+	findings := preflightFindings(nodeDraft(result), nodeTestConfiguration(plan), dockerHost, false)
+	selected := slices.IndexFunc(findings, func(item PreflightFinding) bool { return item.Code == "node_version_selected" })
+	if selected < 0 || findings[selected].Measured != "20 (Build settings)" || findings[selected].FieldID != "configuration.build.nodeVersion" {
+		t.Fatalf("node_version_selected = %+v", findings)
+	}
+	if strings.Count(codesOf(findings), "node_version_selected") != 1 {
+		t.Fatalf("node_version_selected reported twice: %s", codesOf(findings))
+	}
+	if eol := findingByCode(findings, "node_version_eol"); eol == nil || eol.Severity != PreflightWarning {
+		t.Fatalf("node_version_eol = %+v", eol)
+	}
+
+	configuration := nodeTestConfiguration(plan)
+	if err := configuration.Validate(); err != nil {
+		t.Fatalf("valid Node version refused: %v", err)
+	}
+	for _, invalid := range []BuildPlanConfig{
+		{Method: BuildRecipe, Recipe: "node", NodeVersion: "18"},
+		{Method: BuildRecipe, Recipe: "node", NodeVersion: "22.1"},
+		{Method: BuildRecipe, Recipe: "python", NodeVersion: "22"},
+		{Method: BuildDockerfile, NodeVersion: "22"},
+	} {
+		if err := nodeTestConfiguration(invalid).Validate(); err == nil {
+			t.Fatalf("Node version %+v was accepted", invalid)
+		}
+	}
+
+	// Yarn 1 checks engines.node against the Node it runs on, so a chosen
+	// release the package excludes is refused before the build.
+	root := writeNodeTree(t, map[string]string{
+		"package.json": `{"engines":{"node":">=22"},"scripts":{"start":"node server.js"},"dependencies":{"express":"^4.21.0"}}`,
+		"yarn.lock":    "# yarn lockfile v1\n",
+	})
+	_, err := NewArtifactBuilder(&artifactBackendFake{}).Prepare(context.Background(), root,
+		BuildPlanConfig{Method: BuildRecipe, Recipe: "node", StartCommand: "yarn run start", NodeVersion: "20"}, false, "t:1")
+	if !errors.Is(err, ErrUnsupportedBuilder) || recipeRefusalField(recipeRefusalText(err, root)) != "configuration.build.nodeVersion" {
+		t.Fatalf("refusal = %v (field %s)", err, recipeRefusalField(recipeRefusalText(err, root)))
+	}
+}
+
+func codesOf(findings []PreflightFinding) string {
+	codes := []string{}
+	for _, item := range findings {
+		codes = append(codes, item.Code)
+	}
+	return strings.Join(codes, " ")
 }
 
 // A saved command that calls another language's toolchain is refused before

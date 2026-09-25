@@ -643,7 +643,7 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 			return selectedRecipe{}, err
 		}
 		plan := planNodeInstall(source.facts, nodeInstallChoice{
-			selected: config.PackageManager, build: config.BuildCommand, start: config.StartCommand,
+			selected: config.PackageManager, build: config.BuildCommand, start: config.StartCommand, nodeVersion: config.NodeVersion,
 		})
 		if plan.blocked != nil {
 			return selectedRecipe{}, plan.blockedError()

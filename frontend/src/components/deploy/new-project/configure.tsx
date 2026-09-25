@@ -580,6 +580,7 @@ export function Configure({
       return (
         errors.buildMethod ??
         errors.pythonVersion ??
+        errors.nodeVersion ??
         errors.target ??
         errors.startCommand ??
         errors.buildSecrets ??

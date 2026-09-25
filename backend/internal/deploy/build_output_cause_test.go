@@ -133,7 +133,8 @@ func buildCases() []buildCase {
 		{
 			name: "Next needs a newer Node", command: "npm run build", exit: 1, build: nodeBuild,
 			lines: []string{`You are using Node.js 18.17.0. For Next.js, Node.js version ">=20.9.0" is required.`},
-			want:  BuildCause{Code: "build_runtime_version", Phase: phaseBuild, Command: "npm run build", ExitCode: 1, Detail: "node", Subjects: []string{">=20.9.0"}},
+			want: BuildCause{Code: "build_runtime_version", Phase: phaseBuild, Command: "npm run build", ExitCode: 1, Detail: "node", Subjects: []string{">=20.9.0"},
+				Fix: &CauseFix{Kind: fixSetBuild, Field: "configuration.build.nodeVersion", Value: "24"}},
 		},
 		{
 			name: "node-gyp without Python", command: "npm ci", exit: 1, build: nodeBuild,

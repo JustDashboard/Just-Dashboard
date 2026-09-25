@@ -3844,6 +3844,8 @@ export type DeploymentConfiguration = {
     /** The main package a Go recipe builds, relative to the root directory; empty lets it choose. */
     goPackage?: string
     pythonVersion?: string
+    /** The Node major a JavaScript recipe builds and runs on; empty follows the repository. */
+    nodeVersion?: string
     packageManager?: NodePackageManager
     rootDirectory?: string
     dockerfile?: string

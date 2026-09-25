@@ -31,6 +31,9 @@ const (
 	nodeNewestLTS = 24
 )
 
+// nodeRecipeVersionRE is a Node major the plan may choose.
+var nodeRecipeVersionRE = regexp.MustCompile(`^(20|22|24)$`)
+
 // nodeEndOfLife are catalogue majors upstream no longer patches.
 var nodeEndOfLife = map[int]string{20: "April 2026"}
 
@@ -488,8 +491,8 @@ func planNodeRelease(facts nodeInstallFacts, plan *nodeInstallPlan) {
 	major := strconv.Itoa(release.major)
 	plan.findings = append(plan.findings, nodeFinding("node_version_selected", PreflightPass,
 		"Node "+major+" for this package", release.label(),
-		"The build and the server run on "+nodeImage(release.major, plan.family)+". A version file (.nvmrc, .node-version, .tool-versions) or package.json (volta, devEngines, engines) chooses the major; without one the recipe's default does.",
-		"", "configuration.build"))
+		"The build and the server run on "+nodeImage(release.major, plan.family)+". The Node version in Build settings chooses the major when it is set; otherwise a version file (.nvmrc, .node-version, .tool-versions) or package.json (volta, devEngines, engines) does, and without one the recipe's default.",
+		"", "configuration.build.nodeVersion"))
 	mismatch := false
 	if engines := facts.runtime.engines; engines != "" {
 		if satisfied, known := nodeRangeSatisfies(major+".99.99", engines); known && !satisfied {
@@ -512,11 +515,11 @@ func planNodeRelease(facts nodeInstallFacts, plan *nodeInstallPlan) {
 			"The declared Node release is not one the recipe builds on",
 			fmt.Sprintf("%s asks for %s; the build runs Node %d", declared, spec, release.major),
 			"The catalogue builds on Node 20, 22 and 24, and the nearest runs this package; that works unless the code relies on an API or a native binary of the release it asked for.",
-			"Declare Node 20, 22 or 24 (.nvmrc or engines.node), or build with a Dockerfile for another release.", "configuration.build")
+			"Declare Node 20, 22 or 24 (.nvmrc or engines.node), choose one in Build settings, or build with a Dockerfile for another release.", "configuration.build.nodeVersion")
 		if enforcer != "" {
 			item.Severity = PreflightBlocked
 			item.Means = enforcer + " refuses to install a package whose engines field excludes the Node it runs on, so the install would stop."
-			item.Action = fmt.Sprintf("Widen engines.node to include Node %d, or declare one of Node 20, 22 and 24 that it allows.", release.major)
+			item.Action = fmt.Sprintf("Widen engines.node to include Node %d, or choose one of Node 20, 22 and 24 that it allows in Build settings.", release.major)
 			plan.blocked = &item
 			return
 		}
@@ -526,17 +529,17 @@ func planNodeRelease(facts nodeInstallFacts, plan *nodeInstallPlan) {
 		plan.findings = append(plan.findings, nodeFinding("node_sass_unsupported", PreflightWarning,
 			"node-sass does not build on Node "+major, "node-sass with Node "+major+" ("+release.source+")",
 			"node-sass, deprecated since 2024, has no binary for this release and its sources do not compile against it, so the install will most likely fail.",
-			"Replace node-sass with sass, which sass-loader and Vite use as is, or declare Node 20 in .nvmrc.", "configuration.build"))
+			"Replace node-sass with sass, which sass-loader and Vite use as is, or choose Node 20 in Build settings.", "configuration.build.nodeVersion"))
 	}
 	if eol := nodeEndOfLife[release.major]; eol != "" {
-		action := "Declare Node 22 or 24 (.nvmrc or engines.node) once the package builds on it."
+		action := "Choose Node 22 or 24 in Build settings, or declare it in .nvmrc or engines.node, once the package builds on it."
 		if strings.HasPrefix(release.source, "node-sass") {
 			action = "Replace node-sass with sass; the build then runs on Node 22."
 		}
 		plan.findings = append(plan.findings, nodeFinding("node_version_eol", PreflightWarning,
 			"Node "+major+" no longer receives security fixes", "Node "+major+" reached end of life in "+eol,
 			"The image is still built and served, but vulnerabilities found in this release are not fixed upstream.",
-			action, "configuration.build"))
+			action, "configuration.build.nodeVersion"))
 	}
 }
 

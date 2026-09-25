@@ -158,6 +158,16 @@ func TestNodeRecipeRendersTheFrameworksServing(t *testing.T) {
 			config: BuildPlanConfig{BuildCommand: "npm run build", StartCommand: "npm run start"},
 			want:   []string{"AS build\nRUN apk add --no-cache bash\nWORKDIR /app", "RUN npm run build\nFROM node:22-alpine@", "\nRUN apk add --no-cache bash\nWORKDIR /app\nENV NODE_ENV=production"},
 		},
+		{
+			name: "the Node version chosen in Build settings",
+			files: lock(map[string]string{
+				"package.json": `{"engines":{"node":">=20"},"scripts":{"start":"node server.js"},"dependencies":{"express":"^4.21.0"}}`,
+				".nvmrc":       "20\n",
+			}),
+			config: BuildPlanConfig{StartCommand: "npm run start", NodeVersion: "24"},
+			want:   []string{"FROM node:24-alpine@"},
+			avoid:  []string{"node:20-alpine"},
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()

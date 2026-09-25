@@ -266,6 +266,11 @@ export function fixTarget(
         href: `${base}/build#build`,
         label: fix.value ? `Use Python ${fix.value}` : "Choose the Python version",
       }
+    case "nodeVersion":
+      return {
+        href: `${base}/build#build`,
+        label: fix.value ? `Use Node ${fix.value}` : "Choose the Node version",
+      }
     case "buildCommand":
       return {
         href: commands,

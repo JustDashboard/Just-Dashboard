@@ -646,6 +646,8 @@ export function StepProject({
                         goPackage: recipe === "go" ? configuration.build.goPackage : undefined,
                         pythonVersion:
                           recipe === "python" ? configuration.build.pythonVersion : undefined,
+                        nodeVersion:
+                          recipe === "node" ? configuration.build.nodeVersion : undefined,
                         // The PHP recipe's asset stage installs through the
                         // same Node install, so the choice survives the move.
                         packageManager:
@@ -770,6 +772,28 @@ export function StepProject({
                   />
                 </Field>
               )}
+              {configuration.build.method === "recipe" &&
+                (configuration.build.recipe ?? "node") === "node" && (
+                  <Field
+                    label="Node version"
+                    htmlFor="node-version"
+                    hint={
+                      flow.candidate?.nodeVersion
+                        ? `Leave empty to build on Node ${flow.candidate.nodeVersion}.`
+                        : "Leave empty to use .nvmrc, .node-version or engines.node."
+                    }
+                    error={errors.nodeVersion}
+                  >
+                    <Input
+                      id="node-version"
+                      value={configuration.build.nodeVersion ?? ""}
+                      onChange={(event) =>
+                        updateBuild({ nodeVersion: event.target.value || undefined })
+                      }
+                      placeholder="22"
+                    />
+                  </Field>
+                )}
               {configuration.build.method === "recipe" &&
                 configuration.build.recipe === "python" && (
                   <Field
