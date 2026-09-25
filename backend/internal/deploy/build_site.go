@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 )
 
@@ -271,7 +272,16 @@ func selectPythonSite(boundary, root, version string, config BuildPlanConfig) (s
 			return siteRecipe{}, err
 		}
 		recipe.pythonInstalls, recipe.pythonEnv = []string{install.command}, install.env
-		if known && len(generator.pythonPackages) > 0 && !pythonManifestNames(tree, generator.name) {
+		switch {
+		case !known || len(generator.pythonPackages) == 0 || pythonMainDependency(tree, generator):
+		case install.kind == "uv.lock" && pythonManifestNames(tree, generator.name, "uv.lock"),
+			install.kind == "poetry.lock" && pythonManifestNames(tree, generator.name, "poetry.lock", "pyproject.toml"):
+			// A library declares its documentation tool in a dependency group
+			// (`[dependency-groups] docs`, `[tool.poetry.group.docs]`), which
+			// an application's install leaves out; the site's build takes
+			// every group the lock resolved.
+			recipe.pythonInstalls = []string{pythonInstallAllGroups[install.kind]}
+		default:
 			// The project's own manifest does not install its documentation
 			// tool; the pinned release does, into the same environment.
 			recipe.pythonInstalls = append(recipe.pythonInstalls, strings.TrimSuffix(install.serverInstall, " ")+" "+
@@ -326,12 +336,44 @@ func denoSiteStage(config BuildPlanConfig, serving staticServing, bases []Resolv
 	return staticServingStage(bases, serving, "build", source)
 }
 
-// pythonManifestNames says whether the root's Python manifests name a
-// package, by name as it appears in them.
-func pythonManifestNames(tree siteTree, name string) bool {
-	for _, manifest := range []string{"requirements.txt", "pyproject.toml", "uv.lock", "poetry.lock"} {
-		if content, ok := tree.read(manifest); ok && strings.Contains(strings.ToLower(string(content)), name) {
+// pythonInstallAllGroups are the lock installs of selectPythonInstall with
+// every dependency group, for a site whose generator is in one.
+var pythonInstallAllGroups = map[string]string{
+	"uv.lock":     "pip install --no-cache-dir uv && uv sync --frozen --all-groups",
+	"poetry.lock": "pip install --no-cache-dir poetry && poetry install --all-groups --no-root --no-interaction",
+}
+
+// pythonMainDependency says the project's own dependencies — requirements.txt,
+// or the main list of pyproject.toml, never a group — install the generator
+// or a theme or plugin that brings it.
+func pythonMainDependency(tree siteTree, generator siteGenerator) bool {
+	names := []string{}
+	if content, ok := tree.read("requirements.txt"); ok {
+		names = append(names, strings.Split(string(content), "\n")...)
+	}
+	if content, ok := tree.read("pyproject.toml"); ok {
+		names = append(names, pyprojectDependencies(string(content))...)
+	}
+	for _, requirement := range names {
+		match := pythonRequirementRE.FindStringSubmatch(strings.TrimSpace(requirement))
+		if match == nil {
+			continue
+		}
+		name := normalizePythonName(match[1])
+		if strings.Contains(name, generator.name) || slices.Contains(generator.pythonPackages, name) {
 			return true
+		}
+	}
+	return false
+}
+
+// pythonManifestNames says whether the first of the manifests the root has
+// names a package, by name as it appears in it: a lock when there is one,
+// since a frozen install reads nothing else.
+func pythonManifestNames(tree siteTree, name string, manifests ...string) bool {
+	for _, manifest := range manifests {
+		if content, ok := tree.read(manifest); ok {
+			return strings.Contains(strings.ToLower(string(content)), name)
 		}
 	}
 	return false

@@ -247,6 +247,35 @@ func TestPythonDocumentationSitesAreBuiltAndServed(t *testing.T) {
 	if !bare.UnpinnedDependencies || !bare.StaticSite.Unpinned || !evidenceMentions(bare, "mkdocs-minify-plugin==") {
 		t.Fatalf("bare mkdocs = %#v", bare)
 	}
+	// The lists inside a plugin's or an extension's options are not plugins.
+	_, material := siteCandidate(t, map[string]string{"mkdocs.yml": `site_name: Docs
+theme:
+  name: material
+plugins:
+  - search
+  - blog:
+      categories_allowed:
+        - News
+        - Releases
+markdown_extensions:
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - toc:
+      permalink: true
+`, "docs/index.md": ""})
+	if material.RecipeIssue != "" || material.Confidence != ConfidenceHigh || !evidenceMentions(material, "mkdocs==1.6.1 mkdocs-material==9.7.7") {
+		t.Fatalf("material = %#v", material)
+	}
+	_, flow := siteCandidate(t, map[string]string{"mkdocs.yml": "site_name: Docs\nplugins: [search, minify]\n", "docs/index.md": ""})
+	if !evidenceMentions(flow, "mkdocs-minify-plugin==") {
+		t.Fatalf("flow = %#v", flow)
+	}
+	if items := yamlBlockList([]byte("plugins:\n- search\n- tags:\n    listings:\n    - x\nnav:\n  - a\n"), "plugins"); strings.Join(items, ",") != "search,tags" {
+		t.Fatalf("items = %q", items)
+	}
 	unknown := detectShapeFixture(t, map[string]string{"mkdocs.yml": "site_name: Docs\nplugins:\n  - mystery\n", "docs/index.md": ""})
 	if len(unknown.Candidates) != 1 || !strings.Contains(unknown.Candidates[0].RecipeIssue, "plugin mystery") {
 		t.Fatalf("unknown plugin = %#v", unknown.Candidates)

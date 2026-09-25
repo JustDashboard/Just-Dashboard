@@ -345,9 +345,9 @@ const (
 	// site whose _config.yml sets no url: the GitHub Pages gem otherwise
 	// derives it from the repository's GitHub name, which a checkout here
 	// does not carry, and stops the build.
-	jekyllURLOverride   = "/tmp/jd-jekyll.yml"
-	mkdocsBuildCommand  = "mkdocs build"
-	zensicalBuildComand = "zensical build"
+	jekyllURLOverride    = "/tmp/jd-jekyll.yml"
+	mkdocsBuildCommand   = "mkdocs build"
+	zensicalBuildCommand = "zensical build"
 )
 
 var jekyllRubyVersions = []string{"3.1", "3.2", "3.3", "3.4"}
@@ -796,6 +796,7 @@ var pythonSitePackages = map[string]string{
 	"mkdocs-awesome-pages-plugin": "mkdocs-awesome-pages-plugin==2.10.1", "mkdocs-macros-plugin": "mkdocs-macros-plugin==1.5.0",
 	"mkdocs-git-revision-date-localized-plugin": "mkdocs-git-revision-date-localized-plugin==1.6.0", "mkdocs-glightbox": "mkdocs-glightbox==0.5.2",
 	"mkdocs-mermaid2-plugin": "mkdocs-mermaid2-plugin==1.2.3", "mkdocs-rss-plugin": "mkdocs-rss-plugin==1.19.0",
+	"pymdown-extensions": "pymdown-extensions==10.21.3",
 }
 
 // sphinxRelease is the Sphinx release a root with no requirements installs:
@@ -827,8 +828,10 @@ var mkdocsExtensionPrefixes = []string{"pymdownx.", "admonition", "abbr", "attr_
 	"tables", "toc", "codehilite", "fenced_code", "meta", "nl2br", "sane_lists", "smarty", "wikilinks", "extra", "legacy_attrs", "material."}
 
 var (
-	mkdocsListHeadRE = func(key string) *regexp.Regexp { return regexp.MustCompile(`(?m)^` + key + `\s*:\s*$`) }
-	mkdocsListItemRE = regexp.MustCompile(`^\s+-\s+['"]?([A-Za-z0-9_.-]+)['"]?\s*:?`)
+	mkdocsListHeadRE = func(key string) *regexp.Regexp { return regexp.MustCompile(`(?m)^` + key + `\s*:\s*(?:#.*)?$`) }
+	mkdocsFlowListRE = func(key string) *regexp.Regexp { return regexp.MustCompile(`(?m)^` + key + `\s*:\s*\[([^\]\n]*)\]`) }
+	mkdocsListItemRE = regexp.MustCompile(`^\s*-\s+['"]?([A-Za-z0-9_.-]+)['"]?\s*:?`)
+	simpleSiteNameRE = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 	mkdocsThemeRE    = regexp.MustCompile(`(?m)^theme\s*:\s*['"]?([A-Za-z0-9_-]+)['"]?\s*$`)
 	mkdocsThemeName  = regexp.MustCompile(`(?m)^theme\s*:\s*\n(?:\s+.*\n)*?\s+name\s*:\s*['"]?([A-Za-z0-9_-]+)`)
 	mkdocsSiteDirRE  = siteYAMLKeyRE("site_dir")
@@ -839,21 +842,43 @@ func siteYAMLKeyRE(key string) *regexp.Regexp {
 	return regexp.MustCompile(`(?m)^` + key + `\s*:\s*['"]?([^'"#\n]*?)['"]?\s*(?:#.*)?$`)
 }
 
-// yamlBlockList reads the items of a top-level block list (`plugins:` then
+// yamlBlockList reads the items of a top-level list (`plugins:` then
 // `  - search`), stopping at the next top-level key; a !!python tag or an
-// anchor elsewhere in the file costs nothing.
+// anchor elsewhere in the file costs nothing. Only the list's own items
+// count: the options under an item hold lists of their own (a blog's
+// categories, a fence's names) that are not plugins. A flow list on the
+// key's line (`plugins: [search, tags]`) is read too.
 func yamlBlockList(content []byte, key string) []string {
+	if match := mkdocsFlowListRE(key).FindSubmatch(content); match != nil {
+		var items []string
+		for _, item := range strings.Split(string(match[1]), ",") {
+			if item = strings.Trim(strings.TrimSpace(item), `'"`); simpleSiteNameRE.MatchString(item) && len(items) < 64 {
+				items = append(items, item)
+			}
+		}
+		return items
+	}
 	location := mkdocsListHeadRE(key).FindIndex(content)
 	if location == nil {
 		return nil
 	}
 	var items []string
+	indent := -1
 	for _, line := range strings.Split(string(content[location[1]:]), "\n") {
-		if strings.TrimSpace(line) == "" || strings.HasPrefix(strings.TrimSpace(line), "#") {
+		trimmed := strings.TrimLeft(line, " ")
+		if strings.TrimSpace(line) == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
 		if line[0] != ' ' && line[0] != '\t' && line[0] != '-' {
 			break
+		}
+		if !strings.HasPrefix(trimmed, "-") {
+			continue
+		}
+		if depth := len(line) - len(trimmed); indent < 0 {
+			indent = depth
+		} else if depth != indent {
+			continue
 		}
 		if match := mkdocsListItemRE.FindStringSubmatch(line); match != nil && len(items) < 64 {
 			items = append(items, match[1])
@@ -921,7 +946,7 @@ func zensicalSite(tree siteTree) (siteGenerator, bool) {
 		return siteGenerator{}, false
 	}
 	config := readSiteConfig("zensical.toml", content)
-	generator := siteGenerator{name: "zensical", recipe: "python", config: "zensical.toml", build: zensicalBuildComand,
+	generator := siteGenerator{name: "zensical", recipe: "python", config: "zensical.toml", build: zensicalBuildCommand,
 		output: siteOutput(config.text("project.site_dir"), "site")}
 	generator.note("zensical.toml", "Zensical configuration")
 	generator.pythonSiteInstall(tree, "zensical", []string{"zensical"}, nil)

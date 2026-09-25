@@ -235,6 +235,37 @@ func TestPythonAndDenoRecipesServeTheirSiteOutput(t *testing.T) {
 			want:  []string{"RUN pip install --no-cache-dir --requirement requirements.txt\n", "RUN pip install --no-cache-dir mkdocs==1.6.1\n"},
 		},
 		{
+			// A library's documentation tool lives in a dependency group the
+			// application install leaves out.
+			name: "mkdocs in a uv dependency group installs every group",
+			files: map[string]string{"mkdocs.yml": "site_name: x\ntheme: material\n",
+				"pyproject.toml": "[project]\nname = \"lib\"\nversion = \"1.0\"\ndependencies = [\"requests>=2\"]\n\n[dependency-groups]\ndocs = [\"mkdocs-material>=9.5\"]\n",
+				"uv.lock":        "version = 1\n[[package]]\nname = \"mkdocs\"\nversion = \"1.6.1\"\n[[package]]\nname = \"mkdocs-material\"\nversion = \"9.7.7\"\n"},
+			want:   []string{"RUN pip install --no-cache-dir uv && uv sync --frozen --all-groups\n", "RUN mkdocs build\n"},
+			absent: []string{"--no-dev", "mkdocs==1.6.1"},
+		},
+		{
+			name: "mkdocs in a poetry group installs every group",
+			files: map[string]string{"mkdocs.yml": "site_name: x\n",
+				"pyproject.toml": "[tool.poetry]\nname = \"lib\"\n[tool.poetry.dependencies]\npython = \"^3.12\"\nrequests = \"^2\"\n[tool.poetry.group.docs.dependencies]\nmkdocs = \"^1.6\"\n",
+				"poetry.lock":    "[[package]]\nname = \"mkdocs\"\nversion = \"1.6.1\"\n"},
+			want:   []string{"RUN pip install --no-cache-dir poetry && poetry install --all-groups --no-root --no-interaction\n"},
+			absent: []string{"--only main", "mkdocs==1.6.1"},
+		},
+		{
+			name: "mkdocs a uv project depends on installs without its groups",
+			files: map[string]string{"mkdocs.yml": "site_name: x\n",
+				"pyproject.toml": "[project]\nname = \"site\"\nversion = \"1.0\"\ndependencies = [\"mkdocs>=1.6\"]\n",
+				"uv.lock":        "version = 1\n[[package]]\nname = \"mkdocs\"\nversion = \"1.6.1\"\n"},
+			want:   []string{"RUN pip install --no-cache-dir uv && uv sync --frozen --no-dev\n"},
+			absent: []string{"--all-groups", "mkdocs==1.6.1"},
+		},
+		{
+			name:  "mkdocs on its own theme installs PyMdown for pymdownx",
+			files: map[string]string{"mkdocs.yml": "site_name: x\nmarkdown_extensions:\n  - admonition\n  - pymdownx.superfences\n"},
+			want:  []string{"RUN pip install --no-cache-dir mkdocs==1.6.1 pymdown-extensions==10.21.3\n"},
+		},
+		{
 			name: "sphinx from what Read the Docs installs",
 			files: map[string]string{"docs/conf.py": "project = 'x'\n", "docs/index.rst": "x\n",
 				".readthedocs.yaml": "version: 2\nsphinx:\n  configuration: docs/conf.py\npython:\n  install:\n    - requirements: docs/requirements.txt\n    - method: pip\n      path: .\n      extra_requirements:\n        - docs\n"},
@@ -267,5 +298,25 @@ func TestPythonAndDenoRecipesServeTheirSiteOutput(t *testing.T) {
 			}
 			assertDockerfileLines(t, prepared.DockerfilePreview, test.want, test.absent)
 		})
+	}
+}
+
+// Every package a site's configuration can bring has a pinned release: one
+// without would be dropped from the install, and the build would fail on
+// the missing module instead.
+func TestEveryPythonSitePackageIsPinned(t *testing.T) {
+	t.Parallel()
+	packages := []string{"mkdocs", "mkdocs-material", "pymdown-extensions", "zensical", "pelican", "markdown"}
+	for _, table := range []map[string]string{mkdocsPlugins, sphinxThemes, sphinxExtensions} {
+		for _, name := range table {
+			if name != "" {
+				packages = append(packages, name)
+			}
+		}
+	}
+	for _, name := range packages {
+		if release := pythonSitePackages[name]; !strings.HasPrefix(release, name+"==") {
+			t.Fatalf("%s has no pinned release: %q", name, release)
+		}
 	}
 }
