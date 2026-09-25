@@ -13,6 +13,16 @@ import type { EnvironmentRow } from "@/components/deploy/new-project/draft"
 
 export const PYTHON_VERSION = /^3\.(10|11|12|13)$/
 
+/**
+ * The Go releases the recipe builds with, oldest first: `goRecipeFamilies` in
+ * the backend's build_go.go, which a Go test keeps equal to this list. The
+ * oldest is past upstream support, so it builds only when pinned.
+ */
+export const GO_VERSIONS = ["1.25", "1.26", "1.27"]
+export const GO_VERSION = new RegExp(
+  `^1\\.(${GO_VERSIONS.map((family) => family.slice(2)).join("|")})(\\.[0-9]{1,3})?$`,
+)
+
 /** The request-body ceiling a route gets when the plan names none, and the most it may name. */
 export const DEFAULT_MAX_REQUEST_BODY_MB = 64
 export const MAX_REQUEST_BODY_MB = 10240
