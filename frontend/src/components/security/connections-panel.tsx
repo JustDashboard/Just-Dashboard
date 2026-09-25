@@ -14,6 +14,7 @@ import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/comp
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { Reach } from "@/components/security/reach"
+import { Address, ProcessList } from "@/components/security/marks"
 import { addressVerbs, blockAddress } from "@/components/security/address-verbs"
 import { AreaFindings } from "@/components/security/posture-panel"
 import { useSecurity } from "@/components/security/security-context"
@@ -36,7 +37,11 @@ import {
  * offer, which is the question during an incident. Folded by remote address
  * rather than listed one socket per row: a busy host holds thousands, and
  * forty of them are one client — a raw table buries the single address with
- * two hundred connections underneath four hundred rows of noise.
+ * two hundred connections underneath four hundred rows of noise. Each address
+ * is drawn as the network it is on (Tailscale's mark for the tailnet) and
+ * each process as the product it is, so the one caller from the internet
+ * talking to Caddy is found before any row is read. A reading with verbs,
+ * not a destination, so the rows stay rows (§16).
  */
 export function ConnectionsPanel() {
   const { can } = useAuth()
@@ -187,7 +192,9 @@ export function ConnectionsPanel() {
                 <TableBody>
                   {peers.map((peer) => (
                     <TableRow key={peer.address} className="group">
-                      <TableCell className="font-mono">{peer.address}</TableCell>
+                      <TableCell>
+                        <Address ip={peer.address} />
+                      </TableCell>
                       <TableCell>
                         <Reach scope={peer.private ? "private" : "internet"} />
                       </TableCell>
@@ -204,7 +211,7 @@ export function ConnectionsPanel() {
                         )}
                       </TableCell>
                       <TableCell className="hidden text-muted-foreground md:table-cell">
-                        {peer.processes.join(", ") || "—"}
+                        <ProcessList names={peer.processes} />
                       </TableCell>
                       <TableCell>
                         <VerbActions

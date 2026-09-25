@@ -505,9 +505,15 @@ test("the overview reads as readings, findings and how the panel is reached", as
   await page.goto("/security")
   await page.waitForLoadState("networkidle")
 
-  // The facts row: the grade, the allowlist and the address this browser came from.
-  await expect(page.getByText("Tailscale only")).toBeVisible()
-  await expect(page.getByText("100.110.34.9", { exact: true })).toBeVisible()
+  // The identity line: the way in drawn as itself, the grade, the allowlist,
+  // the address this browser came from, and the posture's verdict at its end.
+  const identity = page.locator("[data-slot=host-identity]")
+  // Twice: the way in on the tile, and the network this browser is on.
+  await expect(identity.locator('img[src="/logos/tailscale.svg"]')).toHaveCount(2)
+  await expect(identity.getByText("Tailscale only")).toBeVisible()
+  await expect(identity.getByText("100.110.34.9", { exact: true })).toBeVisible()
+  await expect(identity.getByText("Needs attention")).toBeVisible()
+  await expect(identity).toContainText("7 checks")
 
   // Five tiles, each a destination with a figure read from its own poll.
   // Scoped to the grid: the sidebar and the section strip link to the same
@@ -609,6 +615,13 @@ test("a jail's sheet bans an address by hand and the tuning offers the caller's 
   await page.waitForLoadState("networkidle")
 
   await expect(page.locator("[data-slot=stat-grid]")).toContainText("Banned now")
+  // fail2ban as its own mark, and each jail a card that opens its sheet.
+  await expect(
+    page.locator("[data-slot=host-identity]").locator('img[src="/logos/fail2ban.webp"]'),
+  ).toHaveCount(1)
+  const jail = page.locator("[data-slot=choice-row]").filter({ hasText: "sshd" })
+  await expect(jail).toHaveCount(1)
+  await expect(jail).toContainText("banned now")
   await page.getByRole("button", { name: "sshd", exact: true }).click()
   await page.getByLabel("Ban an address now").fill("192.0.2.200")
   await page.getByRole("button", { name: "Ban", exact: true }).click()
@@ -658,6 +671,10 @@ test("connections offers a block only for an address that is not private", async
   const tailnet = page.getByRole("row").filter({ hasText: "100.110.34.9" })
   await expect(tailnet.getByRole("button", { name: "Block at the firewall" })).toHaveCount(0)
   await expect(tailnet.getByRole("button", { name: "More actions" })).toBeVisible()
+  // The address drawn as the network it is on, and the process as its product.
+  await expect(tailnet.locator('img[src="/logos/tailscale.svg"]')).toHaveCount(1)
+  await expect(internet.locator('img[src="/logos/tailscale.svg"]')).toHaveCount(0)
+  await expect(internet.locator('img[src="/logos/caddy.svg"]')).toHaveCount(1)
 })
 
 test("the logins page folds the failed record into attackers", async ({ page }) => {
@@ -689,6 +706,17 @@ test("the network page leads with what faces the internet", async ({ page }) => 
   await expect(page.getByRole("row").filter({ hasText: "veth1a2b" })).toHaveCount(0)
   await page.getByRole("radio", { name: /Everything/ }).click()
   await expect(page.getByRole("row").filter({ hasText: "veth1a2b" })).toBeVisible()
+  // Each device drawn as what made it: the tunnel as Tailscale, the bridge as Docker.
+  const devices = page.getByRole("table").first()
+  await expect(
+    devices
+      .getByRole("row")
+      .filter({ hasText: "tailscale0" })
+      .locator('img[src="/logos/tailscale.svg"]'),
+  ).toHaveCount(1)
+  await expect(
+    devices.getByRole("row").filter({ hasText: "docker0" }).locator('img[src="/logos/docker.svg"]'),
+  ).toHaveCount(1)
 })
 
 test.describe("with no hover available", () => {

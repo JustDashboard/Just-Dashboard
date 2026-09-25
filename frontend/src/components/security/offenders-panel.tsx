@@ -14,9 +14,10 @@ import { Metric, MetricStrip } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { Sparkline } from "@/components/metrics/sparkline"
-import { Tag } from "@/components/tag"
 import { VerbActions } from "@/components/verbs"
 import { addressVerbs, blockAddress } from "@/components/security/address-verbs"
+import { JailName } from "@/components/security/intrusion-panels"
+import { Address } from "@/components/security/marks"
 import {
   Table,
   TableBody,
@@ -104,7 +105,7 @@ export function OffendersPanel({ onBlocked }: { onBlocked?: () => void }) {
         ) : !data?.offenders.length ? (
           <EmptyState icon={Crosshair} title="Nothing has been banned yet" className="mt-3" />
         ) : (
-          <div className="group-data-[plain]/panel:-mx-4 min-w-0">
+          <div className="min-w-0 group-data-[plain]/panel:-mx-4">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -119,7 +120,9 @@ export function OffendersPanel({ onBlocked }: { onBlocked?: () => void }) {
               <TableBody>
                 {data.offenders.map((offender) => (
                   <TableRow key={offender.ip} className="group">
-                    <TableCell className="font-mono">{offender.ip}</TableCell>
+                    <TableCell>
+                      <Address ip={offender.ip} />
+                    </TableCell>
                     <TableCell>
                       <span
                         className={cn(
@@ -137,9 +140,9 @@ export function OffendersPanel({ onBlocked }: { onBlocked?: () => void }) {
                       {relativeTime(offender.last)}
                     </TableCell>
                     <TableCell>
-                      <span className="flex flex-wrap gap-1">
+                      <span className="flex flex-wrap gap-x-3 gap-y-1 text-body text-muted-foreground">
                         {offender.jails.map((jail) => (
-                          <Tag key={jail}>{jail}</Tag>
+                          <JailName key={jail} name={jail} />
                         ))}
                       </span>
                     </TableCell>
