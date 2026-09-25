@@ -8,33 +8,27 @@ import { del, get, post, put } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type { ProxyValidation, VHost } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import { useMediaQuery } from "@/hooks/use-mobile"
 import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
-import { Page, PageContext, RowLink, SearchInput } from "@/components/page"
-import { Pane, Panel, PanelBody, PanelHeader, PanelToolbar, Well } from "@/components/panel"
-import { ROW_BLEED } from "@/components/row-list"
+import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
+import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
+import { Pane, Well } from "@/components/panel"
+import { ProductGlyph, ProductLogo, ProductLogos } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
-import { ChipCount, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
-import { Status } from "@/components/status-dot"
-import { Tag } from "@/components/tag"
+import { StatusDot } from "@/components/status-dot"
 import { VerbActions, VerbBar } from "@/components/verbs"
 import { AuthFilesPanel } from "@/components/proxy/auth-files-panel"
+import { siteProduct } from "@/components/proxy/marks"
 import { SiteForm } from "@/components/proxy/site-form"
+import { ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
 import { useSiteVerbs } from "@/components/proxy/site-verbs"
 import { Button } from "@/components/ui/button"
-import {
-  stickyTableHeader,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 
 type SiteFilter = "all" | "tls" | "plain" | "disabled"
 
@@ -45,9 +39,37 @@ const FILTER_LABEL: Record<SiteFilter, string> = {
   disabled: "Disabled",
 }
 
+/** A site with something to act on: proxying an application in plain text, or on disk and not serving. */
+function isPlain(v: VHost) {
+  return v.enabled && !v.tls && v.upstreams.length > 0
+}
+function isDisabled(v: VHost) {
+  return v.kind === "nginx" && !v.enabled && Boolean(v.enabledPath)
+}
+function waiting(v: VHost) {
+  return isPlain(v) || isDisabled(v)
+}
+
+/** Worst first, then by name. The order *is* the page's answer to "which of these needs me". */
+function byUrgency(a: VHost, b: VHost): number {
+  const rank = (v: VHost) => (isPlain(v) ? 0 : isDisabled(v) ? 1 : 2)
+  if (rank(a) !== rank(b)) return rank(a) - rank(b)
+  return a.name.localeCompare(b.name)
+}
+
 /**
- * Every site this host serves, nginx and Caddy alike, as one plain table:
- * four readings, a filter row, and a site's verbs as words.
+ * Every site this host serves, nginx and Caddy alike: four readings, the
+ * filters on the page, and the sites as cards ordered worst first.
+ *
+ * The cards replaced a six-column table on a wide screen and a hairlined
+ * list on a phone, for the reason the Docker containers took the same pass:
+ * every row here opens the site — its form, or its file — so it is a choice
+ * and carries the lit edge §16 gives to things you take, and the table's
+ * header was naming six columns that each card now says for itself. Each is
+ * drawn as the engine serving it (nginx or Caddy), with its domains and
+ * where they go on the second line, and its two states held out on the
+ * right — on TLS by whose certificate, and serving — so a column of cards is
+ * still scanned down the way the table was.
  *
  * A site is editable through the form that writes its config, or as raw
  * text for the ones the form does not own — a Caddyfile, a hand-written
@@ -79,6 +101,8 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     (signal) => get<VHost[]>("/proxy/vhosts", undefined, signal),
     30_000,
   )
+  // One shape per width, chosen once, so a reading is in the document once.
+  const wide = useMediaQuery("(min-width: 1024px)")
 
   const openForm = (name: string | null, copyFrom: string | null = null) => {
     setRequested(null)
@@ -107,31 +131,32 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   }
 
   const hosts = useMemo(() => data ?? [], [data])
-  const counts = useMemo(() => {
-    const plain = hosts.filter((v) => v.enabled && !v.tls && v.upstreams.length > 0)
-    const disabled = hosts.filter((v) => v.kind === "nginx" && !v.enabled && Boolean(v.enabledPath))
-    return {
+  const counts = useMemo(
+    () => ({
       all: hosts.length,
       tls: hosts.filter((v) => v.tls).length,
-      plain: plain.length,
-      disabled: disabled.length,
+      plain: hosts.filter(isPlain).length,
+      disabled: hosts.filter(isDisabled).length,
       nginx: hosts.filter((v) => v.kind === "nginx").length,
       caddy: hosts.filter((v) => v.kind === "caddy").length,
-    }
-  }, [hosts])
+    }),
+    [hosts],
+  )
   const visible = useMemo(() => {
     const needle = filter.trim().toLowerCase()
-    return hosts.filter((v) => {
-      if (chip === "tls" && !v.tls) return false
-      if (chip === "plain" && !(v.enabled && !v.tls && v.upstreams.length > 0)) return false
-      if (chip === "disabled" && !(v.kind === "nginx" && !v.enabled && v.enabledPath)) return false
-      if (!needle) return true
-      return (
-        v.name.toLowerCase().includes(needle) ||
-        v.serverNames.some((n) => n.toLowerCase().includes(needle)) ||
-        v.upstreams.some((u) => u.toLowerCase().includes(needle))
-      )
-    })
+    return hosts
+      .filter((v) => {
+        if (chip === "tls" && !v.tls) return false
+        if (chip === "plain" && !isPlain(v)) return false
+        if (chip === "disabled" && !isDisabled(v)) return false
+        if (!needle) return true
+        return (
+          v.name.toLowerCase().includes(needle) ||
+          v.serverNames.some((n) => n.toLowerCase().includes(needle)) ||
+          v.upstreams.some((u) => u.toLowerCase().includes(needle))
+        )
+      })
+      .sort(byUrgency)
   }, [hosts, filter, chip])
 
   const setBusy = (name: string, verb: string | null) =>
@@ -223,6 +248,26 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     )
   }
 
+  const newSite = admin && hasNginx && (
+    <Button size="sm" onClick={() => openForm(null)}>
+      <Plus className="size-4" />
+      New site
+    </Button>
+  )
+
+  // Grouped only where the grouping says something a chip has not: once a
+  // filter is on, its name *is* the group.
+  const narrowed = filter.trim().length > 0 || chip !== "all"
+  const attention = visible.filter(waiting)
+  const settled = visible.filter((v) => !waiting(v))
+  const groups: { key: string; label: string; sites: VHost[] }[] =
+    narrowed || attention.length === 0 || settled.length === 0
+      ? [{ key: "all", label: "", sites: visible }]
+      : [
+          { key: "waiting", label: "Needs attention", sites: attention },
+          { key: "serving", label: "Serving", sites: settled },
+        ]
+
   return (
     <Page className="animate-rise">
       {header}
@@ -232,11 +277,24 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
           label="Sites"
           value={counts.all}
           hint={
-            counts.caddy > 0
-              ? `${counts.nginx} nginx · ${counts.caddy} Caddy`
-              : counts.all === 0
-                ? "none configured"
-                : "all nginx"
+            counts.all === 0 ? (
+              "none configured"
+            ) : (
+              <span className="inline-flex items-center gap-1.5">
+                {counts.nginx > 0 && (
+                  <span className="inline-flex items-center gap-1">
+                    <ProductGlyph id="nginx-static" className="size-3" />
+                    {counts.nginx} nginx
+                  </span>
+                )}
+                {counts.caddy > 0 && (
+                  <span className="inline-flex items-center gap-1">
+                    <ProductGlyph id="caddy" className="size-3" />
+                    {counts.caddy} Caddy
+                  </span>
+                )}
+              </span>
+            )
           }
         />
         <StatTile
@@ -258,97 +316,63 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         />
       </StatGrid>
 
-      <Panel>
-        <PanelHeader
-          title="Sites"
-          actions={
-            admin &&
-            hasNginx && (
-              <Button size="sm" onClick={() => openForm(null)}>
-                <Plus className="size-4" />
-                New site
-              </Button>
-            )
+      {hosts.length === 0 ? (
+        <EmptyState
+          mark={<ProductLogos ids={["nginx-static", "caddy"]} size="md" />}
+          title="No sites found"
+          description={
+            hasNginx
+              ? "Put a domain in front of something running on this machine — the form writes the nginx config for you."
+              : "No nginx configuration directory, Caddyfile or shared Caddy ingress was found on this host."
           }
+          action={newSite}
         />
-        <PanelToolbar>
-          <SearchInput
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Site, domain or upstream"
-            containerClassName="sm:w-64"
-          />
-          <div className="flex min-w-0 flex-wrap items-center gap-1">
-            {(Object.keys(FILTER_LABEL) as SiteFilter[]).map((key) => (
-              <FilterChip key={key} selected={chip === key} onClick={() => setChip(key)}>
-                {FILTER_LABEL[key]} <ChipCount>{counts[key]}</ChipCount>
-              </FilterChip>
-            ))}
-          </div>
-        </PanelToolbar>
-        <PanelBody flush>
-          {hosts.length === 0 ? (
-            <EmptyState
-              icon={Globe}
-              title="No sites found"
-              description={
-                hasNginx
-                  ? "Put a domain in front of something running on this machine — the form writes the nginx config for you."
-                  : "No nginx configuration directory, Caddyfile or shared Caddy ingress was found on this host."
-              }
-              action={
-                admin &&
-                hasNginx && (
-                  <Button size="sm" onClick={() => openForm(null)}>
-                    <Plus className="size-4" />
-                    New site
-                  </Button>
-                )
-              }
-              className="mt-4"
+      ) : (
+        <div className="flex min-w-0 flex-col gap-4">
+          {/* The filters stand on the page rather than inside a panel
+              header: the list is the whole page, and the command to add to
+              it sits with the filters that narrow it. */}
+          <Toolbar className="justify-between gap-x-4">
+            <SearchInput
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Site, domain or upstream"
             />
-          ) : visible.length === 0 ? (
-            <EmptyState icon={Globe} title="No sites match" className="mt-4" />
-          ) : (
-            <>
-              <div className="hidden min-w-0 group-data-[plain]/panel:-mx-4 lg:block">
-                <Table containerClassName="max-h-[calc(100svh-24rem)]">
-                  <TableHeader className={stickyTableHeader}>
-                    <TableRow>
-                      <TableHead className="w-full">Site</TableHead>
-                      <TableHead>Domains</TableHead>
-                      <TableHead>Upstream</TableHead>
-                      <TableHead>TLS</TableHead>
-                      <TableHead>Serving</TableHead>
-                      <TableHead className="w-px" />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {visible.map((vhost) => (
-                      <SiteRow
-                        key={`${vhost.kind}:${vhost.name}`}
-                        vhost={vhost}
-                        busy={pending[vhost.name]}
-                        {...handlers}
-                      />
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-              <ul className="divide-y divide-hairline lg:hidden">
-                {visible.map((vhost) => (
-                  <SiteNarrowRow
-                    key={`${vhost.kind}:${vhost.name}`}
-                    vhost={vhost}
-                    busy={pending[vhost.name]}
-                    {...handlers}
-                  />
+            <ChipStrip>
+              {(Object.keys(FILTER_LABEL) as SiteFilter[])
+                .filter((key) => key === "all" || counts[key] > 0)
+                .map((key) => (
+                  <FilterChip key={key} selected={chip === key} onClick={() => setChip(key)}>
+                    {FILTER_LABEL[key]} <ChipCount>{counts[key]}</ChipCount>
+                  </FilterChip>
                 ))}
-              </ul>
-            </>
+            </ChipStrip>
+            {newSite && <span className="ml-auto">{newSite}</span>}
+          </Toolbar>
+
+          {visible.length === 0 ? (
+            <EmptyState icon={Globe} title="No sites match" />
+          ) : (
+            groups.map((group) => (
+              <div key={group.key} className="flex min-w-0 flex-col gap-2">
+                {group.label && <GroupRule label={group.label} count={group.sites.length} />}
+                <ChoiceList aria-label={group.label || "Sites"} className="animate-rise">
+                  {group.sites.map((vhost, index) => (
+                    <SiteCard
+                      key={`${vhost.kind}:${vhost.name}`}
+                      vhost={vhost}
+                      busy={pending[vhost.name]}
+                      wide={wide}
+                      index={index}
+                      {...handlers}
+                    />
+                  ))}
+                </ChoiceList>
+              </div>
+            ))
           )}
-        </PanelBody>
-      </Panel>
+        </div>
+      )}
 
       {admin && hasNginx && <AuthFilesPanel />}
 
@@ -376,9 +400,11 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   )
 }
 
-type RowProps = {
+type CardProps = {
   vhost: VHost
   busy?: string
+  wide: boolean
+  index: number
   admin: boolean
   onEdit: (v: VHost) => void
   onRaw: (v: VHost) => void
@@ -387,122 +413,65 @@ type RowProps = {
   onDelete: (v: VHost) => void
 }
 
-/** Whether the site is serving, said as a state rather than a switch. */
-function ServingStatus({ vhost, busy }: { vhost: VHost; busy?: string }) {
-  if (busy) return <Status state="activating" label={`${busy}…`} />
-  if (vhost.kind === "nginx" && !vhost.enabledPath && vhost.enabled) {
-    // conf.d: every present .conf file is active and there is nothing to
-    // toggle, which "always on" says without offering a control.
-    return <Status state="active" label="always on" />
-  }
-  return vhost.enabled ? (
-    <Status state="active" label="serving" />
-  ) : (
-    <Status state="inactive" label="disabled" />
-  )
-}
-
-function TLSStatus({ vhost }: { vhost: VHost }) {
-  return vhost.tls ? (
-    <Status state="active" label="TLS" icon={ShieldCheck} />
-  ) : (
-    <span className="text-xs text-muted-foreground">plain</span>
-  )
-}
-
-function SiteRow({ vhost, busy, ...handlers }: RowProps) {
+/**
+ * One site, as a card you open. The engine's mark, the name with its state's
+ * dot, the domains and where they go; TLS and serving held out at the right
+ * on a wide screen and under the name on a phone, and the verbs beside them.
+ *
+ * Opening it is the form for an nginx site and the file for anything else
+ * with a file; a Docker Caddy route has neither, keeps its card and its
+ * verbs, and loses the arrow — a card that looks pressable and does nothing
+ * is the defect `ChoiceRow`'s `disabled` exists to prevent.
+ */
+function SiteCard({ vhost, busy, wide, index, ...handlers }: CardProps) {
   const verbs = useSiteVerbs({ vhost, busy, ...handlers })
   const primary = () => (vhost.kind === "nginx" ? handlers.onEdit(vhost) : handlers.onRaw(vhost))
   const canOpen = vhost.kind === "nginx" ? handlers.admin : Boolean(vhost.path)
-  return (
-    <TableRow className="group" onActivate={canOpen ? primary : undefined}>
-      <TableCell>
-        <div className="max-w-[24rem] min-w-0">
-          {canOpen ? (
-            <RowLink onClick={primary}>{vhost.name}</RowLink>
-          ) : (
-            <span className="block truncate text-body font-medium">{vhost.name}</span>
-          )}
-          <p className="truncate font-mono text-hint text-muted-foreground">
-            {vhost.path || `${vhost.kind} route`}
-          </p>
-        </div>
-      </TableCell>
-      <TableCell className="max-w-[18rem] truncate">
-        {vhost.serverNames.join(", ") || <span className="text-muted-foreground">—</span>}
-      </TableCell>
-      <TableCell className="max-w-[14rem]">
-        <Upstreams vhost={vhost} />
-      </TableCell>
-      <TableCell>
-        <TLSStatus vhost={vhost} />
-      </TableCell>
-      <TableCell>
+  const route = [vhost.serverNames.join(", "), vhost.upstreams[0]].filter(Boolean).join(" → ")
+  const states = (
+    <>
+      <span className={cn(wide && "w-24")}>
+        <SiteTLS vhost={vhost} />
+      </span>
+      <span className={cn(wide && "w-28")}>
         <ServingStatus vhost={vhost} busy={busy} />
-      </TableCell>
-      <TableCell>
-        {/* Always drawn, quiet until the row is hovered: these own their
-            column, and a reserved column left empty reads as a layout bug. */}
-        <VerbActions dim verbs={verbs} />
-      </TableCell>
-    </TableRow>
+      </span>
+    </>
   )
-}
-
-function Upstreams({ vhost }: { vhost: VHost }) {
-  if (vhost.upstreams.length === 0) return <span className="text-muted-foreground">—</span>
   return (
-    <span className="flex min-w-0 items-baseline gap-1.5">
-      <span className="truncate font-mono text-hint">{vhost.upstreams[0]}</span>
-      {vhost.upstreams.length > 1 && (
-        <span className="numeric shrink-0 text-hint text-muted-foreground">
-          +{vhost.upstreams.length - 1}
+    <ChoiceRow
+      verb={canOpen ? `Open ${vhost.name}` : vhost.name}
+      onSelect={canOpen ? primary : undefined}
+      disabled={!canOpen}
+      index={index}
+      className={cn(busy && "opacity-70")}
+      leading={<ProductLogo id={siteProduct(vhost)} size="sm" />}
+      title={
+        <span className="flex min-w-0 items-center gap-2">
+          <StatusDot state={vhost.enabled ? "running" : "stopped"} />
+          <span className="truncate">{vhost.name}</span>
         </span>
-      )}
-    </span>
-  )
-}
-
-function SiteNarrowRow({ vhost, busy, ...handlers }: RowProps) {
-  const verbs = useSiteVerbs({ vhost, busy, ...handlers })
-  const primary = () => (vhost.kind === "nginx" ? handlers.onEdit(vhost) : handlers.onRaw(vhost))
-  const canOpen = vhost.kind === "nginx" ? handlers.admin : Boolean(vhost.path)
-  return (
-    <li
-      className={cn(
-        "group flex min-w-0 items-start gap-3 py-3 transition-colors hover:bg-row-hover",
-        ROW_BLEED,
-      )}
-      onClick={(event) => {
-        if (!canOpen) return
-        if ((event.target as HTMLElement).closest("a, button, [role='menuitem']")) return
-        primary()
-      }}
-    >
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-baseline gap-2">
-          {canOpen ? (
-            <RowLink onClick={primary}>{vhost.name}</RowLink>
-          ) : (
-            <span className="truncate text-body font-medium">{vhost.name}</span>
+      }
+      description={
+        <span className="font-mono">
+          {route || vhost.path || `${vhost.kind} route`}
+          {vhost.upstreams.length > 1 && (
+            <span className="numeric text-muted-foreground/60"> +{vhost.upstreams.length - 1}</span>
           )}
-          <Tag>{vhost.kind}</Tag>
+        </span>
+      }
+      trailing={wide ? states : undefined}
+      actions={<VerbActions dim verbs={verbs} menuLabel={`More actions for ${vhost.name}`} />}
+    >
+      {!wide && (
+        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 pl-11">
+          {states}
+          {vhost.path && (
+            <span className="truncate font-mono text-hint text-muted-foreground">{vhost.path}</span>
+          )}
         </div>
-        <p className="truncate text-hint text-muted-foreground">
-          {vhost.serverNames.join(", ") || vhost.path}
-        </p>
-        {vhost.upstreams[0] && (
-          <p className="truncate font-mono text-hint text-muted-foreground">
-            → {vhost.upstreams[0]}
-          </p>
-        )}
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-          <ServingStatus vhost={vhost} busy={busy} />
-          <TLSStatus vhost={vhost} />
-        </div>
-      </div>
-      <VerbActions verbs={verbs} className="shrink-0" />
-    </li>
+      )}
+    </ChoiceRow>
   )
 }
 

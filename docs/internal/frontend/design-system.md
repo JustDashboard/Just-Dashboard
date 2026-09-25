@@ -921,8 +921,8 @@ The deployment section declares its two sets the same way. A project's verbs are
 `projectCommand`, is the first of View, Start, Deploy and Redeploy the list holds — by a fleet
 card's menu and by a fleet row, so a card and the context row cannot disagree about what can be done to
 a project. A run's and its release's are declared once in `deploy/run-verbs.tsx` and drawn by a
-Deployments row's menu and by the run page's header, which is what keeps a finished run from being
-a dead end. A long menu is grouped: a `Verb` may name its `group` — Running, Building, Project,
+Deployments row's menu and by the run page's identity line, which is what keeps a finished run from
+being a dead end. A long menu is grouped: a `Verb` may name its `group` — Running, Building, Project,
 *Release #4* — and `VerbMenu` draws an eyebrow and a separator where the group changes, because
 eleven sentences in a row are a wall and the same eleven under three names are three short lists.
 Cancelling a run is not a danger verb, any more than Stop is: it is undone by deploying again, and
@@ -1110,6 +1110,25 @@ its initials in the users list's hue, and an attacker's attempts against the mos
 address's as a meter. Connections, logins, devices and routes are readings with verbs, so their
 rows stay rows.
 
+**The proxy section draws the engine and the authority.** Its things have two products between
+them — the engine serving a site and the authority that signed its certificate — and the pages draw
+those where they are true (`components/proxy/marks.ts`). The overview opens on the engine as its
+identity line (`EngineIdentity`): nginx's or Caddy's mark on the tile, the version beside the name
+the way the Overview sets the kernel beside the distribution, the unit's state, the directory it
+reads and the ingress container as facts, certbot drawn as Let's Encrypt — the mark says what it
+issues, not who wrote it — and the service verbs at the right end. A site is a card drawn as the
+engine serving it (`siteProduct`), with TLS said by whose certificate: Let's Encrypt's glyph where
+the site points at certbot's live directory (`certPathProduct`), a shield where the file is
+somebody else's. A certificate is drawn as who signed it (`certificateProduct`, through
+`issuerProduct` and certbot's directory), and an imported one from a company CA keeps a glyph rather
+than a guess. A stream is drawn as the service its port is (`portProduct`: the databases and control
+planes the attention list already names by number, and the two Minecraft editions) and a port
+nothing names keeps a bare connection. A listening socket's process is its product's glyph, read
+from the process name first and the port second, so `postgres` on an odd port is still Postgres and
+`python` on 5432 is not. Sites and streams are cards you open and take the edge; certificates,
+watched domains and sockets are readings with verbs and stay rows, with how much of its term a
+certificate has left drawn as a meter under its verdict (`CertLife`).
+
 **A project is drawn as its website, else as what it is.** `ProjectMark` tries three things in
 order, all on `ProductLogo`'s tile so a card does not change shape when an icon arrives: the icon
 the site declares (read through the dashboard's origin), then the product the project is
@@ -1246,9 +1265,12 @@ already knows the format by is a legend they do not have to learn.
 A folder's colour is a **label**, and §3's tag argument is why it is the operator's: "the red one is
 production" is a fact about this server, so it is stored there (`files.colours`) and drawn wherever the
 folder is — the listing, the tiles, the sidebar, the inspector, the strip, the finder, the terminal's tree.
-Nine names (`--folder-*`, one value each; the tab and the pressed mark are mixed from the face in
-`[data-folder]`), blue until somebody says otherwise, graphite for build output and installed
-dependencies because nothing in them is yours to edit. The picker is the folder drawn in each colour,
+The strip's compact folder button sets one colour for every folder, stores it as `files.defaultColour`,
+and clears old individual labels. A folder can then be labelled on its own in its inspector or menu;
+that label takes precedence until another global choice. Nine names (`--folder-*`, one value each;
+the tab and the pressed mark are mixed from the face in `[data-folder]`), blue until somebody says
+otherwise, graphite for build output and installed dependencies until a global colour is picked
+because nothing in them is yours to edit. The picker is the folder drawn in each colour,
 the chosen one `bg-accent` like every selection. The Files page is a workbench and, like the terminal
 and a Git working copy, has no page header: its commands sit in the strip across the workbench, beside
 the folder they act on.
@@ -1469,7 +1491,7 @@ the reader through it.
 | `/deploy/new` — the source chooser | **Flow** | Step one of three, and the screen is asking a question. |
 | Any page with a run of *choices* on it | either | The register is about the page; the lit choice is about the thing. A reading page with an engine picker in a dialog gets the edge on that picker and changes in no other way. |
 | `/deploy/new` — Configure | **Flow** | Step two of three, ending in the one command that creates the project. |
-| A run in progress (`/deploy/[id]/runs/[run]`) | Reading | You are *watching*, not deciding. A project's first deploy carries the spine the reader walked on `/deploy/new` with one step more, *Deploy* — current while it builds, done once it goes live — so the sequence still reads as one, and nothing else changes. |
+| A run in progress (`/deploy/[id]/runs/[run]`) | Reading | You are *watching*, not deciding. The page opens on the run's identity line with its verbs — Cancel, Retry, Redeploy, Visit, the release's menu — at the line's end beside its state, and nothing above it: the sequence on `/deploy/new` ended when the project was created, so a first run is read the same way as the fortieth, with no spine claiming the screens before it. |
 | Deploy settings, credentials, notifications | Reading | Editable readings of state, not a sequence with an end. |
 | Sign-in, first-run setup | **Flow** | A sequence with an outcome. |
 

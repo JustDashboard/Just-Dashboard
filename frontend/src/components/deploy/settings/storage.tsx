@@ -90,7 +90,10 @@ export function StorageSettings({
     coverageRefused: !coverage.data && Boolean(coverage.error),
   }
   return (
-    <FolderColourProvider colours={places.data?.colours ?? {}}>
+    <FolderColourProvider
+      colours={places.data?.colours ?? {}}
+      defaultColour={places.data?.defaultColour}
+    >
       <SettingsPage
         state={state}
         readings={(configuration) => <StorageReadings configuration={configuration} {...facts} />}

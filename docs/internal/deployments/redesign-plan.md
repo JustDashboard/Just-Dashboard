@@ -418,10 +418,10 @@ redesigned every page of the section, and every sheet, dialog and menu on them, 
   progress and then by day, each with who started it as a face or a product, a duration bar that
   turns amber past twice the median, and verbs declared once in `run-verbs.tsx` — among them a new
   *What changed in this release*. A failure reason in the delivery figures narrows the list to the
-  failed runs. The run page opens on an identity line, carries the creation spine with a sixth
-  step, *Deploy*, on a project's first run, draws a stage the run did not include as dashed, names
-  a failure in words with the engine's code beside it and a way to the failing step, and offers the
-  release's verbs in its header. The build console groups each step's lines under a sticky rule,
+  failed runs. The run page opens on an identity line that carries the run's verbs — Cancel, Retry,
+  Redeploy, Visit and the release's menu — beside its state, draws a stage the run did not include
+  as dashed, and names a failure in words with the engine's code beside it and a way to the failing
+  step. The build console groups each step's lines under a sticky rule,
   counts its errors, shows elapsed time, downloads `deployment-N.log` and, from `2xl`, lists the
   stages in a rail. Rolling back is the brand command, and the dialog draws the swap it will make.
 - **Logs.** The five readings each carry their hour — requests with the agents that asked as

@@ -1691,9 +1691,9 @@ archived — and permanent deletion, which asks for the project's name.
 
 The deployment page (`/deploy/[id]/runs/[run]`) keeps the sequence-based stream, resync and the
 5,000-event cap. It opens on an identity line — the source as its forge, the commit, who or what
-started the run and where, and how long it has taken — then, on a project's first deploy, the
-creation spine with *Deploy* as its last step, the release path (a stage the run did not include
-drawn dashed), and how the run ended: a failure in words with the engine's code beside it and a way to
+started the run and where, how long it has taken, and beside its state the verbs that act on it
+(Cancel, Retry, Redeploy, Visit and the release's menu) — then the release path (a stage the run did
+not include drawn dashed), and how the run ended: a failure in words with the engine's code beside it and a way to
 the failing step, the live address, or which release is live now. A failure is titled from the cause
 the failed step recorded (`failure-cause.ts` reads a build's or release task's `cause` and a health
 gate's `diagnostics.cause`), lists the identifiers it named, and offers its fix — to an administrator —

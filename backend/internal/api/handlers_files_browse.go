@@ -33,11 +33,12 @@ type fileBookmark struct {
 }
 
 type filePlacesResponse struct {
-	Home      string            `json:"home"`
-	Roots     []string          `json:"roots"`
-	Places    []files.Place     `json:"places"`
-	Bookmarks []fileBookmark    `json:"bookmarks"`
-	Colours   map[string]string `json:"colours"`
+	Home          string            `json:"home"`
+	Roots         []string          `json:"roots"`
+	Places        []files.Place     `json:"places"`
+	Bookmarks     []fileBookmark    `json:"bookmarks"`
+	Colours       map[string]string `json:"colours"`
+	DefaultColour string            `json:"defaultColour,omitempty"`
 }
 
 func (s *Server) fileBookmarks(ctx context.Context) []fileBookmark {
@@ -55,11 +56,12 @@ func (s *Server) fileBookmarks(ctx context.Context) []fileBookmark {
 func (s *Server) handleFilePlaces(w http.ResponseWriter, r *http.Request) error {
 	svc := s.modules.files
 	httpx.JSON(w, http.StatusOK, filePlacesResponse{
-		Home:      svc.Home(),
-		Roots:     svc.Roots(),
-		Places:    svc.Places(),
-		Bookmarks: s.fileBookmarks(r.Context()),
-		Colours:   s.fileColours(r.Context()),
+		Home:          svc.Home(),
+		Roots:         svc.Roots(),
+		Places:        svc.Places(),
+		Bookmarks:     s.fileBookmarks(r.Context()),
+		Colours:       s.fileColours(r.Context()),
+		DefaultColour: s.fileDefaultColour(r.Context()),
 	})
 	return nil
 }
@@ -107,6 +109,7 @@ func (s *Server) handleFileBookmarks(w http.ResponseWriter, r *http.Request) err
 }
 
 const filesColoursKey = "files.colours"
+const filesDefaultColourKey = "files.defaultColour"
 
 // The labels a folder can carry. A closed set, because the frontend draws each
 // from a token of its own and a free-form value would be a colour nothing
@@ -114,6 +117,37 @@ const filesColoursKey = "files.colours"
 var folderColours = map[string]bool{
 	"blue": true, "teal": true, "green": true, "yellow": true, "orange": true,
 	"red": true, "pink": true, "purple": true, "graphite": true,
+}
+
+func (s *Server) fileDefaultColour(ctx context.Context) string {
+	colour, ok, err := s.Store.Setting(ctx, filesDefaultColourKey)
+	if err != nil || !ok || !folderColours[colour] {
+		return ""
+	}
+	return colour
+}
+
+// A global choice replaces the old folder labels so every folder takes the
+// new colour. Individual labels can be added again afterward.
+func (s *Server) handleFileDefaultColour(w http.ResponseWriter, r *http.Request) error {
+	var req struct {
+		Colour string `json:"colour"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if !folderColours[req.Colour] {
+		return httpx.BadRequest("colour must be one of blue, teal, green, yellow, orange, red, pink, purple or graphite")
+	}
+	if err := s.Store.SetSettings(r.Context(), map[string]string{
+		filesDefaultColourKey: req.Colour,
+		filesColoursKey:       "{}",
+	}); err != nil {
+		return httpx.Internal(err)
+	}
+	httpx.SetAudit(r, "file.colour.default", "", map[string]any{"colour": req.Colour})
+	httpx.JSON(w, http.StatusOK, map[string]any{"defaultColour": req.Colour, "colours": map[string]string{}})
+	return nil
 }
 
 // A folder's colour is the dashboard's record for the reason a bookmark is:

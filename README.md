@@ -131,6 +131,8 @@ and they survive the tab closing. Files and Git sit beside the shell.
 Browse, preview, edit with a diff before saving, drag and drop, upload whole folders, crop
 pictures, chmod, search by content, archive and extract. Every path is checked against
 `JD_FILE_ROOTS` before anything happens.
+The folder button in the toolbar changes every folder's colour. The inspector and folder menus can
+then set a different colour for one folder.
 
 ### Git
 
