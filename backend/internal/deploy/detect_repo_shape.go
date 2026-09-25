@@ -893,7 +893,7 @@ var frameworkDisplayNames = map[string]string{
 	"create-react-app": "Create React App", "vue-cli": "Vue CLI", "vite": "Vite", "express": "Express",
 	"fastify": "Fastify", "hono": "Hono", "koa": "Koa", "node": "Node.js", "go": "Go", "python": "Python",
 	"django": "Django", "fastapi": "FastAPI", "flask": "Flask", "streamlit": "Streamlit", "gradio": "Gradio",
-	"rust": "Rust", "java": "Java", "spring-boot": "Spring Boot", "dotnet": ".NET", "aspnet": "ASP.NET Core",
+	"rust": "Rust", "java": "Java", "spring-boot": "Spring Boot", "dotnet": ".NET", "aspnet": "ASP.NET Core", "blazor-wasm": "Blazor WebAssembly",
 	"deno": "Deno", "fresh": "Fresh", "php": "PHP", "laravel": "Laravel", "symfony": "Symfony", "slim": "Slim",
 	"rails": "Rails", "sinatra": "Sinatra", "hanami": "Hanami", "phoenix": "Phoenix", "elixir": "Elixir",
 	"ruby": "Ruby", "jekyll": "Jekyll", "hugo": "Hugo", "mkdocs": "MkDocs",
