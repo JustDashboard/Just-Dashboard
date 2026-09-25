@@ -50,6 +50,10 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			// but the password is already known, so the request is the
 			// password and nothing else is typed.
 			r.Method(http.MethodPost, "/host", s.handle(s.handleDBConnectHost))
+			// And for a server whose password nobody knows: make the account
+			// from the host's own shell, where peer authentication lets the
+			// engine's system account in without one.
+			r.Method(http.MethodPost, "/host/grant", s.handle(s.handleDBHostGrant))
 			r.Method(http.MethodPost, "/sync", s.handle(s.handleDBSync))
 			r.Method(http.MethodGet, "/provision/options", s.handle(s.handleDBProvisionOptions))
 			r.Method(http.MethodPost, "/provision", s.handle(s.handleDBProvision))
@@ -66,6 +70,12 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			})
 		})
 		// Read surface: available to any authenticated role, including readonly.
+		// The fleet and the topology are every connection at once — the
+		// section's landing page and its map of what talks to what.
+		r.Method(http.MethodGet, "/fleet", s.handle(s.handleDBFleet))
+		r.Method(http.MethodGet, "/topology", s.handle(s.handleDBTopology))
+		r.Method(http.MethodGet, "/{id}/consumers", s.handle(s.handleDBConsumers))
+		s.mountDatabaseAdminRoutes(r)
 		r.Method(http.MethodGet, "/{id}/ping", s.handle(s.handleDBPing))
 		r.Method(http.MethodGet, "/{id}/stats", s.handle(s.handleDBStats))
 		r.Method(http.MethodGet, "/{id}/schemas", s.handle(s.handleDBList))

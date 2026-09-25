@@ -15,7 +15,7 @@ export default function DiagramPage() {
         conn={conn}
         schema={selection.schema}
         canSave={can("service.control")}
-        onOpenTable={(schema, table) => goto("/databases", { schema, table })}
+        onOpenTable={(schema, table) => goto("/databases/browse", { schema, table })}
         onOpenStructure={(schema, table) => goto("/databases/structure", { schema, table })}
         onQuery={(sql) => goto("/databases/query", { sql })}
       />

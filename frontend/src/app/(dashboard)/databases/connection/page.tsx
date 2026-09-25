@@ -145,7 +145,7 @@ export default function ConnectionPage() {
             }
             hint={
               objects && objects > 0 ? (
-                <Link href={hrefFor("/databases")} className="hover:text-foreground">
+                <Link href={hrefFor("/databases/browse")} className="hover:text-foreground">
                   Browse them <ArrowRight className="inline size-3" />
                 </Link>
               ) : (

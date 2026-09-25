@@ -9,6 +9,41 @@
       "changes": [
         {
           "kind": "added",
+          "text": "Databases opens on a control center of every database at once",
+          "detail": "Five readings — how many, how many answer, what they take, sessions open, deployments fed — over an attention list (a server that refused, a port open to the internet, a database never dumped), the databases as cards drawn as their engines and ordered worst first, the servers found running on this machine but not yet connected, and a map of what each database feeds. Every connection is dialled, sized and counted in one request. Browse moved to its own page under the connection."
+        },
+        {
+          "kind": "added",
+          "text": "A Topology page draws what each database feeds, with light running along every live link",
+          "detail": "Databases on one side, everything reading them on the other — the deployment bound to one, a container whose environment names its address, a stack sibling, a process on this machine or another with a session open — joined by four sources at once and drawn with an animated beam per link: pulsing where sessions are open, still where declared and idle, dashed where a link could carry and has not, and in the warning or danger colour where a deployment's binding is stale or broken."
+        },
+        {
+          "kind": "added",
+          "text": "A Server page manages the server behind a connection: accounts, databases, extensions and settings",
+          "detail": "Accounts on PostgreSQL, MySQL and MariaDB, ClickHouse, SQL Server, MongoDB and Redis can be listed, created with a generated password and handed a database at read, write or everything in the same dialog, given a new password, and dropped. Every database on the server is listed with its size and owner, created from a form, and opened as a sibling connection under the same credentials. PostgreSQL extensions are enabled and disabled from their catalogue; MySQL's plugins are listed. The parameters an operator looks for — connections, memory, listen address, SSL, data directory, timeouts — are read in one table. Each form shows the statement it will run."
+        },
+        {
+          "kind": "added",
+          "text": "An Advisor reads the engine's catalogue for what is wrong, with the fix attached",
+          "detail": "Tables with no primary key and foreign keys with no index on every SQL engine; on PostgreSQL also indexes never read, duplicate indexes, tables the planner has no statistics for, dead rows, sequences near their ceiling, connections near the limit, a low cache hit ratio, sessions idle in a transaction, MD5 password hashing, extra superusers and a missing pg_stat_statements; on MySQL non-InnoDB tables, the slow log and performance_schema off, superusers open to any host and a small buffer pool; and, for an administrator, a server published to the internet. Each finding names its objects and, where one statement fixes it, carries that statement with Copy and Open in the console."
+        },
+        {
+          "kind": "added",
+          "text": "Monitor lists the slowest statements, and Backups and Logs are pages of the connection",
+          "detail": "Monitor draws the statements that cost the most over their whole history from pg_stat_statements or performance_schema, as a ranked list with each one's calls, mean and cache share. Backups lists every dump of the database on this server with Dump now, download, restore (typed for) and delete, and says when the newest is over a week old. Logs streams a container database's output in place and, for a native server, hands its journal units to the Logs page."
+        },
+        {
+          "kind": "added",
+          "text": "A database installed on the machine is connected by making the dashboard its own account",
+          "detail": "A PostgreSQL, MySQL or MariaDB, MongoDB or ClickHouse running natively no longer has to be given a password somebody remembers: from the same dialog the dashboard runs the engine's own client as its system account over the Unix socket, where peer authentication needs none, creates or resets an account with a password generated and sealed on the server, and connects over TCP with it. A native Redis has its requirepass read from its configuration file. Every attempt is audited with the account it made, and the password never reaches the browser."
+        },
+        {
+          "kind": "fixed",
+          "text": "The type list in Create table scrolls, and the diagram's grid no longer outshines the tables",
+          "detail": "The type picker is a popover inside a dialog whose scroll lock swallowed the wheel over it, so every type past the fold could only be typed; it registers its own scroll region now. The diagram's dots were drawn in the border colour and were the brightest thing on the canvas; they take the hairline."
+        },
+        {
+          "kind": "added",
           "text": "Resolve a conflict side by side, and stage single lines",
           "detail": "Merge, cherry-pick and revert started from the workspace keep their conflicts instead of aborting, and each conflicted file opens on its base, current, incoming and working result: edit the result, or take one side whole, then continue or abort. Taking a whole side and aborting discard work, so both ask for a typed phrase. The changes panel stages or unstages chosen hunks or individual changed lines, rebuilt on the server from its own snapshot of the diff and refused if the file moved underneath it. Binary files, symlinks and very large diffs keep the whole-file action."
         },
