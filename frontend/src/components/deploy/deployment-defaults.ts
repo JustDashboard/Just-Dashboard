@@ -2,6 +2,7 @@ import type {
   DeploymentBuildMethod,
   DeploymentConfiguration,
   DeploymentDetection,
+  DeploymentDetectedJavaBuild,
   DeploymentDetectedReadiness,
   DeploymentDetectionCandidate,
   DeploymentDraftSource,
@@ -1240,10 +1241,33 @@ export function javaVersionReading(candidate: DeploymentDetectionCandidate | und
     parts.push(
       `${build.releaseFrom} declares Java ${build.release}${build.toolchain ? " as a Gradle toolchain" : ""}`,
     )
-  if (!parts.length) parts.push("Nothing declares a release; the recipe builds on Java 21")
+  if (!parts.length) {
+    const release = javaDefaultRelease(build)
+    parts.push(
+      release === 21
+        ? "Nothing declares a release; the recipe builds on Java 21"
+        : `Nothing declares a release; the recipe builds on Java ${release}, the newest Gradle ${build.wrapper} runs on`,
+    )
+  }
   if (build.context)
     parts.push(`builds ${build.module || "the root project"} from ${build.context}`)
   return parts.join(" · ")
+}
+
+/**
+ * The release a Java build without a declared one builds on — the backend's
+ * planJavaToolchain: Java 21, unless the committed Gradle wrapper is older
+ * than the 8.5 that runs on it.
+ */
+function javaDefaultRelease(build: DeploymentDetectedJavaBuild) {
+  if (!build.wrapperUsable || !build.wrapper) return 21
+  const [major = 0, minor = 0] = build.wrapper.split(".").map(Number)
+  const atLeast = (wantMajor: number, wantMinor: number) =>
+    major > wantMajor || (major === wantMajor && minor >= wantMinor)
+  if (atLeast(8, 5)) return 21
+  if (atLeast(7, 3)) return 17
+  if (atLeast(5, 0)) return 11
+  return 8
 }
 
 /**

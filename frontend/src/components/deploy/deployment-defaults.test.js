@@ -373,6 +373,18 @@ describe("Java and .NET releases", () => {
     expect(javaVersionReading(candidate({ javaBuild: { tool: "maven" } }))).toBe(
       "Nothing declares a release; the recipe builds on Java 21",
     )
+    expect(
+      javaVersionReading(
+        candidate({ javaBuild: { tool: "gradle", wrapper: "8.4", wrapperUsable: true } }),
+      ),
+    ).toBe(
+      "Nothing declares a release; the recipe builds on Java 17, the newest Gradle 8.4 runs on",
+    )
+    expect(
+      javaVersionReading(
+        candidate({ javaBuild: { tool: "gradle", wrapper: "8.14.3", wrapperUsable: true } }),
+      ),
+    ).toBe("Nothing declares a release; the recipe builds on Java 21")
     expect(javaVersionReading(candidate({}))).toBeUndefined()
     expect(
       dotnetVersionReading(
