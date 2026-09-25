@@ -160,6 +160,13 @@ func (s *repoShapeScan) applySiteGenerators(result *DetectionResult, context sha
 			continue
 		}
 		candidate := s.siteCandidate(root, generator, site, submodules, context)
+		if server := serverAtRoot(result.Candidates, root); server != nil && strings.HasPrefix(generator.config, "config.") && candidate.Confidence == ConfidenceHigh {
+			// config.toml is every tool's name: beside an application that
+			// runs its own server, the site reading is the less likely one.
+			candidate.Confidence = ConfidenceMedium
+			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(root, generator.config),
+				Reason: boundedText(server.Name+" runs a server from the same directory, so the "+generator.label()+" reading of "+generator.config+" ranks below it", 512)})
+		}
 		s.setAsideForSite(result, root, generator, candidate, context.markers)
 		result.Candidates = append(result.Candidates, candidate)
 	}
@@ -191,6 +198,17 @@ func (s *repoShapeScan) applySiteGenerators(result *DetectionResult, context sha
 			}
 		}
 	}
+}
+
+// serverAtRoot is a candidate at root that runs a server of its own.
+func serverAtRoot(candidates []DetectedCandidate, root string) *DetectedCandidate {
+	for index := range candidates {
+		candidate := &candidates[index]
+		if candidate.Root == root && candidate.Profile == ProfileWeb && candidate.StartCommand != "" && candidate.NotDeployable == "" {
+			return candidate
+		}
+	}
+	return nil
 }
 
 // siteCandidateNames say what each generator's output is.
@@ -256,13 +274,21 @@ func (s *repoShapeScan) siteCandidate(root string, generator siteGenerator, site
 			break
 		}
 	}
-	if generator.name == "hugo" {
-		// Hugo writes its permalinks, sitemap and feeds from the base URL:
-		// the planned domain when there is one, the site's root otherwise.
+	switch generator.name {
+	// Hugo and Zola write their permalinks, sitemap and feeds from the base
+	// URL: the planned domain when there is one, the site's root otherwise,
+	// which leaves the sitemap's addresses relative.
+	case "hugo":
 		candidate.Variables = mergeDetectedVariable(candidate.Variables, DetectedVariable{
 			Name: "HUGO_BASEURL", Sources: []string{joinRoot(root, generator.config)}, Setup: "domain", Phase: "build",
 			DomainTemplate: "{{scheme}}://{{hostname}}/",
 			SetupReason:    "Hugo writes the sitemap, feeds and absolute links from it (the site is built for / until a domain is set)",
+		})
+	case "zola":
+		candidate.Variables = mergeDetectedVariable(candidate.Variables, DetectedVariable{
+			Name: "ZOLA_BASE_URL", Sources: []string{joinRoot(root, generator.config)}, Setup: "domain", Phase: "build",
+			DomainTemplate: "{{scheme}}://{{hostname}}",
+			SetupReason:    "Zola writes the sitemap, feeds and permalinks from it (the site is built for / until a domain is set)",
 		})
 	}
 	if candidate.RecipeIssue != "" {

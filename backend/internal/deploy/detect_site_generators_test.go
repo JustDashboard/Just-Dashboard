@@ -118,6 +118,47 @@ func TestHugoSitesAreBuiltByHugo(t *testing.T) {
 	})
 }
 
+// A web application's settings file is named config.toml too, with a
+// base_url, beside the templates/ its server renders.
+func TestZolaIsNotAnApplicationsSettingsFile(t *testing.T) {
+	t.Parallel()
+	flask := map[string]string{
+		"app.py": "from flask import Flask\napp = Flask(__name__)\n", "requirements.txt": "flask==3.1.0\ngunicorn==23.0.0\n",
+		"templates/index.html": "{{ title }}", "config.toml": "base_url = \"https://api.example.com\"\ndebug = false\n",
+	}
+	result, selected := siteCandidate(t, flask)
+	if selected.Framework != "flask" {
+		t.Fatalf("selected %#v", selected)
+	}
+	for _, candidate := range result.Candidates {
+		if candidate.Framework == "zola" {
+			t.Fatalf("a Flask settings file became a Zola site: %#v", candidate)
+		}
+	}
+	// Zola's own settings make it a site; beside a server it ranks below it.
+	flask["config.toml"] += "compile_sass = true\n[extra]\nauthor = \"x\"\n"
+	result, selected = siteCandidate(t, flask)
+	zola := false
+	for _, candidate := range result.Candidates {
+		if candidate.Framework == "zola" {
+			zola = candidate.Confidence == ConfidenceMedium
+		}
+	}
+	if selected.Framework != "flask" || !zola {
+		t.Fatalf("selected %#v of %#v", selected, result.Candidates)
+	}
+	// A committed theme, or content/ beside templates/, is a Zola site.
+	for name, files := range map[string]map[string]string{
+		"theme":   {"config.toml": "base_url = \"/\"\ntheme = \"even\"\n", "themes/even/templates/index.html": "x"},
+		"content": {"config.toml": "base_url = \"/\"\n", "templates/index.html": "x", "content/_index.md": ""},
+		"tables":  {"config.toml": "base_url = \"/\"\n[markdown]\nhighlight_code = true\n", "templates/index.html": "x"},
+	} {
+		if _, site := siteCandidate(t, files); site.Framework != "zola" || site.Confidence != ConfidenceHigh {
+			t.Fatalf("%s: %#v", name, site)
+		}
+	}
+}
+
 func TestZolaAndMdBookSitesAreBuiltByTheirGenerators(t *testing.T) {
 	t.Parallel()
 	result, zola := siteCandidate(t, map[string]string{
@@ -125,8 +166,12 @@ func TestZolaAndMdBookSitesAreBuiltByTheirGenerators(t *testing.T) {
 		"content/_index.md": "", "netlify.toml": "[build.environment]\n  ZOLA_VERSION = \"0.19.2\"\n",
 	})
 	if len(result.Candidates) != 1 || zola.Framework != "zola" || zola.Recipe != "site" || zola.OutputDirectory != "out" ||
-		zola.BuildCommand != "zola build --base-url /" || zola.StaticSite.Version != "0.19.2" || setAsideKind(result, "template") == nil {
+		zola.BuildCommand != `zola build --base-url "${ZOLA_BASE_URL:-/}"` || zola.StaticSite.Version != "0.19.2" || setAsideKind(result, "template") == nil {
 		t.Fatalf("zola = %#v", result.Candidates)
+	}
+	if baseURL := candidateVariable(zola, "ZOLA_BASE_URL"); baseURL == nil || baseURL.Setup != "domain" || baseURL.Phase != "build" ||
+		baseURL.DomainTemplate != "{{scheme}}://{{hostname}}" {
+		t.Fatalf("ZOLA_BASE_URL = %#v", baseURL)
 	}
 	_, book := siteCandidate(t, map[string]string{
 		"book.toml": "[book]\ntitle = \"x\"\n[build]\nbuild-dir = \"public\"\n", "src/SUMMARY.md": "# Summary\n",

@@ -338,7 +338,7 @@ const (
 	zolaOldestImage    = "0.15.3"
 	jekyllDefaultRuby  = "3.3"
 	hugoBuildCommand   = `hugo --gc --minify --baseURL "${HUGO_BASEURL:-/}"`
-	zolaBuildCommand   = "zola build --base-url /"
+	zolaBuildCommand   = `zola build --base-url "${ZOLA_BASE_URL:-/}"`
 	mdbookBuildCommand = "mdbook build"
 	jekyllBuildCommand = `bundle exec jekyll build --baseurl ""`
 	// jekyllURLOverride is the configuration the Jekyll recipe writes for a
@@ -509,20 +509,37 @@ func (g *siteGenerator) chooseVersion(declared []declaredSiteVersion, fallback, 
 	}
 }
 
+// zolaKeys and zolaTablesRE are settings only Zola's config.toml has: a web
+// application's settings file names a base_url too, and keeps templates/.
+var (
+	zolaKeys = []string{"compile_sass", "build_search_index", "generate_feeds", "generate_feed", "generate_sitemap",
+		"generate_robots_txt", "minify_html", "feed_filenames", "hard_link_static", "ignored_content", "taxonomies"}
+	zolaTablesRE = regexp.MustCompile(`(?m)^\s*\[(?:markdown|extra|search|slugify|link_checker|translations|languages)(?:\.[A-Za-z0-9_.-]+)?\]`)
+)
+
 func zolaSite(tree siteTree) (siteGenerator, bool) {
 	content, ok := tree.read("config.toml")
 	if !ok {
 		return siteGenerator{}, false
 	}
 	config := readSiteConfig("config.toml", content)
-	directory := tree.dir("templates") || tree.dir("content") || tree.dir("themes") || tree.dir("sass")
-	if config.text("base_url") == "" || !directory {
+	if config.text("base_url") == "" || !(tree.dir("templates") || tree.dir("content") || tree.dir("themes") || tree.dir("sass")) {
+		return siteGenerator{}, false
+	}
+	theme := strings.TrimSpace(config.text("theme"))
+	zola := tree.dir("content") && tree.dir("templates") || zolaTablesRE.Match(content) ||
+		theme != "" && safeRelativePath(path.Join("themes", theme)) && tree.dir(path.Join("themes", theme))
+	for _, key := range zolaKeys {
+		_, set := config[key]
+		zola = zola || set
+	}
+	if !zola {
 		return siteGenerator{}, false
 	}
 	generator := siteGenerator{name: "zola", recipe: "site", config: "config.toml", build: zolaBuildCommand,
 		output: siteOutput(config.text("output_dir"), "public")}
-	generator.note("config.toml", "Zola configuration (base_url beside templates/ or content/)")
-	if theme := strings.TrimSpace(config.text("theme")); theme != "" && safeRelativePath(path.Join("themes", theme)) {
+	generator.note("config.toml", "Zola configuration (base_url beside content/ and templates/, a theme, or Zola's own settings)")
+	if theme != "" && safeRelativePath(path.Join("themes", theme)) {
 		generator.themes = append(generator.themes, path.Join("themes", theme))
 	}
 	declared := []declaredSiteVersion{}
