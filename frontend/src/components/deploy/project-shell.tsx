@@ -282,7 +282,6 @@ export function useProjectNavScope(
   if (project) {
     const { deployment, name, archived, pendingKinds = [] } = project
     const base = `/deploy/${deployment.id}`
-    const url = deploymentURL(deployment.endpoint)
     const pending = Boolean(deployment.pendingChanges) && !archived
     const pendingPages = new Set(
       pending
@@ -295,7 +294,6 @@ export function useProjectNavScope(
     scope = {
       path: base,
       title: name,
-      caption: url ? hostOf(url) : undefined,
       mark: <ProjectMark deployment={deployment} size="xs" className="size-3.5" />,
       groups: [
         {
