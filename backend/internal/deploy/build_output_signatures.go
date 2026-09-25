@@ -73,6 +73,7 @@ var buildSignatures = []buildSignature{
 	signature("build_lockfile_out_of_sync", "yarn.lock", "YN0028", `YN0028`),
 	signature("build_lockfile_out_of_sync", "poetry.lock", "poetry.lock", `changed significantly since poetry\.lock was last generated`),
 	signature("build_lockfile_out_of_sync", "uv.lock", "--locked", "needs to be updated, but `--locked` was provided"),
+	signature("build_lockfile_out_of_sync", "Pipfile.lock", "Pipfile.lock", `Your Pipfile\.lock \([0-9a-f]+\) is out of date`),
 	signature("build_lockfile_out_of_sync", "Cargo.lock", "--locked", `needs to be updated but --locked was passed`),
 	signature("build_lockfile_out_of_sync", "go.sum", "go.sum", `missing go\.sum entry(?: for module providing package ([^\s;(]+))?`),
 	signature("build_lockfile_out_of_sync", "go.mod", "updates to go.mod needed", `updates to go\.mod needed`),
@@ -189,6 +190,9 @@ var buildSignatures = []buildSignature{
 	signature("build_dependency_local_path", "python", "", `No such file or directory: '(/(?:croot|opt/conda|tmp/build|home/[\w.-]+|Users/[\w.-]+)/[^']*)'`),
 	signature("build_dependency_unavailable", "npm", "is not in this registry", `'(@?[^@'\s]+)@[^']*' is not in this registry`),
 	signature("build_dependency_unavailable", "npm", "No matching version found", `No matching version found for (@?[^@\s]+)@`),
+	// A pip freeze from Windows or macOS pins that system's own packages,
+	// which publish nothing Linux can install.
+	signature("build_dependency_os_only", "python", "No matching distribution", `(?i)No matching distribution found for ((?:pywin32|pypiwin32|pywinpty|windows-curses|pyobjc[\w-]*)\b[^\s]*)`),
 	signature("build_dependency_unavailable", "python", "No matching distribution", `No matching distribution found for ([\w.\-\[\]=<>!~,]+)`),
 	signature("build_dependency_unavailable", "python", "was not found in the package registry", `Because ([\w.-]+) was not found in the package registry`),
 	signature("build_dependency_unavailable", "dotnet", "NU1101", `NU1101: Unable to find package ([\w.-]+)`),

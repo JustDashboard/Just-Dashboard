@@ -51,6 +51,7 @@ var outputCauseTitles = map[string]string{
 	"runtime_master_key_invalid":      "Credentials cannot be decrypted",
 	"runtime_auth_untrusted_host":     "Host not trusted by Auth.js",
 	"runtime_dotenv_missing":          ".env file missing",
+	"runtime_errors_hidden":           "Application errors are not logged",
 	"release_migration_failed":        "Migration failed",
 	"release_migration_failed_before": "Earlier migration failed",
 	"release_database_not_empty":      "Database has an unmanaged schema",
@@ -168,6 +169,9 @@ type runtimeCauseContext struct {
 	runtime   RuntimePlanConfig
 	variables []ReleaseVariableSnapshot
 	compose   bool
+	// checks are the readiness checks that failed, whose answers say what
+	// an application that printed nothing refused.
+	checks []CheckEvidence
 }
 
 func applicationOutputCause(containers []ContainerDiagnostics, context runtimeCauseContext) *OutputCause {
@@ -236,6 +240,12 @@ func applicationOutputCause(containers []ContainerDiagnostics, context runtimeCa
 		case "runtime_origin_rejected":
 			cause.Subjects = []string{"PHX_HOST"}
 			cause.Fix = variableFix("PHX_HOST", "runtime", "", context.variables)
+		case "runtime_library_missing":
+			if context.build.Method == BuildRecipe && context.build.Recipe == "python" && len(cause.Subjects) > 0 {
+				if packages := pythonLibraryPackages[cause.Subjects[0]]; packages != "" {
+					cause.Fix = &CauseFix{Kind: fixSetBuild, Field: "configuration.build.systemPackages", Value: packages}
+				}
+			}
 		}
 		return cause
 	}
@@ -267,6 +277,9 @@ func applicationOutputCause(containers []ContainerDiagnostics, context runtimeCa
 	}
 	if match := classifyLines(genericEnvMissingSignatures, lines, -1); match != nil {
 		return envMissing(match)
+	}
+	if cause := djangoHiddenErrorCause(lines, context); cause != nil {
+		return cause
 	}
 	if startCommandExited(containers) {
 		return &OutputCause{Code: "runtime_start_exited", Fix: &CauseFix{Kind: fixReview, Field: "configuration.build.startCommand"}}
@@ -414,6 +427,8 @@ func (c *OutputCause) sentence() string {
 		return "the application listens " + where + ", which nothing outside its container can reach; bind it to 0.0.0.0 (or read the address from HOST) so the proxy and the readiness check can connect"
 	case "runtime_port_mismatch":
 		return "the application listens on port " + subject + ", not the configured internal port; set the internal port to " + subject + " or make the application listen on $PORT"
+	case "runtime_errors_hidden":
+		return "Django answered " + orDefault(subject, "an error") + " and logged nothing: with DEBUG off it sends errors to the admins' email, not to its output; add a LOGGING setting with a console handler to see the cause (the preflight finding django_errors_unlogged has one)"
 	case "runtime_start_exited":
 		return "the application's start command finished with exit code 0 instead of serving, so the container stopped; a start command must keep the server in the foreground — pm2 start, forever start, a trailing & and a one-off script all return at once (use pm2-runtime, or run the server directly)"
 	}
@@ -509,4 +524,35 @@ func (c *OutputCause) releaseSentence() string {
 // cause, whose message scanRunStep rebuilds from the health evidence.
 func outputCauseCode(code string) bool {
 	return code == "schema_missing" || (strings.HasPrefix(code, "runtime_") && outputCauseTitles[code] != "")
+}
+
+// applicationErrorLineRE is a line that says what failed: a traceback, an
+// exception, an error from Django's own loggers.
+var applicationErrorLineRE = regexp.MustCompile(`Traceback|Error|Exception|DisallowedHost|Invalid HTTP_HOST`)
+
+// djangoHiddenErrorCause names a Django candidate that answered the check
+// with an error and wrote nothing about it: with DEBUG off and no LOGGING
+// setting, Django routes request errors — a DisallowedHost 400, a 500 — to
+// mail_admins only. A 400 is its host allowlist; anything else is hidden.
+func djangoHiddenErrorCause(lines []collectedLine, context runtimeCauseContext) *OutputCause {
+	if context.build.Framework != "django" {
+		return nil
+	}
+	status := 0
+	for _, check := range context.checks {
+		for _, attempt := range check.Attempts {
+			if attempt.StatusCode >= 400 {
+				status = attempt.StatusCode
+			}
+		}
+	}
+	if status == 0 || anyLineMatches(lines, applicationErrorLineRE) {
+		return nil
+	}
+	if status == 400 || status == 421 {
+		return &OutputCause{Code: "runtime_host_disallowed", Detail: "django", Subjects: []string{strconv.Itoa(status)},
+			Fix: &CauseFix{Kind: fixReview, Field: "variables"}}
+	}
+	return &OutputCause{Code: "runtime_errors_hidden", Detail: "django", Subjects: []string{strconv.Itoa(status)},
+		Fix: &CauseFix{Kind: fixReview, Field: "configuration.build"}}
 }

@@ -38,6 +38,7 @@ export const CAUSE_TITLES: Record<string, string> = {
   build_dependency_conflict: "Dependency versions conflict",
   build_dependency_advisory_blocked: "Dependency blocked by a security advisory",
   build_dependency_local_path: "Dependency points at a local path",
+  build_dependency_os_only: "Dependency for another operating system",
   build_dependency_unavailable: "Dependency not found",
   build_registry_auth: "Registry refused the credentials",
   build_registry_rate_limited: "Registry rate limit reached",
@@ -97,6 +98,7 @@ export const CAUSE_TITLES: Record<string, string> = {
   runtime_loopback_bind: "Application listens on localhost only",
   runtime_port_mismatch: "Application listens on another port",
   runtime_start_exited: "Start command exited",
+  runtime_errors_hidden: "Application errors are not logged",
   runtime_sqlite_not_writable: "SQLite database not writable",
   runtime_master_key_invalid: "Credentials cannot be decrypted",
   runtime_auth_untrusted_host: "Host not trusted by Auth.js",
@@ -264,6 +266,11 @@ export function fixTarget(
       return {
         href: `${base}/build#build`,
         label: fix.value ? `Use Python ${fix.value}` : "Choose the Python version",
+      }
+    case "systemPackages":
+      return {
+        href: `${base}/build#build`,
+        label: fix.value ? `Add ${fix.value} to the system packages` : "Review the system packages",
       }
     case "buildCommand":
       return {

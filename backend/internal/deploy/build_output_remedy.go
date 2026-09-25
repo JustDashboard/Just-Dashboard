@@ -33,6 +33,7 @@ var causeTitles = map[string]string{
 	"build_dependency_conflict":          "Dependency versions conflict",
 	"build_dependency_advisory_blocked":  "Dependency blocked by a security advisory",
 	"build_dependency_local_path":        "Dependency points at a local path",
+	"build_dependency_os_only":           "Dependency for another operating system",
 	"build_dependency_unavailable":       "Dependency not found",
 	"build_registry_auth":                "Registry refused the credentials",
 	"build_registry_rate_limited":        "Registry rate limit reached",
@@ -98,6 +99,7 @@ var lockfileManifests = map[string]string{
 	"yarn.lock": "package.json", "poetry.lock": "pyproject.toml", "uv.lock": "pyproject.toml",
 	"Cargo.lock": "Cargo.toml", "go.sum": "go.mod", "go.mod": "the code's imports",
 	"composer.lock": "composer.json", "deno.lock": "deno.json and the code's imports", "Gemfile.lock": "Gemfile",
+	"Pipfile.lock": "Pipfile", "pdm.lock": "pyproject.toml",
 }
 
 var lockfileRegenerate = map[string]string{
@@ -105,6 +107,7 @@ var lockfileRegenerate = map[string]string{
 	"yarn.lock": "yarn install", "poetry.lock": "poetry lock", "uv.lock": "uv lock",
 	"Cargo.lock": "cargo update --workspace", "go.sum": "go mod tidy", "go.mod": "go mod tidy",
 	"composer.lock": "composer update --lock", "deno.lock": "deno install", "Gemfile.lock": "bundle install",
+	"Pipfile.lock": "pipenv lock", "pdm.lock": "pdm lock",
 }
 
 var nodeManagerLockfiles = map[string]string{
@@ -225,8 +228,46 @@ func buildCauseFix(cause *BuildCause, context causeContext) *CauseFix {
 		return &CauseFix{Kind: fixReview, Field: "configuration.build.startCommand"}
 	case "build_wrong_root":
 		return &CauseFix{Kind: fixReview, Field: "configuration.build.rootDirectory"}
+	case "build_system_library_missing", "build_native_toolchain_missing":
+		if build.Recipe != "python" || !recipe {
+			return nil
+		}
+		subject := ""
+		if len(cause.Subjects) > 0 {
+			subject = cause.Subjects[0]
+		}
+		if packages := pythonPackagesFor(cause.Code, subject); packages != "" {
+			return &CauseFix{Kind: fixSetBuild, Field: "configuration.build.systemPackages", Value: packages}
+		}
+		return &CauseFix{Kind: fixReview, Field: "configuration.build.systemPackages"}
 	}
 	return nil
+}
+
+// pythonPackagesFor is the Debian packages a Python build failure names:
+// the development files of the library it compiles against, or a compiler.
+func pythonPackagesFor(code, subject string) string {
+	switch {
+	case subject == "pg_config":
+		return "gcc libc6-dev libpq-dev"
+	case subject == "mysql_config":
+		return "gcc libc6-dev pkg-config default-libmysqlclient-dev"
+	case code == "build_native_toolchain_missing" && subject == "rust":
+		return ""
+	case code == "build_native_toolchain_missing":
+		return "build-essential"
+	}
+	return pythonLibraryPackages[subject]
+}
+
+// pythonLibraryPackages are the trixie packages that provide the shared
+// libraries a Python wheel or extension most often fails to load.
+var pythonLibraryPackages = map[string]string{
+	"libGL.so.1": "libgl1", "libglib-2.0.so.0": "libglib2.0-0t64", "libgthread-2.0.so.0": "libglib2.0-0t64",
+	"libpq.so.5": "libpq5", "libpq": "libpq5", "libmagic.so.1": "libmagic1t64", "libzbar.so.0": "libzbar0t64",
+	"libodbc.so.2": "unixodbc", "libgomp.so.1": "libgomp1", "libsndfile.so.1": "libsndfile1", "libsm.so.6": "libsm6",
+	"libSM.so.6": "libsm6", "libXext.so.6": "libxext6", "libXrender.so.1": "libxrender1", "libgdal.so": "gdal-bin",
+	"libcairo.so.2": "libcairo2", "libpango-1.0.so.0": "libpango-1.0-0", "libvips.so.42": "libvips42t64",
 }
 
 // variableFix adds a variable, or adds a scope to one the run already had.
@@ -472,6 +513,9 @@ func (c *BuildCause) explain() (string, string) {
 	case "build_dependency_local_path":
 		return "a requirement points at a file that exists only on the machine that wrote it" + parenthesized(subject),
 			"regenerate requirements.txt with `pip list --format=freeze` from a virtual environment, not a conda environment"
+	case "build_dependency_os_only":
+		return orDefault(subject, "a dependency") + " installs only on Windows or macOS: a pip freeze from that system pinned it",
+			"add its marker (`; sys_platform == \"win32\"`) or remove it, and regenerate requirements.txt with pip-compile"
 	case "build_dependency_unavailable":
 		return orDefault(subjects, "a dependency") + " could not be found in its registry",
 			"check the name and version; a private package needs its registry token as a build variable scoped to install"
@@ -601,10 +645,10 @@ func (c *BuildCause) systemLibrary(subject string) (string, string) {
 	switch {
 	case subject == "pg_config":
 		return "psycopg2 compiles against libpq, and the image has no libpq development files",
-			"depend on `psycopg[binary]` or `psycopg2-binary`, or build with a Dockerfile that installs libpq-dev"
+			"add gcc, libc6-dev and libpq-dev to the Python recipe's system packages, or depend on `psycopg[binary]` or `psycopg2-binary`"
 	case subject == "mysql_config":
 		return "mysqlclient compiles against the MySQL client library, and the image has none",
-			"use PyMySQL, or build with a Dockerfile that installs default-libmysqlclient-dev and pkg-config"
+			"add gcc, libc6-dev, pkg-config and default-libmysqlclient-dev to the Python recipe's system packages, or use PyMySQL"
 	case c.Detail == "prisma" || strings.HasPrefix(subject, "libssl"):
 		return "Prisma's engine needs OpenSSL, which the image does not have",
 			"install openssl in the image, or set the Prisma generator's binaryTargets for the image's OpenSSL"
@@ -626,7 +670,7 @@ func (c *BuildCause) nativeToolchain(subject string) (string, string) {
 			"use a dependency with prebuilt binaries, or build with a Dockerfile that installs the toolchain"
 	case "python":
 		return orDefault(subject, "a dependency") + " has no prebuilt wheel for this Python and the image has no compiler",
-			"choose a Python version the package publishes wheels for, depend on a binary build, or build with a Dockerfile"
+			"choose a Python version the package publishes wheels for, depend on a binary build, or add build-essential to the Python recipe's system packages"
 	case "go":
 		return "a dependency uses cgo, and the Go recipe builds without a C compiler",
 			"switch to a pure-Go dependency (modernc.org/sqlite for mattn/go-sqlite3), or build with a Dockerfile"
