@@ -104,7 +104,9 @@ taking a frame:
   databases section's connection facts and maintenance rows, its find, monitor and generate panels,
   and every block on the four Processes pages — the live table, the PM2 applications, the systemd
   units, and the cron jobs, timers and system cron files on Scheduled, each a title, a toolbar and
-  a hairline under four `StatTile` readings, with a detail sheet built from plain panels — and the
+  a hairline under four `StatTile` readings (Scheduled's are what fires next across cron and the
+  timers together, the account's jobs, the timers armed and what the packages run), with a detail
+  sheet built from plain panels that opens on the thing's own mark — and the
   two System pages follow the same shape: the accounts table on System users under four readings
   (accounts, who can sign in, who is locked, the last sign-in), with its SSH-keys sheet a plain list
   of rows and a plain form, and the audit log's table under its filters, where a request's outcome
@@ -1047,11 +1049,22 @@ kind's glyph on the same tile.
 reports itself to be — its distribution (`platformProduct`, from `/etc/os-release`'s id), its processor
 (`cpuProduct`, from the model string: AMD, Intel, Arm), its hypervisor (`virtualizationProduct`: QEMU for
 a KVM guest) — and a running process as the product it is (`processProduct`: `postgres` is Postgres,
-`dockerd` is Docker) in the Metrics page's top processes. Each returns nothing for a name it does not
-know, and the tile keeps a glyph: a Tux on an unrecognised distribution, or a guessed logo on `bash`,
-would be the drawing lying about the row. A reading that counts products carries them after its words
-(`ProductGlyphs`): the Overview's Docker tile draws the images its running containers are, Databases
-the engines its connections speak.
+`dockerd` is Docker, `node` is Node.js) in the Metrics page's top processes and in every row of the
+live process table. The other three Processes pages read their rows the same way: a systemd unit as
+the product it runs (`unitProduct` — `postgresql@16-main.service` is Postgres, `pm2-deploy.service`
+PM2, `certbot.timer` Let's Encrypt's renewal, by the unit's name with its suffix and instance
+dropped, then by its first word), a PM2 application as its interpreter (`pm2Product`: Node unless
+the ecosystem file says Bun or Python, a glyph for a binary), and a cron line as the program its
+command starts (`programProduct`, the terminal's reader: `docker system prune` is Docker's, a
+script of the operator's own keeps the clock). Each returns nothing for a name it does not know,
+and the tile keeps a glyph: a Tux on an unrecognised distribution, or a guessed logo on `bash` or
+`apt-daily.timer`, would be the drawing lying about the row. A reading that counts products carries
+them after its words (`ProductGlyphs`): the Overview's Docker tile draws the images its running
+containers are, Databases the engines its connections speak, the live table's Processes tile what
+the machine is running, and the Services page's Active and Failed tiles what is up and what is not.
+The Live page opens on the machine's identity line — the same one, with the table's cadence and cap
+at its right end where Metrics keeps its range — and PM2 on PM2's own: its mark, the account, the
+Node it runs, the boot hook and the last save as facts, and whether it resurrects as the verdict.
 
 And the dashboard's own two pages draw what it is made of and reached through: the stack's three
 services as Caddy, Next.js and Go, its checkout as Compose, the certificate modes as Tailscale and

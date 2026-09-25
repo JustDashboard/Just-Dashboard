@@ -1,15 +1,16 @@
 "use client"
 
 import { useMemo } from "react"
-import { Lightning, Play, Slash, StopCircle } from "@/components/icons"
-import { get, post } from "@/lib/api"
+import { Lightning, Play, Slash, StopCircle, Stopwatch } from "@/components/icons"
+import { post } from "@/lib/api"
 import { relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { SystemdTimer, SystemdUnit } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
-import { usePoll } from "@/hooks/use-poll"
+import type { PollState } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { ProductLogo, unitProduct } from "@/components/product-logo"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -27,19 +28,24 @@ import { useUnitControl } from "@/components/procs/unit-actions"
 
 type ConfirmFn = (request: ConfirmRequest) => void
 
+export type TimerList = { available: boolean; timers: SystemdTimer[] }
+
 /**
  * systemd timers, beside cron, because on a modern host they are where half
  * of the scheduled work lives — apt, logrotate, certbot and fstrim all run
  * from one — and a page that showed only crontabs answered "what runs at
  * night" with half an answer. Soonest first; a timer with nothing scheduled
- * sinks to the bottom.
+ * sinks to the bottom. The list is polled by the page, whose "next run"
+ * reading is the soonest of these and the cron jobs together; each timer is
+ * drawn as the product its unit runs (§14).
  */
-export function TimersPanel({ confirm }: { confirm: ConfirmFn }) {
-  const timers = usePoll(
-    (signal) =>
-      get<{ available: boolean; timers: SystemdTimer[] }>("/systemd/timers", undefined, signal),
-    30_000,
-  )
+export function TimersPanel({
+  timers,
+  confirm,
+}: {
+  timers: PollState<TimerList>
+  confirm: ConfirmFn
+}) {
   const { pending, act } = useUnitControl(timers.refresh)
   const list = useMemo(() => timers.data?.timers ?? [], [timers.data])
 
@@ -206,11 +212,14 @@ function TimerRow({
   return (
     <TableRow className="group">
       <TableCell>
-        <div className="max-w-[26rem] min-w-0">
-          <p className="truncate text-body font-medium">{timer.unit}</p>
-          <p className="truncate text-hint text-muted-foreground">
-            {timer.activates ? `runs ${timer.activates}` : "activates nothing"}
-          </p>
+        <div className="flex max-w-[26rem] min-w-0 items-center gap-3">
+          <ProductLogo id={unitProduct(timer.unit)} size="sm" fallback={Stopwatch} />
+          <div className="min-w-0">
+            <p className="truncate text-body font-medium">{timer.unit}</p>
+            <p className="truncate text-hint text-muted-foreground">
+              {timer.activates ? `runs ${timer.activates}` : "activates nothing"}
+            </p>
+          </div>
         </div>
       </TableCell>
       <TableCell className="hidden md:table-cell">

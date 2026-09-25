@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import { Clock, Copy, Pause, Pencil, Play, Plus, Trash } from "@/components/icons"
-import { get, put } from "@/lib/api"
+import { put } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import {
   CRON_PRESETS,
@@ -18,11 +18,12 @@ import { relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { CronJob, Crontab } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
-import { usePoll } from "@/hooks/use-poll"
+import type { PollState } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { Modal } from "@/components/modal"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
+import { ProductLogo, programProduct } from "@/components/product-logo"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -56,10 +57,17 @@ type ConfirmFn = (request: ConfirmRequest) => void
  * own lines (`lib/crontab.ts`) and sending the file back. The text editor
  * is still there, one button away, for the crontab that does something the
  * builder cannot say.
+ *
+ * The crontab is polled by the page rather than here, because the page's
+ * readings — how many jobs, what fires next — are made of it too. Each job
+ * is drawn as the program its command starts (§14): `docker system prune` is
+ * Docker's, `certbot renew` is Let's Encrypt's, and a script of the
+ * operator's own keeps the clock.
  */
 export function CronJobsPanel({
   user,
   users,
+  crontab,
   onUserChange,
   confirm,
   adding,
@@ -67,17 +75,13 @@ export function CronJobsPanel({
 }: {
   user: string
   users: string[]
+  crontab: PollState<Crontab>
   onUserChange: (user: string) => void
   confirm: ConfirmFn
   adding: boolean
   onAddingChange: (open: boolean) => void
 }) {
   const { can } = useAuth()
-  const crontab = usePoll(
-    (signal) => get<Crontab>(`/cron/user/${encodeURIComponent(user)}`, undefined, signal),
-    30_000,
-    [user],
-  )
   // The draft remembers whose crontab it is, so switching accounts cannot
   // save one account's text over another's.
   const [draftFor, setDraftFor] = useState<{ user: string; text: string } | null>(null)
@@ -365,8 +369,7 @@ function CronJobRow({
         )}
       </TableCell>
       <TableCell className="whitespace-normal">
-        <p className="font-mono text-xs break-all">{job.command}</p>
-        {job.comment && <p className="text-hint text-muted-foreground">{job.comment}</p>}
+        <CommandCell command={job.command} comment={job.comment} />
       </TableCell>
       <TableCell>
         <Status
@@ -378,6 +381,23 @@ function CronJobRow({
         <VerbActions dim verbs={verbs} />
       </TableCell>
     </TableRow>
+  )
+}
+
+/**
+ * A cron line's command, drawn as the program it starts where that is a
+ * product, with the note above the line under it. Shared with the system
+ * cron files on the Scheduled page, so a job is one shape wherever it lives.
+ */
+export function CommandCell({ command, comment }: { command: string; comment?: string }) {
+  return (
+    <div className="flex min-w-0 items-center gap-3">
+      <ProductLogo id={programProduct(command)} size="sm" fallback={Clock} />
+      <div className="min-w-0">
+        <p className="font-mono text-xs break-all">{command}</p>
+        {comment && <p className="text-hint text-muted-foreground">{comment}</p>}
+      </div>
+    </div>
   )
 }
 
