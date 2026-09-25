@@ -6,8 +6,12 @@ on the host. Generated Dockerfiles use root-relative, exclusive writes so a chec
 redirect output outside the build context. Detection ignores this generated directory.
 
 Detection reads manifests as data — `package.json`, `angular.json`, `requirements.txt`, `pyproject.toml`,
-`uv.lock`, `poetry.lock`, `Cargo.toml`, `pom.xml`, `build.gradle(.kts)`, `*.csproj`, `deno.json(c)`, a
-`Procfile`, and for a JavaScript package its lockfiles, `.npmrc`, `.yarnrc.yml`, `bunfig.toml`,
+`uv.lock`, `poetry.lock`, `Cargo.toml`, `pom.xml` (and the in-repository parents and reactor it belongs
+to), `build.gradle(.kts)`, `settings.gradle(.kts)` and `gradle/libs.versions.toml`, `*.csproj`, `*.fsproj`,
+`*.vbproj` with the `Directory.Build.props`, `Directory.Packages.props`, `NuGet.config` and `global.json`
+that apply to them, `deno.json(c)`, a `Procfile`, the JDK and .NET SDK version files (`.java-version`,
+`.sdkmanrc`, `.tool-versions`, `mise.toml`, `system.properties`), and for a JavaScript package its
+lockfiles, `.npmrc`, `.yarnrc.yml`, `bunfig.toml`,
 `pnpm-workspace.yaml` and the Node and Bun version files (`.nvmrc`, `.node-version`, `.tool-versions`,
 `.bun-version`) — and names a candidate per root with the framework, the build and start commands, the port,
 static output, the interpreter or toolchain release, and the environment variables and databases the
@@ -38,8 +42,11 @@ pointing at the setting it names), `build_root_missing` when the root directory 
 
 Where it ran, it replaces the candidate's `recipeIssue`, which was decided with detection's settings
 rather than the plan's; a refusal already named by a more precise finding (`package_manager_*`,
-`go_version_unsupported`, `go_main_*`, `python_version_unsupported`, `start_command_missing`) is not
-reported twice. Without a tree — an image, a pasted Compose file, a commit that could not be fetched —
+`go_version_unsupported`, `go_main_*`, `python_version_unsupported`, `java_version_unsupported`,
+`gradle_wrapper_incompatible`, `dotnet_version_unsupported`, `start_command_missing`) is not reported
+twice. A JDK or .NET release the recipe cannot build with is a setting, not something wrong with the
+source, so detection never freezes it into `recipeIssue` (the dry run's `toolchainVersionError`); preflight
+judges the plan's own `build.javaVersion` or `build.dotnetVersion` against the facts detection kept. Without a tree — an image, a pasted Compose file, a commit that could not be fetched —
 the same checks run from the candidate's stored facts.
 
 ## Build values
@@ -53,7 +60,11 @@ the install. A variable has one mapping; `install_and_build` is the one way to r
 BuildKit still receives one secret. Build settings expose this choice for each build-scoped value
 ("Build", "Install only", "Both"). A registry credential a package manager's configuration names is
 mapped to install automatically when a draft gives it a value (see
-[JavaScript installs](#javascript-installs)). Nothing maps a database URL to the install on its own:
+[JavaScript installs](#javascript-installs)); so is a credential a Maven `settings.xml` (`${env.X}`), a
+Gradle repository's `credentials { … System.getenv("X") }` or `credentials(PasswordCredentials::class)`,
+or a `NuGet.config`'s `packageSourceCredentials` (`%X%`) names (see [Java and Kotlin](#java-and-kotlin) and
+[.NET](#net)). Maven and Gradle resolve dependencies as the build runs rather than in a step of their own,
+so a variable mapped to install is mounted on their build step; .NET restores in its own step. Nothing maps a database URL to the install on its own:
 the install also runs every dependency's install script, and Prisma's `generate` does not connect (see
 [JavaScript runtime and toolchain](#javascript-runtime-and-toolchain)).
 Runtime and release-task scopes remain separate. Custom Dockerfiles do not gain automatic values or
@@ -604,7 +615,7 @@ candidate whose framework is the language or framework and whose `recipeIssue` s
 which preflight's `recipe_unsupported` shows instead of "No deployable plan was detected". Rails
 (`rails new` has generated a production Dockerfile since 7.1; older applications use `dockerfile-rails`),
 Hanami, Sinatra and Rack, Jekyll and Middleman; Phoenix (`mix phx.gen.release --docker`) and Elixir;
-Crystal, Haskell, Zig, Swift, Scala, Clojure, Gleam, F#, OCaml, Nim, Perl, Erlang, Dart, R Shiny and
+Crystal, Haskell, Zig, Swift, Scala, Clojure, Gleam, OCaml, Nim, Perl, Erlang, Dart, R Shiny and
 Plumber, C/C++ (CMake, Meson), Elm, Hugo, MkDocs and a Flutter web app. A web framework among the
 manifest's dependencies makes it a web service on its conventional port. A Rails, Hanami or Phoenix
 application owns its `package.json` (and `assets/package.json`): that asset pipeline is set aside rather
@@ -814,6 +825,13 @@ overridden. Then it excludes `**/node_modules`, `.dockerignore` and the dashboar
 recipes whose toolchains stamp or version builds from Git (Go, Python's setuptools-scm, Maven's
 git-commit-id, SourceLink) keep it. A static site also excludes `.env` and `.env.*`. Committed `.env`
 files are otherwise left in: Next.js and Vite read public build values from them.
+
+The context is the root directory, except where the build reads files above it: a JavaScript workspace
+member installs from its workspace root, a Maven module builds from its reactor, a Gradle project from its
+settings root, and a .NET project from the directory that holds the projects it references and the
+MSBuild, NuGet and SDK files that apply to it. `PreparedBuild.ContextDirectory` names that directory, the
+generated Dockerfile and its ignore file are written there, and the member's own build file is kept in the
+context even when an ignore rule would drop it.
 
 ## JavaScript installs
 
@@ -1264,43 +1282,166 @@ A binary whose `src/main.rs` or `src/bin` entry calls `dotenvy::dotenv()` with `
 
 ## Java and Kotlin
 
-A `pom.xml` builds with `maven:3-eclipse-temurin-<release>` (`mvn -q -B -DskipTests package`); a
-`build.gradle(.kts)` with `gradle:8-jdk<release>` (`./gradlew --no-daemon -q build -x test` through
-the committed wrapper, its Windows line endings stripped first, or the image's own Gradle). The one executable jar — not `-sources`, `-javadoc`,
-Spring Boot's `-plain` or a shade plugin's `original-` — becomes `/app/app.jar` on
-`eclipse-temurin:<release>-jre-alpine`, run by `java -jar` as an unprivileged user with
-`-XX:MaxRAMPercentage=75` so the heap follows the container's limit. The release comes from
-`.java-version`, the pom's `java.version`/`maven.compiler.release` properties, or Gradle's toolchain and
-compatibility settings; 11, 17, 21 and 25 are in the catalogue and 21 is the default. Spring Boot,
-Quarkus, Micronaut, Javalin, Ktor, Helidon and Vert.x mark a web service (8080; Javalin 7070); a plain
-project is a worker that asks. These frameworks do not read PORT, so the default start command bridges
-it into the variable that outranks `application.properties`/`.yml`: `exec env SERVER_PORT=${PORT:-8080}
-java -jar /app/app.jar` for Spring Boot and Helidon, `QUARKUS_HTTP_PORT` for Quarkus,
-`MICRONAUT_SERVER_PORT` for Micronaut (`exec` keeps java as PID 1). A configured `server.port` becomes the
-suggested port. Vert.x, Javalin and Ktor's embedded server fix their port in code, which detection reads
-(`listen(8888)`, `start(7070)`, `embeddedServer(port = …)`); Ktor's `application.conf` with
-`port = ${?PORT}` follows PORT. A multi-module Maven project is a `recipe_unsupported` finding: set the
-root directory to the module that builds the application.
+A root with a `pom.xml` or a `build.gradle(.kts)` is read the way Maven and Gradle read it, as data
+(`deploy/detect_jvm.go`, `detect_maven.go` and `detect_gradle.go`, shared by detection and the recipe in
+`build_java.go`):
+
+- **Maven** POMs are parsed as XML. A module's in-repository parents (`<parent>` with its default
+  `../pom.xml` relative path, checked by artifactId) contribute their properties, dependencies and build
+  plugins, and the reactor that aggregates it (`<modules>`, profiles' included, nested aggregators followed
+  to the top) is where it builds: `mvn -B -ntp -DskipTests -pl :<artifactId> -am package` from the
+  reactor, with `-f` when the reactor sits below the directory that holds every parent. A POM-packaged
+  aggregator is never the candidate once one of its modules builds an application, and set as the root
+  directory it names the module to choose instead.
+- **Gradle** reads `settings.gradle(.kts)` — `include(…)` lists, `:a:b` meaning `a/b`, and
+  `project(":x").projectDir` — and builds from that settings root by project path
+  (`./gradlew :app:bootJar`). `gradle/libs.versions.toml` resolves version-catalog aliases
+  (`libs.spring.boot.starter.web`, `alias(libs.plugins.ktor)`, bundles) to their coordinates and plugin ids
+  before anything matches a framework, and plugins applied through `buildSrc`, `build-logic` or an included
+  build's precompiled script plugins are followed to what they apply. `apply false` applies nothing.
+- A module or project that packages nothing — a library, a `java-library`, a POM aggregator — is set
+  aside (`library`) when its build has an application, whose evidence names what it is built with; with
+  several applications each is a candidate and the ranking decides. `java_module_selected` and
+  `gradle_subproject_selected` name the choice and where it builds. A build none of whose modules packages
+  anything keeps the aggregator, with a `recipeIssue` naming what would.
+- A Kotlin Multiplatform server that depends on a project applying the Android Gradle plugin cannot even
+  be configured without the Android SDK, which is its `recipeIssue` before Deploy; Android modules
+  themselves are set aside as mobile apps.
+
+The artifact follows the packaging plugin, and the task is the one that produces it — never `build`,
+which also runs checks and linters: Spring Boot `bootJar`/`bootWar` (Maven's `package` with
+spring-boot-maven-plugin; an executable war runs as `java -jar /app/app.war`), Quarkus `quarkusBuild`
+(the `quarkus-app/` directory, run as `java -jar /app/quarkus-app/quarkus-run.jar`, or the `*-runner.jar`
+when `quarkus.package.jar.type=uber-jar`), Ktor's `buildFatJar` and Shadow's `shadowJar` (`*-all.jar`),
+the application plugin's (and Micronaut's) `installDist` (the distribution in `/app`, started by
+`/app/bin/app`), Maven shade, assembly's `jar-with-dependencies`, Micronaut and Vert.x fat jars, and a
+Helidon jar with its `libs/`. Jars are tried by name in that order (`-sources`, `-javadoc`, `-tests`,
+`-plain` and `original-` never), and only one whose manifest names a `Main-Class` (read with the JDK's
+`jar` tool) is copied, with the `lib/` or `libs/` beside it that a thin jar's `Class-Path` points at.
+Nothing runnable fails the guard, `build produced no executable jar in …`. Preflight warns
+`java_artifact_not_runnable` when no build file packages anything, and blocks a servlet WAR. Vaadin builds
+its `production` profile and JHipster its `prod` (`-P`, or `-Pvaadin.productionMode=true` for Gradle);
+Vaadin with neither is `vaadin_dev_mode`. A Spring Boot root with `application-prod.*` or
+`application-production.*` gets an empty `SPRING_PROFILES_ACTIVE` row whose example is that profile:
+running with it is the operator's call, since a production profile usually needs variables nobody has set
+yet.
+
+**The Java release.** The catalogue carries 8, 11, 17, 21 and 25. The build files declare the release —
+the POM's `maven.compiler.release`, `java.version`, `maven.compiler.target`/`source` or Kotlin's
+`jvmTarget`, then maven-compiler-plugin's `<release>` (properties resolved, parents included); Gradle's
+toolchain (`JavaLanguageVersion.of`, `jvmToolchain`, through the catalog too) or source/target
+compatibility, in the project's script, the root script, then convention plugins — and a version file pins
+it: `.java-version`, `.sdkmanrc`, `.tool-versions`, `mise.toml` or Heroku's `system.properties`, the nearest
+first. `build.javaVersion` overrides both. A release the catalogue lacks maps up to the next one
+(`java_version_mapped`: a newer JDK compiles for it and its JRE runs the result), and a version file older
+than what the build compiles for gives way to the build. A **Gradle toolchain is exact**: when Gradle runs
+on another JDK, the declared one is copied beside it from `eclipse-temurin:<N>-jdk` into `/opt/jdk-<N>` and
+passed as `-Porg.gradle.java.installations.paths`; one the catalogue lacks needs the foojay toolchain
+resolver in the settings, or it is `java_version_unsupported`. The wrapper's Gradle
+(`gradle-wrapper.properties`) must run on the JDK it builds with — Java 17 needs Gradle 7.3, 21 needs 8.5,
+25 needs 9.1, and Gradle 9 needs 17 — so a wrapper that cannot runs on the newest JDK it supports (compiling
+for the older release, or with the toolchain provided), and when no JDK works `gradle_wrapper_incompatible`
+names the `./gradlew wrapper --gradle-version` to run. With nothing declared the release is 21, or the
+newest one the wrapper runs on.
+
+Builds run on `maven:3-eclipse-temurin-<N>`, on `eclipse-temurin:<N>-jdk` with the committed wrapper (its
+Windows line endings stripped, made executable), or on `gradle:8-jdk<N>` (`gradle:9-jdk25` for 25) without
+one — also when `gradlew` is committed without `gradle/wrapper/gradle-wrapper.jar`, a `*.jar` ignore rule's
+doing, which is `gradle_wrapper_jar_missing`. A Maven wrapper pinning Maven 4 runs as `./mvnw`. The
+artifact runs on `eclipse-temurin:<N>-jre` — Ubuntu, published for amd64 and arm64 for every release (the
+Alpine JREs of 8, 11 and 17 are amd64-only, and an arm64 server failed every such build after Deploy) — as
+the unprivileged `app` user with `-XX:MaxRAMPercentage=75`, so the heap follows the container's limit. A
+build for an explicit target platform refuses a base that does not publish it, naming both, and
+`TestLiveRecipeBaseCatalogueRunsOnAmd64AndArm64` keeps every catalogue image on both architectures.
+
+Spring Boot, Quarkus, Micronaut, Javalin, Ktor, Helidon and Vert.x mark a web service (8080; Javalin
+7070); a plain project is a worker that asks. These frameworks do not read PORT, so the default start
+command bridges it into the variable that outranks `application.properties`/`.yml`: `exec env
+SERVER_PORT=${PORT:-8080} java -jar /app/app.jar` for Spring Boot and Helidon, `QUARKUS_HTTP_PORT` for
+Quarkus, `MICRONAUT_SERVER_PORT` for Micronaut, around whichever launch the packaging needs (`exec` keeps
+the JVM as PID 1). A configured `server.port` becomes the suggested port. Vert.x, Javalin and Ktor's
+embedded server fix their port in code, which detection reads (`listen(8888)`, `start(7070)`,
+`embeddedServer(port = …)`); Ktor's `application.conf` with `port = ${?PORT}` follows PORT.
+
+A private repository's credentials come from the build's own configuration: the `settings.xml` that
+`.mvn/maven.config` passes with `-s` (or a committed `.mvn/settings.xml` or `settings.xml` naming `${env.…}`,
+which the recipe then passes itself), whose servers' `${env.X}` are required when a repository or mirror of
+that id is used; and the `credentials` of a Gradle `repositories` block in the scripts, the settings or a
+convention plugin (`System.getenv`, `providers.environmentVariable`, and typed
+`credentials(PasswordCredentials::class)` as `ORG_GRADLE_PROJECT_<name>Username`/`Password`) — a
+`publishing` block's credentials only publish. Each is a detected variable with step `install`, and
+`registry_token_missing` asks for the ones the plan does not give.
 
 ## .NET
 
-The one `.csproj` at the root — or, among several, the one `Microsoft.NET.Sdk.Web` project — is restored
-(its own layer under the install secret mount) and published with `mcr.microsoft.com/dotnet/sdk:<target>`
-into `/out`, then run on `mcr.microsoft.com/dotnet/aspnet:<target>` (a console project on
-`runtime:<target>`) as the image's `app` user. The target comes from `<TargetFramework>` or the newest
-supported portable entry in `<TargetFrameworks>`; restore and publish explicitly select that same
-framework. Platform-specific-only target lists require a Dockerfile. net8.0, net9.0
-and net10.0 are in the catalogue. Kestrel reads its port from `ASPNETCORE_HTTP_PORTS`, so the default
-start command bridges the `PORT` the runtime injects: `ASPNETCORE_HTTP_PORTS=${PORT:-8080} dotnet
-/app/<Assembly>.dll`. An `appsettings.json`/`appsettings.Production.json` that names Kestrel endpoints or
-`Urls` outranks that variable, so the bridge also sets the one endpoint's
-`Kestrel__Endpoints__<Name>__Url=http://+:${PORT:-8080}`, or `URLS=http://+:${PORT:-8080}`; several
-endpoints, or an HTTPS one, cannot all move to one port and are named in `listen_endpoints_unbridged`. A
-URL passed in `Program.cs` (`app.Run("http://localhost:5000")`, `UseUrls`) outranks everything and is
-read as a fixed port and, on loopback, a blocker. A web project listens on 8080; a console program asks
-whether it serves. `/app`, `/app/data` and the Data Protection key ring
-`/home/app/.aspnet/DataProtection-Keys` belong to the `app` user, so a relative `app.db` and a volume on
-either directory are writable.
+A `*.csproj`, `*.fsproj` or `*.vbproj` is read the way MSBuild and the dotnet CLI read it, as XML data
+(`deploy/detect_dotnet.go`, shared by detection and `build_dotnet.go`): the `Directory.Build.props` chain
+that applies (the nearest, and the next one up when it imports it) is merged under the project's own
+properties, `$(Property)` references resolve (`$(MSBuildProjectName)` included), and the SDK comes from the
+`Sdk` attribute, `<Sdk Name=… />` or an `<Import Sdk=…>`. What it builds decides the rest:
+
+| Kind | From | Built and run |
+|------|------|---------------|
+| web | `Microsoft.NET.Sdk.Web`, or an executable with a `Microsoft.AspNetCore.App` framework reference (a console host running Kestrel) — C#, F# (Giraffe, Saturn, Falco) or Visual Basic | published, run on `aspnet:<target>`, port 8080 |
+| worker | `Microsoft.NET.Sdk.Worker` | `runtime:<target>`, a background service with no port question |
+| exe | `OutputType` Exe | `runtime:<target>`, asking whether it serves HTTP |
+| blazor-wasm | `Microsoft.NET.Sdk.BlazorWebAssembly` | published, its `wwwroot` served by nginx with the single-page fallback (static, port 80) |
+| library, test, apphost | anything else; `IsTestProject`, `Microsoft.NET.Test.Sdk`, xunit, NUnit, MSTest or `MSTest.Sdk`; `Aspire.AppHost.Sdk` or `IsAspireHost` | not deployed |
+
+Among several projects in one directory the one web project, else the one program, is published. Across
+a solution, test projects and an Aspire AppHost are set aside (`tooling`), a library a runnable project
+references is built with it (`library`), a Blazor WebAssembly client its ASP.NET Core host references is
+served by that host, and a static candidate in a .NET project's `wwwroot` is not a site of its own. The
+`.sln` or `.slnx` is not needed for any of it: the walk finds every project, and `ProjectReference` paths
+say what builds with what.
+
+**Where it builds.** A web project in a solution's `src/` references its siblings and inherits the
+solution root's `Directory.Build.props`, `Directory.Packages.props` (central package management) and
+`NuGet.config`, so the build context is the directory that holds all of them: the project, every project
+it references transitively, each props and targets file that applies, every `NuGet.config` at or above it
+(NuGet merges them all) and the `global.json` above it. The Dockerfile copies that context and runs
+`dotnet restore <project>` (its own layer under the install secret mount) and `dotnet publish <project> -c
+Release --no-restore -o /out` in the project's own directory — where the dotnet CLI resolves `global.json`
+for a developer too — then checks `/out/<AssemblyName>.dll`, the assembly name resolved through the props.
+`dotnet_project_selected` names the project and the context.
+
+**The release and the SDK.** The target comes from `<TargetFramework>` or the newest supported portable
+entry of `<TargetFrameworks>` (net8.0, net9.0 and net10.0); restore and publish name it when there are
+several. `build.dotnetVersion` chooses the release instead, and retargets a project that declares another
+(`-p:TargetFramework`), which rescues a net6.0 or net7.0 project or one whose target the recipe cannot
+read; without it such a project is `dotnet_version_unsupported`. A `global.json` pin decides the SDK image
+by its `rollForward`: `latestPatch` (the default), `patch` and `disable` build with `sdk:<exact version>`,
+`feature` and `latestFeature` with the pin's own `sdk:<major.minor>`, and the minor and major policies with
+the newer of the pin's release and the target's. A pin that cannot build the target is
+`dotnet_version_unsupported` before Deploy, and one whose image does not exist fails as
+`base_image_missing` naming the tag. `.tool-versions` (`dotnet`, `dotnet-core`) and `mise.toml` pin the SDK
+the same way when there is no `global.json`. The runtime image always follows the target.
+
+`PublishAot`, `PublishSingleFile`, `PublishReadyToRun`, `SelfContained` and `PublishTrimmed`, in the
+project or its props, make publish need the AOT SDK image and write a native executable instead of the dll;
+the recipe passes `-p:PublishAot=false … -p:PublishTrimmed=false` to restore and publish alike (they must
+agree) and runs the JIT-compiled, framework-dependent dll (`dotnet_aot_disabled`). A project whose publish
+builds a single-page application with npm — `<SpaRoot>`, an `Exec` running npm, yarn or pnpm, or a
+referenced `*.esproj` — gets Node in the SDK image: the Node recipe's install planner reads the front end's
+lockfile, Node is copied from the catalogue's Debian image of that release (the SDK images are glibc; the
+plan's Corepack releases and Bun come with it), and the lockfile's install runs in the front end's
+directory before publish (`dotnet_spa_node`); a Node candidate in that directory ranks below the project.
+An Aspire AppHost's `WithReference` wiring — another project's `services__<name>__http__0`, a resource's
+`ConnectionStrings__<name>` — is named on each service it starts as `dotnet_aspire_orchestration`:
+deployed on its own, nothing sets them.
+
+A `NuGet.config`'s `packageSourceCredentials` (`%NUGET_TOKEN%`) are detected variables with step `install`,
+required when their source is enabled; mapped to the install, they reach `dotnet restore` alone.
+
+Kestrel reads its port from `ASPNETCORE_HTTP_PORTS`, so the default start command bridges the `PORT` the
+runtime injects: `ASPNETCORE_HTTP_PORTS=${PORT:-8080} dotnet /app/<Assembly>.dll`. An
+`appsettings.json`/`appsettings.Production.json` that names Kestrel endpoints or `Urls` outranks that
+variable, so the bridge also sets the one endpoint's `Kestrel__Endpoints__<Name>__Url=http://+:${PORT:-8080}`,
+or `URLS=http://+:${PORT:-8080}`; several endpoints, or an HTTPS one, cannot all move to one port and are
+named in `listen_endpoints_unbridged`. A URL passed in `Program.cs` (`app.Run("http://localhost:5000")`,
+`UseUrls`) outranks everything and is read as a fixed port and, on loopback, a blocker. `/app`, `/app/data`
+and the Data Protection key ring `/home/app/.aspnet/DataProtection-Keys` belong to the `app` user, so a
+relative `app.db` and a volume on either directory are writable.
 
 EF Core migrations (a `Microsoft.EntityFrameworkCore.Design` or `.Tools` reference and a committed
 `*ModelSnapshot.cs`) are recorded as the `ef-core` schema tool. Source that calls `Database.Migrate()`,
@@ -1313,8 +1454,8 @@ A SQLite file an `appsettings` connection string names, committed to the reposit
 `/app/data` owned by `app`: Docker fills an empty named volume from the image the first time it is
 mounted, so the volume detection plans there starts from the committed database — the ASP.NET Core
 Identity template ships `app.db` with its schema and never migrates — rather than from an empty file every
-sign-in fails on. Later releases find the volume filled and copy nothing. A file the repository's
-`.dockerignore` leaves out of the build context, or one reached through a symlink, is not copied.
+sign-in fails on. Later releases find the volume filled and copy nothing. A file the build context's
+`.dockerignore` leaves out, or one reached through a symlink, is not copied.
 
 ## Deno
 
@@ -1581,18 +1722,18 @@ names, with the remedy the evidence supports:
 | `build_lockfile_incompatible` | pnpm `ERR_PNPM_LOCKFILE_BREAKING_CHANGE`/`BROKEN_LOCKFILE`, Cargo lock version, Poetry/uv lock format, Bun lockfile version | — |
 | `build_package_manager_mismatch` | corepack `This project is configured to use X`, `ERR_PNPM_BAD_PM_VERSION` | the manager `packageManager` declares |
 | `build_lifecycle_script_blocked` | `ERR_PNPM_IGNORED_BUILDS`, Bun `Blocked N postinstalls` with a consequence | — |
-| `build_runtime_version` | EBADENGINE, `ERR_PNPM_UNSUPPORTED_ENGINE`, Yarn/Next engine lines, Go `GOTOOLCHAIN=local`, rustc `or newer`, Maven release, Gradle class version, NETSDK1045, Composer `requires php`, pip `requires a different Python`, uv/Poetry Python requirement, Ruby/Elixir/Hugo versions | a Go or Python release the recipe offers |
+| `build_runtime_version` | EBADENGINE, `ERR_PNPM_UNSUPPORTED_ENGINE`, Yarn/Next engine lines, Go `GOTOOLCHAIN=local`, rustc `or newer`, Maven release, Gradle class version, a Gradle toolchain no JDK matches, NETSDK1045, `A compatible .NET SDK was not found`, Composer `requires php`, pip `requires a different Python`, uv/Poetry Python requirement, Ruby/Elixir/Hugo versions | a Go, Python, Java or .NET release the recipe offers |
 | `build_env_missing` | PrismaConfigEnvError, P1012, t3-env, SvelteKit `$env/static`, Astro, Rails `secret_key_base`, Phoenix, Django, `KeyError` on the environment | the variable, or its build scope (recipes only) |
 | `build_sqlx_offline` | sqlx `set DATABASE_URL to use query macros` / no cached data | `SQLX_OFFLINE=true` for the build |
 | `build_database_unreachable`, `build_prerender_failed` | Next prerender/collect-page-data errors, with or without a database error; `Can't reach database server`; a `*.jd.internal` address that does not resolve (a linked database is reachable only on the project network, which a build is not on); Django `OperationalError` | — |
 | `build_prisma_client_missing` | `@prisma/client did not initialize yet` | `prisma generate` before the build command, unless the recipe already runs it (the `prisma` CLI is a dependency); otherwise the sentence says to add the CLI |
 | `build_platform_binary_missing` | rollup/esbuild/SWC/lightningcss/oxide/sharp Linux binaries missing | — |
 | `build_legacy_openssl` | `0308010C`, `ERR_OSSL_EVP_UNSUPPORTED` | `NODE_OPTIONS=--openssl-legacy-provider` |
-| `build_system_library_missing`, `build_native_toolchain_missing` | `pg_config`, `mysql_config`, pkg-config, `cannot find -l`, `*-sys` crates, headers, Prisma libssl, glibc on musl; `gyp ERR!`, a missing compiler (a shell's `make: not found` only with exit 127 or a wrapper reporting 127), `Failed building wheel`, cgo, `linking with cc`, `protoc`, perl, NativeAOT's clang | — |
+| `build_system_library_missing`, `build_native_toolchain_missing` | `pg_config`, `mysql_config`, pkg-config, `cannot find -l`, `*-sys` crates, headers, Prisma libssl, glibc on musl, Gradle's `SDK location not found` (an Android module); `gyp ERR!`, a missing compiler (a shell's `make: not found` only with exit 127 or a wrapper reporting 127), `Failed building wheel`, cgo, `linking with cc`, `protoc`, perl, NativeAOT's clang | — |
 | `build_install_script_failed` | npm `error path /app/node_modules/X` with `command failed`, Yarn `YN0009` | — |
 | `build_php_extension_missing` | `requires ext-X … it is missing from your system` | — |
 | `build_dependency_conflict`, `build_dependency_unavailable`, `build_dependency_local_path`, `build_dependency_advisory_blocked` | ERESOLVE, `ResolutionImpossible`, Composer/uv/Cargo/NuGet conflicts; ETARGET/E404, `No matching distribution`, NU1101, Maven artifacts, Go revisions, gems; conda `/croot/` paths; Composer advisories | — |
-| `build_registry_auth`, `build_registry_rate_limited`, `build_network` | E401/E403, `YN0041`, `terminal prompts disabled`; `toomanyrequests`; DNS, TLS and connection failures | — |
+| `build_registry_auth`, `build_registry_rate_limited`, `build_network` | E401/E403, `YN0041`, `terminal prompts disabled`, NuGet `NU1301` with 401/403, a Maven or Gradle repository's `status code: 401` (read before the dependency it could not resolve); `toomanyrequests`; DNS, TLS and connection failures | — |
 | `build_command_not_found`, `build_script_missing` | `sh: X: not found` when the step exited 127 or a wrapper reports that status (`exit code 127`, `exited (127)`) — a caught probe prints the same line and carries on —, `executable file not found`, pip's `Cannot find command 'git'`, Laravel Wayfinder's `php artisan wayfinder:generate` in an asset stage without PHP; npm/pnpm/Bun/Yarn missing script | the build command with its runner moved to the image's package manager (the install planner's own rewrite, `nodeRunnerFor`), read from the install the build recorded |
 | `build_module_not_found`, `build_type_error`, `build_compile_error` | `Cannot find module`, `Can't resolve`, `No module named`, `no required module provides`; `Type error:`, `error TS…`; rustc, C#, javac/Kotlin, Go, Maven, Gradle, bundler and framework compile errors | — |
 | `build_output_missing`, `build_copy_source_missing`, `build_embed_source_missing`, `build_wrong_root` | the recipe's own guard, a missing `COPY` source, `go:embed` without files, a manifest the build cannot find | the detected output directory, else the field to review |
@@ -1611,14 +1752,26 @@ own starters: Astro 7 (static), Nuxt 4 and React Router 8 (servers), FastAPI on 
 `requirements.txt` with no server declared, a Flask factory on a bare `pyproject.toml`, a Django project
 whose first request reads its migrated table, a Streamlit script (its health endpoint and a file served
 through its own static-serving setting) and a Gradio app (the value in the page's embedded config), an
-axum service, a Maven jar and a Gradle jar, an ASP.NET Core minimal API, a Deno server, a minimal Laravel
-12 application (migrated, with the form's generated `APP_KEY`) and a plain `index.php`. It checks
+axum service, a Maven jar and a Gradle jar, a Spring Boot module of a Maven reactor on Java 17 and an
+application-plugin project of a multi-project Gradle build with a version catalog (each built from its
+build's root), an ASP.NET Core minimal API, a web project in a solution's `src/` with shared props, central
+package versions and a `global.json` pin, a Blazor WebAssembly app served as static files, an F# minimal API,
+an ASP.NET Core project whose publish runs npm for its front end, a Deno server, a minimal Laravel
+12 application (migrated, with the form's generated `APP_KEY`) and a plain `index.php`. The JVM and .NET
+fixtures are also detected and prepared without Docker (`TestCompiledLiveFixturesDetectAndPrepare`);
+`TestLiveRecipeBaseCatalogueRunsOnAmd64AndArm64` resolves every catalogue image and requires amd64 and
+arm64. It checks
 readiness and served values without supplying build values at runtime; recipe fixtures also inspect logs,
 metadata and saved image layers for private install credentials. The Go fixture proves generated code,
 custom startup and the selected toolchain through its HTTP response. These local adapter journeys
 complement the production-build browser gate; they do not constitute public provider/DNS/TLS or clean-VM
 acceptance. The remaining catalogue entries are covered by rendered-Dockerfile and detection tests
-(`frameworks_*_test.go`, `build_recipes_test.go`). Persistent state, schema tools, seeds and their
+(`frameworks_*_test.go`, `build_recipes_test.go`); the JVM and .NET readers, toolchain plans, packagings,
+layouts and registry credentials in `frameworks_jvm_test.go`, `frameworks_dotnet_solution_test.go` and
+`detect_registry_credentials_test.go` — a Gradle 8.4 wrapper with a Java 21 toolchain (Gradle on JDK 17,
+the toolchain provided beside it, a CRLF `gradlew`), a Quarkus fast-jar on a bridged PORT and a
+`PublishAot` web API published as the JIT dll were built and served locally when they were written.
+Persistent state, schema tools, seeds and their
 findings are table-tested per stack in `detect_state_test.go`, `detect_schema_test.go`,
 `preflight_state_test.go` and `recipe_runtime_files_test.go`. Repository shape — ranking, decoys, static
 roots, split repositories, shapes that are not services, ecosystems without a recipe, processes, other

@@ -298,7 +298,16 @@ only renderer/executor/validation authority for their feature.
   Dockerfile checks after the build. `frameworks_python.go` names Django, FastAPI, Flask, Streamlit and
   Gradio from the manifests and finds the application object in the conventional entry files;
   `frameworks_rust.go`, `frameworks_java.go`, `frameworks_dotnet.go` and `frameworks_deno.go` read
-  `Cargo.toml`, `pom.xml`/`build.gradle(.kts)`, `*.csproj` and `deno.json(c)`. A `Procfile`'s `web:`
+  `Cargo.toml`, `pom.xml`/`build.gradle(.kts)`, `*.csproj`/`*.fsproj`/`*.vbproj` and `deno.json(c)`. The
+  JVM and .NET builds are read through one bounded, symlink-refusing reader over the checkout
+  (`build_files.go`) that detection and the recipe share — the Maven reactor and parents, the Gradle
+  settings root and version catalog, the .NET props chain, referenced projects and `global.json`
+  (`detect_maven.go`, `detect_gradle.go`, `detect_jvm.go`, `detect_dotnet.go`) — so a module or solution
+  project builds from the directory that owns it (`PrepareWithin`, `prepared.contextDirectory`) and the
+  candidate keeps `javaBuild`/`dotnetBuild` for preflight (`preflight_compiled.go`, which judges
+  `build.javaVersion`/`build.dotnetVersion`). `detect_compiled_layout.go` sets aside library modules,
+  aggregator POMs, test projects and Aspire AppHosts before the repository-shape passes rank what is
+  left. A `Procfile`'s `web:`
   process outranks every guess, and another platform's deployment file (`fly.toml`, `render.yaml`,
   `app.json`, Kamal's `config/deploy.yml`, …) outranks the framework's defaults. The candidate carries `spaFallback` (a client-routed site's nginx
   fallback), `pythonVersion`, `unpinnedDependencies` (a `dependencies_unpinned` preflight warning,
@@ -326,8 +335,9 @@ only renderer/executor/validation authority for their feature.
   `public_url_variable_missing`, `request_body_limit` and the rest, listed in the recipe guide), so a
   certain loopback bind is a blocker before Deploy rather than a readiness timeout after it. The closed
   recipe set is
-  `node`, `go`, `python`, `rust`, `java`, `dotnet`, `deno` (`validRecipe`), and `build.pythonVersion`
-  and `build.spaFallback` are the two additive plan fields, bounded by `PlanConfiguration.Validate`.
+  `node`, `go`, `python`, `rust`, `java`, `dotnet`, `deno` (`validRecipe`), and `build.pythonVersion`,
+  `build.spaFallback`, `build.javaVersion` and `build.dotnetVersion` are additive plan fields, bounded by
+  `PlanConfiguration.Validate`.
   The contract per language is [the recipe guide](recipes.md). The framework detection recognised is
   recorded on the build plan when a draft commits (`build.framework` on the configuration read) —
   the chosen candidate's, while the plan still builds that candidate's directory — so a later read,

@@ -90,7 +90,10 @@ carries no licensing question at all.
 - Changes to deployment builders or artifact handling also run the opt-in Docker boundary on a release
   host: `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveC4ArtifactAdapters -count=1 -v`.
   Recipe/detection/default changes also run
-  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveDetectedFrameworkBuildAndServing -count=1 -v`.
+  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveDetectedFrameworkBuildAndServing -count=1 -v`,
+  and changes to a recipe's base images
+  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveRecipeBaseCatalogueRunsOnAmd64AndArm64 -count=1 -v`,
+  which resolves (without pulling) every catalogue image and requires it for amd64 and arm64.
   Changes to build-failure diagnosis (the BuildKit reader in `dockerx`, the collector or the signature
   table) also run `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveBuildFailureIsNamedFromBuildKit -count=1 -v`,
   which builds an npm project whose lockfile no longer matches package.json and checks the cause is
