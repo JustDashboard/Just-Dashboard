@@ -1,0 +1,18 @@
+{
+  "name": "jd-acceptance-svelte-auto",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build-check.cjs && vite build",
+    "dev": "vite dev",
+    "postinstall": "node install-check.cjs"
+  },
+  "devDependencies": {
+    "vite": "8.3.0",
+    "svelte": "5.57.0",
+    "@sveltejs/kit": "2.70.3",
+    "@sveltejs/adapter-auto": "7.0.1",
+    "@sveltejs/vite-plugin-svelte": "7.3.0"
+  }
+}
