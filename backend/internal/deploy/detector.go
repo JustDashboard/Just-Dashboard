@@ -87,6 +87,11 @@ type detectedMarkers struct {
 	// node is the package's install inputs, read after the walk under
 	// their own budget.
 	node *nodeInstallSource
+	// python is a Python root's sources beyond its manifests, and
+	// pythonAssets says this package.json is a Python application's asset
+	// build (readPythonSources).
+	python       *pythonSource
+	pythonAssets bool
 }
 
 // phpOwnsAssets says the PHP recipe builds this root's package.json itself:
@@ -308,6 +313,28 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			if !envSourceExtensions[filepath.Ext(name)] && !scanner.factFile(filepath.ToSlash(rel), name) {
 				return nil
 			}
+		}
+		if owner, key, ok := pythonManifestTarget(filepath.ToSlash(rel)); ok {
+			// Python manifests beyond the four marker files — a Pipfile, a
+			// requirements/ folder, setup.cfg — belong to the root beside
+			// them, which a requirements/ folder is not.
+			content, n, err := readMarkerFile(path, limits.MaxFileBytes)
+			result.ScannedBytes += n
+			if result.ScannedBytes > limits.MaxReadBytes {
+				result.Truncated, result.TruncatedReason = true, "read-byte limit reached"
+				return stop
+			}
+			ownerKey := filepath.FromSlash(owner)
+			if markers[ownerKey] == nil {
+				markers[ownerKey] = &detectedMarkers{root: ownerKey, pythonFiles: map[string][]byte{}, csprojs: map[string][]byte{}}
+			}
+			switch {
+			case err == nil:
+				markers[ownerKey].pythonFiles[key] = shape.manifest(filepath.ToSlash(rel), content)
+			case strings.HasSuffix(key, ".lock"):
+				markers[ownerKey].pythonFiles[key] = []byte("locked")
+			}
+			return nil
 		}
 		interesting := detectionInterestingName(name)
 		if denoEntryNames[name] && len(denoEntryPaths) < 64 {
@@ -560,6 +587,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	tree := openDetectionTree(root)
 	defer tree.close()
 	addSkippedBuildDockerfiles(tree, markers, skippedBuild, limits, &result)
+	readPythonSources(tree, markers, pythonEntries)
 
 	roots := make([]string, 0, len(markers))
 	packageRoots := []string{}
@@ -669,6 +697,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		refineServing(group.candidates, marker, readiness, root, allRoots)
 		network.apply(marker, group.candidates, rootPythonEntries, goRoots, jvmRoots)
 		describeRootEnvironment(marker, scanner, prismaProviders, group.candidates)
+		applyPythonEnvironment(marker, group.candidates)
 		for index := range group.candidates {
 			candidate := &group.candidates[index]
 			if len(suggested[index]) > 0 {
@@ -726,7 +755,7 @@ func detectionInterestingName(name string) bool {
 		name == "pom.xml" || name == "build.gradle" || name == "build.gradle.kts" || name == "gradlew" ||
 		name == ".java-version" || strings.HasSuffix(name, ".csproj") ||
 		name == "deno.json" || name == "deno.jsonc" || name == "deno.lock" ||
-		name == "composer.json" || name == "composer.lock" || name == "index.php"
+		name == "composer.json" || name == "composer.lock" || name == "index.php" || pythonManifestName(name)
 }
 
 func readDetectionFile(path string, max int64) ([]byte, int64, error) {
@@ -746,12 +775,7 @@ func readDetectionFile(path string, max int64) ([]byte, int64, error) {
 }
 
 func (m *detectedMarkers) hasPythonManifest() bool {
-	for _, name := range []string{"requirements.txt", "pyproject.toml", "uv.lock", "poetry.lock"} {
-		if _, ok := m.pythonFiles[name]; ok {
-			return true
-		}
-	}
-	return false
+	return len(m.pythonFiles) > 0 && readPythonProject(m.pythonFiles).hasManifest()
 }
 
 // pythonEntriesUnderRoot keeps the entries that belong to one Python root,
@@ -777,7 +801,7 @@ func candidatesForMarkers(marker *detectedMarkers, schemaPaths []string, pythonE
 	if rootLabel == "" {
 		rootLabel = "."
 	}
-	if len(marker.packageJSON) > 0 && !marker.phpOwnsAssets() {
+	if len(marker.packageJSON) > 0 && !marker.phpOwnsAssets() && !marker.pythonAssets {
 		result = append(result, packageCandidate(marker, schemaPaths)...)
 	}
 	if marker.goMod != "" {

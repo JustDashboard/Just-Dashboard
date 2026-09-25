@@ -312,6 +312,11 @@ type DetectedCandidate struct {
 	// family can run the project and how loudly the install would refuse it.
 	PythonRequires string `json:"pythonRequires,omitempty"`
 	PythonInstall  string `json:"pythonInstall,omitempty"`
+	// SystemPackages are the Debian packages the source needs in its image,
+	// each with the dependency that needs it, and Python what detection read
+	// about a Python root beyond its framework (detect_python.go).
+	SystemPackages []DetectedSystemPackage `json:"systemPackages,omitempty"`
+	Python         *DetectedPython         `json:"python,omitempty"`
 
 	// readingConfidence is what the source's own evidence supports when an
 	// unsettled package manager caps Confidence (packageCandidate). Ranking
@@ -509,6 +514,9 @@ type BuildPlanConfig struct {
 	// GoPackage is the main package a Go recipe builds, relative to the root
 	// directory; empty lets the recipe choose when the module has only one.
 	GoPackage string `json:"goPackage,omitempty"`
+	// SystemPackages are Debian packages the Python recipe installs beside
+	// the ones the dependencies need, which it always installs.
+	SystemPackages []string `json:"systemPackages,omitempty"`
 }
 
 // BuildSecretConfig names a variable and the reviewed recipe stages in which
@@ -1168,11 +1176,21 @@ func (c PlanConfiguration) Validate() error {
 	}
 	// The PHP recipe installs its front-end assets through the same Node
 	// install, so the same choice applies to it.
-	if c.Build.PackageManager != "" && (c.Build.Method != BuildRecipe || (c.Build.Recipe != "node" && c.Build.Recipe != "php") || !validNodePackageManager(c.Build.PackageManager)) {
-		return fmt.Errorf("package manager must be bun, npm, pnpm or yarn in a JavaScript or PHP recipe")
+	if c.Build.PackageManager != "" && (c.Build.Method != BuildRecipe || (c.Build.Recipe != "node" && c.Build.Recipe != "php" && c.Build.Recipe != "python") || !validNodePackageManager(c.Build.PackageManager)) {
+		return fmt.Errorf("package manager must be bun, npm, pnpm or yarn in a JavaScript, PHP or Python recipe")
 	}
 	if c.Build.PythonVersion != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "python" || !pythonRecipeVersionRE.MatchString(c.Build.PythonVersion)) {
-		return fmt.Errorf("Python version must select 3.10, 3.11, 3.12 or 3.13 in a Python recipe; use a Dockerfile for other interpreters")
+		return fmt.Errorf("Python version must select 3.10, 3.11, 3.12, 3.13 or 3.14 in a Python recipe; use a Dockerfile for other interpreters")
+	}
+	if len(c.Build.SystemPackages) > 0 {
+		if c.Build.Method != BuildRecipe || c.Build.Recipe != "python" || len(c.Build.SystemPackages) > 32 {
+			return invalidField("build.systemPackages", "system packages apply to the Python recipe, at most 32 of them")
+		}
+		for _, name := range c.Build.SystemPackages {
+			if !systemPackageRE.MatchString(name) || len(name) > 128 {
+				return invalidField("build.systemPackages", "%q is not a Debian package name", name)
+			}
+		}
 	}
 	if c.Build.SPAFallback && c.Build.Method != BuildRecipe && c.Build.Method != BuildStatic {
 		return fmt.Errorf("the single-page fallback applies only to a static site or a recipe with static output")
@@ -1844,6 +1862,9 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 		if err := validateCandidateImageFacts(candidate); err != nil {
 			return err
 		}
+		if err := validateDetectedPython(candidate); err != nil {
+			return err
+		}
 	}
 	if len(detection.SelectionReason) > 512 || strings.ContainsAny(detection.SelectionReason, "\x00\r\n") ||
 		rejectPlanSecretLiteral("selection reason", detection.SelectionReason) != nil {
@@ -1928,7 +1949,7 @@ func validGoPackagePath(pkg string) bool {
 
 func validPythonInstallKind(kind string) bool {
 	switch kind {
-	case "uv.lock", "poetry.lock", "requirements.txt", "pyproject.toml":
+	case "uv.lock", "poetry.lock", "pdm.lock", "Pipfile.lock", "Pipfile", "requirements.txt", "pyproject.toml", "setup.py", "environment.yml":
 		return true
 	}
 	return false

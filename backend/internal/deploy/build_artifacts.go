@@ -46,7 +46,7 @@ var recipeBaseCatalogue = map[string][]string{
 	"node:24-glibc": {"node:24-bookworm-slim"},
 	"bun:glibc":     {"oven/bun:1-slim"},
 	"go":            {"golang:1.26-alpine", "alpine:3.22"},
-	"python":        {"python:3.13-slim"},
+	"python":        {"python:3.13-slim-trixie"},
 	"static":        {"nginx:1.29-alpine"},
 	"rust":          {"rust:1-alpine", "alpine:3.22"},
 	"java:maven":    {"maven:3-eclipse-temurin-21", "eclipse-temurin:21-jre-alpine"},
@@ -147,6 +147,9 @@ type PreparedBuild struct {
 	// build root — a workspace member installs from its workspace root — as
 	// that root's path in the source ("." for its top).
 	ContextDirectory string `json:"contextDirectory,omitempty"`
+	// WebConcurrency says the image's server takes its worker count from
+	// WEB_CONCURRENCY, which the runtime sizes to the container.
+	WebConcurrency bool `json:"webConcurrency,omitempty"`
 }
 
 type PreparedComposeService struct {
@@ -260,8 +263,16 @@ func (b *ArtifactBuilder) PrepareWithin(
 			baseRefs[0] = "golang:" + recipe.goVersion + "-alpine"
 		}
 		if recipe.kind == "python" {
-			prepared.PythonVersion = recipe.pythonVersion
-			baseRefs[0] = "python:" + recipe.pythonVersion + "-slim"
+			if recipe.python.assets != nil {
+				b.settleBunImage(ctx, recipe.python.assets)
+				prepared.NodeVersion = recipe.python.assets.node.label()
+				prepared.Install = recipe.python.assets.installLine()
+			}
+			prepared.PythonVersion = recipe.python.version.version
+			prepared.Toolchain = pythonRecipeToolchain(recipe.python)
+			prepared.WebConcurrency = recipe.python.webConcurrency
+			prepared.Notes = append(prepared.Notes, pythonRecipeNotes(recipe.python)...)
+			baseRefs = pythonRecipeBases(recipe.python)
 		}
 		switch recipe.kind {
 		case "rust":
@@ -582,17 +593,12 @@ type selectedRecipe struct {
 	mainPackage                  string
 	node                         nodeRecipeFramework
 	goVersion                    string
-	python                       pythonInstall
-	pythonVersion                string
-	pythonFramework              string
-	// pythonServers are the process managers the start command runs that no
-	// manifest declares; the recipe installs each one.
-	pythonServers []string
-	rust          rustRecipe
-	java          javaRecipe
-	dotnet        dotnetProject
-	deno          denoRecipe
-	php           phpRecipe
+	python                       pythonRecipe
+	rust                         rustRecipe
+	java                         javaRecipe
+	dotnet                       dotnetProject
+	deno                         denoRecipe
+	php                          phpRecipe
 	// runtimeAssets are the root-level files a compiled service reads at
 	// runtime, copied beside its binary (recipe_runtime_files.go).
 	runtimeAssets []string
@@ -712,34 +718,13 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 		return selectedRecipe{kind: "go", catalogueKey: "go", mainPackage: main, goVersion: goVersion,
 			runtimeAssets: compiledRuntimeAssets(root, ".go"), emptyDotenv: dotenvFileRequired(root, "go")}, nil
 	case "python":
-		files := map[string][]byte{}
-		for _, name := range []string{"requirements.txt", "pyproject.toml", "uv.lock", "poetry.lock"} {
-			if content, err := readContainedRegular(root, name, 2<<20); err == nil {
-				files[name] = content
-			} else if regularExists(root, name) {
-				files[name] = []byte("locked")
-			}
-		}
-		versionFile, _ := readContainedRegular(root, ".python-version", 4096)
-		runtimeFile, _ := readContainedRegular(root, "runtime.txt", 4096)
-		version, err := choosePythonRecipeVersion(config.PythonVersion, string(versionFile), string(runtimeFile), string(files["pyproject.toml"]))
+		python, err := selectPythonRecipe(boundary, root, config)
 		if err != nil {
 			return selectedRecipe{}, err
 		}
-		install, err := selectPythonInstall(root, version)
-		if err != nil {
-			return selectedRecipe{}, err
-		}
-		if strings.TrimSpace(config.StartCommand) == "" {
-			return selectedRecipe{}, fmt.Errorf("%w: Python recipe requires a start command; detection proposes one for Django, FastAPI, Flask, Streamlit and Gradio", ErrUnsupportedBuilder)
-		}
-		deps := readPythonDependencies(files)
-		recipe := selectedRecipe{
-			kind: "python", catalogueKey: "python", lockfile: install.kind, python: install, pythonVersion: version,
-			pythonServers: undeclaredPythonServers(config.StartCommand, deps),
-		}
-		if framework := matchPythonFramework(deps); framework != nil {
-			recipe.pythonFramework = framework.Name
+		recipe := selectedRecipe{kind: "python", catalogueKey: "python", lockfile: python.install.kind, python: python, nodeInputs: python.inputs}
+		if python.contextDir != "" {
+			recipe.contextDir = python.contextDir
 		}
 		return recipe, nil
 	case "rust":
@@ -842,24 +827,11 @@ func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases
 			`RUN test -f /out/app && test -x /out/app || (echo 'Go build command must write an executable to /out/app' >&2; exit 1)`)
 		lines = append(lines, compiledRuntimeLines(bases[1], recipe.runtimeAssets, config.StartCommand)...)
 	case "python":
-		base := immutableImageReference(bases[0])
-		lines = append(lines, "FROM "+base, "WORKDIR /app",
-			"ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_ROOT_USER_ACTION=ignore",
-			pythonRecipeNetworkEnv())
-		for _, env := range recipe.python.env {
-			lines = append(lines, "ENV "+env)
+		rendered, err := renderPythonDockerfile(recipe.python, config, bases, installSecrets, buildSecrets)
+		if err != nil {
+			return "", err
 		}
-		lines = append(lines, "COPY . .", "RUN "+installSecrets+recipe.python.command)
-		for _, server := range recipe.pythonServers {
-			lines = append(lines, "RUN "+installSecrets+recipe.python.serverInstall+" "+pythonServerPackages[server])
-		}
-		if command := strings.TrimSpace(config.BuildCommand); command != "" {
-			lines = append(lines, "RUN "+buildSecrets+command)
-		}
-		for _, env := range pythonFrameworkEnv(recipe.pythonFramework) {
-			lines = append(lines, "ENV "+env)
-		}
-		lines = append(lines, shellCMD(config.StartCommand))
+		lines = append(lines, rendered...)
 	case "rust", "java", "dotnet", "deno", "php":
 		var rendered []string
 		var err error

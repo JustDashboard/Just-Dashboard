@@ -3612,7 +3612,29 @@ export type DeploymentDetectionCandidate = {
   goLibrary?: boolean
   /** The interpreter range pyproject declares, and the manifest the recipe installs from. */
   pythonRequires?: string
-  pythonInstall?: "uv.lock" | "poetry.lock" | "requirements.txt" | "pyproject.toml"
+  pythonInstall?:
+    | "uv.lock"
+    | "poetry.lock"
+    | "pdm.lock"
+    | "Pipfile.lock"
+    | "Pipfile"
+    | "requirements.txt"
+    | "pyproject.toml"
+    | "setup.py"
+    | "environment.yml"
+  /**
+   * Debian packages the source needs in its image. `automatic` ones the Python
+   * recipe installs by itself; the others (another platform's Aptfile) seed
+   * `build.systemPackages`.
+   */
+  systemPackages?: DeploymentDetectedSystemPackage[]
+}
+
+export type DeploymentDetectedSystemPackage = {
+  name: string
+  reason?: string
+  source?: string
+  automatic?: boolean
 }
 
 export type DeploymentDockerfileArg = {
@@ -3840,6 +3862,8 @@ export type DeploymentConfiguration = {
     /** The main package a Go recipe builds, relative to the root directory; empty lets it choose. */
     goPackage?: string
     pythonVersion?: string
+    /** Debian packages the Python recipe installs beside the ones its dependencies need. */
+    systemPackages?: string[]
     packageManager?: NodePackageManager
     rootDirectory?: string
     dockerfile?: string

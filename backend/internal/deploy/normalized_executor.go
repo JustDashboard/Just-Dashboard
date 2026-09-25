@@ -138,6 +138,9 @@ type runtimeReleaseSnapshot struct {
 	// sets, which the runtime withdraws when the proxy does not front the
 	// release alone.
 	ProxyTrust []string `json:"proxyTrust,omitempty"`
+	// WebConcurrency says the image's server sizes its workers from
+	// WEB_CONCURRENCY (runtime_concurrency.go).
+	WebConcurrency bool `json:"webConcurrency,omitempty"`
 }
 
 func (e *NormalizedStepExecutor) Execute(ctx context.Context, execution StepExecution) StepResult {
@@ -563,6 +566,7 @@ func (e *NormalizedStepExecutor) renderRuntime(
 		PlanInputsHash: plan.PlanInputsDigest,
 		SourceIdentity: plan.SourceIdentity,
 		ProxyTrust:     imageProxyTrust(built.Result.Prepared),
+		WebConcurrency: built.Result.Prepared.WebConcurrency,
 	}
 	raw, err := json.Marshal(snapshot)
 	if err != nil {

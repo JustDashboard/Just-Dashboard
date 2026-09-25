@@ -407,6 +407,9 @@ func (e *NormalizedStepExecutor) startCandidate(
 		return runtimeStepFailure(err, "runtime_record_failed", "the candidate started but its identity could not be recorded", recovery)
 	}
 	_ = stepLog(execution, "status", fmt.Sprintf("Started immutable candidate release #%d", release.Release.Number))
+	for _, variable := range webConcurrencyEnvironment(snapshot, variables) {
+		_ = stepLog(execution, "status", "WEB_CONCURRENCY="+variable.Value+": "+webConcurrencyReason(snapshot.Plan))
+	}
 	return StepResult{State: StepPassed, Evidence: mustJSON(startedStepEvidence{
 		ReleaseID: release.Release.ID, Runtime: *runtime, Target: started.Target,
 		PreviousStop: previousStop, ExpectedDowntime: release.Release.ExpectedDowntime,
@@ -508,7 +511,7 @@ func (e *NormalizedStepExecutor) verifyChecks(
 		// removes it. This is the difference between "could not connect" and
 		// "Error: DATABASE_URL is not set".
 		diagnostics := e.captureRuntimeDiagnostics(ctx, execution, release.Release, *runtime, runtimeCauseContext{
-			build: plan.Build, runtime: snapshot.Plan, variables: snapshot.Variables, compose: snapshot.Compose != nil,
+			build: plan.Build, runtime: snapshot.Plan, variables: snapshot.Variables, compose: snapshot.Compose != nil, checks: checks,
 		})
 		message := checkFailureMessage(phase, outcome, checks...) + diagnosticsSuffix(diagnostics)
 		// A cause the output proves is the run's terminal code, so every

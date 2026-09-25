@@ -295,8 +295,15 @@ only renderer/executor/validation authority for their feature.
   Gatsby, Docusaurus, VitePress, Eleventy, Create React App, Vue CLI, Ember, Parcel and Vite, in an
   order where a meta-framework built on Vite is read before Vite itself, each with its serving mode
   (site output or server start command), port, runtime environment and the entry file the generated
-  Dockerfile checks after the build. `frameworks_python.go` names Django, FastAPI, Flask, Streamlit and
-  Gradio from the manifests and finds the application object in the conventional entry files;
+  Dockerfile checks after the build. `frameworks_python.go` names Django, FastAPI, Litestar,
+  Starlette, Sanic, Quart, Falcon, Bottle, Flask, aiohttp, Tornado and the application frameworks
+  (Gradio, Chainlit, NiceGUI, Reflex, Mesop, Dash, Panel, Streamlit) from what the project itself
+  declares, and finds the application object in the conventional entry files, the root's other scripts
+  and the module a runner script imports its factory from; the manifests themselves (requirement
+  layouts and includes, pyproject, Pipfile, the uv/Poetry/PDM locks and their drift, setup files, conda
+  environments) are read by `detect_python_manifests.go`, `detect_python_lock.go` and
+  `detect_python_project.go`, and what the recipe needs beyond the framework is recorded on the
+  candidate as `python` (`detect_python.go`) and judged by `preflight_python.go`;
   `frameworks_rust.go`, `frameworks_java.go`, `frameworks_dotnet.go` and `frameworks_deno.go` read
   `Cargo.toml`, `pom.xml`/`build.gradle(.kts)`, `*.csproj` and `deno.json(c)`. A `Procfile`'s `web:`
   process outranks every guess, and another platform's deployment file (`fly.toml`, `render.yaml`,
@@ -327,7 +334,8 @@ only renderer/executor/validation authority for their feature.
   certain loopback bind is a blocker before Deploy rather than a readiness timeout after it. The closed
   recipe set is
   `node`, `go`, `python`, `rust`, `java`, `dotnet`, `deno` (`validRecipe`), and `build.pythonVersion`
-  and `build.spaFallback` are the two additive plan fields, bounded by `PlanConfiguration.Validate`.
+  (3.10 to 3.14), `build.systemPackages` (at most 32 Debian names, Python recipe only) and
+  `build.spaFallback` are additive plan fields, bounded by `PlanConfiguration.Validate`.
   The contract per language is [the recipe guide](recipes.md). The framework detection recognised is
   recorded on the build plan when a draft commits (`build.framework` on the configuration read) —
   the chosen candidate's, while the plan still builds that candidate's directory — so a later read,
@@ -653,12 +661,23 @@ only renderer/executor/validation authority for their feature.
   programs print it as a warning and carry on: `SENTRY_DSN is not set` beside the port the server
   really took must name the port), and a single container that stopped with exit code 0 instead of
   serving (`runtime_start_exited`; several containers are a Compose stack, where a one-off service
-  exits 0 by design). The cause is the step's code and the run's terminal code in place of
-  `health_gate_failed`, with the health evidence kept; it carries identifiers only (a variable, a
-  port, a module, a listener) and, where the plan can supply one, a fix: the variable or its runtime
-  scope, the internal port, a start command bound to `0.0.0.0`.
+  exits 0 by design), and a Django candidate whose check was answered with a 5xx while the output
+  holds no error at all (`runtime_errors_hidden`, a 400 read as `runtime_host_disallowed`, a 401, 403 or
+  404 left to the readiness classification: with DEBUG off
+  and no `LOGGING`, Django mails request errors instead of printing them — the failed checks' status
+  codes reach the classifier as `runtimeCauseContext.checks`). The cause is the step's code and the run's
+  terminal code in place of `health_gate_failed`, with the health evidence kept; it carries identifiers
+  only (a variable, a port, a module, a listener) and, where the plan can supply one, a fix: the
+  variable or its runtime scope, the internal port, a start command bound to `0.0.0.0`, and for the
+  Python recipe the Debian package that provides a missing shared library (`build.systemPackages`).
 - Container applications receive `PORT` from the frozen internal-port setting unless a runtime variable
-  explicitly supplies it. Compose and host-network applications keep their own environment conventions.
+  explicitly supplies it. A Python recipe image whose gunicorn or uvicorn start leaves the worker count
+  to `WEB_CONCURRENCY`, and which loads no machine-learning model, is recorded as such
+  (`PreparedBuild.webConcurrency`, copied into the runtime snapshot), and `startContainer` sets
+  `WEB_CONCURRENCY` for it (`runtime_concurrency.go`: 2×CPU+1 within 256 MiB of the memory limit per
+  worker, 2 without a limit) unless the plan sets the variable; the start step's log states the value.
+  Detection gives a websocket application's generated uvicorn command `--workers 1`, so it is never
+  marked. Compose and host-network applications keep their own environment conventions.
   This keeps application startup aligned with Docker publication; the host port may still move. The
   recipes switch framework trust of the proxy's `X-Forwarded-*` headers on (`FORWARDED_ALLOW_IPS=*`,
   `ASPNETCORE_FORWARDEDHEADERS_ENABLED`, `SERVER_FORWARD_HEADERS_STRATEGY`, Quarkus proxy forwarding,

@@ -775,7 +775,7 @@ export function StepProject({
                   <Field
                     label="Python version"
                     htmlFor="python-version"
-                    hint="Leave empty to use .python-version, runtime.txt or pyproject.toml."
+                    hint="Leave empty to use .python-version, runtime.txt, .tool-versions, Pipfile or pyproject.toml."
                     error={errors.pythonVersion}
                   >
                     <Input

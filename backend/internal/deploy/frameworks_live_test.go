@@ -36,9 +36,15 @@ func TestLiveDetectedFrameworkBuildAndServing(t *testing.T) {
 	// next-pnpm and express-yarn are the same kind of server installed by
 	// pnpm (a toolchain release the start command runs offline) and by
 	// Yarn 1 (its real frozen install), started through the manager.
+	// The Python install shapes: a Litestar app on a pdm.lock started by its
+	// [tool.pdm.scripts] task, Flask on a Pipfile.lock, FastAPI on a uv.lock
+	// that asks for Python 3.14, a Django project created inside the
+	// repository with a requirements/ folder, split settings and psycopg2
+	// compiled against the libpq the recipe installs, and a Flask app whose
+	// JavaScript a Node stage bundles.
 	for _, name := range []string{"vite", "next", "svelte-node", "svelte-static", "html", "containerfile", "go",
 		"astro", "nuxt", "react-router", "fastapi", "flask", "django", "rust", "java", "gradle", "dotnet", "deno", "laravel", "php",
-		"streamlit", "gradio", "next-pnpm", "express-yarn"} {
+		"streamlit", "gradio", "next-pnpm", "express-yarn", "python-pdm", "python-pipenv", "python-uv", "django-nested", "flask-assets"} {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 			defer cancel()
@@ -98,6 +104,20 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 			run := EngineRun{ID: stamp, EnvironmentID: stamp}
 			release := Release{ID: stamp, EnvironmentID: stamp, RunID: stamp, Number: 1}
 			runtimeVariables := map[string]string{}
+			// What the configure form supplies for a detected Python variable:
+			// its default (the settings module a split Django project runs),
+			// or a generated secret.
+			for _, variable := range candidate.Variables {
+				if candidate.Recipe != "python" {
+					break
+				}
+				switch variable.Setup {
+				case "default":
+					runtimeVariables[variable.Name] = variable.DefaultValue
+				case "generate":
+					runtimeVariables[variable.Name] = fmt.Sprintf("generated-%d-%s", stamp, strings.Repeat("x", 40))
+				}
+			}
 			if name == "laravel" {
 				// What the configure form generates for a Laravel import: the
 				// application key, and file-backed sessions since the fixture
@@ -166,8 +186,15 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 			if name == "go" && (!strings.Contains(content, "custom-start go1.26.8") || result.Prepared.GoVersion != "1.26.8") {
 				t.Fatalf("Go override/version behavior missing: %q", content)
 			}
-			if candidate.Recipe == "python" && result.Prepared.PythonVersion != "3.13" {
+			if wantPython := map[string]string{"python-uv": "3.14", "python-pipenv": "3.12"}[name]; candidate.Recipe == "python" &&
+				result.Prepared.PythonVersion != firstNonEmpty(wantPython, "3.13") {
 				t.Fatalf("Python version not recorded: %+v", result.Prepared)
+			}
+			if name == "python-uv" && !strings.Contains(content, "<p>3.14</p>") {
+				t.Fatalf("uv ran another interpreter than the image's: %q", content)
+			}
+			if name == "django-nested" && !strings.Contains(content, "users=0 psycopg2=2.9.10") {
+				t.Fatalf("Django did not answer through its migrated database and compiled driver: %q", content)
 			}
 			if name == "django" && !strings.Contains(content, "users=0") {
 				t.Fatalf("Django did not answer through its migrated database: %q", content)

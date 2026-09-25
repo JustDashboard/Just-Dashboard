@@ -65,7 +65,7 @@ func TestPythonAndDotnetSchemaToolsApplyTheSchemaBeforeServing(t *testing.T) {
 				"migrations/alembic.ini": "[alembic]\n", "migrations/versions/abc_init.py": "revision = 'abc'\n",
 			},
 			recipe: "python", tool: "flask-migrate", command: "flask --app app db upgrade",
-			start: "flask --app app db upgrade && gunicorn --bind 0.0.0.0:${PORT:-8000} app:app",
+			start: "flask --app app db upgrade && gunicorn --bind 0.0.0.0:${PORT:-8000} --access-logfile - app:app",
 		},
 		{
 			name: "aerich from pyproject",
@@ -82,7 +82,7 @@ func TestPythonAndDotnetSchemaToolsApplyTheSchemaBeforeServing(t *testing.T) {
 				"requirements.txt": "Django==5.1.4\n", "manage.py": "import django\n", "mysite/wsgi.py": "application = None\n",
 			},
 			recipe: "python", tool: "django", command: "python manage.py migrate --noinput",
-			start: "python manage.py migrate --noinput && gunicorn mysite.wsgi:application --bind 0.0.0.0:${PORT:-8000}",
+			start: "python manage.py migrate --noinput && gunicorn --bind 0.0.0.0:${PORT:-8000} --access-logfile - mysite.wsgi:application",
 		},
 		{
 			name: "a Procfile web process is not rewritten",
