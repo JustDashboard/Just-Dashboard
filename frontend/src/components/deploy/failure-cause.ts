@@ -24,6 +24,8 @@ export const CAUSE_TITLES: Record<string, string> = {
   build_lifecycle_script_blocked: "Dependency install scripts blocked",
   build_runtime_version: "Language version mismatch",
   build_hugo_extended_required: "Hugo extended edition required",
+  build_theme_missing: "Site theme missing",
+  build_site_render_failed: "Site failed to render",
   build_env_missing: "Variable missing at build",
   build_sqlx_offline: "sqlx has no offline query data",
   build_database_unreachable: "Database unreachable during build",

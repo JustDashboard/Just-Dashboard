@@ -770,6 +770,18 @@ const FRAMEWORK_LABELS: Record<string, string> = {
   slim: "Slim",
   rails: "Rails",
   phoenix: "Phoenix",
+  hugo: "Hugo",
+  zola: "Zola",
+  mdbook: "mdBook",
+  jekyll: "Jekyll",
+  mkdocs: "MkDocs",
+  zensical: "Zensical",
+  sphinx: "Sphinx",
+  pelican: "Pelican",
+  lume: "Lume",
+  hexo: "Hexo",
+  vuepress: "VuePress",
+  slidev: "Slidev",
 }
 
 /** The Language select, in the order a reader expects to find their stack. */
@@ -782,6 +794,7 @@ export const RECIPE_LABELS: [DeploymentRecipe, string][] = [
   ["dotnet", ".NET"],
   ["deno", "Deno"],
   ["php", "PHP (Composer, FrankenPHP)"],
+  ["site", "Site generator (Hugo, Zola, mdBook, Jekyll)"],
 ]
 
 /**
@@ -798,6 +811,7 @@ export const RECIPE_SHORT: Record<DeploymentRecipe, string> = {
   dotnet: ".NET",
   deno: "Deno",
   php: "PHP",
+  site: "Site generator",
 }
 
 /** How a project is built, in the word a reading uses beside its product. */
