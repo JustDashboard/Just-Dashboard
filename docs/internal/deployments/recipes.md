@@ -66,8 +66,13 @@ process environment (`deploy/build_dockerfile_args.go`). A value typed into a ne
 is stored secret, except one with a browser-public name that is not declared secret: the page's
 JavaScript carries it by design, and only a plain value can become a build argument. Preflight lists
 what is passed (`dockerfile_build_args`) and warns about every other declared argument that will be
-empty (`dockerfile_arg_not_passed`, naming a browser-public one marked secret); a secret, or a name that
-would replace the builder's own environment (`DOCKER_*`, `PATH`, …), never qualifies. A build argument
+empty (`dockerfile_arg_not_passed`, naming a browser-public one marked secret), and — the other way
+round — about every browser-public variable the plan binds for the build (a value, a reference, a
+domain-bound address, a generated value, or a value typed into a new project's environment) that the
+Dockerfile declares no `ARG` for (`dockerfile_public_arg_undeclared`, a warning): the build never
+receives it, so the client bundle compiles it as undefined whatever the running container is given. A
+secret, or a name that would replace the builder's own environment (`DOCKER_*`, `PATH`, …), never
+qualifies as a build argument. A build argument
 stays in the image's history, which is why a secret is never one.
 
 Neither generated Dockerfiles nor command arguments contain variable values. A build's log, its failure

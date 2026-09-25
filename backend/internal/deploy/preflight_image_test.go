@@ -98,6 +98,35 @@ func TestPreflightPassesOnlyPlainPublicBuildArguments(t *testing.T) {
 	}
 }
 
+// A browser-public value the plan binds for the build reaches a repository
+// Dockerfile only through an ARG it declares; without one, the client bundle
+// compiles it as undefined, whatever the running container is given.
+func TestPreflightNamesBrowserValuesTheDockerfileNeverReceives(t *testing.T) {
+	dockerfile := newDetectedCandidate("", BuildDockerfile, DetectedCandidate{
+		Name: "Dockerfile in .", Dockerfile: "Dockerfile", Confidence: ConfidenceHigh,
+		DockerfileArgs: []DockerfileArg{{Name: "VITE_SITE", Consumed: true}},
+	})
+	draft, configuration := imageFindingDraft([]DetectedCandidate{dockerfile}, BuildPlanConfig{Method: BuildDockerfile},
+		PlannedVariable{Name: "NEXT_PUBLIC_API_URL", Sensitivity: "plain", Scopes: []string{"build", "runtime"}, DomainTemplate: "https://{{hostname}}/api"},
+		PlannedVariable{Name: "VITE_SITE", Sensitivity: "plain", Scopes: []string{"build"}, Value: "shop"},
+		PlannedVariable{Name: "NEXT_PUBLIC_RUNTIME_ONLY", Sensitivity: "plain", Scopes: []string{"runtime"}, Value: "x"},
+		PlannedVariable{Name: "NEXT_PUBLIC_UNSET", Sensitivity: "plain", Scopes: []string{"build"}},
+		PlannedVariable{Name: "API_TOKEN", Sensitivity: "secret", Scopes: []string{"build"}, Reference: "${{credential.api}}"},
+	)
+	draft.environment = map[string]string{"NEXT_PUBLIC_POSTHOG_KEY": "phc_123", "DATABASE_URL": "postgres://db/app"}
+	item, ok := findingWithCode(imageBuildFindings(draft, configuration, HostObservation{}), "dockerfile_public_arg_undeclared")
+	if !ok || item.Severity != PreflightWarning || item.Measured != "NEXT_PUBLIC_API_URL, NEXT_PUBLIC_POSTHOG_KEY" ||
+		item.FieldID != "variables.NEXT_PUBLIC_API_URL" || strings.Contains(item.Measured+item.Means+item.Action, "phc_123") {
+		t.Fatalf("finding = %+v", item)
+	}
+	// The recipe passes build values as secrets; the finding is a Dockerfile's.
+	draft, configuration = imageFindingDraft([]DetectedCandidate{dockerfile}, BuildPlanConfig{Method: BuildDockerfile},
+		PlannedVariable{Name: "VITE_SITE", Sensitivity: "plain", Scopes: []string{"build"}, Value: "shop"})
+	if _, ok := findingWithCode(imageBuildFindings(draft, configuration, HostObservation{}), "dockerfile_public_arg_undeclared"); ok {
+		t.Fatal("a declared argument was named as undeclared")
+	}
+}
+
 func TestPreflightNamesForeignArchitectureImages(t *testing.T) {
 	dockerfile := newDetectedCandidate("", BuildDockerfile, DetectedCandidate{
 		Name: "Dockerfile in .", Dockerfile: "Dockerfile", Confidence: ConfidenceHigh, DockerfilePlatforms: []string{"linux/amd64"},

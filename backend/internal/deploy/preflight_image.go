@@ -184,6 +184,9 @@ func imageBuildFindings(draft *Draft, configuration PlanConfiguration, observati
 				"Choose one of the Dockerfile's stages, or clear the stage to build the last one.", "deploy", "configuration.build.target"))
 		}
 		findings = append(findings, dockerfileArgFindings(*planned, configuration)...)
+		if item := dockerfilePublicArgUndeclared(*planned, configuration, draft.environment); item != nil {
+			findings = append(findings, *item)
+		}
 		for _, platform := range planned.DockerfilePlatforms {
 			if item, ok := foreignArchitectureFinding(platform, "FROM --platform in "+joinRoot(planned.Root, planned.Dockerfile), observation); ok {
 				findings = append(findings, item)
@@ -239,6 +242,43 @@ func dockerfileArgFindings(candidate DetectedCandidate, configuration PlanConfig
 			"deploy", "variables"))
 	}
 	return findings
+}
+
+// dockerfilePublicArgUndeclared: a repository Dockerfile builds only with the
+// build arguments it declares, so a browser-public variable the plan binds
+// for the build — a domain-bound NEXT_PUBLIC_API_URL, a VITE_ key — that the
+// Dockerfile declares no ARG for never reaches the build, and the client
+// bundle compiles it as undefined. staged are the draft's typed values,
+// which reach the build and the runtime unless a declaration says otherwise.
+func dockerfilePublicArgUndeclared(candidate DetectedCandidate, configuration PlanConfiguration, staged map[string]string) *PreflightFinding {
+	declared := map[string]bool{}
+	for _, arg := range candidate.DockerfileArgs {
+		declared[arg.Name] = true
+	}
+	missing := []string{}
+	planned := map[string]bool{}
+	for _, variable := range configuration.Variables {
+		planned[variable.Name] = true
+		bound := variable.Value != "" || variable.Reference != "" || variable.DomainTemplate != "" || variable.Generate > 0 || staged[variable.Name] != ""
+		if bound && slicesContain(variable.Scopes, "build") && publicBuildVariable(variable.Name) && !declared[variable.Name] {
+			missing = append(missing, variable.Name)
+		}
+	}
+	for name, value := range staged {
+		if value != "" && !planned[name] && publicBuildVariable(name) && !declared[name] {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+	item := finding("dockerfile_public_arg_undeclared", PreflightWarning,
+		"A browser variable never reaches the Dockerfile's build", listNames(missing),
+		"The plan gives the build these browser-public values, but the Dockerfile declares no ARG for them, and a repository Dockerfile receives only the build arguments it declares; the client bundle compiles them as undefined, whatever the running container is given.",
+		"Declare each with ARG in the stage that runs the build (and ENV NAME=$NAME when the build reads it from the environment), keep it plain and build-scoped, or build with the automatic recipe.",
+		"deploy", "variables."+missing[0])
+	return &item
 }
 
 func slicesContain(values []string, wanted string) bool {
