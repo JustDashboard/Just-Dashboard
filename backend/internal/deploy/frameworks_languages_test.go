@@ -211,6 +211,14 @@ func TestRubyApplicationsAreRecipeCandidates(t *testing.T) {
 			t.Fatalf("candidates = %#v", result.Candidates)
 		}
 	})
+	t.Run("rails without a database execs its server", func(t *testing.T) {
+		files := railsFiles(nil)
+		delete(files, "config/database.yml")
+		candidate := selectedOf(detectShapeFixture(t, files))
+		if candidate == nil || candidate.StartCommand != "exec bundle exec rails server --binding 0.0.0.0 --port ${PORT:-3000}" {
+			t.Fatalf("candidate = %#v", candidate)
+		}
+	})
 	t.Run("rails without bin/rails asks for it", func(t *testing.T) {
 		files := railsFiles(nil)
 		delete(files, "bin/rails")
@@ -237,7 +245,7 @@ func TestRubyApplicationsAreRecipeCandidates(t *testing.T) {
 			"Gemfile": "gem 'sinatra'\ngem 'puma'\n", "Gemfile.lock": "GEM\n  specs:\n    puma (6.6.0)\n    rack (3.1.8)\n    sinatra (4.1.1)\n\nPLATFORMS\n  ruby\n  x86_64-linux\n",
 			"config.ru": "require_relative 'app'\nrun App\n", "app.rb": "require 'sinatra/base'\nclass App < Sinatra::Base; end\n",
 		}))
-		if candidate == nil || candidate.Recipe != "ruby" || candidate.Framework != "sinatra" || candidate.StartCommand != "bundle exec puma --port ${PORT:-4567}" ||
+		if candidate == nil || candidate.Recipe != "ruby" || candidate.Framework != "sinatra" || candidate.StartCommand != "exec bundle exec puma --port ${PORT:-4567}" ||
 			candidate.Readiness == nil || !candidate.Readiness.AcceptAnyAnswer || candidate.UnpinnedDependencies {
 			t.Fatalf("candidate = %#v", candidate)
 		}
@@ -246,7 +254,7 @@ func TestRubyApplicationsAreRecipeCandidates(t *testing.T) {
 		candidate := selectedOf(detectShapeFixture(t, map[string]string{
 			"Gemfile": "gem 'sinatra'\ngem 'rackup'\ngem 'puma'\n", "app.rb": "require 'sinatra'\nget('/') { 'hi' }\n",
 		}))
-		if candidate == nil || candidate.StartCommand != "bundle exec ruby app.rb -o 0.0.0.0 -p ${PORT:-4567}" || !candidate.UnpinnedDependencies {
+		if candidate == nil || candidate.StartCommand != "exec bundle exec ruby app.rb -o 0.0.0.0 -p ${PORT:-4567}" || !candidate.UnpinnedDependencies {
 			t.Fatalf("candidate = %#v", candidate)
 		}
 	})
@@ -298,8 +306,8 @@ func TestRubyRecipeRendersTheBundleAssetsAndRuntime(t *testing.T) {
 		assertRendered(t, prepared, []string{
 			"FROM ruby:3.4.4-slim@sha256:", "AS build", "libpq-dev", "RUN bundle lock --add-platform x86_64-linux",
 			"RUN BUNDLE_DEPLOYMENT=1 bundle install", "RUN SECRET_KEY_BASE_DUMMY=1 bundle exec rails assets:precompile",
-			"RUN apt-get update -qq && apt-get install --no-install-recommends -y libpq5 libvips",
-			"ENV RAILS_ENV=production RACK_ENV=production RAILS_LOG_TO_STDOUT=1 RAILS_SERVE_STATIC_FILES=1 BUNDLE_PATH=/usr/local/bundle BUNDLE_WITHOUT=development:test BUNDLE_DEPLOYMENT=1",
+			"RUN apt-get update -qq && apt-get install --no-install-recommends -y libjemalloc2 libpq5 libvips",
+			"ENV RAILS_ENV=production RACK_ENV=production RAILS_LOG_TO_STDOUT=1 RAILS_SERVE_STATIC_FILES=1 BUNDLE_PATH=/usr/local/bundle BUNDLE_WITHOUT=development:test BUNDLE_DEPLOYMENT=1 LD_PRELOAD=libjemalloc.so.2",
 			"COPY --from=build /usr/local/bundle /usr/local/bundle",
 		}, []string{"node-toolchain", "gem install bundler"})
 		if prepared.Toolchain != "ruby 3.4.4" || len(prepared.Notes) == 0 {
@@ -352,7 +360,7 @@ func TestRubyRecipeRendersTheBundleAssetsAndRuntime(t *testing.T) {
 			t.Fatal(err)
 		}
 		assertRendered(t, prepared, []string{"FROM ruby:3.4-slim@sha256:", "RUN bundle install", "ENV RACK_ENV=production APP_ENV=production", " git "},
-			[]string{"BUNDLE_DEPLOYMENT", "assets:precompile"})
+			[]string{"BUNDLE_DEPLOYMENT", "assets:precompile", "jemalloc"})
 	})
 	t.Run("the recipe refuses a plan without a start command", func(t *testing.T) {
 		_, err := prepareFixture(t, map[string]string{"Gemfile": "gem 'roda'\n", "config.ru": "run App\n"}, BuildPlanConfig{Method: BuildRecipe, Recipe: "ruby"})

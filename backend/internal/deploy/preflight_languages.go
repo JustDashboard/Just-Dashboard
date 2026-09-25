@@ -18,7 +18,13 @@ func languageRecipeFindings(candidate *DetectedCandidate, configuration PlanConf
 	recipe := build.Method == BuildRecipe && firstNonEmpty(build.Recipe, candidate.Recipe) == "ruby"
 	toolchain := candidate.Toolchain
 	findings := []PreflightFinding{}
-	if platform, ok := rubyLockPlatform(toolchain.LockPlatforms, arch); !ok {
+	platforms := toolchain.LockPlatforms
+	if build.Method == BuildDockerfile && candidate.BuildMethod == BuildDockerfile && len(platforms) > 0 {
+		// A Dockerfile that adds the server's platform to the lock before
+		// it installs has fixed what this finding is about.
+		platforms = append(append([]string(nil), platforms...), toolchain.AddedPlatforms...)
+	}
+	if platform, ok := rubyLockPlatform(platforms, arch); !ok {
 		listed := "Gemfile.lock PLATFORMS: " + strings.Join(toolchain.LockPlatforms, ", ")
 		switch {
 		case recipe:

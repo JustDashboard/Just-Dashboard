@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"slices"
 	"strings"
 )
 
@@ -85,6 +86,11 @@ func renderRubyDockerfile(recipe rubyRecipe, config BuildPlanConfig, bases []Res
 	}
 	if recipe.locked {
 		environment += " BUNDLE_DEPLOYMENT=1"
+	}
+	if slices.Contains(recipe.packages, "libjemalloc2") {
+		// Installed, jemalloc is used only when preloaded; the loader finds
+		// it by name on either architecture.
+		environment += " LD_PRELOAD=libjemalloc.so.2"
 	}
 	lines = append(lines,
 		"ENV "+environment,

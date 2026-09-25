@@ -41,9 +41,11 @@ type DetectedToolchain struct {
 	Tool string `json:"tool,omitempty"`
 	// LockPlatforms are Gemfile.lock's PLATFORMS. BundleFrozen says a
 	// repository Dockerfile installs the bundle frozen, where a lock
-	// without the server's platform fails the install.
-	LockPlatforms []string `json:"lockPlatforms,omitempty"`
-	BundleFrozen  bool     `json:"bundleFrozen,omitempty"`
+	// without the server's platform fails the install, and AddedPlatforms
+	// are those its `bundle lock --add-platform` adds to the lock first.
+	LockPlatforms  []string `json:"lockPlatforms,omitempty"`
+	BundleFrozen   bool     `json:"bundleFrozen,omitempty"`
+	AddedPlatforms []string `json:"addedPlatforms,omitempty"`
 	// Bundler is the lock's BUNDLED WITH release, which RubyGems runs;
 	// GitSSH says a gem comes from a Git repository over SSH, which the
 	// build has no key for.
@@ -58,10 +60,11 @@ func validateDetectedToolchain(toolchain *DetectedToolchain) error {
 		return nil
 	}
 	malformed := fmt.Errorf("%w: detected toolchain is malformed", ErrInvalidPlan)
-	if !languageRecipe(toolchain.Language) || len(toolchain.LockPlatforms) > 32 {
+	if !languageRecipe(toolchain.Language) || len(toolchain.LockPlatforms) > 32 || len(toolchain.AddedPlatforms) > 32 {
 		return malformed
 	}
-	for _, value := range append([]string{toolchain.Release, toolchain.From, toolchain.Tool, toolchain.Bundler}, toolchain.LockPlatforms...) {
+	values := append([]string{toolchain.Release, toolchain.From, toolchain.Tool, toolchain.Bundler}, toolchain.LockPlatforms...)
+	for _, value := range append(values, toolchain.AddedPlatforms...) {
 		if !toolchainTextRE.MatchString(value) {
 			return malformed
 		}
@@ -82,13 +85,18 @@ func (t *DetectedToolchain) bounded() *DetectedToolchain {
 			*field = ""
 		}
 	}
-	clean.LockPlatforms = nil
-	for _, platform := range t.LockPlatforms {
-		if toolchainTextRE.MatchString(platform) && len(clean.LockPlatforms) < 32 {
-			clean.LockPlatforms = append(clean.LockPlatforms, platform)
+	clean.LockPlatforms, clean.AddedPlatforms = boundedPlatforms(t.LockPlatforms), boundedPlatforms(t.AddedPlatforms)
+	return &clean
+}
+
+func boundedPlatforms(platforms []string) []string {
+	var kept []string
+	for _, platform := range platforms {
+		if toolchainTextRE.MatchString(platform) && len(kept) < 32 {
+			kept = append(kept, platform)
 		}
 	}
-	return &clean
+	return kept
 }
 
 // readRecipeFile reads a small file a language recipe decides from, bounded

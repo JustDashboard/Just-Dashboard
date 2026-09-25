@@ -27,6 +27,17 @@ func TestRubyLockPlatformsAreCheckedBeforeDeploy(t *testing.T) {
 	if !hasFinding(languageRecipeFindings(frozen, PlanConfiguration{Build: BuildPlanConfig{Method: BuildDockerfile}}, amd64), "ruby_lock_platform_missing", PreflightBlocked) {
 		t.Fatal("a frozen Dockerfile install was not blocked")
 	}
+	// A Dockerfile that adds the server's platform before its frozen
+	// install builds: `docker build` of it succeeds.
+	frozen.Toolchain.AddedPlatforms = []string{"x86_64-linux", "aarch64-linux"}
+	if findings := languageRecipeFindings(frozen, PlanConfiguration{Build: BuildPlanConfig{Method: BuildDockerfile}}, amd64); len(findings) != 0 {
+		t.Fatalf("a Dockerfile adding the platform = %#v", findings)
+	}
+	frozen.Toolchain.AddedPlatforms = []string{"aarch64-linux"}
+	if !hasFinding(languageRecipeFindings(frozen, PlanConfiguration{Build: BuildPlanConfig{Method: BuildDockerfile}}, amd64), "ruby_lock_platform_missing", PreflightBlocked) {
+		t.Fatal("a Dockerfile adding only the other architecture was not blocked")
+	}
+	frozen.Toolchain.AddedPlatforms = nil
 	frozen.Toolchain.BundleFrozen = false
 	if !hasFinding(languageRecipeFindings(frozen, PlanConfiguration{Build: BuildPlanConfig{Method: BuildDockerfile}}, amd64), "ruby_lock_platform_missing", PreflightWarning) {
 		t.Fatal("an unfrozen Dockerfile install was not warned")
@@ -53,6 +64,29 @@ func TestBundleFrozenIsReadFromTheDockerfile(t *testing.T) {
 		if bundleFrozenRE.MatchString(dockerfile) != frozen {
 			t.Errorf("%q frozen = %v", dockerfile, !frozen)
 		}
+	}
+}
+
+func TestDockerfileAddedPlatformsAreRead(t *testing.T) {
+	for dockerfile, want := range map[string]string{
+		"ENV BUNDLE_DEPLOYMENT=\"1\"\nRUN bundle lock --add-platform x86_64-linux aarch64-linux && bundle install\n":   "x86_64-linux,aarch64-linux",
+		"RUN bundle lock \\\n    --add-platform=x86_64-linux --add-platform aarch64-linux-gnu --normalize-platforms\n": "x86_64-linux,aarch64-linux-gnu",
+		"RUN bundle lock --update && bundle install --add-platform nothing\n":                                          "",
+		"RUN bundle install\n": "",
+	} {
+		if got := strings.Join(dockerfileAddedPlatforms([]byte(dockerfile)), ","); got != want {
+			t.Errorf("%q = %q, want %q", dockerfile, got, want)
+		}
+	}
+	result := detectShapeFixture(t, railsFiles(map[string]string{
+		"Dockerfile": "FROM ruby:3.4-slim\nENV BUNDLE_DEPLOYMENT=\"1\"\nCOPY . .\nRUN bundle lock --add-platform x86_64-linux aarch64-linux && bundle install\nCMD [\"bin/rails\", \"server\"]\n",
+	}))
+	dockerfile := candidateAtRoot(result, "", BuildDockerfile)
+	if dockerfile == nil || dockerfile.Toolchain == nil || strings.Join(dockerfile.Toolchain.AddedPlatforms, ",") != "x86_64-linux,aarch64-linux" {
+		t.Fatalf("candidates = %#v", result.Candidates)
+	}
+	if findings := languageRecipeFindings(dockerfile, PlanConfiguration{Build: BuildPlanConfig{Method: BuildDockerfile}}, HostObservation{Architecture: "arm64"}); len(findings) != 0 {
+		t.Fatalf("findings = %#v", findings)
 	}
 }
 
@@ -171,12 +205,14 @@ func TestLanguageRecipeStepsHaveTheirPhase(t *testing.T) {
 }
 
 func TestToolchainFactsAreBoundedBeforeTheyAreSaved(t *testing.T) {
-	odd := &DetectedToolchain{Language: "ruby", Release: "3.4.7", Bundler: "2.6.9 (see notes)", LockPlatforms: []string{"x86_64-linux", "bad platform"}}
+	odd := &DetectedToolchain{Language: "ruby", Release: "3.4.7", Bundler: "2.6.9 (see notes)", LockPlatforms: []string{"x86_64-linux", "bad platform"},
+		AddedPlatforms: []string{"aarch64-linux", "$(TARGET)\n"}}
 	if validateDetectedToolchain(odd) == nil {
 		t.Fatal("prose in a toolchain fact was accepted")
 	}
 	bounded := odd.bounded()
-	if validateDetectedToolchain(bounded) != nil || bounded.Bundler != "" || strings.Join(bounded.LockPlatforms, ",") != "x86_64-linux" || bounded.Release != "3.4.7" {
+	if validateDetectedToolchain(bounded) != nil || bounded.Bundler != "" || strings.Join(bounded.LockPlatforms, ",") != "x86_64-linux" || bounded.Release != "3.4.7" ||
+		strings.Join(bounded.AddedPlatforms, ",") != "aarch64-linux" {
 		t.Fatalf("bounded = %#v", bounded)
 	}
 	if validateDetectedToolchain(&DetectedToolchain{Language: "cobol"}) == nil {

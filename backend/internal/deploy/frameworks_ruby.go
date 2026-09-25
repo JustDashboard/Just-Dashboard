@@ -342,7 +342,7 @@ func (p rubyProject) start() (string, string) {
 			// schema, which a new SQLite volume and a new server alike need.
 			return "bundle exec rails db:prepare && exec " + server, ""
 		}
-		return server, ""
+		return "exec " + server, ""
 	case "hanami":
 		server := p.rackServer(port)
 		if server == "" {
@@ -351,13 +351,13 @@ func (p rubyProject) start() (string, string) {
 		if p.hanamiMigrations {
 			return "bundle exec hanami db migrate && exec " + server, ""
 		}
-		return server, ""
+		return "exec " + server, ""
 	}
 	if !p.configRU && p.classicEntry != "" {
 		// Sinatra's own server runs through rackup's handlers, which moved
 		// out of Rack 3, on whichever server the bundle has.
 		if (has(p.gems, "rackup") || rackBundlesRackup(p.gems["rack"])) && has(p.gems, "puma", "thin", "falcon", "webrick") {
-			return "bundle exec ruby " + p.classicEntry + " -o 0.0.0.0 -p ${PORT:-" + port + "}", ""
+			return "exec bundle exec ruby " + p.classicEntry + " -o 0.0.0.0 -p ${PORT:-" + port + "}", ""
 		}
 		return "", "Sinatra's built-in server needs rackup and puma; add them to the Gemfile or set the start command"
 	}
@@ -365,7 +365,7 @@ func (p rubyProject) start() (string, string) {
 		return "", "no config.ru; set the command that starts the server"
 	}
 	if server := p.rackServer(port); server != "" {
-		return server, ""
+		return "exec " + server, ""
 	}
 	return "", "no Rack server (puma, rackup, unicorn or thin) is locked; add puma to the Gemfile or set the start command"
 }
@@ -432,6 +432,11 @@ func (p rubyProject) packages(nodeNative bool) ([]string, []string) {
 	}
 	if nodeNative {
 		build["python3"] = true
+	}
+	if p.framework == "rails" {
+		// Rails' own Dockerfile runs its servers on jemalloc, which keeps a
+		// long-running Ruby process's memory from fragmenting.
+		runtime["libjemalloc2"] = true
 	}
 	for _, entry := range rubyGemPackages {
 		if _, ok := p.gems[entry.gem]; !ok {
@@ -623,5 +628,31 @@ func lendRubyDockerfileFacts(candidate *DetectedCandidate, buildRoot string) {
 	}
 	dockerfile := readRecipeFile(buildRoot, firstNonEmpty(candidate.Dockerfile, "Dockerfile"), 2<<20)
 	candidate.Toolchain = (&DetectedToolchain{Language: "ruby", LockPlatforms: lock.platforms, Bundler: lock.bundledWith,
-		BundleFrozen: bundleFrozenRE.Match(dockerfile)}).bounded()
+		BundleFrozen: bundleFrozenRE.Match(dockerfile), AddedPlatforms: dockerfileAddedPlatforms(dockerfile)}).bounded()
+}
+
+var bundleLockRE = regexp.MustCompile(`\bbundle\s+lock\b([^\n&;|]*)`)
+
+// dockerfileAddedPlatforms are the platforms a Dockerfile's `bundle lock
+// --add-platform` adds, which a frozen install after it then accepts.
+func dockerfileAddedPlatforms(dockerfile []byte) []string {
+	text := strings.ReplaceAll(string(dockerfile), "\\\n", " ")
+	var platforms []string
+	for _, match := range bundleLockRE.FindAllStringSubmatch(text, 16) {
+		adding := false
+		for _, field := range strings.Fields(strings.ReplaceAll(match[1], ",", " ")) {
+			switch {
+			case field == "--add-platform":
+				adding = true
+			case strings.HasPrefix(field, "--add-platform="):
+				adding = true
+				platforms = append(platforms, strings.TrimPrefix(field, "--add-platform="))
+			case strings.HasPrefix(field, "-"):
+				adding = false
+			case adding:
+				platforms = append(platforms, field)
+			}
+		}
+	}
+	return platforms
 }
