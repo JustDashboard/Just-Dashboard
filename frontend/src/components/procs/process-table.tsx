@@ -1,13 +1,22 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Cpu, SettingsSliders } from "@/components/icons"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Metric, MetricStrip, Page, PageContext, RowLink, SearchInput } from "@/components/page"
+import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
+import { Page, PageContext, RowLink, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
+import {
+  ProductGlyph,
+  ProductGlyphs,
+  ProductLogo,
+  cpuProduct,
+  platformProduct,
+  processProduct,
+} from "@/components/product-logo"
 import { ROW_BLEED } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { ChipCount, FilterChip } from "@/components/tabs"
@@ -92,12 +101,21 @@ function automaticFocus(snapshot: Snapshot | undefined): {
 /**
  * Everything running on the host, and which of it is heavy.
  *
- * Readings first, then the table. The four tiles are the answer to "is the
+ * The machine first, as the identity line the Overview and Metrics open on —
+ * its distribution drawn as itself, and the four host facts that used to
+ * stand in a `MetricStrip` above the tiles (CPU, available memory, load,
+ * uptime) among its facts, where the same numbers sit on the other two pages.
+ * Then the readings, then the table. The four tiles are the answer to "is the
  * process table itself telling me something" — a zombie count and a blocked
  * count are what turns a long list into a diagnosis — and they are computed
  * over the whole snapshot, so a filter narrowing the rows never narrows the
  * figures. The table's own question is "which rows", and the focus control
  * answers it by what the host is short of rather than by a fixed column.
+ *
+ * Every row is drawn as the product it is where it is one (§14): a column of
+ * Postgres, Docker and nginx is seen, a column of names is read. The
+ * Processes tile carries the same marks after its figure, so "143 processes"
+ * says what the machine is running before the table does.
  */
 export function LiveProcesses() {
   const { confirm, dialog } = useConfirm()
@@ -110,7 +128,7 @@ export function LiveProcesses() {
   const [limit, setLimit] = useViewState("processes.table.limit", 200)
   const [refreshSeconds, setRefreshSeconds] = useViewState("processes.table.refresh", 4)
   const appliedQuery = useDebounced(query, 250)
-  const { snapshot } = useMetrics()
+  const { host, snapshot } = useMetrics()
   const automatic = automaticFocus(snapshot)
   const effectiveSort = sort === "auto" ? automatic.sort : sort
   const processList = usePoll(
@@ -145,18 +163,49 @@ export function LiveProcesses() {
     .map((f) => `${f.count} ${f.label.toLowerCase()}`)
     .join(" · ")
   const pid = selectedPid ? Number(selectedPid) : null
+  // The products the listed processes are, most-listed first and each once —
+  // the same reading the Overview's Docker tile makes of its containers.
+  const products = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const p of data?.processes ?? []) {
+      const id = processProduct(p.name)
+      if (id) counts.set(id, (counts.get(id) ?? 0) + 1)
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id)
+  }, [data])
 
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Processes" title="Live" />
 
-      {snapshot?.cpu && snapshot.memory && (
-        <MetricStrip>
-          <Metric label="CPU" value={percent(snapshot.cpu.totalPercent, 0)} />
-          <Metric label="Available" value={bytes(snapshot.memory.available)} />
-          <Metric label="Load" value={snapshot.cpu.loadAvg1.toFixed(2)} />
-          <Metric label="Uptime" value={duration(snapshot.uptimeSeconds)} />
-        </MetricStrip>
+      {host && snapshot?.cpu && snapshot.memory && (
+        <HostIdentity
+          mark={platformProduct(host.platform)}
+          title={host.hostname}
+          facts={
+            <>
+              <HostFact product={platformProduct(host.platform)}>{platformName(host)}</HostFact>
+              <FactDot />
+              <HostFact product={cpuProduct(host.cpuModel, host.kernelArch)}>
+                <span className="numeric">{percent(snapshot.cpu.totalPercent, 0)} CPU</span>
+              </HostFact>
+              <FactDot />
+              <span className="numeric">load {snapshot.cpu.loadAvg1.toFixed(2)}</span>
+              <FactDot />
+              <span className="numeric">{bytes(snapshot.memory.available)} available</span>
+              <FactDot />
+              <span className="numeric">up {duration(snapshot.uptimeSeconds)}</span>
+            </>
+          }
+          aside={
+            <ProcessTableSettings
+              limit={limit}
+              setLimit={setLimit}
+              refreshSeconds={refreshSeconds}
+              setRefreshSeconds={setRefreshSeconds}
+            />
+          }
+        />
       )}
 
       {data && (
@@ -164,7 +213,14 @@ export function LiveProcesses() {
           <StatTile
             label="Processes"
             value={data.available}
-            hint={`${running} running · ${facet(data.states, "sleeping")} sleeping`}
+            hint={
+              <span className="inline-flex max-w-full min-w-0 items-center gap-2">
+                <span className="truncate">
+                  {running} running · {facet(data.states, "sleeping")} sleeping
+                </span>
+                <ProductGlyphs ids={products} />
+              </span>
+            }
             trailing={<span className="text-hint text-muted-foreground">on this host</span>}
           />
           <StatTile
@@ -196,12 +252,16 @@ export function LiveProcesses() {
         <PanelHeader
           title="Process table"
           actions={
-            <ProcessTableSettings
-              limit={limit}
-              setLimit={setLimit}
-              refreshSeconds={refreshSeconds}
-              setRefreshSeconds={setRefreshSeconds}
-            />
+            // The cadence and the row cap sit in the identity line while the
+            // machine is known; a page without it keeps them with the table.
+            !(host && snapshot?.cpu && snapshot.memory) && (
+              <ProcessTableSettings
+                limit={limit}
+                setLimit={setLimit}
+                refreshSeconds={refreshSeconds}
+                setRefreshSeconds={setRefreshSeconds}
+              />
+            )
           }
         />
         <PanelToolbar>
@@ -393,18 +453,24 @@ function ProcessTableRow({
     <TableRow className="group" onActivate={() => onOpen(process)}>
       <TableCell className="numeric font-mono text-muted-foreground">{process.pid}</TableCell>
       <TableCell>
-        <div className="max-w-[28rem] min-w-0">
-          <RowLink title={process.name} onClick={() => onOpen(process)}>
-            {process.name}
-          </RowLink>
-          <p className="truncate font-mono text-hint text-muted-foreground" title={process.cmdline}>
-            {process.cmdline || "Kernel worker"}
-          </p>
+        <div className="flex max-w-[28rem] min-w-0 items-center gap-3">
+          <ProcessMark process={process} />
+          <div className="min-w-0">
+            <RowLink title={process.name} onClick={() => onOpen(process)}>
+              {process.name}
+            </RowLink>
+            <p
+              className="truncate font-mono text-hint text-muted-foreground"
+              title={process.cmdline}
+            >
+              {process.cmdline || "Kernel worker"}
+            </p>
+          </div>
         </div>
       </TableCell>
       <TableCell>
         <div className="max-w-40 min-w-0">
-          <Tag>{managerName(process.manager)}</Tag>
+          <SupervisorTag process={process} />
           {process.managerName && (
             <p className="truncate text-hint text-muted-foreground" title={process.managerName}>
               {process.managerName}
@@ -496,11 +562,12 @@ function ProcessNarrowRow({
         onOpen(process)
       }}
     >
+      <ProcessMark process={process} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-baseline gap-2">
           <RowLink onClick={() => onOpen(process)}>{process.name}</RowLink>
           <span className="numeric font-mono text-hint text-muted-foreground">{process.pid}</span>
-          <Tag>{managerName(process.manager)}</Tag>
+          <SupervisorTag process={process} />
         </div>
         <p className="truncate font-mono text-hint text-muted-foreground">
           {process.cmdline || "Kernel worker"}
@@ -527,6 +594,30 @@ function ProcessNarrowRow({
       </div>
       <VerbActions verbs={verbs} className="shrink-0" />
     </li>
+  )
+}
+
+/** The process as the product it is; a name this cannot place keeps a glyph. */
+function ProcessMark({ process }: { process: ProcessRow }) {
+  return <ProductLogo id={processProduct(process.name)} size="sm" fallback={Cpu} />
+}
+
+/**
+ * Who supervises the process, with the supervisor's own mark where it has
+ * one: PM2 and Docker are products, systemd and the kernel are not.
+ */
+const SUPERVISOR_PRODUCT: Partial<Record<ProcessRow["manager"], string>> = {
+  pm2: "pm2",
+  container: "docker",
+}
+
+function SupervisorTag({ process }: { process: ProcessRow }) {
+  const product = SUPERVISOR_PRODUCT[process.manager]
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      {product && <ProductGlyph id={product} className="size-3" />}
+      <Tag>{managerName(process.manager)}</Tag>
+    </span>
   )
 }
 

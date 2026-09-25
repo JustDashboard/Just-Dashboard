@@ -13,7 +13,9 @@ import { Field } from "@/components/form"
 import { LogViewer } from "@/components/log-viewer"
 import { Modal } from "@/components/modal"
 import { Detail, DetailList } from "@/components/page"
+import { ChartActivity } from "@/components/icons"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { ProductLogo, pm2Product } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -77,7 +79,17 @@ function PM2Sheet({
     <SidePanel
       open={process !== null}
       onOpenChange={onOpenChange}
-      title={process?.name ?? "PM2"}
+      // The sheet opens on the application as what runs it, then its name.
+      title={
+        <>
+          <ProductLogo
+            id={process ? pm2Product(process.interpreter) : "pm2"}
+            size="sm"
+            fallback={ChartActivity}
+          />
+          <span className="min-w-0 truncate">{process?.name ?? "PM2"}</span>
+        </>
+      }
       description={process ? `${process.daemonId} #${process.id}` : "PM2 application"}
       actions={
         process && (

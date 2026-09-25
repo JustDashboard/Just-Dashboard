@@ -341,6 +341,11 @@ const PROCESS_ALIASES: Record<string, string> = {
   httpd: "apache",
   "pm2 v5": "pm2",
   "pm2 v6": "pm2",
+  node: "nodejs",
+  python3: "python",
+  "php-fpm": "php",
+  influxd: "influxdb",
+  "typesense-server": "typesense",
 }
 
 /**
@@ -355,6 +360,64 @@ export function processProduct(name: string) {
   // Compose's mark is a stack's, not a program's, and a process called `X` is
   // the X server rather than the site whose mark shares its key.
   return id in LOGOS && id !== "docker-compose" && id !== "x" ? id : undefined
+}
+
+/**
+ * Which product a systemd unit runs, by its name: `postgresql.service` is
+ * Postgres, `pm2-deploy.service` is PM2, `php8.3-fpm.service` is PHP. The
+ * suffix and an instance name are dropped, then the name is read as a
+ * process, then its first word is — `redis-server` is an alias, `pm2-deploy`
+ * is PM2's own key in front of an account. `apt-daily`, `ssh` and `cron` name
+ * nothing and keep a glyph, which is the same argument `processProduct`
+ * makes about `bash`.
+ */
+export function unitProduct(unit: string) {
+  const base = unit
+    .toLowerCase()
+    .replace(/\.(service|timer|socket|target|mount|path|slice|scope)$/, "")
+    .replace(/@.*$/, "")
+  const word = base.replace(/^php\d+(\.\d+)?-fpm$/, "php-fpm").match(/^[a-z][a-z0-9_]*/)?.[0]
+  // A unit named for a program a terminal would run — certbot's timer is
+  // Let's Encrypt's renewal — is that program's product.
+  return (
+    processProduct(base) ??
+    programProduct(base) ??
+    (word ? (processProduct(word) ?? programProduct(word)) : undefined)
+  )
+}
+
+/**
+ * What runs a PM2 application: its interpreter, which is Node unless the
+ * ecosystem file says otherwise — Bun, Python, or `none` for a binary, which
+ * is no product and keeps a glyph.
+ */
+export function pm2Product(interpreter: string | undefined) {
+  const name = interpreter?.trim() || "node"
+  return name === "none" ? undefined : programProduct(name)
+}
+
+/**
+ * The service a port is conventionally bound to: the databases and control
+ * planes the attention list already names by number, and the two Minecraft
+ * editions. A stream forwarding 5432 is drawn as Postgres for the reason the
+ * finding calls it "PostgreSQL answers on every interface" — the port *is*
+ * the reading. Nothing for a port outside this set: 8080 is anything.
+ */
+const PORTS: Record<number, string> = {
+  5432: "postgresql",
+  3306: "mysql",
+  6379: "redis",
+  27017: "mongodb",
+  9000: "minio",
+  8123: "clickhouse",
+  2375: "docker",
+  2376: "docker",
+  25565: "minecraft-java",
+  19132: "minecraft-bedrock",
+}
+
+export function portProduct(port: number): string | undefined {
+  return PORTS[port]
 }
 
 /**
@@ -405,6 +468,12 @@ const PROGRAMS: Record<string, string> = {
   nginx: "nginx-static",
   tailscale: "tailscale",
   pm2: "pm2",
+  certbot: "lets-encrypt",
+  php: "php",
+  ruby: "ruby",
+  java: "java",
+  cargo: "rust",
+  composer: "php",
 }
 
 export function programProduct(command: string | undefined) {

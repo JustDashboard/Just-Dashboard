@@ -8,8 +8,11 @@ import { expect, test, type Page, type Route } from "@playwright/test"
  * reset and flush on a PM2 application, clear-failed on a unit, disable on a
  * cron job — that a schedule is described in words beside its expression, and
  * that the pages read as the design system says: figures as tiles, one plain
- * panel, no framed block on the page. The screenshots at 1280 and 1720 are
- * the eyes the assertions do not have.
+ * panel, no framed block on the page, and every row drawn as the product it
+ * is where it is one (§14) — nginx's mark on the nginx process and unit,
+ * Postgres's on the failed unit, Node's on a PM2 application, Let's
+ * Encrypt's on certbot's timer. The screenshots at 1280 and 1720 are the
+ * eyes the assertions do not have.
  */
 
 const now = new Date().toISOString()
@@ -448,9 +451,7 @@ async function menuLabels(page: Page, rowName: string): Promise<string[]> {
  */
 async function framedNonTables(page: Page) {
   return page.evaluate(() =>
-    Array.from(
-      document.querySelectorAll("[data-slot=page] [data-slot=panel]:not([data-plain])"),
-    )
+    Array.from(document.querySelectorAll("[data-slot=page] [data-slot=panel]:not([data-plain])"))
       .filter((el) => !el.querySelector("[data-slot=table-container]"))
       .map((el) => el.outerHTML.slice(0, 120)),
   )
@@ -461,8 +462,23 @@ test("the live table reads the host and every process verb is a word", async ({ 
   await page.goto("/processes")
   await expect(page.getByRole("heading", { name: "Live" })).toBeVisible()
 
-  // Figures over the whole host, not over the filtered rows.
+  // The machine first, as the identity line the Overview opens on, with the
+  // table's cadence and cap at its right end.
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity).toContainText("srv-1")
+  await expect(identity).toContainText("Ubuntu 24.04")
+  await expect(identity.getByRole("button", { name: /Every 4s/ })).toBeVisible()
+
+  // Figures over the whole host, not over the filtered rows — and the
+  // products the listed processes are, after the figure.
   await expect(page.locator("[data-slot='stat-tile']").first()).toContainText("143")
+  await expect(
+    page.locator("[data-slot='stat-tile']").first().locator("img[src='/logos/nginx.svg']"),
+  ).toBeVisible()
+  // A row is its product: nginx's mark on the nginx row, Node's on node, and
+  // a glyph rather than a guess on a kernel worker.
+  await expect(page.locator("td img[src='/logos/nginx.svg']")).toHaveCount(1)
+  await expect(page.locator("td img[src='/logos/nodejs.svg']").first()).toBeVisible()
   await expect(page.getByText("exited, but the parent has not reaped them")).toBeVisible()
   await expect(page.getByText("waiting on a disk or a lock")).toBeVisible()
 
@@ -542,8 +558,16 @@ test("PM2 says whether it survives a reboot and offers the housekeeping verbs", 
 }) => {
   await mockHost(page)
   await page.goto("/processes/pm2")
-  await expect(page.getByText("Resurrects on boot")).toBeVisible()
+  // PM2 as the thing the page is about: its mark on the identity line, the
+  // account and its Node among the facts, the verdict at the end.
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.locator("img[src='/logos/pm2.svg']")).toBeVisible()
+  await expect(identity).toContainText("deploy")
+  await expect(identity).toContainText("Node 24.0.0")
+  await expect(identity.getByText("Resurrects on boot")).toBeVisible()
   await expect(page.getByText("15 unstable — crashing soon after start")).toBeVisible()
+  // Each application as what runs it.
+  await expect(page.locator("td img[src='/logos/nodejs.svg']")).toHaveCount(2)
 
   const labels = await menuLabels(page, "worker")
   expect(labels).toEqual(
@@ -573,6 +597,13 @@ test("services list failed units first and the sheet offers reload where it appl
     .locator("[data-slot='table-row'] [data-slot='table-cell']:first-child button")
     .allInnerTexts()
   expect(names[0]).toBe("postgresql.service")
+  // A unit is the product it runs, and the Failed tile says what failed
+  // before the table does.
+  await expect(page.locator("td img[src='/logos/postgresql.svg']")).toBeVisible()
+  await expect(page.locator("td img[src='/logos/nginx.svg']")).toBeVisible()
+  await expect(
+    page.locator("[data-slot='stat-tile']").nth(1).locator("img[src='/logos/postgresql.svg']"),
+  ).toBeVisible()
 
   const failed = await menuLabels(page, "postgresql")
   expect(failed).toEqual(
@@ -592,6 +623,18 @@ test("scheduled says what each schedule means and builds a new one in words", as
   await expect(page.getByText("Every day at 03:00")).toBeVisible()
   await expect(page.getByText("Every hour at :17")).toBeVisible()
   await expect(page.getByText("runs certbot.service")).toBeVisible()
+
+  // Four readings over the three lists: what fires next across cron and the
+  // timers together, and the counts none of the lists says alone.
+  const tiles = page.locator("[data-slot='stat-tile']")
+  await expect(tiles).toHaveCount(4)
+  await expect(tiles.nth(0)).toContainText("Next run")
+  await expect(tiles.nth(1)).toContainText("1 disabled · root")
+  await expect(tiles.nth(2)).toContainText("of 2 · 1 enabled on boot")
+  await expect(tiles.nth(3)).toContainText("1 file owned by packages")
+  // certbot's timer is Let's Encrypt's renewal; a script of the operator's
+  // own keeps the clock.
+  await expect(page.locator("td img[src='/logos/lets-encrypt.svg']")).toBeVisible()
 
   // Disable and Edit are the daily verbs and sit inline; the rest are words
   // in the menu.
