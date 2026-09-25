@@ -1,6 +1,6 @@
 "use client"
 
-import { useId, useMemo, useState } from "react"
+import { useId, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
 import { Copy, Key, Plus, Puzzle, Trash, Users } from "@/components/icons"
 import { del, errorMessage, get, post, put } from "@/lib/api"

@@ -446,7 +446,8 @@ func (mysqlDialect) Roles(ctx context.Context, db *sql.DB) ([]Role, error) {
 }
 
 // mysqlAccount renders 'user'@'host' with each half as a literal. Both halves
-// are values in MySQL's grammar, not identifiers, so they take string quoting.
+// are values in MySQL's grammar, not identifiers, so they take string quoting —
+// the user half escaped, since validateIdent lets a quote or a backslash through.
 func mysqlAccount(user, host string) (string, error) {
 	if err := validateIdent(user); err != nil {
 		return "", err
@@ -460,7 +461,7 @@ func mysqlAccount(user, host string) (string, error) {
 			return "", fmt.Errorf("host %q may contain letters, digits, dots, dashes, colons, %% and _", host)
 		}
 	}
-	return "'" + user + "'@'" + host + "'", nil
+	return dumpString(DriverMySQL, user) + "@'" + host + "'", nil
 }
 
 func (mysqlDialect) CreateRole(ctx context.Context, db *sql.DB, spec RoleSpec) error {

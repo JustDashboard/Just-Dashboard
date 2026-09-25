@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
 import { ArrowRight, Database, Key, Linked, Plus } from "@/components/icons"
 import { get } from "@/lib/api"
@@ -50,6 +51,7 @@ import {
  */
 export default function DatabasesOverviewPage() {
   const { can } = useAuth()
+  const router = useRouter()
   const { drivers, openNew, openConnect, connectHost } = useDatabase()
   const admin = can("system.admin")
   const fleet = usePoll((signal) => get<DbFleet>("/databases/fleet", undefined, signal), 30_000)
@@ -105,7 +107,7 @@ export default function DatabasesOverviewPage() {
                 ? "Open connection"
                 : "Open backups",
           onClick: () => {
-            window.location.assign(
+            router.push(
               `/databases/${concern.reason === "never backed up" || concern.reason.startsWith("last backup") ? "backups" : "connection"}?conn=${entry.id}`,
             )
           },
@@ -124,7 +126,7 @@ export default function DatabasesOverviewPage() {
       })
     }
     return out
-  }, [fleet.data])
+  }, [fleet.data, router])
 
   if (fleet.error && !fleet.data) {
     return (
