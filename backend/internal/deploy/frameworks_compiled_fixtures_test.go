@@ -22,6 +22,9 @@ func TestCompiledLiveFixturesDetectAndPrepare(t *testing.T) {
 		{"blazor-wasm", "", "blazor-wasm", "dotnet", "", []string{"COPY --from=build /out/wwwroot/ /usr/share/nginx/html/"}},
 		{"fsharp", "", "aspnet", "dotnet", "", []string{"RUN dotnet restore App.fsproj", "dotnet /app/App.dll"}},
 		{"dotnet-spa", "", "aspnet", "dotnet", "", []string{"FROM node:22-bookworm-slim@", "COPY --from=spa-node /usr/local/ /usr/local/", "WORKDIR /src/ClientApp\nRUN npm ci"}},
+		{"gradle-composite", "backend/app", "java", "java", ".", []string{"RUN gradle --no-daemon --console=plain -p backend :app:installDist", "RUN cd /src/backend/app/build/install && "}},
+		{"dotnet-multitarget", "src/Api", "aspnet", "dotnet", "src", []string{"WORKDIR /src/Api", "RUN dotnet restore Api.csproj\n",
+			"RUN dotnet publish Api.csproj -c Release --no-restore -o /out --framework net9.0", "FROM mcr.microsoft.com/dotnet/aspnet:9.0@"}},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			t.Parallel()
