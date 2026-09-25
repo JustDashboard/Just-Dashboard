@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -36,11 +37,20 @@ func TestLiveDetectedFrameworkBuildAndServing(t *testing.T) {
 	// next-pnpm and express-yarn are the same kind of server installed by
 	// pnpm (a toolchain release the start command runs offline) and by
 	// Yarn 1 (its real frozen install), started through the manager.
-	for _, name := range []string{"vite", "next", "svelte-node", "svelte-static", "html", "containerfile", "go",
+	// The compiled shapes beyond one crate or module (compiledLiveFixtures)
+	// build a member of a go.work or a Cargo workspace from its workspace,
+	// a Go server embedding its Vite build with cgo SQLite and templ, and the
+	// Leptos and Trunk WebAssembly builds.
+	for _, name := range append([]string{"vite", "next", "svelte-node", "svelte-static", "html", "containerfile", "go",
 		"astro", "nuxt", "react-router", "fastapi", "flask", "django", "rust", "java", "gradle", "dotnet", "deno", "laravel", "php",
-		"streamlit", "gradio", "next-pnpm", "express-yarn"} {
+		"streamlit", "gradio", "next-pnpm", "express-yarn"}, compiledLiveFixtures...) {
 		t.Run(name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
+			timeout := 10 * time.Minute
+			if slices.Contains(compiledLiveFixtures, name) {
+				// A WebAssembly build installs its tool from source first.
+				timeout = 45 * time.Minute
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), timeout)
 			defer cancel()
 			root := t.TempDir()
 			value := "https://" + name + ".build-value.test"
@@ -87,7 +97,7 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 			tag := fmt.Sprintf("jd-framework-test:%s-%d", name, stamp)
 			t.Cleanup(func() { _, _ = liveDockerOutput(context.Background(), "image", "rm", "--force", tag) })
 			logs := []string{}
-			result := livePrepareAndBuild(t, builder, filepath.Join(root, candidate.Root), tag, config, variables, nil, func(line BuildLog) error { logs = append(logs, line.Text); return nil })
+			result := livePrepareAndBuildWithin(t, builder, root, candidate.Root, tag, config, variables, func(line BuildLog) error { logs = append(logs, line.Text); return nil })
 			if config.Method == BuildRecipe {
 				assertLiveArtifactSecretFree(t, tag, secret, result, logs)
 			}
@@ -160,6 +170,7 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 				}
 				content += fetch(path)
 			}
+			content += compiledLiveContent(t, name, html, fetch)
 			if !strings.Contains(content, value) {
 				t.Fatal("served application assets did not contain the configured build value")
 			}
