@@ -326,7 +326,8 @@ only renderer/executor/validation authority for their feature.
   `public_url_variable_missing`, `request_body_limit` and the rest, listed in the recipe guide), so a
   certain loopback bind is a blocker before Deploy rather than a readiness timeout after it. The closed
   recipe set is
-  `node`, `go`, `python`, `rust`, `java`, `dotnet`, `deno` (`validRecipe`), and `build.pythonVersion`
+  `node`, `go`, `python`, `rust`, `java`, `dotnet`, `deno`, `php`, `ruby`, `elixir`, `scala`, `clojure`,
+  `dart`, `gleam` (`validRecipe`), and `build.pythonVersion`
   and `build.spaFallback` are the two additive plan fields, bounded by `PlanConfiguration.Validate`.
   The contract per language is [the recipe guide](recipes.md). The framework detection recognised is
   recorded on the build plan when a draft commits (`build.framework` on the configuration read) —
