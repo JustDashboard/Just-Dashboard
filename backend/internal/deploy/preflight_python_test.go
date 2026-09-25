@@ -57,6 +57,15 @@ func TestPythonPreflightFindingsComeFromTheSource(t *testing.T) {
 			mutate: func(c *DetectedCandidate, b *BuildPlanConfig) { c.Python.DependenciesEmpty = "warning" }},
 		{name: "freeze leftovers", code: "python_requirements_local_artifacts", severity: PreflightWarning, measured: "pywin32==306",
 			mutate: func(c *DetectedCandidate, b *BuildPlanConfig) { c.Python.LocalArtifacts = []string{"pywin32==306"} }},
+		{name: "a developer's own package", code: "python_requirements_local_paths", severity: PreflightWarning, measured: "mylib @ file:///Users/me/code/mylib", action: "publish it",
+			mutate: func(c *DetectedCandidate, b *BuildPlanConfig) {
+				c.Python.LocalPaths = []string{"mylib @ file:///Users/me/code/mylib"}
+			}},
+		{name: "pins that chose an older Python, with the setting the form seeded from it", code: "python_version_limited", severity: PreflightPass, measured: "numpy==1.26.4 publish no wheels for Python 3.13",
+			mutate: func(c *DetectedCandidate, b *BuildPlanConfig) {
+				c.PythonVersion, c.Python.VersionLimited = "3.12", []string{"numpy==1.26.4"}
+				b.PythonVersion = "3.12"
+			}},
 		{name: "a converted conda environment", code: "conda_converted", severity: PreflightWarning, measured: "pandas==2.1.*",
 			mutate: func(c *DetectedCandidate, b *BuildPlanConfig) { c.Python.CondaConverted = []string{"pandas==2.1.*"} }},
 		{name: "a private index", code: "python_private_index", severity: PreflightWarning, measured: "pypi.company.com",

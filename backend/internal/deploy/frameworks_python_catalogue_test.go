@@ -2,6 +2,8 @@ package deploy
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -202,7 +204,7 @@ func TestPythonDjangoLayoutsAreServedAsTheyShip(t *testing.T) {
 		"chat/asgi.py":     "application = ProtocolTypeRouter({})\n",
 		"chat/wsgi.py":     "",
 	})
-	if candidate == nil || candidate.StartCommand != "python manage.py migrate --noinput && uvicorn chat.asgi:application --host 0.0.0.0 --port ${PORT:-8000}" {
+	if candidate == nil || candidate.StartCommand != "python manage.py migrate --noinput && uvicorn chat.asgi:application --host 0.0.0.0 --port ${PORT:-8000} --workers 1" {
 		t.Fatalf("channels with uvicorn = %+v", candidate)
 	}
 
@@ -438,5 +440,251 @@ func TestPythonFactsKeepOnlyWhatCanBeRunAndSaved(t *testing.T) {
 		!slices.Equal(python.Modules, []string{"main"}) || !slices.Equal(python.WheelBlockers["3.14"], []string{"numpy==2.1.3"}) ||
 		python.VersionSource != "" || python.Django != nil {
 		t.Fatalf("kept %+v (%v)", python, err)
+	}
+}
+
+// `uv init --package` inside a workspace puts a member's application five
+// levels down (apps/api/src/api/main.py), past the depth the walk reads
+// entries at; the member is still served, and uv's own workspace root, which
+// declares a [project] with no dependencies, is ranked below it.
+func TestPythonWorkspaceMembersInTheSrcLayoutAreServed(t *testing.T) {
+	t.Parallel()
+	result, candidate := detectPythonFixture(t, map[string]string{
+		"pyproject.toml": "[project]\nname = \"monorepo\"\nversion = \"0.1.0\"\nrequires-python = \">=3.12\"\ndependencies = []\n\n[tool.uv.workspace]\nmembers = [\"apps/*\", \"packages/*\"]\n",
+		"uv.lock":        "version = 1\n",
+		"apps/api/pyproject.toml": "[project]\nname = \"api\"\nversion = \"0.1.0\"\ndependencies = [\"fastapi>=0.115\", \"shared\"]\n\n[tool.uv.sources]\nshared = { workspace = true }\n\n" +
+			"[build-system]\nrequires = [\"hatchling\"]\nbuild-backend = \"hatchling.build\"\n",
+		"apps/api/src/api/__init__.py":           "",
+		"apps/api/src/api/main.py":               "from fastapi import FastAPI\n\nfrom shared import greeting\n\napp = FastAPI()\n",
+		"packages/shared/pyproject.toml":         "[project]\nname = \"shared\"\nversion = \"0.1.0\"\ndependencies = []\n",
+		"packages/shared/src/shared/__init__.py": "def greeting():\n    return 'hi'\n",
+	})
+	if candidate == nil || candidate.Root != "apps/api" || candidate.Framework != "fastapi" || candidate.Confidence != ConfidenceHigh ||
+		candidate.StartCommand != "uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000} --app-dir src" || candidate.Python.Workspace != "." {
+		t.Fatalf("workspace member = %+v", candidate)
+	}
+	for _, other := range result.Candidates {
+		if other.Root == "" && other.Demotion == "" {
+			t.Fatalf("uv's workspace root is offered as an application: %+v", other)
+		}
+	}
+	// A root that declares dependencies of its own is an application beside
+	// its members, and is not demoted.
+	result, _ = detectPythonFixture(t, map[string]string{
+		"pyproject.toml":              "[project]\nname = \"site\"\ndependencies = [\"flask\"]\n\n[tool.uv.workspace]\nmembers = [\"packages/*\"]\n",
+		"uv.lock":                     "version = 1\n",
+		"app.py":                      "from flask import Flask\napp = Flask(__name__)\n",
+		"packages/lib/pyproject.toml": "[project]\nname = \"lib\"\ndependencies = []\n",
+	})
+	for _, other := range result.Candidates {
+		if other.Root == "" && other.Demotion != "" {
+			t.Fatalf("an application at the workspace root was demoted: %+v", other)
+		}
+	}
+}
+
+// A task runner's start task is as often what a developer runs: a
+// development server, a loopback bind or a script beside a framework that
+// has a production server leaves the framework's command in place.
+func TestPythonDevelopmentTasksLeaveTheFrameworkCommand(t *testing.T) {
+	t.Parallel()
+	gunicorn := "gunicorn --bind 0.0.0.0:${PORT:-8000} --access-logfile - app:app"
+	for _, fixture := range []struct {
+		name  string
+		files map[string]string
+		start string
+	}{
+		{name: "runserver", files: map[string]string{
+			"pyproject.toml": "[project]\ndependencies = [\"django>=5.1\"]\n\n[tool.taskipy.tasks]\nstart = \"python manage.py runserver\"\n",
+			"manage.py":      "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'site.settings')\n", "site/wsgi.py": "", "site/settings.py": "LOGGING = {}\n",
+		}, start: "python manage.py migrate --noinput && gunicorn --bind 0.0.0.0:${PORT:-8000} --access-logfile - site.wsgi:application"},
+		{name: "fastapi dev", files: map[string]string{
+			"pyproject.toml": "[project]\ndependencies = [\"fastapi[standard]\"]\n\n[tool.poe.tasks]\nserve = \"fastapi dev main.py\"\n",
+			"main.py":        "from fastapi import FastAPI\napp = FastAPI()\n",
+		}, start: "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"},
+		{name: "reload", files: map[string]string{
+			"pyproject.toml": "[project]\ndependencies = [\"fastapi\", \"uvicorn\"]\n\n[tool.pdm.scripts]\nstart = \"uvicorn main:app --reload --host 0.0.0.0\"\n",
+			"main.py":        "from fastapi import FastAPI\napp = FastAPI()\n",
+		}, start: "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"},
+		{name: "a loopback default", files: map[string]string{
+			"pyproject.toml": "[project]\ndependencies = [\"quart\"]\n\n[tool.taskipy.tasks]\nstart = \"hypercorn app:app\"\n",
+			"app.py":         "from quart import Quart\napp = Quart(__name__)\n",
+		}, start: "hypercorn --bind 0.0.0.0:${PORT:-8000} --access-logfile - 'app:app'"},
+		{name: "Flask's own server", files: map[string]string{
+			"pyproject.toml": "[project]\ndependencies = [\"flask\"]\n\n[tool.taskipy.tasks]\nstart = \"python app.py\"\n",
+			"app.py":         "from flask import Flask\napp = Flask(__name__)\n\nif __name__ == '__main__':\n    app.run(debug=True)\n",
+		}, start: gunicorn},
+		{name: "a run task is not a start task", files: map[string]string{
+			"pyproject.toml": "[project]\ndependencies = [\"flask\", \"gunicorn\"]\n\n[tool.poe.tasks]\nrun = \"gunicorn app:app -b 0.0.0.0:9000\"\n",
+			"app.py":         "from flask import Flask\napp = Flask(__name__)\n",
+		}, start: gunicorn},
+		{name: "a production task is kept", files: map[string]string{
+			"pyproject.toml": "[project]\ndependencies = [\"flask\", \"gunicorn\"]\n\n[tool.taskipy.tasks]\nstart = \"gunicorn app:app --bind 0.0.0.0:8000 --workers 2\"\n",
+			"app.py":         "from flask import Flask\napp = Flask(__name__)\n",
+		}, start: "gunicorn app:app --bind 0.0.0.0:8000 --workers 2"},
+		{name: "a script where no framework names a server is kept", files: map[string]string{
+			"pyproject.toml": "[project]\ndependencies = [\"requests\"]\n\n[tool.taskipy.tasks]\nstart = \"python bot.py\"\n",
+			"bot.py":         "import requests\n",
+		}, start: "python bot.py"},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			t.Parallel()
+			_, candidate := detectPythonFixture(t, fixture.files)
+			if candidate == nil || candidate.StartCommand != fixture.start {
+				t.Fatalf("candidate = %+v", candidate)
+			}
+		})
+	}
+}
+
+// django-tailwind's theme package declares `"start": "npm run dev"`, the
+// watcher `manage.py tailwind start` runs; it is still the Django project's
+// asset build, never a Node site of its own.
+func TestPythonDjangoTailwindThemeIsTheProjectsAssets(t *testing.T) {
+	t.Parallel()
+	for name, packageJSON := range map[string]string{"tailwind 4": djangoTailwind4Package, "tailwind 3": djangoTailwind3Package} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if !pythonBuildsAssets([]byte(packageJSON)) {
+				t.Fatal("the theme package is not read as an asset build")
+			}
+			result, candidate := detectPythonFixture(t, map[string]string{
+				"requirements.txt":                "django==5.1.4\ndjango-tailwind==4.0.1\nwhitenoise==6.8.2\n",
+				"manage.py":                       "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'site.settings')\n",
+				"site/wsgi.py":                    "",
+				"site/settings.py":                "INSTALLED_APPS = ['tailwind', 'theme']\nSTATIC_ROOT = BASE_DIR / 'staticfiles'\nLOGGING = {}\n",
+				"theme/__init__.py":               "",
+				"theme/apps.py":                   "from django.apps import AppConfig\n",
+				"theme/static_src/package.json":   packageJSON,
+				"theme/static_src/src/styles.css": "@import \"tailwindcss\";\n",
+			})
+			if candidate == nil || candidate.Framework != "django" || candidate.Python.Assets != "theme/static_src" {
+				t.Fatalf("candidate = %+v", candidate)
+			}
+			for _, other := range result.Candidates {
+				if other.Root == "theme/static_src" {
+					t.Fatalf("the theme package became a candidate of its own: %+v", other)
+				}
+			}
+		})
+	}
+	// A package whose start script serves is an application, not assets.
+	if pythonBuildsAssets([]byte(`{"scripts": {"build": "vite build", "start": "node server.js"}, "devDependencies": {"vite": "6.0.0"}}`)) {
+		t.Fatal("a package with a server start script was read as assets")
+	}
+}
+
+const djangoTailwind4Package = `{
+  "name": "theme",
+  "version": "4.0.1",
+  "description": "",
+  "scripts": {
+    "start": "npm run dev",
+    "build": "npm run build:clean && npm run build:tailwind",
+    "build:clean": "rimraf ../static/css/dist",
+    "build:tailwind": "cross-env NODE_ENV=production postcss ./src/styles.css -o ../static/css/dist/styles.css --minify",
+    "dev": "cross-env NODE_ENV=development postcss ./src/styles.css -o ../static/css/dist/styles.css --watch"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.3",
+    "cross-env": "^7.0.3",
+    "postcss": "^8.5.3",
+    "postcss-cli": "^11.0.1",
+    "postcss-nested": "^7.0.2",
+    "postcss-simple-vars": "^7.0.1",
+    "rimraf": "^6.0.1",
+    "tailwindcss": "^4.1.3"
+  }
+}
+`
+
+const djangoTailwind3Package = `{
+  "name": "theme",
+  "version": "3.8.0",
+  "description": "",
+  "scripts": {
+    "start": "npm run dev",
+    "build": "npm run build:clean && npm run build:tailwind",
+    "build:clean": "rimraf ../static/css/dist",
+    "build:tailwind": "cross-env NODE_ENV=production tailwindcss --postcss -i ./src/styles.css -o ../static/css/dist/styles.css --minify",
+    "dev": "cross-env NODE_ENV=development tailwindcss --postcss -i ./src/styles.css -o ../static/css/dist/styles.css -w",
+    "tailwindcss": "node ./node_modules/tailwindcss/lib/cli.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@tailwindcss/aspect-ratio": "^0.4.2",
+    "@tailwindcss/forms": "^0.5.7",
+    "@tailwindcss/typography": "^0.5.10",
+    "cross-env": "^7.0.3",
+    "postcss": "^8.4.32",
+    "postcss-import": "^15.1.0",
+    "postcss-nested": "^6.0.1",
+    "postcss-simple-vars": "^7.0.1",
+    "rimraf": "^5.0.5",
+    "tailwindcss": "^3.4.0"
+  }
+}
+`
+
+// A requirements/ folder that is a symlink would list files from outside
+// the root; the recipe reads none of them.
+func TestPythonSourceFilesStayInsideTheRoot(t *testing.T) {
+	t.Parallel()
+	outside, root := t.TempDir(), t.TempDir()
+	writeBuildFixture(t, outside, "host-secret-name.txt", "flask\n")
+	writeBuildFixture(t, root, "app.py", "")
+	if err := os.Symlink(outside, filepath.Join(root, "requirements")); err != nil {
+		t.Fatal(err)
+	}
+	for name := range readPythonSourceFiles(root) {
+		if strings.Contains(name, "host-secret-name") {
+			t.Fatalf("a file outside the root was listed: %q", name)
+		}
+	}
+	// psycopg's reason is said once.
+	project := readPythonProject(map[string][]byte{"requirements.txt": []byte("psycopg==3.2.3\n")})
+	if packages := project.systemPackages(""); len(packages) != 1 || packages[0].Reason != "psycopg loads libpq itself without its binary extra" {
+		t.Fatalf("psycopg = %+v", packages)
+	}
+}
+
+// A websocket application keeps its connections in the process, so its
+// generated uvicorn command runs one worker rather than WEB_CONCURRENCY.
+func TestPythonWebsocketApplicationsRunOneWorker(t *testing.T) {
+	t.Parallel()
+	_, candidate := detectPythonFixture(t, map[string]string{
+		"requirements.txt": "fastapi[standard]==0.115.6\n",
+		"main.py":          "from fastapi import FastAPI, WebSocket\napp = FastAPI()\n\n@app.websocket(\"/ws\")\nasync def ws(socket: WebSocket):\n    await socket.accept()\n",
+	})
+	if candidate == nil || candidate.StartCommand != "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1" || pythonReadsWebConcurrency(candidate.StartCommand) {
+		t.Fatalf("websocket FastAPI = %+v", candidate)
+	}
+	_, candidate = detectPythonFixture(t, map[string]string{
+		"requirements.txt": "litestar[standard]==2.13.0\n",
+		"app.py":           "from litestar import Litestar, websocket_listener\n\n@websocket_listener(\"/ws\")\nasync def echo(data: str) -> str:\n    return data\n\napp = Litestar([echo])\n",
+	})
+	if candidate == nil || !strings.HasSuffix(candidate.StartCommand, " --workers 1") {
+		t.Fatalf("websocket Litestar = %+v", candidate)
+	}
+	_, candidate = detectPythonFixture(t, map[string]string{
+		"requirements.txt": "django==5.1.4\nchannels==4.2.0\n",
+		"manage.py":        "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'chat.settings')\n",
+		"chat/settings.py": "INSTALLED_APPS = ['channels']\n",
+		"chat/asgi.py":     "from channels.routing import ProtocolTypeRouter\napplication = ProtocolTypeRouter({})\n",
+	})
+	if candidate == nil || !strings.HasSuffix(candidate.StartCommand, "uvicorn chat.asgi:application --host 0.0.0.0 --port ${PORT:-8000} --workers 1") {
+		t.Fatalf("Channels = %+v", candidate)
+	}
+	_, candidate = detectPythonFixture(t, map[string]string{
+		"requirements.txt": "fastapi[standard]==0.115.6\n",
+		"main.py":          "from fastapi import FastAPI\napp = FastAPI()\n",
+	})
+	if candidate == nil || strings.Contains(candidate.StartCommand, "--workers") {
+		t.Fatalf("an HTTP-only application takes WEB_CONCURRENCY: %+v", candidate)
 	}
 }

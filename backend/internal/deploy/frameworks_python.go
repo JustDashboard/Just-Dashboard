@@ -841,7 +841,7 @@ func pythonCandidate(marker *detectedMarkers, entries []pythonEntry, rootLabel s
 			candidate.RecipeIssue = resolution.RecipeIssue
 		}
 	}
-	declared, declaredEvidence := pythonDeclaredStart(marker, project)
+	declared, declaredEvidence := pythonDeclaredStart(marker, project, candidate.StartCommand)
 	switch {
 	case declared != "":
 		// The repository has said how it is served: the framework's guesses
@@ -874,15 +874,71 @@ func pythonCandidate(marker *detectedMarkers, entries []pythonEntry, rootLabel s
 			candidate.NeedsDecision = append(candidate.NeedsDecision, "confirm ASGI/WSGI start command, port, and readiness check")
 		}
 	}
+	if declared == "" && framework != nil {
+		if where := pythonWebsocketSource(entries, files.django, source); where != "" {
+			if single := pythonSingleWorker(candidate.StartCommand); single != candidate.StartCommand {
+				candidate.StartCommand = single
+				candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(marker.root, where),
+					Reason: "one uvicorn worker: websocket clients and what they share live in one process"})
+			}
+		}
+	}
 	applyPythonProjectFacts(&candidate, marker, project, source, entries, settings, choice.version)
 	return candidate
+}
+
+// pythonWebsocketSource names the file that serves websockets: a route in an
+// entry, or the ASGI module that routes Channels consumers.
+func pythonWebsocketSource(entries []pythonEntry, django *DetectedDjango, source *pythonSource) string {
+	for _, entry := range sortedPythonEntries(entries) {
+		if pythonWebsocketRouteRE.Match(entry.content) {
+			return entry.path
+		}
+	}
+	if django == nil || !django.Channels {
+		return ""
+	}
+	names := make([]string, 0, len(source.manage))
+	for name, content := range source.manage {
+		if path.Base(name) == "asgi.py" && pythonProtocolRouter.Match(content) {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		return ""
+	}
+	return names[0]
+}
+
+// pythonSingleWorker keeps a generated uvicorn command on one process. A
+// websocket application holds its connections — and usually the list it
+// broadcasts to, FastAPI's documented ConnectionManager or Channels'
+// in-memory layer — in the process, so with WEB_CONCURRENCY workers clients
+// on different workers would never see each other's messages.
+func pythonSingleWorker(start string) string {
+	segments := strings.Split(start, "&&")
+	for index := len(segments) - 1; index >= 0; index-- {
+		fields := strings.Fields(segments[index])
+		if len(fields) > 0 && fields[0] == "uvicorn" {
+			if !pythonWorkersFlagRE.MatchString(segments[index]) {
+				segments[index] = strings.TrimRight(segments[index], " ") + " --workers 1"
+			}
+			return strings.Join(segments, "&&")
+		}
+	}
+	return start
 }
 
 // pythonDeclaredStart is the start command the repository declares, and the
 // evidence naming where: the Procfile's web process, then a task runner's
 // start task in pyproject. Only a plain command counts; a task that chains
-// other tasks is a question, not a command.
-func pythonDeclaredStart(marker *detectedMarkers, project pythonProject) (string, DetectionEvidence) {
+// other tasks is a question, not a command. The Procfile is what a platform
+// ran in production; a task is as often what a developer runs, so one that
+// starts a development server, binds loopback, or runs a script where the
+// framework has a production server (Flask's app.run(), a uvicorn.run() on
+// a fixed port) leaves the framework's command in place.
+func pythonDeclaredStart(marker *detectedMarkers, project pythonProject, frameworkStart string) (string, DetectionEvidence) {
 	if web := procfileProcess(marker.procfile, "web"); web != "" && rejectPlanSecretLiteral("Procfile web process", web) == nil {
 		return web, DetectionEvidence{Path: "Procfile", Reason: "web process: " + boundedEvidence(web)}
 	}
@@ -891,18 +947,34 @@ func pythonDeclaredStart(marker *detectedMarkers, project pythonProject) (string
 			continue
 		}
 		command := strings.TrimSpace(task.command)
-		for _, runner := range []string{"pdm run ", "hatch run ", "poetry run ", "uv run ", "python -m "} {
-			if runner != "python -m " && strings.HasPrefix(command, runner) {
+		for _, runner := range []string{"pdm run ", "hatch run ", "poetry run ", "uv run "} {
+			if strings.HasPrefix(command, runner) {
 				command = strings.TrimSpace(strings.TrimPrefix(command, runner))
 			}
 		}
-		if command == "" || strings.ContainsAny(command, "\n\r") || rejectPlanSecretLiteral("pyproject task", command) != nil {
+		if command == "" || strings.ContainsAny(command, "\n\r") || rejectPlanSecretLiteral("pyproject task", command) != nil ||
+			!pythonTaskServesProduction(command, frameworkStart) {
 			continue
 		}
 		table := map[string]string{"pdm": "tool.pdm.scripts", "poe": "tool.poe.tasks", "taskipy": "tool.taskipy.tasks", "hatch": "tool.hatch.envs.default.scripts"}[task.runner]
 		return command, DetectionEvidence{Path: "pyproject.toml", Reason: "[" + table + "] " + task.name + ": " + boundedEvidence(command)}
 	}
 	return "", DetectionEvidence{}
+}
+
+// pythonTaskServesProduction says a task's command can serve a deployment:
+// not a development server (runserver, flask run, fastapi dev, --reload),
+// not bound to loopback where the recipe's environment does not move it, and
+// not a script run directly when the framework names a production server.
+func pythonTaskServesProduction(command, frameworkStart string) bool {
+	listen := parseCommandListen(command, nil)
+	if listen.devServer != "" {
+		return false
+	}
+	if host, _ := listen.boundHost(map[string]bool{"UVICORN_HOST": true, "FLASK_RUN_HOST": true}); loopbackHost(host) {
+		return false
+	}
+	return frameworkStart == "" || !strings.HasSuffix(listen.tool, ".py") || listen.tool == "manage.py"
 }
 
 // pythonDeclaredStartSteps keeps what a platform would have done before the

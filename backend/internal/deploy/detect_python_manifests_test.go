@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf16"
@@ -230,10 +231,48 @@ func TestPipfileSetupAndCondaManifests(t *testing.T) {
 		len(environment.pip) != 1 || environment.pip[0].name != "plotly" {
 		t.Fatalf("conda = %+v", environment)
 	}
-	project := readPythonProject(map[string][]byte{"environment.yml": []byte("dependencies:\n  - python=3.11\n  - pip\n  - pandas=2.1\n  - streamlit\n  - cudatoolkit=11.8\n  - pip:\n    - plotly==5.24.1\n")})
-	lines, unknown := project.condaRequirements()
-	if !slices.Equal(lines, []string{"pandas==2.1.*", "streamlit", "plotly==5.24.1"}) || !slices.Equal(unknown, []string{"cudatoolkit"}) {
-		t.Fatalf("conda requirements = %q, unknown %q", lines, unknown)
+	project := readPythonProject(map[string][]byte{"environment.yml": []byte("dependencies:\n  - python=3.11\n  - pip\n  - pandas=2.1\n  - numpy=1.26.*\n  - streamlit\n  - cudatoolkit=11.8\n  - pip:\n    - plotly==5.24.1\n")})
+	lines, unknown, refused := project.condaRequirements()
+	if !slices.Equal(lines, []string{"pandas==2.1.*", "numpy==1.26.*", "streamlit", "plotly==5.24.1"}) || !slices.Equal(unknown, []string{"cudatoolkit"}) || len(refused) != 0 {
+		t.Fatalf("conda requirements = %q, unknown %q, refused %q", lines, unknown, refused)
+	}
+	// The pip list is what conda hands pip as a requirement file: markers,
+	// VCS references and includes are carried, and an included file is the
+	// environment's, not an install of its own.
+	project = readPythonProject(map[string][]byte{
+		"environment.yml":        []byte("dependencies:\n  - python=3.11\n  - pip:\n    - streamlit==1.41.0\n    - \"plotly>=5 ; python_version >= '3.8'\"\n    - git+https://github.com/org/lib.git#egg=lib\n    - -r requirements-extra.txt\n"),
+		"requirements-extra.txt": []byte("numpy==2.1.3\npandas==2.2.3\n"),
+	})
+	lines, _, refused = project.condaRequirements()
+	if project.requirementsFile != "" || !slices.Equal(lines, []string{"streamlit==1.41.0", `plotly>=5 ; python_version >= "3.8"`, "git+https://github.com/org/lib.git#egg=lib", "-r requirements-extra.txt"}) ||
+		len(refused) != 0 || !project.deps.declares("numpy") || !project.deps.declares("lib") || !project.deps.declares("plotly") {
+		t.Fatalf("conda pip list = %q (refused %q), install file %q, deps %v", lines, refused, project.requirementsFile, project.deps.direct)
+	}
+	install, err := planPythonInstall(project, pythonInstallChoice{version: "3.11"})
+	if err != nil || install.kind != "environment.yml" || !strings.Contains(install.command, "'-r requirements-extra.txt'") ||
+		!strings.Contains(install.command, "> .jd-conda-requirements.txt && pip install --no-cache-dir --requirement .jd-conda-requirements.txt && rm .jd-conda-requirements.txt") {
+		t.Fatalf("conda install = %+v, %v", install, err)
+	}
+	// What cannot be carried inside the Dockerfile's quotes is refused by
+	// name, never dropped.
+	for _, line := range []string{`it's-a-name`, `lib @ https://user:hunter2@example.com/lib.whl`, "caf\u00e9==1", `a \\`} {
+		project = readPythonProject(map[string][]byte{"environment.yml": []byte("dependencies:\n  - pip:\n    - streamlit\n    - " + strconv.Quote(line) + "\n")})
+		if _, err := planPythonInstall(project, pythonInstallChoice{version: "3.13"}); err == nil || !strings.Contains(err.Error(), "cannot write into the image") || strings.Contains(err.Error(), "hunter2") {
+			t.Fatalf("%q: %v", line, err)
+		}
+	}
+	// An environment the recipe cannot install leaves the requirement file
+	// it includes as the install.
+	project = readPythonProject(map[string][]byte{
+		"environment.yml":  []byte("dependencies:\n  - cudatoolkit=11.8\n  - pip:\n    - -r requirements.txt\n"),
+		"requirements.txt": []byte("streamlit==1.41.0\n"),
+	})
+	if project.requirementsFile != "requirements.txt" {
+		t.Fatalf("install file = %q", project.requirementsFile)
+	}
+	project = readPythonProject(map[string][]byte{"environment.yml": []byte("dependencies:\n  - pip:\n    - streamlit\n    - -r deps/missing.txt\n")})
+	if _, err := planPythonInstall(project, pythonInstallChoice{version: "3.13"}); err == nil || !strings.Contains(err.Error(), "deps/missing.txt") {
+		t.Fatalf("missing include: %v", err)
 	}
 }
 

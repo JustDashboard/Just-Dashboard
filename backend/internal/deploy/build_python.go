@@ -416,7 +416,7 @@ func planPythonInstall(project pythonProject, choice pythonInstallChoice) (pytho
 			install.notes = append(install.notes, drift.Note+"; the build locks again first, so versions may differ from the lock")
 		}
 		install.command = "pip install --no-cache-dir pdm==" + pythonPDMRelease + " && " + export +
-			" && pip install --no-cache-dir --requirement /tmp/jd-requirements.txt"
+			" && pip install --no-cache-dir --requirement /tmp/jd-requirements.txt" + pythonProjectInstall(project, choice)
 		return install, nil
 	case project.pipfile.present && (project.pipfileLock.present || project.requirementsFile == ""):
 		install := pythonInstall{kind: "Pipfile.lock", file: "Pipfile.lock", serverInstall: "pip install --no-cache-dir", toolchain: "pipenv " + pythonPipenvRelease}
@@ -445,16 +445,27 @@ func planPythonInstall(project pythonProject, choice pythonInstallChoice) (pytho
 		if len(project.requirements.missing) > 0 {
 			return pythonInstall{}, fmt.Errorf("%w: %s includes %s, which is not in the repository", ErrUnsupportedBuilder, project.requirementsFile, project.requirements.missing[0])
 		}
+		if !pythonShellSafePathRE.MatchString(project.requirementsFile) {
+			// The file is named unquoted in the install command.
+			return pythonInstall{}, fmt.Errorf("%w: %q is installed by name in a shell command, which needs letters, digits and . _ - /; rename it or build with a Dockerfile",
+				ErrUnsupportedBuilder, boundedText(project.requirementsFile, 128))
+		}
 		install := pythonInstall{kind: "requirements.txt", file: project.requirementsFile,
-			command:       project.torchIndexPrefix() + "pip install --no-cache-dir --requirement " + project.requirementsFile,
+			command:       project.torchIndexPrefix() + "pip install --no-cache-dir --requirement " + project.requirementsFile + pythonProjectInstall(project, choice),
 			serverInstall: "pip install --no-cache-dir"}
-		if len(project.localArtifacts()) > 0 {
+		artifacts, paths := project.localArtifacts(), project.localPaths()
+		if len(artifacts)+len(paths) > 0 {
 			for _, file := range project.requirements.paths() {
 				if pythonShellSafePathRE.MatchString(file) {
 					install.sanitize = append(install.sanitize, file)
 				}
 			}
-			install.notes = append(install.notes, fmt.Sprintf("%d requirement line(s) name a local environment's artifact or another operating system's package; the build installs them by name, or on that system only", len(project.localArtifacts())))
+		}
+		if len(artifacts) > 0 {
+			install.notes = append(install.notes, fmt.Sprintf("%d requirement line(s) name a conda build's artifact or another operating system's package; the build installs the conda ones by name and leaves the others to their own system", len(artifacts)))
+		}
+		if len(paths) > 0 {
+			install.notes = append(install.notes, fmt.Sprintf("%d requirement line(s) point at a path on the machine that wrote them; the build leaves them out rather than installing their names from an index", len(paths)))
 		}
 		return install, nil
 	case project.pyproject.declaresDependencies || (project.requirementsFile != "" && project.pyproject.present):
@@ -485,21 +496,32 @@ func planPythonInstall(project pythonProject, choice pythonInstallChoice) (pytho
 		return pythonInstall{kind: "setup.py", file: file, command: project.torchIndexPrefix() + "pip install --no-cache-dir .",
 			serverInstall: "pip install --no-cache-dir"}, nil
 	case project.condaFound:
-		lines, unknown := project.condaRequirements()
+		lines, unknown, refused := project.condaRequirements()
 		if len(unknown) > 0 {
 			return pythonInstall{}, fmt.Errorf("%w: %s needs conda packages with no PyPI equivalent the recipe knows (%s); use a Dockerfile with micromamba",
 				ErrUnsupportedBuilder, project.conda.file, strings.Join(boundedNames(unknown), ", "))
+		}
+		if len(refused) > 0 {
+			return pythonInstall{}, fmt.Errorf("%w: %s lists %s, which the recipe cannot write into the image (a quote outside a marker, a backslash, a credential or a character outside printable ASCII); change the line or commit a requirements.txt",
+				ErrUnsupportedBuilder, project.conda.file, strings.Join(boundedNames(refused), ", "))
+		}
+		if pipList := project.conda.pipList; len(pipList.escapes) > 0 {
+			return pythonInstall{}, fmt.Errorf("%w: %s includes %s, outside the build root; move it inside or build from a Dockerfile", ErrUnsupportedBuilder, project.conda.file, pipList.escapes[0])
+		} else if len(pipList.missing) > 0 {
+			return pythonInstall{}, fmt.Errorf("%w: %s includes %s, which is not in the repository", ErrUnsupportedBuilder, project.conda.file, pipList.missing[0])
 		}
 		quoted := make([]string, 0, len(lines))
 		for _, line := range lines {
 			quoted = append(quoted, "'"+line+"'")
 		}
-		command := ": > /tmp/jd-requirements.txt"
+		// Written beside environment.yml, where conda writes it, so the
+		// list's -r includes and relative paths resolve as they do there.
+		command := ": > " + pythonCondaRequirements
 		if len(quoted) > 0 {
-			command = "printf '%s\\n' " + strings.Join(quoted, " ") + " > /tmp/jd-requirements.txt"
+			command = "printf '%s\\n' " + strings.Join(quoted, " ") + " > " + pythonCondaRequirements
 		}
 		return pythonInstall{kind: "environment.yml", file: project.conda.file, serverInstall: "pip install --no-cache-dir",
-			command: command + " && " + project.torchIndexPrefix() + "pip install --no-cache-dir --requirement /tmp/jd-requirements.txt",
+			command: command + " && " + project.torchIndexPrefix() + "pip install --no-cache-dir --requirement " + pythonCondaRequirements + " && rm " + pythonCondaRequirements,
 			notes:   []string{project.conda.file + " is installed with pip: " + strings.Join(boundedNames(lines), ", ")}}, nil
 	case project.pyproject.present:
 		// A pyproject that only configures tools declares nothing to
@@ -525,48 +547,87 @@ func (p pythonProject) torchIndexPrefix() string {
 	return `PIP_EXTRA_INDEX_URL="${PIP_EXTRA_INDEX_URL:+$PIP_EXTRA_INDEX_URL }` + pythonCPUTorchIndex + `" `
 }
 
+// pythonCondaRequirements is the requirement file the recipe writes a conda
+// environment into.
+const pythonCondaRequirements = ".jd-conda-requirements.txt"
+
 var condaRequirementRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(\[[A-Za-z0-9,._-]+\])?([<>=!~]=?[A-Za-z0-9.*+!-]+(,[<>=!~]=?[A-Za-z0-9.*+!-]+)*)?$`)
 
-// condaRequirements turns a conda environment into requirement lines: its
-// pip list, and each conda package the table maps to PyPI, with conda's
-// fuzzy `=1.26` read as the release family it means. Only lines of plain
-// names and versions are kept, since they are written into the Dockerfile;
-// unknown lists the conda packages with no mapping.
-func (p pythonProject) condaRequirements() ([]string, []string) {
-	var lines, unknown []string
+// condaRequirements turns a conda environment into the lines of the
+// requirement file the build writes: each conda package the table maps to
+// PyPI, with conda's fuzzy `=1.26` read as the release family it means, then
+// the pip list as conda hands it to pip — markers, direct references, index
+// options and -r includes. unknown lists the conda packages with no mapping,
+// and refused the lines the Dockerfile cannot carry inside single quotes.
+func (p pythonProject) condaRequirements() ([]string, []string, []string) {
+	var lines, refused []string
 	for _, pkg := range p.conda.conda {
 		name := condaPyPIName(pkg.name)
 		if name == "" {
-			if !condaKnown(pkg.name) {
-				unknown = append(unknown, pkg.name)
-			}
 			continue
 		}
 		version := pkg.version
-		switch {
-		case strings.HasPrefix(version, "=") && !strings.HasPrefix(version, "=="):
-			version = "==" + strings.TrimPrefix(version, "=") + ".*"
+		if strings.HasPrefix(version, "=") && !strings.HasPrefix(version, "==") {
+			version = "==" + strings.TrimSuffix(strings.TrimPrefix(version, "="), ".*") + ".*"
 		}
-		line := name + version
-		if condaRequirementRE.MatchString(line) {
+		if line := name + version; condaRequirementRE.MatchString(line) {
+			lines = append(lines, line)
+		} else {
+			refused = append(refused, boundedText(pkg.name+version, 128))
+		}
+	}
+	for _, raw := range p.conda.pipLines {
+		line, ok := condaPipLine(raw)
+		switch {
+		case !ok:
+			refused = append(refused, boundedText(redactURLCredentials(raw), 128))
+		case line != "":
 			lines = append(lines, line)
 		}
 	}
-	for _, line := range p.conda.pipLines {
-		if condaRequirementRE.MatchString(strings.ReplaceAll(line, " ", "")) {
-			lines = append(lines, strings.ReplaceAll(line, " ", ""))
+	return lines, p.conda.unmapped(), refused
+}
+
+// condaPipLine is a pip list entry as the Dockerfile carries it inside single
+// quotes: printable ASCII with no quote of its own and no backslash, no
+// credential, and nothing BuildKit would read as a heredoc. A marker's
+// quotes become double quotes, which PEP 508 reads the same. A comment is
+// dropped.
+func condaPipLine(raw string) (string, bool) {
+	line := strings.TrimSpace(raw)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return "", true
+	}
+	if body, marker, found := strings.Cut(line, ";"); found {
+		line = body + ";" + strings.ReplaceAll(marker, "'", `"`)
+	}
+	if len(line) > 1024 || strings.ContainsAny(line, "'\\`") || strings.Contains(line, "<<") {
+		return "", false
+	}
+	for _, url := range embeddedURLRE.FindAllString(line, -1) {
+		if _, credentials := pythonIndexHost(url); credentials {
+			return "", false
 		}
 	}
-	return lines, unknown
+	for _, r := range line {
+		if r < 0x20 || r > 0x7e {
+			return "", false
+		}
+	}
+	return line, true
 }
 
 // pythonSanitizeExpressions rewrite what a local environment left in a
-// requirement file: a conda build's `name @ file:///…` becomes the bare name,
-// and an operating system's own package, or a path outside the checkout, is
-// commented out — together with its --hash continuation lines, which are
-// joined to it first, since pip reads a comment's trailing backslash as the
-// end of the comment. They name no line of the file, so no repository
-// content enters the Dockerfile.
+// requirement file: a conda build's `name @ file:///croot/…` becomes the bare
+// name, since conda repackaged that PyPI distribution; any other
+// `name @ file:` is a developer's own package and is commented out rather
+// than installed by name from an index that may publish something else
+// under it; and an operating system's own package, or a path outside the
+// checkout, is commented out — together with its --hash continuation lines,
+// which are joined to it first, since pip reads a comment's trailing
+// backslash as the end of the comment. A URL pip expands from a variable is
+// left alone. They name no line of the file, so no repository content enters
+// the Dockerfile.
 func pythonSanitizeExpressions() []string {
 	names := []string{"pyobjc([-_.][A-Za-z0-9_.-]+)?"}
 	for name := range pythonOSOnly {
@@ -576,7 +637,9 @@ func pythonSanitizeExpressions() []string {
 	}
 	sort.Strings(names)
 	return []string{
-		`s%^[[:space:]]*([A-Za-z0-9][A-Za-z0-9._-]*)[[:space:]]*(\[[^]]*\])?[[:space:]]*@[[:space:]]*file:[^;]*(;.*)?$%\1\2 \3%`,
+		`s%^[[:space:]]*([A-Za-z0-9][A-Za-z0-9._-]*)[[:space:]]*(\[[^]]*\])?[[:space:]]*@[[:space:]]*file:(//(localhost)?)?/` + pythonCondaBuildDirectories + `[^;$]*(;.*)?$%\1\2 \7%`,
+		`/^[[:space:]]*[A-Za-z0-9][A-Za-z0-9._-]*[[:space:]]*(\[[^]]*\])?[[:space:]]*@[[:space:]]*file:[^$]*$/{`,
+		`:joinpath`, `/\\$/{`, `N`, `b joinpath`, `}`, `s/\\\n/ /g`, `s/^/# /`, `}`,
 		`/^[[:space:]]*(` + strings.Join(names, "|") + `)([[:space:]]*([<>=!~;\\]|--).*)?$/I{`,
 		`:join`, `/\\$/{`, `N`, `b join`, `}`, `s/\\\n/ /g`, `s/^/# /`, `}`,
 		`s%^[[:space:]]*((-e|--editable)[[:space:]]+)?(/|[A-Za-z]:[\\/]).*$%# &%`,
@@ -669,9 +732,19 @@ func selectPythonRecipe(boundary, root string, config BuildPlanConfig) (pythonRe
 	if workspace != nil {
 		memberProject = readPythonProject(readPythonSourceFiles(root))
 	}
-	choice, err := resolvePythonVersion(pythonVersionInputsFor(config.PythonVersion, versionFiles, memberProject, arch))
+	inputs := pythonVersionInputsFor(config.PythonVersion, versionFiles, memberProject, arch)
+	choice, err := resolvePythonVersion(inputs)
 	if err != nil {
 		return recipe, err
+	}
+	// The form seeds the setting from detection, so a setting equal to what
+	// the source declares is that declaration, and the run log names it and
+	// the pins that chose it.
+	if inputs.explicit != "" {
+		inputs.explicit = ""
+		if declared, declaredErr := resolvePythonVersion(inputs); declaredErr == nil && declared.version == choice.version {
+			choice = declared
+		}
 	}
 	recipe.version = choice
 	if strings.TrimSpace(config.StartCommand) == "" {
@@ -749,6 +822,18 @@ func pythonStartNeedsProject(start string, project pythonProject) bool {
 	}
 	return project.pyproject.poetryFromSrc || project.pyproject.setuptoolsSrc ||
 		slices.ContainsFunc(project.pyproject.hatchPackages, func(pkg string) bool { return strings.HasPrefix(pkg, "src/") })
+}
+
+// pythonProjectInstall installs the project itself after a requirement file
+// or a PDM export installed its dependencies, when the start command runs one
+// of its console scripts or imports it by package name from src/. Only a
+// project that names a build backend can be installed; --no-deps keeps the
+// versions the requirements pinned.
+func pythonProjectInstall(project pythonProject, choice pythonInstallChoice) string {
+	if !choice.installProject || !project.pyproject.buildSystem {
+		return ""
+	}
+	return " && pip install --no-cache-dir --no-deps ."
 }
 
 // pythonRecipeBases lists the images the recipe resolves, in the order the

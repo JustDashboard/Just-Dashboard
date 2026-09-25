@@ -41,9 +41,13 @@ type DetectedPython struct {
 	VersionRaised  string              `json:"versionRaised,omitempty"`
 	VersionLimited []string            `json:"versionLimited,omitempty"`
 	WheelBlockers  map[string][]string `json:"wheelBlockers,omitempty"`
-	// LocalArtifacts are pip freeze leftovers the build rewrites;
-	// CondaConverted the requirements a conda environment became.
+	// LocalArtifacts are pip freeze leftovers the build rewrites: conda
+	// builds installed by name, another system's packages left out;
+	// LocalPaths the requirements on a path of the machine that wrote them,
+	// which the build leaves out; CondaConverted the requirements a conda
+	// environment became.
 	LocalArtifacts []string `json:"localArtifacts,omitempty"`
+	LocalPaths     []string `json:"localPaths,omitempty"`
 	CondaConverted []string `json:"condaConverted,omitempty"`
 	// PrivateIndexes are package index hosts beyond the public ones,
 	// InlineCredentials the files that commit a credential in an index or
@@ -118,6 +122,9 @@ type pythonSource struct {
 	// streamlitSecrets says a .streamlit/secrets.toml is committed.
 	streamlitSecrets bool
 	workspace        *pythonWorkspace
+	// workspaceMembers says this root's [tool.uv.workspace] covers other
+	// Python roots of the repository.
+	workspaceMembers bool
 	assetsDir        string
 	hasAssets        bool
 }
@@ -174,6 +181,7 @@ func readPythonSources(tree detectionTree, markers map[string]*detectedMarkers, 
 		}
 		listing := tree.entries(rootOrDot(root))
 		sort.Strings(listing)
+		packages := []string{}
 		for _, name := range listing {
 			relative := joinRoot(root, name)
 			info, ok := tree.lstat(relative)
@@ -184,11 +192,15 @@ func readPythonSources(tree detectionTree, markers map[string]*detectedMarkers, 
 			case info.IsDir() && pythonModuleNameRE.MatchString(name) && !pythonEntryDirsSkipped[name] && !strings.HasPrefix(name, "."):
 				if tree.exists(joinRoot(relative, "__init__.py")) {
 					source.modules[name] = true
+					packages = append(packages, name)
 				}
 				if name == "src" {
-					for _, inner := range tree.entries(relative) {
+					inners := tree.entries(relative)
+					sort.Strings(inners)
+					for _, inner := range inners {
 						if pythonModuleNameRE.MatchString(inner) && tree.exists(joinRoot(joinRoot(relative, inner), "__init__.py")) {
 							source.modules[inner] = true
+							packages = append(packages, "src/"+inner)
 						}
 					}
 				}
@@ -207,8 +219,16 @@ func readPythonSources(tree detectionTree, markers map[string]*detectedMarkers, 
 				source.rxconfig = true
 			}
 		}
+		readPythonPackageEntries(tree, root, packages, known, pythonRoots, source, budget)
 		source.rxconfig = source.rxconfig || tree.exists(joinRoot(root, "rxconfig.py"))
 		source.streamlitSecrets = tree.exists(joinRoot(root, ".streamlit/secrets.toml"))
+		if facts := readPyproject(marker.pythonFiles["pyproject.toml"]); len(facts.uvWorkspaceMembers) > 0 {
+			for _, other := range pythonRoots {
+				if other != root && underRoot(other, root) && pythonWorkspaceCovers(facts, strings.TrimPrefix(other, rootPrefix(root))) {
+					source.workspaceMembers = true
+				}
+			}
+		}
 		// A first-level application folder's siblings: app/main.py importing
 		// `routers` needs app/ on the import path.
 		for _, entry := range pythonEntriesUnderRoot(entries, root, pythonRoots) {
@@ -281,11 +301,11 @@ func completePythonManifests(tree detectionTree, marker *detectedMarkers, root s
 		file.Close()
 	}
 	for round := 0; round < 3; round++ {
-		closure := readPythonRequirementClosure(marker.pythonFiles, pythonInstallRequirements(marker.pythonFiles))
-		if len(closure.missing) == 0 {
+		missing := pythonMissingIncludes(marker.pythonFiles)
+		if len(missing) == 0 {
 			return
 		}
-		for _, name := range closure.missing {
+		for _, name := range missing {
 			if content, ok := budget.read(tree, joinRoot(root, name), 1<<20); ok {
 				marker.pythonFiles[name] = manifestText(content)
 			} else {
@@ -435,6 +455,31 @@ func ownedByNestedRoot(file, root string, pythonRoots []string) bool {
 		}
 	}
 	return false
+}
+
+// readPythonPackageEntries reads the conventional entry files of the root's
+// packages — <pkg>/ and src/<pkg>/ — that the walk left unread because they
+// sit deeper than it looks for entries: `uv init --package` in a workspace
+// member puts main.py five levels down (apps/api/src/api/main.py). A package
+// that is another Python root is that root's own.
+func readPythonPackageEntries(tree detectionTree, root string, packages []string, known map[string]bool, pythonRoots []string, source *pythonSource, budget *pythonReadBudget) {
+	read := 0
+	for _, directory := range packages {
+		if ownedByNestedRoot(joinRoot(root, directory), root, pythonRoots) {
+			continue
+		}
+		for _, name := range []string{"main.py", "app.py", "server.py", "api.py", "application.py", "asgi.py", "wsgi.py", "__init__.py"} {
+			relative := joinRoot(directory, name)
+			if known[relative] || read >= 16 {
+				continue
+			}
+			if content, ok := budget.read(tree, joinRoot(root, relative), 64<<10); ok {
+				known[relative] = true
+				read++
+				source.scripts = append(source.scripts, pythonEntry{path: relative, content: content})
+			}
+		}
+	}
 }
 
 // readPythonImportHop follows one `from X import Y` from the scripts that
@@ -600,10 +645,13 @@ var pythonAssetBuilders = []string{"tailwindcss", "@tailwindcss/cli", "@tailwind
 	"postcss", "postcss-cli", "sass", "parcel", "rollup", "@parcel/core"}
 
 // pythonBuildsAssets says a package.json is a Python application's asset
-// build: a build script, a bundler or CSS tool, and no server of its own.
+// build: a build script, a bundler or CSS tool, and no server of its own. A
+// start script that only rebuilds the assets as they change is not one:
+// django-tailwind's theme package runs `"start": "npm run dev"`, a
+// `tailwindcss … -w`, for `manage.py tailwind start`.
 func pythonBuildsAssets(content []byte) bool {
 	var manifest nodeManifest
-	if !parseNodeManifest(content, &manifest) || manifest.Scripts["build"] == "" || manifest.Scripts["start"] != "" {
+	if !parseNodeManifest(content, &manifest) || manifest.Scripts["build"] == "" || !pythonAssetWatcher(manifest.Scripts, "start", 0) {
 		return false
 	}
 	if matchNodeServerLibrary(manifest) != "" {
@@ -616,6 +664,66 @@ func pythonBuildsAssets(content []byte) bool {
 		if manifest.has(name) {
 			return true
 		}
+	}
+	return false
+}
+
+// pythonAssetWatcher says a package script, followed through the scripts it
+// runs, only rebuilds assets as their sources change: every step passes a
+// watch flag or starts a bundler's development server. A package without
+// the script has none to run.
+func pythonAssetWatcher(scripts map[string]string, name string, depth int) bool {
+	body := strings.TrimSpace(scripts[name])
+	if body == "" {
+		return true
+	}
+	if depth >= 3 {
+		return false
+	}
+	for _, segment := range strings.Split(body, "&&") {
+		segment = strings.TrimSpace(segment)
+		if match := scriptRunRE.FindStringSubmatch(segment); match != nil && match[1] != name && scripts[match[1]] != "" {
+			if !pythonAssetWatcher(scripts, match[1], depth+1) {
+				return false
+			}
+			continue
+		}
+		if !pythonWatchCommand(segment) {
+			return false
+		}
+	}
+	return true
+}
+
+// pythonWatchCommand says one command rebuilds assets on change: tailwindcss,
+// postcss, sass or esbuild with -w/--watch, or Vite's, webpack's, Parcel's or
+// esbuild's development server.
+func pythonWatchCommand(segment string) bool {
+	fields := strings.Fields(segment)
+	for len(fields) > 0 && (envAssignmentRE.MatchString(fields[0]) || fields[0] == "cross-env" || fields[0] == "npx" || fields[0] == "env" || fields[0] == "exec") {
+		fields = fields[1:]
+	}
+	if len(fields) == 0 {
+		return false
+	}
+	for _, field := range fields[1:] {
+		if field == "-w" || field == "--watch" || strings.HasPrefix(field, "--watch=") || field == "--serve" || strings.HasPrefix(field, "--serve=") {
+			return true
+		}
+	}
+	sub := ""
+	if len(fields) > 1 && !strings.HasPrefix(fields[1], "-") {
+		sub = fields[1]
+	}
+	switch path.Base(fields[0]) {
+	case "vite":
+		return sub == "" || sub == "dev" || sub == "serve"
+	case "webpack-dev-server":
+		return true
+	case "webpack":
+		return sub == "serve"
+	case "parcel":
+		return sub != "build"
 	}
 	return false
 }
@@ -868,7 +976,7 @@ func hasFileNamed(files map[string][]byte, name string) bool {
 }
 
 var (
-	pythonWebsocketRouteRE = regexp.MustCompile(`\.websocket\(|\bWebSocketRoute\(|\bwebsocket_route\(|@\w+\.websocket\b`)
+	pythonWebsocketRouteRE = regexp.MustCompile(`\.websocket\(|\bWebSocketRoute\(|\bwebsocket_route\(|@\w+\.websocket\b|(?m)^\s*@websocket(?:_listener)?\(`)
 	streamlitSecretRE      = regexp.MustCompile(`\bst\.secrets(?:\[\s*["']([A-Za-z_][A-Za-z0-9_]*)["']\s*\]|\.get\(\s*["']([A-Za-z_][A-Za-z0-9_]*)["']|\.([A-Za-z_][A-Za-z0-9_]*)\b)(\s*\[|\.[A-Za-z_])?`)
 )
 
@@ -967,8 +1075,9 @@ func applyPythonProjectFacts(candidate *DetectedCandidate, marker *detectedMarke
 		}
 	}
 	python.LocalArtifacts = boundedList(project.localArtifacts(), 8)
+	python.LocalPaths = boundedList(project.localPaths(), 8)
 	if project.condaFound && project.lock == nil && project.requirementsFile == "" && !project.pyproject.declaresDependencies {
-		lines, _ := project.condaRequirements()
+		lines, _, _ := project.condaRequirements()
 		python.CondaConverted = boundedList(lines, 32)
 	}
 	indexes := project.indexFacts()
@@ -1032,7 +1141,10 @@ func applyPythonProjectFacts(candidate *DetectedCandidate, marker *detectedMarke
 		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(marker.root, "manage.py"),
 			Reason: "settings module " + python.Django.SettingsModule + " (" + python.Django.SettingsSource + ")"})
 	}
-	if source.workspace == nil && project.pyproject.present && len(project.pyproject.uvWorkspaceMembers) > 0 && !project.pyproject.project {
+	// uv's own workspace root has a [project] table too, with no dependencies
+	// of its own: the applications are still its members.
+	if source.workspace == nil && project.pyproject.present && len(project.pyproject.uvWorkspaceMembers) > 0 &&
+		(!project.pyproject.project || (source.workspaceMembers && len(project.pyproject.dependencies) == 0)) {
 		candidate.Demotion = "uv workspace root; the applications are its member packages"
 	}
 }
@@ -1062,7 +1174,7 @@ func validateDetectedPython(candidate DetectedCandidate) error {
 	if python == nil {
 		return nil
 	}
-	lists := [][]string{python.VersionLimited, python.ManifestConflict, python.LocalArtifacts, python.CondaConverted, python.PrivateIndexes,
+	lists := [][]string{python.VersionLimited, python.ManifestConflict, python.LocalArtifacts, python.LocalPaths, python.CondaConverted, python.PrivateIndexes,
 		python.InlineCredentials, python.GitSSH, python.GPUWheels, python.Modules, python.StreamlitSecrets, python.StreamlitNested}
 	for _, list := range lists {
 		if len(list) > 64 {
@@ -1205,7 +1317,7 @@ func keepValidPythonFacts(candidate *DetectedCandidate) {
 		return !systemPackageRE.MatchString(pkg.Name) || !pythonFactText(pkg.Reason, 256) || !pythonFactText(pkg.Source, 512)
 	})
 	python := candidate.Python
-	for _, list := range []*[]string{&python.VersionLimited, &python.ManifestConflict, &python.LocalArtifacts, &python.CondaConverted,
+	for _, list := range []*[]string{&python.VersionLimited, &python.ManifestConflict, &python.LocalArtifacts, &python.LocalPaths, &python.CondaConverted,
 		&python.PrivateIndexes, &python.InlineCredentials, &python.GitSSH, &python.GPUWheels, &python.Modules, &python.StreamlitNested} {
 		*list = slices.DeleteFunc(*list, invalid(256))
 	}

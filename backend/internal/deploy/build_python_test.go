@@ -3,6 +3,9 @@ package deploy
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -111,7 +114,16 @@ func TestPythonInstallPlansFollowTheManifests(t *testing.T) {
 		{name: "an include outside the root is refused", files: map[string][]byte{"requirements.txt": []byte("-r ../shared.txt\n")}, fails: "outside the build root"},
 		{name: "an include the repository lacks is refused", files: map[string][]byte{"requirements.txt": []byte("-r base.txt\n")}, fails: "includes base.txt"},
 		{name: "freeze leftovers are rewritten before pip reads them", files: map[string][]byte{"requirements.txt": []byte("flask==3.1.0\npywin32==306\ncertifi @ file:///croot/certifi/work\n")},
-			kind: "requirements.txt", want: []string{"pip install --no-cache-dir --requirement requirements.txt"}, notes: "local environment"},
+			kind: "requirements.txt", want: []string{"pip install --no-cache-dir --requirement requirements.txt"}, notes: "conda build's artifact"},
+		{name: "a developer's own package is left out", files: map[string][]byte{"requirements.txt": []byte("flask==3.1.0\nmylib @ file:///Users/me/code/mylib\n")},
+			kind: "requirements.txt", want: []string{"pip install --no-cache-dir --requirement requirements.txt"}, notes: "leaves them out"},
+		{name: "a requirement file the shell would split is refused", files: map[string][]byte{"requirements/prod $(id).txt": []byte("flask\n")}, fails: "rename it"},
+		{name: "a console script start installs the project after its requirements", files: map[string][]byte{"requirements.txt": []byte("flask==3.1.0\n"), "pyproject.toml": []byte("[project]\nname = \"svc\"\n[project.scripts]\nsvc-serve = \"svc.cli:main\"\n[build-system]\nrequires = [\"hatchling\"]\nbuild-backend = \"hatchling.build\"\n")},
+			choice: pythonInstallChoice{installProject: true}, kind: "requirements.txt", want: []string{"--requirement requirements.txt && pip install --no-cache-dir --no-deps ."}},
+		{name: "a console script start installs the project after a PDM export", files: map[string][]byte{"pyproject.toml": []byte("[project]\ndependencies = [\"litestar\"]\n[build-system]\nrequires = [\"pdm-backend\"]\n"), "pdm.lock": []byte("[[package]]\nname = \"litestar\"\ngroups = [\"default\"]\n")},
+			choice: pythonInstallChoice{installProject: true}, kind: "pdm.lock", want: []string{"--requirement /tmp/jd-requirements.txt && pip install --no-cache-dir --no-deps ."}},
+		{name: "no build backend, no project install", files: map[string][]byte{"requirements.txt": []byte("flask==3.1.0\n"), "pyproject.toml": []byte("[project]\nname = \"svc\"\n")},
+			choice: pythonInstallChoice{installProject: true}, kind: "requirements.txt", absent: []string{"--no-deps"}},
 		{name: "a pyproject that declares more than requirements.txt wins", files: map[string][]byte{"requirements.txt": []byte("fastapi==0.110.0\n"), "pyproject.toml": []byte("[project]\ndependencies = [\"fastapi\", \"httpx\"]\n")},
 			kind: "pyproject.toml", want: []string{"tomllib"}, notes: "omits httpx"},
 		{name: "a bare pyproject on 3.10 brings tomli", files: map[string][]byte{"pyproject.toml": []byte("[project]\ndependencies = [\"flask\"]\n")},
@@ -120,7 +132,7 @@ func TestPythonInstallPlansFollowTheManifests(t *testing.T) {
 			choice: pythonInstallChoice{installProject: true}, kind: "pyproject.toml", want: []string{"pip install --no-cache-dir ."}},
 		{name: "setup.py", files: map[string][]byte{"setup.py": []byte("setup(install_requires=['flask'])")}, kind: "setup.py", want: []string{"pip install --no-cache-dir ."}},
 		{name: "conda is installed with pip", files: map[string][]byte{"environment.yml": []byte("dependencies:\n  - python=3.11\n  - pandas=2.1\n  - pip:\n    - streamlit==1.41.0\n")},
-			kind: "environment.yml", want: []string{"printf '%s\\n' 'pandas==2.1.*' 'streamlit==1.41.0' > /tmp/jd-requirements.txt"}},
+			kind: "environment.yml", want: []string{"printf '%s\\n' 'pandas==2.1.*' 'streamlit==1.41.0' > .jd-conda-requirements.txt"}},
 		{name: "a conda-only package is refused by name", files: map[string][]byte{"environment.yml": []byte("dependencies:\n  - cudatoolkit=11.8\n  - pip:\n    - streamlit\n")}, fails: "cudatoolkit"},
 		{name: "torch comes from the CPU index", files: map[string][]byte{"requirements.txt": []byte("sentence-transformers==3.3.1\n")},
 			kind: "requirements.txt", want: []string{`PIP_EXTRA_INDEX_URL="${PIP_EXTRA_INDEX_URL:+$PIP_EXTRA_INDEX_URL }https://download.pytorch.org/whl/cpu" pip install`}},
@@ -176,8 +188,60 @@ func TestPythonSanitizeExpressionsAreGeneric(t *testing.T) {
 	}
 	line := install.sanitizeLine()
 	if !strings.HasPrefix(line, "RUN sed -i -E -e '") || !strings.HasSuffix(line, " requirements.txt requirements/base.txt") ||
-		strings.Contains(line, "croot") || strings.Contains(line, "306") || !strings.Contains(line, "pywin32|") {
+		strings.Contains(line, "certifi") || strings.Contains(line, "306") || !strings.Contains(line, "pywin32|") {
 		t.Fatalf("sanitize line = %q", line)
+	}
+}
+
+// The expressions do what they say to a frozen file: a conda build's
+// artifact is installed by name, a developer's own path and another
+// system's package are left out with their hash lines, and what pip expands
+// from a variable or installs from an index is untouched.
+func TestPythonSanitizeExpressionsRewriteFreezeLeftovers(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("sed"); err != nil {
+		t.Skip("sed is not installed")
+	}
+	file := filepath.Join(t.TempDir(), "requirements.txt")
+	input := strings.Join([]string{
+		"flask==3.1.0",
+		"certifi @ file:///croot/certifi_1725551672989/work/certifi",
+		"numpy @ file:///home/conda/feedstock_root/build_artifacts/numpy_17/work ; python_version >= \"3.10\"",
+		"PyYAML @ file:///D:/bld/pyyaml_1695373531/work",
+		"mylib @ file:///Users/me/code/mylib",
+		"shared @ file:///${PROJECT_ROOT}/libs/shared",
+		"pywin32==306 \\",
+		"    --hash=sha256:aaaa",
+		"-e C:\\Users\\me\\tool",
+		"requests==2.32.3",
+	}, "\n") + "\n"
+	if err := os.WriteFile(file, []byte(input), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	arguments := []string{"-i", "-E"}
+	for _, expression := range pythonSanitizeExpressions() {
+		arguments = append(arguments, "-e", expression)
+	}
+	if output, err := exec.Command("sed", append(arguments, file)...).CombinedOutput(); err != nil {
+		t.Fatalf("sed: %v %s", err, output)
+	}
+	content, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Join([]string{
+		"flask==3.1.0",
+		"certifi ",
+		"numpy ; python_version >= \"3.10\"",
+		"PyYAML ",
+		"# mylib @ file:///Users/me/code/mylib",
+		"shared @ file:///${PROJECT_ROOT}/libs/shared",
+		"# pywin32==306      --hash=sha256:aaaa",
+		"# -e C:\\Users\\me\\tool",
+		"requests==2.32.3",
+	}, "\n") + "\n"
+	if string(content) != want {
+		t.Fatalf("sanitized:\n%s\nwant:\n%s", content, want)
 	}
 }
 
@@ -334,6 +398,19 @@ func TestPythonRecipeRecordsWhatItDecided(t *testing.T) {
 		BuildPlanConfig{Method: BuildRecipe, Recipe: "python", StartCommand: "gunicorn -w 4 app:app"}, false, "t")
 	if err != nil || prepared.WebConcurrency {
 		t.Fatalf("an explicit worker count is the command's own: %+v, %v", prepared, err)
+	}
+	// The form seeds the version from detection: the same family is still
+	// the pins' choice, and another one is the operator's.
+	prepared, err = NewArtifactBuilder(&artifactBackendFake{}).Prepare(context.Background(), root,
+		BuildPlanConfig{Method: BuildRecipe, Recipe: "python", StartCommand: "gunicorn app:app", PythonVersion: "3.12"}, false, "t")
+	if notes := strings.Join(prepared.Notes, "\n"); err != nil || !strings.Contains(notes, "numpy==1.26.4 publish no wheels for Python 3.13; using 3.12") ||
+		strings.Contains(notes, "selected in Build settings") {
+		t.Fatalf("seeded version notes = %q, %v", prepared.Notes, err)
+	}
+	prepared, err = NewArtifactBuilder(&artifactBackendFake{}).Prepare(context.Background(), root,
+		BuildPlanConfig{Method: BuildRecipe, Recipe: "python", StartCommand: "gunicorn app:app", PythonVersion: "3.11"}, false, "t")
+	if notes := strings.Join(prepared.Notes, "\n"); err != nil || prepared.PythonVersion != "3.11" || !strings.Contains(notes, "Python 3.11 from selected in Build settings") {
+		t.Fatalf("chosen version notes = %q, %v", prepared.Notes, err)
 	}
 }
 

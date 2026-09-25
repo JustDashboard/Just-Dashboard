@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -372,25 +373,56 @@ func pythonOSOnlyPlatform(name string) string {
 	return ""
 }
 
-// localArtifacts are the requirement lines a local environment left behind:
-// a conda build's `name @ file:///croot/…`, an editable or plain path outside
-// the checkout, and an operating system's own packages without a marker.
+// localArtifacts are the requirement lines a local environment left behind
+// that the build rewrites: a conda package build's `name @ file:///croot/…`,
+// installed by name since it is the PyPI distribution conda repackaged, and
+// an operating system's own packages without a marker, left out.
 func (p pythonProject) localArtifacts() []string {
 	var lines []string
 	for _, requirement := range p.requirements.requirements() {
 		switch {
-		case strings.HasPrefix(requirement.url, "file:"):
+		case pythonCondaBuildURLRE.MatchString(requirement.url):
 			lines = append(lines, requirement.text)
-		case requirement.url != "" && (strings.HasPrefix(requirement.url, "/") || windowsPathRE.MatchString(requirement.url)):
-			lines = append(lines, requirement.text)
-		case requirement.marker == "" && pythonOSOnlyPlatform(requirement.name) != "":
+		case requirement.url == "" && requirement.marker == "" && pythonOSOnlyPlatform(requirement.name) != "":
 			lines = append(lines, requirement.text)
 		}
 	}
 	return lines
 }
 
-var windowsPathRE = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
+// localPaths are the requirement lines that point at a directory or file on
+// the machine that wrote them — a developer's own package, not a conda
+// build's — which the build leaves out: the name alone would install
+// whatever an index publishes under it, an unrelated or a hostile package.
+// A path pip expands from a variable (PDM's ${PROJECT_ROOT}) is not one.
+func (p pythonProject) localPaths() []string {
+	var lines []string
+	for _, requirement := range p.requirements.requirements() {
+		url := requirement.url
+		if url == "" || strings.Contains(url, "${") || pythonCondaBuildURLRE.MatchString(url) {
+			continue
+		}
+		if strings.HasPrefix(url, "file:") || strings.HasPrefix(url, "/") || windowsPathRE.MatchString(url) {
+			lines = append(lines, requirement.text)
+		}
+	}
+	return lines
+}
+
+var (
+	windowsPathRE = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
+	// pythonCondaBuildURLRE is a file URL into the directories conda package
+	// builds run in — Anaconda's /croot/ and /tmp/build/, conda-build's
+	// default, conda-forge's Linux, macOS and Windows builders and
+	// Anaconda's Windows one — which `pip freeze` in a conda environment
+	// writes for every package conda installed.
+	pythonCondaBuildURLRE = regexp.MustCompile(`^file:(?://(?:localhost)?)?/` + pythonCondaBuildDirectories)
+)
+
+// pythonCondaBuildDirectories is shared with the sed expression that
+// rewrites those lines inside the image, so both agree on what is a conda
+// build and what is a developer's own path.
+const pythonCondaBuildDirectories = `(croot/|tmp/build/|opt/conda/conda-bld/|home/conda/feedstock_root/|Users/runner/miniforge3/conda-bld/|[A-Za-z]:/(bld/|b/abs_))`
 
 // pythonPublicIndexes are package indexes anyone can read, which a build
 // needs no credential for.
@@ -423,7 +455,7 @@ func (p pythonProject) indexFacts() pythonIndexFacts {
 		}
 		facts.variables = append(facts.variables, variable)
 	}
-	indexes := append(append(append([]pythonIndexOption(nil), p.requirements.indexes()...), p.pyproject.indexes...), p.pipfile.indexes...)
+	indexes := append(append(append(append([]pythonIndexOption(nil), p.requirements.indexes()...), p.pyproject.indexes...), p.pipfile.indexes...), p.conda.pipList.indexes()...)
 	for _, index := range indexes {
 		facts.declaresAny = true
 		host, credentials := pythonIndexHost(index.url)
@@ -681,7 +713,7 @@ var pythonSystemPackages = map[string]pythonSystemPackageRule{
 	"pyodbc":                 {[]string{"unixodbc"}, "loads unixODBC"},
 	"pyzbar":                 {[]string{"libzbar0t64"}, "loads zbar"},
 	"pyvips":                 {[]string{"libvips42t64"}, "loads libvips"},
-	"psycopg-binary-missing": {[]string{"libpq5"}, "psycopg loads libpq itself without its binary extra"},
+	"psycopg-binary-missing": {[]string{"libpq5"}, "loads libpq itself without its binary extra"},
 }
 
 // systemPackages lists what the project needs from the image, each with the
@@ -796,17 +828,21 @@ func readPythonSourceFiles(root string) map[string][]byte {
 		}
 	}
 	for _, directory := range []string{"requirements", "Requirements"} {
+		// A symlinked folder would list, and name, files outside the root.
+		if info, err := os.Lstat(filepath.Join(root, directory)); err != nil || !info.IsDir() {
+			continue
+		}
 		for _, name := range listContainedFiles(filepath.Join(root, directory), ".txt") {
 			read(directory+"/"+name, 1<<20)
 		}
 	}
 	// Includes are followed until every file the install reads is held.
 	for round := 0; round < 3; round++ {
-		closure := readPythonRequirementClosure(files, pythonInstallRequirements(files))
-		if len(closure.missing) == 0 {
+		missing := pythonMissingIncludes(files)
+		if len(missing) == 0 {
 			break
 		}
-		for _, name := range closure.missing {
+		for _, name := range missing {
 			read(name, 1<<20)
 		}
 	}

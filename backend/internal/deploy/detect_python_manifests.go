@@ -343,6 +343,14 @@ func pythonRequirementsStem(name string) string {
 // its shared base, then the only file that is not for development.
 func pythonInstallRequirements(files map[string][]byte) string {
 	names := pythonRequirementsFiles(files)
+	if environment, ok := readCondaEnvironment(files); ok && len(environment.unmapped()) == 0 {
+		// A file the environment's pip list includes is part of the
+		// environment, not an install of its own — unless the environment
+		// needs conda packages the recipe cannot install, when the file is
+		// still the best install there is.
+		included := environment.pipList.paths()
+		names = slices.DeleteFunc(names, func(name string) bool { return slices.Contains(included, name) })
+	}
 	has := map[string]string{}
 	for _, name := range names {
 		has[strings.ToLower(name)] = name
@@ -366,6 +374,17 @@ func pythonInstallRequirements(files map[string][]byte) string {
 		return remaining[0]
 	}
 	return ""
+}
+
+// pythonMissingIncludes are the files an install reads that files does not
+// hold yet: what the install requirement file includes, and what a conda
+// environment's pip list does.
+func pythonMissingIncludes(files map[string][]byte) []string {
+	missing := readPythonRequirementClosure(files, pythonInstallRequirements(files)).missing
+	if environment, ok := readCondaEnvironment(files); ok {
+		missing = append(missing, environment.pipList.missing...)
+	}
+	return missing
 }
 
 // pythonRequirementClosure is the install file and every file it includes,
@@ -472,7 +491,8 @@ type pyprojectFacts struct {
 }
 
 // pythonTask is a command a pyproject task runner declares under a name that
-// says it serves: start, serve, run, web, prod, server.
+// says it serves: start, serve, server, web, prod. `run` is left out: it is
+// as often a script or a development server as the production process.
 type pythonTask struct {
 	runner  string // pdm, poe, taskipy, hatch
 	name    string
@@ -482,7 +502,7 @@ type pythonTask struct {
 	composite bool
 }
 
-var pythonTaskNames = []string{"start", "serve", "server", "web", "prod", "production", "run"}
+var pythonTaskNames = []string{"start", "serve", "server", "web", "prod", "production"}
 
 var (
 	poetryFromSrcRE = regexp.MustCompile(`from\s*=\s*["']src["']`)
@@ -927,17 +947,32 @@ func setupPyRequirements(text string) ([]pythonRequirement, string, bool) {
 }
 
 // condaEnvironment is a conda environment.yml: its conda packages, the pip
-// sub-list, and the Python it pins.
+// sub-list, and the Python it pins. conda hands the pip list to pip as a
+// requirement file written beside environment.yml, so pipList reads it the
+// way pip does — markers, direct references, index options, and the -r
+// includes it follows — and pip is what that installs.
 type condaEnvironment struct {
 	file     string
 	python   string
 	conda    []condaPackage
 	pip      []pythonRequirement
 	pipLines []string
+	pipList  pythonRequirementClosure
 }
 
 type condaPackage struct {
 	name, version string
+}
+
+// unmapped are the conda packages with no PyPI equivalent the recipe knows.
+func (e condaEnvironment) unmapped() []string {
+	var names []string
+	for _, pkg := range e.conda {
+		if condaPyPIName(pkg.name) == "" && !condaKnown(pkg.name) {
+			names = append(names, pkg.name)
+		}
+	}
+	return names
 }
 
 func readCondaEnvironment(files map[string][]byte) (condaEnvironment, bool) {
@@ -972,16 +1007,20 @@ func readCondaEnvironment(files map[string][]byte) (condaEnvironment, bool) {
 						continue
 					}
 					for _, item := range node.Content[index+1].Content {
-						line := strings.TrimSpace(item.Value)
-						environment.pipLines = append(environment.pipLines, line)
-						if requirement, ok := parsePythonRequirement(line); ok {
-							requirement.file = name
-							environment.pip = append(environment.pip, requirement)
-						}
+						environment.pipLines = append(environment.pipLines, strings.TrimSpace(item.Value))
 					}
 				}
 			}
 		}
+		list := parsePythonRequirementsFile(name, []byte(strings.Join(environment.pipLines, "\n")))
+		environment.pipList = pythonRequirementClosure{files: []pythonRequirementsFile{list}, escapes: list.escapes}
+		for _, include := range list.includes {
+			included := readPythonRequirementClosure(files, include)
+			environment.pipList.files = append(environment.pipList.files, included.files...)
+			environment.pipList.missing = append(environment.pipList.missing, included.missing...)
+			environment.pipList.escapes = append(environment.pipList.escapes, included.escapes...)
+		}
+		environment.pip = environment.pipList.requirements()
 		return environment, true
 	}
 	return condaEnvironment{}, false

@@ -62,8 +62,14 @@ func pythonRecipeFindings(candidate *DetectedCandidate, build BuildPlanConfig) [
 	if len(python.LocalArtifacts) > 0 {
 		findings = append(findings, finding("python_requirements_local_artifacts", PreflightWarning,
 			"Requirements were frozen from a local environment", boundedText(strings.Join(python.LocalArtifacts, "; "), 512),
-			"These were captured from a conda, Windows or macOS environment and cannot install on Linux; the build installs them by name, or on their own system only.",
+			"These were captured from a conda, Windows or macOS environment and cannot install on Linux as written: the build installs a conda build's package by name from PyPI and leaves another system's packages out.",
 			"Regenerate the file with `pip list --format=freeze` in a virtual environment, or with pip-compile.", "deploy", "configuration.build"))
+	}
+	if len(python.LocalPaths) > 0 {
+		findings = append(findings, finding("python_requirements_local_paths", PreflightWarning,
+			"Requirements point at a directory on another machine", boundedText(strings.Join(python.LocalPaths, "; "), 512),
+			"The path exists only where the file was written, and installing the name from a package index instead could fetch an unrelated package published under it, so the build leaves these out; if the application imports one, it stops with ModuleNotFoundError.",
+			"Commit the package into the repository and require it by a relative path (./libs/name), or publish it to a package index the build can read.", "deploy", "configuration.build"))
 	}
 	if len(python.CondaConverted) > 0 {
 		findings = append(findings, finding("conda_converted", PreflightWarning,
@@ -177,7 +183,9 @@ func lockDriftMeasured(lock *DetectedLockfile) string {
 func pythonVersionWheelFindings(candidate *DetectedCandidate, python *DetectedPython, build BuildPlanConfig, version string) []PreflightFinding {
 	blockers := python.WheelBlockers[version]
 	findings := []PreflightFinding{}
-	if len(python.VersionLimited) > 0 && build.PythonVersion == "" {
+	// The form seeds the setting from detection: equal to it, the choice is
+	// still the one the pins made.
+	if len(python.VersionLimited) > 0 && (build.PythonVersion == "" || build.PythonVersion == candidate.PythonVersion) {
 		findings = append(findings, finding("python_version_limited", PreflightPass,
 			"Python "+version+" is chosen for the pinned packages", boundedText(strings.Join(python.VersionLimited, ", ")+" publish no wheels for Python "+defaultPythonRecipeVersion, 512),
 			"A newer Python would build these packages from source, which needs a compiler the image does not have.", "", "deploy", "configuration.build.pythonVersion"))
