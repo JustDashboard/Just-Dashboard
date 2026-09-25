@@ -682,6 +682,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		group.store(result.Candidates)
 	}
 	annotateImageFacts(tree, markers, result.Candidates)
+	goSums := int64(goDetectionSumBytes)
 	for index := range result.Candidates {
 		candidate := &result.Candidates[index]
 		if candidate.Recipe == "go" {
@@ -694,7 +695,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 				candidate.RecipeIssue = recipeRefusalText(err, root)
 			} else {
 				applyGoModulePackages(candidate, packages, markers[filepath.FromSlash(candidate.Root)])
-				applyGoBuildFacts(root, candidate, packages, markers[filepath.FromSlash(candidate.Root)], result.Candidates)
+				applyGoBuildFacts(root, candidate, packages, markers[filepath.FromSlash(candidate.Root)], result.Candidates, &goSums)
 			}
 			if goSources.truncated {
 				candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(candidate.Root, "go.mod"),

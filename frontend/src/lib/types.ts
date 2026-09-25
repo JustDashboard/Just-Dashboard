@@ -3635,6 +3635,9 @@ export type DeploymentDetectionCandidate = {
     codegen?: string
     codegenMissing?: string[]
     subcommand?: string
+    /** The go and toolchain lines of the go.work that uses the module. */
+    workGo?: string
+    workToolchain?: string
   }
   /** How the Rust crate builds: its workspace, binaries and native crates (detect_rust.go). */
   rust?: {

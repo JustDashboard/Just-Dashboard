@@ -55,8 +55,7 @@ func goBuildFindings(candidate *DetectedCandidate, configuration PlanConfigurati
 	add := func(code string, severity PreflightSeverity, title, measured, means, action, field string) {
 		findings = append(findings, finding(code, severity, title, boundedFindingText(measured), means, action, "deploy", field))
 	}
-	if choice, err := resolveGoRecipeVersion(build.GoVersion, candidate.GoVersionFile,
-		goModuleForVersionCheck(candidate.GoMinimumVersion, candidate.GoToolchain)); err == nil {
+	if choice, err := resolveGoRecipeVersion(build.GoVersion, candidate.GoVersionFile, goCandidateVersionModule(candidate)); err == nil {
 		switch {
 		case choice.eol:
 			add("go_version_eol", PreflightWarning, "Go "+choice.version+" no longer receives security fixes",

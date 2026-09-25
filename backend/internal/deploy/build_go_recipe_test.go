@@ -268,8 +268,14 @@ func TestGoWorkspaceAndLocalReplacementsWidenTheBuildContext(t *testing.T) {
 	if prepared.ContextDirectory != "." {
 		t.Fatalf("context = %q", prepared.ContextDirectory)
 	}
-	assertGoDockerfile(t, prepared.DockerfilePreview, "COPY . .\nWORKDIR /src/api\nENV CGO_ENABLED=0 GOTOOLCHAIN=local\n",
+	// go mod download fetches every requirement in a workspace, the sibling
+	// the go.work provides included, which no proxy has; listing the
+	// packages' imports fetches only what the build compiles.
+	assertGoDockerfile(t, prepared.DockerfilePreview, "COPY . .\nWORKDIR /src/api\nENV CGO_ENABLED=0 GOTOOLCHAIN=local\nRUN go list -e -deps ./... >/dev/null\n",
 		"COPY --from=build --chown=app:app /src/api/templates /home/app/templates")
+	if strings.Contains(prepared.DockerfilePreview, "go mod download") {
+		t.Fatalf("a workspace build downloads its sibling module:\n%s", prepared.DockerfilePreview)
+	}
 	detection, candidate := detectGo(t, root, "api")
 	if selected := selectedDetectionCandidate(&detection); selected == nil || selected.ID != candidate.ID {
 		t.Fatalf("the library module tied with the service: %+v", detection.Candidates)
@@ -300,7 +306,7 @@ func TestGoWorkspaceAndLocalReplacementsWidenTheBuildContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertGoDockerfile(t, prepared.DockerfilePreview, "WORKDIR /src/services/api\nENV CGO_ENABLED=0 GOTOOLCHAIN=local GOWORK=off\n")
+	assertGoDockerfile(t, prepared.DockerfilePreview, "WORKDIR /src/services/api\nENV CGO_ENABLED=0 GOTOOLCHAIN=local GOWORK=off\nRUN go mod download\n")
 	if prepared.ContextDirectory != "." {
 		t.Fatalf("context = %q", prepared.ContextDirectory)
 	}
@@ -318,6 +324,97 @@ func TestGoWorkspaceAndLocalReplacementsWidenTheBuildContext(t *testing.T) {
 	}
 }
 
+// A go.work's own lines choose the toolchain as the recipe reads them, and
+// the modules it uses are in the checkout, not fetched from the account.
+func TestGoWorkspaceLinesAndModulesAreTheWorkspaces(t *testing.T) {
+	root := t.TempDir()
+	writeBuildFixture(t, root, "go.work", "go 1.27.0\n\nuse (\n\t./api\n\t./shared\n)\n")
+	writeBuildFixture(t, root, "api/go.mod", "module github.com/acme/api\n\ngo 1.26.0\n\nrequire (\n\tgithub.com/acme/shared v0.0.0-00010101000000-000000000000\n\tgithub.com/acme/billing v1.2.0\n)\n")
+	writeBuildFixture(t, root, "api/main.go", "package main\n\nimport \"net/http\"\n\nfunc main() { http.ListenAndServe(\":8080\", nil) }\n")
+	writeBuildFixture(t, root, "shared/go.mod", "module github.com/acme/shared\n\ngo 1.26.0\n")
+	_, candidate := detectGo(t, root, "api")
+	if candidate.Go == nil || candidate.Go.WorkGo != "1.27.0" || candidate.GoVersion != "1.27" ||
+		!reflect.DeepEqual(candidate.Go.OwnerModules, []string{"github.com/acme/billing"}) {
+		t.Fatalf("workspace = %q / %+v", candidate.GoVersion, candidate.Go)
+	}
+	findings := goBuildFindings(candidate, PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe}}, &DraftSourceConfig{Kind: SourceGit, CredentialID: 7})
+	if item := findingByCode(findings, "go_version_family"); item == nil || !strings.Contains(item.Measured, "maintained Go 1.27 patch") {
+		t.Fatalf("go_version_family = %+v", item)
+	}
+	if item := findingByCode(findings, "go_private_module"); item == nil || item.Measured != "github.com/acme/billing" {
+		t.Fatalf("go_private_module = %+v", item)
+	}
+	prepared, err := NewArtifactBuilder(&artifactBackendFake{}).PrepareWithin(t.Context(), root, root+"/api",
+		BuildPlanConfig{Method: BuildRecipe, Recipe: "go", RootDirectory: "api"}, false, "t:1")
+	if err != nil || prepared.GoVersion != "1.27" {
+		t.Fatalf("prepared %q: %v", prepared.GoVersion, err)
+	}
+	// Go 1.26 cannot build what the go.work asks 1.27 of.
+	pinned := PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe, Recipe: "go", GoVersion: "1.26"}}
+	if item := findingByCode(plannedRecipeFindings(candidate, pinned.Build), "go_version_unsupported"); item == nil || !strings.Contains(item.Measured, "go.work go 1.27.0") {
+		t.Fatalf("go_version_unsupported = %+v", item)
+	}
+}
+
+// A command whose main package is written in cgo is a command, built with
+// cgo, not a library.
+func TestGoCgoMainPackageIsACommand(t *testing.T) {
+	root := t.TempDir()
+	writeBuildFixture(t, root, "go.mod", "module example.com/app\n\ngo 1.26\n")
+	writeBuildFixture(t, root, "main.go", "package main\n\n// #cgo LDFLAGS: -lm\n// #include <math.h>\nimport \"C\"\n\nimport \"net/http\"\n\nfunc main() { _ = C.sqrt(2); http.ListenAndServe(\":8080\", nil) }\n")
+	_, candidate := detectGo(t, root, "")
+	if candidate.GoLibrary || candidate.GoPackage != "." || candidate.RecipeIssue != "" || candidate.Go == nil || !reflect.DeepEqual(candidate.Go.CGOLocal, []string{"."}) {
+		t.Fatalf("cgo command = %+v / %+v", candidate, candidate.Go)
+	}
+	build := BuildPlanConfig{Method: BuildRecipe, Recipe: "go"}
+	if item := findingByCode(plannedRecipeFindings(candidate, build), "go_main_missing"); item != nil {
+		t.Fatalf("the cgo command was refused as a library: %+v", item)
+	}
+	prepared := prepareGo(t, root, BuildPlanConfig{})
+	assertGoDockerfile(t, prepared.DockerfilePreview, "RUN apk add --no-cache gcc musl-dev\n", "ENV CGO_ENABLED=1 GOTOOLCHAIN=local", "-o /out/app ./\n")
+}
+
+// A module of several commands embeds for each its own files: the service
+// is not held to what another command embeds.
+func TestGoEmbedsAreTheChosenCommands(t *testing.T) {
+	root := t.TempDir()
+	writeBuildFixture(t, root, "go.mod", "module example.com/app\n\ngo 1.26\n")
+	writeBuildFixture(t, root, "cmd/server/main.go", "package main\n\nimport (\n\t\"net/http\"\n\n\t\"example.com/app/internal/web\"\n)\n\nfunc main() { http.ListenAndServe(\":8080\", http.FileServerFS(web.Dist)) }\n")
+	writeBuildFixture(t, root, "internal/web/embed.go", "package web\n\nimport \"embed\"\n\n//go:embed dist/assets\nvar Dist embed.FS\n")
+	writeBuildFixture(t, root, "cmd/admin/main.go", "package main\n\nimport \"embed\"\n\n//go:embed ui\nvar ui embed.FS\n\nfunc main() {}\n")
+	writeBuildFixture(t, root, "frontend/package.json", `{"scripts":{"build":"vite build"},"devDependencies":{"vite":"^7.0.0"}}`)
+	writeBuildFixture(t, root, "frontend/vite.config.ts", "export default { build: { outDir: '../internal/web/dist' } }\n")
+	_, candidate := detectGo(t, root, "")
+	if candidate.GoPackage != "cmd/server" || candidate.RecipeIssue != "" || candidate.Go == nil || len(candidate.Go.Embeds) != 1 {
+		t.Fatalf("server = %q %q / %+v", candidate.GoPackage, candidate.RecipeIssue, candidate.Go)
+	}
+	prepared := prepareGo(t, root, BuildPlanConfig{})
+	// The embed sits inside the Vite output: that directory is copied, not
+	// the whole output into it.
+	assertGoDockerfile(t, prepared.DockerfilePreview, "COPY --from=web /app/internal/web/dist/assets/ /src/internal/web/dist/assets/\n", "-o /out/app ./cmd/server\n")
+	if _, err := NewArtifactBuilder(&artifactBackendFake{}).Prepare(t.Context(), root, BuildPlanConfig{Method: BuildRecipe, Recipe: "go", GoPackage: "cmd/admin"}, false, "t:1"); err == nil ||
+		!strings.Contains(err.Error(), "//go:embed ui") {
+		t.Fatalf("the admin command's missing embed: %v", err)
+	}
+}
+
+func TestGoSumReadsAreChargedToTheDetectionBudget(t *testing.T) {
+	root := t.TempDir()
+	module := []byte("module example.com/app\n\ngo 1.26\n\nrequire github.com/go-chi/chi/v5 v5.2.1\n")
+	writeBuildFixture(t, root, "go.mod", string(module))
+	writeBuildFixture(t, root, "go.sum", "github.com/other/module v1.0.0/go.mod h1:x\n")
+	config := BuildPlanConfig{Method: BuildRecipe, Recipe: "go"}
+	plan, _ := planGoBuild(root, root, module, goModulePackages{}, "", config, goSumReadLimit)
+	if !reflect.DeepEqual(plan.sumStale, []string{"github.com/go-chi/chi/v5"}) || plan.sumBytes == 0 {
+		t.Fatalf("stale = %v (%d bytes)", plan.sumStale, plan.sumBytes)
+	}
+	// Past the budget go.sum is left to the go command, as too large a one is.
+	plan, _ = planGoBuild(root, root, module, goModulePackages{}, "", config, 8)
+	if len(plan.sumStale) != 0 || plan.sumAbsent || plan.sumBytes != 0 || plan.modFlag() != "" {
+		t.Fatalf("a go.sum past the budget was read: %+v", plan)
+	}
+}
+
 func TestGoCommandLineApplicationsStartTheirServeSubcommand(t *testing.T) {
 	root := t.TempDir()
 	writeBuildFixture(t, root, "go.mod", "module example.com/tool\n\ngo 1.26\n\nrequire github.com/spf13/cobra v1.9.1\n")
@@ -332,6 +429,18 @@ func TestGoCommandLineApplicationsStartTheirServeSubcommand(t *testing.T) {
 	plan := PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe, StartCommand: "/app serve"}}
 	if item := findingByCode(goBuildFindings(candidate, plan, nil), "go_start_subcommand"); item == nil || item.Severity != PreflightWarning {
 		t.Fatalf("go_start_subcommand = %+v", item)
+	}
+	// server-status is another command, and a tree main never executes
+	// serves nothing.
+	writeBuildFixture(t, root, "cmd/serve.go", "package cmd\n\nimport \"github.com/spf13/cobra\"\n\nvar statusCmd = &cobra.Command{Use: \"server-status\"}\n")
+	if _, candidate = detectGo(t, root, ""); candidate.StartCommand != "" {
+		t.Fatalf("server-status started as %q", candidate.StartCommand)
+	}
+	writeBuildFixture(t, root, "cmd/serve.go", "package cmd\n\nimport \"github.com/spf13/cobra\"\n\nvar serveCmd = &cobra.Command{Use: \"serve\"}\n")
+	writeBuildFixture(t, root, "main.go", "package main\n\nimport _ \"example.com/tool/cmd\"\n\nfunc main() {}\n")
+	writeBuildFixture(t, root, "cmd/root.go", "package cmd\n\nimport \"github.com/spf13/cobra\"\n\nvar rootCmd = &cobra.Command{Use: \"tool\"}\n")
+	if _, candidate = detectGo(t, root, ""); candidate.StartCommand != "" {
+		t.Fatalf("a command tree nothing executes started as %q", candidate.StartCommand)
 	}
 
 	// PocketBase is proved serving by its own health endpoint.

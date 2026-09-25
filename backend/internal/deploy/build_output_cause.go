@@ -547,7 +547,7 @@ func isPullFailure(err error) bool {
 
 // installCommandRE names the recipes' dependency installers: whatever a
 // generated Dockerfile runs before the plan's own build command.
-var installCommandRE = regexp.MustCompile(`(?:^|&& |; )(?:npm (?:ci|install)|corepack enable|pnpm install|yarn install|yarn$|bun install|pip3? install|python3? -m pip|uv (?:sync|pip)|poetry install|pipenv install|go mod download|cargo fetch|mvn .*dependency:|gradle .*dependencies|\./gradlew .*dependencies|dotnet restore|deno (?:install|cache)|composer install|bundle install|mix deps\.get|apk add|apt-get|install-php-extensions)`)
+var installCommandRE = regexp.MustCompile(`(?:^|&& |; )(?:npm (?:ci|install)|corepack enable|pnpm install|yarn install|yarn$|bun install|pip3? install|python3? -m pip|uv (?:sync|pip)|poetry install|pipenv install|go mod download|go list -e -deps|cargo fetch|mvn .*dependency:|gradle .*dependencies|\./gradlew .*dependencies|dotnet restore|deno (?:install|cache)|composer install|bundle install|mix deps\.get|apk add|apt-get|install-php-extensions)`)
 
 // buildCommandRE names the recipes' default build commands, for a plan that
 // left its own build command empty.

@@ -46,6 +46,9 @@ type goSourceFacts struct {
 	cgoLinks []string
 	// embeds are the file's //go:embed patterns.
 	embeds []string
+	// imports are the paths the file imports, which tie a main package to
+	// the packages of its own module it builds.
+	imports []string
 }
 
 // goServerImports are the packages whose import marks a main package that
@@ -88,6 +91,8 @@ func readGoSourceFacts(rel string, content []byte) (goSourceFacts, bool) {
 		}
 		if value == "C" {
 			facts.cgo = true
+		} else if len(facts.imports) < 256 {
+			facts.imports = append(facts.imports, value)
 		}
 		for _, server := range goServerImports {
 			if value == server || strings.HasPrefix(value, server+"/") {
@@ -202,6 +207,9 @@ type goModulePackages struct {
 	cgoLinks []string
 	// embeds are the //go:embed patterns of the module's built files.
 	embeds []goEmbed
+	// imports are each package directory's imports, which say which
+	// packages — and so which embeds — a main package builds.
+	imports map[string][]string
 	// templMissing names .templ components with no generated _templ.go
 	// beside them, which `templ generate` writes.
 	templMissing []string
@@ -217,7 +225,7 @@ type goEmbed struct {
 // Facts below a skipped directory or inside a nested module are left out, as
 // the go command leaves them out of the module's own package list.
 func collectGoModulePackages(facts []goSourceFacts, nestedModules []string) goModulePackages {
-	result := goModulePackages{serving: map[string]bool{}}
+	result := goModulePackages{serving: map[string]bool{}, imports: map[string][]string{}}
 	mains := map[string]bool{}
 	// A file built only when cgo is off is the pure-Go fallback of the cgo
 	// files beside it.
@@ -237,14 +245,28 @@ func collectGoModulePackages(facts []goSourceFacts, nestedModules []string) goMo
 				result.cgo = append(result.cgo, file.dir)
 			}
 		}
-		if file.built && !file.cgo {
-			for _, pattern := range file.embeds {
-				if len(result.embeds) < goEmbedsKept {
-					result.embeds = append(result.embeds, goEmbed{dir: file.dir, pattern: pattern})
-				}
+		// The build compiles a cgo file exactly when planGoCGO turns cgo
+		// on for it — it builds under cgo and no pure-Go twin stands in —
+		// so such a file is as much the package as any other: a command
+		// written in cgo is still a command.
+		compiled := file.built && !file.cgo
+		if file.cgo {
+			compiled = file.builtCgo && !twinned[file.dir]
+		}
+		if !compiled {
+			continue
+		}
+		for _, pattern := range file.embeds {
+			if len(result.embeds) < goEmbedsKept {
+				result.embeds = append(result.embeds, goEmbed{dir: file.dir, pattern: pattern})
 			}
 		}
-		if file.cgo || !file.built || file.pkg != "main" {
+		for _, imported := range file.imports {
+			if !slices.Contains(result.imports[file.dir], imported) {
+				result.imports[file.dir] = append(result.imports[file.dir], imported)
+			}
+		}
+		if file.pkg != "main" {
 			continue
 		}
 		mains[file.dir] = true
@@ -259,6 +281,42 @@ func collectGoModulePackages(facts []goSourceFacts, nestedModules []string) goMo
 	result.cgo = uniqueSorted(result.cgo)
 	result.cgoLinks = uniqueSorted(result.cgoLinks)
 	return result
+}
+
+// embedsOf are the embeds the main package at main compiles: its own and
+// those of every package of the module it imports, directly or through
+// another. Another command's embeds are not this build's to produce, and
+// with no command chosen yet every embed in the module is kept.
+func (p goModulePackages) embedsOf(main, modulePath string) []goEmbed {
+	if main == "" || modulePath == "" {
+		return p.embeds
+	}
+	reached := map[string]bool{main: true}
+	queue := []string{main}
+	for len(queue) > 0 {
+		dir := queue[0]
+		queue = queue[1:]
+		for _, imported := range p.imports[dir] {
+			local := strings.TrimPrefix(imported, modulePath+"/")
+			switch {
+			case imported == modulePath:
+				local = "."
+			case local == imported:
+				continue
+			}
+			if !reached[local] {
+				reached[local] = true
+				queue = append(queue, local)
+			}
+		}
+	}
+	embeds := []goEmbed{}
+	for _, embed := range p.embeds {
+		if reached[embed.dir] {
+			embeds = append(embeds, embed)
+		}
+	}
+	return embeds
 }
 
 func goDirectorySkipped(dir string, nestedModules []string) bool {

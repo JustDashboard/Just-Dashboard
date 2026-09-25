@@ -119,8 +119,7 @@ func plannedRecipeFindings(candidate *DetectedCandidate, build BuildPlanConfig) 
 	}
 	switch recipe {
 	case "go":
-		if _, err := chooseGoRecipeVersion(build.GoVersion, candidate.GoVersionFile,
-			goModuleForVersionCheck(candidate.GoMinimumVersion, candidate.GoToolchain)); err != nil {
+		if _, err := chooseGoRecipeVersion(build.GoVersion, candidate.GoVersionFile, goCandidateVersionModule(candidate)); err != nil {
 			measured := recipeRefusalText(err, "")
 			if pinned := goVersionPins(candidate, build); pinned != "" {
 				measured += " (" + pinned + ")"
@@ -152,6 +151,12 @@ func goVersionPins(candidate *DetectedCandidate, build BuildPlanConfig) string {
 	}
 	if candidate.GoToolchain != "" {
 		pins = append(pins, "toolchain "+candidate.GoToolchain)
+	}
+	if facts := candidate.Go; facts != nil && facts.WorkGo != "" {
+		pins = append(pins, "go.work go "+facts.WorkGo)
+	}
+	if facts := candidate.Go; facts != nil && facts.WorkToolchain != "" {
+		pins = append(pins, "go.work toolchain "+facts.WorkToolchain)
 	}
 	return strings.Join(pins, "; ")
 }

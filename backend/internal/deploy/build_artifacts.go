@@ -708,7 +708,8 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 		if err != nil {
 			return selectedRecipe{}, err
 		}
-		build, err := planGoBuild(boundary, root, module, packages, config)
+		main, mainErr := selectGoMainPackage(packages, config, goModulePath(module))
+		build, err := planGoBuild(boundary, root, module, packages, goEmbedsMain(main, mainErr, config), config, goSumReadLimit)
 		if err != nil {
 			return selectedRecipe{}, err
 		}
@@ -716,9 +717,8 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 		if err != nil {
 			return selectedRecipe{}, err
 		}
-		main, err := selectGoMainPackage(packages, config, goModulePath(module))
-		if err != nil {
-			return selectedRecipe{}, err
+		if mainErr != nil {
+			return selectedRecipe{}, mainErr
 		}
 		recipe := selectedRecipe{kind: "go", catalogueKey: "go", mainPackage: main, goVersion: choice.version, goChoice: choice, goBuild: build,
 			runtimeAssets: compiledRuntimeAssets(root, ".go"), emptyDotenv: dotenvFileRequired(root, "go"), contextDir: build.context.dir}

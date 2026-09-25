@@ -338,14 +338,16 @@ func goModuleOwner(module string) string {
 
 // goOwnerModules are the requirements from the main module's own account,
 // the ones a private repository's build most often cannot fetch anonymously.
-func goOwnerModules(module goModFile) []string {
+// A module a local replacement or the go.work (local) provides is in the
+// checkout, not fetched.
+func goOwnerModules(module goModFile, local []string) []string {
 	owner := goModuleOwner(module.module)
 	if owner == "" {
 		return nil
 	}
 	var owned []string
 	for _, required := range module.requires {
-		if strings.HasPrefix(required.path, owner+"/") && required.path != module.module {
+		if strings.HasPrefix(required.path, owner+"/") && required.path != module.module && !slices.Contains(local, required.path) {
 			if replacement, ok := module.replacementOf(required.path, required.version); ok && replacement.local() {
 				continue
 			}
@@ -370,6 +372,9 @@ type goBuildContext struct {
 	// the context widened for local replacements alone.
 	workspace, replaceOnly bool
 	work                   goModFile
+	// workModules are the module paths of the directories the go.work
+	// uses, which the build finds in the checkout rather than fetching.
+	workModules []string
 	// replaces are the local replacement targets, relative to the checkout.
 	replaces []string
 }
@@ -400,7 +405,16 @@ func goContextFor(boundary, root string, module goModFile) (goBuildContext, erro
 		context.workspace, context.work = true, work
 		anchors = append(anchors, workRel)
 		for _, use := range work.uses {
-			keep(goWorkUseTarget(workRel, use))
+			target, err := goWorkUseTarget(workRel, use)
+			keep(target, err)
+			if err != nil || len(context.workModules) >= 64 {
+				continue
+			}
+			if used, err := readContainedRegular(filepath.Join(boundary, filepath.FromSlash(target)), "go.mod", 64<<10); err == nil {
+				if modulePath := goModulePath(used); modulePath != "" {
+					context.workModules = append(context.workModules, modulePath)
+				}
+			}
 		}
 		for _, replacement := range work.replaces {
 			if replacement.local() {
@@ -619,10 +633,10 @@ var viteOutDirRE = regexp.MustCompile(`outDir\s*:\s*['"` + "`" + `]([^'"` + "`" 
 // directory that is missing, or holds nothing but dotfiles (a .gitkeep in
 // an ignored dist/), is looked for among the package.json builds inside the
 // module: the package it sits in, or one whose Vite outDir writes it.
-func resolveGoEmbeds(moduleRoot string, packages goModulePackages) []goEmbedResolution {
+func resolveGoEmbeds(moduleRoot string, embeds []goEmbed) []goEmbedResolution {
 	var resolved []goEmbedResolution
 	seen := map[string]bool{}
-	for _, embed := range packages.embeds {
+	for _, embed := range embeds {
 		pattern := strings.TrimPrefix(embed.pattern, "all:")
 		literal := []string{}
 		for _, segment := range strings.Split(pattern, "/") {
@@ -705,9 +719,10 @@ func goEmbedFrontend(moduleRoot, dir string) (string, string) {
 				continue
 			}
 			if match := viteOutDirRE.FindSubmatch(content); match != nil {
-				written := path.Clean(path.Join(rel, string(match[1])))
-				if written == dir || underRoot(dir, written) {
-					found, output = rel, written
+				// An embed inside the output is copied on its own, to where
+				// the pattern names it, not the whole output into it.
+				if written := path.Clean(path.Join(rel, string(match[1]))); written == dir || underRoot(dir, written) {
+					found, output = rel, dir
 					return errStop
 				}
 			}
@@ -755,6 +770,8 @@ type goBuildPlan struct {
 	vendored  bool
 	sumAbsent bool
 	sumStale  []string
+	// sumBytes is how much of go.sum the plan read.
+	sumBytes int64
 	// owner is the GOPRIVATE pattern when the install has the token.
 	owner, ownerHost string
 	ownerModules     []string
@@ -776,11 +793,28 @@ func (p goBuildPlan) modFlag() string {
 	return ""
 }
 
+// goEmbedsMain is the main package whose embeds the build must produce: the
+// one the recipe compiles. A build command — even the old `go build ./...`,
+// which compiles every package — and a module whose command is not chosen
+// yet leave it empty, which keeps every embed in the module.
+func goEmbedsMain(main string, err error, config BuildPlanConfig) string {
+	if err != nil || strings.TrimSpace(config.BuildCommand) != "" {
+		return ""
+	}
+	return main
+}
+
+// goSumReadLimit is the largest go.sum the recipe compares with go.mod; a
+// larger one is left to the go command, which checks it anyway.
+const goSumReadLimit = 16 << 20
+
 // planGoBuild reads what the module at root needs to build inside the
-// checkout at boundary. Its error is the recipe's first refusal; the plan
-// still carries every fact it could read, which detection records so
-// preflight names each problem rather than only the first.
-func planGoBuild(boundary, root string, content []byte, packages goModulePackages, config BuildPlanConfig) (goBuildPlan, error) {
+// checkout at boundary, for the main package at main ("" when none is
+// chosen), reading at most sumLimit bytes of go.sum. Its error is the
+// recipe's first refusal; the plan still carries every fact it could read,
+// which detection records so preflight names each problem rather than only
+// the first.
+func planGoBuild(boundary, root string, content []byte, packages goModulePackages, main string, config BuildPlanConfig, sumLimit int64) (goBuildPlan, error) {
 	plan := goBuildPlan{module: parseGoMod(content)}
 	var refusal error
 	refuse := func(err error) {
@@ -801,13 +835,13 @@ func planGoBuild(boundary, root string, content []byte, packages goModulePackage
 	plan.vendored = !context.workspace && regularExists(root, "vendor/modules.txt")
 	// A requirement every local replacement satisfies needs no checksum.
 	if !plan.vendored && !context.workspace && len(goSumMissing(plan.module, nil)) > 0 {
-		if sum, err := readContainedRegular(root, "go.sum", 16<<20); err == nil {
-			plan.sumStale = goSumMissing(plan.module, sum)
+		if sum, err := readContainedRegular(root, "go.sum", min(sumLimit, goSumReadLimit)); err == nil {
+			plan.sumStale, plan.sumBytes = goSumMissing(plan.module, sum), int64(len(sum))
 		} else if !regularExists(root, "go.sum") {
 			plan.sumAbsent = true
 		}
 	}
-	plan.ownerModules = goOwnerModules(plan.module)
+	plan.ownerModules = goOwnerModules(plan.module, context.workModules)
 	if len(plan.ownerModules) > 0 && !plan.vendored {
 		for _, secret := range config.Secrets {
 			if secret.Variable == goPrivateTokenVariable && buildSecretReaches(secret.Step, "install") {
@@ -819,7 +853,7 @@ func planGoBuild(boundary, root string, content []byte, packages goModulePackage
 	plan.templ, plan.templFrom = goTemplGenerate(plan.module, packages)
 	custom := strings.TrimSpace(config.BuildCommand) != "" && strings.TrimSpace(config.BuildCommand) != "go build ./..."
 	inContext := func(rel string) string { return path.Clean(path.Join(context.module, rel)) }
-	plan.embeds = resolveGoEmbeds(root, packages)
+	plan.embeds = resolveGoEmbeds(root, packages.embedsOf(main, plan.module.module))
 	for _, embed := range plan.embeds {
 		switch {
 		case embed.present:
@@ -880,12 +914,28 @@ func goVersionInputs(module []byte, context goBuildContext) []byte {
 		return module
 	}
 	parsed := parseGoMod(module)
-	minimum, toolchain := parsed.goVersion, parsed.toolchain
-	if work := context.work.goVersion; stableGoVersionRE.MatchString(work) && (minimum == "" || version.Compare("go"+work, "go"+minimum) > 0) {
-		minimum = work
+	return goModuleForVersionCheck(goWorkspaceVersionLines(parsed.goVersion, parsed.toolchain, context.work.goVersion, context.work.toolchain))
+}
+
+// goWorkspaceVersionLines folds a go.work's go and toolchain lines into a
+// module's, as goVersionInputs does.
+func goWorkspaceVersionLines(minimum, toolchain, workGo, workToolchain string) (string, string) {
+	if stableGoVersionRE.MatchString(workGo) && (minimum == "" || version.Compare("go"+workGo, "go"+minimum) > 0) {
+		minimum = workGo
 	}
-	if context.work.toolchain != "" {
-		toolchain = context.work.toolchain
+	if workToolchain != "" {
+		toolchain = workToolchain
+	}
+	return minimum, toolchain
+}
+
+// goCandidateVersionModule is what a candidate's toolchain is judged
+// against: its go.mod's go and toolchain lines, with those of the go.work
+// that uses it folded in, as the recipe folds them.
+func goCandidateVersionModule(candidate *DetectedCandidate) []byte {
+	minimum, toolchain := candidate.GoMinimumVersion, candidate.GoToolchain
+	if facts := candidate.Go; facts != nil {
+		minimum, toolchain = goWorkspaceVersionLines(minimum, toolchain, facts.WorkGo, facts.WorkToolchain)
 	}
 	return goModuleForVersionCheck(minimum, toolchain)
 }
@@ -1018,11 +1068,20 @@ func renderGoDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases []R
 	lines = append(lines, "ENV "+strings.Join(env, " "))
 	if !plan.vendored {
 		download := "go mod download"
+		if plan.context.workspace {
+			// In a workspace, go mod download fetches every requirement,
+			// even a sibling module the go.work provides and no proxy has
+			// ("unrecognized import path"); listing the packages' imports
+			// fetches only what the build compiles. -e leaves a package that
+			// is not there yet — generated code, an embed the web stage
+			// writes — to the build.
+			download = "go list -e -deps ./... >/dev/null"
+		}
 		if plan.owner != "" {
 			// The token rewrites the host's URLs for this one command's git;
 			// it lives in the secret mount and this RUN's environment only.
 			download = `export GIT_CONFIG_COUNT="1" GIT_CONFIG_KEY_0="url.https://x-access-token:${` + goPrivateTokenVariable +
-				`}@` + plan.ownerHost + `/.insteadOf" GIT_CONFIG_VALUE_0="https://` + plan.ownerHost + `/" && go mod download`
+				`}@` + plan.ownerHost + `/.insteadOf" GIT_CONFIG_VALUE_0="https://` + plan.ownerHost + `/" && ` + download
 		}
 		lines = append(lines, "RUN "+installSecrets+download)
 	}

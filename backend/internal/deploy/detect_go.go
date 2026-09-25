@@ -50,6 +50,10 @@ type DetectedGoBuild struct {
 	// Subcommand is the command-line subcommand that serves, which the
 	// detected start command runs.
 	Subcommand string `json:"subcommand,omitempty"`
+	// WorkGo and WorkToolchain are the go and toolchain lines of the go.work
+	// that uses the module, which the toolchain is chosen from as well.
+	WorkGo        string `json:"workGo,omitempty"`
+	WorkToolchain string `json:"workToolchain,omitempty"`
 }
 
 // DetectedGoEmbed is one //go:embed directory: whether the commit has it,
@@ -62,16 +66,23 @@ type DetectedGoEmbed struct {
 	Framework string `json:"framework,omitempty"`
 }
 
+// goDetectionSumBytes bounds the go.sum one detection compares across all
+// its modules; past it a module's go.sum is left unread, as too large a one
+// is, and only the build checks it.
+const goDetectionSumBytes = 16 << 20
+
 // applyGoBuildFacts records what the recipe will do with a Go candidate's
 // module and marks what it would refuse, which is the source's shape and not
 // a setting, so it lowers the candidate the way a dry run's refusal does.
-func applyGoBuildFacts(checkout string, candidate *DetectedCandidate, packages goModulePackages, marker *detectedMarkers, candidates []DetectedCandidate) {
+// sums is what is left of the detection's go.sum budget.
+func applyGoBuildFacts(checkout string, candidate *DetectedCandidate, packages goModulePackages, marker *detectedMarkers, candidates []DetectedCandidate, sums *int64) {
 	if marker == nil || len(marker.goModContent) == 0 {
 		return
 	}
 	moduleRoot := filepath.Join(checkout, filepath.FromSlash(candidate.Root))
-	plan, refusal := planGoBuild(checkout, moduleRoot, marker.goModContent, packages,
-		BuildPlanConfig{Method: BuildRecipe, Recipe: "go", BuildCommand: candidate.BuildCommand})
+	config := BuildPlanConfig{Method: BuildRecipe, Recipe: "go", BuildCommand: candidate.BuildCommand}
+	plan, refusal := planGoBuild(checkout, moduleRoot, marker.goModContent, packages, goEmbedsMain(candidate.GoPackage, nil, config), config, *sums)
+	*sums -= plan.sumBytes
 	facts := &DetectedGoBuild{
 		Context: plan.context.dir, Workspace: plan.context.workspace, LocalReplaces: boundedList(plan.context.replaces),
 		CGOModules: plan.cgo.modules, CGOLocal: boundedList(plan.cgo.local), CGORuntime: plan.cgo.runtime,
@@ -98,6 +109,15 @@ func applyGoBuildFacts(checkout string, candidate *DetectedCandidate, packages g
 	}
 	facts.CodegenMissing = goCodegenMissing(moduleRoot, plan)
 	candidate.Go = facts
+	if work := plan.context.work; plan.context.workspace && work.goVersion+work.toolchain != "" &&
+		goVersionLineRE.MatchString(work.goVersion) && goVersionLineRE.MatchString(work.toolchain) {
+		// The go.work's lines choose the toolchain too, as the recipe reads
+		// them (goVersionInputs).
+		facts.WorkGo, facts.WorkToolchain = work.goVersion, work.toolchain
+		if version, err := chooseGoRecipeVersion("", candidate.GoVersionFile, goCandidateVersionModule(candidate)); err == nil {
+			candidate.GoVersion = version
+		}
+	}
 	if refusal != nil && candidate.RecipeIssue == "" {
 		candidate.RecipeIssue = recipeRefusalText(refusal, checkout)
 		if candidate.readingConfidence == "" {
@@ -134,6 +154,10 @@ func applyGoBuildFacts(checkout string, candidate *DetectedCandidate, packages g
 			Reason: "the command line's " + sub + " subcommand serves; the binary alone prints its help"})
 	}
 }
+
+// goVersionLineRE bounds a go.work's go and toolchain values as a candidate
+// records them; empty is the line's absence.
+var goVersionLineRE = regexp.MustCompile(`^[A-Za-z0-9._+-]{0,32}$`)
 
 // goBuildEvidence says on the candidate what the recipe will do beyond
 // compiling the main package.
@@ -229,8 +253,11 @@ func goCodegenMissing(moduleRoot string, plan goBuildPlan) []string {
 // preferred when it defines several.
 var (
 	goServeSubcommands = []string{"serve", "server", "start"}
-	goCobraUseRE       = regexp.MustCompile(`Use:\s*"(serve|server|start)\b`)
-	goUrfaveNameRE     = regexp.MustCompile(`Name:\s*"(serve|server|start)"`)
+	// A Use line is the command's name and then its usage: `serve [flags]`
+	// is serve, `server-status` is another command.
+	goCobraUseRE   = regexp.MustCompile(`Use:\s*"(serve|server|start)["\s]`)
+	goCobraRunRE   = regexp.MustCompile(`\.Execute(?:C|Context|ContextC)?\(`)
+	goUrfaveNameRE = regexp.MustCompile(`Name:\s*"(serve|server|start)"`)
 )
 
 // goServeSubcommand finds the serve subcommand of a cobra or urfave/cli
@@ -241,7 +268,7 @@ func goServeSubcommand(moduleRoot string, module goModFile) string {
 	if !cobra && !urfave {
 		return ""
 	}
-	found := map[string]bool{}
+	found, runs := map[string]bool{}, false
 	files, read := 0, int64(0)
 	errStop := errors.New("stop")
 	_ = filepath.WalkDir(moduleRoot, func(current string, entry os.DirEntry, err error) error {
@@ -270,15 +297,17 @@ func goServeSubcommand(moduleRoot string, module goModFile) string {
 				found[string(match[1])] = true
 			}
 		}
+		// A cobra command tree answers only when main executes it.
+		runs = runs || (cobra && goCobraRunRE.Match(content))
 		if urfave && strings.Contains(string(content), "cli.Command") {
 			for _, match := range goUrfaveNameRE.FindAllSubmatch(content, 8) {
-				found[string(match[1])] = true
+				found["urfave:"+string(match[1])] = true
 			}
 		}
 		return nil
 	})
 	for _, name := range goServeSubcommands {
-		if found[name] {
+		if (found[name] && runs) || found["urfave:"+name] {
 			return name
 		}
 	}
@@ -309,7 +338,8 @@ func validateDetectedGoBuild(candidate DetectedCandidate) error {
 		}
 	}
 	if !text(facts.Context, 4096) || (facts.Context != "" && facts.Context != "." && !safeRelativePath(facts.Context)) ||
-		!text(facts.Codegen, 512) || len(facts.Embeds) > 16 || !slices.Contains(append([]string{""}, goServeSubcommands...), facts.Subcommand) {
+		!text(facts.Codegen, 512) || len(facts.Embeds) > 16 || !slices.Contains(append([]string{""}, goServeSubcommands...), facts.Subcommand) ||
+		!goVersionLineRE.MatchString(facts.WorkGo) || !goVersionLineRE.MatchString(facts.WorkToolchain) {
 		return malformed
 	}
 	for _, embed := range facts.Embeds {
