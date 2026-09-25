@@ -107,6 +107,7 @@ const LOGOS: Record<string, string> = {
   ember: "ember.svg",
   express: "express.svg",
   facebook: "facebook.svg",
+  fail2ban: "fail2ban.webp",
   fastapi: "fastapi.svg",
   fastify: "fastify.svg",
   fedora: "fedora.svg",
@@ -334,6 +335,10 @@ const PROCESS_ALIASES: Record<string, string> = {
   "clickhouse-server": "clickhouse",
   "grafana-server": "grafana",
   tailscaled: "tailscale",
+  "fail2ban-server": "fail2ban",
+  "fail2ban-client": "fail2ban",
+  apache2: "apache",
+  httpd: "apache",
   "pm2 v5": "pm2",
   "pm2 v6": "pm2",
 }

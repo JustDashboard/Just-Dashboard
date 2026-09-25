@@ -12,6 +12,7 @@ import {
   TerminalWindow,
   Warning,
 } from "@/components/icons"
+import { relativeTime } from "@/lib/format"
 import type { Posture, SecurityFinding } from "@/lib/types"
 import { Metric, MetricStrip } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
@@ -64,7 +65,19 @@ export function PosturePanel({
 
   return (
     <Panel plain className={className}>
-      <PanelHeader title="Findings" actions={<PostureBadge status={posture.status} />} />
+      {/* The verdict itself is the page's identity line's; this header says
+          how many there are and when they were read. */}
+      <PanelHeader
+        title="Findings"
+        actions={
+          <span className="numeric text-hint text-muted-foreground">
+            {posture.findings.length === 0
+              ? "none"
+              : `${posture.findings.length} finding${posture.findings.length === 1 ? "" : "s"}`}{" "}
+            · checked {relativeTime(posture.checkedAt)}
+          </span>
+        }
+      />
       {/* The severity split as figures rather than as a sentence: three
           findings and three critical findings are not the same morning, and
           the header used to read identically either way. */}

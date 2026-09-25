@@ -3,6 +3,9 @@
 import { useMemo } from "react"
 import { useSessionState } from "@/lib/view-state"
 import { ClockRewind, Slash } from "@/components/icons"
+import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { ProductGlyph } from "@/components/product-logo"
+import { Address, jailProduct } from "@/components/security/marks"
 import { get, ApiError } from "@/lib/api"
 import { timestamp } from "@/lib/format"
 import type { BanEvent, Fail2banJail } from "@/lib/types"
@@ -29,9 +32,11 @@ import {
 } from "@/components/ui/table"
 
 /**
- * fail2ban: the jails, the addresses they are holding, and — under that — what
- * the tool has actually been doing, because a ban expires and the jail is
- * empty again by morning however busy the night was.
+ * fail2ban: the tool itself in one identity line, drawn as its own mark with
+ * whether it is running at the right end; the jails, the addresses they are
+ * holding, and — under that — what the tool has actually been doing, because
+ * a ban expires and the jail is empty again by morning however busy the night
+ * was.
  */
 export function IntrusionPanels() {
   const { can } = useAuth()
@@ -50,6 +55,7 @@ export function IntrusionPanels() {
   const bannedNow = jails.reduce((n, j) => n + j.currentlyBanned, 0)
   const failingNow = jails.reduce((n, j) => n + j.currentlyFailed, 0)
   const bansTotal = jails.reduce((n, j) => n + j.totalBanned, 0)
+  const watched = new Set(jails.flatMap((j) => j.fileList)).size
 
   const header = <PageContext eyebrow="Security" title="Intrusion prevention" />
 
@@ -101,6 +107,32 @@ export function IntrusionPanels() {
   return (
     <>
       {header}
+
+      <HostIdentity
+        mark="fail2ban"
+        title="fail2ban"
+        facts={
+          <>
+            <span className="numeric">
+              {jails.length === 1 ? "1 jail" : `${jails.length} jails`}
+            </span>
+            <FactDot />
+            <span className="numeric">
+              {watched === 1 ? "1 log watched" : `${watched} logs watched`}
+            </span>
+            {exposure?.client && (
+              <>
+                <FactDot />
+                <span className="inline-flex items-center gap-1">
+                  <span>you</span>
+                  <Address ip={exposure.client} className="text-foreground" />
+                </span>
+              </>
+            )}
+          </>
+        }
+        aside={<Status tone="running" live label="running" className="text-body" />}
+      />
 
       {/* The four numbers the rest of the page is an explanation of. They were
           a "·"-joined sentence in each jail's header, which meant comparing two
@@ -246,8 +278,12 @@ function BanHistoryPanel() {
                         label={event.action === "ban" ? "banned" : "released"}
                       />
                     </TableCell>
-                    <TableCell className="font-mono">{event.ip}</TableCell>
-                    <TableCell className="text-body text-muted-foreground">{event.jail}</TableCell>
+                    <TableCell>
+                      <Address ip={event.ip} />
+                    </TableCell>
+                    <TableCell className="text-body text-muted-foreground">
+                      <JailName name={event.jail} />
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -259,5 +295,16 @@ function BanHistoryPanel() {
         )}
       </PanelBody>
     </Panel>
+  )
+}
+
+/** A jail's name with the mark of the service it watches, where that is one. */
+export function JailName({ name }: { name: string }) {
+  const product = jailProduct(name)
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {product && <ProductGlyph id={product} />}
+      <span>{name}</span>
+    </span>
   )
 }

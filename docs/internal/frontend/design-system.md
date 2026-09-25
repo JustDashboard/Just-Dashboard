@@ -1076,6 +1076,27 @@ sixth. A game server's three pages add one line under that header (`GameIdentity
 the game can say — the address a player types, the edition, how full it is — and draw neither the
 game nor its name again.
 
+**The Security section draws what it watches, not what it is.** Its pages are about things with
+few marks of their own — a firewall backend, sshd, a jail — so the marks it draws are the things
+those watch and hold (`components/security/marks.tsx`). The section opens on how the panel is
+reached as its identity line (`ExposureIdentity`): Tailscale's mark on a tailnet-only panel, a
+glyph for the place otherwise, the grade as the title in its verdict's colour, the allowed ranges
+and interfaces as its facts, the address this browser arrived from drawn as the network it is on,
+and the posture's verdict at the right end, so the two answers the page is opened for share one
+line. Firewall, SSH and Intrusion open on the same line for the thing each is about: the backend by
+its own name with the enable switch beside its state, sshd with its port and what holds the
+listener with its verdict beside the recent jobs, and fail2ban as its own mark (the project's, from
+homarr) with whether it is running. A jail is a card you open — its sheet of held addresses is the
+destination — drawn as the service it watches (`jailProduct`: nginx's mark for `nginx-http-auth`,
+a glyph for `sshd`, which has none) with its counts in fixed measures. An address anywhere in the
+section is drawn as the network it is on (`Address`: Tailscale's mark for the tailnet, a glyph for
+the rest), a peer's processes as the products they are (`ProcessList`, through `processProduct`),
+a network device as what made it (`interfaceProduct`: Tailscale's tunnel, Docker's bridges and
+veths, a Kubernetes CNI; a physical port keeps a glyph for its kind), an account holding a key as
+its initials in the users list's hue, and an attacker's attempts against the most persistent
+address's as a meter. Connections, logins, devices and routes are readings with verbs, so their
+rows stay rows.
+
 **A project is drawn as its website, else as what it is.** `ProjectMark` tries three things in
 order, all on `ProductLogo`'s tile so a card does not change shape when an icon arrives: the icon
 the site declares (read through the dashboard's origin), then the product the project is

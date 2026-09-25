@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
-import { ArrowRight, Key, TerminalWindow, Warning } from "@/components/icons"
+import { ArrowRight, Key, SecureConnection, TerminalWindow, Warning } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type { Job, Posture, SecurityFinding, SSHDConfig, SSHSetting } from "@/lib/types"
@@ -12,6 +12,8 @@ import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { JobConsole, RecentJobs, useJobConsole } from "@/components/job-console"
 import { PageContext } from "@/components/page"
+import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { InitialsMark } from "@/components/account/user-avatar"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Row, ROW_BLEED, RowList } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
@@ -41,8 +43,11 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
  * right and wrong is the difference between a bot wasting its time and a bot
  * getting in.
  *
- * The page opens on those three and the port, as readings; the settings
- * follow as rows, and changes are staged and applied together: sshd is tested
+ * The page opens on the server itself — sshd, where it listens, what it was
+ * read from and what holds the listener, in the identity line every page
+ * that describes a thing opens on, with its verdict at the right end — then
+ * on those three and the port as readings; the settings follow as rows, and
+ * changes are staged and applied together: sshd is tested
  * with its own parser before the daemon is asked to reload, and the file is
  * put back if the test fails. The one refusal that is not about syntax is the
  * important one — turning off password authentication on a host where nobody
@@ -173,6 +178,64 @@ export function SSHPanel({
     <>
       {header}
 
+      <HostIdentity
+        fallback={SecureConnection}
+        title={
+          <>
+            sshd{" "}
+            <span className="font-mono text-body font-normal text-muted-foreground">
+              port {data.ports.join(", ") || "22"}
+            </span>
+          </>
+        }
+        facts={
+          <>
+            <span>
+              {data.source.endsWith("-T") ? "as sshd reports it" : "read from sshd_config"}
+            </span>
+            {data.socket?.unit && (
+              <>
+                <FactDot />
+                <span title="The systemd socket that holds the listener">
+                  listener held by{" "}
+                  <span className="font-mono text-foreground">{data.socket.unit}</span>
+                </span>
+              </>
+            )}
+            {data.managedFile && (
+              <>
+                <FactDot />
+                <span>
+                  writes <span className="font-mono text-foreground">{data.managedFile}</span>
+                </span>
+              </>
+            )}
+            {data.hasMatchBlocks && (
+              <>
+                <FactDot />
+                <Tag
+                  tone="warning"
+                  icon={Warning}
+                  title="Some values are overridden for particular users or addresses. What is shown here is the unconditional configuration; the conditional parts are not editable from this page."
+                >
+                  match blocks
+                </Tag>
+              </>
+            )}
+          </>
+        }
+        aside={
+          <span className="flex flex-wrap items-center gap-3">
+            <RecentJobs kinds={["ssh."]} onOpen={console_.open} />
+            <Status
+              verdict={insecure === 0 ? "ok" : "warning"}
+              label={insecure === 0 ? "Hardened" : `${insecure} below recommendation`}
+              className="text-body"
+            />
+          </span>
+        }
+      />
+
       <JobConsole
         job={console_.job}
         lines={console_.lines}
@@ -187,11 +250,11 @@ export function SSHPanel({
           label="Port"
           value={data.ports.join(", ") || "22"}
           hint={
-            data.socket?.unit
-              ? `held by ${data.socket.unit}`
-              : data.source.endsWith("-T")
-                ? "as sshd reports it"
-                : "read from sshd_config"
+            data.ports.length > 1
+              ? "listening on more than one"
+              : (data.ports[0] ?? "22") === "22"
+                ? "the default, which every scanner tries first"
+                : "not the default, so most scanners walk past"
           }
         />
         <StatTile
@@ -240,26 +303,8 @@ export function SSHPanel({
           title="Settings"
           advanced
           actions={
-            <span className="flex flex-wrap items-center gap-3">
-              {data.socket?.unit && (
-                <Tag mono title="The systemd socket that holds the listener">
-                  {data.socket.unit}
-                </Tag>
-              )}
-              {data.hasMatchBlocks && (
-                <Tag
-                  tone="warning"
-                  icon={Warning}
-                  title="Some values are overridden for particular users or addresses. What is shown here is the unconditional configuration; the conditional parts are not editable from this page."
-                >
-                  match blocks
-                </Tag>
-              )}
-              <RecentJobs kinds={["ssh."]} onOpen={console_.open} />
-              <Status
-                verdict={insecure === 0 ? "ok" : "warning"}
-                label={insecure === 0 ? "Hardened" : `${insecure} below recommendation`}
-              />
+            <span className="numeric text-hint text-muted-foreground">
+              {data.settings.length} directives
             </span>
           }
         />
@@ -345,6 +390,7 @@ export function SSHPanel({
               {data.keyedAccounts.map((account) => (
                 <Row
                   key={account.user}
+                  leading={<InitialsMark name={account.user} />}
                   title={account.user}
                   trailing={
                     <span className="numeric text-hint text-muted-foreground">
