@@ -491,7 +491,14 @@ func languageReadiness(candidate *DetectedCandidate, facts rootFacts) *DetectedR
 	if label == "" {
 		label = "the " + recipeLabel(candidate.Recipe) + " service"
 	}
-	return answeredReadiness("/", readinessFromConvention, "no health route found; any answer from "+label+" at / shows it is serving")
+	readiness := answeredReadiness("/", readinessFromConvention, "no health route found; any answer from "+label+" at / shows it is serving")
+	// Any answer passes readiness, a redirect included, so a Phoenix
+	// endpoint that sends every plain-HTTP request to HTTPS is named here.
+	if forced := facts.of(factPhoenixForceSSL); candidate.Recipe == "elixir" && len(forced) > 0 {
+		readiness.HTTPSRedirect = "force_ssl in " + forced[0].file
+		readiness.HTTPSRedirectIgnoresProxy = forced[0].value != "proxy"
+	}
+	return readiness
 }
 
 // languageToolRecipe is the recipe that installs a language, by the name

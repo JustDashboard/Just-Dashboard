@@ -282,6 +282,13 @@ func TestEnvironmentFindings(t *testing.T) {
 			want: map[string]PreflightSeverity{"database_required_for_start": PreflightBlocked},
 		},
 		{
+			name: "Phoenix's start runs Ecto's migrations against a database nobody linked",
+			candidate: DetectedCandidate{Name: "phoenix", BuildMethod: BuildRecipe, Framework: "phoenix",
+				StartCommand: "/app/bin/shop eval 'Application.load(:shop); for repo <- Application.fetch_env!(:shop, :ecto_repos), do: {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))' && exec /app/bin/shop start",
+				Databases:    []DetectedDatabase{{Engine: "postgres", Variable: "DATABASE_URL", Evidence: "postgrex in mix.exs"}}},
+			want: map[string]PreflightSeverity{"database_required_for_start": PreflightBlocked},
+		},
+		{
 			name: "Laravel on SQLite needs nothing linked",
 			candidate: DetectedCandidate{Name: "laravel", BuildMethod: BuildRecipe, Framework: "laravel", StartCommand: "php artisan migrate --force && php-server",
 				Databases: []DetectedDatabase{{Engine: "mysql", Variable: "DB_URL", Evidence: "DB_CONNECTION=mysql"}}},

@@ -537,6 +537,36 @@ func TestElixirApplicationsAreRecipeCandidates(t *testing.T) {
 	if len(sqlite.PersistentPaths) != 1 || sqlite.PersistentPaths[0].Target != "/app/data" || sqlite.PersistentPaths[0].Value != "/app/data/notes.db" {
 		t.Fatalf("persistent paths = %#v", sqlite.PersistentPaths)
 	}
+	// Phoenix 1.8's prod.exs redirects plain HTTP to HTTPS, trusting the
+	// proxy's X-Forwarded-Proto; readiness takes any answer, a redirect
+	// included, so the plan's HTTPS domain is what the finding asks about.
+	for prod, ignoresProxy := range map[string]bool{
+		"import Config\nconfig :shop, ShopWeb.Endpoint,\n  force_ssl: [rewrite_on: [:x_forwarded_proto], exclude: [hosts: [\"localhost\", \"127.0.0.1\"]]]\n": false,
+		"import Config\nconfig :shop, ShopWeb.Endpoint, force_ssl: [hsts: true]\n":                                                                            true,
+		"import Config\n# config :shop, ShopWeb.Endpoint, force_ssl: [hsts: true]\n":                                                                          false,
+	} {
+		forced := selectedOf(detectShapeFixture(t, map[string]string{"mix.exs": phoenixMix, "config/prod.exs": prod}))
+		if forced == nil || forced.Readiness == nil {
+			t.Fatalf("forced = %#v", forced)
+		}
+		commented := strings.Contains(prod, "# config")
+		if (forced.Readiness.HTTPSRedirect != "") == commented || forced.Readiness.HTTPSRedirectIgnoresProxy != ignoresProxy {
+			t.Fatalf("%q readiness = %#v", prod, forced.Readiness)
+		}
+		if commented {
+			continue
+		}
+		check := `{"path":"/","acceptAnyAnswer":true}`
+		plain := readinessPreflightFindings(readinessDraft(ProfileWeb, *forced), readinessPlan(BuildRecipe, forced.StartCommand, check))
+		if found := findingByCode(plain, "readiness_redirects_to_https"); found == nil || found.Measured != "force_ssl in config/prod.exs" || !strings.Contains(found.Action, "Phoenix") {
+			t.Fatalf("without an HTTPS domain = %#v", plain)
+		}
+		https := readinessPreflightFindings(readinessDraft(ProfileWeb, *forced),
+			readinessPlan(BuildRecipe, forced.StartCommand, check, PlannedDomain{Hostname: "shop.example.test", HTTPS: true, Ownership: OwnershipManaged}))
+		if found := findingByCode(https, "readiness_redirects_to_https"); (found != nil) != ignoresProxy || found != nil && !strings.Contains(found.Action, "rewrite_on") {
+			t.Fatalf("with an HTTPS domain = %#v", https)
+		}
+	}
 }
 
 func TestElixirRecipeRendersARelease(t *testing.T) {
@@ -584,6 +614,18 @@ func TestElixirRecipeRendersARelease(t *testing.T) {
 	}
 	if !secret {
 		t.Fatalf("the umbrella's Phoenix application gave its root no secret: %#v", root.Variables)
+	}
+	// An umbrella's migrations live in the application that owns the
+	// repository, which the start loads and migrates before serving.
+	umbrella["apps/shop/priv/repo/migrations/20240101_create_items.exs"] = "defmodule Shop.Repo.Migrations.CreateItems do\nend\n"
+	migrated := selectedOf(detectShapeFixture(t, umbrella))
+	if migrated == nil || migrated.StartCommand != "/app/bin/shop eval 'for app <- [:shop], do: Application.load(app); Application.ensure_all_started(:ssl); "+
+		"for app <- [:shop], repo <- Application.get_env(app, :ecto_repos, []), do: {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))' && exec /app/bin/shop start" {
+		t.Fatalf("umbrella with migrations = %#v", migrated)
+	}
+	umbrella["apps/shop/lib/shop/release.ex"] = "defmodule Shop.Release do\n  def migrate do\n  end\nend\n"
+	if migrated := selectedOf(detectShapeFixture(t, umbrella)); migrated == nil || migrated.StartCommand != `/app/bin/shop eval "Shop.Release.migrate" && exec /app/bin/shop start` {
+		t.Fatalf("umbrella with a Release module = %#v", migrated)
 	}
 	prepared, err = prepareFixture(t, umbrella, BuildPlanConfig{Method: BuildRecipe, Recipe: "elixir"})
 	if err != nil {

@@ -618,7 +618,7 @@ func databaseFindings(state environmentState, configuration PlanConfiguration, o
 	}
 	if start := state.candidate.StartCommand; (state.candidate.Framework == "laravel" || state.candidate.Framework == "symfony" ||
 		state.candidate.Framework == "rails" || state.candidate.Framework == "phoenix" || state.candidate.Framework == "hanami") &&
-		(strings.Contains(start, "migrat") || strings.Contains(start, "db:prepare")) && !linked {
+		migrationStartRE.MatchString(start) && !linked {
 		relational := false
 		for _, database := range state.candidate.Databases {
 			relational = relational || database.Engine == "postgres" || database.Engine == "mysql" || database.Engine == "mariadb"

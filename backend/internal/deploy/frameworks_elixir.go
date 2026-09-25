@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -184,9 +185,12 @@ type elixirProject struct {
 	serverOverlay, migrateOverlay bool
 	migrations                    bool
 	migrateModule                 string
-	port                          int
-	readsPort                     bool
-	privateHex                    bool
+	// migrateApps are the umbrella's applications with migrations, whose
+	// repositories the start migrates.
+	migrateApps []string
+	port        int
+	readsPort   bool
+	privateHex  bool
 }
 
 func readElixirProject(root string) elixirProject {
@@ -205,9 +209,13 @@ func readElixirProject(root string) elixirProject {
 	for _, match := range mixAliasRE.FindAllSubmatch(project.mix, -1) {
 		project.aliases[string(match[1])] = true
 	}
+	// The directories whose priv/ and lib/ hold migrations and a Release
+	// module: the root, or an umbrella's applications, by their names.
+	sourceApps := map[string]string{".": project.app}
 	if match := mixUmbrellaRE.FindSubmatch(project.mix); match != nil && safeRelativePath(string(match[1])) {
 		// An umbrella's root lists no dependencies of its own: what it
 		// serves is what its applications declare.
+		sourceApps = map[string]string{}
 		children, _ := filepath.Glob(filepath.Join(root, filepath.FromSlash(string(match[1])), "*", "mix.exs"))
 		for index, child := range children {
 			if index >= 16 {
@@ -220,6 +228,9 @@ func readElixirProject(root string) elixirProject {
 			content := readRecipeFile(root, filepath.ToSlash(relative), 256<<10)
 			for _, dependency := range mixDependencyRE.FindAllSubmatch(content, -1) {
 				project.deps[string(dependency[1])] = ""
+			}
+			if name := mixAppRE.FindSubmatch(content); name != nil {
+				sourceApps[filepath.ToSlash(filepath.Dir(relative))] = string(name[1])
 			}
 			app := mixAssetApp{dir: filepath.ToSlash(filepath.Dir(relative)), aliases: map[string]bool{}}
 			for _, alias := range mixAliasRE.FindAllSubmatch(content, -1) {
@@ -237,17 +248,23 @@ func readElixirProject(root string) elixirProject {
 	project.migrateOverlay = regularExists(root, "rel/overlays/bin/migrate")
 	project.privateHex = mixOrganizationRE.Match(project.mix)
 	if has(project.deps, "ecto_sql") {
-		entries, _ := filepath.Glob(filepath.Join(root, "priv", "*", "migrations", "*.exs"))
-		project.migrations = len(entries) > 0
-		sources, _ := filepath.Glob(filepath.Join(root, "lib", "*", "release.ex"))
-		for _, source := range sources {
-			relative, err := filepath.Rel(root, source)
-			if err != nil {
-				continue
+		for _, dir := range slices.Sorted(maps.Keys(sourceApps)) {
+			entries, _ := filepath.Glob(filepath.Join(root, filepath.FromSlash(dir), "priv", "*", "migrations", "*.exs"))
+			if len(entries) > 0 {
+				project.migrations = true
+				if dir != "." && sourceApps[dir] != "" {
+					project.migrateApps = append(project.migrateApps, sourceApps[dir])
+				}
 			}
-			if match := elixirMigrateRE.FindSubmatch(readRecipeFile(root, relative, 64<<10)); match != nil {
-				project.migrateModule = string(match[1])
-				break
+			sources, _ := filepath.Glob(filepath.Join(root, filepath.FromSlash(dir), "lib", "*", "release.ex"))
+			for _, source := range sources {
+				relative, err := filepath.Rel(root, source)
+				if err != nil || project.migrateModule != "" {
+					continue
+				}
+				if match := elixirMigrateRE.FindSubmatch(readRecipeFile(root, filepath.ToSlash(relative), 64<<10)); match != nil {
+					project.migrateModule = string(match[1])
+				}
 			}
 		}
 	}
@@ -371,6 +388,12 @@ func (p elixirProject) start() string {
 	switch {
 	case p.migrateModule != "":
 		migrate = "/app/bin/" + p.release + ` eval "` + p.migrateModule + `.migrate"`
+	case len(p.migrateApps) > 0:
+		// An umbrella's release may leave an application out, which then
+		// neither loads nor has repositories to migrate.
+		apps := ":" + strings.Join(p.migrateApps, ", :")
+		migrate = "/app/bin/" + p.release + " eval 'for app <- [" + apps + "], do: Application.load(app); Application.ensure_all_started(:ssl); " +
+			"for app <- [" + apps + "], repo <- Application.get_env(app, :ecto_repos, []), do: {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))'"
 	case p.app != "":
 		// What phx.gen.release's Release.migrate does, for a project
 		// without it: load the application and run every repository's
