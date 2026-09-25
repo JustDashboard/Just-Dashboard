@@ -623,6 +623,9 @@ func (c *BuildCause) systemLibrary(subject string) (string, string) {
 	case c.Detail == "musl":
 		return "a dependency ships a glibc binary, and the image is Alpine (musl)",
 			"use the dependency's musl build, or a Dockerfile on a glibc base image"
+	case c.Detail == "rust-static":
+		return "bindgen found libclang but could not load it: the crate's build script is linked statically against musl, and a static program cannot load a shared library",
+			"build with RUSTFLAGS=\"-C target-feature=-crt-static\", which the Rust recipe sets when Cargo.lock has bindgen or clang-sys, or on a glibc image"
 	case strings.HasSuffix(subject, "-sys"):
 		return "the Rust crate " + subject + " builds a C library the image does not have",
 			"enable the crate's vendored or rustls feature, or build with a Dockerfile that installs the library"

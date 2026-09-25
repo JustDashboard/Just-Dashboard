@@ -200,7 +200,9 @@ func rustCandidate(marker *detectedMarkers, rootLabel string) (DetectedCandidate
 	} else if len(manifest.bins) > 1 && manifest.defaultRun == "" {
 		candidate.NeedsDecision = append(candidate.NeedsDecision, "several binaries are declared; the first, "+binary+", is served — set package.default-run in Cargo.toml to choose another")
 	}
-	if binary != "" {
+	// A library crate's package name is no binary it builds, which the
+	// repository-shape evidence already says.
+	if facts := candidate.Rust; binary != "" && (facts == nil || len(facts.Binaries) > 0 || facts.BinaryReason == "package.default-run") {
 		reason := "binary target " + binary
 		if facts := candidate.Rust; facts != nil && facts.BinaryReason != "" && facts.BinaryReason != "package.default-run" {
 			reason += ": " + facts.BinaryReason
@@ -292,7 +294,11 @@ func rustBuildEvidence(candidate *DetectedCandidate, root string, facts *Detecte
 			Reason: "sqlx::migrate!() embeds the migrations; the application applies them when it starts"})
 	}
 	if facts.SQLxOffline {
-		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(root, ".sqlx"),
+		data := facts.SQLxOfflineData
+		if data == "" {
+			data = joinRoot(root, ".sqlx")
+		}
+		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: data,
 			Reason: "sqlx offline query data is committed; the build compiles its queries with SQLX_OFFLINE=true"})
 	}
 }

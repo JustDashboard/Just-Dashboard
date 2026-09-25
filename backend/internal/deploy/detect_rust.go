@@ -3,6 +3,7 @@ package deploy
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -33,16 +34,22 @@ type DetectedRustBuild struct {
 	Binary       string   `json:"binary,omitempty"`
 	BinaryReason string   `json:"binaryReason,omitempty"`
 	// NativePackages are the Alpine packages the build stage adds, and
-	// NativeCrates the crates that need them; NativeUnmapped are crates that
-	// need a system library the recipe has no package for.
+	// NativeCrates the crates that need them; NativeRuntime are the ones the
+	// runtime stage adds when the binary links dynamically, and
+	// NativeUnmapped are crates that need a system library the recipe has
+	// no package for.
 	NativePackages []string `json:"nativePackages,omitempty"`
 	NativeCrates   []string `json:"nativeCrates,omitempty"`
+	NativeRuntime  []string `json:"nativeRuntime,omitempty"`
 	NativeUnmapped []string `json:"nativeUnmapped,omitempty"`
 	// sqlx: its compile-time query macros are used, the offline query data
-	// (.sqlx) is committed, and migrate!() embeds migrations.
-	SQLxMacros  bool `json:"sqlxMacros,omitempty"`
-	SQLxOffline bool `json:"sqlxOffline,omitempty"`
-	SQLxMigrate bool `json:"sqlxMigrate,omitempty"`
+	// is committed — .sqlx, or sqlx 0.5 and 0.6's sqlx-data.json, named by
+	// SQLxOfflineData relative to the checkout — and migrate!() embeds
+	// migrations.
+	SQLxMacros      bool   `json:"sqlxMacros,omitempty"`
+	SQLxOffline     bool   `json:"sqlxOffline,omitempty"`
+	SQLxOfflineData string `json:"sqlxOfflineData,omitempty"`
+	SQLxMigrate     bool   `json:"sqlxMigrate,omitempty"`
 	// LockVersion is Cargo.lock's format, LockStale the dependencies it does
 	// not resolve, and Toolchain the rust-toolchain pin.
 	LockVersion int      `json:"lockVersion,omitempty"`
@@ -72,7 +79,10 @@ type cargoTarget struct {
 // cargoLeptos is cargo-leptos's metadata for one project.
 type cargoLeptos struct {
 	name, binPackage, outputName, siteRoot, siteAddr, binTarget string
-	hashFiles                                                   bool
+	// hashFiles names the site's files by content hash, which the server
+	// reads back from hashFile (hash.txt unless named) beside its binary.
+	hashFiles bool
+	hashFile  string
 }
 
 // cargoFile is the inert view of one Cargo.toml.
@@ -277,6 +287,8 @@ func applyCargoLeptos(leptos *cargoLeptos, key string, value tomlValue) {
 		leptos.binTarget = value.text
 	case "hash-files":
 		leptos.hashFiles = value.text == "true"
+	case "hash-file":
+		leptos.hashFile = value.text
 	}
 }
 
@@ -446,12 +458,14 @@ type cargoCrate struct {
 	// target-dir, and rustflags whether it sets build flags.
 	target, targetDir string
 	rustflags         bool
-	sqlxData          bool
-	sqlxMacros        bool
-	sqlxMigrate       bool
-	trunk             string
-	leptos            *cargoLeptos
-	dioxus, shuttle   bool
+	// sqlxData is where the offline query data sits, relative to the
+	// checkout: a .sqlx directory or sqlx-data.json.
+	sqlxData        string
+	sqlxMacros      bool
+	sqlxMigrate     bool
+	trunk           string
+	leptos          *cargoLeptos
+	dioxus, shuttle bool
 }
 
 // contextDir is the directory the build context is: the workspace root
@@ -483,6 +497,14 @@ func (b *rustSourceBudget) keepLock(dir string, lock *cargoLock) {
 	if b != nil && b.locks != nil {
 		b.locks[dir] = lock
 	}
+}
+
+// limit is the most a single read may take: n, or what is left.
+func (b *rustSourceBudget) limit(n int64) int64 {
+	if b == nil {
+		return n
+	}
+	return min(n, b.remaining)
 }
 
 func (b *rustSourceBudget) take(n int64) bool {
@@ -523,7 +545,9 @@ func readCargoCrate(boundary, dir string, budget *rustSourceBudget) (cargoCrate,
 	if cached, ok := budget.lock(context); ok {
 		crate.lock = cached
 	} else {
-		if lock, err := readContainedRegular(context, "Cargo.lock", 8<<20); err == nil {
+		// A lock past what is left of detection's budget is left unread,
+		// as too large a one is: present, resolving nothing it can name.
+		if lock, err := readContainedRegular(context, "Cargo.lock", budget.limit(8<<20)); err == nil && budget.take(int64(len(lock))) {
 			parsed := readCargoLock(lock)
 			crate.lock = &parsed
 		} else if regularExists(context, "Cargo.lock") {
@@ -566,10 +590,25 @@ func readCargoCrate(boundary, dir string, budget *rustSourceBudget) (cargoCrate,
 		}
 	}
 	crate.binary, crate.reason, crate.tied = chooseCargoBinary(crate.file, crate.binaries, sources)
-	crate.sqlxData = dirExists(dir, ".sqlx") || dirExists(context, ".sqlx")
+	// The query macros often live in a library crate of the workspace the
+	// server depends on by path; its queries compile with the server.
+	workspaceDir := ""
+	if crate.workspace != nil {
+		workspaceDir = crate.workspace.dir
+	}
+	libraries := cargoPathLibraries(boundary, dir, workspaceDir, crate.deps, inherited, budget)
+	sqlxDirs := []string{dir}
 	if crate.deps["sqlx"].crate != "" || (crate.lock != nil && crate.lock.has("sqlx-macros")) {
 		crate.sqlxMacros, crate.sqlxMigrate = scanRustSQLx(dir, budget)
 	}
+	for _, library := range libraries {
+		macros, migrate := scanRustSQLx(library, budget)
+		crate.sqlxMacros, crate.sqlxMigrate = crate.sqlxMacros || macros, crate.sqlxMigrate || migrate
+		if macros {
+			sqlxDirs = append(sqlxDirs, library)
+		}
+	}
+	crate.sqlxData = rustSQLxData(boundary, append(sqlxDirs, context))
 	crate.leptos = cargoLeptosFor(crate)
 	if crate.leptos == nil {
 		crate.trunk = cargoTrunk(dir, crate.deps)
@@ -581,6 +620,66 @@ func readCargoCrate(boundary, dir string, budget *rustSourceBudget) (cargoCrate,
 		}
 	}
 	return crate, nil
+}
+
+// rustSQLxData finds the committed offline query data in the first of dirs
+// that has it: .sqlx, or the sqlx-data.json sqlx 0.5 and 0.6 read.
+func rustSQLxData(boundary string, dirs []string) string {
+	for _, dir := range dirs {
+		switch {
+		case dirExists(dir, ".sqlx"):
+			return joinRoot(checkoutPath(boundary, dir), ".sqlx")
+		case regularExists(dir, "sqlx-data.json"):
+			return joinRoot(checkoutPath(boundary, dir), "sqlx-data.json")
+		}
+	}
+	return ""
+}
+
+// cargoPathLibraries are the crates inside the checkout the crate at dir
+// depends on by path, directly or through each other, that depend on sqlx:
+// at most 16 are read, each manifest charged to the budget. A dependency
+// inherited from the workspace (workspaceDir) is relative to it.
+func cargoPathLibraries(boundary, dir, workspaceDir string, deps, workspace map[string]cargoDependency, budget *rustSourceBudget) []string {
+	libraries := []string{}
+	seen := map[string]bool{dir: true}
+	type pending struct {
+		from string
+		deps map[string]cargoDependency
+	}
+	queue := []pending{{dir, deps}}
+	for len(queue) > 0 && len(seen) <= 16 {
+		next := queue[0]
+		queue = queue[1:]
+		for _, name := range slices.Sorted(maps.Keys(next.deps)) {
+			dep := next.deps[name]
+			if dep.path == "" || filepath.IsAbs(dep.path) {
+				continue
+			}
+			from := next.from
+			if dep.workspace && workspaceDir != "" {
+				from = workspaceDir
+			}
+			library := filepath.Join(from, filepath.FromSlash(dep.path))
+			if seen[library] || len(seen) > 16 {
+				continue
+			}
+			seen[library] = true
+			if _, err := containedSubdirectory(boundary, checkoutPath(boundary, library)); err != nil {
+				continue
+			}
+			content, err := readContainedRegular(library, "Cargo.toml", budget.limit(512<<10))
+			if err != nil || !budget.take(int64(len(content))) {
+				continue
+			}
+			libraryDeps := readCargoFile(content).crates(workspace, false)
+			if libraryDeps["sqlx"].crate != "" {
+				libraries = append(libraries, library)
+			}
+			queue = append(queue, pending{library, libraryDeps})
+		}
+	}
+	return libraries
 }
 
 func dirExists(root, relative string) bool {
@@ -917,14 +1016,20 @@ func cargoVersion(text string) ([3]int, bool) {
 }
 
 // rustNativePlan is what the build stage installs and sets for the crates
-// Cargo.lock resolves that build or link C.
+// Cargo.lock resolves that build or link C, and what the runtime stage
+// installs when the binary links musl dynamically.
 type rustNativePlan struct {
 	packages  []string
 	env       []string
 	rustflags string
+	runtime   []string
 	crates    []string
 	unmapped  []string
 }
+
+// dynamic says the binary links musl and libgcc as shared libraries, which
+// the runtime stage installs.
+func (p rustNativePlan) dynamic() bool { return len(p.runtime) > 0 }
 
 // rustBuildBasePackages are installed in every Rust build stage, which is
 // discarded: musl-dev and static OpenSSL link the static binary the alpine
@@ -956,7 +1061,14 @@ func planRustNative(lock *cargoLock) rustNativePlan {
 	}
 	for _, crate := range []string{"bindgen", "clang-sys"} {
 		if lock.has(crate) {
+			// bindgen's build script loads libclang, which a build script
+			// linked statically against musl cannot do ("Dynamic loading
+			// not supported"). Without crt-static every artifact, build
+			// scripts included, links musl dynamically, and the runtime
+			// stage installs the libgcc the binary then needs.
 			add(crate, "clang-dev")
+			plan.rustflags = "-C target-feature=-crt-static"
+			plan.runtime = append(plan.runtime, "libgcc")
 			break
 		}
 	}
@@ -968,11 +1080,16 @@ func planRustNative(lock *cargoLock) rustNativePlan {
 		}
 	}
 	if lock.has("pq-sys") && !lock.has("pq-src") {
-		// libpq's static archive needs the libraries libpq.so would have
-		// brought itself, after it on the link line.
 		add("pq-sys", "libpq-dev")
-		plan.env = append(plan.env, "PQ_LIB_STATIC=1")
-		plan.rustflags = "-C link-arg=-Wl,-Bstatic -C link-arg=-lpgcommon_shlib -C link-arg=-lpgport_shlib -C link-arg=-lssl -C link-arg=-lcrypto -C link-arg=-lc"
+		if plan.dynamic() {
+			// A dynamically linked binary takes libpq.so like the rest.
+			plan.runtime = append(plan.runtime, "libpq")
+		} else {
+			// libpq's static archive needs the libraries libpq.so would
+			// have brought itself, after it on the link line.
+			plan.env = append(plan.env, "PQ_LIB_STATIC=1")
+			plan.rustflags = "-C link-arg=-Wl,-Bstatic -C link-arg=-lpgcommon_shlib -C link-arg=-lpgport_shlib -C link-arg=-lssl -C link-arg=-lcrypto -C link-arg=-lc"
+		}
 	}
 	if lock.has("mysqlclient-sys") && !lock.has("mysqlclient-src") {
 		add("mysqlclient-sys", "mariadb-connector-c-dev", "mariadb-static", "zlib-static", "zstd-static")
@@ -999,8 +1116,8 @@ func planRustNative(lock *cargoLock) rustNativePlan {
 // rustFacts is a crate's reading as a candidate records it.
 func rustFacts(checkout string, crate cargoCrate, native rustNativePlan) *DetectedRustBuild {
 	facts := &DetectedRustBuild{Package: crate.file.name, Binary: crate.binary, BinaryReason: crate.reason,
-		NativeCrates: boundedList(native.crates), NativeUnmapped: boundedList(native.unmapped),
-		SQLxMacros: crate.sqlxMacros, SQLxOffline: crate.sqlxData, SQLxMigrate: crate.sqlxMigrate,
+		NativeCrates: boundedList(native.crates), NativeRuntime: native.runtime, NativeUnmapped: boundedList(native.unmapped),
+		SQLxMacros: crate.sqlxMacros, SQLxOffline: crate.sqlxData != "", SQLxOfflineData: crate.sqlxData, SQLxMigrate: crate.sqlxMigrate,
 		LockStale: boundedList(rustLockStale(crate))}
 	if len(native.packages) > len(rustBuildBasePackages) {
 		facts.NativePackages = native.packages[len(rustBuildBasePackages):]
@@ -1054,7 +1171,7 @@ func validateDetectedRustBuild(candidate DetectedCandidate) error {
 	text := func(value string, limit int) bool {
 		return len(value) <= limit && !strings.ContainsAny(value, "\x00\r\n") && rejectPlanSecretLiteral("detected Rust build", value) == nil
 	}
-	for _, list := range [][]string{facts.Binaries, facts.NativePackages, facts.NativeCrates, facts.NativeUnmapped, facts.LockStale} {
+	for _, list := range [][]string{facts.Binaries, facts.NativePackages, facts.NativeCrates, facts.NativeRuntime, facts.NativeUnmapped, facts.LockStale} {
 		if len(list) > 64 {
 			return malformed
 		}
@@ -1064,7 +1181,7 @@ func validateDetectedRustBuild(candidate DetectedCandidate) error {
 			}
 		}
 	}
-	for _, value := range []string{facts.Workspace, facts.Package, facts.Binary, facts.BinaryReason, facts.Toolchain, facts.HeavyRelease} {
+	for _, value := range []string{facts.Workspace, facts.Package, facts.Binary, facts.BinaryReason, facts.Toolchain, facts.HeavyRelease, facts.SQLxOfflineData} {
 		if !text(value, 512) {
 			return malformed
 		}

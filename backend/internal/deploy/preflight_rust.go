@@ -46,8 +46,15 @@ func rustBuildFindings(candidate *DetectedCandidate, configuration PlanConfigura
 			"The crate inherits from the workspace at "+facts.Workspace+" and shares its Cargo.lock, so the build starts there and selects the package.", "", "configuration.build.rootDirectory")
 	}
 	if len(facts.NativeCrates) > 0 {
-		add("rust_native_dependency", PreflightPass, "Native build dependencies are installed", strings.Join(facts.NativeCrates, "; "),
-			"These crates compile or link C code; the build stage, which the runtime image leaves behind, installs what they need and links the binary statically.", "", "configuration.build")
+		means := "These crates compile or link C code; the build stage, which the runtime image leaves behind, installs what they need and links the binary statically."
+		switch {
+		case facts.Fullstack != "":
+			means = "These crates compile or link C code; the Debian build stage installs what they need, and the runtime image the shared libraries the binary links."
+		case len(facts.NativeRuntime) > 0:
+			means = "These crates compile or link C code; the build stage installs what they need. bindgen loads libclang while the crate builds, which a statically linked build cannot, so the binary links musl dynamically and the runtime image installs " +
+				strings.Join(facts.NativeRuntime, ", ") + "."
+		}
+		add("rust_native_dependency", PreflightPass, "Native build dependencies are installed", strings.Join(facts.NativeCrates, "; "), means, "", "configuration.build")
 	}
 	if len(facts.NativeUnmapped) > 0 {
 		add("rust_native_dependency_unmapped", PreflightWarning, "A crate needs a system library the recipe does not install", strings.Join(facts.NativeUnmapped, ", "),
@@ -60,16 +67,20 @@ func rustBuildFindings(candidate *DetectedCandidate, configuration PlanConfigura
 		})
 		switch {
 		case facts.SQLxOffline:
-			add("sqlx_offline", PreflightPass, "sqlx checks its queries against committed data", ".sqlx",
-				"The build compiles with SQLX_OFFLINE=true, so its query macros read the committed .sqlx data and connect to nothing.", "", "configuration.build")
+			data := facts.SQLxOfflineData
+			if data == "" {
+				data = ".sqlx"
+			}
+			add("sqlx_offline", PreflightPass, "sqlx checks its queries against committed data", data,
+				"The build compiles with SQLX_OFFLINE=true, so its query macros read the committed offline data and connect to nothing.", "", "configuration.build")
 		case databaseURL:
-			add("sqlx_offline_data_missing", PreflightWarning, "sqlx will check its queries against a database while compiling", "DATABASE_URL is a build variable; no .sqlx is committed",
+			add("sqlx_offline_data_missing", PreflightWarning, "sqlx will check its queries against a database while compiling", "DATABASE_URL is a build variable; no .sqlx or sqlx-data.json is committed",
 				"The query macros connect to DATABASE_URL at compile time; a database linked by the dashboard is on the project's network, which the build is not.",
 				"Run cargo sqlx prepare and commit .sqlx, or keep DATABASE_URL pointing at a database the build can reach.", "variables.DATABASE_URL")
 		default:
-			add("sqlx_offline_data_missing", PreflightBlocked, "sqlx cannot compile its queries", "query!/query_as! macros and no .sqlx directory",
+			add("sqlx_offline_data_missing", PreflightBlocked, "sqlx cannot compile its queries", "query!/query_as! macros and no .sqlx directory or sqlx-data.json",
 				"sqlx checks each query macro against a database while compiling, and the build has neither a database nor committed offline data, so it fails with \"set DATABASE_URL to use query macros online\".",
-				"Run cargo sqlx prepare (cargo sqlx prepare --workspace in a workspace) and commit the .sqlx directory.", "configuration.build")
+				"Run cargo sqlx prepare (cargo sqlx prepare --workspace in a workspace) and commit the .sqlx directory, or sqlx-data.json with sqlx 0.6 and older.", "configuration.build")
 		}
 	}
 	if facts.SQLxMigrate {

@@ -47,6 +47,18 @@ func compiledBuildCases() []buildCase {
 			want:  BuildCause{Code: "build_system_library_missing", Phase: phaseBuild, Command: cargoBuild, ExitCode: 101, Detail: "rust", Subjects: []string{"libclang"}},
 		},
 		{
+			name: "bindgen in a static musl build script", command: cargoBuild, exit: 101, build: rustBuild,
+			lines: []string{"thread 'main' panicked at bindgen-0.72.0/lib.rs:616:27:",
+				"Unable to find libclang: \"the `libclang` shared library at /usr/lib/llvm22/lib/libclang.so.22.1.3 could not be opened: Dynamic loading not supported\""},
+			want: BuildCause{Code: "build_system_library_missing", Phase: phaseBuild, Command: cargoBuild, ExitCode: 101, Detail: "rust-static", Subjects: []string{"libclang"}},
+		},
+		{
+			name: "a workspace prefetch that cannot reach a module", command: "go list -e -deps ./... >/dev/null", exit: 1, build: goBuild,
+			lines: []string{"go: github.com/acme/billing@v1.2.0: reading github.com/acme/billing/go.mod at revision v1.2.0: git ls-remote -q origin in /go/pkg/mod/cache/vcs/2a: exit status 128:",
+				"\tfatal: could not read Username for 'https://github.com': terminal prompts disabled"},
+			want: BuildCause{Code: "build_registry_auth", Phase: phaseInstall, Command: "go list -e -deps ./... >/dev/null", ExitCode: 1, Detail: "go"},
+		},
+		{
 			name: "a crate that builds with CMake", command: cargoBuild, exit: 101, build: rustBuild,
 			lines: []string{"failed to execute command: No such file or directory (os error 2)", "is `cmake` not installed?"},
 			want:  BuildCause{Code: "build_native_toolchain_missing", Phase: phaseBuild, Command: cargoBuild, ExitCode: 101, Subjects: []string{"cmake"}},
@@ -77,6 +89,10 @@ func TestCompiledBuildFailuresAreNamed(t *testing.T) {
 	private := BuildCause{Code: "build_registry_auth", Detail: "go", Phase: phaseInstall}
 	if sentence := private.sentence(); !strings.Contains(sentence, "GIT_TOKEN") {
 		t.Fatalf("private module sentence = %q", sentence)
+	}
+	static := BuildCause{Code: "build_system_library_missing", Detail: "rust-static", Subjects: []string{"libclang"}, Phase: phaseBuild}
+	if what, action := static.explain(); !strings.Contains(what, "cannot load a shared library") || !strings.Contains(action, "crt-static") {
+		t.Fatalf("static libclang = %q / %q", what, action)
 	}
 }
 

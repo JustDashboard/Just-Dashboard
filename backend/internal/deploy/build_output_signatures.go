@@ -156,6 +156,9 @@ var buildSignatures = []buildSignature{
 	signature("build_system_library_missing", "python", "mysql_config", `mysql_config(?::)? not found|Can not find valid pkg-config name`).naming("mysql_config"),
 	signature("build_system_library_missing", "", "pkg-config", `Package '?([\w.+-]+)'?,? (?:was not found in the pkg-config search path|required by '[^']+', not found)`),
 	signature("build_system_library_missing", "", "cannot find -l", `cannot find -l([\w+.-]+)`),
+	// A build script linked statically against musl finds libclang and
+	// cannot load it, which is not the library missing.
+	signature("build_system_library_missing", "rust-static", "Dynamic loading not supported", `could not be opened: Dynamic loading not supported`).naming("libclang"),
 	signature("build_system_library_missing", "rust", "libclang", `Unable to find libclang|couldn't find any valid shared libraries matching: \['libclang`).naming("libclang"),
 	signature("build_system_library_missing", "rust", "custom build command", "failed to run custom build command for `([\\w-]+-sys)"),
 	signature("build_system_library_missing", "", "No such file or directory", `fatal error: ([\w/.+-]+\.h): No such file or directory`),

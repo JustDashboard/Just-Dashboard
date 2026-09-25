@@ -3649,9 +3649,13 @@ export type DeploymentDetectionCandidate = {
     binaryReason?: string
     nativePackages?: string[]
     nativeCrates?: string[]
+    /** What the runtime image installs when the binary links dynamically (bindgen). */
+    nativeRuntime?: string[]
     nativeUnmapped?: string[]
     sqlxMacros?: boolean
     sqlxOffline?: boolean
+    /** Where the offline query data is: a .sqlx directory or sqlx-data.json. */
+    sqlxOfflineData?: string
     sqlxMigrate?: boolean
     lockVersion?: number
     lockStale?: string[]

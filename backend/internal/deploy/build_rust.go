@@ -44,9 +44,12 @@ type rustRecipe struct {
 	// target-dir's release directory.
 	output      string
 	sqlxOffline bool
-	leptos      *cargoLeptos
-	trunk       string
-	notes       []string
+	// pinned says a rust-toolchain file sits in the build context, which
+	// rustup obeys over the image's own toolchain unless told otherwise.
+	pinned bool
+	leptos *cargoLeptos
+	trunk  string
+	notes  []string
 }
 
 var (
@@ -98,7 +101,7 @@ func selectRustRecipe(boundary, root string, config BuildPlanConfig) (rustRecipe
 		return rustRecipe{}, err
 	}
 	recipe := rustRecipe{binary: binary, version: version, locked: crate.lock != nil, native: planRustNative(crate.lock),
-		sqlxOffline: crate.sqlxData, leptos: crate.leptos, trunk: crate.trunk, packageName: file.name}
+		sqlxOffline: crate.sqlxData != "", pinned: crate.toolchain != "", leptos: crate.leptos, trunk: crate.trunk, packageName: file.name}
 	if crate.lock != nil && rustLockOutgrowsToolchain(crate.lock.version, version) {
 		recipe.notes = append(recipe.notes, fmt.Sprintf("Cargo.lock is version %d, which Rust %s cannot read; building with the current stable Rust", crate.lock.version, version))
 		recipe.version = "1"
@@ -125,7 +128,10 @@ func selectRustRecipe(boundary, root string, config BuildPlanConfig) (rustRecipe
 		return rustRecipe{}, fmt.Errorf("%w: .cargo/config sets a build target or target-dir the recipe cannot copy from (%s)", ErrUnsupportedBuilder, recipe.output)
 	}
 	if recipe.native.rustflags != "" && crate.rustflags {
-		recipe.notes = append(recipe.notes, "RUSTFLAGS links libpq statically and replaces .cargo/config's build.rustflags")
+		recipe.notes = append(recipe.notes, "RUSTFLAGS ("+recipe.native.rustflags+") replaces .cargo/config's build.rustflags")
+	}
+	if recipe.native.dynamic() && recipe.leptos == nil && recipe.trunk == "" {
+		recipe.notes = append(recipe.notes, "bindgen loads libclang while the crate builds, so the binary links musl dynamically and the runtime installs "+strings.Join(recipe.native.runtime, ", "))
 	}
 	for _, framework := range rustWebFrameworks {
 		if crate.deps[framework.crate].crate != "" {
@@ -157,6 +163,12 @@ func rustRecipeBases(recipe rustRecipe) []string {
 	}
 	return []string{"rust:" + recipe.version + "-alpine", recipeBaseCatalogue["rust"][1]}
 }
+
+// rustToolchainEnv makes rustup use the image's own toolchain — the one the
+// recipe chose from the rust-toolchain file, or the current stable one when
+// Cargo.lock outgrew the pin — rather than install the pin a second time,
+// which a rust-toolchain file in the context otherwise makes it do.
+const rustToolchainEnv = "RUSTUP_TOOLCHAIN=${RUST_VERSION}"
 
 // rustBuildJobs caps Cargo's parallel jobs at the gigabytes the builder
 // has free, read when the step runs: rustc peaks around a gigabyte per job
@@ -193,6 +205,9 @@ func renderRustDockerfile(recipe rustRecipe, config BuildPlanConfig, bases []Res
 	if recipe.native.rustflags != "" {
 		env = append(env, `RUSTFLAGS="`+recipe.native.rustflags+`"`)
 	}
+	if recipe.pinned {
+		env = append(env, rustToolchainEnv)
+	}
 	if recipe.sqlxOffline {
 		// The committed query data is what the macros check against; a
 		// DATABASE_URL in a committed .env or the build's variables would
@@ -223,7 +238,7 @@ func renderRustDockerfile(recipe rustRecipe, config BuildPlanConfig, bases []Res
 		}
 	}
 	return append(lines, compiledRuntimeLines(bases[1], compiledRuntime{
-		assets: recipe.assets, source: rustSourceDir(recipe), start: start, env: runtimeEnv,
+		assets: recipe.assets, source: rustSourceDir(recipe), packages: recipe.native.runtime, start: start, env: runtimeEnv,
 	})...), nil
 }
 
@@ -259,6 +274,19 @@ func rustDebianPackages(native rustNativePlan) (build, runtime []string) {
 	return uniqueOrdered(build), uniqueOrdered(runtime)
 }
 
+// leptosHashFileRE is a hash-file name safe to write unquoted into COPY.
+var leptosHashFileRE = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)
+
+// rustDebianBuildStart opens the Leptos and Trunk build stage: the
+// toolchain the recipe chose, with the WebAssembly target added to it.
+func rustDebianBuildStart(recipe rustRecipe, base ResolvedImage) []string {
+	lines := []string{"FROM " + immutableImageReference(base) + " AS build", "WORKDIR /src"}
+	if recipe.pinned {
+		lines = append(lines, "ENV "+rustToolchainEnv)
+	}
+	return append(lines, "RUN rustup target add wasm32-unknown-unknown")
+}
+
 func debianInstall(packages []string) string {
 	return "apt-get update && apt-get install -y --no-install-recommends " + strings.Join(packages, " ") + " && rm -rf /var/lib/apt/lists/*"
 }
@@ -272,11 +300,7 @@ func renderLeptosDockerfile(recipe rustRecipe, config BuildPlanConfig, bases []R
 		locked = " --locked"
 	}
 	buildPackages, runtimePackages := rustDebianPackages(recipe.native)
-	lines := []string{
-		"FROM " + immutableImageReference(bases[0]) + " AS build",
-		"WORKDIR /src",
-		"RUN rustup target add wasm32-unknown-unknown",
-	}
+	lines := rustDebianBuildStart(recipe, bases[0])
 	if len(buildPackages) > 0 {
 		lines = append(lines, "RUN "+debianInstall(buildPackages))
 	}
@@ -309,11 +333,25 @@ func renderLeptosDockerfile(recipe rustRecipe, config BuildPlanConfig, bases []R
 		outputName = recipe.leptos.outputName
 	}
 	binary := recipe.output + "/" + recipe.binary
+	copied, produced := "cp "+binary+" /out/app && cp -r "+siteRoot+" /out/site", binary+" and "+siteRoot
+	// With hash-files the site's file names carry a content hash the build
+	// writes beside the binary, and the server reads it from beside its own
+	// binary, /app, to link the right bundle; without it the page loads
+	// and its script and WebAssembly are not found.
+	hashFile := ""
+	if recipe.leptos.hashFiles {
+		hashFile = "hash.txt"
+		if name := recipe.leptos.hashFile; name != "" && leptosHashFileRE.MatchString(name) {
+			hashFile = name
+		}
+		copied += " && cp " + recipe.output + "/" + hashFile + " /out/" + hashFile
+		produced += " and " + recipe.output + "/" + hashFile
+	}
 	lines = append(lines,
 		"COPY . .",
 		"RUN "+installSecrets+"cargo fetch"+locked,
 		"RUN "+buildSecrets+rustBuildJobs+build,
-		"RUN mkdir -p /out && test -f "+binary+" && cp "+binary+" /out/app && cp -r "+siteRoot+" /out/site || (echo 'cargo leptos build must produce "+binary+" and "+siteRoot+"' >&2; exit 1)",
+		"RUN mkdir -p /out && test -f "+binary+" && "+copied+" || (echo 'cargo leptos build must produce "+produced+"' >&2; exit 1)",
 		"FROM "+immutableImageReference(bases[1]),
 		"RUN "+debianInstall(append([]string{"ca-certificates", "tzdata"}, runtimePackages...))+" && useradd -u 10001 -m app",
 		"USER app",
@@ -321,6 +359,9 @@ func renderLeptosDockerfile(recipe rustRecipe, config BuildPlanConfig, bases []R
 		"COPY --from=build /out/app /app",
 		"COPY --from=build --chown=app:app /out/site "+compiledRuntimeHome+"/site",
 	)
+	if hashFile != "" {
+		lines = append(lines, "COPY --from=build /out/"+hashFile+" /"+hashFile)
+	}
 	for _, asset := range recipe.assets {
 		if asset != "site" {
 			lines = append(lines, "COPY --from=build --chown=app:app "+rustSourceDir(recipe)+"/"+asset+" "+compiledRuntimeHome+"/"+asset)
@@ -329,6 +370,12 @@ func renderLeptosDockerfile(recipe rustRecipe, config BuildPlanConfig, bases []R
 	env := []string{"LEPTOS_SITE_ROOT=site", "LEPTOS_ENV=PROD"}
 	if outputName != "" && rustBinaryNameRE.MatchString(outputName) {
 		env = append(env, "LEPTOS_OUTPUT_NAME="+outputName)
+	}
+	if hashFile != "" {
+		env = append(env, "LEPTOS_HASH_FILES=true")
+		if hashFile != "hash.txt" {
+			env = append(env, "LEPTOS_HASH_FILE_NAME="+hashFile)
+		}
 	}
 	lines = append(lines, "RUN mkdir -p "+compiledRuntimeHome+"/data", "ENV "+strings.Join(env, " "))
 	start := strings.TrimSpace(config.StartCommand)
@@ -357,11 +404,7 @@ func renderTrunkDockerfile(recipe rustRecipe, config BuildPlanConfig, bases []Re
 		locked = " --locked"
 	}
 	buildPackages, _ := rustDebianPackages(recipe.native)
-	lines := []string{
-		"FROM " + immutableImageReference(bases[0]) + " AS build",
-		"WORKDIR /src",
-		"RUN rustup target add wasm32-unknown-unknown",
-	}
+	lines := rustDebianBuildStart(recipe, bases[0])
 	if len(buildPackages) > 0 {
 		lines = append(lines, "RUN "+debianInstall(buildPackages))
 	}

@@ -50,6 +50,10 @@ site-root = "target/site"
 # Defaults to pkg
 site-pkg-dir = "pkg"
 
+# Content hashes in the JS, WASM and CSS file names. The server reads them back
+# from the hash.txt the build writes beside its binary.
+hash-files = true
+
 # [Optional] The source CSS file. If it ends with .sass or .scss then it will be compiled by dart-sass into CSS. The CSS is optimized by Lightning CSS before being written to <site-root>/<site-pkg>/leptos-start.css
 style-file = "style/main.scss"
 # Assets source dir. All files found here will be copied and synchronized to site-root.

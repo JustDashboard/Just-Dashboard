@@ -1,6 +1,8 @@
 package deploy
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -62,6 +64,12 @@ func TestCargoWorkspaceMembersBuildWithinTheirWorkspace(t *testing.T) {
 	}
 	if server.Framework != "axum" || server.UnpinnedDependencies || server.Rust == nil || server.Rust.Workspace != "." || server.Rust.Package != "server" || server.RecipeIssue != "" {
 		t.Fatalf("server = %+v / %+v", server, server.Rust)
+	}
+	// A library member builds no binary, whatever its package is called.
+	for _, evidence := range rustCandidateAt(t, detection, "crates/core").Evidence {
+		if strings.HasPrefix(evidence.Reason, "binary target") {
+			t.Fatalf("the library crate claims a binary: %+v", evidence)
+		}
 	}
 	prepared := prepareRust(t, root, root+"/crates/server", BuildPlanConfig{RootDirectory: "crates/server"})
 	if prepared.ContextDirectory != "." {
@@ -150,18 +158,19 @@ func TestRustNativeCratesInstallWhatTheyNeed(t *testing.T) {
 	writeBuildFixture(t, root, "Cargo.toml", "[package]\nname = \"svc\"\n\n[dependencies]\ndiesel = { version = \"2\", features = [\"postgres\"] }\ntonic = \"0.12\"\n")
 	writeBuildFixture(t, root, "src/main.rs", "fn main() {}\n")
 	lock := "version = 4\n"
-	for _, name := range []string{"svc", "diesel", "tonic", "pq-sys", "openssl-src", "prost-build", "cmake", "clang-sys"} {
+	for _, name := range []string{"svc", "diesel", "tonic", "pq-sys", "openssl-src", "prost-build", "cmake"} {
 		lock += "\n[[package]]\nname = \"" + name + "\"\nversion = \"1.0.0\"\n"
 	}
 	writeBuildFixture(t, root, "Cargo.lock", lock)
 	prepared := prepareRust(t, root, root, BuildPlanConfig{})
 	assertGoDockerfile(t, prepared.DockerfilePreview,
-		"RUN apk add --no-cache musl-dev pkgconfig openssl-dev openssl-libs-static perl make cmake g++ linux-headers clang-dev protoc protobuf-dev libpq-dev\n",
+		"RUN apk add --no-cache musl-dev pkgconfig openssl-dev openssl-libs-static perl make cmake g++ linux-headers protoc protobuf-dev libpq-dev\n",
 		`ENV OPENSSL_STATIC=1 PQ_LIB_STATIC=1 RUSTFLAGS="-C link-arg=-Wl,-Bstatic -C link-arg=-lpgcommon_shlib`,
-		`export CARGO_BUILD_JOBS="$(`, "FROM alpine:3.22@sha256:")
+		`export CARGO_BUILD_JOBS="$(`, "FROM alpine:3.22@sha256:", "RUN apk add --no-cache tzdata && adduser")
 	candidate := rustCandidateAt(t, detectRust(t, root), "")
 	item := findingByCode(rustBuildFindings(candidate, PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe}}), "rust_native_dependency")
-	if item == nil || !strings.Contains(item.Measured, "pq-sys (libpq-dev)") || !strings.Contains(item.Measured, "prost-build (protoc, protobuf-dev)") {
+	if item == nil || !strings.Contains(item.Measured, "pq-sys (libpq-dev)") || !strings.Contains(item.Measured, "prost-build (protoc, protobuf-dev)") ||
+		!strings.Contains(item.Means, "statically") {
 		t.Fatalf("rust_native_dependency = %+v", item)
 	}
 	// A vendored protoc needs no system one.
@@ -169,6 +178,22 @@ func TestRustNativeCratesInstallWhatTheyNeed(t *testing.T) {
 	prepared = prepareRust(t, root, root, BuildPlanConfig{})
 	if strings.Contains(prepared.DockerfilePreview, "protobuf-dev") {
 		t.Fatalf("a vendored protoc still installed one:\n%s", prepared.DockerfilePreview)
+	}
+
+	// bindgen's build script loads libclang, which a static musl build
+	// script cannot: everything links musl dynamically, libpq included, and
+	// the runtime installs what the binary then loads.
+	writeBuildFixture(t, root, "Cargo.lock", lock+"\n[[package]]\nname = \"clang-sys\"\nversion = \"1.8.1\"\n")
+	prepared = prepareRust(t, root, root, BuildPlanConfig{})
+	assertGoDockerfile(t, prepared.DockerfilePreview, " clang-dev ", `ENV OPENSSL_STATIC=1 RUSTFLAGS="-C target-feature=-crt-static"`+"\n",
+		"RUN apk add --no-cache tzdata libgcc libpq && adduser -D -u 10001 app")
+	if strings.Contains(prepared.DockerfilePreview, "PQ_LIB_STATIC") || !strings.Contains(strings.Join(prepared.Notes, " "), "links musl dynamically") {
+		t.Fatalf("a bindgen build still links statically:\n%s\n%v", prepared.DockerfilePreview, prepared.Notes)
+	}
+	candidate = rustCandidateAt(t, detectRust(t, root), "")
+	item = findingByCode(rustBuildFindings(candidate, PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe}}), "rust_native_dependency")
+	if item == nil || !reflect.DeepEqual(candidate.Rust.NativeRuntime, []string{"libgcc", "libpq"}) || !strings.Contains(item.Means, "runtime image installs libgcc, libpq") {
+		t.Fatalf("rust_native_dependency = %+v / %+v", item, candidate.Rust)
 	}
 }
 
@@ -200,6 +225,37 @@ func TestRustSQLxCompilesOfflineOrSaysWhyNot(t *testing.T) {
 	if item := findingByCode(rustBuildFindings(candidate, PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe}}), "sqlx_offline"); item == nil || item.Severity != PreflightPass {
 		t.Fatalf("sqlx_offline = %+v", item)
 	}
+
+	// sqlx 0.5 and 0.6 read sqlx-data.json instead.
+	legacy := t.TempDir()
+	writeBuildFixture(t, legacy, "Cargo.toml", "[package]\nname = \"svc\"\n\n[dependencies]\nsqlx = { version = \"0.6\", features = [\"postgres\", \"runtime-tokio-rustls\", \"offline\"] }\n")
+	writeBuildFixture(t, legacy, "src/main.rs", "fn main() { sqlx::query!(\"select 1 as one\"); }\n")
+	writeBuildFixture(t, legacy, "sqlx-data.json", "{\"db\": \"PostgreSQL\"}")
+	candidate = rustCandidateAt(t, detectRust(t, legacy), "")
+	if item := findingByCode(rustBuildFindings(candidate, PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe}}), "sqlx_offline"); item == nil ||
+		item.Severity != PreflightPass || item.Measured != "sqlx-data.json" {
+		t.Fatalf("sqlx 0.6 offline data = %+v / %+v", item, candidate.Rust)
+	}
+	assertGoDockerfile(t, prepareRust(t, legacy, legacy, BuildPlanConfig{}).DockerfilePreview, "SQLX_OFFLINE=true")
+
+	// The macros in a library member the server depends on by path are the
+	// server's to compile.
+	workspace := t.TempDir()
+	writeBuildFixture(t, workspace, "Cargo.toml", "[workspace]\nmembers = [\"crates/*\"]\n\n[workspace.dependencies]\ndb = { path = \"crates/db\" }\nsqlx = { version = \"0.8\", features = [\"postgres\", \"macros\"] }\n")
+	writeBuildFixture(t, workspace, "crates/server/Cargo.toml", "[package]\nname = \"server\"\n\n[dependencies]\ndb.workspace = true\naxum = \"0.8\"\n")
+	writeBuildFixture(t, workspace, "crates/server/src/main.rs", "fn main() {}\n")
+	writeBuildFixture(t, workspace, "crates/db/Cargo.toml", "[package]\nname = \"db\"\n\n[dependencies]\nsqlx.workspace = true\n")
+	writeBuildFixture(t, workspace, "crates/db/src/lib.rs", "pub async fn users() { sqlx::query!(\"select id from users\"); }\n")
+	server := rustCandidateAt(t, detectRust(t, workspace), "crates/server")
+	if item := findingByCode(rustBuildFindings(server, PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe}}), "sqlx_offline_data_missing"); item == nil || item.Severity != PreflightBlocked {
+		t.Fatalf("the library member's macros were not read: %+v / %+v", item, server.Rust)
+	}
+	writeBuildFixture(t, workspace, "crates/db/.sqlx/query-1.json", "{}")
+	server = rustCandidateAt(t, detectRust(t, workspace), "crates/server")
+	if server.Rust == nil || server.Rust.SQLxOfflineData != "crates/db/.sqlx" {
+		t.Fatalf("offline data = %+v", server.Rust)
+	}
+	assertGoDockerfile(t, prepareRust(t, workspace, workspace+"/crates/server", BuildPlanConfig{RootDirectory: "crates/server"}).DockerfilePreview, "SQLX_OFFLINE=true")
 }
 
 func TestRustFullStackFrameworksBuildTheirOwnWay(t *testing.T) {
@@ -217,9 +273,29 @@ func TestRustFullStackFrameworksBuildTheirOwnWay(t *testing.T) {
 	prepared := prepareRust(t, leptos, leptos, BuildPlanConfig{})
 	assertGoDockerfile(t, prepared.DockerfilePreview, "FROM rust:1-bookworm@sha256:", "RUN rustup target add wasm32-unknown-unknown\n",
 		"RUN cargo install cargo-leptos --locked --version "+cargoLeptosVersion, "cargo leptos build --release\n",
-		"cp target/release/start-axum /out/app && cp -r target/site /out/site", "FROM debian:bookworm-slim@sha256:",
-		"COPY --from=build --chown=app:app /out/site /home/app/site", "ENV LEPTOS_SITE_ROOT=site LEPTOS_ENV=PROD LEPTOS_OUTPUT_NAME=start-axum",
+		"cp target/release/start-axum /out/app && cp -r target/site /out/site ||", "FROM debian:bookworm-slim@sha256:",
+		"COPY --from=build --chown=app:app /out/site /home/app/site", "ENV LEPTOS_SITE_ROOT=site LEPTOS_ENV=PROD LEPTOS_OUTPUT_NAME=start-axum\n",
 		`CMD ["/bin/sh","-c","exec env LEPTOS_SITE_ADDR=0.0.0.0:${PORT:-3000} /app"]`)
+	if strings.Contains(prepared.DockerfilePreview, "hash.txt") || strings.Contains(prepared.DockerfilePreview, "RUSTUP_TOOLCHAIN") {
+		t.Fatalf("a site without hash-files or a toolchain pin:\n%s", prepared.DockerfilePreview)
+	}
+	// hash-files names the bundle by content hash; the server finds the
+	// hashes beside its binary, and without them links names that 404.
+	manifest, _ := os.ReadFile(filepath.Join(leptos, "Cargo.toml"))
+	writeBuildFixture(t, leptos, "Cargo.toml", strings.Replace(string(manifest), "bin-features", "hash-files = true\nbin-features", 1))
+	writeBuildFixture(t, leptos, "rust-toolchain.toml", "[toolchain]\nchannel = \"1.89\"\n")
+	prepared = prepareRust(t, leptos, leptos, BuildPlanConfig{})
+	assertGoDockerfile(t, prepared.DockerfilePreview, "FROM rust:1.89-bookworm@sha256:", "WORKDIR /src\nENV RUSTUP_TOOLCHAIN=${RUST_VERSION}\nRUN rustup target add wasm32-unknown-unknown\n",
+		"cp -r target/site /out/site && cp target/release/hash.txt /out/hash.txt ||", "COPY --from=build /out/hash.txt /hash.txt\n",
+		"ENV LEPTOS_SITE_ROOT=site LEPTOS_ENV=PROD LEPTOS_OUTPUT_NAME=start-axum LEPTOS_HASH_FILES=true\n")
+	writeBuildFixture(t, leptos, "Cargo.toml", strings.Replace(string(manifest), "bin-features", "hash-files = true\nhash-file = \"bundle.hash\"\nbin-features", 1))
+	prepared = prepareRust(t, leptos, leptos, BuildPlanConfig{})
+	assertGoDockerfile(t, prepared.DockerfilePreview, "cp target/release/bundle.hash /out/bundle.hash", "COPY --from=build /out/bundle.hash /bundle.hash\n",
+		"LEPTOS_HASH_FILES=true LEPTOS_HASH_FILE_NAME=bundle.hash\n")
+	writeBuildFixture(t, leptos, "Cargo.toml", string(manifest))
+	if err := os.Remove(filepath.Join(leptos, "rust-toolchain.toml")); err != nil {
+		t.Fatal(err)
+	}
 	if findings := buildMemoryFindings(candidate, PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe, Recipe: "rust"}}, HostObservation{AvailableMemory: 2 << 30}); len(findings) != 1 ||
 		!strings.Contains(findings[0].Measured, "Leptos") {
 		t.Fatalf("build memory = %+v", findings)
@@ -280,13 +356,38 @@ func TestCargoLockIsComparedWithTheManifest(t *testing.T) {
 	writeBuildFixture(t, root, "Cargo.lock", "version = 4\n\n[[package]]\nname = \"svc\"\nversion = \"0.1.0\"\n\n[[package]]\nname = \"axum\"\nversion = \"0.8.4\"\n\n[[package]]\nname = \"serde\"\nversion = \"1.0.219\"\n\n[[package]]\nname = \"insta\"\nversion = \"1.43.1\"\n")
 	writeBuildFixture(t, root, "rust-toolchain.toml", "[toolchain]\nchannel = \"1.75.0\"\n")
 	prepared = prepareRust(t, root, root, BuildPlanConfig{})
-	assertGoDockerfile(t, prepared.DockerfilePreview, "FROM rust:1-alpine@sha256:", "cargo build --release --locked --bin svc")
+	// rustup obeys the rust-toolchain file over the image's toolchain and
+	// would install the old pin anyway; the image's own is the one chosen.
+	assertGoDockerfile(t, prepared.DockerfilePreview, "FROM rust:1-alpine@sha256:", "ENV OPENSSL_STATIC=1 RUSTUP_TOOLCHAIN=${RUST_VERSION}\n",
+		"cargo build --release --locked --bin svc")
 	candidate = rustCandidateAt(t, detectRust(t, root), "")
 	if item := findingByCode(rustBuildFindings(candidate, PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe}}), "rust_lock_newer_than_toolchain"); item == nil {
 		t.Fatalf("lock/toolchain = %+v", candidate.Rust)
 	}
 	if action := unpinnedDependenciesAction("rust"); !strings.Contains(action, "cargo generate-lockfile") {
 		t.Fatalf("unpinned action = %q", action)
+	}
+}
+
+// Cargo.lock is charged to detection's read budget like the sources: once
+// it is spent a lock is present but unread, and the recipe, which has no
+// budget, still reads it in full.
+func TestCargoLockReadsAreChargedToTheDetectionBudget(t *testing.T) {
+	root := t.TempDir()
+	writeBuildFixture(t, root, "Cargo.toml", "[package]\nname = \"svc\"\n\n[dependencies]\naxum = \"0.8\"\n")
+	writeBuildFixture(t, root, "src/main.rs", "fn main() {}\n")
+	writeBuildFixture(t, root, "Cargo.lock", "version = 4\n\n[[package]]\nname = \"axum\"\nversion = \"0.8.4\"\n\n[[package]]\nname = \"cmake\"\nversion = \"0.1.54\"\n")
+	spent := &rustSourceBudget{remaining: 16, locks: map[string]*cargoLock{}}
+	crate, err := readCargoCrate(root, root, spent)
+	if err != nil || crate.lock == nil || len(crate.lock.packages) != 0 {
+		t.Fatalf("a lock past the budget was read: %+v, %v", crate.lock, err)
+	}
+	budget := &rustSourceBudget{remaining: 16 << 20, locks: map[string]*cargoLock{}}
+	if crate, err = readCargoCrate(root, root, budget); err != nil || !crate.lock.has("cmake") || budget.remaining >= 16<<20 {
+		t.Fatalf("lock = %+v, %v, %d left", crate.lock, err, budget.remaining)
+	}
+	if crate, err = readCargoCrate(root, root, nil); err != nil || !crate.lock.has("cmake") {
+		t.Fatalf("the recipe's read = %+v, %v", crate.lock, err)
 	}
 }
 
