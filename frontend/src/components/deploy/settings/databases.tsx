@@ -652,7 +652,7 @@ function DatabasesBody({
                   return (
                     <DatabaseRowGroup key={`${id}-${index}`}>
                       <ChoiceRow
-                        href={`/databases?conn=${id}`}
+                        href={`/databases/browse?conn=${id}`}
                         verb={name}
                         busy={busy === `ping-${id}`}
                         leading={<ProductLogo size="sm" id={link?.driver} fallback={Database} />}

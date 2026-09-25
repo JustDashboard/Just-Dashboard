@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { CheckCircle, ListOrdered, Play, RefreshClockwise, Stop } from "@/components/icons"
+import { CheckCircle, Globe, ListOrdered, Play, RefreshClockwise, Stop } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { duration } from "@/lib/format"
@@ -10,10 +10,11 @@ import type { ProxyValidation, SystemdUnit } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Status } from "@/components/status-dot"
-import { Tag } from "@/components/tag"
+import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { engineProduct } from "@/components/proxy/marks"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
-import { engineLabel, engineUnit, type ProxyStatus } from "@/components/proxy/proxy-context"
+import { engineUnit, type ProxyStatus } from "@/components/proxy/proxy-context"
 
 /**
  * The engine itself: whether it is running, and the three things done to it.
@@ -75,11 +76,18 @@ export function EngineStatus({
 }
 
 /**
- * What this host's proxy is, as data: the engine and its version, the
- * directory it reads, whether certbot is here, who renews. These are the
- * facts a person opens the page to check, with the service commands beside them.
+ * What this host's proxy is, as the line the host Overview opens on: the
+ * engine drawn as itself on the tile, its name and version, and after it the
+ * facts a person opens the page to check — whether it is running, the
+ * directory it reads, the ingress it serves through, whether certbot is here
+ * and who renews. The service commands sit at the line's right end, where
+ * the Overview keeps its verdict and Metrics link.
+ *
+ * It was a row of grey words. The engine is the one product this section is
+ * about, and a page about nginx that never draws nginx opened on less than
+ * the Docker overview's idle list says about a stopped container.
  */
-export function EngineFacts({
+export function EngineIdentity({
   status,
   unit,
   fetchedAt,
@@ -95,46 +103,77 @@ export function EngineFacts({
   actions?: React.ReactNode
 }) {
   const engine = status.nginx || status.caddy
+  const name = status.nginx ? "nginx" : status.caddy ? "Caddy" : "No reverse proxy"
+  const version = status.nginx
+    ? status.nginxVersion
+    : status.caddy
+      ? status.caddyVersion
+      : undefined
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-hairline pb-4 text-body text-muted-foreground">
-      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-        <span className={engine ? "text-foreground" : undefined}>{engineLabel(status)}</span>
-        {unit && (
-          <>
-            <Dot />
+    <HostIdentity
+      mark={engineProduct(status)}
+      fallback={Globe}
+      title={
+        <>
+          {name}
+          {version && (
+            <>
+              {" "}
+              <span className="font-mono text-body font-normal text-muted-foreground">
+                {version}
+              </span>
+            </>
+          )}
+        </>
+      }
+      facts={
+        <>
+          {unit ? (
             <EngineStatus unit={unit} fetchedAt={fetchedAt} />
-          </>
-        )}
-        {engine && (
-          <>
-            <Dot />
-            <Tag mono>{status.nginx ? status.nginxDir : status.caddyFile}</Tag>
-          </>
-        )}
-        {status.ingressContainer && (
-          <>
-            <Dot />
-            <span>
-              ingress <Tag mono>{status.ingressContainer}</Tag>
-            </span>
-          </>
-        )}
-        <Dot />
-        <span>{status.certbot ? (certbotVersion ?? "certbot") : "no certbot"}</span>
-        {renewSource !== undefined && status.certbot && (
-          <>
-            <Dot />
-            <span>{renewSource ? `renews via ${renewSource}` : "renewal not scheduled"}</span>
-          </>
-        )}
-      </div>
-      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
-    </div>
+          ) : engine ? (
+            <span>{status.ingressContainer ? "runs as a container" : "no service unit"}</span>
+          ) : (
+            <span>nothing found on this host</span>
+          )}
+          {engine && (
+            <>
+              <FactDot />
+              <HostFact>
+                <span className="font-mono">
+                  {status.nginx ? status.nginxDir : status.caddyFile}
+                </span>
+              </HostFact>
+            </>
+          )}
+          {status.ingressContainer && (
+            <>
+              <FactDot />
+              <HostFact product="docker">
+                ingress <span className="font-mono">{status.ingressContainer}</span>
+              </HostFact>
+            </>
+          )}
+          <FactDot />
+          {/* certbot is Let's Encrypt's client, and the mark says what it
+              issues rather than who wrote it. */}
+          {status.certbot ? (
+            <HostFact product="lets-encrypt">{certbotVersion ?? "certbot"}</HostFact>
+          ) : (
+            <span>no certbot</span>
+          )}
+          {renewSource !== undefined && status.certbot && (
+            <>
+              <FactDot />
+              <span className={renewSource ? undefined : "font-medium text-warning"}>
+                {renewSource ? `renews via ${renewSource}` : "renewal not scheduled"}
+              </span>
+            </>
+          )}
+        </>
+      }
+      aside={actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+    />
   )
-}
-
-function Dot() {
-  return <span className="text-muted-foreground/40">·</span>
 }
 
 /**

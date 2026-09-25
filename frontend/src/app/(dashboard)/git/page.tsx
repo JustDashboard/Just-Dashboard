@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
 import { CloudDownload, GitHubMark, RefreshClockwise } from "@/components/icons"
 import { get } from "@/lib/api"
+import { assignPulls, byUrgency, shelve, type RepoShelf } from "@/lib/git-repos"
 import type { GitPullRequest, GitPullRequestSummary, GitRepo } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -16,8 +17,10 @@ import { GroupRule } from "@/components/flow"
 import { CloneDialog } from "@/components/git/clone-dialog"
 import { GitHelp } from "@/components/git/help"
 import { GitHubAccountControl } from "@/components/git/github-account"
-import { RepoRow } from "@/components/git/repo-row"
+import { ForgeFace } from "@/components/git/marks"
+import { REPO_GRID, RepoCard } from "@/components/git/repo-card"
 import { RepoWorkspace } from "@/components/git/repo-workspace"
+import { ProductGlyph, hostProduct } from "@/components/product-logo"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { Button } from "@/components/ui/button"
 
@@ -39,27 +42,19 @@ function matchesPull(pull: GitPullRequest, needle: string): boolean {
   return pull.title.toLowerCase().includes(needle)
 }
 
-/** A repository with anything outstanding: work, commits either way, or a detached HEAD. */
-function waiting(repo: GitRepo): boolean {
-  return repo.dirty || repo.ahead > 0 || repo.behind > 0 || repo.detached || Boolean(repo.gone)
-}
-
-/** Worst first, then most recently touched. The order *is* the page's answer. */
-function byUrgency(a: GitRepo, b: GitRepo): number {
-  const rank = (r: GitRepo) =>
-    r.conflicts > 0
-      ? 0
-      : r.detached || r.gone
-        ? 1
-        : r.dirty
-          ? 2
-          : r.behind > 0
-            ? 3
-            : r.ahead > 0
-              ? 4
-              : 5
-  if (rank(a) !== rank(b)) return rank(a) - rank(b)
-  return (b.commitAt ?? "").localeCompare(a.commitAt ?? "")
+/**
+ * The account a shelf belongs to, drawn as itself: its picture on github.com,
+ * the forge's own mark elsewhere — the way the deploy chooser draws the
+ * identity a repository is cloned through. A host that is no product's gets
+ * nothing here and its name in the rule's detail instead.
+ */
+function ShelfMark({ shelf }: { shelf: RepoShelf }) {
+  if (!shelf.host) return null
+  if (shelf.host === "github.com" && shelf.owner) {
+    return <ForgeFace login={shelf.owner} provider="github" size="xs" />
+  }
+  const product = hostProduct(shelf.host)
+  return product ? <ProductGlyph id={product} /> : null
 }
 
 /**
@@ -71,14 +66,25 @@ function byUrgency(a: GitRepo, b: GitRepo): number {
  * and nothing was lost, because every one of those numbers is already on a
  * filter chip below: the chips answer "is anything waiting" *and* are the way
  * to act on the answer, where the tiles could only say it. What replaced the
- * tiles' other job — putting the urgent thing first — is the ordering and the
- * two groups: a repository with a conflict, a detached HEAD or uncommitted
- * work sorts above a clean one, and the rule over the first group says how
- * many need attention. Do not put the tiles back without reading this.
+ * tiles' other job — putting the urgent thing first — is the order: on a
+ * shelf, a repository with a conflict, a detached HEAD or uncommitted work
+ * sorts above a clean one, and a shelf with something wrong on it sorts above
+ * one with nothing. Do not put the tiles back without reading this.
  *
- * The rows are cards rather than table cells, and the reason is in
- * `git/repo-row.tsx`. They are choices, not readings — every row is a
- * checkout to enter — so they carry the lit edge §16 gives to things you pick.
+ * The checkouts are **shelved by where their code lives** — the account or
+ * group their remote belongs to (`lib/git-repos.ts`), drawn as itself on the
+ * rule — rather than listed worst-first under *Needs attention* and *Up to
+ * date*, which is what shipped first. Two rules over one column of identical
+ * rows said only whether each row was tidy: a reader looking for a product's
+ * three checkouts found them split across the two groups, a repository
+ * checked out twice (a clone and its worktree) drew the same pull request
+ * twice, and a row the width of the page spent most of it on nothing. A
+ * shelf's cards are a grid — `git/repo-card.tsx` says what a card is — and
+ * each pull request is drawn once, on the checkout that is on its branch.
+ * The shelves stay under a filter: they say *where*, which a chip does not.
+ *
+ * The cards are choices, not readings — every one is a checkout to enter —
+ * so they carry the lit edge §16 gives to things you pick.
  *
  * The chosen repository lives in the address bar (`?repo=`), so the browser's
  * back button leaves the workspace and a link into a checkout can be shared
@@ -112,11 +118,8 @@ export default function GitPage() {
   )
 
   const list = useMemo(() => repos.data?.repos ?? [], [repos.data])
-  const pullsByPath = useMemo(() => {
-    const map: Record<string, GitPullRequestSummary["repos"][number]> = {}
-    for (const entry of summary.data?.repos ?? []) map[entry.path] = entry
-    return map
-  }, [summary.data])
+  // What each card draws: the summary with every request on one card only.
+  const pullsByPath = useMemo(() => assignPulls(list, summary.data?.repos), [list, summary.data])
   const counts = useMemo(
     () => ({
       all: list.length,
@@ -149,6 +152,7 @@ export default function GitPage() {
       })
       .sort(byUrgency)
   }, [list, filter, state, pullsByPath])
+  const shelves = useMemo(() => shelve(visible), [visible])
 
   // A selected repository takes the whole page: the working copy is a place to
   // work, not a panel to peek at, and it needs the room for the tree, the
@@ -180,19 +184,6 @@ export default function GitPage() {
 
   const narrowed = filter.trim().length > 0 || state !== "all"
   const canClone = can("service.control")
-
-  // Grouped only where the grouping says something a chip has not: once a
-  // filter is on, its name *is* the group, and a heading repeating it above a
-  // single list is a rule with nothing on either side of it.
-  const attention = visible.filter(waiting)
-  const settled = visible.filter((r) => !waiting(r))
-  const groups: { key: string; label: string; repos: GitRepo[] }[] =
-    narrowed || attention.length === 0 || settled.length === 0
-      ? [{ key: "all", label: "", repos: visible }]
-      : [
-          { key: "waiting", label: "Needs attention", repos: attention },
-          { key: "settled", label: "Up to date", repos: settled },
-        ]
 
   const controls = (
     <span className="ml-auto flex max-w-full flex-wrap items-center gap-2">
@@ -246,10 +237,11 @@ export default function GitPage() {
             action={controls}
           />
         ) : (
-          <div className="flex min-w-0 flex-col gap-4">
+          <div className="flex min-w-0 flex-col gap-5">
             {/* The filters stand on the page rather than inside a panel
-                header: with the readings gone there is no block above the list
-                for them to belong to, and the list is the whole page. */}
+                header: with the readings gone there is no block above the
+                shelves for them to belong to, and the shelves are the whole
+                page. */}
             <Toolbar className="justify-between gap-x-4">
               <SearchInput
                 value={filter}
@@ -302,13 +294,25 @@ export default function GitPage() {
                 }
               />
             ) : (
-              groups.map((group) => (
-                <section key={group.key} className="flex min-w-0 flex-col gap-2">
-                  {group.label && <GroupRule label={group.label} count={group.repos.length} />}
-                  <ul aria-label={group.label || "Repositories"} className="min-w-0 space-y-2">
-                    {group.repos.map((repo) => (
-                      <RepoRow
+              shelves.map((shelf) => (
+                <section key={shelf.key || "local"} className="flex min-w-0 flex-col gap-2.5">
+                  <GroupRule
+                    label={shelf.label}
+                    count={shelf.repos.length}
+                    leading={<ShelfMark shelf={shelf} />}
+                    // The host is said once: by the picture or the mark
+                    // where it is a product's, in words where it is not.
+                    detail={
+                      shelf.owner && shelf.host && !hostProduct(shelf.host)
+                        ? shelf.host
+                        : undefined
+                    }
+                  />
+                  <ul aria-label={shelf.label} className={REPO_GRID}>
+                    {shelf.repos.map((repo, index) => (
+                      <RepoCard
                         key={repo.path}
+                        index={index}
                         repo={repo}
                         pulls={pullsByPath[repo.path]}
                         onOpen={() => select(repo.path)}

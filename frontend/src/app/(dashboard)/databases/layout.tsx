@@ -35,8 +35,17 @@ const SQL_ONLY = new Set([
   "/databases/query",
   "/databases/find",
   "/databases/monitor",
+  "/databases/advisor",
   "/databases/generate",
 ])
+
+/**
+ * The pages that are about every database at once rather than one of them:
+ * the control center the section opens on, and the map of what feeds what.
+ * They draw no connection strip and register no connection panel — the rail
+ * shows the section's own pages, and the connection is chosen on the page.
+ */
+const SECTION_WIDE = new Set(["/databases", "/databases/topology"])
 
 const PAGES =
   NAV.flatMap((group) => group.items).find((item) => item.href === "/databases")?.children ?? []
@@ -61,10 +70,11 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
   const [credentialsFor, setCredentialsFor] = useState<DbCredentialServer | null>(null)
 
   const list = connections.data
+  const sectionWide = SECTION_WIDE.has(pathname)
   const connId = Number(params.get("conn")) || null
-  // Where the reader was in this section, kept for the tab. The rail's own
-  // link is a bare `/databases`, and without this every visit opened on the
-  // first connection's first page rather than the table being worked on.
+  // Where the reader was in this section, kept for the tab. The rail's Browse
+  // link is a bare `/databases/browse`, and without this every visit opened on
+  // the first connection's first page rather than the table being worked on.
   const [place, setPlace] = useSessionState<{ conn: number; schema: string; table: string } | null>(
     "databases.place",
     null,
@@ -131,7 +141,7 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
       try {
         const fresh = await get<DbConnection[]>("/databases/")
         const created = fresh.find((c) => c.name === name)
-        if (created) goto("/databases", { conn: created.id })
+        if (created) goto("/databases/browse", { conn: created.id })
       } catch {
         // The refresh above still brings it into the picker.
       }
@@ -143,7 +153,7 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
   // ?conn= (or a stale one) is rewritten to name the active connection, so
   // every page below reads one source of truth.
   useEffect(() => {
-    if (!list || list.length === 0 || !conn) return
+    if (sectionWide || !list || list.length === 0 || !conn) return
     if (connId === conn.id) return
     const q = new URLSearchParams(Array.from(params.entries()))
     q.set("conn", String(conn.id))
@@ -155,7 +165,7 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
       if (place.table) q.set("table", place.table)
     }
     router.replace(`${pathname}?${q.toString()}`)
-  }, [list, conn, connId, params, pathname, router, place])
+  }, [sectionWide, list, conn, connId, params, pathname, router, place])
 
   // Databases running on this server connect themselves. Idempotent, skips by
   // address, silent when it adds nothing. Fires once per layout mount — the
@@ -179,6 +189,9 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
             duration: Infinity,
           })
         }
+        // On the control center the servers found here are cards with their
+        // own Connect; a toast saying the same thing over them is noise.
+        if (SECTION_WIDE.has(window.location.pathname)) return
         for (const server of res.needsCredentials ?? []) {
           notify.info(`${server.driver} is running on this server`, {
             description: `On port ${server.port}. It is not in a container, so its password is the one thing this dashboard cannot read for itself.`,
@@ -206,7 +219,7 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
   // only this layout holds: which pages this engine actually has, and that
   // every one of them carries the chosen connection in its query string.
   useNavScope(
-    conn
+    conn && !sectionWide
       ? {
           path: "/databases",
           replaces: true,
@@ -271,7 +284,7 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
       </Page>
     )
   }
-  if (list && list.length === 0) {
+  if (list && list.length === 0 && !sectionWide) {
     return (
       <Page>
         <PageContext eyebrow="Apps" title="Databases" />
@@ -305,58 +318,64 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
         goto,
         select,
         hrefFor,
+        openNew: admin ? () => setNewOpen(true) : undefined,
+        openConnect: admin ? () => setAddOpen(true) : undefined,
+        connectHost: admin ? (server) => setCredentialsFor(server) : undefined,
       }}
     >
       <div className="flex h-full min-h-0 flex-col">
-        <h1 className="sr-only">{conn ? `Database ${conn.name}` : "Databases"}</h1>
+        <h1 className="sr-only">{conn && !sectionWide ? `Database ${conn.name}` : "Databases"}</h1>
         {/* The switcher and facts share one compact strip, the way the Files
-            workbench puts the current folder beside its commands. */}
-        <div className="shrink-0 border-b border-hairline">
-          <div className="mx-auto flex w-full max-w-[1440px] min-w-0 flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3 md:px-8">
-            {conn && (
-              <ConnectionSwitcher
-                connections={list ?? []}
-                current={conn}
-                onSelect={(id) => goto(pathname, { conn: id })}
-                onNew={admin ? () => setNewOpen(true) : undefined}
-                onConnect={admin ? () => setAddOpen(true) : undefined}
-              />
-            )}
-            {conn && (
-              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-body text-muted-foreground max-sm:order-3 max-sm:basis-full">
-                <span>{info?.label ?? conn.driver}</span>
-                <Dot />
-                <span className="font-mono text-xs">
-                  {conn.host || "this server"}
-                  {conn.port ? `:${conn.port}` : ""}
-                </span>
-                {conn.database && (
-                  <>
-                    <Dot />
-                    <span className="font-mono text-xs">{conn.database}</span>
-                  </>
-                )}
-                {conn.user && (
-                  <>
-                    <Dot />
-                    <span>as {conn.user}</span>
-                  </>
-                )}
-                <Dot />
-                <span>added {relativeTime(conn.createdAt)}</span>
-              </div>
-            )}
-            <div className="ml-auto flex shrink-0 flex-wrap items-center gap-3 max-sm:order-2">
-              {conn && <ConnectionStatus id={conn.id} />}
-              {admin && (
-                <Button size="sm" variant="outline" onClick={() => setNewOpen(true)}>
-                  <Plus className="size-4" />
-                  New database
-                </Button>
+            workbench puts the current folder beside its commands. The control
+            center and the map are about every connection, so they draw none. */}
+        {!sectionWide && (
+          <div className="shrink-0 border-b border-hairline">
+            <div className="mx-auto flex w-full max-w-[1440px] min-w-0 flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3 md:px-8">
+              {conn && (
+                <ConnectionSwitcher
+                  connections={list ?? []}
+                  current={conn}
+                  onSelect={(id) => goto(pathname, { conn: id })}
+                  onNew={admin ? () => setNewOpen(true) : undefined}
+                  onConnect={admin ? () => setAddOpen(true) : undefined}
+                />
               )}
+              {conn && (
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-body text-muted-foreground max-sm:order-3 max-sm:basis-full">
+                  <span>{info?.label ?? conn.driver}</span>
+                  <Dot />
+                  <span className="font-mono text-xs">
+                    {conn.host || "this server"}
+                    {conn.port ? `:${conn.port}` : ""}
+                  </span>
+                  {conn.database && (
+                    <>
+                      <Dot />
+                      <span className="font-mono text-xs">{conn.database}</span>
+                    </>
+                  )}
+                  {conn.user && (
+                    <>
+                      <Dot />
+                      <span>as {conn.user}</span>
+                    </>
+                  )}
+                  <Dot />
+                  <span>added {relativeTime(conn.createdAt)}</span>
+                </div>
+              )}
+              <div className="ml-auto flex shrink-0 flex-wrap items-center gap-3 max-sm:order-2">
+                {conn && <ConnectionStatus id={conn.id} />}
+                {admin && (
+                  <Button size="sm" variant="outline" onClick={() => setNewOpen(true)}>
+                    <Plus className="size-4" />
+                    New database
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Keyed on the connection so a switch remounts the page — the old
             single-page design got this from `key` on <Tabs> plus Radix

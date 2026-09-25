@@ -1583,6 +1583,8 @@ export type FilePlaces = {
   bookmarks: FileBookmark[]
   /** The colour each labelled folder is drawn in, by resolved path. Absent before 0.7.0. */
   colours?: Record<string, string>
+  /** The server-wide colour chosen for every folder; absent until one is chosen. */
+  defaultColour?: string
 }
 
 export type FileFindHit = {
@@ -5342,6 +5344,157 @@ export type DbSchemaGraph = {
 export type DbDiagramLayoutResponse = {
   layout: Record<string, unknown> | null
   updatedAt?: string
+}
+
+// --- the fleet, the server behind a connection, and the map ----------------
+
+/**
+ * One connection as the control center's fleet lists it: the row's facts
+ * with the readings the server answered — dialled, sized and counted in one
+ * request (`GET /databases/fleet`).
+ */
+export type DbFleetEntry = DbConnection & {
+  ok: boolean
+  error?: string
+  version?: string
+  latencyMs: number
+  bytes: number
+  sizesKnown: boolean
+  objects: number
+  objectWord: "tables" | "collections" | "keys"
+  sessions: number
+  source: "docker" | "host" | "remote" | "file"
+  container?: string
+  composeProject?: string
+  exposure: DbAccess["exposure"]
+  consumers: number
+  lastBackup?: string
+}
+
+export type DbFleet = {
+  connections: DbFleetEntry[]
+  unreachable: DbUnreachableServer[]
+  needsCredentials: DbCredentialServer[]
+  checkedAt: string
+}
+
+/** One account on the server, in the terms every engine shares. */
+export type DbRole = {
+  name: string
+  host?: string
+  login: boolean
+  superuser: boolean
+  createDb: boolean
+  createRole: boolean
+  connectionLimit: number
+  validUntil?: string
+  memberOf?: string[]
+  connections: number
+  locked?: boolean
+  system?: boolean
+}
+
+export type DbRoles = { roles: DbRole[]; supported: boolean; reason?: string }
+
+export type DbGrantLevel = "read" | "write" | "all"
+
+export type DbExtension = {
+  name: string
+  version?: string
+  availableVersion?: string
+  installed: boolean
+  schema?: string
+  comment?: string
+}
+
+export type DbExtensions = {
+  extensions: DbExtension[]
+  supported: boolean
+  editable?: boolean
+  reason?: string
+}
+
+export type DbSetting = {
+  name: string
+  value: string
+  unit?: string
+  category?: string
+  description?: string
+  source?: string
+  restartRequired?: boolean
+}
+
+export type DbSettings = { settings: DbSetting[]; supported: boolean }
+
+/** One thing the advisor found, with the fix where one statement is the fix. */
+export type DbAdvice = {
+  id: string
+  level: "critical" | "warning" | "notice"
+  category: "performance" | "schema" | "security" | "maintenance"
+  title: string
+  detail: string
+  advice?: string
+  objects?: string[]
+  sql?: string
+}
+
+export type DbAdviseReport = {
+  findings: DbAdvice[]
+  tablesChecked: number
+  engineChecks: boolean
+}
+
+export type DbStatement = {
+  id: string
+  query: string
+  calls: number
+  totalMs: number
+  meanMs: number
+  maxMs?: number
+  rows: number
+  hitRatio: number
+}
+
+export type DbStatements = {
+  statements: DbStatement[]
+  supported: boolean
+  reason?: string
+  totalMs: number
+}
+
+export type DbBackupFile = {
+  file: string
+  size: number
+  takenAt: string
+  format: string
+}
+
+export type DbBackups = { dir: string; files: DbBackupFile[] }
+
+/** A node on the map of what talks to what. */
+export type DbTopoNode = {
+  id: string
+  kind: "database" | "deployment" | "container" | "host" | "remote"
+  name: string
+  product?: string
+  detail?: string
+  status?: string
+  href?: string
+  connId?: number
+}
+
+export type DbTopoEdge = {
+  from: string
+  to: string
+  via: ("binding" | "env" | "stack" | "network" | "session")[]
+  sessions: number
+  status: "connected" | "stale" | "broken" | "pending" | "observed" | string
+}
+
+export type DbTopology = {
+  nodes: DbTopoNode[]
+  edges: DbTopoEdge[]
+  checkedAt: string
 }
 
 // ---------------------------------------------------------------------------

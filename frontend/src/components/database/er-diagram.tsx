@@ -909,9 +909,14 @@ function Canvas({
               {doc.grid && (
                 <Background
                   variant={BackgroundVariant.Dots}
-                  gap={20}
+                  gap={24}
                   size={1}
-                  className="[&_circle]:fill-border"
+                  // A grid mark is a ruler, not a reading: at the border's
+                  // own strength the dots were the brightest thing on the
+                  // canvas and the tables sat behind them. The hairline
+                  // token is the border at seventy percent — visible when
+                  // looked for, gone when the tables are.
+                  className="[&_circle]:fill-hairline"
                 />
               )}
               {doc.minimap && (

@@ -133,6 +133,75 @@ Redis on pure-Go drivers, so the image still needs no CGO.
   reporting a negative session age. Oracle has an optional live fixture using `JD_TEST_ORACLE_DSN`;
   without a configured server, its unit coverage does not establish live-engine compatibility.
 
+- **The section opens on every database at once.** `GET /databases/fleet` dials every saved
+  connection concurrently (six at a time, twelve seconds each) and hands back the row's facts with
+  what the server answered: reachable, version, latency, the database's size where the engine
+  reports one, its tables/collections/keys, sessions less this dashboard's own pool, where it runs
+  (`docker`, `host`, `remote`, `file` — read through the same `describeDBAccess` the Connection
+  page uses, so the two agree), its exposure, how many deployment environments are bound to it,
+  and when its newest dump landed. For an administrator it also lists what the sync would report
+  and could not connect — a container with no reachable port, a native server waiting for a
+  password — read without writing anything. `GET /databases/topology` (and `/{id}/consumers` for
+  one connection) joins four sources into nodes and edges: `deploy_database_bindings` with the
+  project and environment names, running containers whose environment names the server's
+  address, container name, compose service or `db-N.jd.internal` alias (one concurrent inspect
+  pass, eight at a time), compose-stack siblings and shared user networks (drawn dashed, as a
+  link that could carry), and the engine's own session list with client addresses mapped back to
+  containers by IP, to this host for loopback and bridge-gateway addresses, or to another
+  machine. A binding's word (`connected`, `stale`, `broken`) outranks an observation's. Both are
+  on the read surface; the detected-but-unconnected half is filled only for `system.admin`.
+- **The server behind a connection.** `dbx.Admin` is an optional second interface a dialect
+  implements — Postgres, MySQL/MariaDB, ClickHouse and SQL Server do; SQLite has no server and
+  Oracle's account model does not fit — with Mongo (`usersInfo`/`createUser`/`grantRolesToUser`)
+  and Redis (`ACL LIST`/`SETUSER`/`DELUSER`, saved where an aclfile exists) mapped onto the same
+  `Role` shape. Routes under `/databases/{id}/server/`: `roles` (list on the read surface; create,
+  alter and `/{name}/grant` under `system.admin`; drop under `s.destructive`, refused for the
+  account the connection signs in with), `databases` (create, and `/connect` to save a sibling
+  connection to another database on the same server under the same credentials, probed before it
+  is stored), `extensions` (list; create and drop for Postgres, listed only for MySQL's plugins)
+  and `settings` (a curated read of `pg_settings`, `global_variables`, `system.server_settings`,
+  `sys.configurations`; Mongo's `serverStatus` and Redis's `INFO` flattened to the same rows).
+  Identifiers go through the dialect's `QuoteIdent`; a grant runs inside the target database on
+  the engines that grant from there (`GrantNeedsDatabase`) through a pool opened for that one
+  statement; a password is the one value no engine binds in `CREATE ROLE`/`CREATE USER`, so it is
+  refused if it carries a control character and quoted by the same per-engine rule `dumpString`
+  applies (`passwordLiteral`). Audited as `database.role.create/alter/drop/grant`,
+  `database.create`, `database.connection.sibling`, `database.extension.create/drop`.
+- **The advisor and statement statistics.** `GET /databases/{id}/advisor?schema=` runs
+  `dbx.Advise`: generic checks over the introspected structure on every SQL engine (tables with no
+  primary key, foreign keys no index begins with, capped at 300 tables), plus an engine's own
+  `Adviser` where it keeps statistics — Postgres (unused indexes over 1 MiB, identical indexes,
+  never-analysed tables, dead rows past a fifth, sequences past 80 % of their ceiling, connections
+  past 80 % of `max_connections`, a cache hit ratio under 90 %, sessions idle in a transaction
+  for five minutes, `password_encryption = md5`, login superusers besides `postgres`, no
+  `pg_stat_statements`) and MySQL (non-InnoDB tables, the slow log and `performance_schema` off,
+  superusers at host `%`, a buffer pool under 128 MiB). The handler prepends one finding no
+  catalogue can make, for an administrator: the server published on every interface with the
+  firewall off or open. Each finding carries the objects it names and, where one statement fixes
+  it, that statement; nothing is executed. `GET /databases/{id}/statements` reads
+  `pg_stat_statements` (13+ and older column names both) or
+  `performance_schema.events_statements_summary_by_digest`, top N by total time, and reports
+  `supported: false` with the reason where neither is there.
+- **The dumps on disk.** `GET /databases/{id}/backups` lists the connection's dump directory
+  newest first with each file's size and format; `DELETE /databases/{id}/backups` (destructive,
+  not typed: the database is still there to dump again) removes one, contained against that
+  directory exactly as the download is. The fleet reads the same listing for "last backup".
+- **An account made from the host.** `POST /databases/host/grant` (admin) is for the native
+  server whose password nobody knows — the apt-installed Postgres whose `postgres` role has never
+  had one. It runs the engine's client on the host through `hostexec`: `psql` as the host's
+  `postgres` account (looked up in the host's passwd, which is mounted at `/etc`, through
+  `setpriv`) over the Unix socket, where peer authentication admits it, with one `DO` block that
+  creates or resets the account (`format('%I … %L')`, so the server quotes both); `mysql`
+  (or `mariadb`) as root over the socket, making the account for both `localhost` and
+  `127.0.0.1`; `mongosh` under the localhost exception; `clickhouse-client` as `default`. Redis
+  has no accounts, so its `requirepass` is read from `/etc/redis/redis.conf` (or Valkey's).
+  The password is generated on the server unless supplied, reaches the client as one argv
+  element and never a shell, and the connection is probed over TCP before anything is saved;
+  an existing connection to the same address is re-sealed rather than duplicated. Audited as
+  `database.connection.host.grant` with the account and outcome, never the password.
+  `TestLiveHostPostgresAccount` exercises it as root against a real native server
+  (`JD_TEST_HOST_PG_PORT`).
+
 ### Database provisioning for deployments
 
 Deployment setup reuses `/databases/provision`, `/adopt`, `/ping` and the explicit admin URL read.

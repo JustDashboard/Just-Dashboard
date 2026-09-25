@@ -136,6 +136,94 @@ const localAccess = {
   firewall: { backend: "ufw", active: true, open: false, editable: true },
 }
 
+/** Every connection dialled at once, as the control center reads it. */
+const fleet = {
+  checkedAt: now,
+  connections: [
+    {
+      ...connection,
+      ok: true,
+      version: "PostgreSQL 16.4",
+      latencyMs: 3,
+      bytes: 5242880,
+      sizesKnown: true,
+      objects: 3,
+      objectWord: "tables",
+      sessions: 2,
+      source: "docker",
+      container: "shop-db",
+      exposure: "local",
+      consumers: 1,
+      lastBackup: now,
+    },
+    {
+      ...otherConnection,
+      ok: false,
+      error: "connection refused",
+      latencyMs: 0,
+      bytes: 0,
+      sizesKnown: false,
+      objects: 0,
+      objectWord: "tables",
+      sessions: 0,
+      source: "docker",
+      container: "cache-db",
+      exposure: "public",
+      consumers: 0,
+    },
+  ],
+  unreachable: [],
+  needsCredentials: [
+    {
+      driver: "postgres",
+      host: "127.0.0.1",
+      port: 5433,
+      process: "postgres",
+      name: "postgres on this server",
+      user: "postgres",
+      database: "postgres",
+    },
+  ],
+}
+
+/** What feeds what: one deployment bound to shop, one container seen connected. */
+const topology = {
+  checkedAt: now,
+  nodes: [
+    {
+      id: "db:1",
+      kind: "database",
+      name: "shop",
+      product: "postgres",
+      detail: "shop",
+      connId: 1,
+      href: "/databases/browse?conn=1",
+    },
+    {
+      id: "deploy:7",
+      kind: "deployment",
+      name: "api",
+      product: "nextjs",
+      detail: "jd-e7-r1",
+      status: "connected",
+      href: "/deploy/7",
+    },
+    {
+      id: "container:worker",
+      kind: "container",
+      name: "worker",
+      product: "python",
+      detail: "python:3.12",
+      status: "running",
+      href: "/docker/containers/abc",
+    },
+  ],
+  edges: [
+    { from: "db:1", to: "deploy:7", via: ["binding", "session"], sessions: 2, status: "connected" },
+    { from: "db:1", to: "container:worker", via: ["env"], sessions: 0, status: "observed" },
+  ],
+}
+
 async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
 }
@@ -256,6 +344,119 @@ async function mockDatabases(
         statement: "",
       })
     }
+    if (path === "/databases/fleet") return json(route, fleet)
+    if (path === "/databases/topology" || path === "/databases/1/consumers")
+      return json(route, topology)
+    if (path === "/databases/1/schemas")
+      return json(route, [
+        { name: "shop", size: 5242880, owner: "app", encoding: "UTF8" },
+        { name: "analytics", size: 1048576, owner: "app", encoding: "UTF8" },
+      ])
+    if (path === "/databases/1/server/roles")
+      return json(route, {
+        supported: true,
+        roles: [
+          {
+            name: "app",
+            login: true,
+            superuser: false,
+            createDb: true,
+            createRole: false,
+            connectionLimit: -1,
+            connections: 2,
+          },
+          {
+            name: "postgres",
+            login: true,
+            superuser: true,
+            createDb: true,
+            createRole: true,
+            connectionLimit: -1,
+            connections: 0,
+          },
+        ],
+      })
+    if (path === "/databases/1/server/extensions")
+      return json(route, {
+        supported: true,
+        editable: true,
+        extensions: [
+          {
+            name: "pgcrypto",
+            version: "1.3",
+            availableVersion: "1.3",
+            installed: true,
+            schema: "public",
+            comment: "cryptographic functions",
+          },
+          {
+            name: "vector",
+            availableVersion: "0.7.0",
+            installed: false,
+            comment: "vector data type and ivfflat and hnsw access methods",
+          },
+        ],
+      })
+    if (path === "/databases/1/server/settings")
+      return json(route, {
+        supported: true,
+        settings: [
+          {
+            name: "max_connections",
+            value: "100",
+            category: "Connections",
+            description: "Sets the maximum number of concurrent connections.",
+            source: "configuration file",
+            restartRequired: true,
+          },
+        ],
+      })
+    if (path === "/databases/1/advisor")
+      return json(route, {
+        tablesChecked: 3,
+        engineChecks: true,
+        findings: [
+          {
+            id: "unindexed-foreign-key",
+            level: "warning",
+            category: "performance",
+            title: "1 foreign key with no index",
+            detail: "Every delete of the referenced row scans the referencing table.",
+            advice: "Create an index on the referencing columns.",
+            objects: ["orders(customer_id)"],
+            sql: 'CREATE INDEX "orders_customer_id_idx" ON "public"."orders" ("customer_id");',
+          },
+        ],
+      })
+    if (path === "/databases/1/statements")
+      return json(route, {
+        supported: true,
+        totalMs: 12000,
+        statements: [
+          {
+            id: "1",
+            query: "SELECT * FROM orders WHERE customer_id = $1",
+            calls: 900,
+            totalMs: 9000,
+            meanMs: 10,
+            maxMs: 80,
+            rows: 900,
+            hitRatio: 0.99,
+          },
+        ],
+      })
+    if (path === "/databases/1/backups")
+      return json(route, {
+        dir: "/var/backups/just-dashboard/databases/shop",
+        files: [
+          {
+            file: "shop-2026-09-24T02-00-00.dump",
+            size: 2048000,
+            takenAt: now,
+            format: "pg_dump archive",
+          },
+        ],
+      })
     if (path === "/databases/1/graph") return json(route, graph)
     if (path === "/databases/1/diagram") {
       if (method === "GET")
@@ -298,7 +499,7 @@ test("the connection sits in the compact workbench strip and the tables are on t
   page,
 }) => {
   await mockDatabases(page, { layout: null, puts: [] })
-  await page.goto("/databases")
+  await page.goto("/databases/browse")
 
   await expect(
     page.getByRole("button", { name: "Connection: shop. Switch connection" }),
@@ -322,7 +523,7 @@ test("the connection sits in the compact workbench strip and the tables are on t
 test("the connection strip wraps without sideways scrolling on a phone", async ({ page }) => {
   await mockDatabases(page, { layout: null, puts: [] })
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.goto("/databases")
+  await page.goto("/databases/browse")
   await expect(
     page.getByRole("button", { name: "Connection: shop. Switch connection" }),
   ).toBeVisible()
@@ -343,7 +544,7 @@ test("the connection strip wraps without sideways scrolling on a phone", async (
 test("exporting carries the conditions and the order the grid is under", async ({ page }) => {
   const exports: string[] = []
   await mockDatabases(page, { layout: null, puts: [], exports })
-  await page.goto("/databases?conn=1")
+  await page.goto("/databases/browse?conn=1")
 
   await page.getByRole("button", { name: /^users/ }).click()
   await expect(page.getByText("ada@example.com")).toBeVisible()
@@ -372,7 +573,7 @@ test("exporting carries the conditions and the order the grid is under", async (
 test("a row says which tables reference it, and following one lands filtered", async ({ page }) => {
   const browses: string[] = []
   await mockDatabases(page, { layout: null, puts: [], browses })
-  await page.goto("/databases?conn=1")
+  await page.goto("/databases/browse?conn=1")
 
   await page.getByRole("button", { name: /^users/ }).click()
   await page.getByRole("button", { name: "More row actions" }).first().click()
@@ -393,7 +594,7 @@ test("a row says which tables reference it, and following one lands filtered", a
 test("the grid pages by typing a page number and by First and Last", async ({ page }) => {
   const browses: string[] = []
   await mockDatabases(page, { layout: null, puts: [], browses })
-  await page.goto("/databases?conn=1")
+  await page.goto("/databases/browse?conn=1")
 
   await page.getByRole("button", { name: /^users/ }).click()
   await expect(page.getByText("ada@example.com")).toBeVisible()
@@ -425,7 +626,7 @@ test("the grid pages by typing a page number and by First and Last", async ({ pa
 test("counting a filtered view does not clamp paging once the filter is gone", async ({ page }) => {
   const browses: string[] = []
   await mockDatabases(page, { layout: null, puts: [], browses })
-  await page.goto("/databases?conn=1")
+  await page.goto("/databases/browse?conn=1")
 
   await page.getByRole("button", { name: /^users/ }).click()
   await expect(page.getByText("ada@example.com")).toBeVisible()
@@ -459,7 +660,7 @@ test("counting a filtered view does not clamp paging once the filter is gone", a
  */
 test("a cell opens its value from the keyboard", async ({ page }) => {
   await mockDatabases(page, { layout: null, puts: [] })
-  await page.goto("/databases?conn=1")
+  await page.goto("/databases/browse?conn=1")
 
   await page.getByRole("button", { name: /^users/ }).click()
   const cell = page.getByRole("button", { name: "ada@example.com", exact: true })
@@ -474,18 +675,18 @@ test("a cell opens its value from the keyboard", async ({ page }) => {
  */
 test("the table filter belongs to the connection, not to the rail", async ({ page }) => {
   await mockDatabases(page, { layout: null, puts: [] })
-  await page.goto("/databases?conn=1")
+  await page.goto("/databases/browse?conn=1")
 
   await page.getByRole("textbox", { name: "Filter tables" }).fill("orders")
   await expect(page.getByRole("button", { name: /^users/ })).toHaveCount(0)
 
-  await page.goto("/databases?conn=2")
+  await page.goto("/databases/browse?conn=2")
   await expect(page.getByRole("textbox", { name: "Filter tables" })).toHaveValue("")
 })
 
 test("the create table form shows the statement it will run", async ({ page }) => {
   await mockDatabases(page, { layout: null, puts: [] })
-  await page.goto("/databases?conn=1")
+  await page.goto("/databases/browse?conn=1")
 
   await page.getByRole("button", { name: "Create table" }).click()
   const dialog = page.getByRole("dialog")
@@ -504,7 +705,7 @@ test("the create table form shows the statement it will run", async ({ page }) =
 
 test("a server found on the host is offered by its engine's name", async ({ page }) => {
   await mockDatabases(page, { layout: null, puts: [] })
-  await page.goto("/databases?conn=1")
+  await page.goto("/databases/browse?conn=1")
 
   // The sync toast carries the one way in; the dialog used to be titled with
   // the literal text "{server.driver}".
@@ -664,10 +865,108 @@ test("deleting a container database can take the container and its data with it"
   expect(deletes[0]).toEqual({ removeContainer: true })
 })
 
+/**
+ * The section opens on the control center rather than on one connection's
+ * table rail: every database as a card drawn as its engine, with what needs
+ * attention above them and the servers found on this machine offered.
+ */
+test("the section opens on every database at once, worst first", async ({ page }) => {
+  await mockDatabases(page, { layout: null, puts: [] })
+  await page.goto("/databases")
+
+  await expect(page.getByRole("heading", { name: "Databases", level: 1 })).toHaveClass(/sr-only/)
+  // No connection strip on a page about every connection.
+  await expect(page.getByRole("button", { name: /Switch connection/ })).toHaveCount(0)
+  await expect(page.getByText("1 of 2")).toBeVisible()
+  // The unreachable one stands first.
+  // The cards only: the map below also links each database by name.
+  const cards = page
+    .locator("[data-slot=choice-card]")
+    .getByRole("link", { name: /^Open (shop|cache)$/ })
+  await expect(cards).toHaveCount(2)
+  await expect(cards.first()).toHaveAccessibleName("Open cache")
+  await expect(cards.first()).toHaveAttribute("href", "/databases/browse?conn=2")
+  await expect(page.getByText("cache connection refused")).toBeVisible()
+  // A server found on the machine is offered, and its dialog can make the
+  // account from the host's own shell.
+  await page.getByRole("button", { name: "Connect postgres on this server" }).click()
+  const dialog = page.getByRole("dialog", { name: "Connect PostgreSQL on this server" })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Make the account and connect" })).toBeVisible()
+  await expect(dialog.getByLabel("Account to make")).toHaveValue("just_dashboard")
+  await page.keyboard.press("Escape")
+  // The map draws both columns.
+  await expect(page.getByRole("list", { name: "What they feed" })).toContainText("api")
+  await page.screenshot({ path: "test-results/database-overview-1280.png", fullPage: true })
+})
+
+test("the map draws every link and the topology page its readings", async ({ page }) => {
+  await mockDatabases(page, { layout: null, puts: [] })
+  await page.goto("/databases/topology")
+  await expect(page.getByRole("list", { name: "Databases" })).toContainText("shop")
+  await expect(page.getByRole("list", { name: "What they feed" })).toContainText("worker")
+  await expect(page.getByText("linked by its deployment · 2 open sessions")).toBeVisible()
+  await expect(
+    page.getByText("2 carrying sessions").or(page.getByText("1 carrying sessions")),
+  ).toBeVisible()
+})
+
+/**
+ * The type picker is a popover inside a dialog. The dialog's scroll lock
+ * used to swallow the wheel over it, so the list could not be scrolled and
+ * every type past the fold was reachable only by typing.
+ */
+test("the create table type list scrolls with the wheel", async ({ page }) => {
+  await mockDatabases(page, { layout: null, puts: [] })
+  await page.goto("/databases/browse?conn=1")
+  await page.getByRole("button", { name: "Create table" }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByRole("button", { name: "Browse types" }).click()
+  const list = page.locator("[data-slot=command-list]")
+  await expect(list).toBeVisible()
+  await list.evaluate((el) => {
+    el.style.maxHeight = "40px"
+  })
+  await list.hover()
+  await page.mouse.wheel(0, 200)
+  await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
+})
+
+test("the server page lists accounts, databases and extensions", async ({ page }) => {
+  await mockDatabases(page, { layout: null, puts: [] })
+  await page.goto("/databases/server?conn=1")
+  await expect(page.getByText("2 databases on this server")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Open as a connection" })).toBeVisible()
+  await page.getByRole("button", { name: /^Accounts/ }).click()
+  await expect(page.getByRole("cell", { name: "postgres", exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "New account" }).click()
+  const dialog = page.getByRole("dialog", { name: "New account" })
+  await dialog.getByLabel("Name").fill("reports")
+  await expect(dialog.getByText(/CREATE ROLE "reports" WITH LOGIN PASSWORD/)).toBeVisible()
+  await expect(dialog.getByText(/GRANT CONNECT ON DATABASE "shop" TO "reports"/)).toBeVisible()
+  await page.keyboard.press("Escape")
+  await page.getByRole("button", { name: /^Extensions/ }).click()
+  await expect(page.getByRole("button", { name: "Enable" })).toBeVisible()
+})
+
+test("the advisor draws findings with their fix", async ({ page }) => {
+  await mockDatabases(page, { layout: null, puts: [] })
+  await page.goto("/databases/advisor?conn=1")
+  await expect(page.getByText("1 foreign key with no index")).toBeVisible()
+  await page.getByRole("button", { name: /1 foreign key with no index/ }).click()
+  await expect(page.getByText(/CREATE INDEX "orders_customer_id_idx"/)).toBeVisible()
+  await expect(page.getByRole("button", { name: "Open in the console" })).toBeVisible()
+})
+
 for (const path of [
-  "/databases?conn=1",
+  "/databases",
+  "/databases/browse?conn=1",
   "/databases/diagram?conn=1",
   "/databases/connection?conn=1",
+  "/databases/topology",
+  "/databases/server?conn=1",
+  "/databases/advisor?conn=1",
+  "/databases/backups?conn=1",
 ]) {
   test(`every icon-only control on ${path} has an accessible name`, async ({ page }) => {
     await mockDatabases(page, { layout: null, puts: [] })

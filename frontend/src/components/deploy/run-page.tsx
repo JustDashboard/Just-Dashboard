@@ -36,7 +36,6 @@ import type {
   DeploymentSummary,
 } from "@/lib/types"
 import type { ProjectDetail } from "@/components/deploy/project-context"
-import { FlowSteps } from "@/components/flow"
 import { Page, PageContext } from "@/components/page"
 import { ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { StatusDot } from "@/components/status-dot"
@@ -48,8 +47,6 @@ import { AuthorMark, BranchChip, ShortSha } from "@/components/git/marks"
 import { Button } from "@/components/ui/button"
 import { Confetti, type ConfettiRef } from "@/components/ui/confetti"
 import {
-  CREATION_SPINE,
-  CREATION_STEPS,
   RUN_LABELS,
   RunStatus,
   deploymentURL,
@@ -528,90 +525,60 @@ export function RunPage() {
     }),
   ]
 
-  // The spine the reader walked on /deploy/new, all of it done, and this
-  // run as its last step: current while it builds and after it fails, done
-  // once it succeeds.
-  const spineStep = run.state === "succeeded" ? CREATION_SPINE.length : CREATION_STEPS.length
+  // The verbs that act on the run, drawn on its identity line beside its
+  // state rather than in a bar above the page. The bar held a way back, one
+  // button at the far end and, on a first run, the creation spine — a row of
+  // things the rail's panel and the menu already say, standing between the
+  // reader and the run. Beside the state each verb reads as the answer to
+  // it: Building, Cancel; Live, Visit; Failed, Retry.
+  const verbs = (
+    <>
+      {canRun && isCancellable(run.state) && !run.cancelRequested && (
+        <Button variant="outline" size="sm" pending={working === "cancel"} onClick={cancel}>
+          <StopCircle className="size-3.5" />
+          {working === "cancel" ? "Cancelling…" : "Cancel"}
+        </Button>
+      )}
+      {canRun && isRetryable(run.state) && !stale && (
+        <Button size="sm" pending={working === "retry"} onClick={retry}>
+          <RefreshClockwise className="size-3.5" />
+          {working === "retry" ? "Starting…" : "Retry"}
+        </Button>
+      )}
+      {canRun && stale && (
+        <Button size="sm" pending={working === "deploy"} onClick={deployCurrent}>
+          <RefreshClockwise className="size-3.5" />
+          {working === "deploy"
+            ? "Starting…"
+            : commitGone
+              ? "Deploy the branch head"
+              : "Deploy with current settings"}
+        </Button>
+      )}
+      {canRun && run.state === "succeeded" && isLiveRelease && (
+        <Button variant="outline" size="sm" pending={working === "redeploy"} onClick={redeploy}>
+          <RefreshClockwise className="size-3.5" />
+          {working === "redeploy" ? "Redeploying…" : "Redeploy"}
+        </Button>
+      )}
+      {run.state === "succeeded" && isLiveRelease && url && (
+        <Button size="sm" asChild>
+          <a href={url} target="_blank" rel="noopener noreferrer">
+            <External className="size-3.5" /> Visit
+          </a>
+        </Button>
+      )}
+      <VerbMenu verbs={menu} label={`More actions for Deployment #${run.runNumber}`} />
+    </>
+  )
 
   return (
     <Page className="animate-rise">
       <Confetti ref={confetti} className="pointer-events-none fixed inset-0 z-50 size-full" />
       {checkedDeploy.gate}
-      <div className="flex min-w-0 flex-col gap-4">
-        <PageContext
-          eyebrow={
-            <Link
-              href={`/deploy/${projectId}`}
-              className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-            >
-              <ArrowLeft className="size-3" /> {deployment?.name || "Deployment"}
-            </Link>
-          }
-          title={`Deployment #${run.runNumber}`}
-          actions={
-            <>
-              {canRun && isCancellable(run.state) && !run.cancelRequested && (
-                <Button variant="outline" size="sm" pending={working === "cancel"} onClick={cancel}>
-                  <StopCircle className="size-3.5" />
-                  {working === "cancel" ? "Cancelling…" : "Cancel"}
-                </Button>
-              )}
-              {canRun && isRetryable(run.state) && !stale && (
-                <Button size="sm" pending={working === "retry"} onClick={retry}>
-                  <RefreshClockwise className="size-3.5" />
-                  {working === "retry" ? "Starting…" : "Retry"}
-                </Button>
-              )}
-              {canRun && stale && (
-                <Button size="sm" pending={working === "deploy"} onClick={deployCurrent}>
-                  <RefreshClockwise className="size-3.5" />
-                  {working === "deploy"
-                    ? "Starting…"
-                    : commitGone
-                      ? "Deploy the branch head"
-                      : "Deploy with current settings"}
-                </Button>
-              )}
-              {canRun && run.state === "succeeded" && isLiveRelease && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  pending={working === "redeploy"}
-                  onClick={redeploy}
-                >
-                  <RefreshClockwise className="size-3.5" />
-                  {working === "redeploy" ? "Redeploying…" : "Redeploy"}
-                </Button>
-              )}
-              {run.state === "succeeded" && isLiveRelease && url && (
-                <Button size="sm" asChild>
-                  <a href={url} target="_blank" rel="noopener noreferrer">
-                    <External className="size-3.5" /> Visit
-                  </a>
-                </Button>
-              )}
-              <VerbMenu verbs={menu} label={`More actions for Deployment #${run.runNumber}`} />
-            </>
-          }
-        />
-        {/* The sequence's last step, happening. §16 keeps this page in the
-            reading register — you are watching, not deciding — and carries the
-            spine across, so a reader who has just pressed Deploy watches the
-            sequence continue instead of landing on a page with no trace of the
-            screens behind it.
-
-            Only the run the flow's own Deploy button enqueued, which is what
-            these three clauses together are: the project's first, deployed
-            rather than adopted — Configure starts a run only for `deploy`
-            (`new-project/draft.ts`), so an import's run #1 is an `import_adopt`
-            begun from the project page — and planned by this engine rather
-            than carried over from the old one. Anywhere else there is no flow
-            behind the run, and the spine would claim screens this reader never
-            walked. */}
-        {run.runNumber === 1 && run.operation === "deploy" && !legacy && (
-          <FlowSteps steps={CREATION_SPINE} current={spineStep} />
-        )}
-      </div>
+      {/* The name is for assistive technology alone (§15): the identity line
+          is the first thing drawn. */}
+      <PageContext title={`Deployment #${run.runNumber}`} />
 
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         Deployment state: {RUN_LABELS[run.state] ?? sentence(run.state)}
@@ -627,6 +594,7 @@ export function RunPage() {
         releaseNumbers={releaseNumbers}
         targetReleaseId={targetReleaseId}
         projectId={projectId}
+        verbs={verbs}
       />
 
       {legacy ? (
@@ -914,6 +882,7 @@ function RunIdentity({
   releaseNumbers,
   targetReleaseId,
   projectId,
+  verbs,
 }: {
   run: DeploymentEngineRun
   /** The release the run made, whose commit names a run that recorded none. */
@@ -924,6 +893,8 @@ function RunIdentity({
   releaseNumbers: Map<number, number>
   targetReleaseId?: number
   projectId: number
+  /** What can be done to the run, drawn beside its state. */
+  verbs: React.ReactNode
 }) {
   const commit = runCommit(run)
   const kind = deployment?.sourceKind
@@ -1038,7 +1009,11 @@ function RunIdentity({
         }
         aside={
           <div className="min-w-0 sm:text-right">
-            <RunStatus state={run.state} live className="mb-2" />
+            {/* The state and what answers it on one row, then how long. */}
+            <div className="mb-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 sm:justify-end">
+              <RunStatus state={run.state} live />
+              <div className="flex flex-wrap items-center gap-2">{verbs}</div>
+            </div>
             <p className="eyebrow">{unclaimed ? "Queued for" : active ? "Running for" : "Took"}</p>
             <p className="numeric text-2xl leading-tight font-semibold tracking-tight">
               {formatDuration(seconds)}

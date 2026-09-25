@@ -131,6 +131,8 @@ and they survive the tab closing. Files and Git sit beside the shell.
 Browse, preview, edit with a diff before saving, drag and drop, upload whole folders, crop
 pictures, chmod, search by content, archive and extract. Every path is checked against
 `JD_FILE_ROOTS` before anything happens.
+The folder button in the toolbar changes every folder's colour. The inspector and folder menus can
+then set a different colour for one folder.
 
 ### Git
 
@@ -158,9 +160,13 @@ health checks and runtime limits remain editable before the first deployment.
 
 ![A database connection, with its connection string and the control that opens it to the internet](docs/databases.png)
 
-PostgreSQL, MySQL and MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis. Browse
-and edit rows, change the structure, run queries, draw the schema, and hand out the connection
-string — on this server or, with one press, from anywhere.
+PostgreSQL, MySQL and MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis. The
+section opens on every database at once — which answer, what they take, who is connected, what
+each one feeds — with a map of the deployments, containers and machines reading them. Browse and
+edit rows, change the structure, run queries, draw the schema, read the advisor's findings with
+their fixes, manage the server's accounts, databases and extensions, keep and restore dumps, and
+hand out the connection string — on this server or, with one press, from anywhere. A database
+installed on the machine itself is connected by letting the dashboard make its own account on it.
 
 ### And the rest
 

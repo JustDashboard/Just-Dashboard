@@ -11,8 +11,10 @@ import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
 import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
-import { Page, PageContext, RowLink } from "@/components/page"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { Page, PageContext } from "@/components/page"
 import { Pane, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
+import { ProductLogo, ProductLogos, portProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
@@ -22,14 +24,6 @@ import { DANGEROUS_PORTS } from "@/components/proxy/attention"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 
 /**
  * Forwarding the things that do not speak HTTP.
@@ -172,7 +166,7 @@ export function StreamsPage() {
         </Notice>
       )}
 
-      <Panel>
+      <Panel plain>
         <PanelHeader
           title="Port forwarding"
           actions={
@@ -192,63 +186,50 @@ export function StreamsPage() {
         <PanelBody flush>
           {data.streams.length === 0 ? (
             <EmptyState
-              icon={Connection}
+              mark={<ProductLogos ids={["postgresql", "redis", "minecraft-java"]} size="md" />}
               title="Nothing forwarded"
               description="Point a port on this host at a service somewhere else — a database replica, a bastion, a game server. Anything TCP or UDP."
               className="mt-2"
             />
           ) : (
-            <div className="min-w-0 animate-rise group-data-[plain]/panel:-mx-4">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-full">Name</TableHead>
-                    <TableHead>Listening</TableHead>
-                    <TableHead>Forwards to</TableHead>
-                    <TableHead>Restricted to</TableHead>
-                    <TableHead className="w-px" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {data.streams.map((stream) => (
-                    <TableRow
-                      key={stream.name}
-                      className="group"
-                      onActivate={admin ? () => open(stream) : undefined}
-                    >
-                      <TableCell>
-                        {admin ? (
-                          <RowLink onClick={() => open(stream)}>{stream.name}</RowLink>
-                        ) : (
-                          <span className="text-body font-medium">{stream.name}</span>
-                        )}
-                        {stream.proxyProtocol && (
-                          <p className="text-hint text-muted-foreground">sends the PROXY header</p>
-                        )}
-                      </TableCell>
-                      <TableCell className="font-mono">
-                        <span className="numeric">{stream.listen}</span>
-                        <span className="ml-1 text-muted-foreground uppercase">
-                          {stream.protocol}
-                        </span>
-                      </TableCell>
-                      <TableCell className="font-mono">{stream.upstream}</TableCell>
-                      <TableCell>
-                        {stream.allowFrom.length > 0 ? (
-                          <span className="font-mono text-hint">{stream.allowFrom.join(", ")}</span>
-                        ) : (
-                          <Status
-                            verdict={DANGEROUS_PORTS[stream.listen] ? "critical" : "warning"}
-                            label="anyone"
-                          />
-                        )}
-                      </TableCell>
-                      <TableCell>{admin && <VerbActions dim verbs={verbsFor(stream)} />}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+            // Every row opens the stream's form, so it is a choice and carries
+            // the edge (§16). Each is drawn as the service its port is — a
+            // forward on 5432 as Postgres — where the port says so, and as a
+            // bare connection where it does not.
+            <ChoiceList aria-label="Streams" className="animate-rise">
+              {[...data.streams].sort(byUrgency).map((stream, index) => (
+                <ChoiceRow
+                  key={stream.name}
+                  verb={admin ? `Edit ${stream.name}` : stream.name}
+                  onSelect={admin ? () => open(stream) : undefined}
+                  disabled={!admin}
+                  index={index}
+                  leading={
+                    <ProductLogo id={portProduct(stream.listen)} size="sm" fallback={Connection} />
+                  }
+                  title={stream.name}
+                  description={
+                    <span className="font-mono">
+                      <span className="uppercase">{stream.protocol}</span>{" "}
+                      <span className="numeric">{stream.listen}</span> → {stream.upstream}
+                      {stream.proxyProtocol && (
+                        <span className="text-muted-foreground/60"> · PROXY header</span>
+                      )}
+                    </span>
+                  }
+                  trailing={<Restriction stream={stream} />}
+                  actions={
+                    admin && (
+                      <VerbActions
+                        dim
+                        verbs={verbsFor(stream)}
+                        menuLabel={`More actions for ${stream.name}`}
+                      />
+                    )
+                  }
+                />
+              ))}
+            </ChoiceList>
           )}
         </PanelBody>
       </Panel>
@@ -268,6 +249,31 @@ export function StreamsPage() {
       {dialog}
     </Page>
   )
+}
+
+/** Who may reach the port, as a reading: a list of sources, or the fact that there is none. */
+function Restriction({ stream }: { stream: StreamSpec }) {
+  if (stream.allowFrom.length > 0) {
+    return (
+      <span className="max-w-56 truncate font-mono text-hint text-muted-foreground">
+        {stream.allowFrom.join(", ")}
+      </span>
+    )
+  }
+  return (
+    <Status
+      verdict={DANGEROUS_PORTS[stream.listen] ? "critical" : "warning"}
+      label={
+        DANGEROUS_PORTS[stream.listen] ? `${DANGEROUS_PORTS[stream.listen]} to anyone` : "anyone"
+      }
+    />
+  )
+}
+
+/** A stream open to anyone above a restricted one, a database port first among those. */
+function byUrgency(a: StreamSpec, b: StreamSpec): number {
+  const rank = (s: StreamSpec) => (s.allowFrom.length > 0 ? 2 : DANGEROUS_PORTS[s.listen] ? 0 : 1)
+  return rank(a) - rank(b) || a.listen - b.listen
 }
 
 const BLANK: StreamSpec = {

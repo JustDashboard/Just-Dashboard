@@ -3,7 +3,7 @@
 import { useMemo } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight, Globe, ShieldCheck } from "@/components/icons"
+import { ArrowRight, Globe } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import type { Certificate, CertbotState, Listener, StreamStatus, VHost } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
@@ -13,17 +13,26 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { BarList, type BarListItem } from "@/components/bar-list"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
-import { StatusDot, Status } from "@/components/status-dot"
+import { StatusDot } from "@/components/status-dot"
 import { FindingList } from "@/components/finding-list"
 import { EmptyState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useProxy } from "@/components/proxy/proxy-context"
-import { EngineActions, EngineFacts, useEngineUnit } from "@/components/proxy/engine"
+import { EngineActions, EngineIdentity, useEngineUnit } from "@/components/proxy/engine"
+import { ProductGlyph, ProductLogo } from "@/components/product-logo"
+import { certificateProduct, siteProduct } from "@/components/proxy/marks"
+import { SiteTLS } from "@/components/proxy/site-marks"
 import { foldProxyFindings } from "@/components/proxy/attention"
 
 /**
  * The section's landing page, read the way the host overview is read: what
  * the engine is, four figures, what needs doing, and the sites.
+ *
+ * The engine opens the page as the Overview's machine does — its logo on the
+ * tile, its version, its facts — and every row after it is drawn as what it
+ * is: a site as the engine serving it, a certificate as who signed it. A
+ * page of grey words about nginx and Let's Encrypt that never drew either was
+ * the flat page the 2026-09-23 pass on Docker and Databases replaced.
  *
  * It used to open on a "Reverse proxy" tile and a list that named every
  * exposed socket as needing attention. The engine is a fact, so it is in the
@@ -75,9 +84,12 @@ export default function ProxyOverviewPage() {
       .slice(0, 8)
       .map((cert) => {
         const wrong = Boolean(cert.error) || cert.expired
+        const product = certificateProduct(cert)
         return {
           key: cert.path,
           label: cert.name,
+          mark: product ? <ProductGlyph id={product} /> : undefined,
+          mono: false,
           // The figure column is a fixed width and does not truncate, so the
           // reading is a word rather than the sentence the finding carries.
           value: cert.error ? "error" : cert.expired ? "expired" : `${cert.daysLeft}d`,
@@ -126,7 +138,7 @@ export default function ProxyOverviewPage() {
     <Page className="animate-rise">
       <PageContext title="Proxy & TLS" />
 
-      <EngineFacts
+      <EngineIdentity
         status={status}
         unit={engine.unit}
         fetchedAt={engine.fetchedAt}
@@ -302,8 +314,13 @@ export default function ProxyOverviewPage() {
                     key={`${vhost.kind}:${vhost.name}`}
                     href={`/proxy/sites?site=${encodeURIComponent(vhost.name)}`}
                     verb={`Open ${vhost.name}`}
-                    leading={<StatusDot state={vhost.enabled ? "running" : "stopped"} />}
-                    title={vhost.name}
+                    leading={<ProductLogo id={siteProduct(vhost)} size="sm" />}
+                    title={
+                      <span className="flex min-w-0 items-center gap-2">
+                        <StatusDot state={vhost.enabled ? "running" : "stopped"} />
+                        <span className="truncate">{vhost.name}</span>
+                      </span>
+                    }
                     description={
                       <span className="font-mono">
                         {[vhost.serverNames.join(", "), vhost.upstreams[0]]
@@ -311,13 +328,7 @@ export default function ProxyOverviewPage() {
                           .join(" → ") || vhost.path}
                       </span>
                     }
-                    trailing={
-                      vhost.tls ? (
-                        <Status state="active" label="TLS" icon={ShieldCheck} />
-                      ) : (
-                        <span className="text-xs text-muted-foreground">plain HTTP</span>
-                      )
-                    }
+                    trailing={<SiteTLS vhost={vhost} />}
                   />
                 ))}
               </ChoiceList>

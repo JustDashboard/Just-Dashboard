@@ -496,17 +496,34 @@ export const CONTROL =
  *
  * A hairline running off to the right rather than a panel header: these are
  * parts of one list, not blocks of their own, and a second framed title under
- * the page's would rank them as sections they are not. The Git page's
- * checkouts and the Docker lists split the same way — what needs you first.
+ * the page's would rank them as sections they are not. The Docker lists split
+ * by what needs you first; the Git page shelves its checkouts by the account
+ * their remote belongs to, with the account drawn as itself in `leading`.
  */
-export function GroupRule({ label, count }: { label: string; count?: number }) {
+export function GroupRule({
+  label,
+  count,
+  leading,
+  detail,
+}: {
+  label: string
+  count?: number
+  /** The group drawn as itself, before its name: the account a shelf of checkouts belongs to. */
+  leading?: React.ReactNode
+  /** Where the group is, after the count — a host that is no product's. */
+  detail?: React.ReactNode
+}) {
   return (
     <div className="flex min-w-0 items-center gap-2.5">
-      <p className="eyebrow shrink-0">{label}</p>
+      {leading && <span className="flex shrink-0 items-center">{leading}</span>}
+      <p className="eyebrow min-w-0 truncate">{label}</p>
       {/* Left out where the label ends in a figure of its own — a date — and
           the count would read as part of it. */}
       {count !== undefined && (
         <span className="numeric shrink-0 text-micro text-muted-foreground">{count}</span>
+      )}
+      {detail && (
+        <span className="min-w-0 truncate font-mono text-micro text-muted-foreground">{detail}</span>
       )}
       <span aria-hidden className="h-px min-w-0 flex-1 bg-hairline" />
     </div>

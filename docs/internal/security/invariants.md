@@ -117,6 +117,9 @@ is the **version being installed** (`0.6`), not a fixed sentence: it names the o
 route does, and *which version* is what has to be read before pressing a button in the sidebar.
 
 **Not typed — routine, recoverable, or both:** deleting rows, documents and Redis keys; dropping an index;
+dropping a database account, disabling an extension or deleting a dump on the Server and Backups pages
+(the account is recreated from its name and a new password, the extension is one `CREATE EXTENSION` away,
+and the database is still there to dump again);
 forgetting a connection; stopping a database session; stopping/restarting/killing/removing/recreating a
 container; removing an image or network; any prune that spares volumes; deleting one file; signalling a
 process; ending an SSH session; stopping or restarting a service; revoking a token or SSH key; deleting a

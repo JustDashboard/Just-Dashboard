@@ -1,14 +1,25 @@
 "use client"
 
 import { useState } from "react"
-import { Clock, RefreshClockwise, ShieldCheck, ShieldOff, Trash, Warning } from "@/components/icons"
+import {
+  Clock,
+  Key,
+  RefreshClockwise,
+  ShieldCheck,
+  ShieldOff,
+  Trash,
+  Warning,
+} from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, post } from "@/lib/api"
-import type { CertbotState, DNSProvider, Job } from "@/lib/types"
+import type { CertbotCert, CertbotState, DNSProvider, Job } from "@/lib/types"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Field, FormNote, OptionList, OptionRow } from "@/components/form"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { ROW_BLEED } from "@/components/row-list"
+import { ProductLogo, ProductLogos } from "@/components/product-logo"
+import { Row, RowList, ROW_BLEED } from "@/components/row-list"
+import { CertLife } from "@/components/proxy/expiry-status"
+import { dnsProviderProduct } from "@/components/proxy/marks"
 import { EmptyState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -25,14 +36,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 
 /**
@@ -100,7 +103,7 @@ export function CertbotLineages({
   if (state.certs.length === 0) {
     return (
       <EmptyState
-        icon={ShieldCheck}
+        mark={<ProductLogos ids={["lets-encrypt"]} size="md" />}
         title="certbot manages no certificates yet"
         description="Issue one and it appears here with its renewal handled by certbot's own schedule."
         className="mt-2"
@@ -153,24 +156,19 @@ export function CertbotLineages({
   ]
   return (
     <>
-      <div className="-mx-4 min-w-0">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-full">Name</TableHead>
-              <TableHead>Domains</TableHead>
-              <TableHead>Expires</TableHead>
-              <TableHead className="w-px" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {state.certs.map((cert) => (
-              <TableRow key={cert.name} className="group">
-                <TableCell className="text-body font-medium">{cert.name}</TableCell>
-                <TableCell className="max-w-xs truncate text-muted-foreground">
-                  {cert.domains.join(", ")}
-                </TableCell>
-                <TableCell>
+      {/* Rows rather than a table: three columns naming themselves is a
+          header spent on nothing, and each lineage is what it is — a
+          Let's Encrypt certificate, drawn as one. */}
+      <RowList className="animate-rise">
+        {state.certs.map((cert) => (
+          <Row
+            key={cert.name}
+            leading={<ProductLogo id="lets-encrypt" size="sm" />}
+            title={cert.name}
+            subtitle={cert.domains.join(", ")}
+            trailing={
+              <>
+                <span className="flex flex-col items-end gap-1">
                   <Status
                     verdict={!cert.valid ? "critical" : cert.daysLeft <= 14 ? "warning" : "ok"}
                     label={
@@ -181,15 +179,42 @@ export function CertbotLineages({
                           : "expired"
                     }
                   />
-                </TableCell>
-                <TableCell>{admin && <VerbActions dim verbs={verbsFor(cert.name)} />}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+                  <LineageLife cert={cert} />
+                </span>
+                {admin && (
+                  <VerbActions
+                    dim
+                    verbs={verbsFor(cert.name)}
+                    menuLabel={`More actions for ${cert.name}`}
+                  />
+                )}
+              </>
+            }
+            className="py-2.5"
+          />
+        ))}
+      </RowList>
       {dialog}
     </>
+  )
+}
+
+/**
+ * certbot's lineages carry days left and an expiry but no issue date, and
+ * every one of them is a ninety-day certificate: the meter is drawn against
+ * that term.
+ */
+function LineageLife({ cert }: { cert: CertbotCert }) {
+  return (
+    <CertLife
+      cert={{
+        notBefore: new Date(new Date(cert.expiry).getTime() - 90 * 86_400_000).toISOString(),
+        notAfter: cert.expiry,
+        daysLeft: cert.daysLeft,
+        expired: !cert.valid,
+        expiring: cert.valid && cert.daysLeft <= 30,
+      }}
+    />
   )
 }
 
@@ -295,6 +320,9 @@ export function DnsProvidersPanel({
                   ROW_BLEED,
                 )}
               >
+                {/* The provider as itself where it has a mark — Cloudflare,
+                    Route 53 as AWS — and a key for the ones that do not. */}
+                <ProductLogo id={dnsProviderProduct(p.key)} size="sm" fallback={Key} />
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-baseline gap-2">
                     <span className="text-body font-medium">{p.name}</span>

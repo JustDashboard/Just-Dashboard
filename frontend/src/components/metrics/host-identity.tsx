@@ -72,8 +72,12 @@ export function HostIdentity({
     >
       {/* On a phone the tile and the title share a row and the facts run the
           full width under both, rather than down a column beside the tile;
-          from `sm` the text stands beside the tile as one block. */}
-      <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-3 sm:flex">
+          from `sm` the text stands beside the tile as one block that takes
+          the width the aside leaves — measured at its content, a long line
+          of facts pushed the aside under the line instead of wrapping the
+          facts, and a run's verbs at the line's end were the first aside
+          wide enough to make that happen on a laptop. */}
+      <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-3 sm:flex sm:flex-1">
         {logo ?? (
           <ProductLogo
             id={mark}
