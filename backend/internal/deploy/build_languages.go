@@ -3,6 +3,7 @@ package deploy
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // languageBuild is what the Ruby, Elixir, Scala, Clojure, Dart and Gleam
@@ -89,17 +90,29 @@ func (b *ArtifactBuilder) prepareLanguageRecipe(ctx context.Context, recipe *sel
 }
 
 func renderLanguageDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases []ResolvedImage, installSecrets, buildSecrets string) ([]string, error) {
+	var lines []string
+	var err error
 	switch recipe.kind {
 	case "ruby":
-		return renderRubyDockerfile(recipe.language.ruby, config, bases, installSecrets, buildSecrets)
+		lines, err = renderRubyDockerfile(recipe.language.ruby, config, bases, installSecrets, buildSecrets)
 	case "elixir":
-		return renderElixirDockerfile(recipe.language.elixir, config, bases, installSecrets, buildSecrets)
+		lines, err = renderElixirDockerfile(recipe.language.elixir, config, bases, installSecrets, buildSecrets)
 	case "scala", "clojure":
-		return renderJVMLanguageDockerfile(recipe.language.jvm, config, bases, installSecrets, buildSecrets)
+		lines, err = renderJVMLanguageDockerfile(recipe.language.jvm, config, bases, installSecrets, buildSecrets)
 	case "dart":
-		return renderDartDockerfile(recipe.language.dart, config, bases, installSecrets, buildSecrets)
+		lines, err = renderDartDockerfile(recipe.language.dart, config, bases, installSecrets, buildSecrets)
 	case "gleam":
-		return renderGleamDockerfile(recipe.language.gleam, config, bases, installSecrets, buildSecrets)
+		lines, err = renderGleamDockerfile(recipe.language.gleam, config, bases, installSecrets, buildSecrets)
+	default:
+		return nil, ErrUnsupportedBuilder
 	}
-	return nil, ErrUnsupportedBuilder
+	// Each line is one instruction. Names read from the repository reach
+	// some of them, and a line break in one would start instructions the
+	// recipe never wrote: an unpinned FROM, another secret mount.
+	for _, line := range lines {
+		if strings.ContainsAny(line, "\r\n") {
+			return nil, fmt.Errorf("%w: the %s recipe would write a Dockerfile instruction across lines; use a Dockerfile", ErrUnsupportedBuilder, recipe.kind)
+		}
+	}
+	return lines, err
 }

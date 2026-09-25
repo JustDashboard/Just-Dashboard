@@ -253,7 +253,7 @@ var selfIssuedSecrets = []secretRule{
 	{name: "APPLICATION_SECRET", format: "hex", length: 64, implied: true, gate: func(s rootStack, _ DetectedVariable) string {
 		for _, candidate := range s.candidates {
 			if candidate.Framework == "play" {
-				return "Play refuses to start in production without a 256-bit secret, which it reads from APPLICATION_SECRET"
+				return "Play refuses to start in production without a secret of at least 256 bits; the recipe's start loads it from APPLICATION_SECRET"
 			}
 		}
 		return ""

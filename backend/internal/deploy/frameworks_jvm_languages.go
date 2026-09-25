@@ -5,6 +5,7 @@ import (
 	"path"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -25,15 +26,19 @@ var (
 	sbtAssemblyRE     = regexp.MustCompile(`"sbt-assembly"`)
 	sbtPlayEnabledRE  = regexp.MustCompile(`enablePlugins\([^)]*\bPlay(?:Scala|Java|MinimalJava|Service)\b`)
 	sbtStageEnabledRE = regexp.MustCompile(`enablePlugins\([^)]*\b(?:Play(?:Scala|Java|MinimalJava|Service)|JavaAppPackaging|JavaServerAppPackaging)\b`)
-	sbtProjectRE      = regexp.MustCompile(`(?m)^\s*lazy\s+val\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\(?\s*project(?:\s+in\s+file\(\s*"([^"]*)"\s*\)|\.in\(\s*file\(\s*"([^"]*)"\s*\)\s*\))?`)
-	sbtNameRE         = regexp.MustCompile(`\bname\s*:=\s*"{1,3}([^"]+)"{1,3}`)
-	sbtScriptNameRE   = regexp.MustCompile(`\bexecutableScriptName\s*:=\s*"([^"]+)"`)
-	sbtJavaReleaseRE  = regexp.MustCompile(`"-?-release"\s*,\s*"(\d{2})"|"-java-output-version"\s*,\s*"(\d{2})"`)
+	sbtProjectRE      = regexp.MustCompile(`(?m)^\s*lazy\s+val\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\(?\s*project(?:\s+in\s+file\(\s*"([^"\n]*)"\s*\)|\.in\(\s*file\(\s*"([^"\n]*)"\s*\)\s*\))?`)
+	sbtNameRE         = regexp.MustCompile(`\bname\s*:=\s*"{1,3}([^"\n]+)"{1,3}`)
+	sbtScriptNameRE   = regexp.MustCompile(`\bexecutableScriptName\s*:=\s*"([^"\n]+)"`)
+	sbtJavaReleaseRE  = regexp.MustCompile(`"-?-release(?::(\d{1,2})"|"\s*,?\s*"(\d{1,2})")|"-java-output-version"\s*,?\s*"(\d{1,2})"`)
 	sbtNonWordRE      = regexp.MustCompile(`\W+`)
 	leinMainRE        = regexp.MustCompile(`:main\s+(\^:skip-aot\s+)?[A-Za-z]`)
 	leinAOTRE         = regexp.MustCompile(`:aot\s+(?::all|\[)`)
 	cljBuildAliasRE   = regexp.MustCompile(`:build\s*\{`)
 	cljUberTaskRE     = regexp.MustCompile(`\(defn\s+(uber(?:jar)?)\b`)
+	// The stage directory and start script are written into the generated
+	// Dockerfile, so only a plain relative path and file name are taken.
+	sbtStageDirRE   = regexp.MustCompile(`^[A-Za-z0-9._/-]{1,128}$`)
+	sbtScriptFileRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 )
 
 // jvmLanguageRecipe is what the Scala and Clojure recipes build with.
@@ -89,31 +94,49 @@ func (r jvmLanguageRecipe) start() string {
 	}
 	start := "exec /app/bin/" + r.script
 	if r.play {
-		// Play reads its port from http.port, writes RUNNING_PID where the
-		// next container would find it, and answers only localhost until
-		// its host filter allows the domain the proxy forwards.
-		start += " -Dhttp.port=${PORT:-9000} -Dpidfile.path=/dev/null -Dplay.filters.hosts.allowed.0=."
+		// Play's secret comes from the configuration the recipe writes
+		// beside the application's own, which keeps it out of argv. Play
+		// reads its port from http.port, writes RUNNING_PID where the next
+		// container would find it, and answers only localhost until its
+		// host filter allows the domain the proxy forwards.
+		start += " -Dconfig.file=" + playSecretConfig + " -Dhttp.port=${PORT:-9000} -Dpidfile.path=/dev/null -Dplay.filters.hosts.allowed.0=."
 	}
 	return start
 }
 
+// playSecretConfig is the configuration a Play start loads: the
+// application's own, then the secret from APPLICATION_SECRET. Play's
+// reference.conf never reads that variable, and a stock application.conf
+// leaves play.http.secret.key at "changeme", which production refuses. An
+// include of the bare name "application" loads application.conf (or .json,
+// .properties) from beside it when sbt stage externalised conf/, and from
+// the classpath when it did not.
+const playSecretConfig = "/app/conf/just-dashboard.conf"
+
+var playSecretConfigLines = []string{`include "application"`, `play.http.secret.key = ${?APPLICATION_SECRET}`}
+
 // chooseJVMLanguageJDK reads .java-version, then a release the build
-// (manifest) compiles for, else the reviewed 21.
-func chooseJVMLanguageJDK(versionFile, build []byte, manifest string) (string, string, error) {
-	selected, source := "", ""
+// (manifest) compiles for, else the reviewed 21. A release below 17 in the
+// build is only the bytecode it targets, which a 17 compiler still writes
+// and a 17 JRE runs; target returns it.
+func chooseJVMLanguageJDK(versionFile, build []byte, manifest string) (jdk, source, target string, err error) {
+	selected := ""
 	if match := javaVersionFileRE.FindStringSubmatch(firstMeaningfulLine(string(versionFile))); match != nil {
 		selected, source = match[1], ".java-version"
 	} else if match := sbtJavaReleaseRE.FindSubmatch(build); match != nil {
-		selected, source = firstNonEmpty(string(match[1]), string(match[2])), manifest
+		selected, source = firstNonEmpty(string(match[1]), string(match[2]), string(match[3])), manifest
+		if release, err := strconv.Atoi(selected); err == nil && release < 17 {
+			return "17", source, selected, nil
+		}
 	}
 	if selected == "" {
-		return "21", "", nil
+		return "21", "", "", nil
 	}
 	if !slices.Contains(jvmLanguageJDKs, selected) {
-		return "", "", fmt.Errorf("%w: the recipe builds on Java %s; %s names %s — use a Dockerfile for other releases",
+		return "", "", "", fmt.Errorf("%w: the recipe builds on Java %s; %s names %s — use a Dockerfile for other releases",
 			ErrUnsupportedBuilder, strings.Join(jvmLanguageJDKs, ", "), source, selected)
 	}
-	return selected, source, nil
+	return selected, source, "", nil
 }
 
 // sbtStagedProject finds the project sbt stage packages: the root, or the
@@ -194,6 +217,8 @@ func sbtNormalizedName(name string) string {
 type jvmLanguageProject struct {
 	recipe jvmLanguageRecipe
 	source string
+	// target is a lower Java release the build compiles for.
+	target string
 	err    error
 }
 
@@ -204,7 +229,7 @@ func readScalaProject(root string) jvmLanguageProject {
 	if match := sbtVersionRE.FindStringSubmatch(string(readRecipeFile(root, "project/build.properties", 4096))); match != nil && strings.HasPrefix(match[1], "2.") {
 		project.recipe.sbt = "2"
 	}
-	project.recipe.jdk, project.source, project.err = chooseJVMLanguageJDK(readRecipeFile(root, ".java-version", 4096), []byte(build), "build.sbt")
+	project.recipe.jdk, project.source, project.target, project.err = chooseJVMLanguageJDK(readRecipeFile(root, ".java-version", 4096), []byte(build), "build.sbt")
 	if project.err != nil {
 		return project
 	}
@@ -213,6 +238,11 @@ func readScalaProject(root string) jvmLanguageProject {
 	case (project.recipe.play || sbtPackagerRE.MatchString(plugins)) && sbtStageEnabledRE.MatchString(build):
 		project.recipe.tool = "sbt-stage"
 		project.recipe.stage, project.recipe.script = sbtStagedProject(build)
+		if project.recipe.stage != "" && (!safeRelativePath(project.recipe.stage) || !sbtStageDirRE.MatchString(project.recipe.stage)) {
+			project.err = fmt.Errorf("%w: build.sbt packages a project whose directory is not a plain relative path; use a Dockerfile", ErrUnsupportedBuilder)
+		} else if !sbtScriptFileRE.MatchString(project.recipe.script) {
+			project.err = fmt.Errorf("%w: build.sbt names a start script that is not a plain file name; use a Dockerfile", ErrUnsupportedBuilder)
+		}
 	case sbtAssemblyRE.MatchString(plugins):
 		project.recipe.tool = "sbt-assembly"
 	default:
@@ -253,7 +283,7 @@ func readClojureProject(root string) jvmLanguageProject {
 	if project.recipe.tool == "tools-deps" {
 		manifest = "deps.edn"
 	}
-	project.recipe.jdk, project.source, project.err = chooseJVMLanguageJDK(readRecipeFile(root, ".java-version", 4096), build, manifest)
+	project.recipe.jdk, project.source, project.target, project.err = chooseJVMLanguageJDK(readRecipeFile(root, ".java-version", 4096), build, manifest)
 	return project
 }
 
@@ -294,13 +324,17 @@ func jvmLanguageCandidate(buildRoot, root string, match *ecosystemMatch) Detecte
 		candidate.Framework, candidate.Profile, candidate.Port = "play", ProfileWeb, 9000
 		candidate.Name = "Play application in " + rootLabelOf(root)
 		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(root, "project/plugins.sbt"),
-			Reason: "Play listens on http.port, which the start command sets from PORT"})
+			Reason: "Play listens on http.port, which the start command sets from PORT, and reads its secret from APPLICATION_SECRET through " + playSecretConfig})
 	}
 	if project.err != nil {
 		candidate.RecipeIssue = recipeRefusalText(project.err, "")
 		candidate.Confidence = ConfidenceLow
 	} else {
 		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(root, manifest), Reason: project.recipe.toolchain()})
+		if project.target != "" {
+			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(root, manifest),
+				Reason: "compiles for Java " + project.target + ", which Java " + project.recipe.jdk + " builds and runs"})
+		}
 	}
 	if candidate.Profile != ProfileWeb {
 		if candidate.Confidence == ConfidenceHigh {
@@ -349,8 +383,15 @@ func renderJVMLanguageDockerfile(recipe jvmLanguageRecipe, config BuildPlanConfi
 	lines = append(lines, "FROM "+immutableImageReference(runtime))
 	if recipe.tool == "sbt-stage" {
 		lines = append(lines, unprivilegedDebianUser, "WORKDIR /app",
-			"COPY --from=build --chown=10001:10001 /src/"+path.Join(firstNonEmpty(recipe.stage, "."), "target/universal/stage")+"/ /app/",
-			"USER 10001")
+			"COPY --from=build --chown=10001:10001 /src/"+path.Join(firstNonEmpty(recipe.stage, "."), "target/universal/stage")+"/ /app/")
+		if recipe.play {
+			quoted := make([]string, 0, len(playSecretConfigLines))
+			for _, line := range playSecretConfigLines {
+				quoted = append(quoted, "'"+line+"'")
+			}
+			lines = append(lines, "RUN mkdir -p "+path.Dir(playSecretConfig)+" && printf '%s\\n' "+strings.Join(quoted, " ")+" > "+playSecretConfig)
+		}
+		lines = append(lines, "USER 10001")
 	} else {
 		lines = append(lines, "RUN adduser -D -u 10001 app && mkdir -p /app/data && chown app:app /app /app/data", "USER app", "WORKDIR /app",
 			"COPY --from=build /out/app.jar /app/app.jar")

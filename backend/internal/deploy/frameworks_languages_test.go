@@ -3,6 +3,7 @@ package deploy
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -596,7 +597,7 @@ func TestScalaAndClojureBuildOnTheJVM(t *testing.T) {
 	}
 	candidate := selectedOf(detectShapeFixture(t, play))
 	if candidate == nil || candidate.Recipe != "scala" || candidate.Framework != "play" || candidate.Port != 9000 ||
-		candidate.StartCommand != "exec /app/bin/shop-web -Dhttp.port=${PORT:-9000} -Dpidfile.path=/dev/null -Dplay.filters.hosts.allowed.0=." ||
+		candidate.StartCommand != "exec /app/bin/shop-web -Dconfig.file=/app/conf/just-dashboard.conf -Dhttp.port=${PORT:-9000} -Dpidfile.path=/dev/null -Dplay.filters.hosts.allowed.0=." ||
 		candidate.Readiness == nil || candidate.Readiness.Attempts != readinessSlowAttempts {
 		t.Fatalf("play = %#v", candidate)
 	}
@@ -614,14 +615,37 @@ func TestScalaAndClojureBuildOnTheJVM(t *testing.T) {
 	assertRendered(t, prepared, []string{
 		"FROM sbtscala/scala-sbt:eclipse-temurin-21_1.x@sha256:", "RUN sbt -batch update", "RUN sbt -batch stage",
 		"FROM eclipse-temurin:21-jre@sha256:", "COPY --from=build --chown=10001:10001 /src/target/universal/stage/ /app/",
-		`ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75"`, "exec /app/bin/shop-web -Dhttp.port=${PORT:-9000}",
-	}, nil)
+		// A stock application.conf leaves the secret at "changeme"; the
+		// configuration the start loads reads it from the environment.
+		`RUN mkdir -p /app/conf && printf '%s\n' 'include "application"' 'play.http.secret.key = ${?APPLICATION_SECRET}' > /app/conf/just-dashboard.conf` + "\nUSER 10001",
+		`ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75"`, "exec /app/bin/shop-web -Dconfig.file=/app/conf/just-dashboard.conf -Dhttp.port=${PORT:-9000}",
+	}, []string{"APPLICATION_SECRET=", "-Dplay.http.secret.key"})
 	release := selectedOf(detectShapeFixture(t, map[string]string{
 		"build.sbt":           "name := \"api\"\njavacOptions ++= Seq(\"--release\", \"17\")\nlazy val root = (project in file(\".\")).enablePlugins(JavaAppPackaging)\n",
 		"project/plugins.sbt": "addSbtPlugin(\"com.github.sbt\" % \"sbt-native-packager\" % \"1.10.4\")\nlibraryDependencies += \"org.http4s\" %% \"http4s-ember-server\" % \"0.23.30\"\n",
 	}, SourceIdentity{Kind: SourceLocal}))
 	if release == nil || release.Toolchain == nil || release.Toolchain.Release != "17" || release.Toolchain.From != "build.sbt" {
 		t.Fatalf("release = %#v", release)
+	}
+	// A lower release is the bytecode the build targets, which 17 builds.
+	for build, target := range map[string]string{
+		"javacOptions ++= Seq(\"--release\", \"11\")\n": "11",
+		"scalacOptions += \"-release:8\"\n":             "8",
+	} {
+		lower := selectedOf(detectShapeFixture(t, map[string]string{
+			"build.sbt":           "name := \"api\"\n" + build + "lazy val root = (project in file(\".\")).enablePlugins(JavaAppPackaging)\n",
+			"project/plugins.sbt": "addSbtPlugin(\"com.github.sbt\" % \"sbt-native-packager\" % \"1.10.4\")\n",
+		}))
+		if lower == nil || lower.RecipeIssue != "" || lower.Toolchain == nil || lower.Toolchain.Release != "17" ||
+			!slices.ContainsFunc(lower.Evidence, func(e DetectionEvidence) bool {
+				return e.Reason == "compiles for Java "+target+", which Java 17 builds and runs"
+			}) {
+			t.Fatalf("release %s = %#v", target, lower)
+		}
+	}
+	if _, err := prepareFixture(t, map[string]string{"build.sbt": "name := \"x\"\n", ".java-version": "11\n"}, BuildPlanConfig{Method: BuildRecipe, Recipe: "scala"}); err == nil ||
+		!strings.Contains(err.Error(), ".java-version names 11") {
+		t.Fatalf(".java-version 11 err = %v", err)
 	}
 	if err := validateDetectionResult(&DraftSourceConfig{Kind: SourceLocal}, withSelection(DetectionResult{Source: SourceIdentity{Kind: SourceLocal}, Candidates: []DetectedCandidate{*release}})); err != nil {
 		t.Fatal(err)
@@ -636,6 +660,36 @@ func TestScalaAndClojureBuildOnTheJVM(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertRendered(t, prepared, []string{"eclipse-temurin-17_1.x", "/src/server/target/universal/stage/ /app/", "exec /app/bin/api-server"}, nil)
+	// build.sbt text reaches the Dockerfile only as a plain path: a line
+	// break in a project's directory (sbt loads one written inside a
+	// comment) cannot start instructions of its own.
+	injected := map[string]string{
+		"build.sbt":           "/*\nlazy val web = (project in file(\"web\nFROM alpine AS injected\nRUN echo injected-instruction\n\")).enablePlugins(JavaAppPackaging)\n*/\n",
+		"project/plugins.sbt": "addSbtPlugin(\"com.github.sbt\" % \"sbt-native-packager\" % \"1.10.4\")\n",
+	}
+	prepared, err = prepareFixture(t, injected, BuildPlanConfig{Method: BuildRecipe, Recipe: "scala"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRendered(t, prepared, []string{"/src/web/target/universal/stage/ /app/"}, []string{"alpine", "injected"})
+	// Whatever reaches the renderer, no instruction spans lines.
+	bases := []ResolvedImage{{Reference: "sbtscala/scala-sbt:eclipse-temurin-21_1.x", Digest: "sha256:" + strings.Repeat("a", 64)},
+		{Reference: "eclipse-temurin:21-jre", Digest: "sha256:" + strings.Repeat("b", 64)}}
+	crafted := selectedRecipe{kind: "scala", language: languageBuild{jvm: jvmLanguageRecipe{language: "scala", tool: "sbt-stage", jdk: "21", sbt: "1",
+		stage: "web\nFROM alpine AS injected", script: "web"}}}
+	if _, err := renderLanguageDockerfile(crafted, BuildPlanConfig{}, bases, "", ""); err == nil || !errors.Is(err, ErrUnsupportedBuilder) {
+		t.Fatalf("a line break reached the Dockerfile: %v", err)
+	}
+	for name, build := range map[string]string{
+		"a directory with a space": "lazy val web = (project in file(\"web app\")).enablePlugins(JavaAppPackaging)\n",
+		"a directory above":        "lazy val web = (project in file(\"../web\")).enablePlugins(JavaAppPackaging)\n",
+		"a script name with a $":   "enablePlugins(JavaAppPackaging)\nexecutableScriptName := \"$(id)\"\n",
+	} {
+		injected["build.sbt"] = build
+		if _, err := prepareFixture(t, injected, BuildPlanConfig{Method: BuildRecipe, Recipe: "scala"}); err == nil || !errors.Is(err, ErrUnsupportedBuilder) {
+			t.Fatalf("%s: err = %v", name, err)
+		}
+	}
 	assembly := map[string]string{"build.sbt": "name := \"worker\"\n", "project/plugins.sbt": "addSbtPlugin(\"com.eed3si9n\" % \"sbt-assembly\" % \"2.3.0\")\n"}
 	prepared, err = prepareFixture(t, assembly, BuildPlanConfig{Method: BuildRecipe, Recipe: "scala"})
 	if err != nil {
