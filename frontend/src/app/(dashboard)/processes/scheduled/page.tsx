@@ -50,10 +50,7 @@ export default function ScheduledPage() {
     30_000,
     [user],
   )
-  const timers = usePoll(
-    (signal) => get<TimerList>("/systemd/timers", undefined, signal),
-    30_000,
-  )
+  const timers = usePoll((signal) => get<TimerList>("/systemd/timers", undefined, signal), 30_000)
   const system = usePoll((signal) => get<Crontab[]>("/cron/system", undefined, signal), 0)
 
   const jobs = useMemo(() => crontab.data?.jobs ?? [], [crontab.data])
@@ -95,9 +92,7 @@ export default function ScheduledPage() {
             label="Next run"
             value={next ? relativeTime(next.at.toISOString()) : "Nothing"}
             hint={
-              next
-                ? `${next.what} · ${timestamp(next.at.toISOString())}`
-                : "no job or timer is due"
+              next ? `${next.what} · ${timestamp(next.at.toISOString())}` : "no job or timer is due"
             }
           />
           <StatTile

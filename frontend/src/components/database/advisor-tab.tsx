@@ -8,7 +8,6 @@ import { copyText } from "@/lib/clipboard"
 import { plural, relativeTime } from "@/lib/format"
 import type { DbAdvice, DbAdviseReport, DbConnection } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { ChipStrip, ChipCount, FilterChip } from "@/components/tabs"
 import { FindingList, type Finding } from "@/components/finding-list"
 import { ErrorState, LoadingPanel } from "@/components/state"
@@ -33,12 +32,14 @@ const CATEGORY_WORD: Record<DbAdvice["category"], string> = {
  * The advisor: what the engine's own catalogue says is wrong, as findings
  * with the fix attached.
  *
- * Four readings first — how many findings, how many of them critical, what
- * was checked, when — then the findings as the same list every verdict in
- * the product is drawn as (`FindingList`), each carrying the objects it is
- * about and, where one statement fixes it, that statement with a copy button
- * and a link to run it in the console. Nothing here executes on its own: the
- * advisor points, the operator decides.
+ * The findings as the same list every verdict in the product is drawn as
+ * (`FindingList`), each carrying the objects it is about and, where one
+ * statement fixes it, that statement with a copy button and a link to run it
+ * in the console. The four readings that stood over the list as tiles — how
+ * many findings, how many critical, what was checked, when — are the list's
+ * own header now (§15 pass 2): a count is loudest as the title of the thing
+ * it counts. Nothing here executes on its own: the advisor points, the
+ * operator decides.
  */
 export function AdvisorTab({
   conn,
@@ -140,59 +141,36 @@ export function AdvisorTab({
 
   return (
     <div className="flex min-w-0 animate-rise flex-col gap-6">
-      <StatGrid columns={4}>
-        <StatTile
-          label="Findings"
-          value={report.data.findings.length.toLocaleString()}
-          tone={
-            critical > 0
-              ? "danger"
-              : warnings > 0
-                ? "warning"
-                : report.data.findings.length === 0
-                  ? "success"
-                  : "default"
-          }
-          hint={
-            report.data.findings.length === 0
-              ? "nothing to fix"
-              : `${critical} critical · ${warnings} warnings`
-          }
-        />
-        <StatTile
-          label="Tables checked"
-          value={report.data.tablesChecked.toLocaleString()}
-          hint={schema ? `in ${schema}` : "default schema"}
-        />
-        <StatTile
-          label="Engine checks"
-          value={report.data.engineChecks ? "On" : "Structure only"}
-          hint={
-            report.data.engineChecks
-              ? "statistics, indexes, settings"
-              : "this engine keeps no statistics to read"
-          }
-        />
-        <StatTile
-          label="Checked"
-          value={relativeTime(checkedAt)}
-          hint={
-            <Button
-              size="xs"
-              variant="ghost"
-              className="-ml-2"
-              onClick={report.refresh}
-              pending={report.loading}
-            >
-              Check again
-            </Button>
-          }
-        />
-      </StatGrid>
-
       <Panel plain>
         <PanelHeader
-          title="What the catalogue says"
+          title={
+            report.data.findings.length === 0
+              ? "Nothing to fix"
+              : `${plural(report.data.findings.length, "finding")}${
+                  critical > 0 ? ` · ${critical} critical` : ""
+                }${warnings > 0 ? ` · ${plural(warnings, "warning")}` : ""}`
+          }
+          eyebrow={
+            <span className="flex flex-wrap items-center gap-x-1.5">
+              <span>
+                {plural(report.data.tablesChecked, "table")} checked
+                {schema ? ` in ${schema}` : ""} ·{" "}
+                {report.data.engineChecks
+                  ? "statistics, indexes and settings read"
+                  : "structure only, this engine keeps no statistics"}{" "}
+                · {relativeTime(checkedAt)}
+              </span>
+              <Button
+                size="xs"
+                variant="ghost"
+                className="-my-1 h-5 px-1.5"
+                onClick={report.refresh}
+                pending={report.loading}
+              >
+                Check again
+              </Button>
+            </span>
+          }
           actions={
             <ChipStrip>
               {(["all", "performance", "schema", "security", "maintenance"] as Category[]).map(

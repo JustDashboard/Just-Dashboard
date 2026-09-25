@@ -197,7 +197,7 @@ const topology = {
       product: "postgres",
       detail: "shop",
       connId: 1,
-      href: "/databases/browse?conn=1",
+      href: "/databases/overview?conn=1",
     },
     {
       id: "deploy:7",
@@ -475,7 +475,14 @@ async function mockDatabases(
     if (path === "/databases/1/overview")
       return json(route, {
         schema: "",
-        tables: [],
+        tables: tables.map((t) => ({
+          schema: t.schema,
+          table: t.name,
+          rows: t.estimatedRows,
+          bytes: t.size,
+          dataBytes: t.size,
+          indexBytes: 0,
+        })),
         totalBytes: 5242880,
         totalRows: 9600,
         tableCount: 3,
@@ -765,7 +772,12 @@ test("structure picks a table from its own rail and edits from there", async ({ 
  * asked for, and only offers to forget a connection the sync would not simply
  * re-add on the next load.
  */
-test("the connection string is masked, shown on request, and the public one names the server", async ({
+/**
+ * A database opens on its own overview: the connection string first, in the
+ * shapes it is pasted in, the facts beside it, its largest tables as bars
+ * that open in Browse, and the things reading it.
+ */
+test("a database opens on its overview: the string, the facts, the tables and what it feeds", async ({
   page,
 }) => {
   await mockDatabases(page, { layout: null, puts: [] })
@@ -773,27 +785,52 @@ test("the connection string is masked, shown on request, and the public one name
     json(route, { added: [], already: [], needsCredentials: [] }),
   )
   await page.setViewportSize({ width: 1696, height: 992 })
-  await page.goto("/databases/connection?conn=1")
+  await page.goto("/databases/overview?conn=1")
 
-  const local = page.getByText("On this server", { exact: true }).locator("..")
-  await expect(local).toContainText("postgres://app:••••••@127.0.0.1:5432/shop")
-  await expect(local).not.toContainText("s3cret")
+  const string = page.locator("[data-slot=connection-string]")
+  await expect(string).toContainText("postgres://app:••••••@127.0.0.1:5432/shop")
+  await expect(string).not.toContainText("s3cret")
   await page.getByRole("button", { name: "Show the connection string" }).click()
-  await expect(local).toContainText("postgres://app:s3cret@127.0.0.1:5432/shop?sslmode=disable")
+  await expect(string).toContainText("postgres://app:s3cret@127.0.0.1:5432/shop?sslmode=disable")
   await page.getByRole("button", { name: "Hide the connection string" }).click()
-  await expect(local).not.toContainText("s3cret")
+  await expect(string).not.toContainText("s3cret")
+  // The same string in the shape an .env file and a shell take.
+  await page.getByRole("button", { name: ".env" }).click()
+  await expect(string).toContainText("DATABASE_URL=postgres://app:••••••@127.0.0.1:5432/shop")
+  await page.getByRole("button", { name: "psql" }).click()
+  await expect(string).toContainText('psql "postgres://app:••••••@127.0.0.1:5432/shop')
+  await page.getByRole("button", { name: "URL" }).click()
 
-  // Loopback only, so the second row explains rather than offers a string,
-  // and Maintenance carries the switch that opens it up.
+  // Loopback only, so the other target explains rather than offers a string,
+  // and names the page whose switch opens it up.
+  await page.getByRole("button", { name: "From anywhere" }).click()
   await expect(
     page.getByText("Not reachable from outside this server", { exact: false }),
   ).toBeVisible()
-  await expect(page.getByRole("button", { name: "Open up…" })).toBeVisible()
+  await expect(string).toHaveCount(0)
+
+  // The facts, from the read that dials every connection.
+  await expect(page.getByRole("heading", { name: "At a glance" })).toBeVisible()
+  await expect(page.getByText("answers in 3 ms")).toBeVisible()
+  await expect(page.getByText("this server only")).toBeVisible()
+  // The largest tables as bars that open in Browse, and the map of what
+  // reads it.
+  const bars = page.locator("[data-slot=bar-list]")
+  await expect(bars).toContainText("orders")
+  await expect(page.getByRole("list", { name: "What they feed" })).toContainText("api")
   await page.screenshot({
     path: "test-results/database-docs.png",
     fullPage: true,
     animations: "disabled",
   })
+  await bars.getByRole("button", { name: "Browse orders" }).click()
+  await expect(page).toHaveURL(/\/databases\/browse\?conn=1&schema=public&table=orders/)
+})
+
+test("the Connection page keeps the switch that opens a loopback database up", async ({ page }) => {
+  await mockDatabases(page, { layout: null, puts: [] })
+  await page.goto("/databases/connection?conn=1")
+  await expect(page.getByRole("button", { name: "Open up…" })).toBeVisible()
   // A database running here is re-added by the sync, so there is nothing to
   // forget: the Remove row is not drawn.
   await expect(page.getByRole("button", { name: "Remove" })).toHaveCount(0)
@@ -812,10 +849,13 @@ test("a server published to every interface hands out the public string and can 
       firewall: { backend: "ufw", active: true, open: true, editable: true },
     },
   })
-  await page.goto("/databases/connection?conn=1")
+  await page.goto("/databases/overview?conn=1")
 
-  const remote = page.getByText("From anywhere", { exact: true }).locator("..")
-  await expect(remote).toContainText("postgres://app:••••••@203.0.113.9:5432/shop")
+  await page.getByRole("button", { name: "From anywhere" }).click()
+  await expect(page.locator("[data-slot=connection-string]")).toContainText(
+    "postgres://app:••••••@203.0.113.9:5432/shop",
+  )
+  await page.goto("/databases/connection?conn=1")
   await expect(page.getByText("The firewall lets it through", { exact: false })).toBeVisible()
   await expect(page.getByRole("button", { name: "Close", exact: true })).toBeVisible()
 })
@@ -839,7 +879,11 @@ test("a connection to a server somewhere else keeps its Remove row and has no sw
 
   await expect(page.getByText("Remove from the dashboard")).toBeVisible()
   await expect(page.getByRole("button", { name: "Open up…" })).toHaveCount(0)
-  await expect(page.getByText("From anywhere")).toHaveCount(0)
+  await page.goto("/databases/overview?conn=1")
+  await expect(page.locator("[data-slot=connection-string]")).toContainText(
+    "postgres://app:••••••@127.0.0.1:5432/shop",
+  )
+  await expect(page.getByRole("button", { name: "From anywhere" })).toHaveCount(0)
 })
 
 test("deleting a container database can take the container and its data with it", async ({
@@ -875,17 +919,18 @@ test("the section opens on every database at once, worst first", async ({ page }
   await page.goto("/databases")
 
   await expect(page.getByRole("heading", { name: "Databases", level: 1 })).toHaveClass(/sr-only/)
-  // No connection strip on a page about every connection.
+  // No connection strip on a page about every connection, and no tiles over
+  // the cards: the cards are the readings.
   await expect(page.getByRole("button", { name: /Switch connection/ })).toHaveCount(0)
-  await expect(page.getByText("1 of 2")).toBeVisible()
-  // The unreachable one stands first.
-  // The cards only: the map below also links each database by name.
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  // The unreachable one stands first, and a card opens the database's own
+  // overview. The cards only: the map below also links each database by name.
   const cards = page
     .locator("[data-slot=choice-card]")
     .getByRole("link", { name: /^Open (shop|cache)$/ })
   await expect(cards).toHaveCount(2)
   await expect(cards.first()).toHaveAccessibleName("Open cache")
-  await expect(cards.first()).toHaveAttribute("href", "/databases/browse?conn=2")
+  await expect(cards.first()).toHaveAttribute("href", "/databases/overview?conn=2")
   await expect(page.getByText("cache connection refused")).toBeVisible()
   // A server found on the machine is offered, and its dialog can make the
   // account from the host's own shell.
@@ -898,6 +943,17 @@ test("the section opens on every database at once, worst first", async ({ page }
   // The map draws both columns.
   await expect(page.getByRole("list", { name: "What they feed" })).toContainText("api")
   await page.screenshot({ path: "test-results/database-overview-1280.png", fullPage: true })
+  await page.setViewportSize({ width: 1720, height: 1000 })
+  await page.screenshot({ path: "test-results/database-overview-1720.png", fullPage: true })
+  // A press anywhere on a card opens it — on its readings, not only on the
+  // two words of its title. The whole surface took the pointer cursor and
+  // only the title went anywhere, which read as a click that had not landed.
+  await page
+    .locator("[data-slot=choice-card]")
+    .filter({ hasText: "shop" })
+    .getByText("Sessions", { exact: true })
+    .click()
+  await expect(page).toHaveURL(/\/databases\/overview\?conn=1/)
 })
 
 test("the map draws every link and the topology page its readings", async ({ page }) => {
@@ -906,9 +962,16 @@ test("the map draws every link and the topology page its readings", async ({ pag
   await expect(page.getByRole("list", { name: "Databases" })).toContainText("shop")
   await expect(page.getByRole("list", { name: "What they feed" })).toContainText("worker")
   await expect(page.getByText("linked by its deployment · 2 open sessions")).toBeVisible()
-  await expect(
-    page.getByText("2 carrying sessions").or(page.getByText("1 carrying sessions")),
-  ).toBeVisible()
+  // The readings are the section's own line and the lanes' heads, not tiles.
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  await expect(page.getByText("2 links · 1 carrying sessions")).toBeVisible()
+  await expect(page.getByRole("list", { name: "How to read the map" })).toBeVisible()
+  await page.setViewportSize({ width: 1720, height: 1000 })
+  await page.screenshot({
+    path: "test-results/database-topology-1720.png",
+    fullPage: true,
+    animations: "disabled",
+  })
 })
 
 /**
@@ -960,6 +1023,7 @@ test("the advisor draws findings with their fix", async ({ page }) => {
 
 for (const path of [
   "/databases",
+  "/databases/overview?conn=1",
   "/databases/browse?conn=1",
   "/databases/diagram?conn=1",
   "/databases/connection?conn=1",

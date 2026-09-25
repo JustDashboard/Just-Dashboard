@@ -17,7 +17,7 @@ export default function ServerPage() {
         confirm={confirm}
         onConnected={(id) => {
           refreshConnections()
-          goto("/databases/browse", { conn: id })
+          goto("/databases/overview", { conn: id })
         }}
       />
       {dialog}

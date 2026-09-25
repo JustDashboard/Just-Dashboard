@@ -2,57 +2,38 @@
 
 import { useRef, useState } from "react"
 import { forgetMemoryState, useMemoryState } from "@/lib/view-state"
-import {
-  ArrowRight,
-  Check,
-  CloudDownload,
-  Copy,
-  Eye,
-  EyeOff,
-  Key,
-  Pencil,
-  Trash,
-  WarningFill,
-} from "@/components/icons"
-import Link from "next/link"
+import { CloudDownload, Key, Pencil, Trash, WarningFill } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, downloadUrl, get, post, put } from "@/lib/api"
-import { bytes, relativeTime, timestamp } from "@/lib/format"
-import { buildDsn, DEFAULT_PORT } from "@/lib/db-dsn"
-import type { DbAccess, DbAccessChange, DbConnection, DbOverview, DbTable } from "@/lib/types"
+import { bytes, timestamp } from "@/lib/format"
+import type { DbAccess, DbAccessChange, DbConnection } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { useCopy } from "@/hooks/use-copy"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Page, DetailList, Detail } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Skeleton } from "@/components/ui/skeleton"
-import { IconAction } from "@/components/icon-action"
 import { ConnectionDialog } from "@/components/database/connection-dialog"
 import { useDatabase } from "@/components/database/db-context"
 
 /**
- * The connection itself: what it is, how big it is, and the three things done
- * to it rarely enough that each deserves a sentence — a dump, forgetting it,
- * and dropping the database it points at.
+ * The connection itself: its facts, and the things done to it rarely enough
+ * that each deserves a sentence — a dump, where its port answers, forgetting
+ * it, and dropping the database it points at.
  *
- * Readings first, as tiles on the page's own edge; the facts as a plain list;
- * the verbs as rows, each with the line of plain English that says what it
- * does, because "Remove" and "Delete" side by side in a header were two words
- * for two very different outcomes.
+ * The facts as a plain list; the verbs as rows, each with the line of plain
+ * English that says what it does, because "Remove" and "Delete" side by side
+ * in a header were two words for two very different outcomes.
  *
- * Between the readings and the facts sits the one thing an operator comes to
- * this page for after the first day: the connection string, to paste into an
- * application. It is shown masked, revealed or copied on purpose (the server
- * audits the reveal), and — where the server is a container on this host — a
- * second string carries the machine's public address, because a database
- * published to loopback is unreachable from the laptop the operator is
- * sitting at, and the switch that changes that lives under Maintenance.
+ * It opened on four readings and the connection string. Both moved to the
+ * database's own overview, which is where a database opens now: the string
+ * is the first thing an operator wants from a database and had been on the
+ * last page of the section, and the readings sit there beside the ones the
+ * fleet dials. What is left here is the settings page — what the connection
+ * is, and what can be done to it.
  *
  * The Remove row is only drawn for a connection the sync would not re-add. A
  * database running on this server connects itself on the next page load, so
@@ -62,7 +43,7 @@ import { useDatabase } from "@/components/database/db-context"
 export default function ConnectionPage() {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
-  const { conn, info, refreshConnections, goto, hrefFor } = useDatabase()
+  const { conn, info, refreshConnections, goto } = useDatabase()
   const [editing, setEditing] = useMemoryState("databases.connection.editing", false)
   // Read at the action rather than rendered: the confirm dialog takes its
   // description once, so the checkbox inside it is uncontrolled and the
@@ -94,103 +75,15 @@ export default function ConnectionPage() {
     { enabled: Boolean(conn) },
   )
 
-  // Redis has no table catalogue — its browser lists keyspaces itself — so the
-  // count is only asked for where the endpoint means something.
-  const countable = info ? info.kind !== "keyvalue" : true
-  const tables = usePoll<DbTable[]>(
-    (signal) =>
-      conn && countable
-        ? get<DbTable[]>(`/databases/${conn.id}/tables`, { schema: "" }, signal)
-        : Promise.resolve([]),
-    0,
-    [conn?.id, countable],
-    { enabled: Boolean(conn) && countable },
-  )
-  // Sizes come from the same breakdown the Monitor tab draws, and only for a
-  // SQL engine, which is the only kind that reports them.
-  const sql = Boolean(info?.sql)
-  const overview = usePoll<DbOverview>(
-    (signal) =>
-      conn && sql
-        ? get<DbOverview>(`/databases/${conn.id}/overview`, { schema: "" }, signal)
-        : Promise.reject(new Error("not a SQL engine")),
-    0,
-    [conn?.id, sql],
-    { enabled: Boolean(conn) && sql },
-  )
-
   if (!conn) return null
 
   const label = info?.label ?? conn.driver
-  const objectWord =
-    info?.kind === "keyvalue" ? "keyspace" : info?.kind === "document" ? "collection" : "table"
-  const objects = tables.data?.length
-  const o = overview.data
   const a = access.data
   const unreachable = ping.data ? !ping.data.ok : false
   const container = a?.container && !a.composeProject ? a.container : undefined
 
   return (
     <Page className="animate-rise">
-      <StatGrid columns={4}>
-        {countable ? (
-          <StatTile
-            label={objectWord === "collection" ? "Collections" : "Tables"}
-            value={
-              tables.loading && !tables.data ? (
-                <Skeleton className="h-6 w-12" />
-              ) : (
-                (objects ?? 0).toLocaleString()
-              )
-            }
-            hint={
-              objects && objects > 0 ? (
-                <Link href={hrefFor("/databases/browse")} className="hover:text-foreground">
-                  Browse them <ArrowRight className="inline size-3" />
-                </Link>
-              ) : (
-                "none yet"
-              )
-            }
-          />
-        ) : (
-          <StatTile label="Engine" value={label} hint="key–value store" />
-        )}
-        {sql && (
-          <StatTile
-            label="Rows"
-            value={
-              overview.loading && !o ? (
-                <Skeleton className="h-6 w-16" />
-              ) : (
-                (o?.totalRows ?? 0).toLocaleString()
-              )
-            }
-            hint="the engine's estimate"
-          />
-        )}
-        {sql && (
-          <StatTile
-            label="Size"
-            value={
-              overview.loading && !o ? (
-                <Skeleton className="h-6 w-16" />
-              ) : o?.sizesKnown ? (
-                bytes(o.totalBytes)
-              ) : (
-                "—"
-              )
-            }
-            hint={o && !o.sizesKnown ? "not reported by this engine" : "data and indexes"}
-          />
-        )}
-        <StatTile
-          label="Added"
-          value={relativeTime(conn.createdAt)}
-          hint={timestamp(conn.createdAt)}
-        />
-      </StatGrid>
-
       {unreachable && (
         <Notice title="This connection cannot sign in" icon={Key} tone="warning">
           <p className="font-mono text-xs break-words">{ping.data?.error}</p>
@@ -204,21 +97,6 @@ export default function ConnectionPage() {
             </p>
           )}
         </Notice>
-      )}
-
-      {admin && conn.driver !== "sqlite" && (
-        <Panel plain>
-          <PanelHeader title="Connection string" />
-          <RowList>
-            <ConnectionStringRow
-              conn={conn}
-              target="host"
-              title={a?.exposure === "remote" ? "As saved" : "On this server"}
-              preview={previewDsn(conn, conn.host)}
-            />
-            {a && a.exposure !== "remote" && <PublicStringRow conn={conn} access={a} />}
-          </RowList>
-        </Panel>
       )}
 
       <div className="grid items-start gap-8 lg:grid-cols-2 [&>*]:min-w-0">
@@ -491,134 +369,6 @@ function credentialFailure(error?: string) {
   if (!error) return false
   return /password authentication failed|access denied for user|authentication failed|wrongpass|noauth|login failed for user|invalid username\/password/i.test(
     error,
-  )
-}
-
-/**
- * The string as the engine would spell it, with the password hidden — built
- * from the facts the page already has, so drawing it reveals nothing and
- * audits nothing. The real one is fetched when it is copied or shown.
- */
-function previewDsn(conn: DbConnection, host: string) {
-  return buildDsn(conn.driver, {
-    host,
-    port: conn.port || DEFAULT_PORT[conn.driver],
-    user: conn.user,
-    password: "••••••",
-    database: conn.database,
-    option: "",
-  }).replace(encodeURIComponent("••••••"), "••••••")
-}
-
-/** One connection string: masked until shown, copied whole. */
-function ConnectionStringRow({
-  conn,
-  target,
-  title,
-  preview,
-}: {
-  conn: DbConnection
-  target: "host" | "public"
-  title: string
-  preview: string
-}) {
-  const { copy, copied } = useCopy()
-  const [shown, setShown] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-
-  const fetchUrl = async () => {
-    const res = await get<{ url: string }>(`/databases/${conn.id}/url`, { target })
-    return res.url
-  }
-  const reveal = async () => {
-    if (shown) {
-      setShown(null)
-      return
-    }
-    setBusy(true)
-    try {
-      setShown(await fetchUrl())
-    } catch (err) {
-      notify.error("Could not read the connection string", err)
-    } finally {
-      setBusy(false)
-    }
-  }
-  const copyIt = async () => {
-    setBusy(true)
-    try {
-      await copy(shown ?? (await fetchUrl()), "Connection string copied")
-    } catch (err) {
-      notify.error("Could not read the connection string", err)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Row
-      title={title}
-      subtitle={shown ?? preview}
-      mono
-      trailing={
-        <>
-          <IconAction
-            label={shown ? "Hide the connection string" : "Show the connection string"}
-            onClick={reveal}
-            disabled={busy}
-          >
-            {shown ? <EyeOff /> : <Eye />}
-          </IconAction>
-          <Button size="sm" variant="outline" onClick={copyIt} disabled={busy}>
-            {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-            Copy
-          </Button>
-        </>
-      }
-    />
-  )
-}
-
-/**
- * The string for a laptop, or the sentence that says why there is not one.
- */
-function PublicStringRow({ conn, access }: { conn: DbConnection; access: DbAccess }) {
-  const address = access.publicAddresses[0]
-  if (access.exposure === "public" && address) {
-    return (
-      <ConnectionStringRow
-        conn={conn}
-        target="public"
-        title="From anywhere"
-        preview={previewDsn(conn, address.includes(":") ? `[${address}]` : address)}
-      />
-    )
-  }
-  if (access.exposure === "public") {
-    return (
-      <Row
-        title="From anywhere"
-        subtitle={`This machine has no public address of its own — the provider maps one in front of it. Use that address with port ${access.port}.`}
-      />
-    )
-  }
-  if (access.exposure === "private") {
-    return (
-      <Row
-        title="From anywhere"
-        subtitle="Published on one address only. Whoever can reach that address can connect on the same port; the binding is changed on the Docker page."
-      />
-    )
-  }
-  return (
-    <Row
-      title="From anywhere"
-      subtitle={
-        access.managed
-          ? "Not reachable from outside this server. Open it up under Maintenance to connect from your own machine or share it."
-          : "Not reachable from outside this server."
-      }
-    />
   )
 }
 

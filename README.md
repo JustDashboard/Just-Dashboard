@@ -158,15 +158,16 @@ health checks and runtime limits remain editable before the first deployment.
 
 ### Databases
 
-![A database connection, with its connection string and the control that opens it to the internet](docs/databases.png)
+![A database's overview: its connection string in the shapes it is pasted in, its facts, its largest tables and what reads it](docs/databases.png)
 
 PostgreSQL, MySQL and MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis. The
 section opens on every database at once — which answer, what they take, who is connected, what
-each one feeds — with a map of the deployments, containers and machines reading them. Browse and
-edit rows, change the structure, run queries, draw the schema, read the advisor's findings with
-their fixes, manage the server's accounts, databases and extensions, keep and restore dumps, and
-hand out the connection string — on this server or, with one press, from anywhere. A database
-installed on the machine itself is connected by letting the dashboard make its own account on it.
+each one feeds — with a map of the deployments, containers and machines reading them, and a
+database opens on its connection string, as the URL, the `.env` line or the shell command, on
+this server or, with one press, from anywhere. Browse and edit rows, change the structure, run
+queries, draw the schema, read the advisor's findings with their fixes, manage the server's
+accounts, databases and extensions, and keep and restore dumps. A database installed on the
+machine itself is connected by letting the dashboard make its own account on it.
 
 ### And the rest
 

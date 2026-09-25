@@ -6,10 +6,9 @@ import { plural, relativeTime } from "@/lib/format"
 import type { DbTopology } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Page, Section } from "@/components/page"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { ErrorState, LoadingPanel } from "@/components/state"
-import { DatabaseTopology } from "@/components/database/topology"
-import { edgeRank, splitTopology } from "@/components/database/fleet"
+import { DatabaseTopology, TopologyLegend } from "@/components/database/topology"
+import { edgeRank } from "@/components/database/fleet"
 
 /**
  * The map of what feeds what, in full.
@@ -17,9 +16,15 @@ import { edgeRank, splitTopology } from "@/components/database/fleet"
  * A database is only ever half of a system, and the other half — the
  * deployment that reads it, the container that was handed its address, the
  * process on this machine holding a session open — is what breaks when the
- * database does. This page draws that: readings first (how many are fed,
- * how many links are live, which are broken), then the picture, with light
- * travelling along every link something is using.
+ * database does. This page draws that, with light travelling along every link
+ * something is using.
+ *
+ * It opened on four readings — databases, fed, links, sessions — and dropped
+ * them (§15 pass 2, the `/git` exit): the two counts are the heads of the
+ * map's own lanes, and the links and the sessions they carry are the line in
+ * the section's corner, beside when the picture was last checked. A figure
+ * that says what the picture under it already says is a row of numbers the
+ * reader scrolls past to reach the picture.
  */
 export default function TopologyPage() {
   const topology = usePoll(
@@ -27,13 +32,10 @@ export default function TopologyPage() {
     20_000,
   )
   const readings = useMemo(() => {
-    const t = topology.data
-    const { databases, consumers } = splitTopology(t)
-    const edges = t?.edges ?? []
+    const edges = topology.data?.edges ?? []
     const live = edges.filter((e) => e.sessions > 0).length
     const broken = edges.filter((e) => edgeRank(e.status) >= 2).length
-    const sessions = edges.reduce((sum, e) => sum + e.sessions, 0)
-    return { databases: databases.length, consumers: consumers.length, links: edges.length, live, broken, sessions }
+    return { links: edges.length, live, broken }
   }, [topology.data])
 
   if (topology.error && !topology.data) {
@@ -53,31 +55,21 @@ export default function TopologyPage() {
 
   return (
     <Page className="animate-rise">
-      <StatGrid columns={4} dense>
-        <StatTile label="Databases" value={readings.databases.toLocaleString()} hint="on the map" />
-        <StatTile
-          label="Fed"
-          value={readings.consumers.toLocaleString()}
-          hint="deployments, containers and machines"
-        />
-        <StatTile
-          label="Links"
-          value={readings.links.toLocaleString()}
-          tone={readings.broken > 0 ? "warning" : "default"}
-          hint={
-            readings.broken > 0
-              ? `${plural(readings.broken, "link")} broken or stale`
-              : `${readings.live} carrying sessions`
-          }
-        />
-        <StatTile
-          label="Sessions"
-          value={readings.sessions.toLocaleString()}
-          hint={`open now · checked ${relativeTime(topology.data.checkedAt)}`}
-        />
-      </StatGrid>
-      <Section title="Databases and what reads them">
+      <Section
+        title="Databases and what reads them"
+        actions={
+          <span className="numeric text-hint text-muted-foreground">
+            {plural(readings.links, "link")} · {readings.live} carrying sessions
+            {readings.broken > 0 && (
+              <span className="text-warning"> · {readings.broken} broken or stale</span>
+            )}
+            {" · checked "}
+            {relativeTime(topology.data.checkedAt)}
+          </span>
+        }
+      >
         <DatabaseTopology topology={topology.data} />
+        <TopologyLegend />
       </Section>
     </Page>
   )
