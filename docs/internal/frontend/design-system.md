@@ -1110,6 +1110,25 @@ its initials in the users list's hue, and an attacker's attempts against the mos
 address's as a meter. Connections, logins, devices and routes are readings with verbs, so their
 rows stay rows.
 
+**The proxy section draws the engine and the authority.** Its things have two products between
+them — the engine serving a site and the authority that signed its certificate — and the pages draw
+those where they are true (`components/proxy/marks.ts`). The overview opens on the engine as its
+identity line (`EngineIdentity`): nginx's or Caddy's mark on the tile, the version beside the name
+the way the Overview sets the kernel beside the distribution, the unit's state, the directory it
+reads and the ingress container as facts, certbot drawn as Let's Encrypt — the mark says what it
+issues, not who wrote it — and the service verbs at the right end. A site is a card drawn as the
+engine serving it (`siteProduct`), with TLS said by whose certificate: Let's Encrypt's glyph where
+the site points at certbot's live directory (`certPathProduct`), a shield where the file is
+somebody else's. A certificate is drawn as who signed it (`certificateProduct`, through
+`issuerProduct` and certbot's directory), and an imported one from a company CA keeps a glyph rather
+than a guess. A stream is drawn as the service its port is (`portProduct`: the databases and control
+planes the attention list already names by number, and the two Minecraft editions) and a port
+nothing names keeps a bare connection. A listening socket's process is its product's glyph, read
+from the process name first and the port second, so `postgres` on an odd port is still Postgres and
+`python` on 5432 is not. Sites and streams are cards you open and take the edge; certificates,
+watched domains and sockets are readings with verbs and stay rows, with how much of its term a
+certificate has left drawn as a meter under its verdict (`CertLife`).
+
 **A project is drawn as its website, else as what it is.** `ProjectMark` tries three things in
 order, all on `ProductLogo`'s tile so a card does not change shape when an icon arrives: the icon
 the site declares (read through the dashboard's origin), then the product the project is

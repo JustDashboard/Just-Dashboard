@@ -230,20 +230,43 @@ async function mockProxy(page: Page, { included }: { included: boolean }) {
   })
 }
 
-test("the reverse proxy is named once, in the facts row", async ({ page }) => {
+test("the reverse proxy is named once, in the identity line", async ({ page }) => {
   await mockProxy(page, { included: true })
   await page.goto("/proxy")
 
-  // The engine's name and version appear in exactly one place. They used to
-  // be on a tile and in the page description, and both copies were wrong.
-  await expect(page.getByText("nginx nginx/1.26.3")).toHaveCount(1)
+  // The engine's version appears in exactly one place — the identity line,
+  // beside its name and drawn as its own logo. It used to be on a tile and
+  // in the page description, and both copies were wrong.
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByText("nginx/1.26.3")).toHaveCount(1)
+  await expect(identity.locator("img[src='/logos/nginx.svg']")).toHaveCount(1)
   await expect(page.getByText(/nginx version:/)).toHaveCount(0)
-  await expect(page.getByText(/nginx nginx version/)).toHaveCount(0)
-  // The unit's state sits beside it, read through the Services API.
-  await expect(page.getByText(/running for/)).toBeVisible()
-  // And the engine's verbs are in the header.
-  await expect(page.getByRole("button", { name: "Test config" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Reload" })).toBeVisible()
+  // The unit's state sits beside it, read through the Services API, and
+  // certbot is drawn as what it issues.
+  await expect(identity.getByText(/running for/)).toBeVisible()
+  await expect(identity.locator("img[src='/logos/lets-encrypt.svg']")).toHaveCount(1)
+  // And the engine's verbs are at the line's right end.
+  await expect(identity.getByRole("button", { name: "Test config" })).toBeVisible()
+  await expect(identity.getByRole("button", { name: "Reload" })).toBeVisible()
+})
+
+test("the overview's sites are cards drawn as the engine serving them", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await page.goto("/proxy")
+
+  const sites = page.getByRole("list", { name: "Sites" })
+  const cards = sites.locator("[data-slot='choice-row']")
+  await expect(cards).toHaveCount(3)
+  await expect(
+    cards.filter({ hasText: "app.example.com" }).locator("img[src='/logos/nginx.svg']"),
+  ).toHaveCount(1)
+  await expect(
+    cards.filter({ hasText: "just-dashboard-shop" }).locator("img[src='/logos/caddy.svg']"),
+  ).toHaveCount(1)
+  // A site whose certificate is certbot's says so with Let's Encrypt's mark.
+  await expect(
+    cards.filter({ hasText: "app.example.com" }).locator("img[src='/logos/lets-encrypt.svg']"),
+  ).toHaveCount(1)
 })
 
 test("the overview's attention list is folded from conditions worth acting on", async ({
@@ -268,18 +291,26 @@ test("a Docker Caddy route is listed without an editor it cannot use", async ({ 
   await mockProxy(page, { included: true })
   await page.goto("/proxy/sites")
 
-  // Scoped to the table: the narrow list below `lg` renders the same rows
-  // and is merely hidden at this width.
-  await expect(page.getByRole("table").getByText("just-dashboard-shop")).toBeVisible()
+  // One card per site, at every width: nothing is rendered twice and hidden.
+  const cards = page.locator("[data-slot='choice-row']")
+  await expect(cards).toHaveCount(3)
+  await expect(cards.filter({ hasText: "just-dashboard-shop" })).toBeVisible()
   // The nginx site has its raw file behind an inline verb; the container
-  // route, having no file on the host, does not.
-  const rows = page.locator("[data-slot='table-row']")
+  // route, having no file on the host, does not — and has no arrow either,
+  // since there is nothing for the card to open.
   await expect(
-    rows.filter({ hasText: "app.example.com" }).first().getByRole("button", { name: "Raw config" }),
+    cards.filter({ hasText: "app.example.com" }).getByRole("button", { name: "Raw config" }),
   ).toHaveCount(1)
   await expect(
-    rows.filter({ hasText: "just-dashboard-shop" }).getByRole("button", { name: "Raw config" }),
+    cards.filter({ hasText: "just-dashboard-shop" }).getByRole("button", { name: "Raw config" }),
   ).toHaveCount(0)
+  await expect(
+    cards.filter({ hasText: "just-dashboard-shop" }).getByRole("button", { name: /^Open / }),
+  ).toHaveCount(0)
+  // Worst first: the site proxying an application in plain text is under
+  // the attention rule, above the two on TLS.
+  await expect(page.getByText("Needs attention")).toBeVisible()
+  await expect(cards.first()).toContainText("legacy.example.com")
   // The four readings sit on the page rather than in a box.
   await expect(page.getByText("Plain HTTP", { exact: true }).first()).toBeVisible()
 })
@@ -337,7 +368,54 @@ test("the certificates page offers to turn the renewal timer on", async ({ page 
 
   await expect(page.getByText("Nothing is scheduled to renew these")).toBeVisible()
   await expect(page.getByRole("button", { name: "Turn it on" })).toBeVisible()
-  // The installed list says which site uses a certificate.
-  const row = page.locator("[data-slot='table-row']").filter({ hasText: "old.example.com" })
+  // The installed list says which site uses a certificate, and draws each
+  // as who signed it: R11 is one of Let's Encrypt's intermediates.
+  const installed = page.locator("[data-slot='cert-list'] [data-slot='row']")
+  const row = installed.filter({ hasText: "old.example.com" })
   await expect(row.getByText("no site")).toBeVisible()
+  await expect(row.locator("img[src='/logos/lets-encrypt.svg']")).toHaveCount(1)
+  // And the expired one is first, over a meter with nothing left in it.
+  await expect(installed.first()).toContainText("old.example.com")
+  await expect(row.getByRole("meter")).toHaveAttribute("aria-valuenow", "0")
+})
+
+test("a stream is drawn as the service its port is", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  // Registered after the catch-all: Playwright tries the newest route first.
+  await page.route("**/api/v1/proxy/streams/", (route) =>
+    json(route, {
+      included: true,
+      snippet,
+      dir: "/etc/nginx/streams",
+      streams: [
+        {
+          name: "postgres-replica",
+          listen: 5432,
+          protocol: "tcp",
+          upstream: "10.0.0.5:5432",
+          proxyProtocol: false,
+          allowFrom: [],
+        },
+        {
+          name: "bastion",
+          listen: 2222,
+          protocol: "tcp",
+          upstream: "10.0.0.9:22",
+          proxyProtocol: false,
+          allowFrom: ["10.0.0.0/8"],
+        },
+      ],
+    }),
+  )
+  await page.goto("/proxy/streams")
+
+  const cards = page.locator("[data-slot='choice-row']")
+  await expect(cards).toHaveCount(2)
+  // A database port open to anyone comes first, as Postgres.
+  await expect(cards.first()).toContainText("postgres-replica")
+  await expect(cards.first().locator("img[src='/logos/postgresql.svg']")).toHaveCount(1)
+  await expect(cards.first().getByText("PostgreSQL to anyone")).toBeVisible()
+  // A port nothing names keeps a glyph, not a guessed logo.
+  await expect(cards.last().locator("img")).toHaveCount(0)
+  await expect(cards.last().getByText("10.0.0.0/8")).toBeVisible()
 })

@@ -6,8 +6,10 @@ import {
   CheckCircle,
   CloudUpload,
   Copy,
+  Globe,
   Inspect,
   RefreshClockwise,
+  ShieldCheck,
   ShieldOff,
   Trash,
 } from "@/components/icons"
@@ -15,13 +17,17 @@ import { notify } from "@/lib/toast"
 import { ApiError, del, get, post } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { calendarDate } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import type { Certificate, CertbotState, DNSProvider, Job } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import { useMediaQuery } from "@/hooks/use-mobile"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { JobConsole, RecentJobs, useJobConsole } from "@/components/job-console"
 import { Page, PageContext } from "@/components/page"
-import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { ProductLogo } from "@/components/product-logo"
+import { Row, RowList, ROW_BLEED } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
@@ -36,19 +42,11 @@ import {
   RenewalNotice,
   useRenew,
 } from "@/components/proxy/certbot-panel"
-import { ExpiryStatus } from "@/components/proxy/expiry-status"
+import { CertLife, ExpiryStatus } from "@/components/proxy/expiry-status"
 import { ImportDialog } from "@/components/proxy/import-dialog"
+import { certificateProduct } from "@/components/proxy/marks"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  stickyTableHeader,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 
 type Watched = { id: number; domain: string; port: number; certificate?: Certificate }
 
@@ -77,6 +75,8 @@ export function CertificatesPage() {
   }))
   const [importOpen, setImportOpen] = useState(false)
   const [domain, setDomain] = useState("")
+  // One shape per width for the installed list, chosen once (see `CertList`).
+  const wide = useMediaQuery("(min-width: 1024px)")
 
   const certs = usePoll(
     (signal) => get<Certificate[]>("/certificates/", undefined, signal),
@@ -246,21 +246,18 @@ export function CertificatesPage() {
         <RenewalNotice state={certbot.data} admin={admin} onChanged={certbot.refresh} />
       )}
 
-      <Panel>
+      {/* Four plain sections, each a title and a hairline (§15 pass 1), in
+          the order a certificate's life runs: issued here, installed on the
+          host, checked from outside, and the DNS plugins an issuance can
+          need. The frames around them opened the page with a stack of four
+          boxes under four figures. */}
+      <Panel plain>
         <PanelHeader
-          title="certbot"
+          title="Issued by certbot"
           actions={
             admin && (
               <>
                 <RecentJobs kinds={["certbot."]} onOpen={console_.open} />
-                {!certbotGone && (
-                  <Button
-                    size="sm"
-                    onClick={() => setIssue({ open: true, domains: undefined, staging: true })}
-                  >
-                    Issue certificate
-                  </Button>
-                )}
                 {certbot.data && certbot.data.certs.length > 0 && (
                   <Button
                     size="sm"
@@ -271,6 +268,14 @@ export function CertificatesPage() {
                   >
                     <RefreshClockwise className="size-3.5" />
                     Renew all due
+                  </Button>
+                )}
+                {!certbotGone && (
+                  <Button
+                    size="sm"
+                    onClick={() => setIssue({ open: true, domains: undefined, staging: true })}
+                  >
+                    Issue certificate
                   </Button>
                 )}
               </>
@@ -285,22 +290,20 @@ export function CertificatesPage() {
           ) : certbot.error ? (
             <ErrorState error={certbot.error} />
           ) : certbot.data ? (
-            <div className="animate-rise">
-              <CertbotLineages
-                state={certbot.data}
-                admin={admin}
-                busy={busy}
-                onRenew={renew}
-                onRevoke={revoke}
-              />
-            </div>
+            <CertbotLineages
+              state={certbot.data}
+              admin={admin}
+              busy={busy}
+              onRenew={renew}
+              onRevoke={revoke}
+            />
           ) : null}
         </PanelBody>
       </Panel>
 
-      <Panel>
+      <Panel plain>
         <PanelHeader
-          title="Installed certificates"
+          title="Installed on this host"
           actions={
             admin && (
               <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
@@ -316,13 +319,12 @@ export function CertificatesPage() {
           ) : certs.error ? (
             <ErrorState error={certs.error} />
           ) : certs.data && certs.data.length > 0 ? (
-            <div className="min-w-0 animate-rise group-data-[plain]/panel:-mx-4">
-              <CertTable
-                certs={certs.data}
-                onScan={(d) => router.push(`/proxy/tls?domain=${encodeURIComponent(d)}`)}
-                canScan={admin}
-              />
-            </div>
+            <CertList
+              certs={certs.data}
+              wide={wide}
+              onScan={(d) => router.push(`/proxy/tls?domain=${encodeURIComponent(d)}`)}
+              canScan={admin}
+            />
           ) : (
             <EmptyState
               icon={ShieldOff}
@@ -334,34 +336,35 @@ export function CertificatesPage() {
         </PanelBody>
       </Panel>
 
-      <Panel>
+      <Panel plain>
         <PanelHeader
-          title="Watched domains"
+          title="Checked from outside"
           actions={
-            watched.data &&
-            watched.data.length > 0 && (
-              <Button variant="outline" size="sm" onClick={() => watched.refresh()}>
-                <RefreshClockwise className="size-3.5" />
-                Re-check now
-              </Button>
-            )
+            <>
+              {admin && (
+                <span className="flex items-center gap-2">
+                  <Input
+                    value={domain}
+                    onChange={(e) => setDomain(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && domain.trim() && addDomain()}
+                    placeholder="example.com, or mail.example.com:993"
+                    aria-label="Domain to watch"
+                    className="h-8 w-56 text-body sm:w-72"
+                  />
+                  <Button size="sm" onClick={addDomain} disabled={!domain.trim()}>
+                    Watch
+                  </Button>
+                </span>
+              )}
+              {watched.data && watched.data.length > 0 && (
+                <Button variant="outline" size="sm" onClick={() => watched.refresh()}>
+                  <RefreshClockwise className="size-3.5" />
+                  Re-check now
+                </Button>
+              )}
+            </>
           }
         />
-        {admin && (
-          <PanelToolbar>
-            <Input
-              value={domain}
-              onChange={(e) => setDomain(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && domain.trim() && addDomain()}
-              placeholder="example.com, or mail.example.com:993"
-              aria-label="Domain to watch"
-              className="h-8 w-full text-body sm:w-80"
-            />
-            <Button size="sm" onClick={addDomain} disabled={!domain.trim()}>
-              Watch
-            </Button>
-          </PanelToolbar>
-        )}
         <PanelBody flush>
           {watched.loading ? (
             <LoadingRows rows={2} />
@@ -373,73 +376,80 @@ export function CertificatesPage() {
               minutes, which is what catches a certificate renewed on disk and never reloaded.
             </p>
           ) : (
-            <div className="min-w-0 animate-rise group-data-[plain]/panel:-mx-4">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-full">Domain</TableHead>
-                    <TableHead>Issuer</TableHead>
-                    <TableHead>Expires</TableHead>
-                    <TableHead>Live check</TableHead>
-                    <TableHead className="w-px" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {watched.data.map((row) => (
-                    <TableRow key={row.id} className="group">
-                      <TableCell>
-                        <span className="text-body font-medium">{row.domain}</span>
-                        {row.port !== 443 && (
-                          <span className="numeric ml-1.5 font-mono text-hint text-muted-foreground">
-                            :{row.port}
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {row.certificate?.issuer ?? "—"}
-                      </TableCell>
-                      <TableCell>
-                        {row.certificate?.notAfter ? calendarDate(row.certificate.notAfter) : "—"}
-                      </TableCell>
-                      <TableCell>
+            <RowList className="animate-rise">
+              {watched.data.map((row) => (
+                <Row
+                  key={row.id}
+                  leading={
+                    <ProductLogo
+                      id={certificateProduct(row.certificate)}
+                      size="sm"
+                      fallback={Globe}
+                    />
+                  }
+                  title={
+                    <>
+                      {row.domain}
+                      {row.port !== 443 && (
+                        <span className="numeric ml-1.5 font-mono text-hint text-muted-foreground">
+                          :{row.port}
+                        </span>
+                      )}
+                    </>
+                  }
+                  subtitle={
+                    row.certificate
+                      ? [
+                          row.certificate.issuer,
+                          row.certificate.notAfter &&
+                            `until ${calendarDate(row.certificate.notAfter)}`,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")
+                      : "not checked yet"
+                  }
+                  trailing={
+                    <>
+                      <span className="flex flex-col items-end gap-1">
                         <ExpiryStatus cert={row.certificate} />
-                      </TableCell>
-                      <TableCell>
-                        {admin && (
-                          <VerbActions
-                            dim
-                            verbs={[
-                              {
-                                key: "scan",
-                                label: "TLS report",
-                                detail: "Grade what a visitor gets: protocols, chain and headers.",
-                                icon: Inspect,
-                                inline: true,
-                                run: () =>
-                                  router.push(
-                                    `/proxy/tls?domain=${encodeURIComponent(row.domain)}`,
-                                  ),
-                              },
-                              {
-                                key: "remove",
-                                label: "Stop watching",
-                                detail: "Drop it from the list. Nothing on the host changes.",
-                                icon: Trash,
-                                danger: true,
-                                run: async () => {
-                                  await del(`/certificates/watched/${row.id}`)
-                                  watched.refresh()
-                                },
-                              },
-                            ]}
-                          />
+                        {row.certificate && !row.certificate.error && (
+                          <CertLife cert={row.certificate} />
                         )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                      </span>
+                      {admin && (
+                        <VerbActions
+                          dim
+                          menuLabel={`More actions for ${row.domain}`}
+                          verbs={[
+                            {
+                              key: "scan",
+                              label: "TLS report",
+                              detail: "Grade what a visitor gets: protocols, chain and headers.",
+                              icon: Inspect,
+                              inline: true,
+                              run: () =>
+                                router.push(`/proxy/tls?domain=${encodeURIComponent(row.domain)}`),
+                            },
+                            {
+                              key: "remove",
+                              label: "Stop watching",
+                              detail: "Drop it from the list. Nothing on the host changes.",
+                              icon: Trash,
+                              danger: true,
+                              run: async () => {
+                                await del(`/certificates/watched/${row.id}`)
+                                watched.refresh()
+                              },
+                            },
+                          ]}
+                        />
+                      )}
+                    </>
+                  }
+                  className="py-2.5"
+                />
+              ))}
+            </RowList>
           )}
         </PanelBody>
       </Panel>
@@ -470,12 +480,25 @@ export function CertificatesPage() {
   )
 }
 
-function CertTable({
+/**
+ * Every certificate on the host as a row drawn as who signed it — Let's
+ * Encrypt as itself, anything else by its glyph — with the file it is, the
+ * names it covers and the sites that use it, and at the right how long it
+ * has: the verdict over a meter of its term. A reading, not a choice: a row
+ * opens nothing, and its two verbs are the path to copy and the report to run.
+ *
+ * On a wide screen the sites and the expiry date stand in fixed measures
+ * beside the name so a column of them reads down; on a phone they go under
+ * it, and nothing is dropped.
+ */
+function CertList({
   certs,
+  wide,
   canScan,
   onScan,
 }: {
   certs: Certificate[]
+  wide: boolean
   canScan: boolean
   onScan: (domain: string) => void
 }) {
@@ -502,53 +525,65 @@ function CertTable({
     }
     return verbs
   }
+  // Worst first: an expired or unreadable certificate above one running out,
+  // above the rest by how soon they do.
+  const ordered = [...certs].sort((a, b) => {
+    const rank = (c: Certificate) => (c.error ? 0 : c.expired ? 1 : c.expiring ? 2 : 3)
+    return rank(a) - rank(b) || a.daysLeft - b.daysLeft
+  })
   return (
-    <Table containerClassName="max-h-[28rem]">
-      <TableHeader className={stickyTableHeader}>
-        <TableRow>
-          <TableHead>Name</TableHead>
-          <TableHead className="w-full">Domains</TableHead>
-          <TableHead>Used by</TableHead>
-          <TableHead>Issuer</TableHead>
-          <TableHead>Expires</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead className="w-px" />
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {certs.map((cert) => (
-          <TableRow key={cert.path || cert.name} className="group">
-            <TableCell>
-              <div className="max-w-[16rem] min-w-0">
-                <div className="flex min-w-0 items-baseline gap-2">
-                  <span className="truncate text-body font-medium">{cert.name}</span>
-                  <Tag>{cert.source.startsWith("nginx:") ? "site" : cert.source}</Tag>
-                  {cert.selfSigned && <Tag tone="warning">self-signed</Tag>}
-                </div>
-                <p className="truncate font-mono text-hint text-muted-foreground">{cert.path}</p>
+    <ul data-slot="cert-list" className="animate-rise divide-y divide-hairline">
+      {ordered.map((cert) => {
+        const usedBy = cert.usedBy.length > 0 ? cert.usedBy.join(", ") : "no site"
+        const expires = cert.notAfter && !cert.error ? calendarDate(cert.notAfter) : "—"
+        return (
+          <li
+            key={cert.path || cert.name}
+            data-slot="row"
+            className={cn(
+              "group flex min-w-0 items-start gap-3 py-3 transition-colors hover:bg-row-hover",
+              ROW_BLEED,
+            )}
+          >
+            <ProductLogo id={certificateProduct(cert)} size="sm" fallback={ShieldCheck} />
+            <div className="min-w-0 flex-1 space-y-0.5">
+              <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <span className="truncate text-body font-medium">{cert.name}</span>
+                <Tag>{cert.source.startsWith("nginx:") ? "site" : cert.source}</Tag>
+                {cert.selfSigned && <Tag tone="warning">self-signed</Tag>}
               </div>
-            </TableCell>
-            <TableCell className="max-w-xs truncate">
-              {cert.domains.join(", ") || <span className="text-muted-foreground">—</span>}
-            </TableCell>
-            <TableCell className="max-w-[12rem] truncate text-muted-foreground">
-              {cert.usedBy.length > 0 ? cert.usedBy.join(", ") : "no site"}
-            </TableCell>
-            <TableCell className="max-w-[12rem] truncate text-muted-foreground">
-              {cert.issuer || "—"}
-            </TableCell>
-            <TableCell>
-              {cert.notAfter && !cert.error ? calendarDate(cert.notAfter) : "—"}
-            </TableCell>
-            <TableCell>
+              <p className="truncate text-hint text-muted-foreground">
+                {cert.domains.join(", ") || "no names"}
+              </p>
+              <p className="truncate font-mono text-hint text-muted-foreground">{cert.path}</p>
+              {!wide && (
+                <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-hint text-muted-foreground">
+                  <span className="truncate">{usedBy}</span>
+                  <span className="whitespace-nowrap">expires {expires}</span>
+                </p>
+              )}
+            </div>
+            {wide && (
+              <>
+                <span
+                  className="w-40 truncate pt-0.5 text-hint text-muted-foreground"
+                  title={usedBy}
+                >
+                  {usedBy}
+                </span>
+                <span className="numeric w-24 pt-0.5 text-hint whitespace-nowrap text-muted-foreground">
+                  {expires}
+                </span>
+              </>
+            )}
+            <span className="flex w-24 shrink-0 flex-col items-end gap-1 pt-0.5">
               <ExpiryStatus cert={cert} />
-            </TableCell>
-            <TableCell>
-              <VerbActions dim verbs={verbsFor(cert)} />
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+              {!cert.error && <CertLife cert={cert} />}
+            </span>
+            <VerbActions dim verbs={verbsFor(cert)} menuLabel={`More actions for ${cert.name}`} />
+          </li>
+        )
+      })}
+    </ul>
   )
 }
