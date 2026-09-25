@@ -1583,6 +1583,8 @@ export type FilePlaces = {
   bookmarks: FileBookmark[]
   /** The colour each labelled folder is drawn in, by resolved path. Absent before 0.7.0. */
   colours?: Record<string, string>
+  /** The server-wide colour chosen for every folder; absent until one is chosen. */
+  defaultColour?: string
 }
 
 export type FileFindHit = {

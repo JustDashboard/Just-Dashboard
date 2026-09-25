@@ -41,5 +41,7 @@ describe("folders", () => {
     expect(folderColourOf(labels, "/srv/odd", "odd")).toBe("blue")
     expect(folderColourOf(labels, "/srv/dist", "dist")).toBe("graphite")
     expect(defaultFolderColour("projects")).toBe("blue")
+    expect(folderColourOf(labels, "/srv/app", "app", "yellow")).toBe("red")
+    expect(folderColourOf(labels, "/srv/dist", "dist", "yellow")).toBe("yellow")
   })
 })
