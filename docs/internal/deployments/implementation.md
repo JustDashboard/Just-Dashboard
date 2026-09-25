@@ -309,7 +309,13 @@ only renderer/executor/validation authority for their feature.
   (`detect_node_start.go`). `frameworks_python.go` names Django, FastAPI, Flask, Streamlit and
   Gradio from the manifests and finds the application object in the conventional entry files;
   `frameworks_rust.go`, `frameworks_java.go`, `frameworks_dotnet.go` and `frameworks_deno.go` read
-  `Cargo.toml`, `pom.xml`/`build.gradle(.kts)`, `*.csproj` and `deno.json(c)`. A `Procfile`'s `web:`
+  `Cargo.toml`, `pom.xml`/`build.gradle(.kts)`, `*.csproj` and `deno.json(c)`; `detect_php.go` and
+  `detect_deno.go` read, after the walk and under budgets of their own, what those recipes decide from
+  beyond the manifest (the lock, the declared release, the code's extension calls, a WordPress tree's
+  shape) through one reader that detection and preparation share, and record it as the candidate's
+  `php` and `deno` facts for preflight; only a WordPress theme's or plugin's header at the top of the
+  checkout is read by the walk itself (at most 32 file heads), since nothing else names a block theme's
+  or a create-block plugin's directory. A `Procfile`'s `web:`
   process outranks every guess, and another platform's deployment file (`fly.toml`, `render.yaml`,
   `app.json`, Kamal's `config/deploy.yml`, …) outranks the framework's defaults. The candidate carries `spaFallback` (a client-routed site's nginx
   fallback), `pythonVersion`, `unpinnedDependencies` (a `dependencies_unpinned` preflight warning,
@@ -339,8 +345,8 @@ only renderer/executor/validation authority for their feature.
   recipe set is
   `node`, `go`, `python`, `rust`, `java`, `dotnet`, `deno`, `php` and `site` (`validRecipe`; `site`
   builds Hugo, Zola, mdBook and Jekyll, and Python and Deno build a site generator's output when they
-  have an output directory), and `build.pythonVersion`
-  and `build.spaFallback` are the two additive plan fields, bounded by `PlanConfiguration.Validate`.
+  have an output directory), and `build.pythonVersion`, `build.phpVersion` and `build.spaFallback` are
+  additive plan fields, bounded by `PlanConfiguration.Validate`.
   The contract per language is [the recipe guide](recipes.md). The framework detection recognised is
   recorded on the build plan when a draft commits (`build.framework` on the configuration read) —
   the chosen candidate's, while the plan still builds that candidate's directory — so a later read,
@@ -667,8 +673,12 @@ only renderer/executor/validation authority for their feature.
   `AUTH_TRUST_HOST=true`), a missing `.env` it exits over, a database address on localhost (Node,
   libpq, Go, MySQL and Rust wordings), Prisma's engine on Alpine, a disallowed Host, a missing entry
   file or app object (with its own sentence for `next start` refusing a static export, whose fix is the
-  output directory `out`, and for NestJS's `dist/main` written as `dist/src/main.js`), a missing module or shared library (psycopg's `libpq library not found` among
-  them), a cgo-less binary, an architecture mismatch, a runner that is not installed, Phoenix's origin
+  output directory `out`, and for NestJS's `dist/main` written as `dist/src/main.js`), a missing module
+  or shared library (psycopg's `libpq library not found` among them), a PHP extension a call needs
+  (`Call to undefined function mysqli_connect()`, `Class "Redis" not found`, WordPress's missing MySQL
+  extension — `runtime_php_extension_missing`, naming the `ext-` requirement that installs it), front-end
+  assets a page renders and the image lacks (Laravel's Vite manifest, `Mix manifest does not exist` —
+  `runtime_assets_missing`), a cgo-less binary, an architecture mismatch, a runner that is not installed, Phoenix's origin
   check (fixed with `PHX_HOST`), Play's PID file, a server that prints a loopback bind (uvicorn,
   gunicorn, werkzeug, puma, Kestrel — not Next.js, which prints `localhost` whatever it binds) or whose
   every listening socket is on loopback (`runtime_loopback_bind`, named in the step message even when

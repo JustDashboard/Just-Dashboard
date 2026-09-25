@@ -900,6 +900,8 @@ var frameworkDisplayNames = map[string]string{
 	"django": "Django", "fastapi": "FastAPI", "flask": "Flask", "streamlit": "Streamlit", "gradio": "Gradio",
 	"rust": "Rust", "java": "Java", "spring-boot": "Spring Boot", "dotnet": ".NET", "aspnet": "ASP.NET Core",
 	"deno": "Deno", "fresh": "Fresh", "php": "PHP", "laravel": "Laravel", "symfony": "Symfony", "slim": "Slim",
+	"wordpress": "WordPress", "drupal": "Drupal", "cakephp": "CakePHP", "codeigniter": "CodeIgniter", "yii": "Yii",
+	"mezzio": "Mezzio", "laminas": "Laminas",
 	"rails": "Rails", "sinatra": "Sinatra", "hanami": "Hanami", "phoenix": "Phoenix", "elixir": "Elixir",
 	"ruby": "Ruby", "jekyll": "Jekyll", "hugo": "Hugo", "mkdocs": "MkDocs", "zola": "Zola", "mdbook": "mdBook",
 	"sphinx": "Sphinx", "pelican": "Pelican", "zensical": "Zensical", "lume": "Lume", "hexo": "Hexo",

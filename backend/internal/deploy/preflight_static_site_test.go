@@ -122,9 +122,13 @@ func TestUnpinnedDependencyAdviceSpeaksTheRecipesLanguage(t *testing.T) {
 		{DetectedCandidate{Recipe: "site", Framework: "jekyll"}, "no Gemfile.lock; the build resolves the gems", "bundle lock"},
 		{DetectedCandidate{Recipe: "python"}, "unpinned entries in the dependency manifest", "uv lock"},
 	} {
-		measured, action := unpinnedDependencyAdvice(&test.candidate)
+		measured, means, action := unpinnedDependencyAdvice(&test.candidate)
 		if measured != test.measured || !strings.Contains(action, test.action) || !strings.HasSuffix(action, "deploying as is works today.") {
 			t.Fatalf("%+v: %q / %q", test.candidate, measured, action)
+		}
+		// Composer's advisory check is a second reason to lock, for PHP only.
+		if strings.Contains(means, "security advisory") != (test.candidate.Recipe == "php") {
+			t.Fatalf("%s: means %q", test.candidate.Recipe, means)
 		}
 		if test.candidate.Recipe != "python" && strings.Contains(action, "uv lock") {
 			t.Fatalf("%s was told how to pin Python", test.candidate.Recipe)

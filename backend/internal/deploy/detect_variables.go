@@ -112,6 +112,10 @@ func (s rootStack) phoenix() bool { return s.mix["phoenix"] }
 func (s rootStack) django() bool  { return s.pythonHas("django") != "" }
 func (s rootStack) flask() bool   { return s.pythonHas("flask") != "" }
 func (s rootStack) laravel() bool { return s.composer.has("laravel/framework") }
+func (s rootStack) symfony() bool { return s.composer.has("symfony/framework-bundle") }
+func (s rootStack) bedrock() bool {
+	return s.composer.has("roots/wordpress") || s.composer.has("johnpbloch/wordpress")
+}
 
 // authJS is Auth.js v5 and its framework packages, which read AUTH_SECRET
 // and trust the Host header only when told to; nextAuth4 is NextAuth v4.
@@ -214,6 +218,12 @@ var selfIssuedSecrets = []secretRule{
 		return ""
 	})},
 	{name: "APP_KEY", length: 32, gate: dependencyGate("AdonisJS encrypts with it (%s)", func(s rootStack) string { return s.nodeHas("@adonisjs/core") })},
+	{name: "APP_SECRET", format: "hex", length: 64, implied: true, gate: dependencyGate("Symfony signs CSRF tokens, remember-me cookies and signed URLs with it (%s)", func(s rootStack) string {
+		if s.symfony() {
+			return "symfony/framework-bundle"
+		}
+		return ""
+	})},
 	{name: "AUTH_SECRET", format: "base64", length: 32, implied: true, gate: dependencyGate("Auth.js signs and encrypts sessions with it (%s)", func(s rootStack) string {
 		if s.authJS() {
 			if name := s.nodeHas("next-auth"); name != "" {
@@ -260,6 +270,10 @@ var selfIssuedSecrets = []secretRule{
 	{name: "ENCRYPTION_KEY", format: "base64", length: 16, gate: strapiGate},
 	{name: "JWT_SECRET", format: "base64", length: 16, gate: strapiGate},
 	{name: "KEY", length: 64, gate: dependencyGate("Directus identifies the instance with it (%s)", func(s rootStack) string { return s.nodeHas("directus") })},
+	{name: "AUTH_KEY", length: 64, gate: bedrockGate}, {name: "SECURE_AUTH_KEY", length: 64, gate: bedrockGate},
+	{name: "LOGGED_IN_KEY", length: 64, gate: bedrockGate}, {name: "NONCE_KEY", length: 64, gate: bedrockGate},
+	{name: "AUTH_SALT", length: 64, gate: bedrockGate}, {name: "SECURE_AUTH_SALT", length: 64, gate: bedrockGate},
+	{name: "LOGGED_IN_SALT", length: 64, gate: bedrockGate}, {name: "NONCE_SALT", length: 64, gate: bedrockGate},
 	{name: "SECRET", length: 64, gate: dependencyGate("Directus signs tokens with it (%s)", func(s rootStack) string { return s.nodeHas("directus") })},
 	{name: "JWT_SECRET", length: 64, gate: dependencyGate("Medusa signs tokens with it (%s)", func(s rootStack) string {
 		return s.nodeHas("@medusajs/medusa", "@medusajs/framework")
@@ -283,6 +297,15 @@ func medusaGate(reason string) func(rootStack, DetectedVariable) string {
 		}
 		return ""
 	}
+}
+
+// bedrockGate mints WordPress's keys and salts in a Bedrock site, whose
+// .env.example names them and whose config reads them from the environment.
+func bedrockGate(stack rootStack, _ DetectedVariable) string {
+	if stack.bedrock() {
+		return "WordPress signs its cookies and nonces with it (Bedrock)"
+	}
+	return ""
 }
 
 func strapiGate(stack rootStack, _ DetectedVariable) string {
@@ -371,6 +394,24 @@ var publicURLRules = []publicURLRule{
 	{name: "APP_URL", template: "{{scheme}}://{{hostname}}", gate: func(s rootStack, _ DetectedVariable) string {
 		if s.laravel() {
 			return "Laravel generates absolute URLs from it"
+		}
+		return ""
+	}},
+	{name: "DEFAULT_URI", template: "{{scheme}}://{{hostname}}", gate: func(s rootStack, _ DetectedVariable) string {
+		if s.symfony() {
+			return "Symfony generates URLs outside a request (mail, the console) from it"
+		}
+		return ""
+	}},
+	{name: "WP_HOME", template: "{{scheme}}://{{hostname}}", gate: func(s rootStack, _ DetectedVariable) string {
+		if s.bedrock() {
+			return "WordPress builds every link from its home address"
+		}
+		return ""
+	}},
+	{name: "WP_SITEURL", template: "{{scheme}}://{{hostname}}/wp", gate: func(s rootStack, _ DetectedVariable) string {
+		if s.bedrock() {
+			return "Bedrock serves WordPress itself from /wp"
 		}
 		return ""
 	}},
@@ -748,7 +789,7 @@ func withImpliedVariables(stack rootStack, variables []DetectedVariable, prefixe
 // manifestFor names the file that makes a framework's variable implied.
 func (s rootStack) manifestFor(name string) string {
 	switch {
-	case name == "APP_KEY" && s.laravel():
+	case name == "APP_KEY" && s.laravel(), name == "APP_SECRET" && s.symfony():
 		return "composer.json"
 	case name == "SECRET_KEY_BASE" && s.rails(), name == "RAILS_MASTER_KEY":
 		if s.gems["railties"] != "" || s.gems["rails"] != "" {

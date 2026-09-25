@@ -94,10 +94,10 @@ var nodeForeignRunners = []string{
 
 // nodeForeignRunner is the first foreign program the build (with the
 // install's lifecycle scripts) or the start command reaches, and the field
-// that runs it. python3 is in the build stage when a native addon brings the
-// compilers in, so only a start command that reaches it, or a build without
-// them, is refused.
-func nodeForeignRunner(facts nodeInstallFacts, build, start string) (string, string) {
+// that runs it; provided are the programs the stage has beside Node. python3
+// is in the build stage when a native addon brings the compilers in, so only
+// a start command that reaches it, or a build without them, is refused.
+func nodeForeignRunner(facts nodeInstallFacts, build, start string, provided []string) (string, string) {
 	compilers := slices.ContainsFunc(nodeNativeAddons, facts.present)
 	for _, command := range []struct {
 		text, field string
@@ -110,7 +110,8 @@ func nodeForeignRunner(facts nodeInstallFacts, build, start string) (string, str
 			}
 		}
 		for _, runner := range nodeForeignRunners {
-			if !tools[runner] || (runner == "python3" && compilers && command.field == "configuration.build.buildCommand") {
+			if !tools[runner] || slices.Contains(provided, runner) ||
+				(runner == "python3" && compilers && command.field == "configuration.build.buildCommand") {
 				continue
 			}
 			return runner, command.field

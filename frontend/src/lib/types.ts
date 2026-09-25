@@ -3865,8 +3865,13 @@ export type DeploymentConfiguration = {
     /** The main package a Go recipe builds, relative to the root directory; empty lets it choose. */
     goPackage?: string
     pythonVersion?: string
-    /** The Node major a JavaScript recipe builds and runs on; empty follows the repository. */
+    /**
+     * The Node major a JavaScript recipe (or a PHP recipe's asset stage) builds and runs on;
+     * empty follows the repository.
+     */
     nodeVersion?: string
+    /** The PHP release a PHP recipe builds on; empty lets composer.json and composer.lock decide. */
+    phpVersion?: string
     packageManager?: NodePackageManager
     rootDirectory?: string
     dockerfile?: string

@@ -178,7 +178,7 @@ func nxCandidates(marker *detectedMarkers, base DetectedCandidate, facts nodeIns
 				candidate.SchemaCommand = schema.Command
 			}
 		}
-		candidate.NodeInstalls = facts.detectedInstalls(base.PackageManager, false, func(manager string) (string, string) {
+		candidate.NodeInstalls = facts.detectedInstalls(base.PackageManager, false, nil, func(manager string) (string, string) {
 			commands := project.candidate(manager)
 			return commands.build, withSchema(manager, commands.start)
 		})

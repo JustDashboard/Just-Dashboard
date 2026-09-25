@@ -49,6 +49,7 @@ import { useProject } from "@/components/deploy/project-context"
 import {
   BROWSER_PREFIX,
   NODE_VERSION,
+  PHP_VERSION,
   PYTHON_VERSION,
   automaticPackageManagerHint,
   commandsForPackageManager,
@@ -136,6 +137,7 @@ const BUILD_FIELD_IDS: Record<string, string> = {
   "build.goPackage": "build-go-package",
   "build.pythonVersion": "build-python-version",
   "build.nodeVersion": "build-node-version",
+  "build.phpVersion": "build-php-version",
   "build.spaFallback": "build-spa",
   "build.dockerfile": "build-dockerfile",
   "build.target": "build-target",
@@ -287,6 +289,7 @@ const LOCKFILE_NAMES: Record<NodePackageManager, string> = {
 
 const PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13"]
 const NODE_VERSIONS = ["20", "22", "24"]
+const PHP_VERSIONS = ["8.2", "8.3", "8.4", "8.5"]
 
 /** What a recipe falls back to when nothing in the draft or the last build names it. */
 const RECIPE_DEFAULT: Record<DeploymentRecipe, string> = {
@@ -433,9 +436,11 @@ function builderReading(
           ? (build.pythonVersion ?? RECIPE_DEFAULT.python)
           : recipe === "go"
             ? (build.goVersion ?? RECIPE_DEFAULT.go)
-            : prepared?.recipe === recipe && prepared.toolchain
-              ? prepared.toolchain
-              : RECIPE_DEFAULT[recipe]
+            : recipe === "php" && build.phpVersion
+              ? `php ${build.phpVersion}`
+              : prepared?.recipe === recipe && prepared.toolchain
+                ? prepared.toolchain
+                : RECIPE_DEFAULT[recipe]
     return {
       value: RECIPE_SHORT[recipe],
       detail: framework ? `${frameworkLabel(framework)} · ${detail}` : detail,
@@ -676,7 +681,11 @@ function BuildForm({
       return
     }
     const refusal =
-      errors.buildMethod || errors.buildSecrets || errors.pythonVersion || errors.nodeVersion
+      errors.buildMethod ||
+      errors.buildSecrets ||
+      errors.pythonVersion ||
+      errors.nodeVersion ||
+      errors.phpVersion
     if (refusal) {
       setError(refusal)
       return
@@ -766,9 +775,10 @@ function BuildForm({
         goVersion: next === "go" ? build.goVersion : undefined,
         goPackage: next === "go" ? build.goPackage : undefined,
         pythonVersion: next === "python" ? build.pythonVersion : undefined,
-        nodeVersion: next === "node" ? build.nodeVersion : undefined,
+        phpVersion: next === "php" ? build.phpVersion : undefined,
         // The PHP recipe's asset stage installs through the same Node
-        // install, so the choice survives the move between the two.
+        // install, so the choices survive the move between the two.
+        nodeVersion: next === "node" || next === "php" ? build.nodeVersion : undefined,
         packageManager: next === "node" || next === "php" ? build.packageManager : undefined,
       })
       return
@@ -785,6 +795,7 @@ function BuildForm({
       goPackage: undefined,
       pythonVersion: undefined,
       nodeVersion: undefined,
+      phpVersion: undefined,
       packageManager: undefined,
       spaFallback: choice.method === "static" ? build.spaFallback : undefined,
       target: choice.method === "dockerfile" ? build.target : undefined,
@@ -830,6 +841,7 @@ function BuildForm({
             "goPackage",
             "pythonVersion",
             "nodeVersion",
+            "phpVersion",
             "dockerfile",
             "target",
             "primaryService",
@@ -935,35 +947,41 @@ function BuildForm({
             </Field>
           )}
 
-        {build.method === "recipe" && recipe === "node" && (
-          <Field
-            label="Node version"
-            hint={
-              detected?.nodeVersion
-                ? `Auto builds on Node ${detected.nodeVersion}; a version here outranks the repository.`
-                : "Auto reads .nvmrc, .node-version, .tool-versions, volta and engines.node."
-            }
-            error={errorFor("build-node-version")}
-          >
-            <Segments
-              id="build-node-version"
+        {build.method === "recipe" &&
+          (recipe === "node" ||
+            (recipe === "php" && (detected?.nodeInstalls?.length ?? 0) > 0)) && (
+            <Field
               label="Node version"
-              fill
-              value={build.nodeVersion ?? "auto"}
-              disabled={!canEdit}
-              onChange={(next) =>
-                setBuild({ ...build, nodeVersion: next === "auto" ? undefined : next })
+              hint={
+                detected?.nodeVersion
+                  ? `Auto builds on Node ${detected.nodeVersion}; a version here outranks the repository.`
+                  : "Auto reads .nvmrc, .node-version, .tool-versions, volta and engines.node."
               }
-              options={[
-                { value: "auto", label: "Auto" },
-                ...NODE_VERSIONS.map((version) => ({ value: version, label: version, mono: true })),
-                ...(build.nodeVersion && !NODE_VERSION.test(build.nodeVersion)
-                  ? [{ value: build.nodeVersion, label: build.nodeVersion, mono: true }]
-                  : []),
-              ]}
-            />
-          </Field>
-        )}
+              error={errorFor("build-node-version")}
+            >
+              <Segments
+                id="build-node-version"
+                label="Node version"
+                fill
+                value={build.nodeVersion ?? "auto"}
+                disabled={!canEdit}
+                onChange={(next) =>
+                  setBuild({ ...build, nodeVersion: next === "auto" ? undefined : next })
+                }
+                options={[
+                  { value: "auto", label: "Auto" },
+                  ...NODE_VERSIONS.map((version) => ({
+                    value: version,
+                    label: version,
+                    mono: true,
+                  })),
+                  ...(build.nodeVersion && !NODE_VERSION.test(build.nodeVersion)
+                    ? [{ value: build.nodeVersion, label: build.nodeVersion, mono: true }]
+                    : []),
+                ]}
+              />
+            </Field>
+          )}
 
         {build.method === "recipe" && recipe === "python" && (
           <Field
@@ -991,6 +1009,32 @@ function BuildForm({
                 // screen so the refusal under it names something visible.
                 ...(build.pythonVersion && !PYTHON_VERSION.test(build.pythonVersion)
                   ? [{ value: build.pythonVersion, label: build.pythonVersion, mono: true }]
+                  : []),
+              ]}
+            />
+          </Field>
+        )}
+
+        {build.method === "recipe" && recipe === "php" && (
+          <Field
+            label="PHP version"
+            hint="Auto reads composer.json, config.platform.php and what composer.lock's packages accept."
+            error={errorFor("build-php-version")}
+          >
+            <Segments
+              id="build-php-version"
+              label="PHP version"
+              fill
+              value={build.phpVersion ?? "auto"}
+              disabled={!canEdit}
+              onChange={(next) =>
+                setBuild({ ...build, phpVersion: next === "auto" ? undefined : next })
+              }
+              options={[
+                { value: "auto", label: "Auto" },
+                ...PHP_VERSIONS.map((version) => ({ value: version, label: version, mono: true })),
+                ...(build.phpVersion && !PHP_VERSION.test(build.phpVersion)
+                  ? [{ value: build.phpVersion, label: build.phpVersion, mono: true }]
                   : []),
               ]}
             />

@@ -589,6 +589,7 @@ export function Configure({
         errors.buildMethod ??
         errors.pythonVersion ??
         errors.nodeVersion ??
+        errors.phpVersion ??
         errors.target ??
         errors.startCommand ??
         errors.buildSecrets ??

@@ -303,7 +303,9 @@ func TestPythonAndDenoRecipesServeTheirSiteOutput(t *testing.T) {
 			name: "lume builds with its task and nginx serves the output",
 			files: map[string]string{"deno.json": `{"imports":{"lume/":"https://deno.land/x/lume@v3.2.5/"},"tasks":{"build":"deno task lume","lume":"echo x"}}`,
 				"deno.lock": "{}", "_config.ts": "const site = lume({ dest: \"./out\" })\n"},
-			want: []string{"FROM denoland/deno:alpine@sha256:", " AS build\n", "RUN deno install --frozen\n", "RUN deno task build\n",
+			// The Deno recipe builds on the reviewed release of the major,
+			// never the floating alpine tag (frameworks_deno.go).
+			want: []string{"FROM denoland/deno:alpine-2.9.7@sha256:", " AS build\n", "RUN deno install --frozen\n", "RUN deno task build\n",
 				"FROM nginx:1.29-alpine@sha256:", "COPY --from=build /app/out/ /usr/share/nginx/html/\n"},
 			absent: []string{"CMD "},
 		},

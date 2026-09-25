@@ -172,10 +172,15 @@ func buildCauseFix(cause *BuildCause, context causeContext) *CauseFix {
 		case "node":
 			// The subject is the range the failing package asks for; the
 			// newest catalogue major inside it is the one to choose.
-			if majors, known := nodeRangeMajors(cause.Subjects[0]); known && len(majors) > 0 && build.Recipe == "node" {
+			if majors, known := nodeRangeMajors(cause.Subjects[0]); known && len(majors) > 0 && (build.Recipe == "node" || build.Recipe == "php") {
 				if version := strconv.Itoa(majors[len(majors)-1]); version != build.NodeVersion {
 					return &CauseFix{Kind: fixSetBuild, Field: "configuration.build.nodeVersion", Value: version}
 				}
+			}
+		case "php":
+			version, err := choosePHPVersion("", "", []phpVersionRequirement{{"composer.lock", cause.Subjects[0]}})
+			if err == nil && build.Recipe == "php" && version != build.PHPVersion {
+				return &CauseFix{Kind: fixSetBuild, Field: "configuration.build.phpVersion", Value: version}
 			}
 		}
 	case "build_env_missing":
@@ -506,6 +511,10 @@ func (c *BuildCause) explain() (string, string) {
 			return ".npmrc authenticates the registry with " + subject + ", which the install was not given",
 				"add " + subject + " as a build variable mapped to the install step"
 		}
+		if c.Detail == "composer" {
+			return "a Composer repository asked for credentials the build does not have" + parenthesized(subject),
+				"set COMPOSER_AUTH (the http-basic, github-oauth or gitlab-token JSON auth.json holds) as a build variable scoped to install"
+		}
 		return "the package registry refused the build's credentials",
 			"add the registry token as a build variable scoped to install (for npm, `NPM_TOKEN` read by an .npmrc)"
 	case "build_registry_rate_limited", "registry_rate_limited":
@@ -689,10 +698,13 @@ func (c *BuildCause) commandNotFound(subject string) (string, string) {
 	switch {
 	case c.Detail == "laravel":
 		return "Laravel's Wayfinder Vite plugin runs `php artisan wayfinder:generate` while the assets build, and the image that builds them has no PHP",
-			"build with a Dockerfile whose asset stage has PHP and the Composer dependencies"
+			"build with the PHP recipe, whose asset stage has PHP and the Composer dependencies, or a Dockerfile that does the same"
 	case c.Detail == "mdbook":
 		return "book.toml runs `" + subject + "`, which the image does not install",
 			"set `optional = true` in its book.toml section, or build with a Dockerfile that installs it"
+	case c.Detail == "composer" && subject == "git":
+		return "Composer clones a repository that publishes no archive, and the image has no git",
+			"publish archives for the package (a tagged release), or build with a Dockerfile that installs git"
 	case fix != nil:
 		return "`" + subject + "` is not installed in the image this build runs on",
 			"run the command with the build's package manager: `" + fix.Value + "`"
@@ -740,6 +752,8 @@ func lockfileTool(lockfile string) string {
 		return "uv"
 	case "bun.lock":
 		return "Bun"
+	case "deno.lock":
+		return "Deno"
 	}
 	return "package-manager"
 }

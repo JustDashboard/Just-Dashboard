@@ -316,6 +316,12 @@ type DetectedCandidate struct {
 	// family can run the project and how loudly the install would refuse it.
 	PythonRequires string `json:"pythonRequires,omitempty"`
 	PythonInstall  string `json:"pythonInstall,omitempty"`
+	// PHP and Deno are what those recipes read beyond their manifests — the
+	// release, the extensions, what the lock says about the manifest — for
+	// preflight to judge a plan without the tree (detect_php.go,
+	// detect_deno.go).
+	PHP  *DetectedPHP  `json:"php,omitempty"`
+	Deno *DetectedDeno `json:"deno,omitempty"`
 
 	// readingConfidence is what the source's own evidence supports when an
 	// unsettled package manager caps Confidence (packageCandidate). Ranking
@@ -492,6 +498,7 @@ type BuildPlanConfig struct {
 	GoVersion       string      `json:"goVersion,omitempty"`
 	PythonVersion   string      `json:"pythonVersion,omitempty"`
 	NodeVersion     string      `json:"nodeVersion,omitempty"`
+	PHPVersion      string      `json:"phpVersion,omitempty"`
 	PackageManager  string      `json:"packageManager,omitempty"`
 	RootDirectory   string      `json:"rootDirectory,omitempty"`
 	Dockerfile      string      `json:"dockerfile,omitempty"`
@@ -1187,9 +1194,13 @@ func (c PlanConfiguration) Validate() error {
 		return fmt.Errorf("Python version must select 3.10, 3.11, 3.12 or 3.13 in a Python recipe; use a Dockerfile for other interpreters")
 	}
 	// A Node major chosen in Build settings outranks what the repository
-	// declares; empty follows the repository.
-	if c.Build.NodeVersion != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "node" || !nodeRecipeVersionRE.MatchString(c.Build.NodeVersion)) {
-		return fmt.Errorf("Node version must select 20, 22 or 24 in a JavaScript recipe; use a Dockerfile for other releases")
+	// declares; empty follows the repository. The PHP recipe's asset stage
+	// runs the same install, so the choice applies to it too.
+	if c.Build.NodeVersion != "" && (c.Build.Method != BuildRecipe || (c.Build.Recipe != "node" && c.Build.Recipe != "php") || !nodeRecipeVersionRE.MatchString(c.Build.NodeVersion)) {
+		return fmt.Errorf("Node version must select 20, 22 or 24 in a JavaScript or PHP recipe; use a Dockerfile for other releases")
+	}
+	if c.Build.PHPVersion != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "php" || !slices.Contains(phpRecipeVersions, c.Build.PHPVersion)) {
+		return fmt.Errorf("PHP version must select 8.2, 8.3, 8.4 or 8.5 in a PHP recipe; use a Dockerfile for other releases")
 	}
 	if c.Build.SPAFallback && c.Build.Method != BuildRecipe && c.Build.Method != BuildStatic {
 		return fmt.Errorf("the single-page fallback applies only to a static site or a recipe with static output")
@@ -1806,6 +1817,9 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 			return err
 		}
 		if err := validateDetectedStaticSite(candidate); err != nil {
+			return err
+		}
+		if err := validateDetectedPHPDeno(candidate); err != nil {
 			return err
 		}
 		for _, label := range []string{candidate.Name, candidate.Framework, candidate.Recipe} {

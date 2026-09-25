@@ -84,25 +84,34 @@ type detectedMarkers struct {
 	composerLock      bool
 	phpIndex          bool
 	phpPublicIndex    bool
+	// phpDocroot is the conventional document root (web/, webroot/, …)
+	// whose index.php named this root, and php what the PHP recipe reads
+	// beyond composer.json (detect_php.go).
+	phpDocroot string
+	php        *phpProject
+	deno       *denoProject
 	// node is the package's install inputs, read after the walk under
 	// their own budget.
 	node *nodeInstallSource
+
+	// wordpressHeader: a file at the top of the checkout, or a theme under
+	// its themes/, carries WordPress's header (wordpressRootHeader).
+	wordpressHeader bool
 }
 
 // phpOwnsAssets says the PHP recipe builds this root's package.json itself:
-// a Laravel or Symfony application's Vite or Encore bundle is a stage of the
-// PHP image, not a site of its own.
+// a PHP framework's package.json, or a PHP application's Vite, Encore or
+// Mix build, is a stage of the PHP image, not a site of its own.
 func (m *detectedMarkers) phpOwnsAssets() bool {
-	manifest, ok := parseComposerManifest(m.composerJSON)
-	if !ok {
-		return false
+	if m.wordpressHeader {
+		// A WordPress theme's or plugin's package.json builds its assets,
+		// never a site of its own.
+		return true
 	}
-	for _, framework := range phpFrameworks {
-		if manifest.has(framework.pkg) {
-			return true
-		}
+	if manifest, ok := parseComposerManifest(m.composerJSON); ok && phpFrameworkOf(manifest) != "" {
+		return true
 	}
-	return false
+	return (m.phpIndex || m.phpPublicIndex || m.phpDocroot != "") && phpAssetKind(m.packageJSON) != ""
 }
 
 // denoEntryNames are the files a Deno service is conventionally run from
@@ -141,6 +150,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	detectCtx, cancel := context.WithTimeout(ctx, limits.MaxDuration)
 	defer cancel()
 	markers := map[string]*detectedMarkers{}
+	wordpressHeads := 0
 	shape := newRepoShapeScan(root, limits)
 	goSources := newGoSourceScan()
 	schemaPaths := []string{}
@@ -314,6 +324,18 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			denoEntryPaths = append(denoEntryPaths, filepath.ToSlash(rel))
 		}
 		if !interesting {
+			if wordpressHeads < 32 && result.ScannedFiles < limits.MaxFiles && wordpressHeaderPath(filepath.ToSlash(rel), name) {
+				wordpressHeads++
+				result.ScannedFiles++
+				found, n := wordpressRootHeader(path, name)
+				result.ScannedBytes += n
+				if found {
+					if markers[""] == nil {
+						markers[""] = &detectedMarkers{root: "", pythonFiles: map[string][]byte{}, csprojs: map[string][]byte{}}
+					}
+					markers[""].wordpressHeader = true
+				}
+			}
 			network.observeFile(path, filepath.ToSlash(rel), entry.Name())
 			if scanner.factFile(filepath.ToSlash(rel), name) || scanner.scannable(filepath.ToSlash(rel), name) {
 				// Application code is read under the scanner's own budget, apart
@@ -365,7 +387,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			// names a PHP application; one deeper (a theme, a plugin) does not.
 			switch {
 			case parent == "":
-			case filepath.Base(parent) == "public":
+			case filepath.Base(parent) == "public" || slices.Contains(phpDocumentRoots, filepath.Base(parent)):
 				parent = filepath.Dir(parent)
 				if parent == "." {
 					parent = ""
@@ -436,10 +458,13 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		case "composer.lock":
 			marker.composerLock = true
 		case "index.php":
-			if filepath.Base(filepath.Dir(rel)) == "public" {
-				marker.phpPublicIndex = true
-			} else {
+			switch base := filepath.Base(filepath.Dir(rel)); {
+			case filepath.Dir(rel) == ".":
 				marker.phpIndex = true
+			case base == "public":
+				marker.phpPublicIndex = true
+			case marker.phpDocroot == "":
+				marker.phpDocroot = base
 			}
 		case "composer.json":
 			content, ok := readMarker(limits.MaxFileBytes)
@@ -586,6 +611,8 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		allRoots = append(allRoots, filepath.ToSlash(candidateRoot))
 	}
 	readNodeInstalls(root, markers)
+	readPHPProjects(root, markers)
+	readDenoProjects(root, markers)
 	for _, candidateRoot := range roots {
 		marker := markers[candidateRoot]
 		root := filepath.ToSlash(marker.root)
@@ -778,7 +805,9 @@ func candidatesForMarkers(marker *detectedMarkers, schemaPaths []string, pythonE
 		rootLabel = "."
 	}
 	if len(marker.packageJSON) > 0 && !marker.phpOwnsAssets() {
-		result = append(result, packageCandidate(marker, schemaPaths)...)
+		packages := packageCandidate(marker, schemaPaths)
+		demoteNodeForDeno(marker, packages)
+		result = append(result, packages...)
 	}
 	if marker.goMod != "" {
 		candidate := DetectedCandidate{
@@ -818,7 +847,7 @@ func candidatesForMarkers(marker *detectedMarkers, schemaPaths []string, pythonE
 	if len(marker.denoJSON) > 0 {
 		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, denoCandidate(marker, rootLabel)))
 	}
-	if len(marker.composerJSON) > 0 || marker.phpIndex || marker.phpPublicIndex {
+	if len(marker.composerJSON) > 0 || marker.phpIndex || marker.phpPublicIndex || marker.phpDocroot != "" || marker.wordpressHeader {
 		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, phpCandidate(marker, rootLabel)))
 	}
 	if marker.staticFile != "" && len(marker.packageJSON) == 0 {
@@ -1077,7 +1106,7 @@ func packageCandidate(marker *detectedMarkers, schemaPaths []string) []DetectedC
 			candidate.SchemaCommand = tool.Command
 		}
 	}
-	candidate.NodeInstalls = facts.detectedInstalls(candidate.PackageManager, false, inputs.commands)
+	candidate.NodeInstalls = facts.detectedInstalls(candidate.PackageManager, false, nil, inputs.commands)
 	candidate.Variables = facts.registry
 	recipe, err := validateNodeRecipeContent(marker.packageJSON, files,
 		BuildPlanConfig{Method: BuildRecipe, Recipe: "node", PackageManager: runner, BuildCommand: candidate.BuildCommand, StartCommand: candidate.StartCommand, OutputDirectory: candidate.OutputDirectory, SPAFallback: candidate.SPAFallback})

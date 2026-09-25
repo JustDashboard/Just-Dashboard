@@ -644,12 +644,11 @@ func preflightFindings(
 		findings = append(findings, nodeFrameworkFindings(planned, configuration)...)
 	}
 	if planned != nil && planned.UnpinnedDependencies && configuration.Build.Method == BuildRecipe {
-		measured, action := unpinnedDependencyAdvice(planned)
+		measured, means, action := unpinnedDependencyAdvice(planned)
 		findings = append(findings, finding("dependencies_unpinned", PreflightWarning,
-			"Dependencies are not pinned to exact versions", measured,
-			"Each build installs the newest versions the manifest allows, so a rebuild of this same commit can run different code.",
-			action, "deploy", "configuration.build"))
+			"Dependencies are not pinned to exact versions", measured, means, action, "deploy", "configuration.build"))
 	}
+	findings = append(findings, phpDenoFindings(planned, configuration)...)
 	if planned != nil && planned.RecipeIssue != "" && configuration.Build.Method == BuildRecipe {
 		findings = append(findings, finding("recipe_unsupported", PreflightBlocked,
 			"Source needs a different build plan", planned.RecipeIssue,

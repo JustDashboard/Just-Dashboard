@@ -522,7 +522,9 @@ function RuntimeFact({
           ? build?.goVersion
           : recipe === "node"
             ? build?.nodeVersion
-            : undefined
+            : recipe === "php"
+              ? build?.phpVersion
+              : undefined
     const language = [RECIPE_SHORT[recipe], version].filter(Boolean).join(" ")
     return (
       <Fact mark={mark}>

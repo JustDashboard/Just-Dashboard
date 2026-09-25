@@ -240,10 +240,10 @@ func TestNodeRecipeRefusesRunnersNoStageProvides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runner, field := nodeForeignRunner(source.facts, "npm run build", "npm run start"); runner != "php" || field != "configuration.build.startCommand" {
+	if runner, field := nodeForeignRunner(source.facts, "npm run build", "npm run start", nil); runner != "php" || field != "configuration.build.startCommand" {
 		t.Fatalf("foreign runner = %q %q", runner, field)
 	}
-	if runner, _ := nodeForeignRunner(source.facts, "npm run build", "node server.js"); runner != "" {
+	if runner, _ := nodeForeignRunner(source.facts, "npm run build", "node server.js", nil); runner != "" {
 		t.Fatalf("python3 with compilers refused: %q", runner)
 	}
 	for _, test := range []struct{ command, manager, want string }{

@@ -76,22 +76,26 @@ func staticSiteFindings(source *DraftSourceConfig, detection *DetectionResult, c
 }
 
 // unpinnedDependencyAdvice says, in the words of the recipe's own tooling,
-// what is unpinned and how to pin it: telling a PHP or Deno operator to run
-// `uv lock` helped nobody.
-func unpinnedDependencyAdvice(candidate *DetectedCandidate) (string, string) {
+// what is unpinned, what that means for a rebuild and how to pin it: telling
+// a PHP or Deno operator to run `uv lock` helped nobody.
+func unpinnedDependencyAdvice(candidate *DetectedCandidate) (measured, means, action string) {
 	const works = " when rebuilds must be identical; deploying as is works today."
+	means = "Each build installs the newest versions the manifest allows, so a rebuild of this same commit can run different code."
 	switch {
 	case candidate.Recipe == "php":
-		return "composer.json without composer.lock", "Run composer install locally and commit composer.lock" + works
+		return "composer.json without composer.lock",
+			means + " Composer also refuses to resolve a version that has a security advisory, so a tightly pinned requirement can stop the build.",
+			"Run composer install locally and commit composer.lock" + works
 	case candidate.Recipe == "deno":
-		return "deno.json imports without deno.lock", "Run deno install and commit deno.lock" + works
+		return "deno.json imports without deno.lock", means, "Run deno install and commit deno.lock" + works
 	case candidate.Recipe == "rust":
-		return "Cargo.toml without Cargo.lock", "Run cargo generate-lockfile and commit Cargo.lock" + works
+		return "Cargo.toml without Cargo.lock", means, "Run cargo generate-lockfile and commit Cargo.lock" + works
 	case candidate.Framework == "jekyll":
-		return "no Gemfile.lock; the build resolves the gems", "Run bundle lock and commit Gemfile.lock (a site with no Gemfile gets the newest github-pages gem)" + works
+		return "no Gemfile.lock; the build resolves the gems", means,
+			"Run bundle lock and commit Gemfile.lock (a site with no Gemfile gets the newest github-pages gem)" + works
 	case candidate.Recipe == "python" && candidate.StaticSite != nil && candidate.StaticSite.Unpinned:
-		return "no requirements file; the build installs pinned " + siteGeneratorNames[candidate.StaticSite.Generator] + " releases",
+		return "no requirements file; the build installs pinned " + siteGeneratorNames[candidate.StaticSite.Generator] + " releases", means,
 			"Commit a requirements.txt that lists the site's generator, theme and plugins with their versions" + works
 	}
-	return "unpinned entries in the dependency manifest", "Commit a lockfile (uv lock, poetry lock, or pip freeze > requirements.txt)" + works
+	return "unpinned entries in the dependency manifest", means, "Commit a lockfile (uv lock, poetry lock, or pip freeze > requirements.txt)" + works
 }

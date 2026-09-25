@@ -51,6 +51,8 @@ var outputCauseTitles = map[string]string{
 	"runtime_master_key_invalid":      "Credentials cannot be decrypted",
 	"runtime_auth_untrusted_host":     "Host not trusted by Auth.js",
 	"runtime_dotenv_missing":          ".env file missing",
+	"runtime_php_extension_missing":   "PHP extension missing at runtime",
+	"runtime_assets_missing":          "Front-end assets not built",
 	"release_migration_failed":        "Migration failed",
 	"release_migration_failed_before": "Earlier migration failed",
 	"release_database_not_empty":      "Database has an unmanaged schema",
@@ -129,6 +131,9 @@ var runtimeSignatures = []buildSignature{
 	signature("runtime_master_key_invalid", "rails", "", `ActiveSupport::MessageEncryptor::InvalidMessage`).naming("RAILS_MASTER_KEY"),
 	signature("runtime_auth_untrusted_host", "authjs", "", `\[auth\]\[error\] UntrustedHost|UntrustedHost: Host must be trusted`),
 	signature("runtime_dotenv_missing", "", "", `open \.env: no such file or directory|Error loading \.env file|\.env file not found`),
+	signature("runtime_php_extension_missing", "php", "", `Call to undefined function ((?:mysqli|image|bc|gmp|pcntl|exif|sodium|apcu|pg|ldap|socket)[\w]*)\(\)|Class "\\?(Redis|ZipArchive|NumberFormatter|IntlDateFormatter|Collator|Imagick|SoapClient|Memcached|XSLTProcessor|MongoDB\\+Driver\\+Manager)" not found|Your PHP installation appears to be missing the (MySQL) extension`),
+	signature("runtime_assets_missing", "php", "", `Vite manifest not found at: (\S+)|Unable to locate file in Vite manifest: (\S+)`),
+	signature("runtime_assets_missing", "php", "Mix manifest", `Mix manifest does not exist`).naming("mix-manifest.json"),
 	signature("runtime_database_localhost", "", "", "ECONNREFUSED (?:127\\.0\\.0\\.1|::1|localhost):(\\d+)|Can't reach database server at `(?:localhost|127\\.0\\.0\\.1):(\\d+)`|connection to server at \"(?:localhost|127\\.0\\.0\\.1)\"[^,]*, port (\\d+) failed|dial tcp (?:127\\.0\\.0\\.1|\\[::1\\]|localhost):(\\d+): connect: connection refused|Can't connect to (?:local )?(?:MySQL )?server on '(?:localhost|127\\.0\\.0\\.1)(?::(\\d+))?'|(?:localhost|127\\.0\\.0\\.1):(\\d+)\\D*Connection refused|Connection refused \\(os error 111\\).*(?:127\\.0\\.0\\.1|localhost):(\\d+)"),
 	signature("runtime_host_disallowed", "django", "", `Invalid HTTP_HOST header: '([^':]+)|DisallowedHost`),
 	signature("runtime_host_disallowed", "vite", "Blocked request", `Blocked request\. This host \("([^"]+)"\) is not allowed`),
@@ -414,6 +419,12 @@ func (c *OutputCause) sentence() string {
 		return "Auth.js does not trust the host it is served on; set AUTH_TRUST_HOST to true, or AUTH_URL to the site's address"
 	case "runtime_dotenv_missing":
 		return "the application exits because it cannot open .env; the dashboard supplies variables in the environment, so create an empty .env in the image or ignore the load error"
+	case "runtime_php_extension_missing":
+		extension := phpExtensionForSymbol(subject)
+		return "the application calls " + orDefault(subject, "a function") + ", which needs the PHP extension " + orDefault(extension, "that provides it") +
+			", and the image does not have it; declare it in composer.json's require (\"ext-" + orDefault(extension, "name") + "\": \"*\") so the recipe installs it"
+	case "runtime_assets_missing":
+		return "the page renders front-end assets the image does not contain" + parenthesized(subject) + "; give package.json a build script (for Laravel Mix, a production script) the PHP recipe runs, or commit the built assets"
 	case "runtime_loopback_bind":
 		where := "on localhost only"
 		if strings.Contains(subject, ":") {

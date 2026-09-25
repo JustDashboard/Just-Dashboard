@@ -461,6 +461,7 @@ func applyStateDetection(marker *detectedMarkers, candidates []DetectedCandidate
 		found = append(found, nodeStatePaths(candidate, marker, view, variables, layout)...)
 		found = append(found, pythonStatePaths(candidate, marker, view, variables, layout)...)
 		found = append(found, laravelStatePaths(candidate, marker, view, variables, layout)...)
+		found = append(found, wordpressStatePaths(candidate, marker, layout)...)
 		found = append(found, railsStatePaths(candidate, marker, view, layout)...)
 		found = append(found, compiledStatePaths(candidate, marker, view, variables, layout)...)
 		found = append(found, dotnetStatePaths(candidate, marker, view, layout)...)

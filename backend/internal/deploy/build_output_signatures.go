@@ -85,6 +85,7 @@ var buildSignatures = []buildSignature{
 	signature("build_lockfile_incompatible", "Cargo.lock", "lock file", "lock file version `?\\d+`? (?:was found, but this version of Cargo does not understand|requires `-Znext-lockfile-bump`)"),
 	signature("build_lockfile_incompatible", "poetry.lock", "lock file", `The lock file is not compatible with the current version of Poetry`),
 	signature("build_lockfile_incompatible", "uv.lock", "uv.lock", "Failed to parse `uv\\.lock`|`uv\\.lock` uses an unsupported schema version"),
+	signature("build_lockfile_incompatible", "deno.lock", "lockfile version", `Unsupported lockfile version '?(\d+)'?`),
 	signature("build_lockfile_incompatible", "bun.lock", "ockfile version", `(?i)(?:unknown|unsupported) lockfile version`),
 	signature("build_package_manager_mismatch", "", "configured to use", `This project is configured to use (npm|pnpm|yarn|bun)\b`),
 	signature("build_package_manager_mismatch", "pnpm", "ERR_PNPM_BAD_PM_VERSION", `ERR_PNPM_BAD_PM_VERSION`),
@@ -222,6 +223,9 @@ var buildSignatures = []buildSignature{
 
 	// Registries that refused the build, and a network that failed it.
 	signature("build_registry_auth", "npmrc", "Failed to replace env in config", `Failed to replace env in config: \$\{([A-Za-z_]\w*)\}`),
+	// Composer asks for credentials it cannot prompt for under
+	// --no-interaction; the repository it names is where they go.
+	signature("build_registry_auth", "composer", "authentic", `The '?"?(https?://[^'"\s]+)'?"? URL required authentication|You must be using the interactive console to authenticate|Could not authenticate against ([\w.-]+)`),
 	signature("build_registry_auth", "", "", `code E401|code E403|ERR_PNPM_FETCH_40[13]|YN0041|401 Unauthorized|403 Forbidden|401 Client Error|Invalid credentials for|authentication required|terminal prompts disabled|unauthorized: `),
 	signature("build_registry_auth", "dotnet", "NU1301", `NU1301`).requiring(`401|403`),
 	signature("build_network", "", "", `getaddrinfo (?:ENOTFOUND|EAI_AGAIN) ([\w.-]+)|Could not resolve host:? ([\w.-]+)|dial tcp: lookup ([\w.-]+)|Temporary failure in name resolution|TLS handshake timeout|i/o timeout|network is unreachable|Failed to establish a new connection|Connection timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|socket hang up|EAI_AGAIN|NU1301`),
@@ -238,6 +242,7 @@ var buildSignatures = []buildSignature{
 	signature("build_embed_source_missing", "go", "no matching files found", `pattern ([^:\s]+): no matching files found`),
 	signature("build_dev_dependency_in_production", "symfony", "Attempted to load class", `Attempted to load class "(\w+Bundle)"`),
 	signature("build_dev_dependency_in_production", "laravel", "Telescope", `Class "Laravel\\+Telescope`).naming("laravel/telescope"),
+	signature("build_dev_dependency_in_production", "laravel", "ServiceProvider", `Class "([\w\\]+ServiceProvider)" not found`).requiring(`package:discover`),
 	// Laravel's Wayfinder Vite plugin runs artisan while the assets build, and
 	// fails the build with it; Vite exits 1 whatever the shell said.
 	signature("build_command_not_found", "laravel", "wayfinder:generate", `php artisan wayfinder:generate`).
@@ -260,8 +265,10 @@ var buildSignatures = []buildSignature{
 	signature("build_compile_error", "", "", `Failed to compile\.|\[(vite:[\w-]+)\] |SyntaxError: |PHP (?:Parse|Fatal) error:`),
 
 	// Commands the image does not have.
-	// pip names the git a VCS requirement needs as it gives up on the install.
+	// pip names the git a VCS requirement needs as it gives up on the install,
+	// and Composer the git a repository without an archive is cloned with.
 	signature("build_command_not_found", "", "Cannot find command", `Cannot find command '(git)'`),
+	signature("build_command_not_found", "composer", "git was not found", `(git) was not found in your PATH`),
 	signature("build_command_not_found", "", "not found", shellNotFoundPattern).exitCode(127),
 	signature("build_command_not_found", "", "not found", shellNotFoundPattern).requiring(exit127ReportPattern),
 	signature("build_command_not_found", "", "", `exec: "([\w./+-]+)": executable file not found in \$PATH|could not determine executable to run`),

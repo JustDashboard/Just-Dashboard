@@ -488,7 +488,7 @@ func refreshNodeInstalls(candidates []DetectedCandidate, markers map[string]*det
 			continue
 		}
 		build, start := candidate.BuildCommand, candidate.StartCommand
-		candidate.NodeInstalls = marker.node.facts.detectedInstalls(candidate.PackageManager, false, func(manager string) (string, string) {
+		candidate.NodeInstalls = marker.node.facts.detectedInstalls(candidate.PackageManager, false, nil, func(manager string) (string, string) {
 			return nodeRunnerFor(build, manager), nodeRunnerFor(start, manager)
 		})
 		var findings []PreflightFinding

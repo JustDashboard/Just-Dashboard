@@ -13,8 +13,15 @@ func TestPHPDetectionAndRecipe(t *testing.T) {
 	for _, fixture := range []struct{ constraint, want string }{
 		{"", "8.3"}, {"^8.2", "8.4"}, {">=8.1", "8.4"}, {"~8.3.0", "8.3"}, {"8.2.*", "8.2"}, {">=8.2 <8.4", "8.3"},
 		{"^8.1 || ^8.2", "8.4"}, {"^7.4", ""}, {"8.1.*", ""},
+		// Composer's other valid forms, and 8.5 only when it is required.
+		{"^8", "8.4"}, {"8.*", "8.4"}, {">=8", "8.4"}, {"*", "8.4"}, {"^8.1|^8.2", "8.4"}, {"8.3.*|8.4.*", "8.4"},
+		{">= 8.2", "8.4"}, {"^7.3|^8.0", "8.4"}, {"^8.5", "8.5"}, {">=8.5", "8.5"},
 	} {
-		got, err := choosePHPRecipeVersion(fixture.constraint)
+		requirements := []phpVersionRequirement{}
+		if fixture.constraint != "" {
+			requirements = append(requirements, phpVersionRequirement{"composer.json", fixture.constraint})
+		}
+		got, err := choosePHPVersion("", "", requirements)
 		if (fixture.want == "") != (err != nil) || got != fixture.want {
 			t.Fatalf("php %q: version %q, %v", fixture.constraint, got, err)
 		}
@@ -42,7 +49,7 @@ func TestPHPDetectionAndRecipe(t *testing.T) {
 		{"plain root index", map[string]string{"index.php": "<?php echo 'hi';"},
 			"php", "frankenphp php-server --listen :80 --root /app", ConfidenceMedium, "", false, 1},
 		{"unsupported php", map[string]string{"composer.json": `{"require":{"php":"^7.4"}}`, "index.php": "<?php"},
-			"php", "frankenphp php-server --listen :80 --root /app", ConfidenceMedium, "8.2 to 8.4", true, 1},
+			"php", "frankenphp php-server --listen :80 --root /app", ConfidenceMedium, "8.2 to 8.5", true, 1},
 		{"composer without an entry point", map[string]string{"composer.json": `{"require":{"monolog/monolog":"^3"}}`},
 			"php", "frankenphp php-server --listen :80 --root /app", ConfidenceLow, "", true, 1},
 	} {
@@ -91,10 +98,10 @@ func TestPHPDetectionAndRecipe(t *testing.T) {
 		// The asset stage installs through the Node recipe's own planner:
 		// Bun is copied beside Node rather than replacing it.
 		"FROM node:22-alpine@sha256:", "AS assets-toolchain", "COPY --from=oven/bun:1-alpine@sha256:",
-		"FROM assets-toolchain AS assets", "bun install --frozen-lockfile", nodeBuildRun("bun run build"),
+		"FROM vendor AS assets", "COPY --from=assets-toolchain /usr/local /opt/node", "bun install --frozen-lockfile", nodeBuildRun("bun run build"),
 		"FROM composer:2@sha256:", "AS composer", "FROM dunglas/frankenphp:1-php8.4-alpine@sha256:",
 		"ENV COMPOSER_ALLOW_SUPERUSER=1 LOG_CHANNEL=stderr",
-		"RUN install-php-extensions pdo_mysql pdo_pgsql opcache intl redis",
+		"RUN install-php-extensions pdo_mysql pdo_pgsql mysqli opcache intl redis",
 		"COPY --from=composer /usr/bin/composer /usr/bin/composer",
 		"composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist",
 		"COPY --from=assets /app/public/build /app/public/build",

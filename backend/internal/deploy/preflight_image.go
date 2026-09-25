@@ -190,7 +190,10 @@ func imageBuildFindings(draft *Draft, configuration PlanConfiguration, observati
 			}
 		}
 	}
-	if build.Method == BuildRecipe && build.Recipe == "php" && phpDocumentRoot(build.StartCommand) == "" {
+	// WordPress is served from its own root by design; its PHP files, not a
+	// dependency tree, are what that root holds.
+	if build.Method == BuildRecipe && build.Recipe == "php" && phpDocumentRoot(build.StartCommand) == "" &&
+		(planned == nil || planned.Framework != "wordpress") {
 		findings = append(findings, finding("php_docroot_is_repository_root", PreflightWarning,
 			"PHP serves the whole repository", "--root /app",
 			"Dependencies, lockfiles, logs and dotfiles under the served directory are reachable over HTTP, and any PHP file in vendor/ can be executed.",

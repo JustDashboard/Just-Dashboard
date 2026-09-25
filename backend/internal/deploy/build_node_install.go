@@ -171,7 +171,7 @@ func (f nodeInstallFacts) detectedLockfiles() []DetectedLockfile {
 // choose, with the commands detection proposes for that manager's runner;
 // resolved is the manager chosen automatically, planned as the automatic
 // choice so its record carries why it was chosen.
-func (f nodeInstallFacts) detectedInstalls(resolved string, assets bool, commands func(runner string) (string, string)) []DetectedNodeInstall {
+func (f nodeInstallFacts) detectedInstalls(resolved string, assets bool, provided []string, commands func(runner string) (string, string)) []DetectedNodeInstall {
 	installs := make([]DetectedNodeInstall, 0, len(nodeManagerOrder))
 	for _, manager := range nodeManagerOrder {
 		build, start := commands(manager)
@@ -179,7 +179,7 @@ func (f nodeInstallFacts) detectedInstalls(resolved string, assets bool, command
 		if manager == resolved {
 			selected = ""
 		}
-		plan := planNodeInstall(f, nodeInstallChoice{selected: selected, build: build, start: start, assets: assets})
+		plan := planNodeInstall(f, nodeInstallChoice{selected: selected, build: build, start: start, assets: assets, provided: provided})
 		installs = append(installs, plan.detected(manager, build, start))
 	}
 	return installs
@@ -848,6 +848,9 @@ type nodeInstallChoice struct {
 	fieldPackageManager string
 	// nodeVersion is the plan's Node major, which outranks the source.
 	nodeVersion string
+	// provided are the programs the stage has beside Node: the PHP recipe's
+	// asset stage builds on its vendor stage, so a script may run php.
+	provided []string
 }
 
 func nodeFinding(code string, severity PreflightSeverity, title, measured, means, action, field string) PreflightFinding {
@@ -971,7 +974,7 @@ func planNodeInstall(facts nodeInstallFacts, choice nodeInstallChoice) nodeInsta
 			"pnpm is added for the scripts that call it", "pnpm "+version,
 			"The image installs with "+nodeManagerLabel(plan.manager)+"; pnpm is installed through Corepack so those scripts find it.", "", "configuration.build.buildCommand"))
 	}
-	if runner, field := nodeForeignRunner(facts, plan.build, plan.start); runner != "" {
+	if runner, field := nodeForeignRunner(facts, plan.build, plan.start, choice.provided); runner != "" {
 		blocked := nodeFinding("command_runner_missing", PreflightBlocked,
 			"A command needs a runtime the Node image does not have", runner,
 			"The build and start commands, or the package scripts they run, call "+runner+", which the Node recipe does not install.",

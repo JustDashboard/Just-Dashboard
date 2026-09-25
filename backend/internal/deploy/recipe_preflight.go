@@ -123,6 +123,8 @@ func recipeRefusalField(text string) string {
 		return "configuration.build.pythonVersion"
 	case strings.Contains(lower, "engines.node") || strings.Contains(lower, "node version"):
 		return "configuration.build.nodeVersion"
+	case strings.Contains(lower, "php recipe builds php"):
+		return "configuration.build.phpVersion"
 	case strings.Contains(lower, "dockerfile"):
 		return "configuration.build.dockerfile"
 	}

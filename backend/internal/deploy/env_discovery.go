@@ -645,6 +645,11 @@ func detectDatabases(marker *detectedMarkers, variables []DetectedVariable, pris
 			}
 		}
 	}
+	if marker.php != nil {
+		for _, found := range marker.php.databaseEvidence() {
+			suggest(found.engine, found.evidence)
+		}
+	}
 	// Manifests detection does not hold as markers — Gemfile.lock, mix.exs —
 	// and those of compiled languages arrive from the root's classification.
 	for _, found := range extra {

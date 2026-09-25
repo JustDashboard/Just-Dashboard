@@ -6,8 +6,9 @@ on the host. Generated Dockerfiles use root-relative, exclusive writes so a chec
 redirect output outside the build context. Detection ignores this generated directory.
 
 Detection reads manifests as data — `package.json`, `angular.json`, `requirements.txt`, `pyproject.toml`,
-`uv.lock`, `poetry.lock`, `Cargo.toml`, `pom.xml`, `build.gradle(.kts)`, `*.csproj`, `deno.json(c)`, a
-`Procfile`, and for a JavaScript package its lockfiles, `.npmrc`, `.yarnrc.yml`, `bunfig.toml`,
+`uv.lock`, `poetry.lock`, `Cargo.toml`, `pom.xml`, `build.gradle(.kts)`, `*.csproj`, `deno.json(c)` and
+`deno.lock` with Deno's version files, `composer.json` and `composer.lock`, a `Procfile`, and for a
+JavaScript package its lockfiles, `.npmrc`, `.yarnrc.yml`, `bunfig.toml`,
 `pnpm-workspace.yaml` and the Node and Bun version files (`.nvmrc`, `.node-version`, `.tool-versions`,
 `.bun-version`), its framework's configuration (`next.config`, `svelte.config`, `astro.config`,
 `nuxt.config`, `vite.config`, `nest-cli.json`, an Nx workspace's `nx.json` and `project.json`, …, read as
@@ -375,6 +376,10 @@ sends, without asking:
   and `QUARKUS_HTTP_PROXY_ALLOW_X_FORWARDED`. OAuth/OIDC redirect URIs and secure cookies then use
   https; detection names the sign-in packages (`Microsoft.AspNetCore.Authentication.*`,
   `Microsoft.Identity.Web`, `spring-boot-starter-oauth2-client`/`-security`) that depend on it.
+- **PHP** images load a prepend file that, while `PHP_FORWARDED_TRUST=private`, takes `HTTPS` from
+  `X-Forwarded-Proto` and the client from the last `X-Forwarded-For` hop, for requests whose peer is a
+  loopback or private address only ([PHP](#php)), so Laravel, Symfony and WordPress see https without
+  trusting a proxy themselves.
 - A server that reads `HOST` with a loopback fallback (`process.env.HOST || 'localhost'`,
   `env::var("HOST").unwrap_or("127.0.0.1")`) in a build whose image does not set HOST — a Dockerfile, a
   Go or Rust recipe — gets a `HOST=0.0.0.0` plan variable instead. HOST is never injected globally: some
@@ -385,7 +390,7 @@ client sent. The release records which trust settings its recipe image sets. Whe
 route (nothing adds the headers), or its port is reachable directly (a `0.0.0.0`/`::` bind, host
 networking, or the application's port published again on every interface), the runtime writes the
 withdrawn value of each recorded setting (`FORWARDED_ALLOW_IPS=127.0.0.1`,
-`ASPNETCORE_FORWARDEDHEADERS_ENABLED=false`, `SERVER_FORWARD_HEADERS_STRATEGY=none`, the Quarkus switches
+`ASPNETCORE_FORWARDEDHEADERS_ENABLED=false`, `SERVER_FORWARD_HEADERS_STRATEGY=none`, `PHP_FORWARDED_TRUST=none`, the Quarkus switches
 `false`, SvelteKit's `PROTOCOL_HEADER` and `ADDRESS_HEADER` empty and `HOST_HEADER=host`, adapter-node's
 own default — before 5.5 an empty one made every origin `https://undefined`) unless the plan sets the
 variable itself, and preflight says so. A repository's own Dockerfile, a pulled image and an adopted
@@ -821,7 +826,8 @@ output directory the plan serves.
   that stage on Alpine (`bash_installed`); one that calls another language's toolchain — `python`,
   `php`, `ruby`, `java`, `go`, `cargo`, `dotnet`, `deno` and their package managers — is refused before
   the build on the field that runs it (`command_runner_missing`); `python3` is in the build stage when a
-  native addon brings the compilers.
+  native addon brings the compilers, and the PHP recipe's asset stage, built on its vendor stage, has
+  `php` and `composer` for a script that runs `php artisan`.
 
 `main` without a start script is a low-confidence worker unless the manifest names an HTTP library; a
 bot or queue library answers the question, making it a worker without one, and a start script beside
@@ -1279,10 +1285,10 @@ from the same files read as data, so detection (`nodeVersion` on the candidate, 
 `nodeInstalls`), preflight and the recipe agree on it.
 
 **Which Node.** The catalogue builds on Node 20, 22 and 24 (`node:<major>-alpine`, digest-pinned like every
-base). The Build setting `nodeVersion` (20, 22 or 24; the new-project form and Build settings offer it)
-outranks everything the repository declares — preflight then names it (`node_version_selected`,
-"22 (Build settings)"), a build log's engine mismatch offers the newest major its range allows as the
-fix, and Yarn 1's or an engine-strict install's refusal of it is the recipe's `recipe_unsupported`
+base). The Build setting `nodeVersion` (20, 22 or 24; the new-project form and Build settings offer it,
+for a JavaScript recipe and for a PHP recipe's asset stage) outranks everything the repository
+declares — preflight then names it (`node_version_selected`, "22 (Build settings)"), a build log's
+engine mismatch offers the newest major its range allows as the fix, and Yarn 1's or an engine-strict install's refusal of it is the recipe's `recipe_unsupported`
 before Deploy. Without it, the first declaration that can be read decides: the nearest version file, looking from the
 package's directory up to the top of the checkout the way nvm, fnm and asdf do (`.nvmrc`, then
 `.node-version`, then `.tool-versions`' `nodejs`/`node` line, in one directory), then `volta.node`,
@@ -1651,45 +1657,205 @@ parsed tasks.
 `deno.json`/`deno.jsonc` (comments and trailing commas tolerated) supplies the `build` and `start`
 tasks; without a start task the conventional entry file (`main.ts`, `server.ts`, `mod.ts`, `main.js`,
 `server.js`, `main.tsx`, `index.ts`, `app.ts`, `src/main.ts`, `src/server.ts`, `src/index.ts`) is run with
-`--allow-all`. `deno install` (`--frozen` with a `deno.lock`) caches the imports on `denoland/deno:alpine`
-before the build task runs. With an output directory — Lume, whose `lume/` import names it — the build
-task's output is served by nginx and there is no start command
-([Static sites](#static-sites-and-site-generators)). A `fresh` import names the framework. The port is read from the start task
-(`deno serve --port 3000`, else `deno serve`'s 8000) or the served file (`Deno.serve({ port: 3000 })`, Oak's
-`listen({ port })`, a `Deno.env.get("PORT")` read); with nothing readable it is `Deno.serve`'s default of
-8000, stated as evidence rather than asked as a question.
+`--allow-all`. A `fresh` import names the framework. A Deno 2 project that keeps its dependencies and
+scripts in `package.json` — its `start` script runs `deno`, or `deno.lock` is its only lockfile — is a
+Deno candidate too, started with `deno task start` (Deno runs package.json scripts as tasks); the Node
+candidate for the same package is low confidence, since its scripts call a `deno` the Node image lacks.
+A start task that runs a development watcher (`--watch`, Fresh 1's `dev.ts`) is replaced by the
+`preview` task, else a non-watching `serve` task, else `deno run -A main.ts`; with none of them it stays
+and preflight says so (`deno_start_watch_mode`). The port is read from the start task (`deno serve
+--port 3000`, else `deno serve`'s 8000) or the served file (`Deno.serve({ port: 3000 })`, Oak's `listen({
+port })`, a `Deno.env.get("PORT")` read); with nothing readable it is `Deno.serve`'s default of 8000,
+stated as evidence rather than asked as a question.
+
+The release is the repository's own declaration, read as data: `.dvmrc` and `.tool-versions` from the
+root up to the checkout, then `deno-version` in the checkout's `.github/workflows/*.yml` (setup-deno).
+An exact release builds on `denoland/deno:alpine-<release>` (a release with no image falls back to its
+major's reviewed release, with a note in the run); a major, `v2.x` or nothing builds on the catalogue's
+reviewed release of that major — `denoland/deno:alpine-2.9.7`, and `alpine-1.46.3` for Deno 1 —
+because Docker Hub publishes no major-only Alpine tag and the floating `alpine` tag moved every rebuild
+onto the newest major. A major the catalogue lacks builds on Deno 2 with `deno_version_mismatch`. The
+Toolchain evidence names the release and where it was declared (`deno 1.46.3 (.dvmrc)`).
+
+Deno 2 installs with `deno install`, `--frozen` when `deno.lock` records everything the workspace
+asks for. Detection compares the lock's `workspace.dependencies` and `workspace.packageJson.dependencies`
+(version 3 and later) with the `jsr:` and `npm:` imports of `deno.json` and the dependencies of
+`package.json`, written the way Deno writes them (`^X.0.0` as `X`, `~X.Y.0` as `X.Y`, anything else
+verbatim, a subpath dropped). A specifier the lock lacks is `deno_lock_outdated` (warning), and the
+install runs without `--frozen` — the Deno twin of a stale `package-lock.json` beside the lockfile that
+is in sync, resolved again rather than stopping on "The lockfile is out of date". The build task runs
+next. The file the start command runs (through `deno task`, `deno run … <file>` or `deno serve …
+<file>`) is then cached with its whole module graph, `deno install --entrypoint <file>`, so URL and `npm:`
+imports written only in code are fetched at build rather than at every container start; the lock still
+verifies every module it records. It runs after the build because the build may write a module the
+entry imports, and only for an entry the checkout has: a start that serves what the build writes
+(Fresh 2's `deno serve -A _fresh/server.js`, an adapter's `dist/server.js`) has nothing to cache before
+the build and imports what `deno.json` already names. Deno 1, whose `install` is a script installer,
+caches the entry with `deno cache <file>` at the same point. With an output directory — Lume, whose
+`lume/` import names it — the build task's output is served by nginx, there is no start command and no
+entry to cache ([Static sites](#static-sites-and-site-generators)).
 
 ## PHP
 
-A `composer.json`, or an `index.php` at the root or under `public/`, is a PHP application; an `index.php`
-deeper in the tree (WordPress's `wp-admin/`, a theme) names nothing on its own. `laravel/framework`
-with an `artisan` file is Laravel, `symfony/framework-bundle` with `bin/console` is Symfony, `slim/slim` is
-Slim; anything else is plain PHP served from the directory that holds `index.php`. The image is
-`dunglas/frankenphp:1-php<version>-alpine` — FrankenPHP serves on 80 with its own worker, so no nginx
-or php-fpm pair — and the version comes from Composer's `php` constraint with Composer's own semantics
-(`^8.2`, `~8.3.0`, `>=8.2 <8.4`, `8.2.*`, `||` unions); 8.2, 8.3 and 8.4 are in the catalogue, 8.3 is the
-default, and a constraint the catalogue cannot satisfy (`^7.4`) is a `recipe_unsupported` finding.
-`ext-*` requirements install through `install-php-extensions` (built-ins such as `mbstring` are skipped;
-`pdo_mysql`, `pdo_pgsql` and `opcache` are always present, so a linked database works without asking).
+A `composer.json`, or an `index.php` at the root, under `public/`, or under a conventional document root
+(`web/`, `webroot/`, `htdocs/`, `public_html/`, `www/`) where nothing else owns the directory above it,
+is a PHP application; an `index.php` deeper in the tree (WordPress's `wp-admin/`, a theme) names
+nothing on its own. The framework decides where the front controller is served from, and what the start
+runs first: `laravel/framework` (Laravel, `public/`, `php artisan migrate --force`), `symfony/framework-
+bundle` (Symfony, `public/`, `doctrine:migrations:migrate` with the migrations bundle), `slim/slim`,
+`mezzio/mezzio` and `laminas/laminas-mvc` (`public/`), `cakephp/cakephp` (CakePHP, `webroot/`, `php
+bin/cake.php migrations migrate` with `cakephp/migrations` and files in `config/Migrations`),
+`codeigniter4/framework` (CodeIgniter, `public/`, `php spark migrate --all` when
+`app/Database/Migrations` has files), `yiisoft/yii2` (Yii, `web/`, `php yii migrate --interactive=0`
+when `migrations/` has files; the image sets `YII_ENV=prod YII_DEBUG=0`, which the prepend below defines
+before the front controller's own development defaults) and `drupal/core(-recommended)` (Drupal, the
+`extra.drupal-scaffold.locations.web-root` of composer.json, `web/` by default; `vendor/bin/drush deploy
+-y` is named as the release task to add once the site is installed). A migration step runs only where
+there are migrations, since a migrate with nothing to migrate still needs a database. Anything else is
+plain PHP served from the directory that holds `index.php`. A Heroku `web: heroku-php-apache2 public/`
+(or `heroku-php-nginx`) is translated rather than run — the buildpack's server is not in the image and
+`--no-dev` does not install its scripts — into FrankenPHP serving the document root it names after the
+framework's migrations; `-C`/`-F`/`-i` server configurations are `php_procfile_server_config_ignored`
+(`-p`'s port and `-l`'s log are skipped as values), and a `release:` line is the release task.
+
+The image is `dunglas/frankenphp:1-php<release>-alpine`, one catalogue entry per release — FrankenPHP
+serves on 80 with its own worker, so no nginx or php-fpm pair. The release satisfies composer.json's
+`php` and every production package composer.lock installs, read with Composer's semantics
+(`php_constraints.go`: `^`, `~`, wildcards, `>=`/`<` ranges with or without a space, hyphen ranges,
+`||` and a single `|`, stability flags; a branch or alias is never a verdict). `config.platform.php`,
+the release the lock was resolved for, wins when it qualifies; otherwise the newest release up to 8.4.
+8.2 to 8.5 are in the catalogue and 8.3 is what an application that names nothing gets; 8.5 is built
+only when the constraints require it or the Build settings choose it, so adding a release does not move
+every PHP deployment onto it at their next build. The evidence names the locked package that narrowed
+the choice (`php ^8.1; laminas/laminas-diactoros requires ~8.1.0 || ~8.2.0 || ~8.3.0 (composer.lock) →
+PHP 8.3`). A requirement no catalogue release satisfies is `recipe_unsupported`, naming the package; a
+release chosen in the Build settings (`build.phpVersion`) that one of them refuses is
+`php_version_unsupported` (blocked), and a build that stops on "your php version does not satisfy that
+requirement" proposes the release that does.
+
+The extensions are installed with `install-php-extensions` before the source is copied, so the layer is
+cached. They are, with the reason each is recorded (`php_extensions`, a pass that lists them):
+`pdo_mysql`, `pdo_pgsql`, `mysqli` and `opcache` always, so a linked database works without asking (a
+default the application needs for a reason of its own is listed with that reason instead); every
+`ext-` requirement of composer.json and of composer.lock's production packages (read under a budget of
+its own, 4 MiB, keeping only names, versions, requirements, `provide`/`replace` and whether a package has
+an archive — `require-dev` packages are not checked by a `--no-dev` install and are skipped); without a
+lock, a table of the popular packages whose own requirements stand in (Filament `intl`, Horizon `pcntl`
+and `redis`, PhpSpreadsheet and Laravel Excel `gd` and `zip`, CodeIgniter and CakePHP `intl`, Drupal
+`gd`, MongoDB `mongodb`, Media Library `exif`, Intervention `gd`); the calls the application's own code
+makes, read breadth first from up to 400 files and 3 MiB (`mysqli_*`, `image*`, `ZipArchive`,
+`NumberFormatter` and Laravel's `Number::`, `bc*`, `exif_read_data`, `new Redis`, `pcntl_*`, `gmp_*`,
+`Imagick`, `SoapClient`, `ftp_connect`, …, each recorded as the call and the file it was seen in:
+`mysqli_connect in includes/db.php → mysqli`); Laravel's phpredis client when `.env.example` makes Redis a
+cache store, queue, session or broadcast driver (`CACHE_STORE=redis`, `QUEUE_CONNECTION=redis`, …) and
+`predis/predis` is absent — the stock `.env.example`'s `REDIS_HOST` and `REDIS_CLIENT=phpredis` configure a
+client nothing uses, so they do not cost every Laravel build the extension's compile, and an application
+that switches a driver to Redis only in its deployment variables is told `Class "Redis" not found`
+(`runtime_php_extension_missing`), whose fix is `"ext-redis": "*"` in composer.json's require; and
+WordPress's `mysqli gd exif intl zip`. Built-ins such as `mbstring` are skipped, Composer's other
+spellings (`zend-opcache`) are read as the extension, and a name `install-php-extensions` cannot build for
+every catalogue release on Alpine (its `data/supported-extensions`; `memcache` stops at 8.4 and is left out
+on 8.5) is left out with `php_extension_unsupported`; a lock too large or not written by Composer is
+`php_extensions_unverified`.
+
+Every image copies PHP's own `php.ini-production` (errors logged, never shown; deprecations no longer
+print before headers) and adds uploads as large as the managed proxy lets through (64 MB),
+`memory_limit=256M`, `expose_php=Off` and an `auto_prepend_file`. Behind the proxy the connection is plain
+HTTP, so FrankenPHP never sets `HTTPS`; the prepend — constant text written with `printf`, with no plan
+value in it — sets `HTTPS=on`, `REQUEST_SCHEME=https` and `SERVER_PORT=443` from `X-Forwarded-Proto` and
+`REMOTE_ADDR` from the last `X-Forwarded-For` hop (the proxy appends the peer it saw — nginx's
+`$proxy_add_x_forwarded_for`, the same address it sends as `X-Real-IP` — so the last hop is the visitor
+whatever earlier hops a client forged), and only for a request whose own peer is a loopback, private or
+reserved address, which the proxy's always is and a visitor reaching a public port directly is not. It
+acts only while `PHP_FORWARDED_TRUST=private`, which the runtime withdraws like every recipe's proxy trust
+(see [Where the server listens](#where-the-server-listens-and-whom-it-trusts)). Laravel's `@vite` and
+`url()`, Symfony's `isSecure()` and WordPress's `is_ssl()` then produce https without the application
+trusting any proxy.
+Laravel's `APP_URL`, Symfony's `DEFAULT_URI` and Bedrock's `WP_HOME`/`WP_SITEURL` follow the planned
+domain; Laravel's `APP_KEY`, Symfony's `APP_SECRET` (64 hex characters) and Bedrock's keys and salts are
+generated on the server at commit.
+
+Composer runs from the `composer:2` image. The build is staged: `php-base` (the release, extensions,
+php.ini and prepend), `vendor` (the source and `composer install --no-dev --optimize-autoloader`), an
+optional `assets` stage, and the final stage from `php-base` with `vendor`'s `/app` copied in. Laravel's
+`storage/`, `bootstrap/cache` and `database/` are created writable in `vendor`, before Composer's
+`package:discover` and the asset build boot the application, and the public disk is linked the way `php
+artisan storage:link` would (`public/storage` → `/app/storage/app/public`, unless the repository commits
+one). Symfony builds and runs with `APP_ENV=prod APP_DEBUG=0` whatever the committed `.env` says — its
+dev bundles are `require-dev`, which `--no-dev` leaves out — and a runtime `APP_ENV` from the plan still
+wins; with `symfony/asset-mapper` (or `importmap.php`) the build runs `importmap:install` and
+`asset-map:compile`, after `tailwind:build --minify` or `sass:build` for the SymfonyCasts bundles.
+
+composer.lock is compared with composer.json as data. A `require` package the lock lacks (or that no
+locked package provides or replaces) is `composer_lock_missing_packages`, and one whose locked version no
+longer satisfies its constraint is `composer_lock_outdated` — both warnings, the Composer twin of the
+npm incident: instead of stopping on "Required package … is not present in the lock file", the build
+runs `composer update --no-dev … --with-all-dependencies <those packages>`, keeping every other locked
+version. A `require-dev` mismatch is `composer_lock_dev_outdated`, which this build does not meet. No lock
+at all is `dependencies_unpinned`, whose action says to commit composer.lock and whose means say that
+Composer refuses to resolve a version with a security advisory. A Laravel application that registers a
+`require-dev` package's provider for every environment (`bootstrap/providers.php`, or the `providers`
+of `config/app.php` — never its `aliases`, facades resolved only when called — with an `App\Providers`
+class followed through what it `extends`, resolved by its `use` imports, to the package's provider —
+Telescope, IDE Helper, Debugbar, Dusk, …) is `laravel_dev_provider_registered` (blocked):
+`package:discover` boots it and the build stops on "Class … not found". A registration guarded by
+`environment(`/`isLocal(`/`class_exists(` is not counted, nor is what a provider's body mentions:
+Telescope's local-only installation registers the package inside `AppServiceProvider::register`, which
+extends Laravel's own provider. A Composer repository needs credentials by its host: a paid or private
+store (Nova, Spark, Private Packagist, Magento's marketplace, Flux Pro, Spatie, ACF Pro, Anystack's
+`*.composer.sh`, Repman) adds `COMPOSER_AUTH` as an install-scoped variable that `registry_token_missing`
+blocks on while it is missing; a public one (Packagist and its mirrors, WPackagist, `packages.drupal.org`,
+Asset Packagist, Firegento) — the Bedrock, Drupal recommended-project and Yii templates list them — or a
+URL that carries its own user and password adds nothing; any other host, and a VCS repository, adds the
+same variable with a warning, since it may be public. A committed `auth.json` supplies them all. A VCS
+repository off GitHub, or a locked package without an archive, installs `git` first.
 FrankenPHP does not read `.htaccess`, so one with access or rewrite rules is a `php_htaccess_ignored`
 warning, and a plain PHP application served from the repository root (`--root /app`) is a
-`php_docroot_is_repository_root` warning: dependencies, lockfiles and logs under it are reachable.
-Composer runs from the `composer:2` image with `--no-dev --optimize-autoloader`; a `package.json` whose
-build script names Vite, `laravel-vite-plugin` or Encore gets an asset stage on the manifest's own
-runtime whose `public/build` is copied in. That asset stage installs through the same plan as the Node
-recipe ([JavaScript installs](#javascript-installs), toolchain stage `assets-toolchain`), the same
-`packageManager` build setting applies to a `php` recipe, and its lockfile findings — competing lockfiles,
-none (`assets_dependencies_unpinned`), a stale one — reach preflight before Deploy. Laravel's start runs `php artisan migrate --force` first;
-Symfony's runs `doctrine:migrations:migrate` when the migrations bundle is present. `storage/`,
-`bootstrap/cache` and `database/` are created writable so a first start on an empty volume works. The
-recipe links the public disk the way `php artisan storage:link` would (`public/storage` →
-`/app/storage/app/public`, unless the repository commits one), without booting the application in
-the build. With `laravel/horizon` the image also carries `pcntl` and `redis`, which Horizon's own
-manifest requires. A Laravel import's `APP_KEY` is generated on the server at commit (`base64:` over 32 random
-bytes), and the **Generate** button is offered on a self-issued name the operator types by hand — never
-on a provider's (`STRIPE_SECRET_KEY`, `AUTH_GITHUB_SECRET`, a client or webhook secret). Laravel's
-`.env.example` names its engine in `DB_CONNECTION`, which becomes a database suggestion on `DB_URL`
-(Laravel 11 and later) or `DATABASE_URL` (Laravel 10 and earlier).
+`php_docroot_is_repository_root` warning: dependencies, lockfiles and logs under it are reachable
+(WordPress, whose root is its own design, is exempt).
+
+A `package.json` whose build the recipe recognises gets the `assets` stage: Vite (with or without
+`laravel-vite-plugin`), Encore, Laravel Mix, or `@wordpress/scripts` (`build/`, or its `--output-path`).
+That stage starts from `vendor`, so the build finds PHP —
+Wayfinder's Vite plugin runs `php artisan wayfinder:generate` — and `vendor/`, which the official
+starter kits import from (Flux's CSS, Ziggy); Node, npm and Corepack, with the manager releases the
+toolchain stage pinned (and Bun beside them), are copied from the reviewed Node image into `/opt/node`.
+When `vite.config` imports a `require-dev` package from `vendor/`, the stage installs Composer's
+development packages first; none of them reaches the final image. The stage installs through the same
+plan as the Node recipe ([JavaScript installs](#javascript-installs), toolchain stage
+`assets-toolchain`), the same `packageManager` build setting applies to a `php` recipe, and its lockfile
+findings — competing lockfiles, none (`assets_dependencies_unpinned`), a stale one — reach preflight
+before Deploy. Exactly the directory the build writes is copied into the final stage: `public/build`
+for `laravel-vite-plugin` (its `publicDirectory`/`buildDirectory` when set) and Encore (its
+`setOutputPath`), Vite's `build.outDir` (`dist` by default) otherwise, and `public/` for Mix, which
+writes `public/js`, `public/css` and `mix-manifest.json`. Output outside the served directory is
+`php_assets_outside_docroot`. Mix builds with its `production` (or `prod`) script unless
+`public/mix-manifest.json` is committed; without either, `mix()` fails every page and preflight says so
+(`laravel_mix_unbuilt`). Any PHP application with such a build — not only a known framework — owns its
+`package.json`, which is no longer offered as a static site of its own.
+
+WordPress is recognised in every shape a repository holds it. **Core** (`wp-settings.php` and
+`wp-includes/version.php`, whose `$wp_version` is read as data) is served from its own root. A
+**wp-content** tree (`themes/`, `plugins/` or `mu-plugins/` in a root no Composer framework owns, with
+WordPress's own evidence: an `index.php` that is "Silence is golden", or, with no `index.php`, a
+`themes/*/style.css` or `plugins/*` file carrying a theme's or plugin's header — a Laravel themer's
+`themes/` or a Slim application's `plugins/` is the application's own), a **theme** (`Theme Name:` in the
+first 8 KiB of `style.css`) and a **plugin** (`Plugin Name:` in a root PHP file's header) are copied into
+the WordPress release of the reviewed `wordpress:6-php8.4-fpm-alpine` image — only its files are taken —
+at `wp-content/`, `wp-content/themes/<text domain>` or `wp-content/plugins/<text domain>`, to be activated
+in wp-admin. The walk reads those headers itself (at most 32 files: the top of the checkout's
+`style.css` and PHP files, and `themes/*/style.css`), so a block theme (`theme.json`, `templates/`, no
+`index.php`) and a `@wordpress/create-block` plugin are WordPress roots too. A theme's or plugin's
+`package.json` is its asset build, never a Node service: a `wp-scripts build` (or a Vite build) runs in the
+`assets` stage from the directory the theme or plugin sits in inside WordPress, and exactly its output is
+copied, so the blocks a create-block plugin registers from `build/` exist. When no `wp-config.php` is
+committed the recipe writes one, constant text again, that reads the database from the `DATABASE_URL` a
+linked MySQL or MariaDB supplies (or the official image's `WORDPRESS_DB_*` names) and keys and salts from
+`WORDPRESS_*` when set, else WordPress generates and stores its own. **Bedrock** (`roots/wordpress`) is
+served from `web/` (the parent of its `wordpress-install-dir`) and reads its own configuration. Every shape
+installs WordPress's extensions, suggests MySQL (`wordpress_database_required`, a decision, while no
+database is linked or configured) and keeps `wp-content/uploads` (Bedrock's `web/app/uploads`) as
+state.
 
 ## Readiness, workers and start commands
 
@@ -1907,10 +2073,10 @@ names, with the remedy the evidence supports:
 | Code | Recognised from | Fix computed |
 |------|-----------------|--------------|
 | `build_lockfile_out_of_sync` | npm `EUSAGE … are in sync` (subjects from `Missing:`/`Invalid:`), Bun `lockfile had changes, but lockfile is frozen`, `ERR_PNPM_OUTDATED_LOCKFILE`, Yarn `YN0028` and Yarn 1 `--frozen-lockfile`, Poetry `changed significantly`, uv `--locked`, Cargo `--locked was passed`, Go `missing go.sum entry` / `updates to go.mod needed`, Composer lock errors, Deno `The lockfile is out of date`, Bundler deployment mode | the package manager whose lockfile the detected candidate reads as in sync |
-| `build_lockfile_incompatible` | pnpm `ERR_PNPM_LOCKFILE_BREAKING_CHANGE`/`BROKEN_LOCKFILE`, Cargo lock version, Poetry/uv lock format, Bun lockfile version | — |
+| `build_lockfile_incompatible` | pnpm `ERR_PNPM_LOCKFILE_BREAKING_CHANGE`/`BROKEN_LOCKFILE`, Cargo lock version, Poetry/uv lock format, Bun lockfile version, Deno `Unsupported lockfile version` | — |
 | `build_package_manager_mismatch` | corepack `This project is configured to use X`, `ERR_PNPM_BAD_PM_VERSION` | the manager `packageManager` declares |
 | `build_lifecycle_script_blocked` | `ERR_PNPM_IGNORED_BUILDS`, Bun `Blocked N postinstalls` with a consequence | — |
-| `build_runtime_version` | EBADENGINE, `ERR_PNPM_UNSUPPORTED_ENGINE`, Yarn/Next engine lines, Go `GOTOOLCHAIN=local`, rustc `or newer`, Maven release, Gradle class version, NETSDK1045, Composer `requires php`, pip `requires a different Python`, uv/Poetry Python requirement, Ruby/Elixir/Hugo versions | a Go or Python release the recipe offers |
+| `build_runtime_version` | EBADENGINE, `ERR_PNPM_UNSUPPORTED_ENGINE`, Yarn/Next engine lines, Go `GOTOOLCHAIN=local`, rustc `or newer`, Maven release, Gradle class version, NETSDK1045, Composer `requires php`, pip `requires a different Python`, uv/Poetry Python requirement, Ruby/Elixir/Hugo versions | a Go, Python or PHP release the recipe offers |
 | `build_env_missing` | PrismaConfigEnvError, P1012, t3-env, SvelteKit `$env/static`, Astro, Rails `secret_key_base`, Phoenix, Django, `KeyError` on the environment | the variable, or its build scope (recipes only) |
 | `build_sqlx_offline` | sqlx `set DATABASE_URL to use query macros` / no cached data | `SQLX_OFFLINE=true` for the build |
 | `build_database_unreachable`, `build_prerender_failed` | Next prerender/collect-page-data errors, with or without a database error; `Can't reach database server`; a `*.jd.internal` address that does not resolve (a linked database is reachable only on the project network, which a build is not on); Django `OperationalError` | — |
@@ -1921,14 +2087,14 @@ names, with the remedy the evidence supports:
 | `build_install_script_failed` | npm `error path /app/node_modules/X` with `command failed`, Yarn `YN0009` | — |
 | `build_php_extension_missing` | `requires ext-X … it is missing from your system` | — |
 | `build_dependency_conflict`, `build_dependency_unavailable`, `build_dependency_local_path`, `build_dependency_advisory_blocked` | ERESOLVE, `ResolutionImpossible`, Composer/uv/Cargo/NuGet conflicts; ETARGET/E404, `No matching distribution`, NU1101, Maven artifacts, Go revisions, gems; conda `/croot/` paths; Composer advisories | — |
-| `build_registry_auth`, `build_registry_rate_limited`, `build_network` | E401/E403, `YN0041`, `terminal prompts disabled`, npm's `Failed to replace env in config: ${X}` (naming the variable `.npmrc` authenticates with); `toomanyrequests`; DNS, TLS and connection failures | — |
+| `build_registry_auth`, `build_registry_rate_limited`, `build_network` | E401/E403, `YN0041`, `terminal prompts disabled`, npm's `Failed to replace env in config: ${X}` (naming the variable `.npmrc` authenticates with), Composer's `URL required authentication` (whose remedy is `COMPOSER_AUTH` for the install); `toomanyrequests`; DNS, TLS and connection failures | — |
 | `build_next_image_export` | `Image Optimization using the default loader is not compatible with` a static export | — |
-| `build_command_not_found`, `build_script_missing` | `sh: X: not found` when the step exited 127 or a wrapper reports that status (`exit code 127`, `exited (127)`) — a caught probe prints the same line and carries on —, `executable file not found`, pip's `Cannot find command 'git'`, Laravel Wayfinder's `php artisan wayfinder:generate` in an asset stage without PHP, an mdBook preprocessor or renderer that is not installed; npm/pnpm/Bun/Yarn missing script | the build command with its runner moved to the image's package manager (the install planner's own rewrite, `nodeRunnerFor`), read from the install the build recorded |
+| `build_command_not_found`, `build_script_missing` | `sh: X: not found` when the step exited 127 or a wrapper reports that status (`exit code 127`, `exited (127)`) — a caught probe prints the same line and carries on —, `executable file not found`, pip's `Cannot find command 'git'`, Composer's `git was not found in your PATH`, Laravel Wayfinder's `php artisan wayfinder:generate` in an asset stage without PHP, an mdBook preprocessor or renderer that is not installed; npm/pnpm/Bun/Yarn missing script | the build command with its runner moved to the image's package manager (the install planner's own rewrite, `nodeRunnerFor`), read from the install the build recorded |
 | `build_module_not_found`, `build_type_error`, `build_compile_error` | `Cannot find module`, `Can't resolve`, `No module named`, `no required module provides`, a Sphinx extension that does not import, an MkDocs plugin that is not installed; `Type error:`, `error TS…`; rustc, C#, javac/Kotlin, Go, Maven, Gradle, bundler and framework compile errors | — |
 | `build_theme_missing`, `build_site_render_failed` | a Hugo theme `module … not found in …/themes/`, Zola `Failed to load theme`, a Jekyll theme gem, MkDocs `Unrecognised theme name`, Sphinx `no theme named`; Hugo `error building site` and `execute of template failed`, Jekyll `Liquid Exception … in <file>`, Zola `Failed to build the site`, Eleventy `Problem writing Eleventy templates`, Hexo `Template render error`, MkDocs strict mode, Sphinx `-W` | — (a Hugo or Zola theme names the Source section's submodules switch) |
 | `build_output_missing`, `build_copy_source_missing`, `build_embed_source_missing`, `build_wrong_root` | the recipe's own guard, a missing `COPY` source, `go:embed` without files, a manifest the build cannot find | the detected output directory, else the field to review |
 | `build_out_of_memory`, `build_disk_full`, `build_timeout` | heap limits, exit 137 (which points at no line: the step's output only shows where it was), `OutOfMemoryError`; `no space left on device`; the 30-minute limit | `NODE_OPTIONS=--max-old-space-size=` three quarters of the server's memory (from 1 GiB, at most 8 GiB) |
-| `build_permission`, `build_script_crlf`, `build_wrapper_missing`, `build_dev_dependency_in_production`, `build_bundle_platform_missing`, `build_hugo_extended_required`, `build_base_image_missing`, `build_platform_unsupported`, `build_dockerfile_invalid` | exit 126, `\r` interpreters, the Gradle/Maven wrapper, Symfony dev bundles and Telescope, a Gemfile.lock without Linux, Hugo Pipes' Sass, a FROM that does not resolve, a manifest for another platform, a Dockerfile that does not parse | — |
+| `build_permission`, `build_script_crlf`, `build_wrapper_missing`, `build_dev_dependency_in_production`, `build_bundle_platform_missing`, `build_hugo_extended_required`, `build_base_image_missing`, `build_platform_unsupported`, `build_dockerfile_invalid` | exit 126, `\r` interpreters, the Gradle/Maven wrapper, Symfony dev bundles and Telescope, any provider class `package:discover` cannot load, a Gemfile.lock without Linux, Hugo Pipes' Sass, a FROM that does not resolve, a manifest for another platform, a Dockerfile that does not parse | — |
 
 Nothing matched is `build_failed`, still with the phase, command and exit code. A Dockerfile build
 never gets a variable fix, because a custom Dockerfile cannot take build secrets.
