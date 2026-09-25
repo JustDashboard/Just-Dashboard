@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -360,6 +361,11 @@ func dockerfileDevServerIssue(candidate DetectedCandidate) (string, bool) {
 func candidateLabel(candidate DetectedCandidate) string {
 	switch candidate.BuildMethod {
 	case BuildDockerfile:
+		// A Swift server package is a Dockerfile candidate before the file
+		// exists; naming the file it lacks would read as one that was found.
+		if slices.ContainsFunc(candidate.ImageBuildIssues, func(issue ImageBuildIssue) bool { return issue.Code == "dockerfile_missing" }) {
+			return "the " + candidate.Name + ", which has no Dockerfile yet"
+		}
 		return joinRoot(candidate.Root, candidate.Dockerfile)
 	case BuildCompose:
 		return "the Compose file in " + rootLabel(candidate.Root)

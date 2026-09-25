@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -709,5 +710,75 @@ func TestStateScannerKeepsConfigurationAheadOfALargeSourceTree(t *testing.T) {
 	candidate := candidateFor(t, result, BuildRecipe, "node")
 	if len(candidate.PersistentPaths) != 1 || candidate.PersistentPaths[0].Variable != "DATABASE_URL" {
 		t.Fatalf("schema was crowded out: %+v", candidate.PersistentPaths)
+	}
+}
+
+// A SQLite URL is worded for what reads it: Django's dj-database-url and
+// django-environ fall back to it from a variable a linked database takes
+// over, Flask-SQLAlchemy has its own URI, and only a bare SQLAlchemy engine
+// is "a SQLAlchemy URL".
+func TestSQLiteURLsAreWordedForTheFrameworkThatReadsThem(t *testing.T) {
+	t.Parallel()
+	django := func(settings string) map[string]string {
+		return map[string]string{
+			"requirements.txt": "Django==5.1.4\ndj-database-url==2.3.0\ndjango-environ==0.11.2\n", "manage.py": "import django\n",
+			"mysite/settings.py": "from pathlib import Path\nBASE_DIR = Path(__file__).resolve().parent.parent\n" + settings,
+			"mysite/wsgi.py":     "application = get_wsgi_application()\n",
+		}
+	}
+	for _, fixture := range []struct {
+		name, recipe  string
+		files         map[string]string
+		variable      string
+		reason, wrong string
+	}{
+		{
+			name: "dj-database-url's default", recipe: "python",
+			files:    django("import dj_database_url\nDATABASES = {\n    'default': dj_database_url.config(\n        default='sqlite:///' + str(BASE_DIR / 'db.sqlite3'),\n        conn_max_age=600,\n    )\n}\n"),
+			variable: "DATABASE_URL", reason: "Django's database comes from DATABASE_URL (dj-database-url) and falls back to the SQLite file db.sqlite3",
+		},
+		{
+			name: "dj-database-url reading another variable", recipe: "python",
+			files:    django("import dj_database_url\nDATABASES = {'default': dj_database_url.config(default='sqlite:///db.sqlite3', env='PRIMARY_DB')}\n"),
+			variable: "PRIMARY_DB", reason: "(dj-database-url)",
+		},
+		{
+			name: "django-environ's env.db", recipe: "python",
+			files:    django("import environ\nenv = environ.Env()\nDATABASES = {'default': env.db('DB_URL', default='sqlite:///db.sqlite3')}\n"),
+			variable: "DB_URL", reason: "Django's database comes from DB_URL (django-environ)",
+		},
+		{
+			name: "Flask-SQLAlchemy's URI", recipe: "python",
+			files: map[string]string{
+				"requirements.txt": "flask==3.1.0\nflask-sqlalchemy==3.1.1\n",
+				"app.py":           "from flask import Flask\napp = Flask(__name__)\napp.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///shop.db'\n",
+			},
+			reason: "Flask-SQLAlchemy's database URI opens the SQLite file instance/shop.db",
+		},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			t.Parallel()
+			candidate := candidateFor(t, detectFixture(t, fixture.files), BuildRecipe, fixture.recipe)
+			index := slices.IndexFunc(candidate.PersistentPaths, func(entry DetectedPersistentPath) bool { return entry.Kind == PersistentSQLite })
+			if index < 0 {
+				t.Fatalf("persistent paths = %+v", candidate.PersistentPaths)
+			}
+			entry := candidate.PersistentPaths[index]
+			if entry.DatabaseVariable != fixture.variable || !strings.Contains(entry.Reason, fixture.reason) || strings.Contains(entry.Reason, "SQLAlchemy URL") {
+				t.Fatalf("entry = %+v", entry)
+			}
+			findings := persistentStateFindings(&candidate, PlanConfiguration{}, nil)
+			ephemeral := slices.IndexFunc(findings, func(item PreflightFinding) bool { return item.Code == "sqlite_ephemeral" })
+			if ephemeral < 0 || strings.Contains(findings[ephemeral].Measured, "SQLAlchemy URL") {
+				t.Fatalf("findings = %+v", findings)
+			}
+			if fixture.variable != "" {
+				// A linked server database in the variable takes the file out of use.
+				linked := persistentStateFindings(&candidate, PlanConfiguration{}, map[string]string{fixture.variable: "postgres://db-4.jd.internal/app"})
+				if slices.ContainsFunc(linked, func(item PreflightFinding) bool { return item.Code == "sqlite_ephemeral" }) {
+					t.Fatalf("a linked database left the file in use: %+v", linked)
+				}
+			}
+		})
 	}
 }

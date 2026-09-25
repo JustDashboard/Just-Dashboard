@@ -1536,7 +1536,7 @@ reported instead.
 | Strapi | `.tmp/data.db`, `public/uploads` | volumes on both |
 | `multer` `dest`/`destination`, `UPLOAD_DIR`-style variables | uploads | the directory, or `/data/uploads` through the variable |
 | Django `django.db.backends.sqlite3`, `MEDIA_ROOT` | the database, media | the file's own directory when it has one; `NAME` or `MEDIA_ROOT` read from a variable moves to `/data` |
-| SQLAlchemy `sqlite:///…` (Flask-SQLAlchemy 3 resolves relative paths in `instance/`) | the database | its own directory, or a warning |
+| SQLAlchemy `sqlite:///…` (Flask-SQLAlchemy 3 resolves relative paths in `instance/`), and the same URL as Django's `dj_database_url.config(default=…)`/`parse()` or django-environ's `env.db(…, default=…)` | the database — worded for its reader: Django's (naming dj-database-url or django-environ and the variable it reads first, `env=` or the first argument, else `DATABASE_URL`, in which a linked server database takes the file out of use), Flask-SQLAlchemy's URI, or a SQLAlchemy URL | its own directory, or a warning |
 | Laravel with `DB_CONNECTION=sqlite` (or none, from Laravel 11) | `database/database.sqlite`, sessions, cache, queue | volume at `/app/storage`, `DB_DATABASE=/app/storage/database.sqlite` when `config/database.php` reads it; a planned `DB_CONNECTION` other than `sqlite`, or a `DB_URL`, takes the file out of use |
 | Laravel with Filament, Media Library or `FILESYSTEM_DISK=public` | uploads on the local disks | volume at `/app/storage` |
 | Statamic | `content/`, `users/` | reported: they are the repository's own files |

@@ -1223,9 +1223,28 @@ func sqlalchemySQLitePath(content string, match []int, source string, deps pytho
 		// application's instance folder.
 		file = path.Join("instance", file)
 	}
-	entry, ok := literalSQLite(file, source, "a SQLAlchemy URL opens the SQLite file "+boundedEvidence(file), view, layout)
+	reader := "a SQLAlchemy URL"
+	switch {
+	case deps.has("django"):
+		reader = "Django's database settings"
+	case deps.has("flask-sqlalchemy"):
+		reader = "Flask-SQLAlchemy's database URI"
+	}
+	entry, ok := literalSQLite(file, source, reader+" opens the SQLite file "+boundedEvidence(file), view, layout)
 	if !ok {
 		return DetectedPersistentPath{}, false
+	}
+	if helper, variable, found := djangoURLReader(content, match[0]); found {
+		// dj_database_url.config(default="sqlite:///…") and django-environ's
+		// env.db(default=…) read the variable first: the file is what runs
+		// without one, and a linked server database takes it out of use.
+		if variable == "" {
+			entry.Reason = "Django's database is the SQLite file " + boundedEvidence(file) + ", parsed by " + helper
+			return entry, true
+		}
+		entry.DatabaseVariable = variable
+		entry.Reason = "Django's database comes from " + variable + " (" + helper + ") and falls back to the SQLite file " + boundedEvidence(file)
+		return entry, true
 	}
 	variable := pythonEnvRead(before)
 	if field := pydanticFieldRE.FindStringSubmatch(before); variable == "" && field != nil && strings.Contains(content, "BaseSettings") {
@@ -1239,6 +1258,54 @@ func sqlalchemySQLitePath(content string, match []int, source string, deps pytho
 		entry.Reason = "the database comes from " + variable + " and falls back to the SQLite file " + boundedEvidence(file)
 	}
 	return entry, true
+}
+
+var (
+	djangoURLReaderRE = regexp.MustCompile(`dj_database_url\.(?:config|parse)\(|\benv\.db(?:_url)?\(`)
+	djangoEnvKwargRE  = regexp.MustCompile(`\benv\s*=\s*["']([A-Za-z_][A-Za-z0-9_]*)["']`)
+	firstStringArgRE  = regexp.MustCompile(`^\s*["']([A-Za-z_][A-Za-z0-9_]*)["']`)
+)
+
+// djangoURLReader is the Django helper whose call the SQLite URL at offset
+// is an argument of — dj-database-url's config() or parse(), django-environ's
+// env.db() — with the variable it reads first ("" for parse, which reads
+// none): config's env= or DATABASE_URL, env.db's first argument or
+// DATABASE_URL.
+func djangoURLReader(content string, offset int) (helper, variable string, found bool) {
+	start := max(0, offset-512)
+	calls := djangoURLReaderRE.FindAllStringIndex(content[start:offset], -1)
+	if len(calls) == 0 {
+		return "", "", false
+	}
+	open := start + calls[len(calls)-1][1]
+	depth, end := 1, open
+	for ; end < len(content) && end < open+2048 && depth > 0; end++ {
+		switch content[end] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		}
+		if depth == 0 && end < offset {
+			return "", "", false
+		}
+	}
+	arguments := content[open:end]
+	switch call := content[start+calls[len(calls)-1][0] : open]; {
+	case strings.HasPrefix(call, "dj_database_url.parse"):
+		return "dj-database-url", "", true
+	case strings.HasPrefix(call, "dj_database_url"):
+		variable = "DATABASE_URL"
+		if match := djangoEnvKwargRE.FindStringSubmatch(arguments); match != nil {
+			variable = match[1]
+		}
+		return "dj-database-url", variable, true
+	}
+	variable = "DATABASE_URL"
+	if match := firstStringArgRE.FindStringSubmatch(arguments); match != nil {
+		variable = match[1]
+	}
+	return "django-environ", variable, true
 }
 
 func flaskSQLAlchemy2(files map[string][]byte) bool {
