@@ -127,7 +127,8 @@ type Conn struct {
 // Spawn gives a holder that has just been started the session to run, and
 // returns the connection, the holder's answer and the PTY master. The holder
 // may not be listening yet when its unit has only just been started, so a
-// socket that does not exist is retried until wait has passed.
+// socket that does not exist, or exists but is not listening yet, is retried
+// until wait has passed.
 func Spawn(socket string, spec Spec, wait time.Duration) (*Conn, Hello, *os.File, error) {
 	payload, err := json.Marshal(spec)
 	if err != nil {
@@ -139,7 +140,8 @@ func Spawn(socket string, spec Spec, wait time.Duration) (*Conn, Hello, *os.File
 		if err == nil {
 			return greet(conn, kindSpawn, payload)
 		}
-		if !errors.Is(err, syscall.ENOENT) || time.Now().After(deadline) {
+		starting := errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED)
+		if !starting || time.Now().After(deadline) {
 			return nil, Hello{}, nil, err
 		}
 		time.Sleep(20 * time.Millisecond)

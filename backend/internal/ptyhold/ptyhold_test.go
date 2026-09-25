@@ -76,6 +76,24 @@ func TestHolderKeepsTheSessionAcrossAttaches(t *testing.T) {
 	if err := SetSize(ptmx, 30, 100); err != nil {
 		t.Fatal(err)
 	}
+	// Closing with output unread resets the holder's end before it reads what
+	// is still queued, so wait until it has the record, as it long has by the
+	// time a dashboard restarts.
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		probe, seen, probePTY, err := Attach(socket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		probe.Close()
+		probePTY.Close()
+		if string(seen.Meta) == `{"name":"renamed"}` {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the holder never took the record: %s", seen.Meta)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	// Letting go is not ending: the dashboard restarting closes its end.
 	first.Close()
 	ptmx.Close()
