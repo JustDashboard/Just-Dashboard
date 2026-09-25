@@ -58,6 +58,12 @@ type NormalizedStepExecutor struct {
 	notifications *AutomationStore
 
 	certificates CertificateIssuer
+
+	// tailnet publishes a preview's loopback port on the node's tailnet
+	// address; nil on hosts without Tailscale Serve. tailnetProbe is the
+	// reachability check after a publish, replaced in tests.
+	tailnet      TailnetPublisher
+	tailnetProbe func(context.Context, string) error
 }
 
 func (e *NormalizedStepExecutor) WithNotifications(store *AutomationStore) *NormalizedStepExecutor {
@@ -79,6 +85,14 @@ func (e *NormalizedStepExecutor) WithBackupGate(backups BackupGate) *NormalizedS
 // run's frozen snapshot, immediately before any build/runtime side effect.
 func (e *NormalizedStepExecutor) WithPreflightObserver(observer PreflightObserver) *NormalizedStepExecutor {
 	e.preflight = observer
+	return e
+}
+
+// WithTailnetPublisher attaches Tailscale Serve for the previews that
+// answer on the tailnet. Without it such a preview's activation reports
+// tailnet_unavailable rather than going live where nobody can reach it.
+func (e *NormalizedStepExecutor) WithTailnetPublisher(publisher TailnetPublisher) *NormalizedStepExecutor {
+	e.tailnet = publisher
 	return e
 }
 

@@ -58,6 +58,16 @@ func New() *Service {
 	}
 }
 
+// NewWithRunner is New with every gh invocation answered by run instead of
+// the binary, for tests in other packages that drive routes end to end
+// without gh installed. run receives the directory, the stdin payload and
+// gh's argv, exactly as the binary would.
+func NewWithRunner(run func(ctx context.Context, dir, stdin string, args ...string) (string, error)) *Service {
+	s := New()
+	s.command = run
+	return s
+}
+
 // Available reports whether gh can be run at all.
 //
 // Only this container's own copy counts. The host's gh would run as root in

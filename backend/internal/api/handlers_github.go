@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -47,6 +48,8 @@ func (s *Server) mountGitHubRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/pulls/{number}", s.handle(s.handleGitHubPull))
 		r.Method(http.MethodGet, "/pulls/{number}/files", s.handle(s.handleGitHubPullFiles))
 		r.Method(http.MethodGet, "/pulls/{number}/conversation", s.handle(s.handleGitHubConversation))
+		r.Method(http.MethodGet, "/pulls/{number}/checks", s.handle(s.handleGitHubPullChecks))
+		r.Method(http.MethodGet, "/issues", s.handle(s.handleGitHubIssues))
 		r.Method(http.MethodGet, "/runs", s.handle(s.handleGitHubRuns))
 		r.Method(http.MethodGet, "/runs/{id}", s.handle(s.handleGitHubRun))
 		r.Method(http.MethodGet, "/runs/{id}/log", s.handle(s.handleGitHubRunLog))
@@ -65,6 +68,7 @@ func (s *Server) mountGitHubRoutes(r chi.Router) {
 			// away from — so they share the tier with every other git write.
 			r.Method(http.MethodPost, "/pulls/{number}/merge", s.handle(s.handleGitHubPullMerge))
 			r.Method(http.MethodPost, "/pulls/{number}/checkout", s.handle(s.handleGitHubPullCheckout))
+			r.Method(http.MethodPost, "/pulls/{number}/comment", s.handle(s.handleGitHubPullComment))
 		})
 
 		r.Group(func(r chi.Router) {
@@ -212,6 +216,7 @@ func (s *Server) handleGitHubPull(w http.ResponseWriter, r *http.Request) error 
 type githubMergeRequest struct {
 	Method       string `json:"method"`
 	DeleteBranch bool   `json:"deleteBranch"`
+	HeadSHA      string `json:"headSha"`
 }
 
 func (s *Server) handleGitHubPullMerge(w http.ResponseWriter, r *http.Request) error {
@@ -225,14 +230,120 @@ func (s *Server) handleGitHubPullMerge(w http.ResponseWriter, r *http.Request) e
 	}
 	var req githubMergeRequest
 	_ = httpx.DecodeJSON(r, &req)
-	err = s.modules.github.MergePull(r.Context(), path, number, req.Method, req.DeleteBranch)
+	err = s.modules.github.MergePull(r.Context(), path, number, req.Method, req.DeleteBranch, req.HeadSHA)
 	httpx.SetAudit(r, "github.pull.merge", path, map[string]any{
 		"ok": err == nil, "number": number, "method": req.Method, "deleteBranch": req.DeleteBranch,
 	})
 	if err != nil {
 		return ghError(err)
 	}
+	s.reconcileCheckoutMerge(r.Context(), path)
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+	return nil
+}
+
+// reconcileCheckoutMerge is what a merge from the Git page owes the deploy
+// side: the previews of that repository are read again — through the
+// trusted identity, not this checkout's — so the merged one closes now
+// rather than on the reconciler's next minute. The repository's name comes
+// from the checkout, which is fine: it only says which previews to ask
+// GitHub about, and GitHub's answer is what closes them.
+func (s *Server) reconcileCheckoutMerge(ctx context.Context, path string) {
+	info, err := s.modules.github.RepoInfo(ctx, path)
+	if err != nil || info.NameWithOwner == "" {
+		return
+	}
+	s.modules.pullRequests.Invalidate(info.NameWithOwner)
+	if s.modules.previewReconciler == nil {
+		return
+	}
+	if err := s.modules.previewReconciler.ReconcileRepository(ctx, info.NameWithOwner); err != nil {
+		s.Log.Warn("previews could not be reconciled after the merge", "repository", info.NameWithOwner, "error", err)
+	}
+}
+
+// handleGitHubPullChecks lists the check runs and statuses on a pull
+// request's head. The head is named by the caller so the list is about the
+// commit on screen, the way the files route pins its reviewed head.
+func (s *Server) handleGitHubPullChecks(w http.ResponseWriter, r *http.Request) error {
+	path, err := s.gitRepo(r)
+	if err != nil {
+		return err
+	}
+	if _, err := pullNumber(r); err != nil {
+		return err
+	}
+	head := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("head")))
+	if !gitRevisionRE.MatchString(head) {
+		return httpx.BadRequest("the pull request's full head commit is required")
+	}
+	info, err := s.modules.github.RepoInfo(r.Context(), path)
+	if err != nil {
+		return ghError(err)
+	}
+	checks, err := s.modules.github.PullChecks(r.Context(), path, info.NameWithOwner, head)
+	if err != nil {
+		return ghError(err)
+	}
+	if checks == nil {
+		checks = []ghx.CheckRun{}
+	}
+	httpx.JSON(w, http.StatusOK, checks)
+	return nil
+}
+
+// handleGitHubPullComment posts a plain comment as the checkout's owner. The
+// body reaches gh on stdin and is not audited: prose is neither an argument
+// nor a security event.
+func (s *Server) handleGitHubPullComment(w http.ResponseWriter, r *http.Request) error {
+	path, err := s.gitRepo(r)
+	if err != nil {
+		return err
+	}
+	number, err := pullNumber(r)
+	if err != nil {
+		return err
+	}
+	var req pullRequestCommentRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if strings.TrimSpace(req.Body) == "" {
+		return httpx.BadRequest("a comment body is required")
+	}
+	info, err := s.modules.github.RepoInfo(r.Context(), path)
+	if err != nil {
+		return ghError(err)
+	}
+	err = s.modules.github.CommentIssue(r.Context(), path, info.NameWithOwner, number, req.Body)
+	httpx.SetAudit(r, "github.pull.comment", path, map[string]any{"ok": err == nil, "number": number})
+	if err != nil {
+		return ghError(err)
+	}
+	s.modules.pullRequests.Invalidate(info.NameWithOwner)
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+	return nil
+}
+
+// handleGitHubIssues lists the repository's issues beside its pull requests.
+func (s *Server) handleGitHubIssues(w http.ResponseWriter, r *http.Request) error {
+	path, err := s.gitRepo(r)
+	if err != nil {
+		return err
+	}
+	info, err := s.modules.github.RepoInfo(r.Context(), path)
+	if err != nil {
+		return ghError(err)
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	issues, err := s.modules.github.ListIssues(r.Context(), path, info.NameWithOwner, defaultStr(r.URL.Query().Get("state"), "open"), limit)
+	if err != nil {
+		return ghError(err)
+	}
+	if issues == nil {
+		issues = []ghx.Issue{}
+	}
+	httpx.JSON(w, http.StatusOK, issues)
 	return nil
 }
 
@@ -330,6 +441,9 @@ func (s *Server) handleGitHubDevicePoll(w http.ResponseWriter, r *http.Request) 
 	if state.Status != "pending" {
 		httpx.SetAudit(r, "github.signin", state.Status, map[string]any{"ok": state.Status == "complete"})
 	}
+	if state.Status == "complete" {
+		s.modules.pullRequests.ForgetLogin()
+	}
 	httpx.JSON(w, http.StatusOK, state)
 	return nil
 }
@@ -356,6 +470,9 @@ func (s *Server) handleGitHubToken(w http.ResponseWriter, r *http.Request) error
 	httpx.SetAudit(r, "github.signin.token", path, map[string]any{"ok": err == nil})
 	if err != nil {
 		return ghError(err)
+	}
+	if path == "" {
+		s.modules.pullRequests.ForgetLogin()
 	}
 	httpx.JSON(w, http.StatusOK, acc)
 	return nil
@@ -389,6 +506,9 @@ func (s *Server) handleGitHubLogout(w http.ResponseWriter, r *http.Request) erro
 	httpx.SetAudit(r, "github.signout", path, map[string]any{"ok": err == nil})
 	if err != nil {
 		return ghError(err)
+	}
+	if path == "" {
+		s.modules.pullRequests.ForgetLogin()
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 	return nil

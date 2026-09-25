@@ -10,9 +10,10 @@ import {
   FloppyDisk,
   RotateCounterClockwise,
   GitTag,
+  PaperAirplane,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { get, post, put } from "@/lib/api"
+import { errorMessage, get, post, put } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -23,6 +24,7 @@ import type {
   GitCommit,
   GitCommitDetail,
   GitComparison,
+  GitHubCheckRun,
   GitPullRequest,
   GitResult,
   GitStash,
@@ -32,6 +34,7 @@ import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
 import { DiffView } from "@/components/files/diff-view"
 import type { GitRun } from "@/components/git/run"
+import { CommentDialog } from "@/components/git/comment-dialog"
 import { PreviewHeader } from "@/components/git/preview-header"
 import { ConflictPreview } from "@/components/git/conflict-preview"
 import { PartialPreview } from "@/components/git/partial-preview"
@@ -45,7 +48,8 @@ import { MergePullDialog } from "@/components/git/merge-pull-dialog"
 import { SourceBranch, SourceMerge } from "@/components/git/glyphs"
 import { RefTags } from "@/components/git/ref-tags"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
-import { Status } from "@/components/status-dot"
+import { IconAction } from "@/components/icon-action"
+import { Status, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { VerbBar, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
@@ -940,7 +944,31 @@ const REVIEW_LABEL: Record<string, string> = {
   review_required: "review required",
 }
 
-/** A pull request: its state on GitHub, its description, and the merge. */
+/** The dot for one check run: GitHub's status/conclusion pair folded to a word. */
+function checkReading(check: GitHubCheckRun): { tone: DotTone; label: string } {
+  if (check.status !== "completed")
+    return { tone: "warning", label: check.status.replace("_", " ") }
+  switch (check.conclusion) {
+    case "success":
+      return { tone: "running", label: "passed" }
+    case "failure":
+    case "timed_out":
+    case "action_required":
+      return { tone: "danger", label: check.conclusion.replace("_", " ") }
+    case "cancelled":
+    case "skipped":
+    case "neutral":
+      return { tone: "stopped", label: check.conclusion }
+    default:
+      return { tone: "unknown", label: check.conclusion || "completed" }
+  }
+}
+
+/**
+ * A pull request: its state on GitHub, its description, the checks on its
+ * head commit, and the merge — pinned to that commit, so what was reviewed
+ * is what lands.
+ */
 function PullPreview({
   number,
   title,
@@ -958,8 +986,23 @@ function PullPreview({
     [ctx.repoPath, number],
   )
   const [merging, setMerging] = useState(false)
+  const [commenting, setCommenting] = useState(false)
   const p = pull.data
   const q = { path: ctx.repoPath }
+  // Read against the head the detail reported, never a bare number: the
+  // route wants the sha, and a listing's checks for an older head would be a
+  // verdict on code that is no longer on the request.
+  const checks = usePoll(
+    (signal) =>
+      get<GitHubCheckRun[]>(
+        `/git/github/pulls/${number}/checks`,
+        { path: ctx.repoPath, head: p?.headSha },
+        signal,
+      ),
+    60_000,
+    [ctx.repoPath, number, p?.headSha],
+    { enabled: Boolean(p?.headSha) },
+  )
 
   const verbs: Verb[] = [
     {
@@ -971,6 +1014,16 @@ function PullPreview({
       run: () => window.open(p?.url, "_blank", "noopener"),
     },
   ]
+  if (ctx.canControl && p) {
+    verbs.push({
+      key: "comment",
+      label: "Comment",
+      detail: "Say something on the pull request, as your GitHub account.",
+      icon: PaperAirplane,
+      inline: true,
+      run: () => setCommenting(true),
+    })
+  }
   if (ctx.canControl && p && p.state === "open") {
     verbs.unshift({
       key: "merge",
@@ -1084,14 +1137,78 @@ function PullPreview({
             )}
           </div>
         )}
+        {p?.headSha && (
+          <div className="border-t border-hairline">
+            <div className="flex h-8 items-center gap-1.5 px-3">
+              <span className="eyebrow">Checks</span>
+              {checks.data && (
+                <span className="numeric text-hint text-muted-foreground">
+                  {checks.data.length}
+                </span>
+              )}
+            </div>
+            {checks.error && (
+              <p className="px-3 pb-2 text-hint text-muted-foreground">
+                Could not list checks: {errorMessage(checks.error)}
+              </p>
+            )}
+            {checks.loading && !checks.data && <LoadingRows className="px-3 pb-2" rows={2} />}
+            {checks.data && checks.data.length === 0 && (
+              <p className="px-3 pb-3 text-hint text-muted-foreground">No checks on this commit.</p>
+            )}
+            {checks.data && checks.data.length > 0 && (
+              <ul className="divide-y divide-hairline">
+                {checks.data.map((check, i) => {
+                  const reading = checkReading(check)
+                  return (
+                    <li
+                      key={`${check.app ?? ""}:${check.name}:${i}`}
+                      className="group flex min-w-0 items-center gap-2 px-3 py-1.5"
+                    >
+                      <Status
+                        tone={reading.tone}
+                        label={reading.label}
+                        className="w-24 shrink-0 text-hint"
+                      />
+                      <span className="min-w-0 flex-1 truncate text-xs">{check.name}</span>
+                      {check.app && (
+                        <span className="truncate text-micro text-muted-foreground">
+                          {check.app}
+                        </span>
+                      )}
+                      {check.url && (
+                        <IconAction
+                          label={`Open ${check.name}`}
+                          reveal
+                          onClick={() => window.open(check.url, "_blank", "noopener")}
+                        >
+                          <External />
+                        </IconAction>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        )}
         {p && <PullReview key={p.number} pull={p} ctx={ctx} onChanged={pull.refresh} />}
       </div>
+      <CommentDialog
+        open={commenting}
+        onOpenChange={setCommenting}
+        repoPath={ctx.repoPath}
+        number={number}
+        title={p?.title}
+        onCommented={pull.refresh}
+      />
       {p && (
         <MergePullDialog
           open={merging}
           onOpenChange={setMerging}
           repoPath={ctx.repoPath}
           pull={p}
+          headSha={p.headSha}
           onMerged={() => {
             pull.refresh()
             ctx.onChanged()

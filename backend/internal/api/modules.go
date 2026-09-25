@@ -22,6 +22,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/ghx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/githubapp"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gitx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/linuxusers"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/logsx"
@@ -95,6 +96,18 @@ type moduleSet struct {
 	deployGit        *deploy.GitWatcher
 	deployDatabases  *deploymentDatabaseNetworks
 	deployPreviews   *deploy.PreviewQuarantineController
+	// deployExecutor is the normalized release path, kept for the tailnet
+	// sweep Start runs once the engine is up.
+	deployExecutor *deploy.NormalizedStepExecutor
+	// tailnet publishes preview environments on this host's Tailscale node
+	// through `tailscale serve`; the executor and the preview route share it.
+	tailnet deploy.TailnetPublisher
+	// pullRequests reads pull requests through the trusted GitHub identity
+	// for the deploy pages and the reconciler.
+	pullRequests *pullRequests
+	// previewReconciler polls GitHub for every open preview so a merge that
+	// no webhook announces still closes it.
+	previewReconciler *deploy.PreviewReconciler
 	// githubApp is the dashboard's own GitHub identity: one App, installed on
 	// the accounts whose repositories deploy here.
 	githubApp *githubapp.Service
@@ -223,6 +236,7 @@ func (s *Server) initModules() {
 		func(ctx context.Context, environmentID int64, phase string, success bool) {
 			s.Audit.Record(ctx, audit.Entry{Actor: "system", Action: "deploy.preview.quarantine." + phase, Target: strconv.FormatInt(environmentID, 10), Success: success})
 		}, func(err error) { s.Log.Warn("preview isolation needs attention", "error", err) })
+	s.modules.tailnet = tailnetPublisher{serve: selfcfg.NewTailnetServe()}
 	normalizedExecutor := deploy.NewNormalizedStepExecutor(
 		s.modules.deployRuns,
 		s.modules.deployPlanning,
@@ -239,7 +253,9 @@ func (s *Server) initModules() {
 		// join adds is that the run asks for one before it starts anything,
 		// instead of reaching a cutover that has nothing to serve.
 		WithCertificateIssuer(s.modules.proxy).
-		WithNotifications(s.modules.deployAutomation)
+		WithNotifications(s.modules.deployAutomation).
+		WithTailnetPublisher(s.modules.tailnet)
+	s.modules.deployExecutor = normalizedExecutor
 	s.modules.deployEngine = deploy.NewEngine(
 		s.modules.deployRuns,
 		deploy.NewDeploymentStepExecutor(
@@ -276,6 +292,44 @@ func (s *Server) initModules() {
 		},
 		s.trafficAlertNames, s.Log)
 	s.modules.deployGit = deploy.NewGitWatcher(s.modules.deployRuns, s.modules.deploySources, s.dispatchGitDeployment)
+	s.modules.pullRequests = newPullRequests(s.modules.github, s.modules.githubApp, s.modules.git)
+	s.modules.previewReconciler = deploy.NewPreviewReconciler(s.modules.deployAutomation, s.modules.pullRequests, s.closePreviewTarget, s.Log)
+}
+
+// tailnetPublisher adapts selfcfg's `tailscale serve` driver to the deploy
+// package's publisher contract, which knows ports and loopback targets and
+// nothing about the CLI.
+type tailnetPublisher struct {
+	serve *selfcfg.TailnetServe
+}
+
+func (p tailnetPublisher) PublishTailnet(ctx context.Context, port, upstreamPort, previousUpstream int) (string, error) {
+	return p.serve.Publish(ctx, port, upstreamPort, previousUpstream)
+}
+
+func (p tailnetPublisher) WithdrawTailnet(ctx context.Context, port int) error {
+	return p.serve.Withdraw(ctx, port)
+}
+
+func (p tailnetPublisher) ServedTailnetPorts(ctx context.Context) (map[int]int, error) {
+	// A host without the client serves nothing, and says so quietly: the
+	// sweep then withdraws nothing and marks any recorded tailnet address
+	// unpublished, instead of warning at every boot of every install.
+	if !hostexec.Available("tailscale") {
+		return map[int]int{}, nil
+	}
+	entries, err := p.serve.Served(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ports := make(map[int]int, len(entries))
+	for port, entry := range entries {
+		// Every served port is a key, so allocation steps around it; the
+		// value names the upstream only for a mapping the dashboard could
+		// have made itself, the one kind a sweep or withdrawal may touch.
+		ports[port] = entry.LoopbackUpstream()
+	}
+	return ports, nil
 }
 
 // restartProxy restarts the Caddy container in this dashboard's own stack.

@@ -27,7 +27,18 @@ A change that weakens any of these has to say so explicitly.
    a bundled constant bootstrap to load the native prompt; paths remain separate positional arguments. `dockerx` invokes the `docker` binary in three places
    (compose, the streaming runner, `Build`) because the Engine API has no equivalent; all three build argv
    explicitly.
-7. Nothing but Caddy binds a routable address.
+7. Nothing but Caddy binds a routable address. The one exception is not the dashboard's own listener:
+   a pull request preview is reachable at `https://<node>.<tailnet>.ts.net:<port>` because **tailscaled**
+   listens on the host's tailnet address for ports **21000–21999** on the dashboard's behalf
+   (`selfcfg.TailnetServe`, `tailscale serve`), forwarding each to a loopback port the dashboard
+   published. The preview's container publishes on loopback exactly as production does; the dashboard
+   refuses a port in that range that is served with any other target or funnelled to the public internet,
+   withdraws a mapping that came back funnelled or whose record could not be written, and at start
+   withdraws only a plain loopback mapping in the range that the address table does not vouch for — a
+   port no preview owns, or an owned port serving an upstream other than the recorded one. A directory,
+   a funnel or any other target of the operator's is never touched, at start, on a failed activation or
+   on removal, since restore and withdrawal act only on a mapping whose upstream the row recorded. See
+   [preview isolation](../deployments/preview-isolation.md#tailnet-only-addresses).
 8. Store schema changes are additive and tolerate an existing database. `CREATE TABLE IF NOT EXISTS` is a
    no-op against a table that exists, so a **column** added later also goes in `store.addedColumns`, which
    `applyAddedColumns` ALTERs in at open. Every entry needs a `DEFAULT` (SQLite refuses a NOT NULL column
@@ -112,6 +123,8 @@ process; ending an SSH session; stopping or restarting a service; revoking a tok
 backup job or deploy project (permanently deleting an *archived* deployment asks for its name in the
 dialog, as the dialog's own guard against a slip in an act that cannot be undone, but the name is not
 sent and the route stays in this set — see [permanent-deletion](../deployments/permanent-deletion.md));
+closing a pull request's preview (`POST /deploy/{id}/pull-requests/{number}/preview/close`: its
+container, volumes and tailnet address go, and the pull request can be tested again in a minute);
 rolling back a deploy; disabling **or deleting** a vhost; deleting an nginx
 stream, htpasswd file or saved DNS-provider credential (pasted again in a minute); deleting a git branch, a branch on the remote, a tag or a remote; adding, **editing** or deleting a firewall rule; tuning a
 fail2ban jail; unbanning an address; stopping a running job; closing a terminal session, window or pane;

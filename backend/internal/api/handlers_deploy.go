@@ -36,7 +36,13 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		})
 		r.Method(http.MethodGet, "/", s.handle(s.handleDeployList))
 		r.Method(http.MethodGet, "/hostname", s.handle(s.handleDeploymentHostname))
+		// Static, and registered before /{id} for the same reason /hostname
+		// is: chi prefers the literal segment, so the fleet's counts never
+		// read as a project called "pull-requests".
+		r.Method(http.MethodGet, "/pull-requests", s.handle(s.handleDeploymentPullRequestSummary))
 		r.Method(http.MethodGet, "/{id}", s.handle(s.handleDeployGet))
+		r.Method(http.MethodGet, "/{id}/pull-requests", s.handle(s.handleDeploymentPullRequests))
+		r.Method(http.MethodGet, "/{id}/pull-requests/{number}/checks", s.handle(s.handleDeploymentPullRequestChecks))
 		r.Method(http.MethodGet, "/{id}/preview-frame", s.handle(s.handleDeploymentPreviewFrame))
 		r.Method(http.MethodGet, "/{id}/favicon", s.handle(s.handleDeploymentFavicon))
 		r.Method(http.MethodGet, "/{id}/runs", s.handle(s.handleDeployRuns))
@@ -78,6 +84,12 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/{id}/environments/{env}/runs", s.handle(s.handleDeploymentRunCreate))
 			r.Method(http.MethodPost, "/{id}/runs/{run}/cancel", s.handle(s.handleDeploymentRunCancel))
 			r.Method(http.MethodPost, "/{id}/runs/{run}/retry", s.handle(s.handleDeploymentRunRetry))
+			// Merging and commenting speak on GitHub as the dashboard's own
+			// account, which is why an API token may not: the same rule as
+			// the Git page's write routes, with the session requirement the
+			// deploy page's other GitHub-facing verbs carry.
+			r.With(httpx.RequireSession).Method(http.MethodPost, "/{id}/pull-requests/{number}/merge", s.handle(s.handleDeploymentPullRequestMerge))
+			r.With(httpx.RequireSession).Method(http.MethodPost, "/{id}/pull-requests/{number}/comment", s.handle(s.handleDeploymentPullRequestComment))
 		})
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
@@ -103,6 +115,9 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Method(http.MethodPut, "/{id}/environments/{env}/source", s.handle(s.handleDeploymentSourceUpdate))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/git-policy", s.handle(s.handleDeploymentGitPolicyPut))
 				r.Method(http.MethodPost, "/{id}/previews/approvals/{approval}/approve", s.handle(s.handleDeploymentPreviewApprove))
+				// Testing a pull request is the approval of that head, so it
+				// sits with the approval route it stands in for.
+				r.Method(http.MethodPost, "/{id}/pull-requests/{number}/preview", s.handle(s.handleDeploymentPullRequestPreview))
 				r.Method(http.MethodPost, "/{id}/duplicate", s.handle(s.handleDeploymentDuplicate))
 				r.Method(http.MethodPost, "/{id}/removal-plan", s.handle(s.handleDeploymentRemovalPlan))
 				r.Method(http.MethodGet, "/credentials", s.handle(s.handleDeploymentCredentials))
@@ -146,6 +161,10 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			// saved DNS-provider credential: destructive, but never a typed
 			// phrase, since the secret is pasted again in a minute.
 			r.Method(http.MethodDelete, "/credentials/{id}", s.handle(s.handleDeploymentCredentialDelete))
+			// Closing a preview removes its container, volumes and address:
+			// destructive, with an ordinary confirmation, since the pull
+			// request can be tested again in a minute.
+			r.With(httpx.RequireSession).Method(http.MethodPost, "/{id}/pull-requests/{number}/preview/close", s.handle(s.handleDeploymentPullRequestClose))
 		})
 	})
 }
@@ -194,6 +213,14 @@ func mapDeployError(err error) error {
 		return httpx.Err(http.StatusBadRequest, "ref_not_found", err.Error())
 	case errors.Is(err, deploy.ErrSourceUnavailable):
 		return httpx.Err(http.StatusBadGateway, "source_unavailable", err.Error())
+	case errors.Is(err, deploy.ErrPreviewAddressExhausted):
+		return httpx.Err(http.StatusConflict, "preview_address_exhausted", err.Error())
+	case errors.Is(err, deploy.ErrPreviewAddressMissing):
+		return httpx.Err(http.StatusConflict, "preview_address_missing", err.Error())
+	case errors.Is(err, deploy.ErrPullRequestRateLimited):
+		return httpx.Err(http.StatusTooManyRequests, "github_rate_limited", err.Error())
+	case errors.Is(err, deploy.ErrPullRequestUnreadable):
+		return httpx.Err(http.StatusBadGateway, "pull_request_unreadable", err.Error())
 	default:
 		return httpx.BadRequest("%v", err)
 	}
@@ -862,6 +889,13 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 	manualOverride := trigger == deploy.TriggerManual && (sourceRevision != "" || requestedRef != "")
 	if manualOverride && !(source.Kind == deploy.SourceGit && deploy.IsRemoteGitSource(source)) {
 		return nil, deploy.ErrRefNotApplicable
+	}
+	// A pull request's head reaches an environment through "Test this pull
+	// request", where an administrator approves that exact commit for a
+	// preview; named here it would deploy anyone's pull request to production
+	// with no approval at all.
+	if requestedRef != "" && deploy.IsProviderPullRef(requestedRef) && target.Kind != deploy.EnvironmentPreview {
+		return nil, fmt.Errorf("%w: %s is a pull request head, which only a preview environment builds", deploy.ErrRefNotApplicable, requestedRef)
 	}
 	if deploy.IsRemoteGitSource(source) {
 		switch {

@@ -491,6 +491,11 @@ type ProviderEvent struct {
 	// build fetches, which on GitHub and GitLab is the provider's own
 	// refs/pull/N/head rather than a name anyone chose.
 	HeadRef string
+	// BaseRef is the branch the pull request wants to land on, and Merged
+	// says whether a close delivery closed it by merging: that is what turns
+	// a preview teardown into a production redeploy.
+	BaseRef string
+	Merged  bool
 }
 
 func VerifyProvider(provider string, headers http.Header, body []byte, secret string) (ProviderEvent, error) {
@@ -548,10 +553,13 @@ func VerifyProvider(provider string, headers http.Header, body []byte, secret st
 			result.HeadRef = nestedString(pr, "head", "ref")
 			result.Revision = nestedString(pr, "head", "sha")
 			result.PreviewClosed = result.Action == "closed"
+			result.Merged = boolValue(pr["merged"])
+			result.BaseRef = nestedString(pr, "base", "ref")
 			result.Author = nestedString(pr, "user", "login")
 			result.HeadRepository = nestedString(pr, "head", "repo", "full_name")
 			result.PreviewRef = fmt.Sprintf("refs/pull/%d/head", result.PreviewNumber)
 		}
+
 	}
 	if provider == "gitlab" {
 		result.Repository = nestedString(raw, "project", "path_with_namespace")
@@ -564,7 +572,10 @@ func VerifyProvider(provider string, headers http.Header, body []byte, secret st
 			result.Revision = nestedString(attrs, "last_commit", "id")
 			state := stringValue(attrs["state"])
 			result.PreviewClosed = state == "closed" || state == "merged"
+			result.Merged = state == "merged"
+			result.BaseRef = stringValue(attrs["target_branch"])
 			result.Author = nestedString(raw, "user", "username")
+
 			result.HeadRepository = nestedString(attrs, "source", "path_with_namespace")
 			result.PreviewRef = fmt.Sprintf("refs/merge-requests/%d/head", result.PreviewNumber)
 		}
@@ -585,7 +596,10 @@ func VerifyProvider(provider string, headers http.Header, body []byte, secret st
 			result.PreviewRef = result.HeadRef
 			result.Revision = nestedString(pr, "source", "commit", "hash")
 			result.PreviewClosed = strings.Contains(event, "fulfilled") || strings.Contains(event, "rejected")
+			result.Merged = strings.Contains(event, "fulfilled")
+			result.BaseRef = nestedString(pr, "destination", "branch", "name")
 			result.Author = nestedString(pr, "author", "nickname")
+
 			result.HeadRepository = nestedString(pr, "source", "repository", "full_name")
 		}
 	}
@@ -613,6 +627,8 @@ func VerifyGenericHook(body []byte, secret, signature string) bool {
 	return verifyHMAC(body, secret, signature)
 }
 func stringValue(v any) string { s, _ := v.(string); return s }
+func boolValue(v any) bool     { b, _ := v.(bool); return b }
+
 func intValue(v any) int {
 	switch x := v.(type) {
 	case float64:
@@ -1076,36 +1092,48 @@ func validScheduleAction(action string) bool {
 	return false
 }
 
+// PreviewRef is one preview environment as the pull request panels and the
+// automation page read it. Everything past IsolationReason is read from the
+// approval, source, address and run rows beside the preview in one query, so
+// a list of pull requests can say what each preview is doing without a
+// second round trip per row.
 type PreviewRef struct {
 	ID              int64     `json:"id"`
 	TriggerID       int64     `json:"triggerId"`
+	ProjectID       int64     `json:"projectId"`
 	ProviderRef     string    `json:"providerRef"`
+	Number          int       `json:"number"`
 	EnvironmentID   int64     `json:"environmentId"`
 	EnvironmentSlug string    `json:"environmentSlug"`
 	State           string    `json:"state"`
 	UpdatedAt       time.Time `json:"updatedAt"`
 	IsolationStatus string    `json:"isolationStatus,omitempty"`
 	IsolationReason string    `json:"isolationReason,omitempty"`
+	// Origin is "" for a preview a webhook opened and PreviewOriginDashboard
+	// for one started with "Test this pull request".
+	Origin string `json:"origin,omitempty"`
+	Title  string `json:"title,omitempty"`
+	// Revision is the approved head the preview is configured at;
+	// HeadRevision is the newest head seen on the pull request since. They
+	// differ once new commits arrive, which is what "out of date" means.
+	Revision       string `json:"revision,omitempty"`
+	HeadRef        string `json:"headRef,omitempty"`
+	HeadRepository string `json:"headRepository,omitempty"`
+	Author         string `json:"author,omitempty"`
+	HeadRevision   string `json:"headRevision,omitempty"`
+	ApprovalState  string `json:"approvalState,omitempty"`
+	// VariablesCopiedRevision is the head whose production variables were
+	// copied into the preview, or "" when none are.
+	VariablesCopiedRevision string          `json:"variablesCopiedRevision,omitempty"`
+	LiveReleaseID           int64           `json:"liveReleaseId,omitempty"`
+	Address                 *PreviewAddress `json:"address,omitempty"`
+	LastRun                 *RecentRun      `json:"lastRun,omitempty"`
 }
 
 func (s *AutomationStore) ListPreviews(ctx context.Context, projectID int64) ([]PreviewRef, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT p.id,p.trigger_id,p.provider_ref,p.environment_id,e.slug,p.state,p.updated_at,COALESCE(q.status,''),COALESCE(q.reason,'') FROM deploy_preview_refs p JOIN deploy_environments e ON e.id=p.environment_id LEFT JOIN deploy_preview_quarantines q ON q.environment_id=e.id WHERE e.project_id=? ORDER BY p.updated_at DESC`, projectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []PreviewRef{}
-	for rows.Next() {
-		var p PreviewRef
-		var updated int64
-		if err := rows.Scan(&p.ID, &p.TriggerID, &p.ProviderRef, &p.EnvironmentID, &p.EnvironmentSlug, &p.State, &updated, &p.IsolationStatus, &p.IsolationReason); err != nil {
-			return nil, err
-		}
-		p.UpdatedAt = time.Unix(updated, 0).UTC()
-		out = append(out, p)
-	}
-	return out, rows.Err()
+	return s.previewRefs(ctx, `WHERE e.project_id=? ORDER BY p.updated_at DESC,p.id DESC`, projectID)
 }
+
 func (s *AutomationStore) EnsurePreview(ctx context.Context, t *Trigger, event ProviderEvent) (*PreviewRef, bool, error) {
 	if !t.Config.Preview || event.PreviewNumber <= 0 {
 		return nil, false, ErrWrongEvent

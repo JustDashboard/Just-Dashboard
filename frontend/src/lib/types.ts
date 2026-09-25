@@ -3131,6 +3131,15 @@ export type DeploymentScheduleTest = {
   nextRuns: string[]
 }
 
+export type DeploymentPreviewAddress = {
+  /** tailnet: a port on this host's Tailscale node, reachable only from the tailnet; domain: a public hostname. */
+  kind: "tailnet" | "domain"
+  url: string
+  port?: number
+  /** Whether the address currently answers: the mapping or route is in place for a live release. */
+  published: boolean
+}
+
 export type DeploymentPreview = {
   id: number
   triggerId: number
@@ -3141,6 +3150,63 @@ export type DeploymentPreview = {
   updatedAt: string
   isolationStatus?: "pending" | "quarantined" | "cleared"
   isolationReason?: string
+  /** The pull request number, as providerRef reads as an integer. */
+  number: number
+  /**
+   * The deploy project the preview belongs to. A checkout on the Git page can
+   * be deployed by more than one project, and its verbs address this one.
+   */
+  projectId?: number
+  /** "dashboard" when Test this pull request created it; absent for a webhook delivery. */
+  origin?: "dashboard"
+  title?: string
+  /** The approved head the preview is configured at. */
+  revision?: string
+  headRef?: string
+  headRepository?: string
+  author?: string
+  /** The newest head seen on the pull request; differs from revision once new commits arrive. */
+  headRevision?: string
+  approvalState?: string
+  /** The head the production variables were copied for; absent when the preview carries none. */
+  variablesCopiedRevision?: string
+  liveReleaseId?: number
+  address?: DeploymentPreviewAddress
+  lastRun?: DeploymentRecentRun
+}
+
+/** A deploy project's pull requests on GitHub, joined to the previews built from them. */
+export type ProjectPullRequests = {
+  repository: string
+  host: string
+  available: boolean
+  /** not_github, sign_in_required, app_not_installed or not_installed when pull requests cannot be read. */
+  reason?: string
+  identity?: "cli" | "app"
+  /** A checkout of the same repository under the git roots, for the link to the Git page. */
+  checkoutPath?: string
+  pulls: GitPullRequest[]
+  previews: DeploymentPreview[]
+  production: {
+    environmentId: number
+    automatic: boolean
+    intervalSeconds: number
+    awaitingFirstDeployment: boolean
+  }
+  tailnet: TailscaleIdentity
+  /** The production build is a Compose stack, which previews cannot isolate. */
+  compose: boolean
+  /** The production source is a local checkout, which has no remote to fetch a pull request from. */
+  localCheckout: boolean
+  /** The runtime plan's internal port; 0 means nothing to publish. */
+  internalPort: number
+  /** Production release tasks, which a preview never runs. */
+  releaseTasks: number
+}
+
+/** Open pull request and preview counts per deploy project, for the fleet. */
+export type FleetPullRequests = {
+  projects: Record<string, { open: number; previews: number }>
 }
 
 export type DeploymentPreviewApproval = {
@@ -4137,6 +4203,52 @@ export type GitPullRequest = {
   deletions?: number
   files?: number
   body?: string
+  /** owner/name of the head branch's repository; differs from the base repository on a fork. */
+  headRepository?: string
+  /** The head lives in another repository: its code is not this repository's own. */
+  fork?: boolean
+  updatedAt?: string
+  labels?: string[]
+  merged?: boolean
+  /** The preview environment built from this pull request, when a deploy project has one. */
+  preview?: DeploymentPreview | null
+}
+
+export type GitHubCheckRun = {
+  name: string
+  status: "queued" | "in_progress" | "completed"
+  /** success, failure, neutral, cancelled, skipped, timed_out, action_required, pending, or empty while running. */
+  conclusion?: string
+  url?: string
+  app?: string
+  startedAt?: string
+  completedAt?: string
+}
+
+export type GitHubIssue = {
+  number: number
+  title: string
+  url: string
+  state: string
+  author?: string
+  createdAt: string
+  updatedAt: string
+  comments: number
+  labels?: string[]
+  assignees?: string[]
+}
+
+/** The open pull requests of every GitHub-backed checkout the Git page lists, each joined to its previews. */
+export type GitPullRequestSummary = {
+  available: boolean
+  repos: {
+    path: string
+    repository: string
+    pulls: GitPullRequest[]
+    deployments: { projectId: number; name: string; environmentId: number }[]
+    /** Why this checkout's pull requests could not be read, in gh's words. */
+    error?: string
+  }[]
 }
 
 export type GitHubWorkflowRun = {

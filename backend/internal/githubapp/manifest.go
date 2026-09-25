@@ -35,8 +35,9 @@ type ManifestStart struct {
 }
 
 // NewManifest describes the App this dashboard needs: read access to code and
-// metadata for clones, write access to statuses and pull requests for the
-// bot's reports, and the two events the deployment pipeline reacts to.
+// metadata for clones, read access to checks so a pull request's runs can be
+// listed beside it, write access to statuses and pull requests for the bot's
+// reports, and the two events the deployment pipeline reacts to.
 //
 // The webhook and redirect targets are built from the dashboard's public
 // address, which is why the setup page refuses to start on a dashboard that
@@ -52,12 +53,12 @@ func NewManifest(name, dashboardURL string) Manifest {
 		// is not sent, so an API callback answered 401 to every real
 		// browser. The page reads code and state and finishes the exchange
 		// with its own session.
-		RedirectURL:    base + "/deploy/credentials",
-		SetupURL:       base + "/deploy/credentials",
-		SetupOnUpdate:  true,
-		Public:         false,
+		RedirectURL:   base + "/deploy/credentials",
+		SetupURL:      base + "/deploy/credentials",
+		SetupOnUpdate: true,
+		Public:        false,
 		DefaultPermissions: map[string]string{
-			"contents": "read", "metadata": "read", "pull_requests": "write", "statuses": "write",
+			"checks": "read", "contents": "read", "metadata": "read", "pull_requests": "write", "statuses": "write",
 		},
 		DefaultEvents: []string{"push", "pull_request"},
 	}

@@ -177,7 +177,11 @@ function filledPills(page: Page) {
 }
 
 /** The registers the page elements declare, and how many flow panels are drawn. */
-function registers(page: Page) {
+async function registers(page: Page) {
+  // networkidle says the requests are done, not that React has committed the
+  // page that the last answer unlocked; on a loaded runner the walk read the
+  // DOM a beat too early and reported a page that was there a moment later.
+  await page.waitForSelector("[data-slot='page']", { timeout: 5_000 }).catch(() => undefined)
   return page.evaluate(() => {
     const pages = [...document.querySelectorAll<HTMLElement>("[data-slot='page']")]
     return {
