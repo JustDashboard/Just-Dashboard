@@ -78,44 +78,34 @@ func (c *DetectedCandidate) staticSite() *DetectedStaticSite {
 	return c.StaticSite
 }
 
-// A base path is read only where it is a literal: `base: '/repo/'`. A value
-// computed in the file (`base: process.env.BASE`) is named as evidence and the
-// site is served at the root, since what it evaluates to on this server is
-// not something reading can know.
-func staticConfigKeyRE(key string) (*regexp.Regexp, *regexp.Regexp) {
-	return regexp.MustCompile(`(?:^|[{,\s])` + key + `\s*:\s*['"` + "`" + `](/[^'"` + "`" + `\s]*)['"` + "`" + `]`),
-		regexp.MustCompile(`(?:^|[{,\s])` + key + `\s*:\s*[A-Za-z_$(]`)
-}
-
 var (
-	staticBaseKeyRE, staticBaseExpressionRE             = staticConfigKeyRE("base")
-	staticBaseURLKeyRE, staticBaseURLExpressionRE       = staticConfigKeyRE("baseUrl")
-	staticPublicPathKeyRE, staticPublicPathExpressionRE = staticConfigKeyRE("publicPath")
-	staticPathPrefixKeyRE, staticPathPrefixExpressionRE = staticConfigKeyRE("pathPrefix")
-	staticNuxtBaseURLKeyRE, staticNuxtBaseURLExprRE     = staticConfigKeyRE("baseURL")
-	svelteKitPathsRE                                    = regexp.MustCompile(`\bpaths\s*:\s*\{([^}]*)\}`)
-	svelteKitFallbackRE                                 = regexp.MustCompile(`\bfallback\s*:\s*['"` + "`" + `]([^'"` + "`" + `]+)['"` + "`" + `]`)
-	angularBaseHrefRE                                   = regexp.MustCompile(`"baseHref"\s*:\s*"(/[^"]*)"`)
-	scriptBaseFlagRE                                    = regexp.MustCompile(`--base(?:-href)?[= ]['"]?(/[^'"\s]*)`)
-	jsConfigExtensions                                  = []string{".ts", ".mts", ".js", ".mjs", ".cjs"}
+	svelteKitFallbackRE = regexp.MustCompile(`\bfallback\s*:\s*['"` + "`" + `]([^'"` + "`" + `]+)['"` + "`" + `]`)
+	angularBaseHrefRE   = regexp.MustCompile(`"baseHref"\s*:\s*"(/[^"]*)"`)
+	scriptBaseFlagRE    = regexp.MustCompile(`--base(?:-href)?[= ]['"]?(/[^'"\s]*)`)
+	jsConfigExtensions  = []string{".ts", ".mts", ".js", ".mjs", ".cjs"}
 )
 
 // staticBasePath reads the sub-path a framework's static output was built
 // for: the literal, the file it came from, and whether the file computes it
 // instead. output is the output directory, from which VitePress and VuePress
-// place their configuration.
+// place their configuration. A base is read only where it is a literal key
+// of the exported configuration (`base: '/repo/'`); a value computed in the
+// file (`base: process.env.BASE`) is named as evidence and the site is
+// served at the root, since what it evaluates to on this server is not
+// something reading can know.
 func staticBasePath(read siteFiles, framework, output string, manifest nodeManifest) (string, string, bool) {
-	literal := func(names []string, key, expression *regexp.Regexp) (string, string, bool) {
+	literal := func(names []string, keys ...string) (string, string, bool) {
 		for _, name := range names {
 			content, ok := read(name)
 			if !ok {
 				continue
 			}
-			if match := key.FindSubmatch(content); match != nil {
-				return cleanStaticBasePath(string(match[1])), name, false
-			}
-			if expression.Match(content) {
+			value := readJSConfig(content).value(keys...)
+			switch {
+			case value.expression:
 				return "", name, true
+			case value.found:
+				return cleanStaticBasePath(value.literal), name, false
 			}
 			return "", "", false
 		}
@@ -131,41 +121,28 @@ func staticBasePath(read siteFiles, framework, output string, manifest nodeManif
 	build := manifest.Scripts["build"]
 	switch framework {
 	case "docusaurus":
-		return literal(configs("docusaurus.config"), staticBaseURLKeyRE, staticBaseURLExpressionRE)
+		return literal(configs("docusaurus.config"), "baseUrl")
 	case "vite", "vue-cli", "astro":
 		if match := scriptBaseFlagRE.FindStringSubmatch(build); match != nil {
 			return cleanStaticBasePath(match[1]), "package.json", false
 		}
 		if framework == "vue-cli" {
-			return literal([]string{"vue.config.js", "vue.config.cjs", "vue.config.mjs", "vue.config.ts"}, staticPublicPathKeyRE, staticPublicPathExpressionRE)
+			return literal([]string{"vue.config.js", "vue.config.cjs", "vue.config.mjs", "vue.config.ts"}, "publicPath")
 		}
 		stem := "vite.config"
 		if framework == "astro" {
 			stem = "astro.config"
 		}
-		return literal(configs(stem), staticBaseKeyRE, staticBaseExpressionRE)
+		return literal(configs(stem), "base")
 	case "vitepress", "vuepress":
 		// Both keep their configuration beside the dist they write:
 		// <docs>/.vitepress/config.ts and <docs>/.vuepress/config.js.
 		if !strings.HasSuffix(output, "/dist") {
 			return "", "", false
 		}
-		return literal(configs(path.Join(path.Dir(output), "config")), staticBaseKeyRE, staticBaseExpressionRE)
+		return literal(configs(path.Join(path.Dir(output), "config")), "base")
 	case "sveltekit":
-		for _, name := range configs("svelte.config") {
-			content, ok := read(name)
-			if !ok {
-				continue
-			}
-			match := svelteKitPathsRE.FindSubmatch(content)
-			if match == nil {
-				return "", "", false
-			}
-			if base := staticBaseKeyRE.FindSubmatch(match[1]); base != nil {
-				return cleanStaticBasePath(string(base[1])), name, false
-			}
-			return "", name, staticBaseExpressionRE.Match(match[1])
-		}
+		return literal(configs("svelte.config"), "kit", "paths", "base")
 	case "angular":
 		if match := scriptBaseFlagRE.FindStringSubmatch(build); match != nil {
 			return cleanStaticBasePath(match[1]), "package.json", false
@@ -195,10 +172,14 @@ func staticBasePath(read siteFiles, framework, output string, manifest nodeManif
 	case "gatsby":
 		// pathPrefix applies only to a build run with --prefix-paths.
 		if strings.Contains(build, "--prefix-paths") {
-			return literal(configs("gatsby-config"), staticPathPrefixKeyRE, staticPathPrefixExpressionRE)
+			return literal(configs("gatsby-config"), "pathPrefix")
 		}
 	case "nuxt":
-		return literal(configs("nuxt.config"), staticNuxtBaseURLKeyRE, staticNuxtBaseURLExprRE)
+		return literal(configs("nuxt.config"), "app", "baseURL")
+	case "nextjs":
+		// A static export (output: 'export', served from out/) keeps its
+		// basePath like any other build.
+		return literal(configs("next.config"), "basePath")
 	case "slidev":
 		if match := scriptBaseFlagRE.FindStringSubmatch(build); match != nil {
 			return cleanStaticBasePath(match[1]), "package.json", false
@@ -215,7 +196,7 @@ func svelteKitFallback(read siteFiles) string {
 		if !ok {
 			continue
 		}
-		if match := svelteKitFallbackRE.FindSubmatch(content); match != nil && staticFallbackRE.Match(match[1]) {
+		if match := svelteKitFallbackRE.FindSubmatch(jsBlankComments(content)); match != nil && staticFallbackRE.Match(match[1]) {
 			return string(match[1])
 		}
 		return ""
@@ -250,7 +231,7 @@ func eleventyOutput(read siteFiles, manifest nodeManifest) (string, string) {
 		if !ok {
 			continue
 		}
-		if dir := eleventyDirRE.FindSubmatch(content); dir != nil {
+		if dir := eleventyDirRE.FindSubmatch(jsBlankComments(content)); dir != nil {
 			if match := eleventyOutputRE.FindSubmatch(dir[1]); match != nil {
 				if output := siteOutput(string(match[1]), ""); output != "" {
 					return output, name

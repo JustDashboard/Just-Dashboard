@@ -21,7 +21,7 @@ func TestStaticBasePathIsReadOnlyFromLiterals(t *testing.T) {
 		base, source            string
 		expression              bool
 	}{
-		{name: "docusaurus", framework: "docusaurus", files: map[string]string{"docusaurus.config.ts": "const config = {\n  url: 'https://me.github.io',\n  baseUrl: '/project/',\n}"},
+		{name: "docusaurus", framework: "docusaurus", files: map[string]string{"docusaurus.config.ts": "import type {Config} from '@docusaurus/types';\nconst config: Config = {\n  url: 'https://me.github.io',\n  baseUrl: '/project/',\n};\nexport default config;"},
 			base: "/project", source: "docusaurus.config.ts"},
 		{name: "docusaurus at the root", framework: "docusaurus", files: map[string]string{"docusaurus.config.js": "module.exports = { baseUrl: '/' }"}, source: "docusaurus.config.js"},
 		{name: "vite", framework: "vite", files: map[string]string{"vite.config.ts": "export default defineConfig({\n  plugins: [react()],\n  base: \"/repo/\",\n})"},
@@ -49,6 +49,35 @@ func TestStaticBasePathIsReadOnlyFromLiterals(t *testing.T) {
 		{name: "gatsby", framework: "gatsby", files: map[string]string{"gatsby-config.js": "module.exports = { pathPrefix: '/blog' }"},
 			manifest: nodeManifest{Scripts: map[string]string{"build": "gatsby build --prefix-paths"}}, base: "/blog", source: "gatsby-config.js"},
 		{name: "an unsafe path is no base", framework: "vite", files: map[string]string{"vite.config.js": "export default { base: '/../etc/' }"}, source: "vite.config.js"},
+		// Only a key of the exported object is the site's base: VitePress's
+		// own sidebar groups carry a base of their own, a commented-out line is
+		// not configuration, and Nuxt's runtimeConfig.baseURL is an API's.
+		{name: "vitepress sidebar base", framework: "vitepress", output: "docs/.vitepress/dist", files: map[string]string{"docs/.vitepress/config.mts": `import { defineConfig } from 'vitepress'
+export default defineConfig({
+  title: 'Docs', // base: '/old/'
+  themeConfig: {
+    sidebar: {
+      '/guide/': { base: '/guide/', items: [{ text: 'Start', link: 'start' }] },
+    },
+  },
+})`}},
+		{name: "commented vite base", framework: "vite", files: map[string]string{"vite.config.ts": "export default defineConfig({\n  plugins: [react()],\n  // base: '/my-repo/',\n  /* base: '/other/', */\n  server: { proxy: { '/api': 'http://localhost:3000' } },\n})"}},
+		{name: "nuxt runtimeConfig baseURL", framework: "nuxt", files: map[string]string{"nuxt.config.ts": "export default defineNuxtConfig({ runtimeConfig: { public: { baseURL: '/api' } } })"}},
+		{name: "nuxt app baseURL", framework: "nuxt", files: map[string]string{"nuxt.config.ts": "export default defineNuxtConfig({ ssr: false, app: { head: { title: 'x' }, baseURL: '/nuxt/' } })"},
+			base: "/nuxt", source: "nuxt.config.ts"},
+		{name: "next basePath", framework: "nextjs", files: map[string]string{"next.config.mjs": "/** @type {import('next').NextConfig} */\nconst nextConfig = { output: 'export', basePath: '/site' };\nexport default withMDX(nextConfig);"},
+			base: "/site", source: "next.config.mjs"},
+		{name: "vite config function", framework: "vite", files: map[string]string{"vite.config.ts": "export default defineConfig(({ command }) => {\n  const plugins = [{ base: '/nested/' }]\n  return { plugins, base: '/fn/' }\n})"},
+			base: "/fn", source: "vite.config.ts"},
+		{name: "vite arrow object", framework: "vite", files: map[string]string{"vite.config.ts": "export default defineConfig(({ mode }) => ({ base: `/arrow/`, build: { outDir: 'dist' } }))"},
+			base: "/arrow", source: "vite.config.ts"},
+		{name: "a url string is not a comment", framework: "astro", files: map[string]string{"astro.config.mjs": "export default defineConfig({ site: 'https://me.github.io', /* c */ base: '/after/' })"},
+			base: "/after", source: "astro.config.mjs"},
+		{name: "shorthand base", framework: "vite", files: map[string]string{"vite.config.js": "const base = '/repo/'\nexport default { base }"},
+			source: "vite.config.js", expression: true},
+		{name: "template placeholder", framework: "vite", files: map[string]string{"vite.config.js": "export default { base: `/${process.env.REPO}/` }"},
+			source: "vite.config.js", expression: true},
+		{name: "a ternary is not a key", framework: "vite", files: map[string]string{"vite.config.js": "export default { title: prod ? base : '/', root: 'src' }"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()

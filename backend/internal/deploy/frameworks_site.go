@@ -1189,7 +1189,7 @@ func lumeSite(tree siteTree, config denoConfig) (siteGenerator, bool) {
 	}
 	for _, name := range []string{"_config.ts", "_config.js"} {
 		if content, ok := tree.read(name); ok {
-			if match := lumeDestRE.FindSubmatch(content); match != nil {
+			if match := lumeDestRE.FindSubmatch(jsBlankComments(content)); match != nil {
 				generator.output = siteOutput(string(match[1]), "_site")
 			}
 			generator.note(name, "Lume configuration; the build writes "+generator.output+"/")
