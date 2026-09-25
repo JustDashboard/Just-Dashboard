@@ -1476,7 +1476,8 @@ warning, and a plain PHP application served from the repository root (`--root /a
 (WordPress, whose root is its own design, is exempt).
 
 A `package.json` whose build the recipe recognises gets the `assets` stage: Vite (with or without
-`laravel-vite-plugin`), Encore, or Laravel Mix. That stage starts from `vendor`, so the build finds PHP —
+`laravel-vite-plugin`), Encore, Laravel Mix, or `@wordpress/scripts` (`build/`, or its `--output-path`).
+That stage starts from `vendor`, so the build finds PHP —
 Wayfinder's Vite plugin runs `php artisan wayfinder:generate` — and `vendor/`, which the official
 starter kits import from (Flux's CSS, Ziggy); Node, npm and Corepack, with the manager releases the
 toolchain stage pinned (and Bun beside them), are copied from the reviewed Node image into `/opt/node`.
@@ -1496,19 +1497,26 @@ writes `public/js`, `public/css` and `mix-manifest.json`. Output outside the ser
 
 WordPress is recognised in every shape a repository holds it. **Core** (`wp-settings.php` and
 `wp-includes/version.php`, whose `$wp_version` is read as data) is served from its own root. A
-**wp-content** tree (`themes/`, `plugins/`, an `index.php` that is "Silence is golden"), a **theme**
-(`Theme Name:` in the first 8 KiB of `style.css`) and a **plugin** (`Plugin Name:` in a root PHP file's
-header) are copied into the WordPress release of the reviewed `wordpress:6-php8.4-fpm-alpine` image —
-only its files are taken — at `wp-content/`, `wp-content/themes/<text domain>` or
-`wp-content/plugins/<text domain>`, to be activated in wp-admin. When no `wp-config.php` is committed the
-recipe writes one, constant text again, that reads the database from the `DATABASE_URL` a linked MySQL
-or MariaDB supplies (or the official image's `WORDPRESS_DB_*` names) and keys and salts from
+**wp-content** tree (`themes/`, `plugins/` or `mu-plugins/` in a root no Composer framework owns, with
+WordPress's own evidence: an `index.php` that is "Silence is golden", or, with no `index.php`, a
+`themes/*/style.css` or `plugins/*` file carrying a theme's or plugin's header — a Laravel themer's
+`themes/` or a Slim application's `plugins/` is the application's own), a **theme** (`Theme Name:` in the
+first 8 KiB of `style.css`) and a **plugin** (`Plugin Name:` in a root PHP file's header) are copied into
+the WordPress release of the reviewed `wordpress:6-php8.4-fpm-alpine` image — only its files are taken —
+at `wp-content/`, `wp-content/themes/<text domain>` or `wp-content/plugins/<text domain>`, to be activated
+in wp-admin. The walk reads those headers itself (at most 32 files: the top of the checkout's
+`style.css` and PHP files, and `themes/*/style.css`), so a block theme (`theme.json`, `templates/`, no
+`index.php`) and a `@wordpress/create-block` plugin are WordPress roots too. A theme's or plugin's
+`package.json` is its asset build, never a Node service: a `wp-scripts build` (or a Vite build) runs in the
+`assets` stage from the directory the theme or plugin sits in inside WordPress, and exactly its output is
+copied, so the blocks a create-block plugin registers from `build/` exist. When no `wp-config.php` is
+committed the recipe writes one, constant text again, that reads the database from the `DATABASE_URL` a
+linked MySQL or MariaDB supplies (or the official image's `WORDPRESS_DB_*` names) and keys and salts from
 `WORDPRESS_*` when set, else WordPress generates and stores its own. **Bedrock** (`roots/wordpress`) is
 served from `web/` (the parent of its `wordpress-install-dir`) and reads its own configuration. Every shape
 installs WordPress's extensions, suggests MySQL (`wordpress_database_required`, a decision, while no
 database is linked or configured) and keeps `wp-content/uploads` (Bedrock's `web/app/uploads`) as
-state. A plugin repository with neither an `index.php` nor a `composer.json` at its root names no PHP
-root and is reported as nothing to deploy.
+state.
 
 ## Readiness, workers and start commands
 

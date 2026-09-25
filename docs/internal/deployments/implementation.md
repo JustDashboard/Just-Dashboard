@@ -302,7 +302,9 @@ only renderer/executor/validation authority for their feature.
   `detect_deno.go` read, after the walk and under budgets of their own, what those recipes decide from
   beyond the manifest (the lock, the declared release, the code's extension calls, a WordPress tree's
   shape) through one reader that detection and preparation share, and record it as the candidate's
-  `php` and `deno` facts for preflight. A `Procfile`'s `web:`
+  `php` and `deno` facts for preflight; only a WordPress theme's or plugin's header at the top of the
+  checkout is read by the walk itself (at most 32 file heads), since nothing else names a block theme's
+  or a create-block plugin's directory. A `Procfile`'s `web:`
   process outranks every guess, and another platform's deployment file (`fly.toml`, `render.yaml`,
   `app.json`, Kamal's `config/deploy.yml`, …) outranks the framework's defaults. The candidate carries `spaFallback` (a client-routed site's nginx
   fallback), `pythonVersion`, `unpinnedDependencies` (a `dependencies_unpinned` preflight warning,

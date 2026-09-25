@@ -93,12 +93,21 @@ type detectedMarkers struct {
 	// node is the package's install inputs, read after the walk under
 	// their own budget.
 	node *nodeInstallSource
+
+	// wordpressHeader: a file at the top of the checkout, or a theme under
+	// its themes/, carries WordPress's header (wordpressRootHeader).
+	wordpressHeader bool
 }
 
 // phpOwnsAssets says the PHP recipe builds this root's package.json itself:
 // a PHP framework's package.json, or a PHP application's Vite, Encore or
 // Mix build, is a stage of the PHP image, not a site of its own.
 func (m *detectedMarkers) phpOwnsAssets() bool {
+	if m.wordpressHeader {
+		// A WordPress theme's or plugin's package.json builds its assets,
+		// never a site of its own.
+		return true
+	}
 	if manifest, ok := parseComposerManifest(m.composerJSON); ok && phpFrameworkOf(manifest) != "" {
 		return true
 	}
@@ -141,6 +150,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	detectCtx, cancel := context.WithTimeout(ctx, limits.MaxDuration)
 	defer cancel()
 	markers := map[string]*detectedMarkers{}
+	wordpressHeads := 0
 	shape := newRepoShapeScan(root, limits)
 	goSources := newGoSourceScan()
 	schemaPaths := []string{}
@@ -314,6 +324,18 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			denoEntryPaths = append(denoEntryPaths, filepath.ToSlash(rel))
 		}
 		if !interesting {
+			if wordpressHeads < 32 && result.ScannedFiles < limits.MaxFiles && wordpressHeaderPath(filepath.ToSlash(rel), name) {
+				wordpressHeads++
+				result.ScannedFiles++
+				found, n := wordpressRootHeader(path, name)
+				result.ScannedBytes += n
+				if found {
+					if markers[""] == nil {
+						markers[""] = &detectedMarkers{root: "", pythonFiles: map[string][]byte{}, csprojs: map[string][]byte{}}
+					}
+					markers[""].wordpressHeader = true
+				}
+			}
 			network.observeFile(path, filepath.ToSlash(rel), entry.Name())
 			if scanner.factFile(filepath.ToSlash(rel), name) || scanner.scannable(filepath.ToSlash(rel), name) {
 				// Application code is read under the scanner's own budget, apart
@@ -825,7 +847,7 @@ func candidatesForMarkers(marker *detectedMarkers, schemaPaths []string, pythonE
 	if len(marker.denoJSON) > 0 {
 		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, denoCandidate(marker, rootLabel)))
 	}
-	if len(marker.composerJSON) > 0 || marker.phpIndex || marker.phpPublicIndex || marker.phpDocroot != "" {
+	if len(marker.composerJSON) > 0 || marker.phpIndex || marker.phpPublicIndex || marker.phpDocroot != "" || marker.wordpressHeader {
 		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, phpCandidate(marker, rootLabel)))
 	}
 	if marker.staticFile != "" && len(marker.packageJSON) == 0 {

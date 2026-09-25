@@ -301,6 +301,9 @@ func phpCandidate(marker *detectedMarkers, rootLabel string) DetectedCandidate {
 		}
 		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: source, Reason: reason})
 		candidate.UnpinnedDependencies = !marker.composerLock
+	} else if header := project.wordpress.header; header != "" && !marker.phpIndex {
+		// A block theme or a create-block plugin has no index.php.
+		source = joinRoot(marker.root, header)
 	} else {
 		source = joinRoot(marker.root, "index.php")
 	}
@@ -332,7 +335,11 @@ func phpCandidate(marker *detectedMarkers, rootLabel string) DetectedCandidate {
 		case "content":
 			reason = "a wp-content directory (themes/, plugins/), served inside the WordPress release the recipe copies in"
 		}
-		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: source, Reason: reason})
+		evidence := source
+		if project.wordpress.header != "" {
+			evidence = joinRoot(marker.root, project.wordpress.header)
+		}
+		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: evidence, Reason: reason})
 		if shape != "bedrock" && !project.wordpress.config {
 			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(marker.root, "wp-config.php"),
 				Reason: "no wp-config.php is committed; the recipe writes one that reads the database from DATABASE_URL"})
@@ -414,7 +421,7 @@ func phpCandidate(marker *detectedMarkers, rootLabel string) DetectedCandidate {
 		}
 	}
 	assets := project.assets
-	building := (parsed || len(marker.composerJSON) == 0) && len(marker.packageJSON) > 0 && assets.kind != "" && project.wordpress.shape == ""
+	building := (parsed || len(marker.composerJSON) == 0) && len(marker.packageJSON) > 0 && assets.kind != "" && phpBuildsAssets(project.wordpress.shape)
 	if building && assets.mixUnbuilt {
 		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(marker.root, "webpack.mix.js"),
 			Reason: "Laravel Mix assets are not committed and package.json has no production script to build them"})
@@ -596,7 +603,7 @@ func selectPHPRecipe(boundary, root string, config BuildPlanConfig) (phpRecipe, 
 		recipe.lockUpdate = []string{"*"}
 	}
 	assets := project.assets
-	if assets.kind != "" && !assets.mixUnbuilt && assets.output != "" && project.wordpress.shape == "" {
+	if assets.kind != "" && !assets.mixUnbuilt && assets.output != "" && phpBuildsAssets(project.wordpress.shape) {
 		source, plan, err := phpAssetInstall(root, config.PackageManager, nodeTargetArch(config.TargetPlatform), assets.script)
 		if err != nil {
 			return phpRecipe{}, err
@@ -634,6 +641,25 @@ func phpRecipeBases(recipe phpRecipe) []string {
 
 func phpWordPressCopiesCore(shape string) bool {
 	return shape == "content" || shape == "theme" || shape == "plugin"
+}
+
+// phpBuildsAssets: package.json's build runs for an application, and for a
+// WordPress theme or plugin (wp-scripts' blocks) where it is copied into
+// WordPress; a core, wp-content or Bedrock tree commits what it serves.
+func phpBuildsAssets(shape string) bool {
+	return shape == "" || shape == "theme" || shape == "plugin"
+}
+
+// working is where the repository sits in the image: inside the WordPress
+// release for a wp-content tree, a theme or a plugin, /app otherwise.
+func (r phpRecipe) working() string {
+	switch r.wordpress {
+	case "content":
+		return "wp-content"
+	case "theme", "plugin":
+		return "wp-content/" + r.wordpress + "s/" + r.wordpressSlug
+	}
+	return ""
 }
 
 // phpIniLines are the production settings every PHP image runs with:
@@ -764,15 +790,10 @@ func renderPHPDockerfile(recipe phpRecipe, config BuildPlanConfig, bases []Resol
 		lines = append(lines, "RUN apk add --no-cache git")
 	}
 	lines = append(lines, "COPY --from=composer /usr/bin/composer /usr/bin/composer", "FROM php-base AS vendor")
-	working := ""
-	switch recipe.wordpress {
-	case "content":
-		lines = append(lines, "COPY --from=wordpress /usr/src/wordpress /app", "COPY . wp-content/")
-		working = "wp-content"
-	case "theme", "plugin":
-		working = "wp-content/" + recipe.wordpress + "s/" + recipe.wordpressSlug
+	working := recipe.working()
+	if working != "" {
 		lines = append(lines, "COPY --from=wordpress /usr/src/wordpress /app", "COPY . "+working+"/")
-	default:
+	} else {
 		lines = append(lines, "COPY . .")
 	}
 	if recipe.framework == "laravel" {
@@ -813,7 +834,8 @@ func renderPHPDockerfile(recipe phpRecipe, config BuildPlanConfig, bases []Resol
 	}
 	lines = append(lines, "FROM php-base", "COPY --from=vendor /app /app")
 	if recipe.assets != "" {
-		lines = append(lines, "COPY --from=assets /app/"+recipe.output+" /app/"+recipe.output)
+		output := path.Join(working, recipe.output)
+		lines = append(lines, "COPY --from=assets /app/"+output+" /app/"+output)
 	}
 	if recipe.wordpress != "" && recipe.wordpress != "bedrock" {
 		write := "RUN mkdir -p wp-content/uploads"
@@ -857,6 +879,10 @@ func phpAssetStage(recipe phpRecipe, bases []ResolvedImage, installSecrets, buil
 		"COPY --from=assets-toolchain /usr/local /opt/node",
 		"COPY --from=assets-toolchain /opt /opt",
 		"ENV PATH=/opt/node/bin:$PATH")
+	if working := recipe.working(); working != "" {
+		// A theme's or plugin's build runs where it sits inside WordPress.
+		lines = append(lines, "WORKDIR /app/"+working)
+	}
 	for _, line := range toolchain {
 		if strings.HasPrefix(line, "ENV ") {
 			lines = append(lines, line)

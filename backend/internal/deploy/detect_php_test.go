@@ -514,6 +514,13 @@ func TestWordPressShapes(t *testing.T) {
 			map[string]string{"acme-forms.php": "<?php\n/**\n * Plugin Name: Acme Forms\n */", "index.php": "<?php // Silence is golden."}},
 		{"content", "content", "COPY --from=wordpress /usr/src/wordpress /app\nCOPY . wp-content/\n",
 			map[string]string{"index.php": "<?php // Silence is golden.", "themes/acme/style.css": "/* Theme Name: Acme */", "plugins/index.php": "<?php"}},
+		{"content without an index.php", "content", "COPY . wp-content/\n",
+			map[string]string{"themes/acme/style.css": "/*\nTheme Name: Acme\n*/", "plugins/forms/forms.php": "<?php\n/*\n * Plugin Name: Forms\n */", "mu-plugins/loader.php": "<?php"}},
+		// A block theme and a @wordpress/create-block plugin have no index.php;
+		// their headers name the root.
+		{"block theme", "theme", "COPY . wp-content/themes/acme-blocks/\n",
+			map[string]string{"style.css": "/*\nTheme Name: Acme Blocks\nText Domain: acme-blocks\nRequires at least: 6.6\n*/", "theme.json": `{"version":3}`,
+				"templates/index.html": "<!-- wp:post-content /-->", "parts/header.html": "<!-- wp:site-title /-->", "functions.php": "<?php"}},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			t.Parallel()
@@ -523,6 +530,44 @@ func TestWordPressShapes(t *testing.T) {
 			}
 			assertDockerfile(t, prepared.DockerfilePreview, []string{"FROM wordpress:6-php8.4-fpm-alpine@sha256:", " AS wordpress\n", fixture.copy, "> wp-config.php"}, nil)
 		})
+	}
+
+	// A create-block plugin's blocks are registered from what wp-scripts
+	// writes, so its build runs where the plugin sits inside WordPress; its
+	// package.json is not a Node service of its own.
+	plugin := map[string]string{
+		"acme-blocks.php":       "<?php\n/**\n * Plugin Name:       Acme Blocks\n * Text Domain:       acme-blocks\n */\nadd_action('init', fn () => register_block_type(__DIR__ . '/build/notice'));\n",
+		"package.json":          `{"name":"acme-blocks","scripts":{"build":"wp-scripts build","start":"wp-scripts start"},"devDependencies":{"@wordpress/scripts":"^30.0.0"}}`,
+		"package-lock.json":     `{"lockfileVersion":3,"packages":{"":{"devDependencies":{"@wordpress/scripts":"^30.0.0"}}}}`,
+		"src/notice/block.json": `{"name":"acme/notice"}`, "src/notice/index.js": "",
+	}
+	result, candidate = detectNodeTree(t, plugin)
+	if len(result.Candidates) != 1 || candidate.PHP.WordPress != "plugin" || candidate.PHP.AssetOutput != "build" ||
+		!slices.ContainsFunc(candidate.Evidence, func(evidence DetectionEvidence) bool {
+			return evidence.Path == "acme-blocks.php" && strings.HasPrefix(evidence.Reason, "a WordPress plugin (its header)")
+		}) {
+		t.Fatalf("candidates = %+v", result.Candidates)
+	}
+	_, prepared, _ = phpPlan(t, plugin)
+	assertDockerfile(t, prepared.DockerfilePreview, []string{
+		"COPY . wp-content/plugins/acme-blocks/\n",
+		"FROM vendor AS assets\n", "WORKDIR /app/wp-content/plugins/acme-blocks\n", "RUN npm ci", "RUN npm run build\n",
+		"COPY --from=assets /app/wp-content/plugins/acme-blocks/build /app/wp-content/plugins/acme-blocks/build\n",
+	}, nil)
+	plugin["package.json"] = `{"scripts":{"build":"wp-scripts build --output-path=dist"},"devDependencies":{"@wordpress/scripts":"^30.0.0"}}`
+	_, prepared, _ = phpPlan(t, plugin)
+	assertDockerfile(t, prepared.DockerfilePreview, []string{"COPY --from=assets /app/wp-content/plugins/acme-blocks/dist /app/wp-content/plugins/acme-blocks/dist\n"}, nil)
+
+	// A themes/ or plugins/ directory outside WordPress is the application's
+	// own: a Laravel themer, a Slim plugin system, plain PHP.
+	for name, files := range map[string]map[string]string{
+		"laravel themer": laravelTree(map[string]string{"themes/default/views/welcome.blade.php": "<h1>hi</h1>", "themes/default/css/app.css": ""}),
+		"slim plugins":   {"composer.json": `{"require":{"slim/slim":"^4"}}`, "plugins/Hello/Plugin.php": "<?php", "public/index.php": "<?php"},
+		"plain plugins":  {"plugins/hello.php": "<?php", "public/index.php": "<?php"},
+	} {
+		if _, candidate := detectNodeTree(t, files); candidate.Framework == "wordpress" || candidate.PHP.WordPress != "" {
+			t.Fatalf("%s was read as WordPress: %+v", name, candidate)
+		}
 	}
 
 	candidate, prepared, _ = phpPlan(t, map[string]string{

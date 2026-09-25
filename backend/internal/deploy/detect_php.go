@@ -139,7 +139,7 @@ type phpProject struct {
 // phpAssets is the application's front-end build: which tool, the package
 // script that runs it, where it writes and what it reads.
 type phpAssets struct {
-	kind     string // vite, encore or mix
+	kind     string // vite, encore, mix or wp-scripts
 	script   string
 	output   string
 	evidence []string
@@ -152,10 +152,10 @@ type phpAssets struct {
 // phpWordPress is a WordPress tree's shape: core (WordPress itself
 // committed), content (a wp-content directory), theme, plugin, or bedrock
 // (Composer-managed, served from web/). slug is where a theme or plugin
-// lives under wp-content.
+// lives under wp-content, and header the file that says what it is.
 type phpWordPress struct {
-	shape, version, slug string
-	config               bool
+	shape, version, slug, header string
+	config                       bool
 }
 
 // readPHPProjects reads every PHP root detection found, after the walk and
@@ -173,7 +173,7 @@ func readPHPProjects(checkout string, markers map[string]*detectedMarkers) {
 			// else owns the directory above it.
 			marker.phpDocroot = ""
 		}
-		if len(marker.composerJSON) == 0 && !marker.phpIndex && !marker.phpPublicIndex && marker.phpDocroot == "" {
+		if len(marker.composerJSON) == 0 && !marker.phpIndex && !marker.phpPublicIndex && marker.phpDocroot == "" && !marker.wordpressHeader {
 			continue
 		}
 		project := readPHPProject(nodeFiles{root: root, dir: filepath.ToSlash(marker.root), budget: newPHPReadBudget()})
@@ -221,8 +221,12 @@ func wordpressStatePaths(candidate *DetectedCandidate, marker *detectedMarkers, 
 		uploads = path.Join(marker.php.bedrockWebRoot, "app/uploads")
 	}
 	target := layout.containerPath(uploads)
+	source := "index.php"
+	if marker.php.wordpress.header != "" {
+		source = marker.php.wordpress.header
+	}
 	return []DetectedPersistentPath{{Kind: PersistentUploads, Path: target, Target: target,
-		Source: joinRoot(marker.root, "index.php"), Reason: "WordPress stores uploaded media in " + uploads + "/"}}
+		Source: joinRoot(marker.root, source), Reason: "WordPress stores uploaded media in " + uploads + "/"}}
 }
 
 // openPHPProject reads the application at a build root, the way detection
@@ -518,6 +522,7 @@ var (
 	viteOutDirRE        = regexp.MustCompile(`outDir\s*:\s*['"]([A-Za-z0-9_./-]+)['"]`)
 	viteVendorImportRE  = regexp.MustCompile(`vendor/([a-z0-9_.-]+/[a-z0-9_.-]+)`)
 	encoreOutputRE      = regexp.MustCompile(`\.setOutputPath\(\s*['"]([A-Za-z0-9_./-]+)['"]`)
+	wpScriptsOutputRE   = regexp.MustCompile(`--output-path[=\s]+['"]?([A-Za-z0-9_./-]+)`)
 	assetPathRE         = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_./-]*$`)
 )
 
@@ -561,6 +566,13 @@ func readPHPAssets(files nodeFiles, project phpProject) phpAssets {
 			if match := encoreOutputRE.FindSubmatch(config); match != nil {
 				assets.output = string(match[1])
 			}
+		}
+	case manifest.has("@wordpress/scripts"):
+		// A block theme's or plugin's blocks are registered from what
+		// wp-scripts writes, build/ unless --output-path moves it.
+		assets.kind, assets.script, assets.output = "wp-scripts", "build", "build"
+		if match := wpScriptsOutputRE.FindStringSubmatch(manifest.Scripts["build"]); match != nil {
+			assets.output = match[1]
 		}
 	case manifest.has("laravel-vite-plugin") || manifest.has("vite"):
 		assets.kind, assets.script = "vite", "build"
@@ -608,7 +620,7 @@ func readPHPAssets(files nodeFiles, project phpProject) phpAssets {
 }
 
 // phpAssetKind says package.json's build is one the PHP recipe's asset stage
-// runs, from the manifest alone: Vite, Encore or Laravel Mix.
+// runs, from the manifest alone: Vite, Encore, Laravel Mix or wp-scripts.
 func phpAssetKind(content []byte) string {
 	var manifest nodeManifest
 	if !parseNodeManifest(content, &manifest) {
@@ -621,6 +633,8 @@ func phpAssetKind(content []byte) string {
 		return ""
 	case manifest.has("@symfony/webpack-encore"):
 		return "encore"
+	case manifest.has("@wordpress/scripts"):
+		return "wp-scripts"
 	case manifest.has("laravel-vite-plugin") || manifest.has("vite"):
 		return "vite"
 	}
@@ -655,6 +669,7 @@ func readPHPWordPress(files nodeFiles, project phpProject) phpWordPress {
 	if head := phpFileHead(files, "style.css"); head != nil {
 		if headers := wordpressHeaders(head); headers["Theme Name"] != "" {
 			wordpress.shape, wordpress.slug = "theme", wordpressSlug(headers["Text Domain"], headers["Theme Name"], "theme")
+			wordpress.header = "style.css"
 			return wordpress
 		}
 	}
@@ -667,17 +682,96 @@ func readPHPWordPress(files nodeFiles, project phpProject) phpWordPress {
 		}
 		head := phpFileHead(files, entry.Name())
 		if headers := wordpressHeaders(head); headers["Plugin Name"] != "" {
-			wordpress.shape = "plugin"
+			wordpress.shape, wordpress.header = "plugin", entry.Name()
 			wordpress.slug = wordpressSlug(headers["Text Domain"], strings.TrimSuffix(entry.Name(), ".php"), "plugin")
 			return wordpress
 		}
 	}
-	if files.dirExists("themes") || files.dirExists("plugins") || files.dirExists("mu-plugins") {
-		if index := phpFileHead(files, "index.php"); index == nil || strings.Contains(string(index), "Silence is golden") {
+	// A themes/ or plugins/ directory is common outside WordPress (Laravel
+	// themers, plugin systems), so a wp-content tree is one no framework
+	// owns that says it is WordPress's: the "Silence is golden" index.php,
+	// or, with no index.php, a theme's or plugin's own header inside it.
+	if project.framework == "" && (files.dirExists("themes") || files.dirExists("plugins") || files.dirExists("mu-plugins")) {
+		index := phpFileHead(files, "index.php")
+		if (index != nil && strings.Contains(string(index), "Silence is golden")) || (index == nil && wordpressContentHeaders(files)) {
 			wordpress.shape = "content"
 		}
 	}
 	return wordpress
+}
+
+// wordpressContentHeaders says a wp-content tree holds a theme (themes/*/
+// style.css) or a plugin (plugins/*/*.php, plugins/*.php, mu-plugins/*.php)
+// that carries WordPress's header, looking at a bounded number of each.
+func wordpressContentHeaders(files nodeFiles) bool {
+	for index, theme := range phpListDirectory(files, "themes") {
+		if index >= 32 {
+			break
+		}
+		if theme.IsDir() && wordpressHeaders(phpFileHead(files, "themes/"+theme.Name()+"/style.css"))["Theme Name"] != "" {
+			return true
+		}
+	}
+	plugin := func(name string) bool {
+		return strings.HasSuffix(name, ".php") && wordpressHeaders(phpFileHead(files, name))["Plugin Name"] != ""
+	}
+	for _, dir := range []string{"plugins", "mu-plugins"} {
+		for index, entry := range phpListDirectory(files, dir) {
+			if index >= 32 {
+				break
+			}
+			name := dir + "/" + entry.Name()
+			if !entry.IsDir() {
+				if plugin(name) {
+					return true
+				}
+				continue
+			}
+			for count, file := range phpListDirectory(files, name) {
+				if count >= 16 {
+					break
+				}
+				if plugin(name + "/" + file.Name()) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// wordpressHeaderPath names the files whose header makes the top of the
+// checkout a WordPress root: its own style.css or PHP files (a theme, a
+// plugin), and a theme's style.css under themes/ (a wp-content tree).
+func wordpressHeaderPath(rel, name string) bool {
+	switch parts := strings.Split(rel, "/"); len(parts) {
+	case 1:
+		return name == "style.css" || strings.HasSuffix(name, ".php")
+	case 3:
+		return parts[0] == "themes" && name == "style.css"
+	}
+	return false
+}
+
+// wordpressRootHeader says the head of such a file carries a theme's
+// (style.css) or a plugin's (*.php) header: the repository is a WordPress
+// root even without an index.php (a block theme, a @wordpress/create-block
+// plugin, a wp-content tree). It is read during the walk, because nothing
+// else names that directory.
+func wordpressRootHeader(path, name string) (bool, int64) {
+	header := "Plugin Name"
+	if name == "style.css" {
+		header = "Theme Name"
+	} else if !strings.HasSuffix(name, ".php") {
+		return false, 0
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return false, 0
+	}
+	defer file.Close()
+	head, _ := io.ReadAll(io.LimitReader(file, 8<<10))
+	return wordpressHeaders(head)[header] != "", int64(len(head))
 }
 
 // phpFileHead is the first 8 KiB of a file, where WordPress reads a theme's
