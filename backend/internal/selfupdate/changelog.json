@@ -69,8 +69,8 @@
         },
         {
           "kind": "changed",
-          "text": "The Git page is a list of repository cards, worst first",
-          "detail": "The four tiles are gone; every figure they carried was already on a filter chip, which also narrows the list. Each card carries the branch, where it lives, the last commit with its author's colour, and how far it stands from its upstream, ordered under Needs attention by what is most wrong. Branches, commits and pull requests are drawn with real git glyphs, and a diff numbers its lines in two gutters that stay put while a long line scrolls."
+          "text": "The Git page shelves its repositories by account, as cards",
+          "detail": "The four tiles are gone; every figure they carried was already on a filter chip, which also narrows the list. The checkouts sit on one shelf per account their remote belongs to, drawn as the account's own picture, three or four cards to a row; each card carries the branch, where it lives, the last commit with its author's colour, how far it stands from its upstream and the shape of its working tree, worst first on the shelf and the shelf with something wrong on it first. A repository checked out twice draws each pull request once. Branches, commits and pull requests are drawn with real git glyphs, and a diff numbers its lines in two gutters that stay put while a long line scrolls."
         },
         {
           "kind": "added",

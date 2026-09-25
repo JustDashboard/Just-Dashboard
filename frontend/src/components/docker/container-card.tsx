@@ -23,7 +23,7 @@ import { ProductLogo, imageProduct } from "@/components/product-logo"
  * One container, as a card you open — at every width.
  *
  * It replaced a nine-column table on the desktop and a hairlined list on a
- * phone, and the argument is the one `git/repo-row.tsx` made for checkouts:
+ * phone, and the argument is the one `git/repo-card.tsx` made for checkouts:
  * every row here is a place to go (the container's own page), so it is a
  * choice and carries the lit edge §16 gives to things you take. The readings
  * did not become less of a reading by moving into a card; what the table spent

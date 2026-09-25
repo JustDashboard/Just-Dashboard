@@ -445,7 +445,7 @@ function RowTraffic({ pulse }: { pulse: TrafficPulse }) {
 /**
  * A card in the grid.
  *
- * Built the way `git/repo-row.tsx` builds a destination rather than as a
+ * Built the way `git/repo-card.tsx` builds a destination rather than as a
  * `ChoiceRow`: a card is taller than a row and lays its readings out in
  * lines, not in a row's trailing measures. The press anywhere on it opens the
  * project, except on a control of its own — the name, the address, the verbs

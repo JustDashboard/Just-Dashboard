@@ -5,15 +5,10 @@ import { useRouter } from "next/navigation"
 import { ArrowRight, External, Play, RotateCounterClockwise } from "@/components/icons"
 import { post } from "@/lib/api"
 import { plural } from "@/lib/format"
+import type { RepoPulls } from "@/lib/git-repos"
 import { canTest, cleanupFailed, previewHeld, previewOutOfDate } from "@/lib/pull-requests"
 import { notify } from "@/lib/toast"
-import type {
-  DeploymentEngineRun,
-  DeploymentPreview,
-  GitPullRequest,
-  GitPullRequestSummary,
-  GitRepo,
-} from "@/lib/types"
+import type { DeploymentEngineRun, DeploymentPreview, GitPullRequest, GitRepo } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { AheadBehind } from "@/components/git/ahead-behind"
@@ -22,66 +17,79 @@ import { BranchChip, CommitLine, WorkingTreeBar } from "@/components/git/marks"
 import { MergePullDialog } from "@/components/git/merge-pull-dialog"
 import { PullRequestRow } from "@/components/git/pull-request-row"
 import { TestPullDialog } from "@/components/git/test-pull-dialog"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { CONTROL, ChoiceList, ChoiceRow } from "@/components/flow"
 import { Modal } from "@/components/modal"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
+import { BlurFade } from "@/components/ui/blur-fade"
 import { SpotlightBorder } from "@/components/ui/spotlight-border"
 import type { Verb } from "@/components/verbs"
 
-/** One checkout's entry in the pull-request summary: its open pull requests and who deploys it. */
-export type RepoPulls = GitPullRequestSummary["repos"][number]
 type Deployment = RepoPulls["deployments"][number]
 
 /** How many pull requests a card shows before it says "and N more". */
 const STRIP = 3
 
 /**
- * One checkout on this host, as the card a git client draws for a repository.
- *
- * It replaced a five-column table, and the argument for the change is what the
- * table was spending its columns on. Two of them — Branch and Upstream — held
- * one short string each and were sized for the longest branch name in the
- * list, so on a screen with four repositories on it the eye crossed two
- * hundred pixels of nothing to read `main`. A third, Last commit, is three
- * facts (who, what, when) which a cell can only stack or truncate. Meanwhile
- * the question actually asked of this list — *which of these needs me* — was
- * answered by reading down a column.
- *
- * Two lines, which is what the facts want: **what this is** — name, where HEAD
- * is, where on disk — and **what last happened in it** — who, which commit,
- * when. The two readings that decide whether to open it are held out on the
- * right, one per line, so a column of cards is scanned down: how far the
- * branch has drifted from its upstream above, and the shape of the working
- * tree below. Three lines was the first draft and was wrong at width: the path
- * on a line of its own left half a wide screen empty beside it, and thirty
- * repositories became a page nobody scrolls.
- *
- * Under those, when GitHub has open pull requests for the checkout, a strip
- * of up to three of them: what is waiting to be merged is the other half of
- * "which of these needs me", and it used to be a tab inside the workspace,
- * one click and a scroll away from the question. Each is a choice of its
- * own with its own verbs — test it as a preview, merge it, open it — inside
- * a container that stops the press reaching the card, because a card that
- * opens the repository when its "Merge" is pressed is the defect
- * `ChoiceRow`'s actions slot exists to prevent.
- *
- * It is a **choice**, not a reading: every row here is a repository to enter,
- * which §15 pass 3 and §16 both settle — the lit edge belongs to things you
- * pick, wherever they are. The title is a real button whose accessible name is
- * the repository, and the press on the card around it is the convenience for
- * the pointer (§12).
+ * The grid a shelf of cards is laid out in — beside the card, as `ChoiceGrid`
+ * keeps its own. As many columns as the width holds at twenty-two rems each:
+ * two on a 1280 screen, three at 1440 and 1720, four past 1900, one on a
+ * phone, where `min(…, 100%)` gives a screen narrower than a card a column
+ * rather than a sideways scroll. Twenty was the first measure and made four
+ * columns at 1720, where a pull request's title on the card's foot was three
+ * words and an ellipsis. The rows are equal, so a card with a pull request on
+ * it does not push its neighbours' feet out of line.
  */
-export function RepoRow({
+export const REPO_GRID =
+  "grid min-w-0 auto-rows-fr gap-3 grid-cols-[repeat(auto-fill,minmax(min(22rem,100%),1fr))]"
+
+/**
+ * One checkout on this host, as a card on a shelf of its account's.
+ *
+ * It was a row the width of the page, and the argument for the change is
+ * what a row that wide did with its width. Two lines of facts — name, branch,
+ * path; who, which commit, when — sat at the left, two readings at the right,
+ * and between them on a wide screen ran three hundred pixels of nothing; a
+ * page of six looked like a table that had lost its columns, and the reader
+ * said so. Stacked in a card the same facts are read top to bottom the way a
+ * forge draws a repository, and three or four cards to a row put a whole
+ * account on one screen.
+ *
+ * The order down the card is the order the question is asked in. **What this
+ * is**: the name, with how far its branch has drifted from the upstream held
+ * out at the right. **Where HEAD is**, with the shape of the working tree
+ * held out beside it — the two readings that decide whether to open it, one
+ * per line, so a shelf of cards is scanned across. Where on disk. **What last
+ * happened**, as a forge draws a commit. And on the foot, when GitHub has
+ * open pull requests for the checkout, up to three of them: what is waiting
+ * to be merged is the other half of "which of these needs me", and it used
+ * to be a tab inside the workspace, one click and a scroll away. Each is a
+ * choice of its own with its own verbs — test it as a preview, merge it,
+ * open it — inside a container that stops the press reaching the card,
+ * because a card that opens the repository when its "Merge" is pressed is
+ * the defect `ChoiceRow`'s actions slot exists to prevent. The strip sits on
+ * the foot rather than under the commit so a row of cards shares one
+ * baseline whether or not each has something to merge.
+ *
+ * It is a **choice**, not a reading: every card is a repository to enter,
+ * which §15 pass 3 and §16 both settle — the lit edge belongs to things you
+ * pick, wherever they are. The title is a real button whose accessible name
+ * is the repository, and the press on the card around it is the convenience
+ * for the pointer (§12), skipping the controls the card holds (`CONTROL`).
+ */
+export function RepoCard({
   repo,
   pulls,
+  index = 0,
   onOpen,
   onOpenPull,
   onPullsChanged,
 }: {
   repo: GitRepo
-  /** The checkout's open pull requests and its deploy projects, once the summary has arrived. */
+  /** The pull requests this card draws and the checkout's deploy projects, once the summary has arrived. */
   pulls?: RepoPulls
+  /** Position on the shelf, for the arrival stagger. */
+  index?: number
   onOpen: () => void
   /** Opens the workspace's GitHub tab — on one pull request when given a number. */
   onOpenPull?: (number?: number) => void
@@ -176,15 +184,23 @@ export function RepoRow({
 
   return (
     <li className="min-w-0">
-      <SpotlightBorder radius={420}>
-        <div
-          onClick={onOpen}
-          className="group/repo flex min-w-0 cursor-pointer items-center gap-3 rounded-xl px-3.5 py-2.5"
-        >
-          <div className="min-w-0 flex-1 space-y-1">
-            {/* What it is. The path takes the slack, so a wide screen spends
-                it on the one fact here that can be arbitrarily long. */}
-            <div className="flex min-w-0 items-center gap-x-2 gap-y-1">
+      {/* Each card lands a beat after the one before it, capped so a shelf
+          of forty does not take two seconds. */}
+      <BlurFade delay={Math.min(index, 11) * 0.03} className="h-full">
+        <SpotlightBorder radius={360} className="h-full">
+          <div
+            onClick={(event) => {
+              // React carries a press inside an open menu — a group label, a
+              // separator — up through its portal to here, though it landed
+              // nowhere on the card.
+              const target = event.target as HTMLElement
+              if (!event.currentTarget.contains(target) || target.closest(CONTROL)) return
+              onOpen()
+            }}
+            className="group group/choice flex h-full min-w-0 cursor-pointer flex-col gap-2 rounded-xl p-3.5"
+          >
+            {/* What it is, and how far it has drifted. */}
+            <div className="flex min-w-0 items-center gap-2">
               <button
                 type="button"
                 // The card's own handler already fires on the pointer; this one
@@ -193,55 +209,44 @@ export function RepoRow({
                   event.stopPropagation()
                   onOpen()
                 }}
-                className="max-w-[18rem] min-w-0 shrink-0 truncate rounded-sm text-left text-body font-medium focus-ring"
+                className="min-w-0 flex-1 truncate rounded-sm text-left text-title leading-tight font-medium focus-ring"
               >
                 {repo.name}
               </button>
-              <BranchChip
-                branch={repo.branch}
-                detached={repo.detached}
-                className="max-w-[16rem]"
-                title={
-                  repo.detached
-                    ? "Detached HEAD"
-                    : repo.upstream
-                      ? `tracks ${repo.upstream}`
-                      : "no upstream — pushing publishes this branch"
-                }
-              />
-              {/* Only the states that change what the next push does get a
-                  word. "tracks origin/main" is the normal case and is already
-                  on the branch chip's tooltip. */}
-              {repo.detached && <Tag tone="danger">detached</Tag>}
-              {repo.gone && <Tag tone="danger">upstream gone</Tag>}
-              {!repo.detached && !repo.empty && !repo.upstream && <Tag>not published</Tag>}
-              {/* gh could not answer for this checkout — not signed in as its
-                  owner, most often. One quiet word, with gh's own sentence a
-                  hover away; the card is still the repository. */}
-              {pulls?.error && <Tag title={pulls.error}>pull requests unavailable</Tag>}
-              <p
-                className="min-w-0 flex-1 truncate font-mono text-hint text-muted-foreground"
-                title={repo.path}
-              >
-                {repo.path}
-              </p>
               <AheadBehind ahead={repo.ahead} behind={repo.behind} />
+              <ArrowRight
+                aria-hidden
+                className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover/choice:text-foreground"
+              />
             </div>
 
-            {/* What last happened, and what is outstanding. */}
-            <div className="flex min-w-0 items-center gap-3">
-              <CommitLine
-                className="min-w-0 flex-1"
-                sha={repo.head}
-                subject={repo.subject}
-                author={repo.author}
-                at={repo.commitAt}
-                empty={repo.empty}
-              />
-              {/* A fixed measure, so the attribution to its left ends on the
-                  same column in every card: a row of them is a row (§15 pass
-                  9), and "clean" against "28 changes" is otherwise ragged. */}
-              <span className="flex shrink-0 items-center justify-end gap-1.5 sm:w-[7.5rem]">
+            {/* Where HEAD is, and the shape of the tree on it. */}
+            <div className="flex min-w-0 items-start gap-2">
+              <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+                <BranchChip
+                  branch={repo.branch}
+                  detached={repo.detached}
+                  className="max-w-full"
+                  title={
+                    repo.detached
+                      ? "Detached HEAD"
+                      : repo.upstream
+                        ? `tracks ${repo.upstream}`
+                        : "no upstream — pushing publishes this branch"
+                  }
+                />
+                {/* Only the states that change what the next push does get a
+                    word. "tracks origin/main" is the normal case and is already
+                    on the branch chip's tooltip. */}
+                {repo.detached && <Tag tone="danger">detached</Tag>}
+                {repo.gone && <Tag tone="danger">upstream gone</Tag>}
+                {!repo.detached && !repo.empty && !repo.upstream && <Tag>not published</Tag>}
+                {/* gh could not answer for this checkout — not signed in as its
+                    owner, most often. One quiet word, with gh's own sentence a
+                    hover away; the card is still the repository. */}
+                {pulls?.error && <Tag title={pulls.error}>pull requests unavailable</Tag>}
+              </span>
+              <span className="flex shrink-0 items-center gap-1.5 leading-[1.6]">
                 <WorkingTreeBar repo={repo} />
                 <span
                   className={cn(
@@ -258,11 +263,28 @@ export function RepoRow({
               </span>
             </div>
 
+            <p className="truncate font-mono text-hint text-muted-foreground" title={repo.path}>
+              {repo.path}
+            </p>
+
+            {/* What last happened. */}
+            <CommitLine
+              className="min-w-0"
+              sha={repo.head}
+              subject={repo.subject}
+              author={repo.author}
+              at={repo.commitAt}
+              empty={repo.empty}
+            />
+
             {/* What is waiting to be merged. The container swallows the
                 press: each row and each verb in it is a control of its own,
                 and none of them is "open the repository". */}
             {open.length > 0 && (
-              <div onClick={(event) => event.stopPropagation()} className="pt-1.5">
+              <div
+                onClick={(event) => event.stopPropagation()}
+                className="mt-auto border-t border-hairline pt-2.5"
+              >
                 <ChoiceList aria-label={`Pull requests in ${repo.name}`}>
                   {open.slice(0, STRIP).map((p) => (
                     <PullRequestRow
@@ -287,13 +309,8 @@ export function RepoRow({
               </div>
             )}
           </div>
-
-          <ArrowRight
-            aria-hidden
-            className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover/repo:text-foreground"
-          />
-        </div>
-      </SpotlightBorder>
+        </SpotlightBorder>
+      </BlurFade>
 
       {/* The dialogs stand beside the card, not inside it: a press in a
           portal still bubbles through the React tree, and inside the card
