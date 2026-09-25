@@ -211,7 +211,6 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
           path: "/databases",
           replaces: true,
           title: conn.name,
-          caption: info?.label ?? conn.driver,
           mark: <ProductGlyph id={conn.driver} />,
           groups: [
             {

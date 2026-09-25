@@ -91,7 +91,6 @@ type Panel = {
   key: string
   /** Absent on the top-level list, and on a panel whose subject has not loaded. */
   title?: string
-  caption?: string
   /**
    * The title is a name the reader gave something — a project, a connection —
    * rather than one of this product's words, so it is printed as written.
@@ -121,7 +120,6 @@ function fromScope(scope: NavScope): Panel {
   return {
     key: `scope:${scope.path}`,
     title: scope.title,
-    caption: scope.caption,
     named: true,
     mark: scope.mark,
     groups: scope.groups,
@@ -451,11 +449,6 @@ function PanelHead({ panel, parent, onBack }: { panel: Panel; parent: Panel; onB
           </p>
         ) : (
           <p className="eyebrow truncate leading-tight">{panel.title}</p>
-        )}
-        {panel.caption && (
-          <p className="mt-1 truncate text-hint leading-tight text-muted-foreground">
-            {panel.caption}
-          </p>
         )}
       </div>
     </div>

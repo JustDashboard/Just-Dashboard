@@ -67,7 +67,7 @@ turned `api-production` into API-PRODUCTION, so a scope's head (`named` in `app-
 as written at `text-hint` semibold, after the scope's `mark` — the thing drawn as itself at the line's
 height, a project's favicon or product (`ProjectMark size="xs"`), a connection's engine
 (`ProductGlyph`). The mark rides along with the rest of the scope but is not what decides a republish,
-so it is derived from the same data as the title and caption. A scope carries no `icon`: a glyph in a
+so it is derived from the same data as the title. A scope carries no `icon`: a glyph in a
 row's slot made the heading read as one more row to press.
 
 The groups run in the order a day on the server runs, and the rail names each group:
