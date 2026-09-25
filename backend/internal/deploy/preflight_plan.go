@@ -290,6 +290,11 @@ func startCommandFinding(recipe string, candidate *DetectedCandidate, build Buil
 	if strings.TrimSpace(build.StartCommand) != "" {
 		return PreflightFinding{}, false
 	}
+	// A Python or Deno build with an output directory is a site nginx
+	// serves (MkDocs, Sphinx, Lume): nothing starts.
+	if (recipe == "python" || recipe == "deno") && strings.TrimSpace(build.OutputDirectory) != "" {
+		return PreflightFinding{}, false
+	}
 	var example string
 	switch recipe {
 	case "python":

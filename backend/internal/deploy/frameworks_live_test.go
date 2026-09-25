@@ -36,9 +36,13 @@ func TestLiveDetectedFrameworkBuildAndServing(t *testing.T) {
 	// next-pnpm and express-yarn are the same kind of server installed by
 	// pnpm (a toolchain release the start command runs offline) and by
 	// Yarn 1 (its real frozen install), started through the manager.
+	// The site generators build on their own images — Hugo, Zola and mdBook
+	// as themselves, Jekyll on Ruby, MkDocs on Python, Lume on Deno,
+	// Eleventy from its own binary with no build script — and nginx serves
+	// what they wrote with clean URLs and the site's own 404 page.
 	for _, name := range []string{"vite", "next", "svelte-node", "svelte-static", "html", "containerfile", "go",
 		"astro", "nuxt", "react-router", "fastapi", "flask", "django", "rust", "java", "gradle", "dotnet", "deno", "laravel", "php",
-		"streamlit", "gradio", "next-pnpm", "express-yarn"} {
+		"streamlit", "gradio", "next-pnpm", "express-yarn", "hugo", "zola", "mdbook", "jekyll", "mkdocs", "lume", "eleventy"} {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 			defer cancel()
@@ -69,7 +73,8 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 				t.Fatalf("no unambiguous quick-setup candidate: %+v", detection.Candidates)
 			}
 			config := BuildPlanConfig{Method: candidate.BuildMethod, Recipe: candidate.Recipe, Dockerfile: candidate.Dockerfile,
-				BuildCommand: candidate.BuildCommand, StartCommand: candidate.StartCommand, OutputDirectory: candidate.OutputDirectory}
+				BuildCommand: candidate.BuildCommand, StartCommand: candidate.StartCommand, OutputDirectory: candidate.OutputDirectory,
+				SPAFallback: candidate.SPAFallback}
 			if name == "go" {
 				config.GoVersion, config.BuildCommand, config.StartCommand = "1.26.8", "go generate ./... && go build -o /out/app .", "/app custom-start"
 				candidate.Port = 8080
@@ -82,6 +87,10 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 			if config.Method == BuildRecipe {
 				config.Secrets = []BuildSecretConfig{{Variable: "PACKAGE_TOKEN", Step: "install"}}
 				variables = map[string]string{"PACKAGE_TOKEN": secret, "NEXT_PUBLIC_API_URL": value, "VITE_API_URL": value, "PUBLIC_API_URL": value}
+				if name == "mdbook" {
+					// mdBook reads its configuration from MDBOOK_ variables.
+					variables["MDBOOK_BOOK__TITLE"] = value
+				}
 			}
 			stamp := time.Now().UnixNano()
 			tag := fmt.Sprintf("jd-framework-test:%s-%d", name, stamp)
@@ -163,6 +172,22 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 			if !strings.Contains(content, value) {
 				t.Fatal("served application assets did not contain the configured build value")
 			}
+			// A site's other pages answer by their clean URLs, and a missing
+			// one with the site's own 404 page.
+			for _, path := range liveSitePaths[name] {
+				fetch(path)
+			}
+			if page, ok := liveSiteMissingPages[name]; ok {
+				response, err := httpClient.Get(base + "/no-such-page")
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+				_ = response.Body.Close()
+				if response.StatusCode != http.StatusNotFound || !strings.Contains(string(body), page) {
+					t.Fatalf("missing page: %d %q", response.StatusCode, body)
+				}
+			}
 			if name == "go" && (!strings.Contains(content, "custom-start go1.26.8") || result.Prepared.GoVersion != "1.26.8") {
 				t.Fatalf("Go override/version behavior missing: %q", content)
 			}
@@ -184,7 +209,15 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 				name == "php" && candidate.Framework != "php" ||
 				name == "next-pnpm" && (candidate.StartCommand != "pnpm run start" || result.Prepared.Toolchain != "pnpm 10.34.5 (lockfileVersion 9.0)") ||
 				name == "express-yarn" && (candidate.Framework != "express" || candidate.StartCommand != "yarn run start" ||
-					result.Prepared.Install != "yarn install --frozen-lockfile") {
+					result.Prepared.Install != "yarn install --frozen-lockfile") ||
+				name == "hugo" && (candidate.Framework != "hugo" || result.Prepared.Toolchain != "hugo "+hugoDefaultVersion+" (extended)") ||
+				name == "zola" && result.Prepared.Toolchain != "zola "+zolaDefaultVersion ||
+				name == "mdbook" && (result.Prepared.Toolchain != "mdbook 0.5.4" || candidate.OutputDirectory != "book/html") ||
+				name == "jekyll" && result.Prepared.Toolchain != "jekyll on ruby "+jekyllDefaultRuby ||
+				name == "mkdocs" && (candidate.Recipe != "python" || candidate.Framework != "mkdocs") ||
+				name == "lume" && (candidate.Recipe != "deno" || candidate.Framework != "lume") ||
+				name == "eleventy" && (candidate.BuildCommand != "npx @11ty/eleventy" || candidate.OutputDirectory != "dist") ||
+				name == "svelte-static" && !candidate.SPAFallback {
 				t.Fatalf("catalogue defaults for %s: %+v / %+v", name, candidate, result.Prepared)
 			}
 			if strings.Contains(content, secret) {
@@ -192,6 +225,20 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 			}
 		})
 	}
+}
+
+// liveSitePaths are pages beyond the home page each static fixture serves:
+// a generator's pretty URL, an about.html answered as /about, the fallback
+// SvelteKit writes for routes it did not prerender.
+var liveSitePaths = map[string][]string{
+	"hugo": {"/about", "/robots.txt"}, "zola": {"/about"}, "mdbook": {"/chapter"}, "jekyll": {"/about"},
+	"mkdocs": {"/guide"}, "lume": {"/about"}, "eleventy": {"/contact"}, "svelte-static": {"/about", "/deep/link"},
+}
+
+// liveSiteMissingPages are what each site's own 404 page says.
+var liveSiteMissingPages = map[string]string{
+	"hugo": "hugo not found page", "zola": "zola not found", "jekyll": "jekyll not found", "eleventy": "eleventy not found",
+	"mdbook": "Page not found",
 }
 
 func copyFrameworkFixture(t *testing.T, name, destination string) {

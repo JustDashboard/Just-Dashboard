@@ -103,9 +103,6 @@ func rubyEcosystem(root string, s *repoShapeScan) *ecosystemMatch {
 		match.framework, match.label, match.profile, match.port = "hanami", "Hanami application", ProfileWeb, 2300
 		match.remedy = "commit a Dockerfile that runs bundle install and bundle exec hanami server"
 		match.ownsAssets = true
-	case has(gems, "jekyll", "github-pages"):
-		match.framework, match.label, match.profile, match.port = "jekyll", "Jekyll site", ProfileStatic, 80
-		match.remedy = "bundle exec jekyll build writes _site/; commit a Dockerfile that builds it and serves _site with nginx"
 	case has(gems, "middleman"):
 		match.framework, match.label, match.profile, match.port = "middleman", "Middleman site", ProfileStatic, 80
 		match.remedy = "bundle exec middleman build writes build/; commit a Dockerfile that builds it and serves build/ with nginx"
@@ -237,14 +234,6 @@ var longTailEcosystems = []struct {
 		remedy: "commit a Dockerfile that builds with Meson and copies the program into a slim runtime"},
 	{key: "elm.json", file: "elm.json", language: "Elm", slug: "elm", profile: ProfileStatic,
 		remedy: "elm make compiles the site to JavaScript; commit a Dockerfile that builds it and serves the output with nginx"},
-	{key: "hugo.toml", file: "hugo.toml", language: "Hugo", slug: "hugo", profile: ProfileStatic,
-		remedy: "hugo --minify writes public/; commit a Dockerfile that builds it and serves public/ with nginx"},
-	{key: "hugo.yaml", file: "hugo.yaml", language: "Hugo", slug: "hugo", profile: ProfileStatic,
-		remedy: "hugo --minify writes public/; commit a Dockerfile that builds it and serves public/ with nginx"},
-	{key: "hugo.json", file: "hugo.json", language: "Hugo", slug: "hugo", profile: ProfileStatic,
-		remedy: "hugo --minify writes public/; commit a Dockerfile that builds it and serves public/ with nginx"},
-	{key: "mkdocs.yml", file: "mkdocs.yml", language: "MkDocs", slug: "mkdocs", profile: ProfileStatic,
-		remedy: "mkdocs build writes site/; commit a Dockerfile that builds it and serves site/ with nginx"},
 }
 
 func frameworksOf(values ...any) []struct {
@@ -308,11 +297,6 @@ func otherEcosystem(root string, s *repoShapeScan) *ecosystemMatch {
 		return &ecosystemMatch{language: "R", framework: "plumber", label: "R Plumber API", marker: joinRoot(root, "plumber.R"),
 			profile: ProfileWeb, port: 8000, primary: true,
 			remedy: "commit a Dockerfile on rstudio/plumber that installs the packages and runs plumber.R"}
-	}
-	if _, ok := files.files["_config.yml"]; ok && (s.hasDirectory(root, "_posts") || s.hasDirectory(root, "_layouts")) {
-		return &ecosystemMatch{language: "Jekyll", framework: "jekyll", label: "Jekyll site", marker: joinRoot(root, "_config.yml"),
-			profile: ProfileStatic, port: 80, primary: true,
-			remedy: "jekyll build writes _site/; commit a Dockerfile that builds it and serves _site with nginx"}
 	}
 	for _, entry := range longTailEcosystems {
 		content, ok := files.files[entry.key]

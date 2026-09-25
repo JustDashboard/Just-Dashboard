@@ -182,15 +182,20 @@ databases:
 			"package.json":      `{"name":"site","scripts":{"build":"vite build"},"devDependencies":{"vite":"6","@cloudflare/something":"1"}}`,
 			"package-lock.json": "{}",
 			"netlify.toml": "[build]\n  command = \"npm run build\"\n  publish = \"dist/client\"\n[build.environment]\n  NODE_VERSION = \"20\"\n" +
-				"[[redirects]]\n  from = \"/old\"\n  to = \"/new\"\n  status = 301\n[[redirects]]\n  from = \"/*\"\n  to = \"/index.html\"\n  status = 200\n",
+				"[[redirects]]\n  from = \"/old\"\n  to = \"/new\"\n  status = 301\n[[redirects]]\n  from = \"/*\"\n  to = \"/index.html\"\n  status = 200\n" +
+				"[[redirects]]\n  from = \"/blog/:year/:slug\"\n  to = \"/posts/:slug\"\n  status = 301\n",
 		})
 		candidate := selectedOf(result)
 		manifest := platformManifest(candidate, "netlify")
-		if candidate.OutputDirectory != "dist/client" || manifest.Redirects != 1 || !slices.Equal(manifest.Toolchains, []string{"node 20"}) {
+		// The plain redirect is applied by the static server; the one with
+		// placeholders is what is left out.
+		if candidate.OutputDirectory != "dist/client" || manifest.Redirects != 0 || !slices.Equal(manifest.Toolchains, []string{"node 20"}) ||
+			candidate.StaticSite == nil || candidate.StaticSite.HostingRules != 1 || candidate.StaticSite.HostingRulesLeftOut != 1 {
 			t.Fatalf("netlify = %#v", candidate)
 		}
-		findings := repoShapeFindings(&result, PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe}})
-		if !hasFinding(findings, "static_redirects_unsupported", PreflightWarning) {
+		configuration := PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe, Recipe: "node", OutputDirectory: "dist/client"}}
+		findings := append(repoShapeFindings(&result, configuration), staticSiteFindings(nil, &result, configuration)...)
+		if !hasFinding(findings, "static_redirects_unsupported", PreflightWarning) || !hasFinding(findings, "static_hosting_rules", PreflightPass) {
 			t.Fatalf("findings = %#v", findings)
 		}
 	})

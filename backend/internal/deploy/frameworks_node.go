@@ -59,6 +59,10 @@ type nodeFrameworkDefaults struct {
 	StartScripts []string
 	// BuildScript is the script that builds when it is not "build".
 	BuildScript string
+	// DefaultBuild is the framework's own build binary and arguments, run
+	// through the manager's runner when the package has no build script:
+	// `npx @11ty/eleventy` is how Eleventy's documentation builds a site.
+	DefaultBuild string
 }
 
 type nodeFrameworkResolution struct {
@@ -260,7 +264,42 @@ var nodeFrameworks = []nodeFramework{
 	},
 	{
 		Name: "eleventy", Label: "Eleventy", Dependencies: []string{"@11ty/eleventy"},
-		resolve: func(nodeManifest, nodeRootFiles, string) nodeFrameworkResolution { return static("_site", false) },
+		resolve: func(manifest nodeManifest, _ nodeRootFiles, _ string) nodeFrameworkResolution {
+			// The build script's --output wins over the configuration file's,
+			// which the shape pass reads (detect_site_generators.go).
+			output, _ := eleventyOutput(func(string) ([]byte, bool) { return nil, false }, manifest)
+			resolution := static(output, false)
+			resolution.DefaultBuild = "@11ty/eleventy"
+			return resolution
+		},
+	},
+	{
+		Name: "hexo", Label: "Hexo", Dependencies: []string{"hexo"},
+		resolve: func(nodeManifest, nodeRootFiles, string) nodeFrameworkResolution {
+			resolution := static("public", false)
+			resolution.DefaultBuild = "hexo generate"
+			return resolution
+		},
+	},
+	{
+		Name: "vuepress", Label: "VuePress", Dependencies: []string{"vuepress", "vuepress-vite", "vuepress-webpack", "@vuepress/cli"},
+		resolve: func(manifest nodeManifest, _ nodeRootFiles, _ string) nodeFrameworkResolution {
+			script, directory := siteScriptDirectory(manifest.Scripts, "vuepress build", "vuepress-vite build", "vuepress-webpack build")
+			resolution := static(path.Join(directory, ".vuepress", "dist"), false)
+			if script != "build" {
+				resolution.BuildScript = script
+			}
+			return resolution
+		},
+	},
+	{
+		// Slidev's slides are routes of one page: /2 is the second slide.
+		Name: "slidev", Label: "Slidev", Dependencies: []string{"@slidev/cli"},
+		resolve: func(nodeManifest, nodeRootFiles, string) nodeFrameworkResolution {
+			resolution := static("dist", true)
+			resolution.DefaultBuild = "slidev build"
+			return resolution
+		},
 	},
 	{
 		Name: "create-react-app", Label: "Create React App", Dependencies: []string{"react-scripts"},
@@ -489,4 +528,37 @@ func procfileProcess(content []byte, process string) string {
 		return strings.TrimSpace(command)
 	}
 	return ""
+}
+
+// siteScriptDirectory finds the script that runs one of a generator's build
+// commands and the source directory it names, since VuePress, like
+// VitePress, writes its site under that directory.
+func siteScriptDirectory(scripts map[string]string, commands ...string) (string, string) {
+	names := make([]string, 0, len(scripts))
+	for name := range scripts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	sort.SliceStable(names, func(i, j int) bool {
+		return (names[i] == "build" || names[i] == "docs:build") && names[j] != "build" && names[j] != "docs:build"
+	})
+	for _, name := range names {
+		for _, command := range commands {
+			_, after, found := strings.Cut(scripts[name], command)
+			if !found {
+				continue
+			}
+			for _, field := range strings.Fields(after) {
+				if strings.HasPrefix(field, "-") {
+					continue
+				}
+				if field != "&&" && field != "||" && field != ";" && safeRelativePath(field) {
+					return name, path.Clean(field)
+				}
+				break
+			}
+			return name, "."
+		}
+	}
+	return "build", "."
 }

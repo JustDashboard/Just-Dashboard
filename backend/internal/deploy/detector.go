@@ -1070,6 +1070,8 @@ func (in nodeCommandInputs) commands(runner string) (string, string) {
 		if in.turboFilter != "" {
 			build = nodeExecRunner(runner) + " turbo run " + buildScript + " --filter=" + in.turboFilter + "..."
 		}
+	} else if resolution.DefaultBuild != "" {
+		build = nodeExecRunner(runner) + " " + resolution.DefaultBuild
 	}
 	start := in.start(runner)
 	if in.schema != nil && in.schema.Command != "" && start != "" && !in.schemaInStart(start) {

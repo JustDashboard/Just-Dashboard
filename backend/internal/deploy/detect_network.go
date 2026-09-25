@@ -294,6 +294,9 @@ func (n *networkDetection) apply(marker *detectedMarkers, candidates []DetectedC
 	for _, index := range order {
 		c := &candidates[index]
 		switch {
+		case c.BuildMethod == BuildRecipe && c.Recipe != "node" && c.OutputDirectory != "":
+			// A Python or Deno build whose output nginx serves (MkDocs, Lume)
+			// runs no server of its own to read a listener from.
 		case c.BuildMethod == BuildRecipe && c.Recipe == "node" && hasManifest:
 			code.merge(n.node(marker, c, manifest))
 		case c.BuildMethod == BuildRecipe && c.Recipe == "python":

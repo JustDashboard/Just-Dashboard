@@ -1,0 +1,3 @@
+{{ $css := resources.Get "css/main.scss" | css.Sass | minify }}
+<!doctype html><html><head><title>{{ .Site.Title }}</title><link rel="stylesheet" href="{{ $css.RelPermalink }}"></head>
+<body><h1>home {{ getenv "PUBLIC_API_URL" }}</h1><a href="{{ "about/" | relURL }}">about</a> base {{ .Site.BaseURL }}</body></html>

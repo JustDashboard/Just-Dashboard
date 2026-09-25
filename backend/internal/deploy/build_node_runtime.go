@@ -125,6 +125,13 @@ func readNodeRuntimeFacts(files nodeFiles, member string, manifest, settings nod
 				facts.bun = nodeReleaseDeclaration{source: source, spec: bun, exact: true}
 			}
 		}
+		// netlify.toml's build environment pins Node for a site built there,
+		// after the version files of the same directory.
+		if content, err := here.read("netlify.toml", 64<<10); err == nil {
+			if node := netlifyNodeVersion(content); node != "" {
+				facts.node = append(facts.node, nodeReleaseDeclaration{source: path.Join(directory, "netlify.toml"), spec: node, exact: true})
+			}
+		}
 		if facts.bun.spec == "" {
 			if content, err := here.read(".bun-version", 1024); err == nil {
 				if version := firstVersionLine(string(content)); version != "" {
