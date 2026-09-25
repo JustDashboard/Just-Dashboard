@@ -1985,7 +1985,10 @@ and `preflight_build_test.go`; the rendered Dockerfiles for canvas on Alpine, a 
 onnxruntime-node on Debian slim, Puppeteer with Alpine's Chromium, Prisma 7 on npm and on Bun with Node
 24, and a webpack-4-era build were built and run locally when they were written. Static sites are covered
 by `build_static_serving_test.go` (the nginx configuration, hosting rules and the shell that writes
-them), `detect_site_generators_test.go`, `detect_static_site_test.go`, `build_site_test.go`,
+them), `build_node_static_serving_test.go` (a framework's static output from detection through the
+recipe to the static server: a Next.js export under its `basePath` with host rules, SvelteKit's
+adapter-static fallback under its base, React Router's SPA shell, Eleventy and Hexo built by their own
+binaries), `detect_site_generators_test.go`, `detect_static_site_test.go`, `build_site_test.go`,
 `preflight_static_site_test.go` and `build_output_cause_site_test.go`; beyond the live fixtures, Hugo
 Modules and Hugo with PostCSS, Zola 0.19 on Debian, mdBook 0.4, Jekyll on the github-pages gem with no
 Gemfile and with a macOS-only lock, Sphinx with autodoc, Pelican, Zensical, Hexo, VuePress 2 under a
