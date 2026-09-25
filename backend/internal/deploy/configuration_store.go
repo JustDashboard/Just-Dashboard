@@ -50,10 +50,10 @@ type DotenvImportRequest struct {
 	Dotenv      string   `json:"dotenv"`
 	Sensitivity string   `json:"sensitivity"`
 	Scopes      []string `json:"scopes"`
-	// Skip names what the import leaves out: the settings page skips PORT
-	// and NODE_ENV by default, which a local .env sets for development and
-	// the deployment sets itself (the internal port the proxy and readiness
-	// check use, and the production mode the recipe builds in).
+	// Skip names what the import leaves out: the settings page skips PORT,
+	// which the deployment sets to the internal port the proxy and the
+	// readiness check use, and a NODE_ENV other than production, which a
+	// local .env sets for development, unless the operator keeps them.
 	Skip []string `json:"skip,omitempty"`
 }
 

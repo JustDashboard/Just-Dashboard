@@ -84,7 +84,13 @@ import {
   Warning,
 } from "@/components/icons"
 import { LINK_STATUS } from "@/components/deploy/vocabulary"
-import { NAME, PLATFORM_NAMES, readDotenv, REFUSAL_WORD } from "@/components/deploy/settings/dotenv"
+import {
+  isPlatformEntry,
+  NAME,
+  platformReason,
+  readDotenv,
+  REFUSAL_WORD,
+} from "@/components/deploy/settings/dotenv"
 import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { SettingSection, SettingsPage } from "@/components/deploy/settings/setting-card"
 import {
@@ -1505,9 +1511,7 @@ function ImportSheet({
   // A Compose file may interpolate ${PORT} itself, so its stack keeps what
   // the paste says unless the reader leaves it out.
   const [keepPlatform, setKeepPlatform] = useState(configuration.build.method === "compose")
-  const platform = PLATFORM_NAMES.filter((name) =>
-    reading.entries.some((entry) => entry.name === name && !entry.refused),
-  )
+  const platform = reading.entries.filter(isPlatformEntry).map((entry) => entry.name)
   const skip = keepPlatform ? [] : platform
   const body = {
     revision: configuration.revision,
@@ -1752,7 +1756,7 @@ function ImportSheet({
             <OptionList>
               <OptionRow
                 title={`Leave out ${platform.join(" and ")}`}
-                hint="The deployment sets them: PORT is the internal port the proxy and the readiness check connect to, and the recipe builds and runs in production."
+                hint={`Left out because ${platformReason(platform)}.`}
                 checked={!keepPlatform}
                 onCheckedChange={(checked) => setKeepPlatform(!checked)}
               />

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { readDotenv, withoutPlatformVariables } from "./dotenv"
+import { platformReason, readDotenv, withoutPlatformVariables } from "./dotenv"
 
 // Each case is one the server's parseDotenvEntries answers the same way, so a
 // preview never lists what the import would refuse, or cut, or join.
@@ -63,5 +63,13 @@ describe("withoutPlatformVariables", () => {
     expect(withoutPlatformVariables("A=1\r\nB=2")).toEqual({ text: "A=1\r\nB=2", skipped: [] })
     const multiline = 'PORT="3000\n4000"\nB=2'
     expect(withoutPlatformVariables(multiline)).toEqual({ text: multiline, skipped: [] })
+  })
+
+  test("keeps NODE_ENV=production, which an image built from its own Dockerfile may rely on", () => {
+    const { text, skipped } = withoutPlatformVariables("PORT=5173\nNODE_ENV=production\n")
+    expect(skipped).toEqual(["PORT"])
+    expect(readDotenv(text).entries.map((entry) => entry.name)).toEqual(["NODE_ENV"])
+    expect(platformReason(skipped)).not.toContain("NODE_ENV")
+    expect(platformReason(["PORT", "NODE_ENV"])).toContain("development variant")
   })
 })

@@ -128,26 +128,42 @@ export const REFUSAL_WORD: Record<DotenvRefusal, string> = {
 }
 
 /**
- * The names a local .env sets for development that the deployment sets
- * itself: PORT is the internal port the proxy and the readiness check connect
- * to, and NODE_ENV the production mode the recipe builds and runs in. A paste
- * that carried them moved the server off the port it is reached on and built
- * the development variant, so an import leaves them out unless asked not to.
+ * What a local .env sets for development that a deployment must not take
+ * over: PORT, which the deployment sets to the internal port the proxy and the
+ * readiness check connect to, and a NODE_ENV other than production, which
+ * builds and runs a framework's development variant. NODE_ENV=production is
+ * kept: an image the repository's own Dockerfile builds may rely on it. A
+ * paste that carried them moved the server off the port it is reached on, so
+ * an import leaves them out unless asked not to.
  */
-export const PLATFORM_NAMES = ["PORT", "NODE_ENV"]
+export function isPlatformEntry(entry: DotenvEntry): boolean {
+  if (entry.refused) return false
+  return entry.name === "PORT" || (entry.name === "NODE_ENV" && entry.value.trim() !== "production")
+}
+
+/** Why the platform names a paste set are left out, in one sentence. */
+export function platformReason(names: string[]): string {
+  const reasons = []
+  if (names.includes("PORT"))
+    reasons.push(
+      "the deployment sets PORT to the internal port the proxy and the readiness check connect to",
+    )
+  if (names.includes("NODE_ENV"))
+    reasons.push("a NODE_ENV other than production builds and runs the development variant")
+  return reasons.join(", and ")
+}
 
 /**
- * A paste without its platform names' lines, for the new-project flow, which
- * sends the paste as text: only a one-line assignment is removed, so a value
- * spanning lines is never cut in half.
+ * A paste without its platform entries' lines, for the new-project flow,
+ * which sends the paste as text: only a one-line assignment is removed, so a
+ * value spanning lines is never cut in half.
  */
 export function withoutPlatformVariables(raw: string): { text: string; skipped: string[] } {
   const reading = readDotenv(raw)
   const lines = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n")
   const skipped: string[] = []
   for (const entry of reading.entries) {
-    if (!PLATFORM_NAMES.includes(entry.name) || entry.refused || entry.value.includes("\n"))
-      continue
+    if (!isPlatformEntry(entry) || entry.value.includes("\n")) continue
     lines[entry.line - 1] = ""
     skipped.push(entry.name)
   }

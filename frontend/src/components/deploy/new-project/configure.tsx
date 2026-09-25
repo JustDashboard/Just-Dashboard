@@ -218,8 +218,9 @@ export function Configure({
   const [branch, setBranch] = useState(flow.source.ref ?? "main")
   const [branchBusy, setBranchBusy] = useState(false)
   const sentRows = environmentRowsToSend(envRows, flow.configuration.variables)
-  // A pasted local .env's PORT and NODE_ENV are the deployment's to set; a
-  // Compose file may interpolate ${PORT} itself, so its paste is sent whole.
+  // A pasted local .env's PORT and development NODE_ENV are not the
+  // deployment's; a Compose file may interpolate ${PORT} itself, so its paste
+  // is sent whole.
   const pasted =
     flow.configuration.build.method === "compose"
       ? { text: dotenv, skipped: [] }

@@ -25,6 +25,7 @@ import {
   rowNeedsOperator,
 } from "@/components/deploy/deployment-defaults"
 import type { EnvironmentRow } from "@/components/deploy/new-project/draft"
+import { platformReason } from "@/components/deploy/settings/dotenv"
 
 /**
  * Key/value rows plus a pasted block, the way `quick-deploy.tsx` handed
@@ -272,8 +273,7 @@ export function EnvironmentEditor({
           {platformSkipped.length > 0 && (
             <FormNote>
               {platformSkipped.join(" and ")} {platformSkipped.length === 1 ? "is" : "are"} left
-              out: the deployment sets PORT to the internal port the proxy and the readiness check
-              connect to, and builds and runs in production.
+              out: {platformReason(platformSkipped)}.
             </FormNote>
           )}
         </Disclosure>
