@@ -438,7 +438,7 @@ func phpCandidate(marker *detectedMarkers, rootLabel string) DetectedCandidate {
 			Reason: boundedEvidenceSentence("composer.lock does not match composer.json (" + strings.Join(updates, "; ") + "); the install updates just those packages")})
 	}
 	for _, extension := range project.extensions {
-		if !slices.Contains(phpDefaultExtensions, extension.Name) {
+		if extension.Reason != phpDefaultExtensionReason {
 			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: source, Reason: boundedEvidenceSentence("PHP extension " + extension.Name + ": " + extension.Reason)})
 		}
 	}
@@ -594,6 +594,7 @@ func selectPHPRecipe(boundary, root string, config BuildPlanConfig) (phpRecipe, 
 	if err != nil {
 		return phpRecipe{}, err
 	}
+	project.settleExtensions(version)
 	recipe := phpRecipe{
 		version: version, framework: project.framework, extensions: project.extensionNames(),
 		composer: project.hasManifest, lockUpdate: project.lockUpdate, git: project.git,

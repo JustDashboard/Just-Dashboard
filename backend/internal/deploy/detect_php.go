@@ -107,8 +107,10 @@ type phpProject struct {
 	platformPHP string
 	envExample  []byte
 	framework   string
-	// extensions and unsupported are in the order their reasons were
-	// found: the defaults, the framework, composer.json, the lock, the code.
+	// wanted are the extensions the application needs, in the order their
+	// reasons were found: the defaults, the framework, composer.json, the
+	// lock, the code; extensions and unsupported split them for a release.
+	wanted       []DetectedPHPExtension
 	extensions   []DetectedPHPExtension
 	unsupported  []DetectedPHPExtension
 	requirements []phpVersionRequirement
@@ -278,7 +280,12 @@ func readPHPProject(files nodeFiles) phpProject {
 	project.readSymfony(files)
 	project.devProviders = laravelDevProviders(files, project)
 	project.codeEvidence = scanPHPExtensionUse(files, project.wordpress.shape == "core")
-	project.extensions, project.unsupported = project.requiredExtensions()
+	project.wanted = project.requiredExtensions()
+	release, err := project.version("")
+	if err != nil {
+		release = phpDefaultVersion
+	}
+	project.settleExtensions(release)
 	return project
 }
 
@@ -962,7 +969,8 @@ func laravelDevPackage(class string) string {
 // Extensions ------------------------------------------------------------------
 
 // phpInstallableExtensions are the names install-php-extensions builds on
-// the Alpine image, as Composer spells them after ext-.
+// the Alpine image for every catalogue release (its data/supported-extensions),
+// as Composer spells them after ext-.
 var phpInstallableExtensions = map[string]bool{
 	"amqp": true, "apcu": true, "ast": true, "bcmath": true, "brotli": true, "bz2": true, "calendar": true,
 	"csv": true, "dba": true, "decimal": true, "ds": true, "enchant": true, "event": true, "excimer": true,
@@ -976,8 +984,15 @@ var phpInstallableExtensions = map[string]bool{
 	"sockets": true, "solr": true, "sqlsrv": true, "ssh2": true, "swoole": true, "sysvmsg": true, "sysvsem": true,
 	"sysvshm": true, "tidy": true, "timezonedb": true, "uuid": true, "vips": true, "xdebug": true, "xhprof": true,
 	"xlswriter": true, "xmlrpc": true, "xsl": true, "yaml": true, "zip": true, "zstd": true, "http": true,
-	"pq": true, "psr": true, "geoip": true, "oci8": true, "pdo_oci": true, "openswoole": true,
+	"pq": true, "psr": true, "oci8": true, "pdo_oci": true, "openswoole": true, "ftp": true, "ev": true, "mcrypt": true,
+	"gearman": true, "relay": true, "uploadprogress": true, "simdjson": true, "snappy": true, "lz4": true,
+	"phalcon": true, "yac": true, "xdiff": true,
 }
+
+// phpExtensionLastRelease are the extensions install-php-extensions builds
+// only up to a PHP release; on a later one they are left out like any
+// other it cannot build.
+var phpExtensionLastRelease = map[string]string{"memcache": "8.4"}
 
 // phpExtensionAliases are the other names Composer's platform uses.
 var phpExtensionAliases = map[string]string{
@@ -999,30 +1014,33 @@ var phpPackageExtensions = []struct {
 }
 
 // phpCodeExtensionRules are calls in the application's own code that need an
-// extension the image lacks.
+// extension the image lacks; the call a rule matched is its evidence.
 var phpCodeExtensionRules = []struct {
-	extension, label string
-	pattern          *regexp.Regexp
+	extension string
+	pattern   *regexp.Regexp
 }{
-	{"mysqli", "mysqli", regexp.MustCompile(`\bmysqli_[a-z_]+\s*\(|\bnew\s+\\?mysqli\b`)},
-	{"gd", "an image* function", regexp.MustCompile(`\bimage(?:create\w*|copyresampled|jpeg|png|webp|gif|ttftext|scale)\s*\(`)},
-	{"zip", "ZipArchive", regexp.MustCompile(`\bnew\s+\\?ZipArchive\b`)},
-	{"intl", "an Intl class", regexp.MustCompile(`\bnew\s+\\?(?:NumberFormatter|IntlDateFormatter|Collator)\b|\bNumber::(?:format|currency|percentage|spell|ordinal)\s*\(`)},
-	{"bcmath", "a bc* function", regexp.MustCompile(`\bbc(?:add|sub|mul|div|comp|mod|pow|sqrt|scale)\s*\(`)},
-	{"exif", "exif_read_data", regexp.MustCompile(`\bexif_read_data\s*\(`)},
-	{"redis", "the Redis class", regexp.MustCompile(`\bnew\s+\\?Redis\s*\(`)},
-	{"pcntl", "a pcntl function", regexp.MustCompile(`\bpcntl_\w+\s*\(`)},
-	{"gmp", "a gmp function", regexp.MustCompile(`\bgmp_\w+\s*\(`)},
-	{"imagick", "Imagick", regexp.MustCompile(`\bnew\s+\\?Imagick\b`)},
-	{"soap", "SoapClient", regexp.MustCompile(`\bnew\s+\\?Soap(?:Client|Server)\b`)},
-	{"sockets", "a socket function", regexp.MustCompile(`\bsocket_(?:create|connect|bind)\s*\(`)},
-	{"pgsql", "a pg_ function", regexp.MustCompile(`\bpg_(?:connect|pconnect|query)\s*\(`)},
-	{"calendar", "a calendar function", regexp.MustCompile(`\b(?:cal_days_in_month|easter_date|jdtogregorian|gregoriantojd)\s*\(`)},
-	{"gettext", "gettext", regexp.MustCompile(`\b(?:bindtextdomain|textdomain|dgettext)\s*\(`)},
-	{"xsl", "XSLTProcessor", regexp.MustCompile(`\bnew\s+\\?XSLTProcessor\b`)},
-	{"apcu", "an apcu function", regexp.MustCompile(`\bapcu_\w+\s*\(`)},
-	{"memcached", "Memcached", regexp.MustCompile(`\bnew\s+\\?Memcached\b`)},
+	{"mysqli", regexp.MustCompile(`\bmysqli_[a-z_]+\s*\(|\bnew\s+\\?mysqli\b`)},
+	{"gd", regexp.MustCompile(`\bimage(?:create\w*|copyresampled|jpeg|png|webp|gif|ttftext|scale)\s*\(`)},
+	{"zip", regexp.MustCompile(`\bnew\s+\\?ZipArchive\b`)},
+	{"intl", regexp.MustCompile(`\bnew\s+\\?(?:NumberFormatter|IntlDateFormatter|Collator)\b|\bNumber::(?:format|currency|percentage|spell|ordinal)\s*\(`)},
+	{"bcmath", regexp.MustCompile(`\bbc(?:add|sub|mul|div|comp|mod|pow|sqrt|scale)\s*\(`)},
+	{"exif", regexp.MustCompile(`\bexif_read_data\s*\(`)},
+	{"redis", regexp.MustCompile(`\bnew\s+\\?Redis\s*\(`)},
+	{"pcntl", regexp.MustCompile(`\bpcntl_\w+\s*\(`)},
+	{"gmp", regexp.MustCompile(`\bgmp_\w+\s*\(`)},
+	{"imagick", regexp.MustCompile(`\bnew\s+\\?Imagick\b`)},
+	{"soap", regexp.MustCompile(`\bnew\s+\\?Soap(?:Client|Server)\b`)},
+	{"sockets", regexp.MustCompile(`\bsocket_(?:create|connect|bind)\s*\(`)},
+	{"pgsql", regexp.MustCompile(`\bpg_(?:connect|pconnect|query)\s*\(`)},
+	{"calendar", regexp.MustCompile(`\b(?:cal_days_in_month|easter_date|jdtogregorian|gregoriantojd)\s*\(`)},
+	{"gettext", regexp.MustCompile(`\b(?:bindtextdomain|textdomain|dgettext)\s*\(`)},
+	{"xsl", regexp.MustCompile(`\bnew\s+\\?XSLTProcessor\b`)},
+	{"apcu", regexp.MustCompile(`\bapcu_\w+\s*\(`)},
+	{"memcached", regexp.MustCompile(`\bnew\s+\\?Memcached\b`)},
+	{"ftp", regexp.MustCompile(`\bftp_(?:connect|ssl_connect|login)\s*\(`)},
 }
+
+var phpCallSpacingRE = regexp.MustCompile(`\s+`)
 
 var phpScanSkippedDirs = map[string]bool{
 	"vendor": true, "node_modules": true, ".git": true, "storage": true, "var": true, "cache": true, "tmp": true,
@@ -1070,11 +1088,16 @@ func scanPHPExtensionUse(files nodeFiles, wordpressCore bool) []DetectedPHPExten
 			count++
 			read += int64(len(content))
 			for _, rule := range phpCodeExtensionRules {
-				if seen[rule.extension] || !rule.pattern.Match(content) {
+				if seen[rule.extension] {
+					continue
+				}
+				call := rule.pattern.Find(content)
+				if call == nil {
 					continue
 				}
 				seen[rule.extension] = true
-				found = append(found, DetectedPHPExtension{Name: rule.extension, Reason: rule.label + " in " + name})
+				label := phpCallSpacingRE.ReplaceAllString(strings.TrimRight(string(call), "( \t\r\n"), " ")
+				found = append(found, DetectedPHPExtension{Name: rule.extension, Reason: label + " in " + name})
 			}
 		}
 	}
@@ -1083,8 +1106,10 @@ func scanPHPExtensionUse(files nodeFiles, wordpressCore bool) []DetectedPHPExten
 
 // requiredExtensions merges every reason an extension is needed — the
 // defaults, the framework, composer.json, the lock or the package table,
-// the code — into the list the recipe installs, and the names it cannot.
-func (p *phpProject) requiredExtensions() (install, unsupported []DetectedPHPExtension) {
+// the code — into one list, in the order the reasons were found. A
+// default's reason gives way to the first that says why this application
+// needs it (mysqli_connect in includes/db.php).
+func (p *phpProject) requiredExtensions() []DetectedPHPExtension {
 	reasons := map[string]string{}
 	order := []string{}
 	add := func(name, reason string) {
@@ -1092,14 +1117,17 @@ func (p *phpProject) requiredExtensions() (install, unsupported []DetectedPHPExt
 		if alias, ok := phpExtensionAliases[name]; ok {
 			name = alias
 		}
-		if name == "" || phpBuiltinExtension[name] || reasons[name] != "" {
-			return
+		switch {
+		case name == "" || phpBuiltinExtension[name]:
+		case reasons[name] == "":
+			reasons[name] = reason
+			order = append(order, name)
+		case reasons[name] == phpDefaultExtensionReason:
+			reasons[name] = reason
 		}
-		reasons[name] = reason
-		order = append(order, name)
 	}
 	for _, name := range phpDefaultExtensions {
-		add(name, "always installed, so a linked database works without asking")
+		add(name, phpDefaultExtensionReason)
 	}
 	if p.framework == "wordpress" {
 		for _, name := range []string{"mysqli", "gd", "exif", "intl", "zip"} {
@@ -1142,36 +1170,70 @@ func (p *phpProject) requiredExtensions() (install, unsupported []DetectedPHPExt
 				add(name, entry.pkg+" needs it")
 			}
 		}
-		if p.framework == "laravel" && !p.manifest.has("predis/predis") && laravelUsesPHPRedis(p.envExample) {
-			add("redis", "Laravel's Redis client defaults to phpredis (REDIS_ in .env.example, no predis/predis)")
+		if setting := laravelPHPRedisSetting(p.envExample); p.framework == "laravel" && !p.manifest.has("predis/predis") && setting != "" {
+			add("redis", setting+" in .env.example, and Laravel's Redis client is phpredis without predis/predis")
 		}
 	}
 	for _, use := range p.codeEvidence {
 		add(use.Name, use.Reason+" → "+use.Name)
 	}
+	wanted := make([]DetectedPHPExtension, 0, len(order))
 	for _, name := range order {
-		entry := DetectedPHPExtension{Name: name, Reason: reasons[name]}
-		if phpInstallableExtensions[name] && phpExtensionNameRE.MatchString(name) {
-			install = append(install, entry)
-		} else {
+		wanted = append(wanted, DetectedPHPExtension{Name: name, Reason: reasons[name]})
+	}
+	return wanted
+}
+
+const phpDefaultExtensionReason = "always installed, so a linked database works without asking"
+
+// settleExtensions splits what the application needs into what the image
+// for release installs and what install-php-extensions cannot build.
+func (p *phpProject) settleExtensions(release string) {
+	p.extensions, p.unsupported = splitPHPExtensions(p.wanted, release)
+}
+
+func splitPHPExtensions(wanted []DetectedPHPExtension, release string) (install, unsupported []DetectedPHPExtension) {
+	for _, entry := range wanted {
+		last := phpExtensionLastRelease[entry.Name]
+		entry.Reason = strings.TrimSuffix(entry.Reason, phpLastReleaseNote(last))
+		switch {
+		case !phpInstallableExtensions[entry.Name] || !phpExtensionNameRE.MatchString(entry.Name):
 			unsupported = append(unsupported, entry)
+		case last != "" && release > last:
+			entry.Reason += phpLastReleaseNote(last)
+			unsupported = append(unsupported, entry)
+		default:
+			install = append(install, entry)
 		}
 	}
 	return install, unsupported
 }
 
+func phpLastReleaseNote(last string) string {
+	if last == "" {
+		return ""
+	}
+	return "; install-php-extensions builds it up to PHP " + last
+}
+
 var (
 	laravelRedisClientRE = regexp.MustCompile(`(?m)^\s*REDIS_CLIENT\s*=\s*['"]?(\w+)`)
-	laravelRedisHostRE   = regexp.MustCompile(`(?m)^\s*REDIS_(?:HOST|URL)\s*=`)
+	laravelRedisDriverRE = regexp.MustCompile(`(?m)^\s*(CACHE_STORE|CACHE_DRIVER|QUEUE_CONNECTION|SESSION_DRIVER|BROADCAST_CONNECTION|BROADCAST_DRIVER)\s*=\s*['"]?redis['"]?\s*$`)
 )
 
-// laravelUsesPHPRedis says .env.example configures Redis through Laravel's
-// default client, the phpredis extension.
-func laravelUsesPHPRedis(env []byte) bool {
-	if match := laravelRedisClientRE.FindSubmatch(env); match != nil {
-		return strings.EqualFold(string(match[1]), "phpredis")
+// laravelPHPRedisSetting is the .env.example setting that makes Laravel use
+// Redis through phpredis, its default client: a cache store, queue, session
+// or broadcast driver set to redis. The stock .env.example's REDIS_HOST and
+// REDIS_CLIENT=phpredis alone configure a client nothing uses, so they do
+// not cost every application the extension's compile.
+func laravelPHPRedisSetting(env []byte) string {
+	if match := laravelRedisClientRE.FindSubmatch(env); match != nil && !strings.EqualFold(string(match[1]), "phpredis") {
+		return ""
 	}
-	return laravelRedisHostRE.Match(env)
+	if match := laravelRedisDriverRE.FindSubmatch(env); match != nil {
+		return string(match[1]) + "=redis"
+	}
+	return ""
 }
 
 // phpFrameworkOf names the framework a manifest requires.

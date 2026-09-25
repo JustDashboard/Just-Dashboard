@@ -88,7 +88,7 @@ func TestPHPExtensionsFromTheLockAndTheCode(t *testing.T) {
 		!slices.ContainsFunc(facts.Extensions, func(extension DetectedPHPExtension) bool {
 			return extension.Name == "intl" && extension.Reason == "ext-intl required by filament/support (composer.lock)"
 		}) || !slices.ContainsFunc(candidate.Evidence, func(evidence DetectionEvidence) bool {
-		return evidence.Reason == "PHP extension bcmath: a bc* function in app/Support/Money.php → bcmath"
+		return evidence.Reason == "PHP extension bcmath: bcadd in app/Support/Money.php → bcmath"
 	}) {
 		t.Fatalf("facts = %+v\nevidence = %+v", facts, candidate.Evidence)
 	}
@@ -101,29 +101,63 @@ func TestPHPExtensionsFromTheLockAndTheCode(t *testing.T) {
 	}
 
 	// Without a lock the packages' own requirements are not in the tree; the
-	// table stands in for the common ones, and a plain PHP application's
-	// mysqli is a default.
+	// table stands in for the common ones. Laravel's phpredis client is
+	// installed when .env.example makes Redis a store, queue or session.
+	stock := "APP_KEY=\nSESSION_DRIVER=database\nCACHE_STORE=database\nREDIS_CLIENT=phpredis\nREDIS_HOST=127.0.0.1\n"
 	candidate, prepared, findings = phpPlan(t, laravelTree(map[string]string{
 		"composer.json": `{"require":{"php":"^8.2","laravel/framework":"^12.0","filament/filament":"^3.3","maatwebsite/excel":"^3.1"}}`,
-		".env.example":  "APP_KEY=\nREDIS_CLIENT=phpredis\nREDIS_HOST=127.0.0.1\n",
+		".env.example":  strings.Replace(stock, "CACHE_STORE=database", "CACHE_STORE=redis", 1),
 	}))
 	assertDockerfile(t, prepared.DockerfilePreview, []string{"RUN install-php-extensions pdo_mysql pdo_pgsql mysqli opcache intl gd zip redis\n"}, nil)
 	if candidate.PHP.Lock != "absent" || findingByCode(findings, "dependencies_unpinned") == nil ||
-		!strings.Contains(findingByCode(findings, "dependencies_unpinned").Action, "commit composer.lock") {
+		!strings.Contains(findingByCode(findings, "dependencies_unpinned").Action, "commit composer.lock") ||
+		!slices.Contains(candidate.PHP.Extensions, DetectedPHPExtension{Name: "redis",
+			Reason: "CACHE_STORE=redis in .env.example, and Laravel's Redis client is phpredis without predis/predis"}) {
 		t.Fatalf("unlocked = %+v / %+v", candidate.PHP, findingByCode(findings, "dependencies_unpinned"))
 	}
-	// predis/predis speaks Redis in PHP, so phpredis is not needed.
-	_, prepared, _ = phpPlan(t, laravelTree(map[string]string{
-		"composer.json": `{"require":{"php":"^8.2","laravel/framework":"^12.0","predis/predis":"^2.0"}}`,
-		".env.example":  "REDIS_CLIENT=predis\nREDIS_HOST=127.0.0.1\n",
-	}))
-	assertDockerfile(t, prepared.DockerfilePreview, nil, []string{" redis\n"})
+	// The stock .env.example configures a Redis client nothing uses, and
+	// predis/predis speaks Redis in PHP: neither needs phpredis.
+	for _, fixture := range []struct{ composer, env string }{
+		{`{"require":{"php":"^8.2","laravel/framework":"^12.0"}}`, stock},
+		{`{"require":{"php":"^8.2","laravel/framework":"^12.0","predis/predis":"^2.0"}}`, "REDIS_CLIENT=predis\nQUEUE_CONNECTION=redis\n"},
+	} {
+		_, prepared, _ = phpPlan(t, laravelTree(map[string]string{"composer.json": fixture.composer, ".env.example": fixture.env}))
+		assertDockerfile(t, prepared.DockerfilePreview, nil, []string{" redis\n"})
+	}
 
-	_, prepared, _ = phpPlan(t, map[string]string{
+	// A default the code calls is recorded with the call, so the pass says
+	// why a legacy application needs mysqli.
+	_, prepared, findings = phpPlan(t, map[string]string{
 		"index.php":       "<?php require 'includes/db.php';",
-		"includes/db.php": "<?php $db = mysqli_connect(getenv('DB_HOST'), 'u', 'p'); $im = imagecreatetruecolor(1, 1); $z = new ZipArchive();",
+		"includes/db.php": "<?php $db = mysqli_connect(getenv('DB_HOST'), 'u', 'p'); $im = imagecreatetruecolor(1, 1); $z = new ZipArchive(); ftp_connect('files');",
 	})
-	assertDockerfile(t, prepared.DockerfilePreview, []string{"RUN install-php-extensions pdo_mysql pdo_pgsql mysqli opcache gd zip\n"}, nil)
+	assertDockerfile(t, prepared.DockerfilePreview, []string{"RUN install-php-extensions pdo_mysql pdo_pgsql mysqli opcache gd zip ftp\n"}, nil)
+	if pass := findingByCode(findings, "php_extensions"); pass == nil || !strings.Contains(pass.Means, "mysqli: mysqli_connect in includes/db.php → mysqli;") ||
+		!strings.Contains(pass.Means, "gd: imagecreatetruecolor in includes/db.php → gd;") || strings.Contains(pass.Means, "pdo_mysql:") {
+		t.Fatalf("php_extensions = %+v", pass)
+	}
+
+	// An extension install-php-extensions stops building at a release is
+	// left out on a later one.
+	memcache := map[string]string{"composer.json": `{"require":{"php":"^8.2","ext-memcache":"*"}}`, "index.php": "<?php"}
+	_, prepared, _ = phpPlan(t, memcache)
+	assertDockerfile(t, prepared.DockerfilePreview, []string{" memcache\n"}, nil)
+	memcache["composer.json"] = `{"require":{"php":"^8.5","ext-memcache":"*"}}`
+	candidate, prepared, findings = phpPlan(t, memcache)
+	assertDockerfile(t, prepared.DockerfilePreview, nil, []string{"memcache"})
+	if unsupported := findingByCode(findings, "php_extension_unsupported"); unsupported == nil ||
+		!strings.Contains(unsupported.Measured, "memcache (ext-memcache in composer.json; install-php-extensions builds it up to PHP 8.4)") {
+		t.Fatalf("php_extension_unsupported = %+v", unsupported)
+	}
+	// The release the Build settings choose is judged, not detection's own.
+	memcache["composer.json"] = `{"require":{"php":"^8.2","ext-memcache":"*"}}`
+	for release, installed := range map[string]bool{"8.4": true, "8.5": false} {
+		_, prepared, findings = phpPlan(t, memcache, func(build *BuildPlanConfig) { build.PHPVersion = release })
+		if strings.Contains(prepared.DockerfilePreview, " memcache\n") != installed || (findingByCode(findings, "php_extension_unsupported") == nil) == !installed ||
+			strings.Contains(findingByCode(findings, "php_extensions").Measured, "memcache") != installed {
+			t.Fatalf("PHP %s: memcache installed=%v\n%s", release, !installed, prepared.DockerfilePreview)
+		}
+	}
 
 	// A lock too large to read, or not one Composer wrote, is said.
 	_, _, findings = phpPlan(t, laravelTree(map[string]string{"composer.lock": "{}"}))

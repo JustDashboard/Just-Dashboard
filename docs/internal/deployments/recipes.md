@@ -1406,7 +1406,8 @@ requirement" proposes the release that does.
 
 The extensions are installed with `install-php-extensions` before the source is copied, so the layer is
 cached. They are, with the reason each is recorded (`php_extensions`, a pass that lists them):
-`pdo_mysql`, `pdo_pgsql`, `mysqli` and `opcache` always, so a linked database works without asking; every
+`pdo_mysql`, `pdo_pgsql`, `mysqli` and `opcache` always, so a linked database works without asking (a
+default the application needs for a reason of its own is listed with that reason instead); every
 `ext-` requirement of composer.json and of composer.lock's production packages (read under a budget of
 its own, 4 MiB, keeping only names, versions, requirements, `provide`/`replace` and whether a package has
 an archive — `require-dev` packages are not checked by a `--no-dev` install and are skipped); without a
@@ -1415,11 +1416,18 @@ and `redis`, PhpSpreadsheet and Laravel Excel `gd` and `zip`, CodeIgniter and Ca
 `gd`, MongoDB `mongodb`, Media Library `exif`, Intervention `gd`); the calls the application's own code
 makes, read breadth first from up to 400 files and 3 MiB (`mysqli_*`, `image*`, `ZipArchive`,
 `NumberFormatter` and Laravel's `Number::`, `bc*`, `exif_read_data`, `new Redis`, `pcntl_*`, `gmp_*`,
-`Imagick`, `SoapClient`, …, each with the file it was seen in); Laravel's phpredis client when
-`.env.example` configures Redis and `predis/predis` is absent; and WordPress's `mysqli gd exif intl zip`.
-Built-ins such as `mbstring` are skipped, Composer's other spellings (`zend-opcache`) are read as the
-extension, and a name `install-php-extensions` cannot build is left out with
-`php_extension_unsupported`; a lock too large or not written by Composer is `php_extensions_unverified`.
+`Imagick`, `SoapClient`, `ftp_connect`, …, each recorded as the call and the file it was seen in:
+`mysqli_connect in includes/db.php → mysqli`); Laravel's phpredis client when `.env.example` makes Redis a
+cache store, queue, session or broadcast driver (`CACHE_STORE=redis`, `QUEUE_CONNECTION=redis`, …) and
+`predis/predis` is absent — the stock `.env.example`'s `REDIS_HOST` and `REDIS_CLIENT=phpredis` configure a
+client nothing uses, so they do not cost every Laravel build the extension's compile, and an application
+that switches a driver to Redis only in its deployment variables is told `Class "Redis" not found`
+(`runtime_php_extension_missing`), whose fix is `"ext-redis": "*"` in composer.json's require; and
+WordPress's `mysqli gd exif intl zip`. Built-ins such as `mbstring` are skipped, Composer's other
+spellings (`zend-opcache`) are read as the extension, and a name `install-php-extensions` cannot build for
+every catalogue release on Alpine (its `data/supported-extensions`; `memcache` stops at 8.4 and is left out
+on 8.5) is left out with `php_extension_unsupported`; a lock too large or not written by Composer is
+`php_extensions_unverified`.
 
 Every image copies PHP's own `php.ini-production` (errors logged, never shown; deprecations no longer
 print before headers) and adds uploads as large as the managed proxy lets through (64 MB),

@@ -35,11 +35,17 @@ func phpFindings(candidate *DetectedCandidate, configuration PlanConfiguration) 
 	if facts == nil {
 		return findings
 	}
-	if len(facts.Extensions) > 0 {
+	installed, unsupported := facts.Extensions, facts.Unsupported
+	if build.PHPVersion != "" && build.PHPVersion != facts.Version {
+		// Detection split them for its own release; the one the Build
+		// settings choose can be past an extension's last build.
+		installed, unsupported = splitPHPExtensions(slices.Concat(facts.Extensions, facts.Unsupported), build.PHPVersion)
+	}
+	if len(installed) > 0 {
 		names, reasons := []string{}, []string{}
-		for _, extension := range facts.Extensions {
+		for _, extension := range installed {
 			names = append(names, extension.Name)
-			if !slices.Contains(phpDefaultExtensions, extension.Name) {
+			if extension.Reason != phpDefaultExtensionReason {
 				reasons = append(reasons, extension.Name+": "+extension.Reason)
 			}
 		}
@@ -50,13 +56,13 @@ func phpFindings(candidate *DetectedCandidate, configuration PlanConfiguration) 
 		findings = append(findings, finding("php_extensions", PreflightPass,
 			"PHP extensions the application needs are installed", strings.Join(names, ", "), boundedFindingText(means), "", "deploy", "configuration.build"))
 	}
-	if len(facts.Unsupported) > 0 {
-		unsupported := []string{}
-		for _, extension := range facts.Unsupported {
-			unsupported = append(unsupported, extension.Name+" ("+extension.Reason+")")
+	if len(unsupported) > 0 {
+		left := []string{}
+		for _, extension := range unsupported {
+			left = append(left, extension.Name+" ("+extension.Reason+")")
 		}
 		findings = append(findings, finding("php_extension_unsupported", PreflightWarning,
-			"A PHP extension cannot be installed by the recipe", boundedFindingText(strings.Join(unsupported, "; ")),
+			"A PHP extension cannot be installed by the recipe", boundedFindingText(strings.Join(left, "; ")),
 			"install-php-extensions has no build of it for the Alpine image, so the recipe leaves it out; Composer refuses a package that requires it, and code that calls it fails when it runs.",
 			"Remove the requirement if nothing uses it, or build with a Dockerfile that installs the extension.", "deploy", "configuration.build.method"))
 	}
