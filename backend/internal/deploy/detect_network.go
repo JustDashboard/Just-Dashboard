@@ -308,6 +308,8 @@ func (n *networkDetection) apply(marker *detectedMarkers, candidates []DetectedC
 			code.merge(n.dotnet(marker, c))
 		case c.BuildMethod == BuildRecipe && c.Recipe == "deno":
 			code.merge(n.deno(marker, c))
+		case c.BuildMethod == BuildRecipe && languageRecipe(c.Recipe):
+			languageStartListen(c)
 		case c.BuildMethod == BuildDockerfile:
 			n.dockerfile(marker, c, code)
 		}

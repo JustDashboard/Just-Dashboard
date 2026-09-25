@@ -34,6 +34,9 @@ var recipeInputNames = map[string]bool{
 	"deno.json": true, "deno.jsonc": true, "deno.lock": true,
 	"composer.json": true, "composer.lock": true, "artisan": true, "index.php": true, "index.html": true,
 	"prisma": true, "drizzle.config.ts": true, "drizzle.config.js": true,
+	"Gemfile": true, "Gemfile.lock": true, ".ruby-version": true, ".tool-versions": true, "config.ru": true, "Rakefile": true,
+	"mix.exs": true, "mix.lock": true, ".elixir-version": true, "build.sbt": true, "project": true, "project.clj": true,
+	"deps.edn": true, "build.clj": true, "pubspec.yaml": true, "pubspec.lock": true, "gleam.toml": true, "manifest.toml": true,
 }
 
 // recipeInputPrefixes are framework configuration files, named per tool.
@@ -126,7 +129,7 @@ func recipeDockerignore(repository []byte, rootNames []string, kind string, inst
 	// These come last so that no repository rule can bring them back.
 	lines = append(lines, "**/node_modules", ".dockerignore", ".just-dashboard", ".just-dashboard-build-metadata-*")
 	switch kind {
-	case "static", "php", "node", "deno":
+	case "static", "php", "node", "deno", "ruby":
 		// Served or copied whole into the runtime image; the history and
 		// remote a checkout carries are nobody's business there. Toolchains
 		// that stamp or version builds from Git (Go, Python's setuptools-scm,

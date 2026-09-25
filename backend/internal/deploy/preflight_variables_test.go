@@ -275,6 +275,13 @@ func TestEnvironmentFindings(t *testing.T) {
 			want: map[string]PreflightSeverity{"database_required_for_start": PreflightBlocked},
 		},
 		{
+			name: "Rails' start prepares a database nobody linked",
+			candidate: DetectedCandidate{Name: "rails", BuildMethod: BuildRecipe, Framework: "rails",
+				StartCommand: "bundle exec rails db:prepare && exec bundle exec rails server --binding 0.0.0.0 --port ${PORT:-3000}",
+				Databases:    []DetectedDatabase{{Engine: "postgres", Variable: "DATABASE_URL", Evidence: "pg in Gemfile.lock"}}},
+			want: map[string]PreflightSeverity{"database_required_for_start": PreflightBlocked},
+		},
+		{
 			name: "Laravel on SQLite needs nothing linked",
 			candidate: DetectedCandidate{Name: "laravel", BuildMethod: BuildRecipe, Framework: "laravel", StartCommand: "php artisan migrate --force && php-server",
 				Databases: []DetectedDatabase{{Engine: "mysql", Variable: "DB_URL", Evidence: "DB_CONNECTION=mysql"}}},

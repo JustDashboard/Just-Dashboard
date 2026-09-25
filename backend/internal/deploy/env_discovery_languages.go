@@ -201,7 +201,7 @@ func relIs(rel, suffix string) bool {
 // settings, and Phoenix's release overlay.
 func environmentFactFile(rel, name string) bool {
 	switch name {
-	case "gemfile.lock", "gemfile", "mix.exs", "pubspec.yaml":
+	case "gemfile.lock", "gemfile", "mix.exs", "pubspec.yaml", "build.sbt", "project.clj", "deps.edn":
 		return true
 	}
 	for _, suffix := range []string{

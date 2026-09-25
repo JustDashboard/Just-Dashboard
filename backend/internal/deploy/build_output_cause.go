@@ -547,11 +547,11 @@ func isPullFailure(err error) bool {
 
 // installCommandRE names the recipes' dependency installers: whatever a
 // generated Dockerfile runs before the plan's own build command.
-var installCommandRE = regexp.MustCompile(`(?:^|&& |; )(?:npm (?:ci|install)|corepack enable|pnpm install|yarn install|yarn$|bun install|pip3? install|python3? -m pip|uv (?:sync|pip)|poetry install|pipenv install|go mod download|cargo fetch|mvn .*dependency:|gradle .*dependencies|\./gradlew .*dependencies|dotnet restore|deno (?:install|cache)|composer install|bundle install|mix deps\.get|apk add|apt-get|install-php-extensions)`)
+var installCommandRE = regexp.MustCompile(`(?:^|&& |; )(?:[A-Z][A-Z0-9_]*=\S* )*(?:npm (?:ci|install)|corepack enable|pnpm install|yarn install|yarn$|bun install|pip3? install|python3? -m pip|uv (?:sync|pip)|poetry install|pipenv install|go mod download|cargo fetch|mvn .*dependency:|gradle .*dependencies|\./gradlew .*dependencies|dotnet restore|deno (?:install|cache)|composer install|bundle install|bundle lock --add-platform|mix deps\.get|mix deps\.compile|mix local\.hex|mix assets\.setup|dart pub get|dart pub global activate|gleam deps download|sbt -batch update|lein deps|clojure -P|apk add|apt-get|install-php-extensions)`)
 
 // buildCommandRE names the recipes' default build commands, for a plan that
 // left its own build command empty.
-var buildCommandRE = regexp.MustCompile(`^(?:go build|cargo build|mvn |\./mvnw |gradle |\./gradlew |dotnet publish|deno task build|(?:npm|pnpm|yarn|bun) run build|(?:npx |bunx )?(?:next|vite|astro|nuxt|ng) build)`)
+var buildCommandRE = regexp.MustCompile(`^(?:go build|cargo build|mvn |\./mvnw |gradle |\./gradlew |dotnet publish|deno task build|(?:npm|pnpm|yarn|bun) run build|(?:npx |bunx )?(?:next|vite|astro|nuxt|ng) build|(?:SECRET_KEY_BASE_DUMMY=1 |SECRET_KEY_BASE="[^"]*" )?bundle exec (?:rails assets:precompile|hanami assets compile)|mix (?:compile|assets\.deploy|release)|sbt -batch (?:stage|assembly)|lein uberjar|clojure -T:build|dart compile exe|dart pub global run dart_frog_cli|gleam export)`)
 
 // guardCommandRE is the recipes' own output check: a test that prints what the
 // build was meant to produce and fails.

@@ -312,6 +312,9 @@ type DetectedCandidate struct {
 	// family can run the project and how loudly the install would refuse it.
 	PythonRequires string `json:"pythonRequires,omitempty"`
 	PythonInstall  string `json:"pythonInstall,omitempty"`
+	// Toolchain is what a Ruby, Elixir, Scala, Clojure, Dart or Gleam
+	// recipe read about the release it builds on (detect_languages.go).
+	Toolchain *DetectedToolchain `json:"toolchain,omitempty"`
 
 	// readingConfidence is what the source's own evidence supports when an
 	// unsettled package manager caps Confidence (packageCandidate). Ranking
@@ -1612,7 +1615,8 @@ func configContainsSecretLiteral(value any, key string) bool {
 // refused at planning so a plan never names a builder that does not exist.
 func validRecipe(name string) bool {
 	switch name {
-	case "node", "go", "python", "rust", "java", "dotnet", "deno", "php":
+	case "node", "go", "python", "rust", "java", "dotnet", "deno", "php",
+		"ruby", "elixir", "scala", "clojure", "dart", "gleam":
 		return true
 	}
 	return false
@@ -1842,6 +1846,9 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 			return err
 		}
 		if err := validateCandidateImageFacts(candidate); err != nil {
+			return err
+		}
+		if err := validateDetectedToolchain(candidate.Toolchain); err != nil {
 			return err
 		}
 	}

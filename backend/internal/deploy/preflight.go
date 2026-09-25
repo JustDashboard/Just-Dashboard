@@ -639,16 +639,17 @@ func preflightFindings(
 	}
 	findings = append(findings, plannedRecipeFindings(planned, configuration.Build)...)
 	if planned != nil && configuration.Build.Method == BuildRecipe &&
-		(planned.Recipe == "node" || (planned.Recipe == "php" && len(planned.NodeInstalls) > 0)) {
+		(planned.Recipe == "node" || (planned.Recipe != "" && len(planned.NodeInstalls) > 0)) {
 		findings = append(findings, nodeInstallFindings(planned, configuration)...)
 	}
 	if planned != nil && planned.UnpinnedDependencies && configuration.Build.Method == BuildRecipe {
 		findings = append(findings, finding("dependencies_unpinned", PreflightWarning,
 			"Dependencies are not pinned to exact versions", "unpinned entries in the dependency manifest",
 			"Each build installs the newest versions the manifest allows, so a rebuild of this same commit can run different code.",
-			"Commit a lockfile (uv lock, poetry lock, or pip freeze > requirements.txt) when rebuilds must be identical; deploying as is works today.",
+			unpinnedDependenciesAction(planned.Recipe),
 			"deploy", "configuration.build"))
 	}
+	findings = append(findings, languageRecipeFindings(planned, configuration, observation)...)
 	if planned != nil && planned.RecipeIssue != "" && configuration.Build.Method == BuildRecipe {
 		findings = append(findings, finding("recipe_unsupported", PreflightBlocked,
 			"Source needs a different build plan", planned.RecipeIssue,

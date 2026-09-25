@@ -79,6 +79,8 @@ var buildSignatures = []buildSignature{
 	signature("build_lockfile_out_of_sync", "composer.lock", "lock file", `Required package "([^"]+)" is not present in the lock file|([\w.-]+/[\w.-]+) is in the lock file as .* but that does not satisfy your constraint|Your lock file does not contain a compatible set of packages`),
 	signature("build_lockfile_out_of_sync", "deno.lock", "lockfile", `The lockfile is out of date|does not match the expected hash in the lock file`),
 	signature("build_lockfile_out_of_sync", "Gemfile.lock", "Gemfile", `in deployment mode after changing your Gemfile|The gemspecs for path gems changed`),
+	signature("build_lockfile_out_of_sync", "mix.lock", "mix.lock", `mix\.lock is out of date|Your mix\.lock is out of date`),
+	signature("build_lockfile_out_of_sync", "pubspec.lock", "pubspec.lock", "Unable to satisfy `pubspec\\.yaml` using `pubspec\\.lock`|pubspec\\.lock is out of date|--enforce-lockfile"),
 
 	// Lockfiles written by a package-manager release this image does not run.
 	signature("build_lockfile_incompatible", "pnpm-lock.yaml", "PNPM", `ERR_PNPM_LOCKFILE_BREAKING_CHANGE|ERR_PNPM_BROKEN_LOCKFILE|Ignoring not compatible lockfile`),
@@ -113,6 +115,8 @@ var buildSignatures = []buildSignature{
 	signature("build_runtime_version", "python", "Python", "(?:locked|project's) Python requirement: `([^`]+)`|does not satisfy Python(>=?[\\d.]+)|is not supported by the project \\(([^)]+)\\)"),
 	signature("build_runtime_version", "ruby", "Your Ruby version", `Your Ruby version is \S+, but your Gemfile specified (\S+)`),
 	signature("build_runtime_version", "elixir", "Elixir", `supports only Elixir ~> ([\d.]+)`),
+	signature("build_runtime_version", "dart", "SDK version", `The current Dart SDK version is \S+\.\s+Because \S+ requires SDK version ([^,]+),`),
+	signature("build_runtime_version", "gleam", "Gleam", `requires Gleam version ([^\s,]+)|The version of Gleam you are using does not meet`),
 	signature("build_runtime_version", "hugo", "Hugo", `not available in your current Hugo version|requires Hugo (?:version )?(\S+)`),
 	signature("build_hugo_extended_required", "hugo", "", `TOCSS|you need the extended version|this feature is not available in this edition of Hugo`),
 
@@ -124,6 +128,7 @@ var buildSignatures = []buildSignature{
 	signature("build_env_missing", "sveltekit", "$env/", `"([A-Za-z_]\w*)" is not exported by "\$env/(?:static|dynamic)/(?:private|public)"`),
 	signature("build_env_missing", "astro", "is missing", `^\s*- ([A-Z][A-Z0-9_]+) is missing`),
 	signature("build_env_missing", "rails", "secret_key_base", `Missing secret_key_base for`).naming("SECRET_KEY_BASE"),
+	signature("build_env_missing", "rails", "master key", `Missing encryption key to decrypt file with|Missing master key`).naming("RAILS_MASTER_KEY"),
 	signature("build_env_missing", "phoenix", "environment variable", `environment variable ([A-Z_][A-Z0-9_]*) is missing`),
 	signature("build_env_missing", "django", "environment variable", `Set the ([A-Z_][A-Z0-9_]*) environment variable`),
 	signature("build_env_missing", "django", "SECRET_KEY", `The SECRET_KEY setting must not be empty`).naming("SECRET_KEY"),
@@ -158,6 +163,7 @@ var buildSignatures = []buildSignature{
 	signature("build_system_library_missing", "rust", "custom build command", "failed to run custom build command for `([\\w-]+-sys)"),
 	signature("build_system_library_missing", "", "No such file or directory", `fatal error: ([\w/.+-]+\.h): No such file or directory`),
 	signature("build_system_library_missing", "", "OpenSSL", `Could not find (?:directory of )?OpenSSL installation`).naming("openssl"),
+	signature("build_system_library_missing", "ruby", "header", `Can't find the '([\w./-]+\.h)'? header|\*\*\* extconf\.rb failed \*\*\*`),
 	signature("build_native_toolchain_missing", "node-gyp", "gyp ERR!", `gyp ERR! find (Python)`),
 	signature("build_native_toolchain_missing", "node-gyp", "gyp ERR!", `gyp ERR! (?:stack Error|build error|configure error|not ok)`).naming("node-gyp"),
 	signature("build_native_toolchain_missing", "", "not found", toolchainNotFoundPattern).exitCode(127),
@@ -175,6 +181,7 @@ var buildSignatures = []buildSignature{
 	signature("build_install_script_failed", "npm", "node_modules", `npm error path /app/node_modules/((?:@[^/\s]+/)?[^/\s]+)`).
 		requiring(`npm error command failed`),
 	signature("build_install_script_failed", "yarn", "YN0009", "YN0009: .*?((?:@[^@\\s]+/)?[^@\\s│]+)@\\S+ couldn't be built successfully"),
+	signature("build_install_script_failed", "ruby", "Bundler cannot", `An error occurred while installing ([\w.-]+) \([^)]*\), and Bundler cannot`),
 
 	// PHP extensions a locked package requires and the image lacks.
 	signature("build_php_extension_missing", "php", "it is missing from your system", `requires? (ext-[a-z0-9_]+) \S+ -> it is missing from your system`),
@@ -185,6 +192,9 @@ var buildSignatures = []buildSignature{
 	signature("build_dependency_conflict", "composer", "installable set", `Your requirements could not be resolved to an installable set of packages`),
 	signature("build_dependency_conflict", "rust", "failed to select a version", "failed to select a version for (?:the requirement )?`([\\w-]+)"),
 	signature("build_dependency_conflict", "dotnet", "NU1107", `NU1107`),
+	signature("build_dependency_conflict", "ruby", "compatible versions", `Bundler could not find compatible versions for gem "([\w.-]+)"`),
+	signature("build_dependency_conflict", "elixir", "Failed to use", `Failed to use "([\w]+)"(?: \(version [^)]+\))? because|Unchecked dependencies for environment|Dependencies have diverged`),
+	signature("build_dependency_conflict", "gleam", "Dependency resolution failed", `Dependency resolution failed|Unable to find compatible versions for the version constraints`),
 	signature("build_dependency_advisory_blocked", "composer", "security advisories", `affected by security advisories`),
 	signature("build_dependency_local_path", "python", "", `No such file or directory: '(/(?:croot|opt/conda|tmp/build|home/[\w.-]+|Users/[\w.-]+)/[^']*)'`),
 	signature("build_dependency_unavailable", "npm", "is not in this registry", `'(@?[^@'\s]+)@[^']*' is not in this registry`),
@@ -198,6 +208,9 @@ var buildSignatures = []buildSignature{
 	signature("build_dependency_unavailable", "rust", "no matching package", "no matching package named `([\\w-]+)` found"),
 	signature("build_dependency_unavailable", "composer", "could not be found", `(?:Package|The requested package) ([\w.-]+/[\w.-]+) could not be found`),
 	signature("build_dependency_unavailable", "ruby", "Could not find gem", `Could not find gem '([\w.-]+)`),
+	signature("build_dependency_unavailable", "elixir", "No package with name", `No package with name ([\w]+)`),
+	signature("build_dependency_unavailable", "dart", "could not find package", `could not find package ([\w]+) at|Could not find package "([\w]+)"`),
+	signature("build_dependency_unavailable", "scala", "", `sbt\.librarymanagement\.ResolveException: (?:Error downloading|unresolved dependency:) (\S+)|\[error\] \s*not found: (https?://\S+)`),
 	signature("build_dependency_unavailable", "hugo", "module", `module "([^"\s]+)" not found`),
 
 	// Registries that refused the build, and a network that failed it.
@@ -236,6 +249,11 @@ var buildSignatures = []buildSignature{
 	signature("build_compile_error", "go", ".go:", `^(?:\S+/)?([\w.-]+\.go):\d+:\d+: `),
 	signature("build_compile_error", "java", "Failed to execute goal", `Failed to execute goal ([\w.-]+:[\w.-]+)`),
 	signature("build_compile_error", "gradle", "Execution failed for task", `Execution failed for task '([^']+)'`),
+	signature("build_compile_error", "elixir", "", `== Compilation error in file (\S+\.exs?) ==|\*\* \((?:CompileError|SyntaxError|TokenMissingError)\) (\S+\.exs?):\d+`),
+	signature("build_compile_error", "scala", "[error]", `\[error\] (?:-- \[E\d+\] [\w ]+: )?(\S+\.scala):\d+|\[error\] \(\S*compile\S*\) Compilation failed`),
+	signature("build_compile_error", "clojure", "", `Syntax error (?:compiling|macroexpanding|reading source) at \(([\w/.-]+\.clj[cs]?):\d+`),
+	signature("build_compile_error", "dart", "Error:", `^([\w/.-]+\.dart):\d+:\d+: Error: `),
+	signature("build_compile_error", "gleam", "", `┌─ (\S+\.gleam):\d+`),
 	signature("build_compile_error", "", "", `Failed to compile\.|\[(vite:[\w-]+)\] |SyntaxError: |PHP (?:Parse|Fatal) error:`),
 
 	// Commands the image does not have.
