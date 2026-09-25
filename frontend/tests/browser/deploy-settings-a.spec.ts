@@ -156,9 +156,10 @@ test.describe("Build settings", () => {
     const buildCard = page.getByRole("form", { name: "Build" })
 
     // Every recipe the backend builds is offered — the select this replaced
-    // had three of eight — and the saved one is the lit card.
+    // had three of eight — and the saved one is the lit card: fifteen
+    // recipes, a Dockerfile and a static site.
     const builder = buildCard.getByRole("group", { name: "Builder" })
-    await expect(builder.getByRole("button")).toHaveCount(10)
+    await expect(builder.getByRole("button")).toHaveCount(17)
     await expect(builder.getByRole("button", { name: /^Node\.js/ })).toHaveAttribute(
       "aria-pressed",
       "true",
