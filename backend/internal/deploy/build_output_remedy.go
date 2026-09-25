@@ -165,6 +165,22 @@ func buildCauseFix(cause *BuildCause, context causeContext) *CauseFix {
 			if slices.Contains(pythonRecipeVersions, version) && version != build.PythonVersion {
 				return &CauseFix{Kind: fixSetBuild, Field: "configuration.build.pythonVersion", Value: version}
 			}
+		case "java", "gradle-toolchain":
+			// The JDK is older than the release the build compiles for: the
+			// catalogue's release at or above it builds it.
+			wanted := javaRelease(cause.Subjects[0])
+			for _, release := range javaRecipeReleases {
+				if wanted > 0 && release >= wanted {
+					if value := strconv.Itoa(release); value != build.JavaVersion && build.Recipe == "java" {
+						return &CauseFix{Kind: fixSetBuild, Field: "configuration.build.javaVersion", Value: value}
+					}
+					break
+				}
+			}
+		case "dotnet":
+			if version := cause.Subjects[0]; slices.Contains(dotnetRecipeVersions, version) && version != build.DotnetVersion && build.Recipe == "dotnet" {
+				return &CauseFix{Kind: fixSetBuild, Field: "configuration.build.dotnetVersion", Value: version}
+			}
 		}
 	case "build_env_missing":
 		if len(cause.Subjects) == 0 || !recipe {
@@ -483,7 +499,7 @@ func (c *BuildCause) explain() (string, string) {
 				"check the image reference and, for a private image, the source's registry credential"
 		}
 		return "the package registry refused the build's credentials",
-			"add the registry token as a build variable scoped to install (for npm, `NPM_TOKEN` read by an .npmrc)"
+			"add the registry token as a build variable scoped to install (for npm, `NPM_TOKEN` read by an .npmrc; for Maven, Gradle and NuGet, the variable settings.xml, the repository's credentials or NuGet.config name)"
 	case "build_registry_rate_limited", "registry_rate_limited":
 		return "the registry's rate limit for this server's address was reached",
 			"sign the server in to Docker Hub (`docker login`), or wait for the limit to reset and deploy again"
@@ -584,10 +600,22 @@ func (c *BuildCause) runtimeVersion(subject string) (string, string) {
 	case "rust":
 		return "the code requires Rust " + orDefault(subject, "a newer release"), "pin a newer toolchain in rust-toolchain.toml, or lower the dependency"
 	case "java", "gradle":
+		if fix != nil {
+			return "the project targets Java " + subject + ", newer than the build's JDK", "set the Java version to " + fix.Value
+		}
 		return "the project targets a Java release the build's JDK does not support" + parenthesized(subject),
 			"set the Java release in the build file to the JDK the recipe uses, upgrade the Gradle wrapper, or build with a Dockerfile"
+	case "gradle-toolchain":
+		if fix != nil {
+			return "the Gradle toolchain asks for Java " + subject + ", which the build image does not provide", "set the Java version to " + fix.Value
+		}
+		return "the Gradle toolchain asks for a JDK the build image does not provide" + parenthesized(subject),
+			"declare a toolchain the recipe carries (8, 11, 17, 21 or 25), or apply the foojay toolchain resolver in settings.gradle"
 	case "dotnet":
-		return "the project targets .NET " + orDefault(subject, "a release") + ", newer than the build's SDK", "change the TargetFramework, or build with a Dockerfile"
+		if fix != nil {
+			return "the project targets .NET " + subject + ", newer than the build's SDK", "set the .NET version to " + fix.Value
+		}
+		return "the project targets .NET " + orDefault(subject, "a release") + ", newer than the build's SDK", "change the TargetFramework or global.json, or build with a Dockerfile"
 	case "php":
 		return "composer.json requires PHP " + subject, "set `require.php` to a release the recipe offers, or build with a Dockerfile"
 	case "ruby":
@@ -599,6 +627,9 @@ func (c *BuildCause) runtimeVersion(subject string) (string, string) {
 
 func (c *BuildCause) systemLibrary(subject string) (string, string) {
 	switch {
+	case c.Detail == "android":
+		return "Gradle configures a project that applies the Android Gradle plugin, which needs the Android SDK the image does not have",
+			"keep Android modules out of what the server depends on, or build with a Dockerfile that installs the Android command-line tools"
 	case subject == "pg_config":
 		return "psycopg2 compiles against libpq, and the image has no libpq development files",
 			"depend on `psycopg[binary]` or `psycopg2-binary`, or build with a Dockerfile that installs libpq-dev"

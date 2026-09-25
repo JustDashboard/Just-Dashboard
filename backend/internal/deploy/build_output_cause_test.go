@@ -376,7 +376,8 @@ func buildCases() []buildCase {
 		{
 			name: "Maven target release", command: "mvn -q -B -DskipTests package", exit: 1, build: BuildPlanConfig{Method: BuildRecipe, Recipe: "java"},
 			lines: []string{"[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile (default-compile) on project app: Fatal error compiling: error: invalid target release: 25 -> [Help 1]"},
-			want:  BuildCause{Code: "build_runtime_version", Phase: phaseBuild, Command: "mvn -q -B -DskipTests package", ExitCode: 1, Detail: "java", Subjects: []string{"25"}},
+			want: BuildCause{Code: "build_runtime_version", Phase: phaseBuild, Command: "mvn -q -B -DskipTests package", ExitCode: 1, Detail: "java", Subjects: []string{"25"},
+				Fix: &CauseFix{Kind: fixSetBuild, Field: "configuration.build.javaVersion", Value: "25"}},
 		},
 		{
 			name: "Gradle wrapper jar", command: "./gradlew --no-daemon bootJar", exit: 1, build: BuildPlanConfig{Method: BuildRecipe, Recipe: "java"},
@@ -391,7 +392,8 @@ func buildCases() []buildCase {
 		{
 			name: "NETSDK1045", command: "dotnet publish -c Release -o /out", exit: 1, build: BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet"},
 			lines: []string{"/usr/share/dotnet/sdk/8.0.404/Sdks/Microsoft.NET.Sdk/targets/Microsoft.NET.TargetFrameworkInference.targets(166,5): error NETSDK1045: The current .NET SDK does not support targeting .NET 10.0.  Either target .NET 8.0 or lower, or use a version of the .NET SDK that supports .NET 10.0."},
-			want:  BuildCause{Code: "build_runtime_version", Phase: phaseBuild, Command: "dotnet publish -c Release -o /out", ExitCode: 1, Detail: "dotnet", Subjects: []string{"10.0"}},
+			want: BuildCause{Code: "build_runtime_version", Phase: phaseBuild, Command: "dotnet publish -c Release -o /out", ExitCode: 1, Detail: "dotnet", Subjects: []string{"10.0"},
+				Fix: &CauseFix{Kind: fixSetBuild, Field: "configuration.build.dotnetVersion", Value: "10.0"}},
 		},
 		{
 			name: "C# compile error", command: "dotnet publish -c Release -o /out", exit: 1, build: BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet"},
