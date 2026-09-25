@@ -10,7 +10,6 @@ import type { DbBackupFile, DbBackups, DbConnection } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import type { useConfirm } from "@/components/confirm-dialog"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -39,11 +38,12 @@ function backupStale(takenAt: string | undefined) {
  *
  * The Connection page had a Dump button and nothing that said what it had
  * produced before; the dumps sat in a directory only the file manager could
- * show. Four readings first — how many, the newest, how much they take, and
- * whether the newest is recent enough — then the files as a table, each
- * downloadable, restorable (typed for: it overwrites live data) and
- * removable. A scheduled job that covers this database is the Backups
- * section's business, and the page says how to get there.
+ * show. The files as a table, each downloadable, restorable (typed for: it
+ * overwrites live data) and removable, under a header that says how many
+ * there are, what they take, when the newest was taken and where they sit —
+ * the four readings that were tiles over the table, said once in the head of
+ * the thing they count (§15 pass 2). A scheduled job that covers this
+ * database is the Backups section's business, and the header links there.
  */
 export function BackupsTab({ conn, confirm }: { conn: DbConnection; confirm: ConfirmFn }) {
   const { can } = useAuth()
@@ -132,30 +132,6 @@ export function BackupsTab({ conn, confirm }: { conn: DbConnection; confirm: Con
 
   return (
     <div className="flex min-w-0 animate-rise flex-col gap-6">
-      <StatGrid columns={4}>
-        <StatTile label="Dumps" value={files.length.toLocaleString()} hint="on this server" />
-        <StatTile
-          label="Newest"
-          value={newest ? relativeTime(newest.takenAt) : "Never"}
-          tone={stale ? "warning" : "success"}
-          hint={newest ? timestamp(newest.takenAt) : "no dump has been taken"}
-        />
-        <StatTile
-          label="Stored"
-          value={files.length > 0 ? bytes(total) : "—"}
-          hint={backups.data.dir}
-        />
-        <StatTile
-          label="Scheduled"
-          value={
-            <Link href={`/backups?database=${conn.id}`} className="hover:text-foreground">
-              Jobs <ArrowRight className="inline size-4" />
-            </Link>
-          }
-          hint="a job that dumps this on a schedule"
-        />
-      </StatGrid>
-
       {stale && (
         <Notice
           title={
@@ -170,14 +146,38 @@ export function BackupsTab({ conn, confirm }: { conn: DbConnection; confirm: Con
 
       <Panel plain>
         <PanelHeader
-          title={plural(files.length, "dump")}
-          actions={
-            can("service.control") && (
-              <Button size="sm" onClick={dump} pending={dumping}>
-                <CloudDownload className="size-3.5" />
-                Dump now
-              </Button>
+          title={
+            files.length > 0
+              ? `${plural(files.length, "dump")} · ${bytes(total)}`
+              : plural(files.length, "dump")
+          }
+          eyebrow={
+            newest ? (
+              <span
+                className={stale ? "text-warning" : undefined}
+                title={timestamp(newest.takenAt)}
+              >
+                newest {relativeTime(newest.takenAt)} · in {backups.data.dir}
+              </span>
+            ) : (
+              "no dump has been taken"
             )
+          }
+          actions={
+            <div className="flex flex-wrap items-center gap-2">
+              <Link
+                href={`/backups?database=${conn.id}`}
+                className="flex items-center gap-1 text-body text-muted-foreground hover:text-foreground"
+              >
+                Scheduled jobs <ArrowRight className="size-3.5" />
+              </Link>
+              {can("service.control") && (
+                <Button size="sm" onClick={dump} pending={dumping}>
+                  <CloudDownload className="size-3.5" />
+                  Dump now
+                </Button>
+              )}
+            </div>
           }
         />
         {files.length === 0 ? (

@@ -320,7 +320,7 @@ test.describe("Databases & backups", () => {
     })
 
     const orders = page.getByRole("link", { name: "orders-db", exact: true })
-    await expect(orders).toHaveAttribute("href", "/databases/browse?conn=9")
+    await expect(orders).toHaveAttribute("href", "/databases/overview?conn=9")
     await expect(page.getByText("db-9.jd.internal", { exact: true })).toBeVisible()
     await expect(page.getByText("Connected", { exact: true })).toBeVisible()
     // The engine is spelled as the picture above spells it, not as the driver key.

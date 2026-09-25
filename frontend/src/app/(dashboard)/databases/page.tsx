@@ -6,12 +6,11 @@ import { useRouter } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
 import { ArrowRight, Database, Key, Linked, Plus } from "@/components/icons"
 import { get } from "@/lib/api"
-import { bytes, plural, relativeTime } from "@/lib/format"
+import { relativeTime } from "@/lib/format"
 import type { DbFleet, DbTopology } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Page, SearchInput, Section } from "@/components/page"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { ChipStrip, ChipCount, FilterChip } from "@/components/tabs"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { FindingList, type Finding } from "@/components/finding-list"
@@ -23,7 +22,7 @@ import { useDatabase } from "@/components/database/db-context"
 import { FleetCard, engineLabel } from "@/components/database/fleet-card"
 import { DatabaseTopology } from "@/components/database/topology"
 import {
-  fleetConcern,
+  fleetFinding,
   fleetReadings,
   matchesFilter,
   matchesQuery,
@@ -38,16 +37,24 @@ import {
  * rail and an empty grid saying "pick a table" — which answered none of the
  * questions somebody arriving at *Databases* has: are they all up, which one
  * grew, what is talking to which, and is anything running here that is not
- * connected yet. This is a reading page (§15) built from those questions:
- * five readings across the top, an attention list of what needs a hand, the
- * databases as cards you open — each drawn as its engine with its readings on
- * it — the servers found on this machine that are not connected yet, and the
+ * connected yet. This is a reading page (§15) built from those questions, in
+ * the order they are asked: the databases first, as cards you open — each
+ * drawn as its engine with its own readings on it — then what needs a hand,
+ * then the servers found on this machine that are not connected yet, and the
  * map of what they feed, in the picture the Topology page draws in full.
+ *
+ * It opened on five readings — databases, reachable, stored, sessions,
+ * feeding — and dropped them (§15 pass 2, the `/git` exit): the count is on
+ * the *All* chip and the engines are drawn beside the title, whether each
+ * answers is the word on its card, and what each takes and carries is the
+ * strip of figures on its card. A total over seven databases is a number
+ * nobody came for, and it stood between the reader and the cards.
  *
  * Everything on it comes from two reads: `/databases/fleet`, which dials every
  * connection at once, and `/databases/topology`. The connection strip the
  * other pages carry is not drawn here because there is no *one* connection —
- * pressing a card is what chooses one.
+ * pressing a card is what chooses one, and it lands on that database's own
+ * overview.
  */
 export default function DatabasesOverviewPage() {
   const { can } = useAuth()
@@ -80,39 +87,8 @@ export default function DatabasesOverviewPage() {
   const findings = useMemo<Finding[]>(() => {
     const out: Finding[] = []
     for (const entry of fleet.data?.connections ?? []) {
-      const concern = fleetConcern(entry)
-      if (!concern) continue
-      out.push({
-        id: `conn-${entry.id}`,
-        level: concern.level,
-        title: `${entry.name} ${concern.reason}`,
-        detail:
-          concern.level === "critical"
-            ? `The dashboard could not sign in: ${entry.error ?? "the server did not answer"}.`
-            : concern.reason === "reachable from the internet"
-              ? "Its port is published on every interface and the firewall lets it through, so the password is all that protects the data."
-              : "No dump of it is on this server. A database whose only copy is the live one is one disk failure from gone.",
-        advice:
-          concern.level === "critical"
-            ? "Open its Connection page to test the stored password or set a new one."
-            : concern.reason === "reachable from the internet"
-              ? "Switch it to this server only under Connection if nothing elsewhere needs it."
-              : "Take a dump under Backups, or add it to a scheduled backup job.",
-        meta: engineLabel(entry.driver),
-        action: {
-          label:
-            concern.level === "critical"
-              ? "Open connection"
-              : concern.reason === "reachable from the internet"
-                ? "Open connection"
-                : "Open backups",
-          onClick: () => {
-            router.push(
-              `/databases/${concern.reason === "never backed up" || concern.reason.startsWith("last backup") ? "backups" : "connection"}?conn=${entry.id}`,
-            )
-          },
-        },
-      })
+      const finding = fleetFinding(entry, (path) => router.push(path))
+      if (finding) out.push({ ...finding, meta: engineLabel(entry.driver) })
     }
     for (const server of fleet.data?.unreachable ?? []) {
       out.push({
@@ -148,84 +124,13 @@ export default function DatabasesOverviewPage() {
 
   return (
     <Page className="animate-rise">
-      <StatGrid columns={5} dense>
-        <StatTile
-          label="Databases"
-          value={readings.total.toLocaleString()}
-          hint={
-            readings.engines.length > 0 ? (
-              <span className="flex items-center gap-1.5">
-                <ProductGlyphs ids={readings.engines} />
-                {plural(readings.engines.length, "engine")}
-              </span>
-            ) : (
-              "none connected"
-            )
-          }
-        />
-        <StatTile
-          label="Reachable"
-          value={
-            readings.total === 0
-              ? "—"
-              : readings.reachable === readings.total
-                ? "All"
-                : `${readings.reachable} of ${readings.total}`
-          }
-          tone={readings.total > 0 && readings.reachable < readings.total ? "danger" : "default"}
-          hint={
-            readings.attention > 0
-              ? `${readings.attention} need${readings.attention === 1 ? "s" : ""} attention`
-              : "answering"
-          }
-        />
-        <StatTile
-          label="Stored"
-          value={readings.sized ? bytes(readings.bytes) : "—"}
-          hint={`${readings.objects.toLocaleString()} tables, collections and keys`}
-        />
-        <StatTile
-          label="Sessions"
-          value={readings.sessions.toLocaleString()}
-          hint="open right now, besides this dashboard's"
-        />
-        <StatTile
-          label="Feeding"
-          value={readings.consumers.toLocaleString()}
-          hint={readings.consumers === 1 ? "deployment linked" : "deployments linked"}
-        />
-      </StatGrid>
-
-      {(findings.length > 0 || waiting.length > 0) && (
-        <Section title="Needs attention">
-          {findings.length > 0 && <FindingList findings={findings} />}
-          {waiting.length > 0 && (
-            <ChoiceGrid columns="fill">
-              {waiting.map((server, index) => (
-                <ChoiceCard
-                  key={`${server.host}:${server.port}`}
-                  index={index}
-                  verb={`Connect ${server.name}`}
-                  onClick={admin && connectHost ? () => connectHost(server) : undefined}
-                  disabled={!admin}
-                  logo={<ProductLogo id={server.driver} size="md" fallback={Database} />}
-                  title={server.name}
-                  description={`Found listening on ${server.host}:${server.port}${server.process ? ` (${server.process})` : ""}. It is installed on the machine, not in a container, so its password has to be given or made.`}
-                  trailing={
-                    <span className="flex items-center gap-1.5 text-hint text-muted-foreground">
-                      <Key className="size-3" />
-                      waiting for a password
-                    </span>
-                  }
-                />
-              ))}
-            </ChoiceGrid>
-          )}
-        </Section>
-      )}
-
       <Section
-        title="Databases"
+        title={
+          <span className="flex items-center gap-2">
+            Databases
+            {readings.engines.length > 0 && <ProductGlyphs ids={readings.engines} />}
+          </span>
+        }
         actions={
           admin && (
             <div className="flex items-center gap-2">
@@ -299,13 +204,13 @@ export default function DatabasesOverviewPage() {
                 description="Nothing in this list matches the filter and the words above."
               />
             ) : (
-              <ChoiceGrid columns="fill">
+              <ChoiceGrid columns={3}>
                 {shown.map((entry, index) => (
                   <FleetCard
                     key={entry.id}
                     entry={entry}
                     index={index}
-                    href={`/databases/browse?conn=${entry.id}`}
+                    href={`/databases/overview?conn=${entry.id}`}
                   />
                 ))}
               </ChoiceGrid>
@@ -313,6 +218,34 @@ export default function DatabasesOverviewPage() {
           </>
         )}
       </Section>
+
+      {(findings.length > 0 || waiting.length > 0) && (
+        <Section title="Needs attention">
+          {findings.length > 0 && <FindingList findings={findings} />}
+          {waiting.length > 0 && (
+            <ChoiceGrid columns="fill">
+              {waiting.map((server, index) => (
+                <ChoiceCard
+                  key={`${server.host}:${server.port}`}
+                  index={index}
+                  verb={`Connect ${server.name}`}
+                  onClick={admin && connectHost ? () => connectHost(server) : undefined}
+                  disabled={!admin}
+                  logo={<ProductLogo id={server.driver} size="md" fallback={Database} />}
+                  title={server.name}
+                  description={`Found listening on ${server.host}:${server.port}${server.process ? ` (${server.process})` : ""}. It is installed on the machine, not in a container, so its password has to be given or made.`}
+                  trailing={
+                    <span className="flex items-center gap-1.5 text-hint text-muted-foreground">
+                      <Key className="size-3" />
+                      waiting for a password
+                    </span>
+                  }
+                />
+              ))}
+            </ChoiceGrid>
+          )}
+        </Section>
+      )}
 
       {!nothing && (
         <Section
@@ -329,7 +262,7 @@ export default function DatabasesOverviewPage() {
           {topology.data ? (
             <DatabaseTopology topology={topology.data} compact />
           ) : (
-            <Skeleton className="h-32 rounded-xl" />
+            <Skeleton className="h-40 rounded-xl" />
           )}
         </Section>
       )}

@@ -15,7 +15,17 @@
         {
           "kind": "added",
           "text": "Databases opens on a control center of every database at once",
-          "detail": "Five readings — how many, how many answer, what they take, sessions open, deployments fed — over an attention list (a server that refused, a port open to the internet, a database never dumped), the databases as cards drawn as their engines and ordered worst first, the servers found running on this machine but not yet connected, and a map of what each database feeds. Every connection is dialled, sized and counted in one request. Browse moved to its own page under the connection."
+          "detail": "The databases as cards drawn as their engines and ordered worst first — each carrying what it holds, how many tables or keys and how many sessions are open, whether it answers, what it feeds and when it was last dumped — over an attention list (a server that refused, a port open to the internet, a database never dumped), the servers found running on this machine but not yet connected, and a map of what each database feeds. Every connection is dialled, sized and counted in one request. A press anywhere on a card opens the database."
+        },
+        {
+          "kind": "added",
+          "text": "A database opens on its own overview, with the connection string first",
+          "detail": "Opening a database used to land on Browse with nothing picked. It lands on the database's overview now: the connection string as a hosted database's page draws it — read from this server or from anywhere where the port is published, as the URL, the .env line or the engine's shell command, masked until shown or copied — beside its facts as one list (whether it answers and how fast, the engine and version, where it runs, what it holds, sessions, what it feeds, where its port answers, the last backup), what needs attention, the largest tables as bars that open in Browse, and the things reading it. The Connection page keeps the facts and the maintenance rows."
+        },
+        {
+          "kind": "changed",
+          "text": "The database pages carry their readings in the things they count rather than in tiles over them",
+          "detail": "The control center, the topology, a connection, its backups and its advisor each opened on a row of figures. The figures are on the cards, in the headers and at the heads of the map's lanes now, and the map itself is drawn as a node editor draws a graph: node cards in two lanes on the ER diagram's dot grid, with a lane kept clear between them for the wires, which leave and arrive level."
         },
         {
           "kind": "added",

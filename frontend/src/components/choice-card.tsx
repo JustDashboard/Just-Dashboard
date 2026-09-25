@@ -1,7 +1,9 @@
 "use client"
 
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { ArrowRight, Check, Database, type Icon } from "@/components/icons"
+import { CONTROL } from "@/components/flow"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { SpotlightBorder } from "@/components/ui/spotlight-border"
@@ -36,6 +38,15 @@ import { cn } from "@/lib/utils"
  * Selection is `border-brand` over `bg-accent` — the same mark the terminal
  * rail puts on the active session and `ToggleGroup` on the pressed item (§3).
  * The lit edge is the *hover*: three states, three mechanisms (§6).
+ *
+ * A card with an `href` navigates from anywhere on it, the way `ChoiceRow`
+ * does. It used to hand the press to the title's link alone and leave the
+ * card's own `onClick` empty, so the whole surface took the pointer cursor
+ * and only the two words of the title actually went anywhere — a press on
+ * the logo, the readings or the space beside them did nothing, which read as
+ * a click that had not registered. A press with a modifier held opens a new
+ * tab, a press that ends a text selection is a selection, and a press on a
+ * control inside the card is that control's.
  */
 export function ChoiceCard({
   selected,
@@ -76,6 +87,7 @@ export function ChoiceCard({
   /** Position in a grid, for the arrival stagger. */
   index?: number
 }) {
+  const router = useRouter()
   const shape = cn(
     "group/choice flex min-h-20 min-w-0 flex-col items-start gap-1.5 rounded-xl p-3 text-left transition-colors",
     selected && "bg-accent",
@@ -111,13 +123,25 @@ export function ChoiceCard({
   const choose = () => {
     if (!disabled) onClick?.()
   }
+  const press = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (disabled) return
+    if (event.target !== event.currentTarget && (event.target as HTMLElement).closest(CONTROL))
+      return
+    if (!href) {
+      choose()
+      return
+    }
+    if (window.getSelection()?.toString()) return
+    if (event.metaKey || event.ctrlKey || event.shiftKey) window.open(href, "_blank")
+    else router.push(href)
+  }
   return (
     <BlurFade delay={index * 0.03} className="h-full">
       <SpotlightBorder resting={edge} className="h-full">
         <div
           data-slot="choice-card"
           data-selected={selected || undefined}
-          onClick={href ? undefined : choose}
+          onClick={press}
           className={cn(shape, "h-full", logo && "flex-row gap-3", !disabled && "cursor-pointer")}
         >
           {logo}
@@ -146,6 +170,9 @@ export function ChoiceCard({
                 <Link
                   href={href}
                   aria-label={verb}
+                  // The card around it already navigates on the pointer; the
+                  // link is the keyboard's way in and must not go twice.
+                  onClick={(event) => event.stopPropagation()}
                   className="min-w-0 flex-1 truncate rounded-sm text-body font-medium focus-ring"
                 >
                   {title}

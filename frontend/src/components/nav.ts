@@ -169,7 +169,8 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
         href: "/databases",
         icon: Database,
         children: [
-          { title: "Overview", href: "/databases", icon: Home },
+          { title: "All databases", href: "/databases", icon: Layers },
+          { title: "Overview", href: "/databases/overview", icon: Home },
           { title: "Browse", href: "/databases/browse", icon: GridSquare },
           { title: "Structure", href: "/databases/structure", icon: Table },
           { title: "Diagram", href: "/databases/diagram", icon: Layout },

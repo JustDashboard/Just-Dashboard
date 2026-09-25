@@ -21,6 +21,12 @@ import { cn } from "@/lib/utils"
  * for the picture of one thing that just happened (a test message leaving for
  * its channel) rather than of a link that carries all the time. Re-key the
  * beam to send another.
+ *
+ * `shape="s"` draws the line as a node editor does: it leaves the first end
+ * level, bends across the middle and arrives level at the other, so a column
+ * of things wired to a column of other things reads as ports and wires
+ * rather than as strings pulled tight between them. The default is the arc
+ * the picture of a request's path uses, bowed by `curvature`.
  */
 export function AnimatedBeam({
   className,
@@ -28,6 +34,7 @@ export function AnimatedBeam({
   fromRef,
   toRef,
   curvature = 0,
+  shape = "arc",
   reverse = false,
   still = false,
   once = false,
@@ -48,6 +55,8 @@ export function AnimatedBeam({
   toRef: RefObject<HTMLElement | null>
   /** How far the midpoint bows above (positive) or below the straight line. */
   curvature?: number
+  /** An arc bowed by `curvature`, or a wire that leaves and arrives level. */
+  shape?: "arc" | "s"
   /** The pulse runs from `toRef` back to `fromRef`. */
   reverse?: boolean
   /** A line with nothing moving on it. */
@@ -94,6 +103,11 @@ export function AnimatedBeam({
       const startY = a.top - box.top + a.height / 2 + startYOffset
       const endX = b.left - box.left + b.width / 2 + endXOffset
       const endY = b.top - box.top + b.height / 2 + endYOffset
+      if (shape === "s") {
+        const midX = (startX + endX) / 2
+        setPathD(`M ${startX},${startY} C ${midX},${startY} ${midX},${endY} ${endX},${endY}`)
+        return
+      }
       const controlY = startY - curvature
       setPathD(`M ${startX},${startY} Q ${(startX + endX) / 2},${controlY} ${endX},${endY}`)
     }
@@ -101,7 +115,17 @@ export function AnimatedBeam({
     if (containerRef.current) observer.observe(containerRef.current)
     update()
     return () => observer.disconnect()
-  }, [containerRef, fromRef, toRef, curvature, startXOffset, startYOffset, endXOffset, endYOffset])
+  }, [
+    containerRef,
+    fromRef,
+    toRef,
+    curvature,
+    shape,
+    startXOffset,
+    startYOffset,
+    endXOffset,
+    endYOffset,
+  ])
 
   const quiet = still || reduced || spent
 

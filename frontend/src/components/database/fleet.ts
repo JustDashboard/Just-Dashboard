@@ -27,6 +27,50 @@ export function fleetConcern(
   return null
 }
 
+/**
+ * A concern as the attention list draws it: what was measured, what it means,
+ * what to do, and the page that does it. The control center and a database's
+ * own overview draw the same finding, so it is decided once.
+ */
+export function fleetFinding(
+  entry: DbFleetEntry,
+  go: (path: string) => void,
+  now = Date.now(),
+): {
+  id: string
+  level: "critical" | "warning"
+  title: string
+  detail: string
+  advice: string
+  action: { label: string; onClick: () => void }
+} | null {
+  const concern = fleetConcern(entry, now)
+  if (!concern) return null
+  const backup = concern.reason === "never backed up" || concern.reason.startsWith("last backup")
+  const page = backup ? "backups" : "connection"
+  return {
+    id: `conn-${entry.id}`,
+    level: concern.level,
+    title: `${entry.name} ${concern.reason}`,
+    detail:
+      concern.level === "critical"
+        ? `The dashboard could not sign in: ${entry.error ?? "the server did not answer"}.`
+        : concern.reason === "reachable from the internet"
+          ? "Its port is published on every interface and the firewall lets it through, so the password is all that protects the data."
+          : "No dump of it is on this server. A database whose only copy is the live one is one disk failure from gone.",
+    advice:
+      concern.level === "critical"
+        ? "Open its Connection page to test the stored password or set a new one."
+        : concern.reason === "reachable from the internet"
+          ? "Switch it to this server only under Connection if nothing elsewhere needs it."
+          : "Take a dump under Backups, or add it to a scheduled backup job.",
+    action: {
+      label: backup ? "Open backups" : "Open connection",
+      onClick: () => go(`/databases/${page}?conn=${entry.id}`),
+    },
+  }
+}
+
 /** Worst first, then by name — the order every list in the product takes. */
 export function sortFleet(entries: DbFleetEntry[], now = Date.now()): DbFleetEntry[] {
   const rank = (e: DbFleetEntry) => {

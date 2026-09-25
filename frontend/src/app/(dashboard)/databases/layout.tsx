@@ -141,7 +141,7 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
       try {
         const fresh = await get<DbConnection[]>("/databases/")
         const created = fresh.find((c) => c.name === name)
-        if (created) goto("/databases/browse", { conn: created.id })
+        if (created) goto("/databases/overview", { conn: created.id })
       } catch {
         // The refresh above still brings it into the picker.
       }
@@ -225,13 +225,29 @@ export default function DatabasesLayout({ children }: { children: React.ReactNod
           replaces: true,
           title: conn.name,
           mark: <ProductGlyph id={conn.driver} className="size-4" />,
+          // The pages about this one database, then the two about every
+          // database: the control center it was opened from and the map.
+          // The control center's entry carries no `?conn=` — it is about no
+          // one connection, and a stale one on its address is a lie.
           groups: [
             {
-              items: pages.map((page) => ({
-                title: page.title,
-                href: hrefFor(page.href),
-                icon: page.icon,
-              })),
+              items: pages
+                .filter((page) => !SECTION_WIDE.has(page.href))
+                .map((page) => ({
+                  title: page.title,
+                  href: hrefFor(page.href),
+                  icon: page.icon,
+                })),
+            },
+            {
+              label: "Every database",
+              items: pages
+                .filter((page) => SECTION_WIDE.has(page.href))
+                .map((page) => ({
+                  title: page.title,
+                  href: page.href === "/databases" ? page.href : hrefFor(page.href),
+                  icon: page.icon,
+                })),
             },
           ],
         }

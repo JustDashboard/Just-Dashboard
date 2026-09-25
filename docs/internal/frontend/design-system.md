@@ -1431,10 +1431,14 @@ the proxy service verbs sit with the engine facts. Detail pages keep their verbs
 and their resource name in the first facts or identity row. The deployment fleet puts its related
 pages and create command with the list filters; an empty fleet has its create command in the empty
 state.
-The Databases section opens on a control center — five readings, an attention list, the databases as
-lit cards drawn as their engines, the servers found here and not yet connected, and the map of what
-they feed — and its per-connection pages keep the connection switcher, facts, status and New command in
-one compact strip. Flow pages keep their visible question as the `h1`, since the question is the work on that
+The Databases section opens on a control center with no tiles — the databases as lit cards drawn as
+their engines, each carrying its own three figures, an attention list under them, the servers found
+here and not yet connected, and the map of what they feed — and a database opens on its own overview:
+the connection string, its facts as one list, its largest tables as bars and what reads it. The
+section took pass 2's `/git` exit on every page (the control center, the topology, a database's
+connection, backups and advisor): each figure went to the card, the header or the lane that counts
+the thing it was about, and every page's doc comment names where. Its per-connection pages keep the
+connection switcher, facts, status and New command in one compact strip. Flow pages keep their visible question as the `h1`, since the question is the work on that
 screen (§16).
 
 The 0.7.0 pass took two things off it that had been saying the same figure twice: a `MetricStrip`

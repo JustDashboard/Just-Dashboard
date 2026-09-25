@@ -619,7 +619,7 @@ func (s *Server) topology(ctx context.Context, conns []*dbConnection) (*topology
 		dbID := "db:" + strconv.FormatInt(conn.ID, 10)
 		node := addNode(topoNode{
 			ID: dbID, Kind: "database", Name: conn.Name, Product: string(conn.Driver),
-			Detail: conn.Database, ConnID: conn.ID, Href: "/databases/browse?conn=" + strconv.FormatInt(conn.ID, 10),
+			Detail: conn.Database, ConnID: conn.ID, Href: "/databases/overview?conn=" + strconv.FormatInt(conn.ID, 10),
 		})
 		_, dsn, err := s.dbConnRow(ctx, conn.ID)
 		if err != nil {
