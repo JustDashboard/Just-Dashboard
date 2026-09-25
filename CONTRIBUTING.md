@@ -100,8 +100,10 @@ carries no licensing question at all.
   test needs `git-lfs` on PATH (it is included in the backend image); it touches only a temporary
   repository. Provider fixture tests do not publish live comments or reviews. See
   [the Git workspace contract](docs/internal/backend/git-workspace-expansion.md) for limits and setup.
-  Twenty-four fixtures: the locked Node starters (installed by Bun, pnpm and Yarn 1), FastAPI, Flask,
-  Django, Streamlit, Gradio, Go, axum, Maven, Gradle, ASP.NET Core, Deno, Laravel and plain PHP.
+  Twenty-six fixtures: the locked Node starters (installed by Bun, pnpm and Yarn 1), FastAPI, Flask,
+  Django, Streamlit, Gradio, Go, axum, Maven, Gradle, ASP.NET Core, Deno, Laravel, Laravel with Vite and
+  Wayfinder (assets built with PHP and vendor/, served behind a forwarded HTTPS), Symfony with
+  AssetMapper (a committed `.env` that says dev) and plain PHP.
 - The blueprint catalogue sweep pulls every deployable definition's pinned image, starts it through the
   real runtime owner with generated secrets and runs its own readiness checks (`JD_BLUEPRINT_ONLY=a,b`
   narrows it; images it pulled are removed again):
@@ -117,8 +119,9 @@ carries no licensing question at all.
   This uses locked application fixtures and checks served build values, private install credentials,
   SvelteKit adapters, HTML/Containerfile defaults and Go command/version behavior, plus the catalogue's
   own starters: Astro, Nuxt, React Router, FastAPI (unpinned requirements, server auto-installed), a
-  Flask factory on a bare pyproject, Django with its migrations, axum, a Maven jar, ASP.NET Core and
-  Deno. It pulls the build images and package registries over the network and takes several minutes.
+  Flask factory on a bare pyproject, Django with its migrations, axum, a Maven jar, ASP.NET Core,
+  Deno, Laravel with Vite and Wayfinder, and Symfony with AssetMapper. It pulls the build images and
+  package registries over the network and takes several minutes.
 - The daemon-wide prune integration tests are separate: set `JD_DOCKER_PRUNE_LIVE=1` and `DOCKER_HOST`
   to an isolated disposable Docker daemon before running
   `go test ./internal/dockerx -run 'TestLive(PruneAllActuallyDeletes|BuildCachePruneRoundTrips)' -count=1 -v`. A normal `go test ./...`

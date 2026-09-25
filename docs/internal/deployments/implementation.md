@@ -298,7 +298,11 @@ only renderer/executor/validation authority for their feature.
   Dockerfile checks after the build. `frameworks_python.go` names Django, FastAPI, Flask, Streamlit and
   Gradio from the manifests and finds the application object in the conventional entry files;
   `frameworks_rust.go`, `frameworks_java.go`, `frameworks_dotnet.go` and `frameworks_deno.go` read
-  `Cargo.toml`, `pom.xml`/`build.gradle(.kts)`, `*.csproj` and `deno.json(c)`. A `Procfile`'s `web:`
+  `Cargo.toml`, `pom.xml`/`build.gradle(.kts)`, `*.csproj` and `deno.json(c)`; `detect_php.go` and
+  `detect_deno.go` read, after the walk and under budgets of their own, what those recipes decide from
+  beyond the manifest (the lock, the declared release, the code's extension calls, a WordPress tree's
+  shape) through one reader that detection and preparation share, and record it as the candidate's
+  `php` and `deno` facts for preflight. A `Procfile`'s `web:`
   process outranks every guess, and another platform's deployment file (`fly.toml`, `render.yaml`,
   `app.json`, Kamal's `config/deploy.yml`, …) outranks the framework's defaults. The candidate carries `spaFallback` (a client-routed site's nginx
   fallback), `pythonVersion`, `unpinnedDependencies` (a `dependencies_unpinned` preflight warning,
@@ -326,8 +330,8 @@ only renderer/executor/validation authority for their feature.
   `public_url_variable_missing`, `request_body_limit` and the rest, listed in the recipe guide), so a
   certain loopback bind is a blocker before Deploy rather than a readiness timeout after it. The closed
   recipe set is
-  `node`, `go`, `python`, `rust`, `java`, `dotnet`, `deno` (`validRecipe`), and `build.pythonVersion`
-  and `build.spaFallback` are the two additive plan fields, bounded by `PlanConfiguration.Validate`.
+  `node`, `go`, `python`, `rust`, `java`, `dotnet`, `deno`, `php` (`validRecipe`), and `build.pythonVersion`,
+  `build.phpVersion` and `build.spaFallback` are additive plan fields, bounded by `PlanConfiguration.Validate`.
   The contract per language is [the recipe guide](recipes.md). The framework detection recognised is
   recorded on the build plan when a draft commits (`build.framework` on the configuration read) —
   the chosen candidate's, while the plan still builds that candidate's directory — so a later read,
@@ -643,7 +647,10 @@ only renderer/executor/validation authority for their feature.
   `AUTH_TRUST_HOST=true`), a missing `.env` it exits over, a database address on localhost (Node,
   libpq, Go, MySQL and Rust wordings), Prisma's engine on Alpine, a disallowed Host, a missing entry
   file or app object, a missing module or shared library (psycopg's `libpq library not found` among
-  them), a cgo-less binary, an architecture mismatch, a runner that is not installed, Phoenix's origin
+  them), a PHP extension a call needs (`Call to undefined function mysqli_connect()`, `Class "Redis"
+  not found`, WordPress's missing MySQL extension — `runtime_php_extension_missing`, naming the
+  `ext-` requirement that installs it), front-end assets a page renders and the image lacks (Laravel's
+  Vite manifest, `Mix manifest does not exist` — `runtime_assets_missing`), a cgo-less binary, an architecture mismatch, a runner that is not installed, Phoenix's origin
   check (fixed with `PHX_HOST`), Play's PID file, a server that prints a loopback bind (uvicorn,
   gunicorn, werkzeug, puma, Kestrel — not Next.js, which prints `localhost` whatever it binds) or whose
   every listening socket is on loopback (`runtime_loopback_bind`, named in the step message even when
