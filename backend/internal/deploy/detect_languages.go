@@ -13,11 +13,12 @@ import (
 
 // Ruby, Elixir, Scala, Clojure, Dart and Gleam have recipes of their own
 // (frameworks_ruby.go, frameworks_elixir.go, frameworks_jvm_languages.go,
-// frameworks_beam_dart.go). Their roots are recognised by the repository-shape
-// pass (detect_ecosystems.go), which also takes their asset pipelines out of
-// the Node candidates; this file turns such a root into a recipe candidate,
-// reading the same files with the same functions the recipe prepares from,
-// so what detection proposes is what the build does.
+// frameworks_dart.go, frameworks_gleam.go). Their roots are recognised by
+// the repository-shape pass (detect_ecosystems.go), which also takes their
+// asset pipelines out of the Node candidates; this file turns such a root
+// into a recipe candidate, reading the same files with the same functions
+// the recipe prepares from, so what detection proposes is what the build
+// does.
 
 // languageRecipes are the recipes detection builds from an ecosystem match
 // rather than from a root's markers.
@@ -411,9 +412,10 @@ const unprivilegedDebianUser = "RUN (getent passwd 10001 >/dev/null || useradd -
 
 // languageStartListen reads the port and bind of a language recipe's start
 // command, which passes $PORT to the server rather than leaving it to code
-// detection cannot read.
+// detection cannot read. Facts the recipe's reader took from the code
+// (Gleam's mist builder) stand: that start command is only a launcher.
 func languageStartListen(c *DetectedCandidate) {
-	if strings.TrimSpace(c.StartCommand) == "" {
+	if strings.TrimSpace(c.StartCommand) == "" || c.Listen != nil {
 		return
 	}
 	settleListen(c, listenInputs{command: parseCommandListen(c.StartCommand, nil), hasCommand: true})

@@ -778,6 +778,40 @@ func TestDartAndGleamServers(t *testing.T) {
 	}
 	assertRendered(t, prepared, []string{"FROM " + gleamImage + "@sha256:", "RUN gleam deps download", "RUN gleam export erlang-shipment",
 		"COPY --from=build --chown=app:app /app/build/erlang-shipment/ /app/", "USER app"}, nil)
+	// Wisp's own hello_world: mist listens on localhost unless mist.bind is
+	// called, which nothing outside the container reaches.
+	wisp := map[string]string{
+		"gleam.toml":           "name = \"app\"\n\n[dependencies]\nwisp = \">= 2.0.0 and < 3.0.0\"\nwisp_mist = \">= 1.0.0 and < 2.0.0\"\nmist = \">= 6.0.0 and < 7.0.0\"\n",
+		"manifest.toml":        "packages = [\n  { name = \"mist\", version = \"6.0.3\", build_tools = [\"gleam\"], requirements = [], otp_app = \"mist\", source = \"hex\", outer_checksum = \"00\" },\n]\n",
+		"src/app.gleam":        "import app/router\nimport gleam/erlang/process\nimport mist\nimport wisp\nimport wisp/wisp_mist\n\npub fn main() {\n  wisp.configure_logger()\n  let secret_key_base = wisp.random_string(64)\n  let assert Ok(_) =\n    wisp_mist.handler(router.handle_request, secret_key_base)\n    |> mist.new\n    |> mist.port(8000)\n    |> mist.start\n  process.sleep_forever()\n}\n",
+		"src/app/router.gleam": "import wisp\n\npub fn handle_request(req) {\n  wisp.ok()\n}\n",
+	}
+	candidate = selectedOf(detectShapeFixture(t, wisp))
+	if candidate == nil || candidate.Recipe != "gleam" || candidate.Port != 8000 || candidate.Listen == nil || candidate.Listen.Loopback != "localhost" ||
+		!candidate.Listen.LoopbackCertain || candidate.Listen.Port != 8000 || !strings.Contains(candidate.Listen.LoopbackFrom, "src/app.gleam builds a mist server without mist.bind") {
+		t.Fatalf("wisp = %#v / %#v", candidate, candidate.Listen)
+	}
+	loopback := findingByCode(networkFindings(networkDraft(*candidate, ProfileWeb), networkConfiguration("gleam", candidate.StartCommand, 8000)), "listen_loopback")
+	if loopback == nil || loopback.Severity != PreflightBlocked || !strings.Contains(loopback.Action, `|> mist.bind("0.0.0.0")`) {
+		t.Fatalf("loopback = %#v", loopback)
+	}
+	// Bound to every interface, and with no mist.port at all: mist's own
+	// default port, which PORT does not move.
+	wisp["src/app.gleam"] = strings.NewReplacer("    |> mist.port(8000)\n", "", "|> mist.new\n", "|> mist.new\n    |> mist.bind(\"0.0.0.0\")\n").Replace(wisp["src/app.gleam"])
+	candidate = selectedOf(detectShapeFixture(t, wisp))
+	if candidate == nil || candidate.Port != mistDefaultPort || candidate.Listen == nil || candidate.Listen.Loopback != "" || candidate.Listen.Port != mistDefaultPort {
+		t.Fatalf("bound wisp = %#v / %#v", candidate, candidate.Listen)
+	}
+	// mist 2 had no bind and listened on every interface.
+	legacy := map[string]string{
+		"gleam.toml":    "name = \"app\"\n\n[dependencies]\nmist = \">= 2.0.0 and < 3.0.0\"\n",
+		"manifest.toml": "packages = [\n  { name = \"mist\", version = \"2.0.0\", build_tools = [\"gleam\"] },\n]\n",
+		"src/app.gleam": "pub fn main() {\n  let port = envoy.get(\"PORT\") |> result.try(int.parse) |> result.unwrap(3000)\n  mist.new(handler) |> mist.port(port) |> mist.start_http\n}\n",
+	}
+	candidate = selectedOf(detectShapeFixture(t, legacy))
+	if candidate == nil || candidate.Port != 3000 || candidate.Listen == nil || candidate.Listen.Loopback != "" || !candidate.Listen.ReadsPort {
+		t.Fatalf("mist 2 = %#v / %#v", candidate, candidate.Listen)
+	}
 	for _, refused := range []map[string]string{
 		{"gleam.toml": "name = \"api\"\ntarget = \"javascript\"\n"},
 		{"gleam.toml": "name = \"api\"\ngleam = \"< 1.0.0\"\n"},
