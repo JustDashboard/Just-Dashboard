@@ -43,13 +43,26 @@ func TestLiveDetectedFrameworkBuildAndServing(t *testing.T) {
 	// repository with a requirements/ folder, split settings and psycopg2
 	// compiled against the libpq the recipe installs, and a Flask app whose
 	// JavaScript a Node stage bundles.
-	// The compiled shapes beyond one crate or module (compiledLiveFixtures)
+	// java-reactor is a Spring Boot module of a Maven reactor on Java 17 and
+	// gradle-multiproject an application-plugin project of a Gradle build
+	// with a version catalog, each built from the build's root;
+	// dotnet-solution a web project in a solution's src/ with shared props,
+	// central package versions and a global.json pin; blazor-wasm a Blazor
+	// WebAssembly app served as static files; fsharp an F# minimal API; and
+	// dotnet-spa an ASP.NET Core project whose publish runs npm for its
+	// front end. gradle-composite is a Gradle build whose settings root is
+	// below the checkout's and includes a build beside it, and
+	// dotnet-multitarget a web project with two target frameworks that
+	// references a library with one.
+	// The Go and Rust shapes beyond one crate or module (compiledLiveFixtures)
 	// build a member of a go.work or a Cargo workspace from its workspace,
 	// a Go server embedding its Vite build with cgo SQLite and templ, and the
 	// Leptos and Trunk WebAssembly builds.
 	for _, name := range append([]string{"vite", "next", "svelte-node", "svelte-static", "html", "containerfile", "go",
 		"astro", "nuxt", "react-router", "fastapi", "flask", "django", "rust", "java", "gradle", "dotnet", "deno", "laravel", "php",
-		"streamlit", "gradio", "next-pnpm", "express-yarn", "python-pdm", "python-pipenv", "python-uv", "django-nested", "flask-assets"},
+		"streamlit", "gradio", "next-pnpm", "express-yarn", "python-pdm", "python-pipenv", "python-uv", "django-nested", "flask-assets",
+		"java-reactor", "gradle-multiproject", "dotnet-solution", "blazor-wasm", "fsharp", "dotnet-spa",
+		"gradle-composite", "dotnet-multitarget"},
 		compiledLiveFixtures...) {
 		t.Run(name, func(t *testing.T) {
 			timeout := 10 * time.Minute
@@ -91,7 +104,7 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 				config.GoVersion, config.BuildCommand, config.StartCommand = "1.26.8", "go generate ./... && go build -o /out/app .", "/app custom-start"
 				candidate.Port = 8080
 			}
-			if name == "java" || name == "gradle" {
+			if name == "java" || name == "gradle" || name == "gradle-multiproject" || name == "gradle-composite" {
 				candidate.Port = 8080
 			}
 			variables := map[string]string{}
@@ -104,6 +117,9 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 			tag := fmt.Sprintf("jd-framework-test:%s-%d", name, stamp)
 			t.Cleanup(func() { _, _ = liveDockerOutput(context.Background(), "image", "rm", "--force", tag) })
 			logs := []string{}
+			// Within the checkout, as prepare_context prepares it: a module
+			// or a solution's project builds from the root that owns it, and a
+			// workspace member from its workspace.
 			result := livePrepareAndBuildWithin(t, builder, root, candidate.Root, tag, config, variables, func(line BuildLog) error { logs = append(logs, line.Text); return nil })
 			if config.Method == BuildRecipe {
 				assertLiveArtifactSecretFree(t, tag, secret, result, logs)
@@ -214,7 +230,15 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 			if name == "astro" && candidate.Profile != ProfileStatic || name == "nuxt" && candidate.Port != 3000 || name == "react-router" && candidate.Framework != "react-router" ||
 				name == "rust" && (candidate.Framework != "axum" || result.Prepared.Toolchain != "rust 1") ||
 				name == "java" && result.Prepared.Toolchain != "java 21 (maven)" ||
-				name == "gradle" && result.Prepared.Toolchain != "java 21 (gradle)" ||
+				name == "gradle" && result.Prepared.Toolchain != "java 21 (gradle 8)" ||
+				name == "java-reactor" && (candidate.Root != "app" || candidate.Framework != "spring-boot" || result.Prepared.Toolchain != "java 17 (maven)" || result.Prepared.ContextDirectory != ".") ||
+				name == "gradle-multiproject" && (candidate.Root != "app" || result.Prepared.Toolchain != "java 21 (gradle 8)" || result.Prepared.ContextDirectory != ".") ||
+				name == "gradle-composite" && (candidate.Root != "backend/app" || result.Prepared.Toolchain != "java 21 (gradle 8)" || result.Prepared.ContextDirectory != ".") ||
+				name == "dotnet-multitarget" && (candidate.Root != "src/Api" || result.Prepared.Toolchain != "dotnet 9.0" || result.Prepared.ContextDirectory != "src") ||
+				name == "dotnet-solution" && (candidate.Root != "src/Shop.Api" || candidate.Framework != "aspnet" || result.Prepared.Toolchain != "dotnet 10.0" || result.Prepared.ContextDirectory != ".") ||
+				name == "blazor-wasm" && (candidate.Framework != "blazor-wasm" || candidate.Port != 80) ||
+				name == "fsharp" && (candidate.Framework != "aspnet" || result.Prepared.Toolchain != "dotnet 10.0") ||
+				name == "dotnet-spa" && (candidate.Framework != "aspnet" || !strings.Contains(result.Prepared.DockerfilePreview, "COPY --from=spa-node /usr/local/ /usr/local/")) ||
 				name == "streamlit" && (candidate.Framework != "streamlit" || candidate.Port != 8501) ||
 				name == "gradio" && (candidate.Framework != "gradio" || candidate.Port != 7860) ||
 				name == "dotnet" && (candidate.Framework != "aspnet" || result.Prepared.Toolchain != "dotnet 10.0") ||

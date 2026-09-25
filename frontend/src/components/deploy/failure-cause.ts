@@ -71,6 +71,10 @@ export const CAUSE_TITLES: Record<string, string> = {
   registry_unreachable: "Registry unreachable",
   registry_auth_failed: "Registry refused the server",
   base_image_missing: "Base image not found",
+  java_version_unsupported: "Java release unsupported",
+  gradle_wrapper_incompatible: "Gradle wrapper cannot run on the JDK",
+  dotnet_version_unsupported: ".NET release unsupported",
+  dotnet_sdk_pin_unavailable: ".NET SDK pin has no image",
   source_auth_failed: "Git credential refused",
   source_repository_missing: "Repository not found",
   source_unreachable: "Git remote unreachable",
@@ -271,6 +275,16 @@ export function fixTarget(
       return {
         href: `${base}/build#build`,
         label: fix.value ? `Add ${fix.value} to the system packages` : "Review the system packages",
+      }
+    case "javaVersion":
+      return {
+        href: `${base}/build#build`,
+        label: fix.value ? `Use Java ${fix.value}` : "Choose the Java version",
+      }
+    case "dotnetVersion":
+      return {
+        href: `${base}/build#build`,
+        label: fix.value ? `Use .NET ${fix.value}` : "Choose the .NET version",
       }
     case "buildCommand":
       return {

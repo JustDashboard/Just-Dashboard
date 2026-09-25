@@ -619,6 +619,7 @@ const FRAMEWORKS: Record<string, string> = {
   ktor: "kotlin",
   dotnet: "dotnet",
   aspnet: "dotnet",
+  "blazor-wasm": "dotnet",
   deno: "deno",
   fresh: "deno",
   php: "php",

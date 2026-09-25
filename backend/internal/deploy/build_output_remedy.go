@@ -65,6 +65,10 @@ var causeTitles = map[string]string{
 	"registry_unreachable":               "Registry unreachable",
 	"registry_auth_failed":               "Registry refused the server",
 	"base_image_missing":                 "Base image not found",
+	"java_version_unsupported":           "Java release unsupported",
+	"gradle_wrapper_incompatible":        "Gradle wrapper cannot run on the JDK",
+	"dotnet_version_unsupported":         ".NET release unsupported",
+	"dotnet_sdk_pin_unavailable":         ".NET SDK pin has no image",
 	"source_auth_failed":                 "Git credential refused",
 	"source_repository_missing":          "Repository not found",
 	"source_unreachable":                 "Git remote unreachable",
@@ -167,6 +171,22 @@ func buildCauseFix(cause *BuildCause, context causeContext) *CauseFix {
 			version := pythonVersionForConstraint(cause.Subjects[0])
 			if slices.Contains(pythonRecipeVersions, version) && version != build.PythonVersion {
 				return &CauseFix{Kind: fixSetBuild, Field: "configuration.build.pythonVersion", Value: version}
+			}
+		case "java", "gradle-toolchain":
+			// The JDK is older than the release the build compiles for: the
+			// catalogue's release at or above it builds it.
+			wanted := javaRelease(cause.Subjects[0])
+			for _, release := range javaRecipeReleases {
+				if wanted > 0 && release >= wanted {
+					if value := strconv.Itoa(release); value != build.JavaVersion && build.Recipe == "java" {
+						return &CauseFix{Kind: fixSetBuild, Field: "configuration.build.javaVersion", Value: value}
+					}
+					break
+				}
+			}
+		case "dotnet":
+			if version := cause.Subjects[0]; slices.Contains(dotnetRecipeVersions, version) && version != build.DotnetVersion && build.Recipe == "dotnet" {
+				return &CauseFix{Kind: fixSetBuild, Field: "configuration.build.dotnetVersion", Value: version}
 			}
 		}
 	case "build_env_missing":
@@ -539,7 +559,7 @@ func (c *BuildCause) explain() (string, string) {
 				"add a build variable " + goPrivateTokenVariable + " scoped to install, holding a token that can read the module's repository; the Go recipe fetches the source's account's modules with it"
 		}
 		return "the package registry refused the build's credentials",
-			"add the registry token as a build variable scoped to install (for npm, `NPM_TOKEN` read by an .npmrc)"
+			"add the registry token as a build variable scoped to install (for npm, `NPM_TOKEN` read by an .npmrc; for Maven, Gradle and NuGet, the variable settings.xml, the repository's credentials or NuGet.config name)"
 	case "build_registry_rate_limited", "registry_rate_limited":
 		return "the registry's rate limit for this server's address was reached",
 			"sign the server in to Docker Hub (`docker login`), or wait for the limit to reset and deploy again"
@@ -640,10 +660,27 @@ func (c *BuildCause) runtimeVersion(subject string) (string, string) {
 	case "rust":
 		return "the code requires Rust " + orDefault(subject, "a newer release"), "pin a newer toolchain in rust-toolchain.toml, or lower the dependency"
 	case "java", "gradle":
+		if fix != nil {
+			return "the project targets Java " + subject + ", newer than the build's JDK", "set the Java version to " + fix.Value
+		}
 		return "the project targets a Java release the build's JDK does not support" + parenthesized(subject),
 			"set the Java release in the build file to the JDK the recipe uses, upgrade the Gradle wrapper, or build with a Dockerfile"
+	case "gradle-toolchain":
+		if fix != nil {
+			return "the Gradle toolchain asks for Java " + subject + ", which the build image does not provide", "set the Java version to " + fix.Value
+		}
+		return "the Gradle toolchain asks for a JDK the build image does not provide" + parenthesized(subject),
+			"declare a toolchain the recipe carries (8, 11, 17, 21 or 25), or apply the foojay toolchain resolver in settings.gradle"
 	case "dotnet":
-		return "the project targets .NET " + orDefault(subject, "a release") + ", newer than the build's SDK", "change the TargetFramework, or build with a Dockerfile"
+		if fix != nil {
+			return "the project targets .NET " + subject + ", newer than the build's SDK", "set the .NET version to " + fix.Value
+		}
+		return "the project targets .NET " + orDefault(subject, "a release") + ", newer than the build's SDK", "change the TargetFramework or global.json, or build with a Dockerfile"
+	case "dotnet-restore":
+		// A restore held to one framework hands it to every project the
+		// published one references, and each then builds for its own.
+		return "the restore resolved " + orDefault(subject, "a referenced project") + " for a framework it does not build for",
+			"give the published project and the projects it references a target framework in common, or build with a Dockerfile"
 	case "php":
 		return "composer.json requires PHP " + subject, "set `require.php` to a release the recipe offers, or build with a Dockerfile"
 	case "ruby":
@@ -655,6 +692,9 @@ func (c *BuildCause) runtimeVersion(subject string) (string, string) {
 
 func (c *BuildCause) systemLibrary(subject string) (string, string) {
 	switch {
+	case c.Detail == "android":
+		return "Gradle configures a project that applies the Android Gradle plugin, which needs the Android SDK the image does not have",
+			"keep Android modules out of what the server depends on, or build with a Dockerfile that installs the Android command-line tools"
 	case subject == "pg_config":
 		return "psycopg2 compiles against libpq, and the image has no libpq development files",
 			"add gcc, libc6-dev and libpq-dev to the Python recipe's system packages, or depend on `psycopg[binary]` or `psycopg2-binary`"

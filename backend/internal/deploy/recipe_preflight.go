@@ -121,6 +121,12 @@ func recipeRefusalField(text string) string {
 		return "configuration.build.goVersion"
 	case strings.Contains(lower, "python recipe supports"):
 		return "configuration.build.pythonVersion"
+	case strings.Contains(lower, "java recipe builds on java") || strings.Contains(lower, "choose java") ||
+		strings.Contains(lower, "gradle toolchain") || strings.Contains(lower, "gradle-version"):
+		return "configuration.build.javaVersion"
+	case strings.Contains(lower, ".net recipe builds") || strings.Contains(lower, "<targetframework>") ||
+		strings.Contains(lower, "pins .net sdk") || strings.Contains(lower, ".net version"):
+		return "configuration.build.dotnetVersion"
 	case strings.Contains(lower, "dockerfile"):
 		return "configuration.build.dockerfile"
 	}
@@ -168,6 +174,7 @@ var buildRefusalCodes = map[string]bool{
 	"command_runner_missing": true, "node_version_unsupported": true,
 	"go_version_unsupported": true, "go_main_missing": true, "go_main_ambiguous": true,
 	"python_version_unsupported": true, "start_command_missing": true,
+	"java_version_unsupported": true, "gradle_wrapper_incompatible": true, "dotnet_version_unsupported": true,
 	// A repository Dockerfile's refusals, read by detection with the same
 	// validator the build runs (preflight_image.go).
 	"dockerfile_refused": true, "dockerfile_target_missing": true,
@@ -189,6 +196,7 @@ var recipeDecidedCodes = map[string]bool{
 	"go_version_unsupported": true, "go_main_missing": true, "go_main_ambiguous": true,
 	"go_cgo_library_unknown": true, "go_embed_missing": true, "go_local_replace_outside_root": true,
 	"rust_binary_ambiguous": true, "rust_binary_missing": true,
+	"java_version_unsupported": true, "gradle_wrapper_incompatible": true, "dotnet_version_unsupported": true,
 }
 
 // applyDryRunVerdict merges a dry run into findings computed from detection.
@@ -296,7 +304,10 @@ func detectedRecipeIssue(ctx context.Context, root string, candidate DetectedCan
 			}
 		}
 	}
-	if err == nil || !errors.Is(err, ErrUnsupportedBuilder) {
+	// A JDK or .NET release is a setting, so a refusal of detection's
+	// default release is the plan's to decide (preflight_compiled.go).
+	var release toolchainVersionError
+	if err == nil || !errors.Is(err, ErrUnsupportedBuilder) || errors.As(err, &release) {
 		return ""
 	}
 	return recipeRefusalText(err, root)

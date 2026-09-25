@@ -34,6 +34,10 @@ var recipeInputNames = map[string]bool{
 	"deno.json": true, "deno.jsonc": true, "deno.lock": true,
 	"composer.json": true, "composer.lock": true, "artisan": true, "index.php": true, "index.html": true,
 	"prisma": true, "drizzle.config.ts": true, "drizzle.config.js": true,
+	"gradle.properties": true, "buildSrc": true, "build-logic": true, ".sdkmanrc": true, ".tool-versions": true,
+	"system.properties": true, "mise.toml": true, ".mise.toml": true,
+	"Directory.Build.props": true, "Directory.Build.targets": true, "Directory.Packages.props": true, "global.json": true,
+	"NuGet.Config": true, "nuget.config": true, "NuGet.config": true,
 }
 
 // recipeInputPrefixes are framework configuration files, named per tool.
@@ -52,7 +56,8 @@ func recipeInput(name string) bool {
 			return true
 		}
 	}
-	return strings.HasSuffix(name, ".csproj") || strings.HasSuffix(name, ".fsproj") || strings.HasSuffix(name, ".sln")
+	return strings.HasSuffix(name, ".csproj") || strings.HasSuffix(name, ".fsproj") || strings.HasSuffix(name, ".vbproj") ||
+		strings.HasSuffix(name, ".sln") || strings.HasSuffix(name, ".slnx")
 }
 
 // recipeDockerignore renders the ignore file for a generated Dockerfile of

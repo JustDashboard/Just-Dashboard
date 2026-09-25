@@ -1,7 +1,6 @@
 package deploy
 
 import (
-	"path"
 	"slices"
 	"sort"
 )
@@ -57,7 +56,7 @@ func (d *Draft) installOnlyCredentials() map[string]bool {
 	}
 	for _, detected := range candidate.Variables {
 		if detected.Step == "install" && len(detected.Sources) > 0 && !slices.ContainsFunc(detected.Sources, func(source string) bool {
-			return !slices.Contains(nodeRegistryConfigFiles, path.Base(source))
+			return !registryConfigSource(source)
 		}) {
 			names[detected.Name] = true
 		}

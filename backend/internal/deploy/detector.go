@@ -94,6 +94,11 @@ type detectedMarkers struct {
 	pythonAssets bool
 	// rust is the crate the Cargo pass read at this root (frameworks_rust.go).
 	rust *rustMarker
+	// jvm and dotnet are the root's build as its tools read it, from the
+	// reactor, settings or solution folder that owns it
+	// (readCompiledProjects).
+	jvm    *jvmProject
+	dotnet *dotnetMarker
 }
 
 // phpOwnsAssets says the PHP recipe builds this root's package.json itself:
@@ -567,7 +572,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 				return stop
 			}
 		}
-		if strings.HasSuffix(name, ".csproj") && len(marker.csprojs) < 8 {
+		if dotnetProjectFile(name) && len(marker.csprojs) < 8 {
 			content, ok := readMarker(limits.MaxFileBytes)
 			if result.Truncated {
 				return stop
@@ -617,6 +622,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 	}
 	readNodeInstalls(root, markers)
 	readCargoCrates(root, markers)
+	readCompiledProjects(root, markers)
 	for _, candidateRoot := range roots {
 		marker := markers[candidateRoot]
 		root := filepath.ToSlash(marker.root)
@@ -675,6 +681,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			return detectDatabases(&detectedMarkers{root: root}, variables, prismaProviders)
 		},
 	}
+	settleCompiledLayouts(&result, markers, shape)
 	shape.shapeCandidates(&result, shapeRun)
 	// A root's candidates, recipe and container alike, are refined together
 	// against the root's files. State settles first: the schema step it
@@ -758,7 +765,7 @@ func detectionInterestingName(name string) bool {
 		name == "runtime.txt" || name == ".python-version" ||
 		name == "cargo.toml" || name == "cargo.lock" || name == "rust-toolchain" || name == "rust-toolchain.toml" ||
 		name == "pom.xml" || name == "build.gradle" || name == "build.gradle.kts" || name == "gradlew" ||
-		name == ".java-version" || strings.HasSuffix(name, ".csproj") ||
+		name == ".java-version" || dotnetProjectFile(name) ||
 		name == "deno.json" || name == "deno.jsonc" || name == "deno.lock" ||
 		name == "composer.json" || name == "composer.lock" || name == "index.php" || pythonManifestName(name)
 }

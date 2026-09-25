@@ -14,6 +14,8 @@ import {
   environmentRowsToSend,
   generateSecretValue,
   goMainPackageList,
+  javaVersionReading,
+  dotnetVersionReading,
   mergeDiscoveredRows,
   persistentStorage,
   pointsAtLocalhost,
@@ -317,6 +319,90 @@ describe("catalogue defaults carried into the plan", () => {
     expect(refused({ recipe: "rust" })).toBe(false)
     expect(refused({ recipe: "go" })).toBe(false)
     expect(refused({ method: "dockerfile" })).toBe(false)
+  })
+})
+
+describe("Java and .NET releases", () => {
+  test("a release outside the recipe's catalogue is refused before the request", () => {
+    const java = defaultConfiguration(
+      "web",
+      candidate({ profile: "web", recipe: "java", port: 8080 }),
+    )
+    expect(
+      validateConfiguration({ ...java, build: { ...java.build, javaVersion: "24" } }, "web"),
+    ).toHaveProperty("javaVersion")
+    expect(
+      validateConfiguration({ ...java, build: { ...java.build, javaVersion: "17" } }, "web"),
+    ).not.toHaveProperty("javaVersion")
+    // Detection chooses; the plan only records an operator's choice.
+    expect(java.build.javaVersion).toBeUndefined()
+    const dotnet = defaultConfiguration(
+      "web",
+      candidate({ profile: "web", recipe: "dotnet", port: 8080 }),
+    )
+    expect(
+      validateConfiguration({ ...dotnet, build: { ...dotnet.build, dotnetVersion: "7.0" } }, "web"),
+    ).toHaveProperty("dotnetVersion")
+    expect(
+      validateConfiguration(
+        { ...dotnet, build: { ...dotnet.build, dotnetVersion: "10.0" } },
+        "web",
+      ),
+    ).not.toHaveProperty("dotnetVersion")
+  })
+
+  test("the automatic choice reads what decides it", () => {
+    expect(
+      javaVersionReading(
+        candidate({
+          javaBuild: {
+            tool: "gradle",
+            release: 21,
+            releaseFrom: "app/build.gradle.kts",
+            toolchain: true,
+            pinned: 21,
+            pinnedFrom: ".sdkmanrc",
+            context: ".",
+            module: ":app",
+          },
+        }),
+      ),
+    ).toBe(
+      ".sdkmanrc pins Java 21 · app/build.gradle.kts declares Java 21 as a Gradle toolchain · builds :app from .",
+    )
+    expect(javaVersionReading(candidate({ javaBuild: { tool: "maven" } }))).toBe(
+      "Nothing declares a release; the recipe builds on Java 21",
+    )
+    expect(
+      javaVersionReading(
+        candidate({ javaBuild: { tool: "gradle", wrapper: "8.4", wrapperUsable: true } }),
+      ),
+    ).toBe(
+      "Nothing declares a release; the recipe builds on Java 17, the newest Gradle 8.4 runs on",
+    )
+    expect(
+      javaVersionReading(
+        candidate({ javaBuild: { tool: "gradle", wrapper: "8.14.3", wrapperUsable: true } }),
+      ),
+    ).toBe("Nothing declares a release; the recipe builds on Java 21")
+    expect(javaVersionReading(candidate({}))).toBeUndefined()
+    expect(
+      dotnetVersionReading(
+        candidate({
+          dotnetBuild: {
+            project: "src/Api/Api.csproj",
+            kind: "web",
+            targetText: "net10.0",
+            sdkPin: "10.0.100",
+            sdkPinFrom: "global.json",
+            context: ".",
+          },
+        }),
+      ),
+    ).toBe("src/Api/Api.csproj targets net10.0 · global.json pins SDK 10.0.100 · published from .")
+    expect(
+      dotnetVersionReading(candidate({ dotnetBuild: { project: "Api.csproj", kind: "web" } })),
+    ).toBe("Api.csproj declares no target framework")
   })
 })
 

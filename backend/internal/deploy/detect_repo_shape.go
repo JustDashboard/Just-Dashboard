@@ -321,7 +321,7 @@ func repoShapeFileName(name string) bool {
 	if _, ok := repoShapeFiles[name]; ok {
 		return true
 	}
-	for _, suffix := range []string{".cabal", ".nimble", ".fsproj"} {
+	for _, suffix := range []string{".cabal", ".nimble"} {
 		if strings.HasSuffix(name, suffix) {
 			return true
 		}
@@ -373,7 +373,7 @@ func shapeFileTarget(rel, lowerName string, depth int) (root, key string, limit 
 	}
 	limit, known := repoShapeFiles[lowerName]
 	if !known {
-		for _, suffix := range []string{".cabal", ".nimble", ".fsproj"} {
+		for _, suffix := range []string{".cabal", ".nimble"} {
 			if strings.HasSuffix(lowerName, suffix) {
 				return directory, suffix, 16 << 10, true
 			}
@@ -896,7 +896,7 @@ var frameworkDisplayNames = map[string]string{
 	"litestar": "Litestar", "starlette": "Starlette", "sanic": "Sanic", "quart": "Quart", "falcon": "Falcon",
 	"bottle": "Bottle", "aiohttp": "aiohttp", "tornado": "Tornado", "dash": "Dash", "panel": "Panel",
 	"chainlit": "Chainlit", "nicegui": "NiceGUI", "reflex": "Reflex", "mesop": "Mesop",
-	"rust": "Rust", "java": "Java", "spring-boot": "Spring Boot", "dotnet": ".NET", "aspnet": "ASP.NET Core",
+	"rust": "Rust", "java": "Java", "spring-boot": "Spring Boot", "dotnet": ".NET", "aspnet": "ASP.NET Core", "blazor-wasm": "Blazor WebAssembly",
 	"deno": "Deno", "fresh": "Fresh", "php": "PHP", "laravel": "Laravel", "symfony": "Symfony", "slim": "Slim",
 	"rails": "Rails", "sinatra": "Sinatra", "hanami": "Hanami", "phoenix": "Phoenix", "elixir": "Elixir",
 	"ruby": "Ruby", "jekyll": "Jekyll", "hugo": "Hugo", "mkdocs": "MkDocs",

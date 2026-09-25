@@ -642,6 +642,7 @@ func preflightFindings(
 		(planned.Recipe == "node" || (planned.Recipe == "php" && len(planned.NodeInstalls) > 0)) {
 		findings = append(findings, nodeInstallFindings(planned, configuration)...)
 	}
+	findings = append(findings, compiledRecipeFindings(planned, configuration)...)
 	if planned != nil && planned.UnpinnedDependencies && configuration.Build.Method == BuildRecipe {
 		findings = append(findings, finding("dependencies_unpinned", PreflightWarning,
 			"Dependencies are not pinned to exact versions", "unpinned entries in the dependency manifest",

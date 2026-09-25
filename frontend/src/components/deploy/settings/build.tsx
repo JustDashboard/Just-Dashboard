@@ -49,13 +49,19 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useProject } from "@/components/deploy/project-context"
 import {
   BROWSER_PREFIX,
+  DOTNET_VERSION,
+  DOTNET_VERSIONS,
   GO_VERSION,
   GO_VERSIONS,
+  JAVA_VERSION,
+  JAVA_VERSIONS,
   PYTHON_VERSION,
   automaticPackageManagerHint,
   commandsForPackageManager,
   dockerfileStageHint,
+  dotnetVersionReading,
   goMainPackageList,
+  javaVersionReading,
   packageManagerOptions,
   packageManagerReading,
   validateConfiguration,
@@ -139,6 +145,8 @@ const BUILD_FIELD_IDS: Record<string, string> = {
   "build.cargoBin": "build-cargo-bin",
   "build.pythonVersion": "build-python-version",
   "build.systemPackages": "build-system-packages",
+  "build.javaVersion": "build-java-version",
+  "build.dotnetVersion": "build-dotnet-version",
   "build.spaFallback": "build-spa",
   "build.dockerfile": "build-dockerfile",
   "build.target": "build-target",
@@ -158,6 +166,8 @@ const FIELD_SECTION: Record<string, "build" | "commands" | "image"> = {
   "build-cargo-bin": "build",
   "build-python-version": "build",
   "build-system-packages": "build",
+  "build-java-version": "build",
+  "build-dotnet-version": "build",
   "build-dockerfile": "build",
   "build-target": "build",
   "build-primary-service": "build",
@@ -426,9 +436,13 @@ function builderReading(
           ? (build.pythonVersion ?? RECIPE_DEFAULT.python)
           : recipe === "go"
             ? (build.goVersion ?? RECIPE_DEFAULT.go)
-            : prepared?.recipe === recipe && prepared.toolchain
-              ? prepared.toolchain
-              : RECIPE_DEFAULT[recipe]
+            : recipe === "java" && build.javaVersion
+              ? `Java ${build.javaVersion}`
+              : recipe === "dotnet" && build.dotnetVersion
+                ? `.NET ${build.dotnetVersion}`
+                : prepared?.recipe === recipe && prepared.toolchain
+                  ? prepared.toolchain
+                  : RECIPE_DEFAULT[recipe]
     return {
       value: RECIPE_SHORT[recipe],
       detail: framework ? `${frameworkLabel(framework)} · ${detail}` : detail,
@@ -672,7 +686,12 @@ function BuildForm({
       setFieldError({ id: "build-system-packages", message: errors.systemPackages })
       return
     }
-    const refusal = errors.buildMethod || errors.buildSecrets || errors.pythonVersion
+    const refusal =
+      errors.buildMethod ||
+      errors.buildSecrets ||
+      errors.pythonVersion ||
+      errors.javaVersion ||
+      errors.dotnetVersion
     if (refusal) {
       setError(refusal)
       return
@@ -764,6 +783,8 @@ function BuildForm({
         cargoBin: next === "rust" ? build.cargoBin : undefined,
         pythonVersion: next === "python" ? build.pythonVersion : undefined,
         systemPackages: next === "python" ? build.systemPackages : undefined,
+        javaVersion: next === "java" ? build.javaVersion : undefined,
+        dotnetVersion: next === "dotnet" ? build.dotnetVersion : undefined,
         // The PHP and Python recipes' asset stages install through the same
         // Node install, so the choice survives the move between them.
         packageManager:
@@ -784,6 +805,8 @@ function BuildForm({
       cargoBin: undefined,
       pythonVersion: undefined,
       systemPackages: undefined,
+      javaVersion: undefined,
+      dotnetVersion: undefined,
       packageManager: undefined,
       spaFallback: choice.method === "static" ? build.spaFallback : undefined,
       target: choice.method === "dockerfile" ? build.target : undefined,
@@ -830,6 +853,8 @@ function BuildForm({
             "cargoBin",
             "pythonVersion",
             "systemPackages",
+            "javaVersion",
+            "dotnetVersion",
             "dockerfile",
             "target",
             "primaryService",
@@ -975,6 +1000,68 @@ function BuildForm({
             error={errorFor("build-system-packages")}
             onChange={(systemPackages) => setBuild({ ...build, systemPackages })}
           />
+        )}
+
+        {build.method === "recipe" && recipe === "java" && (
+          <Field
+            label="Java version"
+            hint={
+              javaVersionReading(detected) ??
+              "Auto reads the build files, .java-version, .sdkmanrc, .tool-versions and mise.toml."
+            }
+            error={errorFor("build-java-version")}
+          >
+            <Segments
+              id="build-java-version"
+              label="Java version"
+              fill
+              value={build.javaVersion ?? "auto"}
+              disabled={!canEdit}
+              onChange={(next) =>
+                setBuild({ ...build, javaVersion: next === "auto" ? undefined : next })
+              }
+              options={[
+                { value: "auto", label: "Auto" },
+                ...JAVA_VERSIONS.map((version) => ({ value: version, label: version, mono: true })),
+                ...(build.javaVersion && !JAVA_VERSION.test(build.javaVersion)
+                  ? [{ value: build.javaVersion, label: build.javaVersion, mono: true }]
+                  : []),
+              ]}
+            />
+          </Field>
+        )}
+
+        {build.method === "recipe" && recipe === "dotnet" && (
+          <Field
+            label=".NET version"
+            hint={
+              dotnetVersionReading(detected) ??
+              "Auto reads the project's target framework and the SDK global.json pins."
+            }
+            error={errorFor("build-dotnet-version")}
+          >
+            <Segments
+              id="build-dotnet-version"
+              label=".NET version"
+              fill
+              value={build.dotnetVersion ?? "auto"}
+              disabled={!canEdit}
+              onChange={(next) =>
+                setBuild({ ...build, dotnetVersion: next === "auto" ? undefined : next })
+              }
+              options={[
+                { value: "auto", label: "Auto" },
+                ...DOTNET_VERSIONS.map((version) => ({
+                  value: version,
+                  label: version,
+                  mono: true,
+                })),
+                ...(build.dotnetVersion && !DOTNET_VERSION.test(build.dotnetVersion)
+                  ? [{ value: build.dotnetVersion, label: build.dotnetVersion, mono: true }]
+                  : []),
+              ]}
+            />
+          </Field>
         )}
 
         {build.method === "recipe" && recipe === "go" && (

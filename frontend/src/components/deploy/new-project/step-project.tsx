@@ -32,13 +32,17 @@ import {
   humanize,
 } from "@/components/deploy/vocabulary"
 import {
+  DOTNET_VERSIONS,
+  JAVA_VERSIONS,
   automaticPackageManagerHint,
   candidateBlocker,
   commandsForPackageManager,
   composeSourceForCandidate,
   dockerfileStageHint,
+  dotnetVersionReading,
   GO_VERSIONS,
   goMainPackageList,
+  javaVersionReading,
   packageManagerOptions,
   packageManagerReading,
 } from "@/components/deploy/deployment-defaults"
@@ -648,6 +652,10 @@ export function StepProject({
                         cargoBin: recipe === "rust" ? configuration.build.cargoBin : undefined,
                         pythonVersion:
                           recipe === "python" ? configuration.build.pythonVersion : undefined,
+                        javaVersion:
+                          recipe === "java" ? configuration.build.javaVersion : undefined,
+                        dotnetVersion:
+                          recipe === "dotnet" ? configuration.build.dotnetVersion : undefined,
                         // The PHP recipe's asset stage installs through the
                         // same Node install, so the choice survives the move.
                         packageManager:
@@ -809,6 +817,67 @@ export function StepProject({
                       onChange={(event) => updateBuild({ pythonVersion: event.target.value })}
                       placeholder="3.13"
                     />
+                  </Field>
+                )}
+              {configuration.build.method === "recipe" && configuration.build.recipe === "java" && (
+                <Field
+                  label="Java version"
+                  htmlFor="java-version"
+                  hint={
+                    javaVersionReading(flow.candidate) ??
+                    "Leave on the build files to use what pom.xml, the Gradle scripts or a version file declare."
+                  }
+                  error={errors.javaVersion}
+                >
+                  <Select
+                    value={configuration.build.javaVersion ?? "auto"}
+                    onValueChange={(value) =>
+                      updateBuild({ javaVersion: value === "auto" ? undefined : value })
+                    }
+                  >
+                    <SelectTrigger id="java-version" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">From the build files</SelectItem>
+                      {JAVA_VERSIONS.map((version) => (
+                        <SelectItem key={version} value={version}>
+                          Java {version}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
+              {configuration.build.method === "recipe" &&
+                configuration.build.recipe === "dotnet" && (
+                  <Field
+                    label=".NET version"
+                    htmlFor="dotnet-version"
+                    hint={
+                      dotnetVersionReading(flow.candidate) ??
+                      "Leave on the project to use its target framework and global.json."
+                    }
+                    error={errors.dotnetVersion}
+                  >
+                    <Select
+                      value={configuration.build.dotnetVersion ?? "auto"}
+                      onValueChange={(value) =>
+                        updateBuild({ dotnetVersion: value === "auto" ? undefined : value })
+                      }
+                    >
+                      <SelectTrigger id="dotnet-version" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">From the project</SelectItem>
+                        {DOTNET_VERSIONS.map((version) => (
+                          <SelectItem key={version} value={version}>
+                            .NET {version}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </Field>
                 )}
               {configuration.build.method === "dockerfile" && (

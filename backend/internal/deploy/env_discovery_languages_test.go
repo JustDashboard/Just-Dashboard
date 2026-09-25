@@ -30,7 +30,9 @@ func TestEnvironmentDiscoveryAcrossLanguages(t *testing.T) {
 				"src/main/resources/application-staging.yml": "app:\n  token: ${STAGING_TOKEN}\n",
 				"src/main/java/app/Config.java":              "class Config { String a = System.getenv(\"API_KEY\"); String b = System.getenv().get(\"REGION\"); @Value(\"${MAIL_FROM:noreply}\") String c; @Value(\"${WEBHOOK_TOKEN}\") String d; }",
 			},
-			names:    []string{"API_KEY", "CACHE_TTL", "DATABASE_URL", "JWT_SIGNING_KEY", "MAIL_FROM", "REGION", "STAGING_TOKEN", "WEBHOOK_TOKEN"},
+			// application-prod.yml offers the prod profile as an empty row
+			// (detect_compiled_layout.go).
+			names:    []string{"API_KEY", "CACHE_TTL", "DATABASE_URL", "JWT_SIGNING_KEY", "MAIL_FROM", "REGION", "SPRING_PROFILES_ACTIVE", "STAGING_TOKEN", "WEBHOOK_TOKEN"},
 			required: []string{"DATABASE_URL", "JWT_SIGNING_KEY", "WEBHOOK_TOKEN"},
 			examples: map[string]string{"CACHE_TTL": "60", "MAIL_FROM": "noreply"},
 		},

@@ -780,6 +780,7 @@ const FRAMEWORK_LABELS: Record<string, string> = {
   vertx: "Vert.x",
   dotnet: ".NET",
   aspnet: "ASP.NET Core",
+  "blazor-wasm": "Blazor WebAssembly",
   deno: "Deno",
   fresh: "Fresh",
   php: "PHP",

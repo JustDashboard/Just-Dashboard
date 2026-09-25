@@ -305,7 +305,16 @@ only renderer/executor/validation authority for their feature.
   `detect_python_project.go`, and what the recipe needs beyond the framework is recorded on the
   candidate as `python` (`detect_python.go`) and judged by `preflight_python.go`;
   `frameworks_rust.go`, `frameworks_java.go`, `frameworks_dotnet.go` and `frameworks_deno.go` read
-  `Cargo.toml`, `pom.xml`/`build.gradle(.kts)`, `*.csproj` and `deno.json(c)`. A `Procfile`'s `web:`
+  `Cargo.toml`, `pom.xml`/`build.gradle(.kts)`, `*.csproj`/`*.fsproj`/`*.vbproj` and `deno.json(c)`. The
+  JVM and .NET builds are read through one bounded, symlink-refusing reader over the checkout
+  (`build_files.go`) that detection and the recipe share — the Maven reactor and parents, the Gradle
+  settings root and version catalog, the .NET props chain, referenced projects and `global.json`
+  (`detect_maven.go`, `detect_gradle.go`, `detect_jvm.go`, `detect_dotnet.go`) — so a module or solution
+  project builds from the directory that owns it (`PrepareWithin`, `prepared.contextDirectory`) and the
+  candidate keeps `javaBuild`/`dotnetBuild` for preflight (`preflight_compiled.go`, which judges
+  `build.javaVersion`/`build.dotnetVersion`). `detect_compiled_layout.go` sets aside library modules,
+  aggregator POMs, Gradle build logic (`buildSrc`, `build-logic`, convention-plugin projects), test
+  projects and Aspire AppHosts before the repository-shape passes rank what is left. A `Procfile`'s `web:`
   process outranks every guess, and another platform's deployment file (`fly.toml`, `render.yaml`,
   `app.json`, Kamal's `config/deploy.yml`, …) outranks the framework's defaults. The candidate carries `spaFallback` (a client-routed site's nginx
   fallback), `pythonVersion`, `unpinnedDependencies` (a `dependencies_unpinned` preflight warning,
@@ -339,8 +348,9 @@ only renderer/executor/validation authority for their feature.
   recipe set is
   `node`, `go`, `python`, `rust`, `java`, `dotnet`, `deno` (`validRecipe`), and `build.pythonVersion`
   (3.10 to 3.14), `build.systemPackages` (at most 32 Debian names, Python recipe only),
-  `build.spaFallback`, `build.goPackage` and `build.cargoBin` (the binary a Rust recipe serves) are
-  additive plan fields, bounded by `PlanConfiguration.Validate`.
+  `build.spaFallback`, `build.goPackage`, `build.cargoBin` (the binary a Rust recipe serves),
+  `build.javaVersion` and `build.dotnetVersion` are additive plan fields, bounded by
+  `PlanConfiguration.Validate`.
   The contract per language is [the recipe guide](recipes.md). The framework detection recognised is
   recorded on the build plan when a draft commits (`build.framework` on the configuration read) —
   the chosen candidate's, while the plan still builds that candidate's directory — so a later read,
@@ -770,7 +780,10 @@ only renderer/executor/validation authority for their feature.
   keeps its cause (`registry_rate_limited`, `registry_unreachable` — DNS, TLS, refused and timed-out
   connections, Go's `Client.Timeout exceeded` and a resolver's `server misbehaving` —,
   `base_image_missing` — also Docker Hub's "repository does not exist or may require 'docker login'" —,
-  `registry_auth_failed`, `builder_missing`) with the daemon's own bounded reason in the transcript, and
+  `registry_auth_failed`, `builder_missing`) with the daemon's own bounded reason in the transcript — a
+  .NET SDK image a `global.json` pin names that was never published is `dotnet_sdk_pin_unavailable`
+  instead —, a JDK or .NET release the recipe refuses at prepare_context ends the run with preflight's
+  own code (`java_version_unsupported`, `gradle_wrapper_incompatible`, `dotnet_version_unsupported`), and
   a candidate's start names `runtime_port_in_use`, `image_missing` and `mount_invalid` from Docker's
   refusal without repeating it. A context deadline that reaches a step while its run is alive is
   `step_timeout`; only a cancelled context is a cancellation. The signature table and fixes are listed

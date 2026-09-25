@@ -81,7 +81,9 @@ func TestRecipesBindEveryInterfaceAndTrustTheProxy(t *testing.T) {
 			name:   "micronaut",
 			files:  map[string]string{"build.gradle": "plugins { id 'io.micronaut.application' }"},
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "java"},
-			want:   []string{"exec env MICRONAUT_SERVER_PORT=${PORT:-8080} java -jar /app/app.jar"},
+			// Micronaut's application plugin packages with installDist when
+			// no Shadow plugin is applied.
+			want:   []string{"exec env MICRONAUT_SERVER_PORT=${PORT:-8080} /app/bin/app"},
 			absent: []string{"FORWARD"},
 		},
 		{

@@ -108,8 +108,10 @@ var buildSignatures = []buildSignature{
 	signature("build_runtime_version", "java", "release", `invalid (?:target|source) release:? (\S+)|release version (\S+) not supported`),
 	signature("build_runtime_version", "gradle", "class file major version", `Unsupported class file major version (\d+)`),
 	signature("build_runtime_version", "java", "JVM", `requires JVM (\d+) or later|UnsupportedClassVersionError`),
+	signature("build_runtime_version", "gradle-toolchain", "languageVersion=", `(?:No matching toolchains found for requested specification|Cannot find a Java installation on your machine matching this tasks requirements): \{languageVersion=(\d+)`),
 	signature("build_runtime_version", "dotnet", "NETSDK1045", `NETSDK1045: The current \.NET SDK does not support targeting \.NET ([\d.]+)`),
 	signature("build_runtime_version", "dotnet", "compatible .NET SDK", `A compatible \.NET SDK was not found`).collecting(`Requested SDK version: (\S+)`),
+	signature("build_runtime_version", "dotnet-restore", "NETSDK1005", `NETSDK1005: Assets file '(?:[^']*/)?([^/']+)/obj/project\.assets\.json' doesn't have a target for`),
 	signature("build_runtime_version", "php", "your php version", `requires php (\S+) -> your php version \([\d.]+\) does not satisfy that requirement|requires php (\S+) but your php version \([\d.]+\) does not satisfy`),
 	signature("build_runtime_version", "python", "requires a different Python", `requires a different Python: \S+ not in '([^']+)'`),
 	signature("build_runtime_version", "python", "Python", "(?:locked|project's) Python requirement: `([^`]+)`|does not satisfy Python(>=?[\\d.]+)|is not supported by the project \\(([^)]+)\\)"),
@@ -164,6 +166,7 @@ var buildSignatures = []buildSignature{
 	signature("build_system_library_missing", "rust", "custom build command", "failed to run custom build command for `([\\w-]+-sys)"),
 	signature("build_system_library_missing", "", "No such file or directory", `fatal error: ([\w/.+-]+\.h): No such file or directory`),
 	signature("build_system_library_missing", "", "OpenSSL", `Could not find (?:directory of )?OpenSSL installation`).naming("openssl"),
+	signature("build_system_library_missing", "android", "SDK location not found", `SDK location not found`).naming("android-sdk"),
 	signature("build_native_toolchain_missing", "node-gyp", "gyp ERR!", `gyp ERR! find (Python)`),
 	signature("build_native_toolchain_missing", "node-gyp", "gyp ERR!", `gyp ERR! (?:stack Error|build error|configure error|not ok)`).naming("node-gyp"),
 	signature("build_native_toolchain_missing", "", "not found", toolchainNotFoundPattern).exitCode(127),
@@ -185,6 +188,11 @@ var buildSignatures = []buildSignature{
 
 	// PHP extensions a locked package requires and the image lacks.
 	signature("build_php_extension_missing", "php", "it is missing from your system", `requires? (ext-[a-z0-9_]+) \S+ -> it is missing from your system`),
+
+	// A private Maven or Gradle repository that refused the build's
+	// credentials; Maven's line also says it could not resolve the
+	// dependencies, which is what it could not do, not why.
+	signature("build_registry_auth", "java", "status code", `status code: 40[13], reason phrase|Received status code 40[13] from server`),
 
 	// Dependencies the registry could not supply.
 	signature("build_dependency_conflict", "npm", "ERESOLVE", `ERESOLVE`).collecting(`(?:peer|Found:) (@?[^@\s]+)@`),

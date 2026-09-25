@@ -3681,6 +3681,10 @@ export type DeploymentDetectionCandidate = {
    * `build.systemPackages`.
    */
   systemPackages?: DeploymentDetectedSystemPackage[]
+  /** What a Maven or Gradle build says about building it. */
+  javaBuild?: DeploymentDetectedJavaBuild
+  /** What a .NET project says about publishing it. */
+  dotnetBuild?: DeploymentDetectedDotnetBuild
 }
 
 export type DeploymentDetectedSystemPackage = {
@@ -3688,6 +3692,56 @@ export type DeploymentDetectedSystemPackage = {
   reason?: string
   source?: string
   automatic?: boolean
+}
+
+/**
+ * A JVM candidate's build: the reactor or settings root it builds from and
+ * the module it selects there, how it packages, and the Java release its
+ * build files declare (`toolchain` for an exact Gradle toolchain) and its
+ * version files pin.
+ */
+export type DeploymentDetectedJavaBuild = {
+  tool: "maven" | "gradle"
+  context?: string
+  module?: string
+  packaging?: string
+  runnable?: boolean
+  library?: boolean
+  aggregator?: boolean
+  release?: number
+  releaseFrom?: string
+  toolchain?: boolean
+  pinned?: number
+  pinnedFrom?: string
+  wrapper?: string
+  wrapperUsable?: boolean
+  wrapperJarMissing?: boolean
+  foojay?: boolean
+  profiles?: string[]
+  vaadinDevMode?: boolean
+}
+
+/**
+ * A .NET candidate's project: the directory it publishes from, the targets
+ * it declares, the SDK global.json pins, and what the recipe changes about
+ * publishing it.
+ */
+export type DeploymentDetectedDotnetBuild = {
+  project: string
+  kind: string
+  context?: string
+  targets?: string[]
+  targetText?: string
+  multiTarget?: boolean
+  sdkPin?: string
+  sdkPinFrom?: string
+  rollForward?: string
+  native?: string[]
+  spaRoot?: string
+  appHost?: string
+  aspire?: string[]
+  /** The projects it references, with the frameworks each declares. */
+  references?: { project: string; targets?: string }[]
 }
 
 export type DeploymentDockerfileArg = {
@@ -3919,6 +3973,10 @@ export type DeploymentConfiguration = {
     pythonVersion?: string
     /** Debian packages the Python recipe installs beside the ones its dependencies need. */
     systemPackages?: string[]
+    /** The JDK release a Java recipe builds and runs on; empty lets the build and version files decide. */
+    javaVersion?: string
+    /** The .NET release a .NET recipe publishes for; empty lets the project and global.json decide. */
+    dotnetVersion?: string
     packageManager?: NodePackageManager
     rootDirectory?: string
     dockerfile?: string

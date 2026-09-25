@@ -310,6 +310,10 @@ type DetectedCandidate struct {
 	// builds beyond its toolchain (detect_go.go, detect_rust.go).
 	Go   *DetectedGoBuild   `json:"go,omitempty"`
 	Rust *DetectedRustBuild `json:"rust,omitempty"`
+	// JavaBuild and DotnetBuild are what a JVM or .NET candidate's build
+	// says about building it (planning_compiled.go).
+	JavaBuild   *DetectedJavaBuild   `json:"javaBuild,omitempty"`
+	DotnetBuild *DetectedDotnetBuild `json:"dotnetBuild,omitempty"`
 	// PythonRequires is the interpreter range the source declares
 	// (requires-python, or Poetry's python constraint), and PythonInstall the
 	// manifest the recipe installs from; together they say whether a chosen
@@ -524,6 +528,11 @@ type BuildPlanConfig struct {
 	// CargoBin is the binary target a Rust recipe serves; empty lets the
 	// recipe choose (default-run, the only one, the one that serves).
 	CargoBin string `json:"cargoBin,omitempty"`
+	// JavaVersion and DotnetVersion choose the JDK or .NET release a Java or
+	// .NET recipe builds and runs on; empty lets the build and version
+	// files decide (planning_compiled.go).
+	JavaVersion   string `json:"javaVersion,omitempty"`
+	DotnetVersion string `json:"dotnetVersion,omitempty"`
 }
 
 // BuildSecretConfig names a variable and the reviewed recipe stages in which
@@ -1202,6 +1211,9 @@ func (c PlanConfiguration) Validate() error {
 			}
 		}
 	}
+	if err := validateCompiledBuildSettings(c.Build); err != nil {
+		return err
+	}
 	if c.Build.SPAFallback && c.Build.Method != BuildRecipe && c.Build.Method != BuildStatic {
 		return fmt.Errorf("the single-page fallback applies only to a static site or a recipe with static output")
 	}
@@ -1817,6 +1829,9 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 			return err
 		}
 		if err := validateDetectedRustBuild(candidate); err != nil {
+			return err
+		}
+		if err := validateDetectedCompiledBuild(candidate); err != nil {
 			return err
 		}
 		for _, label := range []string{candidate.Name, candidate.Framework, candidate.Recipe} {

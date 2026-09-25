@@ -580,6 +580,8 @@ export function Configure({
       return (
         errors.buildMethod ??
         errors.pythonVersion ??
+        errors.javaVersion ??
+        errors.dotnetVersion ??
         errors.target ??
         errors.startCommand ??
         errors.buildSecrets ??
