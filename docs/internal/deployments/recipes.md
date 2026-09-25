@@ -823,7 +823,8 @@ Every recipe and static build writes `.just-dashboard/Dockerfile.dockerignore`, 
 place of the repository's own `.dockerignore` (`deploy/build_dockerignore.go`). It keeps the
 repository's rules except any that would leave out a file the recipe reads by name — a manifest,
 lockfile, framework configuration, Prisma schema — which is `dockerignore_drops_recipe_input`, a warning
-that the rule is set aside; a JavaScript install input below the root is brought back by an exception
+that the rule is set aside; a JavaScript install input below the root (a workspace member's manifest,
+its siblings' manifests) is brought back by an exception
 instead ([JavaScript installs](#javascript-installs)), and the run log names each rule set aside or
 overridden. Then it excludes `**/node_modules`, `.dockerignore` and the dashboard's own files. The static, PHP, Node and Deno images, which are served or copied whole, also exclude `.git`;
 recipes whose toolchains stamp or version builds from Git (Go, Python's setuptools-scm, Maven's
@@ -969,9 +970,15 @@ as stale, since Yarn 1 records no workspace in its lock; the install then runs u
 ([Build context](#build-context)) is written at the install's context — the workspace root for a
 member — and keeps every install input the recipe reads: a root-level one (`package.json`, the lockfile,
 `.npmrc`, `.yarnrc.yml`) by setting aside the rule that would leave it out, and one below the root or a
-directory (a member's `package.json`, `bunfig.toml`, `.yarn/releases`, `patches`) by an exception after
-the repository's rules, so its other exclusions under that directory stand. The run log names each input
-a repository rule had excluded.
+directory (a member's `package.json`, every other workspace member's `package.json`, `bunfig.toml`,
+`.yarn/releases`, `patches`) by an exception after the repository's rules, so its other exclusions under
+that directory stand. The other members' manifests are inputs because a frozen install at the workspace
+root compares every importer its lockfile records with that member's `package.json`; they are found by
+expanding the root's `workspaces` (or `pnpm-workspace.yaml` `packages`) globs over directories — never
+`node_modules` or a hidden one, `!` exclusions honoured, at most four levels below a `**`, 256 manifests.
+The run log names each input a repository rule had excluded, and detection raises
+`dockerignore_drops_recipe_input` for the same inputs before Deploy, reading the workspace root's
+`.dockerignore` for a member.
 
 **Commands follow the manager.** Choosing a manager in the configure form or Build settings swaps a
 command that is still one detection proposed for the one it proposes for the new manager (`nodeInstalls`),

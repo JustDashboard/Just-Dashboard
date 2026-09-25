@@ -142,6 +142,35 @@ func (f nodeFiles) list(rel string, limit int) []string {
 	return names
 }
 
+// directories names the directories directly in one, sorted and bounded,
+// never node_modules or a hidden one.
+func (f nodeFiles) directories(rel string) []string {
+	if f.root == nil || (rel != "" && !safeRelativePath(rel)) {
+		return nil
+	}
+	name := f.name(rel)
+	if name == "" {
+		name = "."
+	}
+	directory, err := f.root.Open(name)
+	if err != nil {
+		return nil
+	}
+	defer directory.Close()
+	entries, err := directory.ReadDir(1024)
+	if err != nil && len(entries) == 0 {
+		return nil
+	}
+	names := []string{}
+	for _, entry := range entries {
+		if entry.IsDir() && entry.Name() != "node_modules" && !strings.HasPrefix(entry.Name(), ".") {
+			names = append(names, entry.Name())
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 // prismaPlaceholder is the value `prisma generate` gets for a name
 // prisma.config reads through env() when the build supplies none: a recipe
 // constant shaped like the schema's provider, pointing at nothing, since

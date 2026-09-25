@@ -147,6 +147,9 @@ type nodeInstallFacts struct {
 	inputs      []string
 	// workspaceTurbo says the workspace root builds with Turborepo.
 	workspaceTurbo bool
+	// workspaceManifests are the other workspace members' package.json
+	// files, by path under the install root, which the install reads too.
+	workspaceManifests []string
 	// runtime is what the image depends on: the Node and Bun releases the
 	// repository declares; prisma is the package's Prisma configuration.
 	runtime nodeRuntimeFacts
@@ -237,6 +240,7 @@ func readNodeInstallFacts(files nodeFiles, member string, manifest []byte, arch 
 			facts.inputs = append(facts.inputs, input+"/")
 		}
 	}
+	facts.workspaceManifests = nodeWorkspaceManifests(files, member)
 
 	scriptTools := nodeCommandTools(facts.manifest.Scripts, nil)
 	signal := func(manager, reason string) { facts.signals[manager] = append(facts.signals[manager], reason) }

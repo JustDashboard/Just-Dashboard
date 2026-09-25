@@ -194,11 +194,19 @@ func annotateImageFacts(tree detectionTree, markers map[string]*detectedMarkers,
 			if candidate.BuildMethod == BuildStatic {
 				kind = "static"
 			}
-			ignore, _ := tree.read(joinRoot(candidate.Root, ".dockerignore"), 256<<10)
-			_, dropped := recipeDockerignore(ignore, tree.entries(candidate.Root), kind, nil)
+			// A workspace member builds from the workspace root, whose
+			// .dockerignore is the one BuildKit reads, and its install reads
+			// the member's manifest, every sibling's and the root's lockfile.
+			context, installInputs := candidate.Root, []string(nil)
+			if candidate.Recipe == "node" && marker != nil && marker.node != nil {
+				context, installInputs = marker.node.context, marker.node.detectedInstallInputs()
+			}
+			ignore, _ := tree.read(joinRoot(context, ".dockerignore"), 256<<10)
+			_, dropped := recipeDockerignore(ignore, tree.entries(context), kind, installInputs)
 			for _, drop := range dropped {
+				input := joinRoot(context, drop.Input)
 				candidate.ImageBuildIssues = append(candidate.ImageBuildIssues, newImageBuildIssue("dockerignore_drops_recipe_input",
-					PreflightWarning, 0, drop.Input, ".dockerignore rule "+drop.Rule+" would leave out "+drop.Input+"; the automatic build sets that rule aside"))
+					PreflightWarning, 0, input, ".dockerignore rule "+drop.Rule+" would leave out "+input+"; the automatic build keeps it"))
 			}
 			if candidate.Recipe == "php" {
 				candidate.ImageBuildIssues = append(candidate.ImageBuildIssues, htaccessIssues(tree, candidate)...)

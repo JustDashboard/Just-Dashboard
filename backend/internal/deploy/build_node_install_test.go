@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -576,5 +577,74 @@ func TestNodeCommandToolsFollowScriptsTheCommandsRun(t *testing.T) {
 	}
 	if got := nodeInstallSegments("npm ci && npm install && yarn && pnpm install --frozen-lockfile && bun add zod"); !slices.Equal(got, []string{"npm install", "yarn", "bun add zod"}) {
 		t.Fatalf("install segments = %v", got)
+	}
+}
+
+// A frozen install at a workspace root reads every member's package.json,
+// so each is an install input of whichever member is built: the generated
+// ignore file brings back a sibling's manifest a repository rule leaves out,
+// and detection says so before Deploy, reading the workspace root's
+// .dockerignore — the one BuildKit reads for a member's build.
+func TestWorkspaceSiblingManifestsAreInstallInputs(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		"package.json":                              `{"name":"root","private":true,"workspaces":["apps/*","packages/**","!packages/private"]}`,
+		"package-lock.json":                         `{"name":"root","lockfileVersion":3,"packages":{"":{"name":"root"}}}`,
+		"apps/web/package.json":                     `{"name":"web","scripts":{"build":"vite build","start":"node server.js"},"dependencies":{"express":"4"}}`,
+		"apps/admin/package.json":                   `{"name":"admin"}`,
+		"packages/ui/package.json":                  `{"name":"ui"}`,
+		"packages/ui/src/index.js":                  "export {}\n",
+		"packages/tools/cli/package.json":           `{"name":"cli"}`,
+		"packages/private/package.json":             `{"name":"private"}`,
+		"packages/ui/node_modules/dep/package.json": `{"name":"dep"}`,
+		"docs/package.json":                         `{"name":"docs"}`,
+		".dockerignore":                             "packages\napps/admin\n",
+	}
+	boundary := writeNodeTree(t, files)
+	root, err := os.OpenRoot(boundary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	manifests := nodeWorkspaceManifests(nodeFiles{root: root, budget: newNodeReadBudget()}, "apps/web")
+	if want := []string{"apps/admin/package.json", "packages/tools/cli/package.json", "packages/ui/package.json"}; !slices.Equal(manifests, want) {
+		t.Fatalf("workspace manifests = %v, want %v", manifests, want)
+	}
+
+	result, err := (Detector{}).DetectPath(context.Background(), boundary, SourceIdentity{Kind: SourceGit, Revision: strings.Repeat("a", 40)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := slices.IndexFunc(result.Candidates, func(candidate DetectedCandidate) bool { return candidate.Root == "apps/web" })
+	if index < 0 {
+		t.Fatalf("candidates = %+v", result.Candidates)
+	}
+	dropped := []string{}
+	for _, issue := range result.Candidates[index].ImageBuildIssues {
+		if issue.Code == "dockerignore_drops_recipe_input" {
+			dropped = append(dropped, issue.Subject)
+		}
+	}
+	sort.Strings(dropped)
+	if want := []string{"apps/admin/package.json", "packages/tools/cli/package.json", "packages/ui/package.json"}; !slices.Equal(dropped, want) {
+		t.Fatalf("detected drops = %v, want %v", dropped, want)
+	}
+
+	if _, err := NewArtifactBuilder(&artifactBackendFake{}).PrepareWithin(context.Background(), boundary, filepath.Join(boundary, "apps", "web"),
+		BuildPlanConfig{Method: BuildRecipe, Recipe: "node", RootDirectory: "apps/web", BuildCommand: "npm run build", StartCommand: "npm start"}, false, "t:1"); err != nil {
+		t.Fatal(err)
+	}
+	ignore, err := os.ReadFile(filepath.Join(boundary, ".just-dashboard", "Dockerfile.dockerignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := parseDockerignore(ignore)
+	for path, excluded := range map[string]bool{
+		"packages/ui/package.json": false, "packages/tools/cli/package.json": false, "apps/admin/package.json": false,
+		"packages/ui/src/index.js": true, "packages/private/package.json": true,
+	} {
+		if got, _ := dockerignoreExcludes(rules, path); got != excluded {
+			t.Errorf("%s excluded = %v, want %v:\n%s", path, got, excluded, ignore)
+		}
 	}
 }
