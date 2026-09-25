@@ -19,6 +19,8 @@ var causeTitles = map[string]string{
 	"build_lifecycle_script_blocked":     "Dependency install scripts blocked",
 	"build_runtime_version":              "Language version mismatch",
 	"build_hugo_extended_required":       "Hugo extended edition required",
+	"build_theme_missing":                "Site theme missing",
+	"build_site_render_failed":           "Site failed to render",
 	"build_env_missing":                  "Variable missing at build",
 	"build_sqlx_offline":                 "sqlx has no offline query data",
 	"build_database_unreachable":         "Database unreachable during build",
@@ -117,7 +119,7 @@ var languageTools = map[string]string{
 	"bundle": "Ruby", "ruby": "Ruby", "rails": "Ruby", "rake": "Ruby", "mix": "Elixir", "elixir": "Elixir",
 	"dart": "Dart", "flutter": "Flutter", "swift": "Swift", "sbt": "Scala", "lein": "Clojure",
 	"clojure": "Clojure", "stack": "Haskell", "cabal": "Haskell", "gleam": "Gleam", "crystal": "Crystal",
-	"zig": "Zig", "php": "PHP", "composer": "PHP", "hugo": "Hugo", "jekyll": "Ruby", "java": "Java",
+	"zig": "Zig", "php": "PHP", "composer": "PHP", "hugo": "Hugo", "jekyll": "Ruby", "java": "Java", "zola": "Zola", "mdbook": "mdBook",
 	"dotnet": "the .NET SDK",
 }
 
@@ -128,6 +130,7 @@ var nodeDependencyTools = map[string]bool{
 	"nuxt": true, "nuxi": true, "svelte-kit": true, "remix": true, "prisma": true, "webpack": true,
 	"rollup": true, "esbuild": true, "tsx": true, "ts-node": true, "ng": true, "vue-cli-service": true,
 	"gatsby": true, "eleventy": true, "turbo": true, "drizzle-kit": true, "tailwindcss": true,
+	"hexo": true, "vuepress": true, "slidev": true,
 }
 
 // buildCauseFix is the one plan change the evidence supports, or nil.
@@ -410,6 +413,11 @@ func (c *BuildCause) explain() (string, string) {
 	case "build_hugo_extended_required":
 		return "the site uses Sass through Hugo Pipes, which only Hugo's extended edition compiles",
 			"build with the extended edition of Hugo"
+	case "build_theme_missing":
+		return c.themeMissing(subject)
+	case "build_site_render_failed":
+		return "the site generator stopped on " + orDefault(subjects, "a template or page"),
+			"its error is in the build log just above; fix the template or page and push"
 	case "build_env_missing":
 		what := "the build reads " + orDefault(subjects, "a variable") + " and no variable supplies it"
 		switch c.Detail {
@@ -597,6 +605,24 @@ func (c *BuildCause) runtimeVersion(subject string) (string, string) {
 		"build with a Dockerfile that provides it"
 }
 
+// themeMissing says where the theme a site names was meant to come from:
+// a submodule the checkout left out, a gem, or a Python package.
+func (c *BuildCause) themeMissing(subject string) (string, string) {
+	theme := orDefault(subject, "it names")
+	switch c.Detail {
+	case "hugo", "zola":
+		return "the theme " + theme + " is not in the build; a theme under themes/ is usually a Git submodule",
+			"turn on submodules in the Source section, or commit the theme into the repository"
+	case "jekyll":
+		return "the theme gem " + theme + " is not installed", "add it to the Gemfile and commit Gemfile.lock"
+	case "mkdocs":
+		return "the MkDocs theme " + theme + " is not installed", "list its package (mkdocs-material for material) in requirements.txt"
+	case "sphinx":
+		return "the Sphinx theme " + theme + " is not installed", "list its package in the documentation's requirements file"
+	}
+	return "the site's theme " + theme + " is not installed", "install it with the site's dependencies"
+}
+
 func (c *BuildCause) systemLibrary(subject string) (string, string) {
 	switch {
 	case subject == "pg_config":
@@ -645,6 +671,9 @@ func (c *BuildCause) commandNotFound(subject string) (string, string) {
 	case c.Detail == "laravel":
 		return "Laravel's Wayfinder Vite plugin runs `php artisan wayfinder:generate` while the assets build, and the image that builds them has no PHP",
 			"build with a Dockerfile whose asset stage has PHP and the Composer dependencies"
+	case c.Detail == "mdbook":
+		return "book.toml runs `" + subject + "`, which the image does not install",
+			"set `optional = true` in its book.toml section, or build with a Dockerfile that installs it"
 	case fix != nil:
 		return "`" + subject + "` is not installed in the image this build runs on",
 			"run the command with the build's package manager: `" + fix.Value + "`"
