@@ -13,6 +13,7 @@ import {
   imageProduct,
   issuerProduct,
   packageManagerProduct,
+  portProduct,
   processProduct,
   recipeProduct,
   variableProduct,
@@ -321,6 +322,15 @@ test("the images the build recipes produce are drawn as their language", () => {
   for (const [image, id] of Object.entries(images)) {
     expect(seen(imageProduct(image))).toBe(id)
   }
+})
+
+test("portProduct names the services the attention list names by number", () => {
+  expect(seen(portProduct(5432))).toBe("postgresql")
+  expect(seen(portProduct(6379))).toBe("redis")
+  expect(seen(portProduct(25565))).toBe("minecraft-java")
+  // 8080 is anything, and a guessed mark would be the row lying.
+  expect(portProduct(8080)).toBeUndefined()
+  expect(portProduct(22)).toBeUndefined()
 })
 
 test("processProduct does not draw the X server as the site", () => {

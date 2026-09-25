@@ -11,6 +11,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Detail, DetailList, Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { ProductGlyph, issuerProduct } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { FindingList } from "@/components/finding-list"
@@ -153,9 +154,14 @@ export function TLSReportPage() {
                     : "default"
               }
               hint={
-                scan.certificate
-                  ? `until ${timestamp(scan.certificate.notAfter)} · ${scan.certificate.issuer}`
-                  : "the handshake completed without one"
+                scan.certificate ? (
+                  <span className="inline-flex max-w-full items-center gap-1.5">
+                    <span className="truncate">until {timestamp(scan.certificate.notAfter)}</span>
+                    <IssuerFact issuer={scan.certificate.issuer} />
+                  </span>
+                ) : (
+                  "the handshake completed without one"
+                )
               }
             />
             <StatTile
@@ -227,7 +233,9 @@ export function TLSReportPage() {
                 <DetailList>
                   <Detail label="Subject">{scan.certificate?.name ?? "—"}</Detail>
                   <Detail label="Names">{scan.certificate?.domains.join(", ") || "—"}</Detail>
-                  <Detail label="Issuer">{scan.certificate?.issuer ?? "—"}</Detail>
+                  <Detail label="Issuer">
+                    {scan.certificate ? <IssuerFact issuer={scan.certificate.issuer} /> : "—"}
+                  </Detail>
                   <Detail label="Valid until">
                     {scan.certificate ? timestamp(scan.certificate.notAfter) : "—"}
                   </Detail>
@@ -259,7 +267,12 @@ export function TLSReportPage() {
                       <span className="numeric w-4 text-hint text-muted-foreground">{i + 1}</span>
                     }
                     title={link.subject}
-                    subtitle={`issued by ${link.issuer}`}
+                    subtitle={
+                      <span className="inline-flex max-w-full items-center gap-1.5">
+                        <span className="truncate">issued by {link.issuer}</span>
+                        <IssuerGlyph issuer={link.issuer} />
+                      </span>
+                    }
                     trailing={
                       <>
                         {link.isCa && <Tag>CA</Tag>}
@@ -357,6 +370,21 @@ export function TLSReportPage() {
       )}
     </Page>
   )
+}
+
+/** Who signed it, with the authority drawn as itself where it is one this product knows. */
+function IssuerFact({ issuer }: { issuer: string }) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      <IssuerGlyph issuer={issuer} />
+      <span className="truncate">{issuer || "—"}</span>
+    </span>
+  )
+}
+
+function IssuerGlyph({ issuer }: { issuer: string }) {
+  const product = issuerProduct(issuer)
+  return product ? <ProductGlyph id={product} /> : null
 }
 
 function gradeTone(grade: string): Tone {

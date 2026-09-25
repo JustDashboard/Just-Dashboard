@@ -8,11 +8,12 @@ import { get } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type { Listener } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { Page, PageContext, SearchInput } from "@/components/page"
-import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
+import { Panel, PanelBody } from "@/components/panel"
+import { ProductGlyph, portProduct, processProduct } from "@/components/product-logo"
 import { ROW_BLEED } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
-import { ChipCount, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { VerbActions, type Verb } from "@/components/verbs"
@@ -160,29 +161,30 @@ export function PortsPage() {
         />
       </StatGrid>
 
-      <Panel>
-        <PanelHeader title="Sockets" />
-        <PanelToolbar>
-          <SearchInput
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Port, process, user or address"
-            containerClassName="sm:w-64"
-          />
-          <div className="flex min-w-0 flex-wrap items-center gap-1">
-            {(Object.keys(REACH_LABEL) as Reach[]).map((key) => (
-              <FilterChip key={key} selected={reach === key} onClick={() => setReach(key)}>
-                {REACH_LABEL[key]} <ChipCount>{counts[key]}</ChipCount>
-              </FilterChip>
-            ))}
-          </div>
-        </PanelToolbar>
+      {/* A table of readings keeps its frame and its density (§16): a socket
+          opens nothing, and its verbs go elsewhere. The panel around it is
+          gone, and the filters stand on the page with the list they narrow. */}
+      <Toolbar className="justify-between gap-x-4">
+        <SearchInput
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Port, process, user or address"
+        />
+        <ChipStrip>
+          {(Object.keys(REACH_LABEL) as Reach[]).map((key) => (
+            <FilterChip key={key} selected={reach === key} onClick={() => setReach(key)}>
+              {REACH_LABEL[key]} <ChipCount>{counts[key]}</ChipCount>
+            </FilterChip>
+          ))}
+        </ChipStrip>
+      </Toolbar>
+      <Panel plain>
         <PanelBody flush>
           {visible.length === 0 ? (
             <EmptyState icon={Router} title="No sockets match" className="mt-4" />
           ) : (
             <>
-              <div className="hidden min-w-0 group-data-[plain]/panel:-mx-4 md:block">
+              <div className="hidden min-w-0 md:block">
                 <Table containerClassName="max-h-[calc(100svh-24rem)]">
                   <TableHeader className={stickyTableHeader}>
                     <TableRow>
@@ -210,8 +212,9 @@ export function PortsPage() {
                         <TableCell className="font-mono">{listener.address || "*"}</TableCell>
                         <TableCell>
                           <div className="max-w-[26rem] min-w-0">
-                            <div className="truncate text-body">
-                              {listener.process || "unknown"}
+                            <div className="flex min-w-0 items-center gap-1.5 text-body">
+                              <ProcessMark listener={listener} />
+                              <span className="truncate">{listener.process || "unknown"}</span>
                             </div>
                             <p className="truncate font-mono text-hint text-muted-foreground">
                               {listener.cmdline}
@@ -245,7 +248,10 @@ export function PortsPage() {
                       {listener.port}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-body">{listener.process || "unknown"}</div>
+                      <div className="flex min-w-0 items-center gap-1.5 text-body">
+                        <ProcessMark listener={listener} />
+                        <span className="truncate">{listener.process || "unknown"}</span>
+                      </div>
                       {/* Which address a port is bound to is the whole reason
                           this page exists — it must not be the line that gets
                           dropped on a narrow screen. */}
@@ -268,6 +274,17 @@ export function PortsPage() {
       </Panel>
     </Page>
   )
+}
+
+/**
+ * The process as the product it is, bare at the line's height — Postgres on
+ * 5432, nginx on 443 — the way the identity line draws a host's facts. Read
+ * from the process name first and the port second, so a `postgres` on an
+ * unusual port is still Postgres and a `python` on 5432 is not.
+ */
+function ProcessMark({ listener }: { listener: Listener }) {
+  const product = processProduct(listener.process ?? "") ?? portProduct(listener.port)
+  return product ? <ProductGlyph id={product} /> : null
 }
 
 function ReachStatus({ listener }: { listener: Listener }) {

@@ -353,6 +353,30 @@ export function processProduct(name: string) {
 }
 
 /**
+ * The service a port is conventionally bound to: the databases and control
+ * planes the attention list already names by number, and the two Minecraft
+ * editions. A stream forwarding 5432 is drawn as Postgres for the reason the
+ * finding calls it "PostgreSQL answers on every interface" — the port *is*
+ * the reading. Nothing for a port outside this set: 8080 is anything.
+ */
+const PORTS: Record<number, string> = {
+  5432: "postgresql",
+  3306: "mysql",
+  6379: "redis",
+  27017: "mongodb",
+  9000: "minio",
+  8123: "clickhouse",
+  2375: "docker",
+  2376: "docker",
+  25565: "minecraft-java",
+  19132: "minecraft-bedrock",
+}
+
+export function portProduct(port: number): string | undefined {
+  return PORTS[port]
+}
+
+/**
  * The program in a terminal's foreground, as the product it is — the command
  * name the backend reads off the PTY. Editors, runtimes, package managers and
  * database shells are the ones a session spends its time in and the ones worth
