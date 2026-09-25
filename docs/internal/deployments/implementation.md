@@ -273,7 +273,7 @@ only renderer/executor/validation authority for their feature.
   of the four managers with that manager's build and start commands and its preflight findings
   (`nodeInstalls`), and the Node release (`nodeVersion`: the nearest version file or the `package.json`
   volta/devEngines/engines field, on the digest-pinned `node:20`/`22`/`24` catalogue, 22 by default —
-  `build_node_runtime.go`); competing lockfiles resolve through the build
+  `build_node_runtime.go` — which the plan's `build.nodeVersion` outranks); competing lockfiles resolve through the build
   setting, the manifest's declaration, the one lockfile a frozen install accepts, the one in sync, then
   manager-exclusive files, and only a tie is `package_manager_ambiguous`. Preflight
   (`preflight_node.go`) judges `configuration.build.packageManager` — or the resolved manager when it is
@@ -290,12 +290,23 @@ only renderer/executor/validation authority for their feature.
   `runner_mismatch` preflight warning. The configuration read carries `detected`, the stored candidate
   the build still describes, so Build settings show which lockfile matches. The contract is
   [the recipe guide](recipes.md#javascript-installs).
-- Detection is a catalogue, not a handful of special cases. `deploy/frameworks_node.go` names Next.js,
-  SvelteKit, Astro, Nuxt, Remix, React Router, SolidStart, TanStack Start, Nitro, Angular, NestJS,
-  Gatsby, Docusaurus, VitePress, Eleventy, Create React App, Vue CLI, Ember, Parcel and Vite, in an
-  order where a meta-framework built on Vite is read before Vite itself, each with its serving mode
-  (site output or server start command), port, runtime environment and the entry file the generated
-  Dockerfile checks after the build. `frameworks_python.go` names Django, FastAPI, Flask, Streamlit and
+- Detection is a catalogue, not a handful of special cases. `deploy/frameworks_node.go` names Strapi,
+  Medusa, Directus, KeystoneJS, AdonisJS, RedwoodJS, Next.js, SvelteKit, Astro, Nuxt, Remix, React Router,
+  SolidStart, TanStack Start, Nitro, Qwik City, Analog, Angular, NestJS, Vike, Waku, Gatsby, Docusaurus,
+  VitePress, VuePress, Rspress, Eleventy, Hexo, Slidev, Create React App, Vue CLI, Ember, Parcel, Rsbuild,
+  Rspack, Farm, webpack and Vite, in an order where a meta-framework built on Vite is read before Vite
+  itself, each with its serving mode (site output or server start command), port, runtime environment
+  and the entry file the generated Dockerfile checks after the build. Each resolution reads the
+  framework's configuration as text (`frameworks_node_config.go`: next.config's output, the adapter
+  svelte.config imports, Astro's output and mode, `ssr: false`, a Nitro preset, Vite's base and outDir,
+  Nest's layout), passes over a start script that runs a development server
+  (`frameworks_node_scripts.go`), and says what it decided as evidence and, for preflight, as
+  `nodeBuild.findings` (with `nodeBuild.devScripts`, the scripts that start a development server);
+  `build_node_frameworks.go` renders what the plan's own commands need around the build (adapter-node for
+  adapter-auto, `NITRO_PRESET`, Next.js standalone assets, a static site under its base path or with
+  clean URLs, the entry check). An Nx workspace's application projects are candidates at its root
+  (`frameworks_node_nx.go`), and a workspace member builds its workspace dependencies first
+  (`detect_node_start.go`). `frameworks_python.go` names Django, FastAPI, Flask, Streamlit and
   Gradio from the manifests and finds the application object in the conventional entry files;
   `frameworks_rust.go`, `frameworks_java.go`, `frameworks_dotnet.go` and `frameworks_deno.go` read
   `Cargo.toml`, `pom.xml`/`build.gradle(.kts)`, `*.csproj` and `deno.json(c)`. A `Procfile`'s `web:`
@@ -642,7 +653,8 @@ only renderer/executor/validation authority for their feature.
   credentials `RAILS_MASTER_KEY` cannot decrypt, an Auth.js host it does not trust (fixed with
   `AUTH_TRUST_HOST=true`), a missing `.env` it exits over, a database address on localhost (Node,
   libpq, Go, MySQL and Rust wordings), Prisma's engine on Alpine, a disallowed Host, a missing entry
-  file or app object, a missing module or shared library (psycopg's `libpq library not found` among
+  file or app object (with its own sentence for `next start` refusing a static export, whose fix is the
+  output directory `out`, and for NestJS's `dist/main` written as `dist/src/main.js`), a missing module or shared library (psycopg's `libpq library not found` among
   them), a cgo-less binary, an architecture mismatch, a runner that is not installed, Phoenix's origin
   check (fixed with `PHX_HOST`), Play's PID file, a server that prints a loopback bind (uvicorn,
   gunicorn, werkzeug, puma, Kestrel — not Next.js, which prints `localhost` whatever it binds) or whose
@@ -795,8 +807,10 @@ only renderer/executor/validation authority for their feature.
   `POST …/variables/import?dryRun=1` (the import's own tier: `system.admin`, session) takes the
   import's body and writes nothing: it answers one verdict per name, in the order the names were
   written, with the line — `added`, `changed` (the value, sensitivity or scopes differ), `unchanged`,
-  or `refused` with `invalid_name`, `duplicate` or `invalid_value` — so the import sheet can say what
-  pressing Import will do before it is pressed. Values meet the stored ones only as digests, on the
+  `skipped` (a name the body's `skip` list leaves out: the sheet sends `PORT` and `NODE_ENV`, which the
+  deployment sets itself, unless the operator keeps them), or `refused` with `invalid_name`,
+  `duplicate` or `invalid_value` — so the import sheet can say what pressing Import will do before it
+  is pressed. The import leaves out the same names. Values meet the stored ones only as digests, on the
   server, and the answer carries neither a value nor a digest. It is audited under an action of its
   own, `deploy.variable.import_preview` (the name count, sensitivity and scopes), rather than as the
   import it did not perform. What the import refuses as a whole — a
