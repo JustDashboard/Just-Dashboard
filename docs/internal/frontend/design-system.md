@@ -854,7 +854,7 @@ right edge — a table that arrives broken.
 
 **And a table whose every row is a place to go is not a table at all.** Since 2026-09-23 the
 containers, images, volumes, networks and stacks lists are cards at every width — the argument
-`git/repo-row.tsx` made for checkouts, and §16's for anything you take: each row opens a page or a
+`git/repo-card.tsx` made for checkouts, and §16's for anything you take: each row opens a page or a
 panel, so it carries the lit edge. `components/docker/container-card.tsx` keeps both halves of the
 paragraphs above: from `xl` its readings sit beside the name in fixed measures, each naming itself
 because there is no header over it; below, they go beneath the name at the card's full width. Which
@@ -1343,7 +1343,7 @@ The passes, in order. Each one is a diff you can review on its own.
    go. Nothing was lost, because every one of those numbers already sat on a filter chip under them,
    and a chip says what is waiting *and* narrows the list to it where a tile could only say it. What
    the tiles also did — put the urgent thing first — is done by ordering the repository cards
-   worst-first under a *Needs attention* rule. A page may drop this pass when it can name where each
+   worst-first on each shelf, and the shelf with something wrong on it first. A page may drop this pass when it can name where each
    figure went and what now does the job the figures were doing; `app/(dashboard)/git/page.tsx`
    carries that in its doc comment, the way a surviving frame carries its sentence in pass 1.
 

@@ -209,10 +209,16 @@ test("the list answers what is waiting before the rows are read", async ({ page 
   await expect(page.getByRole("button", { name: "Unpushed 1" })).toBeVisible()
   await expect(page.getByRole("button", { name: /^Detached/ })).toHaveCount(0)
 
-  // The urgent one is first without being asked: `app` is dirty, `lib` is not.
+  // The checkouts are shelved by the account their remote belongs to — `app`
+  // is acme's on github.com, `lib` has no remote — and the shelf with
+  // something wrong on it comes first without being asked: `app` is dirty.
   const names = page.getByRole("button", { name: /^(app|lib)$/ })
   await expect(names.first()).toHaveText("app")
-  await expect(page.getByText("Needs attention")).toBeVisible()
+  const shelves = page.getByRole("list", { name: /^(acme|No remote)$/ })
+  await expect(shelves).toHaveCount(2)
+  await expect(shelves.first()).toHaveAttribute("aria-label", "acme")
+  await expect(page.getByRole("list", { name: "acme" }).getByRole("button", { name: "app", exact: true })).toBeVisible()
+  await expect(page.getByRole("list", { name: "No remote" }).getByRole("button", { name: "lib", exact: true })).toBeVisible()
 
   await page.getByRole("button", { name: "Behind 1" }).click()
   await expect(page.getByRole("button", { name: "app", exact: true })).toBeVisible()
