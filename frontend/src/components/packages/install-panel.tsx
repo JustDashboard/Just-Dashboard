@@ -8,11 +8,14 @@ import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import type { Job, PackageSearchResult } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
+import { PackageMark } from "@/components/packages/marks"
+import { ProductGlyph, ProductLogos } from "@/components/product-logo"
 import { Panel, PanelBody, PanelToolbar } from "@/components/panel"
 import { SearchInput } from "@/components/page"
 import { ROW_BLEED } from "@/components/row-list"
 import { EmptyState, Notice, Spinner } from "@/components/state"
 import { Status } from "@/components/status-dot"
+import { FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
@@ -37,11 +40,29 @@ import { Button } from "@/components/ui/button"
  *
  * Plain, like the two lists beside it under the strip: the tab is the block's
  * name, so it carries no header of its own — a search box, a hairline, and
- * the rows starting on the page's own edge.
+ * the rows starting on the page's own edge. Each result is drawn as the
+ * software it is (§14), so "postgres" answers with PostgreSQL's elephant
+ * beside the three packages that are its and a glyph beside the rest.
  */
 
 /** Long enough that a word is typed before anything is asked; short enough to feel live. */
 const DEBOUNCE_MS = 220
+
+/**
+ * What an empty search offers to look for, drawn as the software it finds:
+ * words rather than package names, because `docker` is `docker.io` on apt
+ * and `docker` on the rest, and the search reads names and descriptions.
+ */
+const SUGGESTIONS: { query: string; product: string }[] = [
+  { query: "nginx", product: "nginx" },
+  { query: "postgresql", product: "postgresql" },
+  { query: "redis", product: "redis" },
+  { query: "docker", product: "docker" },
+  { query: "nodejs", product: "nodejs" },
+  { query: "python3", product: "python" },
+  { query: "git", product: "git" },
+  { query: "fail2ban", product: "fail2ban" },
+]
 
 export function InstallPanel({
   onJob,
@@ -149,6 +170,23 @@ export function InstallPanel({
         {!shownError && shown.length === 0 && (
           <EmptyState
             icon={MagnifyingGlass}
+            mark={
+              needle ? undefined : (
+                <ProductLogos ids={["nginx", "postgresql", "docker"]} size="md" />
+              )
+            }
+            action={
+              !needle && (
+                <div className="flex max-w-lg flex-wrap justify-center gap-1.5">
+                  {SUGGESTIONS.map((suggestion) => (
+                    <FilterChip key={suggestion.query} onClick={() => setQuery(suggestion.query)}>
+                      <ProductGlyph id={suggestion.product} />
+                      {suggestion.query}
+                    </FilterChip>
+                  ))}
+                </div>
+              )
+            }
             className="mt-4"
             title={
               typing
@@ -179,6 +217,7 @@ export function InstallPanel({
                     ROW_BLEED,
                   )}
                 >
+                  <PackageMark name={result.name} />
                   <button
                     type="button"
                     onClick={() => onInspect(result.name)}

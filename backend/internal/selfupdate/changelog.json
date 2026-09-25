@@ -239,6 +239,11 @@
         },
         {
           "kind": "changed",
+          "text": "Packages, System users and the audit log draw what they list as itself",
+          "detail": "Packages opens on the host's own line — its distribution, the package manager and how fresh the index is — and every package is drawn as the software it is: PostgreSQL's elephant beside postgresql-16, Python's snakes beside python3-requests, a library as its kind. An upgrade shows which part of the version changes, amber for a security fix, and where it came from. System users are cards you open, a person as their initials in the colour they have everywhere else and a daemon's account as its product, under readings of who administers the machine and who last signed in from where. The audit log opens on the last day — how much changed, what failed, who did it and who signed in — and each entry is drawn as the part of the product it touched and the person or automation that touched it, shelved by day, with chips that narrow it to a section."
+        },
+        {
+          "kind": "changed",
           "text": "Restarts and rebuilds are read line by line, and the dashboard's own pages are about what they set",
           "detail": "A restart's or an upgrade's transcript is the whole run in a console — every line numbered, each BuildKit step coloured by the service it builds, the line that failed washed where it sits — rather than the last 64 KB in a small box, and new lines arrive a few at a time instead of landing in one jump. Restart and Rebuild are the two cards beside the stack's three services, the run shows its stages, and the tinted banners around it are gone. Configuration is a form in five sections, each saying what it currently is; Version is one line about the install over the history, drawn as a timeline."
         },

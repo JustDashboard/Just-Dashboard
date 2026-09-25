@@ -29,6 +29,7 @@ import {
   Monitoring,
   NetworkDevice,
   Notes,
+  Pencil,
   Puzzle,
   Route,
   Router,
@@ -205,6 +206,7 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
   {
     label: "Workspace",
     items: [
+      { title: "Boards", href: "/boards", icon: Pencil },
       { title: "Terminal", href: "/terminal", icon: Terminal, capability: "terminal" },
       { title: "Files", href: "/files", icon: FolderOpen },
       { title: "Git", href: "/git", icon: GitHubMark },

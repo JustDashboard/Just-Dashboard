@@ -3,6 +3,7 @@
 import type { RefObject } from "react"
 import { Plus, type Icon } from "@/components/icons"
 import { cn } from "@/lib/utils"
+import { LogoGlyph } from "@/components/logo"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 
 /**
@@ -136,6 +137,33 @@ export function WireMark({
         )}
       >
         {children}
+      </span>
+    </span>
+  )
+}
+
+/**
+ * This server, drawn as the product it runs: the J in its own blue on a tile
+ * of the brand's tint, inside a ring of the brand's rule.
+ *
+ * It was the pale filled square with the J in black — the command face (§3),
+ * so the one mark in a picture that is *here* read as a button nobody could
+ * press, and the logo stood in a colour it never takes anywhere else. Every
+ * other mark in a picture is a product on its own tile somewhere else; this
+ * one is where the reader is standing, and the tint and the ring say so the
+ * way the current nav entry does. Its outer edge is the same size as a `lg`
+ * WireMark, so a line meets it where it would meet any other mark.
+ */
+export function WireHost({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn(
+        "flex shrink-0 rounded-[1.125rem] border border-rule-brand bg-background p-[3px]",
+        className,
+      )}
+    >
+      <span className="flex size-12 items-center justify-center rounded-[0.875rem] bg-wash-brand text-brand">
+        <LogoGlyph className="h-[1.625rem]" />
       </span>
     </span>
   )

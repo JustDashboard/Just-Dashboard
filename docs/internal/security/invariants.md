@@ -102,8 +102,9 @@ is what `s.destructive` marks) but **"how often does somebody do this, and can t
 **Typed — rare, and no way back:** `DROP DATABASE`, `DROP TABLE`, `DROP COLUMN`, `TRUNCATE`, an import that
 truncates first, dropping a Mongo collection, a Mongo pipeline with `$out`/`$merge`, a `critical` statement
 in the query runner, restoring a database or backup over live data (a backup restore types the destination directory, or the phrase `restore in place` when the archive goes back over the paths it was taken from), `compose down`, removing a Docker
-volume, a prune that also sweeps volumes, deleting a dashboard or Linux account, a recursive directory
-delete, `git discard`, `git reset --hard` and dropping a git stash, aborting a Git operation
+volume, a prune that also sweeps volumes, deleting a dashboard or Linux account, deleting a board
+(type its name; its drawing has no recovery path), a recursive directory delete, `git discard`,
+`git reset --hard` and dropping a git stash, aborting a Git operation
 (`abort operation`, which discards conflict-resolution edits), choosing an entire conflict side or deletion
 (`discard changes`), toggling the firewall, resetting it, switching the inbound
 default to deny, changing sshd's configuration, revoking a certificate, applying package updates,
