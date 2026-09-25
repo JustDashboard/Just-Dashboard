@@ -47,7 +47,6 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { useProject } from "@/components/deploy/project-context"
 import {
-  BROWSER_PREFIX,
   PYTHON_VERSION,
   automaticPackageManagerHint,
   commandsForPackageManager,
@@ -55,6 +54,7 @@ import {
   goMainPackageList,
   packageManagerOptions,
   packageManagerReading,
+  publicBuildVariable,
   validateConfiguration,
 } from "@/components/deploy/deployment-defaults"
 import {
@@ -496,7 +496,7 @@ function BuildReadings({
   )
   const secret = buildVariables.filter((variable) => variable.sensitivity === "secret")
   const exposed = secret.find(
-    (variable) => BROWSER_PREFIX.test(variable.name) && !installOnly.has(variable.name),
+    (variable) => publicBuildVariable(variable.name) && !installOnly.has(variable.name),
   )
 
   return (
@@ -1309,7 +1309,7 @@ function BuildForm({
               const ships =
                 variable.sensitivity === "secret" &&
                 stage !== "install" &&
-                BROWSER_PREFIX.test(variable.name)
+                publicBuildVariable(variable.name)
               return (
                 <li key={variable.name} className="min-w-0 py-2 first:pt-0 last:pb-0">
                   <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">

@@ -40,17 +40,25 @@ type candidateScore struct {
 	static bool
 }
 
-// publicBuildPrefixes name the variables a framework compiles into its
-// browser bundle, which only exist in the image if the build receives them.
-var publicBuildPrefixes = []string{"NEXT_PUBLIC_", "VITE_", "PUBLIC_", "NUXT_PUBLIC_", "REACT_APP_", "EXPO_PUBLIC_"}
-
+// publicBuildVariable says whether a name carries a prefix a framework
+// compiles into its browser bundle (browserPrefixRules, any framework's), a
+// value that only exists in the image if the build receives it.
 func publicBuildVariable(name string) bool {
-	for _, prefix := range publicBuildPrefixes {
-		if strings.HasPrefix(name, prefix) {
+	for _, rule := range browserPrefixRules {
+		if strings.HasPrefix(name, rule.prefix) {
 			return true
 		}
 	}
 	return false
+}
+
+// publicBuildPrefixList names every browser prefix, for a sentence.
+func publicBuildPrefixList() string {
+	prefixes := make([]string, 0, len(browserPrefixRules))
+	for _, rule := range browserPrefixRules {
+		prefixes = append(prefixes, rule.prefix)
+	}
+	return strings.Join(prefixes[:len(prefixes)-1], ", ") + " or " + prefixes[len(prefixes)-1]
 }
 
 // reservedBuildArgName keeps a build argument from replacing the builder's

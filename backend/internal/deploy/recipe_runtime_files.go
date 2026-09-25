@@ -152,64 +152,27 @@ func compiledRuntimeAssets(root, extension string) []string {
 // dockerIgnoredPaths reports whether the repository's .dockerignore keeps a
 // root-relative path out of the build context, where a COPY of it from the
 // build stage would fail the build. A path is out when a rule matches it or
-// a directory above it. Anything a rule might touch — including an entry a
-// later "!" rule re-includes — counts as ignored: leaving a file out only
-// loses the convenience, copying a missing one loses the build.
+// a directory above it (BuildKit's matching, parseDockerignore). Anything a
+// rule might touch — including an entry a later "!" rule re-includes, and
+// everything when a rule cannot be read — counts as ignored: leaving a file
+// out only loses the convenience, copying a missing one loses the build.
 func dockerIgnoredPaths(root string) func(string) bool {
 	content, err := readContainedRegular(root, ".dockerignore", 64<<10)
 	if err != nil {
 		return func(string) bool { return false }
 	}
-	var patterns [][]string
-	for _, line := range strings.Split(string(content), "\n") {
-		pattern := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "!"))
-		pattern = strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(pattern, "/"), "./"), "/")
-		if pattern == "" || strings.HasPrefix(pattern, "#") {
-			continue
-		}
-		patterns = append(patterns, strings.Split(pattern, "/"))
+	rules, unreadable := readDockerignore(content)
+	if unreadable > 0 {
+		return func(string) bool { return true }
 	}
 	return func(name string) bool {
-		segments := strings.Split(name, "/")
-		for depth := 1; depth <= len(segments); depth++ {
-			for _, pattern := range patterns {
-				if dockerIgnoreMatches(pattern, segments[:depth]) {
-					return true
-				}
+		for _, rule := range rules {
+			if rule.matches(name) {
+				return true
 			}
 		}
 		return false
 	}
-}
-
-// dockerIgnoreMatches matches one rule's segments against a path's: "**"
-// stands for any number of directories, every other segment follows
-// path.Match, and a segment that cannot be read matches anything. It walks
-// the rule once over the set of reachable positions, so no rule — however
-// many "**" a repository writes — costs more than its length times the
-// path's.
-func dockerIgnoreMatches(pattern, segments []string) bool {
-	reached := make([]bool, len(segments)+1)
-	reached[0] = true
-	for _, part := range pattern {
-		next := make([]bool, len(segments)+1)
-		if part == "**" {
-			for index, any := range reached {
-				next[index] = any || (index > 0 && next[index-1])
-			}
-		} else {
-			for index := range segments {
-				if !reached[index] {
-					continue
-				}
-				if matched, err := path.Match(part, segments[index]); err != nil || matched {
-					next[index+1] = true
-				}
-			}
-		}
-		reached = next
-	}
-	return reached[len(segments)]
 }
 
 // dotnetSQLiteSeeds are the committed SQLite files the project's connection

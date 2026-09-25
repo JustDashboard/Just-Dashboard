@@ -114,3 +114,18 @@ func TestDetectionDoesNotChooseAHelperDockerfileOverTheApplication(t *testing.T)
 		}
 	})
 }
+
+// One list of browser prefixes: what environment discovery classifies as
+// browser-inlined for a framework is what a Dockerfile build may receive as
+// a plain build argument, and what preflight names.
+func TestPublicBuildVariablesFollowTheBrowserPrefixRules(t *testing.T) {
+	t.Parallel()
+	for _, rule := range browserPrefixRules {
+		if !publicBuildVariable(rule.prefix+"API_URL") || !strings.Contains(publicBuildPrefixList(), rule.prefix) {
+			t.Fatalf("%s is not a public build prefix", rule.prefix)
+		}
+	}
+	if publicBuildVariable("DATABASE_URL") || publicBuildPrefixList() != "NEXT_PUBLIC_, VITE_, PUBLIC_, REACT_APP_, NUXT_PUBLIC_, EXPO_PUBLIC_, GATSBY_ or VUE_APP_" {
+		t.Fatalf("list = %q", publicBuildPrefixList())
+	}
+}

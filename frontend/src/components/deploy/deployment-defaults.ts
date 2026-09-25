@@ -606,7 +606,7 @@ export function defaultConfiguration(
           name,
           // A browser-public value is compiled into the page by design, and
           // only a plain one can reach a Compose build argument.
-          sensitivity: BROWSER_PREFIX.test(name) ? ("plain" as const) : ("secret" as const),
+          sensitivity: publicBuildVariable(name) ? ("plain" as const) : ("secret" as const),
           scopes: ["runtime"],
           required: true,
           reference: "",
@@ -1194,10 +1194,14 @@ export function defaultReleaseTaskRunner(
 const DOCKERFILE_STAGE = /^[A-Za-z][A-Za-z0-9_.-]{0,127}$/
 
 /**
- * Prefixes whose variables a front-end build inlines into the JavaScript it
- * serves — the backend's `publicBuildPrefixes`.
+ * Whether a name carries any framework's browser prefix, SvelteKit's and
+ * Astro's bare `PUBLIC_` included — the backend's `publicBuildVariable`: a
+ * value some front-end build inlines into the JavaScript it serves, which is
+ * why a Dockerfile or Compose build receives it only as a plain value.
  */
-export const BROWSER_PREFIX = /^(NEXT_PUBLIC_|VITE_|PUBLIC_|NUXT_PUBLIC_|REACT_APP_|EXPO_PUBLIC_)/
+export function publicBuildVariable(name: string) {
+  return browserInlined(name, [...BROWSER_PREFIXES, "PUBLIC_"])
+}
 
 /** The Stage field's hint: what leaving it empty does, and the stages detection read. */
 export function dockerfileStageHint(stages?: string[]) {

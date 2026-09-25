@@ -19,7 +19,14 @@ type dockerignoreRule struct {
 }
 
 func parseDockerignore(content []byte) []dockerignoreRule {
-	rules := []dockerignoreRule{}
+	rules, _ := readDockerignore(content)
+	return rules
+}
+
+// readDockerignore is parseDockerignore with the count of lines it could not
+// read as a pattern, which BuildKit refuses and which are left out.
+func readDockerignore(content []byte) ([]dockerignoreRule, int) {
+	rules, unreadable := []dockerignoreRule{}, 0
 	for _, raw := range strings.Split(strings.ReplaceAll(string(content), "\r\n", "\n"), "\n") {
 		line := strings.TrimSpace(raw)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -40,6 +47,7 @@ func parseDockerignore(content []byte) []dockerignoreRule {
 		}
 		expression, ok := dockerignoreRegexp(pattern)
 		if !ok {
+			unreadable++
 			continue
 		}
 		rule.Pattern, rule.re = pattern, expression
@@ -48,7 +56,7 @@ func parseDockerignore(content []byte) []dockerignoreRule {
 			break
 		}
 	}
-	return rules
+	return rules, unreadable
 }
 
 func dockerignoreRegexp(pattern string) (*regexp.Regexp, bool) {

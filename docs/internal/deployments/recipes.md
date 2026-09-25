@@ -59,7 +59,8 @@ the install also runs every dependency's install script, and Prisma's `generate`
 Runtime and release-task scopes remain separate. Custom Dockerfiles do not gain automatic values or
 secret mappings; they retain their existing refusal of requested secrets. The one exception is a value
 the Dockerfile itself asks for and that is public by design: a **plain** build-scoped variable with a
-browser-public prefix (`NEXT_PUBLIC_`, `VITE_`, `PUBLIC_`, `NUXT_PUBLIC_`, `REACT_APP_`, `EXPO_PUBLIC_`)
+browser-public prefix (any framework's, from the one list environment discovery classifies with:
+`NEXT_PUBLIC_`, `VITE_`, `PUBLIC_`, `REACT_APP_`, `NUXT_PUBLIC_`, `EXPO_PUBLIC_`, `GATSBY_`, `VUE_APP_`)
 that the Dockerfile declares with `ARG` is passed as `--build-arg NAME`, the value only in buildx's
 process environment (`deploy/build_dockerfile_args.go`). A value typed into a new project's environment
 is stored secret, except one with a browser-public name that is not declared secret: the page's
@@ -1248,8 +1249,9 @@ service reads at runtime are copied there, owned by that user: `templates`, `vie
 plus the directory named by any literal path the sources hand to `LoadHTMLGlob`, `ParseGlob`,
 `http.Dir`, `Static`/`StaticFile`, `os.DirFS` or a `file://` migration source. The sources are read as
 text under a fixed budget, and the walk stops after 20,000 entries. Symlinks are never copied, nor is a
-name the repository's `.dockerignore` keeps out of the build context, because copying a file the context
-lacks would fail the build. `/home/app/data` is created and owned by `app`, so a volume mounted there
+name the repository's `.dockerignore` keeps out of the build context (read with the same BuildKit matching
+as the generated ignore file, counting a rule a later `!` re-includes and, when a rule cannot be read,
+everything), because copying a file the context lacks would fail the build. `/home/app/data` is created and owned by `app`, so a volume mounted there
 starts writable. Rust uses the same stage, reading `ServeDir`, `ServeFile`, `Tera::new`, `NamedFile` and
 actix `Files` literals.
 
