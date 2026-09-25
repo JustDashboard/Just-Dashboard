@@ -115,6 +115,18 @@ func javaCatalogueImages() []string {
 	return images
 }
 
+// jvmLanguageCatalogueImages are the Scala and Clojure builders and the JRE
+// each release runs on.
+func jvmLanguageCatalogueImages() []string {
+	var images []string
+	for _, jdk := range jvmLanguageJDKs {
+		for _, recipe := range []jvmLanguageRecipe{{jdk: jdk, sbt: "1"}, {jdk: jdk, sbt: "2"}, {jdk: jdk, tool: "lein"}, {jdk: jdk, tool: "tools-deps"}} {
+			images = append(images, recipe.bases()...)
+		}
+	}
+	return images
+}
+
 func dotnetCatalogueImages() []string {
 	var images []string
 	for _, version := range dotnetRecipeVersions {
@@ -136,7 +148,7 @@ func TestLiveRecipeBaseCatalogueRunsOnAmd64AndArm64(t *testing.T) {
 	client := liveC4Docker(t)
 	backend := NewDockerArtifactBackend(client)
 	seen := map[string]bool{}
-	images := append(javaCatalogueImages(), dotnetCatalogueImages()...)
+	images := append(append(javaCatalogueImages(), dotnetCatalogueImages()...), jvmLanguageCatalogueImages()...)
 	for _, bases := range recipeBaseCatalogue {
 		images = append(images, bases...)
 	}

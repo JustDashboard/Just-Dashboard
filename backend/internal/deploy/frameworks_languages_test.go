@@ -745,7 +745,7 @@ func TestScalaAndClojureBuildOnTheJVM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertRendered(t, prepared, []string{"RUN sbt -batch assembly", "FROM eclipse-temurin:21-jre-alpine@sha256:", "exec java -jar /app/app.jar"}, nil)
+	assertRendered(t, prepared, []string{"RUN sbt -batch assembly", "FROM eclipse-temurin:21-jre@sha256:", "exec java -jar /app/app.jar"}, nil)
 	if _, err := prepareFixture(t, map[string]string{"build.sbt": "name := \"x\"\n"}, BuildPlanConfig{Method: BuildRecipe, Recipe: "scala"}); err == nil ||
 		!strings.Contains(err.Error(), "sbt-native-packager") {
 		t.Fatalf("plain sbt err = %v", err)
@@ -765,7 +765,7 @@ func TestScalaAndClojureBuildOnTheJVM(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertRendered(t, prepared, []string{"FROM clojure:temurin-21-lein@sha256:", "RUN lein deps", "RUN lein uberjar", "cp \"$jar\" /out/app.jar",
-		"FROM eclipse-temurin:21-jre-alpine@sha256:", "COPY --from=build /out/app.jar /app/app.jar"}, nil)
+		"FROM eclipse-temurin:21-jre@sha256:", "COPY --from=build --chown=10001:10001 /out/app.jar /app/app.jar", "USER 10001"}, nil)
 	notAOT := map[string]string{"project.clj": "(defproject shop \"0.1.0\" :main ^:skip-aot shop.core)\n"}
 	if issue := selectedOf(detectShapeFixture(t, notAOT)).RecipeIssue; !strings.Contains(issue, ":aot :all") {
 		t.Fatalf("issue = %q", issue)

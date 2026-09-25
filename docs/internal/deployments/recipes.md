@@ -2041,7 +2041,8 @@ names; it fetches the sbt and Scala releases the project pins) and the official
   that is not a plain file name is `recipe_unsupported`, and the renderer refuses any instruction that
   would span lines.
 - **sbt-assembly**: `sbt -batch assembly`; the largest jar under `target/scala-*` is the fat jar and runs
-  as `java -jar` on the Alpine JRE.
+  as `java -jar` on the same `eclipse-temurin:<jdk>-jre` — every JVM runtime is the Ubuntu JRE, since the
+  Alpine JRE of 17 is published for amd64 alone.
 - **Leiningen**: `lein deps`, `lein uberjar`; `project.clj` must name `:main`, and a `^:skip-aot` main is
   refused unless a profile compiles `:aot :all`. **tools.build**: `clojure -P`, `clojure -T:build uber`
   (or `uberjar`, whichever `build.clj` defines). Both run the largest jar under `target/`.

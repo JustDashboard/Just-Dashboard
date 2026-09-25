@@ -63,7 +63,7 @@ var recipeBaseCatalogue = map[string][]string{
 	"ruby":    {"ruby:3.4-slim"},
 	"elixir":  {"elixir:1.19-otp-28-slim"},
 	"scala":   {"sbtscala/scala-sbt:eclipse-temurin-21_1.x", "eclipse-temurin:21-jre"},
-	"clojure": {"clojure:temurin-21-lein", "eclipse-temurin:21-jre-alpine"},
+	"clojure": {"clojure:temurin-21-lein", "eclipse-temurin:21-jre"},
 	"dart":    {"dart:3.13", "debian:trixie-slim"},
 	"gleam":   {"ghcr.io/gleam-lang/gleam:v1.18.1-erlang-alpine"},
 }

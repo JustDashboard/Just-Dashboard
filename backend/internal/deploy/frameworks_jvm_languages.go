@@ -62,13 +62,12 @@ func (r jvmLanguageRecipe) builderImage() string {
 	return "sbtscala/scala-sbt:eclipse-temurin-" + r.jdk + "_" + r.sbt + ".x"
 }
 
-// runtimeImage is the JRE the program runs on: Ubuntu's for sbt stage,
-// whose start script is bash, Alpine's for a jar.
+// runtimeImage is the JRE the program runs on: Temurin's Ubuntu image, as
+// the Java recipe's, which sbt stage's bash start script needs and which is
+// published for amd64 and arm64 for every release — the Alpine JRE of 17 is
+// amd64-only.
 func (r jvmLanguageRecipe) runtimeImage() string {
-	if r.tool == "sbt-stage" {
-		return "eclipse-temurin:" + r.jdk + "-jre"
-	}
-	return "eclipse-temurin:" + r.jdk + "-jre-alpine"
+	return "eclipse-temurin:" + r.jdk + "-jre"
 }
 
 func (r jvmLanguageRecipe) bases() []string { return []string{r.builderImage(), r.runtimeImage()} }
@@ -392,9 +391,9 @@ func renderJVMLanguageDockerfile(recipe jvmLanguageRecipe, config BuildPlanConfi
 	}
 	lines = append(lines, "RUN "+installSecrets+fetch, "RUN "+buildSecrets+build, output)
 	lines = append(lines, "FROM "+immutableImageReference(runtime))
+	lines = append(lines, unprivilegedDebianUser, "WORKDIR /app")
 	if recipe.tool == "sbt-stage" {
-		lines = append(lines, unprivilegedDebianUser, "WORKDIR /app",
-			"COPY --from=build --chown=10001:10001 /src/"+path.Join(firstNonEmpty(recipe.stage, "."), "target/universal/stage")+"/ /app/")
+		lines = append(lines, "COPY --from=build --chown=10001:10001 /src/"+path.Join(firstNonEmpty(recipe.stage, "."), "target/universal/stage")+"/ /app/")
 		if recipe.play {
 			quoted := make([]string, 0, len(playSecretConfigLines))
 			for _, line := range playSecretConfigLines {
@@ -402,11 +401,10 @@ func renderJVMLanguageDockerfile(recipe jvmLanguageRecipe, config BuildPlanConfi
 			}
 			lines = append(lines, "RUN mkdir -p "+path.Dir(playSecretConfig)+" && printf '%s\\n' "+strings.Join(quoted, " ")+" > "+playSecretConfig)
 		}
-		lines = append(lines, "USER 10001")
 	} else {
-		lines = append(lines, "RUN adduser -D -u 10001 app && mkdir -p /app/data && chown app:app /app /app/data", "USER app", "WORKDIR /app",
-			"COPY --from=build /out/app.jar /app/app.jar")
+		lines = append(lines, "COPY --from=build --chown=10001:10001 /out/app.jar /app/app.jar")
 	}
+	lines = append(lines, "USER 10001")
 	// The JVM sizes its heap from the container's limit rather than the host's memory.
 	lines = append(lines, `ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75"`)
 	start := strings.TrimSpace(config.StartCommand)
