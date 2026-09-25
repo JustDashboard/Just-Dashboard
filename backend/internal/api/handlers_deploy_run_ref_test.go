@@ -297,3 +297,33 @@ func TestDeploymentRunCreateRefusesADangerousRefBeforeInvokingGit(t *testing.T) 
 		}
 	}
 }
+
+// A pull request's head is what "Test this pull request" builds, after an
+// administrator approved that exact commit for a preview. Named as a manual
+// run's ref it would deploy anyone's pull request to production with no
+// approval at all, so it is refused before git is asked anything.
+func TestDeploymentRunCreateRefusesAPullRequestHeadOutsideAPreview(t *testing.T) {
+	s := testServer(t)
+	invoked := filepath.Join(t.TempDir(), "git-invoked")
+	fakeGitOnPath(t, "#!/bin/sh\necho \"$@\" >> "+invoked+"\nexit 2\n")
+	projectID, environmentID := insertRefDeployFixture(t, s, "ref-pull-app", gitSourceFixture(), deploy.BuildDockerfile)
+	admin := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "ref-pull-admin", auth.RoleAdmin)}
+
+	for _, ref := range []string{"refs/pull/1/head", "refs/merge-requests/1/head"} {
+		body, _ := json.Marshal(map[string]any{"operation": "deploy", "ref": ref})
+		response := admin.do(http.MethodPost, runCreatePath(projectID, environmentID), string(body), nil)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("ref %q on production = %d %s, want 400", ref, response.Code, response.Body.String())
+		}
+		if got := decodedAPIError(t, response.Body.Bytes()); got.Code != "ref_not_applicable" || !strings.Contains(got.Message, ref) {
+			t.Fatalf("ref %q error = %+v, want ref_not_applicable naming the ref", ref, got)
+		}
+		if data, err := os.ReadFile(invoked); err == nil {
+			t.Fatalf("ref %q reached git: %s", ref, data)
+		}
+	}
+	var runs int
+	if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_runs WHERE project_id=?`, projectID).Scan(&runs); err != nil || runs != 0 {
+		t.Fatalf("runs enqueued = %d, %v", runs, err)
+	}
+}

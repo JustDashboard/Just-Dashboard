@@ -562,8 +562,10 @@ CREATE TABLE IF NOT EXISTS deploy_variable_revisions (
   active         INTEGER NOT NULL DEFAULT 1,
   created_by     TEXT NOT NULL DEFAULT 'migration',
   created_at     INTEGER NOT NULL,
+  copied_from_environment INTEGER NOT NULL DEFAULT 0,
   UNIQUE(environment_id, key, revision)
 );
+
 CREATE INDEX IF NOT EXISTS idx_deploy_variable_active
   ON deploy_variable_revisions(environment_id, active, key);
 
@@ -807,8 +809,13 @@ CREATE TABLE IF NOT EXISTS deploy_preview_refs (
   environment_id INTEGER NOT NULL REFERENCES deploy_environments(id) ON DELETE CASCADE,
   state          TEXT NOT NULL DEFAULT 'open',
   updated_at     INTEGER NOT NULL,
+  origin         TEXT NOT NULL DEFAULT '',
+  title          TEXT NOT NULL DEFAULT '',
+  head_revision  TEXT NOT NULL DEFAULT '',
+  variables_copied_revision TEXT NOT NULL DEFAULT '',
   UNIQUE(trigger_id, provider_ref)
 );
+
 
 CREATE TABLE IF NOT EXISTS deploy_preview_approvals (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -831,6 +838,22 @@ CREATE TABLE IF NOT EXISTS deploy_preview_quarantines (
   created_at     INTEGER NOT NULL,
   updated_at     INTEGER NOT NULL
 );
+
+-- Where a preview answers: a port on this host's Tailscale node that
+-- tailscale serve maps to the preview's loopback publication. The port is
+-- unique per kind so two previews can never be served on the same one.
+
+CREATE TABLE IF NOT EXISTS deploy_preview_addresses (
+  environment_id INTEGER PRIMARY KEY REFERENCES deploy_environments(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL DEFAULT 'tailnet',
+  port           INTEGER NOT NULL,
+  upstream_port  INTEGER NOT NULL DEFAULT 0,
+  url            TEXT NOT NULL DEFAULT '',
+  published      INTEGER NOT NULL DEFAULT 0,
+  updated_at     INTEGER NOT NULL,
+  UNIQUE(kind, port)
+);
+
 
 CREATE TABLE IF NOT EXISTS watched_domains (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1038,6 +1061,19 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"backup_jobs", "retention_days", "INTEGER NOT NULL DEFAULT 0"},
 	{"backup_jobs", "pause_containers", "TEXT NOT NULL DEFAULT '[]'"},
 	{"deploy_preview_approvals", "generation", "INTEGER NOT NULL DEFAULT 1"},
+	// A preview started from the dashboard's "Test this pull request" rather
+	// than from a webhook remembers where it came from, the pull request's
+	// title, the newest head the reconciler has seen, and the head whose
+	// production variables were copied in ('' = none copied).
+	{"deploy_preview_refs", "origin", "TEXT NOT NULL DEFAULT ''"},
+	{"deploy_preview_refs", "title", "TEXT NOT NULL DEFAULT ''"},
+	{"deploy_preview_refs", "head_revision", "TEXT NOT NULL DEFAULT ''"},
+	{"deploy_preview_refs", "variables_copied_revision", "TEXT NOT NULL DEFAULT ''"},
+	// A variable copied from production into a preview keeps its provenance,
+	// so closing the preview can drop exactly the copies and nothing the
+	// operator typed there themselves.
+	{"deploy_variable_revisions", "copied_from_environment", "INTEGER NOT NULL DEFAULT 0"},
+
 	{"deploy_git_watches", "reason", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_git_watches", "policy_key", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_git_watches", "baseline_revision", "TEXT NOT NULL DEFAULT ''"},

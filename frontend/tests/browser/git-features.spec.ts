@@ -51,6 +51,7 @@ async function fixture(
   page: Page,
   readonly = false,
   mode: "normal" | "conflict" | "partial" | "staged" | "github" | "gitlab" | "gitea" = "normal",
+  opts: { fork?: boolean; preview?: boolean; cleanupFailed?: boolean } = {},
 ) {
   const requests: Request[] = []
   let resolved = false
@@ -80,6 +81,85 @@ async function fixture(
     additions: 1,
     deletions: 1,
     comments: 1,
+    fork: opts.fork,
+    headRepository: opts.fork ? "mallory/app" : "acme/app",
+  }
+  const preview = {
+    id: 1,
+    triggerId: 2,
+    providerRef: "7",
+    environmentId: 12,
+    environmentSlug: "pr-7",
+    state: "open",
+    updatedAt: now,
+    number: 7,
+    projectId: 4,
+    origin: "dashboard",
+    title: pull.title,
+    revision: sha,
+    headRevision: sha,
+    liveReleaseId: 3,
+    address: {
+      kind: "tailnet",
+      url: "https://vps.tail.ts.net:21000",
+      port: 21000,
+      published: true,
+    },
+    // Closed, and the run that was to remove it was cancelled: its
+    // containers are still there, which is the thing to retry.
+    ...(opts.cleanupFailed
+      ? {
+          state: "closed",
+          liveReleaseId: undefined,
+          address: {
+            kind: "tailnet",
+            url: "https://vps.tail.ts.net:21000",
+            port: 21000,
+            published: false,
+          },
+          lastRun: {
+            id: 77,
+            runNumber: 2,
+            state: "cancelled",
+            operation: "preview_remove",
+            requestedAt: now,
+          },
+        }
+      : {}),
+  }
+  const built = opts.preview || opts.cleanupFailed
+  // The pull-request summary: the checkout's open requests joined to the
+  // project deploying it, which is what puts "Test this pull request" on a row.
+  const summary = {
+    available: true,
+    repos: [
+      {
+        path: "/srv/app",
+        repository: "acme/app",
+        pulls: [{ ...pull, preview: built ? preview : null }],
+        deployments: [{ projectId: 4, name: "app", environmentId: 9 }],
+      },
+    ],
+  }
+  const project = {
+    repository: "acme/app",
+    host: "github.com",
+    available: true,
+    identity: "cli",
+    checkoutPath: "/srv/app",
+    pulls: [pull],
+    previews: built ? [preview] : [],
+    production: {
+      environmentId: 9,
+      automatic: true,
+      intervalSeconds: 5,
+      awaitingFirstDeployment: false,
+    },
+    tailnet: { available: true, running: true, hostname: "vps.tail.ts.net", httpsEnabled: true },
+    compose: false,
+    localCheckout: false,
+    internalPort: 3000,
+    releaseTasks: 0,
   }
   await page.route("**/api/v1/**", async (route) => {
     const req = route.request()
@@ -204,6 +284,39 @@ async function fixture(
           break
         case "/git/github/pulls/7":
           response = pull
+          break
+        case "/git/pull-requests":
+          response = mode === "github" ? summary : { available: true, repos: [] }
+          break
+        case "/deploy/4/pull-requests":
+          response = project
+          break
+        case "/git/github/issues":
+          response = [
+            {
+              number: 9,
+              title: "Crash on start",
+              url: "https://github.com/acme/app/issues/9",
+              state: "open",
+              author: "Ada",
+              createdAt: now,
+              updatedAt: now,
+              comments: 2,
+              labels: ["bug"],
+            },
+          ]
+          break
+        case "/git/github/pulls/7/checks":
+          response = [
+            {
+              name: "unit-tests",
+              status: "completed",
+              conclusion: "success",
+              url: "https://github.com/acme/app/runs/1",
+              app: "GitHub Actions",
+            },
+            { name: "lint-check", status: "in_progress", app: "GitHub Actions" },
+          ]
           break
         case "/git/github/pulls/7/files":
           response = {
@@ -459,6 +572,17 @@ async function fixture(
       response = forge
     }
     if (path === "/git/forge/requests" && req.method() === "POST") response = pull
+    if (path === "/deploy/4/pull-requests/7/preview" && req.method() === "POST")
+      response = {
+        preview,
+        runId: 42,
+        copied: ["DATABASE_URL"],
+        skipped: [],
+        address: { ...preview.address, published: false },
+        variablesFromProduction: true,
+      }
+    if (path === "/deploy/4/runs/77/retry" && req.method() === "POST")
+      response = { id: 78, runNumber: 3, state: "queued", operation: "preview_remove" }
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -916,4 +1040,142 @@ test("a chunk can be selected for unstaging", async ({ page }) => {
   await expect
     .poll(() => seen.find((r) => r.path === "/git/patch/stage")?.body)
     .toEqual({ file: "a.txt", staged: true, version: "patch-0", lines: [5, 6] })
+})
+
+/**
+ * Testing a pull request is the administrator's approval of one exact commit,
+ * so the route is told the head the dialog showed and what the reader decided
+ * about production's variables — the two things the server refuses to guess.
+ */
+test("Test this pull request posts the exact head with the variable choice", async ({ page }) => {
+  const seen = await fixture(page, false, "github")
+  await page.goto("/git?repo=%2Fsrv%2Fapp")
+  await page.getByRole("tab", { name: "GitHub" }).click()
+  // The verb needs the project deploying the checkout, which arrives with the
+  // summary; the link across to it is the sign that it has.
+  await expect(page.getByRole("link", { name: "deployed as app" })).toBeVisible()
+  await page.getByRole("button", { name: "More actions", exact: true }).click()
+  await page.getByRole("menuitem", { name: /^Test this pull request/ }).click()
+  const dialog = page.getByRole("dialog")
+  await expect(
+    dialog.getByRole("checkbox", { name: "Copy production variables into this preview" }),
+  ).toBeChecked()
+  await expect(dialog).toContainText("on your tailnet at vps.tail.ts.net")
+  await dialog.getByRole("button", { name: "Build preview" }).click()
+  await expect
+    .poll(() => seen.find((r) => r.path === "/deploy/4/pull-requests/7/preview")?.body)
+    .toEqual({ revision: sha, copyVariables: true, acceptFork: false })
+  // The build is watched where every other run is.
+  await expect(page).toHaveURL(/\/deploy\/4\/runs\/42$/)
+})
+
+test("a fork is read before it is built and never receives production's variables", async ({
+  page,
+}) => {
+  const seen = await fixture(page, false, "github", { fork: true })
+  await page.goto("/git?repo=%2Fsrv%2Fapp")
+  await page.getByRole("tab", { name: "GitHub" }).click()
+  await expect(page.getByRole("link", { name: "deployed as app" })).toBeVisible()
+  await page.getByRole("button", { name: "More actions", exact: true }).click()
+  await page.getByRole("menuitem", { name: /^Test this pull request/ }).click()
+  const dialog = page.getByRole("dialog")
+  const copy = dialog.getByRole("checkbox", { name: "Copy production variables into this preview" })
+  await expect(copy).toBeDisabled()
+  await expect(copy).not.toBeChecked()
+  await expect(dialog).toContainText("comes from a fork")
+  await expect(dialog.getByRole("button", { name: "Build preview" })).toBeDisabled()
+  await dialog.getByRole("checkbox", { name: "I have reviewed this fork's changes" }).check()
+  await dialog.getByRole("button", { name: "Build preview" }).click()
+  await expect
+    .poll(() => seen.find((r) => r.path === "/deploy/4/pull-requests/7/preview")?.body)
+    .toEqual({ revision: sha, copyVariables: false, acceptFork: true })
+})
+
+test("a preview's state is on its row and closing it is confirmed against its project", async ({
+  page,
+}) => {
+  const seen = await fixture(page, false, "github", { preview: true })
+  await page.goto("/git?repo=%2Fsrv%2Fapp")
+  await page.getByRole("tab", { name: "GitHub" }).click()
+  await expect(page.getByText("preview ready")).toBeVisible()
+  await page.getByRole("button", { name: "More actions", exact: true }).click()
+  await expect(page.getByRole("menuitem", { name: /^Open preview/ })).toBeVisible()
+  // Ready at this commit: nothing to test, so the verb is held here as the
+  // Overview holds it, rather than announcing a build that does not happen.
+  await expect(page.getByRole("menuitem", { name: /^Test this pull request/ })).toHaveCount(0)
+  await page.getByRole("menuitem", { name: /^Close preview/ }).click()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog).toContainText("Production is untouched")
+  await dialog.getByRole("button", { name: "Close preview" }).click()
+  await expect
+    .poll(() => seen.some((r) => r.path === "/deploy/4/pull-requests/7/preview/close"))
+    .toBe(true)
+  // One action, one toast: the dialog's own.
+  await expect(page.getByText("Close the preview of #7 completed")).toBeVisible()
+  await expect(page.getByText("Closing the preview of #7")).toHaveCount(0)
+})
+
+test("a preview whose cleanup failed is retried from its row rather than tested again", async ({
+  page,
+}) => {
+  const seen = await fixture(page, false, "github", { cleanupFailed: true })
+  await page.goto("/git?repo=%2Fsrv%2Fapp")
+  await page.getByRole("tab", { name: "GitHub" }).click()
+  // A cancelled removal reads as a failed cleanup, as the server reads it.
+  await expect(page.getByText("preview cleanup failed")).toBeVisible()
+  await page.getByRole("button", { name: "More actions", exact: true }).click()
+  // The route refuses a test until the removal has run again, so the row
+  // offers the retry and not the build it would refuse — through the run's
+  // own retry route, watched where every other run is.
+  await expect(page.getByRole("menuitem", { name: /^Retry cleanup/ })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: /^Test this pull request/ })).toHaveCount(0)
+  await page.getByRole("menuitem", { name: /^Retry cleanup/ }).click()
+  await expect.poll(() => seen.some((r) => r.path === "/deploy/4/runs/77/retry")).toBe(true)
+  await expect(page).toHaveURL(/\/deploy\/4\/runs\/78$/)
+})
+
+test("the checks on a pull request are read against its head", async ({ page }) => {
+  const seen = await fixture(page, false, "github")
+  await page.goto("/git?repo=%2Fsrv%2Fapp")
+  await page.getByRole("tab", { name: "GitHub" }).click()
+  await page.getByRole("button", { name: /Review this change/ }).click()
+  await expect(page.getByText("unit-tests", { exact: true })).toBeVisible()
+  await expect(page.getByText("passed", { exact: true })).toBeVisible()
+  await expect(page.getByText("in progress", { exact: true })).toBeVisible()
+  expect(seen.find((r) => r.path === "/git/github/pulls/7/checks")?.query.get("head")).toBe(sha)
+})
+
+test("a comment on a pull request goes to its conversation as the checkout's owner", async ({
+  page,
+}) => {
+  const seen = await fixture(page, false, "github")
+  await page.goto("/git?repo=%2Fsrv%2Fapp")
+  await page.getByRole("tab", { name: "GitHub" }).click()
+  await page.getByRole("button", { name: /Review this change/ }).click()
+  await page
+    .locator("[data-slot=git-preview]")
+    .getByRole("button", { name: "Comment", exact: true })
+    .click()
+  await page.getByRole("textbox", { name: "Comment", exact: true }).fill("Looks good to me")
+  await page.getByRole("dialog").getByRole("button", { name: "Comment", exact: true }).click()
+  await expect
+    .poll(() => seen.find((r) => r.path === "/git/github/pulls/7/comment")?.body)
+    .toEqual({ body: "Looks good to me" })
+  expect(seen.find((r) => r.path === "/git/github/pulls/7/comment")?.query.get("path")).toBe(
+    "/srv/app",
+  )
+})
+
+test("open issues are listed under the pull requests and can be answered", async ({ page }) => {
+  const seen = await fixture(page, false, "github")
+  await page.goto("/git?repo=%2Fsrv%2Fapp")
+  await page.getByRole("tab", { name: "GitHub" }).click()
+  const row = page.locator("li").filter({ hasText: "Crash on start" })
+  await expect(row).toContainText("2 comments")
+  await row.getByRole("button", { name: "Comment", exact: true }).click()
+  await page.getByRole("textbox", { name: "Comment", exact: true }).fill("On it")
+  await page.getByRole("dialog").getByRole("button", { name: "Comment", exact: true }).click()
+  await expect
+    .poll(() => seen.find((r) => r.path === "/git/github/pulls/9/comment")?.body)
+    .toEqual({ body: "On it" })
 })

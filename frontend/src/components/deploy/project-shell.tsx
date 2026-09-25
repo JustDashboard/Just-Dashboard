@@ -40,6 +40,7 @@ import { useNavScope, type NavScope } from "@/components/nav-scope"
 import { DeployVersionDialog } from "@/components/deploy/deploy-version-dialog"
 import { DuplicateProjectDialog } from "@/components/deploy/duplicate-dialog"
 import { ProjectMark } from "@/components/deploy/project-mark"
+import { PullRequestPicker } from "@/components/deploy/pull-request-picker"
 import {
   BUILD_METHOD_SHORT,
   CERTIFICATE_LABEL,
@@ -88,6 +89,7 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
   const [versionOpen, setVersionOpen] = useState(false)
+  const [testPullOpen, setTestPullOpen] = useState(false)
   const [duplicateOpen, setDuplicateOpen] = useState(false)
   const project = useProject()
   const { deployment, project: record, runtime } = project.detail
@@ -104,6 +106,7 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
     runtime,
     archived: project.archived,
     onVersion: () => setVersionOpen(true),
+    onTestPull: () => setTestPullOpen(true),
     onDuplicate: () => setDuplicateOpen(true),
     onArchived: () => router.push("/deploy"),
   })
@@ -244,6 +247,12 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
       {children}
       {dialog}
       <DeployVersionDialog open={versionOpen} onOpenChange={setVersionOpen} />
+      <PullRequestPicker
+        open={testPullOpen}
+        onOpenChange={setTestPullOpen}
+        projectId={project.projectId}
+        projectName={record.name}
+      />
       <DuplicateProjectDialog open={duplicateOpen} onOpenChange={setDuplicateOpen} />
     </Page>
   )

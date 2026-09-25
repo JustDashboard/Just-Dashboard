@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import {
   ArrowLeft,
   Archive,
@@ -25,6 +25,7 @@ import { usePanelSize } from "@/lib/panel-size"
 import { usePoll } from "@/hooks/use-poll"
 import { useGitHubAccount } from "@/hooks/use-github"
 import { useAuth } from "@/hooks/use-auth"
+import { workspaceTab } from "@/hooks/use-query-selection"
 import { useConfirm } from "@/components/confirm-dialog"
 import { FileTree, type ConfirmRequest as TreeConfirmRequest } from "@/components/files/file-tree"
 import { SourceBranch, SourceFork } from "@/components/git/glyphs"
@@ -87,6 +88,14 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
  * carries its meaning one hover away (see help.tsx), so the same screen
  * serves someone committing for the first time and someone who has done it
  * ten thousand times.
+ *
+ * The address bar may open it on a pull request (`?pull=`) or on a tab
+ * (`?tab=`): the list page's cards link into the GitHub tab that way, in the
+ * same history entry as the checkout. Read with `useSearchParams` rather
+ * than `useQuerySelection`, whose memory is per pathname — a pull request
+ * remembered for `/git` would reopen on the next checkout entered. The word
+ * in the address decides the tab only until the reader presses one: the tab
+ * they chose is theirs, and it is what is remembered.
  */
 export function RepoWorkspace({
   repo,
@@ -100,8 +109,24 @@ export function RepoWorkspace({
   const { can } = useAuth()
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
+  const search = useSearchParams()
+  const pullParam = search.get("pull")
+  const activePull = pullParam && /^\d+$/.test(pullParam) ? Number(pullParam) : undefined
+  const askedTab = activePull ? "github" : workspaceTab(search.get("tab"))
   const [tab, setTab] = useViewState<Tab>("git.repo.tab", "changes")
-  const [preview, setPreviewState] = useState<GitPreview | null>(null)
+  // The tab the reader pressed on this visit, which outranks the address.
+  const [pressed, setPressed] = useState<Tab>()
+  const shown = pressed ?? askedTab ?? tab
+  const pick = useCallback(
+    (next: Tab) => {
+      setPressed(next)
+      setTab(next)
+    },
+    [setTab],
+  )
+  const [preview, setPreviewState] = useState<GitPreview | null>(() =>
+    activePull ? { kind: "pull", number: activePull } : null,
+  )
   const [graphOpen, setGraphOpen] = useState(false)
   const [historyFile, setHistoryFile] = useState<string>()
   const [remotesOpen, setRemotesOpen] = useState(false)
@@ -211,7 +236,7 @@ export function RepoWorkspace({
     onSelect: setPreview,
     onFileHistory: (path) => {
       setHistoryFile(path)
-      setTab("history")
+      pick("history")
     },
   }
 
@@ -353,7 +378,7 @@ export function RepoWorkspace({
             ? "Finish the bisect in the terminal with git bisect reset."
             : "Resolve each conflicted file in Changes, then continue when the result is ready."}
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <Button size="xs" variant="outline" onClick={() => setTab("changes")}>
+            <Button size="xs" variant="outline" onClick={() => pick("changes")}>
               Show changes
             </Button>
             {operation !== "bisect" && canControl && (
@@ -446,7 +471,7 @@ export function RepoWorkspace({
             <TooltipTrigger asChild>
               <button
                 type="button"
-                onClick={() => setTab("branches")}
+                onClick={() => pick("branches")}
                 className="flex min-w-0 shrink items-center gap-1.5 text-left focus-ring-inset"
               >
                 <SourceBranch
@@ -599,17 +624,17 @@ export function RepoWorkspace({
 
           <div className="relative flex h-[30rem] shrink-0 flex-col border-b border-hairline lg:h-auto lg:min-h-0 lg:w-(--jd-work) lg:border-r lg:border-b-0">
             <div className="flex h-9 shrink-0 [scrollbar-width:none] items-center overflow-x-auto border-b border-hairline px-1">
-              <TabButton active={tab === "changes"} onClick={() => setTab("changes")}>
+              <TabButton active={shown === "changes"} onClick={() => pick("changes")}>
                 Changes
                 {changeCount > 0 && <ChipCount>{changeCount}</ChipCount>}
               </TabButton>
-              <TabButton active={tab === "history"} onClick={() => setTab("history")}>
+              <TabButton active={shown === "history"} onClick={() => pick("history")}>
                 History
               </TabButton>
-              <TabButton active={tab === "branches"} onClick={() => setTab("branches")}>
+              <TabButton active={shown === "branches"} onClick={() => pick("branches")}>
                 Branches
               </TabButton>
-              <TabButton active={tab === "github"} onClick={() => setTab("github")}>
+              <TabButton active={shown === "github"} onClick={() => pick("github")}>
                 GitHub
               </TabButton>
               <span className="flex-1" />
@@ -634,7 +659,7 @@ export function RepoWorkspace({
                 <TooltipContent>See every branch and where it forked</TooltipContent>
               </Tooltip>
             </div>
-            {tab === "changes" && (
+            {shown === "changes" && (
               <ChangesPanel
                 repoPath={repo.path}
                 status={status}
@@ -649,7 +674,7 @@ export function RepoWorkspace({
                 onChanged={onChanged}
               />
             )}
-            {tab === "history" && (
+            {shown === "history" && (
               <HistoryPanel
                 // A commit, a reset or a switch changes what history is, so the
                 // list is keyed on the tip and remounts when it moves.
@@ -668,7 +693,7 @@ export function RepoWorkspace({
                 onChanged={onChanged}
               />
             )}
-            {tab === "branches" && (
+            {shown === "branches" && (
               <BranchesPanel
                 key={`${head.head ?? ""}:${head.branch}`}
                 repoPath={repo.path}
@@ -682,16 +707,19 @@ export function RepoWorkspace({
                 onChanged={onChanged}
               />
             )}
-            {tab === "github" && (
+            {shown === "github" && (
               <GitHubPanel
                 repoPath={repo.path}
                 branch={branch}
                 github={github.data}
                 busy={busy}
                 canControl={canControl}
+                canAdmin={can("system.admin")}
                 run={run}
+                confirm={confirm}
                 onSelect={setPreview}
                 active={activeKey}
+                activePull={activePull}
                 onChanged={onChanged}
               />
             )}

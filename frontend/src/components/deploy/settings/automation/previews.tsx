@@ -37,6 +37,7 @@ import { RunStrip } from "@/components/deploy/run-marks"
 import {
   RunStatus,
   formatDuration,
+  hostOf,
   humanize,
   isActiveRun,
   runDurationSeconds,
@@ -119,10 +120,55 @@ function pullRequestUrl(trigger: DeploymentTrigger | undefined, ref: string, sou
   }
 }
 
-/** The address a preview answers at: its webhook's pattern with its number in. */
-function previewAddress(trigger: DeploymentTrigger | undefined, ref: string) {
+/**
+ * The address a preview answers at: the one the engine published for it — a
+ * port on this host's tailnet node, or the route it holds — else its
+ * webhook's pattern with its number in, which is what the engine will
+ * publish once the preview is built.
+ */
+function previewAddress(
+  trigger: DeploymentTrigger | undefined,
+  ref: string,
+  preview?: DeploymentPreview,
+) {
+  if (preview?.address?.url) return preview.address.url
   const pattern = trigger?.config.previewDomain
-  return pattern ? pattern.replace("{number}", ref) : undefined
+  return pattern ? `https://${pattern.replace("{number}", ref)}` : undefined
+}
+
+/**
+ * Where a preview lives, as the marks a row carries: on the tailnet rather
+ * than the internet, and running production's variables rather than its own.
+ */
+function PreviewTags({ preview }: { preview: DeploymentPreview }) {
+  return (
+    <>
+      {preview.address?.kind === "tailnet" && <Tag>tailnet</Tag>}
+      {preview.variablesCopiedRevision && <Tag>production variables</Tag>}
+    </>
+  )
+}
+
+/** The address as a line: a link once it answers, the bare words before then. */
+function AddressLine({ url, published }: { url: string; published: boolean }) {
+  const host = hostOf(url) ?? url
+  if (!published)
+    return (
+      <span title="Not reachable until the preview is deployed" className="truncate font-mono">
+        {host}
+      </span>
+    )
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex min-w-0 items-center gap-1 font-mono text-foreground/85 underline-offset-2 hover:underline"
+    >
+      <span className="truncate">{host}</span>
+      <External aria-hidden className="size-3 shrink-0" />
+    </a>
+  )
 }
 
 /** Who opened the pull request, as their forge draws them; the pull request's glyph when nobody is named. */
@@ -640,7 +686,11 @@ function PreviewCard({
   const active = recent.find((run) => isActiveRun(run.state))
   const isolation = isolationOf(preview)
   const open = preview.state === "open"
-  const address = open ? previewAddress(trigger, preview.providerRef) : undefined
+  const address = open ? previewAddress(trigger, preview.providerRef, preview) : undefined
+  // The dashboard's own record of the pull request, once Test this pull
+  // request wrote one; a webhook preview knows only what its approval said.
+  const author = preview.author ?? approval?.author
+  const revision = preview.revision ?? approval?.revision
   const readings = (
     <>
       {active ? (
@@ -660,13 +710,14 @@ function PreviewCard({
       onSelect={onOpen}
       busy={deploying || Boolean(active)}
       className={cn(!open && "opacity-80")}
-      leading={<AuthorFace login={approval?.author} trigger={trigger} />}
+      leading={<AuthorFace login={author} trigger={trigger} />}
       title={<span className="font-mono">{preview.environmentSlug}</span>}
       description={
         <>
           PR #{preview.providerRef}
-          {approval?.author && ` · ${approval.author}`}
-          {approval?.revision && ` · ${approval.revision.slice(0, 7)}`}
+          {preview.title && ` · ${preview.title}`}
+          {author && ` · ${author}`}
+          {revision && ` · ${revision.slice(0, 7)}`}
         </>
       }
       trailing={wide ? <span className="flex items-center gap-4">{readings}</span> : undefined}
@@ -679,17 +730,8 @@ function PreviewCard({
       <div className="space-y-2 sm:pl-11">
         <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2 text-hint text-muted-foreground">
           {!wide && <span className="flex flex-wrap items-center gap-x-4 gap-y-1">{readings}</span>}
-          {address && (
-            <a
-              href={`https://${address}`}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex min-w-0 items-center gap-1 font-mono text-foreground/85 underline-offset-2 hover:underline"
-            >
-              <span className="truncate">{address}</span>
-              <External aria-hidden className="size-3 shrink-0" />
-            </a>
-          )}
+          {address && <AddressLine url={address} published={preview.address?.published ?? true} />}
+          <PreviewTags preview={preview} />
           {recent.length > 0 && <RunStrip runs={recent} />}
           <span className="whitespace-nowrap">updated {relativeTime(preview.updatedAt)}</span>
         </div>
@@ -730,7 +772,9 @@ function PreviewSheet({
   const runs = usePreviewRuns(projectId, preview?.environmentId, 5_000)
   const isolation = preview ? isolationOf(preview) : undefined
   const address =
-    preview?.state === "open" ? previewAddress(trigger, preview.providerRef) : undefined
+    preview?.state === "open" ? previewAddress(trigger, preview.providerRef, preview) : undefined
+  const author = preview?.author ?? approval?.author
+  const revision = preview?.revision ?? approval?.revision
   const list = runs.data?.runs ?? []
   return (
     <SidePanel
@@ -752,32 +796,30 @@ function PreviewSheet({
       {preview && isolation && (
         <div className="space-y-6">
           <div className="flex min-w-0 items-start gap-3">
-            <AuthorFace login={approval?.author} trigger={trigger} />
+            <AuthorFace login={author} trigger={trigger} />
             <div className="min-w-0 flex-1 space-y-1">
               <p className="text-title font-semibold tracking-tight">
                 Pull request #{preview.providerRef}
+                {preview.title && (
+                  <span className="font-normal text-muted-foreground"> · {preview.title}</span>
+                )}
               </p>
               <FormFacts>
-                {approval?.author && <FormFact label="By">{approval.author}</FormFact>}
-                {approval?.revision && (
+                {author && <FormFact label="By">{author}</FormFact>}
+                {revision && (
                   <FormFact label="Revision" mono>
-                    {approval.revision.slice(0, 12)}
+                    {revision.slice(0, 12)}
                   </FormFact>
                 )}
                 <FormFact label="Environment">#{preview.environmentId}</FormFact>
                 <FormFact label="Updated">{relativeTime(preview.updatedAt)}</FormFact>
               </FormFacts>
-              {address && (
-                <a
-                  href={`https://${address}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 font-mono text-hint text-foreground/85 underline-offset-2 hover:underline"
-                >
-                  {address}
-                  <External aria-hidden className="size-3" />
-                </a>
-              )}
+              <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-hint">
+                {address && (
+                  <AddressLine url={address} published={preview.address?.published ?? true} />
+                )}
+                <PreviewTags preview={preview} />
+              </div>
             </div>
             <Status tone={isolation.tone} label={isolation.label} className="shrink-0" />
           </div>

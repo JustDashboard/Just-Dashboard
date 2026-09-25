@@ -3,7 +3,7 @@
 - [`Deployment creation audit`](../../audits/2026-09-22-deploy-new/README.md) — wizard state, template
   usability, encrypted draft inputs, database connections and local acceptance evidence.
 - [`implementation.md`](implementation.md) — current implementation, invariants, feature joins, automation, and topology.
-- [`preview-isolation.md`](preview-isolation.md) — exact-revision approval, preview variables, storage, network and cleanup.
+- [`preview-isolation.md`](preview-isolation.md) — exact-revision approval, previews tested from the dashboard, copied production variables, tailnet-only addresses, reconciliation with GitHub, storage, network and cleanup.
 - [`backup-coverage.md`](backup-coverage.md) — immutable archive manifests and persistent-data coverage limitations.
 - [`restore-verification.md`](restore-verification.md) — native SQLite snapshots and artifact-bound isolated application recovery checks.
 - [`recipes.md`](recipes.md) — build variable delivery, the framework catalogue (JavaScript, Python, Go, Rust, Java, .NET, Deno, PHP), environment discovery, Procfiles, the single-page fallback and toolchain selection.

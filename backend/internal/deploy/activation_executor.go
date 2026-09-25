@@ -32,14 +32,16 @@ type recoveryEvidence struct {
 	CandidateStopped bool                 `json:"candidateStopped"`
 	RouteRestored    bool                 `json:"routeRestored"`
 	RuntimeRestored  bool                 `json:"runtimeRestored"`
+	TailnetRestored  bool                 `json:"tailnetRestored"`
 	Stop             *RuntimeStopEvidence `json:"stop,omitempty"`
 }
 
 type activationStepEvidence struct {
-	ReleaseID    int64                    `json:"releaseId"`
-	Route        *routeActivationEvidence `json:"route,omitempty"`
-	PublicChecks []CheckEvidence          `json:"publicChecks"`
-	Recovery     *recoveryEvidence        `json:"recovery,omitempty"`
+	ReleaseID    int64                      `json:"releaseId"`
+	Route        *routeActivationEvidence   `json:"route,omitempty"`
+	Tailnet      *tailnetActivationEvidence `json:"tailnet,omitempty"`
+	PublicChecks []CheckEvidence            `json:"publicChecks"`
+	Recovery     *recoveryEvidence          `json:"recovery,omitempty"`
 }
 
 type routeActivationEvidence struct {
@@ -628,6 +630,27 @@ func (e *NormalizedStepExecutor) activate(
 			return StepResult{State: StepFailed, ErrorCode: "activation_verification_failed", ErrorMessage: "the proxy cutover could not be verified", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 		}
 	}
+	address, err := e.store.PreviewAddressFor(ctx, release.Release.EnvironmentID)
+	if err != nil {
+		recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, appliedRoute)
+		evidence.Recovery = &recovery
+		failure := normalizedStepFailure(err)
+		failure.Evidence, failure.Recovered = mustJSON(evidence), recoveryComplete(recovery, snapshot.Plan, release.Release)
+		return failure
+	}
+	if address != nil && address.Kind == previewAddressTailnet {
+		// The tailnet mapping moves to the candidate before the release
+		// pointer does, so a mapping that cannot be made never leaves a
+		// live release nobody can reach.
+		published, failure := e.publishPreviewAddress(ctx, execution, release.Release.EnvironmentID, *address, *runtime)
+		if failure != nil {
+			recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, appliedRoute)
+			evidence.Recovery = &recovery
+			failure.Evidence, failure.Recovered = mustJSON(evidence), recoveryComplete(recovery, snapshot.Plan, release.Release)
+			return *failure
+		}
+		evidence.Tailnet = published
+	}
 	if _, err := e.store.ActivateCandidate(ctx, execution.Run.ID, execution.ClaimToken, release.Release.ID); err != nil {
 		recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, appliedRoute)
 		evidence.Recovery = &recovery
@@ -705,6 +728,7 @@ func (e *NormalizedStepExecutor) stopCandidateAndRestore(
 	} else {
 		recovery.RuntimeRestored = previous.RuntimeRestored
 	}
+	recovery.TailnetRestored = e.restoreTailnet(recoveryCtx, execution, release, recovery.RuntimeRestored)
 	_ = e.store.SetRuntimeState(recoveryCtx, execution.Run.ID, execution.ClaimToken, release.ID, "failed")
 	return recovery
 }
@@ -720,7 +744,8 @@ func (e *NormalizedStepExecutor) restorePrevious(
 	}
 	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(runtimeGrace(plan)+30)*time.Second)
 	defer cancel()
-	recovery := &recoveryEvidence{RouteRestored: true}
+	// Nothing before activation touches the route or the tailnet mapping.
+	recovery := &recoveryEvidence{RouteRestored: true, TailnetRestored: true}
 	previousRuntime, err := e.store.RuntimeForRelease(recoveryCtx, release.PredecessorReleaseID)
 	if err != nil {
 		return recovery
@@ -749,7 +774,7 @@ func (e *NormalizedStepExecutor) restorePrevious(
 
 func recoveryComplete(recovery recoveryEvidence, plan RuntimePlanConfig, release Release) bool {
 	runtimeOK := recovery.RuntimeRestored || release.PredecessorReleaseID == 0 || plan.Strategy == StrategyBlueGreen
-	return recovery.CandidateStopped && recovery.RouteRestored && runtimeOK
+	return recovery.CandidateStopped && recovery.RouteRestored && runtimeOK && recovery.TailnetRestored
 }
 
 func (e *NormalizedStepExecutor) retirePrevious(
@@ -843,13 +868,17 @@ func (e *NormalizedStepExecutor) removePreview(ctx context.Context, execution St
 		if err := removeRoute(); err != nil {
 			return normalizedStepFailure(err)
 		}
+		addressWithdrawn, err := e.withdrawPreviewAddress(cleanupCtx, execution.Run.EnvironmentID)
+		if err != nil {
+			return tailnetWithdrawFailure(err)
+		}
 		if err := removeResources(); err != nil {
 			return normalizedStepFailure(err)
 		}
 		if err := e.store.CompletePreviewRemoval(cleanupCtx, execution.Run.ID, execution.ClaimToken, 0); err != nil {
 			return normalizedStepFailure(err)
 		}
-		return StepResult{State: StepSkipped, Evidence: mustJSON(map[string]any{"reason": "preview had no live release", "routeRemoved": true})}
+		return StepResult{State: StepSkipped, Evidence: mustJSON(map[string]any{"reason": "preview had no live release", "routeRemoved": true, "addressWithdrawn": addressWithdrawn})}
 	}
 	if err != nil {
 		return normalizedStepFailure(err)
@@ -874,13 +903,17 @@ func (e *NormalizedStepExecutor) removePreview(ctx context.Context, execution St
 	if err = removeRoute(); err != nil {
 		return normalizedStepFailure(err)
 	}
+	addressWithdrawn, err := e.withdrawPreviewAddress(cleanupCtx, execution.Run.EnvironmentID)
+	if err != nil {
+		return tailnetWithdrawFailure(err)
+	}
 	if err := removeResources(); err != nil {
 		return normalizedStepFailure(err)
 	}
 	if err = e.store.CompletePreviewRemoval(cleanupCtx, execution.Run.ID, execution.ClaimToken, live.Release.ID); err != nil {
 		return normalizedStepFailure(err)
 	}
-	return StepResult{State: StepPassed, Evidence: mustJSON(map[string]any{"releaseId": live.Release.ID, "runtimeId": runtime.RuntimeID, "stop": stopped, "routeRemoved": true})}
+	return StepResult{State: StepPassed, Evidence: mustJSON(map[string]any{"releaseId": live.Release.ID, "runtimeId": runtime.RuntimeID, "stop": stopped, "routeRemoved": true, "addressWithdrawn": addressWithdrawn})}
 }
 
 func (e *NormalizedStepExecutor) recordRelease(ctx context.Context, execution StepExecution) StepResult {

@@ -19,6 +19,7 @@ import type {
   DeploymentHostnameSuggestion,
   DeploymentOperations,
   DeploymentPendingChange,
+  DeploymentPreview,
   DeploymentPreviewApproval,
   DeploymentRecentRun,
   DeploymentRunState,
@@ -31,8 +32,10 @@ import type {
   GitHubAppRepository,
   GitHubAppStatus,
   GitHubRepoSummary,
+  GitPullRequest,
   NotificationChannel,
   NotificationDelivery,
+  ProjectPullRequests,
   ReleaseComparisonResponse,
   SourceIdentity,
   TrafficPulse,
@@ -1664,6 +1667,125 @@ const showcaseApprovals: DeploymentPreviewApproval[] = [
   },
 ]
 
+/** The pull request the project's preview environment `pr-42` was built from. */
+export const pullRequest: GitPullRequest = {
+  number: 42,
+  title: "Add checkout retries",
+  url: "https://github.com/acme/api/pull/42",
+  state: "open",
+  draft: false,
+  head: "feature/checkout-retries",
+  base: "main",
+  author: "mira",
+  createdAt: ago(30),
+  updatedAt: ago(2),
+  comments: 3,
+  review: "approved",
+  checks: "success",
+  headSha: "c0ffee42c0ffee42c0ffee42c0ffee42c0ffee42",
+  headRepository: "acme/api",
+  fork: false,
+  labels: ["enhancement"],
+}
+
+/** A second one, from a fork, with nothing built for it yet. */
+export const forkPullRequest: GitPullRequest = {
+  number: 45,
+  title: "Translate the checkout into Romanian",
+  url: "https://github.com/acme/api/pull/45",
+  state: "open",
+  draft: false,
+  head: "i18n/ro",
+  base: "main",
+  author: "octocat",
+  createdAt: ago(6),
+  updatedAt: ago(1),
+  comments: 0,
+  review: "review_required",
+  checks: "failure",
+  headSha: "deadbeef45deadbeef45deadbeef45deadbeef45",
+  headRepository: "octocat/api",
+  fork: true,
+}
+
+/**
+ * The preview built from #42 by Test this pull request: published on the
+ * tailnet, running production's variables, at the pull request's head.
+ */
+export const previewEnvironment: DeploymentPreview = {
+  id: 51,
+  triggerId: 31,
+  providerRef: "42",
+  environmentId: 52,
+  environmentSlug: "pr-42",
+  state: "open",
+  updatedAt: now,
+  number: 42,
+  origin: "dashboard",
+  title: pullRequest.title,
+  revision: pullRequest.headSha,
+  headRef: pullRequest.head,
+  headRepository: "acme/api",
+  author: "mira",
+  headRevision: pullRequest.headSha,
+  approvalState: "approved",
+  variablesCopiedRevision: pullRequest.headSha,
+  liveReleaseId: 520,
+  address: {
+    kind: "tailnet",
+    url: "https://jd-host.tail1234.ts.net:21000",
+    port: 21000,
+    published: true,
+  },
+  lastRun: {
+    id: 520,
+    runNumber: 1,
+    state: "succeeded",
+    operation: "preview_create",
+    requestedAt: ago(20),
+    endedAt: ago(19),
+  },
+}
+
+/**
+ * What the Overview's Pull requests panel reads: the repository's open pull
+ * requests joined to the previews built from them, and what a preview needs
+ * to know before it is built. The bare fixture has the one pull request its
+ * preview came from; the showcase adds the fork.
+ */
+export function projectPullRequests(showcase: boolean): ProjectPullRequests {
+  return {
+    repository: "acme/api",
+    host: "github.com",
+    available: true,
+    identity: "cli",
+    checkoutPath: "/srv/api-production",
+    pulls: [
+      { ...pullRequest, preview: previewEnvironment },
+      ...(showcase ? [{ ...forkPullRequest, preview: null }] : []),
+    ],
+    previews: [previewEnvironment],
+    production: {
+      environmentId: 12,
+      automatic: true,
+      intervalSeconds: 5,
+      awaitingFirstDeployment: false,
+    },
+    tailnet: {
+      available: true,
+      running: true,
+      state: "Running",
+      hostname: "jd-host.tail1234.ts.net",
+      ip4: "100.64.0.7",
+      httpsEnabled: true,
+    },
+    compose: false,
+    localCheckout: false,
+    internalPort: 3000,
+    releaseTasks: 0,
+  }
+}
+
 const showcaseLinks: DeploymentDatabaseLink[] = [
   {
     connectionId: 11,
@@ -2497,17 +2619,13 @@ export async function mockProject(
     } else if (path === "/deploy/7/previews/approvals") {
       body = showcase ? showcaseApprovals : []
     } else if (path === "/deploy/7/previews") {
-      body = [
-        {
-          id: 51,
-          triggerId: 31,
-          providerRef: "42",
-          environmentId: 52,
-          environmentSlug: "pr-42",
-          state: "open",
-          updatedAt: now,
-        },
-      ]
+      body = [previewEnvironment]
+    } else if (path === "/deploy/7/pull-requests") {
+      body = projectPullRequests(showcase)
+    } else if (path === "/deploy/pull-requests") {
+      // The fleet's counts, only for the showcase: the bare fleet's cards
+      // stay as its specs measured them.
+      body = { projects: showcase ? { "7": { open: 2, previews: 1 } } : {} }
     } else if (path === "/deploy/notifications" && method === "GET") {
       body = notificationChannels
     } else if (path === "/deploy/notifications" && method === "POST") {

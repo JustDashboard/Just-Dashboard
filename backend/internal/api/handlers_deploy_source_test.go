@@ -278,3 +278,50 @@ func TestDeploymentConfigurationRouteReturnsSourceAfterCommitAndSourceUpdate(t *
 		t.Fatalf("configuration source after update raw body = %s", afterUpdate.Body.String())
 	}
 }
+
+// A committed project's source and a draft's source name a branch or tag: a
+// pull request's head reaches an environment only as a preview, through
+// "Test this pull request". Both routes refuse the ref before inspecting
+// anything, so git is never asked about it.
+func TestDeploymentSourceUpdateAndDraftRefuseAPullRequestHead(t *testing.T) {
+	s := testServer(t)
+	invoked := filepath.Join(t.TempDir(), "git-invoked")
+	fakeGitOnPath(t, "#!/bin/sh\necho \"$@\" >> "+invoked+"\nexit 1\n")
+	client := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+	projectID, environmentID := seedCommittedDeployment(t, s, "pull-ref-app",
+		deploy.DraftSourceConfig{Kind: deploy.SourceGit, Mode: deploy.SourceModeGitURL, URL: "https://github.com/acme/app.git", Ref: "main"},
+		deploy.SourceIdentity{Kind: deploy.SourceGit, Remote: "https://github.com/acme/app.git", Repository: "acme/app"},
+	)
+	path := "/api/v1/deploy/" + strconv.FormatInt(projectID, 10) + "/environments/" + strconv.FormatInt(environmentID, 10) + "/source"
+	refused := doDeployJSON(t, client, http.MethodPut, path, map[string]any{
+		"revision": 1, "kind": "git", "mode": "git_url", "url": "https://github.com/acme/app.git", "ref": "refs/pull/1/head",
+	})
+	if refused.Code != http.StatusBadRequest || !strings.Contains(refused.Body.String(), `"code":"invalid_ref"`) {
+		t.Fatalf("pull ref as a production source = %d %s, want 400 invalid_ref", refused.Code, refused.Body.String())
+	}
+	var ref string
+	if err := s.Store.DB.QueryRow(`SELECT json_extract(config_json, '$.ref') FROM deploy_sources WHERE environment_id = ? ORDER BY revision DESC LIMIT 1`, environmentID).Scan(&ref); err != nil || ref != "main" {
+		t.Fatalf("source ref after the refusal = %q, %v", ref, err)
+	}
+
+	created := client.do(http.MethodPost, "/api/v1/deploy/drafts", `{}`, nil)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create draft = %d %s", created.Code, created.Body.String())
+	}
+	var draft deploy.Draft
+	decodePlanningResponse(t, created.Body.Bytes(), &draft)
+	draft = saveDraftThroughAPI(t, client, draft, deploy.DraftSaveRequest{
+		Revision: draft.Revision, Step: deploy.DraftIntent,
+		Intent: &deploy.DraftIntentConfig{Name: "pull-ref-draft", Profile: deploy.ProfileWorker},
+	})
+	saved := doPlanningJSON(t, client, http.MethodPut, "/api/v1/deploy/drafts/"+draft.ID, deploy.DraftSaveRequest{
+		Revision: draft.Revision, Step: deploy.DraftSource,
+		Source: &deploy.DraftSourceConfig{Kind: deploy.SourceGit, Mode: deploy.SourceModeGitURL, URL: "https://github.com/acme/app.git", Ref: "refs/pull/1/head"},
+	})
+	if saved.Code != http.StatusBadRequest || !strings.Contains(saved.Body.String(), `"code":"invalid_ref"`) {
+		t.Fatalf("pull ref as a draft source = %d %s, want 400 invalid_ref", saved.Code, saved.Body.String())
+	}
+	if data, err := os.ReadFile(invoked); err == nil {
+		t.Fatalf("a refused pull ref reached git: %s", data)
+	}
+}

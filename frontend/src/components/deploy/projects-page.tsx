@@ -35,6 +35,7 @@ import type {
   DeploymentActiveWork,
   DeploymentFleet,
   DeploymentSummary,
+  FleetPullRequests,
   TrafficPulse,
 } from "@/lib/types"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -193,6 +194,14 @@ function Fleet() {
     (signal) => get<ArchivedDeployment[]>("/deploy/", { view: "archived" }, signal),
     0,
   )
+  // Every GitHub project's open pull requests, on the Git page's minute: the
+  // server answers from its cache, and the read is a line on a card, so a
+  // failure leaves the cards without the line rather than the page with an
+  // error in it.
+  const pullRequests = usePoll(
+    (signal) => get<FleetPullRequests>("/deploy/pull-requests", undefined, signal),
+    60000,
+  )
   const { refresh: refreshFleet } = fleet
   const { refresh: refreshArchive } = archive
   const refresh = useCallback(() => {
@@ -207,17 +216,21 @@ function Fleet() {
 
   const deployments = useMemo(() => fleet.data?.deployments ?? [], [fleet.data])
   const pulses = pulse.data
-  const counts = useMemo(() => fleetCounts(deployments, pulses), [deployments, pulses])
+  const pulls = useMemo(() => pullRequests.data?.projects ?? {}, [pullRequests.data])
+  const counts = useMemo(
+    () => fleetCounts(deployments, pulses, pulls),
+    [deployments, pulses, pulls],
+  )
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     return sortFleet(
       deployments.filter(
         (deployment) =>
           (!q || fleetHaystack(deployment).includes(q)) &&
-          matchesFilter(deployment, filter, pulses),
+          matchesFilter(deployment, filter, pulses, pulls),
       ),
     )
-  }, [deployments, filter, pulses, query])
+  }, [deployments, filter, pulses, pulls, query])
   const findings = useMemo(
     () =>
       fleetAttention(deployments, pulses).map((finding) => ({
@@ -496,6 +509,7 @@ function Fleet() {
                       index={index}
                       deployment={deployment}
                       pulse={pulses?.[String(deployment.id)]}
+                      pulls={pulls[String(deployment.id)]}
                       work={workFor(deployment)}
                       confirm={confirm}
                       refresh={refresh}
@@ -511,6 +525,7 @@ function Fleet() {
                       roomy={roomy}
                       deployment={deployment}
                       pulse={pulses?.[String(deployment.id)]}
+                      pulls={pulls[String(deployment.id)]}
                       work={workFor(deployment)}
                       confirm={confirm}
                       refresh={refresh}

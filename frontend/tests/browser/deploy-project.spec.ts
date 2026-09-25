@@ -1,11 +1,15 @@
 import { expect, test } from "@playwright/test"
 import {
   deployment,
+  forkPullRequest,
   healthyOperations,
   json,
   mockProject,
   now,
+  previewEnvironment,
   project,
+  projectPullRequests,
+  pullRequest,
   run,
   user,
 } from "./deploy-fixture"
@@ -1085,4 +1089,347 @@ test("Deploy a specific version offers what the project deployed and names what 
   await dialog.getByRole("button", { name: "Deploy a12bc34", exact: true }).click()
   await expect(page).toHaveURL(/\/deploy\/7\/runs\/88$/)
   expect(posted).toEqual({ operation: "deploy", sourceRevision: sha })
+})
+
+test("the overview lists the repository's pull requests with the preview built from each", async ({
+  page,
+}, testInfo) => {
+  await mockProject(page)
+  await page.route("**/api/v1/deploy/7/pull-requests", (route) =>
+    json(route, projectPullRequests(true)),
+  )
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/deploy/7")
+    await expect(page.getByRole("heading", { name: "Pull requests", exact: true })).toBeVisible()
+    // The panel replaced the read-only preview list; the previews are on the
+    // rows of the pull requests they were built from.
+    await expect(page.getByRole("heading", { name: "Preview environments" })).toHaveCount(0)
+    await expect(page.getByRole("link", { name: "Git page" })).toHaveAttribute(
+      "href",
+      "/git?repo=%2Fsrv%2Fapi-production",
+    )
+
+    const list = page.getByRole("list", { name: "Pull requests" })
+    const tested = list.getByRole("listitem").filter({ hasText: "Add checkout retries" })
+    await expect(tested.getByRole("button", { name: "Open pull request #42" })).toBeVisible()
+    await expect(tested.getByText("Ready", { exact: true })).toBeVisible()
+    await expect(tested.getByRole("button", { name: "Open preview" })).toBeVisible()
+    const fork = list.getByRole("listitem").filter({ hasText: "Translate the checkout" })
+    await expect(fork.getByText("fork", { exact: true })).toBeVisible()
+    await expect(fork.getByRole("button", { name: "Open preview" })).toHaveCount(0)
+    // The check and review readings yield the phone's width to the title.
+    if (width > 390) {
+      await expect(tested.getByText("checks passed", { exact: true })).toBeVisible()
+      await expect(tested.getByText("approved", { exact: true })).toBeVisible()
+      await expect(fork.getByText("checks failed", { exact: true })).toBeVisible()
+    }
+    await list.scrollIntoViewIfNeeded()
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `horizontal viewport overflow at ${width}px`,
+    ).toBe(true)
+    await testInfo.attach(`overview-pull-requests-${width}`, {
+      body: await page.screenshot({
+        path: testInfo.outputPath(`overview-pull-requests-${width}.png`),
+      }),
+      contentType: "image/png",
+    })
+  }
+})
+
+test("Test this pull request posts the head, the variables choice and the fork acceptance, then opens the run", async ({
+  page,
+}) => {
+  await mockProject(page)
+  await page.route("**/api/v1/deploy/7/pull-requests", (route) =>
+    json(route, projectPullRequests(true)),
+  )
+  let body: Record<string, unknown> | undefined
+  await page.route("**/api/v1/deploy/7/pull-requests/45/preview", async (route) => {
+    body = route.request().postDataJSON() as Record<string, unknown>
+    await route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify({
+        preview: { ...previewEnvironment, id: 53, number: 45, providerRef: "45" },
+        runId: 530,
+        copied: [],
+        skipped: [],
+        address: { kind: "tailnet", url: "https://jd-host.tail1234.ts.net:21001", port: 21001 },
+        variablesFromProduction: false,
+      }),
+    })
+  })
+  await page.goto("/deploy/7")
+  const list = page.getByRole("list", { name: "Pull requests" })
+  await list
+    .getByRole("listitem")
+    .filter({ hasText: "Translate the checkout" })
+    .getByRole("button", { name: "More actions for #45" })
+    .click()
+  // Nothing built from #45 yet, so merging it closes no preview.
+  const merge = page.getByRole("menuitem", { name: /^Merge/ })
+  await expect(merge).toContainText("Production redeploys automatically.")
+  await expect(merge).not.toContainText("Its preview closes.")
+  await page.getByRole("menuitem", { name: /Test this pull request/ }).click()
+
+  const dialog = page.getByRole("dialog", { name: "Test #45" })
+  await expect(dialog).toContainText("This pull request comes from a fork")
+  // A fork's code has to be read before it runs here; the variables are
+  // refused for it outright.
+  const build = dialog.getByRole("button", { name: "Build preview" })
+  await expect(build).toBeDisabled()
+  await expect(
+    dialog.getByRole("checkbox", { name: "Copy production variables into this preview" }),
+  ).toBeDisabled()
+  await dialog.getByRole("checkbox", { name: "I have reviewed this fork's changes" }).click()
+  await build.click()
+
+  await expect
+    .poll(() => body)
+    .toEqual({
+      revision: forkPullRequest.headSha,
+      copyVariables: false,
+      acceptFork: true,
+    })
+  await expect(page).toHaveURL(/\/deploy\/7\/runs\/530$/)
+})
+
+test("merging from the overview posts to the project's route, pins the head and re-reads the listing", async ({
+  page,
+}) => {
+  await mockProject(page)
+  let reads = 0
+  await page.route("**/api/v1/deploy/7/pull-requests", (route) => {
+    reads++
+    return json(route, projectPullRequests(false))
+  })
+  let body: Record<string, unknown> | undefined
+  await page.route("**/api/v1/deploy/7/pull-requests/42/merge", async (route) => {
+    body = route.request().postDataJSON() as Record<string, unknown>
+    await json(route, {
+      merged: true,
+      previewRunId: 531,
+      production: { automatic: true, awaitingFirstDeployment: false },
+    })
+  })
+  await page.goto("/deploy/7")
+  const list = page.getByRole("list", { name: "Pull requests" })
+  await expect(list.getByRole("listitem")).toHaveCount(1)
+  const before = reads
+  await list.getByRole("button", { name: "More actions for #42" }).click()
+  // The verb promises only what the listing says will happen: #42 has an
+  // open preview, and this project's auto-deploy is on.
+  await expect(page.getByRole("menuitem", { name: /^Merge/ })).toContainText(
+    "Its preview closes. Production redeploys automatically.",
+  )
+  await page.getByRole("menuitem", { name: /^Merge/ }).click()
+  const dialog = page.getByRole("dialog", { name: "Merge #42" })
+  await dialog.getByRole("button", { name: "Merge on GitHub" }).click()
+
+  await expect
+    .poll(() => body)
+    .toEqual({
+      method: "merge",
+      deleteBranch: true,
+      headSha: pullRequest.headSha,
+    })
+  await expect(
+    page.getByText("Merged. The preview is closing and production redeploys automatically."),
+  ).toBeVisible()
+  await expect.poll(() => reads).toBeGreaterThan(before)
+})
+
+test("Close preview asks first, then posts to the close route", async ({ page }) => {
+  await mockProject(page)
+  await page.route("**/api/v1/deploy/7/pull-requests", (route) =>
+    json(route, projectPullRequests(false)),
+  )
+  let closed = 0
+  await page.route("**/api/v1/deploy/7/pull-requests/42/preview/close", async (route) => {
+    closed++
+    await route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify({ runId: 532 }),
+    })
+  })
+  await page.goto("/deploy/7")
+  const list = page.getByRole("list", { name: "Pull requests" })
+  await list.getByRole("button", { name: "More actions for #42" }).click()
+  await page.getByRole("menuitem", { name: /^Close preview/ }).click()
+  const dialog = page.getByRole("dialog", { name: "Close preview of #42" })
+  await expect(dialog).toContainText("pr-42")
+  // An ordinary confirmation, no phrase: the pull request stays open and a
+  // second test builds the preview again.
+  await expect(dialog.getByRole("textbox")).toHaveCount(0)
+  expect(closed).toBe(0)
+  await dialog.getByRole("button", { name: "Close preview" }).click()
+  await expect.poll(() => closed).toBe(1)
+  await expect(page.getByText("Close preview of #42 completed")).toBeVisible()
+})
+
+test("Test a pull request… in the header menu picks from the open pull requests", async ({
+  page,
+}) => {
+  await mockProject(page)
+  await page.goto("/deploy/7")
+  await page.getByRole("button", { name: "Deployment actions" }).click()
+  await page.getByRole("menuitem", { name: /Test a pull request/ }).click()
+  const picker = page.getByRole("dialog", { name: "Test a pull request" })
+  await picker
+    .getByRole("list", { name: "Open pull requests" })
+    .getByRole("button", { name: "Test pull request #42" })
+    .click()
+  // The preview already runs production's variables, so the choice is
+  // whether to keep them; the address is the one it was published on.
+  const dialog = page.getByRole("dialog", { name: "Test #42" })
+  await expect(
+    dialog.getByRole("checkbox", { name: "Keep production variables in this preview" }),
+  ).toBeChecked()
+  await expect(dialog).toContainText("https://jd-host.tail1234.ts.net:21000")
+  // The picker lists every open pull request, held or not, so the dialog is
+  // where a preview already ready at this commit is refused: the rows hold
+  // the verb for the same reading, and building it again would only answer
+  // with the run that built it.
+  await expect(dialog).toContainText("This pull request already has a preview at this commit.")
+  await expect(dialog.getByRole("button", { name: "Build preview" })).toBeDisabled()
+})
+
+test("a head that moved under the dialog is re-read, shown, and sent on the next press", async ({
+  page,
+}) => {
+  await mockProject(page)
+  const movedSha = "feed45".repeat(6) + "feed"
+  let moved = false
+  await page.route("**/api/v1/deploy/7/pull-requests", (route) => {
+    const listing = projectPullRequests(true)
+    return json(
+      route,
+      moved
+        ? {
+            ...listing,
+            pulls: listing.pulls.map((pull) =>
+              pull.number === 45 ? { ...pull, headSha: movedSha } : pull,
+            ),
+          }
+        : listing,
+    )
+  })
+  const posted: string[] = []
+  await page.route("**/api/v1/deploy/7/pull-requests/45/preview", async (route) => {
+    posted.push((route.request().postDataJSON() as { revision: string }).revision)
+    if (!moved) {
+      moved = true
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: {
+            code: "pull_request_head_changed",
+            message: `pull request #45 has moved on to ${movedSha}; review the new head before testing it`,
+          },
+        }),
+      })
+      return
+    }
+    await route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify({
+        preview: { ...previewEnvironment, id: 53, number: 45, providerRef: "45" },
+        runId: 540,
+        copied: [],
+        skipped: [],
+        variablesFromProduction: false,
+      }),
+    })
+  })
+  await page.goto("/deploy/7")
+  await page.getByRole("button", { name: "Deployment actions" }).click()
+  await page.getByRole("menuitem", { name: /Test a pull request/ }).click()
+  await page
+    .getByRole("dialog", { name: "Test a pull request" })
+    .getByRole("button", { name: "Test pull request #45" })
+    .click()
+  const dialog = page.getByRole("dialog", { name: "Test #45" })
+  await expect(
+    dialog.getByText(forkPullRequest.headSha!.slice(0, 7), { exact: true }),
+  ).toBeVisible()
+  await dialog.getByRole("checkbox", { name: "I have reviewed this fork's changes" }).click()
+  await dialog.getByRole("button", { name: "Build preview" }).click()
+
+  // Refused with the head the server sees now: the listing behind the picker
+  // is re-read — it was switched off while the dialog was up, which made the
+  // refresh a no-op — and the dialog shows that head, rather than keeping
+  // the row it opened on and sending the same rejected commit again. A fork
+  // was reviewed at one commit, so the new one wants reading again.
+  await expect(dialog).toContainText("moved on to")
+  await expect(dialog.getByText(movedSha.slice(0, 7), { exact: true })).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Build preview" })).toBeDisabled()
+  await dialog.getByRole("checkbox", { name: "I have reviewed this fork's changes" }).click()
+  await dialog.getByRole("button", { name: "Build preview" }).click()
+  await expect.poll(() => posted).toEqual([forkPullRequest.headSha, movedSha])
+  await expect(page).toHaveURL(/\/deploy\/7\/runs\/540$/)
+})
+
+test("a pull-request listing the server cannot answer hides the panel, and an unreadable one says why", async ({
+  page,
+}) => {
+  await mockProject(page)
+  await page.route("**/api/v1/deploy/7/pull-requests", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "not_available", message: "gh is busy" } }),
+    }),
+  )
+  await page.goto("/deploy/7")
+  await expect(page.getByRole("heading", { name: "Recent deployments" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Pull requests", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("alert").filter({ hasText: "gh is busy" })).toHaveCount(0)
+
+  // Not signed in: the sentence names the fix, and the preview built before
+  // is still listed by what the dashboard recorded of its pull request —
+  // with nothing offering to test or merge what nobody here can read.
+  await page.route("**/api/v1/deploy/7/pull-requests", (route) =>
+    json(route, {
+      ...projectPullRequests(false),
+      available: false,
+      reason: "sign_in_required",
+      pulls: [],
+    }),
+  )
+  await page.goto("/deploy/7")
+  await expect(page.getByRole("heading", { name: "Pull requests", exact: true })).toBeVisible()
+  await expect(
+    page.getByText("Sign in to GitHub on the Git page to read this repository's pull requests."),
+  ).toBeVisible()
+  const list = page.getByRole("list", { name: "Pull requests" })
+  const row = list.getByRole("listitem").filter({ hasText: "Add checkout retries" })
+  await expect(row.getByText("Ready", { exact: true })).toBeVisible()
+  await row.getByRole("button", { name: "More actions for #42" }).click()
+  await expect(page.getByRole("menuitem", { name: /^Close preview/ })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: /^Merge/ })).toHaveCount(0)
+  await expect(page.getByRole("menuitem", { name: /Test this pull request/ })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+
+  // A Git project whose repository is not on GitHub has no panel, even with
+  // a webhook preview recorded: there is no pull request here to draw it
+  // under, and no repository to make its number a link or its head a fork.
+  await page.route("**/api/v1/deploy/7/pull-requests", (route) =>
+    json(route, {
+      ...projectPullRequests(false),
+      available: false,
+      reason: "not_github",
+      repository: "",
+      pulls: [],
+    }),
+  )
+  const answered = page.waitForResponse("**/api/v1/deploy/7/pull-requests")
+  await page.goto("/deploy/7")
+  await answered
+  await expect(page.getByRole("heading", { name: "Recent deployments" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Pull requests", exact: true })).toHaveCount(0)
 })

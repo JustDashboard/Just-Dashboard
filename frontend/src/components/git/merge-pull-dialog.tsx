@@ -36,23 +36,45 @@ const METHODS = [
   },
 ]
 
+/** What the deploy page's merge route answers with; the Git page's route says nothing. */
+export type MergeResult = {
+  merged?: boolean
+  previewRunId?: number
+  production?: { automatic: boolean; awaitingFirstDeployment?: boolean }
+}
+
 /**
  * Merging a pull request on GitHub, with the two choices its own button
  * offers: how, and whether the branch is deleted afterwards. It is a dialog
  * rather than a confirm because the method is a decision, not a yes.
+ *
+ * Two pages open it. The Git page merges as the checkout's owner through
+ * `/git/github/pulls/{n}/merge?path=`; a project's Overview has no checkout
+ * and merges as the dashboard's own account through its deploy route, which
+ * also says whether production redeploys by itself. The head sha pins the
+ * merge to the commit the reader looked at: GitHub refuses if the branch
+ * moved on in between, which is the right answer to a review of the wrong
+ * code.
  */
 export function MergePullDialog({
   open,
   onOpenChange,
   repoPath,
+  endpoint,
+  headSha,
   pull,
   onMerged,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  repoPath: string
+  /** The checkout whose owner merges; left out where the dashboard's own account does. */
+  repoPath?: string
+  /** The route to post to, where it is not the Git page's. */
+  endpoint?: string
+  /** The commit the merge is pinned to. */
+  headSha?: string
   pull: GitPullRequest
-  onMerged: () => void
+  onMerged: (result?: MergeResult) => void
 }) {
   const [method, setMethod] = useState("merge")
   const [deleteBranch, setDeleteBranch] = useState(true)
@@ -63,13 +85,13 @@ export function MergePullDialog({
     setBusy(true)
     setError(undefined)
     try {
-      await post(
-        `/git/github/pulls/${pull.number}/merge`,
-        { method, deleteBranch },
-        { query: { path: repoPath } },
+      const result = await post<MergeResult | undefined>(
+        endpoint ?? `/git/github/pulls/${pull.number}/merge`,
+        { method, deleteBranch, headSha },
+        { query: repoPath ? { path: repoPath } : undefined },
       )
       notify.success(`Merged #${pull.number}`, { description: pull.title })
-      onMerged()
+      onMerged(result ?? undefined)
       onOpenChange(false)
     } catch (err) {
       setError(errorMessage(err))
