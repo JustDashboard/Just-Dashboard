@@ -222,7 +222,7 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 				name == "jekyll" && result.Prepared.Toolchain != "jekyll on ruby "+jekyllDefaultRuby ||
 				name == "mkdocs" && (candidate.Recipe != "python" || candidate.Framework != "mkdocs") ||
 				name == "lume" && (candidate.Recipe != "deno" || candidate.Framework != "lume") ||
-				name == "eleventy" && (candidate.BuildCommand != "npx @11ty/eleventy" || candidate.OutputDirectory != "dist") ||
+				name == "eleventy" && (candidate.BuildCommand != "npx eleventy" || candidate.OutputDirectory != "dist") ||
 				name == "svelte-static" && !candidate.SPAFallback {
 				t.Fatalf("catalogue defaults for %s: %+v / %+v", name, candidate, result.Prepared)
 			}

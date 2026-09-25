@@ -74,10 +74,10 @@ func siteBuildCases() []buildCase {
 			want: BuildCause{Code: "build_command_not_found", Phase: phaseBuild, Command: mdbook.BuildCommand, ExitCode: 101, Detail: "mdbook", Subjects: []string{"mdbook-mermaid"}},
 		},
 		{
-			name: "Eleventy template", command: "npx @11ty/eleventy", exit: 1,
-			build: BuildPlanConfig{Method: BuildRecipe, Recipe: "node", BuildCommand: "npx @11ty/eleventy", OutputDirectory: "_site"},
+			name: "Eleventy template", command: "npx eleventy", exit: 1,
+			build: BuildPlanConfig{Method: BuildRecipe, Recipe: "node", BuildCommand: "npx eleventy", OutputDirectory: "_site"},
 			lines: []string{"[11ty] Problem writing Eleventy templates:", "[11ty] 1. Having trouble rendering njk template ./src/index.njk (via TemplateContentRenderError)"},
-			want: BuildCause{Code: "build_site_render_failed", Phase: phaseBuild, Command: "npx @11ty/eleventy", ExitCode: 1, Detail: "eleventy",
+			want: BuildCause{Code: "build_site_render_failed", Phase: phaseBuild, Command: "npx eleventy", ExitCode: 1, Detail: "eleventy",
 				Subjects: []string{"./src/index.njk"}},
 		},
 	}

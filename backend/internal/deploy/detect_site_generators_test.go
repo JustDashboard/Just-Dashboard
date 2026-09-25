@@ -348,8 +348,15 @@ func TestLumeAndNodeSiteGenerators(t *testing.T) {
 		"package.json": `{"devDependencies":{"@11ty/eleventy":"3.1.2"}}`, "package-lock.json": "{}",
 		"eleventy.config.js": "export default function (c) { return { dir: { input: 'src', output: 'dist' } } }", "src/index.md": "",
 	})
-	if eleventy.OutputDirectory != "dist" || eleventy.BuildCommand != "npx @11ty/eleventy" || eleventy.Confidence == ConfidenceLow || len(eleventy.NeedsDecision) != 0 {
+	if eleventy.OutputDirectory != "dist" || eleventy.BuildCommand != "npx eleventy" || eleventy.Confidence == ConfidenceLow || len(eleventy.NeedsDecision) != 0 {
 		t.Fatalf("eleventy = %#v", eleventy)
+	}
+	// pnpm exec and yarn run the binary; neither resolves a package name.
+	for lockfile, want := range map[string]string{"pnpm-lock.yaml": "pnpm exec eleventy", "yarn.lock": "yarn eleventy", "bun.lock": "bunx eleventy"} {
+		_, eleventy := siteCandidate(t, map[string]string{"package.json": `{"devDependencies":{"@11ty/eleventy":"3.1.2"}}`, lockfile: "", "index.md": ""})
+		if eleventy.BuildCommand != want {
+			t.Fatalf("%s: build = %q", lockfile, eleventy.BuildCommand)
+		}
 	}
 	_, flag := siteCandidate(t, map[string]string{
 		"package.json": `{"scripts":{"build":"eleventy --output=_public"},"devDependencies":{"@11ty/eleventy":"3.1.2"}}`, "package-lock.json": "{}",

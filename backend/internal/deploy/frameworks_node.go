@@ -269,7 +269,9 @@ var nodeFrameworks = []nodeFramework{
 			// which the shape pass reads (detect_site_generators.go).
 			output, _ := eleventyOutput(func(string) ([]byte, bool) { return nil, false }, manifest)
 			resolution := static(output, false)
-			resolution.DefaultBuild = "@11ty/eleventy"
+			// The binary's name, not the package's: `pnpm exec` and `yarn`
+			// run a binary, and only npx and bunx also resolve a package.
+			resolution.DefaultBuild = "eleventy"
 			return resolution
 		},
 	},
