@@ -402,7 +402,7 @@ func readNodeInstalls(checkout string, markers map[string]*detectedMarkers) {
 		marker := markers[dir]
 		slash := filepath.ToSlash(marker.root)
 		var source nodeInstallSource
-		if marker.phpOwnsAssets() {
+		if marker.phpOwnsAssets() || marker.pythonAssets {
 			files := nodeFiles{root: root, dir: slash, budget: budget}
 			source = nodeInstallSource{context: slash, dir: slash,
 				facts: readNodeInstallFacts(files, "", marker.packageJSON, arch)}

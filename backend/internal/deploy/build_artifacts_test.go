@@ -103,7 +103,7 @@ func TestAutomaticRecipesAndExplicitAdaptersRenderPinnedPlans(t *testing.T) {
 			name:   "python",
 			files:  map[string]string{"requirements.txt": "uvicorn==0.35.0\nfastapi==0.116.1\n", "app.py": "app = object()\n"},
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "python", StartCommand: "uvicorn app:app"},
-			want:   []string{"FROM python:3.13-slim@sha256:", "pip install --no-cache-dir", "uvicorn app:app"},
+			want:   []string{"FROM python:3.13-slim-trixie@sha256:", "pip install --no-cache-dir", "uvicorn app:app"},
 		},
 		{
 			name:   "static",

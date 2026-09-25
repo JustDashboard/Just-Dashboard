@@ -38,27 +38,28 @@ func TestPythonFrameworkCatalogueDetectsServingDefaults(t *testing.T) {
 		{name: "fastapi without an application object", files: map[string]string{
 			"requirements.txt":   "fastapi==0.116.1\n",
 			"src/server/core.py": "app = FastAPI()\n",
-		}, framework: "fastapi", port: 8000, profile: ProfileWeb, confidence: ConfidenceLow, version: "3.13", decision: "module:app"},
+		}, framework: "fastapi", port: 8000, profile: ProfileWeb, confidence: ConfidenceLow, version: "3.13", decision: "module:object"},
 		{name: "flask module", files: map[string]string{
 			"requirements.txt": "Flask==3.1.0\ngunicorn==23.0.0\n",
 			"app.py":           "from flask import Flask\napp = Flask(__name__)\n",
-		}, framework: "flask", start: "gunicorn --bind 0.0.0.0:${PORT:-8000} app:app", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, version: "3.13"},
+		}, framework: "flask", start: "gunicorn --bind 0.0.0.0:${PORT:-8000} --access-logfile - app:app", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, version: "3.13"},
 		{name: "flask factory", files: map[string]string{
 			"pyproject.toml":  "[project]\nname = \"site\"\nrequires-python = \">=3.11\"\ndependencies = [\n  \"flask>=3\",\n  \"psycopg[binary]\",\n]\n",
 			"app/__init__.py": "from flask import Flask\n\ndef create_app():\n    return Flask(__name__)\n",
-		}, framework: "flask", start: "gunicorn --bind 0.0.0.0:${PORT:-8000} 'app:create_app()'", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, unpinned: true, version: "3.13"},
+		}, framework: "flask", start: "gunicorn --bind 0.0.0.0:${PORT:-8000} --access-logfile - 'app:create_app()'", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, unpinned: true, version: "3.13"},
 		{name: "django", files: map[string]string{
 			"requirements.txt": "Django==5.1.4\n",
 			"manage.py":        "#!/usr/bin/env python\n",
 			"mysite/wsgi.py":   "application = get_wsgi_application()\n",
 			"mysite/asgi.py":   "application = get_asgi_application()\n",
-		}, framework: "django", start: "python manage.py migrate --noinput && gunicorn mysite.wsgi:application --bind 0.0.0.0:${PORT:-8000}", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, version: "3.13"},
+		}, framework: "django", start: "python manage.py migrate --noinput && gunicorn --bind 0.0.0.0:${PORT:-8000} --access-logfile - mysite.wsgi:application", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, version: "3.13"},
 		{name: "django with whitenoise from a uv lock", files: map[string]string{
-			"pyproject.toml": "[project]\nname = \"site\"\nrequires-python = \">=3.12,<3.13\"\ndependencies = [\"django\", \"whitenoise\"]\n",
-			"uv.lock":        "version = 1\n\n[[package]]\nname = \"django\"\nversion = \"5.1.4\"\n\n[[package]]\nname = \"whitenoise\"\nversion = \"6.8.2\"\n",
-			"manage.py":      "",
-			"config/wsgi.py": "",
-		}, framework: "django", start: "python manage.py migrate --noinput && python manage.py collectstatic --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000}", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, version: "3.12"},
+			"pyproject.toml":     "[project]\nname = \"site\"\nrequires-python = \">=3.12,<3.13\"\ndependencies = [\"django\", \"whitenoise\"]\n",
+			"uv.lock":            "version = 1\n\n[[package]]\nname = \"django\"\nversion = \"5.1.4\"\n\n[[package]]\nname = \"whitenoise\"\nversion = \"6.8.2\"\n",
+			"manage.py":          "os.environ.setdefault(\"DJANGO_SETTINGS_MODULE\", \"config.settings\")\n",
+			"config/wsgi.py":     "",
+			"config/settings.py": "MIDDLEWARE = [\"whitenoise.middleware.WhiteNoiseMiddleware\"]\nSTATIC_ROOT = BASE_DIR / \"staticfiles\"\n",
+		}, framework: "django", start: "python manage.py migrate --noinput && python manage.py collectstatic --noinput && gunicorn --bind 0.0.0.0:${PORT:-8000} --access-logfile - config.wsgi:application", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, version: "3.12"},
 		{name: "django without its wsgi module", files: map[string]string{
 			"requirements.txt": "django\n",
 			"manage.py":        "",
@@ -75,7 +76,7 @@ func TestPythonFrameworkCatalogueDetectsServingDefaults(t *testing.T) {
 			"pyproject.toml": "[tool.poetry]\nname = \"site\"\n\n[tool.poetry.dependencies]\npython = \"^3.11\"\nflask = \"^3.1\"\n",
 			"poetry.lock":    "[[package]]\nname = \"flask\"\nversion = \"3.1.0\"\n",
 			"main.py":        "app = Flask(__name__)\n",
-		}, framework: "flask", start: "gunicorn --bind 0.0.0.0:${PORT:-8000} main:app", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, version: "3.13"},
+		}, framework: "flask", start: "gunicorn --bind 0.0.0.0:${PORT:-8000} --access-logfile - main:app", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, version: "3.13"},
 		{name: "plain script", files: map[string]string{
 			"requirements.txt": "requests==2.32.3\n",
 			"main.py":          "print('hi')\n",
@@ -83,12 +84,12 @@ func TestPythonFrameworkCatalogueDetectsServingDefaults(t *testing.T) {
 		{name: "procfile", files: map[string]string{
 			"requirements.txt": "fastapi==0.116.1\n",
 			"Procfile":         "web: uvicorn server.api:application --host 0.0.0.0 --port $PORT\n",
-		}, framework: "fastapi", start: "uvicorn server.api:application --host 0.0.0.0 --port $PORT", port: 8000, profile: ProfileWeb, confidence: ConfidenceLow, version: "3.13"},
+		}, framework: "fastapi", start: "uvicorn server.api:application --host 0.0.0.0 --port $PORT", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, version: "3.13"},
 		{name: "unsupported interpreter", files: map[string]string{
 			"requirements.txt": "flask==3.1.0\n",
 			"runtime.txt":      "python-3.9.19\n",
 			"app.py":           "app = Flask(__name__)\n",
-		}, framework: "flask", start: "gunicorn --bind 0.0.0.0:${PORT:-8000} app:app", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, decision: ""},
+		}, framework: "flask", start: "gunicorn --bind 0.0.0.0:${PORT:-8000} --access-logfile - app:app", port: 8000, profile: ProfileWeb, confidence: ConfidenceHigh, version: "3.10"},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			t.Parallel()
@@ -108,8 +109,8 @@ func TestPythonFrameworkCatalogueDetectsServingDefaults(t *testing.T) {
 				candidate.PythonVersion != fixture.version {
 				t.Fatalf("candidate = %+v", candidate)
 			}
-			if fixture.name == "unsupported interpreter" && !strings.Contains(candidate.RecipeIssue, "3.10 to 3.13") {
-				t.Fatalf("recipe issue = %q", candidate.RecipeIssue)
+			if fixture.name == "unsupported interpreter" && (candidate.RecipeIssue != "" || candidate.Python.VersionRaised != "3.9") {
+				t.Fatalf("a 3.9 pin is raised to 3.10: %q %+v", candidate.RecipeIssue, candidate.Python)
 			}
 			if fixture.decision != "" && !slices.ContainsFunc(candidate.NeedsDecision, func(d string) bool { return strings.Contains(d, fixture.decision) }) {
 				t.Fatalf("decisions %q lack %q", candidate.NeedsDecision, fixture.decision)
@@ -136,9 +137,14 @@ func TestPythonVersionSelection(t *testing.T) {
 		{name: "exact family", pyproject: "[project]\nrequires-python = \"==3.12.*\"\n", want: "3.12"},
 		{name: "poetry caret", pyproject: "[tool.poetry.dependencies]\npython = \"^3.10\"\n", want: "3.13"},
 		{name: "old floor keeps the default", pyproject: "[project]\nrequires-python = \">=3.8\"\n", want: "3.13"},
-		{name: "unsupported family", versionFile: "3.9", fails: true},
-		{name: "unsupported explicit", explicit: "3.14", fails: true},
-		{name: "future exact family", pyproject: "[project]\nrequires-python = \"==3.14.*\"\n", fails: true},
+		{name: "an old family is raised to the oldest the catalogue carries", versionFile: "3.9", want: "3.10"},
+		{name: "python 2 is refused", runtimeFile: "python-2.7.18", fails: true},
+		{name: "3.14 is in the catalogue", explicit: "3.14", want: "3.14"},
+		{name: "unsupported explicit", explicit: "3.15", fails: true},
+		{name: "a floor above the default selects it", pyproject: "[project]\nrequires-python = \">=3.14\"\n", want: "3.14"},
+		{name: "single-quoted requires-python", pyproject: "[project]\nrequires-python = '>=3.10,<3.12'\n", want: "3.11"},
+		{name: "future exact family", pyproject: "[project]\nrequires-python = \"==3.15.*\"\n", fails: true},
+		{name: "a floor above the catalogue is refused by name", pyproject: "[project]\nrequires-python = \">=3.15\"\n", fails: true},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			t.Parallel()

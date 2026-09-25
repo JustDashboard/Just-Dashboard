@@ -135,6 +135,7 @@ func plannedRecipeFindings(candidate *DetectedCandidate, build BuildPlanConfig) 
 		if item, ok := pythonVersionFinding(candidate, build); ok {
 			findings = append(findings, item)
 		}
+		findings = append(findings, pythonRecipeFindings(candidate, build)...)
 	}
 	return findings
 }
@@ -252,36 +253,6 @@ func pythonVersionSatisfies(version, constraint string) bool {
 		}
 	}
 	return true
-}
-
-// pythonDeclaredRange is the interpreter range pyproject declares, bounded
-// like any other detection text.
-func pythonDeclaredRange(files map[string][]byte) string {
-	match := pythonRequiresRE.FindStringSubmatch(string(files["pyproject.toml"]))
-	if match == nil || len(match[1]) > 128 || strings.ContainsAny(match[1], "\x00\r\n") {
-		return ""
-	}
-	return match[1]
-}
-
-// pythonInstallKind names the manifest the recipe installs from, in the
-// order selectPythonInstall reads them.
-func pythonInstallKind(files map[string][]byte) string {
-	pyproject, hasPyproject := files["pyproject.toml"]
-	switch _, uv := files["uv.lock"]; {
-	case uv:
-		return "uv.lock"
-	}
-	if _, poetry := files["poetry.lock"]; poetry || (hasPyproject && strings.Contains(string(pyproject), "[tool.poetry]")) {
-		return "poetry.lock"
-	}
-	if _, requirements := files["requirements.txt"]; requirements {
-		return "requirements.txt"
-	}
-	if hasPyproject {
-		return "pyproject.toml"
-	}
-	return ""
 }
 
 // startCommandFinding asks for the start command every server recipe needs
