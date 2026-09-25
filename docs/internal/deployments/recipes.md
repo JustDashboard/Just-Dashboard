@@ -1,6 +1,6 @@
 # Automatic recipes and serving defaults
 
-`just-dashboard-recipes-v3` prepares immutable Dockerfiles using digest-pinned catalogue bases. Build
+`just-dashboard-recipes-v4` prepares immutable Dockerfiles using digest-pinned catalogue bases. Build
 commands execute inside the build container; source inspection never executes repository configuration
 on the host. Generated Dockerfiles use root-relative, exclusive writes so a checkout symlink cannot
 redirect output outside the build context. Detection ignores this generated directory.
@@ -1180,7 +1180,10 @@ with the default. Resolved image digests, the chosen version, why it was chosen 
 Dockerfile are recorded in build evidence. See the [Go toolchain rules](https://go.dev/doc/toolchain).
 
 Which toolchain builds the module is a setting, so detection keeps the facts — `goMinimumVersion`, the
-`toolchain` line (`goToolchain`) and the `.go-version` pin (`goVersionFile`) — rather than a refusal.
+`toolchain` line (`goToolchain`), the `.go-version` pin (`goVersionFile`) and, for a module a `go.work`
+uses, the go.work's own `go` and `toolchain` lines (`workGo` and `workToolchain` in the candidate's `go`
+facts), which the recipe folds in (the higher `go` minimum, the go.work's `toolchain` first) — rather than
+a refusal.
 Preflight runs `chooseGoRecipeVersion` with the plan's own `build.goVersion` over them and raises
 `go_version_unsupported` (blocked, naming the pins) only when that fails: pinning 1.26 for a module
 whose `.go-version` says 1.24 clears it, as it lets the recipe build.
@@ -1189,7 +1192,8 @@ The main package is read the way the go command reads it, from package clauses a
 and never by compiling (`deploy/go_packages.go`, shared by detection and the recipe): a file counts for
 linux on the host's architecture with cgo disabled and no extra tags, judged on its `//go:build` line
 (or legacy `+build` lines) and its `_GOOS`/`_GOARCH` file-name suffix, so `ignore`, `tools` and mage
-files drop out; `testdata/`, `_*` and `.*` directories and nested modules (a directory with its own
+files drop out. A file importing `"C"` counts when it builds under cgo and has no pure-Go twin, which is
+exactly when the recipe turns cgo on for it, so a command written in cgo is a command, not a library; `testdata/`, `_*` and `.*` directories and nested modules (a directory with its own
 `go.mod`) are not part of the module, and neither are files whose names start with `_` or `.`.
 Detection runs the recipe's own scan (`scanGoModule`: file headers only, at most 10,000 files and 32 MiB
 per module) at each Go candidate's root, apart from its walk's shared read budget, so a module whose
@@ -1275,7 +1279,10 @@ refusal is a named finding before Deploy (`preflight_go.go`):
   entry `go.mod` requires is `lockfile_out_of_sync` (warning); both build with `-mod=mod`, recording the
   checksums of what they download instead of stopping at "missing go.sum entry". Requirements from the
   module's own account (`github.com/acme/…` for `github.com/acme/app`) are `go_private_module` when the
-  source is fetched with a credential: proxy.golang.org cannot see a private module. With a build
+  source is fetched with a credential: proxy.golang.org cannot see a private module. A module a local
+  replacement or the `go.work` provides is in the checkout and is not named. Detection compares at most
+  16 MiB of `go.sum` across all its modules (and 16 MiB for any one); past that a module's `go.sum` is
+  left to the go command, which checks it during the build anyway. With a build
   variable `GIT_TOKEN` mapped to the install step, the recipe installs git, sets
   `GOPRIVATE=<host>/<owner>` and runs `go mod download` with git's URL for that host rewritten through
   `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_0`/`GIT_CONFIG_VALUE_0` in that one command's environment — the
@@ -1283,7 +1290,12 @@ refusal is a named finding before Deploy (`preflight_go.go`):
 - **Workspaces and local replacements.** A module a `go.work` above it `use`s builds from the go.work's
   directory (the build context widens there, `WORKDIR` is the module); a module whose `replace`
   directives point at local directories builds from the nearest directory holding it and every target,
-  with `GOWORK=off`. The runtime files are copied from the module's own directory. A replacement
+  with `GOWORK=off`. The runtime files are copied from the module's own directory. In a workspace the
+  install step is `go list -e -deps ./... >/dev/null` rather than `go mod download`, which fetches every
+  requirement — a sibling the go.work provides (`require example.com/shared v0.0.0`) included, which no
+  proxy has ("unrecognized import path") — while listing the packages' imports fetches only what the
+  build compiles; `-e` leaves a package not written yet (templ output, an embed the web stage builds) to
+  the build. A replacement
   outside the checkout, or at an absolute path, is `go_local_replace_outside_root` (blocked) and the
   recipe's refusal; a module that is only a library is already `Go library` at low confidence, so the
   service in the workspace is selected.
@@ -1293,15 +1305,19 @@ refusal is a named finding before Deploy (`preflight_go.go`):
   runtime agree. Files the repository's own scripts write and the recipe does not — the CSS a
   `tailwindcss … -o <file>` in a Makefile, Taskfile, justfile or package.json writes, sqlc's `out`
   directory — are `go_codegen_missing` (warning) when the commit lacks them.
-- **Embedded front ends.** A `//go:embed` pattern whose directory the commit lacks, or holds only
+- **Embedded front ends.** The embeds are those of the package being built and every package of the
+  module it imports (read from the files' import lists), so another command's embed never blocks the
+  service; with no command chosen yet, or a build command, every embed in the module counts. A
+  `//go:embed` pattern whose directory the commit lacks, or holds only
   dotfiles (`dist/.gitkeep`), is built first when a package.json with a build script contains it, or
-  its Vite `outDir` writes it: a Node stage runs that package's lockfile-driven install and `build`
+  its Vite `outDir` writes it or a directory above it (then the embedded directory itself is copied): a Node stage runs that package's lockfile-driven install and `build`
   script with the JavaScript recipe's own planner (`go_embed_frontend`, pass), and the output is copied
   into the Go stage before `go build`; the package's own candidate is demoted, so the server is selected
   rather than a site without its API. Nothing builds it and no build command is set:
   `go_embed_missing` (blocked).
-- **Command-line applications.** A module on cobra or urfave/cli whose commands include `serve`,
-  `server` or `start` starts `/app <that subcommand>` (`go_start_subcommand`, a warning to confirm it),
+- **Command-line applications.** A module on cobra (whose command tree something executes) or
+  urfave/cli whose commands are named `serve`, `server` or `start` (`Use: "serve [flags]"` is serve,
+  `Use: "server-status"` is not) starts `/app <that subcommand>` (`go_start_subcommand`, a warning to confirm it),
   since the binary run bare prints its help and exits. PocketBase's start command, port and data volume
   are the persistent-state defaults below; its readiness is `/api/health`.
 
@@ -1344,18 +1360,28 @@ The recipe always builds `--bin <binary>`, and reads it from `target/release`, f
 **Native crates.** The build stage, which the runtime image leaves behind, always installs `musl-dev
 pkgconfig openssl-dev openssl-libs-static perl make` (perl and make are what OpenSSL's vendored build and
 jemalloc need). `Cargo.lock`'s packages (the lock resolves every feature of the workspace) add: `cmake`
-→ `cmake g++ linux-headers`; `cxx`/`link-cplusplus` → `g++`; `bindgen`/`clang-sys` → `clang-dev`;
+→ `cmake g++ linux-headers`; `cxx`/`link-cplusplus` → `g++`; `bindgen`/`clang-sys` → `clang-dev`, and a dynamic link (below);
 `prost-build`/`tonic-build`/`protobuf-codegen` without `protoc-bin-vendored`/`protobuf-src` → `protoc
 protobuf-dev`; `pq-sys` without `pq-src` → `libpq-dev`, linked statically (`PQ_LIB_STATIC=1` and the
 archives libpq needs after it on the link line, through `RUSTFLAGS`, which replaces a
 `.cargo/config` `build.rustflags`); `mysqlclient-sys` without `mysqlclient-src` → `mariadb-connector-c-dev
 mariadb-static zlib-static zstd-static` with `MYSQLCLIENT_STATIC=1 PKG_CONFIG_ALL_STATIC=1`;
 `libsqlite3-sys` → `sqlite-dev sqlite-static`; `libz-sys` → `zlib-dev zlib-static`; `rdkafka-sys` → `bash
-g++ linux-headers`. Every binary stays static. `rust_native_dependency` (pass) lists what was added and
-why; a GUI or hardware binding the lock resolves (gtk, webkit2gtk, alsa, udev) is
+g++ linux-headers`. The binary is static, except with bindgen: its build script loads libclang, which a
+build script linked statically against musl cannot ("Dynamic loading not supported"), so the build sets
+`RUSTFLAGS="-C target-feature=-crt-static"` — every artifact, build scripts included, links musl
+dynamically — libpq links as a shared library instead of `PQ_LIB_STATIC`, and the runtime stage installs
+`libgcc` (and `libpq`) beside `tzdata` (`nativeRuntime`). With `[build] target` in `.cargo/config`,
+Cargo keeps `RUSTFLAGS` from build scripts, so such a build still needs a Dockerfile. The classifier names
+that failure (`build_system_library_missing`, detail `rust-static`) apart from a missing libclang.
+`rust_native_dependency` (pass) lists what was added and why; a GUI or hardware binding the lock resolves (gtk, webkit2gtk, alsa, udev) is
 `rust_native_dependency_unmapped` (warning).
 
-**sqlx.** A committed `.sqlx` (at the crate or the workspace root) builds with `SQLX_OFFLINE=true`, so a
+**sqlx.** The query macros are looked for in the crate's sources and in those of the crates inside the
+checkout it depends on by path (directly or through each other, at most 16, a workspace dependency
+resolved from the workspace root) that depend on sqlx, where a workspace usually keeps them. Committed
+offline data — `.sqlx` at the crate, at a library whose macros it compiles or at the workspace root, or the
+`sqlx-data.json` sqlx 0.5 and 0.6 read (`sqlxOfflineData` names which) — builds with `SQLX_OFFLINE=true`, so a
 `DATABASE_URL` in a committed `.env` or the build's variables never sends the query macros to a database
 the build cannot reach (`sqlx_offline`, pass). The query macros (`query!`, `query_as!`, …) with no
 `.sqlx` are `sqlx_offline_data_missing` — blocked, with `cargo sqlx prepare`; a warning when a build-scoped
@@ -1366,8 +1392,13 @@ not a linked one. `sqlx::migrate!()` is `sqlx_migrations`: the application appli
 resolves at no version the requirement accepts (Cargo's caret, tilde, exact and comparator rules), is
 `lockfile_out_of_sync` (warning) and the build runs without `--locked` rather than stopping at "the lock
 file needs to be updated". A `version = 4` lock with a toolchain pinned before 1.78, which cannot read it,
-builds on `rust:1-alpine` (`rust_lock_newer_than_toolchain`). A missing lock is the unpinned warning, whose
-action is `cargo generate-lockfile`.
+builds on `rust:1-alpine` (`rust_lock_newer_than_toolchain`). Whenever a `rust-toolchain` file is in the
+context the build sets `RUSTUP_TOOLCHAIN=${RUST_VERSION}`: rustup obeys the file over the image's own
+toolchain and would otherwise install the pin a second time — or, here, the old release the lock
+outgrew. A missing lock is the unpinned warning, whose action is `cargo generate-lockfile`. Detection
+charges each `Cargo.lock` (read once per workspace, at most 8 MiB) to the same 16 MiB budget as the
+sources it reads; past it a lock is present but unread, and only the recipe, which reads it whole, acts on
+it.
 
 **Memory.** The build runs as many compile jobs as whole gigabytes are free when it starts
 (`CARGO_BUILD_JOBS`, read from `/proc/meminfo` inside the step, so the Dockerfile is the same on every
@@ -1389,7 +1420,10 @@ browser side:
   cargo-leptos --locked --version 0.3.9`, then `cargo leptos build --release` (`--project` for a
   workspace member). The server binary and `target/site` (its `site-root`) run on `debian:bookworm-slim`
   with `LEPTOS_SITE_ROOT=site`, `LEPTOS_ENV=PROD` and `LEPTOS_OUTPUT_NAME` (its `output-name`, else the
-  project's name), started as `exec env LEPTOS_SITE_ADDR=0.0.0.0:${PORT:-<site-addr port>} /app`, since
+  project's name). With `hash-files = true` the bundle's file names carry content hashes that the server
+  reads from the `hash.txt` (or `hash-file`) the build writes beside the binary: the recipe copies it to
+  `/hash.txt`, beside `/app`, and sets `LEPTOS_HASH_FILES=true` (and `LEPTOS_HASH_FILE_NAME`), since
+  without it the page links unhashed names that 404 and never hydrates. The server is started as `exec env LEPTOS_SITE_ADDR=0.0.0.0:${PORT:-<site-addr port>} /app`, since
   `site-addr` is a development address; the port is the `site-addr`'s.
 - **Trunk** (a `Trunk.toml`, or an `index.html` with `data-trunk` links, beside yew, leptos, dioxus-web,
   sycamore or seed) is a static site: `cargo install trunk --locked --version 0.21.14`, `trunk build

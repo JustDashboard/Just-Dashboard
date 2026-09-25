@@ -23,7 +23,7 @@ var (
 	ErrArtifactRetained   = errors.New("deployment artifact is retained")
 )
 
-const AutomaticRecipeVersion = "just-dashboard-recipes-v3"
+const AutomaticRecipeVersion = "just-dashboard-recipes-v4"
 
 // The catalogue is deliberately small and reviewed. Tags are never written
 // into a release Dockerfile: the backend resolves each to a digest first.

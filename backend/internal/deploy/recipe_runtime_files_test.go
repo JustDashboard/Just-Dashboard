@@ -89,7 +89,7 @@ func TestCompiledRecipesRunFromAWritableHomeWithTheirFiles(t *testing.T) {
 			t.Fatalf("Go runtime stage missing %q:\n%s", want, runtime)
 		}
 	}
-	if prepared.RecipeVersion != "just-dashboard-recipes-v3" {
+	if prepared.RecipeVersion != "just-dashboard-recipes-v4" {
 		t.Fatalf("recipe version = %q", prepared.RecipeVersion)
 	}
 
