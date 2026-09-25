@@ -579,7 +579,10 @@ only renderer/executor/validation authority for their feature.
   application's own data, so a migration or seed of SQLite on a volume reaches the file the release then
   opens — but no ports, devices, capabilities or privilege, the image's entrypoint replaced by the
   command, and the container removed however the task ends. The task runs while the live release still
-  serves from the same volume; a stop-first release stops it only when the candidate starts. The container carries
+  serves from the same volume; a stop-first release stops it only when the candidate starts. The mounts
+  are the frozen runtime plan's own — a bind source was resolved and authorised when the plan was saved,
+  a preview's are its own preview volumes (and a preview plans no task) — so a task gains no path the
+  release it precedes does not already have. The container carries
   `io.just-dashboard.release-task`, so runtime observation leaves it out; `Server.Start` removes any a
   previous process left before the engine resumes runs, a task removes a stale one of its own name
   before it starts, and the step's cleanup records whether removal succeeded. A blank command is
