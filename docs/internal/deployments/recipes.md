@@ -1788,10 +1788,11 @@ through its own static-serving setting) and a Gradio app (the value in the page'
 axum service, a Maven jar and a Gradle jar, an ASP.NET Core minimal API, a Deno server, a minimal Laravel
 12 application (migrated, with the form's generated `APP_KEY`) and a plain `index.php`. The compiled
 shapes beyond one module or crate are built from their own fixtures too: a `go.work` member serving a
-template it reads at runtime with a value from its sibling module; a Go server embedding its Vite build,
+template it reads at runtime with a value from its sibling module, which it requires at `v0.0.0` as a
+workspace member does; a Go server embedding its Vite build,
 answering with cgo SQLite's version, a `Europe/Bucharest` zone and a generated templ component; a Cargo
-workspace member beside a maintenance binary; a Leptos (cargo-leptos) application, its site's scripts
-fetched; and a Trunk (yew) site, its WebAssembly module fetched. The WebAssembly builds install their tool
+workspace member beside a maintenance binary; a Leptos (cargo-leptos) application with `hash-files`, its
+site's hashed scripts fetched; and a Trunk (yew) site, its WebAssembly module fetched. The WebAssembly builds install their tool
 from source and take several minutes each, so run them with `-timeout 90m`.
 `TestLiveGoRecipeCatalogueResolves` resolves every Go family's image, the Alpine pair a dynamically linked
 Go build uses, and the Debian images of the Leptos and Trunk builds, for amd64 and arm64. It checks

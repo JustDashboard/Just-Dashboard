@@ -102,9 +102,10 @@ carries no licensing question at all.
   [the Git workspace contract](docs/internal/backend/git-workspace-expansion.md) for limits and setup.
   Twenty-nine fixtures: the locked Node starters (installed by Bun, pnpm and Yarn 1), FastAPI, Flask,
   Django, Streamlit, Gradio, Go, a `go.work` member, a Go server embedding its Vite build with cgo SQLite
-  and templ, axum, a Cargo workspace member, Leptos, Trunk, Maven, Gradle, ASP.NET Core, Deno, Laravel
-  and plain PHP. The Leptos and Trunk builds install their tool from source, so give the run
-  `-timeout 90m`; `TestLiveGoRecipeCatalogueResolves` checks every Go and Rust base image resolves.
+  and templ, axum, a Cargo workspace member, Leptos with hashed file names, Trunk, Maven, Gradle,
+  ASP.NET Core, Deno, Laravel and plain PHP. The Leptos and Trunk builds install their tool from source,
+  so give the run `-timeout 90m`; `TestLiveGoRecipeCatalogueResolves` checks every Go and Rust base
+  image resolves.
 - The blueprint catalogue sweep pulls every deployable definition's pinned image, starts it through the
   real runtime owner with generated secrets and runs its own readiness checks (`JD_BLUEPRINT_ONLY=a,b`
   narrows it; images it pulled are removed again):
