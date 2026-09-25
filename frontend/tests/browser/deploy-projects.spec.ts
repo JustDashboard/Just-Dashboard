@@ -411,6 +411,48 @@ test("a Compose deployment with more than one service reports how many", async (
   await expect(page.getByText("docker-compose.yml", { exact: true })).toHaveCount(0)
 })
 
+test("a card says how many pull requests are open, and the chip narrows the fleet to them", async ({
+  page,
+}) => {
+  await mockProject(page)
+  await page.route("**/api/v1/deploy/?view=fleet", (route) =>
+    json(route, {
+      deployments: [
+        { ...deployment, id: 1, name: "storefront", activeRun: undefined },
+        { ...deployment, id: 2, name: "worker", activeRun: undefined },
+      ],
+      activeWork: [],
+      slots: { heavyUsed: 0, heavyCapacity: 2, lightUsed: 0, lightCapacity: 4 },
+    }),
+  )
+  await page.route("**/api/v1/deploy/pull-requests", (route) =>
+    json(route, { projects: { "1": { open: 3, previews: 1 } } }),
+  )
+  await page.setViewportSize({ width: 1280, height: 1000 })
+  await page.goto("/deploy")
+  const projects = page.getByRole("list", { name: "Deployment projects" })
+  await expect(projects.locator(":scope > li")).toHaveCount(2)
+  // A count in plain words on the source line, only where there is one.
+  const storefront = projects.locator(":scope > li").filter({ hasText: "storefront" })
+  await expect(storefront.getByText("3 pull requests · 1 preview", { exact: true })).toBeVisible()
+  await expect(
+    projects
+      .locator(":scope > li")
+      .filter({ hasText: "worker" })
+      .getByText(/pull request/),
+  ).toHaveCount(0)
+
+  const chip = page.getByRole("button", { name: /^Pull requests/ })
+  await expect(chip).toContainText("1")
+  await chip.click()
+  await expect(projects.locator(":scope > li")).toHaveCount(1)
+  await expect(projects.getByText("storefront", { exact: true })).toBeVisible()
+
+  // The list row's second line carries the same words.
+  await page.getByRole("button", { name: "List view" }).click()
+  await expect(projects.getByText("3 pull requests · 1 preview", { exact: true })).toBeVisible()
+})
+
 test("archived list can be permanently deleted with confirmation and errors remain reviewable", async ({
   page,
 }, testInfo) => {

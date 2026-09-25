@@ -63,3 +63,44 @@ export function useQuerySelection(key: string) {
 
   return [current, select] as const
 }
+
+/** The workspace's tabs, as the address bar may name one. */
+const WORKSPACE_TABS = new Set(["changes", "history", "branches", "github"])
+
+/**
+ * Opens a checkout's workspace on its GitHub tab — on one of its pull
+ * requests, when a number is given — in one history entry.
+ *
+ * Not through `useQuerySelection`: that hook remembers its value per
+ * pathname, and a pull request number remembered for `/git` would reopen on
+ * the next checkout entered. And not as two `pushState`s, one for `repo` and
+ * one for `pull`: the browser's back button would then leave the pull
+ * request and stay in the workspace, which is not where the reader came from.
+ */
+export function openRepoPull(path: string, pull?: number) {
+  const url = new URL(window.location.href)
+  url.searchParams.set("repo", path)
+  url.searchParams.delete("pull")
+  url.searchParams.delete("tab")
+  if (pull) url.searchParams.set("pull", String(pull))
+  else url.searchParams.set("tab", "github")
+  window.history.pushState(null, "", `${url.pathname}${url.search}${url.hash}`)
+}
+
+/**
+ * Leaves the workspace. The checkout and whatever was opened inside it go
+ * together: a pull request number left behind in the address would open the
+ * next checkout entered on a pull request it does not have.
+ */
+export function closeRepo() {
+  const url = new URL(window.location.href)
+  for (const key of ["repo", "pull", "tab"]) url.searchParams.delete(key)
+  window.history.pushState(null, "", `${url.pathname}${url.search}${url.hash}`)
+}
+
+/** The tab the address bar asks the workspace to open on, when it names one it has. */
+export function workspaceTab(value: string | null) {
+  return value && WORKSPACE_TABS.has(value)
+    ? (value as "changes" | "history" | "branches" | "github")
+    : undefined
+}

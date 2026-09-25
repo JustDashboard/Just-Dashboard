@@ -160,7 +160,13 @@ func TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials(t *testi
 		{"ref option", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Ref: "-upload-pack=evil"}},
 		{"ref reflog", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Ref: "main@{1}"}},
 		{"ref double slash", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Ref: "feature//escape"}},
-		{"ref arbitrary namespace", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Ref: "refs/pull/1/head"}},
+		{"ref arbitrary namespace", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Ref: "refs/notes/x"}},
+		{"ref pull without number", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Ref: "refs/pull/head"}},
+		{"ref pull merge commit", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Ref: "refs/pull/1/merge"}},
+		{"ref pull non-numeric", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Ref: "refs/pull/x/head"}},
+		{"ref pull trailing component", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Ref: "refs/pull/1/head/extra"}},
+		{"ref merge request merge commit", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Ref: "refs/merge-requests/1/merge"}},
+
 		{"git query", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git?token=secret"}},
 		{"git encoded traversal", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/%2e%2e/repo.git"}},
 		{"subdirectory traversal", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Subdirectory: "../secret"}},
@@ -203,6 +209,24 @@ func TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials(t *testi
 	}
 	if err := validCompose.Validate(); err != nil {
 		t.Fatalf("typed Compose variable was rejected: %v", err)
+	}
+	// A preview's source points at the provider's own pull request ref; it
+	// is the one ref outside refs/heads and refs/tags a source may name.
+	for _, ref := range []string{"refs/pull/1/head", "refs/pull/1234/head", "refs/merge-requests/7/head"} {
+		pull := DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Ref: ref}
+		if err := pull.Validate(); err != nil {
+			t.Fatalf("pull request ref %q was rejected: %v", ref, err)
+		}
+	}
+	// The same shapes, and nothing else, are what IsProviderPullRef names
+	// for the routes that must refuse a pull request head from a request.
+	for ref, want := range map[string]bool{
+		"refs/pull/1/head": true, "refs/merge-requests/7/head": true,
+		"refs/pull/1/merge": false, "refs/heads/pull/1/head": false, "pull/1/head": false, "main": false, "refs/tags/v1": false,
+	} {
+		if got := IsProviderPullRef(ref); got != want {
+			t.Fatalf("IsProviderPullRef(%q) = %t, want %t", ref, got, want)
+		}
 	}
 
 	base := PlanConfiguration{
@@ -1628,7 +1652,10 @@ func TestProviderRemoteNormalization(t *testing.T) {
 		{"main", "refs/heads/main", "main"},
 		{"refs/heads/release", "refs/heads/release", "release"},
 		{"refs/tags/v1.2.3", "refs/tags/v1.2.3", "v1.2.3"},
+		{"refs/pull/1/head", "refs/pull/1/head", "refs/pull/1/head"},
+		{"refs/merge-requests/7/head", "refs/merge-requests/7/head", "refs/merge-requests/7/head"},
 	} {
+
 		remote, clone := planningGitRef(test.input)
 		if remote != test.remote || clone != test.clone {
 			t.Errorf("planningGitRef(%q) = %q/%q, want %q/%q", test.input, remote, clone, test.remote, test.clone)

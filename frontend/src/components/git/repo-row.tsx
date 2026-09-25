@@ -1,13 +1,40 @@
 "use client"
 
-import { ArrowRight } from "@/components/icons"
+import { useState } from "react"
+import { useRouter } from "next/navigation"
+import { ArrowRight, External, Play, RotateCounterClockwise } from "@/components/icons"
+import { post } from "@/lib/api"
 import { plural } from "@/lib/format"
-import type { GitRepo } from "@/lib/types"
+import { canTest, cleanupFailed, previewHeld, previewOutOfDate } from "@/lib/pull-requests"
+import { notify } from "@/lib/toast"
+import type {
+  DeploymentEngineRun,
+  DeploymentPreview,
+  GitPullRequest,
+  GitPullRequestSummary,
+  GitRepo,
+} from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { useAuth } from "@/hooks/use-auth"
 import { AheadBehind } from "@/components/git/ahead-behind"
+import { SourceMerge } from "@/components/git/glyphs"
 import { BranchChip, CommitLine, WorkingTreeBar } from "@/components/git/marks"
+import { MergePullDialog } from "@/components/git/merge-pull-dialog"
+import { PullRequestRow } from "@/components/git/pull-request-row"
+import { TestPullDialog } from "@/components/git/test-pull-dialog"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { Modal } from "@/components/modal"
 import { Tag } from "@/components/tag"
+import { Button } from "@/components/ui/button"
 import { SpotlightBorder } from "@/components/ui/spotlight-border"
+import type { Verb } from "@/components/verbs"
+
+/** One checkout's entry in the pull-request summary: its open pull requests and who deploys it. */
+export type RepoPulls = GitPullRequestSummary["repos"][number]
+type Deployment = RepoPulls["deployments"][number]
+
+/** How many pull requests a card shows before it says "and N more". */
+const STRIP = 3
 
 /**
  * One checkout on this host, as the card a git client draws for a repository.
@@ -30,19 +57,129 @@ import { SpotlightBorder } from "@/components/ui/spotlight-border"
  * on a line of its own left half a wide screen empty beside it, and thirty
  * repositories became a page nobody scrolls.
  *
+ * Under those, when GitHub has open pull requests for the checkout, a strip
+ * of up to three of them: what is waiting to be merged is the other half of
+ * "which of these needs me", and it used to be a tab inside the workspace,
+ * one click and a scroll away from the question. Each is a choice of its
+ * own with its own verbs — test it as a preview, merge it, open it — inside
+ * a container that stops the press reaching the card, because a card that
+ * opens the repository when its "Merge" is pressed is the defect
+ * `ChoiceRow`'s actions slot exists to prevent.
+ *
  * It is a **choice**, not a reading: every row here is a repository to enter,
  * which §15 pass 3 and §16 both settle — the lit edge belongs to things you
  * pick, wherever they are. The title is a real button whose accessible name is
  * the repository, and the press on the card around it is the convenience for
  * the pointer (§12).
  */
-export function RepoRow({ repo, onOpen }: { repo: GitRepo; onOpen: () => void }) {
+export function RepoRow({
+  repo,
+  pulls,
+  onOpen,
+  onOpenPull,
+  onPullsChanged,
+}: {
+  repo: GitRepo
+  /** The checkout's open pull requests and its deploy projects, once the summary has arrived. */
+  pulls?: RepoPulls
+  onOpen: () => void
+  /** Opens the workspace's GitHub tab — on one pull request when given a number. */
+  onOpenPull?: (number?: number) => void
+  onPullsChanged?: () => void
+}) {
+  const { can } = useAuth()
+  const router = useRouter()
+  const [testing, setTesting] = useState<{ pull: GitPullRequest; deployment: Deployment }>()
+  const [choosing, setChoosing] = useState<GitPullRequest>()
+  const [merging, setMerging] = useState<GitPullRequest>()
+  // The retry in flight, so no row offers a second one until it answers.
+  const [retrying, setRetrying] = useState(false)
+  const open = pulls?.pulls ?? []
+  const deployments = pulls?.deployments ?? []
+  const changed = () => onPullsChanged?.()
+
+  // A failed removal is retried as the run it was, through the run's own
+  // retry route — as the Overview retries it — against the project the
+  // preview names; a checkout deployed by one project is that project.
+  const projectOf = (preview: DeploymentPreview) =>
+    preview.projectId ?? (deployments.length === 1 ? deployments[0].projectId : undefined)
+  const retryCleanup = async (
+    projectId: number,
+    run: NonNullable<DeploymentPreview["lastRun"]>,
+  ) => {
+    setRetrying(true)
+    try {
+      const created = await post<DeploymentEngineRun>(
+        `/deploy/${projectId}/runs/${run.id}/retry`,
+        {},
+      )
+      changed()
+      router.push(`/deploy/${projectId}/runs/${created.id}`)
+    } catch (error) {
+      notify.error("Could not retry the cleanup", error)
+      setRetrying(false)
+    }
+  }
+
+  const verbsFor = (p: GitPullRequest): Verb[] => {
+    const verbs: Verb[] = []
+    const built = p.preview
+    // Held while its preview is ready at this commit, building, closing or
+    // waiting on a failed cleanup: the Overview's rule, so the two pages
+    // never disagree about whether pressing it builds anything.
+    if (can("system.admin") && deployments.length > 0 && canTest(p) && !previewHeld(built)) {
+      verbs.push({
+        key: "test",
+        label: previewOutOfDate(built) ? "Update preview" : "Test this pull request",
+        detail:
+          "Build this exact commit as a preview environment of the project, reachable only on your tailnet.",
+        icon: Play,
+        run: () =>
+          deployments.length === 1
+            ? setTesting({ pull: p, deployment: deployments[0] })
+            : setChoosing(p),
+      })
+    }
+    if (built?.lastRun && cleanupFailed(built) && can("service.control")) {
+      const projectId = projectOf(built)
+      const run = built.lastRun
+      if (projectId)
+        verbs.push({
+          key: "retry-cleanup",
+          label: "Retry cleanup",
+          detail: "Run the failed removal again, so its containers and address are freed.",
+          icon: RotateCounterClockwise,
+          progressive: "Retrying…",
+          disabled: retrying,
+          run: () => void retryCleanup(projectId, run),
+        })
+    }
+    if (can("service.control")) {
+      verbs.push({
+        key: "merge",
+        label: "Merge",
+        detail: "Merge it into its base branch on GitHub.",
+        icon: SourceMerge,
+        disabled: p.draft,
+        run: () => setMerging(p),
+      })
+    }
+    verbs.push({
+      key: "github",
+      label: "Open on GitHub",
+      detail: "The request's own page, with the conversation and the review.",
+      icon: External,
+      run: () => window.open(p.url, "_blank", "noopener"),
+    })
+    return verbs
+  }
+
   return (
     <li className="min-w-0">
       <SpotlightBorder radius={420}>
         <div
           onClick={onOpen}
-          className="group flex min-w-0 cursor-pointer items-center gap-3 rounded-xl px-3.5 py-2.5"
+          className="group/repo flex min-w-0 cursor-pointer items-center gap-3 rounded-xl px-3.5 py-2.5"
         >
           <div className="min-w-0 flex-1 space-y-1">
             {/* What it is. The path takes the slack, so a wide screen spends
@@ -78,6 +215,10 @@ export function RepoRow({ repo, onOpen }: { repo: GitRepo; onOpen: () => void })
               {repo.detached && <Tag tone="danger">detached</Tag>}
               {repo.gone && <Tag tone="danger">upstream gone</Tag>}
               {!repo.detached && !repo.empty && !repo.upstream && <Tag>not published</Tag>}
+              {/* gh could not answer for this checkout — not signed in as its
+                  owner, most often. One quiet word, with gh's own sentence a
+                  hover away; the card is still the repository. */}
+              {pulls?.error && <Tag title={pulls.error}>pull requests unavailable</Tag>}
               <p
                 className="min-w-0 flex-1 truncate font-mono text-hint text-muted-foreground"
                 title={repo.path}
@@ -116,14 +257,96 @@ export function RepoRow({ repo, onOpen }: { repo: GitRepo; onOpen: () => void })
                 </span>
               </span>
             </div>
+
+            {/* What is waiting to be merged. The container swallows the
+                press: each row and each verb in it is a control of its own,
+                and none of them is "open the repository". */}
+            {open.length > 0 && (
+              <div onClick={(event) => event.stopPropagation()} className="pt-1.5">
+                <ChoiceList aria-label={`Pull requests in ${repo.name}`}>
+                  {open.slice(0, STRIP).map((p) => (
+                    <PullRequestRow
+                      key={p.number}
+                      compact
+                      pull={p}
+                      verbs={verbsFor(p)}
+                      onOpen={onOpenPull ? () => onOpenPull(p.number) : undefined}
+                    />
+                  ))}
+                </ChoiceList>
+                {open.length > STRIP && onOpenPull && (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    className="mt-1 text-muted-foreground"
+                    onClick={() => onOpenPull()}
+                  >
+                    and {open.length - STRIP} more
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
 
           <ArrowRight
             aria-hidden
-            className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground"
+            className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover/repo:text-foreground"
           />
         </div>
       </SpotlightBorder>
+
+      {/* The dialogs stand beside the card, not inside it: a press in a
+          portal still bubbles through the React tree, and inside the card
+          it would open the repository under the dialog. */}
+      {choosing && (
+        <Modal
+          open
+          onOpenChange={(o) => !o && setChoosing(undefined)}
+          title={`Which project tests #${choosing.number}?`}
+          description={`${deployments.length} projects deploy ${pulls?.repository ?? repo.name}.`}
+          size="sm"
+        >
+          <ChoiceList>
+            {deployments.map((d) => (
+              <ChoiceRow
+                key={d.projectId}
+                title={d.name}
+                verb={`Test in ${d.name}`}
+                description={`project ${d.projectId}`}
+                onSelect={() => {
+                  setTesting({ pull: choosing, deployment: d })
+                  setChoosing(undefined)
+                }}
+              />
+            ))}
+          </ChoiceList>
+        </Modal>
+      )}
+      {testing && (
+        <TestPullDialog
+          open
+          onOpenChange={(o) => !o && setTesting(undefined)}
+          projectId={testing.deployment.projectId}
+          projectName={testing.deployment.name}
+          pull={testing.pull}
+          preview={testing.pull.preview}
+          onStarted={(runId) => {
+            changed()
+            router.push(`/deploy/${testing.deployment.projectId}/runs/${runId}`)
+          }}
+          onRefresh={changed}
+        />
+      )}
+      {merging && (
+        <MergePullDialog
+          open
+          onOpenChange={(o) => !o && setMerging(undefined)}
+          repoPath={repo.path}
+          pull={merging}
+          headSha={merging.headSha}
+          onMerged={changed}
+        />
+      )}
     </li>
   )
 }

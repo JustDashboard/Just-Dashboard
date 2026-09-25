@@ -38,6 +38,26 @@
           "detail": "A checkout on GitLab or Gitea takes the provider, its address, the project and an access token. The token is sealed, belongs to that checkout and its Linux owner, and never becomes a git argument. Requests can then be listed, read with their files and conversation, opened, reviewed and merged the way GitHub's are."
         },
         {
+          "kind": "added",
+          "text": "Test a pull request as a preview that only your tailnet can reach",
+          "detail": "Test this pull request, on the Git page's card or on a project's Overview, builds that pull request's exact head as a preview environment of the project: its own container, storage and network, production untouched. Pressing it is the administrator's approval of that commit, so nothing is built from a webhook alone, and a pull request from a fork says so and asks to be read first. Production's variables can be copied in for a pull request from the same repository (never for a fork; references to databases, credentials and domains are left out) and are dropped again when the preview closes. The preview answers at https://<node>.<tailnet>.ts.net:<port>, published by tailscale serve on a port between 21000 and 21999 and reachable from nowhere else; a tailnet without certificates gets http. Merging, on either page or on GitHub, closes the preview and production redeploys as it would for any merge, and the dashboard asks GitHub about every open preview once a minute, so this works on an install no webhook can reach. Close preview removes it by hand; a preview whose pull request moved on says Out of date and offers Update preview."
+        },
+        {
+          "kind": "added",
+          "text": "Pull requests, their checks and the repository's issues, on the Git page and on a project's Overview",
+          "detail": "A repository's card on the Git page carries its open pull requests — author, title, branches, how the checks stand, where its preview is — with Merge, Test this pull request and Open on GitHub on each row, and a Pull requests chip narrows the list to the checkouts that have one. The workspace's GitHub tab lists the repository's open issues under the pull requests, with a comment box, and a pull request's preview reads its check runs against the exact head being looked at, each with a link to its details. A project deploying a GitHub repository shows the same pull requests on its Overview, with the preview built from each, and its card on the Projects page says how many are open. Merging from either page pins the commit that was read, so a push in between is refused rather than merged unseen."
+        },
+        {
+          "kind": "changed",
+          "text": "The GitHub App also reads check runs",
+          "detail": "The App's manifest now asks for read access to checks, which is how a pull request's check runs are shown without a signed-in account. An App created before this does not have the permission until its owner accepts it on GitHub, under the App's settings, and each installation approves it; until then the dashboard shows the commit statuses and says the check runs could not be read."
+        },
+        {
+          "kind": "fixed",
+          "text": "A preview could not fetch the pull request's head it was approved for",
+          "detail": "The ref a GitHub preview is configured to build, refs/pull/N/head, was refused by the source validator as an unknown namespace, and had it passed, the fetch would have looked for it under refs/heads. Both are fixed, so a preview fetches the pull request's head from the base repository as intended."
+        },
+        {
           "kind": "fixed",
           "text": "Signing in to GitHub on the Git page also works from the Terminal and over ssh",
           "detail": "The sign-in wrote a credential helper naming the dashboard container's own copy of gh, which does not exist on the host, so any git push from the Terminal page or an ssh shell failed with \"/usr/bin/gh: not found\" while the Git page said the account was set up. The helper now names gh without a path, so each side runs its own copy against the same token. An install signed in before this shows a warning on the account button once; Use this account for git rewrites the line. The installer now puts gh on the host, so a new install has it; an existing one gets it by running sudo ./install.sh again."

@@ -38,7 +38,8 @@ It manages exactly one machine. There is no fleet view, no agents to enrol, no c
   Qdrant, NocoDB and more, one click each — and every card says whether you create the first
   account yourself, sign in with a password this server generated, or find no sign-in page at all.
 - **Automatic Git deployments, previews and notifications.** Push to deploy, approved previews
-  per pull request, and every run reported to Discord, Slack, Telegram, e-mail, a webhook and
+  per pull request — test one from the Git page or a project's overview at an address only your
+  tailnet can reach — and every run reported to Discord, Slack, Telegram, e-mail, a webhook and
   the commit's status on GitHub.
 - **Backups that know what is not backed up.** Every volume, stack, deployment, repository and
   database listed, one press from a job, with writers frozen while the archive is taken.

@@ -30,6 +30,7 @@ import type { DeploymentEngineRun, DeploymentRuntimeServices, DeploymentSummary 
 import type { ConfirmRequest, useConfirm } from "@/components/confirm-dialog"
 import type { Verb } from "@/components/verbs"
 import { FormFact } from "@/components/form"
+import { SourcePull } from "@/components/git/glyphs"
 import { ProductGlyph } from "@/components/product-logo"
 import type { ProjectOperation } from "@/components/deploy/project-context"
 import { ProjectMark } from "@/components/deploy/project-mark"
@@ -42,6 +43,7 @@ import {
   runFailed,
   runTitle,
   sourceLine,
+  sourceProduct,
 } from "@/components/deploy/vocabulary"
 
 type Confirm = ReturnType<typeof useConfirm>["confirm"]
@@ -119,9 +121,10 @@ export function projectCommand(verbs: Verb[]) {
  * the header's button and the menu share one request in flight, and a card
  * passes `useProjectStart`'s. `navigation` adds the ways into the project and
  * Visit inline, for a surface that is not already inside it. `runtime` names
- * the live containers for Open in Docker; `onVersion` and `onDuplicate` open
- * the dialogs the page owns. Archiving leaves by `onArchived`, which is the
- * list's refresh unless the caller has somewhere to go.
+ * the live containers for Open in Docker; `onVersion`, `onTestPull` and
+ * `onDuplicate` open the dialogs the page owns. Archiving leaves by
+ * `onArchived`, which is the list's refresh unless the caller has somewhere
+ * to go.
  */
 export function useProjectVerbs(
   summary: DeploymentSummary,
@@ -134,6 +137,7 @@ export function useProjectVerbs(
     archived = false,
     navigation = false,
     onVersion,
+    onTestPull,
     onDuplicate,
     onArchived,
   }: {
@@ -145,6 +149,7 @@ export function useProjectVerbs(
     archived?: boolean
     navigation?: boolean
     onVersion?: () => void
+    onTestPull?: () => void
     onDuplicate?: () => void
     onArchived?: () => void
   },
@@ -387,6 +392,26 @@ export function useProjectVerbs(
       group: "Building",
       disabled: busy,
       run: onVersion,
+    })
+  }
+  // Testing a pull request is the administrator's approval of its head, so
+  // it takes the capability approving a preview does, not service control;
+  // and it builds in the preview's own environment, so a production run in
+  // flight is no reason to hold it back.
+  if (
+    can("system.admin") &&
+    !archived &&
+    summary.sourceKind === "git" &&
+    sourceProduct(summary) === "github" &&
+    onTestPull
+  ) {
+    verbs.push({
+      key: "test-pull",
+      label: "Test a pull request…",
+      detail: "Build an open pull request as a preview, reachable only on your tailnet.",
+      icon: SourcePull,
+      group: "Building",
+      run: onTestPull,
     })
   }
 

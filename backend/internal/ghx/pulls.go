@@ -48,12 +48,24 @@ type PullRequest struct {
 	Body      string `json:"body,omitempty"`
 	HeadSHA   string `json:"headSha,omitempty"`
 	BaseSHA   string `json:"baseSha,omitempty"`
+	// HeadRepository is the owner/name the head branch lives in. It differs
+	// from the base repository exactly when Fork is set, and a preview built
+	// from it runs that repository's code on this server — which is why both
+	// are said rather than derived.
+	HeadRepository string    `json:"headRepository,omitempty"`
+	Fork           bool      `json:"fork,omitempty"`
+	UpdatedAt      time.Time `json:"updatedAt,omitempty"`
+	Labels         []string  `json:"labels,omitempty"`
+	Merged         bool      `json:"merged,omitempty"`
 }
 
 // pullFields is what `gh pr list` and `gh pr view` are asked for. The review
 // decision and the check rollup are cheap; mergeable is left to the detail
 // read because GitHub computes it lazily and a list should not wait for it.
-const pullFields = "number,title,url,state,isDraft,headRefName,baseRefName,author,createdAt,comments,reviewDecision,statusCheckRollup"
+// The head commit and its repository are in the list because a preview is
+// approved for an exact head, and the list is where the button is.
+const pullFields = "number,title,url,state,isDraft,headRefName,baseRefName,author,createdAt,comments,reviewDecision,statusCheckRollup," +
+	"headRefOid,headRepository,headRepositoryOwner,isCrossRepository,updatedAt,labels,mergedAt"
 
 // ghPull is gh's JSON for one pull request, with only the fields read here.
 type ghPull struct {
@@ -82,6 +94,20 @@ type ghPull struct {
 	Body         string `json:"body"`
 	HeadSHA      string `json:"headRefOid"`
 	BaseSHA      string `json:"baseRefOid"`
+	// HeadRepository is null once a fork has been deleted, which leaves the
+	// name empty rather than failing the read.
+	HeadRepository struct {
+		Name string `json:"name"`
+	} `json:"headRepository"`
+	HeadRepositoryOwner struct {
+		Login string `json:"login"`
+	} `json:"headRepositoryOwner"`
+	IsCrossRepository bool      `json:"isCrossRepository"`
+	UpdatedAt         time.Time `json:"updatedAt"`
+	Labels            []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
+	MergedAt *time.Time `json:"mergedAt"`
 }
 
 func (p ghPull) pullRequest() PullRequest {
@@ -93,6 +119,17 @@ func (p ghPull) pullRequest() PullRequest {
 		Mergeable: strings.ToLower(p.Mergeable),
 		Additions: p.Additions, Deletions: p.Deletions, Files: p.ChangedFiles, Body: p.Body,
 		HeadSHA: p.HeadSHA, BaseSHA: p.BaseSHA,
+		Fork:      p.IsCrossRepository,
+		UpdatedAt: p.UpdatedAt,
+		Merged:    p.MergedAt != nil || strings.EqualFold(p.State, "MERGED"),
+	}
+	if p.HeadRepositoryOwner.Login != "" && p.HeadRepository.Name != "" {
+		pr.HeadRepository = p.HeadRepositoryOwner.Login + "/" + p.HeadRepository.Name
+	}
+	for _, l := range p.Labels {
+		if l.Name != "" {
+			pr.Labels = append(pr.Labels, l.Name)
+		}
 	}
 	// The rollup mixes two shapes — a status context carries `state`, a check
 	// run carries `status` and `conclusion` — and one failure outranks any
@@ -160,19 +197,38 @@ func (s *Service) RepoInfo(ctx context.Context, dir string) (*Repo, error) {
 // ListPulls returns pull requests, newest first. state is open, closed,
 // merged or all; anything else reads as open.
 func (s *Service) ListPulls(ctx context.Context, dir, state string, limit int) ([]PullRequest, error) {
-	if !s.Available() {
-		return nil, ErrNotInstalled
-	}
-	if limit <= 0 || limit > 100 {
-		limit = 30
-	}
 	switch state {
 	case "open", "closed", "merged", "all":
 	default:
 		state = "open"
 	}
-	out, err := s.run(ctx, dir, "", "pr", "list",
-		"--state", state, "--limit", fmt.Sprint(limit), "--json", pullFields)
+	return s.listPulls(ctx, dir, nil, state, limit)
+}
+
+// ListPullsIn lists the pull requests of a named repository rather than of a
+// checkout: dir "" runs as the dashboard's own account, a directory as the
+// account that owns it. state is open, closed, merged or all, and unlike
+// ListPulls an unknown state is refused rather than read as open, because
+// the callers here pass a request's word through and a typo should be told.
+func (s *Service) ListPullsIn(ctx context.Context, dir, nameWithOwner, state string, limit int) ([]PullRequest, error) {
+	if !validRepoName(nameWithOwner) {
+		return nil, fmt.Errorf("%q is not an owner/repository name", nameWithOwner)
+	}
+	switch state {
+	case "open", "closed", "merged", "all":
+	default:
+		return nil, fmt.Errorf("state %q is not one of open, closed, merged or all", state)
+	}
+	return s.listPulls(ctx, dir, []string{"--repo", nameWithOwner}, state, limit)
+}
+
+func (s *Service) listPulls(ctx context.Context, dir string, where []string, state string, limit int) ([]PullRequest, error) {
+	if !s.Available() {
+		return nil, ErrNotInstalled
+	}
+	args := append([]string{"pr", "list"}, where...)
+	args = append(args, "--state", state, "--limit", fmt.Sprint(clampLimit(limit, 30)), "--json", pullFields)
+	out, err := s.run(ctx, dir, "", args...)
 	if err != nil {
 		return nil, ghErr("list pull requests", out)
 	}
@@ -187,17 +243,47 @@ func (s *Service) ListPulls(ctx context.Context, dir, state string, limit int) (
 	return pulls, nil
 }
 
+// clampLimit keeps a page size inside what gh will serve in one call: nothing
+// asked for means the caller's usual page, more than a hundred means a hundred.
+func clampLimit(limit, fallback int) int {
+	if limit <= 0 {
+		return fallback
+	}
+	if limit > 100 {
+		return 100
+	}
+	return limit
+}
+
+// pullDetailFields is what ViewPull asks for beyond the list: the lazily
+// computed mergeability, the size of the change and the body.
+const pullDetailFields = pullFields + ",mergeable,additions,deletions,changedFiles,body,baseRefOid"
+
 // ViewPull reads one pull request in full: the list's fields plus whether
 // GitHub thinks it applies cleanly, the size of the change and its body.
 func (s *Service) ViewPull(ctx context.Context, dir string, number int) (*PullRequest, error) {
+	return s.viewPull(ctx, dir, nil, number)
+}
+
+// ViewPullIn reads one pull request of a named repository; dir chooses the
+// credential the way ListPullsIn describes.
+func (s *Service) ViewPullIn(ctx context.Context, dir, nameWithOwner string, number int) (*PullRequest, error) {
+	if !validRepoName(nameWithOwner) {
+		return nil, fmt.Errorf("%q is not an owner/repository name", nameWithOwner)
+	}
+	return s.viewPull(ctx, dir, []string{"--repo", nameWithOwner}, number)
+}
+
+func (s *Service) viewPull(ctx context.Context, dir string, where []string, number int) (*PullRequest, error) {
 	if !s.Available() {
 		return nil, ErrNotInstalled
 	}
 	if number <= 0 {
 		return nil, fmt.Errorf("a pull request number is required")
 	}
-	out, err := s.run(ctx, dir, "", "pr", "view", fmt.Sprint(number),
-		"--json", pullFields+",mergeable,additions,deletions,changedFiles,body,headRefOid,baseRefOid")
+	args := append([]string{"pr", "view", fmt.Sprint(number)}, where...)
+	args = append(args, "--json", pullDetailFields)
+	out, err := s.run(ctx, dir, "", args...)
 	if err != nil {
 		return nil, ghErr("read the pull request", out)
 	}
@@ -212,12 +298,28 @@ func (s *Service) ViewPull(ctx context.Context, dir string, number int) (*PullRe
 // MergePull merges a pull request on GitHub, the way the button on the
 // request's page does. method is merge, squash or rebase; deleteBranch
 // removes the head branch afterwards, which is what that page offers too.
+// headSHA, when given, is the commit the operator looked at: GitHub refuses
+// the merge if the branch has moved since, so a push that lands between the
+// review and the press merges nothing unseen. Empty leaves the head unpinned.
 //
 // This changes the base branch on the remote, so it sits under
 // service.control with a confirmation rather than being a click: it is the
 // most consequential thing this page can do to a shared repository, and it
 // is also exactly the thing an operator reviewing from a phone wants.
-func (s *Service) MergePull(ctx context.Context, dir string, number int, method string, deleteBranch bool) error {
+func (s *Service) MergePull(ctx context.Context, dir string, number int, method string, deleteBranch bool, headSHA string) error {
+	return s.mergePull(ctx, dir, nil, number, method, deleteBranch, headSHA)
+}
+
+// MergePullIn merges a pull request of a named repository; dir chooses the
+// credential the way ListPullsIn describes.
+func (s *Service) MergePullIn(ctx context.Context, dir, nameWithOwner string, number int, method string, deleteBranch bool, headSHA string) error {
+	if !validRepoName(nameWithOwner) {
+		return fmt.Errorf("%q is not an owner/repository name", nameWithOwner)
+	}
+	return s.mergePull(ctx, dir, []string{"--repo", nameWithOwner}, number, method, deleteBranch, headSHA)
+}
+
+func (s *Service) mergePull(ctx context.Context, dir string, where []string, number int, method string, deleteBranch bool, headSHA string) error {
 	if !s.Available() {
 		return ErrNotInstalled
 	}
@@ -234,9 +336,16 @@ func (s *Service) MergePull(ctx context.Context, dir string, number int, method 
 	default:
 		return fmt.Errorf("merge method %q is not one of merge, squash or rebase", method)
 	}
-	args := []string{"pr", "merge", fmt.Sprint(number), flag}
+	if headSHA != "" && !fullSHA.MatchString(headSHA) {
+		return fmt.Errorf("the head commit to match is not a full SHA")
+	}
+	args := append([]string{"pr", "merge", fmt.Sprint(number)}, where...)
+	args = append(args, flag)
 	if deleteBranch {
 		args = append(args, "--delete-branch")
+	}
+	if headSHA != "" {
+		args = append(args, "--match-head-commit", headSHA)
 	}
 	if out, err := s.run(ctx, dir, "", args...); err != nil {
 		return ghErr("merge the pull request", out)

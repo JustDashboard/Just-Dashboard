@@ -10,10 +10,12 @@ import type {
   DeploymentActiveWork,
   DeploymentEngineRun,
   DeploymentSummary,
+  FleetPullRequests,
   TrafficPulse,
 } from "@/lib/types"
 import type { useConfirm } from "@/components/confirm-dialog"
 import { CONTROL, ChoiceRow } from "@/components/flow"
+import { SourcePull } from "@/components/git/glyphs"
 import { BranchChip, CommitLine, ShortSha } from "@/components/git/marks"
 import { Sparkline } from "@/components/metrics/sparkline"
 import { ProductGlyph, ProductGlyphs, imageProducts } from "@/components/product-logo"
@@ -69,10 +71,14 @@ import { FAILING_NOTICE, failingTone } from "@/components/deploy/fleet"
 
 type Confirm = ReturnType<typeof useConfirm>["confirm"]
 
+/** A project's open pull requests and the previews built from them, from the fleet-wide read. */
+type ProjectPulls = FleetPullRequests["projects"][string]
+
 type ProjectProps = {
   deployment: DeploymentSummary
   /** The last hour at the ingress, from the fleet-wide pulse. */
   pulse?: TrafficPulse
+  pulls?: ProjectPulls
   /** The fleet's own line for the run in flight: its stage and place in the queue. */
   work?: DeploymentActiveWork
   confirm: Confirm
@@ -231,6 +237,26 @@ function LastActivity({ deployment }: { deployment: DeploymentSummary }) {
 }
 
 /**
+ * What is open against the repository: its pull requests, and how many of
+ * them are running as previews. A count in plain text on the pull request's
+ * own glyph, the way the services count sits beside it — not a `Tag`, which
+ * is for a property, and not a `Status`, which is for a state.
+ */
+function PullLine({ pulls }: { pulls?: ProjectPulls }) {
+  if (!pulls || (pulls.open === 0 && pulls.previews === 0)) return null
+  const words = [
+    pulls.open > 0 && plural(pulls.open, "pull request"),
+    pulls.previews > 0 && plural(pulls.previews, "preview"),
+  ].filter(Boolean)
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1">
+      <SourcePull aria-hidden className="size-3 shrink-0" />
+      {words.join(" · ")}
+    </span>
+  )
+}
+
+/**
  * Where a project comes from — the part of the source line it opens with. A
  * row has no room for a repository's name beside its branch and commit, so it
  * leaves it to the forge's mark; nor for the products a stack runs, which the
@@ -238,9 +264,11 @@ function LastActivity({ deployment }: { deployment: DeploymentSummary }) {
  */
 function SourceOrigin({
   deployment: d,
+  pulls,
   compact,
 }: {
   deployment: DeploymentSummary
+  pulls?: ProjectPulls
   compact?: boolean
 }) {
   const services = (d.serviceCount ?? 0) > 1 ? plural(d.serviceCount ?? 0, "service") : undefined
@@ -263,6 +291,7 @@ function SourceOrigin({
           {!runCommit(d.lastRun)?.subject && <ShortSha sha={shortRevision(d.sourceRevision)} />}
           {services && <span className="shrink-0">{services}</span>}
           {services && !compact && <ProductGlyphs ids={runs} />}
+          <PullLine pulls={pulls} />
         </>
       )
     }
@@ -319,9 +348,11 @@ function SourceOrigin({
  */
 export function SourceSummary({
   deployment,
+  pulls,
   compact,
 }: {
   deployment: DeploymentSummary
+  pulls?: ProjectPulls
   compact?: boolean
 }) {
   const commit =
@@ -331,7 +362,7 @@ export function SourceSummary({
   if (compact) {
     return (
       <span className="flex max-w-full min-w-0 items-center gap-1.5">
-        <SourceOrigin deployment={deployment} compact />
+        <SourceOrigin deployment={deployment} pulls={pulls} compact />
         {commit?.subject && (
           <span className="min-w-0 truncate text-foreground/80">{commit.subject}</span>
         )}
@@ -341,7 +372,7 @@ export function SourceSummary({
   return (
     <div className="min-w-0 space-y-1.5 text-hint text-muted-foreground">
       <p className="flex min-w-0 items-center gap-1.5">
-        <SourceOrigin deployment={deployment} />
+        <SourceOrigin deployment={deployment} pulls={pulls} />
       </p>
       {commit?.subject && (
         <CommitLine
@@ -422,6 +453,7 @@ function RowTraffic({ pulse }: { pulse: TrafficPulse }) {
 export function ProjectCard({
   deployment,
   pulse,
+  pulls,
   work,
   confirm,
   refresh,
@@ -497,7 +529,7 @@ export function ProjectCard({
               </div>
             </div>
 
-            <SourceSummary deployment={deployment} />
+            <SourceSummary deployment={deployment} pulls={pulls} />
 
             {/* The traffic sits on the footer rather than under the source, so
                 the lines of a row of cards share one baseline whether or not
@@ -541,6 +573,7 @@ export function ProjectCard({
 export function ProjectRow({
   deployment,
   pulse,
+  pulls,
   work,
   confirm,
   refresh,
@@ -585,7 +618,7 @@ export function ProjectRow({
       verb={`Open ${deployment.name}`}
       leading={<ProjectMark deployment={deployment} size="sm" />}
       title={deployment.name}
-      description={<SourceSummary deployment={deployment} compact />}
+      description={<SourceSummary deployment={deployment} pulls={pulls} compact />}
       trailing={
         wide ? (
           <>

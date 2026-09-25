@@ -154,9 +154,10 @@ func (p *CommitStatusPublisher) target(ctx context.Context, run EngineRun) (comm
 	}, true
 }
 
-// githubRepository accepts only a remote that is unambiguously github.com;
-// a GitHub Enterprise host or another provider yields nothing.
-func githubRepository(source SourceIdentity) string {
+// GitHubRepository is the owner/name behind a source identity, accepting
+// only a remote that is unambiguously github.com; a GitHub Enterprise host
+// or another provider yields nothing.
+func GitHubRepository(source SourceIdentity) string {
 	remote := strings.TrimSpace(source.Remote)
 	if remote == "" {
 		return ""
@@ -177,6 +178,8 @@ func githubRepository(source SourceIdentity) string {
 	}
 	return repository
 }
+
+func githubRepository(source SourceIdentity) string { return GitHubRepository(source) }
 
 func sanitizeStatusContext(environment string) string {
 	environment = strings.TrimSpace(environment)

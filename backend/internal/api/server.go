@@ -150,12 +150,33 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	s.modules.deploySchedule.Start(ctx)
 	s.modules.trafficAlerts.Start(ctx)
-	if err := s.modules.deployEngine.Start(ctx); err != nil {
+	if err := s.startDeployEngine(ctx); err != nil {
 		return err
 	}
 	s.modules.deployGit.Start(ctx)
+	s.modules.previewReconciler.Start(ctx)
 	s.modules.deployDatabases.Start(ctx)
 	return nil
+}
+
+// startDeployEngine puts tailscale's serve config and the preview address
+// table in agreement, then starts the engine — in that order. A restart may
+// have left a served port whose preview is gone, or a preview recorded as
+// reachable that nothing serves, and both are put right before any preview
+// page reads the record. The engine comes second because a run it resumes at
+// boot may publish a preview the moment it starts, and a sweep still reading
+// the config would take that fresh mapping for a dead one.
+func (s *Server) startDeployEngine(ctx context.Context) error {
+	sweepCtx, sweepCancel := context.WithTimeout(ctx, 2*time.Minute)
+	sweep, err := s.modules.deployExecutor.SweepTailnet(sweepCtx)
+	sweepCancel()
+	if len(sweep.Withdrawn) > 0 || len(sweep.Unpublished) > 0 {
+		s.Log.Info("tailnet preview addresses reconciled", "withdrawnPorts", sweep.Withdrawn, "unpublishedEnvironments", sweep.Unpublished)
+	}
+	if err != nil {
+		s.Log.Warn("tailnet preview addresses need attention", "error", err)
+	}
+	return s.modules.deployEngine.Start(ctx)
 }
 
 // Shutdown releases the resources that outlive a request: database pools,
@@ -163,6 +184,7 @@ func (s *Server) Start(ctx context.Context) error {
 func (s *Server) Shutdown() {
 	s.modules.deployPreviews.Stop()
 	s.modules.deployGit.Stop()
+	s.modules.previewReconciler.Stop()
 	s.modules.deployDatabases.Stop()
 	// Stop fresh claims first. Active work is given a bounded grace to reach a
 	// persisted boundary; Engine.Shutdown never injects a cancellation into an

@@ -178,12 +178,25 @@ Startup-timeout failures include bounded PTY output to distinguish launch failur
 ## GitHub sign-in
 
 `internal/ghx` exists because the honest answer to "why did my push ask for a password" used to be an ssh
-session.
+session. It has since grown into the GitHub half of the git page — sign-in, pull requests listed, viewed,
+reviewed, merged and checked out, check runs, issues, comments and Actions logs — and the reader the
+deploy pages use for the repository a project deploys.
 
 - **Everything is per repository.** gh stores its token under the home of whichever account runs it and
   writes a credential helper into that account's git config; gitx already runs git as the account that
   *owns the checkout* (`hostexec.AsOwner`), so ghx runs gh the same way. Sign in as root, push as
-  `deploy`, and the push is anonymous again. Every route takes `?path=`.
+  `deploy`, and the push is anonymous again. The routes about a checkout take `?path=`, and it is not
+  decoration: it names whose credential answers. `/repos`, `/branches` and `/avatar` take none, and the
+  sign-in routes accept an empty one, which means the dashboard's own account — the one every root-owned
+  checkout uses. **Where the answer decides what this server builds, the checkout is not consulted.**
+  The deploy pages' reads (`api.pullRequests`) and the preview reconciler go to the GitHub App's
+  installation where the App is installed on the repository, else to the dashboard's own login (`dir ""`),
+  never to a checkout matched by remote: a host account owning a checkout under `JD_GIT_ROOTS` would
+  otherwise supply the head commit the dashboard builds and runs. The Git page keeps reading as the
+  checkout's owner for display and for that owner's own actions; its merge, once it succeeds, reconciles
+  the repository's previews through the trusted identity (`reconcileCheckoutMerge`) and drops the deploy
+  pages' caches, and signing the dashboard's own account in or out (`/auth/device/{id}`, `/auth/token`,
+  `/auth/logout` with no path) drops their cached "not signed in" answer (`ForgetLogin`).
 - **gh is in the image, not borrowed from the host** — the host's copy runs as the host's root in the
   host's namespaces, and the account that pushes would see neither token nor helper. From this image both
   land in the same account's home, bind-mounted. `gh auth setup-git` writes the helper as its own
@@ -224,16 +237,38 @@ session.
 - **`gh auth status` is parsed, because it has no `--json` and never will.** It is written for a person,
   so the wording is the contract; `parseAuthStatus` matches both wordings gh has shipped and `ghx_test.go`
   pins them. Every field is optional, so a rewording costs a scope list rather than the page.
-- **Pull requests are the one thing git has no verb for.** `CreatePull` shells to `gh pr create` and the
+- **Pull requests are the thing git has no verb for.** `CreatePull` shells to `gh pr create` and the
   handler pushes the branch first, since gh refuses an unseen branch and its remedy is an interactive
   prompt. That is also why `gitx.Push` sets the upstream itself rather than repeating git's advice.
   `ListPulls` takes a state (open, closed, merged, all) and folds each request's review decision and
   status-check rollup into one word each — one failing check outranks any number of passes, one pending
-  outranks passes — so the row can say "checks failed" without a second call; `ViewPull` adds what
-  GitHub computes lazily (mergeable, additions, deletions, changed files, body). `MergePull` runs
-  `gh pr merge` with merge, squash or rebase and an optional `--delete-branch`; `CheckoutPull` runs
-  `gh pr checkout`; `ListRuns` reads `gh run list` for a branch. Merging and checking out sit under
-  `service.control` like every other recoverable git write, and each is audited with the request number.
+  outranks passes — so the row can say "checks failed" without a second call; it also carries the head
+  commit (`headSha`), the head repository and whether it is a fork (`isCrossRepository`), labels,
+  `updatedAt` and `merged`. `ViewPull` adds what GitHub computes lazily (mergeable, additions, deletions,
+  changed files, body). `MergePull` runs `gh pr merge` with merge, squash or rebase, an optional
+  `--delete-branch` and, when the request carries `headSha`, `--match-head-commit <sha>`, so a push that
+  lands between reading and merging is refused by GitHub rather than merged unseen; `CheckoutPull` runs
+  `gh pr checkout`; `ListRuns` reads `gh run list` for a branch. The `…In` variants — `ListPullsIn`,
+  `ViewPullIn`, `MergePullIn` — address a repository by name with `--repo owner/name` instead of a
+  checkout, with `dir ""` running as the dashboard's own account, and refuse an unknown state rather
+  than reading it as open; they are what the deploy pages and the reconciler use. `PullChecks` reads a
+  commit's check runs and its combined status (`gh api repos/o/r/commits/<sha>/check-runs` and
+  `…/status`, a hundred each) and folds both into one list in the check run's vocabulary — a status
+  context becomes `completed/success`, `completed/failure` or `in_progress/pending`, a third-party
+  `details_url` is kept only when it is http(s) — and refuses a malformed sha or repository before gh
+  runs. `ListIssues` runs `gh issue list --repo --state --limit --json`; `CommentIssue` posts
+  `{"body"}` on gh's stdin to `gh api repos/o/r/issues/<n>/comments --method POST --input -`, which takes
+  a pull request's number as readily as an issue's, so a body is never an argument. On the page:
+  `GET /pulls/{number}/checks?path=&head=` (the full head sha is required, so a listing's checks never
+  describe an older commit), `GET /issues?path=&state=&limit=` (open by default) and, under
+  `service.control`, `POST /pulls/{number}/comment?path=` (`{body}`, trimmed, at most 60000 bytes,
+  audited `github.pull.comment` with the number and never the text). Merging, checking out and
+  commenting sit under `service.control` like every other recoverable git write, and each is audited
+  with the request number. The list page reads `GET /git/pull-requests` once a minute: every checkout
+  under the roots that is on github.com, each read as its owner, at most four gh at a time inside a
+  20-second budget and cached 60 s per path, with the previews the deploy projects built from each
+  request joined in — the Git page can then say where a request's preview stands without knowing
+  anything about deploy projects itself.
   `gitConfigured` answers "would a commit and push from this page be this account's" with one dot, and
   knows an **ssh** remote never consults a credential helper.
 - **Reviews stay on the viewed revision.** `/pulls/{number}/files` pages through changed-file patches,

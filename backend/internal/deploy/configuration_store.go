@@ -627,7 +627,111 @@ func (s *PlanningStore) DeleteVariable(
 	return desired, nil
 }
 
+// CopyEnvironmentVariables copies an environment's active variables into a
+// preview of the same project, values and all, and marks each copy with the
+// environment it came from so closing the preview can drop exactly those.
+// It copies whenever it is asked, replacing the preview's earlier copies, so
+// a re-test carries production's current values and nothing production has
+// since removed. References are skipped: a ${{database…}} or ${{credential…}}
+// link would reach past the preview's isolation into production's resources,
+// and a ${{variable…}} alias is only meaningful beside its target. A key the
+// operator set in the preview itself is skipped too and reported with them:
+// closing the preview drops only copies, so a copy that superseded the
+// preview's own value would lose it for good.
+func (s *PlanningStore) CopyEnvironmentVariables(
+	ctx context.Context,
+	projectID, fromEnvironmentID, toEnvironmentID int64,
+	actor string,
+) (copied, skipped []string, err error) {
+	if strings.TrimSpace(actor) == "" {
+		return nil, nil, fmt.Errorf("%w: actor is required", ErrInvalidVariable)
+	}
+	if fromEnvironmentID == toEnvironmentID {
+		return nil, nil, fmt.Errorf("%w: an environment cannot copy its own variables", ErrPreviewIsolation)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+	if err := previewEnvironmentKindTx(ctx, tx, projectID, toEnvironmentID); err != nil {
+		return nil, nil, err
+	}
+	values, err := s.activeVariableValues(ctx, tx, projectID, fromEnvironmentID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE deploy_variable_revisions SET active = 0
+		 WHERE environment_id = ? AND copied_from_environment <> 0 AND active = 1`, toEnvironmentID); err != nil {
+		return nil, nil, err
+	}
+	own, err := s.ownVariableKeysTx(ctx, tx, toEnvironmentID)
+	if err != nil {
+		return nil, nil, err
+	}
+	copied, skipped = []string{}, []string{}
+	for _, value := range values {
+		if strings.HasPrefix(value.value, "${{") || own[value.name] {
+			skipped = append(skipped, value.name)
+			continue
+		}
+		if err := s.writeVariableRevisionTx(ctx, tx, toEnvironmentID, value.name, value.value, value.sensitivity, value.scopes, actor); err != nil {
+			return nil, nil, err
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE deploy_variable_revisions SET copied_from_environment = ?
+			 WHERE environment_id = ? AND key = ? AND active = 1`, fromEnvironmentID, toEnvironmentID, value.name); err != nil {
+			return nil, nil, err
+		}
+		copied = append(copied, value.name)
+	}
+	if err := s.validateActiveVariableGraphTx(ctx, tx, toEnvironmentID); err != nil {
+		return nil, nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, nil, err
+	}
+	return copied, skipped, nil
+}
+
+// ownVariableKeysTx is every key whose active value was written in the
+// environment itself rather than copied into it.
+func (s *PlanningStore) ownVariableKeysTx(ctx context.Context, tx *sql.Tx, environmentID int64) (map[string]bool, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT key FROM deploy_variable_revisions
+		 WHERE environment_id = ? AND active = 1 AND copied_from_environment = 0`, environmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	keys := map[string]bool{}
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		keys[key] = true
+	}
+	return keys, rows.Err()
+}
+
+// DeactivateCopiedVariables drops the variables an environment copied from
+// another one and reports how many it dropped. Variables written in the
+// environment itself are untouched.
+func (s *PlanningStore) DeactivateCopiedVariables(ctx context.Context, environmentID int64) (int, error) {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE deploy_variable_revisions SET active = 0
+		 WHERE environment_id = ? AND copied_from_environment <> 0 AND active = 1`, environmentID)
+	if err != nil {
+		return 0, err
+	}
+	affected, _ := result.RowsAffected()
+	return int(affected), nil
+}
+
 func (s *PlanningStore) writeVariableRevisionTx(
+
 	ctx context.Context,
 	tx *sql.Tx,
 	environmentID int64,

@@ -1,6 +1,6 @@
 import { percent, relativeTime } from "@/lib/format"
 import { perMinute } from "@/lib/requests"
-import type { DeploymentSummary, TrafficPulse } from "@/lib/types"
+import type { DeploymentSummary, FleetPullRequests, TrafficPulse } from "@/lib/types"
 import type { Finding } from "@/components/finding-list"
 import type { Tone } from "@/components/tone"
 import { imageProducts } from "@/components/product-logo"
@@ -25,6 +25,9 @@ import {
 /** Every project's last hour at the ingress, keyed by project id as `/deploy/traffic` answers. */
 export type FleetPulses = Record<string, TrafficPulse> | undefined
 
+/** Every GitHub project's open pull requests and previews, keyed by project id as `/deploy/pull-requests` answers. */
+export type FleetPulls = FleetPullRequests["projects"]
+
 /** A request share this high is a site failing, not a site having a bad minute. */
 export const FAILING_SHARE = 0.05
 
@@ -40,7 +43,7 @@ export function failingTone(rate: number): Tone {
   return rate >= FAILING_SHARE ? "danger" : rate >= FAILING_NOTICE ? "warning" : "default"
 }
 
-export type FleetFilter = "all" | "deploying" | "failed" | "attention" | "pending"
+export type FleetFilter = "all" | "deploying" | "failed" | "attention" | "pending" | "pulls"
 
 export const FLEET_FILTERS: { key: FleetFilter; label: string }[] = [
   { key: "all", label: "All" },
@@ -48,6 +51,7 @@ export const FLEET_FILTERS: { key: FleetFilter; label: string }[] = [
   { key: "failed", label: "Failed" },
   { key: "attention", label: "Attention" },
   { key: "pending", label: "Changes pending" },
+  { key: "pulls", label: "Pull requests" },
 ]
 
 function pulseOf(deployment: DeploymentSummary, pulses: FleetPulses) {
@@ -72,10 +76,17 @@ export function needsAttention(deployment: DeploymentSummary, pulses: FleetPulse
   )
 }
 
+/**
+ * `pulls` is the fleet's pull-request read, which arrives on its own clock
+ * and only for GitHub projects: a project it has no entry for has none open,
+ * and until it answers no project has, so the chip stays hidden rather than
+ * counting a read that has not landed.
+ */
 export function matchesFilter(
   deployment: DeploymentSummary,
   filter: FleetFilter,
   pulses: FleetPulses,
+  pulls: FleetPulls = {},
 ) {
   switch (filter) {
     case "deploying":
@@ -86,17 +97,23 @@ export function matchesFilter(
       return needsAttention(deployment, pulses)
     case "pending":
       return deployment.pendingChanges
+    case "pulls":
+      return (pulls[String(deployment.id)]?.open ?? 0) > 0
     default:
       return true
   }
 }
 
 /** How many projects each chip would leave, for the count it carries. */
-export function fleetCounts(deployments: DeploymentSummary[], pulses: FleetPulses) {
+export function fleetCounts(
+  deployments: DeploymentSummary[],
+  pulses: FleetPulses,
+  pulls: FleetPulls = {},
+) {
   return Object.fromEntries(
     FLEET_FILTERS.map(({ key }) => [
       key,
-      deployments.filter((deployment) => matchesFilter(deployment, key, pulses)).length,
+      deployments.filter((deployment) => matchesFilter(deployment, key, pulses, pulls)).length,
     ]),
   ) as Record<FleetFilter, number>
 }
