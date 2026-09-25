@@ -437,7 +437,7 @@ func phpCandidate(marker *detectedMarkers, rootLabel string) DetectedCandidate {
 	}
 	candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: source,
 		Reason: "production php.ini; forwarded HTTPS honoured behind the platform proxy"})
-	if hosts := append(append([]string{}, project.privateRepositories...), project.vcsRepositories...); len(hosts) > 0 && !project.authJSON {
+	if hosts := slices.Concat(project.privateRepositories, project.otherRepositories, project.vcsRepositories); len(hosts) > 0 && !project.authJSON {
 		candidate.Variables = withInstallVariables(candidate.Variables, []DetectedVariable{{
 			Name: "COMPOSER_AUTH", Sources: []string{boundedEvidenceSentence("composer.json repositories (" + strings.Join(hosts, ", ") + ")")},
 			Step: "install", InstallRequired: len(project.privateRepositories) > 0,

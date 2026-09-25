@@ -1455,14 +1455,21 @@ runs `composer update --no-dev … --with-all-dependencies <those packages>`, ke
 version. A `require-dev` mismatch is `composer_lock_dev_outdated`, which this build does not meet. No lock
 at all is `dependencies_unpinned`, whose action says to commit composer.lock and whose means say that
 Composer refuses to resolve a version with a security advisory. A Laravel application that registers a
-`require-dev` package's provider for every environment (`bootstrap/providers.php` or `config/app.php`,
-the application's own provider followed to the package it extends — Telescope, IDE Helper, Debugbar,
-Dusk, …) is `laravel_dev_provider_registered` (blocked): `package:discover` boots it and the build stops
-on "Class … not found"; a registration guarded by `environment(`/`isLocal(`/`class_exists(` is not
-counted. A Composer repository on a host other than Packagist (Nova, Spark, a paid store, a private
-Satis) or a VCS repository, without a committed `auth.json`, adds `COMPOSER_AUTH` as an install-scoped
-variable — `registry_token_missing` blocks while a Composer repository's is missing and warns for a VCS
-one — and a VCS repository off GitHub, or a locked package without an archive, installs `git` first.
+`require-dev` package's provider for every environment (`bootstrap/providers.php`, or the `providers`
+of `config/app.php` — never its `aliases`, facades resolved only when called — with an `App\Providers`
+class followed through what it `extends`, resolved by its `use` imports, to the package's provider —
+Telescope, IDE Helper, Debugbar, Dusk, …) is `laravel_dev_provider_registered` (blocked):
+`package:discover` boots it and the build stops on "Class … not found". A registration guarded by
+`environment(`/`isLocal(`/`class_exists(` is not counted, nor is what a provider's body mentions:
+Telescope's local-only installation registers the package inside `AppServiceProvider::register`, which
+extends Laravel's own provider. A Composer repository needs credentials by its host: a paid or private
+store (Nova, Spark, Private Packagist, Magento's marketplace, Flux Pro, Spatie, ACF Pro, Anystack's
+`*.composer.sh`, Repman) adds `COMPOSER_AUTH` as an install-scoped variable that `registry_token_missing`
+blocks on while it is missing; a public one (Packagist and its mirrors, WPackagist, `packages.drupal.org`,
+Asset Packagist, Firegento) — the Bedrock, Drupal recommended-project and Yii templates list them — or a
+URL that carries its own user and password adds nothing; any other host, and a VCS repository, adds the
+same variable with a warning, since it may be public. A committed `auth.json` supplies them all. A VCS
+repository off GitHub, or a locked package without an archive, installs `git` first.
 FrankenPHP does not read `.htaccess`, so one with access or rewrite rules is a `php_htaccess_ignored`
 warning, and a plain PHP application served from the repository root (`--root /app`) is a
 `php_docroot_is_repository_root` warning: dependencies, lockfiles and logs under it are reachable

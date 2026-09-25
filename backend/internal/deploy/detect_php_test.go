@@ -566,6 +566,53 @@ func TestPrivateComposerRepositories(t *testing.T) {
 	if slices.ContainsFunc(candidate.Variables, func(variable DetectedVariable) bool { return variable.Name == "COMPOSER_AUTH" }) {
 		t.Fatal("a committed auth.json still asked for COMPOSER_AUTH")
 	}
+
+	// The public stores the Bedrock, Drupal and Yii templates list, and a
+	// URL that carries its own credentials, need nothing; a host neither
+	// public nor a known paid store may, which is a warning.
+	for _, fixture := range []struct {
+		name     string
+		files    map[string]string
+		severity PreflightSeverity
+	}{
+		{"bedrock", map[string]string{
+			"composer.json": `{"name":"roots/bedrock","require":{"php":">=8.2","roots/wordpress":"^6.8","wpackagist-plugin/akismet":"^5.3"},"repositories":[{"type":"composer","url":"https://wpackagist.org","only":["wpackagist-plugin/*","wpackagist-theme/*"]}],"extra":{"wordpress-install-dir":"web/wp"}}`,
+			"web/index.php": "<?php", "web/wp-config.php": "<?php",
+		}, ""},
+		{"drupal recommended-project", map[string]string{
+			"composer.json": `{"name":"drupal/recommended-project","require":{"drupal/core-recommended":"^11.2","drupal/core-composer-scaffold":"^11.2"},"repositories":[{"type":"composer","url":"https://packages.drupal.org/8"}],"extra":{"drupal-scaffold":{"locations":{"web-root":"web/"}}}}`,
+			"web/index.php": "<?php",
+		}, ""},
+		{"yii2 basic", map[string]string{
+			"composer.json": `{"name":"yiisoft/yii2-app-basic","require":{"php":">=7.4.0","yiisoft/yii2":"~2.0.45"},"repositories":{"asset-packagist":{"type":"composer","url":"https://asset-packagist.org"}}}`,
+			"web/index.php": "<?php",
+		}, ""},
+		{"credentials in the URL", map[string]string{
+			"composer.json":    `{"require":{"slim/slim":"^4"},"repositories":[{"type":"composer","url":"https://deploy:token@satis.acme.test"}]}`,
+			"public/index.php": "<?php",
+		}, ""},
+		{"an unknown store", map[string]string{
+			"composer.json":    `{"require":{"slim/slim":"^4"},"repositories":[{"type":"composer","url":"https://satis.acme.test"}]}`,
+			"public/index.php": "<?php",
+		}, PreflightWarning},
+		{"a paid store", map[string]string{
+			"composer.json":    `{"require":{"slim/slim":"^4","acme/pro":"^1"},"repositories":[{"type":"composer","url":"https://acme-pro.composer.sh"}]}`,
+			"public/index.php": "<?php",
+		}, PreflightBlocked},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			t.Parallel()
+			candidate, _, findings := phpPlan(t, fixture.files)
+			missing := findingByCode(findings, "registry_token_missing")
+			requested := slices.ContainsFunc(candidate.Variables, func(variable DetectedVariable) bool { return variable.Name == "COMPOSER_AUTH" })
+			switch {
+			case fixture.severity == "" && (missing != nil || requested):
+				t.Fatalf("a public repository asked for credentials: %+v %+v", missing, candidate.Variables)
+			case fixture.severity != "" && (missing == nil || missing.Severity != fixture.severity):
+				t.Fatalf("registry_token_missing = %+v", missing)
+			}
+		})
+	}
 }
 
 // A require-dev package's provider registered for every environment stops
@@ -590,6 +637,38 @@ func TestLaravelDevProviderUnderNoDev(t *testing.T) {
 	candidate, _, findings = phpPlan(t, files)
 	if len(candidate.PHP.DevProviders) != 0 || findingByCode(findings, "laravel_dev_provider_registered") != nil {
 		t.Fatalf("a local-only registration was refused: %v", candidate.PHP.DevProviders)
+	}
+
+	// Telescope's local-only installation registers the package inside
+	// AppServiceProvider, which extends Laravel's own provider; Laravel 10's
+	// config/app.php aliases a dev package's facade, which is resolved only
+	// when called. Neither is a registration package:discover boots.
+	telescope := laravelTree(map[string]string{
+		"composer.json":           `{"require":{"php":"^8.2","laravel/framework":"^12.0"},"require-dev":{"laravel/telescope":"^5.0","barryvdh/laravel-debugbar":"^3.14"}}`,
+		"bootstrap/providers.php": "<?php\nreturn [\n    App\\Providers\\AppServiceProvider::class,\n];\n",
+		"app/Providers/AppServiceProvider.php": "<?php\nnamespace App\\Providers;\n\nuse Illuminate\\Support\\ServiceProvider;\n\nclass AppServiceProvider extends ServiceProvider\n{\n    public function register(): void\n    {\n" +
+			"        if ($this->app->environment('local') && class_exists(\\Laravel\\Telescope\\TelescopeServiceProvider::class)) {\n" +
+			"            $this->app->register(\\Laravel\\Telescope\\TelescopeServiceProvider::class);\n            $this->app->register(TelescopeServiceProvider::class);\n        }\n    }\n}\n",
+		"app/Providers/TelescopeServiceProvider.php": "<?php\nnamespace App\\Providers;\nuse Laravel\\Telescope\\TelescopeApplicationServiceProvider;\nclass TelescopeServiceProvider extends TelescopeApplicationServiceProvider {}\n",
+		"config/app.php": "<?php\nuse Illuminate\\Support\\Facades\\Facade;\nuse Illuminate\\Support\\ServiceProvider;\nreturn [\n    'name' => env('APP_NAME', 'Laravel'),\n" +
+			"    'providers' => ServiceProvider::defaultProviders()->merge([\n        /* The application's own providers */\n        App\\Providers\\AppServiceProvider::class,\n    ])->toArray(),\n" +
+			"    'aliases' => Facade::defaultAliases()->merge([\n        'Debugbar' => Barryvdh\\Debugbar\\Facades\\Debugbar::class,\n    ])->toArray(),\n];\n",
+	})
+	candidate, _, findings = phpPlan(t, telescope)
+	if len(candidate.PHP.DevProviders) != 0 || findingByCode(findings, "laravel_dev_provider_registered") != nil {
+		t.Fatalf("the local-only installation or a facade alias was refused: %v", candidate.PHP.DevProviders)
+	}
+	// The same config/app.php with the provider in its providers list, and an
+	// application provider that extends the package's under an alias, are.
+	telescope["config/app.php"] = strings.Replace(telescope["config/app.php"], "App\\Providers\\AppServiceProvider::class,\n    ])",
+		"App\\Providers\\AppServiceProvider::class,\n        Barryvdh\\Debugbar\\ServiceProvider::class,\n        App\\Providers\\Local\\Watcher::class,\n    ])", 1)
+	telescope["app/Providers/Local/Watcher.php"] = "<?php\nnamespace App\\Providers\\Local;\nuse Laravel\\Telescope\\TelescopeApplicationServiceProvider as Base;\nfinal class Watcher extends Base {}\n"
+	candidate, _, _ = phpPlan(t, telescope)
+	if !slices.Equal(candidate.PHP.DevProviders, []string{
+		`Barryvdh\Debugbar\ServiceProvider in config/app.php (barryvdh/laravel-debugbar is require-dev)`,
+		`App\Providers\Local\Watcher in config/app.php (laravel/telescope is require-dev)`,
+	}) {
+		t.Fatalf("dev providers = %v", candidate.PHP.DevProviders)
 	}
 }
 

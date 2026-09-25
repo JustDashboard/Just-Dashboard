@@ -8,6 +8,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -119,9 +120,11 @@ type phpProject struct {
 	devLockOutdated           []string
 	// git says Composer will clone a repository, which the image lacks.
 	git bool
-	// privateRepositories are the hosts of repositories that need
-	// credentials, and authJSON a committed auth.json that supplies them.
+	// privateRepositories are the hosts of Composer repositories known to
+	// answer only with credentials, otherRepositories those that may, and
+	// authJSON a committed auth.json that supplies them.
 	privateRepositories []string
+	otherRepositories   []string
 	vcsRepositories     []string
 	authJSON            bool
 	devProviders        []string
@@ -389,9 +392,38 @@ func (p *phpProject) readLock() {
 
 var composerPackageNameRE = regexp.MustCompile(`^[a-z0-9]([_.-]?[a-z0-9]+)*/[a-z0-9](([_.]|-{1,2})?[a-z0-9]+)*$`)
 
-// readRepositories finds the Composer repositories that need credentials:
-// a Composer repository on any host but Packagist (Nova, Spark, a paid
-// plugin store, a private Satis), and a VCS repository, which is cloned.
+// composerPublicRepositories are Composer repositories anyone installs
+// from: Packagist and its public mirrors, and the stores the WordPress
+// (Bedrock), Drupal, Yii and Magento templates list beside it.
+var composerPublicRepositories = map[string]bool{
+	"packagist.org": true, "repo.packagist.org": true, "wpackagist.org": true, "packages.drupal.org": true,
+	"asset-packagist.org": true, "packages.firegento.com": true, "wp-languages.github.io": true, "composer.typo3.org": true,
+	"mirrors.aliyun.com": true, "mirrors.tencent.com": true, "repo.huaweicloud.com": true, "packagist.phpcomposer.com": true,
+}
+
+// composerPrivateRepositories are stores that answer only with credentials:
+// Laravel's paid packages, Private Packagist, Magento's marketplace, and
+// the paid-package stores (Flux Pro, Spatie, ACF Pro, Delicious Brains,
+// Anystack's *.composer.sh, Repman).
+var composerPrivateRepositories = []string{
+	"nova.laravel.com", "spark.laravel.com", "repo.packagist.com", "repo.magento.com", "composer.fluxui.dev",
+	"satis.spatie.be", "connect.advancedcustomfields.com", "composer.deliciousbrains.com", "composer.sh", "repo.repman.io",
+}
+
+func composerPrivateRepository(host string) bool {
+	return slices.ContainsFunc(composerPrivateRepositories, func(store string) bool {
+		return host == store || strings.HasSuffix(host, "."+store)
+	})
+}
+
+// composerURLCredentialsRE is a URL that carries its own user and password,
+// which Composer sends without COMPOSER_AUTH.
+var composerURLCredentialsRE = regexp.MustCompile(`^[a-z][a-z0-9+.-]*://[^@/:]+:[^@/]+@`)
+
+// readRepositories finds the repositories that need credentials. A
+// Composer repository on a paid or private store needs them; one on a
+// public store (Packagist, WPackagist, Drupal's, Asset Packagist) does not,
+// and one on any other host may. A VCS repository is cloned, and may too.
 func (p *phpProject) readRepositories() {
 	if !p.parsed || len(p.manifest.Repositories) == 0 {
 		return
@@ -428,11 +460,15 @@ func (p *phpProject) readRepositories() {
 		}
 		switch strings.ToLower(kind) {
 		case "composer":
-			if host == "repo.packagist.org" || host == "packagist.org" {
+			if composerPublicRepositories[host] || composerURLCredentialsRE.MatchString(strings.ToLower(strings.TrimSpace(url))) {
 				continue
 			}
 			seen[host] = true
-			p.privateRepositories = append(p.privateRepositories, host)
+			if composerPrivateRepository(host) {
+				p.privateRepositories = append(p.privateRepositories, host)
+			} else {
+				p.otherRepositories = append(p.otherRepositories, host)
+			}
 		case "vcs", "git", "github", "gitlab", "bitbucket":
 			seen[host] = true
 			p.vcsRepositories = append(p.vcsRepositories, host)
@@ -689,13 +725,21 @@ var laravelDevNamespaces = []struct{ namespace, pkg string }{
 	{`Laravel\Pail`, "laravel/pail"}, {`NunoMaduro\Collision`, "nunomaduro/collision"},
 }
 
-var laravelProviderRE = regexp.MustCompile(`([A-Za-z_\\][A-Za-z0-9_\\]*)::class`)
+var (
+	laravelProviderRE     = regexp.MustCompile(`([A-Za-z_\\][A-Za-z0-9_\\]*)::class`)
+	laravelProvidersKeyRE = regexp.MustCompile(`['"]providers['"]\s*=>`)
+	phpClassExtendsRE     = regexp.MustCompile(`\bclass\s+[A-Za-z_][A-Za-z0-9_]*\s+extends\s+(\\?[A-Za-z_][A-Za-z0-9_\\]*)`)
+	phpUseRE              = regexp.MustCompile(`(?m)^\s*use\s+\\?([A-Za-z_][A-Za-z0-9_\\]*)(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?\s*;`)
+)
 
 // laravelDevProviders finds providers registered for every environment
 // whose classes come from require-dev packages: bootstrap/providers.php
-// (Laravel 11 and later) and config/app.php's list. The provider an
+// (Laravel 11 and later) and the providers of config/app.php — not its
+// aliases, facades Laravel resolves only when called. The provider an
 // application writes for Telescope lives in app/Providers and extends the
-// package's own, so its file is read too.
+// package's own, so that class is followed through what it extends; what
+// its body mentions is not a registration (Telescope's local-only
+// installation registers the package inside an environment check).
 func laravelDevProviders(files nodeFiles, project phpProject) []string {
 	if project.framework != "laravel" || len(project.manifest.RequireDev) == 0 {
 		return nil
@@ -707,7 +751,11 @@ func laravelDevProviders(files nodeFiles, project phpProject) []string {
 		if err != nil {
 			continue
 		}
-		for _, line := range strings.Split(string(content), "\n") {
+		text := string(content)
+		if source == "config/app.php" {
+			text = phpArrayValue(text, laravelProvidersKeyRE)
+		}
+		for _, line := range strings.Split(text, "\n") {
 			if strings.Contains(line, "environment(") || strings.Contains(line, "isLocal(") || strings.Contains(line, "class_exists(") ||
 				strings.HasPrefix(strings.TrimSpace(line), "//") {
 				continue
@@ -715,16 +763,9 @@ func laravelDevProviders(files nodeFiles, project phpProject) []string {
 			for _, match := range laravelProviderRE.FindAllStringSubmatch(line, -1) {
 				class := strings.TrimPrefix(match[1], `\`)
 				pkg := laravelDevPackage(class)
-				if pkg == "" && strings.HasPrefix(class, `App\Providers\`) {
-					file := "app/Providers/" + strings.TrimPrefix(class, `App\Providers\`) + ".php"
-					if body, err := files.read(file, phpSmallFile); err == nil {
-						for _, entry := range laravelDevNamespaces {
-							if strings.Contains(string(body), entry.namespace+`\`) {
-								pkg = entry.pkg
-								break
-							}
-						}
-					}
+				for parent, depth := class, 0; pkg == "" && strings.HasPrefix(parent, `App\Providers\`) && depth < 3; depth++ {
+					parent = phpParentClass(files, parent)
+					pkg = laravelDevPackage(parent)
 				}
 				if pkg != "" && devOnly(pkg) && len(found) < 8 {
 					found = append(found, class+" in "+source+" ("+pkg+" is require-dev)")
@@ -733,6 +774,86 @@ func laravelDevProviders(files nodeFiles, project phpProject) []string {
 		}
 	}
 	return found
+}
+
+// phpParentClass is the fully qualified class an App\Providers class
+// extends, resolved the way PHP does: a leading backslash is absolute, a
+// name whose first segment a `use` import aliases is that import, anything
+// else is in the file's namespace.
+func phpParentClass(files nodeFiles, class string) string {
+	relative := strings.TrimPrefix(class, `App\Providers\`)
+	body, err := files.read("app/Providers/"+strings.ReplaceAll(relative, `\`, "/")+".php", phpSmallFile)
+	if err != nil {
+		return ""
+	}
+	declaration := phpClassExtendsRE.FindSubmatchIndex(body)
+	if declaration == nil {
+		return ""
+	}
+	parent := string(body[declaration[2]:declaration[3]])
+	if strings.HasPrefix(parent, `\`) {
+		return strings.TrimPrefix(parent, `\`)
+	}
+	first, rest, nested := strings.Cut(parent, `\`)
+	// Imports come before the class; a `use` inside its body is a trait.
+	for _, use := range phpUseRE.FindAllSubmatch(body[:declaration[0]], 64) {
+		imported := string(use[1])
+		alias := string(use[2])
+		if alias == "" {
+			alias = imported[strings.LastIndex(imported, `\`)+1:]
+		}
+		if alias == first {
+			if nested {
+				return imported + `\` + rest
+			}
+			return imported
+		}
+	}
+	if namespace := phpNamespaceRE.FindSubmatch(body[:declaration[0]]); namespace != nil {
+		return string(namespace[1]) + `\` + parent
+	}
+	return parent
+}
+
+// phpArrayValue is the source text of one key's value in a PHP array
+// literal: from `'key' =>` to the comma that ends it at the same depth, or
+// the bracket that closes the array around it. Strings and comments are
+// stepped over; the file is read as text, never run.
+func phpArrayValue(text string, key *regexp.Regexp) string {
+	location := key.FindStringIndex(text)
+	if location == nil {
+		return ""
+	}
+	start, depth := location[1], 0
+	for i := start; i < len(text); i++ {
+		switch c := text[i]; {
+		case c == '\'' || c == '"':
+			for i++; i < len(text) && text[i] != c; i++ {
+				if text[i] == '\\' {
+					i++
+				}
+			}
+		case (c == '#' && !strings.HasPrefix(text[i:], "#[")) || strings.HasPrefix(text[i:], "//"):
+			for i < len(text) && text[i] != '\n' {
+				i++
+			}
+		case strings.HasPrefix(text[i:], "/*"):
+			end := strings.Index(text[i+2:], "*/")
+			if end < 0 {
+				return text[start:]
+			}
+			i += end + 3
+		case c == '[' || c == '(':
+			depth++
+		case c == ']' || c == ')':
+			if depth--; depth < 0 {
+				return text[start:i]
+			}
+		case c == ',' && depth == 0:
+			return text[start:i]
+		}
+	}
+	return text[start:]
 }
 
 func laravelDevPackage(class string) string {
