@@ -3,6 +3,7 @@ package deploy
 import (
 	"os"
 	"path"
+	"slices"
 	"strings"
 )
 
@@ -34,10 +35,26 @@ var recipeInputNames = map[string]bool{
 	"deno.json": true, "deno.jsonc": true, "deno.lock": true,
 	"composer.json": true, "composer.lock": true, "artisan": true, "index.php": true, "index.html": true,
 	"prisma": true, "drizzle.config.ts": true, "drizzle.config.js": true,
-	"gradle.properties": true, "buildSrc": true, "build-logic": true, ".sdkmanrc": true, ".tool-versions": true,
-	"system.properties": true, "mise.toml": true, ".mise.toml": true,
-	"Directory.Build.props": true, "Directory.Build.targets": true, "Directory.Packages.props": true, "global.json": true,
-	"NuGet.Config": true, "nuget.config": true, "NuGet.config": true,
+}
+
+// jvmVersionFiles are the files a JDK pin is read from (javaVersionPin)
+// besides .java-version, which every recipe keeps.
+var jvmVersionFiles = []string{".sdkmanrc", ".tool-versions", "system.properties", "mise.toml", ".mise.toml"}
+
+// languageRecipeInputs are the root files a recipe reads by name, kept for
+// that recipe alone: a rule leaving out a directory called project/, a
+// manifest.toml or a .tool-versions means nothing to a Node or static
+// build, which would then copy or serve the file.
+var languageRecipeInputs = map[string][]string{
+	"java": append([]string{"gradle.properties", "buildSrc", "build-logic"}, jvmVersionFiles...),
+	"dotnet": {"Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props", "global.json",
+		"NuGet.Config", "nuget.config", "NuGet.config", ".tool-versions", "mise.toml", ".mise.toml"},
+	"ruby":    {"Gemfile", "Gemfile.lock", ".ruby-version", ".tool-versions", "config.ru", "Rakefile"},
+	"elixir":  {"mix.exs", "mix.lock", ".tool-versions", ".elixir-version", "elixir_buildpack.config"},
+	"scala":   append([]string{"build.sbt", "project"}, jvmVersionFiles...),
+	"clojure": append([]string{"project.clj", "deps.edn", "build.clj"}, jvmVersionFiles...),
+	"dart":    {"pubspec.yaml", "pubspec.lock"},
+	"gleam":   {"gleam.toml", "manifest.toml"},
 }
 
 // recipeInputPrefixes are framework configuration files, named per tool.
@@ -70,7 +87,7 @@ func recipeDockerignore(repository []byte, rootNames []string, kind string, inst
 	rules := parseDockerignore(repository)
 	inputs := []string{}
 	for _, name := range rootNames {
-		if recipeInput(name) {
+		if recipeInput(name) || slices.Contains(languageRecipeInputs[kind], name) {
 			inputs = append(inputs, name)
 		}
 	}
@@ -131,7 +148,7 @@ func recipeDockerignore(repository []byte, rootNames []string, kind string, inst
 	// These come last so that no repository rule can bring them back.
 	lines = append(lines, "**/node_modules", ".dockerignore", ".just-dashboard", ".just-dashboard-build-metadata-*")
 	switch kind {
-	case "static", "php", "node", "deno":
+	case "static", "php", "node", "deno", "ruby":
 		// Served or copied whole into the runtime image; the history and
 		// remote a checkout carries are nobody's business there. Toolchains
 		// that stamp or version builds from Git (Go, Python's setuptools-scm,

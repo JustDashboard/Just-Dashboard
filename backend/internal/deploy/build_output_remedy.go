@@ -118,8 +118,9 @@ var nodeManagerLockfiles = map[string]string{
 	"npm": "package-lock.json", "bun": "bun.lock", "pnpm": "pnpm-lock.yaml", "yarn": "yarn.lock",
 }
 
-// languageTools are commands that belong to a language the automatic recipes
-// never install, so "not found" means the repository needs its own Dockerfile.
+// languageTools are commands that belong to another language than the one
+// this build's image installs, so "not found" means the repository needs
+// that language's recipe, or a Dockerfile when it has none.
 var languageTools = map[string]string{
 	"bundle": "Ruby", "ruby": "Ruby", "rails": "Ruby", "rake": "Ruby", "mix": "Elixir", "elixir": "Elixir",
 	"dart": "Dart", "flutter": "Flutter", "swift": "Swift", "sbt": "Scala", "lein": "Clojure",
@@ -684,7 +685,13 @@ func (c *BuildCause) runtimeVersion(subject string) (string, string) {
 	case "php":
 		return "composer.json requires PHP " + subject, "set `require.php` to a release the recipe offers, or build with a Dockerfile"
 	case "ruby":
-		return "the Gemfile requires Ruby " + subject, "build with a Dockerfile that installs that release"
+		return "the Gemfile requires Ruby " + subject, "name that release in .ruby-version — the recipe builds 3.3, 3.4 and 4.0 — or build with a Dockerfile"
+	case "elixir":
+		return "a dependency supports only Elixir " + orDefault(subject, "another release"), "name a release it supports in .tool-versions — the recipe builds 1.17 to 1.20 — or build with a Dockerfile"
+	case "dart":
+		return "the project requires Dart SDK " + orDefault(subject, "another release"), "widen environment: sdk in pubspec.yaml to a release the recipe builds (3.9 to 3.13), or build with a Dockerfile"
+	case "gleam":
+		return "the project requires another Gleam release" + parenthesized(subject), "widen the gleam requirement in gleam.toml, or build with a Dockerfile"
 	}
 	return "the project requires a " + c.Detail + " release the build does not run" + parenthesized(subject),
 		"build with a Dockerfile that provides it"
@@ -747,6 +754,10 @@ func (c *BuildCause) commandNotFound(subject string) (string, string) {
 	case fix != nil:
 		return "`" + subject + "` is not installed in the image this build runs on",
 			"run the command with the build's package manager: `" + fix.Value + "`"
+	case languageTools[subject] != "" && languageToolRecipe[languageTools[subject]] != "":
+		language := languageTools[subject]
+		return "`" + subject + "` belongs to " + language + ", which this build's image does not include",
+			"choose the " + language + " builder in Build settings, which builds with " + language
 	case languageTools[subject] != "":
 		return "`" + subject + "` belongs to " + languageTools[subject] + ", which this build's image does not include",
 			"build this part of the repository with a Dockerfile that installs " + languageTools[subject]

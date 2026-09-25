@@ -787,8 +787,30 @@ const FRAMEWORK_LABELS: Record<string, string> = {
   laravel: "Laravel",
   symfony: "Symfony",
   slim: "Slim",
+  ruby: "Ruby",
   rails: "Rails",
+  hanami: "Hanami",
+  sinatra: "Sinatra",
+  elixir: "Elixir",
   phoenix: "Phoenix",
+  scala: "Scala",
+  play: "Play",
+  http4s: "http4s",
+  "akka-http": "Akka HTTP",
+  "pekko-http": "Pekko HTTP",
+  "zio-http": "ZIO HTTP",
+  clojure: "Clojure",
+  ring: "Ring",
+  compojure: "Compojure",
+  pedestal: "Pedestal",
+  "http-kit": "http-kit",
+  dart: "Dart",
+  dart_frog: "Dart Frog",
+  shelf: "shelf",
+  serverpod: "Serverpod",
+  gleam: "Gleam",
+  wisp: "Wisp",
+  mist: "Mist",
 }
 
 /** The Language select, in the order a reader expects to find their stack. */
@@ -801,6 +823,12 @@ export const RECIPE_LABELS: [DeploymentRecipe, string][] = [
   ["dotnet", ".NET"],
   ["deno", "Deno"],
   ["php", "PHP (Composer, FrankenPHP)"],
+  ["ruby", "Ruby (Rails, Hanami, Sinatra, Rack)"],
+  ["elixir", "Elixir (Phoenix, mix release)"],
+  ["scala", "Scala (sbt)"],
+  ["clojure", "Clojure (Leiningen or tools.build)"],
+  ["dart", "Dart (Dart Frog, shelf)"],
+  ["gleam", "Gleam (Erlang shipment)"],
 ]
 
 /**
@@ -817,6 +845,12 @@ export const RECIPE_SHORT: Record<DeploymentRecipe, string> = {
   dotnet: ".NET",
   deno: "Deno",
   php: "PHP",
+  ruby: "Ruby",
+  elixir: "Elixir",
+  scala: "Scala",
+  clojure: "Clojure",
+  dart: "Dart",
+  gleam: "Gleam",
 }
 
 /** How a project is built, in the word a reading uses beside its product. */

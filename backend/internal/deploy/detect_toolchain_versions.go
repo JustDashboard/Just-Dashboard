@@ -63,7 +63,7 @@ func javaVersionPin(files *buildFiles, dir string) (toolchainPin, int) {
 			}
 		}
 	}
-	if value := toolVersionsEntry(files, dir, "java"); value != "" {
+	if value := dirToolVersion(files, dir, "java"); value != "" {
 		if release := javaRelease(value); release > 0 {
 			return toolchainPin{version: strconv.Itoa(release), source: joinRootDir(dir, ".tool-versions")}, release
 		}
@@ -87,7 +87,7 @@ func javaVersionPin(files *buildFiles, dir string) (toolchainPin, int) {
 // dotnet or dotnet-core plugin, or mise's dotnet tool.
 func dotnetVersionPin(files *buildFiles, dir string) toolchainPin {
 	for _, tool := range []string{"dotnet", "dotnet-core"} {
-		if value := toolVersionsEntry(files, dir, tool); value != "" && dotnetSDKVersionRE.MatchString(value) {
+		if value := dirToolVersion(files, dir, tool); value != "" && dotnetSDKVersionRE.MatchString(value) {
 			return toolchainPin{version: value, source: joinRootDir(dir, ".tool-versions")}
 		}
 	}
@@ -97,22 +97,14 @@ func dotnetVersionPin(files *buildFiles, dir string) toolchainPin {
 	return toolchainPin{}
 }
 
-// toolVersionsEntry is the first version .tool-versions lists for a tool.
-func toolVersionsEntry(files *buildFiles, dir, tool string) string {
+// dirToolVersion is the first version the .tool-versions in dir lists for
+// a tool, read the way the language recipes read theirs (toolVersionsEntry).
+func dirToolVersion(files *buildFiles, dir, tool string) string {
 	content, ok := files.read(joinRootDir(dir, ".tool-versions"), 16<<10)
 	if !ok {
 		return ""
 	}
-	for _, line := range strings.Split(string(content), "\n") {
-		if index := strings.Index(line, "#"); index >= 0 {
-			line = line[:index]
-		}
-		fields := strings.Fields(line)
-		if len(fields) >= 2 && fields[0] == tool {
-			return boundedSpec(fields[1])
-		}
-	}
-	return ""
+	return boundedSpec(toolVersionsEntry(content, tool))
 }
 
 // miseTool is the version mise's configuration gives a tool under [tools]:

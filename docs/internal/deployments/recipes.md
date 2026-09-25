@@ -14,7 +14,9 @@ reactor it belongs to), `build.gradle(.kts)`, `settings.gradle(.kts)` and `gradl
 version files (`.java-version`, `.sdkmanrc`, `.tool-versions`, `mise.toml`, `system.properties`), and for
 a JavaScript package its lockfiles, `.npmrc`, `.yarnrc.yml`, `bunfig.toml`,
 `pnpm-workspace.yaml` and the Node and Bun version files (`.nvmrc`, `.node-version`, `.tool-versions`,
-`.bun-version`) — and names a candidate per root with the framework, the build and start commands, the port,
+`.bun-version`), `Gemfile`/`Gemfile.lock`/`.ruby-version`, `mix.exs`/`mix.lock`, `build.sbt` and
+`project/*.sbt`, `project.clj`, `deps.edn`/`build.clj`, `pubspec.yaml`/`pubspec.lock` and
+`gleam.toml`/`manifest.toml` — and names a candidate per root with the framework, the build and start commands, the port,
 static output, the interpreter or toolchain release, and the environment variables and databases the
 source reads. Every default is a plan field the configure form and the Build settings can change. A
 detected framework that the recipe cannot serve automatically (a provider adapter, a workspace without a
@@ -160,7 +162,9 @@ committed file whose value points at loopback.
   `AUTH_SECRET`/`NEXTAUTH_SECRET`, Better Auth, Payload, Rails' and Phoenix's `SECRET_KEY_BASE`,
   Django's `SECRET_KEY`/`DJANGO_SECRET_KEY` (only when its settings read that exact name), Flask's,
   Strapi's `APP_KEYS` (four keys) and salts, Directus `KEY`/`SECRET`, Medusa, AdonisJS, and
-  `SESSION_SECRET`/`COOKIE_SECRET`/`JWT_SECRET` beside the session or JWT library that signs with them,
+  `SESSION_SECRET`/`COOKIE_SECRET`/`JWT_SECRET` beside the session or JWT library that signs with them
+  (Sinatra's `SESSION_SECRET` as 128 hex characters, the 64 bytes Rack's cookie session wants), Play's
+  `APPLICATION_SECRET` (64 hex characters) whether or not the code names it,
   and a name another platform's file generates (render.yaml `generateValue`, app.json
   `generator: "secret"`) as 64 hex characters.
   Every rule is an exact name gated by the dependency that issues it to itself, so a provider's
@@ -184,6 +188,8 @@ committed file whose value points at loopback.
   `int()` read) on whichever variable the settings read it from (`DJANGO_DEBUG`) where they turn debug
   on by default — a settings module named `local`, `dev`, `test` and the like is a developer's and is
   not read for debug or a committed key; `SOLID_QUEUE_IN_PUMA=true` where Puma loads Solid Queue's plugin;
+  `RAILS_LOG_TO_STDOUT=1` where Rails 7.0 and earlier's `production.rb` otherwise logs to a file nothing
+  reads, so a failed request leaves nothing in the container's output;
   `AUTH_TRUST_HOST=true` for Auth.js v5, whose only ingress is the managed proxy. `NODE_ENV`, `PORT`
   and loopback URLs are never filled.
 - `paste` — a secret only the operator holds: Rails' `RAILS_MASTER_KEY` beside committed credentials,
@@ -205,7 +211,7 @@ longer one is cut and ends in a digest of the whole name, which the finding's `f
 
 The engines a source connects to are read from its dependencies (`pg`, `mysql2`, `mongoose`, `ioredis`,
 `psycopg`, `asyncpg`, `pymongo`, `redis`, `github.com/jackc/pgx`, …), from `Gemfile.lock`, `mix.exs`,
-`Cargo.toml` (sqlx, diesel and sea-orm features included), Maven and Gradle coordinates, `*.csproj`
+`Cargo.toml` (sqlx, diesel and sea-orm features included), Maven, Gradle, sbt, Leiningen and `deps.edn` coordinates, `*.csproj`
 package references, `Package.swift`, `pubspec.yaml` and Composer (`predis/predis`, `ext-pdo_pgsql`,
 …), from a Prisma datasource provider, from variable names and example URLs (`REDIS_URL`,
 `MONGODB_URI`, `postgres://…`), and from a committed real env file's URL scheme. Each engine quick
@@ -258,11 +264,12 @@ extra databases on quick-setup MySQL
 (`rails_multidb_create_denied`); a linked PostgreSQL without the schema's extension
 (`database_extension_missing`, blocked; the linked server is asked only when the schema needs an
 extension); MongoDB 5+ on a CPU without AVX or ARMv8.2 atomics
-(`database_cpu_unsupported`); a Laravel or Symfony start that migrates a database nobody linked
-(`database_required_for_start`, blocked); the callback, authorized-domain and webhook addresses to
-register with Auth.js providers, Better Auth, OmniAuth, django-allauth, Passport (named by the strategy
-constructed around its `callbackURL`), Auth0, Clerk, Firebase, Supabase and Stripe
-(`external_callback_registration`); a Clerk production key issued for another host
+(`database_cpu_unsupported`); a Laravel, Symfony, Rails, Hanami or Phoenix start that migrates a
+database nobody linked (`database_required_for_start`, blocked; read with the same pattern as the
+readiness budget's migrating starts, Ecto's inline migrator included); the callback, authorized-domain
+and webhook addresses to register with Auth.js providers, Better Auth, OmniAuth, django-allauth,
+Passport (named by the strategy constructed around its `callbackURL`), Auth0, Clerk, Firebase, Supabase
+and Stripe (`external_callback_registration`); a Clerk production key issued for another host
 (`clerk_key_domain_mismatch`: a warning on the same registrable domain, blocked on another); and a
 Phoenix release whose migrate overlay nothing runs
 (`migrations_not_run`). No finding repeats a secret value.
@@ -294,7 +301,8 @@ things break that silently: a server that ignores PORT and listens elsewhere, an
 readiness timeout that named neither. Detection now reads, as bounded text and never by running anything
 (`deploy/detect_listen.go`, `deploy/detect_network.go`):
 
-- **The start command**, following package scripts: `-p`/`--port N`, `--port=N`, a `PORT=N` prefix,
+- **The start command**, following package scripts and `bundle exec`: `-p`/`--port N` (`-p` for the
+  servers whose flag it is — Next.js, Vite, Rails, Puma, rackup, Unicorn and the like), `--port=N`, a `PORT=N` prefix,
   `--bind host:N`, `--server.port N`, `-Dserver.port=N`, `--urls URL`, `runserver [host:]N`, `$PORT` and
   `${PORT:-N}` (which follow PORT), and the defaults of servers that bind loopback or ignore PORT when
   told nothing: `vite preview` (4173), `astro preview` (4321), `uvicorn`, `hypercorn`, `daphne`,
@@ -405,7 +413,10 @@ When a candidate fails its readiness gate anyway, the diagnosis also reads its l
 runtime owner runs `cat /proc/net/tcp /proc/net/tcp6` inside the candidate's own container (closed
 argv, bounded output, only the parsed addresses kept; an image without `cat` reports nothing). A
 candidate listening only on loopback gets the cause `runtime_loopback_bind` with the listener as its
-subject, named in the failure message even when the application printed nothing.
+subject, named in the failure message even when the application printed nothing. A server whose startup
+line names the port it took — Puma, Bandit and Cowboy under Phoenix or Plug, Play's `Listening for HTTP
+on`, Jetty's connector under Ring, and the Node, Python, Go and JVM servers before them — and names
+another than the plan's gets `runtime_port_mismatch` with that port as the fix.
 
 ## Release commands
 
@@ -616,21 +627,23 @@ project step lists only the others. Octane is recorded as an alternative start c
 
 A root the builder has no recipe for is still named (`detect_ecosystems.go`), with a low-confidence
 candidate whose framework is the language or framework and whose `recipeIssue` says what to commit —
-which preflight's `recipe_unsupported` shows instead of "No deployable plan was detected". Rails
-(`rails new` has generated a production Dockerfile since 7.1; older applications use `dockerfile-rails`),
-Hanami, Sinatra and Rack, Jekyll and Middleman; Phoenix (`mix phx.gen.release --docker`) and Elixir;
-Crystal, Haskell, Zig, Swift, Scala, Clojure, Gleam, OCaml, Nim, Perl, Erlang, Dart, R Shiny and
-Plumber, C/C++ (CMake, Meson), Elm, Hugo, MkDocs and a Flutter web app. A web framework among the
-manifest's dependencies makes it a web service on its conventional port. A Rails, Hanami or Phoenix
-application owns its `package.json` (and `assets/package.json`): that asset pipeline is set aside rather
-than offered as a Node service — a CocoaPods or fastlane Gemfile beside a React Native app owns nothing.
+which preflight's `recipe_unsupported` shows instead of "No deployable plan was detected": Jekyll and
+Middleman; Crystal, Haskell, Zig, Swift, F#, OCaml, Nim, Perl, Erlang, R Shiny and Plumber, C/C++
+(CMake, Meson), Elm, Hugo, MkDocs and a Flutter web app. The same pass recognises Ruby, Elixir, Scala,
+Clojure, Dart and Gleam, which have recipes of their own ([Ruby](#ruby), [Elixir](#elixir),
+[Scala and Clojure](#scala-and-clojure), [Dart and Gleam](#dart-and-gleam)): their candidate is built
+from the recipe's own reading of the root (`detect_languages.go`), beside a Dockerfile when the root has
+one. A web framework among the manifest's dependencies makes it a web service on its conventional port.
+A Rails, Hanami or Phoenix application owns its `package.json` (and `assets/package.json`): that asset
+pipeline is set aside rather than offered as a Node service, and the Ruby or Elixir recipe installs and
+builds it — a CocoaPods or fastlane Gemfile beside a React Native app owns nothing.
 A site generator (Hugo, MkDocs, Jekyll, Middleman, Elm) owns a tooling-only `package.json` at its root
 the same way: a Hugo site with a Tailwind build used to be only a Node worker asking for a start command.
-With a Dockerfile at the same root the Dockerfile is the candidate, and it takes the framework, the
-processes and the database drivers. Every other language is named only when nothing else at its root
-is a candidate, and C/C++ and MkDocs never inside another candidate's root, where they are that
-application's vendored code or manual. Recipes for some of these are planned; each entry is removed when
-its recipe lands.
+With a Dockerfile at the same root the Dockerfile is the candidate — beside the recipe candidate for
+a language that has one — and it takes the framework, the processes and the database drivers. Every
+other language is named only when nothing else at its root is a candidate, and C/C++ and MkDocs never
+inside another candidate's root, where they are that application's vendored code or manual. Each entry
+is removed when its recipe lands.
 
 ## Submodules and Git LFS
 
@@ -823,9 +836,13 @@ Every recipe and static build writes `.just-dashboard/Dockerfile.dockerignore`, 
 place of the repository's own `.dockerignore` (`deploy/build_dockerignore.go`). It keeps the
 repository's rules except any that would leave out a file the recipe reads by name — a manifest,
 lockfile, framework configuration, Prisma schema — which is `dockerignore_drops_recipe_input`, a warning
-that the rule is set aside; a JavaScript install input below the root is brought back by an exception
+that the rule is set aside. Names only one recipe reads (Gradle's `gradle.properties` and build logic, the
+MSBuild and NuGet files and `global.json`, the JDK and SDK version files such as `.tool-versions`, sbt's
+`project/`, a Gemfile or `manifest.toml`) are set aside for that recipe's builds alone, so a static site
+or a Node image keeps the repository's rule instead of copying or serving the file. A JavaScript install
+input below the root is brought back by an exception
 instead ([JavaScript installs](#javascript-installs)), and the run log names each rule set aside or
-overridden. Then it excludes `**/node_modules`, `.dockerignore` and the dashboard's own files. The static, PHP, Node and Deno images, which are served or copied whole, also exclude `.git`;
+overridden. Then it excludes `**/node_modules`, `.dockerignore` and the dashboard's own files. The static, PHP, Node, Deno and Ruby images, which are served or copied whole, also exclude `.git`;
 recipes whose toolchains stamp or version builds from Git (Go, Python's setuptools-scm, Maven's
 git-commit-id, SourceLink) keep it. A static site also excludes `.env` and `.env.*`. Committed `.env`
 files are otherwise left in: Next.js and Vite read public build values from them.
@@ -1325,10 +1342,10 @@ Streamlit start command whose sources read `st.secrets["KEY"]` first writes that
 of the same names (each value a JSON string, which is a TOML string; values never enter the image), unless
 the repository commits one; a table such as `st.secrets["connections"]` cannot be a variable
 (`streamlit_secrets_nested`). A plain `main.py`/`app.py` is a low-confidence worker that asks whether it
-serves. The recipe refuses a plan with no start command, and preflight says so first:
-`start_command_missing` (blocked, on the start command) for the Python, Deno and PHP recipes and a
-JavaScript server with no static output. The configure form's first step refuses to go on without one for
-the same plans (`needsStartCommand`).
+serves. The recipe refuses a plan with no start command, naming the frameworks detection proposes one
+for, and preflight says so first: `start_command_missing` (blocked, on the start command) for the Python,
+Deno, PHP and Ruby recipes and a JavaScript server with no static output. The configure form's first step
+refuses to go on without one for the same plans (`needsStartCommand`).
 
 A Django or Flask application whose `package.json` builds its CSS or JavaScript (a `build` script with
 Tailwind, Vite, webpack, esbuild, PostCSS or Sass, and no server of its own — a `start` script that only
@@ -1891,6 +1908,185 @@ on a provider's (`STRIPE_SECRET_KEY`, `AUTH_GITHUB_SECRET`, a client or webhook 
 `.env.example` names its engine in `DB_CONNECTION`, which becomes a database suggestion on `DB_URL`
 (Laravel 11 and later) or `DATABASE_URL` (Laravel 10 and earlier).
 
+## Ruby
+
+A `Gemfile` whose lock (or, without one, whose `gem` lines) names `railties`, `hanami`, `sinatra`,
+`roda`, `grape` or `rack`, or a root with `config.ru`, is built by the Ruby recipe
+(`deploy/frameworks_ruby.go`, `build_ruby.go`) on the official `ruby:<release>-slim` image. Detection and
+the build read the same files through the same functions — `Gemfile`, `Gemfile.lock` (its GEM, GIT and
+PATH specs, PLATFORMS, RUBY VERSION and BUNDLED WITH), `.ruby-version`, `.tool-versions`, `config.ru`,
+`config/application.rb`, `config/database.yml`, `bin/rails` and the `Procfile` — as bounded data.
+
+The release comes from `.ruby-version` (a leading `ruby-` dropped), then `.tool-versions`, then the
+Gemfile's `ruby` line (`file: ".ruby-version"` defers to the file), then the lock's RUBY VERSION as a
+family. An exact release builds on its own image (`ruby:3.4.7-slim`), which the build resolves first and
+replaces with the family's newest release, saying so, when the registry has no image for it (3.4.0 has
+none); anything else builds on the newest catalogue family the Gemfile's requirement allows, 3.4 first.
+3.3, 3.4 and 4.0 are in the catalogue; another release, JRuby or TruffleRuby, or a `.ruby-version` the
+Gemfile's requirement refuses, is a `recipe_unsupported` finding. RubyGems runs the Bundler the lock was
+written with on its own, so none is installed; a lock written by Bundler 1, which does not run on Ruby
+3.2 and later, is `ruby_bundler_outdated` (warning).
+
+A committed lock installs frozen (`BUNDLE_DEPLOYMENT=1`, into `/usr/local/bundle`, without the
+development and test groups); without one Bundler resolves, and preflight's `dependencies_unpinned` says
+so. A lock resolved on a Mac or on the other architecture has no platform for this server, and a frozen
+install refuses it ("Your bundle only supports platforms …"): the recipe runs `bundle lock --add-platform
+<x86_64|aarch64>-linux` first, and preflight warns `ruby_lock_platform_added` with the command that
+fixes the lock. A lock with `ruby` or the server's Linux platform needs nothing. A repository's own
+Dockerfile beside a Ruby root is judged the same way: `ruby_lock_platform_missing` is blocked when the
+Dockerfile freezes the bundle (`BUNDLE_DEPLOYMENT`, `BUNDLE_FROZEN`, `--deployment`, `--frozen`) and a
+warning otherwise, and not raised when the Dockerfile's own `bundle lock --add-platform` names the
+server's platform before it installs. The build stage installs the headers the locked gems compile
+against (`libpq-dev` for `pg`, `default-libmysqlclient-dev` for `mysql2`, `libssl-dev` for `trilogy`,
+`libsqlite3-dev`, `libmagickwand-dev`, `libffi-dev`, always `build-essential`, `pkg-config` and
+`libyaml-dev`, and `git` for Git gems) and the runtime only the libraries they load (`libpq5`,
+`libmariadb3`, the virtual `libvips` for `ruby-vips`, `imagemagick`); the names hold on bookworm and
+trixie. A Rails runtime also installs `libjemalloc2` and preloads it (`LD_PRELOAD=libjemalloc.so.2`), as
+Rails' own Dockerfile does, which keeps a long-running server's memory from fragmenting. The Gemfile's
+other gem servers (`source "https://gems.contribsys.com/"`) are `BUNDLE_<HOST>` variables mapped to the
+install, and a Git gem's HTTPS host one the install may use; a Git gem over SSH, which the build has no
+key for, is `ruby_git_gem_ssh` (warning).
+
+| Framework | Start | Port |
+| --- | --- | --- |
+| Rails | `bundle exec rails db:prepare && exec bundle exec rails server --binding 0.0.0.0 --port ${PORT:-3000}`, without `db:prepare` when Active Record is not loaded or there is no `config/database.yml`; `bin/rails` must be committed | 3000 |
+| Hanami | `exec bundle exec puma --port ${PORT:-2300}`, after `bundle exec hanami db migrate` when `hanami-db` has migrations | 2300 |
+| Sinatra, Roda, Grape, Rack | `exec bundle exec puma --port ${PORT:-N}` (else the locked `unicorn`, `thin` or `rackup`); a classic Sinatra script with no `config.ru` runs `exec bundle exec ruby app.rb -o 0.0.0.0 -p ${PORT:-4567}` | 4567 (Sinatra), 9292 |
+
+Each start `exec`s its server, so the server is the container's first process and a stop's SIGTERM
+reaches it rather than a shell that ignores it until the grace period ends. A `Procfile` web process
+outranks all of these, and its `release:` line is the candidate's release command, run in the release
+image. With no server gem and no `config.ru` the candidate asks for the
+start command, and preflight's `start_command_missing` names what is missing. The image sets the
+framework's environment (`RAILS_ENV`, `HANAMI_ENV`, `RACK_ENV`, `APP_ENV` to `production`) and for Rails
+`RAILS_LOG_TO_STDOUT=1` and `RAILS_SERVE_STATIC_FILES=1`, which Rails 7.0 and earlier need before they
+log where the dashboard reads and serve their own precompiled assets. It runs as root from `/app`, so
+Rails' `storage/` takes the volume [persistent state](#persistent-state) plans at `/app/storage`.
+
+Rails precompiles its assets when an asset pipeline is locked (Propshaft, Sprockets, jsbundling,
+cssbundling, tailwindcss-rails, dartsass-rails, Shakapacker, Webpacker, Vite Ruby, importmap):
+Rails 7.1 and later with `SECRET_KEY_BASE_DUMMY=1`, as the Dockerfile `rails new` writes does, and older
+releases with a throwaway key made inside the step, never a value from the plan. Hanami with
+`hanami-assets` runs `hanami assets compile`. A Rails or Hanami application whose `package.json` is its
+asset pipeline borrows Node: the install is planned by the [JavaScript installs](#javascript-installs)
+planner on the Debian Node image (the lockfile's manager, pinned releases through Corepack, Bun copied
+in), whose `/usr/local` and `/opt` are copied into the Ruby build stage under `/opt/node`, and the install
+runs there before the precompile, which calls `yarn build` or `npm run build` itself. tailwindcss-rails
+and dartsass-rails need no Node: their compilers are platform gems, which is one more reason the lock
+has to carry the server's platform. ExecJS without `mini_racer` gets Node alone. The runtime stage has no Node, and `node_modules` stays in the build.
+Build values reach the precompile the way they reach any recipe's build (a build-scoped
+`RAILS_MASTER_KEY` among them).
+
+## Elixir
+
+A `mix.exs` is built by the Elixir recipe (`deploy/frameworks_elixir.go`, `build_elixir.go`) into a mix
+release on the official `elixir:<release>-otp-<otp>-slim` image, and the release runs on that same
+image, pinned to the same digest: a release carries the ERTS it was built with, linked against the
+builder's libcrypto and ncurses, so running it on a Debian base of another release is how a working
+build fails at start. The release comes from `.tool-versions` (`elixir 1.17.3-otp-27`, with `erlang
+27.1.2` naming the OTP), then `.elixir-version`, then `elixir_buildpack.config`, with `mix.exs`'s
+`elixir:` requirement as the floor; without a declaration it is 1.19 on OTP 28, or the newest family the
+requirement allows. 1.17, 1.18, 1.19 and 1.20 are in the catalogue on the OTP majors the official image
+publishes for each; anything else is `recipe_unsupported`. An exact release without an image builds on
+its family's newest, as Ruby's does.
+
+The build follows `mix phx.gen.release`: `mix local.hex` and `local.rebar`, `mix deps.get --only prod`
+(`--check-locked` with a committed `mix.lock`, under the install secret mount, where a `HEX_API_KEY` for
+a private organisation's packages belongs), `deps.compile`, `mix assets.setup` when the alias exists,
+the npm install of `assets/package.json` when there is one (the same borrowed Node as Rails), `mix
+compile`, `mix assets.deploy` when the alias exists, and `mix release` — named when `mix.exs` configures
+releases (`default_release`, else the first of `releases:`), plain otherwise. An umbrella without a
+release is `recipe_unsupported`. The slim image has no CA certificates, which Hex needs, so both stages
+install `ca-certificates`. The runtime copies the release to `/app` and runs it as the unprivileged
+`app` user (uid 10001) with `LANG=C.UTF-8`, and for Phoenix `PHX_SERVER=true`, which a release otherwise
+needs its `bin/server` overlay for.
+
+The start is `/app/bin/<release> start`, or `/app/bin/server` when the overlay exists. Ecto migrations
+(`ecto_sql` with `priv/*/migrations`) run in front of it: the project's own `Release.migrate`
+(`/app/bin/shop eval "Shop.Release.migrate" && exec /app/bin/shop start`), else the same loop
+`phx.gen.release` writes, evaluated inline; a `rel/overlays/bin/migrate` overlay is the release command
+instead, run in the release image before each release. An umbrella's migrations are its applications'
+(`apps/*/priv/*/migrations`, and a `Release` module under `apps/*/lib`): the inline loop loads each of
+those applications by the name its `mix.exs` gives it and migrates the repositories it configures, and
+one the release leaves out has none to migrate. Phoenix's `force_ssl:` in `config/prod.exs` or
+`config/runtime.exs` redirects every plain-HTTP request to HTTPS, which readiness (any answer) passes and
+visitors do not: without an HTTPS domain the plan gets `readiness_redirects_to_https`, and with one but no
+`rewrite_on: [:x_forwarded_proto]` (Phoenix 1.8's generator writes it) the same finding names the
+redirect loop behind the proxy. Phoenix listens on PORT, 4000 by default; a Plug or Bandit service on
+the literal port its application module names. `SECRET_KEY_BASE`, `PHX_HOST` and
+`DATABASE_URL` are set up by [environment discovery](#environment-discovery-and-database-suggestions),
+and an `ecto_sqlite3` file named by `DATABASE_PATH` moves to `/app/data`, the directory the image
+creates for the `app` user.
+
+## Scala and Clojure
+
+Scala (`build.sbt`) and Clojure (`project.clj`, or `deps.edn` with a tools.build `:build` alias) build on
+the JVM the way the Java recipe does (`deploy/frameworks_jvm_languages.go`): the heap follows the
+container's limit (`JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75`), the program runs as the `app` user from
+`/app`, and the release comes from the root's version file — read as the Java recipe reads it:
+`.java-version`, `.sdkmanrc`, `.tool-versions`, `mise.toml` or `system.properties` — or a `--release` the
+build compiles for, 17, 21 or 25, 21 by default. A `--release` (or `-release:`) below 17 is only the
+bytecode the build targets, which a 17 compiler still writes: it builds and runs on 17. A version file
+naming another JDK is `recipe_unsupported`. The builders are the sbt project's
+`sbtscala/scala-sbt:eclipse-temurin-<jdk>_<1|2>.x` (the launcher series `project/build.properties`
+names; it fetches the sbt and Scala releases the project pins) and the official
+`clojure:temurin-<jdk>-lein` and `-tools-deps`.
+
+- **sbt-native-packager** (`enablePlugins(JavaAppPackaging)`, or Play, which brings it): `sbt -batch
+  update`, `sbt -batch stage`, and the staged directory runs on `eclipse-temurin:<jdk>-jre` (Ubuntu,
+  since the start script is bash) as `/app/bin/<script>` — the project's `executableScriptName`, else
+  sbt's normalised `name`, top-level settings counting for the root project. A multi-project build
+  stages the project whose settings enable the packager. Both names are written into the Dockerfile, so
+  a directory that is not a plain relative path (`[A-Za-z0-9._/-]`, nothing above the root) or a script
+  that is not a plain file name is `recipe_unsupported`, and the renderer refuses any instruction that
+  would span lines.
+- **sbt-assembly**: `sbt -batch assembly`; the largest jar under `target/scala-*` is the fat jar and runs
+  as `java -jar` on the Alpine JRE.
+- **Leiningen**: `lein deps`, `lein uberjar`; `project.clj` must name `:main`, and a `^:skip-aot` main is
+  refused unless a profile compiles `:aot :all`. **tools.build**: `clojure -P`, `clojure -T:build uber`
+  (or `uberjar`, whichever `build.clj` defines). Both run the largest jar under `target/`.
+
+With neither plugin, or a `deps.edn` with no build, the finding says which to add. Play listens on
+`http.port` and writes `RUNNING_PID` where the next container would find it, and its host filter
+answers only localhost: the start is `exec /app/bin/<script> -Dconfig.file=/app/conf/just-dashboard.conf
+-Dhttp.port=${PORT:-9000} -Dpidfile.path=/dev/null -Dplay.filters.hosts.allowed.0=.`, every flag a plain
+system property. Play refuses to start in production while `play.http.secret.key` is its default
+`changeme`, and neither its `reference.conf` nor a stock `application.conf` reads any variable for it.
+The image therefore writes `/app/conf/just-dashboard.conf` — `include "application"` (the application's
+own configuration, from beside it or the classpath) and `play.http.secret.key =
+${?APPLICATION_SECRET}` — and the start loads it, so `APPLICATION_SECRET`, generated on the server (64 hex
+characters, the 256 bits Play 3 asks for), reaches Play through the environment, never the command line.
+It takes precedence over a secret `application.conf` reads from another variable. http4s, ZIO HTTP,
+Akka and Pekko HTTP, Ring, Compojure, http-kit and Pedestal mark a web service on their conventional
+port. The drivers sbt, Leiningen and `deps.edn` name are database
+suggestions like a pom's. The readiness budget is a JVM's.
+
+## Dart and Gleam
+
+A `pubspec.yaml` without Flutter is compiled ahead of time by the Dart recipe
+(`deploy/frameworks_dart.go`) on the official `dart:<release>` image — the newest of 3.9 to 3.13 that
+both the pubspec's `environment: sdk:` and the lock's resolved SDK range allow — and the executable runs
+on `debian:trixie-slim` (with `ca-certificates`) as the `app` user: an AOT executable needs only glibc,
+and a shell keeps the start command and the release tasks working, which the official image's
+scratch-based `/runtime` would not. The install is `dart pub get --enforce-lockfile` with a committed
+`pubspec.lock`. A Dart Frog project (`dart_frog` and a `routes/` directory) is built with
+`dart_frog_cli` 1.2.14 (`dart_frog build`, then `dart compile exe` of the server it writes, its
+`public/` copied beside it); a shelf or `dart:io` server compiles `bin/server.dart`, `bin/<name>.dart`
+or `bin/main.dart`. Both listen on PORT, 8080 by default. A pub mirror given as a `PUB_HOSTED_URL` build
+value mapped to the install keeps the locked versions without `--enforce-lockfile`, which refuses a
+pub.dev lock resolved against another host. A custom build command must write `/out/server`.
+
+A `gleam.toml` is built by the Gleam recipe (`deploy/frameworks_gleam.go`) into an Erlang shipment
+(`gleam deps download`, `gleam export erlang-shipment`) with the Gleam project's own
+`ghcr.io/gleam-lang/gleam:v1.18.1-erlang-alpine`, and the shipment runs on that same image, whose
+Erlang it was compiled for, as `/app/entrypoint.sh run`. A `gleam = "…"` requirement that 1.18.1 does not
+meet, or a JavaScript target, is `recipe_unsupported`. A Mist or Wisp service listens on the literal
+`mist.port(N)` its source names, on the PORT it reads and passes to `mist.port` (its `unwrap` default,
+else 8000), or on mist's own 4000 when nothing calls `mist.port`. mist 3 and later listen on
+`localhost` unless the builder calls `mist.bind`, and the Wisp examples do not: a module under `src/`
+that builds a mist server with no `mist.bind` anywhere is a certain loopback listen fact, so preflight's
+`listen_loopback` blocks with the fix (`|> mist.bind("0.0.0.0")`) before Deploy.
+
 ## Readiness, workers and start commands
 
 A release takes traffic only after its readiness check passes, and the check a detected plan carries is
@@ -1920,7 +2116,9 @@ the one the source declares (`detect_readiness.go`), strongest first:
 5. The convention: a page framework (Next.js, Nuxt, SvelteKit, Astro, Remix, React Router, Angular SSR,
    Solid/TanStack Start, Streamlit, Gradio, Flask routing `/`, Laravel, Fresh, plain PHP) is asked for a
    2xx at `/`; everything else — Express/Fastify/Hono/Koa/Elysia/hapi and unknown Node servers, Nest,
-   FastAPI, Go, Rust, JVM, .NET, Deno, Symfony, Slim, a Rails API — accepts any answer from `/`, and so
+   FastAPI, Go, Rust, JVM (Scala and Clojure included), .NET, Deno, Symfony, Slim, a Rails API or a Rails
+   application without `/up`, Hanami, Sinatra and Rack, Phoenix and Plug, Dart and Gleam — accepts any
+   answer from `/`, and so
    does a page framework whose authentication SDK (Clerk, Auth0, Kinde, WorkOS, Logto, Descope) sends an
    anonymous visitor to a sign-in page on the provider's site.
 
@@ -1944,7 +2142,7 @@ own domains (a locale prefix, a login page, the https form of the same URL, a na
 domain), is followed on the candidate — at most four times; a redirect anywhere else is never requested
 and is reported with its origin.
 
-Budgets follow the start: 20 attempts 3 s apart by default; 40 for a JVM service or a start command
+Budgets follow the start: 20 attempts 3 s apart by default; 40 for a JVM service (Java, Scala, Clojure) or a start command
 that applies migrations (a detected schema step counts only when the start runs it, not beside a
 Procfile's web process that leaves it to a release task); 60 attempts 5 s apart for Wagtail's first migrations; 60 attempts 10 s apart
 when a Python application loads a model while it starts (`from_pretrained(`, `pipeline(`,
@@ -2010,8 +2208,9 @@ A volume target never hides what the image ships. It is a directory the framewor
 `storage/`, Laravel's `storage/`, Strapi's `.tmp` and `public/uploads`), a conventional data directory
 (`data`, `uploads`, `media`, `instance`, `pb_data`, …) the repository fills with nothing but
 placeholders, a path a `VOLUME` declares, or the image's own data directory reached through a variable:
-`/data` for the recipes that run as root (Node, Python, PHP), `/home/app/data` for Go and Rust and
-`/app/data` for .NET, which those recipes create owned by their unprivileged user. An image built by its
+`/data` for the recipes that run as root (Node, Python, PHP, Ruby), `/home/app/data` for Go and Rust and
+`/app/data` for .NET, Elixir, Gleam, Dart, Scala and Clojure, which those recipes create owned by their
+unprivileged user. An image built by its
 own Dockerfile as a non-root user is only given directories the repository commits, because a volume
 over a directory the image lacks is owned by root. A file that sits beside code (`/app/db.sqlite3`,
 Prisma's `prisma/dev.db`) gets no volume — mounting there would hide the code or the migrations — and is
@@ -2034,7 +2233,7 @@ reported instead.
 | Go `modernc.org/sqlite`, `mattn/go-sqlite3`, … and Rust `rusqlite`, `sqlx`/`diesel` with SQLite | a file named by a variable, or a literal | `/home/app/data` through the variable (keeping `sqlite://`, `file:` and the query), a literal only under `data/` |
 | PocketBase (the Go recipe with no start command of its own) | its databases and uploads | start `/app serve --http=0.0.0.0:${PORT:-8090} --dir=/home/app/data` on port 8090, volume at `/home/app/data`; with a start command of its own, reported |
 | `Microsoft.EntityFrameworkCore.Sqlite` with an `appsettings.json` `Data Source=` | the database | `/app/data` through `ConnectionStrings__<name>` (only `Cache`, `Mode`, `Foreign Keys`, `Pooling` and `Default Timeout` options are kept), seeded from a committed copy |
-| A Phoenix release built by its own Dockerfile with `ecto_sqlite3` | the file `runtime.exs` reads from `DATABASE_PATH` | `/data/<app>.db` through it when the image runs as root; reported under `USER nobody` |
+| A Phoenix release with `ecto_sqlite3`, built by the Elixir recipe or its own Dockerfile | the file `runtime.exs` reads from `DATABASE_PATH` | `/app/data/<app>.db` through it for the recipe; `/data/<app>.db` for a Dockerfile image that runs as root; reported under `USER nobody` |
 | ASP.NET cookie auth, Identity, Razor Pages, MVC views, antiforgery or Blazor without `PersistKeysTo*` | the Data Protection key ring | volume at `/home/app/.aspnet/DataProtection-Keys` |
 | Dockerfile `VOLUME` (final stage, inherited from an earlier stage), a local image's declared volumes | the declared path | a volume on it; scratch space (`/tmp`, `/var/tmp`, `/run`, `/var/run`, `/var/cache`, `/dev/shm`) is left anonymous |
 
@@ -2091,7 +2290,9 @@ A failed build is named from its own output, never by running anything more (see
 [implementation](implementation.md) for the collector and the evidence). The phase comes from which
 rendered instruction failed: a recipe's dependency install (`npm ci`, `bun install`, `pip install`,
 `uv sync`, `poetry install`, `go mod download`, `cargo fetch`, `dotnet restore`, `composer install`,
-`deno install`, an `apk add`) is **install**; the plan's build command, or the recipe's default build
+`deno install`, `bundle install` and its `bundle lock --add-platform`, `mix deps.get` and
+`deps.compile`, `dart pub get`, `gleam deps download`, `sbt -batch update`, `lein deps`, `clojure -P`,
+an `apk add`) is **install**; the plan's build command, or the recipe's default build
 when it has none, is **build**; the `test -f … || (echo '… must produce …' >&2; exit 1)` guard and a
 `COPY --from=build` of an output directory are **output_check**; any other generated line is
 **setup**, and every step of a custom Dockerfile or Compose build is **dockerfile**. A recipe step the
@@ -2128,6 +2329,18 @@ names, with the remedy the evidence supports:
 | `build_out_of_memory`, `build_disk_full`, `build_timeout` | heap limits, exit 137 (which points at no line: the step's output only shows where it was), `OutOfMemoryError`; `no space left on device`; the 30-minute limit | `NODE_OPTIONS=--max-old-space-size=` three quarters of the server's memory (from 1 GiB, at most 8 GiB) |
 | `build_permission`, `build_script_crlf`, `build_wrapper_missing`, `build_dev_dependency_in_production`, `build_bundle_platform_missing`, `build_hugo_extended_required`, `build_base_image_missing`, `build_platform_unsupported`, `build_dockerfile_invalid` | exit 126, `\r` interpreters, the Gradle/Maven wrapper, Symfony dev bundles and Telescope, a Gemfile.lock without Linux, Hugo Pipes' Sass, a FROM that does not resolve, a manifest for another platform, a Dockerfile that does not parse | — |
 
+The language recipes' own failures take the same codes: `mix.lock` refused by `--check-locked` and a
+`pubspec.lock` `--enforce-lockfile` cannot satisfy are `build_lockfile_out_of_sync`; a Dart SDK or Gleam
+release the project requires is `build_runtime_version`; Rails' `Missing encryption key to decrypt file
+with` during the precompile is `build_env_missing` naming `RAILS_MASTER_KEY`; a gem's native extension
+that Bundler cannot build (`An error occurred while installing pg …`, mkmf's missing header) is
+`build_install_script_failed` or `build_system_library_missing`; Bundler's, Hex's and Gleam's
+resolution failures are `build_dependency_conflict`, a Hex package, a pub package or an sbt artifact
+that does not exist `build_dependency_unavailable`; and Elixir's `== Compilation error in file …`,
+scalac's `[error] …scala:N`, Clojure's `Syntax error compiling at (…clj:N)`, Dart's `file.dart:N:M:
+Error:` and Gleam's `┌─ file.gleam:N` are `build_compile_error` naming the file. A command of a language
+another recipe builds (`bundle: not found` in a Node image) names that recipe as the builder to choose.
+
 Nothing matched is `build_failed`, still with the phase, command and exit code. A Dockerfile build
 never gets a variable fix, because a custom Dockerfile cannot take build secrets.
 
@@ -2152,7 +2365,12 @@ an ASP.NET Core minimal API, a web project in a solution's `src/` with shared pr
 versions and a `global.json` pin, a web project with two target frameworks that references a library with
 one, a Blazor WebAssembly app served as static files, an F# minimal API,
 an ASP.NET Core project whose publish runs npm for its front end, a Deno server, a minimal Laravel
-12 application (migrated, with the form's generated `APP_KEY`) and a plain `index.php`. The JVM and .NET
+12 application (migrated, with the form's generated `APP_KEY`), a plain `index.php`, a Rails 8
+application whose `Gemfile.lock` was resolved on a Mac (the recipe adds the Linux platform, precompiles
+with Propshaft and answers through the table `db:prepare` migrated, with a Propshaft asset fetched), a
+Sinatra app behind Puma, a Phoenix 1.8 release, a Play 3 application staged by sbt with the seed's stock
+`application.conf` (its secret reaching Play only through the configuration the image writes), a
+Leiningen uberjar on Ring and a Gleam Mist server. The JVM and .NET
 fixtures are also detected and prepared without Docker (`TestCompiledLiveFixturesDetectAndPrepare`). The
 Go and Rust shapes beyond one module or crate are built from their own fixtures too: a `go.work` member
 serving a template it reads at runtime with a value from its sibling module, which it requires at `v0.0.0`
@@ -2183,7 +2401,14 @@ selection, native crates, sqlx, the lockfile, Leptos, Trunk, Dioxus and Shuttle 
 registry credentials in `frameworks_jvm_test.go`, `frameworks_dotnet_solution_test.go` and
 `detect_registry_credentials_test.go` — a Gradle 8.4 wrapper with a Java 21 toolchain (Gradle on JDK 17,
 the toolchain provided beside it, a CRLF `gradlew`), a Quarkus fast-jar on a bridged PORT and a
-`PublishAot` web API published as the JIT dll were built and served locally when they were written.
+`PublishAot` web API published as the JIT dll were built and served locally when they were written; the
+language recipes' detection, versions, rendered Dockerfiles, preflight findings and failure signatures are
+in `frameworks_languages_test.go` and `preflight_languages_test.go`. Rails with jsbundling on Yarn, Hanami
+with its npm assets, a Phoenix release migrating `ecto_sqlite3` at start, a plain Plug service on an exact
+Elixir and OTP pin, a tools.build uberjar, an sbt-assembly jar, and Dart Frog and shelf servers were built
+and served through the same owners when the recipes were written; the Dart ones are not live fixtures
+because pub.dev refuses this repository's CI host, and were built there through a pub mirror given as
+`PUB_HOSTED_URL`.
 Persistent state, schema tools, seeds and their
 findings are table-tested per stack in `detect_state_test.go`, `detect_schema_test.go`,
 `preflight_state_test.go` and `recipe_runtime_files_test.go`. Repository shape — ranking, decoys, static

@@ -103,15 +103,16 @@ carries no licensing question at all.
   test needs `git-lfs` on PATH (it is included in the backend image); it touches only a temporary
   repository. Provider fixture tests do not publish live comments or reviews. See
   [the Git workspace contract](docs/internal/backend/git-workspace-expansion.md) for limits and setup.
-  Forty-two fixtures: the locked Node starters (installed by Bun, pnpm and Yarn 1), FastAPI, Flask,
+  Forty-eight fixtures: the locked Node starters (installed by Bun, pnpm and Yarn 1), FastAPI, Flask,
   Django, Streamlit, Gradio, the Python install shapes (PDM, Pipenv, uv on Python 3.14, a nested Django
   project with a `requirements/` folder and psycopg2, a Flask app with a Node asset stage), Go, a `go.work`
   member, a Go server embedding its Vite build with cgo SQLite and templ, axum, a Cargo workspace member,
   Leptos with hashed file names, Trunk, Maven, Gradle, the JVM and .NET layouts (a Maven reactor module, a
   multi-project and a composite Gradle build, a solution's web project, a multi-target project with a
   library, Blazor WebAssembly, F#, an ASP.NET Core project publishing an npm front end), ASP.NET Core,
-  Deno, Laravel and plain PHP. The Leptos and Trunk builds install their tool from source, so give the run
-  `-timeout 90m`; `TestLiveGoRecipeCatalogueResolves` checks every Go and Rust base image resolves.
+  Deno, Laravel, plain PHP, Rails, Sinatra, Phoenix, Play, a Leiningen uberjar and Gleam. The Leptos and
+  Trunk builds install their tool from source, so give the run `-timeout 90m`;
+  `TestLiveGoRecipeCatalogueResolves` checks every Go and Rust base image resolves.
 - The blueprint catalogue sweep pulls every deployable definition's pinned image, starts it through the
   real runtime owner with generated secrets and runs its own readiness checks (`JD_BLUEPRINT_ONLY=a,b`
   narrows it; images it pulled are removed again):

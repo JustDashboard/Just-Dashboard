@@ -145,6 +145,8 @@ func listenFindings(draft *Draft, configuration PlanConfiguration, selected *Det
 				field = "variables." + listen.LoopbackVariable
 			case fromCommand:
 				action = "Change the start command to bind 0.0.0.0 (for example --host 0.0.0.0)."
+			case selected.Recipe == "gleam":
+				action = "Add |> mist.bind(\"0.0.0.0\") to the mist builder."
 			}
 			title := "The server listens on " + listen.Loopback + " inside its container"
 			means := "Only the container itself reaches " + listen.Loopback + "; the proxy and the readiness check connect from outside it, so every request is refused."

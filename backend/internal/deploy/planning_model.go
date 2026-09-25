@@ -325,6 +325,9 @@ type DetectedCandidate struct {
 	// about a Python root beyond its framework (detect_python.go).
 	SystemPackages []DetectedSystemPackage `json:"systemPackages,omitempty"`
 	Python         *DetectedPython         `json:"python,omitempty"`
+	// Toolchain is what a Ruby, Elixir, Scala, Clojure, Dart or Gleam
+	// recipe read about the release it builds on (detect_languages.go).
+	Toolchain *DetectedToolchain `json:"toolchain,omitempty"`
 
 	// readingConfidence is what the source's own evidence supports when an
 	// unsettled package manager caps Confidence (packageCandidate). Ranking
@@ -1193,10 +1196,11 @@ func (c PlanConfiguration) Validate() error {
 	if c.Build.CargoBin != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "rust" || !rustBinaryNameRE.MatchString(c.Build.CargoBin)) {
 		return invalidField("build.cargoBin", "the Rust binary names one binary target, such as server, in a Rust recipe")
 	}
-	// The PHP recipe installs its front-end assets through the same Node
-	// install, so the same choice applies to it.
-	if c.Build.PackageManager != "" && (c.Build.Method != BuildRecipe || (c.Build.Recipe != "node" && c.Build.Recipe != "php" && c.Build.Recipe != "python") || !validNodePackageManager(c.Build.PackageManager)) {
-		return fmt.Errorf("package manager must be bun, npm, pnpm or yarn in a JavaScript, PHP or Python recipe")
+	// The PHP and Python asset stages and the Ruby and Elixir builds install
+	// their front-end assets through the same Node install, so the same
+	// choice applies to them (installsAssetsWithNode in the configure form).
+	if c.Build.PackageManager != "" && (c.Build.Method != BuildRecipe || !slices.Contains(nodeInstallRecipes, c.Build.Recipe) || !validNodePackageManager(c.Build.PackageManager)) {
+		return fmt.Errorf("package manager must be bun, npm, pnpm or yarn in a JavaScript, PHP, Python, Ruby or Elixir recipe")
 	}
 	if c.Build.PythonVersion != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "python" || !pythonRecipeVersionRE.MatchString(c.Build.PythonVersion)) {
 		return fmt.Errorf("Python version must select 3.10, 3.11, 3.12, 3.13 or 3.14 in a Python recipe; use a Dockerfile for other interpreters")
@@ -1645,11 +1649,17 @@ func configContainsSecretLiteral(value any, key string) bool {
 	return false
 }
 
+// nodeInstallRecipes are the recipes whose build runs the JavaScript
+// install planner: the Node recipe itself, and the recipes that install a
+// package's assets with it.
+var nodeInstallRecipes = []string{"node", "php", "python", "ruby", "elixir"}
+
 // validRecipe is the closed set of automatic recipes; a name outside it is
 // refused at planning so a plan never names a builder that does not exist.
 func validRecipe(name string) bool {
 	switch name {
-	case "node", "go", "python", "rust", "java", "dotnet", "deno", "php":
+	case "node", "go", "python", "rust", "java", "dotnet", "deno", "php",
+		"ruby", "elixir", "scala", "clojure", "dart", "gleam":
 		return true
 	}
 	return false
@@ -1891,6 +1901,9 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 			return err
 		}
 		if err := validateDetectedPython(candidate); err != nil {
+			return err
+		}
+		if err := validateDetectedToolchain(candidate.Toolchain); err != nil {
 			return err
 		}
 	}

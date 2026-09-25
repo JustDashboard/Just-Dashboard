@@ -62,7 +62,7 @@ func TestLiveDetectedFrameworkBuildAndServing(t *testing.T) {
 		"astro", "nuxt", "react-router", "fastapi", "flask", "django", "rust", "java", "gradle", "dotnet", "deno", "laravel", "php",
 		"streamlit", "gradio", "next-pnpm", "express-yarn", "python-pdm", "python-pipenv", "python-uv", "django-nested", "flask-assets",
 		"java-reactor", "gradle-multiproject", "dotnet-solution", "blazor-wasm", "fsharp", "dotnet-spa",
-		"gradle-composite", "dotnet-multitarget"},
+		"gradle-composite", "dotnet-multitarget", "rails", "sinatra", "phoenix", "play", "clojure", "gleam"},
 		compiledLiveFixtures...) {
 		t.Run(name, func(t *testing.T) {
 			timeout := 10 * time.Minute
@@ -150,6 +150,13 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 				// application key, and file-backed sessions since the fixture
 				// ships no sessions table.
 				runtimeVariables = map[string]string{"APP_KEY": "base64:" + base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 32))), "SESSION_DRIVER": "file", "CACHE_STORE": "file"}
+			}
+			// The secrets the configure form generates for these frameworks.
+			switch name {
+			case "rails", "phoenix":
+				runtimeVariables = map[string]string{"SECRET_KEY_BASE": strings.Repeat("0123456789abcdef", 8)}
+			case "play":
+				runtimeVariables = map[string]string{"APPLICATION_SECRET": strings.Repeat("0123456789abcdef", 4)}
 			}
 			started, err := owner.StartCandidate(ctx, CandidateRuntimeRequest{Run: run, Release: release,
 				Snapshot: runtimeReleaseSnapshot{Version: 1, Plan: plan, Image: result.Image}, RuntimeVariables: runtimeVariables, Host: "127.0.0.1", Port: liveC5LoopbackPort(t)}, nil)
@@ -247,7 +254,14 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 				name == "php" && candidate.Framework != "php" ||
 				name == "next-pnpm" && (candidate.StartCommand != "pnpm run start" || result.Prepared.Toolchain != "pnpm 10.34.5 (lockfileVersion 9.0)") ||
 				name == "express-yarn" && (candidate.Framework != "express" || candidate.StartCommand != "yarn run start" ||
-					result.Prepared.Install != "yarn install --frozen-lockfile") {
+					result.Prepared.Install != "yarn install --frozen-lockfile") ||
+				name == "rails" && (candidate.Framework != "rails" || result.Prepared.Toolchain != "ruby 3.4.7" || candidate.Readiness == nil || candidate.Readiness.Path != "/up" ||
+					!strings.Contains(content, "notes=0")) ||
+				name == "sinatra" && (candidate.Framework != "sinatra" || candidate.Port != 4567) ||
+				name == "phoenix" && (candidate.Framework != "phoenix" || candidate.Port != 4000 || !strings.HasPrefix(result.Prepared.Toolchain, "elixir 1.")) ||
+				name == "play" && (candidate.Framework != "play" || candidate.Port != 9000 || !strings.HasPrefix(result.Prepared.Toolchain, "scala · sbt 1.x stage")) ||
+				name == "clojure" && result.Prepared.Toolchain != "clojure · lein uberjar on java 21" ||
+				name == "gleam" && (candidate.Recipe != "gleam" || result.Prepared.Toolchain != "gleam "+gleamRecipeVersion) {
 				t.Fatalf("catalogue defaults for %s: %+v / %+v", name, candidate, result.Prepared)
 			}
 			if strings.Contains(content, secret) {

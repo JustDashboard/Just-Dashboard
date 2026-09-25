@@ -639,7 +639,7 @@ func preflightFindings(
 	}
 	findings = append(findings, plannedRecipeFindings(planned, configuration.Build)...)
 	if planned != nil && configuration.Build.Method == BuildRecipe &&
-		(planned.Recipe == "node" || (planned.Recipe == "php" && len(planned.NodeInstalls) > 0)) {
+		(planned.Recipe == "node" || (planned.Recipe != "" && len(planned.NodeInstalls) > 0)) {
 		findings = append(findings, nodeInstallFindings(planned, configuration)...)
 	}
 	findings = append(findings, compiledRecipeFindings(planned, configuration)...)
@@ -650,6 +650,7 @@ func preflightFindings(
 			unpinnedDependenciesAction(planned.Recipe), "deploy", "configuration.build"))
 	}
 	findings = append(findings, compiledBuildFindings(planned, configuration, draft.Data.Source)...)
+	findings = append(findings, languageRecipeFindings(planned, configuration, observation)...)
 	if planned != nil && planned.RecipeIssue != "" && configuration.Build.Method == BuildRecipe && !refusalNamed(findings) {
 		findings = append(findings, finding("recipe_unsupported", PreflightBlocked,
 			"Source needs a different build plan", planned.RecipeIssue,

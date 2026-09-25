@@ -185,7 +185,7 @@ func readinessConfigFile(rel, name string) bool {
 	lower := strings.ToLower(rel)
 	for _, suffix := range []string{
 		"config/routes.rb", "config/environments/production.rb", "config/application.rb", "config/deploy.yml",
-		"bootstrap/app.php", "src/main/resources/application.properties", "src/main/resources/application.yml",
+		"config/prod.exs", "config/runtime.exs", "bootstrap/app.php", "src/main/resources/application.properties", "src/main/resources/application.yml",
 		"src/main/resources/application.yaml",
 	} {
 		if lower == suffix || strings.HasSuffix(lower, "/"+suffix) {
@@ -320,6 +320,9 @@ func (s *readinessScanner) scan(rel, name string, content []byte) {
 		return
 	case strings.HasSuffix(rel, "config/environments/production.rb") || strings.HasSuffix(rel, "config/application.rb"):
 		s.scanRailsConfig(rel, content)
+		return
+	case strings.HasSuffix(rel, "config/prod.exs") || strings.HasSuffix(rel, "config/runtime.exs"):
+		s.scanPhoenixConfig(rel, content)
 		return
 	case strings.HasSuffix(rel, "config/deploy.yml"):
 		if route := kamalHealthcheckPath(content); route != "" {
@@ -619,6 +622,26 @@ func startupModelLoad(content []byte) string {
 		}
 	}
 	return ""
+}
+
+// factPhoenixForceSSL's value is "proxy" when force_ssl trusts the proxy's
+// X-Forwarded-Proto (rewrite_on), as Phoenix 1.8's generated prod.exs does.
+const factPhoenixForceSSL = "phoenix_force_ssl"
+
+var (
+	phoenixForceSSLRE  = regexp.MustCompile(`(?m)^[^#\n]*\bforce_ssl:\s*\[`)
+	phoenixRewriteOnRE = regexp.MustCompile(`(?m)^[^#\n]*\brewrite_on:\s*\[[^\]]*:x_forwarded_proto\b`)
+)
+
+func (s *readinessScanner) scanPhoenixConfig(rel string, content []byte) {
+	if !phoenixForceSSLRE.Match(content) {
+		return
+	}
+	value := ""
+	if phoenixRewriteOnRE.Match(content) {
+		value = "proxy"
+	}
+	s.add(readinessFact{file: rel, kind: factPhoenixForceSSL, value: value})
 }
 
 func (s *readinessScanner) scanRailsConfig(rel string, content []byte) {

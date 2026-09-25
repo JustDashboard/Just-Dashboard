@@ -1,0 +1,4 @@
+/storage/*
+!/storage/.keep
+/tmp
+/log

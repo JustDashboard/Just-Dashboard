@@ -58,6 +58,14 @@ var recipeBaseCatalogue = map[string][]string{
 	"deno":          {"denoland/deno:alpine"},
 	"php":           {"dunglas/frankenphp:1-php8.3-alpine"},
 	"php:composer":  {"composer:2"},
+	// The language recipes (detect_languages.go) name their release from
+	// the project's own files; these are the reviewed defaults.
+	"ruby":    {"ruby:3.4-slim"},
+	"elixir":  {"elixir:1.19-otp-28-slim"},
+	"scala":   {"sbtscala/scala-sbt:eclipse-temurin-21_1.x", "eclipse-temurin:21-jre"},
+	"clojure": {"clojure:temurin-21-lein", "eclipse-temurin:21-jre-alpine"},
+	"dart":    {"dart:3.13", "debian:trixie-slim"},
+	"gleam":   {"ghcr.io/gleam-lang/gleam:v1.18.1-erlang-alpine"},
 }
 
 type ResolvedImage struct {
@@ -307,6 +315,8 @@ func (b *ArtifactBuilder) PrepareWithin(
 				prepared.Notes = append(prepared.Notes, recipe.php.node.notes...)
 			}
 			baseRefs = phpRecipeBases(recipe.php)
+		case "ruby", "elixir", "scala", "clojure", "dart", "gleam":
+			baseRefs = b.prepareLanguageRecipe(ctx, &recipe, &prepared)
 		case "node":
 			b.settleBunImage(ctx, &recipe.nodeInstall)
 			prepared.Toolchain = recipe.nodeInstall.toolchain
@@ -607,6 +617,7 @@ type selectedRecipe struct {
 	dotnet                       dotnetProject
 	deno                         denoRecipe
 	php                          phpRecipe
+	language                     languageBuild
 	// runtimeAssets are the root-level files a compiled service reads at
 	// runtime, copied beside its binary (recipe_runtime_files.go).
 	runtimeAssets []string
@@ -649,6 +660,10 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 			requested = "deno"
 		case regularExists(root, "composer.json") || regularExists(root, "index.php") || regularExists(root, "public/index.php"):
 			requested = "php"
+		case regularExists(root, "Gemfile"):
+			requested = "ruby"
+		case regularExists(root, "mix.exs"):
+			requested = "elixir"
 		}
 	}
 	switch requested {
@@ -788,6 +803,8 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 			recipe.nodeInputs = php.inputs
 		}
 		return recipe, nil
+	case "ruby", "elixir", "scala", "clojure", "dart", "gleam":
+		return selectLanguageRecipe(root, requested, config)
 	default:
 		return selectedRecipe{}, fmt.Errorf("%w: no supported automatic recipe was selected", ErrUnsupportedBuilder)
 	}
@@ -852,6 +869,12 @@ func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases
 		default:
 			rendered, err = renderDenoDockerfile(recipe.deno, config, bases, installSecrets, buildSecrets)
 		}
+		if err != nil {
+			return "", err
+		}
+		lines = append(lines, rendered...)
+	case "ruby", "elixir", "scala", "clojure", "dart", "gleam":
+		rendered, err := renderLanguageDockerfile(recipe, config, bases, installSecrets, buildSecrets)
 		if err != nil {
 			return "", err
 		}

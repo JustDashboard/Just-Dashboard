@@ -6,6 +6,7 @@ import type {
   DeploymentDetectedReadiness,
   DeploymentDetectionCandidate,
   DeploymentDraftSource,
+  DeploymentRecipe,
   DeploymentSourceMode,
   NodePackageManager,
   WorkloadProfile,
@@ -64,7 +65,7 @@ export const DEFAULT_REQUEST_BODY_LIMIT = `${DEFAULT_MAX_REQUEST_BODY_MB} MB on 
  * API key from a provider it cannot.
  */
 export const SELF_ISSUED_SECRET =
-  /(^|_)(APP_KEY|APP_KEYS|APP_SECRET|SECRET_KEY|SECRET_KEY_BASE|SESSION_SECRET|JWT_SECRET|AUTH_SECRET|NEXTAUTH_SECRET|BETTER_AUTH_SECRET|PAYLOAD_SECRET|ENCRYPTION_KEY|COOKIE_SECRET|CSRF_SECRET|TOKEN_SECRET|SIGNING_SECRET|SIGNING_KEY|HASH_SALT|TOKEN_SALT)$/
+  /(^|_)(APP_KEY|APP_KEYS|APP_SECRET|APPLICATION_SECRET|SECRET_KEY|SECRET_KEY_BASE|SESSION_SECRET|JWT_SECRET|AUTH_SECRET|NEXTAUTH_SECRET|BETTER_AUTH_SECRET|PAYLOAD_SECRET|ENCRYPTION_KEY|COOKIE_SECRET|CSRF_SECRET|TOKEN_SECRET|SIGNING_SECRET|SIGNING_KEY|HASH_SALT|TOKEN_SALT)$/
 
 /**
  * Names a provider issues even though they end like a self-issued secret:
@@ -1228,8 +1229,18 @@ export function dockerfileStageHint(stages?: string[]) {
 }
 
 /**
+ * Whether a recipe installs a JavaScript package for its assets through the
+ * Node recipe's install — the PHP and Python asset stages, and the Node
+ * toolchain the Ruby and Elixir builds borrow — so the package manager choice
+ * applies to it while its build and start commands stay the language's own.
+ */
+export function installsAssetsWithNode(recipe: DeploymentRecipe | undefined) {
+  return recipe === "php" || recipe === "python" || recipe === "ruby" || recipe === "elixir"
+}
+
+/**
  * Whether a recipe plan is missing the start command its recipe refuses to
- * build without: Python, Deno and PHP always run one, and a JavaScript build
+ * build without: Python, Deno, PHP and Ruby always run one, and a JavaScript build
  * runs one unless it has static output for nginx to serve. The screen that
  * owns the field says so, rather than preflight four screens later or the
  * build after Deploy.
@@ -1240,6 +1251,7 @@ export function needsStartCommand(build: DeploymentConfiguration["build"]) {
     case "python":
     case "deno":
     case "php":
+    case "ruby":
       return true
     case "node":
       return !build.outputDirectory?.trim()

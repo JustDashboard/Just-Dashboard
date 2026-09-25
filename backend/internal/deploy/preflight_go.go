@@ -34,21 +34,6 @@ func refusalNamed(findings []PreflightFinding) bool {
 	})
 }
 
-// unpinnedDependenciesAction is how each ecosystem commits the lockfile
-// that pins what a rebuild installs.
-func unpinnedDependenciesAction(recipe string) string {
-	const works = " when rebuilds must be identical; deploying as is works today."
-	switch recipe {
-	case "rust":
-		return "Run cargo generate-lockfile and commit Cargo.lock" + works
-	case "php":
-		return "Run composer update --lock and commit composer.lock" + works
-	case "deno":
-		return "Run deno install and commit deno.lock" + works
-	}
-	return "Commit a lockfile (uv lock, poetry lock, or pip freeze > requirements.txt)" + works
-}
-
 func goBuildFindings(candidate *DetectedCandidate, configuration PlanConfiguration, source *DraftSourceConfig) []PreflightFinding {
 	build := configuration.Build
 	findings := []PreflightFinding{}

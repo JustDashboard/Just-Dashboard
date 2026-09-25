@@ -279,6 +279,8 @@ func startCommandFinding(recipe string, candidate *DetectedCandidate, build Buil
 		example = "such as `deno task start` or `deno run -A main.ts`"
 	case "php":
 		example = "such as `frankenphp php-server --root public/`"
+	case "ruby":
+		example = "such as `bundle exec puma --port $PORT`"
 	default:
 		return PreflightFinding{}, false
 	}

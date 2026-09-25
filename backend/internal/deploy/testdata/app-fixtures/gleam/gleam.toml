@@ -1,0 +1,10 @@
+name = "fixture"
+version = "1.0.0"
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.60.0 and < 0.70.0"
+gleam_erlang = ">= 1.0.0 and < 2.0.0"
+gleam_http = ">= 4.0.0 and < 5.0.0"
+mist = ">= 5.0.0 and < 6.0.0"
+envoy = ">= 1.0.0 and < 2.0.0"

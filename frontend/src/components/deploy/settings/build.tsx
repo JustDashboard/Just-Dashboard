@@ -61,6 +61,7 @@ import {
   dockerfileStageHint,
   dotnetVersionReading,
   goMainPackageList,
+  installsAssetsWithNode,
   javaVersionReading,
   packageManagerOptions,
   packageManagerReading,
@@ -191,7 +192,7 @@ type Builder = {
 }
 
 /**
- * Every way a Git or local source can be built: the eight recipes the
+ * Every way a Git or local source can be built: the fourteen recipes the
  * backend's `validRecipe` accepts, then a Dockerfile of the project's own and
  * a static site. The detail is a word about the toolchain or what decides it,
  * short enough for the five-across grid at 1280, where a card has about 60px
@@ -263,6 +264,54 @@ const BUILDERS: Builder[] = [
     recipe: "php",
   },
   {
+    key: "ruby",
+    label: RECIPE_SHORT.ruby,
+    product: "ruby",
+    detail: "Bundler",
+    method: "recipe",
+    recipe: "ruby",
+  },
+  {
+    key: "elixir",
+    label: RECIPE_SHORT.elixir,
+    product: "elixir",
+    detail: "mix release",
+    method: "recipe",
+    recipe: "elixir",
+  },
+  {
+    key: "scala",
+    label: RECIPE_SHORT.scala,
+    product: "scala",
+    detail: "sbt",
+    method: "recipe",
+    recipe: "scala",
+  },
+  {
+    key: "clojure",
+    label: RECIPE_SHORT.clojure,
+    product: "clojure",
+    detail: "uberjar",
+    method: "recipe",
+    recipe: "clojure",
+  },
+  {
+    key: "dart",
+    label: RECIPE_SHORT.dart,
+    product: "dart",
+    detail: "AOT exe",
+    method: "recipe",
+    recipe: "dart",
+  },
+  {
+    key: "gleam",
+    label: RECIPE_SHORT.gleam,
+    product: "gleam",
+    detail: "BEAM",
+    method: "recipe",
+    recipe: "gleam",
+  },
+  {
     key: "dockerfile",
     label: "Dockerfile",
     product: "docker",
@@ -302,6 +351,12 @@ const RECIPE_DEFAULT: Record<DeploymentRecipe, string> = {
   dotnet: ".NET SDK",
   deno: "deno.json",
   php: "Composer · FrankenPHP",
+  ruby: ".ruby-version decides",
+  elixir: ".tool-versions decides",
+  scala: "sbt stage or assembly",
+  clojure: "Leiningen or tools.build",
+  dart: "pubspec.yaml decides",
+  gleam: "gleam.toml",
 }
 
 // `validateConfiguration` wants the plan's variable shape (a value or
@@ -752,7 +807,9 @@ function BuildForm({
     setBuild({
       ...build,
       packageManager,
-      ...(recipe === "php" ? {} : commandsForPackageManager(detected, build, packageManager)),
+      ...(installsAssetsWithNode(recipe)
+        ? {}
+        : commandsForPackageManager(detected, build, packageManager)),
     })
   // What the last build did is said only while the draft still builds the
   // same way: a Node toolchain or a Node Dockerfile under a Python recipe
@@ -785,10 +842,11 @@ function BuildForm({
         systemPackages: next === "python" ? build.systemPackages : undefined,
         javaVersion: next === "java" ? build.javaVersion : undefined,
         dotnetVersion: next === "dotnet" ? build.dotnetVersion : undefined,
-        // The PHP and Python recipes' asset stages install through the same
-        // Node install, so the choice survives the move between them.
+        // The PHP and Python recipes' asset stages, and the Ruby and Elixir
+        // builds' assets, install through the same Node install, so the
+        // choice survives the move between them.
         packageManager:
-          next === "node" || next === "php" || next === "python" ? build.packageManager : undefined,
+          next === "node" || installsAssetsWithNode(next) ? build.packageManager : undefined,
       })
       return
     }
@@ -917,7 +975,7 @@ function BuildForm({
 
         {build.method === "recipe" &&
           (recipe === "node" ||
-            (recipe === "php" && (detected?.nodeInstalls?.length ?? 0) > 0)) && (
+            (installsAssetsWithNode(recipe) && (detected?.nodeInstalls?.length ?? 0) > 0)) && (
             <Field
               label="Package manager"
               hint={
