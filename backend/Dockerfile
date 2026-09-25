@@ -23,6 +23,11 @@ COPY . .
 # CGO stays off so the binary runs on a slim base without a libc mismatch;
 # the SQLite driver is pure Go precisely so this works.
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/just-dashboard ./cmd/server
+# The terminal holder runs on the host, not in this image, for as long as a
+# session lasts — the dashboard copies it out at boot. Static for the same
+# reason as above, and small so each session pins megabytes rather than the
+# whole dashboard. See internal/ptyhold.
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/jd-terminal-holder ./cmd/terminal-holder
 
 FROM debian:bookworm-slim
 
@@ -138,6 +143,7 @@ https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cl
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /out/just-dashboard /usr/local/bin/just-dashboard
+COPY --from=build /out/jd-terminal-holder /usr/local/bin/jd-terminal-holder
 
 # Runs as root deliberately: managing systemd units, the firewall, host
 # accounts and a PTY all require it. The security boundary is the network

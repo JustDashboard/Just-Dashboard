@@ -1,144 +1,69 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import {
-  ChevronDown,
-  Cross,
-  FolderClosed,
-  FolderPlus,
-  MoreHorizontal,
-  Pencil,
-  Pin,
-  Plus,
-  SidebarLeftClose,
-  Trash,
-} from "@/components/icons"
+import { Cross, Plus, SidebarLeftClose } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import type { TerminalActivity, TerminalFolder, TerminalWorkspace } from "@/lib/types"
+import type { TerminalActivity, TerminalWorkspace } from "@/lib/types"
 import { sessionLabel, sessionProgram, sessionWorking } from "@/lib/terminal-activity"
-import { useViewState } from "@/lib/view-state"
 import { SearchInput } from "@/components/page"
 import { ActivityMark, ProgramMark } from "@/components/terminal/activity-mark"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { IconAction, rowReveal } from "@/components/icon-action"
 import { Pane, PaneHeader } from "@/components/panel"
 
 type RowHandlers = {
   activeId: string | null
-  folders: TerminalFolder[]
   /** What each visited window's socket last said it was doing, by window id. */
   activity: Record<string, TerminalActivity>
   /** The sessions with a window whose socket in this browser has dropped. */
   disconnected: ReadonlySet<string>
   onSelect: (session: TerminalWorkspace) => void
-  onRename: (session: TerminalWorkspace, title: string) => void
-  onTogglePinned: (session: TerminalWorkspace) => void
-  onSetFolder: (id: string, folder: string) => void
   onClose: (session: TerminalWorkspace) => void
-  onNew: (folder?: string) => void
 }
 
+/**
+ * The sessions, newest first, and nothing to do to one but open it or close
+ * it. Folders, renaming and pinning were a filing system for shells that
+ * name themselves: a row already says what its session is doing.
+ */
 export function SessionRail({
   sessions,
-  folders,
   activeId,
   activity,
   disconnected,
   onSelect,
-  onRename,
-  onTogglePinned,
-  onSetFolder,
   onClose,
   onNew,
-  onCreateFolder,
-  onUpdateFolder,
-  onDeleteFolder,
   onHide,
   className,
-}: {
+}: RowHandlers & {
   sessions: TerminalWorkspace[]
-  folders: TerminalFolder[]
-  activeId: string | null
-  activity: Record<string, TerminalActivity>
-  disconnected: ReadonlySet<string>
-  onSelect: (session: TerminalWorkspace) => void
-  onRename: (session: TerminalWorkspace, title: string) => void
-  onTogglePinned: (session: TerminalWorkspace) => void
-  onSetFolder: (id: string, folder: string) => void
-  onClose: (session: TerminalWorkspace) => void
-  onNew: (folder?: string) => void
-  onCreateFolder: (name: string) => void
-  onUpdateFolder: (name: string, next: { name?: string }) => void
-  onDeleteFolder: (folder: TerminalFolder) => void
+  onNew: () => void
   /** Given when the rail covers the emulator rather than sitting beside it,
    *  so the only way back to the shell is not a session pick. */
   onHide?: () => void
   className?: string
 }) {
-  const [collapsed, setCollapsed] = useViewState<Record<string, boolean>>(
-    "terminal.folders.collapsed",
-    {},
-  )
-  const [creatingFolder, setCreatingFolder] = useState(false)
   const [filter, setFilter] = useState("")
   const matches = useMemo(() => {
     const needle = filter.trim().toLowerCase()
-    if (!needle) return sessions
-    return sessions.filter((session) =>
-      [sessionLabel(session, activity), session.title, session.cwd, session.folder].some((value) =>
-        value?.toLowerCase().includes(needle),
-      ),
-    )
+    const found = needle
+      ? sessions.filter((session) =>
+          [sessionLabel(session, activity), session.title, session.cwd].some((value) =>
+            value?.toLowerCase().includes(needle),
+          ),
+        )
+      : sessions
+    return [...found].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   }, [sessions, filter, activity])
-  const groups = useMemo(() => {
-    const byFolder = new Map<string, TerminalWorkspace[]>()
-    for (const session of matches) {
-      const key = session.folder || ""
-      byFolder.set(key, [...(byFolder.get(key) ?? []), session])
-    }
-    const order = (items: TerminalWorkspace[]) =>
-      [...items].sort((a, b) => {
-        if (a.favourite !== b.favourite) return a.favourite ? -1 : 1
-        return b.createdAt.localeCompare(a.createdAt)
-      })
-    return {
-      folders: folders.map((folder) => ({ folder, items: order(byFolder.get(folder.name) ?? []) })),
-      unfiled: order(byFolder.get("") ?? []),
-    }
-  }, [matches, folders])
-  const rows = {
-    activeId,
-    folders,
-    activity,
-    disconnected,
-    onSelect,
-    onRename,
-    onTogglePinned,
-    onSetFolder,
-    onClose,
-    onNew,
-  }
+  const rows = { activeId, activity, disconnected, onSelect, onClose }
 
   return (
     <Pane flush aria-label="Terminal sessions" className={cn("w-full shrink-0", className)}>
       <PaneHeader className="h-10 gap-1 py-0 pl-3">
         <span className="text-body font-medium">Sessions</span>
         <span className="flex-1" />
-        <IconAction label="New folder" className="size-7" onClick={() => setCreatingFolder(true)}>
-          <FolderPlus />
-        </IconAction>
-        <IconAction label="New session" className="size-7" onClick={() => onNew()}>
+        <IconAction label="New session" className="size-7" onClick={onNew}>
           <Plus />
         </IconAction>
         {onHide && (
@@ -162,46 +87,10 @@ export function SessionRail({
           />
         </div>
       )}
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-1.5">
-        {creatingFolder && (
-          <InlineEdit
-            placeholder="Folder name"
-            value=""
-            onCommit={(value) => {
-              if (value) onCreateFolder(value)
-              setCreatingFolder(false)
-            }}
-            onCancel={() => setCreatingFolder(false)}
-          />
-        )}
-        {groups.folders.map(({ folder, items }) => (
-          <FolderGroup
-            key={folder.name}
-            folder={folder}
-            items={items}
-            collapsed={Boolean(collapsed[folder.name])}
-            onToggle={() =>
-              setCollapsed((value) => ({ ...value, [folder.name]: !value[folder.name] }))
-            }
-            onUpdateFolder={onUpdateFolder}
-            onDeleteFolder={onDeleteFolder}
-            {...rows}
-          />
+      <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-1.5">
+        {matches.map((session) => (
+          <SessionRow key={session.id} session={session} {...rows} />
         ))}
-        {groups.unfiled.length > 0 && (
-          <div data-folder="">
-            {folders.length > 0 && (
-              <p className="px-2 py-1 text-hint font-medium tracking-wide text-muted-foreground uppercase">
-                All sessions
-              </p>
-            )}
-            <div className="space-y-0.5">
-              {groups.unfiled.map((session) => (
-                <SessionRow key={session.id} session={session} {...rows} />
-              ))}
-            </div>
-          </div>
-        )}
         {matches.length === 0 && filter && (
           <p className="px-2 py-4 text-center text-xs text-muted-foreground">
             No session matches <span className="font-medium text-foreground">{filter}</span>.
@@ -212,112 +101,14 @@ export function SessionRail({
   )
 }
 
-function FolderGroup({
-  folder,
-  items,
-  collapsed,
-  onToggle,
-  onUpdateFolder,
-  onDeleteFolder,
-  ...rows
-}: RowHandlers & {
-  folder: TerminalFolder
-  items: TerminalWorkspace[]
-  collapsed: boolean
-  onToggle: () => void
-  onUpdateFolder: (name: string, next: { name?: string }) => void
-  onDeleteFolder: (folder: TerminalFolder) => void
-}) {
-  const [renaming, setRenaming] = useState(false)
-  if (renaming)
-    return (
-      <InlineEdit
-        placeholder="Folder name"
-        value={folder.name}
-        onCommit={(value) => {
-          if (value && value !== folder.name) onUpdateFolder(folder.name, { name: value })
-          setRenaming(false)
-        }}
-        onCancel={() => setRenaming(false)}
-      />
-    )
-
-  return (
-    <div className="min-w-0" data-folder={folder.name}>
-      <div className="group/folder flex items-center gap-1 px-1 py-0.5">
-        <button
-          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1 text-left focus-ring hover:text-foreground"
-          onClick={onToggle}
-        >
-          <ChevronDown
-            className={cn(
-              "size-3 shrink-0 text-muted-foreground transition-transform",
-              collapsed && "-rotate-90",
-            )}
-          />
-          <span className="truncate text-hint font-medium tracking-wide text-muted-foreground uppercase">
-            {folder.name}
-          </span>
-        </button>
-        <span className={cn("flex shrink-0", rowReveal("folder"))}>
-          <IconAction
-            label={`New session in ${folder.name}`}
-            className="size-6"
-            onClick={() => rows.onNew(folder.name)}
-          >
-            <Plus />
-          </IconAction>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label={`More for ${folder.name}`}
-                className="size-6"
-              >
-                <MoreHorizontal />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-44">
-              <DropdownMenuItem className="gap-2 text-xs" onSelect={() => setRenaming(true)}>
-                <Pencil className="size-3.5" /> Rename folder
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                variant="destructive"
-                className="gap-2 text-xs"
-                onSelect={() => onDeleteFolder(folder)}
-              >
-                <Trash className="size-3.5" /> Delete folder
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </span>
-      </div>
-      {!collapsed && items.length > 0 && (
-        <div className="mt-0.5 space-y-0.5 pl-3">
-          {items.map((session) => (
-            <SessionRow key={session.id} session={session} {...rows} />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 function SessionRow({
   session,
   activeId,
-  folders,
   activity,
   disconnected,
   onSelect,
-  onRename,
-  onTogglePinned,
-  onSetFolder,
   onClose,
 }: RowHandlers & { session: TerminalWorkspace }) {
-  const [renaming, setRenaming] = useState(false)
   const active = activeId === session.id
   // One line: what the session is called, which — unless somebody named it —
   // is what its current window is doing. The directory used to sit under the
@@ -328,18 +119,6 @@ function SessionRow({
   const label = sessionLabel(session, activity)
   const working = sessionWorking(session, activity)
   const dropped = disconnected.has(session.id)
-  if (renaming)
-    return (
-      <InlineEdit
-        placeholder="Name this session"
-        value={session.named ? session.title : label}
-        onCommit={(value) => {
-          if (value) onRename(session, value)
-          setRenaming(false)
-        }}
-        onCancel={() => setRenaming(false)}
-      />
-    )
 
   return (
     <div
@@ -358,7 +137,6 @@ function SessionRow({
         className="flex min-w-0 flex-1 items-center gap-1.5 text-left focus-ring-inset"
       >
         <ProgramMark process={sessionProgram(session, activity)} />
-        {session.favourite && <Pin className="size-2.5 shrink-0 text-muted-foreground" />}
         <span
           className={cn("min-w-0 flex-1 truncate text-body leading-tight", active && "font-medium")}
         >
@@ -366,9 +144,6 @@ function SessionRow({
         </span>
         <ActivityMark working={working} disconnected={dropped} className="pr-1" />
       </button>
-      {/* Closing is the one thing done often enough to earn its own control,
-          so it sits on the card rather than two clicks into the menu. The
-          menu keeps what is done rarely: rename, pin, refile. */}
       <Button
         size="icon-sm"
         variant="ghost"
@@ -378,74 +153,6 @@ function SessionRow({
       >
         <Cross className="size-3.5" />
       </Button>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            aria-label={`More for ${label}`}
-            className={cn("size-6 shrink-0", rowReveal())}
-          >
-            <MoreHorizontal />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-48">
-          <DropdownMenuItem className="gap-2 text-xs" onSelect={() => setRenaming(true)}>
-            <Pencil className="size-3.5" /> Rename
-          </DropdownMenuItem>
-          <DropdownMenuItem className="gap-2 text-xs" onSelect={() => onTogglePinned(session)}>
-            <Pin className="size-3.5" /> {session.favourite ? "Unpin" : "Pin"}
-          </DropdownMenuItem>
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger className="gap-2 text-xs">
-              <FolderClosed className="size-3.5" /> Move to
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="w-44">
-              <DropdownMenuItem className="text-xs" onSelect={() => onSetFolder(session.id, "")}>
-                All sessions
-              </DropdownMenuItem>
-              {folders.map((folder) => (
-                <DropdownMenuItem
-                  key={folder.name}
-                  className="text-xs"
-                  disabled={folder.name === session.folder}
-                  onSelect={() => onSetFolder(session.id, folder.name)}
-                >
-                  {folder.name}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-        </DropdownMenuContent>
-      </DropdownMenu>
     </div>
-  )
-}
-
-function InlineEdit({
-  value,
-  placeholder,
-  onCommit,
-  onCancel,
-}: {
-  value: string
-  placeholder: string
-  onCommit: (value: string) => void
-  onCancel: () => void
-}) {
-  const [draft, setDraft] = useState(value)
-  return (
-    <Input
-      autoFocus
-      value={draft}
-      placeholder={placeholder}
-      className="h-8 text-xs"
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={() => onCommit(draft.trim())}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") onCommit(draft.trim())
-        if (event.key === "Escape") onCancel()
-      }}
-    />
   )
 }

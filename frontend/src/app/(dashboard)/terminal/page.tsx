@@ -13,12 +13,7 @@ import {
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, patch, post } from "@/lib/api"
-import type {
-  TerminalActivity,
-  TerminalFolder,
-  TerminalWindow as Window,
-  TerminalWorkspace,
-} from "@/lib/types"
+import type { TerminalActivity, TerminalWindow as Window, TerminalWorkspace } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import {
   actionFor,
@@ -31,7 +26,6 @@ import { usePanelSize } from "@/lib/panel-size"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
-import { useConfirm } from "@/components/confirm-dialog"
 import { Page } from "@/components/page"
 import { Pane, PaneHeader } from "@/components/panel"
 import { XtermPane } from "@/components/xterm-pane"
@@ -45,8 +39,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 
 type TerminalList = {
   enabled: boolean
+  /** Whether a session outlives the dashboard, held on the host, or ends when it restarts. */
+  persistent: boolean
   login: { user: string; home: string; shell: string; error?: string }
-  folders: TerminalFolder[]
   sessions: TerminalWorkspace[]
 }
 
@@ -57,7 +52,6 @@ const TERMINAL_MIN = 360
 const STACKED = "(max-width: 1023px)"
 
 export default function TerminalPage() {
-  const { confirm, dialog } = useConfirm()
   const router = useRouter()
   // Which session, and within each session which window, was on screen. Kept
   // in the browser rather than in component state, so leaving for another
@@ -98,7 +92,6 @@ export default function TerminalPage() {
 
   const params = useSearchParams()
   const requestedCwd = params.get("cwd")
-  const requestedFolder = params.get("folder") ?? undefined
   const launched = useRef(false)
   // Five seconds rather than ten: the listing now carries whether each session
   // is working, and that is worth seeing sooner. The remembered windows of
@@ -118,7 +111,7 @@ export default function TerminalPage() {
   }, 5000)
 
   const openSession = useCallback(
-    async (cwd?: string, folder?: string) => {
+    async (cwd?: string) => {
       try {
         // No title, even for a shell opened in a chosen directory: the rail
         // follows the shell, whose prompt names the directory it is in, and a
@@ -127,7 +120,6 @@ export default function TerminalPage() {
           rows: 30,
           cols: 110,
           cwd,
-          folder,
         })
         await refresh()
         setRemembered(session.id)
@@ -148,10 +140,9 @@ export default function TerminalPage() {
     launched.current = true
     const url = new URL(window.location.href)
     url.searchParams.delete("cwd")
-    url.searchParams.delete("folder")
     window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash)
-    void openSession(requestedCwd, requestedFolder)
-  }, [requestedCwd, requestedFolder, data, openSession])
+    void openSession(requestedCwd)
+  }, [requestedCwd, data, openSession])
 
   useEffect(() => {
     const el = workspaceRef.current
@@ -262,27 +253,15 @@ export default function TerminalPage() {
   const showWindow = (id: string) => {
     if (active) setRememberedWindows((windows) => ({ ...windows, [active]: id }))
   }
-  const setMeta = (id: string, next: Record<string, unknown>) =>
-    act(() => patch(`/terminal/${encodeURIComponent(id)}`, next), "Could not update that session")
 
   // Closing a shell asks nothing first, for the same reason the API route
   // carries no typed phrase: it is an everyday act, and a dialog in front of
-  // an everyday act stops being read and starts being dismissed. Deleting a
-  // folder below still asks, because nobody does that a dozen times a day.
+  // an everyday act stops being read and starts being dismissed.
   const closeSession = (session: TerminalWorkspace) =>
     act(async () => {
       await del(`/terminal/${encodeURIComponent(session.id)}`)
       if (active === session.id) setRemembered("")
     }, "Could not close that session")
-
-  const deleteFolder = (folder: TerminalFolder) =>
-    confirm({
-      title: `Delete ${folder.name}?`,
-      description:
-        "Sessions in this folder will move back to All sessions. No terminal will close.",
-      confirmLabel: "Delete folder",
-      action: () => del(`/terminal/folders/${encodeURIComponent(folder.name)}`).then(refresh),
-    })
 
   // A new window opens beside the one you were looking at, so it starts where
   // that shell currently is. The polled list carries a cwd up to five seconds
@@ -435,7 +414,10 @@ export default function TerminalPage() {
         <LoadingPanel rows={4} />
       </Page>
     )
-  if (error)
+  // Only when there is nothing to show. A listing that fails while the
+  // dashboard restarts must not take the workbench down with it: the shells
+  // are still running, and each pane reconnects to its own on its own.
+  if (error && !data)
     return (
       <Page className="px-2 py-2 md:px-3 md:py-3">
         <ErrorState error={error} />
@@ -471,7 +453,6 @@ export default function TerminalPage() {
             showWindow(id)
             focusPaneRef.current?.()
           }}
-          onRename={(id, name) => updateWindow(id, { name }, "Could not rename that window")}
           onReorder={(id, position) => updateWindow(id, { position }, "Could not move that window")}
           onNew={() => void openWindow()}
           onClose={closeWindow}
@@ -520,26 +501,12 @@ export default function TerminalPage() {
           <div className="absolute inset-0 z-20 flex bg-card lg:relative lg:inset-auto lg:z-auto lg:w-(--jd-rail) lg:shrink-0 lg:border-r lg:border-hairline">
             <SessionRail
               sessions={sessions}
-              folders={data.folders}
               activeId={active}
               activity={activity}
               disconnected={disconnectedSessions}
               onSelect={select}
-              onRename={(session, title) => setMeta(session.id, { title })}
-              onTogglePinned={(session) => setMeta(session.id, { favourite: !session.favourite })}
-              onSetFolder={(id, folder) => setMeta(id, { folder })}
               onClose={closeSession}
-              onNew={(folder) => void openSession(undefined, folder)}
-              onCreateFolder={(name) =>
-                void act(() => post("/terminal/folders", { name }), "Could not create that folder")
-              }
-              onUpdateFolder={(name, next) =>
-                void act(
-                  () => patch(`/terminal/folders/${encodeURIComponent(name)}`, next),
-                  "Could not update that folder",
-                )
-              }
-              onDeleteFolder={deleteFolder}
+              onNew={() => void openSession()}
               onHide={overlay ? () => setShowRail(false) : undefined}
             />
             <ResizeHandle
@@ -595,7 +562,11 @@ export default function TerminalPage() {
                 className="flex-1"
                 icon={TerminalWindow}
                 title="No sessions yet"
-                description="Open a direct PTY to start working. It ends when the dashboard closes."
+                description={
+                  data.persistent
+                    ? "Sessions keep running on the server until you close them, even with this page closed or the dashboard restarting."
+                    : "Sessions keep running with this page closed, but end when the dashboard restarts."
+                }
                 action={
                   <Button size="sm" onClick={() => void openSession()}>
                     <Plus className="size-4" />
@@ -627,7 +598,6 @@ export default function TerminalPage() {
           </div>
         )}
       </div>
-      {dialog}
     </Page>
   )
 }

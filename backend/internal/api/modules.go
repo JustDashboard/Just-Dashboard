@@ -146,6 +146,11 @@ func (s *Server) initModules() {
 		if err := s.modules.term.SetupShell(); err != nil {
 			s.Log.Warn("terminal prompt setup unavailable", "error", err)
 		}
+		// After the shell setup, because a held session is started with the
+		// login SetupShell assembles.
+		if err := s.modules.term.HoldSessions(s.Cfg.DataDir); err != nil {
+			s.Log.Warn("terminal sessions will end when the dashboard restarts", "error", err)
+		}
 	}
 	s.modules.files = files.New(s.Cfg.FileRoots)
 	s.modules.gameVersions = gameserver.New()
