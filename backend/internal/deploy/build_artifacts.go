@@ -52,9 +52,18 @@ var recipeBaseCatalogue = map[string][]string{
 	"java:maven":    {"maven:3-eclipse-temurin-21", "eclipse-temurin:21-jre-alpine"},
 	"java:gradle":   {"gradle:8-jdk21", "eclipse-temurin:21-jre-alpine"},
 	"dotnet":        {"mcr.microsoft.com/dotnet/sdk:8.0", "mcr.microsoft.com/dotnet/aspnet:8.0"},
-	"deno":          {"denoland/deno:alpine"},
+	"deno":          {"denoland/deno:alpine-2.9.7"},
+	"deno:1":        {"denoland/deno:alpine-1.46.3"},
+	"deno:2":        {"denoland/deno:alpine-2.9.7"},
 	"php":           {"dunglas/frankenphp:1-php8.3-alpine"},
+	"php:8.2":       {"dunglas/frankenphp:1-php8.2-alpine"},
+	"php:8.3":       {"dunglas/frankenphp:1-php8.3-alpine"},
+	"php:8.4":       {"dunglas/frankenphp:1-php8.4-alpine"},
+	"php:8.5":       {"dunglas/frankenphp:1-php8.5-alpine"},
 	"php:composer":  {"composer:2"},
+	// The WordPress release a theme, plugin or wp-content repository is
+	// served inside; only its files are copied, never its PHP.
+	"php:wordpress": {"wordpress:6-php8.4-fpm-alpine"},
 }
 
 type ResolvedImage struct {
@@ -283,7 +292,9 @@ func (b *ArtifactBuilder) PrepareWithin(
 				baseRefs[1] = "mcr.microsoft.com/dotnet/runtime:" + recipe.dotnet.version
 			}
 		case "deno":
-			prepared.Toolchain = "deno"
+			prepared.Notes = append(prepared.Notes, b.settleDenoImage(ctx, &recipe.deno)...)
+			prepared.Toolchain = recipe.deno.toolchain()
+			baseRefs = []string{recipe.deno.image}
 		case "php":
 			prepared.Toolchain = "php " + recipe.php.version
 			if recipe.php.assets != "" {
@@ -763,7 +774,7 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 		project.seeds = dotnetSQLiteSeeds(root, project)
 		return selectedRecipe{kind: "dotnet", catalogueKey: "dotnet", dotnet: project}, nil
 	case "deno":
-		deno, err := selectDenoRecipe(root, config)
+		deno, err := selectDenoRecipe(boundary, root, config)
 		if err != nil {
 			return selectedRecipe{}, err
 		}

@@ -1,0 +1,5 @@
+framework:
+    secret: '%env(APP_SECRET)%'
+    asset_mapper:
+        paths:
+            - assets/

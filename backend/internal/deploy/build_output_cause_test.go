@@ -409,8 +409,9 @@ func buildCases() []buildCase {
 		{
 			name: "PHP release", command: "composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist", exit: 2, build: BuildPlanConfig{Method: BuildRecipe, Recipe: "php"},
 			lines: []string{"    - Root composer.json requires php ^8.4 but your php version (8.3.12) does not satisfy that requirement."},
+			// The Build settings choose the PHP release, so the cause says which.
 			want: BuildCause{Code: "build_runtime_version", Phase: phaseInstall, Command: "composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist", ExitCode: 2,
-				Detail: "php", Subjects: []string{"^8.4"}},
+				Detail: "php", Subjects: []string{"^8.4"}, Fix: &CauseFix{Kind: fixSetBuild, Field: "configuration.build.phpVersion", Value: "8.4"}},
 		},
 		{
 			name: "Symfony dev bundle", command: "composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist", exit: 1, build: BuildPlanConfig{Method: BuildRecipe, Recipe: "php"},

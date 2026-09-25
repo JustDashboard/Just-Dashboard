@@ -122,6 +122,7 @@ func (s *PlanningStore) planRevisionChanges(ctx context.Context, environmentID i
 		{"packageManager", oldBuild.PackageManager, newBuild.PackageManager},
 		{"goVersion", oldBuild.GoVersion, newBuild.GoVersion},
 		{"pythonVersion", oldBuild.PythonVersion, newBuild.PythonVersion},
+		{"phpVersion", oldBuild.PHPVersion, newBuild.PHPVersion},
 		{"rootDirectory", oldBuild.RootDirectory, newBuild.RootDirectory},
 		{"dockerfile", oldBuild.Dockerfile, newBuild.Dockerfile},
 		{"target", oldBuild.Target, newBuild.Target},

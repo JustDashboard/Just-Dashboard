@@ -50,7 +50,7 @@ var (
 	composerDatabaseDrivers = []struct{ name, engine string }{
 		{"predis/predis", "redis"}, {"ext-redis", "redis"}, {"mongodb/laravel-mongodb", "mongodb"}, {"jenssegers/mongodb", "mongodb"},
 		{"mongodb/mongodb", "mongodb"}, {"ext-mongodb", "mongodb"}, {"ext-pdo_pgsql", "postgres"}, {"ext-pgsql", "postgres"},
-		{"ext-pdo_mysql", "mysql"}, {"ext-mysqli", "mysql"},
+		{"ext-pdo_mysql", "mysql"}, {"ext-mysqli", "mysql"}, {"roots/wordpress", "mysql"}, {"johnpbloch/wordpress", "mysql"},
 	}
 	// extensionDependencies are the libraries that only work on a Postgres
 	// that has the extension.

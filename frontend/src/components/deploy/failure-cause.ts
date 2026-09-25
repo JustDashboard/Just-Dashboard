@@ -101,6 +101,8 @@ export const CAUSE_TITLES: Record<string, string> = {
   runtime_master_key_invalid: "Credentials cannot be decrypted",
   runtime_auth_untrusted_host: "Host not trusted by Auth.js",
   runtime_dotenv_missing: ".env file missing",
+  runtime_php_extension_missing: "PHP extension missing at runtime",
+  runtime_assets_missing: "Front-end assets not built",
   release_migration_failed: "Migration failed",
   release_migration_failed_before: "Earlier migration failed",
   release_database_not_empty: "Database has an unmanaged schema",
@@ -264,6 +266,11 @@ export function fixTarget(
       return {
         href: `${base}/build#build`,
         label: fix.value ? `Use Python ${fix.value}` : "Choose the Python version",
+      }
+    case "phpVersion":
+      return {
+        href: `${base}/build#build`,
+        label: fix.value ? `Use PHP ${fix.value}` : "Choose the PHP version",
       }
     case "buildCommand":
       return {

@@ -84,25 +84,25 @@ type detectedMarkers struct {
 	composerLock      bool
 	phpIndex          bool
 	phpPublicIndex    bool
+	// phpDocroot is the conventional document root (web/, webroot/, …)
+	// whose index.php named this root, and php what the PHP recipe reads
+	// beyond composer.json (detect_php.go).
+	phpDocroot string
+	php        *phpProject
+	deno       *denoProject
 	// node is the package's install inputs, read after the walk under
 	// their own budget.
 	node *nodeInstallSource
 }
 
 // phpOwnsAssets says the PHP recipe builds this root's package.json itself:
-// a Laravel or Symfony application's Vite or Encore bundle is a stage of the
-// PHP image, not a site of its own.
+// a PHP framework's package.json, or a PHP application's Vite, Encore or
+// Mix build, is a stage of the PHP image, not a site of its own.
 func (m *detectedMarkers) phpOwnsAssets() bool {
-	manifest, ok := parseComposerManifest(m.composerJSON)
-	if !ok {
-		return false
+	if manifest, ok := parseComposerManifest(m.composerJSON); ok && phpFrameworkOf(manifest) != "" {
+		return true
 	}
-	for _, framework := range phpFrameworks {
-		if manifest.has(framework.pkg) {
-			return true
-		}
-	}
-	return false
+	return (m.phpIndex || m.phpPublicIndex || m.phpDocroot != "") && phpAssetKind(m.packageJSON) != ""
 }
 
 // denoEntryNames are the files a Deno service is conventionally run from
@@ -365,7 +365,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 			// names a PHP application; one deeper (a theme, a plugin) does not.
 			switch {
 			case parent == "":
-			case filepath.Base(parent) == "public":
+			case filepath.Base(parent) == "public" || slices.Contains(phpDocumentRoots, filepath.Base(parent)):
 				parent = filepath.Dir(parent)
 				if parent == "." {
 					parent = ""
@@ -436,10 +436,13 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		case "composer.lock":
 			marker.composerLock = true
 		case "index.php":
-			if filepath.Base(filepath.Dir(rel)) == "public" {
-				marker.phpPublicIndex = true
-			} else {
+			switch base := filepath.Base(filepath.Dir(rel)); {
+			case filepath.Dir(rel) == ".":
 				marker.phpIndex = true
+			case base == "public":
+				marker.phpPublicIndex = true
+			case marker.phpDocroot == "":
+				marker.phpDocroot = base
 			}
 		case "composer.json":
 			content, ok := readMarker(limits.MaxFileBytes)
@@ -586,6 +589,8 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		allRoots = append(allRoots, filepath.ToSlash(candidateRoot))
 	}
 	readNodeInstalls(root, markers)
+	readPHPProjects(root, markers)
+	readDenoProjects(root, markers)
 	for _, candidateRoot := range roots {
 		marker := markers[candidateRoot]
 		root := filepath.ToSlash(marker.root)
@@ -778,7 +783,9 @@ func candidatesForMarkers(marker *detectedMarkers, schemaPaths []string, pythonE
 		rootLabel = "."
 	}
 	if len(marker.packageJSON) > 0 && !marker.phpOwnsAssets() {
-		result = append(result, packageCandidate(marker, schemaPaths)...)
+		packages := packageCandidate(marker, schemaPaths)
+		demoteNodeForDeno(marker, packages)
+		result = append(result, packages...)
 	}
 	if marker.goMod != "" {
 		candidate := DetectedCandidate{
@@ -818,7 +825,7 @@ func candidatesForMarkers(marker *detectedMarkers, schemaPaths []string, pythonE
 	if len(marker.denoJSON) > 0 {
 		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, denoCandidate(marker, rootLabel)))
 	}
-	if len(marker.composerJSON) > 0 || marker.phpIndex || marker.phpPublicIndex {
+	if len(marker.composerJSON) > 0 || marker.phpIndex || marker.phpPublicIndex || marker.phpDocroot != "" {
 		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, phpCandidate(marker, rootLabel)))
 	}
 	if marker.staticFile != "" && len(marker.packageJSON) == 0 {

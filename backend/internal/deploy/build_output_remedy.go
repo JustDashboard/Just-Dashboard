@@ -165,6 +165,11 @@ func buildCauseFix(cause *BuildCause, context causeContext) *CauseFix {
 			if slices.Contains(pythonRecipeVersions, version) && version != build.PythonVersion {
 				return &CauseFix{Kind: fixSetBuild, Field: "configuration.build.pythonVersion", Value: version}
 			}
+		case "php":
+			version, err := choosePHPVersion("", "", []phpVersionRequirement{{"composer.lock", cause.Subjects[0]}})
+			if err == nil && build.Recipe == "php" && version != build.PHPVersion {
+				return &CauseFix{Kind: fixSetBuild, Field: "configuration.build.phpVersion", Value: version}
+			}
 		}
 	case "build_env_missing":
 		if len(cause.Subjects) == 0 || !recipe {
@@ -482,6 +487,10 @@ func (c *BuildCause) explain() (string, string) {
 			return "the registry refused it: the image does not exist, or it is private and no valid credential was given",
 				"check the image reference and, for a private image, the source's registry credential"
 		}
+		if c.Detail == "composer" {
+			return "a Composer repository asked for credentials the build does not have" + parenthesized(subject),
+				"set COMPOSER_AUTH (the http-basic, github-oauth or gitlab-token JSON auth.json holds) as a build variable scoped to install"
+		}
 		return "the package registry refused the build's credentials",
 			"add the registry token as a build variable scoped to install (for npm, `NPM_TOKEN` read by an .npmrc)"
 	case "build_registry_rate_limited", "registry_rate_limited":
@@ -644,7 +653,10 @@ func (c *BuildCause) commandNotFound(subject string) (string, string) {
 	switch {
 	case c.Detail == "laravel":
 		return "Laravel's Wayfinder Vite plugin runs `php artisan wayfinder:generate` while the assets build, and the image that builds them has no PHP",
-			"build with a Dockerfile whose asset stage has PHP and the Composer dependencies"
+			"build with the PHP recipe, whose asset stage has PHP and the Composer dependencies, or a Dockerfile that does the same"
+	case c.Detail == "composer" && subject == "git":
+		return "Composer clones a repository that publishes no archive, and the image has no git",
+			"publish archives for the package (a tagged release), or build with a Dockerfile that installs git"
 	case fix != nil:
 		return "`" + subject + "` is not installed in the image this build runs on",
 			"run the command with the build's package manager: `" + fix.Value + "`"
@@ -692,6 +704,8 @@ func lockfileTool(lockfile string) string {
 		return "uv"
 	case "bun.lock":
 		return "Bun"
+	case "deno.lock":
+		return "Deno"
 	}
 	return "package-manager"
 }

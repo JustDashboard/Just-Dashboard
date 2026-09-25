@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -212,9 +213,12 @@ func TestSecondaryProcessesAreDetected(t *testing.T) {
 		if len(processes) != 1 || processes[0].Command != "php artisan horizon" {
 			t.Fatalf("processes = %#v", processes)
 		}
-		manifest, _ := parseComposerManifest([]byte(`{"require":{"laravel/horizon":"^5.0"}}`))
-		if strings.Join(manifest.extensions(), ",") != "pcntl,redis" {
-			t.Fatalf("horizon extensions = %v", manifest.extensions())
+		extensions := []string{}
+		for _, extension := range selectedOf(result).PHP.Extensions {
+			extensions = append(extensions, extension.Name)
+		}
+		if !slices.Contains(extensions, "pcntl") || !slices.Contains(extensions, "redis") {
+			t.Fatalf("horizon extensions = %v", extensions)
 		}
 	})
 	t.Run("a Procfile worker is the Gemfile's worker", func(t *testing.T) {

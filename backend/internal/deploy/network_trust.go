@@ -48,6 +48,9 @@ var (
 		{"ADDRESS_HEADER", "x-forwarded-for", ""}, {"XFF_DEPTH", "1", "1"},
 	}
 	dotnetProxyTrust = []proxyTrustSetting{{"ASPNETCORE_FORWARDEDHEADERS_ENABLED", "true", "false"}}
+	// The PHP recipe's prepend file honours the forwarded headers from a
+	// private peer only while this is set (frameworks_php.go).
+	phpProxyTrust    = []proxyTrustSetting{{"PHP_FORWARDED_TRUST", "private", "none"}}
 	springProxyTrust = []proxyTrustSetting{{"SERVER_FORWARD_HEADERS_STRATEGY", "framework", "none"}}
 	quarkusTrust     = []proxyTrustSetting{
 		{"QUARKUS_HTTP_PROXY_PROXY_ADDRESS_FORWARDING", "true", "false"}, {"QUARKUS_HTTP_PROXY_ALLOW_X_FORWARDED", "true", "false"},
@@ -68,6 +71,8 @@ func recipeProxyTrust(recipe, framework string) []proxyTrustSetting {
 		return springProxyTrust
 	case recipe == "java" && framework == "quarkus":
 		return quarkusTrust
+	case recipe == "php":
+		return phpProxyTrust
 	}
 	return nil
 }
@@ -77,7 +82,7 @@ func recipeProxyTrust(recipe, framework string) []proxyTrustSetting {
 func proxyTrustSettings() []proxyTrustSetting {
 	seen := map[string]bool{}
 	var settings []proxyTrustSetting
-	for _, recipe := range [][]proxyTrustSetting{pythonProxyTrust, sveltekitProxyTrust, dotnetProxyTrust, springProxyTrust, quarkusTrust} {
+	for _, recipe := range [][]proxyTrustSetting{pythonProxyTrust, sveltekitProxyTrust, dotnetProxyTrust, springProxyTrust, quarkusTrust, phpProxyTrust} {
 		for _, setting := range recipe {
 			if !seen[setting.name] {
 				seen[setting.name] = true

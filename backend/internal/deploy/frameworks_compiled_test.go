@@ -250,7 +250,7 @@ func TestDenoDetectionAndRecipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"FROM denoland/deno:alpine@sha256:", "RUN deno install --frozen", "RUN deno task build", `CMD ["/bin/sh","-c","deno task start"]`} {
+	for _, want := range []string{"FROM denoland/deno:alpine-2.9.7@sha256:", "RUN deno install --frozen", "RUN deno task build", `CMD ["/bin/sh","-c","deno task start"]`} {
 		if !strings.Contains(prepared.DockerfilePreview, want) {
 			t.Fatalf("Dockerfile missing %q:\n%s", want, prepared.DockerfilePreview)
 		}

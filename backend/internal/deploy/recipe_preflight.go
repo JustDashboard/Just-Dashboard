@@ -121,6 +121,8 @@ func recipeRefusalField(text string) string {
 		return "configuration.build.goVersion"
 	case strings.Contains(lower, "python recipe supports"):
 		return "configuration.build.pythonVersion"
+	case strings.Contains(lower, "php recipe builds php"):
+		return "configuration.build.phpVersion"
 	case strings.Contains(lower, "dockerfile"):
 		return "configuration.build.dockerfile"
 	}

@@ -643,12 +643,12 @@ func preflightFindings(
 		findings = append(findings, nodeInstallFindings(planned, configuration)...)
 	}
 	if planned != nil && planned.UnpinnedDependencies && configuration.Build.Method == BuildRecipe {
+		means, action := unpinnedDependencyAdvice(planned.Recipe)
 		findings = append(findings, finding("dependencies_unpinned", PreflightWarning,
-			"Dependencies are not pinned to exact versions", "unpinned entries in the dependency manifest",
-			"Each build installs the newest versions the manifest allows, so a rebuild of this same commit can run different code.",
-			"Commit a lockfile (uv lock, poetry lock, or pip freeze > requirements.txt) when rebuilds must be identical; deploying as is works today.",
+			"Dependencies are not pinned to exact versions", "unpinned entries in the dependency manifest", means, action,
 			"deploy", "configuration.build"))
 	}
+	findings = append(findings, phpDenoFindings(planned, configuration)...)
 	if planned != nil && planned.RecipeIssue != "" && configuration.Build.Method == BuildRecipe {
 		findings = append(findings, finding("recipe_unsupported", PreflightBlocked,
 			"Source needs a different build plan", planned.RecipeIssue,

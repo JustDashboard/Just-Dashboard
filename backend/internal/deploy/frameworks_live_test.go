@@ -7,9 +7,11 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -36,9 +38,13 @@ func TestLiveDetectedFrameworkBuildAndServing(t *testing.T) {
 	// next-pnpm and express-yarn are the same kind of server installed by
 	// pnpm (a toolchain release the start command runs offline) and by
 	// Yarn 1 (its real frozen install), started through the manager.
+	// laravel-vite is Laravel 13 with Vite and Wayfinder, whose plugin runs
+	// php artisan while the assets build, served behind a forwarded HTTPS;
+	// symfony is an AssetMapper application whose committed .env says dev
+	// and whose DebugBundle is require-dev.
 	for _, name := range []string{"vite", "next", "svelte-node", "svelte-static", "html", "containerfile", "go",
 		"astro", "nuxt", "react-router", "fastapi", "flask", "django", "rust", "java", "gradle", "dotnet", "deno", "laravel", "php",
-		"streamlit", "gradio", "next-pnpm", "express-yarn"} {
+		"streamlit", "gradio", "next-pnpm", "express-yarn", "laravel-vite", "symfony"} {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 			defer cancel()
@@ -98,7 +104,7 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 			run := EngineRun{ID: stamp, EnvironmentID: stamp}
 			release := Release{ID: stamp, EnvironmentID: stamp, RunID: stamp, Number: 1}
 			runtimeVariables := map[string]string{}
-			if name == "laravel" {
+			if strings.HasPrefix(name, "laravel") {
 				// What the configure form generates for a Laravel import: the
 				// application key, and file-backed sessions since the fixture
 				// ships no sessions table.
@@ -136,7 +142,14 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 			// Gradio's page embeds the whole application config, the
 			// configured value included, and declares a manifest script it
 			// serves only to an installed app; the shell alone is the proof.
-			walkAssets := name != "gradio"
+			walkAssets := name != "gradio" && name != "symfony"
+			if name == "symfony" {
+				// AssetMapper names its modules in an import map, beside a shim
+				// served from a CDN.
+				if match := regexp.MustCompile(`"app": "(/assets/app-[\w-]+\.js)"`).FindStringSubmatch(html); match != nil {
+					content += fetch(match[1])
+				}
+			}
 			if name == "streamlit" {
 				// Streamlit renders its page over a websocket, so the shell
 				// alone proves nothing about the script: the static file the
@@ -152,6 +165,10 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 					break
 				}
 				path := strings.TrimPrefix(match[1], "./")
+				if absolute, err := url.Parse(path); err == nil && absolute.Host != "" {
+					// Laravel's @vite writes absolute URLs from the request.
+					path = absolute.Path
+				}
 				if !strings.HasPrefix(path, "/") {
 					path = "/" + path
 				}
@@ -162,6 +179,29 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 			}
 			if !strings.Contains(content, value) {
 				t.Fatal("served application assets did not contain the configured build value")
+			}
+			if name == "laravel-vite" || name == "symfony" {
+				// The platform proxy terminates TLS; behind it the page and its
+				// asset URLs are https, and the client is the proxy's
+				// last X-Forwarded-For hop.
+				request, _ := http.NewRequest(http.MethodGet, base+"/", nil)
+				request.Header.Set("X-Forwarded-Proto", "https")
+				request.Header.Set("X-Forwarded-For", "203.0.113.7")
+				response, err := httpClient.Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+				response.Body.Close()
+				want := []string{`<h1 id="api">https</h1>`, `https://127.0.0.1:`, "FROM vendor AS assets"}
+				if name == "symfony" {
+					want = []string{`<h1 id="api">prod https</h1>`, "asset-map:compile"}
+				}
+				if slices.ContainsFunc(want, func(text string) bool {
+					return !strings.Contains(string(body), text) && !strings.Contains(result.Prepared.DockerfilePreview, text)
+				}) {
+					t.Fatalf("forwarded HTTPS was not honoured behind the proxy:\n%s", body)
+				}
 			}
 			if name == "go" && (!strings.Contains(content, "custom-start go1.26.8") || result.Prepared.GoVersion != "1.26.8") {
 				t.Fatalf("Go override/version behavior missing: %q", content)
