@@ -249,11 +249,12 @@ extra databases on quick-setup MySQL
 (`rails_multidb_create_denied`); a linked PostgreSQL without the schema's extension
 (`database_extension_missing`, blocked; the linked server is asked only when the schema needs an
 extension); MongoDB 5+ on a CPU without AVX or ARMv8.2 atomics
-(`database_cpu_unsupported`); a Laravel or Symfony start that migrates a database nobody linked
-(`database_required_for_start`, blocked); the callback, authorized-domain and webhook addresses to
-register with Auth.js providers, Better Auth, OmniAuth, django-allauth, Passport (named by the strategy
-constructed around its `callbackURL`), Auth0, Clerk, Firebase, Supabase and Stripe
-(`external_callback_registration`); a Clerk production key issued for another host
+(`database_cpu_unsupported`); a Laravel, Symfony, Rails, Hanami or Phoenix start that migrates a
+database nobody linked (`database_required_for_start`, blocked; read with the same pattern as the
+readiness budget's migrating starts, Ecto's inline migrator included); the callback, authorized-domain
+and webhook addresses to register with Auth.js providers, Better Auth, OmniAuth, django-allauth,
+Passport (named by the strategy constructed around its `callbackURL`), Auth0, Clerk, Firebase, Supabase
+and Stripe (`external_callback_registration`); a Clerk production key issued for another host
 (`clerk_key_domain_mismatch`: a warning on the same registrable domain, blocked on another); and a
 Phoenix release whose migrate overlay nothing runs
 (`migrations_not_run`). No finding repeats a secret value.
@@ -1402,23 +1403,28 @@ install refuses it ("Your bundle only supports platforms …"): the recipe runs 
 fixes the lock. A lock with `ruby` or the server's Linux platform needs nothing. A repository's own
 Dockerfile beside a Ruby root is judged the same way: `ruby_lock_platform_missing` is blocked when the
 Dockerfile freezes the bundle (`BUNDLE_DEPLOYMENT`, `BUNDLE_FROZEN`, `--deployment`, `--frozen`) and a
-warning otherwise. The build stage installs the headers the locked gems compile against (`libpq-dev`
-for `pg`, `default-libmysqlclient-dev` for `mysql2`, `libssl-dev` for `trilogy`, `libsqlite3-dev`,
-`libmagickwand-dev`, `libffi-dev`, always `build-essential`, `pkg-config` and `libyaml-dev`, and `git`
-for Git gems) and the runtime only the libraries they load (`libpq5`, `libmariadb3`, the virtual
-`libvips` for `ruby-vips`, `imagemagick`); the names hold on bookworm and trixie. The Gemfile's other
-gem servers (`source "https://gems.contribsys.com/"`) are `BUNDLE_<HOST>` variables mapped to the
+warning otherwise, and not raised when the Dockerfile's own `bundle lock --add-platform` names the
+server's platform before it installs. The build stage installs the headers the locked gems compile
+against (`libpq-dev` for `pg`, `default-libmysqlclient-dev` for `mysql2`, `libssl-dev` for `trilogy`,
+`libsqlite3-dev`, `libmagickwand-dev`, `libffi-dev`, always `build-essential`, `pkg-config` and
+`libyaml-dev`, and `git` for Git gems) and the runtime only the libraries they load (`libpq5`,
+`libmariadb3`, the virtual `libvips` for `ruby-vips`, `imagemagick`); the names hold on bookworm and
+trixie. A Rails runtime also installs `libjemalloc2` and preloads it (`LD_PRELOAD=libjemalloc.so.2`), as
+Rails' own Dockerfile does, which keeps a long-running server's memory from fragmenting. The Gemfile's
+other gem servers (`source "https://gems.contribsys.com/"`) are `BUNDLE_<HOST>` variables mapped to the
 install, and a Git gem's HTTPS host one the install may use; a Git gem over SSH, which the build has no
 key for, is `ruby_git_gem_ssh` (warning).
 
 | Framework | Start | Port |
 | --- | --- | --- |
 | Rails | `bundle exec rails db:prepare && exec bundle exec rails server --binding 0.0.0.0 --port ${PORT:-3000}`, without `db:prepare` when Active Record is not loaded or there is no `config/database.yml`; `bin/rails` must be committed | 3000 |
-| Hanami | `bundle exec puma --port ${PORT:-2300}`, after `bundle exec hanami db migrate` when `hanami-db` has migrations | 2300 |
-| Sinatra, Roda, Grape, Rack | `bundle exec puma --port ${PORT:-N}` (else the locked `unicorn`, `thin` or `rackup`); a classic Sinatra script with no `config.ru` runs `bundle exec ruby app.rb -o 0.0.0.0 -p ${PORT:-4567}` | 4567 (Sinatra), 9292 |
+| Hanami | `exec bundle exec puma --port ${PORT:-2300}`, after `bundle exec hanami db migrate` when `hanami-db` has migrations | 2300 |
+| Sinatra, Roda, Grape, Rack | `exec bundle exec puma --port ${PORT:-N}` (else the locked `unicorn`, `thin` or `rackup`); a classic Sinatra script with no `config.ru` runs `exec bundle exec ruby app.rb -o 0.0.0.0 -p ${PORT:-4567}` | 4567 (Sinatra), 9292 |
 
-A `Procfile` web process outranks all of these, and its `release:` line is the candidate's release
-command, run in the release image. With no server gem and no `config.ru` the candidate asks for the
+Each start `exec`s its server, so the server is the container's first process and a stop's SIGTERM
+reaches it rather than a shell that ignores it until the grace period ends. A `Procfile` web process
+outranks all of these, and its `release:` line is the candidate's release command, run in the release
+image. With no server gem and no `config.ru` the candidate asks for the
 start command, and preflight's `start_command_missing` names what is missing. The image sets the
 framework's environment (`RAILS_ENV`, `HANAMI_ENV`, `RACK_ENV`, `APP_ENV` to `production`) and for Rails
 `RAILS_LOG_TO_STDOUT=1` and `RAILS_SERVE_STATIC_FILES=1`, which Rails 7.0 and earlier need before they
@@ -1467,8 +1473,15 @@ The start is `/app/bin/<release> start`, or `/app/bin/server` when the overlay e
 (`ecto_sql` with `priv/*/migrations`) run in front of it: the project's own `Release.migrate`
 (`/app/bin/shop eval "Shop.Release.migrate" && exec /app/bin/shop start`), else the same loop
 `phx.gen.release` writes, evaluated inline; a `rel/overlays/bin/migrate` overlay is the release command
-instead, run in the release image before each release. Phoenix listens on PORT, 4000 by default; a Plug
-or Bandit service on the literal port its application module names. `SECRET_KEY_BASE`, `PHX_HOST` and
+instead, run in the release image before each release. An umbrella's migrations are its applications'
+(`apps/*/priv/*/migrations`, and a `Release` module under `apps/*/lib`): the inline loop loads each of
+those applications by the name its `mix.exs` gives it and migrates the repositories it configures, and
+one the release leaves out has none to migrate. Phoenix's `force_ssl:` in `config/prod.exs` or
+`config/runtime.exs` redirects every plain-HTTP request to HTTPS, which readiness (any answer) passes and
+visitors do not: without an HTTPS domain the plan gets `readiness_redirects_to_https`, and with one but no
+`rewrite_on: [:x_forwarded_proto]` (Phoenix 1.8's generator writes it) the same finding names the
+redirect loop behind the proxy. Phoenix listens on PORT, 4000 by default; a Plug or Bandit service on
+the literal port its application module names. `SECRET_KEY_BASE`, `PHX_HOST` and
 `DATABASE_URL` are set up by [environment discovery](#environment-discovery-and-database-suggestions),
 and an `ecto_sqlite3` file named by `DATABASE_PATH` moves to `/app/data`, the directory the image
 creates for the `app` user.
@@ -1479,15 +1492,21 @@ Scala (`build.sbt`) and Clojure (`project.clj`, or `deps.edn` with a tools.build
 the JVM the way the Java recipe does (`deploy/frameworks_jvm_languages.go`): the heap follows the
 container's limit (`JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75`), the program runs as the `app` user from
 `/app`, and the release comes from `.java-version` or a `--release` the build compiles for, 17, 21 or
-25, 21 by default. The builders are the sbt project's `sbtscala/scala-sbt:eclipse-temurin-<jdk>_<1|2>.x`
-(the launcher series `project/build.properties` names; it fetches the sbt and Scala releases the project
-pins) and the official `clojure:temurin-<jdk>-lein` and `-tools-deps`.
+25, 21 by default. A `--release` (or `-release:`) below 17 is only the bytecode the build targets,
+which a 17 compiler still writes: it builds and runs on 17. A `.java-version` naming another JDK is
+`recipe_unsupported`. The builders are the sbt project's
+`sbtscala/scala-sbt:eclipse-temurin-<jdk>_<1|2>.x` (the launcher series `project/build.properties`
+names; it fetches the sbt and Scala releases the project pins) and the official
+`clojure:temurin-<jdk>-lein` and `-tools-deps`.
 
 - **sbt-native-packager** (`enablePlugins(JavaAppPackaging)`, or Play, which brings it): `sbt -batch
   update`, `sbt -batch stage`, and the staged directory runs on `eclipse-temurin:<jdk>-jre` (Ubuntu,
   since the start script is bash) as `/app/bin/<script>` — the project's `executableScriptName`, else
   sbt's normalised `name`, top-level settings counting for the root project. A multi-project build
-  stages the project whose settings enable the packager.
+  stages the project whose settings enable the packager. Both names are written into the Dockerfile, so
+  a directory that is not a plain relative path (`[A-Za-z0-9._/-]`, nothing above the root) or a script
+  that is not a plain file name is `recipe_unsupported`, and the renderer refuses any instruction that
+  would span lines.
 - **sbt-assembly**: `sbt -batch assembly`; the largest jar under `target/scala-*` is the fat jar and runs
   as `java -jar` on the Alpine JRE.
 - **Leiningen**: `lein deps`, `lein uberjar`; `project.clj` must name `:main`, and a `^:skip-aot` main is
@@ -1496,12 +1515,17 @@ pins) and the official `clojure:temurin-<jdk>-lein` and `-tools-deps`.
 
 With neither plugin, or a `deps.edn` with no build, the finding says which to add. Play listens on
 `http.port` and writes `RUNNING_PID` where the next container would find it, and its host filter
-answers only localhost: the start is `exec /app/bin/<script> -Dhttp.port=${PORT:-9000}
--Dpidfile.path=/dev/null -Dplay.filters.hosts.allowed.0=.`, every flag a plain system property.
-`APPLICATION_SECRET`, which Play refuses to start without in production, is generated on the server (64
-hex characters, the 256 bits Play 3 asks for); Play reads it through `${?APPLICATION_SECRET}`, never
-from the command line. http4s, ZIO HTTP, Akka and Pekko HTTP, Ring, Compojure, http-kit and Pedestal mark
-a web service on their conventional port. The drivers sbt, Leiningen and `deps.edn` name are database
+answers only localhost: the start is `exec /app/bin/<script> -Dconfig.file=/app/conf/just-dashboard.conf
+-Dhttp.port=${PORT:-9000} -Dpidfile.path=/dev/null -Dplay.filters.hosts.allowed.0=.`, every flag a plain
+system property. Play refuses to start in production while `play.http.secret.key` is its default
+`changeme`, and neither its `reference.conf` nor a stock `application.conf` reads any variable for it.
+The image therefore writes `/app/conf/just-dashboard.conf` — `include "application"` (the application's
+own configuration, from beside it or the classpath) and `play.http.secret.key =
+${?APPLICATION_SECRET}` — and the start loads it, so `APPLICATION_SECRET`, generated on the server (64 hex
+characters, the 256 bits Play 3 asks for), reaches Play through the environment, never the command line.
+It takes precedence over a secret `application.conf` reads from another variable. http4s, ZIO HTTP,
+Akka and Pekko HTTP, Ring, Compojure, http-kit and Pedestal mark a web service on their conventional
+port. The drivers sbt, Leiningen and `deps.edn` name are database
 suggestions like a pom's. The readiness budget is a JVM's.
 
 ## Dart and Gleam
@@ -1524,7 +1548,11 @@ A `gleam.toml` is built by the Gleam recipe (`deploy/frameworks_gleam.go`) into 
 `ghcr.io/gleam-lang/gleam:v1.18.1-erlang-alpine`, and the shipment runs on that same image, whose
 Erlang it was compiled for, as `/app/entrypoint.sh run`. A `gleam = "…"` requirement that 1.18.1 does not
 meet, or a JavaScript target, is `recipe_unsupported`. A Mist or Wisp service listens on the literal
-`mist.port(N)` its source names, else 8000.
+`mist.port(N)` its source names, on the PORT it reads and passes to `mist.port` (its `unwrap` default,
+else 8000), or on mist's own 4000 when nothing calls `mist.port`. mist 3 and later listen on
+`localhost` unless the builder calls `mist.bind`, and the Wisp examples do not: a module under `src/`
+that builds a mist server with no `mist.bind` anywhere is a certain loopback listen fact, so preflight's
+`listen_loopback` blocks with the fix (`|> mist.bind("0.0.0.0")`) before Deploy.
 
 ## Readiness, workers and start commands
 
@@ -1795,8 +1823,9 @@ axum service, a Maven jar and a Gradle jar, an ASP.NET Core minimal API, a Deno 
 12 application (migrated, with the form's generated `APP_KEY`), a plain `index.php`, a Rails 8
 application whose `Gemfile.lock` was resolved on a Mac (the recipe adds the Linux platform, precompiles
 with Propshaft and answers through the table `db:prepare` migrated, with a Propshaft asset fetched), a
-Sinatra app behind Puma, a Phoenix 1.8 release, a Play 3 application staged by sbt, a Leiningen uberjar
-on Ring and a Gleam Mist server. It checks
+Sinatra app behind Puma, a Phoenix 1.8 release, a Play 3 application staged by sbt with the seed's stock
+`application.conf` (its secret reaching Play only through the configuration the image writes), a
+Leiningen uberjar on Ring and a Gleam Mist server. It checks
 readiness and served values without supplying build values at runtime; recipe fixtures also inspect logs,
 metadata and saved image layers for private install credentials. The Go fixture proves generated code,
 custom startup and the selected toolchain through its HTTP response. These local adapter journeys
