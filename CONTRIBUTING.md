@@ -100,9 +100,10 @@ carries no licensing question at all.
   test needs `git-lfs` on PATH (it is included in the backend image); it touches only a temporary
   repository. Provider fixture tests do not publish live comments or reviews. See
   [the Git workspace contract](docs/internal/backend/git-workspace-expansion.md) for limits and setup.
-  Thirty-one fixtures: the locked Node starters (installed by Bun, pnpm and Yarn 1), FastAPI, Flask,
-  Django, Streamlit, Gradio, Go, axum, Maven, Gradle, ASP.NET Core, Deno, Laravel and plain PHP, and the
-  site generators Hugo, Zola, mdBook, Jekyll, MkDocs, Lume and Eleventy.
+  Thirty-two fixtures: the locked Node starters (installed by Bun, pnpm and Yarn 1), FastAPI, Flask,
+  Django, Streamlit, Gradio, Go, axum, Maven, Gradle, ASP.NET Core, Deno, Laravel and plain PHP, the
+  site generators Hugo, Zola, mdBook, Jekyll, MkDocs, Lume and Eleventy, and a plain site whose
+  `_redirects`, `_headers` and `netlify.toml` repeat and overlap each other's rules.
 - The blueprint catalogue sweep pulls every deployable definition's pinned image, starts it through the
   real runtime owner with generated secrets and runs its own readiness checks (`JD_BLUEPRINT_ONLY=a,b`
   narrows it; images it pulled are removed again):

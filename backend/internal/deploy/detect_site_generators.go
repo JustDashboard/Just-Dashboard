@@ -381,16 +381,21 @@ func (s *repoShapeScan) applyStaticSiteFacts(result *DetectionResult, context sh
 			}
 		}
 		var above siteFiles
+		read := map[string]bool{}
 		if candidate.Root != "" {
 			if content, ok := s.file("", "netlify.toml"); ok {
 				if base, ok := platformPath("", tomlText(readTOML(content), "build", "base")); ok && base == candidate.Root {
 					above = func(relative string) ([]byte, bool) { return content, relative == "netlify.toml" }
+					read["netlify.toml"] = true
 				}
 			}
 		}
-		rules := readHostingRules(site.read, above)
+		rules := readHostingRules(site.read, above, staticHostingPlaces(BuildPlanConfig{Method: candidate.BuildMethod, OutputDirectory: candidate.OutputDirectory}))
 		if len(rules.files) == 0 {
 			continue
+		}
+		for _, file := range rules.files {
+			read[joinRoot(candidate.Root, file)] = true
 		}
 		facts := candidate.staticSite()
 		facts.HostingRules, facts.HostingRulesLeftOut = rules.translated(), rules.unsupported
@@ -400,14 +405,17 @@ func (s *repoShapeScan) applyStaticSiteFacts(result *DetectionResult, context sh
 		}
 		if rules.spa && !candidate.SPAFallback {
 			candidate.SPAFallback = true
-			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(candidate.Root, rules.files[0]), Reason: "a rule rewrites every path to /index.html"})
+			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(candidate.Root, rules.files[0]), Reason: "a rule rewrites every path to " + rules.fallbackPage()})
 		}
 		// The rules this server applies are no longer "unsupported" in the
-		// other platform's own reading of the file.
+		// other platform's own reading of the file; a platform file it did
+		// not read keeps its count, and preflight says it is not read.
 		for manifest := range candidate.PlatformManifests {
 			switch candidate.PlatformManifests[manifest].Platform {
 			case "netlify", "vercel":
-				candidate.PlatformManifests[manifest].Redirects = 0
+				if read[candidate.PlatformManifests[manifest].File] {
+					candidate.PlatformManifests[manifest].Redirects = 0
+				}
 			}
 		}
 	}

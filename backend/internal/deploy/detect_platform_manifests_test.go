@@ -199,6 +199,22 @@ databases:
 			t.Fatalf("findings = %#v", findings)
 		}
 	})
+	t.Run("a platform file the static server does not read", func(t *testing.T) {
+		// Only a file the server read has its rules applied; one it did not
+		// keeps its count, and preflight names it as unread.
+		result := detectShapeFixture(t, map[string]string{"index.html": "<h1>x</h1>", "_redirects": "/old /new 301\n"})
+		candidate := selectedOf(result)
+		if manifest := platformManifest(candidate, "netlify"); manifest == nil || manifest.Redirects != 0 || candidate.StaticSite.HostingRules != 1 {
+			t.Fatalf("read = %#v", candidate)
+		}
+		candidate.PlatformManifests = append(candidate.PlatformManifests, DetectedPlatformManifest{File: "infra/netlify.toml", Platform: "netlify", Redirects: 2})
+		findings := repoShapeFindings(&result, PlanConfiguration{Build: BuildPlanConfig{Method: BuildStatic}})
+		unread := findingByCode(findings, "static_redirects_unsupported")
+		if unread == nil || unread.Measured != "2 rule(s) in infra/netlify.toml" || !strings.Contains(unread.Means, "infra/netlify.toml is not among the files it reads") ||
+			strings.Contains(unread.Means, "single-page fallback only") {
+			t.Fatalf("finding = %+v", unread)
+		}
+	})
 	t.Run("kamal", func(t *testing.T) {
 		result := detectShapeFixture(t, map[string]string{
 			"Dockerfile": "FROM ruby:3.3\nEXPOSE 80\n",

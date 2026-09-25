@@ -329,6 +329,23 @@ func TestStaticSiteFactsAreRecorded(t *testing.T) {
 
 // A directory a generator's configuration names becomes part of a COPY line
 // and a build command; anything but a plain path is the default instead.
+// The live static-rules fixture, read by detection: its overlapping rules
+// count once each, and what cannot be applied is counted as left out.
+func TestOverlappingHostingRulesAreCountedOnce(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	copyFrameworkFixture(t, "static-rules", root)
+	result, err := (Detector{}).DetectPath(t.Context(), root, SourceIdentity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	site := selectedOf(result)
+	if site == nil || site.BuildMethod != BuildStatic || !site.SPAFallback || site.StaticSite == nil ||
+		site.StaticSite.HostingRules != 7 || site.StaticSite.HostingRulesLeftOut != 2 || !evidenceMentions(site, "every path to /app.html") {
+		t.Fatalf("site = %#v", result.Candidates)
+	}
+}
+
 func TestSiteDirectoriesAreOnlyPlainPaths(t *testing.T) {
 	t.Parallel()
 	_, pelican := siteCandidate(t, map[string]string{"pelicanconf.py": "PATH = 'posts; touch /x'\nOUTPUT_PATH = '$(id)'\n", "content/a.md": ""})

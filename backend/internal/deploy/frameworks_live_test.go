@@ -40,9 +40,12 @@ func TestLiveDetectedFrameworkBuildAndServing(t *testing.T) {
 	// as themselves, Jekyll on Ruby, MkDocs on Python, Lume on Deno,
 	// Eleventy from its own binary with no build script — and nginx serves
 	// what they wrote with clean URLs and the site's own 404 page.
+	// static-rules is a plain site whose _redirects, _headers and
+	// netlify.toml repeat and overlap each other's rules, as a site moved
+	// between hosts carries them: nginx has to start on what they become.
 	for _, name := range []string{"vite", "next", "svelte-node", "svelte-static", "html", "containerfile", "go",
 		"astro", "nuxt", "react-router", "fastapi", "flask", "django", "rust", "java", "gradle", "dotnet", "deno", "laravel", "php",
-		"streamlit", "gradio", "next-pnpm", "express-yarn", "hugo", "zola", "mdbook", "jekyll", "mkdocs", "lume", "eleventy"} {
+		"streamlit", "gradio", "next-pnpm", "express-yarn", "hugo", "zola", "mdbook", "jekyll", "mkdocs", "lume", "eleventy", "static-rules"} {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 			defer cancel()
@@ -188,6 +191,9 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 					t.Fatalf("missing page: %d %q", response.StatusCode, body)
 				}
 			}
+			if name == "static-rules" {
+				assertLiveHostingRules(t, base)
+			}
 			if name == "go" && (!strings.Contains(content, "custom-start go1.26.8") || result.Prepared.GoVersion != "1.26.8") {
 				t.Fatalf("Go override/version behavior missing: %q", content)
 			}
@@ -233,6 +239,47 @@ func main() { http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) 
 var liveSitePaths = map[string][]string{
 	"hugo": {"/about", "/robots.txt"}, "zola": {"/about"}, "mdbook": {"/chapter"}, "jekyll": {"/about"},
 	"mkdocs": {"/guide"}, "lume": {"/about"}, "eleventy": {"/contact"}, "svelte-static": {"/about", "/deep/link"},
+	"static-rules": {"/documentation", "/docs", "/old", "/deep/link", "/app/deep/link"},
+}
+
+// assertLiveHostingRules checks what the static-rules fixture's overlapping
+// rules became: one answer per path, each where the first rule put it.
+func assertLiveHostingRules(t *testing.T, base string) {
+	t.Helper()
+	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	get := func(path string) (int, http.Header, string) {
+		t.Helper()
+		response, err := client.Get(base + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+		return response.StatusCode, response.Header, string(body)
+	}
+	if status, header, _ := get("/docs"); status != http.StatusMovedPermanently || header.Get("Location") != "/documentation" ||
+		header.Get("X-Robots-Tag") != "noindex" || header.Get("X-Frame-Options") != "DENY" {
+		t.Fatalf("/docs = %d %v", status, header)
+	}
+	if status, header, body := get("/deep/link"); status != http.StatusOK || !strings.Contains(body, "static-rules app page") ||
+		len(header.Values("X-Frame-Options")) != 1 {
+		t.Fatalf("/deep/link = %d %v %q", status, header, body)
+	}
+	if status, header, body := get("/app/deep/link"); status != http.StatusOK || !strings.Contains(body, "static-rules sub app") ||
+		header.Get("Cache-Control") != "no-cache" {
+		t.Fatalf("/app/deep/link = %d %v %q", status, header, body)
+	}
+	if status, _, _ := get("/api/hello"); status != http.StatusNotFound {
+		t.Fatalf("/api/hello = %d", status)
+	}
+	if status, header, _ := get("/404.html"); status != http.StatusOK || header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("/404.html = %d %v", status, header)
+	}
+	for _, private := range []string{"/.private/notes.txt", "/_redirects", "/_headers"} {
+		if status, _, body := get(private); status == http.StatusOK || strings.Contains(body, "private notes") {
+			t.Fatalf("%s = %d %q", private, status, body)
+		}
+	}
 }
 
 // liveSiteMissingPages are what each site's own 404 page says.

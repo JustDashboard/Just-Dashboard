@@ -85,7 +85,12 @@ func TestStaticServerServesCleanURLsAndTheSitesOwn404(t *testing.T) {
 
 func TestSinglePageFallbackLeavesTheAPIAnd404Alone(t *testing.T) {
 	t.Parallel()
-	conf := staticConfig(t, staticServing{spaFallback: true, fallback: "/200.html"})
+	// A client route under /api (a developer portal's /api/reference) is the
+	// application's own until the site keeps functions there.
+	if conf := staticConfig(t, staticServing{spaFallback: true, fallback: "/index.html"}); strings.Contains(conf, "^/api") {
+		t.Fatalf("a site with no functions refused /api:\n%s", conf)
+	}
+	conf := staticConfig(t, staticServing{spaFallback: true, fallback: "/200.html", apiFunctions: true})
 	for _, want := range []string{
 		"        try_files $uri $uri.html $uri/ /200.html;",
 		"    location ~ ^/api(?:/|$) {\n        try_files $uri $uri.html $uri/ =404;",
@@ -145,7 +150,7 @@ func TestHostingRulesBecomeLiteralNginxRules(t *testing.T) {
 		`    location ~ ^/blog/(.*)$ {` + "\n        return 301 /news/$1$is_args$args;",
 		`    location ~ ^/docs/(.*)$ {` + "\n        return 308 https://docs.example.com/$1$is_args$args;",
 		"    location /app/ {\n        try_files $uri $uri.html $uri/ /app/index.html;",
-		"    location = /about {\n        rewrite ^ /about-us.html last;",
+		"    location = /about {\n        try_files /about-us.html /about-us.html.html /about-us.html/index.html =404;",
 	} {
 		if !strings.Contains(conf, want) {
 			t.Fatalf("configuration lacks %q:\n%s", want, conf)
@@ -242,7 +247,7 @@ func TestNetlifyAndVercelRulesAreRead(t *testing.T) {
 		content, ok := files[name]
 		return []byte(content), ok
 	}
-	rules := readHostingRules(read, nil)
+	rules := readHostingRules(read, nil, staticHostingDirectories)
 	if !rules.spa || rules.unsupported != 3 || strings.Join(rules.files, ",") != "netlify.toml,vercel.json" {
 		t.Fatalf("rules = %+v", rules)
 	}
@@ -335,5 +340,219 @@ func TestPreparedStaticOutputCarriesTheSitesRules(t *testing.T) {
 	prepared, err = NewArtifactBuilder(&artifactBackendFake{}).Prepare(context.Background(), static, BuildPlanConfig{Method: BuildStatic}, false, "t:1")
 	if err != nil || !strings.Contains(prepared.DockerfilePreview, `'    location ~ ^/team/(.*)$ {' '        return 302 /about$is_args$args;'`) {
 		t.Fatalf("static = %v\n%s", err, prepared.DockerfilePreview)
+	}
+}
+
+// staticLocationMatches are the location blocks of a configuration, each
+// once: nginx refuses to start on a second block with the same match.
+func staticLocationMatches(t *testing.T, conf string) []string {
+	t.Helper()
+	seen := map[string]bool{}
+	var matches []string
+	for _, line := range strings.Split(conf, "\n") {
+		match, found := strings.CutPrefix(line, "    location ")
+		if !found {
+			continue
+		}
+		match = strings.TrimSuffix(match, " {")
+		if seen[match] {
+			t.Fatalf("location %q is written twice:\n%s", match, conf)
+		}
+		seen[match] = true
+		matches = append(matches, match)
+	}
+	return matches
+}
+
+// hostingServing reads a site's hosting files as Prepare does and renders
+// the configuration nginx is given.
+func hostingServing(t *testing.T, files map[string]string, serving staticServing) (hostingRules, string) {
+	t.Helper()
+	read := func(name string) ([]byte, bool) {
+		content, ok := files[name]
+		return []byte(content), ok
+	}
+	serving.rules = readHostingRules(read, nil, staticHostingDirectories)
+	if serving.rules.fallback != "" {
+		serving.fallback = serving.rules.fallback
+	}
+	conf := staticConfig(t, serving)
+	staticLocationMatches(t, conf)
+	return serving.rules, conf
+}
+
+func TestHostingRulesNeverWriteALocationTwice(t *testing.T) {
+	t.Parallel()
+	// A splat rewrite to one page is the single-page fallback with that page,
+	// not a second `location /`.
+	rules, conf := hostingServing(t, map[string]string{"_redirects": "/*  /app.html  200\n"}, staticServing{spaFallback: true, fallback: "/index.html"})
+	if !rules.spa || rules.fallback != "/app.html" || rules.unsupported != 0 ||
+		!strings.Contains(conf, "    location / {\n        try_files $uri $uri.html $uri/ /app.html;") {
+		t.Fatalf("rules = %+v\n%s", rules, conf)
+	}
+	// Only a page can answer every path, and only one page.
+	rules, _ = hostingServing(t, map[string]string{"_redirects": "/* /index.html 200\n/* /app.html 200\n/* /app 200\n"}, staticServing{})
+	if !rules.spa || rules.fallback != "" || rules.unsupported != 2 {
+		t.Fatalf("rules = %+v", rules)
+	}
+	// The same redirect in _redirects and netlify.toml, as a migration leaves
+	// it, is one rule; a different target for the same path is the first
+	// rule's, as the host applies the first match.
+	rules, conf = hostingServing(t, map[string]string{
+		"_redirects":   "/old /new 301\n/old /new 301\n/gone /a 302\n",
+		"netlify.toml": "[[redirects]]\n  from = \"/old\"\n  to = \"/new\"\n  status = 301\n[[redirects]]\n  from = \"/gone\"\n  to = \"/b\"\n",
+	}, staticServing{})
+	if len(rules.redirects) != 2 || rules.unsupported != 1 || !strings.Contains(conf, "    location = /gone {\n        return 302 /a$is_args$args;") {
+		t.Fatalf("rules = %+v\n%s", rules, conf)
+	}
+	// A header rule for a path a redirect, the 404 page or a directory's
+	// single-page application already answers joins that block.
+	rules, conf = hostingServing(t, map[string]string{
+		"_redirects": "/docs /documentation 301\n/app/* /app/index.html 200\n",
+		"_headers":   "/*\n  X-Frame-Options: DENY\n/docs\n  X-Robots-Tag: noindex\n/404.html\n  Cache-Control: no-store\n/app/*\n  Cache-Control: no-cache\n",
+	}, staticServing{spaFallback: true, fallback: "/index.html"})
+	for _, want := range []string{
+		"    location = /docs {\n        add_header X-Frame-Options \"DENY\" always;\n        add_header X-Robots-Tag \"noindex\" always;\n        return 301 /documentation$is_args$args;",
+		"    location = /404.html {\n        add_header X-Frame-Options \"DENY\" always;\n        add_header Cache-Control \"no-store\" always;\n        try_files $uri =404;",
+		"    location /app/ {\n        add_header X-Frame-Options \"DENY\" always;\n        add_header Cache-Control \"no-cache\" always;\n        try_files $uri $uri.html $uri/ /app/index.html;",
+	} {
+		if !strings.Contains(conf, want) {
+			t.Fatalf("configuration lacks %q:\n%s", want, conf)
+		}
+	}
+	if rules.unsupported != 0 || rules.translated() != 6 {
+		t.Fatalf("rules = %+v", rules)
+	}
+	// The same header declared twice is sent once.
+	rules, conf = hostingServing(t, map[string]string{
+		"_headers":     "/*\n  X-Frame-Options: DENY\n",
+		"netlify.toml": "[[headers]]\n  for = \"/*\"\n  [headers.values]\n    X-Frame-Options = \"DENY\"\n",
+	}, staticServing{})
+	if rules.translated() != 1 || strings.Count(conf, "X-Frame-Options") != 1 {
+		t.Fatalf("rules = %+v\n%s", rules, conf)
+	}
+	// A redirect from the 404 page itself is left out; on a sub-path site the
+	// rules move under the base and still meet its blocks once.
+	rules, conf = hostingServing(t, map[string]string{
+		"_redirects": "/404.html /missing 301\n/ /en/ 302\n",
+		"_headers":   "/404.html\n  X-Robots-Tag: noindex\n/\n  X-Home: yes\n",
+	}, staticServing{basePath: "/docs", fallback: "/index.html"})
+	if rules.unsupported != 1 || !strings.Contains(conf, "    location = /docs/ {\n        add_header X-Home \"yes\" always;\n        return 302 /docs/en/$is_args$args;") ||
+		!strings.Contains(conf, "    location = /docs/404.html {\n        add_header X-Robots-Tag \"noindex\" always;") {
+		t.Fatalf("rules = %+v\n%s", rules, conf)
+	}
+}
+
+// A directory's own single-page application keeps its page when the whole
+// site falls back to another one.
+func TestSubDirectoryApplicationKeepsItsPageUnderTheSiteFallback(t *testing.T) {
+	t.Parallel()
+	_, conf := hostingServing(t, map[string]string{"_redirects": "/app/*  /app/index.html  200\n"}, staticServing{spaFallback: true, fallback: "/index.html"})
+	if !strings.Contains(conf, "    location /app/ {\n        try_files $uri $uri.html $uri/ /app/index.html;") ||
+		!strings.Contains(conf, "    location / {\n        try_files $uri $uri.html $uri/ /index.html;") {
+		t.Fatalf("configuration:\n%s", conf)
+	}
+}
+
+// An exact location ends nginx's search before the refusal of dot-paths, so
+// no rule may name one: `/.env` with a header of its own would be served.
+func TestHostingRulesNeverNameAHiddenPath(t *testing.T) {
+	t.Parallel()
+	rules, conf := hostingServing(t, map[string]string{
+		"_redirects": "/.git/config /x 301\n/secret /.env 200\n/go /.env 302\n/_headers /x 301\n/.well-known/change-password /account 302\n",
+		"_headers":   "/.env\n  X-A: b\n/.git/*\n  X-A: b\n/_redirects\n  X-A: b\n/.well-known/*\n  X-B: c\n",
+	}, staticServing{fallback: "/index.html"})
+	if rules.unsupported != 7 || len(rules.redirects) != 1 || len(rules.headers) != 1 {
+		t.Fatalf("rules = %+v", rules)
+	}
+	for _, refused := range []string{"/.env", "/.git", "location = /_"} {
+		if strings.Contains(conf, refused) {
+			t.Fatalf("configuration names %q:\n%s", refused, conf)
+		}
+	}
+	if !strings.Contains(conf, "    location /.well-known/ {") {
+		t.Fatalf("configuration:\n%s", conf)
+	}
+}
+
+// A rule that sends paths to a function or another host is left out, and the
+// single-page fallback leaves its paths to answer 404, as the functions it
+// could not reach would.
+func TestProxiedRoutesAnswer404UnderTheFallback(t *testing.T) {
+	t.Parallel()
+	rules, conf := hostingServing(t, map[string]string{
+		"_redirects":  "/api/*  /.netlify/functions/:splat  200\n/submit /.netlify/functions/submit 200\n",
+		"vercel.json": `{"rewrites": [{"source": "/backend/:path*", "destination": "https://api.example.com/:path*"}]}`,
+	}, staticServing{spaFallback: true, fallback: "/index.html"})
+	if rules.unsupported != 3 || rules.translated() != 0 || strings.Join(rules.proxied, ",") != "/api/,= /submit,/backend/" {
+		t.Fatalf("rules = %+v", rules)
+	}
+	for _, want := range []string{
+		"    location /api/ {\n        try_files $uri $uri.html $uri/ =404;",
+		"    location = /submit {\n        try_files $uri $uri.html $uri/ =404;",
+		"    location /backend/ {\n        try_files $uri $uri.html $uri/ =404;",
+	} {
+		if !strings.Contains(conf, want) {
+			t.Fatalf("configuration lacks %q:\n%s", want, conf)
+		}
+	}
+	if strings.Contains(conf, ".netlify") {
+		t.Fatalf("configuration names a function:\n%s", conf)
+	}
+}
+
+// A splat redirect whose target matches the splat again never ends.
+func TestHostingRulesRefuseRedirectLoops(t *testing.T) {
+	t.Parallel()
+	rules := hostingRules{}
+	rules.addRedirectsFile([]byte("/blog/* /blog/ 301\n/docs/* /docs/v2/:splat 301\n/* /new/:splat 301\n/* /maintenance.html 302\n/blog/* /blog 301\n"))
+	if rules.unsupported != 4 || len(rules.redirects) != 1 || rules.redirects[0].to != "/blog" {
+		t.Fatalf("rules = %+v", rules)
+	}
+}
+
+// Prepare tells a site that keeps functions under /api from one whose client
+// owns /api, from the files it commits.
+func TestPreparedFallbackRefusesAPIOnlyBesideFunctions(t *testing.T) {
+	t.Parallel()
+	prepare := func(files map[string]string) string {
+		root := t.TempDir()
+		for name, content := range files {
+			writeBuildFixture(t, root, name, content)
+		}
+		prepared, err := NewArtifactBuilder(&artifactBackendFake{}).Prepare(context.Background(), root,
+			BuildPlanConfig{Method: BuildStatic, OutputDirectory: "public", SPAFallback: true}, false, "t:1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return prepared.DockerfilePreview
+	}
+	if dockerfile := prepare(map[string]string{"public/index.html": "x"}); strings.Contains(dockerfile, "^/api") {
+		t.Fatalf("no functions, yet /api is refused:\n%s", dockerfile)
+	}
+	for _, function := range []string{"api/hello.ts", "api/users/[id].js", "functions/api/hello.ts"} {
+		if dockerfile := prepare(map[string]string{"public/index.html": "x", function: "export default () => {}"}); !strings.Contains(dockerfile, "'    location ~ ^/api(?:/|$) {'") {
+			t.Fatalf("%s: /api still falls back:\n%s", function, dockerfile)
+		}
+	}
+}
+
+// A committed site serves the directory its rules are in, and a netlify.toml
+// at the checkout's top whose base is the site is read for it too.
+func TestPreparedCommittedSiteReadsItsServedDirectoryAndNetlifyBase(t *testing.T) {
+	t.Parallel()
+	boundary := t.TempDir()
+	writeBuildFixture(t, boundary, "netlify.toml", "[build]\n  base = \"site\"\n[[redirects]]\n  from = \"/from-top\"\n  to = \"/\"\n")
+	writeBuildFixture(t, boundary, "site/dist/index.html", "x")
+	writeBuildFixture(t, boundary, "site/dist/_redirects", "/from-dist /\n")
+	prepared, err := NewArtifactBuilder(&artifactBackendFake{}).PrepareWithin(context.Background(), boundary, boundary+"/site",
+		BuildPlanConfig{Method: BuildStatic, OutputDirectory: "dist"}, false, "t:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"'    location = /from-top {'", "'    location = /from-dist {'"} {
+		if !strings.Contains(prepared.DockerfilePreview, want) {
+			t.Fatalf("Dockerfile lacks %q:\n%s", want, prepared.DockerfilePreview)
+		}
 	}
 }

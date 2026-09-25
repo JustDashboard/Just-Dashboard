@@ -50,12 +50,13 @@ func TestRecipesRenderFrameworkEnvironmentsEntriesAndFallbacks(t *testing.T) {
 			want:   []string{"RUN test -f /app/build/index.js || (echo 'SvelteKit must produce build/index.js"},
 		},
 		{
-			name:   "single-page site falls back to index.html",
-			files:  map[string]string{"package.json": `{"scripts":{"build":"vite build"},"devDependencies":{"vite":"6"}}`, "package-lock.json": "{}"},
+			name: "single-page site falls back to index.html",
+			files: map[string]string{"package.json": `{"scripts":{"build":"vite build"},"devDependencies":{"vite":"6"}}`, "package-lock.json": "{}",
+				"api/hello.ts": "export default function handler() {}"},
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "node", BuildCommand: "npm run build", OutputDirectory: "dist", SPAFallback: true},
 			want: []string{"FROM nginx:1.29-alpine@sha256:", "try_files $uri $uri.html $uri/ /index.html;", "> /etc/nginx/conf.d/default.conf",
-				// The fallback never answers a request for an API the site
-				// does not have.
+				// The fallback never answers a request for the functions
+				// another host ran beside the site.
 				`'    location ~ ^/api(?:/|$) {' '        try_files $uri $uri.html $uri/ =404;'`,
 				"COPY --from=build /app/dist/ /usr/share/nginx/html/"},
 		},

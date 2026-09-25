@@ -1,0 +1,6 @@
+# Every path answers with the application's page.
+/*        /app.html                    200
+/docs     /documentation               301
+/old      /documentation               301
+/app/*    /app/index.html              200
+/api/*    /.netlify/functions/:splat   200

@@ -3,9 +3,11 @@ package deploy
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -26,12 +28,16 @@ import (
 type staticServing struct {
 	spaFallback bool
 	// fallback is the page the single-page fallback answers with, from the
-	// site's root: "/index.html", or SvelteKit's configured "/200.html".
+	// site's root: "/index.html", SvelteKit's configured "/200.html", or the
+	// page a host's `/* /app.html 200` rule names.
 	fallback string
 	// basePath is the sub-path the site was built for ("/docs"), without a
 	// trailing slash; the files are served under it and / redirects there.
 	basePath string
-	rules    hostingRules
+	// apiFunctions says the site keeps functions its host serves under /api,
+	// which this server does not run.
+	apiFunctions bool
+	rules        hostingRules
 }
 
 // staticRedirect is one redirect or rewrite rule. A splat rule matches every
@@ -57,11 +63,18 @@ type staticHeaderRule struct {
 type hostingRules struct {
 	redirects []staticRedirect
 	headers   []staticHeaderRule
-	// spa says a rule rewrites every path to /index.html, which is the
-	// single-page fallback by another name.
-	spa bool
+	// spa says a rule rewrites every path to one page, which is the
+	// single-page fallback by another name; fallback is that page when it
+	// is not /index.html.
+	spa      bool
+	fallback string
+	// proxied are the paths a rule sends to another host or to a Netlify
+	// function, neither of which this server reaches: the single-page
+	// fallback leaves them to answer 404 rather than with the page.
+	proxied []string
 	// unsupported counts the rules left out: placeholders, conditions, a
-	// proxy to another host, a header that is not a plain value.
+	// proxy to another host, a header that is not a plain value, a second
+	// rule for a path an earlier one already took.
 	unsupported int
 	// files names the files the rules came from, for the evidence.
 	files []string
@@ -130,8 +143,60 @@ func readStaticServing(boundary, root string, config BuildPlanConfig, framework 
 			serving.fallback = "/" + fallback
 		}
 	}
-	serving.rules = readHostingRules(read, netlifyBaseFiles(boundary, root))
+	serving.rules = readHostingRules(read, netlifyBaseFiles(boundary, root), staticHostingPlaces(config))
+	if serving.rules.fallback != "" {
+		serving.fallback = serving.rules.fallback
+	}
+	serving.apiFunctions = plainDirectoryHolds(root, "api", functionFile) || plainDirectoryHolds(root, "functions/api", functionFile)
 	return serving
+}
+
+// staticHostingPlaces are where a site's _redirects and _headers are read
+// from: beside its pages, and first in the directory a committed site
+// serves, which is the one a host would have read them from.
+func staticHostingPlaces(config BuildPlanConfig) []string {
+	output := strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(config.OutputDirectory), "./"), "/")
+	if config.Method != BuildStatic || output == "" || output == "." || !safeRelativePath(output) || slices.Contains(staticHostingDirectories, output) {
+		return staticHostingDirectories
+	}
+	return append([]string{path.Clean(output)}, staticHostingDirectories...)
+}
+
+// plainDirectoryHolds says a directory of root, reached without a symlink,
+// holds a file the predicate accepts, directly or one directory down; a
+// listing reads names only, and at most 256 of them in each directory.
+func plainDirectoryHolds(root, relative string, accept func(relative string) bool) bool {
+	if !safeRelativePath(relative) {
+		return false
+	}
+	current := root
+	for _, segment := range strings.Split(relative, "/") {
+		current = filepath.Join(current, segment)
+		info, err := os.Lstat(current)
+		if err != nil || !info.IsDir() {
+			return false
+		}
+	}
+	var holds func(directory, relative string, depth int) bool
+	holds = func(directory, relative string, depth int) bool {
+		handle, err := os.Open(directory)
+		if err != nil {
+			return false
+		}
+		entries, _ := handle.ReadDir(256)
+		_ = handle.Close()
+		for _, entry := range entries {
+			name := relative + "/" + entry.Name()
+			switch {
+			case entry.Type().IsRegular() && accept(name):
+				return true
+			case entry.IsDir() && depth == 0 && holds(filepath.Join(directory, entry.Name()), name, 1):
+				return true
+			}
+		}
+		return false
+	}
+	return holds(current, relative, 0)
 }
 
 // netlifyBaseFiles reads the netlify.toml above a root whose [build] base is
@@ -164,12 +229,13 @@ func netlifyBaseFiles(boundary, root string) siteFiles {
 var staticHostingDirectories = []string{"", "public", "static"}
 
 // readHostingRules reads Netlify's and Cloudflare Pages' _redirects and
-// _headers, netlify.toml and vercel.json, in the order those hosts apply
-// them. above supplies a netlify.toml read from further up the checkout.
-func readHostingRules(read siteFiles, above siteFiles) hostingRules {
+// _headers from the first of places that holds each, netlify.toml and
+// vercel.json, in the order those hosts apply them. above supplies a
+// netlify.toml read from further up the checkout.
+func readHostingRules(read siteFiles, above siteFiles, places []string) hostingRules {
 	var rules hostingRules
 	for _, name := range []string{"_redirects", "_headers"} {
-		for _, directory := range staticHostingDirectories {
+		for _, directory := range places {
 			relative := path.Join(directory, name)
 			content, ok := read(relative)
 			if !ok {
@@ -438,6 +504,8 @@ func vercelDestination(destination string) string {
 // addRedirect translates one rule, or counts it as left out. A redirect
 // (3xx) may go to a path or an http(s) URL; a rewrite (200) only to a path
 // of this site, since serving another host's response would be a proxy.
+// The first rule for a path is the one kept, as the hosts apply the first
+// rule that matches; nginx would not start with two blocks for one path.
 func (r *hostingRules) addRedirect(from, to, status string) {
 	from, to = strings.TrimSpace(from), strings.TrimSpace(to)
 	code := 301
@@ -449,8 +517,8 @@ func (r *hostingRules) addRedirect(from, to, status string) {
 		}
 		code = parsed
 	}
-	if (from == "/*" || from == "/") && (to == "/index.html" || to == "/") && code == 200 {
-		r.spa = true
+	if from == "/" && (to == "/index.html" || to == "/") && code == 200 {
+		// The root rewritten to its own page changes nothing.
 		return
 	}
 	if code == 404 && to == "/404.html" {
@@ -463,37 +531,105 @@ func (r *hostingRules) addRedirect(from, to, status string) {
 	}
 	splatTarget := strings.HasSuffix(rule.to, ":splat")
 	target := strings.TrimSuffix(rule.to, ":splat")
+	local := strings.HasPrefix(target, "/")
+	validFrom := staticRulePathRE.MatchString(rule.from) && !strings.Contains(rule.from, "//") && !staticHiddenPath(rule.from)
+	if code == 200 && validFrom && (!local || strings.HasPrefix(target, "/.netlify/")) {
+		// A rewrite to another host, or to a Netlify function, needs code
+		// this server does not run.
+		route := rule.from
+		if !rule.splat {
+			route = "= " + rule.from
+		}
+		if len(r.proxied) < 16 && !slices.Contains(r.proxied, route) {
+			r.proxied = append(r.proxied, route)
+		}
+		r.unsupported++
+		return
+	}
 	switch {
-	case len(r.redirects) >= staticMaxRedirects,
-		!staticRulePathRE.MatchString(rule.from), strings.Contains(rule.from, "//"),
-		!staticRuleTargetRE.MatchString(target) || target == "",
+	case !validFrom, rule.from == "/404.html",
+		!staticRuleTargetRE.MatchString(target) || target == "", local && staticHiddenPath(target),
 		splatTarget && (!rule.splat || !strings.HasSuffix(target, "/")),
 		code != 200 && code != 301 && code != 302 && code != 303 && code != 307 && code != 308,
-		code == 200 && !strings.HasPrefix(target, "/"),
 		rule.from == target && !rule.splat:
 		r.unsupported++
 		return
 	}
-	if code == 200 && splatTarget && strings.HasPrefix(target, rule.from) {
-		// A rewrite into its own prefix would match itself again.
+	if rule.splat && rule.from == "/" && code == 200 && !splatTarget {
+		// Every path answering with one page is the single-page fallback;
+		// only a page can be that answer, and only one page.
+		page := target
+		if page == "/" {
+			page = "/index.html"
+		}
+		switch {
+		case !strings.HasSuffix(page, ".html"), r.spa && r.fallbackPage() != page:
+			r.unsupported++
+		case page != "/index.html":
+			r.spa, r.fallback = true, page
+		default:
+			r.spa = true
+		}
+		return
+	}
+	if rule.splat && local && strings.HasPrefix(target, rule.from) && (code != 200 || splatTarget) {
+		// A redirect or rewrite into its own prefix would match itself again.
+		r.unsupported++
+		return
+	}
+	for _, existing := range r.redirects {
+		if existing.match() == rule.match() {
+			if existing != rule {
+				r.unsupported++
+			}
+			return
+		}
+	}
+	if len(r.redirects) >= staticMaxRedirects {
 		r.unsupported++
 		return
 	}
 	r.redirects = append(r.redirects, rule)
 }
 
+// fallbackPage is the page a rule made the single-page fallback answer with.
+func (r hostingRules) fallbackPage() string {
+	if r.fallback != "" {
+		return r.fallback
+	}
+	return "/index.html"
+}
+
+// staticHiddenPath says a rule names a path the server never serves: a
+// dot-file or dot-directory other than .well-known, or a host's own rules
+// file. An exact location for it would end nginx's search before the
+// refusal that keeps it private.
+func staticHiddenPath(value string) bool {
+	segments := strings.Split(value, "/")
+	for _, segment := range segments {
+		if strings.HasPrefix(segment, ".") && segment != ".well-known" {
+			return true
+		}
+	}
+	last := segments[len(segments)-1]
+	return last == "_redirects" || last == "_headers"
+}
+
 // staticHeaderPath reads a header rule's path: /* for every path, /dir/* for
 // a prefix, anything else an exact path.
 func staticHeaderPath(pattern string) (staticHeaderRule, bool) {
 	pattern = strings.TrimSpace(pattern)
+	valid := func(value string) bool {
+		return staticRulePathRE.MatchString(value) && !strings.Contains(value, "//") && !staticHiddenPath(value)
+	}
 	switch {
 	case pattern == "/*":
 		return staticHeaderRule{}, true
 	case strings.HasSuffix(pattern, "/*"):
 		prefix := strings.TrimSuffix(pattern, "*")
-		return staticHeaderRule{path: prefix, prefix: true}, staticRulePathRE.MatchString(prefix) && !strings.Contains(prefix, "//")
+		return staticHeaderRule{path: prefix, prefix: true}, valid(prefix)
 	}
-	return staticHeaderRule{path: pattern}, staticRulePathRE.MatchString(pattern) && !strings.Contains(pattern, "//")
+	return staticHeaderRule{path: pattern}, valid(pattern)
 }
 
 // addHeaderValue adds one header to a rule when it is a plain value nginx
@@ -510,15 +646,20 @@ func (r *hostingRules) addHeaderValue(rule *staticHeaderRule, name, value string
 }
 
 func (r *hostingRules) addHeaderRule(rule staticHeaderRule) {
+	for index := range r.headers {
+		if r.headers[index].path == rule.path && r.headers[index].prefix == rule.prefix {
+			// Two files declaring the same header for one path send it once.
+			for _, value := range rule.values {
+				if !slices.Contains(r.headers[index].values, value) {
+					r.headers[index].values = append(r.headers[index].values, value)
+				}
+			}
+			return
+		}
+	}
 	if len(r.headers) >= staticMaxHeaderRules {
 		r.unsupported++
 		return
-	}
-	for index := range r.headers {
-		if r.headers[index].path == rule.path && r.headers[index].prefix == rule.prefix {
-			r.headers[index].values = append(r.headers[index].values, rule.values...)
-			return
-		}
 	}
 	r.headers = append(r.headers, rule)
 }
@@ -530,6 +671,59 @@ func (r hostingRules) translated() int {
 		count += len(rule.values)
 	}
 	return count
+}
+
+// staticLocation is one location block of the server: what it matches, the
+// directive that answers, and the headers a rule adds to its responses.
+type staticLocation struct {
+	match, answer string
+	headers       [][2]string
+}
+
+// staticLocations are the server's location blocks in the order they are
+// written, which is the order nginx tries its regular expressions in. A
+// match has one block: nginx refuses to start on a second `location = /x`
+// or `location /x/`, so a later rule for the same match is not written and
+// a header rule joins the block that is there.
+type staticLocations struct {
+	blocks []*staticLocation
+	byKey  map[string]*staticLocation
+}
+
+func (l *staticLocations) add(match, answer string) {
+	if l.byKey == nil {
+		l.byKey = map[string]*staticLocation{}
+	}
+	if l.byKey[match] != nil {
+		return
+	}
+	block := &staticLocation{match: match, answer: answer}
+	l.blocks = append(l.blocks, block)
+	l.byKey[match] = block
+}
+
+func (l *staticLocations) addHeaders(match, answer string, values [][2]string) {
+	l.add(match, answer)
+	for _, value := range values {
+		if block := l.byKey[match]; !slices.Contains(block.headers, value) {
+			block.headers = append(block.headers, value)
+		}
+	}
+}
+
+func (l staticLocations) lines(global [][2]string) []string {
+	var lines []string
+	for _, block := range l.blocks {
+		lines = append(lines, "    location "+block.match+" {")
+		if len(block.headers) > 0 {
+			// A location with headers of its own inherits none from the
+			// server, so the site-wide ones are repeated.
+			lines = append(lines, staticHeaderLines("        ", global)...)
+			lines = append(lines, staticHeaderLines("        ", block.headers)...)
+		}
+		lines = append(lines, "        "+block.answer, "    }")
+	}
+	return lines
 }
 
 // serverLines renders the site's nginx configuration as one RUN that writes
@@ -562,41 +756,48 @@ func (s staticServing) serverLines() []string {
 		}
 	}
 	conf = append(conf, staticHeaderLines("    ", global)...)
-	conf = append(conf, `    location ~ /\.(?!well-known/) {`, "        deny all;", "    }",
-		// A host's rules files sit beside the pages and are configuration.
-		`    location ~ /_(?:redirects|headers)$ {`, "        return 404;", "    }")
+	var locations staticLocations
+	locations.add(`~ /\.(?!well-known/)`, "deny all;")
+	// A host's rules files sit beside the pages and are configuration.
+	locations.add(`~ /_(?:redirects|headers)$`, "return 404;")
 	if base != "" {
-		conf = append(conf, "    location = / {", "        return 302 "+base+"/;", "    }")
+		locations.add("= /", "return 302 "+base+"/;")
 	}
+	locations.add("/", try)
+	// The site's 404.html is the answer to a missing page, never the
+	// single-page fallback; without one nginx answers with its own page.
+	locations.add("= "+base+"/404.html", "try_files $uri =404;")
 	for _, redirect := range s.rules.redirects {
-		conf = append(conf, redirect.under(base).lines(try)...)
+		redirect = redirect.under(base)
+		locations.add(redirect.match(), redirect.answer())
 	}
 	if s.spaFallback {
-		// A static site has no API; a request for one answers 404 rather
-		// than the application's page with a 200.
-		conf = append(conf, `    location ~ ^/api(?:/|$) {`, "        try_files $uri $uri.html $uri/ =404;", "    }")
+		// The routes of functions another host ran, and of hosts it proxied
+		// to, answer 404 rather than the application's page with a 200.
+		missing := "try_files $uri $uri.html $uri/ =404;"
+		if s.apiFunctions {
+			locations.add(`~ ^/api(?:/|$)`, missing)
+		}
+		for _, route := range s.rules.proxied {
+			if exact, found := strings.CutPrefix(route, "= "); found {
+				locations.add("= "+underBase(base, exact), missing)
+			} else {
+				locations.add(underBase(base, route), missing)
+			}
+		}
 	}
 	for _, rule := range s.rules.headers {
 		if rule.path == "" {
 			continue
 		}
-		rule.path = underBase(base, rule.path)
-		match := "= " + rule.path
-		if rule.prefix {
-			match = rule.path
+		match := underBase(base, rule.path)
+		if !rule.prefix {
+			match = "= " + match
 		}
-		// A location with headers of its own inherits none from the server,
-		// so the site-wide ones are repeated.
-		conf = append(conf, "    location "+match+" {")
-		conf = append(conf, staticHeaderLines("        ", global)...)
-		conf = append(conf, staticHeaderLines("        ", rule.values)...)
-		conf = append(conf, "        "+try, "    }")
+		locations.addHeaders(match, try, rule.values)
 	}
-	conf = append(conf, "    location / {", "        "+try, "    }",
-		// The site's 404.html is the answer to a missing page, never the
-		// single-page fallback; without one nginx answers with its own page.
-		"    location = "+base+"/404.html {", "        try_files $uri =404;", "    }",
-		"    error_page 404 "+base+"/404.html;", "}")
+	conf = append(conf, locations.lines(global)...)
+	conf = append(conf, "    error_page 404 "+base+"/404.html;", "}")
 	quoted := make([]string, 0, len(conf))
 	for _, line := range conf {
 		quoted = append(quoted, "'"+strings.ReplaceAll(line, "'", `'\''`)+"'")
@@ -630,27 +831,44 @@ func staticHeaderLines(indent string, values [][2]string) []string {
 	return lines
 }
 
-func (r staticRedirect) lines(try string) []string {
+// match is the rule's nginx location: an exact path, the prefix of a
+// single-page application in a directory, or a regular expression that
+// captures the rest of a splat's path.
+func (r staticRedirect) match() string {
+	switch {
+	case !r.splat:
+		return "= " + r.from
+	case r.status == 200 && !strings.HasSuffix(r.to, ":splat"):
+		return r.from
+	}
+	return "~ ^" + nginxRegexLiteral(r.from) + "(.*)$"
+}
+
+// answer is the directive the rule's location answers with.
+func (r staticRedirect) answer() string {
 	target := strings.TrimSuffix(r.to, ":splat")
 	splatTarget := strings.HasSuffix(r.to, ":splat")
-	if !r.splat {
-		if r.status == 200 {
-			return []string{"    location = " + r.from + " {", "        rewrite ^ " + target + " last;", "    }"}
-		}
-		return []string{"    location = " + r.from + " {", "        return " + strconv.Itoa(r.status) + " " + target + "$is_args$args;", "    }"}
-	}
-	pattern := "^" + nginxRegexLiteral(r.from) + "(.*)$"
+	status := strconv.Itoa(r.status)
 	switch {
+	case !r.splat && r.status == 200 && strings.HasSuffix(target, "/"):
+		// A rewrite serves its target from this location, as the host does,
+		// so the headers a rule adds to the path reach the response.
+		return "try_files " + target + "index.html =404;"
+	case !r.splat && r.status == 200:
+		return "try_files " + target + " " + target + ".html " + target + "/index.html =404;"
+	case !r.splat:
+		return "return " + status + " " + target + "$is_args$args;"
 	case r.status == 200 && !splatTarget:
 		// Every path under the prefix answers with one page when it has no
 		// file of its own: a single-page application in a sub-directory.
-		return []string{"    location " + r.from + " {", "        " + strings.Replace(try, "=404", target, 1), "    }"}
+		return "try_files $uri $uri.html $uri/ " + target + ";"
 	case r.status == 200:
-		return []string{"    location ~ " + pattern + " {", "        rewrite " + pattern + " " + target + "$1 last;", "    }"}
+		pattern := "^" + nginxRegexLiteral(r.from) + "(.*)$"
+		return "rewrite " + pattern + " " + target + "$1 last;"
 	case splatTarget:
-		return []string{"    location ~ " + pattern + " {", "        return " + strconv.Itoa(r.status) + " " + target + "$1$is_args$args;", "    }"}
+		return "return " + status + " " + target + "$1$is_args$args;"
 	}
-	return []string{"    location ~ " + pattern + " {", "        return " + strconv.Itoa(r.status) + " " + target + "$is_args$args;", "    }"}
+	return "return " + status + " " + target + "$is_args$args;"
 }
 
 // nginxRegexLiteral escapes a rule path, which staticRulePathRE limits to

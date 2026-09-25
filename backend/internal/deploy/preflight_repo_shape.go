@@ -388,8 +388,9 @@ func repoShapeFindings(detection *DetectionResult, configuration PlanConfigurati
 		if manifest.Redirects > 0 && (selected.Profile == ProfileStatic || method == BuildStatic) {
 			findings = append(findings, finding("static_redirects_unsupported", PreflightWarning,
 				"Redirect rules are not applied", fmt.Sprintf("%d rule(s) in %s", manifest.Redirects, manifest.File),
-				"The static server here applies the single-page fallback only; other redirects and rewrites from another platform's file are ignored.",
-				"Serve the redirects from the application, or accept that those paths answer 404.", "deploy", "configuration.build"))
+				"The static server applies the rules in _redirects, _headers, netlify.toml and vercel.json at the site's root (and in public/, static/ or the directory a committed site serves); "+
+					manifest.File+" is not among the files it reads for this site, so its rules are ignored.",
+				"Move the rules into a file at the site's root, serve them from an application, or accept that those paths answer 404.", "deploy", "configuration.build"))
 		}
 	}
 	return findings

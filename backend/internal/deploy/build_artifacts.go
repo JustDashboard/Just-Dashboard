@@ -361,7 +361,7 @@ func (b *ArtifactBuilder) PrepareWithin(
 			return PreparedBuild{}, err
 		}
 		prepared.BaseImages = bases
-		content, err := renderStaticDockerfile(config, readStaticServing(root, root, config, ""), bases[0])
+		content, err := renderStaticDockerfile(config, readStaticServing(boundary, root, config, ""), bases[0])
 		if err != nil {
 			return PreparedBuild{}, err
 		}
@@ -966,12 +966,6 @@ func renderStaticDockerfile(config BuildPlanConfig, serving staticServing, base 
 	}
 	lines := append([]string{"# syntax=docker/dockerfile:1.10"}, serving.stage(base, "", filepath.ToSlash(output)+"/")...)
 	return strings.Join(lines, "\n") + "\n", nil
-}
-
-// staticServerLines is the platform's nginx configuration for a site with
-// nothing of its own to say (build_static_serving.go).
-func staticServerLines(spaFallback bool) []string {
-	return staticServing{spaFallback: spaFallback, fallback: "/index.html"}.serverLines()
 }
 
 func (b *ArtifactBuilder) resolveBases(ctx context.Context, references []string) ([]ResolvedImage, error) {
