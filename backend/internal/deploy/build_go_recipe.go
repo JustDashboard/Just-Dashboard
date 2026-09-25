@@ -931,7 +931,11 @@ func goRecipeNotes(recipe selectedRecipe) []string {
 		notes = append(notes, note)
 	}
 	if plan.context.workspace {
-		notes = append(notes, "Building "+rootLabelOf(plan.context.module)+" inside the go.work at "+plan.context.dir)
+		note := "Building the module in the go.work workspace that uses it"
+		if plan.context.dir != "" {
+			note += ", from " + plan.context.dir
+		}
+		notes = append(notes, note)
 	} else if plan.context.replaceOnly {
 		notes = append(notes, "Building from "+plan.context.dir+", which holds the module and its local replacements ("+strings.Join(plan.context.replaces, ", ")+")")
 	}

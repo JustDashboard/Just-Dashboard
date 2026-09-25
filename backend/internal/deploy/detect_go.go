@@ -143,7 +143,11 @@ func goBuildEvidence(candidate *DetectedCandidate, plan goBuildPlan) {
 		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: path, Reason: detectionLine(reason)})
 	}
 	if plan.context.workspace {
-		add(joinRoot(strings.TrimPrefix(plan.context.dir, "."), "go.work"), "go.work uses this module: the build starts in "+plan.context.dir)
+		start := plan.context.dir
+		if start == "" {
+			start = rootLabelOf(candidate.Root)
+		}
+		add(module, "a go.work uses this module: the build starts in "+start)
 	} else if plan.context.replaceOnly {
 		add(module, "local replacements "+strings.Join(plan.context.replaces, ", ")+": the build starts in "+plan.context.dir)
 	}
