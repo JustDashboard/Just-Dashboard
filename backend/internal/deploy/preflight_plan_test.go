@@ -125,9 +125,16 @@ func TestGoVersionIsJudgedAgainstThePlansOwnChoice(t *testing.T) {
 		t.Fatalf("the recipe refuses what preflight accepted: %v", err)
 	}
 
+	// A toolchain line is a preference: one newer than the catalogue builds
+	// with the newest family (go_toolchain_downgraded says so), while a go
+	// line newer than every family is a requirement nothing satisfies.
 	toolchain := &DetectedCandidate{Recipe: "go", GoMinimumVersion: "1.26.0", GoToolchain: "go1.99.1", GoMainPackages: []string{"."}, GoPackage: "."}
-	if item := findingByCode(plannedRecipeFindings(toolchain, BuildPlanConfig{Method: BuildRecipe, Recipe: "go"}), "go_version_unsupported"); item == nil {
-		t.Fatal("a toolchain line outside the catalogue was accepted")
+	if item := findingByCode(plannedRecipeFindings(toolchain, BuildPlanConfig{Method: BuildRecipe, Recipe: "go"}), "go_version_unsupported"); item != nil {
+		t.Fatalf("a newer toolchain preference was refused: %#v", item)
+	}
+	future := &DetectedCandidate{Recipe: "go", GoMinimumVersion: "1.99", GoMainPackages: []string{"."}, GoPackage: "."}
+	if item := findingByCode(plannedRecipeFindings(future, BuildPlanConfig{Method: BuildRecipe, Recipe: "go"}), "go_version_unsupported"); item == nil {
+		t.Fatal("a go line outside the catalogue was accepted")
 	}
 	if item := findingByCode(plannedRecipeFindings(toolchain, BuildPlanConfig{Method: BuildRecipe, Recipe: "go", GoVersion: "1.26"}), "go_version_unsupported"); item != nil {
 		t.Fatalf("an explicit supported version still read the toolchain line: %#v", item)

@@ -101,8 +101,14 @@ func readTOML(content []byte) []tomlEntry {
 				if !ok {
 					continue
 				}
+				value := tomlValue{text: tomlScalar(strings.TrimSpace(innerValue))}
+				// Cargo's `features = ["a", "b"]` inside a dependency's inline
+				// table is an array, not text.
+				if strings.HasPrefix(strings.TrimSpace(innerValue), "[") {
+					value = tomlValue{list: tomlStrings(innerValue), isList: true}
+				}
 				entries = append(entries, tomlEntry{table: table, index: index,
-					key: key + "." + normalizeTOMLKey(strings.TrimSpace(innerKey)), value: tomlValue{text: tomlScalar(strings.TrimSpace(innerValue))}})
+					key: key + "." + normalizeTOMLKey(strings.TrimSpace(innerKey)), value: value})
 			}
 		default:
 			entries = append(entries, tomlEntry{table: table, index: index, key: key, value: tomlValue{text: tomlScalar(rawValue)}})
@@ -190,9 +196,12 @@ func tomlStrings(body string) []string {
 	return result
 }
 
+// splitTOMLInline splits an inline table's pairs at the commas outside
+// strings and nested arrays or tables.
 func splitTOMLInline(body string) []string {
 	var parts []string
 	inString := byte(0)
+	depth := 0
 	start := 0
 	for index := 0; index < len(body); index++ {
 		switch character := body[index]; {
@@ -204,7 +213,11 @@ func splitTOMLInline(body string) []string {
 			}
 		case character == '"' || character == '\'':
 			inString = character
-		case character == ',':
+		case character == '[' || character == '{':
+			depth++
+		case character == ']' || character == '}':
+			depth--
+		case character == ',' && depth == 0:
 			parts = append(parts, body[start:index])
 			start = index + 1
 		}

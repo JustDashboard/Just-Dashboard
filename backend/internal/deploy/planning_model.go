@@ -306,6 +306,10 @@ type DetectedCandidate struct {
 	// GoLibrary says the module has no buildable main package at all, which
 	// no Go setting can fix: the recipe builds a command, not a library.
 	GoLibrary bool `json:"goLibrary,omitempty"`
+	// Go and Rust are what detection read about how the module or crate
+	// builds beyond its toolchain (detect_go.go, detect_rust.go).
+	Go   *DetectedGoBuild   `json:"go,omitempty"`
+	Rust *DetectedRustBuild `json:"rust,omitempty"`
 	// PythonRequires is the interpreter range the source declares
 	// (requires-python, or Poetry's python constraint), and PythonInstall the
 	// manifest the recipe installs from; together they say whether a chosen
@@ -509,6 +513,9 @@ type BuildPlanConfig struct {
 	// GoPackage is the main package a Go recipe builds, relative to the root
 	// directory; empty lets the recipe choose when the module has only one.
 	GoPackage string `json:"goPackage,omitempty"`
+	// CargoBin is the binary target a Rust recipe serves; empty lets the
+	// recipe choose (default-run, the only one, the one that serves).
+	CargoBin string `json:"cargoBin,omitempty"`
 }
 
 // BuildSecretConfig names a variable and the reviewed recipe stages in which
@@ -1161,10 +1168,13 @@ func (c PlanConfiguration) Validate() error {
 		return fmt.Errorf("a recipe is valid only for the automatic builder")
 	}
 	if c.Build.GoVersion != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "go" || !goRecipeVersionRE.MatchString(c.Build.GoVersion)) {
-		return fmt.Errorf("Go version must select stable Go 1.25 or 1.26 in a Go recipe; use a Dockerfile for other toolchains")
+		return fmt.Errorf("Go version must select stable Go %s in a Go recipe; use a Dockerfile for other toolchains", goRecipeVersionList())
 	}
 	if c.Build.GoPackage != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "go" || !validGoPackagePath(c.Build.GoPackage)) {
 		return fmt.Errorf("Go main package must be a directory inside the root, such as cmd/api, in a Go recipe")
+	}
+	if c.Build.CargoBin != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "rust" || !rustBinaryNameRE.MatchString(c.Build.CargoBin)) {
+		return invalidField("build.cargoBin", "the Rust binary names one binary target, such as server, in a Rust recipe")
 	}
 	// The PHP recipe installs its front-end assets through the same Node
 	// install, so the same choice applies to it.
@@ -1176,9 +1186,6 @@ func (c PlanConfiguration) Validate() error {
 	}
 	if c.Build.SPAFallback && c.Build.Method != BuildRecipe && c.Build.Method != BuildStatic {
 		return fmt.Errorf("the single-page fallback applies only to a static site or a recipe with static output")
-	}
-	if c.Build.Recipe == "go" && cgoEnabledCommandRE.MatchString(c.Build.BuildCommand) {
-		return fmt.Errorf("the Go recipe builds without CGO; use a Dockerfile with the required C toolchain")
 	}
 	if c.Build.TargetPlatform != "" && !validPlatform(strings.ToLower(c.Build.TargetPlatform)) {
 		return fmt.Errorf("build target platform is malformed")
@@ -1786,6 +1793,12 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 			}
 		}
 		if err := validateDetectedNodeInstall(candidate); err != nil {
+			return err
+		}
+		if err := validateDetectedGoBuild(candidate); err != nil {
+			return err
+		}
+		if err := validateDetectedRustBuild(candidate); err != nil {
 			return err
 		}
 		for _, label := range []string{candidate.Name, candidate.Framework, candidate.Recipe} {

@@ -406,7 +406,7 @@ func (e *NormalizedStepExecutor) analyzePlan(
 // plan left them open, and the release — or, for the Go main package, the
 // recipe — has nothing to proceed with until someone makes them.
 func executionDecisionMustBlock(code string) bool {
-	return code == "domain_link_missing" || code == "readiness_missing" || code == "go_main_ambiguous"
+	return code == "domain_link_missing" || code == "readiness_missing" || code == "go_main_ambiguous" || code == "rust_binary_ambiguous"
 }
 
 func (e *NormalizedStepExecutor) prepareContext(

@@ -171,6 +171,10 @@ var buildRefusalCodes = map[string]bool{
 	// A repository Dockerfile's refusals, read by detection with the same
 	// validator the build runs (preflight_image.go).
 	"dockerfile_refused": true, "dockerfile_target_missing": true,
+	// The Go and Rust recipes' refusals, named from detection's facts
+	// (preflight_go.go, preflight_rust.go).
+	"go_cgo_library_unknown": true, "go_embed_missing": true, "go_local_replace_outside_root": true,
+	"rust_binary_ambiguous": true, "rust_binary_missing": true,
 }
 
 // recipeDecidedCodes are the findings detection's facts raise about what
@@ -183,6 +187,8 @@ var recipeDecidedCodes = map[string]bool{
 	"package_manager_lockfile_incompatible": true, "workspace_member_path_unsupported": true,
 	"command_runner_missing": true, "node_version_unsupported": true,
 	"go_version_unsupported": true, "go_main_missing": true, "go_main_ambiguous": true,
+	"go_cgo_library_unknown": true, "go_embed_missing": true, "go_local_replace_outside_root": true,
+	"rust_binary_ambiguous": true, "rust_binary_missing": true,
 }
 
 // applyDryRunVerdict merges a dry run into findings computed from detection.
@@ -275,6 +281,11 @@ func detectedRecipeIssue(ctx context.Context, root string, candidate DetectedCan
 	}
 	if strings.TrimSpace(config.StartCommand) == "" {
 		config.StartCommand = "true"
+	}
+	if facts := candidate.Rust; facts != nil && facts.Binary == "" && len(facts.Binaries) > 0 {
+		// Which binary serves is the operator's choice, asked for by
+		// rust_binary_ambiguous, not a refusal of the candidate.
+		config.CargoBin = facts.Binaries[0]
 	}
 	err := dryRunBuild(ctx, root, config, nil)
 	if err != nil && candidate.Recipe == "node" && candidate.PackageManager == "" {
