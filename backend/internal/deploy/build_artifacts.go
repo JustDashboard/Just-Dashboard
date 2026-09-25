@@ -23,7 +23,7 @@ var (
 	ErrArtifactRetained   = errors.New("deployment artifact is retained")
 )
 
-const AutomaticRecipeVersion = "just-dashboard-recipes-v3"
+const AutomaticRecipeVersion = "just-dashboard-recipes-v4"
 
 // The catalogue is deliberately small and reviewed. Tags are never written
 // into a release Dockerfile: the backend resolves each to a digest first.
@@ -45,10 +45,13 @@ var recipeBaseCatalogue = map[string][]string{
 	"node:22-glibc": {"node:22-bookworm-slim"},
 	"node:24-glibc": {"node:24-bookworm-slim"},
 	"bun:glibc":     {"oven/bun:1-slim"},
-	"go":            {"golang:1.26-alpine", "alpine:3.22"},
+	"go":            {"golang:1.27-alpine", "alpine:3.22"},
+	"go:dynamic":    {"golang:1.27-alpine" + compiledDynamicAlpine, "alpine:" + compiledDynamicAlpine},
 	"python":        {"python:3.13-slim-trixie"},
 	"static":        {"nginx:1.29-alpine"},
 	"rust":          {"rust:1-alpine", "alpine:3.22"},
+	"rust:leptos":   {"rust:1-" + rustDebianRelease, "debian:" + rustDebianRelease + "-slim"},
+	"rust:trunk":    {"rust:1-" + rustDebianRelease, "nginx:1.29-alpine"},
 	"java:maven":    {"maven:3-eclipse-temurin-21", "eclipse-temurin:21-jre-alpine"},
 	"java:gradle":   {"gradle:8-jdk21", "eclipse-temurin:21-jre-alpine"},
 	"dotnet":        {"mcr.microsoft.com/dotnet/sdk:8.0", "mcr.microsoft.com/dotnet/aspnet:8.0"},
@@ -260,7 +263,12 @@ func (b *ArtifactBuilder) PrepareWithin(
 		baseRefs := append([]string(nil), recipeBaseCatalogue[recipe.catalogueKey]...)
 		if recipe.kind == "go" {
 			prepared.GoVersion = recipe.goVersion
-			baseRefs[0] = "golang:" + recipe.goVersion + "-alpine"
+			if stage := recipe.goBuild.frontend; stage != nil {
+				b.settleBunImage(ctx, &stage.plan)
+				prepared.NodeVersion = stage.plan.node.label()
+			}
+			baseRefs = goRecipeBases(recipe)
+			prepared.Notes = append(prepared.Notes, goRecipeNotes(recipe)...)
 		}
 		if recipe.kind == "python" {
 			if recipe.python.assets != nil {
@@ -277,7 +285,8 @@ func (b *ArtifactBuilder) PrepareWithin(
 		switch recipe.kind {
 		case "rust":
 			prepared.Toolchain = "rust " + recipe.rust.version
-			baseRefs[0] = "rust:" + recipe.rust.version + "-alpine"
+			baseRefs = rustRecipeBases(recipe.rust)
+			prepared.Notes = append(prepared.Notes, recipe.rust.notes...)
 		case "java":
 			prepared.Toolchain = "java " + recipe.java.version + " (" + recipe.java.tool + ")"
 			if recipe.java.tool == "maven" {
@@ -614,6 +623,11 @@ type selectedRecipe struct {
 	member, contextDir         string
 	buildCommand, startCommand string
 	nodeInputs                 []string
+
+	// goChoice is why the toolchain is goVersion, and goBuild what the
+	// module needs beyond it (build_go_recipe.go).
+	goChoice goVersionChoice
+	goBuild  goBuildPlan
 }
 
 func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe, error) {
@@ -696,27 +710,28 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 				return selectedRecipe{}, err
 			}
 		}
-		goVersion, err := chooseGoRecipeVersion(config.GoVersion, string(versionFile), module)
-		if err != nil {
-			return selectedRecipe{}, err
-		}
-		if cgoEnabledCommandRE.MatchString(config.BuildCommand) {
-			return selectedRecipe{}, fmt.Errorf("%w: CGO requires a Dockerfile with a C toolchain", ErrUnsupportedBuilder)
-		}
 		packages, err := scanGoModule(root)
 		if err != nil {
 			return selectedRecipe{}, err
 		}
-		if len(packages.cgo) > 0 {
-			return selectedRecipe{}, fmt.Errorf("%w: CGO source requires a Dockerfile with the required C toolchain (%s imports \"C\")",
-				ErrUnsupportedBuilder, goPackageArgument(packages.cgo[0]))
-		}
-		main, err := selectGoMainPackage(packages, config, goModulePath(module))
+		main, mainErr := selectGoMainPackage(packages, config, goModulePath(module))
+		build, err := planGoBuild(boundary, root, module, packages, goEmbedsMain(main, mainErr, config), config, goSumReadLimit)
 		if err != nil {
 			return selectedRecipe{}, err
 		}
-		return selectedRecipe{kind: "go", catalogueKey: "go", mainPackage: main, goVersion: goVersion,
-			runtimeAssets: compiledRuntimeAssets(root, ".go"), emptyDotenv: dotenvFileRequired(root, "go")}, nil
+		choice, err := resolveGoRecipeVersion(config.GoVersion, string(versionFile), goVersionInputs(module, build.context))
+		if err != nil {
+			return selectedRecipe{}, err
+		}
+		if mainErr != nil {
+			return selectedRecipe{}, mainErr
+		}
+		recipe := selectedRecipe{kind: "go", catalogueKey: "go", mainPackage: main, goVersion: choice.version, goChoice: choice, goBuild: build,
+			runtimeAssets: compiledRuntimeAssets(root, ".go"), emptyDotenv: dotenvFileRequired(root, "go"), contextDir: build.context.dir}
+		if stage := build.frontend; stage != nil {
+			recipe.nodeInputs = stage.inputs
+		}
+		return recipe, nil
 	case "python":
 		python, err := selectPythonRecipe(boundary, root, config)
 		if err != nil {
@@ -728,12 +743,13 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 		}
 		return recipe, nil
 	case "rust":
-		rust, err := selectRustRecipe(root, config)
+		rust, err := selectRustRecipe(boundary, root, config)
 		if err != nil {
 			return selectedRecipe{}, err
 		}
 		rust.assets = compiledRuntimeAssets(root, ".rs")
-		return selectedRecipe{kind: "rust", catalogueKey: "rust", rust: rust, emptyDotenv: dotenvFileRequired(root, "rust")}, nil
+		return selectedRecipe{kind: "rust", catalogueKey: "rust", rust: rust, emptyDotenv: rust.trunk == "" && dotenvFileRequired(root, "rust"),
+			contextDir: rust.context}, nil
 	case "java":
 		java, err := selectJavaRecipe(root)
 		if err != nil {
@@ -801,31 +817,11 @@ func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases
 		}
 		lines = append(lines, rendered...)
 	case "go":
-		if len(bases) != 2 {
-			return "", ErrBuilderUnavailable
+		rendered, err := renderGoDockerfile(recipe, config, bases, installSecrets, buildSecrets)
+		if err != nil {
+			return "", err
 		}
-		packagePath := "./"
-		if recipe.mainPackage != "." {
-			packagePath += filepath.ToSlash(recipe.mainPackage)
-		}
-		lines = append(lines,
-			"FROM "+immutableImageReference(bases[0])+" AS build", "WORKDIR /src", "COPY . .",
-			"ENV CGO_ENABLED=0 GOTOOLCHAIN=local",
-			"RUN "+installSecrets+"go mod download",
-		)
-		command := strings.TrimSpace(config.BuildCommand)
-		if command == "go build ./..." {
-			// Old detection saved this literal default without an output path.
-			// Execute it, then produce the runtime binary under the current contract.
-			lines = append(lines, "RUN "+buildSecrets+command)
-			command = ""
-		}
-		if command == "" {
-			command = "go build -trimpath -ldflags='-s -w' -o /out/app " + packagePath
-		}
-		lines = append(lines, "RUN "+buildSecrets+command,
-			`RUN test -f /out/app && test -x /out/app || (echo 'Go build command must write an executable to /out/app' >&2; exit 1)`)
-		lines = append(lines, compiledRuntimeLines(bases[1], recipe.runtimeAssets, config.StartCommand)...)
+		lines = append(lines, rendered...)
 	case "python":
 		rendered, err := renderPythonDockerfile(recipe.python, config, bases, installSecrets, buildSecrets)
 		if err != nil {

@@ -3610,6 +3610,59 @@ export type DeploymentDetectionCandidate = {
   goPackage?: string
   /** A Go module with no main package: nothing for the recipe to run. */
   goLibrary?: boolean
+  /** How the Go module builds beyond its toolchain (detect_go.go). */
+  go?: {
+    context?: string
+    workspace?: boolean
+    localReplaces?: string[]
+    replacesOutside?: string[]
+    cgoModules?: string[]
+    cgoLocal?: string[]
+    cgoPackages?: string[]
+    cgoRuntime?: string[]
+    cgoUnknown?: string[]
+    vendored?: boolean
+    sumMissing?: boolean
+    sumStale?: string[]
+    ownerModules?: string[]
+    embeds?: {
+      pattern: string
+      path: string
+      present?: boolean
+      frontend?: string
+      framework?: string
+    }[]
+    codegen?: string
+    codegenMissing?: string[]
+    subcommand?: string
+    /** The go and toolchain lines of the go.work that uses the module. */
+    workGo?: string
+    workToolchain?: string
+  }
+  /** How the Rust crate builds: its workspace, binaries and native crates (detect_rust.go). */
+  rust?: {
+    workspace?: string
+    package?: string
+    /** The crate's binary targets, and the one the recipe serves unless the plan names another. */
+    binaries?: string[]
+    binary?: string
+    binaryReason?: string
+    nativePackages?: string[]
+    nativeCrates?: string[]
+    /** What the runtime image installs when the binary links dynamically (bindgen). */
+    nativeRuntime?: string[]
+    nativeUnmapped?: string[]
+    sqlxMacros?: boolean
+    sqlxOffline?: boolean
+    /** Where the offline query data is: a .sqlx directory or sqlx-data.json. */
+    sqlxOfflineData?: string
+    sqlxMigrate?: boolean
+    lockVersion?: number
+    lockStale?: string[]
+    toolchain?: string
+    heavyRelease?: string
+    fullstack?: "leptos" | "trunk" | "dioxus" | "shuttle"
+  }
   /** The interpreter range pyproject declares, and the manifest the recipe installs from. */
   pythonRequires?: string
   pythonInstall?:
@@ -3861,6 +3914,8 @@ export type DeploymentConfiguration = {
     goVersion?: string
     /** The main package a Go recipe builds, relative to the root directory; empty lets it choose. */
     goPackage?: string
+    /** The binary target a Rust recipe serves; empty lets it choose. */
+    cargoBin?: string
     pythonVersion?: string
     /** Debian packages the Python recipe installs beside the ones its dependencies need. */
     systemPackages?: string[]

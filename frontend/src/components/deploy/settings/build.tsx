@@ -49,6 +49,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useProject } from "@/components/deploy/project-context"
 import {
   BROWSER_PREFIX,
+  GO_VERSION,
+  GO_VERSIONS,
   PYTHON_VERSION,
   automaticPackageManagerHint,
   commandsForPackageManager,
@@ -134,6 +136,7 @@ const BUILD_FIELD_IDS: Record<string, string> = {
   "build.rootDirectory": "build-root",
   "build.goVersion": "build-go-version",
   "build.goPackage": "build-go-package",
+  "build.cargoBin": "build-cargo-bin",
   "build.pythonVersion": "build-python-version",
   "build.systemPackages": "build-system-packages",
   "build.spaFallback": "build-spa",
@@ -152,6 +155,7 @@ const FIELD_SECTION: Record<string, "build" | "commands" | "image"> = {
   "build-package-manager": "build",
   "build-go-version": "build",
   "build-go-package": "build",
+  "build-cargo-bin": "build",
   "build-python-version": "build",
   "build-system-packages": "build",
   "build-dockerfile": "build",
@@ -165,9 +169,7 @@ const FIELD_SECTION: Record<string, "build" | "commands" | "image"> = {
   "build-platform": "image",
 }
 
-/** The Go releases the recipe builds with, as `build_go.go`'s own pattern states them. */
-const GO_VERSION = /^1\.(25|26)(\.[0-9]{1,3})?$/
-const GO_ERROR = "Use Go 1.25 or 1.26, or leave empty to follow go.mod."
+const GO_ERROR = `Use Go ${GO_VERSIONS.slice(0, -1).join(", ")} or ${GO_VERSIONS.at(-1)}, or leave empty to follow go.mod.`
 
 type Builder = {
   key: string
@@ -206,7 +208,7 @@ const BUILDERS: Builder[] = [
     key: "go",
     label: RECIPE_SHORT.go,
     product: "go",
-    detail: "1.25 · 1.26",
+    detail: `${GO_VERSIONS[0]}–${GO_VERSIONS.at(-1)}`,
     method: "recipe",
     recipe: "go",
   },
@@ -759,6 +761,7 @@ function BuildForm({
         secrets: build.method === "recipe" ? build.secrets : [],
         goVersion: next === "go" ? build.goVersion : undefined,
         goPackage: next === "go" ? build.goPackage : undefined,
+        cargoBin: next === "rust" ? build.cargoBin : undefined,
         pythonVersion: next === "python" ? build.pythonVersion : undefined,
         systemPackages: next === "python" ? build.systemPackages : undefined,
         // The PHP and Python recipes' asset stages install through the same
@@ -778,6 +781,7 @@ function BuildForm({
       secrets: [],
       goVersion: undefined,
       goPackage: undefined,
+      cargoBin: undefined,
       pythonVersion: undefined,
       systemPackages: undefined,
       packageManager: undefined,
@@ -823,6 +827,7 @@ function BuildForm({
             "packageManager",
             "goVersion",
             "goPackage",
+            "cargoBin",
             "pythonVersion",
             "systemPackages",
             "dockerfile",
@@ -1005,6 +1010,34 @@ function BuildForm({
                 }
               />
             </InputGroup>
+          </Field>
+        )}
+
+        {build.method === "recipe" && recipe === "rust" && (
+          <Field
+            label="Rust binary"
+            htmlFor="build-cargo-bin"
+            hint={
+              proposedFor("build.cargoBin") ??
+              ((proposal?.candidate?.rust?.binaries?.length ?? 0) > 1 && !proposal?.elsewhere
+                ? `Binaries: ${proposal?.candidate?.rust?.binaries?.join(", ")}.`
+                : "The binary target to serve; empty lets the recipe choose (default-run, or the one that starts a server).")
+            }
+            error={errorFor("build-cargo-bin")}
+          >
+            <Input
+              id="build-cargo-bin"
+              value={build.cargoBin ?? ""}
+              readOnly={!canEdit}
+              aria-invalid={Boolean(errorFor("build-cargo-bin"))}
+              className="font-mono"
+              placeholder={proposal?.candidate?.rust?.binary || "recipe chooses"}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) =>
+                setBuild({ ...build, cargoBin: event.target.value.trim() || undefined })
+              }
+            />
           </Field>
         )}
 

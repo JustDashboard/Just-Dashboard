@@ -77,6 +77,7 @@ var buildSignatures = []buildSignature{
 	signature("build_lockfile_out_of_sync", "Cargo.lock", "--locked", `needs to be updated but --locked was passed`),
 	signature("build_lockfile_out_of_sync", "go.sum", "go.sum", `missing go\.sum entry(?: for module providing package ([^\s;(]+))?`),
 	signature("build_lockfile_out_of_sync", "go.mod", "updates to go.mod needed", `updates to go\.mod needed`),
+	signature("build_lockfile_out_of_sync", "vendor/modules.txt", "inconsistent vendoring", `inconsistent vendoring`),
 	signature("build_lockfile_out_of_sync", "composer.lock", "lock file", `Required package "([^"]+)" is not present in the lock file|([\w.-]+/[\w.-]+) is in the lock file as .* but that does not satisfy your constraint|Your lock file does not contain a compatible set of packages`),
 	signature("build_lockfile_out_of_sync", "deno.lock", "lockfile", `The lockfile is out of date|does not match the expected hash in the lock file`),
 	signature("build_lockfile_out_of_sync", "Gemfile.lock", "Gemfile", `in deployment mode after changing your Gemfile|The gemspecs for path gems changed`),
@@ -156,6 +157,10 @@ var buildSignatures = []buildSignature{
 	signature("build_system_library_missing", "python", "mysql_config", `mysql_config(?::)? not found|Can not find valid pkg-config name`).naming("mysql_config"),
 	signature("build_system_library_missing", "", "pkg-config", `Package '?([\w.+-]+)'?,? (?:was not found in the pkg-config search path|required by '[^']+', not found)`),
 	signature("build_system_library_missing", "", "cannot find -l", `cannot find -l([\w+.-]+)`),
+	// A build script linked statically against musl finds libclang and
+	// cannot load it, which is not the library missing.
+	signature("build_system_library_missing", "rust-static", "Dynamic loading not supported", `could not be opened: Dynamic loading not supported`).naming("libclang"),
+	signature("build_system_library_missing", "rust", "libclang", `Unable to find libclang|couldn't find any valid shared libraries matching: \['libclang`).naming("libclang"),
 	signature("build_system_library_missing", "rust", "custom build command", "failed to run custom build command for `([\\w-]+-sys)"),
 	signature("build_system_library_missing", "", "No such file or directory", `fatal error: ([\w/.+-]+\.h): No such file or directory`),
 	signature("build_system_library_missing", "", "OpenSSL", `Could not find (?:directory of )?OpenSSL installation`).naming("openssl"),
@@ -169,6 +174,7 @@ var buildSignatures = []buildSignature{
 	signature("build_native_toolchain_missing", "go", "C compiler", `cgo: C compiler "([\w.+-]+)" not found|exec: "(gcc|g\+\+|cc|clang)": executable file not found`),
 	signature("build_native_toolchain_missing", "rust", "linking with", "linking with `([\\w.+-]+)` failed"),
 	signature("build_native_toolchain_missing", "", "protoc", "Could not find `(protoc)`"),
+	signature("build_native_toolchain_missing", "", "cmake", "is `cmake` not installed\\?").naming("cmake"),
 	signature("build_native_toolchain_missing", "", "perl", `Can't locate [\w/]+\.pm in @INC|Command '(perl)' not found`).naming("perl"),
 	signature("build_native_toolchain_missing", "dotnet", "Platform linker", `Platform linker \('(\w+)'\) not found`),
 
@@ -188,6 +194,7 @@ var buildSignatures = []buildSignature{
 	signature("build_dependency_conflict", "dotnet", "NU1107", `NU1107`),
 	signature("build_dependency_advisory_blocked", "composer", "security advisories", `affected by security advisories`),
 	signature("build_dependency_local_path", "python", "", `No such file or directory: '(/(?:croot|opt/conda|tmp/build|home/[\w.-]+|Users/[\w.-]+)/[^']*)'`),
+	signature("build_dependency_local_path", "go", "replacement directory", `replacement directory (\S+) does not exist`),
 	signature("build_dependency_unavailable", "npm", "is not in this registry", `'(@?[^@'\s]+)@[^']*' is not in this registry`),
 	signature("build_dependency_unavailable", "npm", "No matching version found", `No matching version found for (@?[^@\s]+)@`),
 	// A pip freeze from Windows or macOS pins that system's own packages,
@@ -197,14 +204,18 @@ var buildSignatures = []buildSignature{
 	signature("build_dependency_unavailable", "python", "was not found in the package registry", `Because ([\w.-]+) was not found in the package registry`),
 	signature("build_dependency_unavailable", "dotnet", "NU1101", `NU1101: Unable to find package ([\w.-]+)`),
 	signature("build_dependency_unavailable", "dotnet", "NU1015", `NU1015`),
-	signature("build_dependency_unavailable", "go", "", `unknown revision (\S+)|no matching versions for query|(?:reading|verifying) (\S+): 404 Not Found`),
+	signature("build_dependency_unavailable", "go", "", `unknown revision (\S+)|no matching versions for query|(?:reading|verifying) (\S+): (?:404 Not Found|410 Gone)`),
 	signature("build_dependency_unavailable", "java", "", `Could not find artifact (\S+)|Non-resolvable parent POM for (\S+)|Could not resolve dependencies for project (\S+)|Could not resolve all (?:files|dependencies) for configuration`),
 	signature("build_dependency_unavailable", "rust", "no matching package", "no matching package named `([\\w-]+)` found"),
 	signature("build_dependency_unavailable", "composer", "could not be found", `(?:Package|The requested package) ([\w.-]+/[\w.-]+) could not be found`),
 	signature("build_dependency_unavailable", "ruby", "Could not find gem", `Could not find gem '([\w.-]+)`),
 	signature("build_dependency_unavailable", "hugo", "module", `module "([^"\s]+)" not found`),
 
-	// Registries that refused the build, and a network that failed it.
+	// Registries that refused the build, and a network that failed it. The
+	// go command fetches a module the proxy does not have with git, which
+	// asks for the credentials of a private repository.
+	signature("build_registry_auth", "go", "", `terminal prompts disabled|could not read Username for 'https://|exec: "git": executable file not found`).
+		requiring(`^go: \S+@\S+: |git ls-remote -q`),
 	signature("build_registry_auth", "", "", `code E401|code E403|ERR_PNPM_FETCH_40[13]|YN0041|401 Unauthorized|403 Forbidden|401 Client Error|Invalid credentials for|authentication required|terminal prompts disabled|unauthorized: `),
 	signature("build_registry_auth", "dotnet", "NU1301", `NU1301`).requiring(`401|403`),
 	signature("build_network", "", "", `getaddrinfo (?:ENOTFOUND|EAI_AGAIN) ([\w.-]+)|Could not resolve host:? ([\w.-]+)|dial tcp: lookup ([\w.-]+)|Temporary failure in name resolution|TLS handshake timeout|i/o timeout|network is unreachable|Failed to establish a new connection|Connection timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|socket hang up|EAI_AGAIN|NU1301`),
@@ -226,6 +237,7 @@ var buildSignatures = []buildSignature{
 	signature("build_command_not_found", "laravel", "wayfinder:generate", `php artisan wayfinder:generate`).
 		requiring(`\bphp: (?:command )?not found`).naming("php"),
 	signature("build_bundle_platform_missing", "ruby", "Your bundle only supports platforms", `Your bundle only supports platforms`).collecting(`"([\w.-]+)"`),
+	signature("build_wrong_root", "go.work", "go.work", `is outside modules listed in go\.work|is not one of the workspace modules listed in go\.work`),
 	signature("build_wrong_root", "", "", "Couldn't find any `pages` or `app` directory|go: cannot find main module|no Go files in (\\S+)|could not find `Cargo\\.toml`|there is no POM in this directory|Could not read package\\.json|ENOENT: no such file or directory, open '(/[\\w./-]*package\\.json)'|MSB1003|failed to find a workspace root|error inheriting `[\\w-]+` from workspace root|Config file '([\\w./-]+)' does not exist|does not contain a Gradle build|Could not open input file: (artisan)"),
 
 	// The code itself.

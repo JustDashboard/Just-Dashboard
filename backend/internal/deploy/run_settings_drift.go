@@ -128,6 +128,7 @@ func (s *PlanningStore) planRevisionChanges(ctx context.Context, environmentID i
 		{"target", oldBuild.Target, newBuild.Target},
 		{"primaryService", oldBuild.PrimaryService, newBuild.PrimaryService},
 		{"goPackage", oldBuild.GoPackage, newBuild.GoPackage},
+		{"cargoBin", oldBuild.CargoBin, newBuild.CargoBin},
 		{"secrets", secrets(oldBuild.Secrets), secrets(newBuild.Secrets)},
 		{"buildCommand", oldBuild.BuildCommand, newBuild.BuildCommand},
 		{"startCommand", oldBuild.StartCommand, newBuild.StartCommand},

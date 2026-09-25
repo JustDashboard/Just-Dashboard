@@ -92,6 +92,8 @@ type detectedMarkers struct {
 	// build (readPythonSources).
 	python       *pythonSource
 	pythonAssets bool
+	// rust is the crate the Cargo pass read at this root (frameworks_rust.go).
+	rust *rustMarker
 }
 
 // phpOwnsAssets says the PHP recipe builds this root's package.json itself:
@@ -614,6 +616,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		allRoots = append(allRoots, filepath.ToSlash(candidateRoot))
 	}
 	readNodeInstalls(root, markers)
+	readCargoCrates(root, markers)
 	for _, candidateRoot := range roots {
 		marker := markers[candidateRoot]
 		root := filepath.ToSlash(marker.root)
@@ -708,6 +711,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 		group.store(result.Candidates)
 	}
 	annotateImageFacts(tree, markers, result.Candidates)
+	goSums := int64(goDetectionSumBytes)
 	for index := range result.Candidates {
 		candidate := &result.Candidates[index]
 		if candidate.Recipe == "go" {
@@ -720,6 +724,7 @@ func (d Detector) DetectPath(ctx context.Context, root string, identity SourceId
 				candidate.RecipeIssue = recipeRefusalText(err, root)
 			} else {
 				applyGoModulePackages(candidate, packages, markers[filepath.FromSlash(candidate.Root)])
+				applyGoBuildFacts(root, candidate, packages, markers[filepath.FromSlash(candidate.Root)], result.Candidates, &goSums)
 			}
 			if goSources.truncated {
 				candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(candidate.Root, "go.mod"),
@@ -831,7 +836,9 @@ func candidatesForMarkers(marker *detectedMarkers, schemaPaths []string, pythonE
 		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, pythonCandidate(marker, pythonEntries, rootLabel)))
 	}
 	if len(marker.cargoToml) > 0 {
-		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, rustCandidate(marker, rootLabel)))
+		if candidate, ok := rustCandidate(marker, rootLabel); ok {
+			result = append(result, newDetectedCandidate(marker.root, BuildRecipe, candidate))
+		}
 	}
 	if len(marker.pomXML) > 0 || len(marker.gradleBuild) > 0 {
 		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, javaCandidate(marker, rootLabel)))
@@ -845,7 +852,7 @@ func candidatesForMarkers(marker *detectedMarkers, schemaPaths []string, pythonE
 	if len(marker.composerJSON) > 0 || marker.phpIndex || marker.phpPublicIndex {
 		result = append(result, newDetectedCandidate(marker.root, BuildRecipe, phpCandidate(marker, rootLabel)))
 	}
-	if marker.staticFile != "" && len(marker.packageJSON) == 0 {
+	if marker.staticFile != "" && len(marker.packageJSON) == 0 && !marker.trunkSource() {
 		// There is no public directory left to confirm. A marker's root is the
 		// directory its files were found in, so this candidate's root is
 		// already the one holding the index.html — at the top of the checkout,

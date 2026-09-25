@@ -81,7 +81,7 @@ func TestCompiledRecipesRunFromAWritableHomeWithTheirFiles(t *testing.T) {
 	}
 	runtime := prepared.DockerfilePreview[strings.LastIndex(prepared.DockerfilePreview, "FROM "):]
 	for _, want := range []string{
-		"RUN adduser -D -u 10001 app\nUSER app\nWORKDIR /home/app\nCOPY --from=build /out/app /app\n",
+		"RUN apk add --no-cache tzdata && adduser -D -u 10001 app\nUSER app\nWORKDIR /home/app\nCOPY --from=build /out/app /app\n",
 		"COPY --from=build --chown=app:app /src/templates /home/app/templates\n",
 		"RUN mkdir -p /home/app/data && ln -s /app /home/app/app\n", `ENTRYPOINT ["/app"]`,
 	} {
@@ -89,7 +89,7 @@ func TestCompiledRecipesRunFromAWritableHomeWithTheirFiles(t *testing.T) {
 			t.Fatalf("Go runtime stage missing %q:\n%s", want, runtime)
 		}
 	}
-	if prepared.RecipeVersion != "just-dashboard-recipes-v3" {
+	if prepared.RecipeVersion != "just-dashboard-recipes-v4" {
 		t.Fatalf("recipe version = %q", prepared.RecipeVersion)
 	}
 
@@ -108,7 +108,7 @@ func TestCompiledRecipesRunFromAWritableHomeWithTheirFiles(t *testing.T) {
 	}
 
 	// A root-level directory named app is copied as it is; nothing links over it.
-	lines := strings.Join(compiledRuntimeLines(ResolvedImage{Reference: "alpine:3.22", Digest: "sha256:" + strings.Repeat("a", 64)}, []string{"app", "templates"}, ""), "\n")
+	lines := strings.Join(compiledRuntimeLines(ResolvedImage{Reference: "alpine:3.22", Digest: "sha256:" + strings.Repeat("a", 64)}, compiledRuntime{assets: []string{"app", "templates"}}), "\n")
 	if strings.Contains(lines, "ln -s") || !strings.Contains(lines, "/src/app /home/app/app") {
 		t.Fatalf("runtime lines with an app directory:\n%s", lines)
 	}

@@ -319,7 +319,11 @@ only renderer/executor/validation authority for their feature.
   dotenv load, an identity provider's callback, Rails credentials), `listen` (where the source says its
   server listens: a port it fixes, whether it reads PORT, a loopback bind, each naming its file and line
   — `detect_listen.go`, `detect_network.go`) and `networkVariables` (plain runtime variables the proxy
-  decides: `AUTH_TRUST_HOST`, `NEXTAUTH_URL` on a domain template, `HOST`). The form declares a set-up
+  decides: `AUTH_TRUST_HOST`, `NEXTAUTH_URL` on a domain template, `HOST`), and `go` and `rust` (how a
+  Go module or a Rust crate builds beyond its toolchain: its build context, cgo, dependency sources,
+  embeds and generated code; its Cargo workspace, binaries, native crates, sqlx and lockfile — from the
+  same `planGoBuild` and `readCargoCrate` the recipes run, bounded by `validateDetectedGoBuild` and
+  `validateDetectedRustBuild`). The form declares a set-up
   variable once: the classification's declaration first, then a network variable for a name it did not
   set up. The environment is described last for each root, after the state, readiness and network
   passes, so its classification sees the ports and frameworks they settled. A repository's container
@@ -334,8 +338,9 @@ only renderer/executor/validation authority for their feature.
   certain loopback bind is a blocker before Deploy rather than a readiness timeout after it. The closed
   recipe set is
   `node`, `go`, `python`, `rust`, `java`, `dotnet`, `deno` (`validRecipe`), and `build.pythonVersion`
-  (3.10 to 3.14), `build.systemPackages` (at most 32 Debian names, Python recipe only) and
-  `build.spaFallback` are additive plan fields, bounded by `PlanConfiguration.Validate`.
+  (3.10 to 3.14), `build.systemPackages` (at most 32 Debian names, Python recipe only),
+  `build.spaFallback`, `build.goPackage` and `build.cargoBin` (the binary a Rust recipe serves) are
+  additive plan fields, bounded by `PlanConfiguration.Validate`.
   The contract per language is [the recipe guide](recipes.md). The framework detection recognised is
   recorded on the build plan when a draft commits (`build.framework` on the configuration read) —
   the chosen candidate's, while the plan still builds that candidate's directory — so a later read,
@@ -445,8 +450,9 @@ only renderer/executor/validation authority for their feature.
   plan excludes raw observed import material and accepts only typed secret references. The observer
   reads `MemAvailable` and `SwapFree`, and `build_memory_low` (warning, `preflight_build.go`) compares
   them with the selected recipe's estimated build peak (a Next.js, Nuxt, Angular, Gatsby, Docusaurus,
-  Strapi or Payload build ~2 GiB, other JavaScript frameworks ~1 GiB, Rust ~2 GiB, Maven/Gradle and .NET
-  ~1.5 GiB). The JavaScript recipe leaves V8's heap at its default rather than injecting
+  Strapi or Payload build ~2 GiB, other JavaScript frameworks ~1 GiB, Rust ~2 GiB, or ~3 GiB with fat
+  LTO, one codegen unit or Leptos, Maven/Gradle and .NET ~1.5 GiB); the Rust recipe also caps Cargo's
+  jobs at the gigabytes free when the step starts. The JavaScript recipe leaves V8's heap at its default rather than injecting
   `NODE_OPTIONS`, which every worker process of a build would inherit. The same file judges what the
   configuration gives a JavaScript build against what the candidate recorded (`nodeBuild`): an
   env-validation schema's variables without a build value (`build_env_validation_skipped`,
@@ -486,7 +492,7 @@ only renderer/executor/validation authority for their feature.
   whatever builds it (`rootDetectionCandidate`), since the same code runs either way. The step's evidence carries `candidate` and
   `findings`, which the run page draws as findings ("Checked before building"); a blocked finding — or
   one of the decisions a run cannot pass: `readiness_missing`, `domain_link_missing`,
-  `go_main_ambiguous` — stops the run with the finding's code as the terminal code and
+  `go_main_ambiguous`, `rust_binary_ambiguous` — stops the run with the finding's code as the terminal code and
   `title: measured. action` as the reason.
 - `POST /deploy/{id}/environments/{env}/check` answers the same evaluation for the environment's desired
   plan before Deploy is pressed. It carries the run request's capability (`service.control`), resolves

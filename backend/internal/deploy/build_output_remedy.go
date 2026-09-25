@@ -97,7 +97,7 @@ func namedCauseTitle(code string) string {
 var lockfileManifests = map[string]string{
 	"package-lock.json": "package.json", "bun.lock": "package.json", "pnpm-lock.yaml": "package.json",
 	"yarn.lock": "package.json", "poetry.lock": "pyproject.toml", "uv.lock": "pyproject.toml",
-	"Cargo.lock": "Cargo.toml", "go.sum": "go.mod", "go.mod": "the code's imports",
+	"Cargo.lock": "Cargo.toml", "go.sum": "go.mod", "go.mod": "the code's imports", "vendor/modules.txt": "go.mod",
 	"composer.lock": "composer.json", "deno.lock": "deno.json and the code's imports", "Gemfile.lock": "Gemfile",
 	"Pipfile.lock": "Pipfile", "pdm.lock": "pyproject.toml",
 }
@@ -105,7 +105,7 @@ var lockfileManifests = map[string]string{
 var lockfileRegenerate = map[string]string{
 	"package-lock.json": "npm install", "bun.lock": "bun install", "pnpm-lock.yaml": "pnpm install",
 	"yarn.lock": "yarn install", "poetry.lock": "poetry lock", "uv.lock": "uv lock",
-	"Cargo.lock": "cargo update --workspace", "go.sum": "go mod tidy", "go.mod": "go mod tidy",
+	"Cargo.lock": "cargo update --workspace", "go.sum": "go mod tidy", "go.mod": "go mod tidy", "vendor/modules.txt": "go mod vendor",
 	"composer.lock": "composer update --lock", "deno.lock": "deno install", "Gemfile.lock": "bundle install",
 	"Pipfile.lock": "pipenv lock", "pdm.lock": "pdm lock",
 }
@@ -511,12 +511,20 @@ func (c *BuildCause) explain() (string, string) {
 		return "Composer refused a package version that has a known security advisory",
 			"update the affected package with `composer update <package>`, or set `config.audit.block-insecure` to false in composer.json"
 	case "build_dependency_local_path":
+		if c.Detail == "go" {
+			return "go.mod replaces a module with a directory the build does not have" + parenthesized(subject),
+				"keep the replaced module inside the repository, where the automatic build widens its context to it, or replace it with a published version"
+		}
 		return "a requirement points at a file that exists only on the machine that wrote it" + parenthesized(subject),
 			"regenerate requirements.txt with `pip list --format=freeze` from a virtual environment, not a conda environment"
 	case "build_dependency_os_only":
 		return orDefault(subject, "a dependency") + " installs only on Windows or macOS: a pip freeze from that system pinned it",
 			"add its marker (`; sys_platform == \"win32\"`) or remove it, and regenerate requirements.txt with pip-compile"
 	case "build_dependency_unavailable":
+		if c.Detail == "go" {
+			return orDefault(subjects, "a module") + " could not be fetched: the module proxy has no such version, or the module is private",
+				"check the version; for a private module from the source's own account, add a build variable " + goPrivateTokenVariable + " scoped to install, which the Go recipe fetches it directly with"
+		}
 		return orDefault(subjects, "a dependency") + " could not be found in its registry",
 			"check the name and version; a private package needs its registry token as a build variable scoped to install"
 	case "build_registry_auth":
@@ -525,6 +533,10 @@ func (c *BuildCause) explain() (string, string) {
 			// that does not exist alike, so the sentence names both.
 			return "the registry refused it: the image does not exist, or it is private and no valid credential was given",
 				"check the image reference and, for a private image, the source's registry credential"
+		}
+		if c.Detail == "go" {
+			return "the go command fetched a private module with git, and git had no credentials for it",
+				"add a build variable " + goPrivateTokenVariable + " scoped to install, holding a token that can read the module's repository; the Go recipe fetches the source's account's modules with it"
 		}
 		return "the package registry refused the build's credentials",
 			"add the registry token as a build variable scoped to install (for npm, `NPM_TOKEN` read by an .npmrc)"
@@ -655,6 +667,9 @@ func (c *BuildCause) systemLibrary(subject string) (string, string) {
 	case c.Detail == "musl":
 		return "a dependency ships a glibc binary, and the image is Alpine (musl)",
 			"use the dependency's musl build, or a Dockerfile on a glibc base image"
+	case c.Detail == "rust-static":
+		return "bindgen found libclang but could not load it: the crate's build script is linked statically against musl, and a static program cannot load a shared library",
+			"build with RUSTFLAGS=\"-C target-feature=-crt-static\", which the Rust recipe sets when Cargo.lock has bindgen or clang-sys, or on a glibc image"
 	case strings.HasSuffix(subject, "-sys"):
 		return "the Rust crate " + subject + " builds a C library the image does not have",
 			"enable the crate's vendored or rustls feature, or build with a Dockerfile that installs the library"
@@ -672,8 +687,8 @@ func (c *BuildCause) nativeToolchain(subject string) (string, string) {
 		return orDefault(subject, "a dependency") + " has no prebuilt wheel for this Python and the image has no compiler",
 			"choose a Python version the package publishes wheels for, depend on a binary build, or add build-essential to the Python recipe's system packages"
 	case "go":
-		return "a dependency uses cgo, and the Go recipe builds without a C compiler",
-			"switch to a pure-Go dependency (modernc.org/sqlite for mattn/go-sqlite3), or build with a Dockerfile"
+		return "the build compiles cgo code without a C compiler: the recipe installs one for the cgo modules it knows and for local cgo files, and neither named this one",
+			"set CGO_ENABLED=1 in the build command, which makes the recipe install gcc and musl-dev, switch to a pure-Go dependency, or build with a Dockerfile"
 	case "rust":
 		return "the Rust build could not link its native code", "build with a Dockerfile that installs the linker and libraries"
 	case "dotnet":

@@ -318,6 +318,12 @@ func recipeReadiness(candidate *DetectedCandidate, marker *detectedMarkers, fact
 		case "dotnet":
 			readiness = declaredOrCodeReadiness(facts, "ASP.NET Core", "dotnet", "dotnet")
 		case "go":
+			if marker != nil && strings.Contains(string(marker.goModContent), "github.com/pocketbase/pocketbase") {
+				// PocketBase answers its own health endpoint before any
+				// collection exists, and / is an admin redirect.
+				readiness = strictReadiness("/api/health", readinessFromFramework, "PocketBase health endpoint /api/health")
+				break
+			}
 			readiness = declaredOrCodeReadiness(facts, "the Go service", "", "go")
 		case "rust":
 			label := "the Rust service"

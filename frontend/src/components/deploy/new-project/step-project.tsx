@@ -37,6 +37,7 @@ import {
   commandsForPackageManager,
   composeSourceForCandidate,
   dockerfileStageHint,
+  GO_VERSIONS,
   goMainPackageList,
   packageManagerOptions,
   packageManagerReading,
@@ -644,6 +645,7 @@ export function StepProject({
                         recipe,
                         goVersion: recipe === "go" ? configuration.build.goVersion : undefined,
                         goPackage: recipe === "go" ? configuration.build.goPackage : undefined,
+                        cargoBin: recipe === "rust" ? configuration.build.cargoBin : undefined,
                         pythonVersion:
                           recipe === "python" ? configuration.build.pythonVersion : undefined,
                         // The PHP recipe's asset stage installs through the
@@ -756,6 +758,29 @@ export function StepProject({
                   />
                 </Field>
               )}
+              {configuration.build.method === "recipe" &&
+                configuration.build.recipe === "rust" &&
+                (flow.candidate?.rust?.binaries?.length ?? 0) > 1 && (
+                  <Field
+                    label="Rust binary"
+                    htmlFor="cargo-bin"
+                    hint={
+                      flow.candidate?.rust?.binary
+                        ? `This crate builds ${flow.candidate.rust.binaries?.join(", ")}; ${flow.candidate.rust.binary} is served unless you choose another.`
+                        : `This crate builds ${flow.candidate?.rust?.binaries?.join(", ")}. Choose the one to serve.`
+                    }
+                  >
+                    <Input
+                      id="cargo-bin"
+                      value={configuration.build.cargoBin ?? ""}
+                      onChange={(event) =>
+                        updateBuild({ cargoBin: event.target.value.trim() || undefined })
+                      }
+                      placeholder={flow.candidate?.rust?.binary || "server"}
+                      className="font-mono"
+                    />
+                  </Field>
+                )}
               {configuration.build.method === "recipe" && configuration.build.recipe === "go" && (
                 <Field
                   label="Go version"
@@ -766,7 +791,7 @@ export function StepProject({
                     id="go-version"
                     value={configuration.build.goVersion ?? ""}
                     onChange={(event) => updateBuild({ goVersion: event.target.value })}
-                    placeholder="1.26"
+                    placeholder={GO_VERSIONS.at(-1)}
                   />
                 </Field>
               )}

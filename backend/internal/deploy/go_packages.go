@@ -35,9 +35,20 @@ type goSourceFacts struct {
 	// not restrict to cgo builds still counts as one the build needs.
 	built bool
 	cgo   bool
+	// builtCgo is the same judgement with cgo enabled, which a file
+	// restricted to cgo builds passes and its `!cgo` twin fails.
+	builtCgo bool
 	// serves says the file imports an HTTP or RPC server package, which is
 	// what tells a service's main package from a worker's or a tool's.
 	serves bool
+	// cgoLinks are the system libraries a cgo file's preamble links for
+	// linux: "pkg-config:<name>" and "lib:<name>" (from -l in LDFLAGS).
+	cgoLinks []string
+	// embeds are the file's //go:embed patterns.
+	embeds []string
+	// imports are the paths the file imports, which tie a main package to
+	// the packages of its own module it builds.
+	imports []string
 }
 
 // goServerImports are the packages whose import marks a main package that
@@ -80,6 +91,8 @@ func readGoSourceFacts(rel string, content []byte) (goSourceFacts, bool) {
 		}
 		if value == "C" {
 			facts.cgo = true
+		} else if len(facts.imports) < 256 {
+			facts.imports = append(facts.imports, value)
 		}
 		for _, server := range goServerImports {
 			if value == server || strings.HasPrefix(value, server+"/") {
@@ -87,7 +100,13 @@ func readGoSourceFacts(rel string, content []byte) (goSourceFacts, bool) {
 			}
 		}
 	}
-	facts.built = goFileNameMatches(path.Base(rel)) && goConstraintSatisfied(content)
+	named := goFileNameMatches(path.Base(rel))
+	facts.built = named && goConstraintSatisfied(content, false)
+	facts.builtCgo = named && goConstraintSatisfied(content, true)
+	if facts.cgo {
+		facts.cgoLinks = goCgoLinks(content)
+	}
+	facts.embeds = goEmbedPatterns(content)
 	return facts, true
 }
 
@@ -113,9 +132,9 @@ func goFileNameMatches(name string) bool {
 
 // goConstraintSatisfied evaluates the //go:build line (or, lacking one, the
 // legacy +build lines) above the package clause for linux on this host's
-// architecture with cgo disabled and no extra tags, which is how the recipe
-// builds. `ignore`, `tools` and mage files therefore drop out.
-func goConstraintSatisfied(content []byte) bool {
+// architecture with no extra tags, with or without cgo, which is how the
+// recipe builds. `ignore`, `tools` and mage files therefore drop out.
+func goConstraintSatisfied(content []byte, cgo bool) bool {
 	var expression constraint.Expr
 	var plus []constraint.Expr
 	for _, raw := range strings.Split(string(content), "\n") {
@@ -156,6 +175,8 @@ func goConstraintSatisfied(content []byte) bool {
 		switch tag {
 		case "linux", "unix", "gc", runtime.GOARCH:
 			return true
+		case "cgo":
+			return cgo
 		}
 		// Release tags: the recipe's toolchain is new enough for any go1.N a
 		// module that builds on it would name.
@@ -177,25 +198,75 @@ type goModulePackages struct {
 	mains []string
 	// serving marks the mains whose files import a server package.
 	serving map[string]bool
-	// cgo names files that import "C" without a constraint restricting them
-	// to cgo builds: the recipe's CGO_ENABLED=0 build would drop them.
+	// cgo names the directories whose files import "C" with no pure-Go twin
+	// beside them (a file built only without cgo): a CGO_ENABLED=0 build
+	// would drop them and lose what they define, so the build needs cgo.
 	cgo []string
+	// cgoLinks are the system libraries every cgo file a cgo build compiles
+	// links, as goSourceFacts names them.
+	cgoLinks []string
+	// embeds are the //go:embed patterns of the module's built files.
+	embeds []goEmbed
+	// imports are each package directory's imports, which say which
+	// packages — and so which embeds — a main package builds.
+	imports map[string][]string
+	// templMissing names .templ components with no generated _templ.go
+	// beside them, which `templ generate` writes.
+	templMissing []string
+}
+
+// goEmbed is one //go:embed pattern and the directory of the file that
+// declares it, which the pattern is relative to.
+type goEmbed struct {
+	dir, pattern string
 }
 
 // collectGoModulePackages reduces per-file facts to one module's packages.
 // Facts below a skipped directory or inside a nested module are left out, as
 // the go command leaves them out of the module's own package list.
 func collectGoModulePackages(facts []goSourceFacts, nestedModules []string) goModulePackages {
-	result := goModulePackages{serving: map[string]bool{}}
+	result := goModulePackages{serving: map[string]bool{}, imports: map[string][]string{}}
 	mains := map[string]bool{}
+	// A file built only when cgo is off is the pure-Go fallback of the cgo
+	// files beside it.
+	twinned := map[string]bool{}
+	for _, file := range facts {
+		if !file.cgo && file.built && !file.builtCgo {
+			twinned[file.dir] = true
+		}
+	}
 	for _, file := range facts {
 		if goDirectorySkipped(file.dir, nestedModules) {
 			continue
 		}
-		if file.cgo && file.built {
-			result.cgo = append(result.cgo, file.dir)
+		if file.cgo && file.builtCgo {
+			result.cgoLinks = append(result.cgoLinks, file.cgoLinks...)
+			if !twinned[file.dir] {
+				result.cgo = append(result.cgo, file.dir)
+			}
 		}
-		if file.cgo || !file.built || file.pkg != "main" {
+		// The build compiles a cgo file exactly when planGoCGO turns cgo
+		// on for it — it builds under cgo and no pure-Go twin stands in —
+		// so such a file is as much the package as any other: a command
+		// written in cgo is still a command.
+		compiled := file.built && !file.cgo
+		if file.cgo {
+			compiled = file.builtCgo && !twinned[file.dir]
+		}
+		if !compiled {
+			continue
+		}
+		for _, pattern := range file.embeds {
+			if len(result.embeds) < goEmbedsKept {
+				result.embeds = append(result.embeds, goEmbed{dir: file.dir, pattern: pattern})
+			}
+		}
+		for _, imported := range file.imports {
+			if !slices.Contains(result.imports[file.dir], imported) {
+				result.imports[file.dir] = append(result.imports[file.dir], imported)
+			}
+		}
+		if file.pkg != "main" {
 			continue
 		}
 		mains[file.dir] = true
@@ -208,7 +279,44 @@ func collectGoModulePackages(facts []goSourceFacts, nestedModules []string) goMo
 	}
 	sort.Strings(result.mains)
 	result.cgo = uniqueSorted(result.cgo)
+	result.cgoLinks = uniqueSorted(result.cgoLinks)
 	return result
+}
+
+// embedsOf are the embeds the main package at main compiles: its own and
+// those of every package of the module it imports, directly or through
+// another. Another command's embeds are not this build's to produce, and
+// with no command chosen yet every embed in the module is kept.
+func (p goModulePackages) embedsOf(main, modulePath string) []goEmbed {
+	if main == "" || modulePath == "" {
+		return p.embeds
+	}
+	reached := map[string]bool{main: true}
+	queue := []string{main}
+	for len(queue) > 0 {
+		dir := queue[0]
+		queue = queue[1:]
+		for _, imported := range p.imports[dir] {
+			local := strings.TrimPrefix(imported, modulePath+"/")
+			switch {
+			case imported == modulePath:
+				local = "."
+			case local == imported:
+				continue
+			}
+			if !reached[local] {
+				reached[local] = true
+				queue = append(queue, local)
+			}
+		}
+	}
+	embeds := []goEmbed{}
+	for _, embed := range p.embeds {
+		if reached[embed.dir] {
+			embeds = append(embeds, embed)
+		}
+	}
+	return embeds
 }
 
 func goDirectorySkipped(dir string, nestedModules []string) bool {
@@ -237,10 +345,6 @@ const goMainPackagesKept = 64
 // no main package is a library: it stays listed, at low confidence, so a
 // service elsewhere in the repository is selected over it.
 func applyGoModulePackages(candidate *DetectedCandidate, packages goModulePackages, marker *detectedMarkers) {
-	if len(packages.cgo) > 0 {
-		candidate.RecipeIssue = "CGO source requires a Dockerfile with the required C toolchain (" +
-			goPackageArgument(packages.cgo[0]) + " imports \"C\")"
-	}
 	for _, main := range packages.mains {
 		if len(candidate.GoMainPackages) < goMainPackagesKept && validGoPackagePath(main) {
 			candidate.GoMainPackages = append(candidate.GoMainPackages, main)
@@ -425,6 +529,7 @@ func scanGoModule(root string) (goModulePackages, error) {
 	defer contained.Close()
 	facts := []goSourceFacts{}
 	nested := []string{}
+	templ, generated := []string{}, map[string]bool{}
 	files := 0
 	var read int64
 	errStop := errors.New("Go source scan exceeded its bound")
@@ -449,6 +554,14 @@ func scanGoModule(root string) (goModulePackages, error) {
 				return filepath.SkipDir
 			}
 			return nil
+		}
+		// A templ component is Go source once `templ generate` has written
+		// its _templ.go beside it, which a repository often leaves ignored.
+		if entry.Type().IsRegular() && strings.HasSuffix(entry.Name(), ".templ") && len(templ) < goEmbedsKept {
+			templ = append(templ, rel)
+		}
+		if strings.HasSuffix(entry.Name(), "_templ.go") {
+			generated[rel] = true
 		}
 		// The go command ignores files whose names start with _ or ., as it
 		// ignores directories named that way.
@@ -477,7 +590,13 @@ func scanGoModule(root string) (goModulePackages, error) {
 	if err != nil {
 		return goModulePackages{}, fmt.Errorf("%w: %v", ErrUnsupportedBuilder, err)
 	}
-	return collectGoModulePackages(facts, nested), nil
+	packages := collectGoModulePackages(facts, nested)
+	for _, component := range templ {
+		if !generated[strings.TrimSuffix(component, ".templ")+"_templ.go"] && !goDirectorySkipped(path.Dir(component), nested) {
+			packages.templMissing = append(packages.templMissing, component)
+		}
+	}
+	return packages, nil
 }
 
 func readGoHeader(root *os.Root, rel string) ([]byte, error) {

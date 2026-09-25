@@ -315,7 +315,7 @@ export function ProductCard({
     >
       <ProductLogo id={product} size="sm" fallback={fallback} />
       {/* The rest of the card's width, not its title's: sized to its own
-          content, a detail wider than the name ("1.25 · 1.26" under "Go")
+          content, a detail wider than the name ("1.25–1.27" under "Go")
           was clipped mid-glyph rather than given the room beside it. */}
       <span className="flex min-w-0 flex-1 flex-col">
         <ChoiceCardTitle className="truncate">{label}</ChoiceCardTitle>

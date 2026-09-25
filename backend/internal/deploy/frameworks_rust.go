@@ -2,14 +2,18 @@ package deploy
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
-// cargoManifest is the inert view of Cargo.toml detection reads: the package
-// and binary names a build produces, whether the file is a workspace, and
-// the crates it depends on.
+// cargoManifest is the summary of Cargo.toml the repository-shape and
+// network passes read: the package and binary names a build produces,
+// whether the file is a workspace, and the crates it depends on. It is
+// readCargoFile's reading, so both agree on dotted keys, renamed packages
+// and target-specific dependencies.
 type cargoManifest struct {
 	name       string
 	defaultRun string
@@ -20,64 +24,19 @@ type cargoManifest struct {
 }
 
 var (
-	cargoTableRE     = regexp.MustCompile(`^\[\[?([A-Za-z0-9_.\-"']+)\]\]?$`)
-	cargoAssignRE    = regexp.MustCompile(`^([A-Za-z0-9_\-"']+)\s*=\s*(.*)$`)
 	rustToolchainRE  = regexp.MustCompile(`\b(1\.[0-9]{2,3}(?:\.[0-9]+)?)\b`)
 	rustPreReleaseRE = regexp.MustCompile(`\b(nightly|beta)\b`)
 )
 
-// parseCargoManifest is a line reader over the tables that matter, not a
-// TOML parser: [package] name, [[bin]] name, [workspace], and the keys of
-// [dependencies] (including `[dependencies.foo]` tables). An unusual layout
-// yields fewer facts, never wrong ones.
 func parseCargoManifest(content []byte) cargoManifest {
-	manifest := cargoManifest{deps: map[string]bool{}}
-	table := ""
-	for _, raw := range strings.Split(string(content), "\n") {
-		line := strings.TrimSpace(raw)
-		if comment := strings.Index(line, " #"); comment >= 0 {
-			line = strings.TrimSpace(line[:comment])
-		}
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if match := cargoTableRE.FindStringSubmatch(line); match != nil {
-			table = strings.Trim(match[1], `"'`)
-			switch {
-			case table == "package":
-				manifest.hasPkg = true
-			case table == "workspace":
-				manifest.workspace = true
-			case strings.HasPrefix(table, "dependencies."):
-				manifest.deps[normalizeCrate(strings.TrimPrefix(table, "dependencies."))] = true
-			case strings.HasPrefix(table, "bin"):
-				manifest.bins = append(manifest.bins, "")
-			}
-			continue
-		}
-		match := cargoAssignRE.FindStringSubmatch(line)
-		if match == nil {
-			continue
-		}
-		key, value := strings.Trim(match[1], `"'`), strings.TrimSpace(match[2])
-		switch {
-		case table == "package" && key == "name":
-			manifest.name = strings.Trim(value, `"'`)
-		case table == "package" && key == "default-run":
-			manifest.defaultRun = strings.Trim(value, `"'`)
-		case table == "bin" && key == "name" && len(manifest.bins) > 0 && manifest.bins[len(manifest.bins)-1] == "":
-			manifest.bins[len(manifest.bins)-1] = strings.Trim(value, `"'`)
-		case table == "dependencies":
-			manifest.deps[normalizeCrate(key)] = true
-		}
+	file := readCargoFile(content)
+	manifest := cargoManifest{name: file.name, defaultRun: file.defaultRun, workspace: file.workspace, hasPkg: file.hasPkg, deps: map[string]bool{}}
+	for _, bin := range file.bins {
+		manifest.bins = append(manifest.bins, bin.name)
 	}
-	bins := manifest.bins[:0]
-	for _, bin := range manifest.bins {
-		if bin != "" {
-			bins = append(bins, bin)
-		}
+	for name := range file.crates(nil, false) {
+		manifest.deps[name] = true
 	}
-	manifest.bins = bins
 	return manifest
 }
 
@@ -119,8 +78,75 @@ func chooseRustToolchain(content string) (string, error) {
 	return "1", nil
 }
 
-// rustCandidate builds the candidate for a root with a Cargo.toml.
-func rustCandidate(marker *detectedMarkers, rootLabel string) DetectedCandidate {
+// rustLockOutgrowsToolchain says Cargo.lock's format is newer than the
+// pinned toolchain reads: version 4 needs Cargo 1.78.
+func rustLockOutgrowsToolchain(lockVersion int, toolchain string) bool {
+	if lockVersion < 4 || toolchain == "1" {
+		return false
+	}
+	parts := strings.Split(toolchain, ".")
+	if len(parts) < 2 {
+		return false
+	}
+	minor, err := strconv.Atoi(parts[1])
+	return err == nil && minor < 78
+}
+
+// rustMarker is what the Cargo pass read about one root: the crate, the
+// facts a candidate records, and how many workspace members name this
+// root as their workspace.
+type rustMarker struct {
+	crate   *cargoCrate
+	facts   *DetectedRustBuild
+	members int
+}
+
+// readCargoCrates reads every crate the walk found, under one source budget
+// apart from the walk's own, before candidates are built: a member's
+// framework is declared through its workspace, and a Trunk crate's
+// index.html is its source, not a site of its own.
+func readCargoCrates(checkout string, markers map[string]*detectedMarkers) {
+	roots := []string{}
+	for root, marker := range markers {
+		if len(marker.cargoToml) > 0 {
+			roots = append(roots, root)
+		}
+	}
+	sort.Strings(roots)
+	budget := &rustSourceBudget{remaining: 16 << 20, locks: map[string]*cargoLock{}}
+	for index, root := range roots {
+		marker := markers[root]
+		marker.rust = &rustMarker{}
+		if index >= 64 {
+			continue
+		}
+		crate, err := readCargoCrate(checkout, filepath.Join(checkout, root), budget)
+		if err != nil {
+			continue
+		}
+		marker.rust.crate = &crate
+		marker.rust.facts = rustFacts(checkout, crate, planRustNative(crate.lock))
+	}
+	for _, root := range roots {
+		crate := markers[root].rust.crate
+		if crate == nil || crate.workspace == nil || crate.workspace.member == "" || !crate.file.hasPkg {
+			continue
+		}
+		if owner := markers[filepath.FromSlash(checkoutPath(checkout, crate.workspace.dir))]; owner != nil && owner.rust != nil {
+			owner.rust.members++
+		}
+	}
+}
+
+// trunkSource says the root's index.html is a Trunk crate's source page.
+func (m *detectedMarkers) trunkSource() bool {
+	return m.rust != nil && m.rust.crate != nil && m.rust.crate.trunk != ""
+}
+
+// rustCandidate builds the candidate for a root with a Cargo.toml. A
+// workspace root with no package of its own is no candidate when the walk
+// found its members: each member is one, built within the workspace.
+func rustCandidate(marker *detectedMarkers, rootLabel string) (DetectedCandidate, bool) {
 	manifest := parseCargoManifest(marker.cargoToml)
 	candidate := DetectedCandidate{
 		Name: "Rust service in " + rootLabel, Profile: ProfileWorker, Confidence: ConfidenceMedium,
@@ -128,32 +154,63 @@ func rustCandidate(marker *detectedMarkers, rootLabel string) DetectedCandidate 
 		Evidence:      []DetectionEvidence{{Path: joinRoot(marker.root, "Cargo.toml"), Reason: "Cargo package manifest"}},
 		NeedsDecision: []string{},
 	}
-	candidate.UnpinnedDependencies = !marker.cargoLock
-	if _, err := chooseRustToolchain(string(marker.rustToolchain)); err != nil {
-		candidate.RecipeIssue = err.Error()
+	var crate *cargoCrate
+	if marker.rust != nil {
+		crate = marker.rust.crate
 	}
-	switch {
-	case manifest.workspace && !manifest.hasPkg:
+	if manifest.workspace && !manifest.hasPkg {
+		if marker.rust != nil && marker.rust.members > 0 {
+			return DetectedCandidate{}, false
+		}
 		candidate.Confidence = ConfidenceLow
 		candidate.RecipeIssue = "Cargo workspace without a root package; set the root directory to the member crate that builds the service, or use a Dockerfile"
-	case manifest.name == "":
+		candidate.UnpinnedDependencies = !marker.cargoLock
+		return candidate, true
+	}
+	toolchain := string(marker.rustToolchain)
+	candidate.UnpinnedDependencies = !marker.cargoLock
+	deps := manifest.deps
+	if crate != nil {
+		toolchain = crate.toolchain
+		candidate.UnpinnedDependencies = crate.lock == nil
+		deps = map[string]bool{}
+		for name := range crate.deps {
+			deps[name] = true
+		}
+		candidate.Rust = marker.rust.facts
+	}
+	if _, err := chooseRustToolchain(toolchain); err != nil {
+		candidate.RecipeIssue = err.Error()
+	}
+	if manifest.name == "" {
 		candidate.Confidence = ConfidenceLow
 		candidate.NeedsDecision = append(candidate.NeedsDecision, "Cargo.toml names no package; confirm the binary the build produces")
 	}
 	binary := manifest.binary()
-	if len(manifest.bins) > 1 && manifest.defaultRun == "" {
+	if facts := candidate.Rust; facts != nil {
+		binary = facts.Binary
+		if workspace := facts.Workspace; workspace != "" {
+			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(strings.TrimPrefix(workspace, "."), "Cargo.toml"),
+				Reason: detectionLine("member of the Cargo workspace at " + workspace + "; the build runs there with -p " + facts.Package)})
+		}
+		if binary == "" && len(facts.Binaries) > 1 {
+			candidate.NeedsDecision = append(candidate.NeedsDecision,
+				detectionLine("choose the binary to serve: "+strings.Join(facts.Binaries, ", ")+" (or set package.default-run in Cargo.toml)"))
+		}
+	} else if len(manifest.bins) > 1 && manifest.defaultRun == "" {
 		candidate.NeedsDecision = append(candidate.NeedsDecision, "several binaries are declared; the first, "+binary+", is served — set package.default-run in Cargo.toml to choose another")
 	}
-	if binary != "" {
-		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(marker.root, "Cargo.toml"), Reason: "binary target " + binary})
+	// A library crate's package name is no binary it builds, which the
+	// repository-shape evidence already says.
+	if facts := candidate.Rust; binary != "" && (facts == nil || len(facts.Binaries) > 0 || facts.BinaryReason == "package.default-run") {
+		reason := "binary target " + binary
+		if facts := candidate.Rust; facts != nil && facts.BinaryReason != "" && facts.BinaryReason != "package.default-run" {
+			reason += ": " + facts.BinaryReason
+		}
+		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(marker.root, "Cargo.toml"), Reason: reason})
 	}
-	names := make([]string, 0, len(manifest.deps))
-	for name := range manifest.deps {
-		names = append(names, name)
-	}
-	sort.Strings(names)
 	for _, framework := range rustWebFrameworks {
-		if manifest.deps[framework.crate] {
+		if deps[framework.crate] {
 			candidate.Framework = framework.name
 			candidate.Profile, candidate.Port = ProfileWeb, framework.port
 			candidate.Confidence = ConfidenceHigh
@@ -162,6 +219,9 @@ func rustCandidate(marker *detectedMarkers, rootLabel string) DetectedCandidate 
 			candidate.NeedsDecision = append(candidate.NeedsDecision, "confirm the port the service binds; the recipe passes PORT")
 			break
 		}
+	}
+	if crate != nil {
+		rustFullstackCandidate(&candidate, marker, crate, rootLabel)
 	}
 	if candidate.Framework == "rust" {
 		candidate.NeedsDecision = append(candidate.NeedsDecision, "confirm whether this binary serves HTTP (web application) or runs as a worker, and its port")
@@ -174,98 +234,73 @@ func rustCandidate(marker *detectedMarkers, rootLabel string) DetectedCandidate 
 		}
 		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(marker.root, "Procfile"), Reason: "web process: " + boundedEvidence(procfileWeb)})
 	}
+	if facts := candidate.Rust; facts != nil {
+		rustBuildEvidence(&candidate, marker.root, facts)
+	}
 	if candidate.RecipeIssue != "" && candidate.Confidence == ConfidenceHigh {
 		candidate.Confidence = ConfidenceMedium
 	}
-	return candidate
+	return candidate, true
 }
 
-// rustRecipe is what the builder needs beyond the plan: the binary the build
-// writes and the image tag for the pinned toolchain.
-type rustRecipe struct {
-	binary  string
-	version string
-	locked  bool
-	// framework decides whether the image needs Rocket's address and its
-	// default start Rocket's port bridge.
-	framework string
-	// assets are the root-level files the service reads at runtime.
-	assets []string
-}
-
-func selectRustRecipe(root string, config BuildPlanConfig) (rustRecipe, error) {
-	content, err := readContainedRegular(root, "Cargo.toml", 512<<10)
-	if err != nil {
-		return rustRecipe{}, fmt.Errorf("%w: Rust recipe requires Cargo.toml", ErrUnsupportedBuilder)
-	}
-	manifest := parseCargoManifest(content)
-	if manifest.workspace && !manifest.hasPkg {
-		return rustRecipe{}, fmt.Errorf("%w: Cargo workspace without a root package; set the root directory to the member crate or use a Dockerfile", ErrUnsupportedBuilder)
-	}
-	binary := manifest.binary()
-	if binary == "" {
-		return rustRecipe{}, fmt.Errorf("%w: Cargo.toml names no package or binary to build", ErrUnsupportedBuilder)
-	}
-	if !safeRelativePath(binary) || strings.ContainsAny(binary, "/\\ ") {
-		return rustRecipe{}, fmt.Errorf("%w: Cargo binary name %q is not a plain file name", ErrUnsupportedBuilder, binary)
-	}
-	toolchain := ""
-	for _, name := range []string{"rust-toolchain.toml", "rust-toolchain"} {
-		if regularExists(root, name) {
-			file, err := readContainedRegular(root, name, 4096)
-			if err == nil {
-				toolchain = string(file)
+// rustFullstackCandidate reads the frameworks that build a browser side as
+// well: cargo-leptos's server and site, a Trunk application's static
+// WebAssembly site, and the two the recipe cannot build — Dioxus, which
+// bundles with its own CLI, and Shuttle, whose runtime starts main.
+func rustFullstackCandidate(candidate *DetectedCandidate, marker *detectedMarkers, crate *cargoCrate, rootLabel string) {
+	cargo := joinRoot(marker.root, "Cargo.toml")
+	confirm := "confirm the port the service binds; the recipe passes PORT"
+	switch {
+	case crate.leptos != nil:
+		port := 3000
+		if _, value, ok := strings.Cut(crate.leptos.siteAddr, ":"); ok {
+			if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 && parsed < 65536 {
+				port = parsed
 			}
-			break
 		}
+		candidate.Framework, candidate.Profile, candidate.Port, candidate.Confidence = "leptos", ProfileWeb, port, ConfidenceHigh
+		candidate.Name = "Leptos application in " + rootLabel
+		candidate.NeedsDecision = withoutDecision(candidate.NeedsDecision, confirm)
+		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: cargo,
+			Reason: fmt.Sprintf("cargo-leptos metadata: the build compiles the server and its WebAssembly site; site-addr port %d", port)})
+	case crate.trunk != "":
+		candidate.Framework, candidate.Profile, candidate.Port, candidate.Confidence = "trunk", ProfileStatic, 80, ConfidenceHigh
+		candidate.OutputDirectory, candidate.SPAFallback = "dist", true
+		candidate.Name = "Trunk site in " + rootLabel
+		candidate.NeedsDecision = withoutDecision(candidate.NeedsDecision, confirm)
+		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(marker.root, "index.html"),
+			Reason: "Trunk builds " + crate.trunk + " to WebAssembly and serves the result as a static site"})
+	case crate.dioxus:
+		candidate.Framework = "dioxus"
+		candidate.RecipeIssue = "Dioxus builds with its own CLI (dx bundle), which the Rust recipe does not run; build from a Dockerfile that runs dx bundle"
+	case crate.shuttle:
+		candidate.Framework = "shuttle"
+		candidate.RecipeIssue = "shuttle-runtime: main is started by Shuttle's runtime (#[shuttle_runtime::main]) and does not listen on its own; deploy it on Shuttle, or give main a tokio runtime that serves and remove the Shuttle attribute"
 	}
-	version, err := chooseRustToolchain(toolchain)
-	if err != nil {
-		return rustRecipe{}, err
-	}
-	recipe := rustRecipe{binary: binary, version: version, locked: regularExists(root, "Cargo.lock")}
-	for _, framework := range rustWebFrameworks {
-		if manifest.deps[framework.crate] {
-			recipe.framework = framework.name
-			break
-		}
-	}
-	return recipe, nil
 }
 
-func renderRustDockerfile(recipe rustRecipe, config BuildPlanConfig, bases []ResolvedImage, installSecrets, buildSecrets string) ([]string, error) {
-	if len(bases) != 2 {
-		return nil, ErrBuilderUnavailable
+// rustBuildEvidence says on the candidate what the recipe adds to the build.
+func rustBuildEvidence(candidate *DetectedCandidate, root string, facts *DetectedRustBuild) {
+	lock := joinRoot(strings.TrimPrefix(facts.Workspace, "."), "Cargo.lock")
+	if facts.Workspace == "" {
+		lock = joinRoot(root, "Cargo.lock")
 	}
-	locked := ""
-	if recipe.locked {
-		locked = " --locked"
+	if len(facts.NativeCrates) > 0 {
+		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: lock,
+			Reason: detectionLine("native build dependencies installed in the build stage: " + strings.Join(facts.NativeCrates, "; "))})
 	}
-	build := strings.TrimSpace(config.BuildCommand)
-	if build == "" {
-		build = "cargo build --release" + locked
+	if facts.SQLxMigrate {
+		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(root, "src"),
+			Reason: "sqlx::migrate!() embeds the migrations; the application applies them when it starts"})
 	}
-	lines := []string{
-		"FROM " + immutableImageReference(bases[0]) + " AS build",
-		"WORKDIR /src",
-		// musl-dev links the static binary the alpine image targets; the
-		// OpenSSL pieces let openssl-sys crates link statically too.
-		"RUN apk add --no-cache musl-dev pkgconfig openssl-dev openssl-libs-static",
-		"ENV OPENSSL_STATIC=1",
-		"COPY . .",
-		"RUN " + installSecrets + "cargo fetch" + locked,
-		"RUN " + buildSecrets + build,
-		"RUN mkdir -p /out && test -f /src/target/release/" + recipe.binary + " && cp /src/target/release/" + recipe.binary + " /out/app || (echo 'Rust build must produce target/release/" + recipe.binary + "; configure the build command and binary together' >&2; exit 1)",
-	}
-	start := config.StartCommand
-	var env []string
-	if recipe.framework == "rocket" {
-		env = append(env, rocketAddressEnv)
-		if strings.TrimSpace(start) == "" {
-			start = rocketStart
+	if facts.SQLxOffline {
+		data := facts.SQLxOfflineData
+		if data == "" {
+			data = joinRoot(root, ".sqlx")
 		}
+		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: data,
+			Reason: "sqlx offline query data is committed; the build compiles its queries with SQLX_OFFLINE=true"})
 	}
-	return append(lines, compiledRuntimeLines(bases[1], recipe.assets, start, env...)...), nil
 }
 
 func joinRoot(root, name string) string {
