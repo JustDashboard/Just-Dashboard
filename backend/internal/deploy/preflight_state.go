@@ -236,18 +236,29 @@ func sqliteOnVolume(candidate *DetectedCandidate, configuration PlanConfiguratio
 // empty — or, seeded from a committed copy, only the first time — and a tool
 // whose schema step nothing runs creates no table.
 func sqliteSchemaStepFinding(candidate *DetectedCandidate, build BuildPlanConfig) PreflightFinding {
-	// A release task runs on the host or in a one-off container of the
-	// image, neither of which mounts the plan's volumes, so the schema it
-	// applies never reaches the database on one.
-	build.ReleaseTasks = nil
+	build.ReleaseTasks = volumeReleaseTasks(build.ReleaseTasks)
 	item := schemaStepFinding(candidate, build)
 	if item.Severity == PreflightPass {
-		item.Means = "The SQLite database on the volume receives the " + item.Measured + " schema from the start command or the application itself."
+		item.Means = "The SQLite database on the volume receives the " + item.Measured + " schema from the start command, a release task in the release image, or the application itself."
 		return item
 	}
 	item.Title = "The SQLite database on the volume will not receive the application's schema"
 	item.Means = "The volume starts empty, and " + item.Measured + " creates no table until its schema step runs, so the first request that reads the database fails with \"no such table\". A database file committed to the repository seeds the volume only the first time it is mounted; migrations added later are never applied."
 	return item
+}
+
+// volumeReleaseTasks are the tasks that see the plan's volumes: those in
+// the release image, which mounts them as the release does. A task in the
+// dashboard's shell runs over the checkout, and what it writes there never
+// reaches a volume.
+func volumeReleaseTasks(tasks []ReleaseTaskConfig) []ReleaseTaskConfig {
+	kept := []ReleaseTaskConfig{}
+	for _, task := range tasks {
+		if task.Runner == ReleaseTaskRunnerImage {
+			kept = append(kept, task)
+		}
+	}
+	return kept
 }
 
 var seedStepRE = regexp.MustCompile(`db[: ]seed|\bseed\b`)
@@ -260,13 +271,19 @@ func seedFinding(candidate *DetectedCandidate, configuration PlanConfiguration, 
 	if candidate == nil || candidate.SeedCommand == "" || !firstRelease {
 		return nil
 	}
-	fresh := hasDatabaseDependency(configuration.Dependencies) || sqliteOnVolume(candidate, configuration, values)
+	linked := hasDatabaseDependency(configuration.Dependencies)
+	fresh := linked || sqliteOnVolume(candidate, configuration, values)
 	if !fresh || seedStepRE.MatchString(configuration.Build.StartCommand) {
 		return nil
 	}
-	// A release task reaches a linked server, not a volume.
-	for _, task := range configuration.Build.ReleaseTasks {
-		if hasDatabaseDependency(configuration.Dependencies) && seedStepRE.MatchString(task.Command) {
+	// A release task reaches a linked server wherever it runs, and a volume
+	// only from the release image.
+	tasks := configuration.Build.ReleaseTasks
+	if !linked {
+		tasks = volumeReleaseTasks(tasks)
+	}
+	for _, task := range tasks {
+		if seedStepRE.MatchString(task.Command) {
 			return nil
 		}
 	}

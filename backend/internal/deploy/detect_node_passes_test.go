@@ -67,7 +67,8 @@ func TestIncidentRepositoryResolvesToBunWithItsReadinessVariablesAndVolume(t *te
 			t.Fatalf("%s install = %+v", manager, candidate.NodeInstalls)
 		}
 	}
-	if candidate.NodeBuild == nil || !slices.Equal(candidate.NodeBuild.PrismaEnv, []string{"DATABASE_URL"}) {
+	if candidate.NodeBuild == nil || !slices.Equal(candidate.NodeBuild.PrismaEnv, []string{"DATABASE_URL"}) ||
+		!slices.Equal(candidate.NodeBuild.PrismaConnectScripts, []string{"db:push"}) {
 		t.Fatalf("node build = %+v", candidate.NodeBuild)
 	}
 
@@ -88,12 +89,16 @@ func TestIncidentRepositoryResolvesToBunWithItsReadinessVariablesAndVolume(t *te
 	if item := findingByCode(findings, "persistent_state_kept"); item == nil {
 		t.Fatalf("the SQLite volume was not recognised: %+v", findings)
 	}
-	// The same read still needs a value in a build that migrates, which
-	// connects.
-	migrating := configuration
-	migrating.Build.BuildCommand = "bunx prisma migrate deploy && bun run build"
-	if record := prismaBuildPlaceholders(readNodeInstallFactsAt(t, root), migrating.Build.BuildCommand); record != nil {
-		t.Fatalf("a migrating build was given a placeholder: %v", record)
+	// The same read still needs a value in a build that migrates or pushes,
+	// which connects — written into the plan's own build command, or run
+	// through a package script — and gets no placeholder from the recipe.
+	for _, command := range []string{"bunx prisma migrate deploy && bun run build", "bun run db:push && bun run build"} {
+		migrating := configuration
+		migrating.Build.BuildCommand = command
+		findings := preflightFindings(nodeDraft(result), migrating, dockerHost, false)
+		if item := findingByCode(findings, "build_variable_missing_database_url"); item == nil || item.Severity != PreflightBlocked {
+			t.Fatalf("%q was not asked for DATABASE_URL: %+v", command, item)
+		}
 	}
 
 	prepared, err := NewArtifactBuilder(&artifactBackendFake{}).Prepare(context.Background(), root, configuration.Build, false, "t:1")
@@ -105,15 +110,6 @@ func TestIncidentRepositoryResolvesToBunWithItsReadinessVariablesAndVolume(t *te
 		`DATABASE_URL="${DATABASE_URL:-file:./prisma-generate.db}"`,
 		"ENV HOST=0.0.0.0\nCOPY --from=build /app /app",
 	}, []string{"npm ci"})
-}
-
-func readNodeInstallFactsAt(t *testing.T, root string) nodeInstallFacts {
-	t.Helper()
-	source, err := readNodeInstallSource(root, "", "x64", newNodeReadBudget())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return source.facts
 }
 
 // A pnpm server runs from the toolchain stage Corepack installed pnpm into;
@@ -220,5 +216,52 @@ func TestUnsettledManagerStaysLowYetOutranksAHelperElsewhere(t *testing.T) {
 	if selected.BuildMethod != BuildRecipe || selected.Confidence != ConfidenceLow || selected.PackageManager != "" ||
 		!strings.Contains(result.SelectionReason, "shallower root") {
 		t.Fatalf("selected %s at %q confidence %s (%s)", selected.BuildMethod, selected.Root, selected.Confidence, result.SelectionReason)
+	}
+}
+
+// The placeholder answers a build-time read only prisma.config makes: a name
+// next.config reads while the build runs too is one the build needs a real
+// value for, whatever prisma generate is given.
+func TestPrismaPlaceholderCoversOnlyTheReadPrismaConfigMakes(t *testing.T) {
+	t.Parallel()
+	files := incidentWithStateTree(t)
+	root := writeNodeTree(t, files)
+	result, err := (Detector{}).DetectPath(context.Background(), root, SourceIdentity{Kind: SourceGit, Revision: strings.Repeat("a", 40)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := selectedDetectionCandidate(&result)
+	database := slices.IndexFunc(candidate.Variables, func(variable DetectedVariable) bool { return variable.Name == "DATABASE_URL" })
+	if database < 0 || candidate.Variables[database].Phase != "build" || !slices.Equal(candidate.Variables[database].BuildSources, []string{"prisma.config.ts"}) {
+		t.Fatalf("DATABASE_URL = %+v", candidate.Variables)
+	}
+	configuration := nodeTestConfiguration(BuildPlanConfig{Method: BuildRecipe, Recipe: "node", BuildCommand: candidate.BuildCommand, StartCommand: candidate.StartCommand})
+	if supplied := prismaRecipeSupplied(candidate, configuration); !slices.Equal(supplied, []string{"DATABASE_URL"}) {
+		t.Fatalf("supplied = %v", supplied)
+	}
+
+	files["next.config.ts"] = "export default { env: { DB_HOST: new URL(process.env.DATABASE_URL).host } }\n"
+	root = writeNodeTree(t, files)
+	result, err = (Detector{}).DetectPath(context.Background(), root, SourceIdentity{Kind: SourceGit, Revision: strings.Repeat("a", 40)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate = selectedDetectionCandidate(&result)
+	database = slices.IndexFunc(candidate.Variables, func(variable DetectedVariable) bool { return variable.Name == "DATABASE_URL" })
+	if database < 0 || !slices.Equal(candidate.Variables[database].BuildSources, []string{"next.config.ts", "prisma.config.ts"}) {
+		t.Fatalf("DATABASE_URL = %+v", candidate.Variables[database])
+	}
+	if supplied := prismaRecipeSupplied(candidate, configuration); len(supplied) != 0 {
+		t.Fatalf("a name next.config reads at build was taken as supplied: %v", supplied)
+	}
+	configuration.Variables = []PlannedVariable{{Name: "DATABASE_URL", Sensitivity: "secret", Scopes: []string{"runtime"}, Reference: "database:4:url"}}
+	findings := preflightFindings(nodeDraft(result), configuration, dockerHost, false)
+	if item := findingByCode(findings, "build_variable_missing_database_url"); item == nil || item.Severity != PreflightBlocked {
+		t.Fatalf("build_variable_missing_database_url = %+v", item)
+	}
+	// A Dockerfile never had the placeholder.
+	configuration.Build = BuildPlanConfig{Method: BuildDockerfile}
+	if supplied := prismaRecipeSupplied(candidate, configuration); len(supplied) != 0 {
+		t.Fatalf("a Dockerfile build was given the recipe's placeholder: %v", supplied)
 	}
 }

@@ -8,6 +8,7 @@ import {
   failureCause,
   fixTarget,
   isReleaseTaskFailure,
+  variableFixLabel,
   runPlanIsStale,
   settingsChangeText,
 } from "./failure-cause"
@@ -115,6 +116,23 @@ describe("fixTarget", () => {
       href: "/deploy/5/settings/variables?variable=DATABASE_URL&scope=build",
       label: "Give DATABASE_URL the build scope",
     })
+    expect(
+      fixTarget(5, {
+        kind: "remove_variable_scope",
+        field: "variables.DATABASE_URL",
+        scope: "build",
+      }),
+    ).toEqual({
+      href: "/deploy/5/settings/variables?variable=DATABASE_URL&without=build",
+      label: "Remove DATABASE_URL's build scope",
+    })
+    expect(
+      variableFixLabel({
+        kind: "remove_variable_scope",
+        field: "variables.DATABASE_URL",
+        scope: "build",
+      }),
+    ).toBe("Remove DATABASE_URL's build scope")
     expect(
       fixTarget(5, { kind: "set_runtime", field: "runtime.internalPort", value: "3000" }),
     ).toEqual({ href: "/deploy/5/settings/runtime#runtime", label: "Set the port to 3000" })

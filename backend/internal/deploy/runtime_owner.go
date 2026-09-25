@@ -320,6 +320,23 @@ func containerRuntimeEnvironment(plan RuntimePlanConfig, variables map[string]st
 	return environment, names
 }
 
+// runtimeMountSpecs are the plan's mounts as the container runtime takes
+// them: a path is a bind of that host directory, anything else a named
+// volume.
+func runtimeMountSpecs(plan RuntimePlanConfig) []dockerx.MountSpec {
+	mounts := make([]dockerx.MountSpec, 0, len(plan.Mounts))
+	for _, planned := range plan.Mounts {
+		kind := "volume"
+		if filepath.IsAbs(planned.Source) {
+			kind = "bind"
+		}
+		mounts = append(mounts, dockerx.MountSpec{
+			Type: kind, Source: planned.Source, Target: planned.Target, ReadOnly: planned.ReadOnly,
+		})
+	}
+	return mounts
+}
+
 func (o *DockerRuntimeOwner) startContainer(
 	ctx context.Context,
 	request CandidateRuntimeRequest,
@@ -332,16 +349,7 @@ func (o *DockerRuntimeOwner) startContainer(
 	environment, variableNames := containerRuntimeEnvironment(plan, request.RuntimeVariables)
 	environment = append(environment, withdrawnProxyTrust(request.Snapshot, request.RuntimeVariables)...)
 	environment = append(environment, webConcurrencyEnvironment(request.Snapshot, request.RuntimeVariables)...)
-	mounts := make([]dockerx.MountSpec, 0, len(plan.Mounts))
-	for _, planned := range plan.Mounts {
-		kind := "volume"
-		if filepath.IsAbs(planned.Source) {
-			kind = "bind"
-		}
-		mounts = append(mounts, dockerx.MountSpec{
-			Type: kind, Source: planned.Source, Target: planned.Target, ReadOnly: planned.ReadOnly,
-		})
-	}
+	mounts := runtimeMountSpecs(plan)
 	devices := make([]dockerx.DeviceSpec, 0, len(plan.Devices))
 	for _, device := range plan.Devices {
 		devices = append(devices, dockerx.DeviceSpec{Host: device, Container: device, Permissions: "rwm"})

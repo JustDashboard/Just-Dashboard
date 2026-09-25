@@ -29,6 +29,7 @@ import {
   mergeDiscoveredRows,
   releaseStrategy,
   validateConfiguration,
+  variablesWithoutScope,
 } from "@/components/deploy/deployment-defaults"
 import { PlanWiring } from "@/components/deploy/new-project/plan-wiring"
 import { StepProject } from "@/components/deploy/new-project/step-project"
@@ -562,6 +563,27 @@ export function Configure({
     if (section) openSection(section)
   }
 
+  // A finding's computed change is applied to the plan on this screen; the
+  // plan it changes is a new one, which Review checks again on its own.
+  const applyFindingFix = (finding: DeploymentPreflightFinding) => {
+    const fix = finding.fix
+    if (fix?.kind !== "remove_variable_scope" || !fix.scope || !fix.field.startsWith("variables."))
+      return
+    const name = fix.field.slice("variables.".length)
+    const scope = fix.scope
+    onFlowChange((current) =>
+      current
+        ? {
+            ...current,
+            configuration: {
+              ...current.configuration,
+              variables: variablesWithoutScope(current.configuration.variables, name, scope),
+            },
+          }
+        : current,
+    )
+  }
+
   /**
    * What stops this step from being finished, said in the words the reader
    * can act on.
@@ -962,6 +984,7 @@ export function Configure({
                 onAcknowledgedChange={setAcknowledged}
                 onOpenRemedy={openRemedyField}
                 canOpenRemedy={(finding) => Boolean(sectionForField(finding.fieldId))}
+                onApplyFix={applyFindingFix}
                 onInspectAgain={() => void inspectAgain()}
               />
             )}

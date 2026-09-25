@@ -513,6 +513,22 @@ func (s *envScanner) rootReadFlags(root, name string) (envReadFlags, []string) {
 	return merged, localhost
 }
 
+// rootBuildSources are the files of a root that read the variable while the
+// build runs, sorted and bounded.
+func (s *envScanner) rootBuildSources(root, name string) []string {
+	sources := []string{}
+	for source, flags := range s.flags[name] {
+		if flags&envReadBuild != 0 && s.sourceRank(root, source) >= 0 {
+			sources = append(sources, source)
+		}
+	}
+	sort.Strings(sources)
+	if len(sources) > 8 {
+		sources = sources[:8]
+	}
+	return sources
+}
+
 // applyReadFlags turns the merged read flags into the variable's own
 // evidence: its phase, whether it is required, and which committed file
 // gives it a loopback value.
@@ -520,6 +536,7 @@ func (s *envScanner) applyReadFlags(root, name string, variable *DetectedVariabl
 	flags, localhost := s.rootReadFlags(root, name)
 	if flags&envReadBuild != 0 {
 		variable.Phase = "build"
+		variable.BuildSources = s.rootBuildSources(root, name)
 	}
 	if flags&envReadInlined != 0 {
 		variable.BrowserInlined = true

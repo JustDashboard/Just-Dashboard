@@ -16,6 +16,7 @@ import { FindingRow } from "@/components/deploy/deployment-findings"
 import {
   attentionFindings,
   confirmationSignature,
+  findingFixAction,
   needsConfirmation,
   rememberDeploymentCheck,
   settingsPathForField,
@@ -125,6 +126,7 @@ export function DeployCheckList({
               const path = settingsPathForField(item.fieldId)
               if (path) router.push(`/deploy/${projectId}${path}`)
             }}
+            fixAction={findingFixAction(projectId, finding, (href) => router.push(href))}
           />
         </li>
       ))}

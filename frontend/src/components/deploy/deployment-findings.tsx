@@ -62,6 +62,7 @@ export function FindingRow({
   index,
   onOpenRemedy,
   canOpenRemedy = true,
+  fixAction,
 }: {
   finding: DeploymentPreflightFinding
   index?: number
@@ -73,6 +74,8 @@ export function FindingRow({
    * a blocked plan offered to open a remedy and then did nothing.
    */
   canOpenRemedy?: boolean
+  /** The plan change the finding's `fix` makes, as this screen applies it. */
+  fixAction?: { label: string; onApply: () => void }
 }) {
   const remedy = findingRemedy(finding)
   const remedyOpensControl = Boolean(onOpenRemedy) && canOpenRemedy && !finding.deepLink
@@ -134,6 +137,19 @@ export function FindingRow({
                 className="rounded-sm underline underline-offset-2 focus-ring"
               >
                 Open it
+              </button>
+            </>
+          )}
+          {fixAction && (
+            <>
+              {" "}
+              ·{" "}
+              <button
+                type="button"
+                onClick={fixAction.onApply}
+                className="rounded-sm underline underline-offset-2 focus-ring"
+              >
+                {fixAction.label}
               </button>
             </>
           )}

@@ -457,6 +457,7 @@ func (b *ArtifactBuilder) Build(
 	config BuildPlanConfig,
 	prepared PreparedBuild,
 	variables map[string]string,
+	secret map[string]bool,
 	registryAuth string,
 	source SourceIdentity,
 	compose *ComposeAnalysis,
@@ -466,6 +467,7 @@ func (b *ArtifactBuilder) Build(
 	if emit == nil {
 		emit = func(BuildLog) error { return nil }
 	}
+	redacted := buildLogRedactions(variables, secret)
 	if (b == nil || b.backend == nil) && config.Method != BuildNone {
 		return result, ErrBuilderUnavailable
 	}
@@ -500,7 +502,7 @@ func (b *ArtifactBuilder) Build(
 			ContextDir: root, Dockerfile: prepared.Dockerfile, Tag: tag,
 			Platform: prepared.TargetPlatform, NoCache: prepared.CachePolicy == "no_cache",
 			Pull: true, Secrets: secrets, Target: prepared.Target, BuildArgs: buildArgs,
-		}, redactBuildEmitter(variables, emit))
+		}, redactBuildEmitter(redacted, emit))
 		if err != nil {
 			return result, err
 		}
@@ -521,7 +523,7 @@ func (b *ArtifactBuilder) Build(
 			return result, fmt.Errorf("%w: image source has no immutable digest", ErrArtifactMissing)
 		}
 		exact := source.Repository + "@" + source.Digest
-		image, err := b.backend.PullImage(ctx, exact, registryAuth, redactBuildEmitter(variables, emit))
+		image, err := b.backend.PullImage(ctx, exact, registryAuth, redactBuildEmitter(redacted, emit))
 		if err != nil {
 			return result, err
 		}
@@ -595,7 +597,7 @@ func (b *ArtifactBuilder) Build(
 					ContextDir: contextRoot, Dockerfile: dockerfile, Tag: serviceTag,
 					Platform: prepared.TargetPlatform, NoCache: prepared.CachePolicy == "no_cache", Pull: true,
 					Target: target, BuildArgs: buildArgs,
-				}, redactBuildEmitter(variables, emit))
+				}, redactBuildEmitter(redacted, emit))
 				if err != nil {
 					return result, &ComposeServiceError{Service: service.Name, Err: err}
 				}
@@ -620,7 +622,7 @@ func (b *ArtifactBuilder) Build(
 			if err := validateResolvedImage(image); err != nil {
 				return result, err
 			}
-			pulled, err := b.backend.PullImage(ctx, image.Reference+"@"+image.Digest, registryAuth, redactBuildEmitter(variables, emit))
+			pulled, err := b.backend.PullImage(ctx, image.Reference+"@"+image.Digest, registryAuth, redactBuildEmitter(redacted, emit))
 			if err != nil {
 				return result, fmt.Errorf("pull Compose service %s image: %w", service.Name, err)
 			}
@@ -1133,7 +1135,23 @@ func redactBuildEmitter(values map[string]string, emit func(BuildLog) error) fun
 	}
 }
 
-// buildRedactor replaces every variable value in a text, longest first so a
+// buildLogRedactions are the values a build's transcript must never show:
+// every value secret names, and a plain one that carries credential material
+// anyway (a database URL with its password, typed as plain). Any other plain
+// value — a flag such as AUTH_TRUST_HOST=true, a port, a public address — is
+// what the variable's own sensitivity says it is, and replacing "true" or
+// "3000" everywhere in the log would hide the build's own account of itself.
+func buildLogRedactions(values map[string]string, secret map[string]bool) map[string]string {
+	redacted := map[string]string{}
+	for name, value := range values {
+		if secret[name] || rejectPlanSecretLiteral("build value", value) != nil {
+			redacted[name] = value
+		}
+	}
+	return redacted
+}
+
+// buildRedactor replaces every given value in a text, longest first so a
 // value that contains another is not left half redacted.
 func buildRedactor(values map[string]string) func(string) string {
 	secrets := make([]string, 0, len(values))

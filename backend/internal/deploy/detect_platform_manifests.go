@@ -306,7 +306,10 @@ type renderService struct {
 	PreDeployCommand  string `yaml:"preDeployCommand"`
 	StaticPublishPath string `yaml:"staticPublishPath"`
 	Schedule          string `yaml:"schedule"`
-	Routes            []struct {
+	Disk              struct {
+		MountPath string `yaml:"mountPath"`
+	} `yaml:"disk"`
+	Routes []struct {
 		Type        string `yaml:"type"`
 		Source      string `yaml:"source"`
 		Destination string `yaml:"destination"`
@@ -370,6 +373,9 @@ func renderTargets(root string, content []byte) []platformTarget {
 			manifest.BuildCommand = cleanPlatformCommand(service.BuildCommand, true)
 			manifest.HealthPath = service.HealthCheckPath
 			manifest.Dockerfile = strings.TrimPrefix(service.DockerfilePath, "./")
+			if mount := service.Disk.MountPath; strings.HasPrefix(mount, "/") && len(mount) <= 256 && len(manifest.Volumes) < 32 {
+				manifest.Volumes = append(manifest.Volumes, mount)
+			}
 			if release := cleanPlatformCommand(service.PreDeployCommand, false); release != "" {
 				manifest.ReleaseCommand = release
 				target.processes = append(target.processes, DetectedProcess{Name: "release", Kind: "release", Command: release,
@@ -430,7 +436,7 @@ func renderTargets(root string, content []byte) []platformTarget {
 func railwayTarget(root, name string, content []byte) platformTarget {
 	file := joinRoot(root, name)
 	target := platformTarget{root: root, manifest: DetectedPlatformManifest{File: file, Platform: "railway"}}
-	var build, start, health, dockerfile, release string
+	var build, start, health, dockerfile, release, mount string
 	if name == "railway.json" {
 		var document struct {
 			Build struct {
@@ -438,15 +444,17 @@ func railwayTarget(root, name string, content []byte) platformTarget {
 				DockerfilePath string `json:"dockerfilePath"`
 			} `json:"build"`
 			Deploy struct {
-				StartCommand     string          `json:"startCommand"`
-				HealthcheckPath  string          `json:"healthcheckPath"`
-				PreDeployCommand json.RawMessage `json:"preDeployCommand"`
+				StartCommand      string          `json:"startCommand"`
+				HealthcheckPath   string          `json:"healthcheckPath"`
+				PreDeployCommand  json.RawMessage `json:"preDeployCommand"`
+				RequiredMountPath string          `json:"requiredMountPath"`
 			} `json:"deploy"`
 		}
 		if json.Unmarshal(manifestText(content), &document) != nil {
 			return platformTarget{}
 		}
 		build, start, health, dockerfile = document.Build.BuildCommand, document.Deploy.StartCommand, document.Deploy.HealthcheckPath, document.Build.DockerfilePath
+		mount = document.Deploy.RequiredMountPath
 		var single string
 		var many []string
 		if json.Unmarshal(document.Deploy.PreDeployCommand, &single) == nil {
@@ -458,6 +466,7 @@ func railwayTarget(root, name string, content []byte) platformTarget {
 		entries := readTOML(content)
 		build, start, health = tomlText(entries, "build", "buildCommand"), tomlText(entries, "deploy", "startCommand"), tomlText(entries, "deploy", "healthcheckPath")
 		dockerfile = tomlText(entries, "build", "dockerfilePath")
+		mount = tomlText(entries, "deploy", "requiredMountPath")
 		if value, ok := tomlLookup(entries, "deploy", "preDeployCommand"); ok {
 			release = value.text
 			if value.isList {
@@ -470,6 +479,11 @@ func railwayTarget(root, name string, content []byte) platformTarget {
 	manifest.StartCommand = cleanPlatformCommand(start, false)
 	manifest.HealthPath = health
 	manifest.Dockerfile = strings.TrimPrefix(dockerfile, "./")
+	// A Railway volume is attached in its dashboard; the config names only
+	// the path a deployment refuses to start without.
+	if strings.HasPrefix(mount, "/") && len(mount) <= 256 {
+		manifest.Volumes = append(manifest.Volumes, mount)
+	}
 	if release = cleanPlatformCommand(release, false); release != "" {
 		manifest.ReleaseCommand = release
 		target.processes = append(target.processes, DetectedProcess{Name: "release", Kind: "release", Command: release,
@@ -1058,7 +1072,7 @@ func applyPlatformTarget(candidate *DetectedCandidate, target platformTarget, ma
 			evidence(platform + " start command not used: " + reason)
 			break
 		}
-		candidate.StartCommand = withSchemaStep(candidate, manifest.StartCommand)
+		candidate.StartCommand = withSchemaStep(candidate, marker, manifest.StartCommand)
 		startTaken = true
 		manifest.Applied = append(manifest.Applied, "start command")
 		evidence(platform + " start command: " + boundedEvidence(manifest.StartCommand))
@@ -1124,6 +1138,16 @@ func applyPlatformTarget(candidate *DetectedCandidate, target platformTarget, ma
 			candidate.Variables = mergeDetectedVariable(candidate.Variables, variable)
 		}
 	}
+	// A value the platform asks for at creation (render.yaml sync: false,
+	// app.json's required) is one the application cannot run without, so
+	// the plan declares it required and preflight asks for it.
+	for _, name := range manifest.RequiredVariables {
+		for index := range candidate.Variables {
+			if candidate.Variables[index].Name == name {
+				candidate.Variables[index].Required = true
+			}
+		}
+	}
 	// The platform mints these itself (render.yaml generateValue, app.json
 	// generator: "secret"); the dashboard does the same when the project is
 	// created, unless the environment classification knows the framework's
@@ -1147,11 +1171,20 @@ func applyPlatformTarget(candidate *DetectedCandidate, target platformTarget, ma
 // withSchemaStep keeps the detected schema step in front of a start command
 // another platform's file declares, the way the package's own start gets it:
 // the database this server creates is empty until the step runs, and that
-// platform ran it somewhere this file does not say.
-func withSchemaStep(candidate *DetectedCandidate, command string) string {
+// platform ran it somewhere this file does not say — unless the release
+// command the candidate plans as a release task runs it once before each
+// release.
+func withSchemaStep(candidate *DetectedCandidate, marker *detectedMarkers, command string) string {
 	tool := schemaToolByName(candidate.SchemaTool)
 	if candidate.Recipe != "node" || candidate.SchemaCommand == "" || candidate.SchemaInStart || tool == nil || tool.applied(command) {
 		return command
+	}
+	if marker != nil {
+		var node nodeManifest
+		parseNodeManifest(marker.packageJSON, &node)
+		if releaseAppliesSchema(tool, marker.release, node.Scripts) {
+			return command
+		}
 	}
 	runner := candidate.PackageManager
 	if runner == "" {

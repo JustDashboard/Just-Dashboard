@@ -331,6 +331,11 @@ func TestDetectionReadsRepositoryComposeFiles(t *testing.T) {
 	if issue, found := fixtureIssue(swift.Candidates[0], "dockerfile_missing"); !found || issue.Severity != PreflightBlocked {
 		t.Fatalf("Swift without a Dockerfile names no cause: %+v", swift.Candidates[0])
 	}
+	// Selection names the package, not the Dockerfile it lacks.
+	if label := candidateLabel(swift.Candidates[0]); label != "the Hummingbird server in ., which has no Dockerfile yet" ||
+		!strings.Contains(swift.SelectionReason, "the Hummingbird server in ., which has no Dockerfile yet") {
+		t.Fatalf("label %q, selection reason %q", label, swift.SelectionReason)
+	}
 }
 
 func TestDetectionReadsDeclaredReleaseCommands(t *testing.T) {

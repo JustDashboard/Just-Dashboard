@@ -66,7 +66,7 @@ func TestFrameworkMigrationsAreSchemaSteps(t *testing.T) {
 			if item := schemaStepFinding(&candidate, build); item.Code != "schema_step_missing" || !strings.Contains(item.Action, fixture.command) {
 				t.Fatalf("edited start = %+v", item)
 			}
-			if chained := withSchemaStep(&candidate, fixture.edited); chained != fixture.chained {
+			if chained := withSchemaStep(&candidate, nil, fixture.edited); chained != fixture.chained {
 				t.Fatalf("declared start = %q, want %q", chained, fixture.chained)
 			}
 		})

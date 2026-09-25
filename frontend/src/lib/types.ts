@@ -2433,7 +2433,13 @@ export type DeploymentFailureCause = {
  * `review` opens a field whose right value the output cannot prove.
  */
 export type DeploymentCauseFix = {
-  kind: "set_build" | "set_runtime" | "add_variable" | "variable_scope" | "review"
+  kind:
+    | "set_build"
+    | "set_runtime"
+    | "add_variable"
+    | "variable_scope"
+    | "remove_variable_scope"
+    | "review"
   /** `configuration.build.packageManager`, `runtime.internalPort`, `variables.NAME`, `dependencies`. */
   field: string
   value?: string
@@ -3349,6 +3355,8 @@ export type DeploymentDetectedVariable = {
   required?: boolean
   /** Read with no default on a path that may not always run. */
   requiredRead?: boolean
+  /** The files that read it while the build runs, which its build phase comes from. */
+  buildSources?: string[]
   /** A committed file whose value for this name points at loopback. */
   localhostIn?: string
   /**
@@ -3554,6 +3562,8 @@ export type DeploymentDetectionCandidate = {
   schemaTool?: string
   schemaCommand?: string
   schemaInStart?: boolean
+  /** The repository's release command applies the schema, so the start command does not. */
+  schemaInRelease?: boolean
   spaFallback?: boolean
   pythonVersion?: string
   unpinnedDependencies?: boolean
@@ -3638,6 +3648,8 @@ export type DeploymentDetectionCandidate = {
     findings?: DeploymentPreflightFinding[]
     /** Package scripts that start a development server or a watcher, with what they start. */
     devScripts?: Record<string, string>
+    /** Package scripts that migrate or push, so a build that runs one needs the real database. */
+    prismaConnectScripts?: string[]
   }
   /** go.mod's toolchain line and the .go-version pin, judged against the plan's Go version. */
   goToolchain?: string
@@ -4247,6 +4259,8 @@ export type DeploymentPreflightFinding = {
   owner?: string
   fieldId?: string
   deepLink?: string
+  /** The one plan change the finding offers, when the check could compute it. */
+  fix?: DeploymentCauseFix
 }
 
 /**

@@ -32,6 +32,8 @@ import {
   packageManagerOptions,
   packageManagerReading,
   automaticPackageManagerHint,
+  variablesWithoutScope,
+  publicBuildVariable,
 } from "./deployment-defaults"
 
 const candidate = (overrides) => ({
@@ -1276,5 +1278,46 @@ describe("the language recipes", () => {
     for (const recipe of ["node", "go", "scala", "dart", undefined]) {
       expect(installsAssetsWithNode(recipe)).toBe(false)
     }
+  })
+})
+
+describe("variablesWithoutScope", () => {
+  test("takes one scope from a declared variable, and declares a typed one with what it keeps", () => {
+    const declared = [
+      { name: "DATABASE_URL", sensitivity: "secret", scopes: ["runtime", "build"], required: true },
+      { name: "API_KEY", sensitivity: "secret", scopes: ["runtime", "build"] },
+    ]
+    expect(variablesWithoutScope(declared, "DATABASE_URL", "build")).toEqual([
+      { name: "DATABASE_URL", sensitivity: "secret", scopes: ["runtime"], required: true },
+      { name: "API_KEY", sensitivity: "secret", scopes: ["runtime", "build"] },
+    ])
+    // A value typed into the environment reaches build and runtime until a
+    // declaration says otherwise.
+    expect(variablesWithoutScope([], "DATABASE_URL", "build")).toEqual([
+      { name: "DATABASE_URL", sensitivity: "secret", scopes: ["runtime"] },
+    ])
+    // A variable is never left with no scope at all.
+    expect(
+      variablesWithoutScope([{ name: "X", sensitivity: "plain", scopes: ["build"] }], "X", "build"),
+    ).toEqual([{ name: "X", sensitivity: "plain", scopes: ["runtime"] }])
+  })
+})
+
+describe("publicBuildVariable", () => {
+  test("is every framework's browser prefix, SvelteKit's and Astro's bare PUBLIC_ included", () => {
+    for (const name of [
+      "NEXT_PUBLIC_A",
+      "VITE_A",
+      "PUBLIC_A",
+      "NUXT_PUBLIC_A",
+      "REACT_APP_A",
+      "EXPO_PUBLIC_A",
+      "GATSBY_A",
+      "VUE_APP_A",
+    ])
+      expect(publicBuildVariable(name)).toBe(true)
+    expect(publicBuildVariable("DATABASE_URL")).toBe(false)
+    // Without a framework named, a bare PUBLIC_ is not taken as inlined.
+    expect(browserInlined("PUBLIC_URL")).toBe(false)
   })
 })

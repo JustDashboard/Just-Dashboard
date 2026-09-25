@@ -428,7 +428,8 @@ func cargoWorkspaceIncludes(root cargoFile, member string) bool {
 		}
 	}
 	for _, pattern := range root.members {
-		if dockerIgnoreMatches(strings.Split(path.Clean(pattern), "/"), strings.Split(member, "/")) {
+		// Cargo's member globs are the path globs a .dockerignore line is.
+		if expression, ok := dockerignoreRegexp(path.Clean(pattern)); ok && expression.MatchString(member) {
 			return true
 		}
 	}

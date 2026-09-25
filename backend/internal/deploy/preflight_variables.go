@@ -54,11 +54,8 @@ func newEnvironmentState(draft *Draft, configuration PlanConfiguration) environm
 			state.recipeSupplied[name] = true
 		}
 	}
-	if state.candidate != nil && state.candidate.NodeBuild != nil &&
-		configuration.Build.Method == BuildRecipe && configuration.Build.Recipe == "node" {
-		for _, name := range state.candidate.NodeBuild.PrismaEnv {
-			state.recipeSupplied[name] = true
-		}
+	for _, name := range prismaRecipeSupplied(state.candidate, configuration) {
+		state.recipeSupplied[name] = true
 	}
 	return state
 }

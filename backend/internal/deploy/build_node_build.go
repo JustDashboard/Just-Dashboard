@@ -289,7 +289,8 @@ func nodeBuildMemoryMiB(framework, build string, facts nodeInstallFacts) int {
 // detectedNodeBuild is the candidate's record of the build, or nil when
 // there is nothing for preflight to judge.
 func detectedNodeBuild(facts nodeInstallFacts, framework, build string) *DetectedNodeBuild {
-	record := DetectedNodeBuild{MemoryMiB: nodeBuildMemoryMiB(framework, build, facts), PrismaEnv: prismaBuildPlaceholders(facts, build)}
+	record := DetectedNodeBuild{MemoryMiB: nodeBuildMemoryMiB(framework, build, facts)}
+	record.PrismaEnv, record.PrismaConnectScripts = prismaBuildPlaceholders(facts)
 	if validation := facts.envValidation; validation.source != "" {
 		record.EnvSchema, record.EnvServer, record.EnvClient, record.EnvSkippable =
 			validation.source, validation.server, validation.client, validation.skippable

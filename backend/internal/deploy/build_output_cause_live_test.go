@@ -36,7 +36,7 @@ func TestLiveBuildFailureIsNamedFromBuildKit(t *testing.T) {
 	}
 	seq := int64(0)
 	collector := newBuildOutputCollector(func() int64 { return seq })
-	_, err = builder.Build(context.Background(), root, tag, config, prepared, nil, "", SourceIdentity{}, nil, func(line BuildLog) error {
+	_, err = builder.Build(context.Background(), root, tag, config, prepared, nil, nil, "", SourceIdentity{}, nil, func(line BuildLog) error {
 		seq++
 		collector.observe(line)
 		return nil

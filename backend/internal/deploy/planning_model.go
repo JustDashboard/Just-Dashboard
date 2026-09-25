@@ -199,10 +199,12 @@ type DetectedCandidate struct {
 	// SchemaTool names the migration tool the source declares. SchemaCommand
 	// is how the detected start command applies its schema; it is empty when
 	// the tool needs a decision, and SchemaInStart says the package's own
-	// start script already runs it.
-	SchemaTool    string `json:"schemaTool,omitempty"`
-	SchemaCommand string `json:"schemaCommand,omitempty"`
-	SchemaInStart bool   `json:"schemaInStart,omitempty"`
+	// start script already runs it. SchemaInRelease says ReleaseCommand runs
+	// it — itself or through the scripts it runs — so the start does not.
+	SchemaTool      string `json:"schemaTool,omitempty"`
+	SchemaCommand   string `json:"schemaCommand,omitempty"`
+	SchemaInStart   bool   `json:"schemaInStart,omitempty"`
+	SchemaInRelease bool   `json:"schemaInRelease,omitempty"`
 	// SPAFallback says the site's client owns its routes, so nginx answers
 	// any path it has no file for with index.html.
 	SPAFallback   bool   `json:"spaFallback,omitempty"`
@@ -362,15 +364,17 @@ type EnvironmentNote struct {
 // server and client variables it requires and whether it honours
 // SKIP_ENV_VALIDATION, the memory the build is estimated to peak at, and
 // the names prisma.config reads that the recipe gives a placeholder while
-// the build runs `prisma generate` (PrismaEnv, empty when the build
-// command connects to the database).
+// a step only generates the client (PrismaEnv), with the package scripts
+// that migrate or push instead (PrismaConnectScripts), so a build command
+// that runs one is known to need the real database.
 type DetectedNodeBuild struct {
-	EnvSchema    string   `json:"envSchema,omitempty"`
-	EnvServer    []string `json:"envServer,omitempty"`
-	EnvClient    []string `json:"envClient,omitempty"`
-	EnvSkippable bool     `json:"envSkippable,omitempty"`
-	MemoryMiB    int      `json:"memoryMiB,omitempty"`
-	PrismaEnv    []string `json:"prismaEnv,omitempty"`
+	EnvSchema            string   `json:"envSchema,omitempty"`
+	EnvServer            []string `json:"envServer,omitempty"`
+	EnvClient            []string `json:"envClient,omitempty"`
+	EnvSkippable         bool     `json:"envSkippable,omitempty"`
+	MemoryMiB            int      `json:"memoryMiB,omitempty"`
+	PrismaEnv            []string `json:"prismaEnv,omitempty"`
+	PrismaConnectScripts []string `json:"prismaConnectScripts,omitempty"`
 	// Findings are what the framework's configuration made the recipe do
 	// that the repository could say itself (adapter-node for adapter-auto,
 	// a Nitro preset replaced); DevScripts names each package script that
@@ -412,6 +416,9 @@ type DetectedVariable struct {
 	// that may only run on one path, which is a warning rather than a gate.
 	Required     bool `json:"required,omitempty"`
 	RequiredRead bool `json:"requiredRead,omitempty"`
+	// BuildSources are the files that read it while the build runs, the
+	// reads its build Phase comes from.
+	BuildSources []string `json:"buildSources,omitempty"`
 	// LocalhostIn names a committed file whose value for this variable
 	// points at loopback, which inside the container is the app itself.
 	LocalhostIn string `json:"localhostIn,omitempty"`
@@ -1899,10 +1906,10 @@ func validateDetectionResult(source *DraftSourceConfig, detection DetectionResul
 				(variable.Step != "" && variable.Step != "install") ||
 				strings.ContainsAny(variable.Example, "\x00\r\n") ||
 				rejectPlanSecretLiteral("detected variable example", variable.Example) != nil ||
-				len(variable.Sources) > 8 {
+				len(variable.Sources) > 8 || len(variable.BuildSources) > 8 {
 				return fmt.Errorf("%w: detected variable is malformed", ErrInvalidPlan)
 			}
-			for _, source := range variable.Sources {
+			for _, source := range slices.Concat(variable.Sources, variable.BuildSources) {
 				if source == "" || len(source) > 4096 || strings.ContainsAny(source, "\x00\r\n") {
 					return fmt.Errorf("%w: detected variable is malformed", ErrInvalidPlan)
 				}
@@ -1976,8 +1983,13 @@ func validateDetectedNodeInstall(candidate DetectedCandidate) error {
 	}
 	if build := candidate.NodeBuild; build != nil {
 		if !text(build.EnvSchema, 256) || len(build.EnvServer) > 64 || len(build.EnvClient) > 64 || len(build.PrismaEnv) > 16 ||
-			build.MemoryMiB < 0 || build.MemoryMiB > 65536 {
+			len(build.PrismaConnectScripts) > 16 || build.MemoryMiB < 0 || build.MemoryMiB > 65536 {
 			return malformed
+		}
+		for _, script := range build.PrismaConnectScripts {
+			if !nodeScriptNameRE.MatchString(script) {
+				return malformed
+			}
 		}
 		for _, name := range slices.Concat(build.EnvServer, build.EnvClient, build.PrismaEnv) {
 			if ValidateEnvKey(name) != nil {
@@ -2022,7 +2034,7 @@ func validDetectedFindings(findings []PreflightFinding, text func(string, int) b
 		}
 		if finding.Code == "" || !text(finding.Code, 64) || !text(finding.Title, 512) || !text(finding.Measured, 512) ||
 			!text(finding.Means, 512) || !text(finding.Action, 512) || !text(finding.Owner, 64) ||
-			!text(finding.FieldID, 256) || finding.DeepLink != "" {
+			!text(finding.FieldID, 256) || finding.DeepLink != "" || finding.Fix != nil {
 			return false
 		}
 	}

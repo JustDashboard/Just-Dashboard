@@ -33,7 +33,13 @@ func livePrepareAndBuildWithin(t *testing.T, builder *ArtifactBuilder, root, mem
 	if prepared.ContextDirectory != "" {
 		context = filepath.Join(root, filepath.FromSlash(prepared.ContextDirectory))
 	}
-	result, err := builder.Build(t.Context(), context, tag, config, prepared, variables, "", SourceIdentity{}, nil, emit)
+	// Every value a live build is given is treated as secret, as the
+	// strictest redaction the executor applies.
+	secret := map[string]bool{}
+	for name := range variables {
+		secret[name] = true
+	}
+	result, err := builder.Build(t.Context(), context, tag, config, prepared, variables, secret, "", SourceIdentity{}, nil, emit)
 	if err != nil {
 		t.Fatal(err)
 	}

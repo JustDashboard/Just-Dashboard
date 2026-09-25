@@ -158,3 +158,44 @@ func TestNxApplicationProjectsAreTheCandidates(t *testing.T) {
 		}
 	}
 }
+
+// An Nx workspace's schema step is chained in front of each application's
+// start, unless the release command the repository declares at the
+// workspace root applies it: then the release task runs it once.
+func TestNxApplicationsLeaveTheSchemaStepToTheReleaseCommand(t *testing.T) {
+	t.Parallel()
+	workspace := map[string]string{
+		"package.json":          `{"name":"@org/source","private":true,"dependencies":{"express":"^4.21.0","@prisma/client":"6"},"devDependencies":{"nx":"20.4.0","@nx/esbuild":"20.4.0","prisma":"6"}}`,
+		"package-lock.json":     "{}",
+		"nx.json":               nxJSON,
+		"apps/api/project.json": `{"name":"api","projectType":"application","targets":{"build":{"executor":"@nx/esbuild:esbuild","options":{"outputPath":"dist/apps/api","main":"apps/api/src/main.ts"}}}}`,
+		"prisma/schema.prisma":  "datasource db {\n  provider = \"postgresql\"\n  url = env(\"DATABASE_URL\")\n}\n",
+		"prisma/migrations/0001_init/migration.sql": "CREATE TABLE t (id int);\n",
+	}
+	api := func(files map[string]string) DetectedCandidate {
+		for _, candidate := range detectFixture(t, files).Candidates {
+			if candidate.Name == "api" {
+				return candidate
+			}
+		}
+		t.Fatalf("no api candidate")
+		return DetectedCandidate{}
+	}
+	chained := api(workspace)
+	if chained.StartCommand != "npx prisma migrate deploy && node dist/apps/api/main.js" || chained.SchemaInRelease {
+		t.Fatalf("without a release command: start %q, in release %v", chained.StartCommand, chained.SchemaInRelease)
+	}
+	withRelease := map[string]string{"Procfile": "release: npx prisma migrate deploy\n"}
+	for name, content := range workspace {
+		withRelease[name] = content
+	}
+	released := api(withRelease)
+	if released.StartCommand != "node dist/apps/api/main.js" || !released.SchemaInRelease || released.SchemaCommand != "prisma migrate deploy" {
+		t.Fatalf("with a release command: start %q, schema %q, in release %v", released.StartCommand, released.SchemaCommand, released.SchemaInRelease)
+	}
+	for _, install := range released.NodeInstalls {
+		if strings.Contains(install.StartCommand, "migrate") {
+			t.Fatalf("%s start = %q", install.Manager, install.StartCommand)
+		}
+	}
+}

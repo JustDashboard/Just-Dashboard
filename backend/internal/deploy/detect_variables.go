@@ -42,7 +42,6 @@ type rootStack struct {
 
 var (
 	gemLockSpecRE     = regexp.MustCompile(`(?m)^    ([A-Za-z0-9_.\-]+) \(([^)]*)\)`)
-	mixDepRE          = regexp.MustCompile(`\{\s*:([a-z0-9_]+)\s*,`)
 	nugetReferenceRE  = regexp.MustCompile(`(?i)<PackageReference\s+Include\s*=\s*"([^"]+)"`)
 	railsAppRE        = regexp.MustCompile(`<\s*Rails::Application\b`)
 	solidQueuePumaRE  = regexp.MustCompile(`(?m)^\s*plugin\s+:solid_queue\b`)
@@ -579,7 +578,7 @@ func readRootStack(marker *detectedMarkers, scanner *envScanner, candidates []De
 		}
 	}
 	if mix := own("mix.exs"); mix != nil {
-		for _, match := range mixDepRE.FindAllSubmatch(mix, -1) {
+		for _, match := range mixDependencyRE.FindAllSubmatch(mix, -1) {
 			stack.mix[string(match[1])] = true
 		}
 		// An umbrella's root declares no dependencies of its own; the
@@ -588,7 +587,7 @@ func readRootStack(marker *detectedMarkers, scanner *envScanner, candidates []De
 			prefix := path.Join(filepath.ToSlash(marker.root), string(match[1])) + "/"
 			for rel, content := range scanner.facts.files {
 				if child, ok := strings.CutPrefix(rel, prefix); ok && strings.Count(child, "/") == 1 && path.Base(child) == "mix.exs" {
-					for _, dependency := range mixDepRE.FindAllSubmatch(content, -1) {
+					for _, dependency := range mixDependencyRE.FindAllSubmatch(content, -1) {
 						stack.mix[string(dependency[1])] = true
 					}
 				}

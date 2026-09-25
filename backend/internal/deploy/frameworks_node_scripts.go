@@ -7,8 +7,9 @@ import (
 	"strings"
 )
 
-// nodeScriptNameRE is a package script's name as a start command may run it.
-var nodeScriptNameRE = regexp.MustCompile(`^[A-Za-z0-9:_.@/+-]+$`)
+// nodeScriptNameRE is a package script's name as a command may run it,
+// never starting with the dash a runner would read as one of its options.
+var nodeScriptNameRE = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9:._@/+-]{0,127}$`)
 
 // A package's `start` script is what its author runs, which is not always
 // what a server should run: the Angular CLI writes "start": "ng serve",

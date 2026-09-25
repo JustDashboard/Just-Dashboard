@@ -124,7 +124,7 @@ func TestComposeBuildPassesTargetAndInterpolatedArgs(t *testing.T) {
 	result, err := NewArtifactBuilder(backend).Build(
 		context.Background(), root, "just-dashboard/release:1-2", BuildPlanConfig{Method: BuildCompose},
 		PreparedBuild{Method: BuildCompose, CachePolicy: "reuse"},
-		map[string]string{"API_URL": "https://api.example.com", "BUILD_REVISION": "abc123"}, "",
+		map[string]string{"API_URL": "https://api.example.com", "BUILD_REVISION": "abc123"}, nil, "",
 		SourceIdentity{Kind: SourceCompose}, &analysis, nil,
 	)
 	if err != nil {
@@ -202,7 +202,7 @@ func TestDockerfileBuildReceivesOnlyDeclaredPublicArgsAndItsTarget(t *testing.T)
 		t.Fatalf("argv = %s", argv)
 	}
 	if _, err := builder.Build(context.Background(), root, "just-dashboard/release:1-2", config, prepared,
-		map[string]string{"NEXT_PUBLIC_API_URL": "https://api.example.com", "NPM_CONFIG_LOGLEVEL": "warn"}, "",
+		map[string]string{"NEXT_PUBLIC_API_URL": "https://api.example.com", "NPM_CONFIG_LOGLEVEL": "warn"}, nil, "",
 		SourceIdentity{Kind: SourceGit}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +290,7 @@ func TestComposeBuildArgumentsReadOnlyPlainRuntimeAndBuildValues(t *testing.T) {
 	backend := &artifactBackendFake{}
 	if _, err := NewArtifactBuilder(backend).Build(
 		context.Background(), root, "just-dashboard/release:1-2", BuildPlanConfig{Method: BuildCompose},
-		PreparedBuild{Method: BuildCompose, CachePolicy: "reuse"}, values, "",
+		PreparedBuild{Method: BuildCompose, CachePolicy: "reuse"}, values, nil, "",
 		SourceIdentity{Kind: SourceCompose}, &analysis, nil,
 	); err != nil {
 		t.Fatal(err)
@@ -369,7 +369,7 @@ func TestOperatorChoosesTheComposePrimaryService(t *testing.T) {
 	writeBuildFixture(t, root, "Dockerfile", "FROM scratch AS production\n")
 	result, err := NewArtifactBuilder(&artifactBackendFake{}).Build(
 		context.Background(), root, "just-dashboard/release:1-2", BuildPlanConfig{Method: BuildCompose, PrimaryService: "db"},
-		PreparedBuild{Method: BuildCompose, CachePolicy: "reuse"}, map[string]string{"API_URL": "x"}, "",
+		PreparedBuild{Method: BuildCompose, CachePolicy: "reuse"}, map[string]string{"API_URL": "x"}, nil, "",
 		SourceIdentity{Kind: SourceCompose}, &analysis, nil,
 	)
 	if err != nil || result.Compose.PrimaryService != "db" {

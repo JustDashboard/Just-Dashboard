@@ -66,6 +66,12 @@ func TestImageReleaseTaskRunsWithTheReleaseVariables(t *testing.T) {
 	if recorded := cleanup.(map[string]any); recorded["container"] != "jd-e4-run9-task2" || recorded["removed"] != true {
 		t.Fatalf("cleanup = %v", cleanup)
 	}
+	if evidence, _, err := runImageReleaseTask(context.Background(), runner, ReleaseTaskRuntimeRequest{
+		Plan: RuntimePlanConfig{Mounts: []RuntimeMount{{Source: "app-data", Target: "/data", Ownership: OwnershipManaged}}},
+		Task: ReleaseTaskConfig{Name: "migrate", Command: "true", TimeoutSeconds: 5},
+	}, nil, func(BuildLog) error { return nil }); err != nil || !slices.Equal(evidence.Mounts, []string{"/data"}) {
+		t.Fatalf("mounted task evidence = %+v, %v", evidence, err)
+	}
 	stuck := &releaseTaskRuntimeFake{leftBehind: true}
 	if _, cleanup, _ := runImageReleaseTask(context.Background(), stuck, ReleaseTaskRuntimeRequest{
 		Task: ReleaseTaskConfig{Name: "migrate", Command: "true", TimeoutSeconds: 5},
@@ -188,6 +194,29 @@ func TestReleaseTaskContainerFollowsTheReleaseNetwork(t *testing.T) {
 	if !labelled {
 		t.Fatalf("the task container is not marked as one: %+v", spec.Labels)
 	}
+	if len(spec.Mounts) != 0 || len(spec.Ports) != 0 || spec.Privileged || len(spec.Devices) != 0 || len(spec.CapAdd) != 0 {
+		t.Fatalf("a plan without mounts gave the task %+v", spec)
+	}
+	// The plan's volumes are mounted as the release mounts them, so a
+	// migration of a SQLite file on one reaches the file the release opens;
+	// nothing else of the release's privilege comes with them.
+	request.Plan = RuntimePlanConfig{
+		Mounts: []RuntimeMount{
+			{Source: "notes-data", Target: "/data", Ownership: OwnershipManaged},
+			{Source: "/srv/notes/config", Target: "/app/config", ReadOnly: true, Ownership: OwnershipLinked},
+		},
+		Privileged: true, Devices: []string{"/dev/fuse"}, Capabilities: []string{"SYS_ADMIN"},
+		Ports: []PublishedPort{{HostPort: 2222, ContainerPort: 22}},
+	}
+	spec, err = releaseTaskContainerSpec(request, nil)
+	if err != nil || !slices.Equal(spec.Mounts, runtimeMountSpecs(request.Plan)) ||
+		spec.Mounts[0].Type != "volume" || spec.Mounts[1].Type != "bind" || !spec.Mounts[1].ReadOnly {
+		t.Fatalf("task mounts = %+v, %v", spec.Mounts, err)
+	}
+	if spec.Privileged || len(spec.Devices) != 0 || len(spec.CapAdd) != 0 || len(spec.Ports) != 0 {
+		t.Fatalf("the task took the release's privileges: %+v", spec)
+	}
+	request.Plan = RuntimePlanConfig{}
 	// On the host's network, as the release itself runs, so localhost and
 	// host-bound services are the ones the application reaches.
 	request.Plan.HostNetwork = true

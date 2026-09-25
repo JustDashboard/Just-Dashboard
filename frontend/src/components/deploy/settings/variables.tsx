@@ -258,11 +258,14 @@ function VariablesBody({
   // A failed run's remedy arrives as `?variable=NAME&scope=build[&value=…]`
   // and opens the editor on it: an existing variable with the scope its step
   // lacked added, or a new one with the value the server computed — a flag,
-  // never a secret. The address is what the editor opens on, and is then
-  // dropped so a reload does not open it again.
+  // never a secret. A check's finding can arrive as `&without=build` instead,
+  // opening the variable with that scope taken away (a linked database's
+  // build scope no build read needs). The address is what the editor opens
+  // on, and is then dropped so a reload does not open it again.
   const search = useSearchParams()
   const remedy = !compact && canEdit ? search.get("variable") : null
   const remedyScope = SCOPES.find((entry) => entry.scope === search.get("scope"))?.scope
+  const remedyWithout = SCOPES.find((entry) => entry.scope === search.get("without"))?.scope
   const remedyTarget = remedy
     ? configuration.variables.find((variable) => variable.name === remedy)
     : undefined
@@ -295,7 +298,9 @@ function VariablesBody({
     `${draft}.scopes`,
     ["runtime"],
     remedy
-      ? [...new Set([...(remedyTarget?.scopes ?? []), ...(remedyScope ? [remedyScope] : [])])]
+      ? [
+          ...new Set([...(remedyTarget?.scopes ?? []), ...(remedyScope ? [remedyScope] : [])]),
+        ].filter((scope) => scope !== remedyWithout)
       : null,
   )
   useEffect(() => {

@@ -9,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import type { DeploymentConfiguration, DeploymentPreflightFinding } from "@/lib/types"
 import { FindingRow, findingRemedy } from "@/components/deploy/deployment-findings"
+import { variableFixLabel } from "@/components/deploy/failure-cause"
 import { WORKLOAD_LABELS } from "@/components/deploy/vocabulary"
 import { AutomaticDeployment } from "@/components/deploy/new-project/automatic-deployment"
 import type { ConfigureFlow, DraftGitPolicy } from "@/components/deploy/new-project/draft"
@@ -55,6 +56,7 @@ export function StepReview({
   onAcknowledgedChange,
   onOpenRemedy,
   canOpenRemedy,
+  onApplyFix,
   onInspectAgain,
 }: {
   flow: ConfigureFlow
@@ -74,6 +76,12 @@ export function StepReview({
   onAcknowledgedChange: (codes: string[]) => void
   onOpenRemedy: (finding: DeploymentPreflightFinding) => void
   canOpenRemedy: (finding: DeploymentPreflightFinding) => boolean
+  /**
+   * Applies a finding's computed plan change to the plan this screen holds,
+   * which the check then answers again; how it reads comes from
+   * `variableFixLabel`.
+   */
+  onApplyFix?: (finding: DeploymentPreflightFinding) => void
   /**
    * Reads the source again at the branch's newer commit, keeping the chosen
    * candidate — `source_moved`'s remedy, since accepting the warning deploys
@@ -247,6 +255,11 @@ export function StepReview({
                 index={index}
                 onOpenRemedy={onOpenRemedy}
                 canOpenRemedy={canOpenRemedy(finding)}
+                fixAction={
+                  finding.fix && onApplyFix
+                    ? { label: variableFixLabel(finding.fix), onApply: () => onApplyFix(finding) }
+                    : undefined
+                }
               />
             ))}
           </div>
@@ -293,6 +306,21 @@ export function StepReview({
                           </>
                         )}
                       </span>
+                    )}
+                    {finding.fix && onApplyFix && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="xs"
+                        className="mt-1.5"
+                        onClick={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          onApplyFix(finding)
+                        }}
+                      >
+                        {variableFixLabel(finding.fix)}
+                      </Button>
                     )}
                     {finding.code === "source_moved" && onInspectAgain && (
                       <Button

@@ -102,6 +102,8 @@ type pythonRootFiles struct {
 	procfile []byte
 	source   *pythonSource
 	django   *DetectedDjango
+	// release is the repository's declared release command.
+	release string
 }
 
 var (
@@ -810,7 +812,7 @@ func pythonCandidate(marker *detectedMarkers, entries []pythonEntry, rootLabel s
 	if len(python.WheelBlockers) == 0 {
 		python.WheelBlockers = nil
 	}
-	files := pythonRootFiles{managePy: marker.managePy, procfile: marker.procfile, source: source}
+	files := pythonRootFiles{managePy: marker.managePy, procfile: marker.procfile, source: source, release: marker.release}
 	settings := ""
 	if deps.declares("django") {
 		files.django = readDjangoFacts(source, deps)

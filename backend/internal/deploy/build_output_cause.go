@@ -54,14 +54,15 @@ const (
 
 // Fix kinds. set_build and set_runtime replace a plan field with Value;
 // add_variable creates the named variable in Scope; variable_scope adds Scope
-// to an existing variable; review opens a field whose right value the output
-// cannot prove.
+// to an existing variable; remove_variable_scope takes Scope away from one;
+// review opens a field whose right value the output cannot prove.
 const (
-	fixSetBuild      = "set_build"
-	fixSetRuntime    = "set_runtime"
-	fixAddVariable   = "add_variable"
-	fixVariableScope = "variable_scope"
-	fixReview        = "review"
+	fixSetBuild            = "set_build"
+	fixSetRuntime          = "set_runtime"
+	fixAddVariable         = "add_variable"
+	fixVariableScope       = "variable_scope"
+	fixRemoveVariableScope = "remove_variable_scope"
+	fixReview              = "review"
 )
 
 // composeServiceBuildStatus opens each Compose service's build on the status

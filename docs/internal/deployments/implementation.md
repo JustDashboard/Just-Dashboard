@@ -467,7 +467,8 @@ only renderer/executor/validation authority for their feature.
   read from a variable, the value that moves it there. The walk hands every file to a state scanner with
   its own budgets (configuration apart from source, so a large tree cannot crowd out the schema); it reads
   text only. Per root it runs before the readiness and network passes: the schema step it chains into a
-  Python start command is what readiness budgets a slow start for, and the start command it gives
+  Python start command is what readiness budgets a slow start for — nothing is chained when the release
+  command the repository declares (read per root before any candidate is made) applies it — and the start command it gives
   PocketBase is the one network reads a listener from. The server database it offers in place of a
   Python SQLite default is added after the environment pass, which replaces the root's databases. The
   configure form plans one managed named volume per target with a storage dependency, named per draft,
@@ -505,7 +506,11 @@ only renderer/executor/validation authority for their feature.
   lists only the rest), a prerendering framework's build-scoped database URL that points at a
   `db-N.jd.internal` alias or loopback, or a typed database reference (`build_database_unreachable` —
   BuildKit cannot join the environment's network, and `--network=host` would hand repository build code
-  the host's loopback services), and platform variables an operator's pasted `.env` sets
+  the host's loopback services; when no build-time read detection saw needs the variable — its phase
+  is not `build`, or `prisma.config` alone reads it and the recipe supplies that — the finding carries a
+  `fix` of kind `remove_variable_scope`, which Review applies to the draft's declaration and the check
+  before Deploy and the run page open in the variable editor with the build scope already cleared,
+  `?variable=NAME&without=build`), and platform variables an operator's pasted `.env` sets
   (`port_variable_mismatch`, `node_env_not_production`, `host_variable_loopback_hostname`; a loopback
   `HOST` is the environment check's `host_variable_loopback_host`). Values are compared, never echoed,
   except a port number, a `NODE_ENV` word and a host name.
@@ -626,8 +631,15 @@ only renderer/executor/validation authority for their feature.
   `dockerx.RunToCompletion`): the runtime variables the release starts with plus the task's
   `release_task`-scoped ones as container environment, on the project's database networks (and the
   preview network for an isolated preview) or on the host's network when the release runs there, with
-  the release's resource limits, no ports, mounts or privileges, the image's entrypoint replaced by the
-  command, and the container removed however the task ends. The container carries
+  the release's resource limits and the plan's mounts (its volumes and binds, read-only where the plan
+  says so, recorded in the task evidence as `mounts`) — a Heroku or Render release phase that sees the
+  application's own data, so a migration or seed of SQLite on a volume reaches the file the release then
+  opens — but no ports, devices, capabilities or privilege, the image's entrypoint replaced by the
+  command, and the container removed however the task ends. The task runs while the live release still
+  serves from the same volume; a stop-first release stops it only when the candidate starts. The mounts
+  are the frozen runtime plan's own — a bind source was resolved and authorised when the plan was saved,
+  a preview's are its own preview volumes (and a preview plans no task) — so a task gains no path the
+  release it precedes does not already have. The container carries
   `io.just-dashboard.release-task`, so runtime observation leaves it out; `Server.Start` removes any a
   previous process left before the engine resumes runs, a task removes a stale one of its own name
   before it starts, and the step's cleanup records whether removal succeeded. A blank command is
@@ -705,7 +717,8 @@ only renderer/executor/validation authority for their feature.
   (`Call to undefined function mysqli_connect()`, `Class "Redis" not found`, WordPress's missing MySQL
   extension — `runtime_php_extension_missing`, naming the `ext-` requirement that installs it), front-end
   assets a page renders and the image lacks (Laravel's Vite manifest, `Mix manifest does not exist` —
-  `runtime_assets_missing`), a cgo-less binary, an architecture mismatch, a runner that is not installed, Phoenix's origin
+  `runtime_assets_missing`), a cgo-less binary, an architecture mismatch, a runner that is not installed
+  (`runtime_command_not_found`), Phoenix's origin
   check (fixed with `PHX_HOST`), Play's PID file, a server that prints a loopback bind (uvicorn,
   gunicorn, werkzeug, puma, Kestrel — not Next.js, which prints `localhost` whatever it binds) or whose
   every listening socket is on loopback (`runtime_loopback_bind`, named in the step message even when
@@ -722,8 +735,14 @@ only renderer/executor/validation authority for their feature.
   codes reach the classifier as `runtimeCauseContext.checks`). The cause is the step's code and the run's
   terminal code in place of `health_gate_failed`, with the health evidence kept; it carries identifiers
   only (a variable, a port, a module, a listener) and, where the plan can supply one, a fix: the
-  variable or its runtime scope, the internal port, a start command bound to `0.0.0.0`, and for the
-  Python recipe the Debian package that provides a missing shared library (`build.systemPackages`).
+  variable or its runtime scope, the internal port, a start command bound to `0.0.0.0`, for the
+  Python recipe the Debian package that provides a missing shared library (`build.systemPackages`),
+  or — for a Node recipe whose start runs a package manager the image lacks — the start command moved to
+  the manager the image carries (`nodeRunnerFor`, the install planner's own rewrite: `bun run start` in
+  an npm image is `npm run start`). That manager is the one this run's build installed with (its
+  prepared install line), else the plan's, else the one detection resolved; a start the rewrite cannot
+  carry (a file Bun ran as a script, the image's own manager missing, a Dockerfile's start) is left to
+  review.
 - Container applications receive `PORT` from the frozen internal-port setting unless a runtime variable
   explicitly supplies it. A Python recipe image whose gunicorn or uvicorn start leaves the worker count
   to `WEB_CONCURRENCY`, and which loads no machine-learning model, is recorded as such
@@ -793,8 +812,10 @@ only renderer/executor/validation authority for their feature.
   `BuildError` with the failed RUN's command, exit code and step number, or BuildKit's own reason for
   a failure that was not a process exit;
   a build that reaches its 30-minute limit while the run is alive returns `ErrBuildTimeout`, which does
-  not wrap a context error and so is never recorded as a cancellation. The executor feeds the persisted,
-  already redacted transcript to a bounded collector (`build_output_cause.go`): a ring per open BuildKit
+  not wrap a context error and so is never recorded as a cancellation. The builder redacts the
+  transcript of the run's secret build values and of any plain one carrying credential material, never
+  of other plain values (`buildLogRedactions`, with the sensitivity `OpenRunScopedVariables` returns).
+  The executor feeds the persisted, already redacted transcript to a bounded collector (`build_output_cause.go`): a ring per open BuildKit
   step (400 lines, 64 KiB), one over the stream (64 KiB), BuildKit's replayed and Dockerfile-excerpt
   lines refused. A step that finishes (`DONE` or `CACHED`) is dropped from both: what a passing step
   printed on its way — npm retrying a request that hung up, a config probing for `git` — is never a

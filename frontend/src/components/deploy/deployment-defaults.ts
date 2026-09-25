@@ -446,6 +446,29 @@ export function withPersistentVariables(
 }
 
 /**
+ * The plan's variables with one scope taken from one variable — a finding's
+ * `remove_variable_scope` fix, such as a linked database's build scope no
+ * build-time read needs. A name only a typed value supplies is declared with
+ * the scopes it keeps, since an undeclared value reaches the build and the
+ * runtime; one left with no scope at all keeps the runtime's.
+ */
+export function variablesWithoutScope(
+  variables: DeploymentConfiguration["variables"],
+  name: string,
+  scope: string,
+): DeploymentConfiguration["variables"] {
+  const keep = (scopes: string[]) => {
+    const kept = scopes.filter((value) => value !== scope)
+    return kept.length > 0 ? kept : ["runtime"]
+  }
+  if (!variables.some((variable) => variable.name === name))
+    return [...variables, { name, sensitivity: "secret", scopes: keep(["runtime", "build"]) }]
+  return variables.map((variable) =>
+    variable.name === name ? { ...variable, scopes: keep(variable.scopes) } : variable,
+  )
+}
+
+/**
  * Moves the plan's commands to the package manager chosen, where `undefined`
  * is "from the lockfile" — the manager detection resolved, not the command's
  * old runner. A command that is still one detection proposed is swapped whole
@@ -628,7 +651,7 @@ export function defaultConfiguration(
           name,
           // A browser-public value is compiled into the page by design, and
           // only a plain one can reach a Compose build argument.
-          sensitivity: BROWSER_PREFIX.test(name) ? ("plain" as const) : ("secret" as const),
+          sensitivity: publicBuildVariable(name) ? ("plain" as const) : ("secret" as const),
           scopes: ["runtime"],
           required: true,
           reference: "",
@@ -1230,10 +1253,14 @@ export function defaultReleaseTaskRunner(
 const DOCKERFILE_STAGE = /^[A-Za-z][A-Za-z0-9_.-]{0,127}$/
 
 /**
- * Prefixes whose variables a front-end build inlines into the JavaScript it
- * serves — the backend's `publicBuildPrefixes`.
+ * Whether a name carries any framework's browser prefix, SvelteKit's and
+ * Astro's bare `PUBLIC_` included — the backend's `publicBuildVariable`: a
+ * value some front-end build inlines into the JavaScript it serves, which is
+ * why a Dockerfile or Compose build receives it only as a plain value.
  */
-export const BROWSER_PREFIX = /^(NEXT_PUBLIC_|VITE_|PUBLIC_|NUXT_PUBLIC_|REACT_APP_|EXPO_PUBLIC_)/
+export function publicBuildVariable(name: string) {
+  return browserInlined(name, [...BROWSER_PREFIXES, "PUBLIC_"])
+}
 
 /** The Stage field's hint: what leaving it empty does, and the stages detection read. */
 export function dockerfileStageHint(stages?: string[]) {

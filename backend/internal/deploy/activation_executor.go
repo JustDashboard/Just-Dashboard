@@ -512,6 +512,7 @@ func (e *NormalizedStepExecutor) verifyChecks(
 		// "Error: DATABASE_URL is not set".
 		diagnostics := e.captureRuntimeDiagnostics(ctx, execution, release.Release, *runtime, runtimeCauseContext{
 			build: plan.Build, runtime: snapshot.Plan, variables: snapshot.Variables, compose: snapshot.Compose != nil, checks: checks,
+			manager: e.releaseNodeManager(ctx, execution.Run.ID, plan),
 		})
 		message := checkFailureMessage(phase, outcome, checks...) + diagnosticsSuffix(diagnostics)
 		// A cause the output proves is the run's terminal code, so every
@@ -1196,6 +1197,28 @@ func (e *NormalizedStepExecutor) runtimeVariablesForRelease(
 		return nil, err
 	}
 	return e.variablesForScope(ctx, release.Release.RunID, release.Release.EnvironmentID, "runtime")
+}
+
+// releaseNodeManager is the JavaScript package manager the release's image
+// carries: the one this run's build installed with, else the plan's, else
+// the one detection resolved for a plan left to the lockfile.
+func (e *NormalizedStepExecutor) releaseNodeManager(ctx context.Context, runID int64, plan *StoredExecutionPlan) string {
+	if plan.Build.Method != BuildRecipe || plan.Build.Recipe != "node" {
+		return ""
+	}
+	var prepared preparedStepEvidence
+	if e.latestStepEvidence(ctx, runID, StepPrepareContext, &prepared) == nil {
+		if manager := preparedNodeManager(prepared.Prepared); manager != "" {
+			return manager
+		}
+	}
+	if plan.Build.PackageManager != "" {
+		return plan.Build.PackageManager
+	}
+	if candidate := e.causeCandidate(ctx, runID, plan); candidate != nil {
+		return candidate.PackageManager
+	}
+	return ""
 }
 
 func runtimeFromInput(input ReleaseRuntimeInput) ReleaseRuntime {

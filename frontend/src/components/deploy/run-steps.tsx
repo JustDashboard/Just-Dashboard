@@ -29,7 +29,11 @@ import {
   stepStateLabel,
 } from "@/components/deploy/vocabulary"
 import { FindingRow } from "@/components/deploy/deployment-findings"
-import { attentionFindings, settingsPathForField } from "@/components/deploy/deploy-check-state"
+import {
+  attentionFindings,
+  findingFixAction,
+  settingsPathForField,
+} from "@/components/deploy/deploy-check-state"
 
 /** Where a step sits in the run's time, as start and end in milliseconds. */
 function stepSpan(step: DeploymentStep, now: number) {
@@ -356,6 +360,11 @@ function PreflightChecks({
             const path = settingsPathForField(item.fieldId)
             if (projectId !== undefined && path) router.push(`/deploy/${projectId}${path}`)
           }}
+          fixAction={
+            projectId === undefined
+              ? undefined
+              : findingFixAction(projectId, finding, (href) => router.push(href))
+          }
         />
       ))}
     </section>

@@ -91,6 +91,15 @@ func TestPythonAndDotnetSchemaToolsApplyTheSchemaBeforeServing(t *testing.T) {
 				"Procfile": "release: python manage.py migrate\nweb: gunicorn mysite.wsgi\n",
 			},
 			recipe: "python", tool: "django", command: "python manage.py migrate --noinput",
+			start: "gunicorn mysite.wsgi", evidence: "the release command applies them before each release",
+		},
+		{
+			name: "a Procfile web process without a release process is not rewritten",
+			files: map[string]string{
+				"requirements.txt": "Django==5.1.4\ngunicorn==23.0.0\n", "manage.py": "import django\n", "mysite/wsgi.py": "application = None\n",
+				"Procfile": "web: gunicorn mysite.wsgi\n",
+			},
+			recipe: "python", tool: "django", command: "python manage.py migrate --noinput",
 			start: "gunicorn mysite.wsgi", evidence: "the Procfile's web process does not apply them",
 		},
 		{
@@ -321,6 +330,103 @@ func TestSeedCommandsAreDetected(t *testing.T) {
 			candidate := candidateFor(t, detectFixture(t, fixture.files), fixture.method, fixture.recipe)
 			if candidate.SeedCommand != fixture.command || candidate.SeedResets != fixture.resets {
 				t.Fatalf("seed = %q resets %v", candidate.SeedCommand, candidate.SeedResets)
+			}
+		})
+	}
+}
+
+// A repository that declares both how it starts and a release command that
+// migrates runs its schema step once, as the release task, and never also in
+// front of the start: chained, it would migrate again in every container
+// start, beside the release task that already did.
+func TestADeclaredReleaseCommandOwnsTheSchemaStep(t *testing.T) {
+	t.Parallel()
+	prismaApp := map[string]string{
+		"package.json":         `{"name":"api","scripts":{"start":"node server.js","migrate":"prisma migrate deploy"},"dependencies":{"express":"4","@prisma/client":"6"},"devDependencies":{"prisma":"6"}}`,
+		"package-lock.json":    `{"name":"api","lockfileVersion":3,"packages":{"":{"name":"api"}}}`,
+		"server.js":            "require('express')().listen(process.env.PORT)\n",
+		"prisma/schema.prisma": "datasource db {\n  provider = \"postgresql\"\n  url = env(\"DATABASE_URL\")\n}\n",
+		"prisma/migrations/0001_init/migration.sql": "CREATE TABLE t (id int);\n",
+	}
+	with := func(files map[string]string, extra map[string]string) map[string]string {
+		merged := map[string]string{}
+		for name, content := range files {
+			merged[name] = content
+		}
+		for name, content := range extra {
+			merged[name] = content
+		}
+		return merged
+	}
+	for _, fixture := range []struct {
+		name, recipe  string
+		files         map[string]string
+		start         string
+		release       string
+		schemaCommand string
+	}{
+		{
+			name: "render.yaml preDeployCommand beside its startCommand", recipe: "node",
+			files: with(prismaApp, map[string]string{"render.yaml": "services:\n  - type: web\n    name: api\n    startCommand: node server.js\n    preDeployCommand: npx prisma migrate deploy\n"}),
+			start: "node server.js", release: "npx prisma migrate deploy", schemaCommand: "prisma migrate deploy",
+		},
+		{
+			name: "fly.toml release_command through a package script", recipe: "node",
+			files: with(prismaApp, map[string]string{"fly.toml": "[deploy]\n  release_command = \"npm run migrate\"\n"}),
+			start: "npm run start", release: "npm run migrate", schemaCommand: "prisma migrate deploy",
+		},
+		{
+			name: "Procfile release beside its web process", recipe: "node",
+			files: with(prismaApp, map[string]string{"Procfile": "release: npx prisma migrate deploy\nweb: node server.js\n"}),
+			start: "node server.js", release: "npx prisma migrate deploy", schemaCommand: "prisma migrate deploy",
+		},
+		{
+			name: "a release command that does not migrate leaves the step in the start", recipe: "node",
+			files: with(prismaApp, map[string]string{"Procfile": "release: node scripts/warm-cache.js\n"}),
+			start: "npx prisma migrate deploy && npm run start", release: "node scripts/warm-cache.js", schemaCommand: "prisma migrate deploy",
+		},
+		{
+			name: "Django's default start leaves migrate to the Procfile release", recipe: "python",
+			files: map[string]string{
+				"requirements.txt": "Django==5.1.4\ngunicorn==23.0.0\n", "manage.py": "import django\n", "mysite/wsgi.py": "application = None\n",
+				"Procfile": "release: python manage.py migrate --noinput\n",
+			},
+			start: "gunicorn --bind 0.0.0.0:${PORT:-8000} --access-logfile - mysite.wsgi:application", release: "python manage.py migrate --noinput",
+			schemaCommand: "python manage.py migrate --noinput",
+		},
+		{
+			name: "render.yaml's Flask start is not chained when its pre-deploy upgrades", recipe: "python",
+			files: map[string]string{
+				"requirements.txt": "flask==3.1.0\nflask-migrate==4.0.7\ngunicorn==23.0.0\n", "app.py": "from flask import Flask\napp = Flask(__name__)\n",
+				"migrations/alembic.ini": "[alembic]\n", "migrations/versions/abc_init.py": "revision = 'abc'\n",
+				"render.yaml": "services:\n  - type: web\n    name: app\n    startCommand: gunicorn app:app\n    preDeployCommand: flask db upgrade\n",
+			},
+			start: "gunicorn app:app", release: "flask db upgrade", schemaCommand: "flask --app app db upgrade",
+		},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			t.Parallel()
+			candidate := candidateFor(t, detectFixture(t, fixture.files), BuildRecipe, fixture.recipe)
+			if candidate.StartCommand != fixture.start || candidate.ReleaseCommand != fixture.release || candidate.SchemaCommand != fixture.schemaCommand ||
+				candidate.SchemaInRelease == strings.Contains(fixture.start, "migrate") {
+				t.Fatalf("start = %q, release = %q, schema = %q, in release %v", candidate.StartCommand, candidate.ReleaseCommand, candidate.SchemaCommand, candidate.SchemaInRelease)
+			}
+			for _, install := range candidate.NodeInstalls {
+				if strings.Contains(install.StartCommand, "migrate") != strings.Contains(fixture.start, "migrate") {
+					t.Fatalf("%s start = %q", install.Manager, install.StartCommand)
+				}
+			}
+			if fixture.release != "" && !strings.Contains(fixture.start, "migrate") {
+				// The release task the form plans from the release command
+				// is the step preflight counts.
+				build := BuildPlanConfig{StartCommand: candidate.StartCommand,
+					ReleaseTasks: []ReleaseTaskConfig{{Name: "release", Command: candidate.ReleaseCommand, Runner: ReleaseTaskRunnerImage}}}
+				if !schemaStepConfigured(&candidate, build) {
+					t.Fatal("the release task was not counted as the schema step")
+				}
+				if candidate.Readiness != nil && candidate.Readiness.SlowStart != "" {
+					t.Fatalf("readiness = %+v, want no migration budget for a start that does not migrate", candidate.Readiness)
+				}
 			}
 		})
 	}

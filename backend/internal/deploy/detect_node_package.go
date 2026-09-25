@@ -132,8 +132,11 @@ func nxCandidates(marker *detectedMarkers, base DetectedCandidate, facts nodeIns
 	runner := firstNonEmpty(base.PackageManager, "npm")
 	var manifest nodeManifest
 	parseNodeManifest(marker.packageJSON, &manifest)
+	// The repository's release command applying the schema runs it once, as
+	// the release task, rather than before every application's start too.
+	inRelease := schema != nil && schema.Command != "" && releaseAppliesSchema(&schema.Tool, marker.release, manifest.Scripts)
 	withSchema := func(manager, start string) string {
-		if schema == nil || schema.Command == "" || start == "" || schema.Tool.applied(start) {
+		if schema == nil || schema.Command == "" || start == "" || schema.Tool.applied(start) || inRelease {
 			return start
 		}
 		return nodeSchemaStep(manager, schema.Tool, schema.Command) + " && " + start
@@ -174,8 +177,8 @@ func nxCandidates(marker *detectedMarkers, base DetectedCandidate, facts nodeIns
 		}
 		if schema != nil {
 			candidate.SchemaTool, candidate.SchemaCommand = schema.Tool.Name, ""
-			if candidate.StartCommand != nx.start {
-				candidate.SchemaCommand = schema.Command
+			if candidate.StartCommand != nx.start || inRelease {
+				candidate.SchemaCommand, candidate.SchemaInRelease = schema.Command, inRelease
 			}
 		}
 		candidate.NodeInstalls = facts.detectedInstalls(base.PackageManager, false, nil, func(manager string) (string, string) {

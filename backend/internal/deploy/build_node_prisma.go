@@ -142,6 +142,35 @@ func (f nodeFiles) list(rel string, limit int) []string {
 	return names
 }
 
+// directories names the directories directly in one, sorted and bounded,
+// never node_modules or a hidden one.
+func (f nodeFiles) directories(rel string) []string {
+	if f.root == nil || (rel != "" && !safeRelativePath(rel)) {
+		return nil
+	}
+	name := f.name(rel)
+	if name == "" {
+		name = "."
+	}
+	directory, err := f.root.Open(name)
+	if err != nil {
+		return nil
+	}
+	defer directory.Close()
+	entries, err := directory.ReadDir(1024)
+	if err != nil && len(entries) == 0 {
+		return nil
+	}
+	names := []string{}
+	for _, entry := range entries {
+		if entry.IsDir() && entry.Name() != "node_modules" && !strings.HasPrefix(entry.Name(), ".") {
+			names = append(names, entry.Name())
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 // prismaPlaceholder is the value `prisma generate` gets for a name
 // prisma.config reads through env() when the build supplies none: a recipe
 // constant shaped like the schema's provider, pointing at nothing, since
@@ -227,16 +256,87 @@ func prismaBuildSteps(facts nodeInstallFacts, build string) (generates, connects
 }
 
 // prismaBuildPlaceholders are the names prisma.config reads that the recipe
-// supplies with a placeholder in every build step that loads it, so the
-// build needs no value for them — none when the build command connects,
-// which needs the real database.
-func prismaBuildPlaceholders(facts nodeInstallFacts, build string) []string {
+// supplies with a placeholder in every build step that loads it only to
+// generate — the install, its own `prisma generate`, and a build command
+// that generates without migrating — and the package scripts that do
+// migrate or push, directly or through the scripts and hooks they run. A
+// build that runs one of those needs the real database, and the recipe
+// gives it no placeholder; preflight judges the plan's own build command
+// against them.
+func prismaBuildPlaceholders(facts nodeInstallFacts) (names, connecting []string) {
 	if len(facts.prisma.env) == 0 || (!facts.manifest.has("prisma") && !facts.settings.has("prisma") &&
 		!facts.manifest.has("@prisma/client") && !facts.settings.has("@prisma/client")) {
+		return nil, nil
+	}
+	scripts := make([]string, 0, len(facts.manifest.Scripts))
+	for name := range facts.manifest.Scripts {
+		scripts = append(scripts, name)
+	}
+	sort.Strings(scripts)
+	for _, name := range scripts {
+		if _, connects := prismaBuildSteps(facts, "npm run "+name); connects && nodeScriptNameRE.MatchString(name) && len(connecting) < 16 {
+			connecting = append(connecting, name)
+		}
+	}
+	return append([]string(nil), facts.prisma.env...), connecting
+}
+
+// prismaBuildConnects says whether a build command migrates or pushes the
+// schema — itself, or through a package script detection recorded as doing
+// so — which the recipe runs with the real value, never the placeholder.
+func prismaBuildConnects(record *DetectedNodeBuild, command string) bool {
+	for _, segment := range nodeCommandSegments(command) {
+		if strings.Contains(segment, "prisma migrate") || strings.Contains(segment, "prisma db ") {
+			return true
+		}
+		words := nodeSegmentWords(segment)
+		if len(words) < 2 {
+			continue
+		}
+		switch path.Base(words[0]) {
+		case "npm", "pnpm", "bun", "yarn":
+			script := words[1]
+			if (script == "run" || script == "run-script") && len(words) > 2 {
+				script = words[2]
+			}
+			if slices.Contains(record.PrismaConnectScripts, script) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// prismaConfigSource says whether a repository path is a prisma.config
+// file, which only Prisma's own commands load.
+func prismaConfigSource(source string) bool {
+	return slices.ContainsFunc(nodePrismaConfigNames, func(name string) bool {
+		return source == name || strings.HasSuffix(source, "/"+name)
+	})
+}
+
+// prismaRecipeSupplied are the names prisma.config reads that a Node recipe
+// plan's build needs no value for: prisma.config is the only file that reads
+// the name while the build runs, and the plan's build command does not
+// migrate or push, so every step that loads the config gets the
+// placeholder. A name another build-time read needs — next.config, a
+// static env import, a browser prefix — or a build that migrates needs the
+// real value.
+func prismaRecipeSupplied(candidate *DetectedCandidate, configuration PlanConfiguration) []string {
+	if candidate == nil || candidate.NodeBuild == nil || configuration.Build.Method != BuildRecipe ||
+		configuration.Build.Recipe != "node" || prismaBuildConnects(candidate.NodeBuild, configuration.Build.BuildCommand) {
 		return nil
 	}
-	if _, connects := prismaBuildSteps(facts, build); connects {
-		return nil
+	supplied := []string{}
+	for _, name := range candidate.NodeBuild.PrismaEnv {
+		index := slices.IndexFunc(candidate.Variables, func(variable DetectedVariable) bool { return variable.Name == name })
+		if index >= 0 {
+			variable := candidate.Variables[index]
+			if variable.BrowserInlined || slices.ContainsFunc(variable.BuildSources, func(source string) bool { return !prismaConfigSource(source) }) {
+				continue
+			}
+		}
+		supplied = append(supplied, name)
 	}
-	return append([]string(nil), facts.prisma.env...)
+	return supplied
 }

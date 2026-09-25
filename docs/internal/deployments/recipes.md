@@ -81,17 +81,27 @@ the install also runs every dependency's install script, and Prisma's `generate`
 Runtime and release-task scopes remain separate. Custom Dockerfiles do not gain automatic values or
 secret mappings; they retain their existing refusal of requested secrets. The one exception is a value
 the Dockerfile itself asks for and that is public by design: a **plain** build-scoped variable with a
-browser-public prefix (`NEXT_PUBLIC_`, `VITE_`, `PUBLIC_`, `NUXT_PUBLIC_`, `REACT_APP_`, `EXPO_PUBLIC_`)
+browser-public prefix (any framework's, from the one list environment discovery classifies with:
+`NEXT_PUBLIC_`, `VITE_`, `PUBLIC_`, `REACT_APP_`, `NUXT_PUBLIC_`, `EXPO_PUBLIC_`, `GATSBY_`, `VUE_APP_`)
 that the Dockerfile declares with `ARG` is passed as `--build-arg NAME`, the value only in buildx's
 process environment (`deploy/build_dockerfile_args.go`). A value typed into a new project's environment
 is stored secret, except one with a browser-public name that is not declared secret: the page's
 JavaScript carries it by design, and only a plain value can become a build argument. Preflight lists
 what is passed (`dockerfile_build_args`) and warns about every other declared argument that will be
-empty (`dockerfile_arg_not_passed`, naming a browser-public one marked secret); a secret, or a name that
-would replace the builder's own environment (`DOCKER_*`, `PATH`, …), never qualifies. A build argument
+empty (`dockerfile_arg_not_passed`, naming a browser-public one marked secret), and — the other way
+round — about every browser-public variable the plan binds for the build (a value, a reference, a
+domain-bound address, a generated value, or a value typed into a new project's environment) that the
+Dockerfile declares no `ARG` for (`dockerfile_public_arg_undeclared`, a warning): the build never
+receives it, so the client bundle compiles it as undefined whatever the running container is given. A
+secret, or a name that would replace the builder's own environment (`DOCKER_*`, `PATH`, …), never
+qualifies as a build argument. A build argument
 stays in the image's history, which is why a secret is never one.
 
-Neither generated Dockerfiles nor command arguments contain variable values. Logs redact exact values.
+Neither generated Dockerfiles nor command arguments contain variable values. A build's log, its failure
+diagnosis and a builder error are redacted of the exact value of every secret build variable, and of a
+plain one whose value carries credential material anyway (a URL with a password, a private key, a
+`password=` assignment); any other plain value — `AUTH_TRUST_HOST=true`, a port, a public address — is
+left readable, as its own sensitivity says it may be (`buildLogRedactions`).
 An ephemeral mount does not prevent application build code from intentionally copying a value into its
 output. In particular, Next.js `NEXT_PUBLIC_` values and Vite `VITE_` values embedded in browser assets
 are public, even if encrypted in the dashboard. Quick setup labels such rows `public`, the variable
@@ -141,7 +151,7 @@ the engine its scheme names.
 
 Each variable carries how it was read. `phase: build` marks a value read while the build runs — a
 framework config file (`next.config.*`, `vite.config.*`, `prisma.config.*`, …), a static env import, a
-compile-time macro, a browser prefix. `browserInlined` marks a value the framework compiles into the
+compile-time macro, a browser prefix — and `buildSources` lists the files whose reads made it one. `browserInlined` marks a value the framework compiles into the
 JavaScript every visitor downloads: the prefix the root's own framework inlines (`NEXT_PUBLIC_`,
 `VITE_`, SvelteKit's and Astro's `PUBLIC_`, `REACT_APP_`, `NUXT_PUBLIC_`, `EXPO_PUBLIC_`, `GATSBY_`,
 `VUE_APP_`, listed on the candidate as `browserPrefixes`), or a Vite `define` / `next.config` `env`
@@ -435,8 +445,9 @@ The command a repository declares runs once before each release — a Procfile `
 it), or a Phoenix release's `rel/overlays/bin/migrate` — is the candidate's `releaseCommand`. The form
 plans it as a release task named `release` that runs **in the release image** (`runner: "image"`): one
 throwaway container of the candidate release's image, with the runtime variables the release starts
-with plus the task's own `release_task`-scoped ones, on the project's database networks — or on the
-host's network when the release runs there — removed when it exits. A command with shell syntax runs
+with plus the task's own `release_task`-scoped ones and the plan's volumes mounted where the release
+mounts them, on the project's database networks — or on the host's network when the release runs there
+— removed when it exits. A command with shell syntax runs
 through the image's `/bin/sh`; a plain one is executed directly, so an image without a shell still runs
 `bin/migrate`. Its container is labelled as a release task, so it never counts as one of the release's
 services; one a stopped dashboard left behind is removed when the dashboard starts and before the task
@@ -455,6 +466,16 @@ dashboard does not have — in its own image that includes `npx`, `python` and `
 schema step. `release_process_not_run` is not raised for a process the release command or a planned task
 already runs; `fly.toml`'s `/app/bin/migrate` is the overlay's `bin/migrate`, run from the image's
 working directory.
+
+A release command that applies the detected schema tool's step — itself, or through the package scripts
+it runs (`npm run migrate` whose script is `prisma migrate deploy`) — owns that step: detection reads
+the release command before it makes any candidate, and then chains nothing into the start command,
+neither the package's own start, an Nx workspace application's start, a Procfile or platform file's
+start command, nor Django's default start (which keeps `collectstatic` but leaves `migrate` out). The candidate records `schemaInRelease`, the
+schema evidence says the release command applies it, and preflight counts the release task planned from
+that command as the schema step even when its text names a script rather than the tool. Chained as well,
+the migration would run a second time in every container start, beside the release task that already
+ran it. A release command that does not migrate leaves the step in front of the start.
 
 ## Repository shape and candidate selection
 
@@ -588,17 +609,17 @@ candidate records the file, the facts and which it took (`platformManifests`):
 
 | Declared | Taken as |
 | --- | --- |
-| start command (`startCommand`, `[start] cmd`, `run_command`, fly `app` process, Space `app_file`) | the start command of a recipe candidate that did not take the Procfile's, unless it runs a package manager the lockfile does not build with, with the detected schema step kept in front of it unless it applies the schema itself; it answers the start-command decisions |
+| start command (`startCommand`, `[start] cmd`, `run_command`, fly `app` process, Space `app_file`) | the start command of a recipe candidate that did not take the Procfile's, unless it runs a package manager the lockfile does not build with, with the detected schema step kept in front of it unless it applies the schema itself or the repository's release command does; it answers the start-command decisions |
 | build command | the build command when detection had none, with its dependency installs (`npm ci`, `pip install`, `bundle install`, …) removed — the recipe installs from the lockfile |
 | port (`internal_port`, `http_port`, Kamal `proxy.app_port`, Space `app_port`) | the port when the start command came from the same file, or when nothing named one |
 | publish directory (`publish`, `outputDirectory`, `staticPublishPath`, `output_dir`, hosting `public`) and a rewrite of every path to `/index.html` | the output directory and the single-page fallback of a static candidate |
 | health check path | evidence and `healthPath`; readiness detection reads the same files for the check ([Readiness](#readiness-workers-and-start-commands)) |
 | `generateValue`, `generator: "secret"` | a variable set up to be generated on the server when the project is created (`setup: generate`), unless the environment classification knows the framework's own shape for it |
-| secret env names, `sync: false`, `required` | a variable row that must be set |
+| secret env names, `sync: false`, `required` | a variable detection marks `required`, which the form declares required in the plan, so preflight asks for its value (`variable_required_*`) |
 | accessories, add-ons, `fromDatabase`, `databases:` | a database suggestion on the declared variable |
 | worker, cron, Kamal roles, `[processes]` | [processes](#background-processes) |
 | release command (`release_command`, `preDeployCommand`, `PRE_DEPLOY` job) | a `release` process; `fly.toml`'s and `render.yaml`'s are also the candidate's release command ([Release commands](#release-commands)), and one no release task runs is `release_process_not_run` |
-| volumes and `[[mounts]]` | evidence and `volumes`; no mount is created from them yet |
+| volumes: fly `[[mounts]]` `destination`, `render.yaml`'s `disk.mountPath`, Railway's `requiredMountPath`, Kamal `volumes:` | evidence, `volumes`, and state to keep at the same path (`persistentPaths`, kind `storage`), which the form plans as a managed volume: the application names the absolute path itself. A volume state detection already planned there, or under it, is not planned twice, and state found under it without a directory of its own takes it. A runtime that is not root gets a volume only where it can write one (its data directory, or a committed directory under a Dockerfile's workdir); elsewhere the path is only named, and preflight warns `persistent_path_unmounted` |
 | `Aptfile`, `aptPkgs` | `platform_system_packages_ignored` (warning) for a recipe build |
 | redirects, rewrites and headers (`_redirects`, `_headers`, `netlify.toml`, `vercel.json`) | rules the static server applies ([Static sites](#static-sites-and-site-generators)); `static_redirects_unsupported` (warning) counts those it leaves out |
 | `HUGO_VERSION`, `ZOLA_VERSION`, `NODE_VERSION` in a build environment | the Hugo or Zola release the site recipe builds with, and the Node release after the version files |
@@ -1137,8 +1158,8 @@ MSBuild and NuGet files and `global.json`, the JDK and SDK version files such as
 `config.toml`, `book.toml` and Jekyll's `_config.yml` for the site recipe, `mkdocs.yml`, `zensical.toml`
 and Pelican's settings for Python, Lume's `_config.ts` for Deno, Hexo's `_config.yml` for Node) are set
 aside for that recipe's builds alone, so a static site or another recipe's image keeps the repository's
-rule instead of copying or serving the file. A JavaScript install
-input below the root is brought back by an exception
+rule instead of copying or serving the file. A JavaScript install input below the root (a workspace
+member's manifest, its siblings' manifests) is brought back by an exception
 instead ([JavaScript installs](#javascript-installs)), and the run log names each rule set aside or
 overridden. Then it excludes `**/node_modules`, `.dockerignore` and the dashboard's own files. The static, PHP, Node, Deno and Ruby images, which are served or copied whole, also exclude `.git`;
 recipes whose toolchains stamp or version builds from Git (Go, Python's setuptools-scm, Maven's
@@ -1315,9 +1336,15 @@ as stale, since Yarn 1 records no workspace in its lock; the install then runs u
 ([Build context](#build-context)) is written at the install's context — the workspace root for a
 member — and keeps every install input the recipe reads: a root-level one (`package.json`, the lockfile,
 `.npmrc`, `.yarnrc.yml`) by setting aside the rule that would leave it out, and one below the root or a
-directory (a member's `package.json`, `bunfig.toml`, `.yarn/releases`, `patches`) by an exception after
-the repository's rules, so its other exclusions under that directory stand. The run log names each input
-a repository rule had excluded.
+directory (a member's `package.json`, every other workspace member's `package.json`, `bunfig.toml`,
+`.yarn/releases`, `patches`) by an exception after the repository's rules, so its other exclusions under
+that directory stand. The other members' manifests are inputs because a frozen install at the workspace
+root compares every importer its lockfile records with that member's `package.json`; they are found by
+expanding the root's `workspaces` (or `pnpm-workspace.yaml` `packages`) globs over directories — never
+`node_modules` or a hidden one, `!` exclusions honoured, at most four levels below a `**`, 256 manifests.
+The run log names each input a repository rule had excluded, and detection raises
+`dockerignore_drops_recipe_input` for the same inputs before Deploy, reading the workspace root's
+`.dockerignore` for a member.
 
 **Commands follow the manager.** Choosing a manager in the configure form or Build settings swaps a
 command that is still one detection proposed for the one it proposes for the new manager (`nodeInstalls`),
@@ -1409,9 +1436,15 @@ runs `prisma migrate` or `prisma db` gets no placeholder, since it needs the rea
 value is never widened to the install on its own — the install also runs every dependency's install
 script — unless the variable is mapped to `install_and_build` (`prisma_config_env`). Environment
 discovery reads the same `env()` calls as build-time reads; detection records the names the placeholder
-covers as `nodeBuild.prismaEnv` (none when the detected build command connects), and for a Node recipe
-build the environment check does not refuse them as `build_variable_missing_*`, since the build runs
-without them. A repository Dockerfile gets no placeholder, so there they stay build-time reads.
+covers as `nodeBuild.prismaEnv`, the package scripts that migrate or push (through the scripts and hooks
+they run) as `nodeBuild.prismaConnectScripts`, and for each variable the files that read it while the
+build runs (`buildSources`). A Node recipe plan's environment check does not refuse such a name as
+`build_variable_missing_*` only when `prisma.config` is its sole build-time read — no `next.config`, static
+env import or browser prefix reads it too — and the plan's own build command, as saved, neither runs
+`prisma migrate`/`prisma db` nor one of those scripts: then every step that loads the config gets the
+placeholder and the build runs without a value (`prismaRecipeSupplied`). An edited build that migrates
+is asked for the real value again. A repository Dockerfile gets no placeholder, so there they stay
+build-time reads.
 
 **The build command's RUN** (`build_node_build.go`) leaves V8's heap at its own default (a quarter of
 physical memory, at most about 4 GiB). `NODE_OPTIONS` is inherited by every `node` process a build starts —
@@ -1454,7 +1487,7 @@ toolchain needs, below; the PHP recipe's asset stage builds the same way.
 | `build_env_validation_skipped` (pass; warning when a skipped variable has no value at all) | the schema's required server variables have no build value and the schema honours `SKIP_ENV_VALIDATION`; the environment check then does not refuse them as `build_variable_missing_*` |
 | `build_env_missing` (warning) | the same, and the schema cannot be skipped, so the build stops with "Invalid environment variables"; it lists only what the environment check did not already refuse per field as `build_variable_missing_*` |
 | `build_env_client_missing` (warning) | a `client` variable has no build value; the browser bundle gets `undefined` |
-| `build_database_unreachable` (warning) | Next.js, Nuxt, Astro, SvelteKit or Gatsby with a database client, and a build-scoped URL pointing at `db-N.jd.internal`, at loopback, or a linked database reference: the build runs apart from the environment's network, so a prerendered page that queries it fails; the action is rendering those pages on request |
+| `build_database_unreachable` (warning) | Next.js, Nuxt, Astro, SvelteKit or Gatsby with a database client, and a build-scoped URL pointing at `db-N.jd.internal`, at loopback, or a linked database reference: the build runs apart from the environment's network, so a prerendered page that queries it fails; the action is rendering those pages on request, and — when no build-time read detection saw needs the variable — the finding's `fix` removes its build scope, one click on Review or the variable editor opened on the change elsewhere |
 | `port_variable_mismatch` (warning) | a `PORT` variable differs from the internal port the proxy and readiness check use |
 | `node_env_not_production` (warning) | `NODE_ENV` other than `production` reaches the build or the server |
 | `host_variable_loopback_hostname` (warning) | `HOSTNAME` on loopback, which Next.js standalone binds to (a loopback `HOST` is the environment check's `host_variable_loopback_host`) |
@@ -1712,7 +1745,8 @@ Django (`python manage.py migrate --noinput`, already the default start's first 
 (`alembic.ini` beside the manifest or one directory down, with the `alembic` dependency: `alembic upgrade
 head`, `-c <ini>` when it is not at the root), Flask-Migrate (`migrations/alembic.ini` with
 `flask-migrate`: `flask --app <module> db upgrade`) and Aerich (`[tool.aerich]`: `aerich upgrade`). The
-command is chained before a detected start; a `Procfile` web process is the repository's own and is not
+command is chained before a detected start unless the repository's release command applies it
+([Release commands](#release-commands)); a `Procfile` web process is the repository's own and is not
 rewritten, so a linked database without the step raises `schema_step_missing` instead. A start command
 that runs a committed `prestart.sh` (or `scripts/prestart.sh`) which applies the migrations counts as the
 step. Alembic is chained only when the `env.py` beside its script location takes the database from the
@@ -1796,8 +1830,9 @@ service reads at runtime are copied there, owned by that user: `templates`, `vie
 plus the directory named by any literal path the sources hand to `LoadHTMLGlob`, `ParseGlob`,
 `http.Dir`, `Static`/`StaticFile`, `os.DirFS` or a `file://` migration source. The sources are read as
 text under a fixed budget, and the walk stops after 20,000 entries. Symlinks are never copied, nor is a
-name the repository's `.dockerignore` keeps out of the build context, because copying a file the context
-lacks would fail the build. `/home/app/data` is created and owned by `app`, so a volume mounted there
+name the repository's `.dockerignore` keeps out of the build context (read with the same BuildKit matching
+as the generated ignore file, counting a rule a later `!` re-includes and, when a rule cannot be read,
+everything), because copying a file the context lacks would fail the build. `/home/app/data` is created and owned by `app`, so a volume mounted there
 starts writable. Rust uses the same stage, reading `ServeDir`, `ServeFile`, `Tera::new`, `NamedFile` and
 actix `Files` literals.
 
@@ -2733,7 +2768,7 @@ reported instead.
 | Strapi | `.tmp/data.db`, `public/uploads` | volumes on both |
 | `multer` `dest`/`destination`, `UPLOAD_DIR`-style variables | uploads | the directory, or `/data/uploads` through the variable |
 | Django `django.db.backends.sqlite3`, `MEDIA_ROOT` | the database, media | the file's own directory when it has one; `NAME` or `MEDIA_ROOT` read from a variable moves to `/data` |
-| SQLAlchemy `sqlite:///…` (Flask-SQLAlchemy 3 resolves relative paths in `instance/`) | the database | its own directory, or a warning |
+| SQLAlchemy `sqlite:///…` (Flask-SQLAlchemy 3 resolves relative paths in `instance/`), and the same URL as Django's `dj_database_url.config(default=…)`/`parse()` or django-environ's `env.db(…, default=…)` | the database — worded for its reader: Django's (naming dj-database-url or django-environ and the variable it reads first, `env=` or the first argument, else `DATABASE_URL`, in which a linked server database takes the file out of use), Flask-SQLAlchemy's URI, or a SQLAlchemy URL | its own directory, or a warning |
 | Laravel with `DB_CONNECTION=sqlite` (or none, from Laravel 11) | `database/database.sqlite`, sessions, cache, queue | volume at `/app/storage`, `DB_DATABASE=/app/storage/database.sqlite` when `config/database.php` reads it; a planned `DB_CONNECTION` other than `sqlite`, or a `DB_URL`, takes the file out of use |
 | Laravel with Filament, Media Library or `FILESYSTEM_DISK=public` | uploads on the local disks | volume at `/app/storage` |
 | Statamic | `content/`, `users/` | reported: they are the repository's own files |
@@ -2744,6 +2779,7 @@ reported instead.
 | A Phoenix release with `ecto_sqlite3`, built by the Elixir recipe or its own Dockerfile | the file `runtime.exs` reads from `DATABASE_PATH` | `/app/data/<app>.db` through it for the recipe; `/data/<app>.db` for a Dockerfile image that runs as root; reported under `USER nobody` |
 | ASP.NET cookie auth, Identity, Razor Pages, MVC views, antiforgery or Blazor without `PersistKeysTo*` | the Data Protection key ring | volume at `/home/app/.aspnet/DataProtection-Keys` |
 | Dockerfile `VOLUME` (final stage, inherited from an earlier stage), a local image's declared volumes | the declared path | a volume on it; scratch space (`/tmp`, `/var/tmp`, `/run`, `/var/run`, `/var/cache`, `/dev/shm`) is left anonymous |
+| Another platform's volume ([Other platforms' deployment files](#other-platforms-deployment-files)) | the path it mounts | a volume on the same path, where the process can write one |
 
 A variable holds one value, so detection keeps one entry per variable — the reader that read it more
 closely wins (Django's `MEDIA_ROOT` from the settings, not from the generic upload-variable list).
@@ -2768,8 +2804,9 @@ the source needs. State that is kept passes as `persistent_state_kept`, and `bac
 asks for a backup. A linked server database in the variable a SQLite default falls back from takes the
 file out of use and raises nothing. SQLite moved onto a volume starts empty the way a new server database
 does, so the detected schema tool's step is checked for it too (`schema_step_missing`, titled for the
-volume); only the start command or the application itself counts there, because a release task, on the
-host or in the release image, runs without the plan's volumes. A container that cannot open or write its SQLite file — the directory is missing or not writable
+volume); the start command, the application itself and a release task in the release image count there,
+since that task mounts the plan's volumes as the release does, but not a task in the dashboard's shell,
+which runs over the checkout. A container that cannot open or write its SQLite file — the directory is missing or not writable
 by its user — fails its readiness gate with `runtime_sqlite_not_writable` named.
 
 Limits: an image's declared volumes are read only when the image is already on this host (the registry
@@ -2786,7 +2823,8 @@ Laravel's `DatabaseSeeder` when it does more than the skeleton's test user (`php
 --force`), a `db/seeds.rb` with code (`bin/rails db:seed`), and the fixtures a Django application commits
 in its `fixtures/` directories, outside any test directory (`python manage.py loaddata <names>`). When
 the plan links a database or keeps SQLite on a new volume, and neither the start command nor a release
-task seeds — a release task reaches a linked server, never a volume — preflight raises `seed_available` (a
+task seeds — any release task reaches a linked server, and one in the release image reaches the volume —
+preflight raises `seed_available` (a
 warning) naming the command to run once from the project's console after the first release. Only a
 first release does: a deployment that replaces a live runtime has a database that already holds whatever
 was seeded. It is never planned as a release task, which runs before every release, because a seed that

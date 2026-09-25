@@ -25,7 +25,7 @@ func TestRecipeBuildScopeWorksWithoutExplicitMappingAndInstallCredentialsStayNar
 			t.Fatalf("install stage received incorrect variables: %s", line)
 		}
 	}
-	result, err := builder.Build(t.Context(), root, "fixture:variables", config, prepared, variables, "", SourceIdentity{}, nil, nil)
+	result, err := builder.Build(t.Context(), root, "fixture:variables", config, prepared, variables, map[string]bool{"NPM_TOKEN": true}, "", SourceIdentity{}, nil, nil)
 	if err != nil || len(backend.builds) != 1 || len(backend.builds[0].Secrets) != 2 {
 		t.Fatalf("scoped build delivery failed: %v, %+v", err, backend.builds)
 	}
@@ -60,7 +60,7 @@ func TestInstallAndBuildMappingMountsOneValueInBothSteps(t *testing.T) {
 			t.Fatalf("build stage received incorrect variables: %s", line)
 		}
 	}
-	if _, err := builder.Build(t.Context(), root, "fixture:variables", config, prepared, variables, "", SourceIdentity{}, nil, nil); err != nil ||
+	if _, err := builder.Build(t.Context(), root, "fixture:variables", config, prepared, variables, map[string]bool{"DATABASE_URL": true}, "", SourceIdentity{}, nil, nil); err != nil ||
 		len(backend.builds) != 1 || len(backend.builds[0].Secrets) != 2 {
 		t.Fatalf("one secret per variable must reach BuildKit: %v, %+v", err, backend.builds)
 	}

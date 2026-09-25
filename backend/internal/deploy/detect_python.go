@@ -899,9 +899,10 @@ func readDjangoFacts(source *pythonSource, deps pythonDependencies) *DetectedDja
 	return django
 }
 
-// resolveDjango builds a Django project's start: migrations, the static
-// files WhiteNoise serves when STATIC_ROOT says where, then gunicorn — or an
-// ASGI server for Channels, whose websocket routes WSGI cannot serve.
+// resolveDjango builds a Django project's start: migrations, unless the
+// repository's release command applies them, the static files WhiteNoise
+// serves when STATIC_ROOT says where, then gunicorn — or an ASGI server for
+// Channels, whose websocket routes WSGI cannot serve.
 func resolveDjango(ctx pythonResolveContext) pythonResolution {
 	source := ctx.files.source
 	if source == nil || len(source.manageDirs) == 0 {
@@ -944,10 +945,14 @@ func resolveDjango(ctx pythonResolveContext) pythonResolution {
 	}
 	manage := joinRoot(directory, "manage.py")
 	start := "python " + manage + " migrate --noinput && "
+	evidence := []DetectionEvidence{{Path: manage, Reason: "Django project"}}
+	if releaseAppliesSchema(schemaToolByName("django"), ctx.files.release, nil) {
+		start = ""
+		evidence[0].Reason = "Django project; the release command applies migrations before each release"
+	}
 	if django.WhiteNoise && django.StaticRoot {
 		start += "python " + manage + " collectstatic --noinput && "
 	}
-	evidence := []DetectionEvidence{{Path: manage, Reason: "Django project"}}
 	target := pythonTarget{module: project, directory: directory}
 	asgi := django.Channels || (server == "asgi.py" && !hasFileNamed(source.manage, joinRoot(directory, project+"/wsgi.py")))
 	switch {

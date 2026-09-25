@@ -417,7 +417,7 @@ func (e *NormalizedStepExecutor) prepareContext(
 	execution StepExecution,
 	plan *StoredExecutionPlan,
 ) StepResult {
-	buildVariables, err := e.variablesForScope(ctx, execution.Run.ID, execution.Run.EnvironmentID, "build")
+	buildVariables, secret, err := e.buildScopeVariables(ctx, execution.Run)
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
@@ -442,7 +442,7 @@ func (e *NormalizedStepExecutor) prepareContext(
 			result = builderUnavailableFailure(err)
 			// The daemon's own words are the only record of why, and nothing
 			// else writes them down before the step ends.
-			_ = stepLog(execution, "stderr", builderUnavailableDetail(err, buildRedactor(buildVariables)))
+			_ = stepLog(execution, "stderr", builderUnavailableDetail(err, buildRedactor(buildLogRedactions(buildVariables, secret))))
 		}
 		result.Cleanup = mustJSON(map[string]any{"workspaceRemoved": cleaned, "error": safeCleanupError(cleanupErr)})
 		return result
@@ -474,7 +474,7 @@ func (e *NormalizedStepExecutor) buildArtifact(
 	if err := e.latestStepEvidence(ctx, execution.Run.ID, StepPrepareContext, &preparedEvidence); err != nil {
 		return normalizedStepFailure(err)
 	}
-	buildVariables, err := e.variablesForScope(ctx, execution.Run.ID, execution.Run.EnvironmentID, "build")
+	buildVariables, secret, err := e.buildScopeVariables(ctx, execution.Run)
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
@@ -498,7 +498,7 @@ func (e *NormalizedStepExecutor) buildArtifact(
 	result, err := e.builder.Build(
 		ctx, preparedEvidence.BuildRoot,
 		releaseImageTag(execution.Run.EnvironmentID, execution.Run.ID),
-		plan.Build, preparedEvidence.Prepared, buildVariables, registryAuth,
+		plan.Build, preparedEvidence.Prepared, buildVariables, secret, registryAuth,
 		plan.SourceIdentity, plan.BuildEvidence.Compose,
 		func(line BuildLog) error {
 			if err := stepLog(execution, line.Stream, line.Text); err != nil {
@@ -517,7 +517,7 @@ func (e *NormalizedStepExecutor) buildArtifact(
 				Cleanup: mustJSON(cleanup),
 			}
 		}
-		if failure := e.buildFailure(ctx, execution, plan, preparedEvidence.Prepared, buildVariables, collector, err); failure != nil {
+		if failure := e.buildFailure(ctx, execution, plan, preparedEvidence.Prepared, buildLogRedactions(buildVariables, secret), collector, err); failure != nil {
 			failure.Cleanup = mustJSON(buildFailureCleanup(cleanup, err))
 			return *failure
 		}
@@ -742,6 +742,24 @@ func (e *NormalizedStepExecutor) variablesForScope(
 		result[value.Name] = value.Value
 	}
 	return result, nil
+}
+
+// buildScopeVariables are the run's build values and which of them are
+// secret, which is what the build's transcript is redacted of.
+func (e *NormalizedStepExecutor) buildScopeVariables(ctx context.Context, run EngineRun) (map[string]string, map[string]bool, error) {
+	if e.variables == nil {
+		return nil, nil, fmt.Errorf("%w: variable store is unavailable", ErrArtifactMissing)
+	}
+	scoped, err := e.variables.OpenRunScopedVariables(ctx, run.ID, run.EnvironmentID, "build")
+	if err != nil {
+		return nil, nil, err
+	}
+	values, secret := make(map[string]string, len(scoped)), map[string]bool{}
+	for _, value := range scoped {
+		values[value.Name] = value.Value
+		secret[value.Name] = value.Sensitivity != "plain"
+	}
+	return values, secret, nil
 }
 
 func validateImmutableExecutionSource(plan *StoredExecutionPlan) error {

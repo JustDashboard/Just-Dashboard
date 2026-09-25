@@ -135,6 +135,74 @@ func nodeWorkspacePatterns(files nodeFiles) []string {
 	return patterns
 }
 
+// nodeWorkspaceManifestLimit bounds how many workspace members' manifests an
+// install's inputs name.
+const nodeWorkspaceManifestLimit = 256
+
+// nodeWorkspaceManifests lists the package.json of every member the
+// workspace at files declares, by path under it, leaving out the one at
+// except. A frozen install at the workspace root reads each of them —
+// npm ci and pnpm install compare every importer the lockfile records with
+// its package.json — so each is an input of the install, whichever member
+// is being built. Globs are expanded over directories only (never
+// node_modules or a hidden one), at most four levels below a `**`.
+func nodeWorkspaceManifests(files nodeFiles, except string) []string {
+	patterns := nodeWorkspacePatterns(files)
+	if len(patterns) == 0 {
+		return nil
+	}
+	found := map[string]bool{}
+	var expand func(dir string, segments []string, depth int)
+	expand = func(dir string, segments []string, depth int) {
+		if len(found) >= nodeWorkspaceManifestLimit || depth > 8 {
+			return
+		}
+		if len(segments) == 0 {
+			if dir != "" && dir != except && files.exists(path.Join(dir, "package.json")) && nodeWorkspaceIncludes(patterns, dir) {
+				found[dir] = true
+			}
+			return
+		}
+		segment := segments[0]
+		if segment == "**" {
+			expand(dir, segments[1:], depth+1)
+			if depth < 4 {
+				for _, child := range files.directories(dir) {
+					expand(path.Join(dir, child), segments, depth+1)
+				}
+			}
+			return
+		}
+		if !strings.ContainsAny(segment, "*?[") {
+			if files.dirExists(path.Join(dir, segment)) {
+				expand(path.Join(dir, segment), segments[1:], depth+1)
+			}
+			return
+		}
+		for _, child := range files.directories(dir) {
+			if matched, err := path.Match(segment, child); err == nil && matched {
+				expand(path.Join(dir, child), segments[1:], depth+1)
+			}
+		}
+	}
+	for _, pattern := range patterns {
+		if strings.HasPrefix(pattern, "!") {
+			continue
+		}
+		pattern = strings.TrimSuffix(strings.TrimPrefix(pattern, "./"), "/")
+		if pattern == "" || !safeRelativePath(strings.NewReplacer("*", "x", "?", "x", "[", "x", "]", "x").Replace(pattern)) {
+			continue
+		}
+		expand("", strings.Split(pattern, "/"), 0)
+	}
+	manifests := make([]string, 0, len(found))
+	for dir := range found {
+		manifests = append(manifests, path.Join(dir, "package.json"))
+	}
+	sort.Strings(manifests)
+	return manifests
+}
+
 // nodeWorkspaceIncludes matches a member path against workspace globs the
 // way npm, Yarn, pnpm and Bun do for the common forms: `*` within a
 // segment, `**` across segments, and `!` exclusions.
@@ -272,16 +340,35 @@ func (b *ArtifactBuilder) settleBunImage(ctx context.Context, plan *nodeInstallP
 }
 
 // installInputs are the files the install reads from the build context, by
-// their path in it.
+// their path in it: the manifests — the package's, the workspace root's and
+// every other member's — the lockfile it installs from, and the
+// configuration its manager reads.
 func (s nodeInstallSource) installInputs(plan nodeInstallPlan) []string {
+	lockfiles := []string{}
+	if plan.lockfile != "" {
+		lockfiles = append(lockfiles, plan.lockfile)
+	}
+	return s.inputsWith(lockfiles)
+}
+
+// detectedInstallInputs are installInputs before a manager is chosen, with
+// every lockfile the install could read.
+func (s nodeInstallSource) detectedInstallInputs() []string {
+	lockfiles := []string{}
+	for _, reading := range s.facts.readings {
+		lockfiles = append(lockfiles, reading.Path)
+	}
+	return s.inputsWith(lockfiles)
+}
+
+func (s nodeInstallSource) inputsWith(lockfiles []string) []string {
 	inputs := []string{"package.json"}
 	if member := s.member(); member != "" {
 		inputs = append(inputs, path.Join(member, "package.json"))
 	}
-	if plan.lockfile != "" {
-		inputs = append(inputs, plan.lockfile)
-	}
-	return append(inputs, s.facts.inputs...)
+	inputs = append(inputs, lockfiles...)
+	inputs = append(inputs, s.facts.inputs...)
+	return append(inputs, s.facts.workspaceManifests...)
 }
 
 // renderNodeDockerfile renders the Node recipe: an optional toolchain stage

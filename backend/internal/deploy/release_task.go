@@ -19,6 +19,9 @@ type ReleaseTaskEvidence struct {
 	DurationMS    int64    `json:"durationMs"`
 	ExitCode      int      `json:"exitCode"`
 	Runner        string   `json:"runner,omitempty"`
+	// Mounts are the container paths of the plan's mounts an image task
+	// ran with.
+	Mounts []string `json:"mounts,omitempty"`
 }
 
 func runStoredReleaseTask(

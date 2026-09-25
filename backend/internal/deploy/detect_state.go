@@ -479,11 +479,65 @@ func applyStateDetection(marker *detectedMarkers, candidates []DetectedCandidate
 				})
 			}
 		}
+		found = platformVolumePaths(candidate, found, view, layout)
 		candidate.PersistentPaths = mergePersistentPaths(found)
 		for _, entry := range candidate.PersistentPaths {
 			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: entry.Source, Reason: persistentEvidence(entry)})
 		}
 	}
+}
+
+// platformVolumePaths adds the volumes another platform's file mounts for
+// the candidate — fly.toml's [[mounts]], render.yaml's disk, Railway's
+// volumes — as state to keep where that platform kept it. The application
+// names the absolute path itself, so the volume stands at the same one. A
+// volume already planned there, or state detection found under it without
+// a volume, takes that platform's directory instead of a second entry. The
+// directory needs a volume the process can write: anywhere for a process
+// running as root, otherwise only where the image prepares one.
+func platformVolumePaths(candidate *DetectedCandidate, found []DetectedPersistentPath, view stateRoot, layout stateLayout) []DetectedPersistentPath {
+	for _, manifest := range candidate.PlatformManifests {
+		for _, volume := range manifest.Volumes {
+			volume = path.Clean(volume)
+			if !path.IsAbs(volume) || volume == "/" || volume == layout.workdir || strings.HasPrefix(layout.workdir, volume+"/") {
+				continue
+			}
+			nested := func(a, b string) bool { return a == b || strings.HasPrefix(a, b+"/") }
+			target := platformVolumeTarget(volume, view, layout)
+			planned := false
+			for index := range found {
+				entry := &found[index]
+				switch {
+				case entry.Target != "" && (nested(entry.Target, volume) || nested(volume, entry.Target)):
+					planned = true
+				case entry.Target == "" && entry.Variable == "" && target != "" && nested(entry.Path, volume):
+					entry.Target, planned = target, true
+				}
+			}
+			if planned {
+				continue
+			}
+			found = append(found, DetectedPersistentPath{
+				Kind: PersistentStorage, Path: volume, Target: target, Source: manifest.File,
+				Reason: platformNames[manifest.Platform] + " mounts a volume at " + volume,
+			})
+		}
+	}
+	return found
+}
+
+// platformVolumeTarget is where a volume can stand for a platform's mount:
+// the same path, when the process can write a volume there.
+func platformVolumeTarget(volume string, view stateRoot, layout stateLayout) string {
+	switch {
+	case layout.root, volume == layout.dataDir:
+		return volume
+	case layout.repoDirsOnly && strings.HasPrefix(volume, layout.workdir+"/"):
+		if dir := strings.TrimPrefix(volume, layout.workdir+"/"); view.committed[dir] {
+			return volume
+		}
+	}
+	return ""
 }
 
 func persistentEvidence(entry DetectedPersistentPath) string {
@@ -1174,9 +1228,28 @@ func sqlalchemySQLitePath(content string, match []int, source string, deps pytho
 		// application's instance folder.
 		file = path.Join("instance", file)
 	}
-	entry, ok := literalSQLite(file, source, "a SQLAlchemy URL opens the SQLite file "+boundedEvidence(file), view, layout)
+	reader := "a SQLAlchemy URL"
+	switch {
+	case deps.has("django"):
+		reader = "Django's database settings"
+	case deps.has("flask-sqlalchemy"):
+		reader = "Flask-SQLAlchemy's database URI"
+	}
+	entry, ok := literalSQLite(file, source, reader+" opens the SQLite file "+boundedEvidence(file), view, layout)
 	if !ok {
 		return DetectedPersistentPath{}, false
+	}
+	if helper, variable, found := djangoURLReader(content, match[0]); found {
+		// dj_database_url.config(default="sqlite:///…") and django-environ's
+		// env.db(default=…) read the variable first: the file is what runs
+		// without one, and a linked server database takes it out of use.
+		if variable == "" {
+			entry.Reason = "Django's database is the SQLite file " + boundedEvidence(file) + ", parsed by " + helper
+			return entry, true
+		}
+		entry.DatabaseVariable = variable
+		entry.Reason = "Django's database comes from " + variable + " (" + helper + ") and falls back to the SQLite file " + boundedEvidence(file)
+		return entry, true
 	}
 	variable := pythonEnvRead(before)
 	if field := pydanticFieldRE.FindStringSubmatch(before); variable == "" && field != nil && strings.Contains(content, "BaseSettings") {
@@ -1190,6 +1263,54 @@ func sqlalchemySQLitePath(content string, match []int, source string, deps pytho
 		entry.Reason = "the database comes from " + variable + " and falls back to the SQLite file " + boundedEvidence(file)
 	}
 	return entry, true
+}
+
+var (
+	djangoURLReaderRE = regexp.MustCompile(`dj_database_url\.(?:config|parse)\(|\benv\.db(?:_url)?\(`)
+	djangoEnvKwargRE  = regexp.MustCompile(`\benv\s*=\s*["']([A-Za-z_][A-Za-z0-9_]*)["']`)
+	firstStringArgRE  = regexp.MustCompile(`^\s*["']([A-Za-z_][A-Za-z0-9_]*)["']`)
+)
+
+// djangoURLReader is the Django helper whose call the SQLite URL at offset
+// is an argument of — dj-database-url's config() or parse(), django-environ's
+// env.db() — with the variable it reads first ("" for parse, which reads
+// none): config's env= or DATABASE_URL, env.db's first argument or
+// DATABASE_URL.
+func djangoURLReader(content string, offset int) (helper, variable string, found bool) {
+	start := max(0, offset-512)
+	calls := djangoURLReaderRE.FindAllStringIndex(content[start:offset], -1)
+	if len(calls) == 0 {
+		return "", "", false
+	}
+	open := start + calls[len(calls)-1][1]
+	depth, end := 1, open
+	for ; end < len(content) && end < open+2048 && depth > 0; end++ {
+		switch content[end] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		}
+		if depth == 0 && end < offset {
+			return "", "", false
+		}
+	}
+	arguments := content[open:end]
+	switch call := content[start+calls[len(calls)-1][0] : open]; {
+	case strings.HasPrefix(call, "dj_database_url.parse"):
+		return "dj-database-url", "", true
+	case strings.HasPrefix(call, "dj_database_url"):
+		variable = "DATABASE_URL"
+		if match := djangoEnvKwargRE.FindStringSubmatch(arguments); match != nil {
+			variable = match[1]
+		}
+		return "dj-database-url", variable, true
+	}
+	variable = "DATABASE_URL"
+	if match := firstStringArgRE.FindStringSubmatch(arguments); match != nil {
+		variable = match[1]
+	}
+	return "django-environ", variable, true
 }
 
 func flaskSQLAlchemy2(files map[string][]byte) bool {
