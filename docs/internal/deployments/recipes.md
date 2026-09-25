@@ -5,8 +5,8 @@ commands execute inside the build container; source inspection never executes re
 on the host. Generated Dockerfiles use root-relative, exclusive writes so a checkout symlink cannot
 redirect output outside the build context. Detection ignores this generated directory.
 
-Detection reads manifests as data — `package.json`, `angular.json`, `requirements.txt`, `pyproject.toml`,
-`uv.lock`, `poetry.lock`, `Cargo.toml`, `pom.xml`, `build.gradle(.kts)`, `*.csproj`, `deno.json(c)`, a
+Detection reads manifests as data — `package.json`, `angular.json`, requirement files, `pyproject.toml`,
+`uv.lock`, `poetry.lock`, `pdm.lock`, `Pipfile(.lock)`, `setup.cfg`, `environment.yml`, `Cargo.toml`, `pom.xml`, `build.gradle(.kts)`, `*.csproj`, `deno.json(c)`, a
 `Procfile`, and for a JavaScript package its lockfiles, `.npmrc`, `.yarnrc.yml`, `bunfig.toml`,
 `pnpm-workspace.yaml` and the Node and Bun version files (`.nvmrc`, `.node-version`, `.tool-versions`,
 `.bun-version`) — and names a candidate per root with the framework, the build and start commands, the port,
@@ -1092,53 +1092,198 @@ toolchain needs, below; the PHP recipe's asset stage builds the same way.
 
 ## Python
 
-The recipe reads `requirements.txt`, a PEP 621 `pyproject.toml`, a Poetry `pyproject.toml`, `uv.lock`
-and `poetry.lock`. Unpinned requirements are accepted — refusing them turned the most ordinary Python
-repository there is into a manual Dockerfile — and preflight raises `dependencies_unpinned` as a warning
-the operator acknowledges, naming what a rebuild may resolve differently and how to pin. Installation
-follows the manifest: `pip install --requirement` for requirements, `uv sync --frozen --no-dev` into the
-project's `.venv` (put first on `PATH`, with `VIRTUAL_ENV` set, so a start command can say `uvicorn`),
-`poetry install --only main --no-root` into the interpreter (`POETRY_VIRTUALENVS_CREATE=false`), and for
-a bare pyproject the standard library's `tomllib` reads `[project].dependencies` into a requirements
-file rather than `pip install .`, which needs a build backend an application never set up (3.10 brings
-`tomli`). A process manager the start command runs that no manifest declares — `gunicorn`, `uvicorn` —
-is installed at the exact release `build_python.go` pins, into the same environment as the dependencies.
+A Python root is a directory with a dependency manifest: `requirements.txt` or a requirement file
+beside it (`requirements-prod.txt`, a `requirements/` folder), `pyproject.toml`, `Pipfile`, a uv,
+Poetry or PDM lock, `setup.cfg` or a literal `install_requires=[…]` in `setup.py`, or a conda
+`environment.yml`. The last two count only when they install something that serves (a framework or
+`gunicorn`/`uvicorn`), since vendored libraries and documentation environments carry them too; a
+`requirements-dev.txt` alone never does. Every manifest is read as bounded data
+(`detect_python_manifests.go`, `detect_python_lock.go`, `detect_python_project.go`): `setup.py` is
+searched for a literal list and never executed, a requirement file's `-r`/`-c` includes are followed
+inside the root (three deep, sixteen files), UTF-16 files written by PowerShell's `pip freeze >` are
+decoded, pyproject arrays are read quote-aware (`celery[redis]` no longer ends the dependency list), and a
+lock too large for the walk's budget is streamed once and kept without other platforms' wheels and
+hashes. A `manage.py` directory that `django-admin startproject` made inside the repository is folded into
+the root above it rather than becoming a root of its own.
 
-The interpreter family comes from `build.pythonVersion`, then `.python-version`, then Heroku-style
-`runtime.txt`, then pyproject's `requires-python` (or Poetry's `python` constraint): `>=3.11` picks the
-newest release the constraint allows, `~=3.11.0` and `==3.12.*` mean that family. The catalogue carries
-3.10 to 3.13; anything else is a `recipe_unsupported` finding pointing at a Dockerfile.
+**What is installed, and how.** The recipe installs from the manifest that pins most:
 
-The candidate keeps pyproject's declared range (`pythonRequires`) and the manifest the recipe installs
-from (`pythonInstall`). A family the plan selects — or the one detection chose, from `.python-version`
-say — outside that range is `python_version_unsupported`: blocked on the `uv.lock` and `poetry.lock`
-paths, which refuse the interpreter, and a warning on pip, which installs anyway. The action names the
-newest family the range allows.
+| Manifest | Install |
+| --- | --- |
+| `uv.lock` | `pip install uv==<pin> && uv sync --locked --no-dev --python /usr/local/bin/python` into `/app/.venv` (first on `PATH`, `VIRTUAL_ENV` set, `UV_PYTHON_DOWNLOADS=never`), so the interpreter is always the digest-pinned image's |
+| `poetry.lock` or `[tool.poetry]` | `pip install poetry==<pin> && poetry install --only main --no-root --no-interaction` into the interpreter (`POETRY_VIRTUALENVS_CREATE=false`) |
+| `pdm.lock` | `pip install pdm==<pin> && pdm export --prod` to a hashed requirement file, installed with pip |
+| `Pipfile.lock` | `pip install pipenv==<pin> && pipenv install --system --deploy`; `--ignore-pipfile` when the build's Python is not the Pipfile's `python_version` (`--deploy` would refuse it); a `Pipfile` without a lock installs `--skip-lock` |
+| requirement file | `pip install --requirement <file>`: `requirements.txt`, else `requirements/production.txt`, `requirements/prod.txt`, `requirements-prod.txt`, `requirements/base.txt`, … or the only file that is not for development |
+| bare `pyproject.toml` | `tomllib` reads `[project].dependencies` into a requirement file (3.10 brings `tomli`) rather than `pip install .`, which needs a build backend an application never set up |
+| `setup.py`/`setup.cfg` | `pip install .` |
+| `environment.yml` | its `pip:` list and the conda packages a reviewed table maps to PyPI (`pandas=2.1` read as `pandas==2.1.*`), written into the image; a conda-only package is `recipe_unsupported` naming it |
 
-`deploy/frameworks_python.go` recognises the frameworks from the dependency names and finds the
-application object in the conventional entry files (`main.py`, `app.py`, `server.py`, `api.py`,
-`wsgi.py`, `asgi.py`, `streamlit_app.py`, a package's `__init__.py`; never under `tests/`, `migrations/`
-or `examples/`), shallowest first:
+The tools are pinned (`build_python.go`), so two builds of one commit run the same resolver.
+Unpinned requirements are accepted — refusing them turned the most ordinary Python repository there is
+into a manual Dockerfile — and preflight raises `dependencies_unpinned` as a warning. A process manager
+the start command runs that no manifest declares is installed at the pinned release into the same
+environment: `gunicorn`, and `uvicorn[standard]`, whose websocket library FastAPI's websocket routes need
+(`python_websocket_library_missing` warns when a declared bare `uvicorn` would refuse them).
+
+A lock is compared with the manifest it was generated from, the Python shape of the npm incident: uv's
+root package `requires-dist` (names and specifiers) and dependency groups against pyproject, Poetry's and
+PDM's package names against the declared dependencies, `Pipfile.lock`'s `default` against the Pipfile.
+A stale lock is resolved again inside the build (`uv sync --no-dev`, `poetry lock &&`, `pdm lock
+--update-reuse &&`, `pipenv install --skip-lock`) with the reason in the run log, and preflight warns
+`python_lock_stale` (missing and changed names; run `uv lock` and commit). A lock detection judges in
+sync installs `--locked`, so drift it could not see fails loudly and is classified. A requirement file
+that omits dependencies a PEP 621 pyproject declares is the older description: the build installs from
+pyproject and `python_manifests_disagree` says so. A pyproject that only configures tools installs
+nothing, and `python_dependencies_empty` warns — blocked when the code imports a framework or has a
+`manage.py`.
+
+`pip freeze` leftovers are rewritten inside the image before pip reads them, by generic `sed`
+expressions that name no line of the file: `name @ file:///croot/…` becomes `name`, and Windows or macOS
+packages (`pywin32`, `pywinpty`, `pyobjc-*`) and paths outside the checkout (`-e C:\…`) are commented out
+with their `--hash` continuation lines (`python_requirements_local_artifacts`). A pip install that pulls
+PyTorch in (`torch`, `sentence-transformers`, `ultralytics`, `openai-whisper`, …) with no index of its own
+adds PyTorch's CPU index to `PIP_EXTRA_INDEX_URL` for that one command: a deployment container is never
+given a GPU, and PyPI's Linux x86_64 torch brings gigabytes of CUDA libraries (`python_cpu_torch_selected`;
+a lock that pins them is `python_gpu_wheels`).
+
+A private index becomes install-scoped variables with the names each tool reads — `PIP_EXTRA_INDEX_URL`
+or `PIP_INDEX_URL` for a requirement file's index, `POETRY_HTTP_BASIC_<SOURCE>_USERNAME/PASSWORD`,
+`UV_INDEX_<NAME>_USERNAME/PASSWORD`, and every `${NAME}` a requirement file or Pipfile source expands
+(required, since the file names it) — with `python_private_index` warning. A credential committed in an
+index or dependency URL is `credential_in_manifest`; a `git+ssh` dependency is the decision
+`python_private_git_dependency`, since the build has no SSH key.
+
+A uv workspace member (a directory a parent pyproject's `[tool.uv.workspace]` members cover, with the
+workspace's `uv.lock`) installs from the workspace root: the build context widens to it
+(`ContextDirectory`), `uv sync --locked --no-dev --package <member>` installs the member with its sibling
+packages, and the server runs from the member's directory. A `[tool.uv.sources]` workspace or path
+dependency built without its workspace is `recipe_unsupported`: pip would fetch an unrelated package of
+the same name from PyPI.
+
+**System packages.** The image is `python:<family>-slim-trixie`, named by its Debian release so the
+package names cannot drift, and a dependency that builds or loads against a system library gets it from
+Debian in one layer before the source is copied: `psycopg2` (gcc, libc6-dev, libpq-dev), `psycopg`
+without its binary or C extra (libpq5), `mysqlclient`, `mariadb`, `python-ldap`, `uwsgi`, `pycairo`,
+`GDAL`, `opencv-python` (libgl1, libglib2.0-0t64), `weasyprint` (Pango), `python-magic`, `pdf2image`
+(poppler), `pytesseract`, `pydub`/`moviepy`/`openai-whisper` (ffmpeg), `pyodbc`, `pyzbar`, `pyvips`,
+GeoDjango (`django.contrib.gis`: gdal-bin), and `git` for a VCS requirement. The recipe installs these
+itself on every build (`candidate.systemPackages`, `automatic`); `build.systemPackages` adds others, at
+most 32 Debian names, and is seeded from another platform's `Aptfile` or `nixpacks.toml` under trixie's
+names (`libgl1-mesa-glx` → `libgl1`), which answers `platform_system_packages_ignored`.
+`python_system_packages` lists what the image installs and why. A build that still fails on a missing
+library is classified with the packages to add (`pg_config` → gcc libc6-dev libpq-dev, `libGL.so.1` →
+libgl1) as its fix.
+
+**The interpreter.** The catalogue carries 3.10 to 3.14; 3.13 stays the default for a project that
+declares nothing. The family comes from `build.pythonVersion`, then the first file that pins one —
+`.python-version` (the root's, or the nearest directory above it in a monorepo), `runtime.txt`,
+`.tool-versions`, `mise.toml`, the Pipfile's `python_version`, `environment.yml`'s `python=` — then the
+range `requires-python` (either TOML quote style), Poetry's `python`, `uv.lock`'s `requires-python` or a
+setup file's `python_requires` allows. A range picks the newest family at or below the default, and a
+floor above it (`>=3.14`) picks the family it asks for; a range the catalogue cannot meet is
+`recipe_unsupported` naming it, never the default. A patch pin (`3.13.1`) is served by the family's image,
+said in the evidence. A declared 3.8 or 3.9 is raised to 3.10 (`python_version_raised`) when its pins
+publish 3.10 wheels, and refused naming them otherwise.
+
+Pins decide too: a 2024 `pip freeze` pins numpy 1.26 and pydantic-core 2.14, which publish no wheel for
+3.13, and on an image with no compiler the build fails. A lock is read exactly — a locked package with
+Linux wheels supports a family when one of them is tagged for it (`cp3N`, `abi3` from an earlier `cp3M`,
+or pure) for the build's architecture — and a requirement file's `==` pins and upper bounds are checked
+against a reviewed table of the first release with Linux wheels for each family, for the compiled
+distributions freezes commonly pin (`build_python_wheels.go`, generated from PyPI's JSON). A few releases
+import a module a later Python removed (python-telegram-bot before 20, Django before 4.1, pydub without
+`audioop-lts`). An undeclared version then stays below the family those pins cannot use, with the pins as
+evidence (`python_version_limited`); a chosen one they cannot use is `python_version_wheels_missing`
+(naming a family that works) or `python_native_build_unmapped` when none does. A family outside the
+declared range is `python_version_unsupported`: blocked on the uv and Poetry paths, which refuse it, a
+warning on pip.
+
+**Frameworks.** `deploy/frameworks_python.go` recognises a framework from what the project itself
+declares — not from everything its lock installs, since Gradio locks FastAPI and Dash locks Flask — and
+from the entry that builds its application: the conventional entry files the walk reads, the root's other
+scripts (at most 32), and the module a `run.py`, `wsgi.py`, `main.py` or `app.py` imports its factory from.
+Frameworks built on another come first, and one that only appears in the manifests yields to one whose
+application an entry builds (a FastAPI app that mounts Gradio is FastAPI). aiohttp, Tornado and Starlette
+count only with an entry that builds their application, since half the catalogue depends on them.
 
 | Framework | Start | Port |
 | --- | --- | --- |
-| Django (`manage.py`) | `python manage.py migrate --noinput && gunicorn <project>.wsgi:application --bind 0.0.0.0:${PORT:-8000}`, with `collectstatic` before it when WhiteNoise is installed; `uvicorn <project>.asgi:application` when only an ASGI module exists and uvicorn is declared | 8000 |
-| FastAPI | `uvicorn <module>:<object> --host 0.0.0.0 --port ${PORT:-8000}` for the `= FastAPI(` object found | 8000 |
-| Flask | `gunicorn --bind 0.0.0.0:${PORT:-8000} <module>:<object>`, or `'<package>:create_app()'` for a factory | 8000 |
-| Streamlit | `streamlit run <script> --server.port ${PORT:-8501} --server.address 0.0.0.0 --server.headless true` | 8501 |
-| Gradio | `python <script>` with `GRADIO_SERVER_NAME=0.0.0.0` in the image | 7860 |
+| Django (`manage.py` at the root, or the only one two levels down) | `python [dir/]manage.py migrate --noinput && [collectstatic &&] gunicorn --bind 0.0.0.0:${PORT:-8000} --access-logfile - [--chdir dir] <project>.wsgi:application`; Channels (`ProtocolTypeRouter` in asgi.py) runs `daphne` when declared, else `uvicorn <project>.asgi:application` | 8000 |
+| FastAPI, Litestar, Starlette | `uvicorn <module>:<object> --host 0.0.0.0 --port ${PORT:-8000}`; `--factory` for a factory with no required parameters | 8000 |
+| Flask, Bottle, Falcon (WSGI) | `gunicorn --bind 0.0.0.0:${PORT:-8000} --access-logfile - <module>:<object>`, or `'<module>:create_app()'`; Flask-SocketIO runs one worker with threads (or eventlet/gevent-websocket) | 8000 |
+| Falcon ASGI | uvicorn | 8000 |
+| Sanic | `sanic <module>:<object> --host 0.0.0.0 --port ${PORT:-8000}` | 8000 |
+| Quart | `hypercorn --bind 0.0.0.0:${PORT:-8000} '<module>:<object>'` | 8000 |
+| aiohttp | `python <script>` for `web.run_app` (its `port=`), else gunicorn with `aiohttp.GunicornWebWorker` | 8080 |
+| Tornado | `python <script>` | its `.listen(N)` |
+| Streamlit | `streamlit run <script> --server.port ${PORT:-8501} --server.address 0.0.0.0 --server.headless true`, the script beside `pages/` for a multipage app | 8501 |
+| Gradio | `python <script>` with `GRADIO_SERVER_NAME=0.0.0.0` (`gradio_bind_loopback` warns about a literal `server_name="127.0.0.1"`) | its `server_port`, else 7860 |
+| Dash | `gunicorn … <module>:server` when the script exposes `server = app.server`, else `python <script>` with `HOST=0.0.0.0` | 8050 |
+| Panel | `panel serve <script> --address 0.0.0.0 --port ${PORT:-5006}`, with `BOKEH_ALLOW_WS_ORIGIN` bound to the domain | 5006 |
+| Chainlit | `chainlit run <script> --host 0.0.0.0 --port ${PORT:-8000} --headless` | 8000 |
+| NiceGUI | `python <script>` | its `ui.run(port=)`, else 8080 |
+| Mesop | `gunicorn --bind 0.0.0.0:${PORT:-8080} --access-logfile - <module>:me` | 8080 |
+| Reflex | `recipe_unsupported`: it compiles a Node frontend and runs a separate backend | — |
+
+An application object is found as applications keep it: `app = FastAPI()` or `fastapi.FastAPI()`, a
+module-level `app = create_app()` whose factory builds or is annotated with the framework's type, a Flask
+factory that takes a configuration used through the object a `wsgi.py` builds from it. A `src/` layout
+imports by package name with `--app-dir src` (uvicorn) or `--pythonpath src` (gunicorn), and installs the
+project itself (`pip install .`, Poetry without `--no-root`) when it declares a build system; an
+application folder whose modules import their siblings by bare name (`app/main.py` importing `routers`)
+runs from inside it. `start_module_unresolved` warns when a start command's module is none of the root's
+importable names.
+
+A start command the repository declares outranks every guess: a `Procfile` web process, then a task
+runner's `start`/`serve` task (`[tool.pdm.scripts]`, `[tool.poe.tasks]`, `[tool.taskipy.tasks]`, Hatch's
+default scripts), with `pdm run`/`hatch run`/`poetry run`/`uv run` stripped; a composite task is not a
+command. A declared start answers the framework's questions (confidence high), and keeps what the
+platform it was written for would have done: Heroku's buildpack collects Django's static files at build
+time, so a Django web process gets `collectstatic` before it when WhiteNoise has a `STATIC_ROOT`. Its
+`release:` line is planned as described under [release commands](#release-commands).
+
+Django's settings are read as text. The settings module is the one the WSGI (or ASGI) module names;
+when that is a development module (`…dev`, `…local`) with a `production.py` beside it that sets a
+`SECRET_KEY`, the production one. When `manage.py` names another (cookiecutter-django's `local`), the
+chosen module is seeded as a plain `DJANGO_SETTINGS_MODULE` variable, so `migrate`, `collectstatic` and
+the server load the same settings. A development module with no usable production sibling (Wagtail's
+template, whose `production.py` sets no key) keeps running and `django_development_settings` warns.
+`collectstatic` runs at container start, never at build (settings need runtime secrets), and only with
+WhiteNoise and a `STATIC_ROOT`: WhiteNoise without one is `django_static_root_missing`, static files
+without WhiteNoise `django_static_unserved`. With DEBUG off and no `LOGGING`, Django sends request errors
+to the admins' email, not to the output the dashboard shows: `django_errors_unlogged` warns with a
+console `LOGGING` snippet, the detected gunicorn commands write their access log (`--access-logfile -`),
+and a readiness failure that answered an error with no error in the output is named
+`runtime_errors_hidden` (a 400 is Django's host allowlist, `runtime_host_disallowed`).
 
 The detected commands read `${PORT:-N}` rather than a fixed port, so changing the application port in
-Build settings moves the server with it. A framework whose application object is not in an entry file
-keeps the port and asks for the module. A Django project answers only the hosts its settings allow; the
+Build settings moves the server with it. A Django project answers only the hosts its settings allow; the
 variable `ALLOWED_HOSTS` is read from is bound to the planned domain in the separator the settings split
-it on (see [environment discovery](#environment-discovery-and-database-suggestions)), and a literal list
-is checked against the planned domain by `readiness_host_allowlist`. A plain `main.py`/`app.py` is a
-low-confidence worker that asks whether it serves. The recipe refuses a plan with no start command,
-naming the frameworks detection proposes one for, and preflight says so first: `start_command_missing`
-(blocked, on the start command) for the Python, Deno and PHP recipes and a JavaScript server with no
-static output. The configure form's first step refuses to go on without one for the same plans
-(`needsStartCommand`).
+it on, and `CSRF_TRUSTED_ORIGINS` to its origin (see [environment
+discovery](#environment-discovery-and-database-suggestions)); a literal list is checked against the
+planned domain by `readiness_host_allowlist`. `st.secrets` reads only `.streamlit/secrets.toml`, so a
+Streamlit start command whose sources read `st.secrets["KEY"]` first writes that file from the variables
+of the same names (each value a JSON string, which is a TOML string; values never enter the image), unless
+the repository commits one; a table such as `st.secrets["connections"]` cannot be a variable
+(`streamlit_secrets_nested`). A plain `main.py`/`app.py` is a low-confidence worker that asks whether it
+serves. The recipe refuses a plan with no start command, and preflight says so first:
+`start_command_missing` (blocked, on the start command) for the Python, Deno and PHP recipes and a
+JavaScript server with no static output. The configure form's first step refuses to go on without one for
+the same plans (`needsStartCommand`).
+
+A Django or Flask application whose `package.json` builds its CSS or JavaScript (a `build` script with
+Tailwind, Vite, webpack, esbuild, PostCSS or Sass, and no server of its own) at the root or in
+django-tailwind's `theme/static_src` gets a Node stage: the same install planner as the JavaScript recipe
+installs and runs the build over a copy of the application, drops `node_modules`, and the Python image
+copies the result in place of the source (`python_assets_built`). The package is not offered as a site
+of its own, and `build.packageManager` chooses its manager among competing lockfiles.
+
+gunicorn and uvicorn run one worker unless told otherwise, and both read `WEB_CONCURRENCY`. When the
+start command leaves the count to it and the application loads no machine-learning model, the build
+records that (`PreparedBuild.webConcurrency`) and the runtime sets it for the container
+(`runtime_concurrency.go`): 2×CPU+1 within 256 MiB of the memory limit per worker, and 2 when the plan
+sets no limit; an explicit variable always wins.
 
 Python migration tools are recognised the way the Node ones are, and share their preflight findings:
 Django (`python manage.py migrate --noinput`, already the default start's first step), Alembic
@@ -1577,7 +1722,7 @@ names, with the remedy the evidence supports:
 
 | Code | Recognised from | Fix computed |
 |------|-----------------|--------------|
-| `build_lockfile_out_of_sync` | npm `EUSAGE … are in sync` (subjects from `Missing:`/`Invalid:`), Bun `lockfile had changes, but lockfile is frozen`, `ERR_PNPM_OUTDATED_LOCKFILE`, Yarn `YN0028` and Yarn 1 `--frozen-lockfile`, Poetry `changed significantly`, uv `--locked`, Cargo `--locked was passed`, Go `missing go.sum entry` / `updates to go.mod needed`, Composer lock errors, Deno `The lockfile is out of date`, Bundler deployment mode | the package manager whose lockfile the detected candidate reads as in sync |
+| `build_lockfile_out_of_sync` | npm `EUSAGE … are in sync` (subjects from `Missing:`/`Invalid:`), Bun `lockfile had changes, but lockfile is frozen`, `ERR_PNPM_OUTDATED_LOCKFILE`, Yarn `YN0028` and Yarn 1 `--frozen-lockfile`, Poetry `changed significantly`, uv `--locked`, Pipenv `Your Pipfile.lock (…) is out of date`, Cargo `--locked was passed`, Go `missing go.sum entry` / `updates to go.mod needed`, Composer lock errors, Deno `The lockfile is out of date`, Bundler deployment mode | the package manager whose lockfile the detected candidate reads as in sync |
 | `build_lockfile_incompatible` | pnpm `ERR_PNPM_LOCKFILE_BREAKING_CHANGE`/`BROKEN_LOCKFILE`, Cargo lock version, Poetry/uv lock format, Bun lockfile version | — |
 | `build_package_manager_mismatch` | corepack `This project is configured to use X`, `ERR_PNPM_BAD_PM_VERSION` | the manager `packageManager` declares |
 | `build_lifecycle_script_blocked` | `ERR_PNPM_IGNORED_BUILDS`, Bun `Blocked N postinstalls` with a consequence | — |
@@ -1588,10 +1733,10 @@ names, with the remedy the evidence supports:
 | `build_prisma_client_missing` | `@prisma/client did not initialize yet` | `prisma generate` before the build command, unless the recipe already runs it (the `prisma` CLI is a dependency); otherwise the sentence says to add the CLI |
 | `build_platform_binary_missing` | rollup/esbuild/SWC/lightningcss/oxide/sharp Linux binaries missing | — |
 | `build_legacy_openssl` | `0308010C`, `ERR_OSSL_EVP_UNSUPPORTED` | `NODE_OPTIONS=--openssl-legacy-provider` |
-| `build_system_library_missing`, `build_native_toolchain_missing` | `pg_config`, `mysql_config`, pkg-config, `cannot find -l`, `*-sys` crates, headers, Prisma libssl, glibc on musl; `gyp ERR!`, a missing compiler (a shell's `make: not found` only with exit 127 or a wrapper reporting 127), `Failed building wheel`, cgo, `linking with cc`, `protoc`, perl, NativeAOT's clang | — |
+| `build_system_library_missing`, `build_native_toolchain_missing` | `pg_config`, `mysql_config`, pkg-config, `cannot find -l`, `*-sys` crates, headers, Prisma libssl, glibc on musl; `gyp ERR!`, a missing compiler (a shell's `make: not found` only with exit 127 or a wrapper reporting 127), `Failed building wheel`, cgo, `linking with cc`, `protoc`, perl, NativeAOT's clang | for the Python recipe, the Debian packages to add to `build.systemPackages` (`pg_config` → gcc libc6-dev libpq-dev, a compiler → build-essential) |
 | `build_install_script_failed` | npm `error path /app/node_modules/X` with `command failed`, Yarn `YN0009` | — |
 | `build_php_extension_missing` | `requires ext-X … it is missing from your system` | — |
-| `build_dependency_conflict`, `build_dependency_unavailable`, `build_dependency_local_path`, `build_dependency_advisory_blocked` | ERESOLVE, `ResolutionImpossible`, Composer/uv/Cargo/NuGet conflicts; ETARGET/E404, `No matching distribution`, NU1101, Maven artifacts, Go revisions, gems; conda `/croot/` paths; Composer advisories | — |
+| `build_dependency_conflict`, `build_dependency_unavailable`, `build_dependency_local_path`, `build_dependency_os_only`, `build_dependency_advisory_blocked` | ERESOLVE, `ResolutionImpossible`, Composer/uv/Cargo/NuGet conflicts; ETARGET/E404, `No matching distribution`, NU1101, Maven artifacts, Go revisions, gems; conda `/croot/` paths; a Windows or macOS package from a `pip freeze` (`pywin32`, `pywinpty`, `pyobjc-*`); Composer advisories | — |
 | `build_registry_auth`, `build_registry_rate_limited`, `build_network` | E401/E403, `YN0041`, `terminal prompts disabled`; `toomanyrequests`; DNS, TLS and connection failures | — |
 | `build_command_not_found`, `build_script_missing` | `sh: X: not found` when the step exited 127 or a wrapper reports that status (`exit code 127`, `exited (127)`) — a caught probe prints the same line and carries on —, `executable file not found`, pip's `Cannot find command 'git'`, Laravel Wayfinder's `php artisan wayfinder:generate` in an asset stage without PHP; npm/pnpm/Bun/Yarn missing script | the build command with its runner moved to the image's package manager (the install planner's own rewrite, `nodeRunnerFor`), read from the install the build recorded |
 | `build_module_not_found`, `build_type_error`, `build_compile_error` | `Cannot find module`, `Can't resolve`, `No module named`, `no required module provides`; `Type error:`, `error TS…`; rustc, C#, javac/Kotlin, Go, Maven, Gradle, bundler and framework compile errors | — |
@@ -1610,7 +1755,12 @@ Containerfile and Go fixtures through detection and the real artifact/runtime ow
 own starters: Astro 7 (static), Nuxt 4 and React Router 8 (servers), FastAPI on an unpinned
 `requirements.txt` with no server declared, a Flask factory on a bare `pyproject.toml`, a Django project
 whose first request reads its migrated table, a Streamlit script (its health endpoint and a file served
-through its own static-serving setting) and a Gradio app (the value in the page's embedded config), an
+through its own static-serving setting) and a Gradio app (the value in the page's embedded config), the
+Python install shapes (a Litestar app on a `pdm.lock` started by its `[tool.pdm.scripts]` task, Flask on a
+`Pipfile.lock`, FastAPI on a `uv.lock` that asks for Python 3.14 and answers from the image's own
+interpreter, a Django project created inside the repository with a `requirements/` folder, split settings
+run through the seeded `DJANGO_SETTINGS_MODULE` and psycopg2 compiled against the libpq the recipe
+installs, and a Flask app whose JavaScript a Node stage bundles), an
 axum service, a Maven jar and a Gradle jar, an ASP.NET Core minimal API, a Deno server, a minimal Laravel
 12 application (migrated, with the form's generated `APP_KEY`) and a plain `index.php`. It checks
 readiness and served values without supplying build values at runtime; recipe fixtures also inspect logs,
@@ -1618,7 +1768,11 @@ metadata and saved image layers for private install credentials. The Go fixture 
 custom startup and the selected toolchain through its HTTP response. These local adapter journeys
 complement the production-build browser gate; they do not constitute public provider/DNS/TLS or clean-VM
 acceptance. The remaining catalogue entries are covered by rendered-Dockerfile and detection tests
-(`frameworks_*_test.go`, `build_recipes_test.go`). Persistent state, schema tools, seeds and their
+(`frameworks_*_test.go`, `build_recipes_test.go`); for Python, `frameworks_python_catalogue_test.go`,
+`build_python_test.go`, `detect_python_manifests_test.go` and `preflight_python_test.go`, and every other
+framework's detected start command (Starlette, Sanic, Quart, Falcon, Bottle, aiohttp, Tornado, Dash, Panel,
+Chainlit, NiceGUI, Mesop, Channels under Daphne), the setup.py, conda, freeze-leftover and uv workspace
+installs, and the Streamlit secrets step were built and served locally when they were written. Persistent state, schema tools, seeds and their
 findings are table-tested per stack in `detect_state_test.go`, `detect_schema_test.go`,
 `preflight_state_test.go` and `recipe_runtime_files_test.go`. Repository shape — ranking, decoys, static
 roots, split repositories, shapes that are not services, ecosystems without a recipe, processes, other
