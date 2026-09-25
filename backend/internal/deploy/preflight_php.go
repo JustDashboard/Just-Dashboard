@@ -147,7 +147,7 @@ func denoFindings(candidate *DetectedCandidate, configuration PlanConfiguration)
 	findings := []PreflightFinding{}
 	if len(facts.LockStale) > 0 {
 		findings = append(findings, finding("deno_lock_outdated", PreflightWarning,
-			"deno.lock does not match deno.json", boundedFindingText(strings.Join(facts.LockStale, ", ")),
+			"deno.lock does not match the project's dependencies", boundedFindingText(strings.Join(facts.LockStale, ", ")),
 			"`deno install --frozen` would stop with 'The lockfile is out of date'; the build installs without --frozen instead, so it resolves versions the lock does not record.",
 			"Run deno install and commit deno.lock.", "deploy", "configuration.build"))
 	}

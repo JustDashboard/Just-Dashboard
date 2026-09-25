@@ -210,7 +210,7 @@ func denoCandidate(marker *detectedMarkers, rootLabel string) DetectedCandidate 
 		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(marker.root, "deno.lock"),
 			Reason: boundedEvidenceSentence("deno.lock does not record " + strings.Join(facts.LockStale, ", ") + "; the install runs without --frozen")})
 	}
-	if entry := denoCommandEntry(candidate.StartCommand, project.task); entry != "" {
+	if entry := denoCommandEntry(candidate.StartCommand, project.task); entry != "" && (project.entries[entry] || marker.denoEntries[entry]) {
 		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(marker.root, entry), Reason: "caches " + entry + "'s module graph at build"})
 	}
 	candidate.Deno = facts
@@ -252,13 +252,18 @@ func selectDenoRecipe(boundary, root string, config BuildPlanConfig) (denoRecipe
 		return denoRecipe{}, fmt.Errorf("%w: Deno recipe requires a start command (deno task start, or deno run an entry file)", ErrUnsupportedBuilder)
 	}
 	major, _ := strconv.Atoi(strings.SplitN(project.release, ".", 2)[0])
-	return denoRecipe{
+	recipe := denoRecipe{
 		release: project.release, image: project.image, major: major, versionFrom: project.versionFrom,
 		// A stale lock is installed the way a stale package-lock.json is:
 		// resolved again, with the warning preflight gave before Deploy.
 		locked: project.lock && len(project.stale) == 0,
-		entry:  denoCommandEntry(config.StartCommand, project.task),
-	}, nil
+	}
+	// A start that runs what the build writes (Fresh 2's _fresh/server.js,
+	// an adapter's dist/server.js) has no graph to cache from the checkout.
+	if entry := denoCommandEntry(config.StartCommand, project.task); entry != "" && regularExists(root, entry) {
+		recipe.entry = entry
+	}
+	return recipe, nil
 }
 
 // toolchain names the release for the build evidence, and where the
@@ -295,27 +300,28 @@ func renderDenoDockerfile(recipe denoRecipe, config BuildPlanConfig, bases []Res
 		"WORKDIR /app",
 		"COPY . .",
 	}
-	if recipe.major == 1 {
-		// Deno 1's install is a script installer; its cache step caches the
-		// entry's graph against deno.lock.
-		if recipe.entry != "" {
-			lines = append(lines, "RUN "+installSecrets+"deno cache "+recipe.entry)
-		}
-	} else {
+	if recipe.major != 1 {
+		// Deno 1's install is a script installer; its cache step below is
+		// what caches the application's modules.
 		install := "deno install"
 		if recipe.locked {
 			install += " --frozen"
 		}
 		lines = append(lines, "RUN "+installSecrets+install)
-		if recipe.entry != "" {
-			// URL and npm: imports written only in code are not deno.json's,
-			// so without this they are fetched at every container start. The
-			// lock still verifies every module it records.
-			lines = append(lines, "RUN "+installSecrets+"deno install --entrypoint "+recipe.entry)
-		}
 	}
 	if command := strings.TrimSpace(config.BuildCommand); command != "" {
 		lines = append(lines, "RUN "+buildSecrets+command)
+	}
+	// URL and npm: imports written only in code are not deno.json's, so
+	// without this they are fetched at every container start. It runs after
+	// the build, which may write a file the entry imports; the lock still
+	// verifies every module it records.
+	switch {
+	case recipe.entry == "":
+	case recipe.major == 1:
+		lines = append(lines, "RUN "+installSecrets+"deno cache "+recipe.entry)
+	default:
+		lines = append(lines, "RUN "+installSecrets+"deno install --entrypoint "+recipe.entry)
 	}
 	lines = append(lines, shellCMD(config.StartCommand))
 	return lines, nil

@@ -1356,12 +1356,15 @@ asks for. Detection compares the lock's `workspace.dependencies` and `workspace.
 `package.json`, written the way Deno writes them (`^X.0.0` as `X`, `~X.Y.0` as `X.Y`, anything else
 verbatim, a subpath dropped). A specifier the lock lacks is `deno_lock_outdated` (warning), and the
 install runs without `--frozen` — the Deno twin of a stale `package-lock.json` beside the lockfile that
-is in sync, resolved again rather than stopping on "The lockfile is out of date". The file the start
-command runs (through `deno task`, `deno run … <file>` or `deno serve … <file>`) is then cached with its
-whole module graph, `deno install --entrypoint <file>`, so URL and `npm:` imports written only in code
-are fetched at build rather than at every container start; the lock still verifies every module it
-records. Deno 1, whose `install` is a script installer, caches the entry with `deno cache <file>`. The
-build task runs after both.
+is in sync, resolved again rather than stopping on "The lockfile is out of date". The build task runs
+next. The file the start command runs (through `deno task`, `deno run … <file>` or `deno serve …
+<file>`) is then cached with its whole module graph, `deno install --entrypoint <file>`, so URL and `npm:`
+imports written only in code are fetched at build rather than at every container start; the lock still
+verifies every module it records. It runs after the build because the build may write a module the
+entry imports, and only for an entry the checkout has: a start that serves what the build writes
+(Fresh 2's `deno serve -A _fresh/server.js`, an adapter's `dist/server.js`) has nothing to cache before
+the build and imports what `deno.json` already names. Deno 1, whose `install` is a script installer,
+caches the entry with `deno cache <file>` at the same point.
 
 ## PHP
 

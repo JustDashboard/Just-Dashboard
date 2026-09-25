@@ -54,7 +54,8 @@ func TestDenoLockStaleOrInSync(t *testing.T) {
 		t.Fatalf("stale = %v", candidate.Deno.LockStale)
 	}
 	assertDockerfile(t, prepared.DockerfilePreview, []string{"RUN deno install\n"}, []string{"--frozen"})
-	if outdated := findingByCode(findings, "deno_lock_outdated"); outdated == nil || outdated.Severity != PreflightWarning {
+	if outdated := findingByCode(findings, "deno_lock_outdated"); outdated == nil || outdated.Severity != PreflightWarning ||
+		outdated.Title != "deno.lock does not match the project's dependencies" {
 		t.Fatalf("deno_lock_outdated = %+v", outdated)
 	}
 	// A lock before version 3 records no workspace and is not judged.
@@ -178,6 +179,31 @@ func TestDenoPackageJSONProjects(t *testing.T) {
 		BuildPlanConfig{Method: BuildRecipe, Recipe: "deno", StartCommand: "deno task start"}, false, "t:1"); !errors.Is(err, ErrUnsupportedBuilder) {
 		t.Fatalf("a Node project was built with the Deno recipe: %v", err)
 	}
+}
+
+// The entry's graph is cached after the build, which may write a file it
+// imports, and only when the checkout has it: Fresh 2's start serves what
+// its build writes, whose imports deno.json already names.
+func TestDenoEntryCachedAfterTheBuild(t *testing.T) {
+	t.Parallel()
+	fresh2 := map[string]string{
+		"deno.json": `{"tasks":{"dev":"vite","build":"vite build","start":"deno serve -A _fresh/server.js"},"imports":{"fresh":"jsr:@fresh/core@^2.0.0","vite":"npm:vite@^7.1.3"}}`,
+		"main.ts":   `import { App } from "fresh"; export const app = new App();`, "vite.config.ts": "",
+	}
+	candidate, prepared, _ := denoPlan(t, fresh2, nil)
+	if candidate.Framework != "fresh" || candidate.StartCommand != "deno task start" || slices.ContainsFunc(candidate.Evidence, func(evidence DetectionEvidence) bool {
+		return strings.HasPrefix(evidence.Reason, "caches ")
+	}) {
+		t.Fatalf("fresh 2 = %+v", candidate)
+	}
+	assertDockerfile(t, prepared.DockerfilePreview, []string{"RUN deno install\nRUN deno task build\nCMD "}, []string{"--entrypoint", "deno cache"})
+
+	app := map[string]string{"deno.json": `{"tasks":{"build":"deno run -A gen.ts","start":"deno run -A main.ts"}}`, "main.ts": `import "./routes.gen.ts";`}
+	_, prepared, _ = denoPlan(t, app, nil)
+	assertDockerfile(t, prepared.DockerfilePreview, []string{"RUN deno install\nRUN deno task build\nRUN deno install --entrypoint main.ts\nCMD "}, nil)
+	app[".dvmrc"] = "1.46.3\n"
+	_, prepared, _ = denoPlan(t, app, nil)
+	assertDockerfile(t, prepared.DockerfilePreview, []string{"COPY . .\nRUN deno task build\nRUN deno cache main.ts\nCMD "}, []string{"deno install"})
 }
 
 // The file the start command runs is cached with its whole module graph,

@@ -69,6 +69,9 @@ type denoProject struct {
 	lock           bool
 	lockVersion    int
 	stale          []string
+	// entries says, for each file a task or the Procfile's web process runs,
+	// whether the checkout has it; one the build writes it has not.
+	entries map[string]bool
 }
 
 // denoRelease is where a repository's own declaration puts the build: the
@@ -165,7 +168,24 @@ func readDenoProject(files nodeFiles, top nodeFiles) denoProject {
 	if project.lock {
 		project.readLock(files)
 	}
+	project.entries = map[string]bool{}
+	commands := []string{}
+	for name := range project.config.Tasks {
+		commands = append(commands, project.config.task(name))
+	}
+	for _, script := range project.packageScripts {
+		commands = append(commands, script)
+	}
+	project.readEntries(files, commands)
 	return project
+}
+
+func (p *denoProject) readEntries(files nodeFiles, commands []string) {
+	for _, command := range commands {
+		if entry := denoCommandEntry(command, p.task); entry != "" && len(p.entries) < 32 {
+			p.entries[entry] = files.exists(entry)
+		}
+	}
 }
 
 // denoLockFile is the part of deno.lock that records what the workspace
@@ -339,7 +359,9 @@ func readDenoProjects(checkout string, markers map[string]*detectedMarkers) {
 		if len(marker.denoJSON) == 0 {
 			continue
 		}
-		project := readDenoProject(nodeFiles{root: root, dir: filepath.ToSlash(marker.root), budget: top.budget}, top)
+		files := nodeFiles{root: root, dir: filepath.ToSlash(marker.root), budget: top.budget}
+		project := readDenoProject(files, top)
+		project.readEntries(files, []string{procfileProcess(marker.procfile, "web")})
 		marker.deno = &project
 	}
 }
