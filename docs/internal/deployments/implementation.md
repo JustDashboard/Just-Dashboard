@@ -746,7 +746,8 @@ only renderer/executor/validation authority for their feature.
   proves it and a fix — is the step's evidence `cause`; its code is the step's and the run's terminal
   code (`build_failed` when nothing matched) and its sentence the message, also written to the
   transcript as `Diagnosis:`. The fix is computed from analyze_plan's recorded `candidate` when present,
-  else the plan's stored candidate for the same root and method, and the run's variable names and
+  else the plan's stored candidate for the same root and method (told apart by the plan's build and
+  start commands when several share them, as an Nx workspace's applications do), and the run's variable names and
   scopes: the package manager whose lockfile is in sync, a variable or its build scope, a rewritten
   runner, a Go or Python release the recipe offers, `NODE_OPTIONS` sized to three quarters of the
   server's memory, `prisma generate` before the build, the detected output directory. A Compose

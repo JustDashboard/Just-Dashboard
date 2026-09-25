@@ -667,23 +667,23 @@ except where the framework has a build command of its own (KeystoneJS, RedwoodJS
 | Framework | Recognised by | Serves as | Default |
 | --- | --- | --- | --- |
 | Strapi | `@strapi/strapi` | server, 1337 | the `start` script (`strapi start`); the build runs with `NODE_ENV=production` so the admin is built for production |
-| Medusa v2 | `@medusajs/medusa` in `dependencies` | server, 9000 | `cd .medusa/server && medusa db:migrate && medusa start` (what `medusa build` writes, on the root's `node_modules`); entry `.medusa/server/package.json` |
+| Medusa v2 | `@medusajs/medusa` in `dependencies` (v2 by its major or `@medusajs/framework`) | server, 9000 | `cd .medusa/server && medusa db:migrate && medusa start` (what `medusa build` writes, on the root's `node_modules`); entry `.medusa/server/package.json`; Medusa 1 keeps its `start` script with a decision to confirm it and its `medusa migrations run` |
 | Directus | `directus` | server, 8055 | `<runner> directus bootstrap && <runner> directus start` |
 | KeystoneJS 6 | `@keystone-6/core` | server, 3000 | `<runner> keystone start --with-migrations`; `<runner> keystone build` without a build script |
-| AdonisJS 6 (5) | `@adonisjs/core` | server, 3333 | `node build/bin/server.js` (5: `build/server.js`), after `node build/ace.js migration:run --force` with `@adonisjs/lucid` and `database/migrations`; the template's `start` runs inside `build/` and is not used |
+| AdonisJS 6 (5) | `@adonisjs/core` | server, 3333 | `node build/bin/server.js` (5: `build/server.js`), after `node build/ace.js migration:run --force` (5: `build/ace`) with `@adonisjs/lucid` and `database/migrations`; the template's `start` runs inside `build/` and is not used |
 | RedwoodJS | `@redwoodjs/core` | server, 8910 | `<runner> rw serve` (after `rw prisma migrate deploy` with `api/db/migrations`); `<runner> rw build` |
 | Next.js | `next` | server, 3000 / site `out` | `<manager> run start` (`<runner> next start` without a script); `output: 'export'` is a static site in `out` (or its `distDir`) under its `basePath`; Payload is Next.js |
-| SvelteKit | `@sveltejs/kit` | server, 3000 / site `build` | the adapter `svelte.config.js` imports: `node build` (Bun: `bun ./build/index.js`) for adapter-node, and for adapter-auto or a provider adapter, built with a pinned adapter-node; adapter-static's `pages` and `fallback` |
+| SvelteKit | `@sveltejs/kit` | server, 3000 / site `build` | the adapter `svelte.config.js` imports: `node build` (Bun: `bun ./build/index.js`), or adapter-node's `out`, for adapter-node, and for adapter-auto or a provider adapter, built with a pinned adapter-node; adapter-static's `pages` and `fallback` |
 | Astro | `astro` (+ `@astrojs/node`) | site `dist` / server, 4321 | `node ./dist/server/entry.mjs` (every Node server's runtime stage sets `HOST=0.0.0.0`); a provider adapter, middleware mode, or `output: 'server'` without an adapter is a decision |
 | Nuxt 3/4 | `nuxt` | server, 3000 / site `.output/public` for `nuxt generate` or the `static` preset | `node .output/server/index.mjs`; a provider preset builds with `NITRO_PRESET=node-server`; Nuxt 2 runs `nuxt start` |
 | Remix | `@remix-run/dev` (+ `@remix-run/serve`) | server, 3000 / site `build/client` | `remix-serve ./build/server/index.js` (`build/index.js` with `remix.config.js`); `ssr: false` is a single-page site |
-| React Router (framework mode) | `@react-router/dev` (+ `@react-router/serve`) | server, 3000 / site `build/client` | `react-router-serve ./build/server/index.js`; `ssr: false` in `react-router.config` is a single-page site; `react-router` alone is a Vite site |
+| React Router (framework mode) | `@react-router/dev` (+ `@react-router/serve`) | server, 3000 / site `build/client` | `react-router-serve ./build/server/index.js`; `ssr: false` in `react-router.config` is a single-page site, answering from `__spa-fallback.html` when prerendering wrote `/` to `index.html`; `react-router` alone is a Vite site |
 | SolidStart, TanStack Start, Nitro | `@solidjs/start`, `@tanstack/*-start`, `nitropack` | server, 3000 | `node .output/server/index.mjs`; TanStack Start is certain of it with the Nitro Vite plugin or a vinxi `app.config`, and otherwise asks to confirm the entry |
 | Qwik City | `@builder.io/qwik-city` | server, 3000 / site `dist` | the adapter `build.server` builds (`node server/entry.express`, `.fastify`, `.node-server`, or its `serve` script); the static adapter's site; no adapter is a decision |
 | Analog | `@analogjs/platform` | server, 3000 | `node dist/analog/server/index.mjs`; `ssr: false` is a single-page site in `dist/analog/public` |
 | Angular | `@angular/core` (+ `@angular/ssr`) | site from `angular.json` (`dist/<app>/browser` with the application builder) / server, 4000 | `node dist/<app>/server/server.mjs`, or the `serve:ssr:<app>` script; `outputMode: "static"` is a site |
 | NestJS | `@nestjs/core` | server, 3000 | `start:prod` script, else `node dist/main` — or `node dist/src/main` when a TypeScript file outside `src/` makes tsc write there, `dist/apps/<app>/main` in monorepo mode |
-| Vike | `vike` | server, 3000 / site `dist/client` | the `start`/`prod`/`serve` script that runs its server; prerendering is a site; otherwise a decision |
+| Vike | `vike` | server, 3000 / site `dist/client` | the `start`/`prod`/`serve`/`production`/`preview` script that runs its server (following the scripts it runs; Bati names it `preview`), never one that builds first; prerendering is a site; otherwise a decision |
 | Waku | `waku` | server, 8080 | `<runner> waku start` |
 | Gatsby, Docusaurus, VitePress, VuePress, Rspress, Eleventy, Hexo, Slidev | their packages | site `public`, `build`, `<docs>/.vitepress/dist`, `<docs>/.vuepress/dist`, `doc_build`, `_site`, `public`, `dist` | VitePress and VuePress read the docs directory from their build script (`docs:build`) |
 | Create React App, Vue CLI, Ember, Parcel, Rsbuild, Rspack, Farm, webpack, Vite | their packages (webpack only when the build script runs it) | site `build` / `dist`, or the directory the bundler's configuration names (Vite `outDir` under its `root`, webpack/Rspack `output.path`, Rsbuild `distPath.root`, Farm `output.path`) | single-page fallback on by default; Vite's `base` is the path the site is served under |
@@ -697,7 +697,9 @@ Every command the table proposes uses the resolved manager's runner (`bun`/`npm`
 each of the four managers, so choosing another manager swaps whole commands.
 
 **Framework configuration is read as data** (`frameworks_node_config.go`), from the package's own
-directory, through the install's `os.Root` and read budget: `next.config.*`, `svelte.config.*`,
+directory, through the install's `os.Root`, on a read budget of their own (16 MiB a detection or build,
+apart from the lockfiles', so a monorepo's configuration and `next/image` scans never spend what a later
+package's lockfile comparison needs): `next.config.*`, `svelte.config.*`,
 `astro.config.*`, `react-router.config.*`, `nuxt.config.*`, `vite.config.*`, the webpack, Rsbuild,
 Rspack and Farm configurations, a vinxi `app.config.*`, `nest-cli.json`, `tsconfig(.build).json` and
 `nx.json`, each at most 64 KiB, as text with its comments removed so a commented-out
@@ -708,7 +710,9 @@ Rspack and Farm configurations, a vinxi `app.config.*`, `nest-cli.json`, `tsconf
 `base`, `root` and `outDir` (`path.resolve(__dirname, …)` read from the package), a bundler's output
 directory, and Nest's `sourceRoot`, `entryFile`, `monorepo`, `root`, `outDir`, `rootDir` and `include`.
 A key given an expression keeps the catalogue's default with a decision — `output: process.env.X ?
-'export' : undefined` asks whether the site is exported. Detection and the recipe read through the same
+'export' : undefined` asks whether the site is exported, and so do Astro's `output` and Vite's `root`
+(other than `__dirname`) and `outDir` given one; an `svelte.config` that imports several adapters and
+picks one by an expression asks which. Detection and the recipe read through the same
 function, so what detection proposes is what the recipe renders. NestJS writes `dist/src/main.js`
 instead of `dist/main.js` when tsc's common root is the package: a TypeScript file outside `src/` and
 `test/` — at the root (`prisma.config.ts`, `drizzle.config.ts`) or one directory down (`prisma/seed.ts`)
@@ -728,16 +732,19 @@ without a framework uses another script that serves a build (`start:prod`, `star
 `production`, `serve:prod`, `serve`), else the watcher's own command without the watcher — `nodemon
 index.js` is `node index.js`, `tsx watch src/index.ts` is `tsx src/index.ts` (with `tsx` installed),
 `node --watch server.js` is `node server.js`, `bun --hot src/index.ts` is `bun src/index.ts` — run after
-`<manager> run prestart` when the package has that hook. A development server nothing can replace is
+`<manager> run prestart` when the package has that hook. A `start` that only runs another script
+(`"start": "npm run dev"`, with no arguments passed on) is followed to that script's watcher, after each
+script's pre hook. A development server nothing can replace is
 kept, and preflight warns while the plan still runs one (`start_command_dev_server`, judged against the
 configured command through the scripts detection recorded as `nodeBuild.devScripts`).
 
 **A server without a start script.** A server library's starter often ships only `dev` (`bun create
 hono`, `bun create elysia`): its start is the dev script without the watcher, else the conventional entry
 file (`src/index.ts`, `src/server.ts`, `index.ts`, `server.js`, … — the first that exists), on Bun with
-a Bun lockfile, through `tsx` for TypeScript when installed, else Node. Bun's `export default app` (a
-fetch handler, Hono's Bun template) serves only on Bun, as does Elysia: with another package manager
-the candidate asks to choose Bun or a Node adapter.
+a Bun lockfile, through `tsx` for TypeScript when installed, else Node — then with a decision, since
+`node <file>.ts` runs only through Node's own type stripping (22.6 and later, no enums, decorators or
+extensionless imports). Bun's `export default app` (a fetch handler, Hono's Bun template) serves only on
+Bun, as does Elysia: with another package manager the candidate asks to choose Bun or a Node adapter.
 
 **A site builder beside a server.** Vite, Parcel, Create React App, Vue CLI and the bundlers only build
 a site; a package that also runs a server library from `dependencies` and whose start command (or
@@ -745,7 +752,8 @@ Procfile) runs a file — `NODE_ENV=production node dist/index.js`, the Replit f
 `vite build` writes the client into what Express serves — is that server, started by its script
 (evidence: "vite builds the client; the start command serves it with express"). A package that lists
 Vite beside a server library with no `index.html` and no `vite.config` at its root (Vite for its tests)
-is the server too. A `vite preview` or `serve` start keeps the site.
+is the server too, with a decision to confirm its start command unless `vitest` says what Vite is for. A
+`vite preview` or `serve` start keeps the site.
 
 **Static output as the framework writes it** (`build_node_frameworks.go`). When the output directory is
 the framework's own, nginx serves it the way the framework means: under a base path (Next.js `basePath`,
@@ -753,7 +761,8 @@ Vite and Astro `base`) the site is copied to `/usr/share/nginx/html/<base>/` and
 (`absolute_redirect off`, since nginx's `alias` and `try_files` do not combine reliably); a generator that
 writes `about.html` (Next.js export, SvelteKit's adapter-static) is served with `try_files $uri
 $uri.html $uri/`, `$uri.html` before the directory Next.js writes beside it; adapter-static's `fallback:
-'200.html'` is the single-page fallback. Output served at the root as nginx's default would keeps
+'200.html'` and React Router's `__spa-fallback.html` are the single-page fallback, tried as a file before
+`index.html` since a framework writes it only in some modes. Output served at the root as nginx's default would keeps
 nginx's own configuration.
 
 **What the recipe adds around the build** for the plan's own commands:
@@ -761,10 +770,12 @@ nginx's own configuration.
 - SvelteKit on adapter-auto or a provider adapter: after the install, `<manager> add` of
   `@sveltejs/adapter-node` at a reviewed release (5.5.7 for Kit 2.4 and later, 3.0.3 before, 1.3.1 for
   Kit 1; npm installs with `--no-save --legacy-peer-deps`), unless it is installed, and
-  `svelte.config.js` moved to `svelte.config.user.js` behind a wrapper that imports it and sets
-  `kit.adapter` to adapter-node — every other option is the repository's. The repository is not changed;
-  `sveltekit_adapter_substituted` (a warning) gives the one-line change that makes it build the same way
-  everywhere. A `svelte.config.ts`, or a Kit major without a reviewed adapter, stays a decision.
+  `svelte.config.js` moved to `svelte.config.user.js` (a `svelte.config.mjs` in a `"type": "module"`
+  package to `svelte.config.user.mjs`) behind a `svelte.config.js`, the file SvelteKit loads, that imports
+  it and sets `kit.adapter` to adapter-node — every other option is the repository's. The repository is
+  not changed; `sveltekit_adapter_substituted` (a warning) gives the one-line change that makes it build
+  the same way everywhere. A `svelte.config.ts`, an `.mjs` in a CommonJS package, or a Kit major without a
+  reviewed adapter, stays a decision.
 - A Nitro provider preset (Nuxt, SolidStart, TanStack Start): the build command's RUN sets
   `NITRO_PRESET="${NITRO_PRESET:-node-server}"`, which outranks the configuration's preset
   (`nitro_preset_overridden`).
@@ -804,6 +815,7 @@ is judged against the plan as it stands, from what detection recorded (`nodeBuil
 | `next_export_images` (warning) | the plan exports a Next.js site, a page imports `next/image` and `next.config` sets neither `images.unoptimized` nor a custom loader; the build would stop with "Image Optimization using the default loader is not compatible with export" |
 | `nest_output_layout` (warning) | the plan runs the start detection proposed past a `start:prod` that looks for `dist/main` |
 | `start_command_dev_server` (warning) | the configured start command runs a development server or a watcher, directly or through a package script |
+| `node_decision_open` (warning) | a question detection left open about the framework (an output set by an expression, Astro's middleware mode, a Vike or TanStack Start entry, an entry only Bun serves, TypeScript on plain Node, an Nx executor it does not know, …) while the setting that answers it — named by the finding's field, the start command, output directory or package manager, else the whole build — still holds detection's guess; the questions one setting answers are one finding |
 | `command_runner_missing` (blocked) | a saved build or start command calls another language's toolchain |
 
 A service whose manifest depends on a recognised migration tool starts by applying its schema: the
@@ -813,7 +825,13 @@ declares its schema) runs `prisma migrate deploy` when a `migration.sql` is comm
 otherwise; Drizzle (`drizzle.config.*`) runs `drizzle-kit migrate` with a
 `_journal.json` and `drizzle-kit push` otherwise; Knex (`knexfile.*`) runs `knex migrate:latest`;
 Sequelize CLI runs `sequelize-cli db:migrate`; MikroORM migrations run `mikro-orm migration:up`. TypeORM
-is recognised but needs an operator's command. A start script that already runs the tool is left as it
+is recognised but needs an operator's command. A framework that owns its migrations names its tool from
+its catalogue entry instead of a dependency: AdonisJS's Lucid (`node build/ace.js migration:run --force`,
+run as written), Medusa (`(cd .medusa/server && medusa db:migrate)`, already in its start), KeystoneJS
+(`keystone prisma migrate deploy`, applied by its start's `--with-migrations`) and RedwoodJS
+(`rw prisma migrate deploy`). Their steps are chained, judged (`schema_step`, `schema_step_missing`) and
+put in front of a Procfile's or platform file's start like any package's own tool; a start script that
+migrates does not count for them, since the framework's start is not that script. A start script that already runs the tool is left as it
 is, and static output never gains a start command. Prisma's push refuses destructive changes without an
 explicit flag and Drizzle's stops to ask a question nobody can answer, so a schema that would lose data
 fails the start instead of dropping it. That is why a push is never a pass: preflight raises
@@ -1069,9 +1087,13 @@ their own: each application project whose build target's executor is known (`@nx
 whose build `@nx/next/plugin` or `@nx/vite/plugin` infers from its `next.config`/`vite.config`, is a
 candidate at the workspace root that builds with `NX_DAEMON=false NX_NO_CLOUD=true <runner> nx run
 <project>:build` (with `--configuration=production` when the target has one) and serves what that build
-writes: `next start <outputPath>` (inferred: `next start <project root>`), the Vite or Angular site, or
-`node <outputPath>/main.js`. The root package itself is not offered, and an unknown executor keeps a
-decision. The member's directory is written
+writes: `next start <outputPath>` (inferred: `next start <project root>`), the Vite or Angular site, an
+Angular application with `ssr` from `node <outputPath>/server/server.mjs` on 4000, or `node
+<outputPath>/main.js` (for esbuild, the file its `outputFileName`, else its `main`, names). The root
+package itself is not offered, and an unknown executor keeps a decision. The applications share the
+workspace root and the build method, so a saved plan, which carries no selection, is matched to its
+application by the build and start commands it runs, then by its build command alone, before preflight,
+`analyze_plan` or the check before Deploy judge it. The member's directory is written
 unquoted into `WORKDIR`, `ENV PATH` and `RUN` lines, so one outside letters, digits and `. _ @ + - /` is
 refused before Deploy and at build (`workspace_member_path_unsupported`, blocked) rather than rendered
 into a Dockerfile BuildKit cannot parse. A Yarn 1 member that depends on a sibling by a plain range reads
@@ -1224,12 +1246,14 @@ toolchain needs, below; the PHP recipe's asset stage builds the same way.
 | `node_env_not_production` (warning) | `NODE_ENV` other than `production` reaches the build or the server |
 | `host_variable_loopback_hostname` (warning) | `HOSTNAME` on loopback, which Next.js standalone binds to (a loopback `HOST` is the environment check's `host_variable_loopback_host`) |
 
-A pasted local `.env` is where `PORT` and `NODE_ENV` usually come from, so both are left out of it
-before they reach the plan: the new-project form drops their lines from the pasted block (saying so
-under it), and the Settings import sends them as `skip` — the import and its dry run leave them out,
-the preview's verdict is `skipped` ("left out · set by the deployment") — unless the operator keeps
-them. A Compose stack keeps them by default, since its file may interpolate `${PORT}` itself. A
-variable added one at a time is deliberate and is kept; the warnings above still name it.
+A pasted local `.env` is where `PORT` and a development `NODE_ENV` usually come from, so both are left
+out of it before they reach the plan: the new-project form drops their lines from the pasted block
+(saying so under it), and the Settings import sends them as `skip` — the import and its dry run leave
+them out, the preview's verdict is `skipped` ("left out · set by the deployment") — unless the operator
+keeps them. `NODE_ENV=production` is kept, whatever the build method: the recipe sets it anyway, and an
+image a repository's own Dockerfile builds may rely on it being passed. A Compose stack keeps both by
+default, since its file may interpolate `${PORT}` itself. A variable added one at a time is deliberate
+and is kept; the warnings above still name it.
 
 ## Python
 
@@ -1751,8 +1775,9 @@ never gets a variable fix, because a custom Dockerfile cannot take build secrets
 start`), an Express server installed and started by Yarn 1, Vite, SvelteKit Node/static, a Next.js static
 export under a `basePath` (a second page served from its `.html` file), a Next.js standalone server
 started from its `server.js` (serving `public/` and its static assets), a SvelteKit app on adapter-auto
-built with adapter-node, Express serving the Vite client its build writes (the Replit shape) and a Hono
-starter with only a `bun --hot` dev script, on Bun, plain HTML,
+built with adapter-node, Express serving the Vite client its build writes (the Replit shape), a Hono
+starter with only a `bun --hot` dev script, on Bun, React Router 8 in SPA mode with a prerendered home
+(another path answered by its `__spa-fallback.html` shell, not the home page), plain HTML,
 Containerfile and Go fixtures through detection and the real artifact/runtime owners, and the catalogue's
 own starters: Astro 7 (static), Nuxt 4 and React Router 8 (servers), FastAPI on an unpinned
 `requirements.txt` with no server declared, a Flask factory on a bare `pyproject.toml`, a Django project
@@ -1779,9 +1804,11 @@ raises `lockfile_out_of_sync` before Deploy and installs unfrozen instead of fai
 and the build around the install are covered by `build_node_runtime_test.go` (the Node and Bun release
 from every declaration, and the system packages each dependency adds), the framework catalogue by
 `frameworks_node_catalogue_test.go` (each framework's configuration, the long tail, development-server
-start scripts), `frameworks_node_config_test.go` and `frameworks_node_scripts_test.go` (the readers),
+start scripts), `frameworks_node_config_test.go` and `frameworks_node_scripts_test.go` (the readers and
+their read budget), `frameworks_node_schema_test.go` (the migrations a framework owns as schema steps),
 `build_node_frameworks_test.go` (what the recipe renders around each framework's build, and the runners
-it refuses), `detect_node_monorepo_test.go` (every manager's workspace build and Nx),
+it refuses), `detect_node_monorepo_test.go` (every manager's workspace build, and Nx, its plans matched
+to their application),
 `preflight_node_frameworks_test.go` and `build_output_node_frameworks_test.go`, `build_node_prisma_test.go`
 (`prisma generate` and the `env()` placeholders, the incident repository with Prisma 7's
 `prisma.config.ts` included), `build_node_build_test.go` (legacy OpenSSL, T3 Env, `--env-file`)
