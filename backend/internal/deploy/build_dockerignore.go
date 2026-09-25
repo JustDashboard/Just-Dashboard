@@ -3,6 +3,7 @@ package deploy
 import (
 	"os"
 	"path"
+	"slices"
 	"strings"
 )
 
@@ -34,9 +35,18 @@ var recipeInputNames = map[string]bool{
 	"deno.json": true, "deno.jsonc": true, "deno.lock": true,
 	"composer.json": true, "composer.lock": true, "artisan": true, "index.php": true, "index.html": true,
 	"prisma": true, "drizzle.config.ts": true, "drizzle.config.js": true,
-	"Gemfile": true, "Gemfile.lock": true, ".ruby-version": true, ".tool-versions": true, "config.ru": true, "Rakefile": true,
-	"mix.exs": true, "mix.lock": true, ".elixir-version": true, "build.sbt": true, "project": true, "project.clj": true,
-	"deps.edn": true, "build.clj": true, "pubspec.yaml": true, "pubspec.lock": true, "gleam.toml": true, "manifest.toml": true,
+}
+
+// languageRecipeInputs are the root files a language recipe reads by name,
+// kept for that recipe alone: a rule leaving out a directory called
+// project/ or a manifest.toml means nothing to a Node or static build.
+var languageRecipeInputs = map[string][]string{
+	"ruby":    {"Gemfile", "Gemfile.lock", ".ruby-version", ".tool-versions", "config.ru", "Rakefile"},
+	"elixir":  {"mix.exs", "mix.lock", ".tool-versions", ".elixir-version", "elixir_buildpack.config"},
+	"scala":   {"build.sbt", "project"},
+	"clojure": {"project.clj", "deps.edn", "build.clj"},
+	"dart":    {"pubspec.yaml", "pubspec.lock"},
+	"gleam":   {"gleam.toml", "manifest.toml"},
 }
 
 // recipeInputPrefixes are framework configuration files, named per tool.
@@ -68,7 +78,7 @@ func recipeDockerignore(repository []byte, rootNames []string, kind string, inst
 	rules := parseDockerignore(repository)
 	inputs := []string{}
 	for _, name := range rootNames {
-		if recipeInput(name) {
+		if recipeInput(name) || slices.Contains(languageRecipeInputs[kind], name) {
 			inputs = append(inputs, name)
 		}
 	}

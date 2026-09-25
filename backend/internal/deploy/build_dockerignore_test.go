@@ -52,6 +52,14 @@ func TestRecipeDockerignoreKeepsRepositoryRulesButNotRecipeInputs(t *testing.T) 
 			t.Errorf("a static site would publish %s", path)
 		}
 	}
+	// sbt's project/ is an input of the Scala recipe alone; a Node build
+	// keeps the repository's rule leaving a directory of that name out.
+	for kind, kept := range map[string]bool{"scala": true, "node": false} {
+		content, _ := recipeDockerignore([]byte("project\n"), []string{"build.sbt", "package.json", "project"}, kind, nil)
+		if excluded, _ := dockerignoreExcludes(parseDockerignore([]byte(content)), "project/plugins.sbt"); excluded == kept {
+			t.Errorf("%s: project/ excluded = %v\n%s", kind, excluded, content)
+		}
+	}
 	// Toolchains that stamp builds from Git keep the repository metadata.
 	golang, _ := recipeDockerignore(nil, []string{"go.mod"}, "go", nil)
 	if excluded, _ := dockerignoreExcludes(parseDockerignore([]byte(golang)), ".git/HEAD"); excluded {
