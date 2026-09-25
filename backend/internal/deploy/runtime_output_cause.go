@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"fmt"
+	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -162,12 +163,15 @@ var databasePorts = map[string]string{
 	"5432": "PostgreSQL", "3306": "MySQL", "6379": "Redis", "27017": "MongoDB", "5672": "RabbitMQ", "9200": "Elasticsearch",
 }
 
-// runtimeCauseContext is what a runtime remedy is computed from.
+// runtimeCauseContext is what a runtime remedy is computed from. manager is
+// the JavaScript package manager the release's image carries: the Node
+// recipe's server image has the one it installed with, and no other.
 type runtimeCauseContext struct {
 	build     BuildPlanConfig
 	runtime   RuntimePlanConfig
 	variables []ReleaseVariableSnapshot
 	compose   bool
+	manager   string
 }
 
 func applicationOutputCause(containers []ContainerDiagnostics, context runtimeCauseContext) *OutputCause {
@@ -228,6 +232,8 @@ func applicationOutputCause(containers []ContainerDiagnostics, context runtimeCa
 			cause.Fix = &CauseFix{Kind: fixReview, Field: "dependencies"}
 		case "runtime_entry_missing":
 			cause.Fix = &CauseFix{Kind: fixReview, Field: "configuration.build.startCommand"}
+		case "runtime_command_not_found":
+			cause.Fix = startRunnerFix(cause.Subjects, context)
 		case "runtime_master_key_invalid":
 			cause.Fix = variableFix("RAILS_MASTER_KEY", "runtime", "", context.variables)
 		case "runtime_auth_untrusted_host":
@@ -272,6 +278,43 @@ func applicationOutputCause(containers []ContainerDiagnostics, context runtimeCa
 		return &OutputCause{Code: "runtime_start_exited", Fix: &CauseFix{Kind: fixReview, Field: "configuration.build.startCommand"}}
 	}
 	return nil
+}
+
+// nodeScriptFileRE is a package-manager `run` of a file rather than a
+// script: Bun runs `bun run server.ts`, which `npm run` would look up as a
+// script name.
+var nodeScriptFileRE = regexp.MustCompile(`\b(?:npm|pnpm|yarn|bun) run \S+\.[cm]?[jt]sx?\b`)
+
+// startRunnerFix is the start command that runs through the package
+// manager the image has, for a start that calls one it lacks: the Node
+// recipe's server image carries the manager it installed with, so `bun run
+// start` in an npm image is `npm run start`, and `bunx prisma` is `npx
+// prisma`. A start the rewrite cannot carry — a file Bun ran as a script,
+// the image's own manager missing, a start command a Dockerfile or Compose
+// file owns — is left for the operator to review.
+func startRunnerFix(subjects []string, context runtimeCauseContext) *CauseFix {
+	if context.compose {
+		return nil
+	}
+	review := &CauseFix{Kind: fixReview, Field: "configuration.build.startCommand"}
+	if len(subjects) == 0 || context.build.Method != BuildRecipe || context.build.Recipe != "node" || context.manager == "" {
+		return review
+	}
+	missing := nodeManagerForCommand(path.Base(subjects[0]))
+	command := strings.TrimSpace(context.build.StartCommand)
+	if missing == "" || missing == context.manager || command == "" {
+		return review
+	}
+	rewritten := nodeRunnerFor(command, context.manager)
+	if rewritten == command || nodeScriptFileRE.MatchString(rewritten) {
+		return review
+	}
+	for _, segment := range strings.Split(rewritten, "&&") {
+		if nodeManagerForCommand(segment) == missing {
+			return review
+		}
+	}
+	return &CauseFix{Kind: fixSetBuild, Field: "configuration.build.startCommand", Value: rewritten}
 }
 
 // loopbackBindCause is a candidate listening on loopback only, with the start
@@ -388,6 +431,9 @@ func (c *OutputCause) sentence() string {
 	case "runtime_exec_format":
 		return "the image's entry is built for another architecture or is a script with Windows line endings; build for this server, or convert the script to LF"
 	case "runtime_command_not_found":
+		if c.Fix != nil && c.Fix.Kind == fixSetBuild {
+			return "`" + orDefault(subject, "the start command") + "` is not installed in the runtime image, which carries the package manager the build installed with; start the application with `" + c.Fix.Value + "`"
+		}
 		return "`" + orDefault(subject, "the start command") + "` is not installed in the runtime image; start the application with a command the image has"
 	case "runtime_origin_rejected":
 		return "Phoenix rejected the socket's origin; set PHX_HOST to the domain the site is served on, or `check_origin` to the deployment's hostname"

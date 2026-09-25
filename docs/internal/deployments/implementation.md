@@ -648,7 +648,8 @@ only renderer/executor/validation authority for their feature.
   `AUTH_TRUST_HOST=true`), a missing `.env` it exits over, a database address on localhost (Node,
   libpq, Go, MySQL and Rust wordings), Prisma's engine on Alpine, a disallowed Host, a missing entry
   file or app object, a missing module or shared library (psycopg's `libpq library not found` among
-  them), a cgo-less binary, an architecture mismatch, a runner that is not installed, Phoenix's origin
+  them), a cgo-less binary, an architecture mismatch, a runner that is not installed
+  (`runtime_command_not_found`), Phoenix's origin
   check (fixed with `PHX_HOST`), Play's PID file, a server that prints a loopback bind (uvicorn,
   gunicorn, werkzeug, puma, Kestrel — not Next.js, which prints `localhost` whatever it binds) or whose
   every listening socket is on loopback (`runtime_loopback_bind`, named in the step message even when
@@ -661,7 +662,12 @@ only renderer/executor/validation authority for their feature.
   exits 0 by design). The cause is the step's code and the run's terminal code in place of
   `health_gate_failed`, with the health evidence kept; it carries identifiers only (a variable, a
   port, a module, a listener) and, where the plan can supply one, a fix: the variable or its runtime
-  scope, the internal port, a start command bound to `0.0.0.0`.
+  scope, the internal port, a start command bound to `0.0.0.0`, or — for a Node recipe whose start runs
+  a package manager the image lacks — the start command moved to the manager the image carries
+  (`nodeRunnerFor`, the install planner's own rewrite: `bun run start` in an npm image is `npm run
+  start`). That manager is the one this run's build installed with (its prepared install line), else the
+  plan's, else the one detection resolved; a start the rewrite cannot carry (a file Bun ran as a
+  script, the image's own manager missing, a Dockerfile's start) is left to review.
 - Container applications receive `PORT` from the frozen internal-port setting unless a runtime variable
   explicitly supplies it. Compose and host-network applications keep their own environment conventions.
   This keeps application startup aligned with Docker publication; the host port may still move. The

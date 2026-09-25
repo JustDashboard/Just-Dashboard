@@ -131,7 +131,8 @@ func TestApplicationOutputCauseNamesRuntimeFailures(t *testing.T) {
 		{
 			name:  "start runner missing",
 			lines: []string{"/bin/sh: pnpm: not found"},
-			want:  OutputCause{Code: "runtime_command_not_found", Subjects: []string{"pnpm"}},
+			want: OutputCause{Code: "runtime_command_not_found", Subjects: []string{"pnpm"},
+				Fix: &CauseFix{Kind: fixReview, Field: "configuration.build.startCommand"}},
 		},
 		{
 			name:  "exec format",
@@ -423,5 +424,44 @@ func TestEveryNamedCauseHasATitleOnThePage(t *testing.T) {
 				t.Errorf("%s is %q here and not so on the run page", code, title)
 			}
 		}
+	}
+}
+
+// A start command that runs a package manager the image lacks is rewritten
+// to the one the Node recipe's image carries — the manager the build
+// installed with — and anything the rewrite cannot carry is left to review.
+func TestMissingStartRunnerIsRewrittenToTheImagesManager(t *testing.T) {
+	t.Parallel()
+	node := func(start string) BuildPlanConfig {
+		return BuildPlanConfig{Method: BuildRecipe, Recipe: "node", StartCommand: start}
+	}
+	review := &CauseFix{Kind: fixReview, Field: "configuration.build.startCommand"}
+	for _, fixture := range []struct {
+		name, line string
+		context    runtimeCauseContext
+		want       *CauseFix
+	}{
+		{"bun in an npm image", "sh: bun: not found", runtimeCauseContext{build: node("bun run start"), manager: "npm"},
+			&CauseFix{Kind: fixSetBuild, Field: "configuration.build.startCommand", Value: "npm run start"}},
+		{"pnpm migrate and start in a yarn image", "/bin/sh: pnpm: not found",
+			runtimeCauseContext{build: node("pnpm exec prisma migrate deploy && pnpm run start"), manager: "yarn"},
+			&CauseFix{Kind: fixSetBuild, Field: "configuration.build.startCommand", Value: "yarn prisma migrate deploy && yarn run start"}},
+		{"bunx through exec", `exec: "bunx": executable file not found in $PATH`, runtimeCauseContext{build: node("bunx prisma migrate deploy && node server.js"), manager: "npm"},
+			&CauseFix{Kind: fixSetBuild, Field: "configuration.build.startCommand", Value: "npx prisma migrate deploy && node server.js"}},
+		{"a file Bun runs as a script", "sh: bun: not found", runtimeCauseContext{build: node("bun run server.ts"), manager: "npm"}, review},
+		{"the image's own manager missing", "sh: pnpm: not found", runtimeCauseContext{build: node("pnpm run start"), manager: "pnpm"}, review},
+		{"a Dockerfile's start", "sh: bun: not found", runtimeCauseContext{build: BuildPlanConfig{Method: BuildDockerfile, StartCommand: "bun run start"}, manager: "npm"}, review},
+		{"a Compose stack", "sh: bun: not found", runtimeCauseContext{build: node("bun run start"), manager: "npm", compose: true}, nil},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			t.Parallel()
+			cause := applicationOutputCause([]ContainerDiagnostics{{Lines: runtimeLines(fixture.line)}}, fixture.context)
+			if cause == nil || cause.Code != "runtime_command_not_found" || !reflect.DeepEqual(cause.Fix, fixture.want) {
+				t.Fatalf("cause = %+v, fix %+v", cause, cause.Fix)
+			}
+			if fixture.want != nil && fixture.want.Kind == fixSetBuild && !strings.Contains(cause.sentence(), "`"+fixture.want.Value+"`") {
+				t.Fatalf("sentence = %q", cause.sentence())
+			}
+		})
 	}
 }
