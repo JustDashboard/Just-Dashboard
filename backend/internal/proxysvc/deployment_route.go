@@ -435,6 +435,9 @@ func (s *Service) restoreDeploymentRouteLocked(ctx context.Context, snapshot Dep
 		return errors.New("deployment route location changed since snapshot")
 	}
 	before, beforeExisted := readIfPresent(path)
+	// Forgotten before the first write rather than after the last, so a
+	// restore that fails half-way still leaves no stale dump behind.
+	s.forgetEffective()
 	if snapshot.Existed {
 		if err := writeAtomic(path, snapshot.Content); err != nil {
 			return err
@@ -465,7 +468,6 @@ func (s *Service) restoreDeploymentRouteLocked(ctx context.Context, snapshot Dep
 	// Recorded like any other write, or a history would go on showing a
 	// route holding what was just rolled back. A restore has no undo, so the
 	// record is made once the files are in place rather than after the test.
-	s.forgetEffective()
 	if beforeExisted != snapshot.Existed || before != snapshot.Content {
 		change := Change{Path: path, Action: ChangeWrite,
 			Before: []byte(before), BeforeExisted: beforeExisted, After: []byte(snapshot.Content)}

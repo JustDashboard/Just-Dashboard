@@ -198,6 +198,7 @@ func (s *Service) DeleteSite(ctx context.Context, name string) error {
 			return err
 		}
 		removedLink = true
+		s.forgetEffective()
 	}
 	for _, candidate := range []string{
 		filepath.Join(s.nginxDir, "sites-available", name),

@@ -67,9 +67,9 @@ type effectiveCache struct {
 	gen uint64
 }
 
-// forgetEffective drops the cached dump. Callers change files and must call
-// it while still holding s.mu, so no dump can start between the change and
-// the forgetting.
+// forgetEffective drops the cached dump. A caller that changes files calls it
+// within the same hold of s.mu, before or after the change, so no dump can
+// run between the two.
 func (s *Service) forgetEffective() {
 	s.effective.mu.Lock()
 	s.effective.files = nil
