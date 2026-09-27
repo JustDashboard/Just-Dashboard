@@ -534,11 +534,16 @@ func pgParse(text string) (pgHead, bool) {
 	if h, ok := pgParseText(text); ok {
 		return h, true
 	}
+	// pg_ctl prints "waiting for server to start...." or "shut down...",
+	// then a dot a second until the server answers, and the server's own
+	// lines land on the end of that line and the start of the next.
 	if strings.HasPrefix(text, "waiting for server to ") {
-		if i := strings.Index(text, "...."); i >= 0 {
-			rest := strings.TrimLeft(text[i:], ".")
-			return pgParseText(rest)
+		if i := strings.Index(text, "..."); i >= 0 {
+			return pgParseText(strings.TrimLeft(text[i:], "."))
 		}
+	}
+	if strings.HasPrefix(text, ".") {
+		return pgParseText(strings.TrimLeft(text, "."))
 	}
 	if strings.HasPrefix(text, `{"timestamp":"`) {
 		return pgParseJSON(text)

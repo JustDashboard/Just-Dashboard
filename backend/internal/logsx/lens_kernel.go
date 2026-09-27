@@ -102,8 +102,12 @@ func kernelEvent(l *Line, msg, owner string) string {
 	case strings.HasPrefix(msg, "traps: "):
 		// A general protection fault is a SIGSEGV by another route. The int3
 		// and invalid-opcode traps are how Chrome and Go abort on purpose,
-		// hundreds a day from a headless browser, and are left as text.
+		// hundreds a day from a headless browser, and are left as text — at
+		// the KERN_INFO the kernel prints them with, since the "error:0" at
+		// the end is the trap's error code, and read as a level word it made
+		// every headless browser on the host a column of errors.
 		if !strings.Contains(msg, "] general protection fault ") {
+			l.SetLevel("info")
 			return ""
 		}
 		rest := msg[len("traps: "):]

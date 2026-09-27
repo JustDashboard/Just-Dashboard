@@ -103,9 +103,9 @@ func TestLensKernelReadsCrashesAndHardware(t *testing.T) {
 		},
 		sysWant{
 			// Headless Chrome aborting on purpose, hundreds a day: left as
-			// text, with the level its "error:0" earns it.
+			// text, at the kernel's own KERN_INFO whatever "error:0" says.
 			text: "2026-09-27T12:12:37.154248+00:00 web-1 kernel: traps: Compositor[4053605] trap int3 ip:5d4644df0628 sp:784641df4830 error:0 in chrome-headless-shell[7562628,5d463f354000+9a6d000]",
-			at:   "2026-09-27T12:12:37.154248Z", level: "error",
+			at:   "2026-09-27T12:12:37.154248Z", level: "info",
 		},
 		sysWant{
 			// arch/x86/kernel/traps.c's format.

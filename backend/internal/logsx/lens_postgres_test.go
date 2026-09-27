@@ -45,6 +45,19 @@ var postgresCases = []dbCase{
 		},
 	},
 	{
+		name: "the entrypoint stopping its temporary server, pg_ctl's dots on both lines",
+		lines: []string{
+			"waiting for server to shut down...2026-08-30 19:11:58.676 UTC [41] LOG:  received fast shutdown request",
+			".2026-08-30 19:11:58.677 UTC [41] LOG:  aborting any active transactions",
+			"2026-08-30 19:11:58.737 UTC [41] LOG:  database system is shut down",
+		},
+		want: []dbWant{
+			{level: "info", at: "2026-08-30 19:11:58.676Z", event: "shutdown", attrs: pgAttrs("41", "LOG")},
+			{level: "info", at: "2026-08-30 19:11:58.677Z", attrs: pgAttrs("41", "LOG")},
+			{level: "info", at: "2026-08-30 19:11:58.737Z", event: "shutdown", attrs: pgAttrs("41", "LOG")},
+		},
+	},
+	{
 		name: "a fast shutdown with sessions still open",
 		lines: []string{
 			"2026-09-18 09:47:43.282 UTC [1] LOG:  received fast shutdown request",
