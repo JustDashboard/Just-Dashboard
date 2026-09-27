@@ -510,3 +510,183 @@ test("on a phone every watched row keeps how old its check is in full", async ({
   expect(await age.evaluate((el) => getComputedStyle(el).textOverflow)).not.toBe("ellipsis")
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
 })
+
+test("a new watch shows its row being checked until its first check arrives", async ({ page }) => {
+  await mockShowcase(page)
+  const rows: object[] = []
+  const posted: unknown[] = []
+  let lists = 0
+  let hold = false
+  let release: () => void = () => {}
+  await page.route("**/api/v1/certificates/watched", async (route) => {
+    const request = route.request()
+    if (request.method() === "POST") {
+      posted.push(request.postDataJSON())
+      const existing = rows.length > 0
+      const row = { id: 7, ...request.postDataJSON(), createdAt: now }
+      if (!existing) {
+        rows.push({ ...row, checkedAt: new Date().toISOString(), certificate: certs[0] })
+        hold = true
+      }
+      return route.fulfill({
+        status: existing ? 200 : 201,
+        contentType: "application/json",
+        body: JSON.stringify(row),
+      })
+    }
+    lists++
+    if (hold) {
+      hold = false
+      await new Promise<void>((resolve) => (release = resolve))
+    }
+    return json(route, rows)
+  })
+  await page.goto("/proxy/certificates")
+  await expect(page.getByText("Nothing watched yet.", { exact: false })).toBeVisible()
+  const field = page.getByLabel("Domain to watch")
+  const watch = page.getByRole("button", { name: "Watch", exact: true })
+  const list = page.getByRole("list", { name: "Watched domains" })
+
+  await field.fill("new.example.com")
+  await watch.click()
+  await expect(
+    page.locator("[data-sonner-toast]").filter({ hasText: "Watching new.example.com" }),
+  ).toBeVisible()
+  // The row is there at once, and everything says the check is running.
+  const row = list.getByRole("listitem").filter({ hasText: "new.example.com" })
+  await expect(row).toContainText("checking…")
+  await expect(page.getByText("1 watched, checked while")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Re-checking…" })).toHaveAttribute(
+    "aria-busy",
+    "true",
+  )
+  await expect(watch).toHaveAttribute("aria-busy", "true")
+  await field.fill("other.example.com")
+  await field.press("Enter")
+  await expect.poll(() => lists).toBe(2)
+  expect(posted).toHaveLength(1)
+
+  release()
+  await expect(row).toContainText("checked just now")
+  await expect(list.getByRole("listitem")).toHaveCount(1)
+  await expect(page.getByRole("button", { name: "Re-check now" })).toBeEnabled()
+  await expect(watch).not.toHaveAttribute("aria-busy", "true")
+
+  // Watching it again says so and does not check the whole list for nothing.
+  await field.fill("new.example.com")
+  await watch.click()
+  await expect(
+    page.locator("[data-sonner-toast]").filter({ hasText: "new.example.com is already watched" }),
+  ).toBeVisible()
+  await expect(field).toHaveValue("")
+  expect(posted).toHaveLength(2)
+  expect(lists).toBe(2)
+})
+
+test("a server that refused the handshake is not said to be silent", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const refused = {
+    ...scan,
+    reachable: false,
+    grade: "F",
+    summary: "The server on app.example.com:443 refused the handshake.",
+    error: "remote error: tls: unrecognized name",
+    certificate: undefined,
+    protocols: [],
+    chain: [],
+    http: undefined,
+    findings: [
+      {
+        id: "tls.refused",
+        level: "critical",
+        title: "The server refused the handshake",
+        detail:
+          "It answered unrecognized name, both to the handshake a current client makes and to one offering every version and cipher suite this check has.",
+        advice:
+          "Something on port 443 speaks TLS and will not finish a handshake for app.example.com.",
+      },
+    ],
+  }
+  const silent = {
+    ...refused,
+    summary: "Nothing answered a TLS handshake on app.example.com:443.",
+    error: "dial tcp 203.0.113.4:443: connect: connection refused",
+    findings: [
+      {
+        id: "tls.unreachable",
+        level: "critical",
+        title: "Nothing answered a TLS handshake",
+        detail: "dial tcp 203.0.113.4:443: connect: connection refused",
+        advice: "Check the domain resolves to this server and that the proxy is listening on 443.",
+      },
+    ],
+  }
+  let answer: object = refused
+  await scans(page, () => answer)
+  await page.goto("/proxy/tls?domain=app.example.com")
+  await expect(page.getByText("The server refused the handshake")).toBeVisible()
+  await expect(page.getByText("It answered unrecognized name", { exact: false })).toBeVisible()
+  await expect(page.getByText("will not finish a handshake for app.example.com")).toBeVisible()
+  await expect(page.getByText(/Nothing answered/)).toHaveCount(0)
+  await expect(page.getByText(/resolves to this server/)).toHaveCount(0)
+
+  answer = silent
+  await page.getByRole("button", { name: "Scan", exact: true }).click()
+  await expect(page.getByText("Nothing answered a TLS handshake", { exact: true })).toBeVisible()
+  await expect(page.getByText(/resolves to this server/)).toBeVisible()
+  await expect(page.getByText("The server refused the handshake")).toHaveCount(0)
+})
+
+test("a server that takes only an older offer is reported with what it took", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  await scans(page, () => ({
+    ...scan,
+    grade: "F",
+    summary: "The handshake a current client makes is refused; only an older offer is taken.",
+    negotiated: "TLS 1.2",
+    cipherSuite: "TLS_RSA_WITH_AES_128_GCM_SHA256",
+    legacyOnly: true,
+    findings: [
+      {
+        id: "tls.legacy-only",
+        level: "critical",
+        title: "The handshake a current client makes is refused",
+        detail:
+          "The server refused the versions and cipher suites a current client offers, and took TLS 1.2 with TLS_RSA_WITH_AES_128_GCM_SHA256 when older ones were offered as well.",
+      },
+    ],
+  }))
+  await page.goto("/proxy/tls?domain=app.example.com")
+  await expect(
+    page.getByText(
+      "The handshake a current client makes is refused; only an older offer is taken.",
+    ),
+  ).toBeVisible()
+  await expect(
+    page.getByText("The handshake a current client makes is refused", { exact: true }),
+  ).toBeVisible()
+  await expect(page.getByText("TLS_RSA_WITH_AES_128_GCM_SHA256").first()).toBeVisible()
+  await expect(page.getByText(/Nothing answered/)).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+})
+
+test("a full-length serial wraps inside its panel", async ({ page }) => {
+  // Let's Encrypt serials are 18 bytes and the RFC allows 20: one unbroken
+  // token of up to 59 characters.
+  const serial = Array.from({ length: 20 }, (_, i) => (0x60 + i).toString(16).toUpperCase()).join(
+    ":",
+  )
+  await mockProxy(page, { included: true })
+  await scans(page, () => ({ ...scan, serial }))
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 })
+    await page.goto("/proxy/tls?domain=app.example.com")
+    const value = page.locator('dt:has-text("Serial") + dd')
+    await expect(value).toHaveText(serial)
+    expect(await value.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      width,
+    )
+  }
+})

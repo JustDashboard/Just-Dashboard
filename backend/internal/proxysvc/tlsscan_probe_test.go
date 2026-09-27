@@ -5,9 +5,11 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"errors"
 	"io"
 	"math/big"
 	"net"
@@ -50,6 +52,40 @@ func scanTestCert(t *testing.T, serial int64, ocsp []string) (tls.Certificate, *
 		t.Fatal(err)
 	}
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}, parsed
+}
+
+// rsaTestCert is an RSA leaf for scan.test, which RSA key exchange needs.
+func rsaTestCert(t *testing.T) tls.Certificate {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(8), Subject: pkix.Name{CommonName: "scan.test"},
+		DNSNames: []string{"scan.test"}, NotBefore: time.Now().Add(-time.Hour),
+		NotAfter: time.Now().Add(24 * time.Hour), KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
+}
+
+// splitAddr is a listener's address as ScanTLS takes it.
+func splitAddr(t *testing.T, addr string) (string, int) {
+	t.Helper()
+	host, portText, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return host, port
 }
 
 // tlsListener serves TLS on 127.0.0.1 and hands each completed handshake to
@@ -205,7 +241,7 @@ func TestAServiceThatIsNotAWebsiteIsNotGradedOnHeaders(t *testing.T) {
 	}))
 	defer plain.Close()
 
-	result := scanHTTP(context.Background(), "https://"+addr+"/", plain.URL+"/")
+	result := scanHTTP(context.Background(), "https://"+addr+"/", plain.URL+"/", tlsOffer("", 0, 0))
 	if result.HTTPSError == "" {
 		t.Fatalf("the non-HTTP answer should be the error: %+v", result)
 	}
@@ -318,7 +354,7 @@ func TestThePlainHTTPRedirectIsFollowedToHTTPS(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			plain := redirects(t, c.to)
-			result := scanHTTP(context.Background(), httpsURL, plain+"/")
+			result := scanHTTP(context.Background(), httpsURL, plain+"/", tlsOffer("", 0, 0))
 			if result.PlainRedirects != c.redirects || len(result.RedirectChain) != c.hops {
 				t.Fatalf("redirects=%v with %d hops, want %v with %d: %+v",
 					result.PlainRedirects, len(result.RedirectChain), c.redirects, c.hops, result.RedirectChain)
@@ -346,7 +382,7 @@ func TestThePlainHTTPRedirectIsFollowedToHTTPS(t *testing.T) {
 // A closed port 80 is not a missing redirect, and the page may only call it
 // refused when it was.
 func TestAClosedPort80IsNamedForWhatHappened(t *testing.T) {
-	result := scanHTTP(context.Background(), httpsWithHeaders(t), "http://127.0.0.1:1/")
+	result := scanHTTP(context.Background(), httpsWithHeaders(t), "http://127.0.0.1:1/", tlsOffer("", 0, 0))
 	if result.PlainError == "" || result.PlainErrorKind != "refused" {
 		t.Fatalf("got %q (%s)", result.PlainError, result.PlainErrorKind)
 	}
@@ -442,7 +478,7 @@ func TestARedirectIsNotFollowedIntoThisMachine(t *testing.T) {
 		"http://localhost:" + internalPort + "/admin/delete?x=1",
 	} {
 		plain := redirects(t, func(string) map[string]string { return map[string]string{"/": target} })
-		result := scanHTTP(context.Background(), httpsURL, plain+"/")
+		result := scanHTTP(context.Background(), httpsURL, plain+"/", tlsOffer("", 0, 0))
 		if internalHits.Load() != 0 {
 			t.Fatalf("%s was requested", target)
 		}
@@ -487,5 +523,120 @@ func TestHopAllowed(t *testing.T) {
 		if got := hopAllowed("127.0.0.1:80", c.address); got != c.allowed {
 			t.Errorf("%s = %v, want %v", c.address, got, c.allowed)
 		}
+	}
+}
+
+// A server taking TLS 1.2 only with RSA key exchange answers a current
+// client's offer with an alert, and the report said nothing answered and
+// advised checking DNS. Offered everything this library has, it connects, so
+// it is reachable with the one finding that matters, and the HTTP half is
+// asked with the offer that worked: with the current one it failed the same
+// handshake and said the service was not a website.
+func TestScanTLSReachesAServerThatTakesOnlyRSAKeyExchange(t *testing.T) {
+	addr := tlsListener(t, &tls.Config{
+		Certificates: []tls.Certificate{rsaTestCert(t)},
+		MinVersion:   tls.VersionTLS12, MaxVersion: tls.VersionTLS12,
+		CipherSuites: []uint16{tls.TLS_RSA_WITH_AES_128_GCM_SHA256},
+	}, func(c *tls.Conn) { c.Write([]byte("* OK ready\r\n")) })
+	host, port := splitAddr(t, addr)
+
+	scan := ScanTLS(context.Background(), host, port)
+	if !scan.Reachable || !scan.LegacyOnly || scan.Error != "" {
+		t.Fatalf("reachable=%v legacy=%v error=%q", scan.Reachable, scan.LegacyOnly, scan.Error)
+	}
+	if scan.Negotiated != "TLS 1.2" || scan.CipherSuite != "TLS_RSA_WITH_AES_128_GCM_SHA256" || scan.Certificate == nil {
+		t.Fatalf("negotiated %s with %s, certificate %v", scan.Negotiated, scan.CipherSuite, scan.Certificate)
+	}
+	if scan.Grade != "F" || !hasFinding(scan, "tls.legacy-only") || hasFinding(scan, "tls.unreachable") {
+		t.Fatalf("grade %s with %+v", scan.Grade, scan.Findings)
+	}
+	for _, f := range scan.Findings {
+		if f.ID == "tls.legacy-only" && !strings.Contains(f.Detail, "took TLS 1.2 with TLS_RSA_WITH_AES_128_GCM_SHA256") {
+			t.Errorf("the finding should say what was taken: %q", f.Detail)
+		}
+	}
+	if strings.Contains(scan.Summary, "Nothing answered") || !strings.Contains(scan.Summary, "current client") {
+		t.Errorf("summary %q", scan.Summary)
+	}
+	if scan.HTTP == nil || !strings.Contains(scan.HTTP.HTTPSError, "malformed HTTP") {
+		t.Errorf("the HTTPS request should have reached the service: %+v", scan.HTTP)
+	}
+}
+
+// An alert is the server's answer, so the report may not say nothing answered
+// or send the reader to check DNS; a closed port still reads as silence.
+func TestScanTLSSaysARefusedHandshakeWasRefused(t *testing.T) {
+	addr := tlsListener(t, &tls.Config{
+		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+			return nil, errors.New("no certificate for this name")
+		},
+	}, func(*tls.Conn) {})
+	host, port := splitAddr(t, addr)
+
+	scan := ScanTLS(context.Background(), host, port)
+	if scan.Reachable || scan.LegacyOnly || scan.Grade != "F" {
+		t.Fatalf("got %+v", scan)
+	}
+	if !hasFinding(scan, "tls.refused") || hasFinding(scan, "tls.unreachable") {
+		t.Fatalf("findings %+v", scan.Findings)
+	}
+	f := scan.Findings[0]
+	if !strings.Contains(f.Detail, "It answered internal error") || strings.Contains(f.Advice, "resolves") {
+		t.Errorf("finding %+v", f)
+	}
+	if strings.Contains(scan.Summary, "Nothing answered") || !strings.Contains(scan.Summary, "refused the handshake") {
+		t.Errorf("summary %q", scan.Summary)
+	}
+
+	closed := ScanTLS(context.Background(), "127.0.0.1", 1)
+	if !hasFinding(closed, "tls.unreachable") || !strings.HasPrefix(closed.Summary, "Nothing answered") {
+		t.Fatalf("a closed port: %q %+v", closed.Summary, closed.Findings)
+	}
+}
+
+// One alert is not a policy: when the current offer is taken on the second
+// try, the server is not reported as taking only older ones.
+func TestAPassingAlertIsNotReportedAsLegacyOnly(t *testing.T) {
+	cert, _ := scanTestCert(t, 9, nil)
+	var calls atomic.Int32
+	addr := tlsListener(t, &tls.Config{
+		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+			if calls.Add(1) == 1 {
+				return nil, errors.New("not ready yet")
+			}
+			return &cert, nil
+		},
+	}, func(*tls.Conn) {})
+
+	conn, legacy, err := handshake(context.Background(), addr, "scan.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if legacy || conn.ConnectionState().Version != tls.VersionTLS13 || calls.Load() != 3 {
+		t.Fatalf("legacy=%v version=%x after %d handshakes", legacy, conn.ConnectionState().Version, calls.Load())
+	}
+}
+
+// The HTTPS request of a legacy-only server offers what it takes; the one a
+// current client makes fails the handshake.
+func TestScanHTTPOffersWhatItIsGiven(t *testing.T) {
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+	}))
+	srv.TLS = &tls.Config{
+		MinVersion: tls.VersionTLS12, MaxVersion: tls.VersionTLS12,
+		CipherSuites: []uint16{tls.TLS_RSA_WITH_AES_128_GCM_SHA256},
+	}
+	srv.StartTLS()
+	defer srv.Close()
+
+	current := scanHTTP(context.Background(), srv.URL+"/", "http://127.0.0.1:1/", tlsOffer("", 0, 0))
+	if !strings.Contains(current.HTTPSError, "handshake failure") {
+		t.Fatalf("the current offer should be refused: %+v", current)
+	}
+	everything := scanHTTP(context.Background(), srv.URL+"/", "http://127.0.0.1:1/", tlsOffer("", oldestVersion, newestVersion))
+	if everything.HTTPSError != "" || everything.StatusCode != http.StatusOK || everything.HSTS == nil {
+		t.Fatalf("got %+v", everything)
 	}
 }

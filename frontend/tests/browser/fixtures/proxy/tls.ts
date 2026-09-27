@@ -10,6 +10,7 @@ export const scan = {
   summary: "A trusted certificate with headers to improve",
   negotiated: "TLS 1.3",
   cipherSuite: "TLS_AES_128_GCM_SHA256",
+  legacyOnly: false,
   certificate: certs[0],
   trusted: true,
   chainComplete: true,

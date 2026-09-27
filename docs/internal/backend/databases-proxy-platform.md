@@ -316,7 +316,17 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   client will not ask for, a probe that could not connect, or one that timed out is `unknown`, **never
   `refused`**, since reporting it absent would be false reassurance about the versions that matter most;
   `TestLiveNginxRefusalsAreReportedAsRefused` and
-  `TestLiveNginxLegacyVersionsWithOnlyRSAKeyExchangeAreOffered` hold this against a private real nginx. When HTTPS gives no HTTP response (`httpsError`: a mail
+  `TestLiveNginxLegacyVersionsWithOnlyRSAKeyExchangeAreOffered` hold this against a private real nginx.
+  The report's own handshake (`handshake`) offers what a current client does, since that is what it
+  calls negotiated. A server answering it with an alert is asked again offering every version and
+  suite (`tlsOffer` with TLS 1.0–1.3), then once more as a current client so a passing fault is not
+  reported as policy: taken only by the full offer, the scan is reachable and `legacyOnly`, graded F with
+  `tls.legacy-only` naming what was negotiated, and its HTTPS request makes the full offer too (a
+  server taking TLS 1.2 only with RSA key exchange was reported as nothing answering, with DNS advice).
+  Refused by both, it is `tls.refused` with the alert — no certificate for the name
+  (`ssl_reject_handshake`, Caddy), a client certificate wanted, or a suite Go lacks — and
+  `tls.unreachable` is kept for nothing answering at all; `TestLiveNginxWithOnlyRSAKeyExchangeIsReachable`
+  and `TestLiveNginxRejectedHandshakeIsARefusal`. When HTTPS gives no HTTP response (`httpsError`: a mail
   server on 993, or a failing site) nothing else on the HTTP side is measured or graded — no HSTS or
   header finding, no port-80 request. Otherwise the plain-HTTP side is followed by hand up to five hops
   (`redirectChain`) and passes when it reaches `https://` on any host; `plainErrorKind` says whether

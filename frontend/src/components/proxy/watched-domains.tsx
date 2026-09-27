@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Globe, Inspect, RefreshClockwise, Trash } from "@/components/icons"
 import { notify } from "@/lib/toast"
@@ -54,17 +54,34 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
   // An administrator's request handshakes with every endpoint, which can take
   // up to half a minute; usePoll keeps the old list on screen meanwhile and
   // does not call that loading, so the re-check is tracked here until an
-  // answer or an error replaces the list it was asked over.
-  const [recheckOver, setRecheckOver] = useState<Pick<typeof watched, "data" | "error">>()
+  // answer or an error replaces the list it was asked over. An endpoint just
+  // added rides along: its row is on screen, being checked, from the moment
+  // the server has it, where it used to appear only when the whole list came
+  // back and nothing said anything was happening.
+  const [recheckOver, setRecheckOver] = useState<
+    Pick<typeof watched, "data" | "error"> & { added?: Watched }
+  >()
   const rechecking =
     recheckOver !== undefined &&
     recheckOver.data === watched.data &&
     recheckOver.error === watched.error
-  const recheck = () => {
-    setRecheckOver({ data: watched.data, error: watched.error })
+  // Adding re-checks after its request returns, when the list this render
+  // closed over may already have been replaced; the one on screen is read.
+  const onScreen = useRef(watched)
+  useEffect(() => {
+    onScreen.current = watched
+  })
+  const recheck = (added?: Watched) => {
+    setRecheckOver({ data: onScreen.current.data, error: onScreen.current.error, added })
     watched.refresh()
   }
-  const rows = watched.data?.filter((row) => !removed.includes(row.id))
+  const added = rechecking ? recheckOver.added : undefined
+  // Watch stays busy until the new endpoint's first check is on screen: a
+  // second submission would restart the list's request and abandon it.
+  const watching = adding || added !== undefined
+  const rows = watched.data
+    ?.concat(added && !watched.data.some((row) => row.id === added.id) ? [added] : [])
+    .filter((row) => !removed.includes(row.id))
 
   const addDomain = async () => {
     // Read the way the TLS report reads its field: host:port for a service
@@ -75,11 +92,20 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
       setFieldError(parsed.error)
       return
     }
+    const label = targetLabel(parsed.target)
     setAdding(true)
     try {
-      await post("/certificates/watched", { domain: parsed.target.host, port: parsed.target.port })
+      const row = await post<Watched>("/certificates/watched", {
+        domain: parsed.target.host,
+        port: parsed.target.port,
+      })
       setDomain("")
-      watched.refresh()
+      if (rows?.some((shown) => shown.id === row.id)) {
+        notify.info(`${label} is already watched`)
+      } else {
+        notify.success(`Watching ${label}`)
+        recheck(row)
+      }
     } catch (err) {
       notify.error("Could not watch domain", err)
     } finally {
@@ -115,7 +141,7 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
           admin &&
           rows &&
           rows.length > 0 && (
-            <Button variant="outline" size="sm" onClick={recheck} pending={rechecking}>
+            <Button variant="outline" size="sm" onClick={() => recheck()} pending={rechecking}>
               <RefreshClockwise className="size-3.5" />
               {rechecking ? "Re-checking…" : "Re-check now"}
             </Button>
@@ -126,7 +152,7 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
           <form
             onSubmit={(event) => {
               event.preventDefault()
-              if (domain.trim()) void addDomain()
+              if (domain.trim() && !watching) void addDomain()
             }}
             className="min-w-0"
           >
@@ -151,8 +177,8 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
                 <Button
                   type="submit"
                   size="sm"
-                  disabled={!domain.trim() || adding}
-                  pending={adding}
+                  disabled={!domain.trim() || watching}
+                  pending={watching}
                 >
                   Watch
                 </Button>
@@ -164,7 +190,7 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
           {watched.loading || (rechecking && watched.error) ? (
             <LoadingRows rows={2} />
           ) : watched.error ? (
-            <ErrorState error={watched.error} onRetry={recheck} />
+            <ErrorState error={watched.error} onRetry={() => recheck()} />
           ) : !rows?.length ? (
             <p className="py-2 text-body text-muted-foreground">
               Nothing watched yet. A watched domain is checked with a real handshake when an
@@ -230,7 +256,9 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
                         ? "Removing…"
                         : row.checkedAt
                           ? `checked ${relativeTime(row.checkedAt)}`
-                          : "not checked yet"}
+                          : rechecking
+                            ? "checking…"
+                            : "not checked yet"}
                     </p>
                     {admin && (
                       <VerbBar

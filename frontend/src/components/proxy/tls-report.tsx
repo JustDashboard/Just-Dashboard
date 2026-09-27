@@ -144,7 +144,9 @@ export function TLSReportPage() {
             label="Negotiated"
             value={scan.negotiated ?? "—"}
             hint={scan.cipherSuite}
-            tone={scan.negotiated === "TLS 1.3" ? "success" : "default"}
+            tone={
+              scan.legacyOnly ? "danger" : scan.negotiated === "TLS 1.3" ? "success" : "default"
+            }
           />
           <StatTile
             label="Chain"
@@ -241,11 +243,17 @@ export function TLSReportPage() {
           </p>
         )}
         {report.error && !busy && <ErrorState error={report.error} onRetry={rescan} />}
-        {scan && !scan.reachable && (
-          <Notice tone="danger" icon={CrossCircle} title={`Nothing answered at ${scanned}`}>
-            {scan.error}
-          </Notice>
-        )}
+        {/* Why no handshake completed is the report's one finding: nothing
+            listening, or a server that answered and refused, which need
+            different advice. */}
+        {scan &&
+          !scan.reachable &&
+          scan.findings.map((finding) => (
+            <Notice key={finding.id} tone="danger" icon={CrossCircle} title={finding.title}>
+              <p className="break-words">{finding.detail}</p>
+              {finding.advice && <p>{finding.advice}</p>}
+            </Notice>
+          ))}
       </div>
 
       {scan?.reachable && (
@@ -411,7 +419,7 @@ export function TLSReportPage() {
                       {scan.keyBits ? ` ${scan.keyBits} bits` : ""}
                     </Detail>
                     <Detail label="Signature">{scan.signatureAlgorithm ?? "—"}</Detail>
-                    <Detail label="Serial" className="font-mono">
+                    <Detail label="Serial" className="font-mono break-all">
                       {scan.serial ?? "—"}
                     </Detail>
                     <Detail label="OCSP stapled">

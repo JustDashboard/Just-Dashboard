@@ -3,14 +3,10 @@ package proxysvc
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
-	"math/big"
 	"net"
 	"os"
 	"os/exec"
@@ -51,23 +47,9 @@ func TestLiveNginxRefusalsAreReportedAsRefused(t *testing.T) {
 // answered the probe's default offer with handshake_failure, and the report
 // said both were refused — grade A for a server offering retired versions.
 func TestLiveNginxLegacyVersionsWithOnlyRSAKeyExchangeAreOffered(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(8), Subject: pkix.Name{CommonName: "scan.test"},
-		DNSNames: []string{"scan.test"}, NotBefore: time.Now().Add(-time.Hour),
-		NotAfter: time.Now().Add(24 * time.Hour), KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-	}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
-	if err != nil {
-		t.Fatal(err)
-	}
 	// SECLEVEL=0 because OpenSSL 3 refuses TLS 1.0 and 1.1 at any higher
 	// level whatever ssl_protocols says.
-	addr := startLiveNginx(t, tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key},
+	addr := startLiveNginx(t, rsaTestCert(t),
 		"ssl_protocols TLSv1 TLSv1.1 TLSv1.2;\n        ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:AES128-SHA:@SECLEVEL=0;")
 
 	protocols := probeProtocols(context.Background(), addr, "scan.test")
@@ -77,6 +59,38 @@ func TestLiveNginxLegacyVersionsWithOnlyRSAKeyExchangeAreOffered(t *testing.T) {
 		if got := protocolStatus(protocols, name); got != want {
 			t.Errorf("%s = %s, want %s: %+v", name, got, want, protocols)
 		}
+	}
+}
+
+// An nginx taking TLS 1.2 only with RSA key exchange was reported as nothing
+// answering. It is reachable, legacy-only, and its HTTPS answer is read.
+func TestLiveNginxWithOnlyRSAKeyExchangeIsReachable(t *testing.T) {
+	addr := startLiveNginx(t, rsaTestCert(t), "ssl_protocols TLSv1.2;\n        ssl_ciphers AES128-GCM-SHA256;")
+
+	conn, legacy, err := handshake(context.Background(), addr, "scan.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := conn.ConnectionState()
+	conn.Close()
+	if !legacy || tls.CipherSuiteName(state.CipherSuite) != "TLS_RSA_WITH_AES_128_GCM_SHA256" {
+		t.Fatalf("legacy=%v with %s", legacy, tls.CipherSuiteName(state.CipherSuite))
+	}
+	http := scanHTTP(context.Background(), "https://"+addr+"/", "http://127.0.0.1:1/", tlsOffer("", oldestVersion, newestVersion))
+	if http.HTTPSError != "" || http.StatusCode != 200 {
+		t.Fatalf("got %+v", http)
+	}
+}
+
+// nginx's ssl_reject_handshake answers with an alert: a refusal, not silence.
+func TestLiveNginxRejectedHandshakeIsARefusal(t *testing.T) {
+	cert, _ := scanTestCert(t, 10, nil)
+	addr := startLiveNginx(t, cert, "ssl_reject_handshake on;")
+	host, port := splitAddr(t, addr)
+
+	scan := ScanTLS(context.Background(), host, port)
+	if scan.Reachable || !hasFinding(scan, "tls.refused") || !strings.Contains(scan.Findings[0].Detail, "unrecognized name") {
+		t.Fatalf("got %q %+v", scan.Summary, scan.Findings)
 	}
 }
 

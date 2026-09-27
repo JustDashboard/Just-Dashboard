@@ -86,6 +86,12 @@ export type TLSScan = {
   summary: string
   negotiated?: string
   cipherSuite?: string
+  /**
+   * The server refused the handshake a current client makes and took one
+   * offering older versions and cipher suites too; negotiated and
+   * cipherSuite are what it took then.
+   */
+  legacyOnly: boolean
   protocols: ProtocolResult[]
   certificate?: Certificate
   chain: ChainLink[]

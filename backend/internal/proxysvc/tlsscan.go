@@ -50,6 +50,10 @@ type TLSScan struct {
 
 	Negotiated  string `json:"negotiated,omitempty"`
 	CipherSuite string `json:"cipherSuite,omitempty"`
+	// LegacyOnly reports that the server refused the handshake a current
+	// client makes and took one offering every version and cipher suite this
+	// library has; Negotiated and CipherSuite are what it took then.
+	LegacyOnly bool `json:"legacyOnly"`
 	// Protocols reports each version the server was asked for. "unknown" is a
 	// real answer: the probe got nothing from the server to stand behind —
 	// this client would not ask, the connection failed, or the server's answer
@@ -182,34 +186,94 @@ func ScanTLS(ctx context.Context, domain string, port int) *TLSScan {
 	}
 	addr := net.JoinHostPort(domain, strconv.Itoa(port))
 
-	conn, err := dialTLS(ctx, addr, domain, 0, 0)
+	conn, legacy, err := handshake(ctx, addr, domain)
 	if err != nil {
-		scan.Error = err.Error()
-		scan.Grade = "F"
-		scan.Summary = "Nothing answered a TLS handshake on " + addr + "."
-		scan.Findings = append(scan.Findings, ScanFinding{
-			ID: "tls.unreachable", Level: "critical", Title: "No TLS on this address",
-			Detail: err.Error(),
-			Advice: "Check the domain resolves to this server and that the proxy is listening on " + strconv.Itoa(port) + ".",
-		})
+		unanswered(scan, addr, err)
 		return scan
 	}
 	state := conn.ConnectionState()
 	conn.Close()
 
 	scan.Reachable = true
+	scan.LegacyOnly = legacy
 	scan.Negotiated = tls.VersionName(state.Version)
 	scan.CipherSuite = tls.CipherSuiteName(state.CipherSuite)
 	scan.OCSPStapled = len(state.OCSPResponse) > 0
 	describeChain(scan, state.PeerCertificates, domain)
 
 	scan.Protocols = probeProtocols(ctx, addr, domain)
-	// The plain half goes to port 80 whatever the TLS port is: a redirect on
-	// a non-standard port tells nobody anything, because no browser goes there.
-	scan.HTTP = scanHTTP(ctx, "https://"+addr+"/", "http://"+urlHost(domain)+"/")
+	// The HTTPS request offers what the handshake got an answer to. The plain
+	// half goes to port 80 whatever the TLS port is: a redirect on a
+	// non-standard port tells nobody anything, because no browser goes there.
+	offer := tlsOffer("", 0, 0)
+	if legacy {
+		offer = tlsOffer("", oldestVersion, newestVersion)
+	}
+	scan.HTTP = scanHTTP(ctx, "https://"+addr+"/", "http://"+urlHost(domain)+"/", offer)
 
 	grade(scan)
 	return scan
+}
+
+// handshake is the scan's own, offering what a current client does. A server
+// that takes only what such a client leaves out — RSA key exchange, 3DES, TLS
+// 1.0 — answers that with an alert, and was reported as nothing answering at
+// all. So an alert is followed by an offer of every version and cipher suite
+// this library has, and when that is taken the current offer is made once
+// more: legacy is true only when it is refused again, so a passing fault is
+// not reported as the server's policy.
+func handshake(ctx context.Context, addr, serverName string) (conn *tls.Conn, legacy bool, err error) {
+	conn, err = dialTLS(ctx, addr, serverName, 0, 0)
+	if _, alerted := remoteAlert(err); !alerted {
+		return conn, false, err
+	}
+	old, oldErr := dialTLS(ctx, addr, serverName, oldestVersion, newestVersion)
+	if oldErr != nil {
+		return nil, false, err
+	}
+	if again, againErr := dialTLS(ctx, addr, serverName, 0, 0); againErr == nil {
+		old.Close()
+		return again, false, nil
+	}
+	return old, true, nil
+}
+
+// oldestVersion and newestVersion bound the offer of everything this library
+// has.
+const oldestVersion, newestVersion = tls.VersionTLS10, tls.VersionTLS13
+
+// unanswered records a handshake that never completed. A server's alert is
+// its refusal, which is not the same fact as nothing listening, and the
+// advice for one is wrong for the other.
+func unanswered(scan *TLSScan, addr string, err error) {
+	scan.Error = err.Error()
+	scan.Grade = "F"
+	alert, alerted := remoteAlert(err)
+	if !alerted {
+		scan.Summary = "Nothing answered a TLS handshake on " + addr + "."
+		scan.Findings = append(scan.Findings, ScanFinding{
+			ID: "tls.unreachable", Level: "critical", Title: "Nothing answered a TLS handshake",
+			Detail: err.Error(),
+			Advice: "Check the domain resolves to this server and that the proxy is listening on " + strconv.Itoa(scan.Port) + ".",
+		})
+		return
+	}
+	scan.Summary = "The server on " + addr + " refused the handshake."
+	scan.Findings = append(scan.Findings, ScanFinding{
+		ID: "tls.refused", Level: "critical", Title: "The server refused the handshake",
+		Detail: "It answered " + alert + ", both to the handshake a current client makes and to one offering every version and cipher suite this check has.",
+		Advice: "Something on port " + strconv.Itoa(scan.Port) + " speaks TLS and will not finish a handshake for " + scan.Domain +
+			". It may have no certificate for that name (nginx's ssl_reject_handshake and Caddy refuse a name they have no certificate for), want a client certificate, or take only cipher suites this check cannot offer, such as finite-field DHE or Camellia.",
+	})
+}
+
+// remoteAlert is the alert a server answered a handshake with, in its words.
+func remoteAlert(err error) (string, bool) {
+	var op *net.OpError
+	if err == nil || !errors.As(err, &op) || op.Op != "remote error" {
+		return "", false
+	}
+	return strings.TrimPrefix(op.Err.Error(), "tls: "), true
 }
 
 // CheckEndpoint is CheckDomain for the watch list, which checks many
@@ -251,23 +315,9 @@ func CheckEndpoint(ctx context.Context, domain string, port int) (*Certificate, 
 	return cert, nil
 }
 
-// dialTLS handshakes with addr. With a version pinned it offers every cipher
-// suite this library implements (probeSuites), so the question it asks is only
-// the version; unpinned it offers what a current client does, since that
-// handshake is what the report calls negotiated.
+// dialTLS handshakes with addr, offering tlsOffer's versions and suites.
 func dialTLS(ctx context.Context, addr, serverName string, minVer, maxVer uint16) (*tls.Conn, error) {
-	config := &tls.Config{
-		ServerName: serverName,
-		// The certificate is being examined, not trusted. A failed
-		// verification is the finding, not a reason to stop.
-		InsecureSkipVerify: true,
-		MinVersion:         minVer,
-		MaxVersion:         maxVer,
-	}
-	if minVer != 0 {
-		config.CipherSuites = probeSuites
-	}
-	dialer := &tls.Dialer{NetDialer: &net.Dialer{Timeout: 8 * time.Second}, Config: config}
+	dialer := &tls.Dialer{NetDialer: &net.Dialer{Timeout: 8 * time.Second}, Config: tlsOffer(serverName, minVer, maxVer)}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
@@ -280,6 +330,25 @@ func dialTLS(ctx context.Context, addr, serverName string, minVer, maxVer uint16
 		return nil, fmt.Errorf("unexpected connection type")
 	}
 	return tlsConn, nil
+}
+
+// tlsOffer is what a handshake of this check offers. With versions set it
+// offers every cipher suite this library implements (probeSuites), so the
+// question it asks is only the version; unset it offers what a current client
+// does, since that handshake is what the report calls negotiated.
+func tlsOffer(serverName string, minVer, maxVer uint16) *tls.Config {
+	config := &tls.Config{
+		ServerName: serverName,
+		// The certificate is being examined, not trusted. A failed
+		// verification is the finding, not a reason to stop.
+		InsecureSkipVerify: true,
+		MinVersion:         minVer,
+		MaxVersion:         maxVer,
+	}
+	if minVer != 0 {
+		config.CipherSuites = probeSuites
+	}
+	return config
 }
 
 // probeSuites is every cipher suite this library implements, the insecure
@@ -475,12 +544,13 @@ var securityHeaders = []struct {
 
 const scanUserAgent = "Just-Dashboard TLS check"
 
-// scanHTTP fetches httpsURL for the headers, then follows plainURL's
-// redirects to see whether a plain-HTTP visitor reaches HTTPS.
-func scanHTTP(ctx context.Context, httpsURL, plainURL string) *HTTPScan {
+// scanHTTP fetches httpsURL for the headers, offering what offer does, then
+// follows plainURL's redirects to see whether a plain-HTTP visitor reaches
+// HTTPS.
+func scanHTTP(ctx context.Context, httpsURL, plainURL string, offer *tls.Config) *HTTPScan {
 	out := &HTTPScan{Headers: []HeaderCheck{}, RedirectChain: []RedirectHop{}}
 	client := scanClient(&http.Transport{
-		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig:     offer,
 		DisableKeepAlives:   true,
 		TLSHandshakeTimeout: 8 * time.Second,
 	})
@@ -721,6 +791,12 @@ func grade(scan *TLSScan) {
 		scan.Findings = findings
 		return
 	}
+	if scan.LegacyOnly {
+		demote(gradeF, ScanFinding{ID: "tls.legacy-only", Level: "critical",
+			Title:  "The handshake a current client makes is refused",
+			Detail: "The server refused the versions and cipher suites a current client offers, and took " + scan.Negotiated + " with " + scan.CipherSuite + " when older ones were offered as well.",
+			Advice: "Clients that no longer offer those — this dashboard's own TLS library among them — cannot connect. In nginx set ssl_protocols TLSv1.2 TLSv1.3 and an ssl_ciphers list with ECDHE suites, such as Mozilla's intermediate profile."})
+	}
 	cert := scan.Certificate
 	switch {
 	case cert == nil:
@@ -876,6 +952,9 @@ const (
 )
 
 func letterFor(worst int, scan *TLSScan) (string, string) {
+	if scan.LegacyOnly {
+		return "F", "The handshake a current client makes is refused; only an older offer is taken."
+	}
 	switch worst {
 	case gradeF:
 		return "F", "Browsers will refuse or warn about this site."
