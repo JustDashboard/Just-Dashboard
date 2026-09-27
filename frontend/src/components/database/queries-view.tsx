@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import { useRouter } from "next/navigation"
 import {
   ClockRewind,
   CodeBracket,
@@ -36,10 +35,12 @@ import {
   QUERY_RANGES,
   around,
   countWords,
+  entryKeys,
   historyEntries,
   oneLine,
   queryNoun,
   rangeSince,
+  refreshEvery,
   sortEntries,
   sourceWords,
   type QueryOrder,
@@ -77,10 +78,19 @@ type Reading = QueryOrder | "top"
  * A SQLite file has no server keeping any of this, so its list is the
  * statements this dashboard ran on it. `ctx` is the logs pane this view sits
  * in; a database whose log is not on this machine has none, and its rows
- * simply have nowhere to send the reader.
+ * simply have nowhere to send the reader. `onQuery` is where the page runs a
+ * statement — the Databases section's query console — offered to an account
+ * that may run one, on an engine that speaks SQL.
  */
-export function DatabaseQueries({ conn, ctx }: { conn: DbConnection; ctx?: ServiceLogsContext }) {
-  const router = useRouter()
+export function DatabaseQueries({
+  conn,
+  ctx,
+  onQuery,
+}: {
+  conn: DbConnection
+  ctx?: ServiceLogsContext
+  onQuery?: (sql: string) => void
+}) {
   const { can } = useAuth()
   const noun = queryNoun(conn.driver)
   const sqlite = conn.driver === "sqlite"
@@ -101,7 +111,7 @@ export function DatabaseQueries({ conn, ctx }: { conn: DbConnection; ctx?: Servi
         { since: rangeSince(range), limit: LIMIT },
         signal,
       ),
-    30_000,
+    refreshEvery(range),
     [conn.id, range],
     { enabled: !sqlite },
   )
@@ -113,15 +123,18 @@ export function DatabaseQueries({ conn, ctx }: { conn: DbConnection; ctx?: Servi
   )
 
   const openInQuery =
-    !NOT_SQL.has(conn.driver) && can("service.control")
-      ? (sql: string) =>
-          router.push(`/databases/query?conn=${conn.id}&sql=${encodeURIComponent(sql)}`)
-      : undefined
+    onQuery && !NOT_SQL.has(conn.driver) && can("service.control") ? onQuery : undefined
 
   const result = sqlite ? history : log
   const entries = sqlite ? historyEntries(history.data ?? []) : (log.data?.entries ?? [])
   const rows = sortEntries(entries, shown === "slowest" ? "slowest" : "latest")
   const data = log.data
+  // A global setting Postgres reports as off can be on for one database or
+  // one role (ALTER DATABASE … SET), so rows in its log answer the Notice
+  // better than the setting does. MySQL's rows beside it are the stand-in the
+  // Notice explains, so it stays.
+  const enable =
+    data?.enable && (data.source !== "log" || rows.length === 0) ? data.enable : undefined
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -169,9 +182,9 @@ export function DatabaseQueries({ conn, ctx }: { conn: DbConnection; ctx?: Servi
       ) : (
         <>
           <div className="min-h-0 flex-1 overflow-auto bg-surface-sunken">
-            {data?.enable && (
+            {enable && (
               <EnableNotice
-                enable={data.enable}
+                enable={enable}
                 driver={conn.driver}
                 onQuery={openInQuery}
                 className="m-3"
@@ -192,6 +205,7 @@ export function DatabaseQueries({ conn, ctx }: { conn: DbConnection; ctx?: Servi
                 entries={rows}
                 noun={noun}
                 ctx={ctx}
+                range={range}
                 fromLog={data?.source === "log"}
                 onQuery={openInQuery}
               />
@@ -216,11 +230,20 @@ export function DatabaseQueries({ conn, ctx }: { conn: DbConnection; ctx?: Servi
                         <span className="numeric">slower than {data.threshold}</span>
                       </>
                     )}
-                    {data.truncated && (
+                    {data.reason ? (
                       <>
                         <FactDot />
-                        <span>the newest {LIMIT} — narrow the window to see the rest</span>
+                        <span className="min-w-0 truncate text-warning" title={data.reason}>
+                          {data.reason}
+                        </span>
                       </>
+                    ) : (
+                      data.truncated && (
+                        <>
+                          <FactDot />
+                          <span>the newest {LIMIT} — narrow the window to see the rest</span>
+                        </>
+                      )
                     )}
                   </>
                 )
@@ -345,11 +368,6 @@ function EnableNotice({
   )
 }
 
-/** A stable key for a row: the moment and the statement, which two rows never share. */
-function entryKey(entry: DbQueryEntry, i: number) {
-  return `${entry.at}|${entry.durationMs}|${i}`
-}
-
 /**
  * The statements as the request console draws requests: log lines rather
  * than a table, read down the left for the time and across for the one that
@@ -361,16 +379,19 @@ function QueryRows({
   entries,
   noun,
   ctx,
+  range,
   fromLog,
   onQuery,
 }: {
   entries: DbQueryEntry[]
   noun: ReturnType<typeof queryNoun>
   ctx?: ServiceLogsContext
+  range: QueryRange
   fromLog: boolean
   onQuery?: (sql: string) => void
 }) {
   const [open, setOpen] = useState<string | null>(null)
+  const keys = entryKeys(entries)
   const { highlight } = useLogView()
   const plain = !highlight
   const wide = useMediaQuery("(min-width: 640px)")
@@ -399,7 +420,7 @@ function QueryRows({
         </div>
       )}
       {entries.map((entry, i) => {
-        const key = entryKey(entry, i)
+        const key = keys[i]
         const slow = latencyTone(entry.durationMs) === "warning"
         const face = cn(
           "flex w-full cursor-default text-left focus-ring-inset transition-colors hover:bg-row-hover",
@@ -442,7 +463,7 @@ function QueryRows({
                   >
                     {clock(entry.at)}
                   </span>
-                  <span className="w-16">{took}</span>
+                  <span className="w-16 shrink-0 text-right">{took}</span>
                   <span className="min-w-0 flex-1 truncate" title={entry.query}>
                     {oneLine(entry.query)}
                   </span>
@@ -492,6 +513,7 @@ function QueryRows({
                 entry={entry}
                 noun={noun}
                 ctx={ctx}
+                range={range}
                 fromLog={fromLog}
                 plain={plain}
                 onQuery={onQuery}
@@ -529,6 +551,7 @@ function QueryDetail({
   entry,
   noun,
   ctx,
+  range,
   fromLog,
   plain,
   onQuery,
@@ -536,6 +559,8 @@ function QueryDetail({
   entry: DbQueryEntry
   noun: ReturnType<typeof queryNoun>
   ctx?: ServiceLogsContext
+  /** The list's window, which "every time this shape was slow" searches. */
+  range: QueryRange
   fromLog: boolean
   plain: boolean
   onQuery?: (sql: string) => void
@@ -590,12 +615,15 @@ function QueryDetail({
             key: "shape",
             label: "Every time this shape was slow",
             icon: Filter,
+            // The list's window, not the pane's: the pane's is wherever the
+            // last "server log around this" left it, two minutes wide.
             run: () =>
               ctx.openHistory({
-                since: ctx.window.since ?? around(entry.at, 7 * 24 * 3600).since,
-                until: ctx.window.until ?? new Date().toISOString(),
+                since: rangeSince(range),
+                until: new Date().toISOString(),
                 fields: { event: ["slow"], fp: [entry.fp!] },
                 levels: [],
+                q: "",
               }),
           },
         ]

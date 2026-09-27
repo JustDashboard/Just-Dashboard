@@ -106,6 +106,34 @@ export function rangeSince(range: QueryRange, now = Date.now()): string {
   return new Date(now - minutes * 60_000).toISOString()
 }
 
+/**
+ * How often a window is read again. The last hour moves while it is
+ * watched; a day or a week read every half minute is the whole of it
+ * searched again — the rotated files decompressed and all — for a row or
+ * two at the top.
+ */
+export function refreshEvery(range: QueryRange): number {
+  if (range === "1h") return 30_000
+  return range === "24h" ? 120_000 : 300_000
+}
+
+/**
+ * A key for each row that is the row's own rather than its place. A read
+ * that finds a new statement puts it on top, and keys counted from the top
+ * would move every row's by one and close the row being read. Only the same
+ * statement recorded twice at the same moment for the same time shares one,
+ * and those are told apart by their order among themselves.
+ */
+export function entryKeys(entries: DbQueryEntry[]): string[] {
+  const seen = new Map<string, number>()
+  return entries.map((entry) => {
+    const key = `${entry.at}|${entry.durationMs}|${entry.query.slice(0, 200)}`
+    const n = seen.get(key) ?? 0
+    seen.set(key, n + 1)
+    return n === 0 ? key : `${key}#${n}`
+  })
+}
+
 /** How many of what, in the view's own noun: "1 slow statement", "12 commands". */
 export function countWords(n: number, noun: QueryNoun): string {
   return `${n.toLocaleString()} ${n === 1 ? noun.one : noun.many}`

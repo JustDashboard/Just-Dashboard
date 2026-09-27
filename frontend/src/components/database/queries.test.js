@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test"
 import {
   around,
   countWords,
+  entryKeys,
   historyEntries,
   oneLine,
   queryNoun,
   rangeSince,
+  refreshEvery,
   sortEntries,
   sourceWords,
 } from "./queries"
@@ -89,4 +91,25 @@ test("a window's start is counted back from now", () => {
 test("a count is said in the view's own noun", () => {
   expect(countWords(1, queryNoun("postgres"))).toBe("1 statement")
   expect(countWords(12, queryNoun("redis"))).toBe("12 commands")
+})
+
+test("a row keeps its key when a newer statement arrives above it", () => {
+  const older = { at: "2026-09-27T09:58:40Z", durationMs: 312, query: "UPDATE stock SET qty = 1" }
+  const slow = { at: "2026-09-27T10:01:03Z", durationMs: 1843, query: "SELECT o.id FROM orders o" }
+  const newer = { at: "2026-09-27T10:05:00Z", durationMs: 420, query: "SELECT 1" }
+  const before = entryKeys([slow, older])
+  const after = entryKeys([newer, slow, older])
+  expect(after.slice(1)).toEqual(before)
+})
+
+test("the same statement recorded twice at one moment is still two rows", () => {
+  const twice = { at: "2026-09-27T10:00:00Z", durationMs: 12, query: "HGET cart:77" }
+  const keys = entryKeys([twice, { ...twice }])
+  expect(new Set(keys).size).toBe(2)
+})
+
+test("a longer window is read again less often", () => {
+  expect(refreshEvery("1h")).toBe(30_000)
+  expect(refreshEvery("24h")).toBeGreaterThan(refreshEvery("1h"))
+  expect(refreshEvery("7d")).toBeGreaterThan(refreshEvery("24h"))
 })

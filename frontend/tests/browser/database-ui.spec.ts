@@ -1146,19 +1146,21 @@ test("/databases/logs reads a container database's output through its engine's l
   expect(sockets[0].get("lens")).toBe("postgres")
 
   // The lens's figures are counts on chips over the pane — the section draws
-  // no tiles — and a press narrows the stream to the lines one counts.
+  // no tiles — and a press narrows the stream to the lines one counts. A
+  // reading a quick view already asks is left to the quick view: one chip per
+  // question, not two with two different counts.
   const readings = page.locator('[aria-label="Readings"]')
-  const slow = readings.getByRole("button", { name: /^Slow statements/ })
-  await expect(slow).toContainText("12")
+  const restarts = readings.getByRole("button", { name: /^Restarts/ })
+  await expect(restarts).toContainText("1")
+  await expect(readings.getByRole("button", { name: /^Slow statements/ })).toHaveCount(0)
+  await expect(readings.getByRole("button", { name: /^Errors/ })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /^Slow( \d+)?$/ })).toBeVisible()
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
-  await slow.click()
-  await expect(slow).toHaveAttribute("aria-pressed", "true")
-  await expect.poll(() => sockets.at(-1)?.getAll("f")).toEqual(["event:slow"])
-  // The lens's own quick view agrees about the question on screen.
-  await expect(page.getByRole("button", { name: /^Slow( \d+)?$/ })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
+  await restarts.click()
+  await expect(restarts).toHaveAttribute("aria-pressed", "true")
+  await expect.poll(() => sockets.at(-1)?.getAll("f")).toEqual(["event:startup"])
+  await restarts.click()
+  await expect.poll(() => sockets.at(-1)?.getAll("f")).toEqual([])
   await expect(page.locator('[data-slot=page] a[href^="/logs"]')).toHaveCount(0)
 })
 
@@ -1224,7 +1226,7 @@ test("/databases/logs offers a host database's file and its unit's journal, and 
   await expect(page.locator('[data-slot=page] a[href^="/logs"]')).toHaveCount(0)
 })
 
-test("/databases/logs lists the slow statements and says which setting keeps them from the log", async ({
+test("/databases/logs lists the slow statements, each opening on the whole statement and the log around it", async ({
   page,
 }) => {
   const searches: URLSearchParams[] = []
@@ -1236,9 +1238,9 @@ test("/databases/logs lists the slow statements and says which setting keeps the
     { timeout: 15_000 },
   )
 
-  const notice = page.getByText("Slow statements are not being logged")
-  await expect(notice).toBeVisible()
-  await expect(page.getByText(/log_min_duration_statement, which is -1/)).toBeVisible()
+  // Postgres reports log_min_duration_statement off server-wide, and its log
+  // has slow statements anyway — set for one database. The rows answer that.
+  await expect(page.getByText("Slow statements are not being logged")).toHaveCount(0)
 
   // A row is one line; opened, it is the whole statement and what came with it.
   const row = page.getByRole("button", { name: /SELECT o\.id, o\.total FROM orders o JOIN/ })
@@ -1263,17 +1265,228 @@ test("/databases/logs lists the slow statements and says which setting keeps the
   const history = searches.find((s) => s.get("limit") === "3000")!
   expect(history.get("until")).toBe("2026-09-27T10:02:03.221Z")
   expect(history.getAll("f")).toEqual([])
+})
 
-  // The fix is the advisor's: the statement, run in the query console.
-  await page.getByRole("button", { name: "Queries", exact: true }).click()
+test("/databases/logs asks every time a shape was slow over the list's window, and runs a statement in the query console", async ({
+  page,
+}) => {
+  const searches: URLSearchParams[] = []
+  await mockDatabases(page, { layout: null, puts: [], searches, queryLog: slowLog })
+  await page.goto("/databases/logs?conn=1&view=queries")
+  const queries = page.getByRole("button", { name: "Queries", exact: true })
+  await expect(queries).toHaveAttribute("aria-pressed", "true", { timeout: 15_000 })
+
+  // The list reads the last week; the pane's own History is on its last
+  // day. The shape's question is the list's, not the pane's.
+  await page.getByRole("group", { name: "Window" }).getByRole("button", { name: "7d" }).click()
+  await page.getByRole("button", { name: /SELECT o\.id, o\.total FROM orders o JOIN/ }).click()
+  await page.getByRole("button", { name: "More actions for this statement" }).click()
+  const asked = Date.now()
+  await page.getByRole("menuitem", { name: "Every time this shape was slow" }).click()
+  await expect
+    .poll(() => searches.find((s) => s.get("limit") === "3000")?.getAll("f"))
+    .toEqual(["event:slow", "fp:3f2a9c1d0b7e"])
+  const shape = searches.find((s) => s.get("limit") === "3000")!
+  const since = Date.parse(shape.get("since")!)
+  expect(Math.abs(asked - 7 * 24 * 3600_000 - since)).toBeLessThan(120_000)
+  expect(Date.parse(shape.get("until")!)).toBeGreaterThanOrEqual(asked - 1000)
+
+  // The totals over every run are the third reading.
+  await queries.click()
   await page.getByRole("button", { name: "Top statements" }).click()
   await expect(page.getByRole("heading", { name: "Top statements" })).toBeVisible()
   await expect(page.getByText("SELECT * FROM orders WHERE customer_id = $1")).toBeVisible()
+
+  // A statement runs in the section's query console.
   await page.getByRole("button", { name: "Latest" }).click()
-  await page.getByRole("button", { name: "Open in Query" }).first().click()
+  await page.getByRole("button", { name: /UPDATE stock SET qty/ }).click()
+  await page.getByRole("button", { name: "Open in Query" }).click()
+  await expect(page).toHaveURL(/\/databases\/query\?conn=1&sql=UPDATE\+stock|sql=UPDATE%20stock/)
+})
+
+test("/databases/logs says which setting keeps slow statements out of an empty log, with the statement that changes it", async ({
+  page,
+}) => {
+  await mockDatabases(page, {
+    layout: null,
+    puts: [],
+    queryLog: { ...slowLog, entries: [] },
+  })
+  await page.goto("/databases/logs?conn=1&view=queries")
+  const notice = page.getByText("Slow statements are not being logged")
+  await expect(notice).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText(/log_min_duration_statement, which is -1/)).toBeVisible()
+  await expect(page.getByText("No slow statements recorded")).toBeVisible()
+
+  // The fix is the advisor's: the statement, run in the query console.
+  await page.getByRole("button", { name: "Open in Query" }).click()
   await expect(page).toHaveURL(
     /\/databases\/query\?conn=1&sql=ALTER\+SYSTEM|\/databases\/query\?conn=1&sql=ALTER%20SYSTEM/,
   )
+})
+
+/** A host Postgres: its file, emptied by logrotate, and its unit's journal. */
+const LOG_FILE = "/var/log/postgresql/postgresql-17-main.log"
+const hostLog = {
+  sources: [
+    {
+      id: `file:${LOG_FILE}`,
+      label: "postgresql-17-main.log",
+      kind: "app",
+      path: LOG_FILE,
+      size: 0,
+      modified: now,
+      archives: 1,
+      archiveBytes: 1297,
+      lens: "postgres",
+      detail: "Empty since it was last rotated — History reads the rotated files too",
+      primary: true,
+      rotated: true,
+    },
+    {
+      id: "journal:postgresql@17-main.service",
+      label: "postgresql@17-main.service",
+      kind: "journal",
+      lens: "postgres",
+      detail:
+        "What systemd recorded starting and stopping it; the server's own lines are in postgresql-17-main.log",
+      rotated: false,
+    },
+  ],
+  refused: [
+    {
+      path: "/var/lib/postgresql/17/main/log/postgresql-Sat.log",
+      reason: "outside the log roots (/var/log)",
+    },
+  ],
+}
+
+test("/databases/logs reads the log around a statement in the server's own file, whichever log is open", async ({
+  page,
+}) => {
+  const searches: URLSearchParams[] = []
+  await mockDatabases(page, {
+    layout: null,
+    puts: [],
+    searches,
+    logSources: hostLog,
+    queryLog: slowLog,
+  })
+  const journal = encodeURIComponent("journal:postgresql@17-main.service")
+  await page.goto(`/databases/logs?conn=1&source=${journal}&view=queries`)
+  // The file the roots refuse is named whole, directory and all: that is
+  // what an administrator adds to JD_LOG_ROOTS.
+  await expect(page.getByText("/var/lib/postgresql/17/main/log/postgresql-Sat.log")).toBeVisible({
+    timeout: 15_000,
+  })
+
+  await page.getByRole("button", { name: /SELECT o\.id, o\.total FROM orders o JOIN/ }).click()
+  await page.getByRole("button", { name: "Server log around this" }).click()
+  await expect(page.getByRole("combobox", { name: "Server log" })).toContainText(
+    "postgresql-17-main.log",
+  )
+  // Once, on the file and its rotated one, never first on the journal.
+  await expect
+    .poll(() => searches.filter((s) => s.get("limit") === "3000").map((s) => s.get("source")))
+    .toEqual([`file:${LOG_FILE}`])
+  const history = searches.find((s) => s.get("limit") === "3000")!
+  expect(history.get("archives")).toBe("true")
+  expect(history.get("since")).toBe("2026-09-27T10:00:03.221Z")
+  await expect(page).toHaveURL(/source=file%3A%2Fvar%2Flog%2Fpostgresql/)
+  await expect(page).toHaveURL(/view=search/)
+})
+
+test("/databases/logs keeps a stopped server's log on screen and says it is not answering", async ({
+  page,
+}) => {
+  await page.clock.install()
+  let stopped = false
+  await mockDatabases(page, { layout: null, puts: [] })
+  await page.route("**/api/v1/databases/1/logs/sources", (route) =>
+    json(
+      route,
+      stopped
+        ? {
+            sources: [],
+            reason:
+              "Nothing on this machine is listening on port 5438, and no unit of this engine's was found by name.",
+          }
+        : containerLog,
+    ),
+  )
+  await page.goto("/databases/logs?conn=1")
+  const lines = page.getByLabel("Log lines")
+  await expect(lines.getByText("deadlock", { exact: true })).toBeVisible({ timeout: 15_000 })
+
+  // The next reading finds nothing listening; the log it was reading stays.
+  stopped = true
+  await page.clock.runFor(61_000)
+  await expect(page.getByText("The server is not answering")).toBeVisible()
+  await expect(lines.getByText("deadlock", { exact: true })).toBeVisible()
+})
+
+test("/databases/logs names a server found stopped as not answering", async ({ page }) => {
+  await mockDatabases(page, {
+    layout: null,
+    puts: [],
+    logSources: {
+      ...containerLog,
+      sources: [{ ...containerLog.sources[0], status: "exited" }],
+      note: "shop-db is exited, so nothing answers for this connection. Its output runs up to the moment it stopped.",
+    },
+  })
+  await page.goto("/databases/logs?conn=1")
+  await expect(page.getByText("The server is not answering")).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText(/shop-db is exited/)).toBeVisible()
+  await expect(page.getByLabel("Log lines").getByText("deadlock", { exact: true })).toBeVisible()
+})
+
+test("/databases/logs presses a reading from the Queries view back to the lines it counts", async ({
+  page,
+}) => {
+  const sockets: URLSearchParams[] = []
+  await mockDatabases(page, { layout: null, puts: [], sockets })
+  await page.goto("/databases/logs?conn=1&view=queries")
+  const queries = page.getByRole("button", { name: "Queries", exact: true })
+  await expect(queries).toHaveAttribute("aria-pressed", "true", { timeout: 15_000 })
+  // Back through the section's own link, which names no view: the pane
+  // opens on the reading it was left on.
+  await page.goto("/databases/logs?conn=1")
+  await expect(queries).toHaveAttribute("aria-pressed", "true", { timeout: 15_000 })
+
+  await page
+    .locator('[aria-label="Readings"]')
+    .getByRole("button", { name: /^Restarts/ })
+    .click()
+  await expect(page.getByRole("button", { name: "Live", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect.poll(() => sockets.at(-1)?.getAll("f")).toEqual(["event:startup"])
+})
+
+test("/databases/logs on a phone says why a remote server has no log here, whole", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const reason = "The server is on another machine (10.0.4.9), and its log is there."
+  await mockDatabases(page, {
+    layout: null,
+    puts: [],
+    logSources: { sources: [], reason },
+    queryLog: {
+      supported: true,
+      source: "slowlog",
+      threshold: "10 ms",
+      entries: [],
+      truncated: false,
+    },
+  })
+  await page.goto("/databases/logs?conn=1")
+  const why = page.getByText(reason)
+  await expect(why).toBeVisible({ timeout: 15_000 })
+  expect(await why.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+  await expect(page.getByLabel("Log lines")).toHaveCount(0)
 })
 
 test("/databases/logs on a SQLite file lists what was run from here, with no log pane", async ({

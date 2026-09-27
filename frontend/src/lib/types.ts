@@ -5555,6 +5555,8 @@ export type DbLogSources = {
   refused?: { path: string; reason: string }[]
   /** Why there is no source, when there is none. */
   reason?: string
+  /** What the sources are when nothing answers for the connection: a stopped server's log. */
+  note?: string
 }
 
 /** One statement the server itself recorded as slow — or, for ClickHouse, as run. */
