@@ -366,6 +366,15 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `conf.d/<name>.conf` on a conf.d host) and `exists` whether a file is there. Both are left out when the
   host has neither directory. A new site's name follows its domain, so it can land on an existing site
   without the operator typing it; the form refuses that at the field before the save refuses it.
+  `enabledElsewhere` is the other way a name is taken: a `sites-enabled/<name>` that enables a different
+  file (a hand-written site linked under its domain rather than its file name, or a link to a file that is
+  gone) or is a file of its own, said as a sentence (`enabledElsewhere()`, which follows relative and
+  chained links, so a link naming this very file, even before it is written, is not in the way). The save
+  refuses a new site there, and an edit asked to enable itself there, before `linkEnabled` runs: it used to
+  replace the link before `nginx -t`, so the test never saw the two sites claim one name and the other
+  site silently stopped being served. An edit that keeps its link state leaves such a link alone and
+  reports itself not enabled (`TestSaveSiteLeavesAnotherSitesLinkAlone`,
+  `TestSiteFileSaysWhatHoldsTheNamesLink`).
 
   The form's side of this lives in pure modules beside `site-form.tsx`, tested with bun:
   `site-identity.ts` works a new site's file name and certificate paths out of its whole first domain on
@@ -374,15 +383,19 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   shows the name as its own **File name** field (read-only for an existing site), with **Match the
   domain** and **Use the domain's certificate** to follow the domain again. `site-save.ts` builds the
   request — `keep` for an existing site, HSTS only with TLS, since the switch is drawn only under HTTPS
-  and its hidden default warned on every plain-HTTP site — and turns the result into what the toast
-  says. A refused conflict is a Notice in the form with **Save anyway**.
+  and its hidden default warned on every plain-HTTP site, and `spa` and `permanent` only with the kind
+  that draws them — and turns the result into what the toast says. A refused conflict is a Notice in the
+  form with **Save anyway**. A new form opens with the keyboard in **Domains**, and the presets come
+  after the file name, so the one field every site needs is in view on a phone.
 
   A new site can **start from a preset** (`site-presets.ts`: Node.js app, single-page app, Grafana, Home
   Assistant, Docker registry, MinIO, Jellyfin, redirect), a `SiteSpec` partial laid over the form. It
   keeps the operator's name, domains, certificate, access settings and any upstream they typed, and
   swaps only its own lines in the extra configuration (the registry and MinIO turn
-  `proxy_request_buffering` off there and lift the upload limit with `client_max_body_size 0`). Each
-  preset is checked in as `proxysvc/testdata/presets/<id>.json`, which `site-presets.test.js` holds equal
+  `proxy_request_buffering` off there and lift the upload limit with `client_max_body_size 0`). A
+  preset's card stays chosen, with its note about the application's own settings, until the operator
+  picks another kind by hand: `leavePreset` then takes out the preset's extra lines and puts back the
+  default for each field it set that still holds its value. Each preset is checked in as `proxysvc/testdata/presets/<id>.json`, which `site-presets.test.js` holds equal
   to the TypeScript; `TestPresetsRenderAndReadBackAsThemselves` renders every one plain and over HTTPS
   and reads it back unchanged, `TestLivePresetsPassNginxTest` puts all of them through the host's
   `nginx -t` with no warning, and two more live tests prove the single-page fallback and a 64 MB upload
@@ -395,8 +408,10 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   443 and 8443 are offered as `https://`.
   nginx's own sockets, UDP, sockets bound to one other interface and ports that answer something other
   than HTTP (SSH, mail, databases, Docker's API) are left out. A loopback upstream nothing listens on is
-  warned about under the field, not refused: nginx answers 502 until the application starts. Both lists
-  are polled while the form is open, so an application started half-way through appears.
+  warned about under the field, not refused: nginx answers 502 until the application starts. The blank
+  form's own default (`127.0.0.1:3000`) is not warned about until somebody sets the upstream — by
+  typing, picking, a preset or a link — or the site already had it. Both lists are polled while the form
+  is open, so an application started half-way through appears.
 
   **`/proxy/sites?new=1&upstream=<url>&domain=<name>`** opens the form on a new site from elsewhere in
   the dashboard (`site-link.ts`, called from the Sites page). It is read once, taken off the address, and

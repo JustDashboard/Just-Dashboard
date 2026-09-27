@@ -38,6 +38,18 @@ describe("what a save sends", () => {
     expect(sendableSpec(spec({ tls: true, hsts: false })).hsts).toBe(false)
   })
 
+  test("a kind's own switch goes only with that kind", () => {
+    // Left on by a preset or a click under another kind, where it is not drawn.
+    expect(sendableSpec(spec({ kind: "proxy", spa: true }))).not.toHaveProperty("spa")
+    expect(sendableSpec(spec({ kind: "redirect", spa: true }))).not.toHaveProperty("spa")
+    expect(sendableSpec(spec({ kind: "static", spa: true })).spa).toBe(true)
+    expect(sendableSpec(spec({ kind: "static", spa: false })).spa).toBe(false)
+    expect(sendableSpec(spec({ kind: "proxy", permanent: true }))).not.toHaveProperty("permanent")
+    expect(sendableSpec(spec({ kind: "static", permanent: true }))).not.toHaveProperty("permanent")
+    expect(sendableSpec(spec({ kind: "redirect", permanent: true })).permanent).toBe(true)
+    expect(sendableSpec(spec({ kind: "static" }))).not.toHaveProperty("spa")
+  })
+
   test("an existing site keeps its link and a new one is enabled", () => {
     expect(saveRequest(spec(), { existing: true, reload: true })).toMatchObject({
       enable: "keep",

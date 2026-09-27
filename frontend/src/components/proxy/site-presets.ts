@@ -165,6 +165,9 @@ const DECIDED: Partial<SiteSpec> = {
   spa: false,
 }
 
+/** What a preset's fields go back to when the site leaves it. */
+const UNSET: Partial<SiteSpec> = { ...DECIDED, upstream: BLANK.upstream }
+
 /**
  * A preset laid over the site so far. The name, domains, certificate and
  * access settings are the operator's and stay. So does an upstream they
@@ -182,6 +185,22 @@ export function applyPreset(spec: SiteSpec, preset: SitePreset): SiteSpec {
     upstream: typed ?? preset.spec.upstream ?? BLANK.upstream,
     custom: swapCustom(spec.custom, preset.spec.custom),
   }
+}
+
+/**
+ * The site once its kind is changed by hand after a preset: it is no longer
+ * that preset's site, so what the preset put in goes — its own extra lines,
+ * and each field it set that still holds its value, back to the default. What
+ * the operator changed since stays, as does everything applyPreset keeps.
+ */
+export function leavePreset(spec: SiteSpec, preset: SitePreset, kind: SiteSpec["kind"]): SiteSpec {
+  const given: Partial<SiteSpec> = { ...DECIDED, ...preset.spec }
+  const untouched = Object.fromEntries(
+    Object.entries(UNSET).filter(
+      ([key]) => spec[key as keyof SiteSpec] === given[key as keyof SiteSpec],
+    ),
+  )
+  return { ...spec, ...untouched, kind, custom: swapCustom(spec.custom, undefined) }
 }
 
 function swapCustom(current: string | undefined, next: string | undefined) {
@@ -205,7 +224,9 @@ export const LINK_PARAMS = ["new", "upstream", "domain"] as const
  * which beats quietly opening on the default upstream as though the link had
  * asked for it. Nothing without new=1.
  */
-export function linkedSite(params: URLSearchParams): { spec: SiteSpec; domains: string } | null {
+export function linkedSite(
+  params: URLSearchParams,
+): { spec: SiteSpec; domains: string; upstreamGiven: boolean } | null {
   if (params.get("new") !== "1") return null
   const upstream = params.get("upstream")?.trim().slice(0, 512)
   const domains = (params.get("domain") ?? "")
@@ -214,6 +235,7 @@ export function linkedSite(params: URLSearchParams): { spec: SiteSpec; domains: 
     .filter(Boolean)
   return {
     domains: domains.join(" "),
+    upstreamGiven: Boolean(upstream),
     spec: {
       ...BLANK,
       ...(upstream ? { kind: "proxy", upstream } : {}),

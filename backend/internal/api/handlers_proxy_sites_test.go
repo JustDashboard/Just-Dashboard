@@ -224,6 +224,33 @@ func TestSitePreviewSaysWhichFileASaveWrites(t *testing.T) {
 		t.Fatalf("after the save the file is not reported: %+v", p)
 	}
 
+	// A link named app that enables another file holds the name as surely
+	// as a file does, and a new site saved over it is refused with the
+	// other site's link untouched.
+	other := filepath.Join(dir, "sites-available", "shopfront.conf")
+	if err := os.WriteFile(other, []byte("server { server_name shop.example.com; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(other, filepath.Join(dir, "sites-enabled", "shop.example.com")); err != nil {
+		t.Fatal(err)
+	}
+	w := c.do(http.MethodPost, "/api/v1/proxy/sites/preview", siteBody(t, "shop.example.com", "shop.example.com", `"enable"`, nil), nil)
+	var held struct {
+		Exists           bool   `json:"exists"`
+		EnabledElsewhere string `json:"enabledElsewhere"`
+	}
+	decodeSite(t, w, &held)
+	if held.Exists || held.EnabledElsewhere != "sites-enabled/shop.example.com already enables "+other {
+		t.Fatalf("a name held by another site's link: %+v", held)
+	}
+	w = c.do(http.MethodPost, "/api/v1/proxy/sites/", siteBody(t, "shop.example.com", "shop.example.com", `"enable"`, map[string]any{"overwrite": false}), nil)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "already enables") {
+		t.Fatalf("a new site over another's link: %d %s", w.Code, w.Body.String())
+	}
+	if target, err := os.Readlink(filepath.Join(dir, "sites-enabled", "shop.example.com")); err != nil || target != other {
+		t.Fatalf("the other site's link now names %q: %v", target, err)
+	}
+
 	// A conf.d host writes app.conf there.
 	if err := os.RemoveAll(filepath.Join(dir, "sites-available")); err != nil {
 		t.Fatal(err)

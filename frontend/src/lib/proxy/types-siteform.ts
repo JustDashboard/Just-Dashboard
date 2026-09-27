@@ -54,6 +54,11 @@ export type SitePreview = {
   path?: string
   /** Whether a file is already there. */
   exists?: boolean
+  /**
+   * What holds the name's sites-enabled link when it is another file — a
+   * site a new one of this name would unlink. A sentence.
+   */
+  enabledElsewhere?: string
 }
 
 /** One of a site's names another server block also claims on the same address. */

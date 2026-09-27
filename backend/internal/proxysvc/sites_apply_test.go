@@ -108,6 +108,132 @@ func TestSaveSiteLeavesTheLinkAsItWas(t *testing.T) {
 	}
 }
 
+func linkTarget(t *testing.T, root, name string) string {
+	t.Helper()
+	target, err := os.Readlink(filepath.Join(root, "sites-enabled", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return target
+}
+
+// A hand-written site can be enabled under a link named for its domain
+// rather than for its file. A new site derived from that domain used to
+// replace the link before nginx -t ran: the test never saw the two claim one
+// name, and the hand-written site silently stopped being served.
+func TestSaveSiteLeavesAnotherSitesLinkAlone(t *testing.T) {
+	service, root := siteNginx(t, cleanTest, 0, "", 0)
+	ctx := context.Background()
+	handWritten := filepath.Join(root, "sites-available", "shopfront.conf")
+	if err := os.WriteFile(handWritten, []byte("server { server_name shop.example.com; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../sites-available/shopfront.conf", filepath.Join(root, "sites-enabled", "shop.example.com")); err != nil {
+		t.Fatal(err)
+	}
+	spec := plainSpec("shop.example.com", "shop.example.com")
+	want := "sites-enabled/shop.example.com already enables " + handWritten
+
+	file, err := service.SiteFile("shop.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file.Exists || file.EnabledElsewhere != want {
+		t.Fatalf("the preview's view of the name = %+v, want it held by %s", file, handWritten)
+	}
+	for _, opts := range []SiteSave{{Enable: true, Reload: true}, {Reload: true}} {
+		_, err := service.SaveSite(ctx, spec, opts)
+		if err == nil || !strings.HasPrefix(err.Error(), want+" — ") {
+			t.Fatalf("a new site over another's link (%+v): %v", opts, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "sites-available", "shop.example.com")); !os.IsNotExist(err) {
+		t.Fatal("a refused new site left its file behind")
+	}
+	if got := linkTarget(t, root, "shop.example.com"); got != "../sites-available/shopfront.conf" {
+		t.Fatalf("the hand-written site's link now names %s", got)
+	}
+
+	// An existing file of that name, edited: keeping its link state leaves
+	// the other site's link where it is and says this one is not enabled;
+	// asking to enable it is refused rather than unlinking the other.
+	if err := os.WriteFile(filepath.Join(root, "sites-available", "shop.example.com"), []byte("# old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := service.SaveSite(ctx, spec, SiteSave{Overwrite: true, Reload: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Enabled || linkTarget(t, root, "shop.example.com") != "../sites-available/shopfront.conf" {
+		t.Fatalf("an edit kept as it was took the other site's link: %+v", res)
+	}
+	if _, err := service.SaveSite(ctx, spec, SiteSave{Overwrite: true, Enable: true}); err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Fatalf("enabling over another site's link: %v", err)
+	}
+	if got := linkTarget(t, root, "shop.example.com"); got != "../sites-available/shopfront.conf" {
+		t.Fatalf("the hand-written site's link now names %s", got)
+	}
+}
+
+// What holds a name's link, for each shape a sites-enabled entry takes.
+func TestSiteFileSaysWhatHoldsTheNamesLink(t *testing.T) {
+	service, root := siteNginx(t, cleanTest, 0, "", 0)
+	enabled := func(name string) string { return filepath.Join(root, "sites-enabled", name) }
+	available := func(name string) string { return filepath.Join(root, "sites-available", name) }
+	if err := os.Symlink("../sites-available/stale", enabled("stale")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(available("gone"), enabled("orphan")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(enabled("inline"), []byte("server {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(available("app"), []byte("server {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(available("app"), enabled("app")); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name, want string
+		exists     bool
+	}{
+		{"free", "", false},
+		{"app", "", true},
+		// Its own link, left from a file deleted by hand: saving writes the
+		// file it already names.
+		{"stale", "", false},
+		{"orphan", "sites-enabled/orphan links to " + available("gone") + ", which is not there", false},
+		{"inline", "sites-enabled/inline is a file of its own, not a link", false},
+	} {
+		file, err := service.SiteFile(c.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if file.Path != available(c.name) || file.Exists != c.exists || file.EnabledElsewhere != c.want {
+			t.Errorf("%s: %+v, want exists=%v held by %q", c.name, file, c.exists, c.want)
+		}
+	}
+
+	// The stale link is this name's own, so a new site is saved through it.
+	res, err := service.SaveSite(context.Background(), plainSpec("stale", "stale.example.com"), SiteSave{Enable: true})
+	if err != nil || !res.Enabled {
+		t.Fatalf("a new site over its own stale link: %+v %v", res, err)
+	}
+
+	// On a conf.d host there are no links to hold a name.
+	if err := os.RemoveAll(filepath.Join(root, "sites-available")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "conf.d"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if file, err := service.SiteFile("inline"); err != nil || file.EnabledElsewhere != "" {
+		t.Fatalf("conf.d: %+v %v", file, err)
+	}
+}
+
 // A reload that fails after a clean test is the running process's problem,
 // not the file's: the site is saved and in place, and the result says what
 // nginx did not do instead of reporting that nothing was applied.

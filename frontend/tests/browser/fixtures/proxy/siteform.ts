@@ -55,6 +55,15 @@ export function siteResult(overrides: Record<string, unknown> = {}) {
 /** The sites the mocked host already has files for, as the preview reports them. */
 const ON_DISK = new Set(["app.example.com", "legacy.example.com"])
 
+/**
+ * A name whose sites-enabled link enables a hand-written file of another
+ * name, as the preview reports it.
+ */
+export const LINKED_ELSEWHERE: Record<string, string> = {
+  "wiki.example.com":
+    "sites-enabled/wiki.example.com already enables /etc/nginx/sites-available/wiki.conf",
+}
+
 /** The site form's own endpoints: reading a site back, its preview, and saving it. */
 export const routes: ProxyRoutes = {
   "/proxy/sites/app.example.com": (route) =>
@@ -68,6 +77,7 @@ export const routes: ProxyRoutes = {
       warnings: [],
       path: `/etc/nginx/sites-available/${spec.name}`,
       exists: ON_DISK.has(spec.name),
+      ...(LINKED_ELSEWHERE[spec.name] ? { enabledElsewhere: LINKED_ELSEWHERE[spec.name] } : {}),
     })
   },
   "/proxy/sites/": (route) => {

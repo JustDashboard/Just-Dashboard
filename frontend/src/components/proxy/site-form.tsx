@@ -51,7 +51,13 @@ import {
   type IdentityFixed,
 } from "@/components/proxy/site-identity"
 import { NEW_SITE_DRAFT } from "@/components/proxy/site-link"
-import { applyPreset, BLANK, presetById, PRESETS } from "@/components/proxy/site-presets"
+import {
+  applyPreset,
+  BLANK,
+  leavePreset,
+  presetById,
+  PRESETS,
+} from "@/components/proxy/site-presets"
 import { saveOutcome, saveRequest, sendableSpec } from "@/components/proxy/site-save"
 import {
   nothingListening,
@@ -142,6 +148,11 @@ function SiteFormBody({
   // The preset last picked, drawn as the chosen card; the fields it filled
   // stay the operator's to change.
   const [preset, setPreset] = useSessionState<string | null>(`${draft}.preset`, null)
+  const presetNote = useRef<HTMLParagraphElement>(null)
+  // Whether somebody chose the upstream — typed, picked, a preset's or a
+  // link's. Until then it is BLANK's suggestion, and a blank form opened on
+  // a warning that nothing listens behind an address nobody had given.
+  const [upstreamSet, setUpstreamSet] = useSessionState(`${draft}.upstreamSet`, false)
   // The rendered file and where it goes, for the spec named here: a preview
   // of another name says nothing about this one's file.
   const [preview, setPreview] = useState<(SitePreview & { name: string }) | null>(null)
@@ -317,6 +328,25 @@ function SiteFormBody({
     if (!chosen) return
     setSpec((s) => applyPreset(s, chosen))
     setPreset(id)
+    setUpstreamSet(true)
+    // What to set on the application's side lands under the cards, often
+    // past the pane's edge on a phone.
+    requestAnimationFrame(() => presetNote.current?.scrollIntoView({ block: "nearest" }))
+  }
+  // Another kind picked by hand is no longer the preset's site: its card
+  // lets go, its note goes, and so does what it put in.
+  const chooseKind = (kind: SiteSpec["kind"]) => {
+    const chosen = presetById(preset)
+    if (chosen && chosen.spec.kind !== kind) {
+      setSpec((s) => leavePreset(s, chosen, kind))
+      setPreset(null)
+      return
+    }
+    set("kind", kind)
+  }
+  const setUpstream = (upstream: string) => {
+    set("upstream", upstream)
+    setUpstreamSet(true)
   }
 
   const save = async (reload: boolean, allowConflict = false) => {
@@ -362,12 +392,14 @@ function SiteFormBody({
       ? nameProblem
       : !editing && file?.exists
         ? `A site called ${spec.name} already exists. Pick another name, or open that site to edit it.`
-        : undefined
+        : !editing && file?.enabledElsewhere
+          ? `${file.enabledElsewhere}, so the name is taken. Pick another name.`
+          : undefined
   const certificateFollows =
     spec.domains.length === 0 ||
     (derived.certPath === spec.certPath && derived.keyPath === spec.keyPath)
   const idle =
-    spec.kind === "proxy"
+    spec.kind === "proxy" && (source !== null || upstreamSet)
       ? nothingListening(spec.upstream ?? "", picker.listeners, picker.containers)
       : undefined
   const chosenPreset = !source ? presetById(preset) : undefined
@@ -378,7 +410,7 @@ function SiteFormBody({
     spec.name !== "" &&
     file !== null &&
     !nameProblem &&
-    (editing !== null || !file.exists)
+    (editing !== null || (!file.exists && !file.enabledElsewhere))
   const certKnown =
     !spec.tls || !spec.certPath || !certs.data || certs.data.some((c) => c.path === spec.certPath)
   const issueHref = `/proxy/certificates?issue=${encodeURIComponent(spec.domains.join(" "))}`
@@ -442,25 +474,6 @@ function SiteFormBody({
             </Notice>
           )}
 
-          {!source && (
-            <FormSection title="Start from">
-              <ChoiceGrid columns={2} className="grid-cols-2">
-                {PRESETS.map((p) => (
-                  <ProductCard
-                    key={p.id}
-                    product={p.product}
-                    fallback={KIND_MARK[p.spec.kind ?? "proxy"]}
-                    label={p.label}
-                    detail={p.detail}
-                    selected={preset === p.id}
-                    onClick={() => choosePreset(p.id)}
-                  />
-                ))}
-              </ChoiceGrid>
-              {chosenPreset?.note && <FormNote>{chosenPreset.note}</FormNote>}
-            </FormSection>
-          )}
-
           <Field
             label="Domains"
             htmlFor="site-domains"
@@ -474,6 +487,9 @@ function SiteFormBody({
               id="site-domains"
               value={domainText}
               onChange={(e) => commitDomains(e.target.value)}
+              // The one field every new site needs, so the keyboard starts
+              // here rather than on the first preset card.
+              autoFocus={!editing}
               placeholder="app.example.com www.app.example.com"
               className="font-mono text-xs"
             />
@@ -515,6 +531,25 @@ function SiteFormBody({
             />
           </Field>
 
+          {!source && (
+            <FormSection title="Start from">
+              <ChoiceGrid columns={2} className="grid-cols-2">
+                {PRESETS.map((p) => (
+                  <ProductCard
+                    key={p.id}
+                    product={p.product}
+                    fallback={KIND_MARK[p.spec.kind ?? "proxy"]}
+                    label={p.label}
+                    detail={p.detail}
+                    selected={preset === p.id}
+                    onClick={() => choosePreset(p.id)}
+                  />
+                ))}
+              </ChoiceGrid>
+              {chosenPreset?.note && <FormNote ref={presetNote}>{chosenPreset.note}</FormNote>}
+            </FormSection>
+          )}
+
           <FormSection title="What it serves">
             <ChoiceGrid columns={3} className="grid-cols-3">
               {(
@@ -529,7 +564,7 @@ function SiteFormBody({
                   <ChoiceCard
                     key={kind}
                     selected={spec.kind === kind}
-                    onClick={() => set("kind", kind)}
+                    onClick={() => chooseKind(kind)}
                     className="min-h-20 justify-center"
                   >
                     <Mark aria-hidden className="size-4 text-muted-foreground" />
@@ -555,7 +590,7 @@ function SiteFormBody({
               <UpstreamPicker
                 id="site-upstream"
                 value={spec.upstream ?? ""}
-                onChange={(v) => set("upstream", v)}
+                onChange={setUpstream}
                 options={picker.options}
                 loading={picker.loading}
                 failed={picker.failed}

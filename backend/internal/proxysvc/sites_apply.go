@@ -146,6 +146,16 @@ func (s *Service) saveSiteLocked(ctx context.Context, spec *SiteSpec, content st
 		return nil, fmt.Errorf("a site called %s already exists", spec.Name)
 	}
 	link := filepath.Join(s.nginxDir, "sites-enabled", spec.Name)
+	// A link of this name that enables another file is that site's. Linking
+	// this one in its place unlinks it before nginx -t runs, so the test
+	// never sees the two claim one name and the site just stops.
+	elsewhere := ""
+	if !confd {
+		elsewhere = enabledElsewhere(link, full)
+	}
+	if elsewhere != "" && (!opts.Overwrite || enable) {
+		return nil, fmt.Errorf("%s — pick another name, or move that link aside first", elsewhere)
+	}
 	// What nginx read of this file before the save: a name the site wins
 	// after it is only taken from someone if the site did not answer it
 	// already.
@@ -153,9 +163,10 @@ func (s *Service) saveSiteLocked(ctx context.Context, spec *SiteSpec, content st
 	if existed && (!strings.Contains(full, "sites-available") || resolvedFile(link) == full) {
 		previous, _ = ParseNginxFile(full, original, []string{"http"})
 	}
-	if !enable {
+	if !enable && elsewhere == "" {
 		// Leaving the link as it was: a site that has one is enabled, and
-		// relinking it makes sure the link names the file being saved.
+		// relinking it makes sure the link names the file being saved. One
+		// that enables another file is not this site's and stays put.
 		if _, err := os.Lstat(link); err == nil {
 			enable = true
 		}
@@ -531,20 +542,80 @@ func (s *Service) siteTarget(name string) (full string, confd bool, err error) {
 	return full, confd, err
 }
 
-// SiteFile is the file saving a site named name writes, and whether one is
-// there already. The form shows the first as the site's file name and refuses
-// a new site over the second before the save does, since a derived name can
-// land on an existing site without the operator ever typing it.
-func (s *Service) SiteFile(name string) (string, bool, error) {
+// SiteFileInfo is where saving a site of some name writes, and what already
+// holds that name.
+type SiteFileInfo struct {
+	Path string
+	// Exists is a file at Path: a site of this name.
+	Exists bool
+	// EnabledElsewhere says what holds the name's sites-enabled link when
+	// that is not Path — another site's file, which a save would unlink.
+	EnabledElsewhere string
+}
+
+// SiteFile is the file saving a site named name writes, and what already
+// holds the name. The form shows the first as the site's file name and
+// refuses a new site over the rest before the save does, since a derived
+// name can land on another site without the operator ever typing it.
+func (s *Service) SiteFile(name string) (SiteFileInfo, error) {
 	if !siteNameRe.MatchString(name) {
-		return "", false, fmt.Errorf("invalid site name")
+		return SiteFileInfo{}, fmt.Errorf("invalid site name")
 	}
-	full, _, err := s.siteTarget(name)
+	full, confd, err := s.siteTarget(name)
 	if err != nil {
-		return "", false, err
+		return SiteFileInfo{}, err
 	}
 	_, err = os.Stat(full)
-	return full, err == nil, nil
+	file := SiteFileInfo{Path: full, Exists: err == nil}
+	if !confd {
+		file.EnabledElsewhere = enabledElsewhere(filepath.Join(s.nginxDir, "sites-enabled", name), full)
+	}
+	return file, nil
+}
+
+// enabledElsewhere says what holds the sites-enabled link a site saved as
+// full would use, when that is not full: a link to another file, or a file of
+// its own sitting where the link belongs. Empty when there is no link, or it
+// already names full — spelled relatively, or through another link, or
+// before the file it names has been written.
+func enabledElsewhere(link, full string) string {
+	info, err := os.Lstat(link)
+	if err != nil {
+		return ""
+	}
+	name := filepath.Base(link)
+	if info.Mode()&os.ModeSymlink == 0 {
+		return fmt.Sprintf("sites-enabled/%s is a file of its own, not a link", name)
+	}
+	target, err := os.Readlink(link)
+	if err != nil {
+		return fmt.Sprintf("sites-enabled/%s cannot be read: %v", name, err)
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(link), target)
+	}
+	target = resolvePath(target)
+	if target == resolvePath(full) {
+		return ""
+	}
+	if _, err := os.Stat(target); err != nil {
+		return fmt.Sprintf("sites-enabled/%s links to %s, which is not there", name, target)
+	}
+	return fmt.Sprintf("sites-enabled/%s already enables %s", name, target)
+}
+
+// resolvePath follows the links in a path as far as they go. A file that is
+// not there yet is placed by its directory, which is how a new site's path
+// compares with a link written ahead of it.
+func resolvePath(path string) string {
+	path = filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	if dir, err := filepath.EvalSymlinks(filepath.Dir(path)); err == nil {
+		return filepath.Join(dir, filepath.Base(path))
+	}
+	return path
 }
 
 // ReadSiteSpec reads a site the listing names back into the form: its spec,

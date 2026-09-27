@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import path from "node:path"
-import { applyPreset, BLANK, linkedSite, presetById, PRESETS } from "./site-presets"
+import { applyPreset, BLANK, leavePreset, linkedSite, presetById, PRESETS } from "./site-presets"
 
 // The backend renders each of these through a real `nginx -t`
 // (TestLivePresetsPassNginxTest), from its own copy.
@@ -87,6 +87,47 @@ describe("site presets", () => {
     )
   })
 
+  test("a kind changed by hand leaves the preset and takes back what it put in", () => {
+    const mine = "location /metrics {\n    deny all;\n}"
+    const site = { ...BLANK, name: "reg.example.com", domains: ["reg.example.com"], custom: mine }
+    const registry = presetById("registry")
+    const redirect = leavePreset(applyPreset(site, registry), registry, "redirect")
+    expect(redirect).toEqual({
+      ...site,
+      kind: "redirect",
+      permanent: false,
+      spa: false,
+      custom: mine,
+    })
+
+    const spa = presetById("spa")
+    expect(leavePreset(applyPreset(BLANK, spa), spa, "proxy")).toMatchObject({
+      kind: "proxy",
+      spa: false,
+      upstream: BLANK.upstream,
+    })
+
+    // What the operator changed after picking it is theirs and stays: here a
+    // timeout and an upstream typed over the preset's port.
+    const grafana = presetById("grafana")
+    const tuned = {
+      ...applyPreset(BLANK, grafana),
+      proxyTimeout: 600,
+      upstream: "http://127.0.0.1:3300",
+    }
+    expect(leavePreset(tuned, grafana, "static")).toMatchObject({
+      kind: "static",
+      proxyTimeout: 600,
+      upstream: "http://127.0.0.1:3300",
+    })
+    const homeAssistant = presetById("home-assistant")
+    expect(leavePreset(applyPreset(BLANK, homeAssistant), homeAssistant, "static")).toMatchObject({
+      kind: "static",
+      proxyTimeout: BLANK.proxyTimeout,
+      upstream: BLANK.upstream,
+    })
+  })
+
   test("every preset says where it listens and has a logo or a kind to draw", () => {
     for (const preset of PRESETS) {
       expect(preset.label.length).toBeGreaterThan(0)
@@ -103,6 +144,7 @@ describe("a link into a new site", () => {
     )
     expect(linkedSite(params)).toEqual({
       domains: "shop.example.com www.shop.example.com",
+      upstreamGiven: true,
       spec: {
         ...BLANK,
         upstream: "http://127.0.0.1:8081",
@@ -125,6 +167,12 @@ describe("a link into a new site", () => {
     })
     const named = linkedSite(new URLSearchParams("new=1&domain=*.example.com"))
     expect(named?.spec).toMatchObject({ upstream: BLANK.upstream, name: "example.com" })
+    expect(named?.upstreamGiven).toBe(false)
+    // An upstream the link names is one somebody chose, default or not.
+    expect(
+      linkedSite(new URLSearchParams(`new=1&upstream=${encodeURIComponent(BLANK.upstream)}`))
+        ?.upstreamGiven,
+    ).toBe(true)
   })
 
   test("what the link spells wrong goes in as spelled, for the form to say so", () => {

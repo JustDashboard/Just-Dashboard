@@ -86,11 +86,15 @@ func (s *Server) handleSitePreview(w http.ResponseWriter, r *http.Request) error
 		return httpx.BadRequest("%v", err)
 	}
 	out := map[string]any{"content": content, "warnings": proxysvc.SpecWarnings(&req.Spec)}
-	// Where the save would write, and whether a file is there already: a new
-	// site's name follows its domain, so the form says which file that is,
-	// and that it belongs to another site, before the save refuses it.
-	if path, exists, err := s.modules.proxy.SiteFile(req.Spec.Name); err == nil {
-		out["path"], out["exists"] = path, exists
+	// Where the save would write, and whether a file or a sites-enabled link
+	// holds the name already: a new site's name follows its domain, so the
+	// form says which file that is, and that it belongs to another site,
+	// before the save refuses it.
+	if file, err := s.modules.proxy.SiteFile(req.Spec.Name); err == nil {
+		out["path"], out["exists"] = file.Path, file.Exists
+		if file.EnabledElsewhere != "" {
+			out["enabledElsewhere"] = file.EnabledElsewhere
+		}
 	}
 	httpx.JSON(w, http.StatusOK, out)
 	return nil

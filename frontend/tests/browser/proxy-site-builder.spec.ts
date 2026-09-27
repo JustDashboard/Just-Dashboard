@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
-import { runningContainers, siteResult } from "./fixtures/proxy/siteform"
+import { LINKED_ELSEWHERE, runningContainers, siteResult } from "./fixtures/proxy/siteform"
 import { json, mockProxy, ports, user, vhosts } from "./proxy-fixtures"
 
 /**
@@ -302,6 +302,152 @@ test("a new site whose file name is already a site's is stopped before saving", 
     sheet.getByText("Saved as /etc/nginx/sites-available/app-v2.example.com"),
   ).toBeVisible()
   await expect(sheet.getByRole("button", { name: "Save and reload" })).toBeEnabled()
+})
+
+test("a new site whose name another site's link holds is stopped before saving", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const saved = await capture(page, "**/api/v1/proxy/sites/", (route, body) =>
+    json(route, siteResult({ name: (body.spec as { name: string }).name })),
+  )
+  const sheet = await openNewSite(page)
+  // The name follows the domain, so the operator never typed it: saving it
+  // would have unlinked the hand-written site that link enables.
+  await sheet.getByLabel("Domains").fill("wiki.example.com")
+  await expect(
+    sheet.getByText(
+      `${LINKED_ELSEWHERE["wiki.example.com"]}, so the name is taken. Pick another name.`,
+    ),
+  ).toBeVisible()
+  await expect(sheet.getByLabel("File name")).toHaveAttribute("aria-invalid", "true")
+  await expect(sheet.getByRole("button", { name: "Save and reload" })).toBeDisabled()
+  await expect(sheet.getByRole("button", { name: "Save only" })).toBeDisabled()
+  await sheet.getByLabel("File name").fill("wiki-v2.example.com")
+  await expect(sheet.getByText(/so the name is taken/)).toHaveCount(0)
+  await sheet.getByRole("button", { name: "Save and reload" }).click()
+  await expect(page.getByText("wiki-v2.example.com is live")).toBeVisible()
+  expect(saved[0]).toMatchObject({
+    overwrite: false,
+    spec: { name: "wiki-v2.example.com", domains: ["wiki.example.com"] },
+  })
+})
+
+test("the new-site form opens with the keyboard in Domains, above the presets", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const sheet = await openNewSite(page)
+  const domains = sheet.getByLabel("Domains")
+  await expect(domains).toBeFocused()
+  await page.keyboard.type("typed.example.com")
+  await expect(domains).toHaveValue("typed.example.com")
+  await expect(sheet.getByLabel("File name")).toHaveValue("typed.example.com")
+  // Domains and the file name come first; the presets follow them.
+  const name = await sheet.getByLabel("File name").boundingBox()
+  const firstPreset = await sheet.getByRole("button", { name: /^Node\.js app/ }).boundingBox()
+  expect(name!.y).toBeLessThan(firstPreset!.y)
+
+  // On a phone the one field every site needs is in view when the form opens.
+  await page.keyboard.press("Escape")
+  await page.setViewportSize({ width: 390, height: 844 })
+  const phone = await openNewSite(page)
+  await expect(phone.getByLabel("Domains")).toBeFocused()
+  await expect(phone.getByLabel("Domains")).toBeInViewport({ ratio: 1 })
+  await expect(phone.getByLabel("File name")).toBeInViewport({ ratio: 1 })
+
+  // A preset's note is brought into view under the card that was picked.
+  await phone.getByLabel("Domains").fill("dash.example.com")
+  const jellyfin = phone.getByRole("button", { name: /^Jellyfin/ })
+  await jellyfin.scrollIntoViewIfNeeded()
+  await jellyfin.click()
+  await expect(phone.getByText(/Known proxies under Networking/)).toBeInViewport({ ratio: 1 })
+})
+
+test("a new site's default upstream is not warned about until somebody sets it", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  // Nothing listens on 3000 here, the port the blank form suggests.
+  await page.route("**/api/v1/ports", (route) =>
+    json(
+      route,
+      ports.filter((p) => p.port !== 3000),
+    ),
+  )
+  const listed = page.waitForResponse((r) => r.url().endsWith("/api/v1/ports"))
+  const sheet = await openNewSite(page)
+  await listed
+  await sheet.getByLabel("Domains").fill("fresh.example.com")
+  const upstream = sheet.getByLabel("Send it to")
+  await expect(upstream).toHaveValue("http://127.0.0.1:3000")
+  await expect(
+    sheet.getByText("Where the application is listening. Usually loopback on this machine."),
+  ).toBeVisible()
+  await expect(sheet.getByText(/Nothing is listening/)).toHaveCount(0)
+
+  // A preset that picks that same port is somebody choosing it.
+  await sheet.getByRole("button", { name: /^Node\.js app/ }).click()
+  await expect(upstream).toHaveValue("http://127.0.0.1:3000")
+  await expect(
+    sheet.getByText(
+      "Nothing is listening on 127.0.0.1:3000 right now, so nginx answers 502 until something does.",
+    ),
+  ).toBeVisible()
+  await expect(sheet.getByRole("button", { name: "Save and reload" })).toBeEnabled()
+  await page.keyboard.press("Escape")
+
+  // So is typing it, and so is a link that names it.
+  const typed = await openNewSite(page)
+  await typed.getByLabel("Domains").fill("typed.example.com")
+  await expect(typed.getByText(/Nothing is listening/)).toHaveCount(0)
+  await typed.getByLabel("Send it to").fill("")
+  await typed.getByLabel("Send it to").pressSequentially("http://127.0.0.1:3000")
+  await expect(typed.getByText(/Nothing is listening on 127\.0\.0\.1:3000/)).toBeVisible()
+  await page.keyboard.press("Escape")
+
+  await page.goto(
+    "/proxy/sites?new=1&upstream=http%3A%2F%2F127.0.0.1%3A3000&domain=linked.example.com",
+  )
+  const linked = page.getByRole("dialog", { name: "New site" })
+  await expect(linked.getByLabel("Send it to")).toHaveValue("http://127.0.0.1:3000")
+  await expect(linked.getByText(/Nothing is listening on 127\.0\.0\.1:3000/)).toBeVisible()
+})
+
+test("a kind picked by hand after a preset lets the preset go", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const previews = await capture(page, "**/api/v1/proxy/sites/preview", (route, body) =>
+    json(route, {
+      content: `# ${(body.spec as { name: string }).name}\n`,
+      warnings: [],
+      path: `/etc/nginx/sites-available/${(body.spec as { name: string }).name}`,
+      exists: false,
+    }),
+  )
+  const sheet = await openNewSite(page)
+  await sheet.getByLabel("Domains").fill("kinds.example.com")
+
+  const spa = sheet.getByRole("button", { name: /^Single-page app/ })
+  await spa.click()
+  await expect(spa).toHaveAttribute("aria-pressed", "true")
+  await sheet.getByRole("button", { name: "An app", exact: true }).click()
+  await expect(spa).toHaveAttribute("aria-pressed", "false")
+  await expect.poll(() => previews.at(-1)?.spec).toMatchObject({ kind: "proxy" })
+  expect(previews.at(-1)?.spec).not.toHaveProperty("spa")
+
+  const registry = sheet.getByRole("button", { name: /^Docker registry/ })
+  await registry.click()
+  await expect(sheet.getByText(/Docker refuses a registry over plain HTTP/)).toBeVisible()
+  await expect(sheet.getByLabel("Extra configuration")).toHaveValue(/proxy_request_buffering off;/)
+  await sheet.getByRole("button", { name: "A redirect", exact: true }).click()
+  await expect(registry).toHaveAttribute("aria-pressed", "false")
+  await expect(sheet.getByText(/Docker refuses a registry over plain HTTP/)).toHaveCount(0)
+  await expect(sheet.getByLabel("Extra configuration")).toHaveValue("")
+  await expect.poll(() => previews.at(-1)?.spec).toMatchObject({ kind: "redirect" })
+  const sent = previews.at(-1)?.spec as Record<string, unknown>
+  expect(sent.custom).toBeUndefined()
+  expect(sent.clientMaxBody).toBe("50m")
+  expect(sent.upstream).toBe("http://127.0.0.1:3000")
 })
 
 test("an existing site shows its file read-only and offers no presets", async ({ page }) => {

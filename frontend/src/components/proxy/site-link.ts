@@ -28,6 +28,7 @@ export function useNewSiteLink(open: () => void) {
   const { status } = useProxy()
   const [, setSpec] = useSessionState<SiteSpec>(`${NEW_SITE_DRAFT}.spec`, BLANK)
   const [, setDomainText] = useSessionState(`${NEW_SITE_DRAFT}.domains`, "")
+  const [, setUpstreamSet] = useSessionState(`${NEW_SITE_DRAFT}.upstreamSet`, false)
   const asked = params.get("new") === "1"
 
   const follow = useEffectEvent(() => {
@@ -39,6 +40,7 @@ export function useNewSiteLink(open: () => void) {
     forgetSessionState("proxy.site.form.")
     setSpec(link.spec)
     setDomainText(link.domains)
+    setUpstreamSet(link.upstreamGiven)
     open()
   })
 

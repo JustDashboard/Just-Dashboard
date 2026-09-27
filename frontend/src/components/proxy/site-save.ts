@@ -4,10 +4,18 @@ import type { ProxyDiagnostic, ServerNameConflict, SiteResult, SiteSpec } from "
  * The spec as the server should read it. HSTS goes only with TLS: the switch
  * is drawn only under "Serve over HTTPS", and the default it keeps for when
  * TLS is turned on reached the server on every plain-HTTP site as a warning
- * about a control nobody could see.
+ * about a control nobody could see. The single-page-app fallback goes only
+ * with files and a permanent redirect only with a redirect, for the same
+ * reason: a switch left on under another kind is not drawn and means nothing.
  */
 export function sendableSpec(spec: SiteSpec): SiteSpec {
-  return spec.hsts && !spec.tls ? { ...spec, hsts: false } : spec
+  const { spa, permanent, ...rest } = spec
+  return {
+    ...rest,
+    hsts: spec.hsts && spec.tls,
+    ...(spec.kind === "static" && spa !== undefined ? { spa } : {}),
+    ...(spec.kind === "redirect" && permanent !== undefined ? { permanent } : {}),
+  }
 }
 
 /**
