@@ -33,11 +33,12 @@ func TestParseSiteSpecReadsWhereTheSiteLogs(t *testing.T) {
 		{"the form's own files", managed(func(*SiteSpec) {}),
 			"/var/log/nginx/app.access.log", "/var/log/nginx/app.error.log"},
 		{"the form with logging off", managed(func(s *SiteSpec) { s.AccessLog = false }), "", ""},
-		// A managed file edited by hand to drop a directive still logs where
-		// the renderer would have put it.
+		// A managed file edited by hand to drop a directive logs where nginx
+		// then puts it — the http block's shared file — not where the
+		// renderer would have: nothing writes that file any more.
 		{"a managed file missing its error_log",
 			strings.Replace(managed(func(*SiteSpec) {}), "    error_log  /var/log/nginx/app.error.log;\n", "", 1),
-			"/var/log/nginx/app.access.log", "/var/log/nginx/app.error.log"},
+			"/var/log/nginx/app.access.log", ""},
 		{"a named format and a level after the path",
 			server("    access_log /srv/logs/shop.access.log main buffer=32k;\n    error_log /srv/logs/shop.error.log warn;"),
 			"/srv/logs/shop.access.log", "/srv/logs/shop.error.log"},
@@ -69,13 +70,22 @@ func TestParseSiteSpecReadsWhereTheSiteLogs(t *testing.T) {
 			}
 		})
 	}
+
+	// A location silencing one path leaves the site logging, to nginx's
+	// shared file: read as the site's switch, the form offered to turn on a
+	// log that was on, and the site's page said it kept none.
+	spec, _ := ParseSiteSpec("shop", server("    location = /favicon.ico { access_log off; }"))
+	if !spec.AccessLog || spec.AccessLogPath != "" {
+		t.Errorf("access log %v at %q; want on, to the shared file", spec.AccessLog, spec.AccessLogPath)
+	}
 }
 
 // A site's record is read from the file it names, and only while that file —
 // and every rotated generation beside it — is somewhere the logs page may
 // read too: the path comes from a file an operator edits, and a generation
-// can be a link to anywhere.
-func TestSiteAccessLogReaderHoldsTheSiteToTheLogRoots(t *testing.T) {
+// can be a link to anywhere. The record is the file rather than the site, so
+// an edit that moves the log is read from the next question on.
+func TestSiteRequestRouteHoldsTheSiteToTheLogRoots(t *testing.T) {
 	root, outside, nginx := t.TempDir(), t.TempDir(), t.TempDir()
 	if err := os.MkdirAll(filepath.Join(nginx, "sites-available"), 0o755); err != nil {
 		t.Fatal(err)
@@ -114,12 +124,19 @@ func TestSiteAccessLogReaderHoldsTheSiteToTheLogRoots(t *testing.T) {
 	if err := os.Symlink(secret, live+".2"); err != nil {
 		t.Fatal(err)
 	}
+	// Files that only begin with the same letters are other records.
+	write(live+".json", `{"not":"this site's"}`)
+	write(filepath.Join(root, "shop.access.log-v2"), "nor this")
 
 	s := New(nginx, filepath.Join(nginx, "Caddyfile"))
 	ctx := context.Background()
-	reader, facts, err := s.SiteAccessLogReader(ctx, "shop", allow)
+	route, err := s.SiteRequestRoute("shop", allow)
 	if err != nil {
 		t.Fatal(err)
+	}
+	reader, facts, ok := SiteRecordReader(route, allow)
+	if !ok {
+		t.Fatalf("route %q is not a site's file", route)
 	}
 	if facts.Path != live || facts.Driver != "nginx" || facts.Latency {
 		t.Errorf("facts = %+v; nginx's combined format carries no duration", facts)
@@ -139,14 +156,45 @@ func TestSiteAccessLogReaderHoldsTheSiteToTheLogRoots(t *testing.T) {
 		t.Fatalf("read %q", lines)
 	}
 
+	// Moved by an edit, the site is another record.
+	moved := filepath.Join(root, "shop-moved.access.log")
+	site("shop", "access_log "+moved+";")
+	if again, err := s.SiteRequestRoute("shop", allow); err != nil || again == route {
+		t.Errorf("after the edit the route is %q (%v), still %q", again, err, route)
+	}
+
 	for name, want := range map[string]error{
 		"elsewhere": ErrOutsideLogRoots,
 		"quiet":     ErrNoSiteAccessLog,
 		"missing":   ErrSiteNotFound,
 		"../shop":   ErrSiteNotFound,
 	} {
-		if _, _, err := s.SiteAccessLogReader(ctx, name, allow); !errors.Is(err, want) {
+		if _, err := s.SiteRequestRoute(name, allow); !errors.Is(err, want) {
 			t.Errorf("%s: err = %v, want %v", name, err, want)
 		}
+	}
+
+	// A deployment's route is the record its Logs page holds already: by its
+	// name where it has no file on the host (the Docker Caddy ingress), and
+	// where its file logs where the renderer put it.
+	deployment := "just-dashboard-env-7.conf"
+	if route, err := s.SiteRequestRoute(deployment, allow); err != nil || route != deployment {
+		t.Errorf("a route with no file: %q %v", route, err)
+	}
+	if _, _, ok := SiteRecordReader(deployment, allow); ok {
+		t.Error("a deployment's route read as a site's file")
+	}
+	if _, err := s.SiteRequestRoute("just-dashboard-Not A Route", allow); !errors.Is(err, ErrSiteNotFound) {
+		t.Errorf("a name no renderer writes: %v", err)
+	}
+	rendered, err := RenderNginx(&SiteSpec{Name: deployment, Kind: "proxy", Domains: []string{"shop.example.com"}, Upstream: "http://127.0.0.1:3000", AccessLog: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nginx, "sites-available", deployment), []byte(rendered), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if route, err := s.SiteRequestRoute(deployment, func(string) error { return nil }); err != nil || route != deployment {
+		t.Errorf("a deployment's own file: %q %v", route, err)
 	}
 }

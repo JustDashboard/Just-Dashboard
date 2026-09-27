@@ -1,7 +1,6 @@
 package proxysvc
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -32,6 +31,11 @@ var (
 	ErrOutsideLogRoots = errors.New("the site's access log is outside the log roots")
 )
 
+// siteRecordPrefix marks a record that is the file a site's access_log names.
+// A deployment's route is a site name the renderer chose and can hold no
+// colon, so the two can never name the same record.
+const siteRecordPrefix = "file:"
+
 // SiteConfig reads a site's file by its name, in either layout: the listing
 // on a conf.d host reports a name that already ends in .conf, and a host set
 // up by hand may have a file without it. It reads through the config
@@ -53,27 +57,56 @@ func (s *Service) SiteConfig(name string) (string, error) {
 	return "", ErrSiteNotFound
 }
 
-// SiteAccessLogReader resolves a site to its request record. An nginx site
-// is read from the file its access_log names, refused unless allow accepts
-// it; a route on the shared Docker Caddy ingress, which has no file on the
-// host, is read the way the deployment it belongs to is.
-func (s *Service) SiteAccessLogReader(ctx context.Context, name string, allow func(string) error) (accesslog.Reader, accesslog.Facts, error) {
+// SiteRequestRoute names the record a site's requests are held under, and is
+// asked on every read rather than once. The record is the file, not the site:
+// an edit — the form, the raw sheet, or an editor over SSH — that moves the
+// site's access_log is a new record, where a record held under the site's
+// name went on reading the old file for as long as anyone was looking. And a
+// name with no site behind it is refused here, before the store holds
+// anything for it.
+//
+// An nginx site is the file its access_log names, refused unless allow
+// accepts it. A deployment's own file, and a route on the shared Docker
+// Caddy ingress that has no file on the host, are the deployment's route —
+// the record its Logs page already holds, rather than a second copy of it.
+func (s *Service) SiteRequestRoute(name string, allow func(string) error) (string, error) {
 	content, err := s.SiteConfig(name)
 	if err != nil {
-		if _, routeErr := dockerCaddyRoutePath(name); routeErr == nil {
-			if edge, _ := s.dockerCaddy(ctx); edge != nil {
-				return s.AccessLogReader(ctx, name)
-			}
+		if deploymentRoute(name) {
+			return name, nil
 		}
-		return nil, accesslog.Facts{}, err
+		return "", err
 	}
 	spec, _ := ParseSiteSpec(name, content)
-	if spec.AccessLogPath == "" {
-		return nil, accesslog.Facts{}, ErrNoSiteAccessLog
+	path := spec.AccessLogPath
+	if path == "" {
+		return "", ErrNoSiteAccessLog
 	}
-	if err := allow(spec.AccessLogPath); err != nil {
-		return nil, accesslog.Facts{}, fmt.Errorf("%w: %v", ErrOutsideLogRoots, err)
+	if err := allow(path); err != nil {
+		return "", fmt.Errorf("%w: %v", ErrOutsideLogRoots, err)
 	}
-	facts := accesslog.Facts{Driver: accessDriverNginx, Format: accesslog.FormatCombined, Latency: false, Path: spec.AccessLogPath}
-	return &fileAccessLog{path: spec.AccessLogPath, allow: allow}, facts, nil
+	if deploymentRoute(name) && path == nginxAccessLogPath(name) {
+		return name, nil
+	}
+	return siteRecordPrefix + path, nil
+}
+
+// deploymentRoute reports whether a name is one the deployment renderer
+// writes, which the deployment reader resolves on its own.
+func deploymentRoute(name string) bool {
+	_, err := dockerCaddyRoutePath(name)
+	return err == nil && siteNameRe.MatchString(name)
+}
+
+// SiteRecordReader opens a record SiteRequestRoute named by its file, and
+// reports false for any other route. allow is asked again before every open
+// of the live file and of each rotated generation: the route was resolved
+// once, and a generation beside the file can be a link to anywhere.
+func SiteRecordReader(route string, allow func(string) error) (accesslog.Reader, accesslog.Facts, bool) {
+	path, ok := strings.CutPrefix(route, siteRecordPrefix)
+	if !ok {
+		return nil, accesslog.Facts{}, false
+	}
+	facts := accesslog.Facts{Driver: accessDriverNginx, Format: accesslog.FormatCombined, Latency: false, Path: path}
+	return &fileAccessLog{path: path, allow: allow}, facts, true
 }

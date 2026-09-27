@@ -26,21 +26,21 @@ import (
 // the shared store's, under a route of its own: two stores would hold two
 // caps, and the cap exists to bound what the whole process keeps.
 
-// siteRoutePrefix marks a site's route in the shared request record. A
-// deployment's route is a site name the renderer chose and can hold no
-// colon, so the two can never name the same record.
-const siteRoutePrefix = "site:"
-
-func siteRoute(name string) string { return siteRoutePrefix + name }
-
-// openRequestRecord resolves a route of the shared record: a site by the file
-// its own access_log names, held to the log roots, and anything else as the
+// openRequestRecord resolves a route of the shared record: a file a site's
+// access_log names, held to the log roots, and anything else as the
 // deployment route it has always been.
 func (s *Server) openRequestRecord(ctx context.Context, route string) (accesslog.Reader, accesslog.Facts, error) {
-	if name, ok := strings.CutPrefix(route, siteRoutePrefix); ok {
-		return s.modules.proxy.SiteAccessLogReader(ctx, name, s.modules.logs.Allow)
+	if reader, facts, ok := proxysvc.SiteRecordReader(route, s.modules.logs.Allow); ok {
+		return reader, facts, nil
 	}
 	return s.modules.proxy.AccessLogReader(ctx, route)
+}
+
+// siteRequestRoute is the record a site's requests are read from, resolved
+// from its file on every question — a read of one small file — so an edit
+// that moved its access_log is read from the next poll on.
+func (s *Server) siteRequestRoute(name string) (string, error) {
+	return s.modules.proxy.SiteRequestRoute(name, s.modules.logs.Allow)
 }
 
 // siteParam is the site the URL names. The page escapes it, and chi hands the
@@ -74,7 +74,12 @@ func (s *Server) observeSiteRequests(ctx context.Context, name string, filter ac
 		Status: "unavailable", ObservedAt: time.Now().UTC(),
 		Entries: []accesslog.Entry{}, Summary: accesslog.Summary{Classes: map[string]int{}, Buckets: []accesslog.Bucket{}},
 	}
-	window, err := s.modules.requests.Window(ctx, siteRoute(name), filter)
+	route, err := s.siteRequestRoute(name)
+	if err != nil {
+		result.Reason = siteRecordReason(err)
+		return result
+	}
+	window, err := s.modules.requests.Window(ctx, route, filter)
 	if err != nil {
 		result.Reason = siteRecordReason(err)
 		return result
@@ -109,7 +114,13 @@ func (s *Server) handleSiteRequestStream(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		return err
 	}
-	return s.followRequests(w, r, siteRoute(name),
+	// Refused as a request rather than as a socket that opens and closes: a
+	// site with nothing to follow is an answer the page already shows.
+	route, err := s.siteRequestRoute(name)
+	if err != nil {
+		return httpx.BadRequest("%s", siteRecordReason(err))
+	}
+	return s.followRequests(w, r, route,
 		"This site's request record could not be followed. Open Proxy to check the engine is running.")
 }
 
@@ -118,7 +129,11 @@ func (s *Server) handleSiteRequestExport(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		return err
 	}
-	return s.exportRequests(w, r, siteRoute(name), "requests-"+name)
+	route, err := s.siteRequestRoute(name)
+	if err != nil {
+		return httpx.BadRequest("%s", siteRecordReason(err))
+	}
+	return s.exportRequests(w, r, route, "requests-"+name)
 }
 
 // followRequests is the live tail of one route's record, as the deployment's

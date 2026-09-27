@@ -118,6 +118,17 @@ func TestSiteRequestsReadTheFileTheSiteNames(t *testing.T) {
 		t.Fatalf("appended frame %s %s", kind, data)
 	}
 
+	// Edited to log elsewhere — in the raw sheet, or over SSH — the site is
+	// read from its new file on the next question, not the one it named
+	// when the record was first held.
+	moved := filepath.Join(root, "shop-moved.access.log")
+	site("shop", "    access_log "+moved+";")
+	writeLog(t, moved, line(30*time.Second, "192.0.2.4", "GET /moved", 200, 10, "Mozilla/5.0"))
+	after := decode[deploy.RequestWindow](t, reader.do("GET", "/api/v1/proxy/sites/shop/requests", "", nil))
+	if len(after.Entries) != 1 || after.Entries[0].Path != "/moved" {
+		t.Fatalf("after the edit: %+v", after.Entries)
+	}
+
 	// Each nothing says which it is.
 	for name, want := range map[string]string{
 		"quiet":     "keeps no access log of its own",

@@ -137,9 +137,6 @@ func (s *Server) handleSiteApply(w http.ResponseWriter, r *http.Request) error {
 		"domains": req.Spec.Domains, "kind": req.Spec.Kind,
 		"tls": req.Spec.TLS, "reloaded": res.Reloaded,
 	})
-	// The held record was opened on the file the site used to name; the next
-	// read resolves it again, in case the save moved or silenced it.
-	s.modules.requests.Forget(siteRoute(req.Spec.Name))
 	httpx.JSON(w, http.StatusOK, res)
 	return nil
 }
@@ -151,7 +148,6 @@ func (s *Server) handleSiteDelete(w http.ResponseWriter, r *http.Request) error 
 	}
 	// The site is gone from disk; nginx keeps serving it until it reloads,
 	// which is reported rather than hidden.
-	s.modules.requests.Forget(siteRoute(name))
 	reload, reloadErr := s.modules.proxy.Reload(r.Context(), proxysvc.KindNginx)
 	httpx.SetAudit(r, "proxy.site.delete", name, map[string]any{"reloaded": reloadErr == nil})
 	out := map[string]any{"name": name, "reload": reload}

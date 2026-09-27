@@ -16,6 +16,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/accesslog"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/logsx"
 )
 
 // The request record, read back.
@@ -64,8 +65,7 @@ func (s *Service) AccessLogReader(ctx context.Context, name string) (accesslog.R
 
 // nginxAccessLogPath is the file `deploymentSiteSpec` asked nginx for. The two
 // spellings must agree, and this is the one place either is written — the
-// renderer, this reader and a site read back without its directive all ask
-// here.
+// renderer, this reader and a site's request route all ask here.
 func nginxAccessLogPath(name string) string {
 	return "/var/log/nginx/" + name + ".access.log"
 }
@@ -278,14 +278,17 @@ func (f *fileAccessLog) Rolled(context.Context) ([]accesslog.FileStat, error) {
 }
 
 // generations lists the rotated files beside the live one that can be read
-// as text. logrotate's compressed generations are skipped: a `.gz` cannot be
+// as text. They are the names logrotate gives a file — `access.log.1`, or
+// `access.log-20260927` under dateext — and not whatever else begins with the
+// same letters: a site's path is its author's, and `access_log
+// /var/log/nginx/api;` sits beside `api-v2.access.log`, another site's
+// record entirely. The compressed generations are skipped: a `.gz` cannot be
 // read from an offset, and the newest generation is the uncompressed one
 // under `delaycompress`, which is the one a roll's tail sits in.
 func (f *fileAccessLog) generations() []string {
-	matches, _ := filepath.Glob(f.path + "*")
 	var out []string
-	for _, match := range matches {
-		if match == f.path || !f.allowed(match) {
+	for _, match := range logsx.Archives(f.path) {
+		if !f.allowed(match) {
 			continue
 		}
 		switch filepath.Ext(match) {

@@ -12,7 +12,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Page, PageContext, PageState } from "@/components/page"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { EmptyState, Notice } from "@/components/state"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { VerbBar } from "@/components/verbs"
 import { siteProduct } from "@/components/proxy/marks"
@@ -60,7 +60,7 @@ export function SitePage() {
 function SiteBody({ name }: { name: string }) {
   const { can } = useAuth()
   const admin = can("system.admin")
-  const { status } = useProxy()
+  const { status, loading, refresh: refreshStatus } = useProxy()
   const { confirm, dialog } = useConfirm()
   const [form, setForm] = useState({ open: false, session: 0 })
   const [raw, setRaw] = useState(false)
@@ -90,7 +90,11 @@ function SiteBody({ name }: { name: string }) {
     onDelete: () => {},
   }).filter((verb) => PAGE_VERBS.includes(verb.key))
 
-  if (!vhosts.data || (nginx && !read.data && !read.error)) {
+  // A route on the Docker Caddy ingress is read through the ingress the
+  // proxy's status names, so its page waits for that as an nginx site's
+  // waits for its file: drawn before, it said the ingress was not running.
+  const routed = vhost?.kind === "caddy" && !vhost.path && !vhost.name.startsWith("docker-caddy:")
+  if (!vhosts.data || (nginx && !read.data && !read.error) || (routed && !status && loading)) {
     return <PageState eyebrow={BACK} title={name} error={vhosts.error} onRetry={refresh} />
   }
   if (!vhost) {
@@ -167,45 +171,65 @@ function SiteBody({ name }: { name: string }) {
         }
       />
 
-      {plan.unrecorded && (
-        <Notice
-          icon={Logs}
-          title={
-            plan.unrecorded === "off"
-              ? "This site keeps no access log"
-              : "This site has no access log of its own"
-          }
-        >
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <span>
-              {plan.unrecorded === "off"
-                ? "Nothing records the requests it serves, so there are none to read here — its errors still are."
-                : "Its requests go to nginx's shared log, syslog or a stream, where a line does not say which site answered it."}{" "}
-              Turn its access log on in the site&rsquo;s form to read its requests here.
-            </span>
-            {admin && (
-              <Button size="xs" variant="outline" onClick={openForm}>
-                <Pencil className="size-3" />
-                Edit
-              </Button>
-            )}
-          </div>
-        </Notice>
-      )}
-
-      {plan.sources.length > 0 ? (
-        <SiteLogs
-          key={plan.sources.map((s) => s.id).join("|")}
-          name={name}
-          plan={plan}
-          engine={engine}
-        />
+      {nginx && !spec && read.error ? (
+        // Where an nginx site logs is its file's to say. Unread, the page
+        // does not guess: the guess was nginx's shared log, under a notice
+        // that the site kept no log of its own.
+        <ErrorState error={read.error} onRetry={read.refresh} />
       ) : (
-        <EmptyState
-          icon={Logs}
-          title="Nothing to read for this site"
-          description="The Caddy ingress that serves this route is not running, so neither its requests nor its errors can be read. Its state is on the Proxy overview."
-        />
+        <>
+          {plan.unrecorded && (
+            <Notice
+              icon={Logs}
+              title={
+                plan.unrecorded === "off"
+                  ? "This site keeps no access log"
+                  : "This site has no access log of its own"
+              }
+            >
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <span>
+                  {plan.unrecorded === "off"
+                    ? "Nothing records the requests it serves, so there are none to read here — its errors still are."
+                    : "Its requests go to nginx's shared log, syslog or a stream, where a line does not say which site answered it."}{" "}
+                  Turn its access log on in the site&rsquo;s form to read its requests here.
+                </span>
+                {admin && (
+                  <Button size="xs" variant="outline" onClick={openForm}>
+                    <Pencil className="size-3" />
+                    Edit
+                  </Button>
+                )}
+              </div>
+            </Notice>
+          )}
+
+          {plan.sources.length > 0 ? (
+            <SiteLogs
+              key={plan.sources.map((s) => s.id).join("|")}
+              name={name}
+              plan={plan}
+              engine={engine}
+            />
+          ) : (
+            <EmptyState
+              icon={Logs}
+              title="Nothing to read for this site"
+              description={
+                status
+                  ? "The Caddy ingress that serves this route is not running, so neither its requests nor its errors can be read. Its state is on the Proxy overview."
+                  : "The proxy's state could not be read, so neither is which ingress serves this route, and its requests and errors are read through that ingress."
+              }
+              action={
+                !status && (
+                  <Button size="sm" variant="outline" onClick={refreshStatus}>
+                    Try again
+                  </Button>
+                )
+              }
+            />
+          )}
+        </>
       )}
 
       <SiteForm

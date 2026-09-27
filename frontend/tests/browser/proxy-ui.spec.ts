@@ -580,7 +580,20 @@ const handshake = {
   attrs: { client: "198.51.100.7", conn: "17", pid: "812" },
 }
 
-type LogMocks = { sockets: URLSearchParams[]; searches: URLSearchParams[] }
+type LogMocks = {
+  sockets: URLSearchParams[]
+  searches: URLSearchParams[]
+  requests: URLSearchParams[]
+}
+
+/** A window of site requests as the server answers it: narrowed by the families asked for. */
+function requestWindow(window: typeof siteRequests, params: URLSearchParams) {
+  const classes = params.get("classes")?.split(",") ?? []
+  const entries = classes.length
+    ? window.entries.filter((entry) => classes.includes(`${Math.floor(entry.status / 100)}xx`))
+    : window.entries
+  return { ...window, entries }
+}
 
 /**
  * The proxy's logs behind the log routes: the error log's failures for a
@@ -589,11 +602,13 @@ type LogMocks = { sockets: URLSearchParams[]; searches: URLSearchParams[] }
  * question a page asked.
  */
 async function mockLogs(page: Page): Promise<LogMocks> {
-  const recorded: LogMocks = { sockets: [], searches: [] }
+  const recorded: LogMocks = { sockets: [], searches: [], requests: [] }
   await page.route("**/api/v1/proxy/sites/app.example.com", (route) => json(route, siteRead))
-  await page.route("**/api/v1/proxy/sites/app.example.com/requests*", (route) =>
-    json(route, siteRequests),
-  )
+  await page.route("**/api/v1/proxy/sites/app.example.com/requests*", (route) => {
+    const params = new URL(route.request().url()).searchParams
+    recorded.requests.push(params)
+    return json(route, requestWindow(siteRequests, params))
+  })
   await page.route("**/api/v1/logs/**", (route) => {
     const url = new URL(route.request().url())
     const params = url.searchParams
@@ -632,8 +647,11 @@ async function mockLogs(page: Page): Promise<LogMocks> {
         })),
       })
     }
-    if (params.get("facets") === "event" && params.get("limit") === "1000") {
-      return result([handshake, refused], {
+    // The Errors view's day: its counts by kind, and its lines when no kind
+    // is chosen — a chosen kind is a search of its own.
+    if (params.get("facets") === "event") {
+      return result(params.get("limit") === "1" ? [] : [handshake, refused], {
+        matched: 2,
         facets: {
           event: {
             values: [
@@ -732,12 +750,16 @@ test("/proxy/sites/app.example.com reads the site's requests, and what nginx sai
     .click()
   await expect(page.getByText(/^Around a failed request/)).toHaveCount(0)
 
-  // The 5xx figure narrows the rows to the failed ones.
+  // The 5xx figure narrows the rows to the failed ones, by asking the
+  // site's record for them.
   await readings.getByRole("button", { name: "Show the requests that failed" }).click()
-  await expect(page.getByRole("button", { name: "Clear the 5xx filter" })).toHaveCount(0)
   await expect(
     page.getByRole("button", { name: /^5xx/ }).and(page.locator("[aria-pressed='true']")),
   ).toBeVisible()
+  await expect.poll(() => logs.requests.some((q) => q.get("classes") === "5xx")).toBe(true)
+  await expect(page.getByText("/cart", { exact: true })).toBeVisible()
+  await expect(page.getByText("/.env", { exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Show every request again" })).toBeVisible()
 })
 
 test("/proxy/sites/app.example.com reads its error log by what failed", async ({ page }) => {
@@ -752,13 +774,23 @@ test("/proxy/sites/app.example.com reads its error log by what failed", async ({
   const search = logs.searches.find((q) => q.get("limit") === "1000")!
   expect(search.get("source")).toBe(`file:${ERROR_LOG}`)
   expect(search.get("levels")).toBe("critical,error,warn")
-  // A chip per kind the lens names, with its count, narrowing the lines.
+  // A chip per kind the lens names, with its count over the whole day.
   await expect(page.getByRole("button", { name: /^TLS/ })).toBeVisible()
   await expect(page.getByRole("button", { name: /^Rate limited/ })).toHaveCount(0)
   await expect(page.getByText(/SSL_do_handshake/)).toBeVisible()
+  // A chip is a question of its own, so what it shows is every line of its
+  // kind in the day rather than those among the newest thousand of all.
   await page.getByRole("button", { name: /^Upstream/ }).click()
   await expect(page.getByText(/SSL_do_handshake/)).toHaveCount(0)
   await expect(page.getByText(/Connection refused/)).toBeVisible()
+  const upstream = logs.searches.find(
+    (q) => q.getAll("f").includes("event:upstream_refused") && !q.get("histogramBy"),
+  )!
+  expect(upstream.get("limit")).toBe("1000")
+  expect(upstream.get("levels")).toBe("critical,error,warn")
+  // The counts still come from the day: the other kinds keep their chips.
+  await expect(page.getByRole("button", { name: /^TLS/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^All/ })).toContainText("2")
 
   // Live reads the error log through its lens, since that is the log named.
   await views.getByRole("button", { name: "Live" }).click()
@@ -811,4 +843,320 @@ test("/proxy/certificates reads every renewal certbot ran", async ({ page }) => 
   await expect(page.getByRole("button", { name: /^Failures/ })).toBeVisible()
   await page.getByRole("combobox", { name: "Renewal log" }).click()
   await expect(page.getByRole("option", { name: "certbot.service" })).toBeVisible()
+})
+
+test("/proxy/sites/app.example.com's upstream figure opens its failures, and lets go when pressed again", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockLogs(page)
+  await page.goto("/proxy/sites/app.example.com")
+
+  const readings = page.locator("[data-slot='stat-grid']")
+  const views = page.getByRole("navigation", { name: "Log mode" })
+  await readings.getByRole("button", { name: /upstream failures/ }).click()
+  await expect(views.getByRole("button", { name: "Errors" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  const chip = (name: RegExp) =>
+    page.getByRole("button", { name }).and(page.locator("[aria-pressed='true']"))
+  await expect(chip(/^Upstream/)).toBeVisible()
+  // Pressed, the figure says it lets go — and does.
+  await readings
+    .getByRole("button", { name: "Show every line again, not only the upstream failures" })
+    .click()
+  await expect(chip(/^All/)).toBeVisible()
+  await expect(views.getByRole("button", { name: "Errors" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+})
+
+test("/proxy/sites/legacy.example.com says why it has no requests to read, and reads nginx's shared error log for its names", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const logs = await mockLogs(page)
+  // Written by hand, with no access_log or error_log of its own.
+  await page.route("**/api/v1/proxy/sites/legacy.example.com", (route) =>
+    json(route, {
+      spec: {
+        ...siteRead.spec,
+        name: "legacy.example.com",
+        domains: ["legacy.example.com"],
+        upstream: "http://127.0.0.1:8080",
+        tls: false,
+        accessLogPath: undefined,
+        errorLogPath: undefined,
+      },
+      managed: false,
+      content: "server {\n    listen 80;\n    server_name legacy.example.com;\n}\n",
+      warnings: [],
+    }),
+  )
+  await page.goto("/proxy/sites/legacy.example.com")
+
+  await expect(page.getByText("This site has no access log of its own")).toBeVisible()
+  await expect(page.getByText(/nginx's shared log, syslog or a stream/)).toBeVisible()
+  // Nothing records its requests: no Requests view, and no figures over one.
+  const views = page.getByRole("navigation", { name: "Log mode" })
+  await expect(views.getByRole("button", { name: "Requests" })).toHaveCount(0)
+  await expect(views.getByRole("button", { name: "Errors" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(0)
+  // Its errors are nginx's shared log's, narrowed to its name.
+  await expect
+    .poll(() =>
+      logs.searches.some(
+        (q) =>
+          q.get("source") === "file:/var/log/nginx/error.log" &&
+          q.getAll("f").includes("host:legacy.example.com"),
+      ),
+    )
+    .toBe(true)
+  await expect(page.getByText(/Connection refused/)).toBeVisible()
+
+  // The form that turns its log on is a press away, in the notice itself.
+  const notice = page
+    .locator("div")
+    .filter({ has: page.getByText("This site has no access log of its own", { exact: true }) })
+    .last()
+  await notice.getByRole("button", { name: "Edit" }).click()
+  await expect(page.getByText("Edit legacy.example.com")).toBeVisible()
+})
+
+/** A route on the Docker Caddy ingress: Caddy's JSON, which records the host and the time taken. */
+const shopEntries = [
+  {
+    seq: 7,
+    time: minuteAgo(1),
+    method: "POST",
+    path: "/cart",
+    host: "shop.example.com",
+    status: 502,
+    size: 0,
+    durationMs: 3.2,
+    remoteIp: "203.0.113.9",
+    proto: "HTTP/2.0",
+    tls: true,
+    userAgent: "Mozilla/5.0 Chrome/140.0",
+  },
+  {
+    seq: 6,
+    time: minuteAgo(2),
+    method: "GET",
+    path: "/",
+    host: "shop.example.com",
+    status: 200,
+    size: 2048,
+    durationMs: 41,
+    remoteIp: "203.0.113.9",
+    proto: "HTTP/2.0",
+    tls: true,
+    userAgent: "Mozilla/5.0 Chrome/140.0",
+  },
+]
+
+const caddyRefused = {
+  text: '{"level":"error","logger":"http.log.error","msg":"dial tcp 172.18.0.4:3000: connect: connection refused","request":{"method":"POST","host":"shop.example.com","uri":"/cart"},"status":502}',
+  timestamp: minuteAgo(1),
+  level: "error",
+  event: "upstream_refused",
+  message: "dial tcp 172.18.0.4:3000: connect: connection refused",
+  attrs: { host: "shop.example.com", upstream: "172.18.0.4:3000", status: "502" },
+}
+
+const caddyCertFailed = {
+  text: '{"level":"error","logger":"tls.obtain","msg":"will retry","identifier":"shop.example.com","error":"[shop.example.com] Obtain: too many certificates already issued"}',
+  timestamp: minuteAgo(30),
+  level: "error",
+  event: "cert_failed",
+  message: "will retry",
+  fields: {
+    logger: "tls.obtain",
+    identifier: "shop.example.com",
+    error: "[shop.example.com] Obtain: too many certificates already issued",
+  },
+  attrs: { domain: "shop.example.com", error: "too many certificates already issued" },
+}
+
+test("/proxy/sites/just-dashboard-shop reads its route's requests, and what Caddy said about a failed one", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const logs = await mockLogs(page)
+  await page.route("**/api/v1/proxy/status", (route) =>
+    json(route, { ...availability, caddy: true, ingressContainer: "edge" }),
+  )
+  await page.route("**/api/v1/proxy/sites/just-dashboard-shop/requests*", (route) =>
+    json(
+      route,
+      requestWindow(
+        {
+          ...siteRequests,
+          driver: "docker-caddy",
+          format: "caddy-json",
+          latency: true,
+          entries: shopEntries as typeof siteEntries,
+        },
+        new URL(route.request().url()).searchParams,
+      ),
+    ),
+  )
+  // The ingress's output: the failure under the 502, and a renewal that
+  // failed for the route's name, which Caddy writes by domain, not by host.
+  await page.route("**/api/v1/logs/search*", (route) => {
+    const params = new URL(route.request().url()).searchParams
+    if (params.get("source") !== "docker:edge") return route.fallback()
+    logs.searches.push(params)
+    const lines = params.getAll("f").some((f) => f.startsWith("domain:"))
+      ? [caddyCertFailed]
+      : params.get("order") === "asc"
+        ? [caddyRefused]
+        : undefined
+    if (!lines) return route.fallback()
+    return json(route, {
+      lines,
+      scanned: 40,
+      matched: lines.length,
+      truncated: false,
+      complete: true,
+      files: [],
+      histogram: [],
+      tookMillis: 2,
+    })
+  })
+  await page.goto("/proxy/sites/just-dashboard-shop")
+
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByText("a deployment route")).toBeVisible()
+  const views = page.getByRole("navigation", { name: "Log mode" })
+  await expect(views.getByRole("button", { name: "Requests" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  // The ingress is every route's, so its figures are nobody's in particular.
+  const readings = page.locator("[data-slot='stat-grid']")
+  await expect(readings.getByText("Server errors")).toBeVisible()
+  await expect(readings.getByText("Upstream failures")).toHaveCount(0)
+
+  await page.getByText("/cart", { exact: true }).click()
+  const said = page.getByRole("region", { name: "What Caddy logged" })
+  await expect(said.getByText("upstream refused")).toBeVisible()
+  await expect(said.getByText(/connection refused/)).toBeVisible()
+  const around = logs.searches.find(
+    (q) => q.get("source") === "docker:edge" && q.get("order") === "asc",
+  )!
+  expect(around.get("lens")).toBe("caddy")
+  expect(around.getAll("f")).toContain("host:shop.example.com")
+
+  // Its Errors are the ingress's lines about its names, and the renewal that
+  // failed for them, which a narrowing by host would have hidden.
+  await views.getByRole("button", { name: "Errors" }).click()
+  await expect(page.getByRole("button", { name: /^Certificates/ })).toContainText("1")
+  await expect(page.getByRole("button", { name: /^All/ })).toContainText("3")
+  await expect(page.getByText("will retry")).toBeVisible()
+  await expect(page.getByText("cert failed")).toBeVisible()
+  const day = logs.searches.find(
+    (q) => q.get("source") === "docker:edge" && q.get("facets") === "event",
+  )!
+  expect(day.getAll("f")).toEqual(["host:shop.example.com"])
+  await expect(page.locator("a[href^='/logs']")).toHaveCount(0)
+})
+
+test("the Caddyfile's page reads Caddy's journal whole, since its names are addresses no line carries", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const logs = await mockLogs(page)
+  await page.route("**/api/v1/proxy/status", (route) =>
+    json(route, { ...availability, nginx: false, caddy: true, caddyVersion: "v2.8.4" }),
+  )
+  await page.route("**/api/v1/proxy/vhosts", (route) =>
+    json(route, [
+      {
+        name: "Caddyfile",
+        kind: "caddy",
+        path: "/etc/caddy/Caddyfile",
+        enabled: true,
+        serverNames: [":80", "https://blog.example.com", "shop.example.com:443"],
+        listen: [],
+        upstreams: ["localhost:8080"],
+        tls: true,
+        modified: now,
+        size: 300,
+      },
+    ]),
+  )
+  await page.goto("/proxy/sites/Caddyfile")
+
+  await expect(
+    page.locator("[data-slot='host-identity']").getByText("a site in the Caddyfile"),
+  ).toBeVisible()
+  const views = page.getByRole("navigation", { name: "Log mode" })
+  await expect(views.getByRole("button", { name: "Requests" })).toHaveCount(0)
+  await expect(views.getByRole("button", { name: "Errors" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect
+    .poll(() =>
+      logs.searches.find(
+        (q) => q.get("source") === "journal:caddy.service" && q.get("facets") === "event",
+      ),
+    )
+    .toBeTruthy()
+  for (const search of logs.searches.filter((q) => q.get("source") === "journal:caddy.service")) {
+    expect(search.getAll("f")).toEqual([])
+  }
+  await expect(page.getByText(/Connection refused/)).toBeVisible()
+})
+
+test("/proxy reads the Docker Caddy ingress beside nginx, once it is there", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const logs = await mockLogs(page)
+  await page.route("**/api/v1/proxy/status", (route) =>
+    json(route, { ...availability, caddy: true, ingressContainer: "edge" }),
+  )
+  await page.goto("/proxy")
+
+  await expect(page.getByRole("heading", { name: "Engine log" })).toBeVisible()
+  await page.getByRole("combobox", { name: "Engine log" }).click()
+  await expect(page.getByRole("option", { name: "error.log" })).toBeVisible()
+  await expect(page.getByRole("option", { name: "edge" })).toBeVisible()
+  await page.getByRole("option", { name: "edge" }).click()
+  await expect(page.getByText("a line from docker:edge")).toBeVisible()
+  expect(logs.sockets.at(-1)!.get("lens")).toBe("caddy")
+})
+
+test("/proxy does not offer an ingress that is only the name one would have", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await mockLogs(page)
+  // Nothing provisioned: the status names the container it would create.
+  await page.route("**/api/v1/proxy/status", (route) =>
+    json(route, {
+      ...availability,
+      nginx: false,
+      nginxVersion: "",
+      caddy: true,
+      ingressContainer: "just-dashboard-ingress",
+    }),
+  )
+  const probed: string[] = []
+  await page.route("**/api/v1/logs/source*", (route) => {
+    probed.push(new URL(route.request().url()).searchParams.get("source") ?? "")
+    return route.fulfill({
+      status: 404,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "not_found", message: "No such container" } }),
+    })
+  })
+  await page.goto("/proxy")
+
+  await expect(page.getByRole("list", { name: "Sites" })).toBeVisible()
+  await expect.poll(() => probed).toContain("docker:just-dashboard-ingress")
+  await expect(page.getByRole("heading", { name: "Engine log" })).toHaveCount(0)
 })

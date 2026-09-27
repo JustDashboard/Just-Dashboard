@@ -36,6 +36,7 @@ test("an nginx site with its own files reads them, and its requests beside the a
     source: "file:/var/log/nginx/shop.error.log",
     lens: "nginx-error",
     fields: {},
+    shared: false,
   })
   expect(plan.unrecorded).toBeUndefined()
 })
@@ -45,7 +46,11 @@ test("a hand-written site with no files of its own reads nginx's, narrowed to it
   expect(plan.sources.map((s) => s.id)).toEqual([`file:${NGINX_ERROR_LOG}`])
   expect(plan.requests).toBeUndefined()
   expect(plan.errors.fields).toEqual({ host: ["shop.example.com", "www.shop.example.com"] })
+  expect(plan.errors.shared).toBe(true)
   expect(plan.unrecorded).toBe("shared")
+  // A catch-all has no name to narrow by, and its log is still not its own.
+  const catchAll = siteLogPlan(vhost({ serverNames: ["_"] }), spec({}), undefined)
+  expect(catchAll.errors).toMatchObject({ fields: {}, shared: true })
   // A site that turned its log off is told apart from one sharing nginx's.
   expect(siteLogPlan(vhost(), spec({ accessLog: false }), undefined).unrecorded).toBe("off")
 })
@@ -56,6 +61,11 @@ test("a route on the Docker Caddy ingress reads its record and the ingress's out
   expect(plan.sources.map((s) => [s.id, s.lens])).toEqual([["docker:edge", "caddy"]])
   expect(plan.requests).toBe("docker:edge")
   expect(plan.errors.fields.host).toEqual(["shop.example.com", "www.shop.example.com"])
+  expect(plan.errors.shared).toBe(true)
+  // Caddy's certificate lines name the domain, not a host: narrowed by that.
+  expect(plan.errors.certificates).toEqual({
+    domain: ["shop.example.com", "www.shop.example.com"],
+  })
   // Without the ingress there is nothing to read it through.
   expect(siteLogPlan(route, undefined, undefined).sources).toEqual([])
 })
@@ -76,6 +86,24 @@ test("an unmanaged host on an ingress and a Caddyfile site read Caddy's own outp
   )
   expect(file.sources.map((s) => [s.id, s.lens])).toEqual([["journal:caddy.service", "caddy"]])
   expect(file.requests).toBeUndefined()
+  // The Caddyfile's names are addresses — `:80`, `https://x` — that no line
+  // carries as its host, and its journal is all of it: nothing to narrow.
+  const addressed = siteLogPlan(
+    vhost({
+      name: "Caddyfile",
+      kind: "caddy",
+      path: "/etc/caddy/Caddyfile",
+      serverNames: [":80", "https://blog.example.com", "shop.example.com:443"],
+    }),
+    undefined,
+    undefined,
+  )
+  expect(addressed.errors).toEqual({
+    source: "journal:caddy.service",
+    lens: "caddy",
+    fields: {},
+    shared: false,
+  })
 })
 
 test("a wildcard, a regex name and nginx's catch-all equal no host a line can carry", () => {

@@ -37,8 +37,6 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	sawTLSListen := false
 	sawPlainRedirect := false
 	sawAccessLog := false
-	// Which of access_log and error_log the server block itself set.
-	serverLogs := map[string]bool{}
 	var custom []string
 	inCustom := false
 
@@ -114,25 +112,23 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		case "gzip":
 			spec.Gzip = value == "on"
 		case "access_log":
-			sawAccessLog = true
-			spec.AccessLog = value != "off"
 			// A server's own directive, not a location's: `access_log off`
 			// under /favicon.ico is the common case, and it silences one path
-			// rather than moving the site's log. The first that names a file
-			// wins, since a plain-HTTP server that only redirects often logs
-			// nothing while the one beside it logs everything.
+			// rather than the site — read as the site's, the form said a site
+			// logging to nginx's shared file kept no log at all. The first
+			// that names a file wins, since a plain-HTTP server that only
+			// redirects often logs nothing while the one beside it logs
+			// everything.
 			if location == "" {
-				serverLogs[directive] = true
+				sawAccessLog = true
+				spec.AccessLog = value != "off"
 				if spec.AccessLogPath == "" {
 					spec.AccessLogPath = logFile(value)
 				}
 			}
 		case "error_log":
-			if location == "" {
-				serverLogs[directive] = true
-				if spec.ErrorLogPath == "" {
-					spec.ErrorLogPath = logFile(value)
-				}
+			if location == "" && spec.ErrorLogPath == "" {
+				spec.ErrorLogPath = logFile(value)
 			}
 		case "auth_basic":
 			spec.BasicAuthRealm = strings.Trim(value, `"`)
@@ -231,18 +227,6 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	// only ever decides for the ones the form did not write.
 	if !managed && !sawAccessLog {
 		spec.AccessLog = true
-	}
-	// A managed file names both files whenever it logs, so this only answers
-	// for one edited by hand since: the convention the renderer writes. A
-	// hand-written file without the directives logs to nginx's shared files,
-	// whose lines do not say which site they were, and gets no path at all.
-	if managed && spec.AccessLog {
-		if !serverLogs["access_log"] {
-			spec.AccessLogPath = nginxAccessLogPath(name)
-		}
-		if !serverLogs["error_log"] {
-			spec.ErrorLogPath = nginxErrorLogPath(name)
-		}
 	}
 	if spec.Kind != "redirect" {
 		if spec.Upstream == "" && spec.Root != "" {

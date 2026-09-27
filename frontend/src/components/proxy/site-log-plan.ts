@@ -31,13 +31,32 @@ export type SiteLogPlan = {
    * narrowed to the site where the log is shared: the Errors view, and the
    * lines under a failed request, read it.
    */
-  errors?: { source: string; lens: string; fields: LogFields }
+  errors?: SiteErrorLog
   /**
    * An nginx site whose requests are written nowhere this page can read as
    * its own: `off` when it logs none, `shared` when they go to nginx's
    * shared log, syslog or a stream.
    */
   unrecorded?: "off" | "shared"
+}
+
+export type SiteErrorLog = {
+  source: string
+  lens: string
+  /** What narrows the log to this site: its names, where the log is shared. */
+  fields: LogFields
+  /**
+   * Other sites write here too. A figure over it is theirs as much as this
+   * one's — and where the site has no name a line can carry, so are its
+   * lines.
+   */
+  shared: boolean
+  /**
+   * What narrows the certificate lines instead, where they name the domain
+   * rather than the host a request asked for: Caddy's, whose renewal for
+   * this site's names would otherwise be the one failure narrowed away.
+   */
+  certificates?: LogFields
 }
 
 /** The names a line's `host` can equal: a wildcard or a regex name matches no one value. */
@@ -96,6 +115,7 @@ export function siteLogPlan(
         source: fileSource(errors),
         lens: "nginx-error",
         fields: own ? {} : hostFields(hosts),
+        shared: !own,
       },
       unrecorded: access ? undefined : spec && !spec.accessLog ? "off" : "shared",
     }
@@ -127,12 +147,27 @@ export function siteLogPlan(
         }
       : undefined
   if (!source) return { sources: [] }
+  // The Caddyfile is listed as one site, whose names are its addresses —
+  // `:80`, `https://x`, `x:443` — rather than hosts a line carries, and whose
+  // journal is all of it: nothing to narrow, and nobody else's.
+  if (vhost.path) {
+    return {
+      sources: [source],
+      errors: { source: source.id, lens: "caddy", fields: {}, shared: false },
+    }
+  }
   // A route the dashboard wrote on the ingress keeps a request record of its
   // own inside the container, which the site's record reads through it.
-  const routed = !vhost.path && !vhost.name.startsWith(DOCKER_CADDY_HOST) && Boolean(ingress)
+  const routed = !vhost.name.startsWith(DOCKER_CADDY_HOST)
   return {
     sources: [source],
     requests: routed ? source.id : undefined,
-    errors: { source: source.id, lens: "caddy", fields: hostFields(hosts) },
+    errors: {
+      source: source.id,
+      lens: "caddy",
+      fields: hostFields(hosts),
+      shared: true,
+      certificates: hosts.length > 0 ? { domain: hosts } : undefined,
+    },
   }
 }
