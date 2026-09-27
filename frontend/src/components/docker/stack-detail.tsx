@@ -20,12 +20,16 @@ import {
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post, put, ApiError } from "@/lib/api"
-import type { ComposeService, ComposeValidation, LogLine, StackDetail } from "@/lib/types"
-import { useViewState } from "@/lib/view-state"
+import type { ComposeService, ComposeValidation, StackDetail } from "@/lib/types"
+import { EMPTY_FILTER } from "@/lib/log-filter"
+import { STACK_LENS, lensFor, type LogLens } from "@/lib/log-lenses"
+import { stackSource } from "@/lib/log-sources"
+import { useSessionState, useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
+import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
-import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { PortLink } from "@/components/docker/shared"
+import { ContainerEvents } from "@/components/docker/container-events"
 import { RunConsole, useRunConsole } from "@/components/docker/run-console"
 import { ContainerMenu, type ContainerVerb } from "@/components/docker/container-actions"
 import { Hint, Term } from "@/components/docker/explain"
@@ -36,7 +40,13 @@ import {
   type ComposeActionKey,
 } from "@/components/docker/stack-state"
 import { CodeEditor } from "@/components/code-editor"
-import { LogViewer } from "@/components/log-viewer"
+import { LensReadings, useLensReadings } from "@/components/logs/lens-readings"
+import type { LogFilterState } from "@/components/logs/types"
+import {
+  ServiceLogs,
+  type ServiceLogSource,
+  type ServiceLogsView,
+} from "@/components/logs/service-logs"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Metric, MetricStrip, Page, PageContext } from "@/components/page"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
@@ -266,8 +276,8 @@ function StackBody({ name }: { name: string }) {
             <TabsContent value="history" className="min-h-0 flex-1 overflow-y-auto">
               {tab === "history" && <DeploymentHistoryPanel stack={data.name} />}
             </TabsContent>
-            <TabsContent value="logs" className="min-h-0 flex-1">
-              {tab === "logs" && <StackLogs stack={data.name} active />}
+            <TabsContent value="logs" className="min-h-0 flex-1 overflow-y-auto">
+              {tab === "logs" && <StackLogs stack={data} />}
             </TabsContent>
           </Tabs>
         </>
@@ -665,44 +675,123 @@ function ComposeEditor({
 
 /* ------------------------------------------------------------------ logs -- */
 
-/** Every container in the stack, merged into one feed and tagged by service. */
-function StackLogs({ stack, active }: { stack: string; active: boolean }) {
-  const [lines, setLines] = useState<LogLine[]>([])
-
-  const onMessage = useCallback((envelope: Envelope) => {
-    if (envelope.type !== "logs") return
-    const batch = envelope.data as { stream: string; text: string; service?: string }[]
-    setLines((prev) => {
-      const next = [
-        ...prev,
-        // No stream-to-level mapping: services that log everything to stderr
-        // would otherwise paint the whole merged feed red. The viewer colours
-        // lines by their own words instead.
-        ...batch.map((l) => ({
-          // The service prefix goes into the text rather than a column so the
-          // filter box searches it too — "show me only what the database
-          // said" is the commonest thing to want from a merged feed.
-          text: l.service ? `${l.service} | ${l.text}` : l.text,
-        })),
-      ]
-      return next.length > 5000 ? next.slice(next.length - 5000) : next
-    })
-  }, [])
-
-  const query = useMemo(() => ({ tail: 200 }), [])
-  const { state } = useSocket(`/docker/stacks/${encodeURIComponent(stack)}/logs/stream`, {
-    onMessage,
-    enabled: active,
-    query,
-  })
-
+/**
+ * Every container in the stack, as one log.
+ *
+ * It was a socket of its own that followed the running services only and
+ * wrote `db | ` in front of each line — so a crashed service's last words
+ * were never in it, a JSON line stopped being JSON, and the only way to read
+ * one service was to type its name into the filter. The stack is a log
+ * source now (`stack:<project>`): every container's output merged by time,
+ * the exited ones included, each line read through its own container's lens
+ * and carrying its service as the lane down the left and as a field to
+ * narrow by. Events is what Docker did to them, beside it.
+ */
+function StackLogs({ stack }: { stack: StackDetail }) {
+  // As one string: the stack's poll hands a new array every ten seconds.
+  const images = stack.services
+    .map((service) => service.image)
+    .filter(Boolean)
+    .join(",")
+  const running = stack.services.some((service) => service.state === "running")
+  const sources = useMemo<ServiceLogSource[]>(
+    () => [
+      {
+        id: stackSource(stack.name),
+        label: stack.name,
+        kind: "stack",
+        status: running ? "running" : "exited",
+        images: images ? images.split(",") : undefined,
+        product: "docker-compose",
+      },
+    ],
+    [stack.name, running, images],
+  )
+  const views = useMemo<ServiceLogsView[]>(
+    () => [
+      {
+        id: "events",
+        label: "Events",
+        render: (ctx) => <ContainerEvents stack={stack.name} ctx={ctx} />,
+      },
+    ],
+    [stack.name],
+  )
+  const storageKey = `docker.stack.${stack.name}.logs`
+  // On a phone the figures would push the pane off the screen; the quick
+  // views carry their counts on their chips there.
+  const wide = useMediaQuery("(min-width: 640px)")
   return (
-    <LogViewer
-      className="h-full"
-      lines={lines}
-      showTimestamps={false}
-      onClear={() => setLines([])}
-      emptyMessage={state === "open" ? "No output yet." : "Connecting…"}
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      {wide && <StackReadings stack={stack.name} storageKey={storageKey} />}
+      <ServiceLogs
+        sources={sources}
+        storageKey={storageKey}
+        views={views}
+        className="min-h-0 flex-1"
+        paneClassName="min-h-[30rem]"
+      />
+    </div>
+  )
+}
+
+/**
+ * What a stack's log adds up to, over every service. The stack's own lens
+ * names no readings — each container's lens has its own, in words that do
+ * not add up across a database and a web server — so these are the ones
+ * that do: levels, which every lens sets, how many services the errors came
+ * from, and the start-ups the app and database lenses both name.
+ */
+const STACK_READINGS: LogLens = {
+  ...lensFor(STACK_LENS)!,
+  readings: [
+    {
+      id: "errors",
+      label: "Errors",
+      levels: ["critical", "error"],
+      tone: "danger",
+      hint: "Lines at error level or worse",
+    },
+    {
+      id: "failing",
+      label: "Services with errors",
+      levels: ["critical", "error"],
+      distinct: "service",
+      tone: "danger",
+      hint: "How many of its services logged one",
+    },
+    {
+      id: "warnings",
+      label: "Warnings",
+      levels: ["warn"],
+      tone: "warning",
+      hint: "Lines at warning level",
+    },
+    {
+      id: "starts",
+      label: "Starts",
+      fields: { event: ["startup"] },
+      hint: "Times a service said it was starting",
+    },
+  ],
+}
+
+/**
+ * The readings over the pane, pressed as a container's are: a press narrows
+ * the lines to what the figure counts. `ServiceLogs` draws readings only
+ * from its source's lens, which for a stack has none, so they are drawn
+ * here and reach the pane's filter where the pane keeps it for the tab —
+ * under its storage key, which is also how the pane hears of the press.
+ */
+function StackReadings({ stack, storageKey }: { stack: string; storageKey: string }) {
+  const readings = useLensReadings(stackSource(stack), STACK_READINGS)
+  const [filter, setFilter] = useSessionState<LogFilterState>(`${storageKey}.filter`, EMPTY_FILTER)
+  return (
+    <LensReadings
+      readings={readings}
+      filter={filter}
+      onFilterChange={setFilter}
+      className="shrink-0"
     />
   )
 }

@@ -8,8 +8,8 @@ import {
   ArrowLeft,
   ChevronRight,
   Clock,
+  ClockRewind,
   Copy,
-  Download,
   Eye,
   EyeOff,
   FolderClosed,
@@ -23,22 +23,27 @@ import {
 import { notify } from "@/lib/toast"
 import { get, post, ApiError } from "@/lib/api"
 import { bytes, duration, relativeTime, timestamp } from "@/lib/format"
-import { useViewState } from "@/lib/view-state"
+import { useSessionState, useViewState } from "@/lib/view-state"
 import type {
   ContainerDetail,
   DockerDiagnosis,
   FailureDiagnosis,
   FileChange,
-  LogLine,
   MigrationPlan,
   PortRoute,
   WritableEntry,
   WritableLayerReport,
 } from "@/lib/types"
-import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { LogViewer } from "@/components/log-viewer"
+import { useMediaQuery } from "@/hooks/use-mobile"
+import { dockerSource } from "@/lib/log-sources"
+import {
+  ServiceLogs,
+  type LogWindow,
+  type ServiceLogSource,
+  type ServiceLogsView,
+} from "@/components/logs/service-logs"
 import { XtermPane } from "@/components/xterm-pane"
 import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -46,6 +51,7 @@ import { ContainerUsage } from "@/components/docker/container-usage"
 import { statusWord } from "@/components/docker/container-cells"
 import { useContainerControl, useContainerVerbs } from "@/components/docker/container-actions"
 import { ContainerFindings } from "@/components/docker/attention"
+import { ContainerEvents } from "@/components/docker/container-events"
 import { PortTag, RouteRow } from "@/components/docker/exposure"
 import { ExplainIcon, Hint, Term } from "@/components/docker/explain"
 import {
@@ -59,6 +65,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { Detail, DetailList, Metric, MetricStrip, Page, PageContext } from "@/components/page"
 import { Group, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { ROW_BLEED } from "@/components/row-list"
+import { FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -66,9 +73,6 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { copyText } from "@/lib/clipboard"
-
-/** How many log lines the panel keeps before dropping the oldest. */
-const LOG_LIMIT = 5000
 
 /**
  * One container, as a place of its own.
@@ -141,6 +145,17 @@ function ContainerDetailPanel({
     (signal) => get<DockerDiagnosis>("/docker/health", undefined, signal),
     60_000,
   )
+  // Why it stopped, read once for the page rather than by the tab that says
+  // so: the Logs tab opens on the same diagnosis's window.
+  const failure = usePoll<FailureDiagnosis>(
+    (signal) =>
+      get<FailureDiagnosis>(`/docker/containers/${containerId}/failure`, undefined, signal),
+    0,
+    [containerId],
+  )
+  // Whether the Logs tab is handed that window rather than the tail, and
+  // how many times it has been: each handing opens History on it afresh.
+  const [crash, setCrash] = useState<CrashWindow>({ on: false, times: 0 })
 
   // Whether this page has ever had its container, so a 404 can be told apart
   // from a bad address.
@@ -175,7 +190,8 @@ function ContainerDetailPanel({
   const changed = useCallback(() => {
     setReloads((n) => n + 1)
     health.refresh()
-  }, [health])
+    failure.refresh()
+  }, [health, failure])
 
   return (
     <Page fill>
@@ -267,7 +283,13 @@ function ContainerDetailPanel({
               about it. An operator who opened this page opened it for the
               first of those, and the version this replaces led with the third.
             */}
-            <FailurePanel containerId={detail.id} />
+            <FailurePanel
+              data={failure.data}
+              onReadLogs={() => {
+                setCrash((c) => ({ on: true, times: c.times + 1 }))
+                setTab("logs")
+              }}
+            />
             <ContainerFindings diagnosis={health.data} containerId={detail.id} />
             <OverviewFields detail={detail} />
             <Reachability containerId={detail.id} />
@@ -282,8 +304,15 @@ function ContainerDetailPanel({
             <ContainerUsage containerId={detail.id} name={detail.name} />
           </TabsContent>
 
-          <TabsContent value="logs" className="min-h-0 flex-1">
-            <ContainerLogs containerId={detail.id} active={tab === "logs"} />
+          {/* Scrolls on a phone, where the readings and a pane worth reading
+              are taller than what is left of the window under the facts. */}
+          <TabsContent value="logs" className="min-h-0 flex-1 overflow-y-auto">
+            <ContainerLogs
+              detail={detail}
+              failure={failure.data}
+              crash={crash}
+              onCrashChange={(on) => setCrash((c) => ({ on, times: c.times + (on ? 1 : 0) }))}
+            />
           </TabsContent>
 
           <TabsContent value="env" className="min-h-0 flex-1">
@@ -659,71 +688,147 @@ function FieldGroup({ title, children }: { title: React.ReactNode; children: Rea
   )
 }
 
-function ContainerLogs({ containerId, active }: { containerId: string; active: boolean }) {
-  const [lines, setLines] = useState<LogLine[]>([])
-  const [timestamps, setTimestamps] = useState(true)
-
-  const onMessage = useCallback((envelope: Envelope) => {
-    if (envelope.type !== "logs") return
-    const batch = envelope.data as { stream: string; text: string }[]
-    setLines((prev) => {
-      // No stream-to-level mapping here: plenty of programs log everything to
-      // stderr, and painting all of it red is what made this pane unreadable.
-      // The viewer colours lines by their own words instead.
-      const next = [...prev, ...batch.map((l) => ({ text: l.text }))]
-      return next.length > LOG_LIMIT ? next.slice(next.length - LOG_LIMIT) : next
-    })
-  }, [])
-
-  const query = useMemo(
-    () => ({ tail: 500, timestamps: timestamps ? "true" : "false" }),
-    [timestamps],
+/**
+ * The container's output, read where the container is.
+ *
+ * It was a raw tail — the text, a filter box and Save — which could not
+ * look further back than the socket's first five hundred lines, read every
+ * line as the same grey string, and saved only what happened to be on
+ * screen. It is the service logs every page embeds now, on this container:
+ * Live, History and Insights over its whole log, read through the lens its
+ * image names (a Postgres container's lines as Postgres events, an nginx
+ * one's as requests), the lens's readings above it, and Events — what
+ * Docker did to it — as a view of its own beside them, so an exit and the
+ * lines that led to it are one page.
+ *
+ * The failure diagnosis's window is the one question worth a chip: a
+ * container that is looping or has died is read at the failure, because by
+ * the time anybody looks the tail is the next attempt starting up.
+ */
+function ContainerLogs({
+  detail,
+  failure,
+  crash,
+  onCrashChange,
+}: {
+  detail: ContainerDetail
+  failure?: FailureDiagnosis
+  crash: CrashWindow
+  onCrashChange: (on: boolean) => void
+}) {
+  const sources = useMemo<ServiceLogSource[]>(
+    () => [
+      {
+        id: dockerSource(detail.id),
+        label: detail.name,
+        kind: "docker",
+        status: detail.state,
+        product: imageProduct(detail.image),
+      },
+    ],
+    [detail.id, detail.name, detail.state, detail.image],
   )
-  const { state } = useSocket(`/docker/containers/${containerId}/logs/stream`, {
-    onMessage,
-    enabled: active,
-    query,
-  })
-
+  const views = useMemo<ServiceLogsView[]>(
+    () => [
+      {
+        id: "events",
+        label: "Events",
+        render: (ctx) => (
+          <ContainerEvents containerId={detail.id} healthcheck={detail.hasHealthcheck} ctx={ctx} />
+        ),
+      },
+    ],
+    [detail.id, detail.hasHealthcheck],
+  )
+  const logWindow = failure?.logWindow
+  // A clean exit has a window too — the minutes before it stopped — and
+  // calling that a crash would be the page inventing one.
+  const crashed =
+    failure?.state === "looping" || (detail.state !== "running" && detail.exitCode !== 0)
+  const label = crashed ? "Crash window" : "Before it stopped"
+  // Kept for the tab, per container: the Environment tab and back is not a
+  // reason to lose the question on screen.
+  const storageKey = `docker.container.${detail.id}.logs`
+  const handed = crash.on ? logWindow : undefined
+  const onWindow = useOnWindow(storageKey, handed, crash.times)
+  // The reading on screen as the pane last said it, handed back to it as
+  // "live" when the window is let go from Events or Insights — where the
+  // pane itself, going back to Live only from History, would stay.
+  const [view, setView] = useState<string | null>(null)
+  // A window the reader moved off is opened again by starting the pane
+  // afresh on it: handing the same window twice is not a new arrival.
+  const [reopened, setReopened] = useState(0)
+  // On a phone the readings would be the whole screen above a pane the
+  // reader came for; the quick views carry the same counts on their chips.
+  const wide = useMediaQuery("(min-width: 640px)")
+  const chip = logWindow && (
+    <FilterChip
+      selected={onWindow}
+      onClick={() => {
+        if (onWindow) {
+          onCrashChange(false)
+          return
+        }
+        if (crash.on) setReopened((n) => n + 1)
+        onCrashChange(true)
+      }}
+      title={`The logs worth reading are ${logWindow.reason}.`}
+    >
+      <ClockRewind aria-hidden className="size-3 text-muted-foreground" />
+      {label}
+    </FilterChip>
+  )
   return (
-    <LogViewer
-      className="h-full"
-      lines={lines}
-      showTimestamps={false}
-      onClear={() => setLines([])}
-      emptyMessage={state === "open" ? "No output yet." : "Connecting…"}
-      toolbar={
-        <>
-          <Button
-            size="xs"
-            variant="ghost"
-            onClick={() => {
-              setLines([])
-              setTimestamps((t) => !t)
-            }}
-          >
-            {timestamps ? "Hide times" : "Show times"}
-          </Button>
-          {/*
-            Saved from what is already in the browser rather than re-fetched.
-            The pane holds the tail it was given plus everything since; asking
-            the server for a file would be a second, differently-truncated copy
-            of the same thing, and this is what the reader is actually looking
-            at.
-          */}
-          <Button
-            size="xs"
-            variant="ghost"
-            onClick={() => downloadLines(containerId, lines)}
-            disabled={lines.length === 0}
-          >
-            <Download className="size-3" />
-            Save
-          </Button>
-        </>
-      }
-    />
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      {/* The pane's strip has no room for it beside four views on a phone. */}
+      {!wide && chip && <div className="flex shrink-0">{chip}</div>}
+      <ServiceLogs
+        key={reopened}
+        sources={sources}
+        storageKey={storageKey}
+        readings={wide}
+        views={views}
+        view={view}
+        onViewChange={setView}
+        // Named only while the pane is on it: a range picked since is not
+        // the crash window, whatever the page handed. On a phone the chip
+        // above the pane names it, where the strip has no room for the words.
+        window={handed && { ...handed, label: onWindow && wide ? label : undefined }}
+        onLeaveWindow={() => {
+          onCrashChange(false)
+          setView("live")
+        }}
+        actions={wide && chip}
+        className="min-h-0 flex-1"
+        paneClassName="min-h-[30rem]"
+      />
+    </div>
   )
+}
+
+/** The failure's window as the page hands it to the Logs tab. */
+type CrashWindow = { on: boolean; times: number }
+
+/**
+ * Whether the pane is still reading the window it was handed.
+ *
+ * `ServiceLogs` opens History on a window and says nothing when the reader
+ * moves off it — a range picked, the histogram zoomed, "Open in History"
+ * from Events — so the window's name in the strip and a chip pressed on
+ * would outlive what the pane shows. The pane keeps its range for the tab
+ * under the page's storage key, and it is read here from there. Until the
+ * pane has written the window it was last handed (`handed` counts the
+ * handings), it is taken to be on it.
+ */
+function useOnWindow(storageKey: string, window: LogWindow | undefined, handed: number) {
+  const [range] = useSessionState(`${storageKey}.range`, "")
+  const [since] = useSessionState(`${storageKey}.since`, "")
+  const [until] = useSessionState(`${storageKey}.until`, "")
+  const on =
+    window !== undefined && range === "custom" && since === window.since && until === window.until
+  const [seen, setSeen] = useState(0)
+  if (on && seen !== handed) setSeen(handed)
+  return window !== undefined && (on || seen !== handed)
 }
 
 /**
@@ -1600,13 +1705,14 @@ function Reachability({ containerId }: { containerId: string }) {
  * it"; everybody else reads three numbers. This is the assembly — and because
  * it is an assembly rather than a reading, the conclusion says "likely".
  */
-function FailurePanel({ containerId }: { containerId: string }) {
-  const { data } = usePoll<FailureDiagnosis>(
-    (signal) =>
-      get<FailureDiagnosis>(`/docker/containers/${containerId}/failure`, undefined, signal),
-    0,
-    [containerId],
-  )
+function FailurePanel({
+  data,
+  onReadLogs,
+}: {
+  data?: FailureDiagnosis
+  /** Opens the Logs tab on the diagnosis's window. */
+  onReadLogs: () => void
+}) {
   if (!data) return null
 
   // A container that has been up for a week with nothing to say deserves to be
@@ -1649,25 +1755,20 @@ function FailurePanel({ containerId }: { containerId: string }) {
       )}
 
       {data.logWindow && (
-        <p className="mt-2 text-hint text-muted-foreground">
-          The logs worth reading are {data.logWindow.reason} — {timestamp(data.logWindow.since)} to{" "}
-          {timestamp(data.logWindow.until)}. By the time you look, the tail is the next attempt
-          starting up.
-        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <p className="min-w-0 flex-1 basis-64 text-hint text-muted-foreground">
+            The logs worth reading are {data.logWindow.reason} — {timestamp(data.logWindow.since)}{" "}
+            to {timestamp(data.logWindow.until)}. By the time you look, the tail is the next attempt
+            starting up.
+          </p>
+          <Button size="xs" variant="outline" onClick={onReadLogs}>
+            <ClockRewind className="size-3" />
+            Read those lines
+          </Button>
+        </div>
       )}
     </Notice>
   )
-}
-
-/** Saves the lines currently on screen as a text file. */
-function downloadLines(containerId: string, lines: LogLine[]) {
-  const blob = new Blob([lines.map((l) => l.text).join("\n")], { type: "text/plain" })
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement("a")
-  anchor.href = url
-  anchor.download = `${containerId.slice(0, 12)}-logs.txt`
-  anchor.click()
-  URL.revokeObjectURL(url)
 }
 
 /**

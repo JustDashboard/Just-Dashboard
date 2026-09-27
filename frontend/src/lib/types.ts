@@ -810,6 +810,8 @@ export type DockerEvent = {
   image?: string
   stack?: string
   exitCode?: string
+  /** The compose service: what a stack's log names the container by (`db`, not `shop-db-1`). */
+  service?: string
   /**
    * The dashboard's own labels off the object this happened to, with the
    * `io.just-dashboard.` prefix stripped — `environment-id`, `release-id`,
