@@ -15,7 +15,6 @@ import type {
 } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import type { LogWindow } from "@/components/logs/service-logs"
-import type { LogFields } from "@/components/logs/types"
 import { Pane } from "@/components/panel"
 import { tabClasses } from "@/components/tabs"
 import { Tag } from "@/components/tag"
@@ -40,7 +39,7 @@ const AROUND_MS = 60_000
 const iso = (ms: number) => new Date(ms).toISOString()
 
 /** Another log, opened on History over a stretch of time — narrowed, where the asker knows how. */
-export type OpenLog = (source: string, at: LogWindow & { fields?: LogFields }) => void
+export type OpenLog = (source: string, at: LogWindow) => void
 
 /** The minute either side of a request, or of the exception a container threw. */
 function around(time: string): LogWindow {

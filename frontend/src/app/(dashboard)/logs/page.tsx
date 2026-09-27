@@ -9,16 +9,14 @@ import type { DbFleetEntry, LogSource, LogSourceIndex } from "@/lib/types"
 import {
   EMPTY_FILTER,
   fieldsFromParams,
-  fieldsOf,
   filterQuery,
   levelsFromParam,
   readLogWindow,
   resolveRange,
-  type LogLevel,
 } from "@/lib/log-filter"
 import { lensFor, withLensDefaults } from "@/lib/log-lenses"
 import { journalSource } from "@/lib/log-sources"
-import type { LogFields, LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
+import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useMetrics } from "@/hooks/use-metrics"
@@ -32,6 +30,7 @@ import { Button } from "@/components/ui/button"
 import { SourceRail, railSources, sourceProduct } from "@/components/logs/source-rail"
 import { SourceFacts } from "@/components/logs/source-facts"
 import { ExportDialog } from "@/components/logs/export-dialog"
+import { askOf, withAsk } from "@/components/logs/logs-model"
 import { LogWorkspace } from "@/components/logs/log-workspace"
 import type {
   LogWindow,
@@ -63,7 +62,7 @@ const COLUMN = "max-lg:h-[max(32rem,calc(100dvh-5rem))] max-lg:flex-none"
 const VIEW_ID = /^[a-z][a-z-]{0,31}$/
 
 /** History on a stretch of time, narrowed, on this source or the one a view names. */
-type OpenAt = LogWindow & { fields?: LogFields; levels?: LogLevel[]; q?: string; source?: string }
+type OpenAt = LogWindow & { source?: string }
 
 /** The words a link into a source says; a record's link says its own in their place. */
 const SOURCE_PARAMS = ["source", "mode", "q", "unit", "since", "until", "f", "levels", "lens"]
@@ -286,14 +285,8 @@ export default function LogsPage() {
     setRange("custom")
     setSince(at.since)
     setUntil(at.until)
-    if (at.fields || at.levels || at.q !== undefined) {
-      setFilter((f) => ({
-        ...f,
-        fields: at.fields ?? fieldsOf(f),
-        levels: at.levels ?? f.levels,
-        q: at.q ?? f.q,
-      }))
-    }
+    const ask = askOf(at)
+    if (ask) setFilter((f) => withAsk(f, ask))
     setMode("search")
     setJump((n) => n + 1)
   }

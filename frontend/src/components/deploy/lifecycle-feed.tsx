@@ -18,7 +18,7 @@ import {
 import { get } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { clock, plural, relativeTime, timestamp } from "@/lib/format"
-import { dedupeEvents, eventKey } from "@/lib/docker-events"
+import { dedupeEvents, eventKey, lastLinesSearch } from "@/lib/docker-events"
 import { dockerSource } from "@/lib/log-sources"
 import type { DeploymentLifecycle, DockerEvent } from "@/lib/types"
 import { useSessionState } from "@/lib/view-state"
@@ -614,14 +614,7 @@ function LastLines({ event, onOutput }: { event: DockerEvent; onOutput?: () => v
     <OutputLines
       title="Last lines"
       facts={<span className="numeric">the minute before {clock(event.time)}</span>}
-      query={{
-        source: dockerSource(event.id),
-        since: new Date(at - 60_000).toISOString(),
-        // The exit itself, as the event wrote it: the next attempt starts up
-        // a moment later and is not why it stopped.
-        until: event.time,
-        limit: 20,
-      }}
+      query={{ source: dockerSource(event.id), ...lastLinesSearch(event.time) }}
       empty="The container wrote nothing in the minute before it stopped."
       action={
         onOutput && (

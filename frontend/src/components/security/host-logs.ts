@@ -96,9 +96,7 @@ export function hostLogSource(plan: HostLogPlan, probes: HostLogProbe[]): Servic
   for (const file of plan.files) {
     const probe = probes.find((p) => p.path === file.path)
     if (probe && "source" in probe) {
-      return file.lens
-        ? { ...probe.source, lens: file.lens }
-        : { ...probe.source, described: true }
+      return file.lens ? { ...probe.source, lens: file.lens } : { ...probe.source, described: true }
     }
   }
   const outside = probes.find((p) => "refused" in p && p.refused === "outside")
