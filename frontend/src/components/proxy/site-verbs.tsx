@@ -53,33 +53,46 @@ export function useSiteVerbs({
   vhost,
   admin,
   busy,
+  ambiguous = false,
   onEdit,
   onRaw,
   onDuplicate,
   onToggle,
   onDelete,
+  onUnlink,
 }: {
   vhost: VHost
   admin: boolean
   /** The present participle a row reports while a change is in flight. */
   busy?: string
+  /** Another nginx entry has this name, so a verb that acts by name alone could act on it. */
+  ambiguous?: boolean
   onEdit: (vhost: VHost) => void
   onRaw: (vhost: VHost) => void
   onDuplicate: (vhost: VHost) => void
   onToggle: (vhost: VHost, enabled: boolean) => void
   onDelete: (vhost: VHost) => void
+  onUnlink: (vhost: VHost) => void
 }): Verb[] {
   const router = useRouter()
   const verbs: Verb[] = []
-  const managedByForm = vhost.kind === "nginx"
+  // The form writes a site back only where it read it from; a conf.d file on
+  // a Debian host, or one only in sites-enabled, it would save beside the
+  // original under the same server names.
+  const form = vhost.formEditable && admin
   // A Docker Caddy route has no file on the host: its config lives inside
-  // the container and is owned by the deployment that made it.
+  // the container and is owned by the deployment that made it. Nor has a
+  // link to nothing.
   const hasFile = Boolean(vhost.path)
   const url = siteUrl(vhost)
   const domain = scanDomain(vhost)
-  const log = accessLogSource(vhost)
+  const log = hasFile ? accessLogSource(vhost) : undefined
+  // A link in sites-enabled that no site's switch owns: one to nothing, or
+  // one to a file kept outside sites-available.
+  const strayLink =
+    vhost.broken === "dangling" || (vhost.layout === "sites-enabled" && Boolean(vhost.enabledPath))
 
-  if (managedByForm && admin) {
+  if (form) {
     verbs.push({
       key: "edit",
       label: "Edit",
@@ -122,7 +135,7 @@ export function useSiteVerbs({
       run: () => router.push(`/logs?source=${encodeURIComponent(log)}`),
     })
   }
-  if (managedByForm && admin) {
+  if (form) {
     verbs.push({
       key: "duplicate",
       label: "Duplicate",
@@ -132,8 +145,10 @@ export function useSiteVerbs({
   }
   // A conf.d host has no sites-enabled to link into, so there is nothing
   // for a toggle to do — every file there is active. An empty enabledPath
-  // is what says which layout this is.
-  if (managedByForm && admin && vhost.enabledPath) {
+  // is what says which layout this is. A copy sitting where the link
+  // belongs is not replaced by an enable, which says so and changes nothing.
+  const copied = vhost.broken === "stale" && !vhost.linkTarget
+  if (form && vhost.enabledPath && !copied) {
     verbs.push(
       vhost.enabled
         ? {
@@ -154,7 +169,22 @@ export function useSiteVerbs({
           },
     )
   }
-  if (managedByForm && admin) {
+  if (admin && strayLink) {
+    verbs.push({
+      key: "unlink",
+      label: "Remove link",
+      icon: Trash,
+      danger: true,
+      progressive: "Removing",
+      disabled: Boolean(busy),
+      run: () => onUnlink(vhost),
+    })
+  }
+  // The delete acts by name: sites-available first, then conf.d/<name>, and
+  // it removes a sites-enabled entry of that name on the way.
+  const deletable =
+    vhost.formEditable || (vhost.layout === "conf.d" && vhost.name.endsWith(".conf"))
+  if (admin && deletable && !ambiguous) {
     verbs.push({
       key: "delete",
       label: "Delete",

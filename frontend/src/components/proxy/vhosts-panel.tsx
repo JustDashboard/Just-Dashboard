@@ -4,13 +4,16 @@ import { useMemo, useState } from "react"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import { Globe, Plus } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { del, get, post } from "@/lib/api"
-import type { VHost } from "@/lib/types"
+import { plural } from "@/lib/format"
+import { ApiError, del, get, post } from "@/lib/api"
+import type { SiteDeleteResult, VHost, VHostLinkResult } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceRow, GroupRule } from "@/components/flow"
+import { Modal } from "@/components/modal"
+import { Well } from "@/components/panel"
 import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
 import { ProductGlyph, ProductLogo, ProductLogos } from "@/components/product-logo"
 import { StatGrid, StatTile } from "@/components/stat-tile"
@@ -21,20 +24,32 @@ import { AuthFilesPanel } from "@/components/proxy/auth-files-panel"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { siteProduct } from "@/components/proxy/marks"
 import { SiteForm } from "@/components/proxy/site-form"
-import { ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
+import { ServingStatus, SiteLinkNote, SiteTLS, siteKind } from "@/components/proxy/site-marks"
+import { reloadFailure, reloadOutput } from "@/components/proxy/site-outcome"
 import { useSiteVerbs } from "@/components/proxy/site-verbs"
 import { ProxyGrid, RoutePath } from "@/components/proxy/route-path"
-import { byUrgency, isDisabled, isPlain, waiting } from "@/components/proxy/site-order"
+import {
+  byUrgency,
+  isBroken,
+  isDisabled,
+  isPlain,
+  sharedNames,
+  waiting,
+} from "@/components/proxy/site-order"
 import { Button } from "@/components/ui/button"
 
-type SiteFilter = "all" | "tls" | "plain" | "disabled"
+type SiteFilter = "all" | "broken" | "tls" | "plain" | "disabled"
 
 const FILTER_LABEL: Record<SiteFilter, string> = {
   all: "All",
+  broken: "Broken links",
   tls: "TLS",
   plain: "Plain HTTP",
   disabled: "Disabled",
 }
+
+/** nginx's own words about a change, kept for the operator who asks to see them. */
+type NginxOutput = { title: string; output: string }
 
 /**
  * A route needs two readable ends and commands separate from its readings.
@@ -59,6 +74,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   const [filter, setFilter] = useSessionState("proxy.sites.query", "")
   const [chip, setChip] = useSessionState<SiteFilter>("proxy.sites.chip", "all")
   const [pending, setPending] = useState<Record<string, string>>({})
+  const [output, setOutput] = useState<NginxOutput | null>(null)
   // In the URL so a deployment finding can link straight at the site serving
   // its hostname, and so the browser's back button restores the selection.
   const [requested, setRequested] = useQuerySelection("site")
@@ -74,11 +90,18 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
 
   // A ?site= link from elsewhere in the dashboard opens that site as soon as
   // its row loads. The open panel is derived from the URL rather than copied
-  // into state, so the back button closes it and a reload reopens it.
-  const linked = requested ? data?.find((vhost) => vhost.name === requested) : undefined
-  const rawEditing = editing ?? (linked && linked.kind !== "nginx" && linked.path ? linked : null)
-  const formIsOpen = form.open || linked?.kind === "nginx"
-  const formEditing = form.open ? form.editing : (linked?.name ?? null)
+  // into state, so the back button closes it and a reload reopens it. The
+  // form is for an administrator and a file it saves back where it found it;
+  // anyone else, and any other file, gets the config viewer — read-only
+  // unless they may write it.
+  const linked = requested
+    ? (data?.find((vhost) => vhost.name === requested && vhost.formEditable) ??
+      data?.find((vhost) => vhost.name === requested))
+    : undefined
+  const linkedForm = admin && linked?.formEditable ? linked : undefined
+  const rawEditing = editing ?? (linked && !linkedForm && linked.path ? linked : null)
+  const formIsOpen = form.open || Boolean(linkedForm)
+  const formEditing = form.open ? form.editing : (linkedForm?.name ?? null)
 
   const closeForm = (open: boolean) => {
     setForm((f) => ({ ...f, open }))
@@ -94,9 +117,11 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   }
 
   const hosts = useMemo(() => data ?? [], [data])
+  const shared = useMemo(() => sharedNames(hosts), [hosts])
   const counts = useMemo(
     () => ({
       all: hosts.length,
+      broken: hosts.filter(isBroken).length,
       tls: hosts.filter((v) => v.tls).length,
       plain: hosts.filter(isPlain).length,
       disabled: hosts.filter(isDisabled).length,
@@ -109,6 +134,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     const needle = filter.trim().toLowerCase()
     return hosts
       .filter((v) => {
+        if (chip === "broken" && !isBroken(v)) return false
         if (chip === "tls" && !v.tls) return false
         if (chip === "plain" && !isPlain(v)) return false
         if (chip === "disabled" && !isDisabled(v)) return false
@@ -130,36 +156,116 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
       return next
     })
 
+  // The whole of what nginx printed, one press away from the toast that
+  // carries its first line.
+  const showOutput = (name: string, text: string | undefined) =>
+    text
+      ? { label: "Show nginx output", onClick: () => setOutput({ title: name, output: text }) }
+      : undefined
+
+  /**
+   * Says what a change to a link did. The change itself passed `nginx -t` —
+   * a refused one comes back as a 422 carrying nginx's reason, and nothing
+   * changed — but the reload after it can still fail, and then nginx is
+   * running the configuration from before, which the page has to say.
+   */
+  const reportLink = (res: VHostLinkResult, done: string, notYet: string) => {
+    const failure = reloadFailure(res)
+    if (!failure) {
+      notify.success(done)
+      return
+    }
+    notify.warning(`${done}, not reloaded`, {
+      description: `${notYet} ${failure}`,
+      duration: 12_000,
+      action: showOutput(res.name, reloadOutput(res)),
+    })
+  }
+  const reportRefusal = (title: string, name: string, err: unknown) =>
+    notify.error(title, err, {
+      action: err instanceof ApiError ? showOutput(name, err.raw) : undefined,
+    })
+
   const toggle = (vhost: VHost, enabled: boolean) => {
-    const body = { enabled, reload: true }
-    const apply = async (c?: string) => {
+    const apply = async (): Promise<"reported"> => {
       setBusy(vhost.name, enabled ? "Enabling" : "Disabling")
       try {
-        await post(`/proxy/vhosts/${encodeURIComponent(vhost.name)}/enabled`, body, {
-          confirm: c,
-        })
-        if (enabled) notify.success(`${vhost.name} enabled`)
-        refresh()
+        const res = await post<VHostLinkResult>(
+          `/proxy/vhosts/${encodeURIComponent(vhost.name)}/enabled`,
+          { enabled, reload: true },
+        )
+        if (enabled) {
+          reportLink(res, `${vhost.name} enabled`, "It is not serving until nginx reloads.")
+        } else {
+          reportLink(
+            res,
+            `${vhost.name} disabled`,
+            "nginx keeps serving it until a reload succeeds.",
+          )
+        }
+      } catch (err) {
+        reportRefusal(`Could not ${enabled ? "enable" : "disable"} ${vhost.name}`, vhost.name, err)
       } finally {
         setBusy(vhost.name, null)
+        refresh()
       }
+      return "reported"
     }
     if (!enabled) {
       confirm({
-        title: "Disable site",
+        title: `Disable ${vhost.name}`,
         confirmLabel: "Disable and reload",
         description: (
           <p>
             <b>{vhost.name}</b> stops serving as soon as nginx reloads. The config file stays on
-            disk.
+            disk. If taking it out breaks a configuration nginx was loading, the link goes back and
+            nothing changes.
           </p>
         ),
         action: apply,
       })
       return
     }
-    apply().catch((err) => notify.error("Could not enable", err))
+    void apply()
   }
+
+  const unlink = (vhost: VHost) =>
+    confirm({
+      title: `Remove sites-enabled/${vhost.name}`,
+      confirmLabel: "Remove and reload",
+      description:
+        vhost.broken === "dangling" ? (
+          <p>
+            The link points at <code className="font-mono break-all">{vhost.linkTarget}</code>,
+            which is missing. Removing it is what lets nginx load its configuration again; nothing
+            else is deleted.
+          </p>
+        ) : (
+          <p>
+            nginx stops reading <code className="font-mono break-all">{vhost.linkTarget}</code> once
+            it reloads. The file itself stays where it is, but nothing on this page links it back.
+          </p>
+        ),
+      action: async (): Promise<"reported"> => {
+        setBusy(vhost.name, "Removing")
+        try {
+          const res = await del<VHostLinkResult>(
+            `/proxy/vhosts/${encodeURIComponent(vhost.name)}/link`,
+          )
+          reportLink(
+            res,
+            `sites-enabled/${vhost.name} removed`,
+            "nginx keeps running the configuration from before until a reload succeeds.",
+          )
+        } catch (err) {
+          reportRefusal(`Could not remove sites-enabled/${vhost.name}`, vhost.name, err)
+        } finally {
+          setBusy(vhost.name, null)
+          refresh()
+        }
+        return "reported"
+      },
+    })
 
   const remove = (vhost: VHost) =>
     confirm({
@@ -175,10 +281,20 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
       action: async () => {
         setBusy(vhost.name, "Deleting")
         try {
-          await del(`/proxy/sites/${encodeURIComponent(vhost.name)}`)
-          refresh()
+          const res = await del<SiteDeleteResult>(`/proxy/sites/${encodeURIComponent(vhost.name)}`)
+          const failure = reloadFailure(res)
+          if (!failure) return
+          // The file is gone, and nginx is still serving what it loaded:
+          // "completed" would send the operator away from a site that is up.
+          notify.warning(`${vhost.name} deleted, not reloaded`, {
+            description: `nginx keeps serving it until a reload succeeds. ${failure}`,
+            duration: 12_000,
+            action: showOutput(vhost.name, reloadOutput(res)),
+          })
+          return "reported"
         } finally {
           setBusy(vhost.name, null)
+          refresh()
         }
       },
     })
@@ -190,6 +306,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     onDuplicate: (v: VHost) => openForm(null, v.name),
     onToggle: toggle,
     onDelete: remove,
+    onUnlink: unlink,
   }
 
   const header = <PageContext eyebrow="Proxy" title="Sites" />
@@ -275,7 +392,13 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         <StatTile
           label="Disabled"
           value={counts.disabled}
-          hint={counts.disabled > 0 ? "on disk, not serving" : "every site serving"}
+          hint={
+            counts.disabled > 0
+              ? "on disk, not serving"
+              : counts.broken > 0
+                ? `none, but ${plural(counts.broken, "broken link")}`
+                : "every site serving"
+          }
         />
       </StatGrid>
 
@@ -328,10 +451,11 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
                 >
                   {group.sites.map((vhost, index) => (
                     <SiteCard
-                      key={`${vhost.kind}:${vhost.name}`}
+                      key={`${vhost.kind}:${vhost.layout ?? ""}:${vhost.name}`}
                       vhost={vhost}
                       busy={pending[vhost.name]}
                       index={index}
+                      ambiguous={shared.has(vhost.name)}
                       {...handlers}
                     />
                   ))}
@@ -377,6 +501,15 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
           )
         }
       />
+      <Modal
+        open={output !== null}
+        onOpenChange={(open) => !open && setOutput(null)}
+        title={`nginx output — ${output?.title ?? ""}`}
+        size="lg"
+        initialFocus="body"
+      >
+        <Well className="max-h-[60svh] break-all whitespace-pre-wrap">{output?.output}</Well>
+      </Modal>
       {dialog}
     </Page>
   )
@@ -386,19 +519,29 @@ type CardProps = {
   vhost: VHost
   busy?: string
   index: number
+  ambiguous: boolean
   admin: boolean
   onEdit: (v: VHost) => void
   onRaw: (v: VHost) => void
   onDuplicate: (v: VHost) => void
   onToggle: (v: VHost, enabled: boolean) => void
   onDelete: (v: VHost) => void
+  onUnlink: (v: VHost) => void
 }
 
-/** The route owns the body; service state and commands each have their own line. */
-function SiteCard({ vhost, busy, index, ...handlers }: CardProps) {
-  const verbs = useSiteVerbs({ vhost, busy, ...handlers })
-  const primary = () => (vhost.kind === "nginx" ? handlers.onEdit(vhost) : handlers.onRaw(vhost))
-  const canOpen = vhost.kind === "nginx" ? handlers.admin : Boolean(vhost.path)
+/**
+ * The route owns the body; service state and commands each have their own
+ * line. The card opens the form for an administrator and a file the form
+ * saves back; everything else with a file opens that file, read-only unless
+ * the reader may write it. A link to nothing has nothing to open.
+ */
+function SiteCard({ vhost, busy, index, ambiguous, ...handlers }: CardProps) {
+  const verbs = useSiteVerbs({ vhost, busy, ambiguous, ...handlers })
+  const form = handlers.admin && vhost.formEditable
+  const primary = () => (form ? handlers.onEdit(vhost) : handlers.onRaw(vhost))
+  const canOpen = form || Boolean(vhost.path)
+  // A link to nothing has no domain or upstream to draw, only where it points.
+  const linkOnly = vhost.broken === "dangling" && !vhost.path
   return (
     <ChoiceRow
       verb={canOpen ? `Open ${vhost.name}` : vhost.name}
@@ -409,21 +552,24 @@ function SiteCard({ vhost, busy, index, ...handlers }: CardProps) {
       className="h-full gap-4 p-4"
       leading={<ProductLogo id={siteProduct(vhost)} size="md" />}
       title={<span className="text-title">{vhost.name}</span>}
-      description={
-        vhost.kind === "nginx" ? "nginx site" : vhost.path ? "Caddyfile" : "Docker Caddy ingress"
-      }
+      description={siteKind(vhost)}
       trailing={<ServingStatus vhost={vhost} busy={busy} />}
     >
-      <RoutePath
-        source={vhost.serverNames.join(", ") || "Default host"}
-        destination={vhost.upstreams.join(", ") || "Served by configuration"}
-      />
+      {!linkOnly && (
+        <RoutePath
+          source={vhost.serverNames.join(", ") || "Default host"}
+          destination={vhost.upstreams.join(", ") || "Served by configuration"}
+        />
+      )}
+      <SiteLinkNote vhost={vhost} />
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-hint text-muted-foreground">
-          <SiteTLS vhost={vhost} />
-          <span className="font-mono">{vhost.listen.join(" · ") || "No listener reported"}</span>
-        </div>
-        <VerbBar verbs={verbs} menuLabel={`More actions for ${vhost.name}`} />
+        {!linkOnly && (
+          <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-hint text-muted-foreground">
+            <SiteTLS vhost={vhost} />
+            <span className="font-mono">{vhost.listen.join(" · ") || "No listener reported"}</span>
+          </div>
+        )}
+        <VerbBar verbs={verbs} menuLabel={`More actions for ${vhost.name}`} className="ml-auto" />
       </div>
     </ChoiceRow>
   )
@@ -454,6 +600,7 @@ function SiteFileVerbs({
     onDuplicate: noop,
     onToggle: noop,
     onDelete: noop,
+    onUnlink: noop,
   }).filter((v) => v.key === "open" || v.key === "scan" || v.key === "log" || v.key === "edit")
   return <VerbBar verbs={verbs.map((v) => ({ ...v, inline: true }))} className="ml-auto" />
 }
