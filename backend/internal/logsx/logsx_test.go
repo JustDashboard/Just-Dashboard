@@ -374,7 +374,10 @@ func TestHistogramSnapsToRoundBuckets(t *testing.T) {
 	svc, dir := service(t)
 	path := filepath.Join(dir, "app.log")
 	lines := []string{}
-	base := time.Date(2024, 6, 12, 10, 0, 0, 0, time.UTC)
+	// The lines carry no zone, and a stamp with no zone is the host's local
+	// time — so the expected first stamp is built in time.Local too. Built in
+	// UTC, this only passed on a host whose zone is UTC.
+	base := time.Date(2024, 6, 12, 10, 0, 0, 0, time.Local)
 	for i := range 120 {
 		lines = append(lines, base.Add(time.Duration(i)*time.Minute).Format("2006-01-02 15:04:05")+" error boom")
 	}
