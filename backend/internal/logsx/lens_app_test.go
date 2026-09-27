@@ -290,6 +290,12 @@ func TestLensAppOtherRuntimes(t *testing.T) {
 		"main.main()",
 		"	/app/main.go:12 +0x1d",
 		"exit status 2",
+		// A dump on SIGQUIT has no panic line; its goroutines still continue
+		// the line before them.
+		"SIGQUIT: quit",
+		"goroutine 1 [select]:",
+		"main.main()",
+		"	/app/main.go:30 +0x9c",
 		// Java.
 		`Exception in thread "main" java.lang.IllegalStateException: Failed to execute CommandLineRunner`,
 		"	at org.springframework.boot.SpringApplication.callRunner(SpringApplication.java:798)",
@@ -319,6 +325,10 @@ func TestLensAppOtherRuntimes(t *testing.T) {
 		{level: "error", cont: true},
 		{level: "error", cont: true},
 		{level: "error", cont: true},
+		{},
+		{cont: true},
+		{cont: true},
+		{cont: true},
 		{event: "exception", level: "error", attrs: map[string]string{"error": "java.lang.IllegalStateException: Failed to execute CommandLineRunner"}},
 		{level: "error", cont: true},
 		{level: "error", cont: true},

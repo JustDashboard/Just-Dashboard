@@ -131,6 +131,12 @@ func (r *appReader) continues(text string) bool {
 		r.msgLines = 0
 		return true
 	}
+	if strings.HasPrefix(text, "goroutine ") && strings.Contains(text, " [") && strings.HasSuffix(text, "]:") {
+		// A goroutine dump — after a panic, or on SIGQUIT with no panic line
+		// before it — continues whatever came before, and its frames follow.
+		r.rec = appRecGo
+		return true
+	}
 	switch r.rec {
 	case appRecTrace:
 		if text == "" || appIndentedProp(text) || appClosing(text) ||
