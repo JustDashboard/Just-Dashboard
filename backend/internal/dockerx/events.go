@@ -249,19 +249,74 @@ func (e *EventLog) record(ev Event) {
 // spent on nothing, in the same spirit as the server-side log filtering the
 // rest of the dashboard already does.
 func (e *EventLog) Recent(limit int, kinds []string, search string) []Event {
+	return e.Find(limit, EventFilter{Kinds: kinds, Search: search})
+}
+
+// EventFilter is the question one reader asks of the buffer: the host feed
+// narrows by kind and text, a container's page by the container, a stack's
+// by its compose project.
+type EventFilter struct {
+	Kinds  []string
+	Search string
+	// Container is a container's id — the whole of it, or twelve characters
+	// or more of its start — or its name. A name matches every container
+	// that has carried it, which is what a name is asked for; the pages ask
+	// by id, so a container recreated under the same name is not this one.
+	Container string
+	// Stack is a compose project, matched against the label compose writes.
+	Stack string
+}
+
+// Match reports whether an event answers the filter.
+func (f EventFilter) Match(ev Event) bool {
+	if !f.wantsKind(ev.Type) {
+		return false
+	}
+	if needle := strings.ToLower(strings.TrimSpace(f.Search)); needle != "" &&
+		!strings.Contains(strings.ToLower(ev.Message+" "+ev.Name+" "+ev.Image), needle) {
+		return false
+	}
+	if f.Container != "" {
+		if ev.Type != "container" {
+			return false
+		}
+		byID := ev.ID == f.Container || (len(f.Container) >= 12 && strings.HasPrefix(ev.ID, f.Container))
+		if !byID && ev.Name != f.Container {
+			return false
+		}
+	}
+	if f.Stack != "" && ev.Stack != f.Stack {
+		return false
+	}
+	return true
+}
+
+// wantsKind is the kinds test. An empty name is what splitting "" or "a,,b"
+// leaves, and it narrows nothing: no kind named is every kind.
+func (f EventFilter) wantsKind(kind string) bool {
+	named := false
+	for _, k := range f.Kinds {
+		if k == kind {
+			return true
+		}
+		named = named || k != ""
+	}
+	return !named
+}
+
+// Find returns the buffered events the filter keeps, newest first.
+//
+// The filter is applied while the ring is walked rather than to a slice of
+// its newest entries: one container's events are a small fraction of a busy
+// host's, and a limit taken first would answer a quiet container with the
+// last two hundred events of every other one and none of its own.
+func (e *EventLog) Find(limit int, f EventFilter) []Event {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
 	if limit <= 0 || limit > eventBufferSize {
 		limit = 200
 	}
-	want := map[string]bool{}
-	for _, k := range kinds {
-		if k != "" {
-			want[k] = true
-		}
-	}
-	needle := strings.ToLower(strings.TrimSpace(search))
 
 	out := make([]Event, 0, limit)
 	count := len(e.buffer)
@@ -272,13 +327,7 @@ func (e *EventLog) Recent(limit int, kinds []string, search string) []Event {
 		// Walk backwards from the newest.
 		idx := (e.next - 1 - i + len(e.buffer)) % len(e.buffer)
 		ev := e.buffer[idx]
-		if ev.Time.IsZero() {
-			continue
-		}
-		if len(want) > 0 && !want[ev.Type] {
-			continue
-		}
-		if needle != "" && !strings.Contains(strings.ToLower(ev.Message+" "+ev.Name+" "+ev.Image), needle) {
+		if ev.Time.IsZero() || !f.Match(ev) {
 			continue
 		}
 		out = append(out, ev)

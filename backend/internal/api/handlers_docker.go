@@ -150,7 +150,6 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 			r.Method(http.MethodGet, "/", s.handle(s.handleStackList))
 			r.Method(http.MethodGet, "/{name}", s.handle(s.handleStackDetail))
 			r.Method(http.MethodGet, "/{name}/config", s.handle(s.handleStackConfig))
-			r.Method(http.MethodGet, "/{name}/logs/stream", s.handle(s.handleStackLogStream))
 			// What a deploy would do, and what the last few did. Read-only:
 			// the preview changes nothing and the history is a record.
 			r.Method(http.MethodGet, "/{name}/preview", s.handle(s.handleStackPreview))
