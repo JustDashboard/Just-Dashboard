@@ -63,9 +63,16 @@ func (s *Service) AccessLogReader(ctx context.Context, name string) (accesslog.R
 }
 
 // nginxAccessLogPath is the file `deploymentSiteSpec` asked nginx for. The two
-// spellings must agree, and this is the one place either is written.
+// spellings must agree, and this is the one place either is written — the
+// renderer, this reader and a site read back without its directive all ask
+// here.
 func nginxAccessLogPath(name string) string {
 	return "/var/log/nginx/" + name + ".access.log"
+}
+
+// nginxErrorLogPath is its sibling, which the renderer writes beside it.
+func nginxErrorLogPath(name string) string {
+	return "/var/log/nginx/" + name + ".error.log"
 }
 
 // caddyAccessLog reads a route's record out of the ingress container.
@@ -201,11 +208,24 @@ func sortGenerations(gens []accesslog.FileStat) {
 // nginx's, under a log root the dashboard mounts.
 type fileAccessLog struct {
 	path string
+	// allow, when set, is asked about every file before it is opened. A
+	// site's path comes from a file an operator edits, and a rotated
+	// generation beside it can be a link to anywhere; the live file passing
+	// once says nothing about what `access.log.1` points at.
+	allow func(string) error
+}
+
+// allowed reports whether the file may be read at all.
+func (f *fileAccessLog) allowed(path string) bool {
+	return f.allow == nil || f.allow(path) == nil
 }
 
 func (f *fileAccessLog) Read(ctx context.Context, identity string, offset, limit int64, fn func(string)) (accesslog.FileStat, accesslog.FileStat, int64, error) {
 	if offset < 0 {
 		offset = 0
+	}
+	if !f.allowed(f.path) {
+		return accesslog.FileStat{}, accesslog.FileStat{}, offset, errors.New("the request record is outside the log roots")
 	}
 	live := statPath(f.path)
 	path := f.path
@@ -265,7 +285,7 @@ func (f *fileAccessLog) generations() []string {
 	matches, _ := filepath.Glob(f.path + "*")
 	var out []string
 	for _, match := range matches {
-		if match == f.path {
+		if match == f.path || !f.allowed(match) {
 			continue
 		}
 		switch filepath.Ext(match) {

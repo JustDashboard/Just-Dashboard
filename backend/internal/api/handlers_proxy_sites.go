@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -53,6 +52,12 @@ func (s *Server) mountSiteRoutes(r chi.Router) {
 
 	r.Route("/proxy/sites", func(r chi.Router) {
 		r.Method(http.MethodGet, "/{name}", s.handle(s.handleSiteSpec))
+		// A site's requests, read as a deployment's are: the window, the
+		// live tail and the export over the file its access_log names
+		// (handlers_proxy_site_requests.go). Reads, like the site itself.
+		r.Method(http.MethodGet, "/{name}/requests", s.handle(s.handleSiteRequests))
+		r.Method(http.MethodGet, "/{name}/requests/stream", s.handle(s.handleSiteRequestStream))
+		r.Method(http.MethodGet, "/{name}/requests/export", s.handle(s.handleSiteRequestExport))
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 			// Preview renders and touches nothing, but it lives inside the
@@ -73,27 +78,12 @@ func (s *Server) handleSiteSpec(w http.ResponseWriter, r *http.Request) error {
 	if name == "" || strings.ContainsAny(name, "/\\") {
 		return httpx.BadRequest("invalid site name")
 	}
-	// Read through the same allowlist the config editor uses rather than
-	// joining a path here: this endpoint takes a name, and a name that turns
-	// out to be a path is exactly what that check exists for.
-	var content string
-	var err error
-	// Both spellings of the conf.d layout: the listing on such a host reports
-	// a name that already ends in .conf, and a host that was set up by hand
-	// may have a file without it.
-	for _, candidate := range []string{
-		filepath.Join(s.Cfg.NginxDir, "sites-available", name),
-		filepath.Join(s.Cfg.NginxDir, "conf.d", name),
-		filepath.Join(s.Cfg.NginxDir, "conf.d", name+".conf"),
-	} {
-		content, err = s.modules.proxy.ReadConfig(candidate)
-		if err == nil {
-			break
-		}
-	}
+	content, err := s.modules.proxy.SiteConfig(name)
 	if err != nil {
 		return httpx.ErrNotFound
 	}
+	// The spec carries where the site logs, which is what its page reads its
+	// requests and errors from.
 	spec, managed := proxysvc.ParseSiteSpec(name, content)
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"spec": spec, "managed": managed, "content": content,
@@ -147,6 +137,9 @@ func (s *Server) handleSiteApply(w http.ResponseWriter, r *http.Request) error {
 		"domains": req.Spec.Domains, "kind": req.Spec.Kind,
 		"tls": req.Spec.TLS, "reloaded": res.Reloaded,
 	})
+	// The held record was opened on the file the site used to name; the next
+	// read resolves it again, in case the save moved or silenced it.
+	s.modules.requests.Forget(siteRoute(req.Spec.Name))
 	httpx.JSON(w, http.StatusOK, res)
 	return nil
 }
@@ -158,6 +151,7 @@ func (s *Server) handleSiteDelete(w http.ResponseWriter, r *http.Request) error 
 	}
 	// The site is gone from disk; nginx keeps serving it until it reloads,
 	// which is reported rather than hidden.
+	s.modules.requests.Forget(siteRoute(name))
 	reload, reloadErr := s.modules.proxy.Reload(r.Context(), proxysvc.KindNginx)
 	httpx.SetAudit(r, "proxy.site.delete", name, map[string]any{"reloaded": reloadErr == nil})
 	out := map[string]any{"name": name, "reload": reload}

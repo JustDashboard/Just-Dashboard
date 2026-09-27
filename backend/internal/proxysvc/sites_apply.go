@@ -37,6 +37,8 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	sawTLSListen := false
 	sawPlainRedirect := false
 	sawAccessLog := false
+	// Which of access_log and error_log the server block itself set.
+	serverLogs := map[string]bool{}
 	var custom []string
 	inCustom := false
 
@@ -114,6 +116,24 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		case "access_log":
 			sawAccessLog = true
 			spec.AccessLog = value != "off"
+			// A server's own directive, not a location's: `access_log off`
+			// under /favicon.ico is the common case, and it silences one path
+			// rather than moving the site's log. The first that names a file
+			// wins, since a plain-HTTP server that only redirects often logs
+			// nothing while the one beside it logs everything.
+			if location == "" {
+				serverLogs[directive] = true
+				if spec.AccessLogPath == "" {
+					spec.AccessLogPath = logFile(value)
+				}
+			}
+		case "error_log":
+			if location == "" {
+				serverLogs[directive] = true
+				if spec.ErrorLogPath == "" {
+					spec.ErrorLogPath = logFile(value)
+				}
+			}
 		case "auth_basic":
 			spec.BasicAuthRealm = strings.Trim(value, `"`)
 		case "auth_basic_user_file":
@@ -211,6 +231,18 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	// only ever decides for the ones the form did not write.
 	if !managed && !sawAccessLog {
 		spec.AccessLog = true
+	}
+	// A managed file names both files whenever it logs, so this only answers
+	// for one edited by hand since: the convention the renderer writes. A
+	// hand-written file without the directives logs to nginx's shared files,
+	// whose lines do not say which site they were, and gets no path at all.
+	if managed && spec.AccessLog {
+		if !serverLogs["access_log"] {
+			spec.AccessLogPath = nginxAccessLogPath(name)
+		}
+		if !serverLogs["error_log"] {
+			spec.ErrorLogPath = nginxErrorLogPath(name)
+		}
 	}
 	if spec.Kind != "redirect" {
 		if spec.Upstream == "" && spec.Root != "" {
@@ -363,6 +395,23 @@ func cutDirective(line string) (string, string) {
 		return name, ""
 	}
 	return name, strings.TrimSpace(value)
+}
+
+// logFile is the file an access_log or error_log directive writes to: its
+// first token, when that is one. `off`, `syslog:`, `stderr` and `memory:` are
+// not files; a path under /dev is a stream the reader cannot seek in; one
+// carrying a variable is a file per value of it; and a relative one is
+// relative to a prefix only nginx's build knows.
+func logFile(value string) string {
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return ""
+	}
+	path := strings.Trim(fields[0], `"'`)
+	if !filepath.IsAbs(path) || strings.Contains(path, "$") || strings.HasPrefix(path, "/dev/") {
+		return ""
+	}
+	return filepath.Clean(path)
 }
 
 func parseSeconds(value string) int {
