@@ -1,12 +1,14 @@
 "use client"
 
+import { useMemo, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
 import { useSearchParams } from "next/navigation"
 import { CheckCircle, CrossCircle, Inspect } from "@/components/icons"
 import { get } from "@/lib/api"
 import { relativeTime, timestamp } from "@/lib/format"
+import { parseScanQuery, parseScanTarget, targetLabel } from "@/lib/scan-target"
 import { cn } from "@/lib/utils"
-import type { TLSScan } from "@/lib/types"
+import type { HTTPScan, TLSScan } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Detail, DetailList, Page, PageContext } from "@/components/page"
@@ -16,7 +18,7 @@ import { RowList } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { FindingList } from "@/components/finding-list"
 import { EmptyState, ErrorState, Notice, Spinner } from "@/components/state"
-import { Status } from "@/components/status-dot"
+import { Status, type Verdict } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import type { Tone } from "@/components/tone"
 import { Button } from "@/components/ui/button"
@@ -42,29 +44,51 @@ import { Input } from "@/components/ui/input"
 export function TLSReportPage() {
   const { can } = useAuth()
   const params = useSearchParams()
-  const initial = params.get("domain") ?? ""
-  const [domain, setDomain] = useSessionState("proxy.tls.domain", "", initial || undefined)
-  // The domain being reported on. A ?domain= link from a site or a
-  // certificate runs the report on arrival: the link is the question, and a
-  // page that then waits for a second click to ask it is a page that forgot
-  // why it was opened. The scan is a one-shot poll keyed on the target, so
-  // arriving with one and pressing Scan are the same path.
-  const [target, setTarget] = useSessionState("proxy.tls.target", "", initial.trim() || undefined)
+  // A link says host:port in ?domain= (a watched mail server on 993) or
+  // splits it into ?port=; both are read the way the field is, so the link
+  // scans the port it names instead of that text on 443.
+  const linked = params.get("domain")
+  const arrival = linked === null ? undefined : parseScanQuery(linked, params.get("port"))
+  const [domain, setDomain] = useSessionState(
+    "proxy.tls.domain",
+    "",
+    arrival && (arrival.target ? targetLabel(arrival.target) : linked),
+  )
+  // The target being reported on, as its label. A ?domain= link from a site
+  // or a certificate runs the report on arrival: the link is the question,
+  // and a page that then waits for a second click to ask it is a page that
+  // forgot why it was opened. The scan is a one-shot poll keyed on the
+  // target, so arriving with one and pressing Scan are the same path.
+  const [target, setTarget] = useSessionState(
+    "proxy.tls.target",
+    "",
+    arrival && (arrival.target ? targetLabel(arrival.target) : ""),
+  )
+  const [fieldError, setFieldError] = useState(arrival?.error)
+  const scanning = useMemo(() => parseScanTarget(target).target, [target])
   const admin = can("system.admin")
   const report = usePoll(
-    (signal) => get<TLSScan>("/certificates/scan", { domain: target }, signal),
+    (signal) =>
+      get<TLSScan>("/certificates/scan", { domain: scanning?.host, port: scanning?.port }, signal),
     0,
     [target],
-    { enabled: admin && target !== "" },
+    { enabled: admin && scanning !== undefined },
   )
   const scan = report.data ?? null
   const busy = report.loading
+  const scanned = scan ? targetLabel({ host: scan.domain, port: scan.port }) : ""
 
   const run = () => {
-    const name = domain.trim()
-    if (!name) return
-    if (name === target) report.refresh()
-    else setTarget(name)
+    const parsed = parseScanTarget(domain)
+    if (!parsed.target) {
+      setFieldError(parsed.error)
+      return
+    }
+    const label = targetLabel(parsed.target)
+    setFieldError(undefined)
+    setDomain(label)
+    if (label === target) report.refresh()
+    else setTarget(label)
   }
 
   return (
@@ -74,7 +98,7 @@ export function TLSReportPage() {
       {scan?.reachable ? (
         <StatGrid columns={4} dense>
           <StatTile
-            label={scan.domain}
+            label={scanned}
             value={scan.grade}
             tone={gradeTone(scan.grade)}
             hint={scan.summary}
@@ -140,9 +164,7 @@ export function TLSReportPage() {
             fallback={Inspect}
           />
           <div className="min-w-0">
-            <h2 className="text-section font-semibold break-all">
-              {scan?.domain || "Live TLS report"}
-            </h2>
+            <h2 className="text-section font-semibold break-all">{scanned || "Live TLS report"}</h2>
             {scan && (
               <p className="text-hint text-muted-foreground">
                 Checked {relativeTime(scan.checkedAt)}
@@ -155,25 +177,37 @@ export function TLSReportPage() {
             event.preventDefault()
             if (admin && !busy) run()
           }}
-          className="flex w-full items-end gap-2 sm:w-auto"
+          className="w-full min-w-0 sm:w-auto"
         >
-          <Field label="Domain to scan" htmlFor="tls-domain" className="min-w-0 flex-1">
-            <Input
-              id="tls-domain"
-              value={domain}
-              onChange={(event) => setDomain(event.target.value)}
-              placeholder="app.example.com"
-              className="w-full sm:w-72"
-            />
+          {/* The button sits in the field's row so an error line under the
+              input does not pull it down with it. */}
+          <Field label="Domain to scan" htmlFor="tls-domain" error={fieldError}>
+            <div className="flex min-w-0 items-center gap-2">
+              <Input
+                id="tls-domain"
+                value={domain}
+                onChange={(event) => {
+                  setDomain(event.target.value)
+                  setFieldError(undefined)
+                }}
+                placeholder="app.example.com"
+                aria-invalid={fieldError ? true : undefined}
+                spellCheck={false}
+                autoCapitalize="none"
+                autoCorrect="off"
+                inputMode="url"
+                className="w-full sm:w-72"
+              />
+              <Button
+                type="submit"
+                size="sm"
+                disabled={busy || !domain.trim() || !admin}
+                pending={busy}
+              >
+                Scan
+              </Button>
+            </div>
           </Field>
-          <Button
-            type="submit"
-            size="sm"
-            disabled={busy || !domain.trim() || !admin}
-            pending={busy}
-          >
-            Scan
-          </Button>
         </form>
       </div>
       <div>
@@ -183,11 +217,11 @@ export function TLSReportPage() {
             account level as the network probes.
           </Notice>
         )}
-        {admin && !scan && !busy && (
+        {admin && !scan && !busy && !report.error && (
           <EmptyState
             icon={Inspect}
             title="Nothing scanned yet"
-            description="Enter a domain this server should be serving. The scan reaches it the way a browser would, from the outside."
+            description="Enter a domain, host:port or URL. The scan connects to it from this server and grades what it serves."
           />
         )}
         {busy && (
@@ -198,7 +232,7 @@ export function TLSReportPage() {
         )}
         {report.error && !busy && <ErrorState error={report.error} />}
         {scan && !scan.reachable && (
-          <Notice tone="danger" icon={CrossCircle} title={`Nothing answered at ${scan.domain}`}>
+          <Notice tone="danger" icon={CrossCircle} title={`Nothing answered at ${scanned}`}>
             {scan.error}
           </Notice>
         )}
@@ -245,9 +279,10 @@ export function TLSReportPage() {
                     </RowList>
                     <p className="pt-3 text-hint leading-relaxed text-muted-foreground">
                       Each version is asked for on a connection of its own, so the answer is the
-                      server&rsquo;s rather than a negotiation. &ldquo;unknown&rdquo; means this
-                      dashboard&rsquo;s own TLS library would not make the request — reporting that
-                      as absent would be a false reassurance.
+                      server&rsquo;s rather than a negotiation. &ldquo;refused&rdquo; is the server
+                      saying no. &ldquo;unknown&rdquo; is no answer to stand behind — the connection
+                      failed, or this dashboard&rsquo;s TLS library would not ask — and the row says
+                      which; reporting it as absent would be a false reassurance.
                     </p>
                   </PanelBody>
                 </Panel>
@@ -258,75 +293,94 @@ export function TLSReportPage() {
                   <PanelBody flush>
                     <RowList>
                       <ReportRow
-                        title="Plain HTTP"
-                        subtitle={scan.http.plainLocation || "port 80, followed nowhere"}
+                        title="HTTPS"
+                        subtitle={
+                          scan.http.httpsError ??
+                          (scan.http.server ? `Server: ${scan.http.server}` : undefined)
+                        }
                         mono
                         trailing={
-                          scan.http.plainError ? (
-                            <Status verdict="notice" label="refused connection" />
-                          ) : scan.http.plainRedirects ? (
-                            <Status verdict="ok" label="redirects to HTTPS" />
+                          scan.http.httpsError ? (
+                            <Status verdict="notice" label="no HTTP answer" />
                           ) : (
                             <Status
-                              verdict="critical"
-                              label={`answers ${scan.http.plainStatus} without redirecting`}
+                              verdict={scan.http.statusCode >= 500 ? "warning" : "ok"}
+                              label={`answers ${scan.http.statusCode}`}
                             />
                           )
                         }
                         className="py-2"
                       />
-                      <ReportRow
-                        title="HSTS"
-                        subtitle={scan.http.hsts?.raw ?? "no Strict-Transport-Security header"}
-                        mono
-                        trailing={
-                          scan.http.hsts ? (
-                            <Status
-                              verdict={scan.http.hsts.maxAge >= 15552000 ? "ok" : "warning"}
-                              label={`max-age ${scan.http.hsts.maxAge}${
-                                scan.http.hsts.includeSubDomains ? " · subdomains" : ""
-                              }${scan.http.hsts.preload ? " · preload" : ""}`}
+                      {!scan.http.httpsError && (
+                        <>
+                          <ReportRow
+                            title="Plain HTTP"
+                            subtitle={<PlainChain http={scan.http} />}
+                            mono
+                            trailing={<Status {...plainVerdict(scan.http)} />}
+                            className="py-2"
+                          />
+                          <ReportRow
+                            title="HSTS"
+                            subtitle={scan.http.hsts?.raw ?? "no Strict-Transport-Security header"}
+                            mono
+                            trailing={
+                              scan.http.hsts ? (
+                                <Status
+                                  verdict={scan.http.hsts.maxAge >= 15552000 ? "ok" : "warning"}
+                                  label={`max-age ${scan.http.hsts.maxAge}${
+                                    scan.http.hsts.includeSubDomains ? " · subdomains" : ""
+                                  }${scan.http.hsts.preload ? " · preload" : ""}`}
+                                />
+                              ) : (
+                                <Status verdict="notice" label="not set" />
+                              )
+                            }
+                            className="py-2"
+                          />
+                          {scan.http.headers.map((header) => (
+                            <ReportRow
+                              key={header.name}
+                              leading={
+                                header.present ? (
+                                  <CheckCircle className="size-3.5 text-success" />
+                                ) : (
+                                  <CrossCircle
+                                    className={cn(
+                                      "size-3.5",
+                                      header.level === "important"
+                                        ? "text-warning"
+                                        : "text-muted-foreground/60",
+                                    )}
+                                  />
+                                )
+                              }
+                              title={<span className="font-mono text-xs">{header.name}</span>}
+                              subtitle={header.present ? header.value : header.detail}
+                              mono={header.present}
+                              trailing={
+                                !header.present && header.level === "important" ? (
+                                  <Tag tone="warning">missing</Tag>
+                                ) : !header.present ? (
+                                  <Tag>optional</Tag>
+                                ) : undefined
+                              }
+                              className="py-2"
                             />
-                          ) : (
-                            <Status verdict="notice" label="not set" />
-                          )
-                        }
-                        className="py-2"
-                      />
-                      {scan.http.headers.map((header) => (
-                        <ReportRow
-                          key={header.name}
-                          leading={
-                            header.present ? (
-                              <CheckCircle className="size-3.5 text-success" />
-                            ) : (
-                              <CrossCircle
-                                className={cn(
-                                  "size-3.5",
-                                  header.level === "important"
-                                    ? "text-warning"
-                                    : "text-muted-foreground/60",
-                                )}
-                              />
-                            )
-                          }
-                          title={<span className="font-mono text-xs">{header.name}</span>}
-                          subtitle={header.present ? header.value : header.detail}
-                          mono={header.present}
-                          trailing={
-                            !header.present && header.level === "important" ? (
-                              <Tag tone="warning">missing</Tag>
-                            ) : !header.present ? (
-                              <Tag>optional</Tag>
-                            ) : undefined
-                          }
-                          className="py-2"
-                        />
-                      ))}
+                          ))}
+                        </>
+                      )}
                     </RowList>
+                    {scan.http.httpsError && (
+                      <p className="pt-3 text-hint leading-relaxed text-muted-foreground">
+                        Only TLS was checked. HSTS, the security headers and the plain-HTTP redirect
+                        need an HTTP answer, which a mail server or another service that is not a
+                        website does not give.
+                      </p>
+                    )}
                   </PanelBody>
                 </Panel>
-              )}{" "}
+              )}
             </div>
             <div className="min-w-0 space-y-8">
               <Panel plain>
@@ -349,13 +403,19 @@ export function TLSReportPage() {
                     <Detail label="Serial" className="font-mono">
                       {scan.serial ?? "—"}
                     </Detail>
-                    <Detail label="OCSP stapled">{scan.ocspStapled ? "yes" : "no"}</Detail>
+                    <Detail label="OCSP stapled">
+                      {scan.ocspStapled
+                        ? "yes"
+                        : scan.ocspServers?.length
+                          ? "no"
+                          : "not applicable, the certificate names no OCSP responder"}
+                    </Detail>
                     <Detail label="SHA-256" className="font-mono text-micro break-all">
                       {scan.fingerprint}
                     </Detail>
                   </DetailList>
                 </PanelBody>
-              </Panel>{" "}
+              </Panel>
               <Panel plain>
                 <PanelHeader title="Chain as presented" />
                 <PanelBody flush>
@@ -458,6 +518,54 @@ function IssuerFact({ issuer }: { issuer: string }) {
 function IssuerGlyph({ issuer }: { issuer: string }) {
   const product = issuerProduct(issuer)
   return product ? <ProductGlyph id={product} /> : null
+}
+
+/** Every plain-HTTP request in order, so a redirect through another host reads as one. */
+function PlainChain({ http }: { http: HTTPScan }) {
+  if (http.plainError) return <>{http.plainError}</>
+  return (
+    <ol className="space-y-0.5">
+      {http.redirectChain.map((hop) => (
+        <li key={hop.url}>
+          {hop.url}{" "}
+          {hop.error
+            ? "did not answer"
+            : `${hop.status}${hop.location ? ` → ${hop.location}` : ""}`}
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+const PLAIN_ERRORS: Record<NonNullable<HTTPScan["plainErrorKind"]>, string> = {
+  refused: "port 80 refused the connection",
+  timeout: "port 80 did not answer in time",
+  dns: "the name did not resolve",
+  other: "port 80 did not answer",
+}
+
+/** Where a plain-HTTP visitor ends up. Only a refused connection is called refused. */
+function plainVerdict(http: HTTPScan): { verdict: Verdict; label: string } {
+  const hops = http.redirectChain
+  const last = hops[hops.length - 1]
+  if (http.plainError)
+    return { verdict: "notice", label: PLAIN_ERRORS[http.plainErrorKind ?? "other"] }
+  if (http.plainRedirects) {
+    return {
+      verdict: "ok",
+      label: hops.length > 1 ? `redirects to HTTPS in ${hops.length} hops` : "redirects to HTTPS",
+    }
+  }
+  if (last?.error) return { verdict: "critical", label: "a redirect leads nowhere" }
+  if (last?.status && last.status >= 300 && last.status < 400) {
+    return { verdict: "critical", label: "redirects, never to HTTPS" }
+  }
+  if (hops.length > 1)
+    return { verdict: "critical", label: `stays on HTTP, answering ${last?.status}` }
+  return {
+    verdict: "critical",
+    label: `answers ${last?.status ?? http.plainStatus} without redirecting`,
+  }
 }
 
 function gradeTone(grade: string): Tone {

@@ -1,0 +1,383 @@
+package proxysvc
+
+import (
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"io"
+	"math/big"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strconv"
+	"strings"
+	"sync/atomic"
+	"syscall"
+	"testing"
+	"time"
+)
+
+// scanTestCert is a leaf for a local listener: its serial and OCSP responder
+// are what the report is being tested on.
+func scanTestCert(t *testing.T, serial int64, ocsp []string) (tls.Certificate, *x509.Certificate) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(serial),
+		Subject:      pkix.Name{CommonName: "scan.test"},
+		DNSNames:     []string{"scan.test"},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(90 * 24 * time.Hour),
+		OCSPServer:   ocsp,
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}, parsed
+}
+
+// tlsListener serves TLS on 127.0.0.1 and hands each completed handshake to
+// serve; it never speaks HTTP unless serve does.
+func tlsListener(t *testing.T, config *tls.Config, serve func(*tls.Conn)) string {
+	t.Helper()
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				tc := conn.(*tls.Conn)
+				tc.SetDeadline(time.Now().Add(5 * time.Second))
+				if tc.Handshake() == nil {
+					serve(tc)
+				}
+			}()
+		}
+	}()
+	return ln.Addr().String()
+}
+
+// The server's protocol_version alert reads "protocol version not supported",
+// and matching those words once filed every correct refusal of TLS 1.0 and
+// 1.1 as this client's own — a well-configured server could never be shown
+// refusing them. Probed against a listener that really refuses.
+func TestProbeProtocolsReportsTheServersRefusal(t *testing.T) {
+	cert, _ := scanTestCert(t, 1, nil)
+	addr := tlsListener(t, &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
+		func(*tls.Conn) {})
+
+	got := map[string]ProtocolResult{}
+	for _, p := range probeProtocols(context.Background(), addr, "scan.test") {
+		got[p.Name] = p
+	}
+	for name, want := range map[string]string{
+		"TLS 1.0": "refused", "TLS 1.1": "refused", "TLS 1.2": "offered", "TLS 1.3": "offered",
+	} {
+		if got[name].Status != want {
+			t.Errorf("%s = %+v, want %s", name, got[name], want)
+		}
+	}
+	if !strings.Contains(got["TLS 1.0"].Detail, "protocol version not supported") {
+		t.Errorf("the refusal should carry the server's own words: %q", got["TLS 1.0"].Detail)
+	}
+}
+
+func TestProbeProtocolsFindsAMissingTLS13(t *testing.T) {
+	cert, _ := scanTestCert(t, 1, nil)
+	addr := tlsListener(t, &tls.Config{Certificates: []tls.Certificate{cert},
+		MinVersion: tls.VersionTLS12, MaxVersion: tls.VersionTLS12}, func(*tls.Conn) {})
+
+	scan := goodScan()
+	scan.Protocols = probeProtocols(context.Background(), addr, "scan.test")
+	if status := protocolStatus(scan.Protocols, "TLS 1.3"); status != "refused" {
+		t.Fatalf("TLS 1.3 = %s: %+v", status, scan.Protocols)
+	}
+	grade(scan)
+	if !hasFinding(scan, "tls.no-13") {
+		t.Fatalf("no finding for the missing TLS 1.3: %+v", scan.Findings)
+	}
+}
+
+// Only the server's answer is a refusal. Anything that could be the network
+// or this client stays unknown, because "refused" there is false reassurance.
+func TestProtocolAnswer(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		err    error
+		status string
+		detail string
+	}{
+		{"an alert", &net.OpError{Op: "remote error", Err: errString("tls: protocol version not supported")},
+			"refused", "The server answered: protocol version not supported."},
+		{"a handshake failure alert", &net.OpError{Op: "remote error", Err: errString("tls: handshake failure")},
+			"refused", "handshake failure"},
+		{"a close on the hello", io.EOF, "refused", "closed the connection"},
+		{"a reset on the hello", &net.OpError{Op: "read", Err: syscall.ECONNRESET}, "refused", "closed the connection"},
+		{"another version picked", errString("tls: server selected unsupported protocol version 303"),
+			"refused", "different version"},
+		{"this client would not ask", errString("tls: no supported versions satisfy MinVersion and MaxVersion"),
+			"unknown", "never asked"},
+		{"no connection", &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}, "unknown", "could not connect"},
+		{"no answer in time", context.DeadlineExceeded, "unknown", "did not answer in time"},
+		{"something else", errString("tls: unexpected message"), "unknown", "unexpected message"},
+	} {
+		status, detail := protocolAnswer(c.err)
+		if status != c.status || !strings.Contains(detail, c.detail) {
+			t.Errorf("%s: got %s %q, want %s containing %q", c.name, status, detail, c.status, c.detail)
+		}
+	}
+}
+
+// openssl, browsers and crt.sh all print the serial in hex; the decimal form
+// matched none of them.
+func TestDescribeChainPrintsTheSerialInHex(t *testing.T) {
+	_, leaf := scanTestCert(t, 0x04D351, nil)
+	scan := &TLSScan{Chain: []ChainLink{}}
+	describeChain(scan, []*x509.Certificate{leaf}, "scan.test")
+	if scan.Serial != "04:D3:51" {
+		t.Fatalf("serial = %q", scan.Serial)
+	}
+	if scan.Serial != scan.Certificate.Serial {
+		t.Fatalf("the report and the certificate disagree: %q and %q", scan.Serial, scan.Certificate.Serial)
+	}
+}
+
+// Let's Encrypt's leaves no longer name an OCSP responder, so there is nothing
+// to staple, and a notice about it appeared on every one of their sites.
+func TestNoOCSPNoticeOnlyWhenTheLeafNamesAResponder(t *testing.T) {
+	_, withoutOCSP := scanTestCert(t, 2, nil)
+	scan := goodScan()
+	scan.OCSPStapled = false
+	describeChain(scan, []*x509.Certificate{withoutOCSP}, "scan.test")
+	grade(scan)
+	if hasFinding(scan, "tls.no-ocsp") {
+		t.Fatalf("a leaf with no responder has nothing to staple: %+v", scan.Findings)
+	}
+
+	_, withOCSP := scanTestCert(t, 3, []string{"http://ocsp.example.test"})
+	scan = goodScan()
+	scan.OCSPStapled = false
+	describeChain(scan, []*x509.Certificate{withOCSP}, "scan.test")
+	grade(scan)
+	if !hasFinding(scan, "tls.no-ocsp") {
+		t.Fatalf("a responder and no staple should be noted: %+v", scan.Findings)
+	}
+}
+
+// A TLS service that is not a website — a mail server on 993 — gave no HTTP
+// response, and the report called that a missing HSTS header.
+func TestAServiceThatIsNotAWebsiteIsNotGradedOnHeaders(t *testing.T) {
+	cert, _ := scanTestCert(t, 4, nil)
+	addr := tlsListener(t, &tls.Config{Certificates: []tls.Certificate{cert}}, func(c *tls.Conn) {
+		c.Write([]byte("* OK IMAP4rev1 ready\r\n"))
+		io.Copy(io.Discard, io.LimitReader(c, 4096))
+	})
+	var plainHits atomic.Int32
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		plainHits.Add(1)
+	}))
+	defer plain.Close()
+
+	result := scanHTTP(context.Background(), "https://"+addr+"/", plain.URL+"/")
+	if result.HTTPSError == "" {
+		t.Fatalf("the non-HTTP answer should be the error: %+v", result)
+	}
+	if plainHits.Load() != 0 {
+		t.Error("port 80 belongs to another service and should not be graded for this one")
+	}
+
+	scan := goodScan()
+	scan.HTTP = result
+	grade(scan)
+	for _, id := range []string{"tls.no-hsts", "tls.no-redirect", "http.header."} {
+		if hasFinding(scan, id) {
+			t.Errorf("%s reported for a response that never came: %+v", id, scan.Findings)
+		}
+	}
+	if !hasFinding(scan, "http.https-error") {
+		t.Errorf("the failed request should be said: %+v", scan.Findings)
+	}
+}
+
+// The whole scan of the same listener: reachable, and the HTTP half says it
+// got no HTTP answer instead of inventing findings.
+func TestScanTLSOfANonHTTPService(t *testing.T) {
+	cert, _ := scanTestCert(t, 5, nil)
+	addr := tlsListener(t, &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
+		func(c *tls.Conn) { c.Write([]byte("* OK ready\r\n")) })
+	host, portText, _ := net.SplitHostPort(addr)
+	port, _ := strconv.Atoi(portText)
+
+	scan := ScanTLS(context.Background(), host, port)
+	if !scan.Reachable || scan.HTTP == nil || scan.HTTP.HTTPSError == "" {
+		t.Fatalf("got %+v", scan)
+	}
+	if protocolStatus(scan.Protocols, "TLS 1.0") != "refused" {
+		t.Errorf("protocols = %+v", scan.Protocols)
+	}
+	if hasFinding(scan, "tls.no-hsts") {
+		t.Errorf("HSTS judged on no response: %+v", scan.Findings)
+	}
+}
+
+// httpsWithHeaders is the HTTPS side the plain-HTTP tests share: an answer
+// with HSTS, so only the redirect is under test.
+func httpsWithHeaders(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+		w.Header().Set("Server", "nginx")
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL + "/"
+}
+
+// redirects answers each path with a redirect to the mapped location, and
+// anything unmapped with 200.
+func redirects(t *testing.T, to func(base string) map[string]string) string {
+	t.Helper()
+	var base string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if location, ok := to(base)[r.URL.Path]; ok {
+			w.Header().Set("Location", location)
+			w.WriteHeader(http.StatusMovedPermanently)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	base = srv.URL
+	return srv.URL
+}
+
+// Only the first hop used to be read, so http://x → http://www.x →
+// https://www.x was graded "does not redirect to HTTPS".
+func TestThePlainHTTPRedirectIsFollowedToHTTPS(t *testing.T) {
+	cases := []struct {
+		name      string
+		to        func(base string) map[string]string
+		redirects bool
+		hops      int
+		detail    string
+	}{
+		{"straight to HTTPS", func(string) map[string]string {
+			return map[string]string{"/": "https://example.test/"}
+		}, true, 1, ""},
+		{"through another host first", func(base string) map[string]string {
+			return map[string]string{"/": base + "/www", "/www": "https://www.example.test/"}
+		}, true, 2, ""},
+		{"a relative hop first", func(string) map[string]string {
+			return map[string]string{"/": "/login", "/login": "https://example.test/login"}
+		}, true, 2, ""},
+		{"no redirect", func(string) map[string]string { return map[string]string{} },
+			false, 1, "answered 200"},
+		{"to a page that stays on HTTP", func(base string) map[string]string {
+			return map[string]string{"/": base + "/home"}
+		}, false, 2, "which answered 200"},
+		{"a loop", func(string) map[string]string {
+			return map[string]string{"/": "/a", "/a": "/"}
+		}, false, 2, "loop back to"},
+		{"more hops than it follows", func(string) map[string]string {
+			return map[string]string{"/": "/1", "/1": "/2", "/2": "/3", "/3": "/4", "/4": "/5", "/5": "/6"}
+		}, false, maxRedirectHops, "without reaching HTTPS"},
+		{"a hop that does not answer", func(string) map[string]string {
+			return map[string]string{"/": "http://127.0.0.1:1/"}
+		}, false, 2, "did not answer"},
+	}
+	httpsURL := httpsWithHeaders(t)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			plain := redirects(t, c.to)
+			result := scanHTTP(context.Background(), httpsURL, plain+"/")
+			if result.PlainRedirects != c.redirects || len(result.RedirectChain) != c.hops {
+				t.Fatalf("redirects=%v with %d hops, want %v with %d: %+v",
+					result.PlainRedirects, len(result.RedirectChain), c.redirects, c.hops, result.RedirectChain)
+			}
+			if result.RedirectChain[0].URL != plain+"/" || result.PlainStatus != result.RedirectChain[0].Status {
+				t.Errorf("the first hop is not the plain request: %+v", result.RedirectChain[0])
+			}
+			scan := goodScan()
+			scan.HTTP = result
+			grade(scan)
+			if got := hasFinding(scan, "tls.no-redirect"); got == c.redirects {
+				t.Fatalf("no-redirect finding = %v: %+v", got, scan.Findings)
+			}
+			if !c.redirects {
+				for _, f := range scan.Findings {
+					if f.ID == "tls.no-redirect" && !strings.Contains(f.Detail, c.detail) {
+						t.Errorf("detail %q does not say %q", f.Detail, c.detail)
+					}
+				}
+			}
+		})
+	}
+}
+
+// A closed port 80 is not a missing redirect, and the page may only call it
+// refused when it was.
+func TestAClosedPort80IsNamedForWhatHappened(t *testing.T) {
+	result := scanHTTP(context.Background(), httpsWithHeaders(t), "http://127.0.0.1:1/")
+	if result.PlainError == "" || result.PlainErrorKind != "refused" {
+		t.Fatalf("got %q (%s)", result.PlainError, result.PlainErrorKind)
+	}
+	if len(result.RedirectChain) != 0 {
+		t.Errorf("nothing answered, so there is no chain: %+v", result.RedirectChain)
+	}
+	if strings.HasPrefix(result.PlainError, "Get ") {
+		t.Errorf("the URL is already on the page: %q", result.PlainError)
+	}
+	scan := goodScan()
+	scan.HTTP = result
+	grade(scan)
+	if hasFinding(scan, "tls.no-redirect") {
+		t.Error("a closed port 80 is not a missing redirect")
+	}
+}
+
+func TestRequestErrorSaysWhatHappened(t *testing.T) {
+	closed := &url.Error{Op: "Get", URL: "https://mail.example.test/", Err: io.EOF}
+	if got := requestError(closed); got != "the server closed the connection without an HTTP response" {
+		t.Errorf("EOF read as %q", got)
+	}
+	refused := &url.Error{Op: "Get", URL: "http://127.0.0.1:1/", Err: errString("dial tcp 127.0.0.1:1: connect: connection refused")}
+	if got := requestError(refused); got != "dial tcp 127.0.0.1:1: connect: connection refused" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestNetErrorKind(t *testing.T) {
+	for _, c := range []struct {
+		err  error
+		kind string
+	}{
+		{&net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}, "refused"},
+		{&net.DNSError{Err: "no such host", Name: "nowhere.test", IsNotFound: true}, "dns"},
+		{context.DeadlineExceeded, "timeout"},
+		{errString("something"), "other"},
+	} {
+		if got := netErrorKind(c.err); got != c.kind {
+			t.Errorf("%v = %s, want %s", c.err, got, c.kind)
+		}
+	}
+}

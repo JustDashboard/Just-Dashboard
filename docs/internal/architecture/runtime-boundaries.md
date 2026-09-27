@@ -132,7 +132,7 @@ Tables are grouped by owner: authentication and audit (`users`, `recovery_codes`
 runtimes, steps, logs, dependencies, checks, triggers, delivery records, variable and plan snapshots,
 blueprint installs, port and queue leases, removals, drafts, schedules, Git watch cursors, notifications,
 and previews; proxy
-watching (`watched_domains`); compose deployment history (`docker_stack_deployments` — the file, the
+watching (`watched_endpoints`, filled from the older one-port-per-name `watched_domains`); compose deployment history (`docker_stack_deployments` — the file, the
 running digests and the git commit captured before every state-changing action, with environment values
 hashed rather than stored); the general `settings` key/value table; and mount, container, and host metric
 samples. The schema block in `store.go` is the authoritative column-level reference. `migrateLegacyDeployments` maps each populated

@@ -137,6 +137,7 @@ func TestGradeMissingIntermediateIsB(t *testing.T) {
 func TestGradeNoRedirectIsB(t *testing.T) {
 	scan := goodScan()
 	scan.HTTP.PlainRedirects = false
+	scan.HTTP.RedirectChain = []RedirectHop{{URL: "http://example.com/", Status: 200}}
 	grade(scan)
 	if scan.Grade != "B" {
 		t.Fatalf("grade = %q", scan.Grade)
@@ -209,15 +210,6 @@ func TestUnknownProtocolStatusIsNotTreatedAsRefused(t *testing.T) {
 	grade(scan)
 	if hasFinding(scan, "tls.no-13") {
 		t.Error("reported TLS 1.3 as missing when it was never tested")
-	}
-}
-
-func TestIsLocalVersionRefusal(t *testing.T) {
-	if !isLocalVersionRefusal(errString("tls: no supported versions satisfy MinVersion and MaxVersion")) {
-		t.Error("a local refusal should be recognised")
-	}
-	if isLocalVersionRefusal(errString("dial tcp: connection refused")) {
-		t.Error("a network failure is not a local refusal")
 	}
 }
 

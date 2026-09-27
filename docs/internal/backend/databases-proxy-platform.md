@@ -304,11 +304,33 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   the whole site on the next save.
 - **`tlsscan.go` — what the domain actually serves.** Everything else on the page reads files, which
   cannot see a certificate renewed and never reloaded, a proxy still offering TLS 1.0, or a redirect that
-  quietly stopped. Each version is probed on a connection pinned to exactly that version; a version this
-  client will not ask for is `unknown`, **never `refused`**, since reporting it absent would be false
-  reassurance about the versions that matter most. `grade` is a pure function of the scan. The live
-  certificate, TLS and DNS probes require `system.admin`: each emits traffic to a caller-chosen
-  destination, the same scanner boundary as `/network/probe`.
+  quietly stopped. Each version is probed on a connection pinned to exactly that version. Only the
+  server's own answer is `refused` — an alert (recognised by its `remote error` type: OpenSSL's
+  protocol_version alert reads "protocol version not supported", and matching those words once filed
+  every correct refusal as this client's), a different version picked, or the connection closed on the
+  ClientHello — with its words in `detail`. A version this client will not ask for, a probe that could
+  not connect, or one that timed out is `unknown`, **never `refused`**, since reporting it absent would
+  be false reassurance about the versions that matter most; `TestLiveNginxRefusalsAreReportedAsRefused`
+  holds this against a private real nginx. When HTTPS gives no HTTP response (`httpsError`: a mail
+  server on 993, or a failing site) nothing else on the HTTP side is measured or graded — no HSTS or
+  header finding, no port-80 request. Otherwise the plain-HTTP side is followed by hand up to five hops
+  (`redirectChain`) and passes when it reaches `https://` on any host; `plainErrorKind` says whether
+  port 80 refused, timed out or did not resolve. The serial is colon hex as openssl prints it, and the
+  unstapled-OCSP notice needs a responder in the leaf (`ocspServers`; Let's Encrypt names none).
+  `grade` is a pure function of the scan. The live certificate, TLS and DNS probes require
+  `system.admin`: each emits traffic to a caller-chosen destination, the same scanner boundary as
+  `/network/probe`. What reaches them is `ParseScanTarget` (`scantarget.go`): a URL, host:port, a
+  bracketed IPv6 address or a name in its own script become a host and port, and anything else is a 400
+  with the reason; `frontend/src/lib/scan-target.ts` is the same parser, and both are tested against
+  `frontend/src/lib/scan-target-cases.json`.
+- **The watch list is endpoints.** `watched_endpoints` (lane G in `proxySchema`) is a name, a port and
+  an address, unique together, so a mail server can be watched on 443 and 993; `watched_domains` held
+  one row per name and a second port replaced the first. Its rows are copied in on every boot with
+  `INSERT OR IGNORE`, which brings nothing back because an unwatch deletes the `watched_domains` row as
+  well. Each endpoint keeps its last check (`checked_at`, `certificate` as JSON). Only an
+  administrator's `GET /certificates/watched` handshakes, and stores what it found; every other account
+  reads the stored result — the list is readable by all, and the handshake is outbound traffic a
+  read-only account may not cause.
 - **`dns01.go` — wildcards and CDN-fronted domains**, which between them are most of the certificates
   people want: Let's Encrypt signs `*.example.com` only against DNS-01, and a Cloudflare-proxied domain
   never receives an HTTP challenge. Eight certbot plugins as a closed set (each names credentials and
@@ -381,8 +403,9 @@ ownership and cleanup, then removes its own containers/volumes/networks.
 - **`certbot.go`** issues, renews and revokes. `renewalScheduled` has its own field because it is the real
   story behind almost every expired certificate: not a forgotten renewal, a timer that stopped months ago.
   Issuance defaults to `--staging` in the UI (the real limit is five failures an hour). `dns.go` answers
-  "does this domain point here yet" and recognises Cloudflare explicitly, since reporting a CDN as a
-  misconfiguration is the commonest false alarm of this kind.
+  "does this domain point here yet" and recognises Cloudflare explicitly — every range it publishes at
+  cloudflare.com/ips-v4 and /ips-v6 — since reporting a CDN as a misconfiguration is the commonest false
+  alarm of this kind.
 - **The proxy routes are mounted per area**, each from its own file beside its handlers, and composed in
   `mountProxyRoutes` (`api/handlers_proxy.go`): `mountEngineRoutes` (status, the raw config editor,
   validate, test, reload; `handlers_proxy_engine.go`), `mountVHostRoutes` (the listing and the enable

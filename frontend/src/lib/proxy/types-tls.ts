@@ -4,6 +4,7 @@ import type { Certificate } from "./types-certs"
 export type ProtocolResult = {
   name: string
   status: "offered" | "refused" | "unknown"
+  /** What the server said, or why nothing it said was heard. */
   detail?: string
 }
 
@@ -32,13 +33,32 @@ export type HeaderCheck = {
   detail: string
 }
 
+/** One plain-HTTP request: its status and where it pointed, or why it did not answer. */
+export type RedirectHop = {
+  url: string
+  status?: number
+  location?: string
+  error?: string
+}
+
 export type HTTPScan = {
   statusCode: number
   server?: string
+  /**
+   * Why HTTPS gave no HTTP response — the service is not a website, or it is
+   * failing. Nothing else on the HTTP side was measured then.
+   */
+  httpsError?: string
+  /** Whether plain HTTP ends up at HTTPS, however many hops it takes. */
   plainRedirects: boolean
+  /** The first hop's answer. */
   plainStatus?: number
   plainLocation?: string
+  /** Why port 80 did not answer at all. */
   plainError?: string
+  plainErrorKind?: "refused" | "timeout" | "dns" | "other"
+  /** Every plain-HTTP request made, in order. */
+  redirectChain: RedirectHop[]
   hsts?: HSTS
   headers: HeaderCheck[]
 }
@@ -74,6 +94,8 @@ export type TLSScan = {
   fingerprint?: string
   serial?: string
   ocspStapled: boolean
+  /** The OCSP responders the leaf names; with none there is nothing to staple. */
+  ocspServers?: string[]
   http?: HTTPScan
   findings: ScanFinding[]
 }
