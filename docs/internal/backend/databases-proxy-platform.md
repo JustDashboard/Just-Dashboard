@@ -432,10 +432,12 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   indexed once by path and directory, which keeps thousands of sites linear.
 - **Every change to a configuration file is offered to a `ChangeRecorder`** (`changes.go`) once it is
   committed — `WriteConfig`, `ApplySite` and deployment cutovers through `applySiteLocked`, `DeleteSite`,
-  `SetVHostEnabled` (which now takes the service lock like every other change), `ApplyStream`,
+  `SetVHostEnabled` (which now takes the service lock like every other change, resolves the site file
+  as the writes do, and records nothing for a toggle that leaves the link as it was), `ApplyStream`,
   `DeleteStream`, and a deployment route's restore — with its prior content and the actor
   `WithActor` put on the context (empty for a deployment or a background loop). Password files are never
-  recorded and the htpasswd writers do not call it; a recorder that fails is logged and the change stands.
+  recorded, a site file that resolves outside the proxy's directories is recorded without content, and
+  the htpasswd writers do not call it; a recorder that fails is logged and the change stands.
   No recorder is attached yet.
 - **Certificates carry their fingerprint and serial**, the SHA-256 of the DER and the serial number in
   the uppercase colon form `openssl x509 -fingerprint -sha256` prints, which
