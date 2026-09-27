@@ -12,7 +12,12 @@ import { certPathProduct } from "@/components/proxy/marks"
 
 /** On TLS, with Let's Encrypt drawn as itself where the site points at certbot's live directory. */
 export function SiteTLS({ vhost }: { vhost: VHost }) {
-  if (!vhost.tls) return <span className="text-xs text-muted-foreground">plain HTTP</span>
+  if (!vhost.tls)
+    return vhost.enabled && vhost.upstreams.length > 0 ? (
+      <Status verdict="warning" label="plain HTTP" />
+    ) : (
+      <span className="text-xs text-muted-foreground">plain HTTP</span>
+    )
   const product = certPathProduct(vhost.certPath)
   if (!product) return <Status state="active" label="TLS" icon={ShieldCheck} />
   return (
