@@ -732,6 +732,21 @@ test("the diagram draws every table and remembers what was hidden", async ({ pag
   await expect(nodes).toHaveCount(3)
   await expect(page.getByRole("button", { name: "Full screen" })).toBeVisible()
 
+  // The grid dots take `--grid-dot`, not React Flow's default grey: a class
+  // on the circle loses to the library's own fill rule and did nothing.
+  const dots = await page
+    .locator(".react-flow__background circle")
+    .first()
+    .evaluate((circle) => {
+      const probe = document.createElementNS("http://www.w3.org/2000/svg", "circle")
+      probe.style.fill = "var(--grid-dot)"
+      circle.parentNode!.appendChild(probe)
+      const want = getComputedStyle(probe).fill
+      probe.remove()
+      return { got: getComputedStyle(circle).fill, want }
+    })
+  expect(dots.got).toBe(dots.want)
+
   await page.getByRole("button", { name: "Export the diagram" }).click()
   await expect(page.getByRole("menuitem", { name: /PNG image/ })).toBeVisible()
   await expect(page.getByRole("menuitem", { name: /Mermaid/ })).toBeVisible()
