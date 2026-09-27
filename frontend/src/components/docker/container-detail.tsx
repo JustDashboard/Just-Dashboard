@@ -39,6 +39,7 @@ import { XtermPane } from "@/components/xterm-pane"
 import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { ContainerUsage } from "@/components/docker/container-usage"
+import { ContainerLiveUsage } from "@/components/docker/container-live-usage"
 import { statusWord } from "@/components/docker/container-cells"
 import { useContainerControl, useContainerVerbs } from "@/components/docker/container-actions"
 import { ContainerFindings } from "@/components/docker/attention"
@@ -268,13 +269,10 @@ function ContainerDetailPanel({
             <Reachability containerId={detail.id} />
           </TabsContent>
 
-          {/* Recorded history rather than a live feed: the point is the spike
-              that happened while nobody had this page open. The limits sit
-              above the charts because this is where somebody realises theirs
-              are wrong. */}
-          <TabsContent value="usage" className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+          <TabsContent value="usage" className="min-h-0 flex-1 space-y-6 overflow-y-auto">
+            <ContainerLiveUsage key={detail.id} detail={detail} />
             <ResourceLimitsEditor detail={detail} onSaved={() => setReloads((n) => n + 1)} />
-            <ContainerUsage containerId={detail.id} name={detail.name} />
+            <ContainerUsage containerId={detail.id} name={detail.name} plain />
           </TabsContent>
 
           <TabsContent value="logs" className="min-h-0 flex-1">
