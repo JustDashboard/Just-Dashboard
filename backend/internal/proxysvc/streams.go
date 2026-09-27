@@ -299,6 +299,8 @@ func (s *Service) ApplyStream(ctx context.Context, spec *StreamSpec, reload, ove
 		res.Enabled = false
 		return res, ErrInvalidConf
 	}
+	s.recordChange(ctx, Change{Path: path, Action: ChangeWrite,
+		Before: []byte(original), BeforeExisted: existed, After: []byte(content)})
 	if reload {
 		out, err := hostexec.Command(ctx, "nginx", "-s", "reload").CombinedOutput()
 		res.Output = strings.TrimSpace(string(out))
@@ -353,8 +355,13 @@ func (s *Service) DeleteStream(ctx context.Context, name string) error {
 	if _, err := os.Stat(path); err != nil {
 		return fmt.Errorf("no such stream: %s", name)
 	}
-	if b, err := os.ReadFile(path); err == nil {
+	b, readErr := os.ReadFile(path)
+	if readErr == nil {
 		os.WriteFile(path+".bak", b, 0o644)
 	}
-	return os.Remove(path)
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	s.recordChange(ctx, Change{Path: path, Action: ChangeDelete, Before: b, BeforeExisted: true})
+	return nil
 }

@@ -19,6 +19,7 @@ import (
 // gates are pinned by TestProxyRoutesKeepTheirPaths.
 func (s *Server) mountProxyRoutes(r chi.Router) {
 	r.Group(func(r chi.Router) {
+		r.Use(withProxyActor)
 		r.Route("/proxy", func(r chi.Router) {
 			s.mountEngineRoutes(r)
 			s.mountVHostRoutes(r)
@@ -36,6 +37,16 @@ func (s *Server) mountProxyRoutes(r chi.Router) {
 			s.mountTLSRoutes(r)
 		})
 		r.Route("/ports", s.mountPortRoutes)
+	})
+}
+
+// withProxyActor tells the proxy service who is asking. The service records
+// every configuration file it changes, and a record that cannot say whose
+// change it was is no help to the operator reading it after an outage.
+func withProxyActor(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := proxysvc.WithActor(r.Context(), httpx.MustPrincipal(r).Username())
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 

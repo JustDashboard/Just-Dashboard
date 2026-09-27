@@ -1,14 +1,18 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -149,5 +153,43 @@ func TestPortListAnswersAtItsOldAddress(t *testing.T) {
 		if err := json.Unmarshal(w.Body.Bytes(), &listeners); err != nil {
 			t.Fatalf("GET %s is not a list of listeners: %v", path, err)
 		}
+	}
+}
+
+type actorLog struct{ actors []string }
+
+func (l *actorLog) Record(_ context.Context, c proxysvc.Change) error {
+	l.actors = append(l.actors, c.Actor)
+	return nil
+}
+
+// A change made through the proxy routes is recorded as the account that made
+// it, which is what a configuration history is read for after an outage.
+func TestProxyChangesAreRecordedAsTheSignedInAccount(t *testing.T) {
+	s := testServer(t)
+	dir := t.TempDir()
+	for _, sub := range []string{"sites-available", "bin"} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bin", "nginx"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", filepath.Join(dir, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
+	s.Cfg.NginxDir = dir
+	s.initModules()
+	log := &actorLog{}
+	s.modules.proxy.SetRecorder(log)
+
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+	body, _ := json.Marshal(map[string]any{
+		"kind": "nginx", "path": filepath.Join(dir, "sites-available", "app"), "content": "server {}\n",
+	})
+	if w := c.do(http.MethodPut, "/api/v1/proxy/config", string(body), nil); w.Code != http.StatusOK {
+		t.Fatalf("got %d: %s", w.Code, w.Body.String())
+	}
+	if !reflect.DeepEqual(log.actors, []string{"tester"}) {
+		t.Fatalf("recorded actors %q, want the signed-in account", log.actors)
 	}
 }

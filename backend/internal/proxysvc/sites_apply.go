@@ -101,6 +101,8 @@ func (s *Service) applySiteLocked(ctx context.Context, spec *SiteSpec, content s
 		res.Enabled = false
 		return res, ErrInvalidConf
 	}
+	s.recordChange(ctx, Change{Path: full, Action: ChangeWrite,
+		Before: []byte(original), BeforeExisted: existed, After: []byte(content)})
 	if reload {
 		raw, err := hostexec.Command(ctx, "nginx", "-s", "reload").CombinedOutput()
 		out := strings.TrimSpace(string(raw))
@@ -213,10 +215,15 @@ func (s *Service) DeleteSite(ctx context.Context, name string) error {
 		// thing, and the only cure for the second is the previous version.
 		// The listing skips these, so the copy is a file on disk rather than
 		// a site that comes back the moment the one it replaced is deleted.
-		if b, err := os.ReadFile(full); err == nil {
+		b, readErr := os.ReadFile(full)
+		if readErr == nil {
 			os.WriteFile(full+".bak", b, 0o644)
 		}
-		return os.Remove(full)
+		if err := os.Remove(full); err != nil {
+			return err
+		}
+		s.recordChange(ctx, Change{Path: full, Action: ChangeDelete, Before: b, BeforeExisted: true})
+		return nil
 	}
 	if removedLink {
 		// A link with nothing behind it is exactly what takes every site on

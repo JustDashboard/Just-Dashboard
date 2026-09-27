@@ -2,6 +2,7 @@ package proxysvc
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
@@ -31,6 +32,11 @@ type Certificate struct {
 	// which is the answer to the question the list used to leave open: what
 	// breaks when this one expires.
 	UsedBy []string `json:"usedBy"`
+	// Fingerprint is the SHA-256 of the DER and Serial the serial number,
+	// both in the uppercase colon form `openssl x509 -fingerprint` prints,
+	// so one can be compared by eye with what a browser or a CA shows.
+	Fingerprint string `json:"fingerprint,omitempty"`
+	Serial      string `json:"serial,omitempty"`
 }
 
 // expiryWarningDays matches Let's Encrypt's own renewal window: certbot
@@ -171,6 +177,9 @@ func summarise(c *x509.Certificate, name, path string) *Certificate {
 	cert.Expired = time.Now().After(c.NotAfter)
 	cert.Expiring = !cert.Expired && cert.DaysLeft <= expiryWarningDays
 	cert.SelfSigned = c.Issuer.String() == c.Subject.String()
+	sum := sha256.Sum256(c.Raw)
+	cert.Fingerprint = colonHex(sum[:])
+	cert.Serial = colonHex(c.SerialNumber.Bytes())
 	return cert
 }
 

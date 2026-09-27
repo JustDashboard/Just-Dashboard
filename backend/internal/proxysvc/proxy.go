@@ -50,6 +50,9 @@ type Service struct {
 	// Serialising every validate and write keeps two operators from having
 	// their candidates interleaved on the same file.
 	mu sync.Mutex
+
+	recorder  ChangeRecorder
+	effective effectiveCache
 }
 
 func New(nginxDir, caddyFile string) *Service {
@@ -254,6 +257,11 @@ type ValidationResult struct {
 	// passes `nginx -t` without being read, and saying so is the difference
 	// between a dry run and a false reassurance.
 	Note string `json:"note,omitempty"`
+	// Diagnostics are the leveled lines of Output, placed where they name a
+	// file and line. Warnings counts the warn-level ones, because nginx passes
+	// a config it is quietly ignoring part of.
+	Diagnostics []Diagnostic `json:"diagnostics"`
+	Warnings    int          `json:"warnings"`
 }
 
 // Validate runs the server's own config test and leaves the host exactly as it
@@ -338,11 +346,13 @@ func runValidator(ctx context.Context, name string, args ...string) *ValidationR
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 	err := cmd.Run()
-	return &ValidationResult{
+	res := &ValidationResult{
 		Valid:   err == nil,
 		Output:  strings.TrimSpace(buf.String()),
 		Command: name + " " + strings.Join(args, " "),
 	}
+	res.diagnose(name)
+	return res
 }
 
 // WriteConfig saves a configuration only after it validates. The order here is
@@ -362,9 +372,12 @@ func (s *Service) WriteConfig(ctx context.Context, kind Kind, path, content stri
 		if !res.Valid {
 			return res, ErrInvalidConf
 		}
+		original, existed := readIfPresent(full)
 		if err := writeAtomic(full, content); err != nil {
 			return nil, err
 		}
+		s.recordChange(ctx, Change{Path: full, Action: ChangeWrite,
+			Before: []byte(original), BeforeExisted: existed, After: []byte(content)})
 		return res, nil
 	}
 	// Validation now restores the original unconditionally, so the write has
@@ -379,6 +392,7 @@ func (s *Service) WriteConfig(ctx context.Context, kind Kind, path, content stri
 	if !res.Valid {
 		return res, ErrInvalidConf
 	}
+	original, existed := readIfPresent(full)
 	restore, err := s.stageNginx(full, content)
 	if err != nil {
 		return nil, err
@@ -387,6 +401,8 @@ func (s *Service) WriteConfig(ctx context.Context, kind Kind, path, content stri
 		restore()
 		return after, ErrInvalidConf
 	}
+	s.recordChange(ctx, Change{Path: full, Action: ChangeWrite,
+		Before: []byte(original), BeforeExisted: existed, After: []byte(content)})
 	return res, nil
 }
 
@@ -433,6 +449,7 @@ type ReloadResult struct {
 // Reload tests first and refuses to reload a config that does not pass. This
 // is the guard rail that makes a config editor safe to expose at all.
 func (s *Service) Reload(ctx context.Context, kind Kind) (*ReloadResult, error) {
+	s.forgetEffective()
 	var validation *ValidationResult
 	var reload *exec.Cmd
 	switch kind {

@@ -228,16 +228,31 @@ func (s *Service) SetVHostEnabled(ctx context.Context, name string, enabled bool
 	if _, err := os.Stat(available); err != nil {
 		return fmt.Errorf("no such vhost: %s", name)
 	}
+	// Held like every other change to the tree, so a toggle cannot land in
+	// the middle of another operator's validation and is recorded in order.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	content, _ := os.ReadFile(available)
+	change := Change{Path: available, Before: content, BeforeExisted: true, After: content}
 	if enabled {
 		// linkEnabled rather than a bare Symlink: a link already present but
 		// pointing somewhere else — the previous file of a renamed site, a
 		// dangling target — used to be reported as "enabled" and left as it
 		// was, so the switch said on while nginx read nothing.
-		_, err := linkEnabled(link, available)
+		if _, err := linkEnabled(link, available); err != nil {
+			return err
+		}
+		change.Action = ChangeEnable
+		s.recordChange(ctx, change)
+		return nil
+	}
+	if err := os.Remove(link); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return err
 	}
-	if err := os.Remove(link); err != nil && !os.IsNotExist(err) {
-		return err
-	}
+	change.Action = ChangeDisable
+	s.recordChange(ctx, change)
 	return nil
 }

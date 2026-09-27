@@ -434,6 +434,7 @@ func (s *Service) restoreDeploymentRouteLocked(ctx context.Context, snapshot Dep
 	if err != nil || path != snapshot.Path || link != snapshot.LinkPath {
 		return errors.New("deployment route location changed since snapshot")
 	}
+	before, beforeExisted := readIfPresent(path)
 	if snapshot.Existed {
 		if err := writeAtomic(path, snapshot.Content); err != nil {
 			return err
@@ -460,6 +461,18 @@ func (s *Service) restoreDeploymentRouteLocked(ctx context.Context, snapshot Dep
 				return err
 			}
 		}
+	}
+	// Recorded like any other write, or a history would go on showing a
+	// route holding what was just rolled back. A restore has no undo, so the
+	// record is made once the files are in place rather than after the test.
+	s.forgetEffective()
+	if beforeExisted != snapshot.Existed || before != snapshot.Content {
+		change := Change{Path: path, Action: ChangeWrite,
+			Before: []byte(before), BeforeExisted: beforeExisted, After: []byte(snapshot.Content)}
+		if !snapshot.Existed {
+			change.Action, change.After = ChangeDelete, nil
+		}
+		s.recordChange(ctx, change)
 	}
 	if validation := runValidator(ctx, "nginx", "-t"); !validation.Valid {
 		return fmt.Errorf("restored nginx configuration did not validate: %s", validation.Output)
