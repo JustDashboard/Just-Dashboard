@@ -87,6 +87,11 @@ export function useRenew(attach: (job: Job) => void) {
  * sentence each — the forced one spends a rate-limited duplicate and the
  * revocation cannot be undone, which is not something a glyph can say.
  *
+ * A test certificate has no renewal verbs: certbot renews from the authority
+ * in the lineage's configuration, the staging one, so renewing only fetched
+ * another certificate browsers refuse. Its verb is the real issuance for the
+ * same names, which replaces it.
+ *
  * certbot holds one lock for all of its work, so while the job on screen is
  * a certbot run every verb here waits for it, and the lineage it acts on
  * says what is happening to it.
@@ -97,6 +102,7 @@ export function CertbotLineages({
   busy,
   job,
   onRenew,
+  onReplace,
   onRevoke,
 }: {
   state: CertbotState
@@ -104,6 +110,8 @@ export function CertbotLineages({
   busy: string
   job: Job | null
   onRenew: (name: string, dryRun: boolean, force?: boolean) => void
+  /** Opens the real issuance for a test certificate's names. */
+  onReplace: (domains: string) => void
   onRevoke: (name: string) => void
 }) {
   const { confirm, dialog } = useConfirm()
@@ -126,50 +134,66 @@ export function CertbotLineages({
     )
   }
   const waiting = busy !== "" || running
-  const verbsFor = (name: string): Verb[] => [
-    {
-      key: "renew",
-      label: "Renew",
-      icon: RefreshClockwise,
-      inline: true,
-      disabled: waiting,
-      run: () => onRenew(name, false),
-    },
-    {
-      key: "dry-run",
-      label: "Dry run",
-      icon: ShieldCheck,
-      disabled: waiting,
-      run: () => onRenew(name, true),
-    },
-    {
-      key: "force",
-      label: "Force renewal",
-      icon: Warning,
-      disabled: waiting,
-      run: () =>
-        confirm({
-          title: `Force renewal of ${name}`,
-          confirmLabel: "Renew now",
-          description: (
-            <p>
-              certbot normally refuses to renew a certificate that is not due. Forcing it spends one
-              of the five duplicate certificates Let&rsquo;s Encrypt allows per week for this set of
-              names.
-            </p>
-          ),
-          action: async () => onRenew(name, false, true),
-        }),
-    },
-    {
+  const verbsFor = ({ name, domains, staging }: CertbotCert): Verb[] => {
+    const revoke: Verb = {
       key: "revoke",
       label: "Revoke and delete",
       icon: Trash,
       danger: true,
       disabled: waiting,
       run: () => onRevoke(name),
-    },
-  ]
+    }
+    if (staging) {
+      return [
+        {
+          key: "replace",
+          label: "Issue real certificate",
+          icon: ShieldCheck,
+          inline: true,
+          disabled: waiting,
+          run: () => onReplace(domains.join(" ")),
+        },
+        revoke,
+      ]
+    }
+    return [
+      {
+        key: "renew",
+        label: "Renew",
+        icon: RefreshClockwise,
+        inline: true,
+        disabled: waiting,
+        run: () => onRenew(name, false),
+      },
+      {
+        key: "dry-run",
+        label: "Dry run",
+        icon: ShieldCheck,
+        disabled: waiting,
+        run: () => onRenew(name, true),
+      },
+      {
+        key: "force",
+        label: "Force renewal",
+        icon: Warning,
+        disabled: waiting,
+        run: () =>
+          confirm({
+            title: `Force renewal of ${name}`,
+            confirmLabel: "Renew now",
+            description: (
+              <p>
+                certbot normally refuses to renew a certificate that is not due. Forcing it spends
+                one of the five duplicate certificates Let&rsquo;s Encrypt allows per week for this
+                set of names.
+              </p>
+            ),
+            action: async () => onRenew(name, false, true),
+          }),
+      },
+      revoke,
+    ]
+  }
   return (
     <>
       {admin && running && (
@@ -204,6 +228,12 @@ export function CertbotLineages({
                 </div>
               </div>
               {!cert.error && <LineageLife cert={cert} />}
+              {cert.staging && (
+                <p className="text-hint text-muted-foreground">
+                  A staging authority signed it, so browsers refuse it. A real issuance for the same
+                  names replaces it.
+                </p>
+              )}
               <div className="flex flex-wrap items-center justify-between gap-2">
                 {activity ? (
                   <Status state="activating" label={activity} />
@@ -220,10 +250,7 @@ export function CertbotLineages({
                   />
                 )}
                 {admin && (
-                  <VerbBar
-                    verbs={verbsFor(cert.name)}
-                    menuLabel={`More actions for ${cert.name}`}
-                  />
+                  <VerbBar verbs={verbsFor(cert)} menuLabel={`More actions for ${cert.name}`} />
                 )}
               </div>
             </li>

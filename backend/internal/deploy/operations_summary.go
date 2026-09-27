@@ -454,7 +454,10 @@ func observeDomainRoutes(
 				}
 				row.CertificateName, row.CertificateDaysLeft = certificate.Name, certificate.DaysLeft
 				row.CertificateIssuer = certificate.Issuer
-				row.CertificateLink = "/proxy/certificates"
+				// Caddy's release copy is not on the Certificates page.
+				if !certificate.CaddyEvidence() {
+					row.CertificateLink = "/proxy/certificates"
+				}
 				switch {
 				case certificate.Expired:
 					row.Certificate = "expired"

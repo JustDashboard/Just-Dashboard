@@ -265,7 +265,7 @@ func (s *Service) IssueArgs(ctx context.Context, req IssueRequest) ([]string, er
 		// certificate, left it where sites could name it, and made the real
 		// issuance that followed a no-op — the lineage was not due.
 		args = append(args, "--dry-run")
-	} else if lineage, ok := lineageFor(letsencryptDir, req.Domains); ok && lineage.staging() {
+	} else if lineage, leaf, ok := lineageFor(letsencryptDir, req.Domains); ok && lineage.testCertificate(leaf) {
 		// These names already have a test certificate from a staging
 		// authority, and certbot keeps a lineage until it is due whatever
 		// signed it. Replacing it is the point of asking for a real one.

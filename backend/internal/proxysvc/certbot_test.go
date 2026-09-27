@@ -229,6 +229,11 @@ func TestIssueArgsReplacesAStagingLineage(t *testing.T) {
 	production := newAuthority(t, "R11", nil)
 	issued, _, _ := production.issue(t, []string{"shop.example.com"}, time.Now().Add(80*24*time.Hour))
 	writeLineage(t, dir, "shop.example.com", productionACME, issued)
+	// Renewed from the real authority now, still holding a staging
+	// certificate: the page calls it a test certificate, and the real
+	// issuance it offers has to replace it too.
+	leftover, _, _ := staging.issue(t, []string{"old.example.com"}, time.Now().Add(80*24*time.Hour))
+	writeLineage(t, dir, "old.example.com", productionACME, leftover)
 
 	s := New("/etc/nginx", "/etc/caddy/Caddyfile")
 	issue := func(domains ...string) string {
@@ -246,6 +251,9 @@ func TestIssueArgsReplacesAStagingLineage(t *testing.T) {
 	}
 	if got := issue("shop.example.com"); strings.Contains(got, "--force-renewal") {
 		t.Fatalf("real issuance over a real lineage forces renewal: %q", got)
+	}
+	if got := issue("old.example.com"); !strings.Contains(got, "--force-renewal") {
+		t.Fatalf("real issuance over a staging certificate renewed from production = %q", got)
 	}
 	// A different set of names is a different certificate to certbot.
 	if got := issue("app.example.com"); strings.Contains(got, "--force-renewal") {

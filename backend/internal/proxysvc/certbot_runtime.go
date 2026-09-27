@@ -3,7 +3,6 @@ package proxysvc
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -63,7 +62,12 @@ func loadCertbotRuntime(ctx context.Context) (*certbotRuntime, error) {
 	if out, err := rt.command(ctx, "--version").CombinedOutput(); err == nil {
 		rt.version = strings.TrimSpace(string(out))
 	}
-	out, err := rt.command(ctx, append([]string{"plugins"}, certbotProbeDirs()...)...).CombinedOutput()
+	dirs, cleanup, err := rt.probeDirs(ctx)
+	if err != nil {
+		return rt, err
+	}
+	out, err := rt.command(ctx, append([]string{"plugins"}, dirs...)...).CombinedOutput()
+	cleanup()
 	if err != nil {
 		return rt, fmt.Errorf("certbot could not list its plugins: %s", lastMeaningfulLine(strings.TrimSpace(string(out))))
 	}
@@ -93,20 +97,50 @@ func (rt *certbotRuntime) where() string {
 }
 
 func (rt *certbotRuntime) command(ctx context.Context, args ...string) *exec.Cmd {
-	if rt.onHost {
-		return hostexec.CommandOnHost(ctx, "certbot", args...)
-	}
-	return hostexec.Command(ctx, "certbot", args...)
+	return rt.on(ctx, "certbot", args...)
 }
 
-// certbotProbeDirs points a certbot that only answers a question at
-// directories of its own. Run as root, certbot takes the lock on its
-// configuration directory even to list plugins, and a renewal timer that
-// fires during that second fails with "Another instance of Certbot is
-// already running" — a failure the page would have caused and then reported.
-func certbotProbeDirs() []string {
-	dir := filepath.Join(os.TempDir(), "just-dashboard-certbot-probe")
-	return []string{"--config-dir", dir, "--work-dir", filepath.Join(dir, "work"), "--logs-dir", filepath.Join(dir, "logs")}
+// on runs name on the side this certbot runs on, so what it does to the
+// filesystem is what certbot will see.
+func (rt *certbotRuntime) on(ctx context.Context, name string, args ...string) *exec.Cmd {
+	if rt.onHost {
+		return hostexec.CommandOnHost(ctx, name, args...)
+	}
+	return hostexec.Command(ctx, name, args...)
+}
+
+const certbotProbePrefix = "just-dashboard-certbot-probe."
+
+// probeDirs points a certbot that only answers a question at directories of
+// its own. Run as root, certbot takes the lock on its configuration directory
+// even to list plugins, and a renewal timer that fires during that second
+// fails with "Another instance of Certbot is already running" — a failure the
+// page would have caused and then reported.
+//
+// The directory is new for every probe, made by mktemp on certbot's side:
+// mode 0700 under a name nobody could have created first. It used to be one
+// fixed name in the shared temporary directory, which on the host is /tmp —
+// any local user could make it their own before the first probe, and certbot,
+// as root, follows the symlinks it finds inside and writes where they point.
+func (rt *certbotRuntime) probeDirs(ctx context.Context) ([]string, func(), error) {
+	out, err := rt.on(ctx, "mktemp", "-d", "-t", certbotProbePrefix+"XXXXXXXXXX").Output()
+	dir := strings.TrimSpace(string(out))
+	if err != nil || !filepath.IsAbs(dir) || !strings.HasPrefix(filepath.Base(dir), certbotProbePrefix) {
+		reason := fmt.Sprintf("it printed %q", dir)
+		if exit, ok := err.(*exec.ExitError); ok && len(exit.Stderr) > 0 {
+			reason = lastMeaningfulLine(strings.TrimSpace(string(exit.Stderr)))
+		} else if err != nil {
+			reason = err.Error()
+		}
+		return nil, nil, fmt.Errorf("certbot could not list its plugins: mktemp made no directory to run it in: %s", reason)
+	}
+	cleanup := func() {
+		// The probe's own context may be the one that ended it.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		_ = rt.on(ctx, "rm", "-rf", "--", dir).Run()
+	}
+	return []string{"--config-dir", dir, "--work-dir", filepath.Join(dir, "work"), "--logs-dir", filepath.Join(dir, "logs")}, cleanup, nil
 }
 
 // CertbotCommand is certbot with args on the side the page reads it from, for

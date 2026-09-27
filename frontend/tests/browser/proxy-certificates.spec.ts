@@ -207,10 +207,8 @@ test("the site form's hand-off link opens the form once, not on every reload", a
   await expect(page.getByRole("dialog")).toHaveCount(0)
 })
 
-test("a staging lineage reads as a test certificate, without Let's Encrypt's mark", async ({
-  page,
-}) => {
-  await mockProxy(page, { included: true })
+/** One certbot lineage holding a certificate a staging authority signed. */
+async function mockStagingLineage(page: Page) {
   await page.route("**/api/v1/certificates/certbot", (route) =>
     json(
       route,
@@ -218,7 +216,7 @@ test("a staging lineage reads as a test certificate, without Let's Encrypt's mar
         certs: [
           {
             name: "test.example.com",
-            domains: ["test.example.com"],
+            domains: ["test.example.com", "www.test.example.com"],
             expiry: inThirtyDays,
             daysLeft: 80,
             valid: true,
@@ -228,6 +226,21 @@ test("a staging lineage reads as a test certificate, without Let's Encrypt's mar
       }),
     ),
   )
+}
+
+test("a staging lineage reads as a test certificate, and its verb is the real issuance, not a renewal", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockStagingLineage(page)
+  const renewals = await capture(page, "**/api/v1/certificates/renew", () => ({}))
+  const issued = await capture(page, "**/api/v1/certificates/issue", () =>
+    certbotJob({
+      kind: "certbot.issue",
+      title: "Issuing a certificate for test.example.com",
+      target: "test.example.com www.test.example.com",
+    }),
+  )
   await page.goto("/proxy/certificates")
   const row = page
     .getByRole("list", { name: "certbot lineages" })
@@ -236,6 +249,47 @@ test("a staging lineage reads as a test certificate, without Let's Encrypt's mar
   await expect(row.getByText("test certificate")).toBeVisible()
   await expect(row.getByText("80d left")).toHaveCount(0)
   await expect(row.locator("img[src='/logos/lets-encrypt.svg']")).toHaveCount(0)
+  await expect(row.getByText(/A staging authority signed it, so browsers refuse it/)).toBeVisible()
+
+  // certbot renews from the staging authority the lineage names: none of the
+  // renewal verbs would give it anything but another test certificate.
+  await expect(row.getByRole("button", { name: "Renew", exact: true })).toHaveCount(0)
+  await row.getByRole("button", { name: "More actions for test.example.com" }).click()
+  await expect(page.getByRole("menuitem", { name: "Revoke and delete" })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: "Dry run" })).toHaveCount(0)
+  await expect(page.getByRole("menuitem", { name: "Force renewal" })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+
+  await row.getByRole("button", { name: "Issue real certificate" }).click()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog.getByLabel("Domains")).toHaveValue("test.example.com www.test.example.com")
+  await expect(dialog.getByRole("switch", { name: /Test run first/ })).not.toBeChecked()
+  await expect(dialog.getByText("This counts against the rate limit")).toBeVisible()
+  await dialog.getByLabel("Contact email").fill("ops@example.com")
+  await dialog.getByRole("radio", { name: "A folder", exact: true }).click()
+  await dialog.getByRole("button", { name: "Issue", exact: true }).click()
+  await expect(dialog).toBeHidden()
+  expect(issued).toHaveLength(1)
+  expect(issued[0]).toMatchObject({
+    staging: false,
+    domains: ["test.example.com", "www.test.example.com"],
+  })
+  expect(renewals).toHaveLength(0)
+})
+
+test("a test certificate's lineage fits a phone with its verb", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  await mockStagingLineage(page)
+  await page.goto("/proxy/certificates")
+  const verb = page.getByRole("button", { name: "Issue real certificate" })
+  await verb.scrollIntoViewIfNeeded()
+  await expect(verb).toBeInViewport({ ratio: 1 })
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+    ),
+  ).toBe(true)
 })
 
 test("lineages that cannot be read say so, and the renewal reading still stands", async ({

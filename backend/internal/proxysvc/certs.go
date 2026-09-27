@@ -46,8 +46,24 @@ const expiryWarningDays = 30
 // ListCertificates reads certbot's live directory plus any certificate paths
 // referenced by the proxy config, so a manually installed certificate is not
 // invisible just because certbot does not know about it.
+//
+// It is every certificate on the host, Caddy's release copies included:
+// deployment activation, preflight and the route summary find a release's
+// certificate among them, and on a Docker Caddy host those copies are the
+// only pair that covers its domains. What the operator reads as an inventory
+// is CertificateInventory.
 func (s *Service) ListCertificates(ctx context.Context) ([]Certificate, error) {
 	return listCertificates(filepath.Join(letsencryptDir, "live"), importedDir, s.nginxVHosts()), nil
+}
+
+// CertificateInventory is ListCertificates as the Certificates page and the
+// security posture read it: without the Caddy release copies no site serves.
+func (s *Service) CertificateInventory(ctx context.Context) ([]Certificate, error) {
+	certs, err := s.ListCertificates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return withoutCaddyEvidence(certs), nil
 }
 
 // listCertificates is ListCertificates with its directories as arguments, so
@@ -99,13 +115,9 @@ func listCertificates(liveDir, imported string, vhosts []VHost) []Certificate {
 	// renewal run must never be able to prune one it did not issue — which
 	// means they have to be looked for separately or they would be invisible
 	// until a vhost happened to reference one.
-	//
-	// Caddy's release copies share the directory and are not imports: Caddy
-	// renews the certificate it serves, never these, so listing them raised
-	// an expiry alarm for every one, named by hash and used by nothing.
 	if entries, err := os.ReadDir(imported); err == nil {
 		for _, e := range entries {
-			if e.IsDir() && !isCaddyEvidence(e.Name()) {
+			if e.IsDir() {
 				add(filepath.Join(imported, e.Name(), "fullchain.pem"), "imported", "")
 			}
 		}

@@ -2,6 +2,7 @@ package proxysvc
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -59,35 +60,101 @@ func TestListDNSProvidersWithNoCertbot(t *testing.T) {
 }
 
 // Listing plugins as root takes the lock on certbot's configuration
-// directory, and a renewal timer firing in that second fails. The probe
-// points certbot at directories of its own.
-func TestCertbotRuntimeProbesInItsOwnDirectories(t *testing.T) {
+// directory, and a renewal timer firing in that second fails, so the probe
+// points certbot at directories of its own. They are made for each probe,
+// private, and removed after it: one fixed name under the shared /tmp could be
+// made first by any local user, with a symlink inside that certbot, as root,
+// follows and writes through.
+func TestCertbotRuntimeProbesInAPrivateDirectoryOfItsOwn(t *testing.T) {
 	useLetsencryptDir(t, t.TempDir())
-	log := fakeCertbot(t, "webroot")
-	if _, err := loadCertbotRuntime(context.Background()); err != nil {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	// What another user could have left under the old fixed name.
+	victim := t.TempDir()
+	planted := filepath.Join(tmp, "just-dashboard-certbot-probe")
+	if err := os.Mkdir(planted, 0o777); err != nil {
 		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, filepath.Join(planted, "logs")); err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	log := filepath.Join(bin, "argv.log")
+	// certbot writes its log into --logs-dir even to list plugins.
+	writeExecutable(t, filepath.Join(bin, "certbot"), fmt.Sprintf(`#!/bin/sh
+case "$1" in
+--version) echo "certbot 9.9.9"; exit 0 ;;
+plugins)
+  echo "$(stat -c %%a "$3") $*" >> %q
+  mkdir -p "$7" && echo written > "$7/letsencrypt.log"
+  printf '* webroot\nInterfaces: Authenticator, Plugin\n\n'
+  exit 0 ;;
+esac
+exit 1
+`, log))
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	forgetCertbotRuntime()
+	t.Cleanup(forgetCertbotRuntime)
+
+	for _, fresh := range []bool{true, false, true} {
+		if fresh {
+			forgetCertbotRuntime()
+		}
+		rt, err := loadCertbotRuntime(context.Background())
+		if err != nil || !rt.authenticators["webroot"] {
+			t.Fatalf("runtime = %+v, %v", rt, err)
+		}
 	}
 	raw, _ := os.ReadFile(log)
-	probe := filepath.Join(os.TempDir(), "just-dashboard-certbot-probe")
-	var plugins string
-	for _, line := range strings.Split(string(raw), "\n") {
-		if strings.HasPrefix(line, "plugins") {
-			plugins = line
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	// The answer is kept: the look inside the cache window ran nothing.
+	if len(lines) != 2 {
+		t.Fatalf("probed %d times, want 2:\n%s", len(lines), raw)
+	}
+	seen := map[string]bool{}
+	for _, line := range lines {
+		// <mode> plugins --config-dir <dir> --work-dir <dir>/work --logs-dir <dir>/logs
+		f := strings.Fields(line)
+		if len(f) != 8 {
+			t.Fatalf("plugins ran as %q", line)
+		}
+		mode, dir := f[0], f[3]
+		if filepath.Dir(dir) != tmp || !strings.HasPrefix(filepath.Base(dir), certbotProbePrefix) || seen[dir] {
+			t.Fatalf("probed in %s, want a new directory of its own under %s", dir, tmp)
+		}
+		seen[dir] = true
+		if mode != "700" {
+			t.Fatalf("%s had mode %s while certbot ran", dir, mode)
+		}
+		if f[5] != dir+"/work" || f[7] != dir+"/logs" {
+			t.Fatalf("plugins ran as %q", line)
+		}
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Fatalf("%s is still there after the probe: %v", dir, err)
 		}
 	}
-	for _, want := range []string{"--config-dir " + probe, "--work-dir " + probe + "/work", "--logs-dir " + probe + "/logs"} {
-		if !strings.Contains(plugins, want) {
-			t.Fatalf("plugins ran as %q, missing %q", plugins, want)
-		}
+	if written, _ := os.ReadDir(victim); len(written) != 0 {
+		t.Fatalf("certbot wrote through the planted directory: %v", written)
 	}
-	// And the answer is kept: a second look runs nothing.
-	before := strings.Count(string(raw), "\n")
-	if _, err := loadCertbotRuntime(context.Background()); err != nil {
-		t.Fatal(err)
+}
+
+// Without a directory of its own the probe does not run certbot anywhere
+// else, and says why.
+func TestCertbotRuntimeRefusesToProbeWithoutAPrivateDirectory(t *testing.T) {
+	useLetsencryptDir(t, t.TempDir())
+	log := fakeCertbot(t, "webroot")
+	bin := t.TempDir()
+	writeExecutable(t, filepath.Join(bin, "mktemp"), `#!/bin/sh
+echo "mktemp: failed to create directory via template '$4': No space left on device" >&2
+exit 1
+`)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	_, err := loadCertbotRuntime(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "No space left on device") {
+		t.Fatalf("probe without a directory = %v", err)
 	}
-	after, _ := os.ReadFile(log)
-	if strings.Count(string(after), "\n") != before {
-		t.Fatal("the runtime was probed again inside its cache window")
+	if raw, _ := os.ReadFile(log); strings.Contains(string(raw), "plugins") {
+		t.Fatalf("certbot ran without a directory of its own:\n%s", raw)
 	}
 }
 
@@ -122,6 +189,8 @@ func TestLiveCertbotRuntimeIsTheHostsCertbot(t *testing.T) {
 	if err != nil {
 		t.Skip("certbot is not installed here")
 	}
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
 	forgetCertbotRuntime()
 	t.Cleanup(forgetCertbotRuntime)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -129,6 +198,10 @@ func TestLiveCertbotRuntimeIsTheHostsCertbot(t *testing.T) {
 	rt, err := loadCertbotRuntime(ctx)
 	if err != nil || rt == nil {
 		t.Fatalf("runtime = %+v, %v", rt, err)
+	}
+	// The real certbot ran in a directory of its own, and it is gone.
+	if left, _ := os.ReadDir(tmp); len(left) != 0 {
+		t.Fatalf("the probe left %v behind", left)
 	}
 	want, err := exec.CommandContext(ctx, path, "--version").CombinedOutput()
 	if err != nil {

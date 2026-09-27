@@ -379,9 +379,14 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   one the system trusts, or `JD_ACME_CA_ROOT`), not that more than one block was pasted. A name already
   imported is a 409 `certificate_exists` naming what is there; `replace: true` overwrites it and keeps
   the previous pair as `.bak`, so replacing is a write rather than a destructive act. Caddy's release
-  copies (`caddy-<24 hex>`, `docker_caddy_certs.go`) share the directory, are refreshed through
-  `keepCaddyEvidence`, are left out of `ListCertificates` — Caddy renews what it serves, never these, so
-  listed they raised an expiry finding apiece — and their names are refused to an operator's import.
+  copies (`caddy-<24 hex>`, `docker_caddy_certs.go`) share the directory and are refreshed through
+  `keepCaddyEvidence`. `ListCertificates` keeps them: deployment activation
+  (`ResolveDeploymentCertificate`), preflight, the route summary and the hostname suggestions find a
+  release's certificate there, and on a Docker Caddy host a copy is the only pair covering its domains
+  (the route summary names it without a link to the Certificates page, which does not list it).
+  `CertificateInventory` — `GET /certificates/` and the security posture — leaves out the copies no
+  nginx site names, since Caddy renews what it serves and never these, and listed they raised an expiry
+  finding apiece; their names are refused to an operator's import.
 - **`streams.go`** — nginx's `stream` is a sibling of `http`, so a stream cannot live under
   sites-available. They go in `/etc/nginx/stream.d`, and the page says plainly when `nginx.conf` does not
   include it. nginx.conf itself is never edited from here: everything else on the host depends on it.
@@ -393,10 +398,14 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   run in the UI (the real limit is five failures an hour), and a test run is `certonly --dry-run` — the
   whole exchange, nothing saved (`--staging` used to write a lineage holding an untrusted certificate and
   make the real issuance that followed a "no action taken" no-op). A real issuance whose names already
-  have a lineage renewed from a staging authority adds `--force-renewal`; with `JD_ACME_DIRECTORY` both
-  name `--server`. **One certbot** (`certbot_runtime.go`): the host's when the host has one, this
+  hold a test certificate (a lineage renewed from a staging authority, or one a staging authority
+  signed) adds `--force-renewal`; with `JD_ACME_DIRECTORY` both name `--server`. The page offers that
+  issuance on a test lineage in place of Renew, since certbot renews from the authority the lineage's
+  configuration names. **One certbot** (`certbot_runtime.go`): the host's when the host has one, this
   process's own otherwise, for the version, the plugin list (`certbot plugins`, cached a minute, run
-  with a private `--config-dir` so the probe never holds the lock a renewal timer needs) and the jobs,
+  in a directory `mktemp -d` makes for each probe on certbot's side, mode 0700, removed after it, so
+  the probe never holds the lock a renewal timer needs and never runs as root in a directory another
+  user could have made first) and the jobs,
   which stream it through `jobs.Emitter.RunCmd`; the page used to read the image's certbot and run the
   host's. `IssueArgs` refuses the nginx or a DNS method when that certbot lacks the plugin, naming which
   certbot. **Lineages are read from files** (`certbot_lineages.go`: `renewal/*.conf` and the certificate

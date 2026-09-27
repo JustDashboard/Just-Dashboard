@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
@@ -98,6 +99,11 @@ func (h fakeCertbotHost) argv(t *testing.T) string {
 
 func testCertificate(t *testing.T, names []string) (string, string) {
 	t.Helper()
+	return testCertificateUntil(t, names, time.Now().Add(80*24*time.Hour))
+}
+
+func testCertificateUntil(t *testing.T, names []string, notAfter time.Time) (string, string) {
+	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +111,7 @@ func testCertificate(t *testing.T, names []string) (string, string) {
 	serial, _ := rand.Int(rand.Reader, big.NewInt(1<<62))
 	tmpl := &x509.Certificate{
 		SerialNumber: serial, Subject: pkix.Name{CommonName: names[0]}, DNSNames: names,
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(80 * 24 * time.Hour),
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: notAfter,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
@@ -334,5 +340,62 @@ func TestCertImportRefusesAnExistingNameUnlessReplacing(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(host.imported, "bought", "privkey.pem.bak")); err != nil {
 		t.Fatalf("the replaced key was not kept: %v", err)
+	}
+}
+
+// Caddy's release copies are out of what the operator reads as an inventory,
+// the list and the security posture, and in what deployments read: on a
+// Docker Caddy host a copy is the only certificate covering a release's
+// domains, and hidden from them every release failed its activation and read
+// as having no certificate.
+func TestCaddyEvidenceIsOutOfTheInventoryAndInTheDeploymentsView(t *testing.T) {
+	host := useFakeCertbot(t)
+	c, _ := newClient(t)
+	evidence := "caddy-0da2f3126af1d760c968313b"
+	for dir, domain := range map[string]string{evidence: "app.jd.test", "bought": "bought.example.com"} {
+		certPEM, keyPEM := testCertificateUntil(t, []string{domain}, time.Now().Add(10*24*time.Hour))
+		if err := os.MkdirAll(filepath.Join(host.imported, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for file, content := range map[string]string{"fullchain.pem": certPEM, "privkey.pem": keyPEM} {
+			if err := os.WriteFile(filepath.Join(host.imported, dir, file), []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	w := c.do(http.MethodGet, "/api/v1/certificates/", "", nil)
+	var listed []proxysvc.Certificate
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &listed) != nil {
+		t.Fatalf("list = %d: %s", w.Code, w.Body.String())
+	}
+	if len(listed) != 1 || listed[0].Name != "bought" {
+		t.Fatalf("the inventory is %+v, want the import alone", listed)
+	}
+
+	w = c.do(http.MethodGet, "/api/v1/security/posture", "", nil)
+	var posture netsec.Posture
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &posture) != nil {
+		t.Fatalf("posture = %d: %s", w.Code, w.Body.String())
+	}
+	var ids []string
+	for _, f := range posture.Findings {
+		ids = append(ids, f.ID)
+	}
+	joined := strings.Join(ids, " ")
+	if !strings.Contains(joined, "tls.expiring.bought") || strings.Contains(joined, evidence) {
+		t.Fatalf("posture findings %v: want the import's expiry and not the copy's", ids)
+	}
+
+	w = c.do(http.MethodGet, "/api/v1/deploy/hostname?hostname=app.jd.test", "", nil)
+	var suggestion struct {
+		Covered         bool   `json:"covered"`
+		CertificateName string `json:"certificateName"`
+	}
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &suggestion) != nil {
+		t.Fatalf("hostname = %d: %s", w.Code, w.Body.String())
+	}
+	if !suggestion.Covered || suggestion.CertificateName != evidence {
+		t.Fatalf("app.jd.test reads %+v, want covered by %s", suggestion, evidence)
 	}
 }

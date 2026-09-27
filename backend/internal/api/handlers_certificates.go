@@ -43,7 +43,7 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 }
 
 func (s *Server) handleCertList(w http.ResponseWriter, r *http.Request) error {
-	certs, err := s.modules.proxy.ListCertificates(r.Context())
+	certs, err := s.modules.proxy.CertificateInventory(r.Context())
 	if err != nil {
 		return httpx.Internal(err)
 	}

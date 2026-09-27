@@ -46,6 +46,13 @@ func (c renewalConf) staging() bool {
 	return strings.Contains(c.Server, "staging")
 }
 
+// testCertificate reports a lineage whose certificate, leaf, browsers refuse
+// as a test one: renewed from a staging authority, or signed by one whatever
+// the configuration says now.
+func (c renewalConf) testCertificate(leaf *x509.Certificate) bool {
+	return c.staging() || strings.HasPrefix(leaf.Issuer.CommonName, "(STAGING)")
+}
+
 // readRenewalConf reads the configobj file certbot writes: key = value lines,
 // top-level keys before the first [section], # comments.
 func readRenewalConf(path string) (renewalConf, error) {
@@ -150,7 +157,7 @@ func readCertbotLineages(dir string) ([]CertbotCert, error) {
 		cert.DaysLeft = summary.DaysLeft
 		cert.Valid = !summary.Expired
 		cert.Serial = leaf.SerialNumber.Text(16)
-		cert.Staging = conf.staging() || strings.HasPrefix(leaf.Issuer.CommonName, "(STAGING)")
+		cert.Staging = conf.testCertificate(leaf)
 		certs = append(certs, cert)
 	}
 	return certs, nil
@@ -159,7 +166,7 @@ func readCertbotLineages(dir string) ([]CertbotCert, error) {
 // lineageFor finds the lineage certbot would treat as the same certificate as
 // a request for these names: exactly the same set, the case certbot resolves
 // without a question.
-func lineageFor(dir string, domains []string) (renewalConf, bool) {
+func lineageFor(dir string, domains []string) (renewalConf, *x509.Certificate, bool) {
 	want := map[string]bool{}
 	for _, d := range domains {
 		want[strings.ToLower(d)] = true
@@ -186,10 +193,10 @@ func lineageFor(dir string, domains []string) (renewalConf, bool) {
 			same = same && have[n]
 		}
 		if same {
-			return conf, true
+			return conf, leaf, true
 		}
 	}
-	return renewalConf{}, false
+	return renewalConf{}, nil, false
 }
 
 // CertbotSerials is each lineage's current serial, by name — what a job

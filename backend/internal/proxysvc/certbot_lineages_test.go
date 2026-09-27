@@ -138,15 +138,15 @@ func TestLineageForMatchesExactlyTheSameNames(t *testing.T) {
 	leaf, _, _ := root.issue(t, []string{"app.example.com", "www.app.example.com"}, time.Now().Add(time.Hour))
 	writeLineage(t, dir, "app.example.com", stagingACME, leaf)
 
-	if conf, ok := lineageFor(dir, []string{"WWW.app.example.com", "app.example.com"}); !ok || conf.Name != "app.example.com" {
+	if conf, _, ok := lineageFor(dir, []string{"WWW.app.example.com", "app.example.com"}); !ok || conf.Name != "app.example.com" {
 		t.Fatalf("the same names in another order and case were not matched: %+v %v", conf, ok)
 	}
 	for _, names := range [][]string{{"app.example.com"}, {"app.example.com", "www.app.example.com", "api.example.com"}} {
-		if _, ok := lineageFor(dir, names); ok {
+		if _, _, ok := lineageFor(dir, names); ok {
 			t.Fatalf("%v matched a lineage with different names", names)
 		}
 	}
-	if _, ok := lineageFor(filepath.Join(dir, "absent"), []string{"app.example.com"}); ok {
+	if _, _, ok := lineageFor(filepath.Join(dir, "absent"), []string{"app.example.com"}); ok {
 		t.Fatal("a directory with no lineages matched")
 	}
 }

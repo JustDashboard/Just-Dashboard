@@ -294,6 +294,7 @@ export function CertificatesPage() {
                   busy={busy}
                   job={console_.job}
                   onRenew={renew}
+                  onReplace={(domains) => setIssue({ open: true, domains, staging: false })}
                   onRevoke={revoke}
                 />
               ) : null}
