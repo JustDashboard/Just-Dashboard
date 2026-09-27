@@ -11,7 +11,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
 import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceRow } from "@/components/flow"
 import { Page, PageContext } from "@/components/page"
 import { Pane, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { ProductLogo, ProductLogos, portProduct } from "@/components/product-logo"
@@ -19,8 +19,9 @@ import { SidePanel } from "@/components/side-panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { VerbActions, type Verb } from "@/components/verbs"
+import { VerbBar, type Verb } from "@/components/verbs"
 import { DANGEROUS_PORTS } from "@/components/proxy/attention"
+import { ProxyGrid, RoutePath } from "@/components/proxy/route-path"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -123,7 +124,7 @@ export function StreamsPage() {
     <Page className="animate-rise">
       {header}
 
-      <StatGrid columns={4}>
+      <StatGrid columns={4} dense>
         <StatTile
           label="Streams"
           value={counts.all}
@@ -196,7 +197,7 @@ export function StreamsPage() {
             // the edge (§16). Each is drawn as the service its port is — a
             // forward on 5432 as Postgres — where the port says so, and as a
             // bare connection where it does not.
-            <ChoiceList aria-label="Streams" className="animate-rise">
+            <ProxyGrid aria-label="Streams">
               {[...data.streams].sort(byUrgency).map((stream, index) => (
                 <ChoiceRow
                   key={stream.name}
@@ -204,32 +205,46 @@ export function StreamsPage() {
                   onSelect={admin ? () => open(stream) : undefined}
                   disabled={!admin}
                   index={index}
+                  className="h-full gap-4 p-4"
                   leading={
-                    <ProductLogo id={portProduct(stream.listen)} size="sm" fallback={Connection} />
+                    <ProductLogo id={portProduct(stream.listen)} size="md" fallback={Connection} />
                   }
-                  title={stream.name}
-                  description={
-                    <span className="font-mono">
-                      <span className="uppercase">{stream.protocol}</span>{" "}
-                      <span className="numeric">{stream.listen}</span> → {stream.upstream}
-                      {stream.proxyProtocol && (
-                        <span className="text-muted-foreground/60"> · PROXY header</span>
-                      )}
-                    </span>
+                  title={<span className="text-title">{stream.name}</span>}
+                  description={[
+                    `${stream.protocol.toUpperCase()} forwarding`,
+                    stream.proxyProtocol && "PROXY header",
+                    stream.timeout && `${stream.timeout}s timeout`,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                  trailing={
+                    <Status
+                      verdict={data.included ? "ok" : "warning"}
+                      label={data.included ? "configured" : "not live"}
+                    />
                   }
-                  trailing={<Restriction stream={stream} />}
-                  actions={
-                    admin && (
-                      <VerbActions
-                        dim
+                >
+                  <RoutePath
+                    sourceLabel="Listen on this host"
+                    source={<span className="numeric text-2xl font-semibold">{stream.listen}</span>}
+                    destinationLabel="Forward to"
+                    destination={stream.upstream}
+                  />
+                  <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+                    <div className="min-w-0 space-y-1">
+                      <span className="block text-hint text-muted-foreground">Allowed sources</span>
+                      <Restriction stream={stream} />
+                    </div>
+                    {admin && (
+                      <VerbBar
                         verbs={verbsFor(stream)}
                         menuLabel={`More actions for ${stream.name}`}
                       />
-                    )
-                  }
-                />
+                    )}
+                  </div>
+                </ChoiceRow>
               ))}
-            </ChoiceList>
+            </ProxyGrid>
           )}
         </PanelBody>
       </Panel>
@@ -255,7 +270,7 @@ export function StreamsPage() {
 function Restriction({ stream }: { stream: StreamSpec }) {
   if (stream.allowFrom.length > 0) {
     return (
-      <span className="max-w-56 truncate font-mono text-hint text-muted-foreground">
+      <span className="block font-mono text-hint break-all text-muted-foreground">
         {stream.allowFrom.join(", ")}
       </span>
     )
@@ -393,7 +408,12 @@ function StreamForm({
       open={open}
       onOpenChange={(o) => !busy && onOpenChange(o)}
       width="lg"
-      title={initial ? `Edit ${initial.name}` : "New stream"}
+      title={
+        <>
+          <ProductLogo id={portProduct(spec.listen)} size="sm" fallback={Connection} />
+          {initial ? `Edit ${initial.name}` : "New stream"}
+        </>
+      }
       description="A port on this host, forwarded somewhere else"
       bodyClassName="flex min-h-0 flex-1 flex-col gap-4 p-4"
       footer={
