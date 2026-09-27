@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	gnet "github.com/shirou/gopsutil/v4/net"
 )
 
 // The verdict is the product making a claim, so these pin the claims. Each
@@ -340,8 +342,8 @@ var thisHost = HostNetwork{Addresses: []HostAddress{
 	// address, which shares Tailscale's range, on a second NIC.
 	{IP: mustIP("172.31.5.9"), Interface: "eth0", Kind: "physical", DefaultRoute: true},
 	{IP: mustIP("100.72.0.5"), Interface: "eth1", Kind: "physical"},
-	// A bridge that carries the default route is the uplink, as on a host
-	// whose NIC is enslaved to it.
+	// A bridge that carries the default route is the uplink whatever is
+	// enslaved to it.
 	{IP: mustIP("192.168.1.20"), Interface: "br-lan", Kind: "bridge", DefaultRoute: true},
 }}
 
@@ -441,6 +443,66 @@ func TestAssessPassesOverAnInternetOnlyDangerTheInternetCannotReach(t *testing.T
 		case c.want != "" && (!ok || f.Level != c.want):
 			t.Errorf("%s on %s = %+v (found %v), want %s", id, c.address, f, ok, c.want)
 		}
+	}
+}
+
+// LXD's and Incus's dnsmasq, Podman's aardvark-dns and a Proxmox internal
+// network's resolver answer their guests on bridges no name rule knew, and
+// were a permanent open-resolver warning with the provider-mapping clause.
+// The kernel's link table says they are bridges with only guests behind them;
+// and a bridge holding a second NIC, whatever it is called, is that LAN, so a
+// Redis on it is not said to be the containers' alone.
+func TestAssessGradesABridgeByWhatTheKernelSaysIsOnIt(t *testing.T) {
+	iface := func(name string, addrs ...string) gnet.InterfaceStat {
+		ifc := gnet.InterfaceStat{Name: name, Flags: []string{"up"}}
+		for _, a := range addrs {
+			ifc.Addrs = append(ifc.Addrs, gnet.InterfaceAddr{Addr: a})
+		}
+		return ifc
+	}
+	network := hostNetworkFrom(gnet.InterfaceStatList{
+		iface("ens3", "57.131.21.87/32"),
+		iface("lxdbr0", "10.20.30.1/24", "fd42:5c1e:9a2b:1::1/64"),
+		iface("incusbr0", "10.40.0.1/24"),
+		iface("podman1", "10.89.0.1/24"),
+		iface("vmbr1", "10.10.10.1/24"),
+		iface("br-lan", "192.168.50.2/24"),
+		iface("eth1"),
+	}, map[string]bool{"ens3": true}, classifyLinks([]link{
+		{name: "ens3", index: 2},
+		{name: "lxdbr0", index: 3, kind: "bridge"},
+		{name: "veth1a2b3c4d", index: 4, master: 3, kind: "veth"},
+		{name: "incusbr0", index: 5, kind: "bridge"},
+		{name: "tapa1b2c3d4", index: 6, master: 5, kind: "tun"},
+		{name: "podman1", index: 7, kind: "bridge"},
+		{name: "veth0", index: 8, master: 7, kind: "veth"},
+		{name: "br-lan", index: 9, kind: "bridge"},
+		{name: "eth1", index: 10, master: 9},
+		{name: "vmbr1", index: 11, kind: "bridge"},
+		{name: "tap100i1", index: 12, master: 11, kind: "tun"},
+	}))
+	for _, address := range []string{"10.20.30.1", "fd42:5c1e:9a2b:1::1", "10.40.0.1", "10.89.0.1", "10.10.10.1"} {
+		if got := network.Reach(address); got != ReachHost {
+			t.Errorf("Reach(%s) = %q, want host", address, got)
+		}
+		p := Assess(AssessInput{Network: network, Listeners: []ExposedPort{
+			{Port: 53, Protocol: "udp", Address: address, Process: "dnsmasq", Exposed: true},
+		}})
+		if f, ok := findingByID(p, "ports.exposed.udp.53"); ok {
+			t.Errorf("DNS on %s was reported: %+v", address, f)
+		}
+	}
+
+	if got := network.Reach("192.168.50.2"); got != ReachNetwork {
+		t.Errorf("Reach(192.168.50.2) on a bridge holding eth1 = %q, want network", got)
+	}
+	p := Assess(AssessInput{Network: network, Listeners: []ExposedPort{
+		{Port: 6379, Protocol: "tcp", Address: "192.168.50.2", Process: "redis-server", Exposed: true},
+	}})
+	f, ok := findingByID(p, "ports.exposed.tcp.6379")
+	if !ok || f.Level != "warning" || f.Title != "Redis is listening on a private address" ||
+		!strings.Contains(f.Advice, "can connect to it: the machines on that network") {
+		t.Errorf("Redis on br-lan = %+v (found %v), want a warning that the LAN can reach it", f, ok)
 	}
 }
 

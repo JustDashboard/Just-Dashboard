@@ -96,12 +96,18 @@ position sell a score out of a hundred, which is a number to optimise rather tha
   audit has no dependency on how ports or certificates are discovered.
 - A database or control port is judged by the **address it is bound to and the interface that address
   is on** (`reach.go`), since `ExposedPort.Exposed` is any bind but loopback. `ReadHostNetwork` places
-  each address on its interface (Go's interface list, `classifyInterface`) and marks the interfaces
-  carrying a default route (`/proc/net/{route,ipv6_route}`, the namespace the sockets are read in), and
-  `HostNetwork.Reach` grades a bind: `all` and `public` are critical; `network` (a tailnet — Tailscale's
-  ranges or a `tailscale*` tunnel —, another tunnel, a link-local address on the uplink, or a private
-  address on a physical or default-route interface) and `host` (an address, link-local included, on a
-  bridge or veth that carries no default route: Docker, libvirt) are warnings. Only the private address
+  each address on its interface (Go's interface list) and marks the interfaces carrying a default route
+  (`/proc/net/{route,ipv6_route}`, the namespace the sockets are read in). A bridge is told by the
+  kernel's link table (an `RTM_GETLINK` dump: each device's kind and master, `classifyLinks`), not by
+  its name: a Linux bridge whose every port is a veth, tap or dummy is `bridge` whatever it is called
+  (Docker, libvirt, LXD's `lxdbr0`, Incus's `incusbr0`, Podman's `podman1`, a Proxmox internal
+  `vmbr1`), and one that enslaves a NIC, bond, VLAN or VXLAN is that network and `physical`, as is a
+  device named like a bridge that the kernel does not call one (Open vSwitch). `NetworkInfo` classifies
+  the Network page's devices the same way; names (`classifyInterface`) are only the fallback when the
+  table cannot be read. `HostNetwork.Reach` grades a bind: `all` and `public` are critical; `network` (a
+  tailnet — Tailscale's ranges or a `tailscale*` tunnel —, another tunnel, a link-local address on the
+  uplink, or a private address on a physical or default-route interface) and `host` (an address,
+  link-local included, on such a bridge or a veth that carries no default route) are warnings. Only the private address
   on the uplink, or one on no interface the host listed, gets the clause that a provider mapping a public
   address onto it makes it the internet's too; a bridge or link-local address cannot be mapped. Every
   level keeps the catalogue's `Danger` in the advice. A preset marked `InternetOnly` (DNS as an open

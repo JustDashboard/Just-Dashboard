@@ -72,8 +72,8 @@ type HostNetwork struct {
 type HostAddress struct {
 	IP        net.IP
 	Interface string
-	// Kind is classifyInterface's: physical, tunnel, bridge, virtual or
-	// loopback.
+	// Kind is classifyLinks': physical, tunnel, bridge, virtual or loopback.
+	// A bridge is one whose every port is a container's or a VM's.
 	Kind string
 	// DefaultRoute says the interface carries a default route, which makes
 	// it the uplink whatever its name.
