@@ -96,6 +96,24 @@ func TestMongodbLens(t *testing.T) {
 	dbRun(t, "mongodb", mongodbCases)
 }
 
+// A line whose fields are not in mongod's order, or that carries the svc a
+// sharded cluster adds, still reads the same.
+func TestMongodbLensReadsLinesOutOfOrderAndWithService(t *testing.T) {
+	got := readThrough(t, "mongodb",
+		`{"t":{"$date":"2026-09-27T10:00:00.000Z"},"msg":"Connection accepted","s":"I","c":"NETWORK","id":22943,"ctx":"listener","attr":{"remote":"10.0.1.9:32988","connectionId":305,"connectionCount":1}}`,
+		`{"t":{"$date":"2026-09-27T10:00:01.000+02:00"},"s":"I",  "c":"NETWORK",  "id":22944,   "ctx":"conn305","svc":"R","msg":"Connection ended","attr":{"remote":"[::1]:40112","connectionId":305,"connectionCount":0}}`,
+	)
+	want := []dbWant{
+		{level: "info", at: "2026-09-27 10:00:00Z", event: "connection", attrs: mongoAttrs("NETWORK", "listener",
+			"client", "10.0.1.9", "port", "32988")},
+		{level: "info", at: "2026-09-27 08:00:01Z", event: "disconnection", attrs: mongoAttrs("NETWORK", "conn305",
+			"client", "::1", "port", "40112")},
+	}
+	for i := range got {
+		dbCheckLine(t, i, got[i], want[i])
+	}
+}
+
 // A shape is the fields a command touches, not the values it passes, and not
 // the session and cluster-time noise a driver adds to every command.
 func TestMongodbLensShapesIgnoreValuesAndDriverNoise(t *testing.T) {
