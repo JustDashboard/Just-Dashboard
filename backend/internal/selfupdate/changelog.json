@@ -9,6 +9,11 @@
       "changes": [
         {
           "kind": "fixed",
+          "text": "Boards save, images included",
+          "detail": "Every board save was refused with \"board revision and scene are required; scene must contain elements, appState, and files\": the editor wrote the scene in Excalidraw's database format, which leaves out the images for a separate store this server does not have. It now saves Excalidraw's file format, so images are kept in the board. Opening a board no longer saves it, so two people looking at one board no longer put each other into a conflict. A blank name is not sent and comes back on leaving the field, Ctrl+S saves the board instead of downloading a file, a board deleted in another tab stops autosaving and says so, a scene over 16 MiB is refused as too large rather than malformed, and when a save cannot go through, Back asks before leaving instead of doing nothing. Deleting asks for the name the server has, so an untrimmed or unsaved name no longer makes the confirmation impossible."
+        },
+        {
+          "kind": "fixed",
           "text": "A container is drawn as what it runs after its image is pulled again",
           "detail": "Pulling a newer image under the same tag — postgres:16-alpine, say — left every container started from the old one listed by a bare sha256 id, so the Docker page, the Overview, volumes and backups drew a Postgres database as Docker's whale, and database discovery skipped it. The container list now names it by the image it was created from, as its own page already did. A deployment's container, which is created from an image id and has no name to recover, is drawn as what its image's labels say it is — n8n, Bun, Caddy — where they say."
         },
