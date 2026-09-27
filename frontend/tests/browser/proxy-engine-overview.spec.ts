@@ -64,6 +64,40 @@ test("a source the overview cannot read is reported, never cleared", async ({ pa
   await expect(sitesTile).toContainText("3")
 })
 
+test("a source that fails after answering is not judged from its last answer", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  let sitesFail = false
+  await page.route("**/api/v1/proxy/vhosts", (route) =>
+    sitesFail
+      ? failWith(500, {
+          code: "internal",
+          message: "could not determine Docker ingress ownership",
+        })(route)
+      : json(route, vhosts),
+  )
+  await page.goto("/proxy")
+
+  const sitesTile = page.locator("a[aria-label='Sites'] [data-slot='stat-tile']")
+  const plainText = page.getByText("legacy.example.com serves an application in plain text")
+  await expect(plainText).toBeVisible()
+  await expect(sitesTile).toContainText("3")
+
+  // Reload reads the sites again, and this time they fail. The poll keeps its
+  // last answer, and the page went on judging it: the old plain-text finding
+  // and the old count stayed up beside "Sites could not be read".
+  sitesFail = true
+  await page.locator("[data-slot='host-identity']").getByRole("button", { name: "Reload" }).click()
+  await expect(page.getByText("nginx reloaded")).toBeVisible()
+  await expect(page.getByText("Sites could not be read")).toBeVisible()
+  await expect(plainText).toHaveCount(0)
+  await expect(sitesTile).toContainText("—")
+  await expect(sitesTile).toContainText("couldn't read")
+  await expect(sitesTile).not.toContainText("3")
+  await expect(
+    page.getByRole("alert").filter({ hasText: "could not determine Docker ingress ownership" }),
+  ).toBeVisible()
+})
+
 test("the overview says why when the proxy status cannot be read", async ({ page }) => {
   await mockProxy(page, { included: true })
   let statusFails = true

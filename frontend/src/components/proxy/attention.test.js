@@ -432,4 +432,18 @@ describe("finding actions", () => {
       certificates: "Open certificates",
     })
   })
+
+  // The label came from a table of the metas above, so a finding another area
+  // added with a meta of its own got a wrench-only button with no name.
+  test("a finding with a meta no area used before still names where it leads", () => {
+    const action = (meta, href) =>
+      findingAction({ id: "x", level: "notice", title: "x", meta, href })
+    expect(action("tls", "/proxy/tls")).toBe("Open TLS report")
+    expect(action("default site", "/proxy/sites?site=_")).toBe("Open site")
+    expect(action("drift", "/proxy/sites")).toBe("Open sites")
+    expect(action(undefined, "/proxy/certificates#lineage")).toBe("Open certificates")
+    expect(action("served cert", "/proxy/ports")).toBe("Open ports")
+    expect(action("stream readiness", "/proxy/streams?stream=db")).toBe("Open streams")
+    expect(action("config", "/proxy/config?path=/etc/nginx/nginx.conf")).toBe("Open")
+  })
 })

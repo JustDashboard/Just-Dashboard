@@ -337,7 +337,11 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   not know is a 400 rather than nginx. For the shared Docker Caddy that kind is `caddy-ingress`
   (`docker_caddy_engine.go`): `caddy validate` and `caddy reload` run inside the running container
   against its own `/etc/caddy/Caddyfile`, never the host's caddy, and with no ingress running both
-  answer 409 `no_ingress`. `Availability` names an ingress only once it runs (`ingressState:
+  answer 409 `no_ingress`. The editor's `POST /proxy/validate` and `PUT /proxy/config` take the same
+  kinds (none named is nginx, an unknown one is a 400) and refuse `caddy-ingress` with a 400 before
+  any file is touched: `WriteConfig` treats every kind but `caddy` as nginx, so the ingress kind wrote
+  an nginx file and then reloaded the container, and the ingress's Caddyfile is the deployments' to
+  write. `Availability` names an ingress only once it runs (`ingressState:
   "running"`); one the first deployment would start is `ingressState: "provisionable"` with neither
   `caddy` nor `ingressContainer` set, and deploy preflight counts either state as a proxy that can
   serve and certify the domain. Start, restart and stop go through `POST /proxy/engine/{start|

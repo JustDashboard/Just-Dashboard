@@ -137,8 +137,20 @@ func TestEngineRoutesNeedAServiceUnit(t *testing.T) {
 // Test config and Reload name the engine they act on. An unknown one used to
 // fall through to nginx; the ingress is refused where none is running rather
 // than tested with the host's caddy.
+//
+// The config editor's validate and save took any kind as well: "apache" was
+// validated by nginx -t, and "caddy-ingress" validated and wrote an nginx file
+// and then reloaded the Docker Caddy. Both are refused before a file is
+// touched, and the ingress, whose Caddyfile deployments write, is not the
+// editor's to validate or save.
 func TestEngineTestAndReloadTakeOnlyAKnownEngine(t *testing.T) {
 	s, bin := engineHost(t, map[string]string{"nginx": "exit 0\n", "caddy": "exit 0\n"})
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "conf.d"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s.Cfg.NginxDir = dir
+	s.initModules()
 	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
 	for _, path := range []string{"/api/v1/proxy/test", "/api/v1/proxy/reload"} {
 		if w := c.do(http.MethodPost, path, `{"kind":"apache"}`, nil); w.Code != http.StatusBadRequest {
@@ -149,7 +161,34 @@ func TestEngineTestAndReloadTakeOnlyAKnownEngine(t *testing.T) {
 			t.Errorf("%s for an ingress that is not running: %d %s", path, w.Code, w.Body.String())
 		}
 	}
+
+	file := filepath.Join(dir, "conf.d", "zz-kind.conf")
+	for _, kind := range []string{"apache", "caddy-ingress"} {
+		body, _ := json.Marshal(map[string]any{
+			"kind": kind, "path": file, "content": "server { listen 20001; return 200 ok; }\n", "reload": true,
+		})
+		for _, route := range [][2]string{
+			{http.MethodPost, "/api/v1/proxy/validate"},
+			{http.MethodPut, "/api/v1/proxy/config"},
+		} {
+			if w := c.do(route[0], route[1], string(body), nil); w.Code != http.StatusBadRequest {
+				t.Errorf("%s %s with kind %q: %d %s", route[0], route[1], kind, w.Code, w.Body.String())
+			}
+		}
+	}
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Fatalf("a refused request left %s on disk: %v", file, err)
+	}
 	if got := shimLog(t, bin, "nginx") + shimLog(t, bin, "caddy"); got != "" {
 		t.Fatalf("an engine was run for a request naming another: %q", got)
+	}
+
+	// An unnamed engine is still nginx, as the editor has always sent it.
+	body, _ := json.Marshal(map[string]any{"path": file, "content": "server { listen 20001; }\n"})
+	if w := c.do(http.MethodPut, "/api/v1/proxy/config", string(body), nil); w.Code != http.StatusOK {
+		t.Fatalf("a save naming no engine: %d %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(shimLog(t, bin, "nginx"), "-t") {
+		t.Fatal("a save naming no engine was not tested by nginx")
 	}
 }

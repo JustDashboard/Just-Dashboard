@@ -3,11 +3,7 @@ import {
   certificateFindings,
   type CertificateFindingInput,
 } from "@/components/proxy/findings/certificates"
-import {
-  engineFindings,
-  type EngineFindingInput,
-  type ProxySource,
-} from "@/components/proxy/findings/engine"
+import { engineFindings, type EngineFindingInput } from "@/components/proxy/findings/engine"
 import { insightFindings } from "@/components/proxy/findings/insights"
 import { portFindings, type PortFindingInput } from "@/components/proxy/findings/ports"
 import type { ProxyFinding } from "@/components/proxy/findings/shared"
@@ -45,25 +41,27 @@ export function foldProxyFindings(
   ].sort((a, b) => RANK[b.level] - RANK[a.level])
 }
 
-/** The label each area puts on its findings. */
-type Meta = "certificate" | "renewal" | "site" | "stream" | "streams" | "ports" | ProxySource
-
-/**
- * The words on a finding's button, by where it leads. It was `Open ${meta}`,
- * which read "Open renewal" and "Open ports"; a finding about one site opens
- * that site, and the rest open the page that lists what they are about.
- */
-const ACTION: Record<Meta, string> = {
-  certificate: "Open certificates",
-  certificates: "Open certificates",
-  renewal: "Open certificates",
-  site: "Open site",
-  sites: "Open sites",
-  stream: "Open streams",
-  streams: "Open streams",
-  ports: "Open ports",
+/** The pages a finding can lead to, named as its button reads them. */
+const PLACE: Record<string, string> = {
+  "/proxy/sites": "sites",
+  "/proxy/certificates": "certificates",
+  "/proxy/tls": "TLS report",
+  "/proxy/streams": "streams",
+  "/proxy/ports": "ports",
 }
 
+/**
+ * The words on a finding's button, from where it leads. It was `Open ${meta}`,
+ * which read "Open renewal", and then a table of the metas each area used,
+ * which left any meta added later with a wrench and no name. The href is the
+ * one thing every finding has: a finding about one site opens that site, the
+ * rest open the page that lists what they are about, and a page not named
+ * here is still a button that says it opens something.
+ */
 export function findingAction(finding: ProxyFinding): string {
-  return ACTION[finding.meta as Meta]
+  // Any origin will do: only the path and the query are read.
+  const { pathname, searchParams } = new URL(finding.href, "http://proxy.invalid")
+  if (pathname === "/proxy/sites" && searchParams.has("site")) return "Open site"
+  const place = PLACE[pathname]
+  return place ? `Open ${place}` : "Open"
 }

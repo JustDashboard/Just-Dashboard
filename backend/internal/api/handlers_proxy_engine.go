@@ -67,12 +67,30 @@ type proxyConfigRequest struct {
 	Reload  bool          `json:"reload"`
 }
 
+// decode reads a file the config editor validates or saves. The service
+// treats every kind but caddy as nginx, so an unknown engine validated as
+// nginx, and "caddy-ingress" wrote an nginx file and then reloaded the Docker
+// Caddy. The ingress's Caddyfile lives in its container and is written by
+// deployments, so these routes refuse it rather than edit a host file for it.
+func (req *proxyConfigRequest) decode(r *http.Request) error {
+	if err := httpx.DecodeJSON(r, req); err != nil {
+		return err
+	}
+	if err := knownEngine(&req.Kind); err != nil {
+		return err
+	}
+	if req.Kind == proxysvc.KindCaddyIngress {
+		return httpx.BadRequest("the Caddy ingress is configured by deployments, not by the config editor")
+	}
+	return nil
+}
+
 // handleProxyValidate tells the operator whether a config would be accepted,
 // and leaves what is currently serving traffic as it was. It is audited rather
 // than skipped because the nginx path touches the real file to do it.
 func (s *Server) handleProxyValidate(w http.ResponseWriter, r *http.Request) error {
 	var req proxyConfigRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
+	if err := req.decode(r); err != nil {
 		return err
 	}
 	res, err := s.modules.proxy.Validate(r.Context(), req.Kind, req.Path, req.Content)
@@ -87,7 +105,7 @@ func (s *Server) handleProxyValidate(w http.ResponseWriter, r *http.Request) err
 
 func (s *Server) handleProxyConfigWrite(w http.ResponseWriter, r *http.Request) error {
 	var req proxyConfigRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
+	if err := req.decode(r); err != nil {
 		return err
 	}
 	res, err := s.modules.proxy.WriteConfig(r.Context(), req.Kind, req.Path, req.Content)
@@ -117,18 +135,22 @@ type reloadRequest struct {
 	Kind proxysvc.Kind `json:"kind"`
 }
 
-// decode reads which engine a test or reload is for: nginx when unnamed, and
-// never an engine the service does not know, which used to fall through to
-// nginx and test the wrong server.
+// decode reads which engine a test or reload is for.
 func (req *reloadRequest) decode(r *http.Request) error {
 	if err := httpx.DecodeJSON(r, req); err != nil {
 		return err
 	}
-	if req.Kind == "" {
-		req.Kind = proxysvc.KindNginx
+	return knownEngine(&req.Kind)
+}
+
+// knownEngine makes an unnamed engine nginx and refuses one the service does
+// not know, which used to fall through to nginx and act on the wrong server.
+func knownEngine(kind *proxysvc.Kind) error {
+	if *kind == "" {
+		*kind = proxysvc.KindNginx
 	}
-	if !req.Kind.Known() {
-		return httpx.BadRequest("unknown engine %q", req.Kind)
+	if !kind.Known() {
+		return httpx.BadRequest("unknown engine %q", *kind)
 	}
 	return nil
 }
