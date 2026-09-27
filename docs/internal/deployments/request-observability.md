@@ -120,6 +120,11 @@ each byte once and keeps what it parsed.
   milliseconds out of time order; the running maximum is monotone regardless, and a window's start
   is found in it by binary search — exact, because everything before the index found is older than
   the window and the filter decides the rest.
+- **Aggregation and exports release the route lock.** A reader captures an immutable slice and its
+  coverage, then filters, aggregates and sorts outside the lock. Export callbacks likewise cannot hold
+  up a live tail while a download waits on its client. Published entries are append-only; retention must
+  copy survivors into a new backing array, never compact an array a reader may still hold. The snapshot
+  therefore requires no full-record copy per request and still describes one consistent window.
 - **Rotation, by identity.** A reader addresses a generation by inode, not by path. A read of the
   live file names the inode it expects; when the file has rolled, the container-side script finds the
   old generation with `find -inum` wherever the roller put it, opens it and holds it — an open file

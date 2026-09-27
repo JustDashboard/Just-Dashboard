@@ -12,6 +12,9 @@ a failed detection.
 - Process disk counters are cumulative in `/proc`, so `Table` keeps one small, mutex-protected previous
   sample per PID and returns rates. The create timestamp participates in the identity because Linux reuses
   PIDs; a replacement starts at zero rather than inheriting the old process's apparent I/O spike.
+- Concurrent inventory readers share a scan already in progress. Each receives its own row slice for
+  sorting and PM2 enrichment, and canceling one reader does not cancel the others. The last reader's
+  departure cancels collection; completed scans are not cached, so the next refresh starts fresh.
 - Search, user/state/manager filters and sorting all run **before** the response limit. The response says
   matched, available and truncated separately and carries facets from the complete snapshot — cutting
   first made the old promise that filtering could reach the rest of the table false. That richer response

@@ -33,6 +33,7 @@ import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { copyText } from "@/lib/clipboard"
+import { logLineKey } from "@/lib/log-line-key"
 
 function lineToText(line: LogLine, withTime: boolean) {
   const stamp = withTime && line.timestamp ? `${timestamp(line.timestamp)} ` : ""
@@ -109,9 +110,9 @@ export function LogConsole({
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [following, setFollowing] = useState(true)
-  const [pinned, setPinned] = useState<number | null>(null)
+  const [pinned, setPinned] = useState<LogLine | null>(null)
   const { wrap, timestamps: showTime, highlight } = useLogView()
-  const pin = useCallback((i: number) => setPinned((p) => (p === i ? null : i)), [])
+  const pin = useCallback((line: LogLine) => setPinned((p) => (p === line ? null : line)), [])
   const hostname = useMetrics().host?.hostname
 
   const toBottom = useCallback(() => {
@@ -211,12 +212,11 @@ export function LogConsole({
           // Keyed on arrival so the block rises once when the first lines
           // land and then holds still while the tail appends to it.
           <div key="lines" className={cn("animate-rise py-1.5", !wrap && "w-max min-w-full")}>
-            {lines.map((line, i) => (
+            {lines.map((line) => (
               <Line
-                key={i}
-                index={i}
+                key={logLineKey(line)}
                 line={line}
-                pinned={pinned === i}
+                pinned={pinned === line}
                 onPin={pin}
                 showTime={showTime}
                 showLineNumbers={showLineNumbers}
@@ -272,7 +272,6 @@ export function LogConsole({
  * it as before.
  */
 const Line = memo(function Line({
-  index,
   line,
   pinned,
   onPin,
@@ -285,10 +284,9 @@ const Line = memo(function Line({
   hostname,
   filter,
 }: {
-  index: number
   line: LogLine
   pinned: boolean
-  onPin: (index: number) => void
+  onPin: (line: LogLine) => void
   showTime: boolean
   showLineNumbers?: boolean
   showFile?: boolean
@@ -312,7 +310,7 @@ const Line = memo(function Line({
   const warned = highlight && level === "warn"
   return (
     <div
-      onClick={() => onPin(index)}
+      onClick={() => onPin(line)}
       onDoubleClick={() => {
         void copyText(lineToText(line, showTime), "Line copied")
       }}
