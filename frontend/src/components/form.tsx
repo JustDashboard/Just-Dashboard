@@ -241,7 +241,14 @@ export function FormSection({
   }
   return (
     <section id={id} data-slot={slot} className={cn("min-w-0 space-y-3", className)}>
-      <div className="flex min-w-0 flex-wrap items-end justify-between gap-x-4 gap-y-1 border-b border-hairline pb-2">
+      <div
+        className={cn(
+          "flex min-w-0 flex-wrap justify-between gap-x-4 gap-y-1 border-b border-hairline pb-2",
+          // Bottom-aligned, the actions sit on the hint's line; with no hint
+          // that put a 32px button's label several pixels above the title's.
+          hint ? "items-end" : "items-center",
+        )}
+      >
         <div className="min-w-0">
           <h3 className="min-w-0 text-title font-semibold tracking-tight">{title}</h3>
           {hint && <p className="mt-0.5 text-hint text-muted-foreground">{hint}</p>}

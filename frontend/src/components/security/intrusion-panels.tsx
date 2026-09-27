@@ -157,7 +157,7 @@ export function IntrusionPanels() {
             )}
           </>
         }
-        aside={<Status tone="running" live label="running" className="text-body" />}
+        aside={<Status tone="running" label="running" className="text-body" />}
       />
 
       {/* The four numbers the rest of the page is an explanation of. They were

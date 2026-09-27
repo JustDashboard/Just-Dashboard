@@ -6,6 +6,13 @@
 compose, the streaming compose runner, and `Build` — because the Engine API has no equivalent; all three
 build argv explicitly.
 
+Container-table WebSockets share one two-second inventory/stats sampler while viewers are connected.
+Each cycle still reads Docker, including changes made outside the dashboard, and sends inventory before
+stats in the existing envelopes. New viewers receive the current sample; a slow viewer retains only
+the latest pair and cannot block collection. The final unsubscribe cancels the sampler and drops the
+snapshot. Direct reads and mutation checks remain fresh. Read-only database discovery can separately
+opt into a request-scoped inventory/inspection snapshot; it never survives that request.
+
 - **`ContainerSpec` is the dashboard's shape, not `container.Config` + `HostConfig`.** Those are split on
   the historical accident of which fields the daemon could change after creation, and rendering them as a
   form is how Portainer's create page became twelve accordions. `toEngine` translates and warns about
@@ -72,10 +79,16 @@ build argv explicitly.
   `GET /docker/stacks/{name}/logs/stream` are gone: a second reader of the same lines with no lens and no
   filter, and nothing called them once both pages embedded the service logs.
 - **`CheckUpdate` compares the registry's current digest against the pulled one** — a more useful question
-  than "is there a newer tag", because it catches a moving tag that moved. Cached 30 min, four-worker
-  pool, because Docker Hub rate-limits by address. Unreachable or credentialed registries are `unknown`
-  with the reason; a locally built image is `local`, a digest reference is `pinned`, and neither is a
-  failure — reporting "not checked" for something that cannot change reads as a broken check.
+  than "is there a newer tag", because it catches a moving tag that moved. Only successful registry
+  digests are cached for 30 min, with a four-worker pool because Docker Hub rate-limits by address.
+  The bounded cache belongs to one Docker client and keys on the normalized reference and local digest;
+  local state is inspected on every check, so an external pull, tag change or removal cannot reuse an
+  old verdict. A changed local digest also refreshes the remote answer. Concurrent misses share a read;
+  forced checks and ordinary image pulls invalidate the reference and reject older in-flight fills.
+  `checkedAt` retains the registry read's timestamp on a hit. Unreachable or credentialed registries are
+  `unknown` with the reason; a locally built image is `local`, a digest reference is `pinned`, and neither is a
+  failure — reporting "not checked" for something that cannot change reads as a broken check. Errors
+  are not cached. These are anonymous registry reads; adding credentials requires a credential-scoped key.
 - **`preview.go` and `deployments.go` make a compose deploy predictable and reversible.** Docker keeps no
   history: `up` replaces what was running and the previous configuration is gone, so "what changed" and
   "roll back" have no answer. `SnapshotStack` records the compose file, the digests each service was
@@ -111,20 +124,69 @@ build argv explicitly.
   reaches, and silently building with the legacy one produces images differing from the same Dockerfile
   from a shell.
 - **Efficiency rules that are load-bearing**: `ListContainers` carries `Mounts` (the Engine summary
-  already has them, and "what uses this volume" for every volume at once is otherwise an inspect per
-  container per poll); `ListStacks` builds on `ListContainers` so it inherits resolved health and uptime;
-  `Diagnose` inspects each container once and runs every rule against that payload.
+  already has them); membership joins for volumes, networks and images, and image-reference discovery
+  use the summary without fetching unused inspection fields. The history recorder reads the enriched
+  listing because it persists explicit memory budgets, including a limit equal to host RAM, which the
+  stats response alone cannot distinguish from an unlimited container. The shared live table sampler
+  reuses the inventory it already collected and samples those IDs without another listing.
+  `ListStacks` builds on `ListContainers` so it inherits resolved health and uptime;
+  `Diagnose` inspects each container once, reusing that payload for enrichment and every rule.
   `ListContainersWithLabels` applies exact label filters in the Engine list call before health/uptime
   enrichment, so a deployment detail read inspects only its matching running containers. The uptime pass
   also collects limits, health-check presence and restart policy from the inspect it was already making,
   and marks the rows it did not inspect (`Inspected`) so the UI never renders an absence as an answer.
-  Writable-layer sizes ride along on the stats sampler from the **cached** disk walk — a sampler must
-  never trigger one — which is what makes "grew 6.4 GB today" a measurement rather than a guess.
+  It also inspects any container, stopped or not, that the Engine lists by bare `sha256:…` id — which it
+  does once the container's tag has moved on to a newer pull — and reports the name from the container's
+  own config instead, as `Inspect` does. An id named no product, so every page drew such a container as
+  Docker's whale and database discovery (which reads the engine off the name) skipped it.
+  Writable-layer sizes ride along on the stats sampler from the shared disk cache, rather than a
+  separate layer walk per sample, so "grew 6.4 GB today" is a measurement rather than a guess.
+- **Disk accounting has bounded staleness.** One client shares a disk walk between concurrent cold
+  readers. After 60 seconds it refreshes in the background; the previous snapshot may be reused for at
+  most three minutes from the start of its source read. Older snapshots wait for a refresh, and a failed
+  refresh then reports unavailable instead of serving old figures indefinitely. Cancelling one waiting
+  request does not cancel the shared walk, which has its own two-minute deadline. Pulls, builds,
+  container lifecycle/create/recreate/removal, volume creation/removal, prunes and Compose execution
+  invalidate on completion, including partial failures. A generation check prevents an older read from
+  restoring invalidated data. These caches are local to one backend; independent instances do not share
+  invalidation. Authorization and destructive preconditions remain outside the caches.
 - **`httpx.URLParam`, not `chi.URLParam`.** chi routes on `r.URL.RawPath` whenever a request carried one
   and slices the parameter out of the same string, so a handler receives the percent-escapes the browser
   sent. Every Docker route uses the decoding wrapper; `urlparam_test.go` pins it.
 
+### Container usage measurements
+
+`stats.go` retains the Engine's sample timestamp and raw counters. Memory working set subtracts
+`total_inactive_file` on cgroup v1 or `inactive_file` on v2, in Docker CLI precedence order; raw usage,
+excluded cache, anonymous memory and swap (when reported) are separate readings. CPU counts 100% per
+core and carries a readiness flag, quota, host core count and throttling counters. Streaming limits
+refresh every 15 seconds because Docker permits in-place resource updates.
+
+Network availability is determined by reported interfaces, never positive traffic. The stream carries
+each interface's bytes, packets, errors and drops; the Usage tab derives bytes/second and packets/second
+from successive Docker timestamps. First samples, resets, topology changes and reconnects establish a
+new baseline. Host networking has no isolated container traffic attribution; `container:` networking
+reports a shared namespace. These are interface totals including local/container/LAN traffic, not an
+internet billing meter. Block I/O is device traffic, not filesystem occupancy or cached application I/O.
+
+The definitions follow [Docker stats](https://docs.docker.com/reference/cli/docker/container/stats/),
+the [CLI calculations](https://github.com/docker/cli/blob/master/cli/command/container/stats_helpers.go),
+[runtime metrics](https://docs.docker.com/engine/containers/runmetrics/) and
+[resource constraints](https://docs.docker.com/engine/containers/resource_constraints/).
+`stats_test.go`, `metrics/container_usage_test.go`, the store migration test and
+`frontend/src/lib/container-usage.test.js` pin conversion, availability and rate boundaries. Browser
+coverage lives in `docker-ui.spec.ts`, including pause/reconnect, stale data, disabled retention,
+host networking, stopped containers and desktop/phone layouts.
+For read-only acceptance against a running container, run from `backend/`:
+`JD_DOCKER_STATS_CONTAINER=<id> go test ./internal/dockerx -run '^TestLiveContainerUsageStream$' -count=1 -v`.
+The test opens the existing stats stream, reconciles totals and memory, and checks cancellation;
+it creates or changes no containers.
+
 ## Files
+
+Owner and group names are memoised only within a listing or completion request. The next request
+performs NSS lookups again, so account renames and reused IDs are not hidden until backend restart.
+User and group IDs have separate maps, and numeric IDs remain the filesystem identity.
 
 Copy and move pin configured roots with Go's `os.Root` while traversing entries. Copy resolves a
 destination that is intentionally followed, rejects existing symlink children and same-inode or
@@ -258,6 +320,14 @@ the refusal from listing a root it cannot. The image editor commits each operati
 rather than a live parameter pipeline — that is what makes undo a stack of bitmaps and why "rotate, crop,
 rotate again" behaves the way it looks; saving goes through the ordinary upload route with
 `overwrite=true`, so owner and mode survive.
+
+Large listings keep every filename and metadata cell mounted: native find, sorting, filtering, range
+selection and select-all still address the complete directory. One shared intersection observer defers
+offscreen thumbnails and heavier row controls; keyboard focus keeps its current control mounted.
+The row/tile checkbox is a controlled two-state button, while select-all keeps its mixed state.
+Overflow menus instantiate on first activation and remain mounted afterwards for focus restoration.
+The listing API still returns the complete directory; these rendering savings do not reduce its disk
+reads or response bytes.
 
 ## Logs
 
@@ -464,9 +534,11 @@ over the raw JSON. A record's continuation lines stay under their head, three in
 an "N more lines" fold that a search hit inside forces open; a lens's lifecycle events (`divider`: a unit
 started, an application came up) draw a rule across the pane; and in Live, consecutive repeats — same
 source, level, event and words, the leading time aside — are one row with `×N` (the Repeats toggle).
-Tokens are cached by text, because a server's log repeats itself, and each row is memoised and keyed by a
-`WeakMap` sequence on the line object rather than its index, because the live tail appends and trims. A
-"Colour" toggle, persisted with Wrap, Time and Repeats in `lib/log-view.ts`, shows every line exactly as
+Tokens are cached by text, because a server's log repeats itself, and each row is memoised and keyed by
+its arrival (`lib/log-line-key.ts`, a `WeakMap` sequence on the line object) rather than its buffer
+position, because the live tail appends and trims: evicting old lines at the 4,000-line cap reuses the
+retained rows and keeps the opened line attached to its text, the weak keys hold no evicted history, and
+identical messages from separate arrivals keep separate keys. A "Colour" toggle, persisted with Wrap, Time and Repeats in `lib/log-view.ts`, shows every line exactly as
 written. A press on a line — only when nothing is selected, so a drag still copies — opens it **in place**
 (`line-detail.tsx`, the request row's shape): the event as its title, its values as facts drawn as what
 they are, each with "Only lines where …" and "Hide lines where …", the raw text in a `Well` (indented

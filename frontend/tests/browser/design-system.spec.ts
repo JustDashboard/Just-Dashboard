@@ -194,6 +194,50 @@ function filledPills(page: Page) {
   })
 }
 
+/**
+ * Text a centred row sets off its own centre line. A bare span, link or cell in
+ * a flex row is a block that keeps the line box it inherits — the page's 16px
+ * one where nothing set another — so a 12px status inside it rests on that
+ * box's baseline, three pixels below the button beside it. The database strip,
+ * a deployment's route and certificate columns and the pending-changes link
+ * all shipped that way; the box has to be a flex box, or carry its content's
+ * own type size.
+ */
+function offCentreText(page: Page) {
+  return page.evaluate(() => {
+    const bad: string[] = []
+    for (const item of document.querySelectorAll<HTMLElement>("body *")) {
+      const row = item.parentElement
+      if (!row) continue
+      const rowStyle = getComputedStyle(row)
+      if (!rowStyle.display.endsWith("flex") || !rowStyle.flexDirection.startsWith("row")) continue
+      const style = getComputedStyle(item)
+      const align = ["auto", "normal"].includes(style.alignSelf)
+        ? rowStyle.alignItems
+        : style.alignSelf
+      if (align !== "center" || style.display !== "block" || style.position === "absolute") continue
+      const box = item.getBoundingClientRect()
+      if (box.height < 2 || box.width < 2) continue
+      const blocks = [...item.children].some((child) => {
+        const display = getComputedStyle(child).display
+        return display !== "none" && !display.startsWith("inline")
+      })
+      if (blocks) continue
+      const range = document.createRange()
+      range.selectNodeContents(item)
+      const ink = [...range.getClientRects()].filter((r) => r.width > 0 && r.height > 0)
+      if (ink.length === 0) continue
+      const top = Math.min(...ink.map((r) => r.top))
+      const bottom = Math.max(...ink.map((r) => r.bottom))
+      const offset = (top + bottom) / 2 - (box.top + box.bottom) / 2
+      if (Math.abs(offset) >= 1.5) {
+        bad.push(`${offset.toFixed(1)}px ${item.outerHTML.slice(0, 140)}`)
+      }
+    }
+    return bad
+  })
+}
+
 /** The registers the page elements declare, and how many flow panels are drawn. */
 async function registers(page: Page) {
   // networkidle says the requests are done, not that React has committed the
@@ -397,6 +441,31 @@ test.describe("with no hover available", () => {
       })
       expect(hidden, `controls hidden behind hover on ${path}`).toEqual([])
     })
+  }
+})
+
+test("a centred row sets every item's text on its centre line", async ({ page }) => {
+  test.setTimeout(SURFACES.length * 5_000)
+  await mockShell(page)
+
+  for (const path of SURFACES) {
+    await page.goto(path)
+    await page.waitForLoadState("networkidle")
+    expect(await offCentreText(page), `text off its row's centre line on ${path}`).toEqual([])
+  }
+})
+
+test("a centred row sets every item's text on its centre line, with a project", async ({
+  page,
+}) => {
+  test.setTimeout(PROJECT_SURFACES.length * 5_000)
+  await mockProject(page, { showcase: true })
+
+  for (const path of PROJECT_SURFACES) {
+    await page.goto(path)
+    await page.waitForLoadState("networkidle")
+    await expect(page.locator("[data-slot=page]").first()).toBeVisible({ timeout: 15_000 })
+    expect(await offCentreText(page), `text off its row's centre line on ${path}`).toEqual([])
   }
 })
 

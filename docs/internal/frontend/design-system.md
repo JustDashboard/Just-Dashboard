@@ -45,12 +45,13 @@ unless it can say why it needs an edge.** The host Overview ended 0.6.7 with no 
 above its Services row and none in it — see §15 for what that took. Three kinds of thing stopped
 taking a frame:
 
-- a run of figures — `StatGrid` draws hairlines *between* tiles and nothing around them, and the
-  first column starts on the page's own content edge (`framed` restores the box for
-  the one case a run sits inside another surface). The first-column rule is written twice, for a tile
-  inside a `StatLink` and for a tile that *is* the cell: the descendant form alone never matched the
-  second, so until the Security pass every grid of bare tiles started a step in from the content it
-  was meant to line up with. The Overview's Services row is one of these too:
+- a run of figures — `StatGrid` draws hairlines *between* tiles and nothing around them (`framed`
+  restores the box for the one case a run sits inside another surface). Every tile keeps the same
+  inset, the first in a row included: the first column used to drop its left padding to line its
+  name up with the title, and on a `StatLink` that put the hover wash flush against the name, one
+  tile of the row drawn tighter than the rest. A tile left alone on the last row takes the whole row
+  rather than sit beside a hole — five two-up is two, two and one. The Overview's Services row is one
+  of these too:
   a module's headline figure is a reading, and eight framed cards under a page that had just stopped
   drawing boxes were eight boxes. Each is a `StatLink`, so the arrow says it goes somewhere;
 - a list that is the whole of a section — `Panel plain` keeps the panel's anatomy (header, toolbar,
@@ -60,14 +61,14 @@ taking a frame:
   overview's idle containers, attention, compose projects, cleanup and disk; the containers, images,
   volumes, networks, stacks and events lists with their toolbars; the disk breakdown above the
   images; the attention and storage blocks on a container's page), the
-  whole of the Security section (the overview's exposure facts, five area tiles and findings, and on
-  every area page the readings, the findings under them, the tables, the Auth log, Firewall log and
-  Activity sections — each a title over the log's `Pane` — and the twenty probe blocks on Tools),
-  every block on the proxy pages (the overview's engine facts, attention list, sites, certificate
-  expiry and Engine log; the sites, certificates, streams and ports tables with their toolbars; the
-  Renewals section on Certificates; a site's own page, its readings on the page's ground and its
-  logs one `Pane` under its identity line; the TLS report's readings, findings, protocol, certificate, chain
-  and HTTP rows; the password files and DNS provider lists),
+  Security section's exposure facts, area readings, findings, probe forms and the Auth log, Firewall
+  log and Activity sections — each a title over the log's `Pane` (its tables, dashboard access
+  picture and Tools workbench retain frames), every block on the proxy pages (the overview's engine
+  facts, attention list, sites, certificate expiry and Engine log; the sites, certificates and
+  streams inventories and the ports table with their toolbars; the Renewals section on
+  Certificates; a site's own page, its readings on the page's ground and its logs one `Pane` under
+  its identity line; the TLS report's readings, findings, protocol, certificate, chain and HTTP
+  rows; the password files and DNS provider lists),
   health findings, the runtime-health bar, and every block of the deployment section — the fleet
   and its archive, Credentials and Notifications, a project's Overview, Deployments, Logs, Runtime
   and Console, the run page, the nine settings pages and the create flow — are plain, with every
@@ -651,6 +652,19 @@ is opaque with is `--panel-ground` — declared by the panel (`--card` framed, `
 never assumed by the table. Reading `--card` there put a faint unexplained band across every table on
 a plain panel, overhanging the header hairline by the table's own `-mx-4` bleed.
 
+**A row's text shares one centre line.** A bare `span`, `div` or `Link` placed in a flex row is a
+block, and a block keeps the line box it inherits — the page's 16px, 24px-tall one where nothing
+set another. A 12px `Status` or `Tag` inside it rests on that box's baseline, three pixels below the
+button beside it: the database strip's "connected", a deployment's route and certificate columns,
+a container card's state, a release note's kind and the identity line's aside all shipped that way.
+A wrapper around an inline status is a flex box (`flex`, or `flex flex-col items-start` for a state
+over its detail), or it carries its content's own type size. A glyph beside a title is nudged by
+the title's line box, not by habit: `mt-0.5` centres a 16px glyph on a 20px line and drops it two
+pixels below a `leading-tight` one. A field and its button in one row are `items-center`, since the
+field is 44px on a phone and the button is not. A view strip's tabs carry `pt-0.5` against their
+2px underline, so their labels sit on the strip's centre line with whatever shares the strip.
+`design-system.spec.ts` checks the first of these on every surface it opens.
+
 `.eyebrow` is the small-caps label that opens a section, a panel header or a stat tile. `.numeric` is
 any figure meant to be compared with the one above it — tabular digits stop a polling table from
 shimmering.
@@ -1047,7 +1061,10 @@ owner's picture on the same reasoning: the face is the account, which a glyph co
 
 The same marks carry into Docker and Databases, because they are the same products. A container,
 an image and a stack's service are drawn as the product their image is (`imageProduct` reads the
-last segment of the reference; anything it cannot name is Docker's whale), a stack as its services'
+last segment of the reference; anything it cannot name is Docker's whale). A container whose reference
+names nothing — a deployment's is a bare image id — is what its image's OCI title or source label says
+(`containerProduct`), since the publisher wrote those and Docker copies them onto the container; the
+reference wins when it names a product, because labels are inherited from a base. A stack is drawn as its services'
 products overlapping (`ProductLogos`, the way a group of avatars overlaps; Compose's own mark when
 none has a logo), a volume as the product of the container that keeps its data there, and a
 database connection as its engine — in the workbench switcher and in every engine picker,
@@ -1108,47 +1125,60 @@ sixth. A game server's three pages add one line under that header (`GameIdentity
 the game can say — the address a player types, the edition, how full it is — and draw neither the
 game nor its name again.
 
-**The Security section draws what it watches, not what it is.** Its pages are about things with
-few marks of their own — a firewall backend, sshd, a jail — so the marks it draws are the things
-those watch and hold (`components/security/marks.tsx`). The section opens on how the panel is
-reached as its identity line (`ExposureIdentity`): Tailscale's mark on a tailnet-only panel, a
-glyph for the place otherwise, the grade as the title in its verdict's colour, the allowed ranges
-and interfaces as its facts, the address this browser arrived from drawn as the network it is on,
-and the posture's verdict at the right end, so the two answers the page is opened for share one
-line. Firewall, SSH and Intrusion open on the same line for the thing each is about: the backend by
-its own name with the enable switch beside its state, sshd with its port and what holds the
-listener with its verdict beside the recent jobs, and fail2ban as its own mark (the project's, from
-homarr) with whether it is running. A jail is a card you open — its sheet of held addresses is the
-destination — drawn as the service it watches (`jailProduct`: nginx's mark for `nginx-http-auth`,
-a glyph for `sshd`, which has none) with its counts in fixed measures. An address anywhere in the
-section is drawn as the network it is on (`Address`: Tailscale's mark for the tailnet, a glyph for
-the rest), a peer's processes as the products they are (`ProcessList`, through `processProduct`),
-a network device as what made it (`interfaceProduct`: Tailscale's tunnel, Docker's bridges and
-veths, a Kubernetes CNI; a physical port keeps a glyph for its kind), an account holding a key as
-its initials in the users list's hue, and an attacker's attempts against the most persistent
-address's as a meter. Connections, logins, devices and routes are readings with verbs, so their
-rows stay rows.
+**The Security section draws what it watches.** All eight pages use the reading register and
+retain their `StatGrid` figures. Beneath them, the overview's observed browser-to-dashboard path is
+one framed picture, using the same `SettingPicture`, `WireNode` and still `AnimatedBeam` as deployment
+settings. The picture names the access scope and this browser's address; it never claims that every
+host port has that scope. Findings put severity and skipped checks in a rail beside the list.
+Firewall's policy controls sit beside its bounded rule table; SSH groups its directives into rail
+forms, with controls aligned and the pending apply action following a dirty form. Intrusion's jail
+choices carry their watched service's mark, state and comparable readings. SSH, Firewall and
+Intrusion each end on their own log — the auth log, the firewall's log, fail2ban's Activity — read
+through its lens in one `Pane` under a title across the page, since a log needs the width a rail or a
+half row does not have; the last day's counts join the page's one `StatGrid` rather than drawing a
+second, and an attacker's address is blocked from the line it is on. Repeat offenders therefore take
+Intrusion's row alone. Connections, Logins and Network combine related facts into fewer,
+richer columns: a peer and its network, a service and its ports, an account and its terminal, an
+interface and its kind. Their action columns are always drawn. Tools is a two-pane working surface,
+with a searchable choice rail and one visible form/result, retaining every other probe's work.
+The diagram and the workbench have edges for §7's reasons; tables keep theirs, and forms and
+findings remain plain. `components/security/marks.tsx` supplies the inline address, `PeerIdentity`,
+process and interface marks. A product is named only when it can be identified; no logo is guessed
+for ufw, sshd or an unknown interface. Source choices in the firewall dialog use the same lit
+`ChoiceCard` as deployment choices, with Tailscale's own mark for the tailnet.
 
-**The proxy section draws the engine and the authority.** Its things have two products between
-them — the engine serving a site and the authority that signed its certificate — and the pages draw
-those where they are true (`components/proxy/marks.ts`). The overview opens on the engine as its
-identity line (`EngineIdentity`): nginx's or Caddy's mark on the tile, the version beside the name
-the way the Overview sets the kernel beside the distribution, the unit's state, the directory it
-reads and the ingress container as facts, certbot drawn as Let's Encrypt — the mark says what it
-issues, not who wrote it — and the service verbs at the right end. A site is a card drawn as the
-engine serving it (`siteProduct`), with TLS said by whose certificate: Let's Encrypt's glyph where
-the site points at certbot's live directory (`certPathProduct`), a shield where the file is
-somebody else's. A certificate is drawn as who signed it (`certificateProduct`, through
-`issuerProduct` and certbot's directory), and an imported one from a company CA keeps a glyph rather
-than a guess. A stream is drawn as the service its port is (`portProduct`: the databases and control
-planes the attention list already names by number, and the two Minecraft editions) and a port
-nothing names keeps a bare connection. A listening socket's process is its product's glyph, read
-from the process name first and the port second, so `postgres` on an odd port is still Postgres and
-`python` on 5432 is not. Sites and streams are cards you open and take the edge — a site onto its own
-page, which opens on the same marks as an identity line and reads its requests and errors there, so its
-Logs verb goes to that page rather than to a file on the Logs page; certificates,
-watched domains and sockets are readings with verbs and stay rows, with how much of its term a
-certificate has left drawn as a meter under its verdict (`CertLife`).
+**The proxy section draws routes, engines and authorities.** All six pages stay in the reading
+register and begin with four `StatTile` readings, two per row on phones. On the overview the engine
+identity and service commands sit below them, with the routes in the main column and attention and
+expiry in a narrower column. A site's and a stream's card separates identity, route and named
+actions into three bands: `components/proxy/route-path.tsx` gives the source and destination their
+own labelled columns (stacked on phones), so a hostname and its upstream do not compete for the same
+truncated line. Sites and streams use a two-column grid on wide screens and a single column on
+smaller ones. The nginx or Caddy mark names a site's engine, the stream's port names its product
+where known, and the TLS reading carries Let's Encrypt's mark only where the certificate path
+supports it. Unknown products keep a glyph.
+Every site card, the overview's route rows and a certificate's links to the sites using it open the
+site's own page (`/proxy/sites/<name>`): the same marks as an identity line, its readings on the
+page's ground, and its requests and errors read there in one log `Pane`, so a site's Logs verb goes to
+that page rather than to a file on the Logs page. Editing stays with the card's verbs. The overview
+ends on the engine's own log, a `Pane` across the page under the two columns.
+
+Certificates has a searchable inventory beside renewal and DNS management. Each inventory card opens
+its details — all names, dates, the full path and links to the sites using it — so it takes the lit
+edge; its issuer, expiry and lifetime meter remain on the card. An unreadable certificate carries a
+short verdict on the card and its complete error in the detail sheet; unavailable dates and signing
+status stay unknown, and it draws no invented lifetime.
+A watched domain opens a live report and preserves its nonstandard port. Password files and
+watched-domain setup use the deployment settings' rail sections. Certificate renewal lineages and
+DNS providers remain readings with their own actions, laid out to fit the management column; every
+run certbot made, the timer's included, follows the two columns as Renewals, a log `Pane` across the
+page's width, which a log needs and the management column does not have. The TLS
+report keeps findings, protocol checks and HTTP readings beside the live certificate and its
+vertical chain; long header values wrap instead of hiding the verdict. Listening sockets stay a
+table of readings, with fixed endpoint, application, reach and action columns and a stacked phone
+layout. Tables retain their scrolling boundary; forms and sections remain plain.
+`tests/browser/proxy-ui.spec.ts` covers all six populated pages at 390, 1280 and 1720, detail
+navigation, site-kind choices and read-only access.
 
 **What a host has installed, who is on it and what they changed are products too.** Packages
 draws a package as the software its name says it is (`packageProduct`, `components/packages/marks.tsx`:
@@ -1328,7 +1358,10 @@ already knows the format by is a legend they do not have to learn.
 
 A folder's colour is a **label**, and §3's tag argument is why it is the operator's: "the red one is
 production" is a fact about this server, so it is stored there (`files.colours`) and drawn wherever the
-folder is — the listing, the tiles, the sidebar, the inspector, the strip, the finder, the terminal's tree.
+folder is — the listing, the tiles, the sidebar, the inspector, the strip, the finder, the terminal's and
+a checkout's tree, a volume's or a stack's browser, a deployment's storage. The shell provides the saved
+labels to every page (`SavedFolderColours`, read again on each navigation); Files nests its own provider
+over it so a colour it picks is drawn before the round trip lands.
 The strip's compact folder button sets one colour for every folder, stores it as `files.defaultColour`,
 and clears old individual labels. A folder can then be labelled on its own in its inspector or menu;
 that label takes precedence until another global choice. Nine names (`--folder-*`, one value each;
@@ -1365,8 +1398,8 @@ The passes, in order. Each one is a diff you can review on its own.
    side are both plain; the gap between them is the separation. A framed block that survives this pass
    has a sentence in a comment saying why.
 2. **Figures are tiles.** Any set of headline numbers — utilisation, counts, one-per-module "service
-   cards" — is a `StatGrid` of `StatTile`s: hairlines between, nothing around, the first column on the
-   page's own edge. A tile that is a destination is wrapped in `StatLink` and takes
+   cards" — is a `StatGrid` of `StatTile`s: hairlines between, nothing around, every tile the same
+   inset. A tile that is a destination is wrapped in `StatLink` and takes
    `className="h-full transition-colors group-hover:bg-row-hover"`; the arrow is the link's, not yours.
    A tile whose figure is a question about what is under it — a log's "Auth failures 12" — is a
    `StatButton` instead: a press narrows the pane below rather than leaving the page, its revealed mark
@@ -1478,8 +1511,8 @@ The passes, in order. Each one is a diff you can review on its own.
 8. **Data, not captions.** No sentence under a title (§5). What the reader needs is a `Tag`, a
    `Status`, a hint on a tile, or a `Notice`. What the page *is* — a hostname, a kernel, a platform —
    is its own row.
-9. **Alignment.** Tiles top-align so a row of names is a row; hints truncate rather than wrap; the
-   first column starts at the page gutter.
+9. **Alignment.** Tiles top-align so a row of names is a row; hints truncate rather than wrap; every
+   tile in a row, the first included, keeps the same inset.
 10. **Verify.** `scripts/test-changed.sh` (it runs `tests/browser/design-system.spec.ts` for any
     UI change), then a screenshot at 1280 and 1720 wide against a mocked
     API in the pattern `mockShell` uses, and look at it: a scrollbar where none belongs, a label a

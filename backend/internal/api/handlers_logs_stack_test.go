@@ -240,7 +240,7 @@ func TestStackSearchMergesContainersByTime(t *testing.T) {
 
 // The source list has one entry per compose project, describing it by its
 // services and images — the database by the name it was created from, not
-// the bare id the container list reports for a moved tag.
+// the bare id the Engine reports for a moved tag.
 func TestLogSourcesListStacks(t *testing.T) {
 	s := testServer(t)
 	fake := serveFakeLogEngine(t, s, shopStack(time.Now())...)
@@ -281,16 +281,19 @@ func TestLogSourcesListStacks(t *testing.T) {
 		t.Errorf("container source = %+v", container)
 	}
 
-	// The image behind a bare id is asked for once per image, not on every
-	// poll of the source list.
+	// The list itself trades a moved tag's sha256 id for the config's name
+	// (the images above). An id printed bare, with no prefix, it passes on,
+	// and that is asked of Inspect once per image, not on every poll of the
+	// source list.
+	bare := dockerx.Container{ID: "aaaaaaaaaaaa1111", Image: strings.Repeat("d", 12), ImageID: "sha256:" + strings.Repeat("d", 64)}
 	before := fake.inspects["aaaaaaaaaaaa1111"]
 	for range 3 {
-		if got := s.containerImage(t.Context(), dockerx.Container{ID: "aaaaaaaaaaaa1111", Image: "sha256:" + strings.Repeat("d", 64), ImageID: "sha256:" + strings.Repeat("d", 64)}); got != "postgres:17" {
+		if got := s.containerImage(t.Context(), bare); got != "postgres:17" {
 			t.Fatalf("image = %q", got)
 		}
 	}
-	if after := fake.inspects["aaaaaaaaaaaa1111"]; after != before {
-		t.Errorf("inspected %d more times for an image already known", after-before)
+	if asked := fake.inspects["aaaaaaaaaaaa1111"] - before; asked != 1 {
+		t.Errorf("inspected %d times for one bare image id, want once", asked)
 	}
 }
 

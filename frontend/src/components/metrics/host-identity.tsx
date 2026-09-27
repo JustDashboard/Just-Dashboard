@@ -92,7 +92,9 @@ export function HostIdentity({
           </p>
         </div>
       </div>
-      {aside && <div className="shrink-0">{aside}</div>}
+      {/* A flex box, so a bare status set here sits on the line's centre
+          rather than on the baseline of a 16px line box it never asked for. */}
+      {aside && <div className="flex shrink-0">{aside}</div>}
     </div>
   )
 }

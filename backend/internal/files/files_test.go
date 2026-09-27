@@ -201,10 +201,7 @@ func TestSymlinkChecksItsTarget(t *testing.T) {
 	}
 }
 
-// The NSS caches are package-level maps written from the request goroutine.
-// A concurrent map write is a runtime throw that httpx.Recoverer cannot catch,
-// so two people browsing files at once took the whole process down. Run with
-// -race to see it.
+// Concurrent listings must not share mutable name maps.
 func TestLookupUserIsConcurrencySafe(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < 16; i++ {
@@ -216,4 +213,30 @@ func TestLookupUserIsConcurrencySafe(t *testing.T) {
 		}(uint32(i % 4))
 	}
 	wg.Wait()
+}
+
+func TestOwnerNamesAreReusedOnlyWithinOneListing(t *testing.T) {
+	name, calls := "old-owner", 0
+	resolve := func(uint32) string {
+		calls++
+		return name
+	}
+	first := newEntryNames()
+	for range 1000 {
+		if got := first.users.lookup(42, resolve); got != "old-owner" {
+			t.Fatalf("owner = %q", got)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("NSS lookups = %d, want one per owner", calls)
+	}
+	name = "renamed-owner"
+	second := newEntryNames()
+	if got := second.users.lookup(42, resolve); got != name {
+		t.Fatalf("next listing kept the old owner: %q", got)
+	}
+	name = "group-with-the-same-id"
+	if got := second.groups.lookup(42, resolve); got != name {
+		t.Fatalf("group reused a user's name: %q", got)
+	}
 }

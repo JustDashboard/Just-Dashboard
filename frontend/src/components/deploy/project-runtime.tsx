@@ -753,7 +753,7 @@ function ServiceCard({
             <span className="w-32 min-w-0">
               <ReleaseCell service={service} release={release} />
             </span>
-            <span className="w-40 min-w-0">
+            <span className="flex w-40 min-w-0 flex-col items-start">
               {state}
               <span className="mt-0.5 flex min-w-0 gap-1.5 text-hint text-muted-foreground">
                 <span className="truncate">{detail || " "}</span>
@@ -957,8 +957,8 @@ function DomainCard({
         wide && (
           <>
             {tags}
-            <span className="w-24">{route}</span>
-            <span className="w-56 min-w-0">
+            <span className="flex w-24">{route}</span>
+            <span className="flex w-56 min-w-0">
               <CertificateReading domain={domain} issuer={false} />
             </span>
           </>

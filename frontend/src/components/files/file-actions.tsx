@@ -15,6 +15,7 @@ import {
   FolderOpen,
   GitHubMark,
   Image as ImageIcon,
+  MoreHorizontal,
   Pencil,
   Shield,
   Star,
@@ -33,7 +34,9 @@ import {
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Button } from "@/components/ui/button"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -407,14 +410,18 @@ export function FileActionsMenu({
   caps,
   actions,
   children,
+  open,
+  onOpenChange,
 }: {
   entry: FileEntry
   caps: RowCaps
   actions: FileActions
   children: React.ReactNode
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }) {
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={onOpenChange}>
       {children}
       <DropdownMenuContent align="end" className="w-56">
         <VerbList
@@ -425,6 +432,61 @@ export function FileActionsMenu({
         />
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+// Thousands of closed menus cost more to mount than the directory's text.
+// Keep the trigger immediately usable; instantiate its menu on first use and
+// retain it afterwards so Radix can restore focus when it closes.
+export function FileActionsButton({
+  entry,
+  caps,
+  actions,
+  className,
+  label = "More actions",
+}: {
+  entry: FileEntry
+  caps: RowCaps
+  actions: FileActions
+  className?: string
+  label?: string
+}) {
+  const [mounted, setMounted] = useState(false)
+  const [open, setOpen] = useState(false)
+  const activate = () => {
+    setMounted(true)
+    setOpen(true)
+  }
+  const button = (
+    <Button
+      size="icon-xs"
+      variant="ghost"
+      aria-label={label}
+      aria-haspopup="menu"
+      aria-expanded={open}
+      title="Rename, move, copy, permissions, delete"
+      className={className}
+      onClick={mounted ? undefined : activate}
+      onKeyDown={
+        mounted
+          ? undefined
+          : (event) => {
+              if (event.key === "ArrowDown") {
+                event.preventDefault()
+                activate()
+              }
+            }
+      }
+    >
+      <MoreHorizontal className="size-3.5" />
+    </Button>
+  )
+  return mounted ? (
+    <FileActionsMenu entry={entry} caps={caps} actions={actions} open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>{button}</DropdownMenuTrigger>
+    </FileActionsMenu>
+  ) : (
+    button
   )
 }
 

@@ -97,6 +97,7 @@ const (
 // sequence, because "pull failed, now recreating anyway" is the one thing an
 // update must not do.
 func (c *Client) RunComposeStream(ctx context.Context, dir string, action ComposeAction, service string, out chan<- LogLine) (int, error) {
+	defer c.forgetDiskUsage()
 	if !dirExists(dir) {
 		return -1, os.ErrNotExist
 	}
@@ -166,6 +167,7 @@ func (c *Client) RunComposeRelease(
 	graceSeconds int,
 	emit func(LogLine) error,
 ) error {
+	defer c.forgetDiskUsage()
 	if !validComposeProjectName(spec.ProjectName) || !dirExists(spec.ProjectDirectory) ||
 		len(spec.Files) == 0 || len(spec.Files) > 16 || graceSeconds < 0 || graceSeconds > 300 {
 		return errors.New("invalid deployment Compose invocation")

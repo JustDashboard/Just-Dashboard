@@ -199,6 +199,40 @@ async function openFiles(page: Page) {
   await page.locator("tr[data-entry-path]").first().waitFor()
 }
 
+test("large listings retain find, selection and keyboard menu focus", async ({ page }) => {
+  await mockFiles(page)
+  const many = Array.from({ length: 500 }, (_, i) =>
+    entry(`large-${String(i).padStart(4, "0")}.txt`),
+  )
+  await page.route("**/api/v1/files/list**", (route) =>
+    json(route, { path: home, parent: "/home", entries: many, roots: ["/"] }),
+  )
+  await openFiles(page)
+  await expect(page.locator("tr[data-entry-path]")).toHaveCount(500)
+  const found = await page.evaluate(() =>
+    (window as unknown as { find: (text: string) => boolean }).find("large-0499.txt"),
+  )
+  expect(found).toBe(true)
+  const last = page.locator(`tr[data-entry-path="${home}/large-0499.txt"]`)
+  await last.scrollIntoViewIfNeeded()
+  await expect(last).toBeInViewport()
+  await page.getByRole("checkbox", { name: "Select all", exact: true }).click()
+  const checkbox = last.getByRole("checkbox", { name: "Select large-0499.txt", exact: true })
+  await checkbox.focus()
+  await checkbox.press("Space")
+  await expect(checkbox).toHaveAttribute("aria-checked", "false")
+  await expect(page.getByRole("checkbox", { name: "Select all", exact: true })).toHaveAttribute(
+    "aria-checked",
+    "mixed",
+  )
+  const more = last.getByRole("button", { name: "More actions", exact: true })
+  await more.focus()
+  await more.press("ArrowDown")
+  await expect(page.getByRole("menuitem", { name: /Rename/ })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(more).toBeFocused()
+})
+
 test("the sidebar is a fixed list of places that stays put while browsing", async ({ page }) => {
   await mockFiles(page)
   await openFiles(page)

@@ -1,6 +1,13 @@
 "use client"
 
-import { Connection, Globe, Router, type Icon } from "@/components/icons"
+import { useRef } from "react"
+import { Connection, Globe, Router, ShieldCheck, type Icon } from "@/components/icons"
+import { networkOf } from "@/lib/clients"
+import { NETWORK_GLYPH } from "@/components/client-mark"
+import { ProductGlyph } from "@/components/product-logo"
+import { WireHost, WireMark, WireNode } from "@/components/deploy/wire"
+import { SettingPicture } from "@/components/deploy/settings/setting-picture"
+import { AnimatedBeam } from "@/components/ui/animated-beam"
 import type { Exposure } from "@/lib/types"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { NetworkFact } from "@/components/client-mark"
@@ -132,6 +139,83 @@ export function ExposureIdentity({
         </>
       }
       aside={aside}
+    />
+  )
+}
+
+/** The observed path to this dashboard, not a claim about every port on the host. */
+export function ExposurePath({ exposure }: { exposure: Exposure | undefined }) {
+  const container = useRef<HTMLDivElement>(null)
+  const client = useRef<HTMLDivElement>(null)
+  const access = useRef<HTMLDivElement>(null)
+  const host = useRef<HTMLDivElement>(null)
+  if (!exposure) return null
+  const network = networkOf(exposure.client || "")
+  const ClientMark = NETWORK_GLYPH[network.kind]
+  const risky = exposure.grade === "open" || exposure.grade === "public"
+  return (
+    <SettingPicture
+      label="How this browser reaches the dashboard"
+      containerRef={container}
+      lines={
+        <>
+          <AnimatedBeam
+            containerRef={container}
+            fromRef={client}
+            toRef={access}
+            still
+            tone={risky ? "warning" : "success"}
+          />
+          <AnimatedBeam
+            containerRef={container}
+            fromRef={access}
+            toRef={host}
+            still
+            tone={risky ? "warning" : "success"}
+          />
+        </>
+      }
+      start={[
+        <WireNode
+          key="client"
+          nodeRef={client}
+          align="end"
+          mark={
+            <WireMark tone="logo">
+              {network.product ? <ProductGlyph id={network.product} /> : <ClientMark />}
+            </WireMark>
+          }
+          eyebrow="Your connection"
+          title={exposure.client || "Address unavailable"}
+          hint={network.label}
+        />,
+      ]}
+      middle={
+        <WireNode
+          nodeRef={access}
+          align="center"
+          mark={
+            <WireMark tone={risky ? "warning" : "logo"}>
+              {exposure.grade === "tailscale" ? <ProductGlyph id="tailscale" /> : <ShieldCheck />}
+            </WireMark>
+          }
+          title={EXPOSURE_GRADE[exposure.grade].label}
+          hint={
+            exposure.allowlist.length
+              ? `${exposure.allowlist.length} allowed range${exposure.allowlist.length === 1 ? "" : "s"}`
+              : "No network restriction"
+          }
+        />
+      }
+      end={
+        <WireNode
+          nodeRef={host}
+          mark={<WireHost />}
+          eyebrow="This dashboard"
+          title={exposure.tailscaleIp || "This server"}
+          hint={exposure.interfaces.join(", ") || "Protected by sign-in"}
+        />
+      }
     />
   )
 }

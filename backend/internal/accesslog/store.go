@@ -262,21 +262,30 @@ func (s *Store) window(ctx context.Context, route string, filter Filter, minGap 
 	now := s.now()
 	rec := s.record(route, now)
 	rec.mu.Lock()
-	defer rec.mu.Unlock()
 	if err := rec.refresh(ctx, s, now, minGap); err != nil && len(rec.entries) == 0 && !rec.seeded {
+		rec.mu.Unlock()
 		return Window{}, err
 	}
 	s.enforceCap(route)
+	// Published entries are immutable: feed only appends and trim copies into
+	// a new backing array. Capturing this slice does not copy a 150k-entry
+	// record per reader, and releases the route before aggregation and sorting.
+	entries := rec.entries[rec.lowerBound(filter.Since):len(rec.entries):len(rec.entries)]
+	coverage, facts, complete := rec.coverage(), rec.facts, rec.complete
+	rec.mu.Unlock()
 
 	c := NewCollector(filter)
-	for i := rec.lowerBound(filter.Since); i < len(rec.entries); i++ {
-		c.Feed(rec.entries[i])
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return Window{}, err
+		}
+		c.Feed(entry)
 	}
-	c.Format(rec.facts.Format)
-	if !rec.complete {
+	c.Format(facts.Format)
+	if !complete {
 		c.Truncated()
 	}
-	return Window{Result: c.Result(), Coverage: rec.coverage(), Facts: rec.facts}, nil
+	return Window{Result: c.Result(), Coverage: coverage, Facts: facts}, nil
 }
 
 // Export hands every request in the window that matches the filter to fn,
@@ -287,17 +296,22 @@ func (s *Store) Export(ctx context.Context, route string, filter Filter, limit i
 	now := s.now()
 	rec := s.record(route, now)
 	rec.mu.Lock()
-	defer rec.mu.Unlock()
 	if err := rec.refresh(ctx, s, now, refreshEvery); err != nil && len(rec.entries) == 0 && !rec.seeded {
+		rec.mu.Unlock()
 		return 0, err
 	}
+	entries := rec.entries[rec.lowerBound(filter.Since):len(rec.entries):len(rec.entries)]
+	rec.mu.Unlock()
 	if limit <= 0 {
 		limit = 50_000
 	}
 	n := 0
-	for i := rec.lowerBound(filter.Since); i < len(rec.entries) && n < limit; i++ {
-		if filter.Match(rec.entries[i]) {
-			fn(rec.entries[i])
+	for i := 0; i < len(entries) && n < limit; i++ {
+		if err := ctx.Err(); err != nil {
+			return n, err
+		}
+		if filter.Match(entries[i]) {
+			fn(entries[i])
 			n++
 		}
 	}
@@ -631,7 +645,8 @@ func (r *record) trim(now time.Time) {
 		r.entries, r.ceil = nil, nil
 	} else {
 		// Copied rather than resliced: a reslice keeps the dropped prefix
-		// alive underneath, and the point of dropping it is the memory.
+		// alive underneath. It also keeps published windows immutable: never
+		// compact the old backing array while an aggregator or export reads it.
 		r.entries = append([]Entry(nil), r.entries[drop:]...)
 		r.ceil = append([]int64(nil), r.ceil[drop:]...)
 	}

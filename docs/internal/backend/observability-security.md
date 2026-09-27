@@ -14,10 +14,11 @@ since a tab was opened, and charts that start empty every visit cannot show last
   replaces the container and seeing across the restart is the point. Docker being absent is logged once,
   not an error. `/docker/containers/stats/history` serves a sparkline per table row in one query.
 - The sample carries `size_rw`, the writable layer, taken from the **cached** disk walk rather than by
-  asking the daemon for sizes: a sampler running every fifteen seconds must never trigger a walk of every
-  layer on the host. It is what makes "grew 6.4 GB today" a measurement — a static 38.7 GB cannot tell a
-  container that has held it for six months from one whose disk has two days left. Zero means the walk
-  had not completed when the sample was taken, and `dockerx.DetectAnomalies` treats that as an absent
+  asking the daemon for sizes per container: a sampler running every fifteen seconds shares the bounded
+  disk cache and its refresh instead of starting a separate walk per sample. It is what makes
+  "grew 6.4 GB today" a measurement — a static 38.7 GB cannot tell a container that has held it for six
+  months from one whose disk has two days left. Zero means the walk
+  was unavailable when the sample was taken, and `dockerx.DetectAnomalies` treats that as an absent
   measurement rather than as an empty layer.
 - Samples also retain the observed container ID for release attribution. The additive `container_id`
   column defaults to empty for old rows, which stay visible in name-continuous charts but cannot be
@@ -25,9 +26,15 @@ since a tab was opened, and charts that start empty every visit cannot show last
   CPU/memory means, peaks and sample counts; its half-open window is limited to 24 hours and requested
   resolution to 600 buckets per container. Empty series remain empty, and retention-disabled reads
   return no samples. An `(container_id, ts)` index is installed after the column migration.
-- Container network/block totals are stored as Docker's **cumulative counters** and differenced in SQL
-  (`MAX - MIN` over the bucket). A total can be re-bucketed later; a rate recorded against one interval
-  cannot.
+- Container network/block totals are stored as Docker's **cumulative counters** at Docker's sample
+  timestamp (`sample_time` retains fractional seconds; legacy rows use their integer timestamp).
+  `container_usage.go` differences consecutive samples **before** bucketing, with a bounded
+  look-behind for the first visible sample. Means are weighted by measured elapsed time; peaks are the
+  highest measured interval rate. Single-sample buckets retain the interval from their predecessor.
+  Missing counters, identity changes, backwards CPU/I/O counters and gaps over three sample intervals
+  return null rates, not zeroes or spikes. Additive nullable availability/limit/counter columns leave old
+  rows unknown; positive legacy counters can still establish availability. Only explicitly configured
+  memory limits become historical limit lines, rather than Docker's default host RAM ceiling.
 - The recorder keeps its **own** `sysinfo.Collector` and `dockerx.StatsSampler`: rates are deltas, and
   sharing with request handlers would let a one-shot `GET /system/metrics` shorten the next interval.
 
@@ -43,6 +50,11 @@ Two **live-only hardware readings** ride on the snapshot and are never recorded:
 container runtime hands out the 64-bit maximum, so nothing divides by it), and `sensors` is every hwmon
 or thermal-zone temperature gopsutil can read, hottest first, each with the driver's own high and critical
 marks. A VPS usually reports no sensors, and the UI shows none rather than a cold machine.
+
+Each of the snapshot's `net` rows carries the `kind` the Security network page uses
+(`netsec.ClassifyInterface`: physical, tunnel, bridge, virtual) and they arrive in that order, so the
+metrics page can open on the host's own devices and set Docker's veth pairs and bridges aside — a host
+running a dozen containers otherwise lists thirty interfaces with the uplink among them.
 
 `metrics.Assess` (`GET /system/health`) turns those into findings — measured / means / do — ranked
 worst-first. It runs on the server because the thresholds are a claim the product makes, and because
@@ -304,6 +316,13 @@ beats a page that renders empty.
 
 - **The installed set comes from the local database, never the front end** (dpkg, `rpm -qa`). Asking dnf
   needs a metadata cache present to answer a question about this disk.
+- The installed inventory is reused for up to 30 seconds, with concurrent misses sharing one read.
+  Cached and uncached answers preserve every architecture and return independent slices. Package jobs
+  invalidate at start and completion, including failure or cancellation, and suppress cache fills while
+  any job is active. A generation check rejects reads begun before invalidation. External changes are
+  picked up after expiry; pending upgrades are still read separately on each inventory request. The
+  cache belongs to this backend instance, and cancelling a waiting reader does not cancel a shared
+  package-manager read, which has its own two-minute deadline.
 - **"Installed on purpose" is a different question on each** and is what makes two thousand rows
   readable: `apt-mark showmanual`, `dnf repoquery --userinstalled`, pacman's `Install Reason`, Alpine's
   `/etc/apk/world`. zypper has no supported query, so `Explicit` stays false and the filter is hidden.

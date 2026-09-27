@@ -59,9 +59,9 @@ export function PullRequestRow({
   /** The accessible name of the title — "Open pull request #7" unless the press does something else. */
   verb?: string
   /**
-   * One line, the size of a reading in a card: for the strip under a
-   * checkout on the list page, where three of these sit inside the row that
-   * names the repository and must not outrank it.
+   * One line, the size of a reading in a card: for the foot of a checkout's
+   * card on the list page, which it shares with the repository's name and
+   * must not outrank.
    */
   compact?: boolean
   index?: number

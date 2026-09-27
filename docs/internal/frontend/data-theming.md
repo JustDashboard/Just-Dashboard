@@ -18,6 +18,10 @@
   retain the same resource's data. Cleanup aborts the request and ignores late responses.
 - `useSocket` — reconnect with backoff (these sockets ride a tunnel that drops routinely), handlers in a
   ref so a fresh closure does not rebuild the socket.
+- Persisted view/session values use individual Web Storage entries, so changing a small filter does not
+  serialize unrelated editor drafts. Writes remain synchronous for reload persistence. Existing single
+  documents migrate on first read, with restoration and the old persistence path if splitting exceeds
+  quota. Prefix deletion and sign-out remove the same values; the memory store never writes to storage.
 - `lib/view-state.ts` is what a page remembers about itself, in three stores drawn by how long the
   thing should live. `useViewState` is **how the page is arranged** — a hidden panel, a chosen tab, a
   sort order, a toggle — in localStorage, so a reload keeps it. `useSessionState` is **what you were
@@ -96,7 +100,11 @@
   and the `MetricsWindow` a dragged span becomes (fixed in the past, fetched once, never re-polled).
   **Live and recorded data are never spliced into one line** — the cadences differ by two orders of
   magnitude, and a chart drawing twenty coarse points and a hundred fine ones at equal spacing lies about
-  when things happened. Container charts offer only recorded ranges. `hooks/use-metrics.ts` and
+  when things happened. Container charts offer only recorded ranges; the container Usage tab also has
+  a separate `container-live-usage.tsx` reading section on its existing stats WebSocket. Its rate helper
+  differences Docker timestamps and per-interface counters, rejects resets and gaps, and establishes a
+  new baseline after reconnects. Pausing freezes labelled readings; a disconnected or ten-second-stale
+  feed clears current figures without hiding recorded history. `hooks/use-metrics.ts` and
   `hooks/use-metrics-history.ts` are the React surface over those two.
 - `hooks/use-self-update.tsx` is one poll for the whole shell, and its gotcha is the feature's design
   problem: **the API goes away in the middle of the thing it is watching**. A failed poll during a run

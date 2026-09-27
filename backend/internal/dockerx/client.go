@@ -30,14 +30,22 @@ type Client struct {
 	host string
 	err  error
 
+	feedMu sync.Mutex
+	feed   *containerFeed
+
 	// Disk usage is the one Docker query that walks every layer and volume on
 	// disk; on a modest server it takes seconds. It is cached because the
 	// volume list needs it only to answer "how big, and is anything using
 	// it" — figures that do not move between two page refreshes.
-	duMu   sync.Mutex
-	duVal  *dtypes.DiskUsage
-	duAt   time.Time
-	duBusy bool
+	duMu         sync.Mutex
+	duVal        *dtypes.DiskUsage
+	duAt         time.Time
+	duGeneration uint64
+	duFlight     *diskUsageRead
+
+	updateMu      sync.Mutex
+	updates       map[string]updateEntry
+	updateFlights map[string]*registryRead
 
 	// How much memory and how many CPUs this host has, cached forever.
 	//
@@ -74,55 +82,77 @@ func (c *Client) HostCapacity(ctx context.Context) (memory int64, cpus int) {
 	return memory, cpus
 }
 
-// diskUsageTTL is how long a cached disk-usage reading stays authoritative.
-const diskUsageTTL = 60 * time.Second
+const (
+	diskUsageTTL = 60 * time.Second
+	// Keep the fast background refresh, but never pass an indefinitely old
+	// snapshot off as current when Docker repeatedly fails to answer.
+	diskUsageMaxAge = diskUsageTTL + 2*time.Minute
+)
+
+type diskUsageRead struct {
+	done       chan struct{}
+	cancel     context.CancelFunc
+	generation uint64
+	value      *dtypes.DiskUsage
+}
 
 // diskUsage returns Docker's disk accounting, refreshing it at most once per
 // TTL. A stale reading is served immediately while a refresh runs in the
-// background, so only the very first caller after startup waits for the walk.
+// background within a bounded grace period. Cold and expired readers share one
+// walk, but cancelling a reader does not cancel the walk for everybody else.
 func (c *Client) diskUsage(ctx context.Context) *dtypes.DiskUsage {
 	cli, err := c.api()
 	if err != nil {
 		return nil
 	}
 
-	c.duMu.Lock()
-	val, at, busy := c.duVal, c.duAt, c.duBusy
-	fresh := val != nil && time.Since(at) < diskUsageTTL
-	if fresh {
-		c.duMu.Unlock()
-		return val
-	}
-	if val != nil {
-		// Stale but usable: hand it back now and refresh out of band.
-		if !busy {
-			c.duBusy = true
-			go func() {
-				bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
-				defer cancel()
-				du, err := cli.DiskUsage(bg, dtypes.DiskUsageOptions{})
-				c.duMu.Lock()
-				if err == nil {
-					c.duVal, c.duAt = &du, time.Now()
-				}
-				c.duBusy = false
-				c.duMu.Unlock()
-			}()
+	for ctx.Err() == nil {
+		c.duMu.Lock()
+		val, age := c.duVal, time.Since(c.duAt)
+		if val != nil && age < diskUsageTTL {
+			c.duMu.Unlock()
+			return val
+		}
+		flight := c.duFlight
+		if flight == nil {
+			readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+			flight = &diskUsageRead{done: make(chan struct{}), cancel: cancel, generation: c.duGeneration}
+			c.duFlight = flight
+			go c.readDiskUsage(readCtx, cli, flight)
 		}
 		c.duMu.Unlock()
-		return val
+		if val != nil && age < diskUsageMaxAge {
+			return val
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-flight.done:
+			c.duMu.Lock()
+			valid := flight.generation == c.duGeneration
+			c.duMu.Unlock()
+			if valid {
+				return flight.value
+			}
+		}
 	}
-	c.duMu.Unlock()
+	return nil
+}
 
-	// Nothing cached at all, so this caller has to wait for the real thing.
+func (c *Client) readDiskUsage(ctx context.Context, cli *client.Client, flight *diskUsageRead) {
+	defer flight.cancel()
+	started := time.Now()
 	du, err := cli.DiskUsage(ctx, dtypes.DiskUsageOptions{})
-	if err != nil {
-		return nil
-	}
 	c.duMu.Lock()
-	c.duVal, c.duAt = &du, time.Now()
-	c.duMu.Unlock()
-	return &du
+	defer c.duMu.Unlock()
+	if flight.generation == c.duGeneration && err == nil {
+		flight.value = &du
+		c.duVal, c.duAt = &du, started
+	}
+	if c.duFlight == flight {
+		c.duFlight = nil
+	}
+	close(flight.done)
 }
 
 // forgetDiskUsage drops the cached reading so the next caller pays for a fresh
@@ -135,7 +165,14 @@ func (c *Client) diskUsage(ctx context.Context) *dtypes.DiskUsage {
 // nothing, and was exactly how a working prune came to look broken.
 func (c *Client) forgetDiskUsage() {
 	c.duMu.Lock()
+	c.duGeneration++
 	c.duVal, c.duAt = nil, time.Time{}
+	// An older read may still complete, but it can no longer publish or be
+	// joined by a request made after this mutation.
+	if c.duFlight != nil {
+		c.duFlight.cancel()
+		c.duFlight = nil
+	}
 	c.duMu.Unlock()
 }
 
@@ -184,6 +221,11 @@ func (c *Client) Close() error {
 	if c == nil {
 		return nil
 	}
+	c.feedMu.Lock()
+	if c.feed != nil {
+		c.feed.cancel()
+	}
+	c.feedMu.Unlock()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.cli != nil {

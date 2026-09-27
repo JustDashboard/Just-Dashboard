@@ -155,10 +155,7 @@ function Verdict({
   const Mark = on ? ShieldCheck : ShieldOff
   return (
     <div className="flex min-w-0 items-start gap-3">
-      <Mark
-        aria-hidden
-        className={cn("mt-0.5 size-5 shrink-0", on ? "text-success" : "text-warning")}
-      />
+      <Mark aria-hidden className={cn("size-5 shrink-0", on ? "text-success" : "text-warning")} />
       <div className="min-w-0 space-y-1">
         <p className="text-sm font-medium">{title}</p>
         <p className="max-w-prose text-hint leading-relaxed text-muted-foreground">{children}</p>

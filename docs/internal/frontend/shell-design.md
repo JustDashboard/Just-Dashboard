@@ -8,8 +8,10 @@ deployment detail/new wrappers remain server components and hand interaction to 
 ## The shell
 
 `(dashboard)/layout.tsx` owns `CommandPaletteProvider`, `SelfUpdateProvider`, `NavScopeProvider`,
-`SidebarProvider` + `AppSidebar`, and `MetricsStream` — which renders nothing and exists to hold the
-metrics socket open for the whole shell, so Overview's charts keep filling from other pages. Its
+`SidebarProvider` + `AppSidebar`, `MetricsStream` — which renders nothing and exists to hold the
+metrics socket open for the whole shell, so Overview's charts keep filling from other pages — and
+`SavedFolderColours` around the page, which reads the folder labels from `/files/places` and again on
+each navigation, so a folder coloured in Files is that colour in every tree and browser. Its
 redirect to `/login` is convenience, not a control; every API call behind it is authenticated server-side.
 
 **The scroll container is on the `SidebarInset`, not the document.** That is what lets a page ask for
@@ -175,7 +177,8 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   nothing else.
 - `components/stat-tile.tsx` — `StatTile` (a small name over a 24px figure, an optional meter and one
   hint) and `StatGrid`, which runs them across the page with a hairline between cells and no frame
-  around them, the first column on the page's own edge. `framed` restores the box. `StatLink` wraps a
+  around them, every tile the same inset and a lone last tile taking its row. `framed` restores the
+  box. `StatLink` wraps a
   tile that is also a destination — the Docker and proxy overviews, and the Services row on the host
   overview — with the revealed arrow that says so on touch; `StatButton` wraps one whose press
   narrows what is under it (a lens's readings wherever a page draws them, a site's request figures)

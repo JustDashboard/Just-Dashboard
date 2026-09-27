@@ -137,8 +137,7 @@ export function AutomationWiring({
         title={
           trigger.config.repository ? (
             <span className="font-mono">
-              {trigger.config.repository}
-              {trigger.config.ref && `@${trigger.config.ref}`}
+              <Repository name={trigger.config.repository} at={trigger.config.ref} />
             </span>
           ) : (
             "any signed request"
@@ -383,6 +382,29 @@ function Source({
         title={title}
         hint={hint}
       />
+    </>
+  )
+}
+
+/**
+ * A repository and the ref it deploys, wrapping after a slash or before the
+ * `@` rather than inside a name: the start edge is as narrow as the picture's
+ * first column, and `owner/name@ref` set in one piece is often wider.
+ */
+function Repository({ name, at }: { name: string; at?: string }) {
+  return (
+    <>
+      {name.split(/(?<=\/)/).map((part, index) => (
+        <Fragment key={index}>
+          {index > 0 && <wbr />}
+          {part}
+        </Fragment>
+      ))}
+      {at && (
+        <>
+          <wbr />@{at}
+        </>
+      )}
     </>
   )
 }

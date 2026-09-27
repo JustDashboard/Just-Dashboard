@@ -237,7 +237,7 @@ export function RequestConsole({
         {entries.length === 0 ? (
           <div className="flex h-full items-center justify-center p-6 font-sans">{empty}</div>
         ) : (
-          <div key="rows" className="animate-rise py-1">
+          <div key="rows" className={cn("animate-rise py-1", wide && "pt-0")}>
             {/*
               A header, because unlike a log line these columns are not
               self-describing: "512" is a size and "34ms" is a duration only
@@ -246,7 +246,10 @@ export function RequestConsole({
               rows name their parts by where they sit, and have none.
             */}
             {wide && (
-              <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-hairline bg-surface-sunken px-0 pr-4 pb-1 font-sans text-hint font-medium text-muted-foreground">
+              // Padded above as well as below, so once it sticks to the top
+              // of the pane its labels stay centred in the band rather than
+              // pressed against the band's top edge.
+              <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-hairline bg-surface-sunken px-0 py-1 pr-4 font-sans text-hint font-medium text-muted-foreground">
                 <span aria-hidden className="w-0.5 shrink-0" />
                 <span className="w-16 shrink-0">Time</span>
                 <span className="w-12 shrink-0">Method</span>

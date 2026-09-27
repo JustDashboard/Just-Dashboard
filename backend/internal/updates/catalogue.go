@@ -172,9 +172,21 @@ const installedTTL = 30 * time.Second
 // Service is stateless apart from the installed-package index it caches.
 type Service struct {
 	mu          sync.Mutex
-	index       map[string]InstalledPackage
+	index       []InstalledPackage
 	indexedAt   time.Time
 	indexedWith string
+	generation  uint64
+	mutations   int
+	flight      *installedRead
+}
+
+type installedRead struct {
+	done       chan struct{}
+	cancel     context.CancelFunc
+	generation uint64
+	manager    string
+	list       []InstalledPackage
+	err        error
 }
 
 func New() *Service { return &Service{} }
@@ -258,38 +270,88 @@ func baseName(name string) string {
 
 // installed returns the cached index's packages, refreshing when stale.
 func (s *Service) installed(ctx context.Context, m manager, force bool) ([]InstalledPackage, error) {
-	s.mu.Lock()
-	fresh := !force && s.indexedWith == m.Name() && time.Since(s.indexedAt) < installedTTL && s.index != nil
-	if fresh {
-		out := make([]InstalledPackage, 0, len(s.index))
-		for _, p := range s.index {
-			out = append(out, p)
+	if force {
+		s.Invalidate()
+	}
+	for ctx.Err() == nil {
+		s.mu.Lock()
+		if s.indexedWith == m.Name() && time.Since(s.indexedAt) < installedTTL && s.index != nil {
+			out := append([]InstalledPackage{}, s.index...)
+			s.mu.Unlock()
+			return out, nil
+		}
+		flight := s.flight
+		if flight == nil || flight.manager != m.Name() {
+			readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+			flight = &installedRead{done: make(chan struct{}), cancel: cancel, generation: s.generation, manager: m.Name()}
+			s.flight = flight
+			go s.readInstalled(readCtx, m, flight)
 		}
 		s.mu.Unlock()
-		return out, nil
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-flight.done:
+			s.mu.Lock()
+			valid := flight.generation == s.generation
+			s.mu.Unlock()
+			if valid {
+				return append([]InstalledPackage{}, flight.list...), flight.err
+			}
+		}
 	}
-	s.mu.Unlock()
+	return nil, ctx.Err()
+}
 
+func (s *Service) readInstalled(ctx context.Context, m manager, flight *installedRead) {
+	defer flight.cancel()
+	started := time.Now()
 	list, err := m.ListInstalled(ctx)
-	if err != nil {
-		return nil, err
-	}
-	index := make(map[string]InstalledPackage, len(list))
-	for _, p := range list {
-		index[baseName(p.Name)] = p
-	}
 	s.mu.Lock()
-	s.index, s.indexedAt, s.indexedWith = index, time.Now(), m.Name()
-	s.mu.Unlock()
-	return list, nil
+	defer s.mu.Unlock()
+	flight.list, flight.err = list, err
+	if flight.generation == s.generation && s.mutations == 0 && err == nil {
+		// Keep every architecture and return copies: a hit must describe the
+		// same installed set as the original package-manager read.
+		s.index = append([]InstalledPackage{}, list...)
+		s.indexedAt, s.indexedWith = started, m.Name()
+	}
+	if s.flight == flight {
+		s.flight = nil
+	}
+	close(flight.done)
 }
 
 // Invalidate forgets the installed index, so the next read is the truth.
 // Called when a job that changes the set has finished.
 func (s *Service) Invalidate() {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.invalidateLocked()
+}
+
+func (s *Service) invalidateLocked() {
+	s.generation++
 	s.index, s.indexedAt = nil, time.Time{}
+	if s.flight != nil {
+		s.flight.cancel()
+		s.flight = nil
+	}
+}
+
+// BeginMutation brackets a package job, including a failed or cancelled one:
+// managers can change part of the installed set before returning an error.
+func (s *Service) BeginMutation() func() {
+	s.mu.Lock()
+	s.mutations++
+	s.invalidateLocked()
 	s.mu.Unlock()
+	return func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.mutations--
+		s.invalidateLocked()
+	}
 }
 
 // Search asks the repositories, ranks the answer and says what is already here.

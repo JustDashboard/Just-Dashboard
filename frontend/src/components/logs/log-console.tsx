@@ -55,27 +55,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { copyText } from "@/lib/clipboard"
+import { logLineKey } from "@/lib/log-line-key"
 
 function lineToText(line: LogLine, withTime: boolean) {
   const stamp = withTime && line.timestamp ? `${timestamp(line.timestamp)} ` : ""
   return `${stamp}${line.text}`
-}
-
-// A line's identity for as long as it is on screen. The wire type has no id,
-// and the index is not one: once the live buffer trims its oldest lines every
-// index shifts, the opened line became a different line and every memoised
-// row got new props on every batch. The buffer keeps the objects it was sent,
-// so the object is the identity and a sequence number is its name.
-const keys = new WeakMap<LogLine, number>()
-let sequence = 0
-
-export function lineKey(line: LogLine): number {
-  let key = keys.get(line)
-  if (key === undefined) {
-    key = ++sequence
-    keys.set(line, key)
-  }
-  return key
 }
 
 /**
@@ -158,7 +142,7 @@ function buildRows(
       const open = !long || expanded || run.slice(FOLD_AFTER).some((l) => hasHit(l, opts.filter))
       const shown = open ? run : run.slice(0, FOLD_AFTER)
       for (const cont of shown) {
-        rows.push({ kind: "line", key: lineKey(cont), line: cont, prev, head: head.line })
+        rows.push({ kind: "line", key: logLineKey(cont), line: cont, prev, head: head.line })
         prev = cont.timestamp ?? prev
       }
       if (long && (expanded || !open)) {
@@ -176,7 +160,7 @@ function buildRows(
       continue
     }
 
-    const key = lineKey(line)
+    const key = logLineKey(line)
     const startsRun = Boolean(lines[i + 1]?.cont)
     if (opts.dedupe && last && !lastHasRun && !startsRun && sameAs(last.line, line)) {
       last.repeat = (last.repeat ?? 1) + 1

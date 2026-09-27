@@ -13,7 +13,6 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { BarList, type BarListItem } from "@/components/bar-list"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
-import { StatusDot } from "@/components/status-dot"
 import { FindingList } from "@/components/finding-list"
 import { EmptyState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -23,25 +22,15 @@ import { EngineLog } from "@/components/proxy/engine-log"
 import { sitePath } from "@/components/proxy/site-verbs"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { certificateProduct, siteProduct } from "@/components/proxy/marks"
-import { SiteTLS } from "@/components/proxy/site-marks"
+import { RoutePath } from "@/components/proxy/route-path"
+import { ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
 import { foldProxyFindings } from "@/components/proxy/attention"
 
 /**
- * The section's landing page, read the way the host overview is read: what
- * the engine is, four figures, what needs doing, and the sites.
- *
- * The engine opens the page as the Overview's machine does — its logo on the
- * tile, its version, its facts — and every row after it is drawn as what it
- * is: a site as the engine serving it, a certificate as who signed it. A
- * page of grey words about nginx and Let's Encrypt that never drew either was
- * the flat page the 2026-09-23 pass on Docker and Databases replaced.
- *
- * It used to open on a "Reverse proxy" tile and a list that named every
- * exposed socket as needing attention. The engine is a fact, so it is in the
- * facts row; and the attention list is folded from the conditions somebody
- * would actually act on, with the same three-part shape the host's health
- * findings use. It ends on the engine's own log, read here rather than on
- * the Logs page, because this is where "why is the proxy unhappy" is asked.
+ * Readings first, then the engine and its commands. Routes own the wide column;
+ * findings and expiry share the rail so a list of warnings never pushes every route off screen.
+ * The engine's own log closes the page, read here rather than on the Logs page, because this is
+ * where "why is the proxy unhappy" is asked.
  */
 export default function ProxyOverviewPage() {
   const { status, loading, refresh: refreshStatus } = useProxy()
@@ -141,26 +130,7 @@ export default function ProxyOverviewPage() {
     <Page className="animate-rise">
       <PageContext title="Proxy & TLS" />
 
-      <EngineIdentity
-        status={status}
-        unit={engine.unit}
-        fetchedAt={engine.fetchedAt}
-        certbotVersion={certbot.data?.version}
-        renewSource={certbot.data ? (certbot.data.renewSource ?? null) : undefined}
-        actions={
-          admin &&
-          hasEngine && (
-            <EngineActions
-              status={status}
-              unitName={engine.name}
-              unit={engine.unit}
-              onChanged={refreshAll}
-            />
-          )
-        }
-      />
-
-      <StatGrid columns={4}>
+      <StatGrid columns={4} dense>
         <StatLink href="/proxy/sites" label="Sites">
           <StatTile
             className="h-full transition-colors group-hover:bg-row-hover"
@@ -246,38 +216,30 @@ export default function ProxyOverviewPage() {
         </StatLink>
       </StatGrid>
 
-      {/* A titled list on the page, not a box, for the reason the host
-          overview's health list is: the findings are the first thing to read
-          after the figures, and a frame around them opened the page with a
-          stack of containers. */}
-      <Panel plain>
-        <PanelHeader title="Needs attention" />
-        <PanelBody>
-          {!settled ? (
-            <div className="space-y-2">
-              <Skeleton className="h-4 w-56" />
-              <Skeleton className="h-4 w-40" />
-            </div>
-          ) : (
-            <div className="animate-rise">
-              <FindingList
-                findings={findings.map((f) => ({
-                  ...f,
-                  action: { label: `Open ${f.meta}`, onClick: () => router.push(f.href) },
-                }))}
-                emptyLabel="Certificates, renewal, sites, streams and exposed ports all within limits"
-              />
-            </div>
-          )}
-        </PanelBody>
-      </Panel>
+      <EngineIdentity
+        status={status}
+        unit={engine.unit}
+        fetchedAt={engine.fetchedAt}
+        certbotVersion={certbot.data?.version}
+        renewSource={certbot.data ? (certbot.data.renewSource ?? null) : undefined}
+        actions={
+          admin &&
+          hasEngine && (
+            <EngineActions
+              status={status}
+              unitName={engine.name}
+              unit={engine.unit}
+              onChanged={refreshAll}
+            />
+          )
+        }
+      />
 
-      {/* The list a reader leaves this page through, beside a reading that
-          stands still — the shape the host overview ends on. */}
-      <div className="grid items-start gap-6 lg:grid-cols-3 [&>*]:min-w-0">
-        <Panel plain className="lg:col-span-2">
+      {/* Route destinations need room for both ends; verdicts fit in the rail. */}
+      <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_20rem] [&>*]:min-w-0">
+        <Panel plain>
           <PanelHeader
-            title="Sites"
+            title="Routes"
             actions={
               hosts.length > 0 && (
                 <Link
@@ -317,66 +279,93 @@ export default function ProxyOverviewPage() {
                     key={`${vhost.kind}:${vhost.name}`}
                     href={sitePath(vhost.name)}
                     verb={`Open ${vhost.name}`}
-                    leading={<ProductLogo id={siteProduct(vhost)} size="sm" />}
-                    title={
-                      <span className="flex min-w-0 items-center gap-2">
-                        <StatusDot state={vhost.enabled ? "running" : "stopped"} />
-                        <span className="truncate">{vhost.name}</span>
-                      </span>
-                    }
-                    description={
-                      <span className="font-mono">
-                        {[vhost.serverNames.join(", "), vhost.upstreams[0]]
-                          .filter(Boolean)
-                          .join(" → ") || vhost.path}
-                      </span>
-                    }
-                    trailing={<SiteTLS vhost={vhost} />}
-                  />
+                    className="gap-4 p-4"
+                    leading={<ProductLogo id={siteProduct(vhost)} size="md" />}
+                    title={<span className="text-title">{vhost.name}</span>}
+                    description={vhost.kind === "nginx" ? "nginx site" : "Caddy route"}
+                    trailing={<ServingStatus vhost={vhost} />}
+                  >
+                    <RoutePath
+                      source={vhost.serverNames.join(", ") || "Default host"}
+                      destination={vhost.upstreams.join(", ") || "Served by configuration"}
+                    />
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-hint text-muted-foreground">
+                      <SiteTLS vhost={vhost} />
+                      <span className="font-mono">{vhost.listen.join(" · ")}</span>
+                    </div>
+                  </ChoiceRow>
                 ))}
               </ChoiceList>
             )}
           </PanelBody>
         </Panel>
 
-        {/* The four figures above count the certificates; none of them says
+        <div className="min-w-0 space-y-8">
+          {/* A titled list on the page, not a box, for the reason the host
+          overview's health list is: the findings are the first thing to read
+          after the figures, and a frame around them opened the page with a
+          stack of containers. */}
+          <Panel plain>
+            <PanelHeader title="Needs attention" />
+            <PanelBody>
+              {!settled ? (
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-56" />
+                  <Skeleton className="h-4 w-40" />
+                </div>
+              ) : (
+                <div className="animate-rise">
+                  <FindingList
+                    findings={findings.map((f) => ({
+                      ...f,
+                      action: { label: `Open ${f.meta}`, onClick: () => router.push(f.href) },
+                    }))}
+                    emptyLabel="Certificates, renewal, sites, streams and exposed ports all within limits"
+                  />
+                </div>
+              )}
+            </PanelBody>
+          </Panel>
+
+          {/* The four figures above count the certificates; none of them says
             which one runs out first, and that is the reading somebody opens a
             certificate list for. §7: the meter's track behind each name, the
             figure at the right, and a signal segment for the share that is
             wrong. */}
-        <Panel plain>
-          <PanelHeader
-            title="Certificate expiry"
-            actions={
-              certExpiry.length > 0 && (
-                <Link
-                  href="/proxy/certificates"
-                  className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
-                >
-                  All certificates <ArrowRight className="size-3" />
-                </Link>
-              )
-            }
-          />
-          <PanelBody flush>
-            {certs.loading ? (
-              <div className="space-y-3 py-1">
-                <Skeleton className="h-4 w-48" />
-                <Skeleton className="h-4 w-56" />
-              </div>
-            ) : (
-              <BarList
-                className="animate-rise"
-                items={certExpiry}
-                emptyLabel={
-                  status.certbot
-                    ? "Nothing issued yet — issue a certificate from the Certificates tab."
-                    : "No certificates were found on this host."
-                }
-              />
-            )}
-          </PanelBody>
-        </Panel>
+          <Panel plain>
+            <PanelHeader
+              title="Certificate expiry"
+              actions={
+                certExpiry.length > 0 && (
+                  <Link
+                    href="/proxy/certificates"
+                    className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
+                  >
+                    All certificates <ArrowRight className="size-3" />
+                  </Link>
+                )
+              }
+            />
+            <PanelBody flush>
+              {certs.loading ? (
+                <div className="space-y-3 py-1">
+                  <Skeleton className="h-4 w-48" />
+                  <Skeleton className="h-4 w-56" />
+                </div>
+              ) : (
+                <BarList
+                  className="animate-rise"
+                  items={certExpiry}
+                  emptyLabel={
+                    status.certbot
+                      ? "Nothing issued yet — issue a certificate from the Certificates tab."
+                      : "No certificates were found on this host."
+                  }
+                />
+              )}
+            </PanelBody>
+          </Panel>
+        </div>
       </div>
 
       <EngineLog status={status} />

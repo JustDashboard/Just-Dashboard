@@ -125,6 +125,23 @@ export function Address({ ip, className }: { ip: string; className?: string }) {
   )
 }
 
+/** A peer owns one column: its address and origin stay together at every width. */
+export function PeerIdentity({ ip, detail }: { ip: string; detail?: React.ReactNode }) {
+  const network = networkOf(ip)
+  return (
+    <div className="flex min-w-0 items-center gap-3">
+      <ProductLogo id={network.product} fallback={NETWORK_GLYPH[network.kind]} size="sm" />
+      <div className="min-w-0 space-y-1">
+        <span className="block font-mono text-body font-medium break-all">{ip}</span>
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-hint text-muted-foreground">
+          {network.label}
+          {detail}
+        </span>
+      </div>
+    </div>
+  )
+}
+
 /**
  * The programs holding a peer's sockets, each drawn as the product it is
  * where it is one — caddy, nginx, dockerd, postgres — and as its name where

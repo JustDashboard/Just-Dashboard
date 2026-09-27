@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
-import { Code, Plus, Trash, Warning } from "@/components/icons"
+import { ArrowRight, Code, FolderOpen, Globe, Plus, Trash, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -16,6 +16,8 @@ import type {
   SiteSpec,
 } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
+import { ProductLogo } from "@/components/product-logo"
 import { CodeEditor } from "@/components/code-editor"
 import { Field, FieldRow, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
@@ -28,7 +30,6 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 /**
@@ -295,7 +296,12 @@ function SiteFormBody({
       open={open}
       onOpenChange={(o) => !busy && onOpenChange(o)}
       width="xl"
-      title={editing ? `Edit ${editing}` : copyFrom ? `New site from ${copyFrom}` : "New site"}
+      title={
+        <>
+          <ProductLogo id="nginx-static" size="sm" />
+          {editing ? `Edit ${editing}` : copyFrom ? `New site from ${copyFrom}` : "New site"}
+        </>
+      }
       description={
         spec.domains.length > 0
           ? spec.domains.join(", ")
@@ -318,7 +324,7 @@ function SiteFormBody({
       }
     >
       <div className="min-h-0 flex-1 overflow-y-auto p-4 lg:w-[26rem] lg:shrink-0 lg:border-r lg:border-hairline">
-        <div className="space-y-5">
+        <div className="space-y-6">
           {editing && !managed && (
             <Notice tone="warning" icon={Warning} title="This file was written by hand">
               The form has read what it recognises. Saving replaces the file with what the form
@@ -346,26 +352,27 @@ function SiteFormBody({
           </Field>
           {spec.domains[0] && <DNSCheck domain={spec.domains[0]} />}
 
-          <Field label="What it serves">
-            <ToggleGroup
-              type="single"
-              value={spec.kind}
-              onValueChange={(v) => v && set("kind", v as SiteSpec["kind"])}
-              variant="outline"
-              size="sm"
-              className="w-full"
-            >
-              <ToggleGroupItem value="proxy" className="flex-1 text-hint">
-                An app
-              </ToggleGroupItem>
-              <ToggleGroupItem value="static" className="flex-1 text-hint">
-                Files
-              </ToggleGroupItem>
-              <ToggleGroupItem value="redirect" className="flex-1 text-hint">
-                A redirect
-              </ToggleGroupItem>
-            </ToggleGroup>
-          </Field>
+          <FormSection title="What it serves">
+            <ChoiceGrid columns={3} className="grid-cols-3">
+              {(
+                [
+                  { kind: "proxy", label: "An app", icon: Globe },
+                  { kind: "static", label: "Files", icon: FolderOpen },
+                  { kind: "redirect", label: "A redirect", icon: ArrowRight },
+                ] as const
+              ).map(({ kind, label, icon: Icon }) => (
+                <ChoiceCard
+                  key={kind}
+                  selected={spec.kind === kind}
+                  onClick={() => set("kind", kind)}
+                  className="min-h-20 justify-center"
+                >
+                  <Icon aria-hidden className="size-4 text-muted-foreground" />
+                  <span className="text-body font-medium">{label}</span>
+                </ChoiceCard>
+              ))}
+            </ChoiceGrid>
+          </FormSection>
 
           {spec.kind === "proxy" && (
             <Field
@@ -767,7 +774,7 @@ function ListField({
             ))}
           </div>
         )}
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           <Input
             id={id}
             value={draft}

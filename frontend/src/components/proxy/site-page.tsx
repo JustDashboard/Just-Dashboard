@@ -16,6 +16,7 @@ import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { VerbBar } from "@/components/verbs"
 import { siteProduct } from "@/components/proxy/marks"
+import { RoutePath } from "@/components/proxy/route-path"
 import { useProxy } from "@/components/proxy/proxy-context"
 import { ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
 import { siteLogPlan } from "@/components/proxy/site-log-plan"
@@ -137,8 +138,12 @@ function SiteBody({ name }: { name: string }) {
       />
 
       {/* What the site is, as the facts the Sites card carries, laid out as
-          the line the section's other destinations open on. */}
+          the line the section's other destinations open on; its two ends
+          under it in their own columns, as its card draws them, rather than
+          as two facts truncating each other. The route's own hairline is the
+          line's rule, so the line draws none of its own above it. */}
       <HostIdentity
+        className="border-b-0 pb-0"
         mark={siteProduct(vhost)}
         fallback={Globe}
         title={name}
@@ -151,24 +156,17 @@ function SiteBody({ name }: { name: string }) {
                 <span>written by hand</span>
               </>
             )}
-            {vhost.serverNames.length > 0 && (
-              <>
-                <FactDot />
-                <span className="min-w-0 truncate font-mono">{vhost.serverNames.join(", ")}</span>
-              </>
-            )}
-            {target && (
-              <>
-                <FactDot />
-                <span className="min-w-0 truncate font-mono">→ {target}</span>
-              </>
-            )}
             <FactDot />
             <SiteTLS vhost={vhost} />
             <FactDot />
             <ServingStatus vhost={vhost} />
           </>
         }
+      />
+      <RoutePath
+        source={vhost.serverNames.join(", ") || "Default host"}
+        destinationLabel={destinationLabel(spec)}
+        destination={target || "Served by configuration"}
       />
 
       {nginx && !spec && read.error ? (
@@ -257,6 +255,18 @@ function SiteBody({ name }: { name: string }) {
       {dialog}
     </Page>
   )
+}
+
+/** What the far end of the route is, in the form's words for each kind of site. */
+function destinationLabel(spec: SiteSpec | undefined) {
+  switch (spec?.kind) {
+    case "static":
+      return "Directory"
+    case "redirect":
+      return "Redirect to"
+    default:
+      return "Upstream"
+  }
 }
 
 /** What the site does, in the form's words, or where a Caddy site lives. */

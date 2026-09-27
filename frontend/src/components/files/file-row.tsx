@@ -1,18 +1,18 @@
 "use client"
 
-import { Download, Eye, MoreHorizontal, Pencil } from "@/components/icons"
+import { useState } from "react"
+import { Download, Eye, Pencil } from "@/components/icons"
 import { downloadUrl } from "@/lib/api"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileEntry } from "@/lib/types"
+import { FileSelection } from "@/components/files/file-selection"
 import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { Checkbox } from "@/components/ui/checkbox"
+import { useNearViewport } from "@/hooks/use-near-viewport"
 import { IconAction, RowActions } from "@/components/icon-action"
 import { TableCell, TableRow } from "@/components/ui/table"
-import { DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Thumbnail } from "@/components/files/thumbnail"
-import { FileActionsMenu, type FileActions, type RowCaps } from "@/components/files/file-actions"
+import { FileActionsButton, type FileActions, type RowCaps } from "@/components/files/file-actions"
 import { mediaKind } from "@/components/files/media"
 import { useDropTarget, type DropMode } from "@/components/files/dnd"
 
@@ -76,6 +76,10 @@ export function FileRow({
   onDropFiles?: (transfer: DataTransfer, dir: string) => void
   actions: FileActions
 }) {
+  const [viewportRef, near] = useNearViewport<HTMLTableRowElement>()
+  const [focusedControls, setFocusedControls] = useState<boolean | null>(null)
+  // A viewport update must not replace the button the keyboard is on.
+  const fullControls = focusedControls ?? (near || active)
   const drop = useDropTarget({
     dir: entry.isDir ? entry.path : null,
     onDropPaths,
@@ -93,6 +97,15 @@ export function FileRow({
 
   return (
     <TableRow
+      ref={viewportRef}
+      onFocusCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node)) {
+          setFocusedControls(!!(near || active))
+        }
+      }}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node)) setFocusedControls(null)
+      }}
       data-entry-path={entry.path}
       data-state={selected ? "selected" : undefined}
       draggable={caps.write && !!onDragStart}
@@ -120,7 +133,7 @@ export function FileRow({
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => e.stopPropagation()}
       >
-        <Checkbox
+        <FileSelection
           checked={selected}
           onCheckedChange={(v) => onToggle(v === true)}
           aria-label={`Select ${entry.name}`}
@@ -128,7 +141,11 @@ export function FileRow({
       </TableCell>
       <TableCell className="py-1.5">
         <div className="flex max-w-[30rem] min-w-0 items-center gap-2.5">
-          <Thumbnail entry={entry} size="row" />
+          {near || active ? (
+            <Thumbnail entry={entry} size="row" />
+          ) : (
+            <span aria-hidden className="size-7 shrink-0" />
+          )}
           <div className="min-w-0">
             <button
               className="flex max-w-full items-center text-left text-body hover:underline"
@@ -168,39 +185,47 @@ export function FileRow({
         <RowActions className="justify-end">
           {!entry.isDir && (
             <>
-              {media ? (
-                <IconAction label="View" onClick={actions.onView}>
-                  <Eye />
+              {fullControls ? (
+                media ? (
+                  <IconAction label="View" onClick={actions.onView}>
+                    <Eye />
+                  </IconAction>
+                ) : (
+                  <IconAction label={caps.write ? "Edit" : "Open"} onClick={actions.onEdit}>
+                    <Pencil />
+                  </IconAction>
+                )
+              ) : (
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label={media ? "View" : caps.write ? "Edit" : "Open"}
+                  onClick={media ? actions.onView : actions.onEdit}
+                >
+                  {media ? <Eye className="size-3.5" /> : <Pencil className="size-3.5" />}
+                </Button>
+              )}
+              {fullControls ? (
+                <IconAction label="Download" asChild>
+                  <a href={downloadUrl("/files/download", { path: entry.path })} download>
+                    <Download />
+                  </a>
                 </IconAction>
               ) : (
-                <IconAction label={caps.write ? "Edit" : "Open"} onClick={actions.onEdit}>
-                  <Pencil />
-                </IconAction>
+                <Button size="icon-sm" variant="ghost" aria-label="Download" asChild>
+                  <a href={downloadUrl("/files/download", { path: entry.path })} download>
+                    <Download className="size-3.5" />
+                  </a>
+                </Button>
               )}
-              <IconAction label="Download" asChild>
-                <a href={downloadUrl("/files/download", { path: entry.path })} download>
-                  <Download />
-                </a>
-              </IconAction>
             </>
           )}
-          <FileActionsMenu entry={entry} caps={caps} actions={actions}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    aria-label="More actions"
-                    className="size-7 p-0 text-muted-foreground hover:text-foreground"
-                  >
-                    <MoreHorizontal className="size-3.5" />
-                  </Button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent>Rename, move, copy, permissions, delete</TooltipContent>
-            </Tooltip>
-          </FileActionsMenu>
+          <FileActionsButton
+            entry={entry}
+            caps={caps}
+            actions={actions}
+            className="size-7 p-0 text-muted-foreground hover:text-foreground"
+          />
         </RowActions>
       </TableCell>
     </TableRow>

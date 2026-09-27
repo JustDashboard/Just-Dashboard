@@ -5,14 +5,17 @@ import { Servers } from "@/components/icons"
 import { get } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { bytes, rate } from "@/lib/format"
-import type { DirEntry, SensorReading, Snapshot } from "@/lib/types"
+import type { DirEntry, NetStats, SensorReading, Snapshot } from "@/lib/types"
+import { useViewState } from "@/lib/view-state"
 import type { Tone } from "@/components/tone"
-import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
+import { Panel, PanelBody, PanelHeader, PanelToolbar, Well } from "@/components/panel"
 import { Meter, utilisationTone } from "@/components/meter"
 import { EmptyState } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
+  stickyTableHeader,
   Table,
   TableBody,
   TableCell,
@@ -265,23 +268,53 @@ export function MountsPanel({ snapshot }: { snapshot: Snapshot }) {
   )
 }
 
+/** A device Docker made for its containers, rather than one carrying the host's own traffic. */
+const VIRTUAL: NetStats["kind"][] = ["virtual", "bridge"]
+
 export function InterfacesPanel({ snapshot }: { snapshot: Snapshot }) {
+  const [scope, setScope] = useViewState<"real" | "all">("metrics.interfaces.scope", "real")
+  // Docker makes a veth pair per container and a bridge per network, so a host
+  // running a dozen containers drew thirty rows here, the page's longest block
+  // by far, with the uplink somewhere in the middle. The Network page's answer:
+  // the real devices by default, everything one press away.
+  const interfaces =
+    scope === "all" ? snapshot.net : snapshot.net.filter((n) => !VIRTUAL.includes(n.kind))
+
   return (
     <Panel>
       <PanelHeader
         title="Interfaces"
         actions={
           <span className="numeric text-hint text-muted-foreground">
-            {snapshot.net.filter((n) => n.isUp).length} up
+            {interfaces.filter((n) => n.isUp).length} up
           </span>
         }
       />
+      <PanelToolbar>
+        <ToggleGroup
+          type="single"
+          value={scope}
+          onValueChange={(next) => next && setScope(next as "real" | "all")}
+          variant="outline"
+          size="sm"
+          aria-label="Which interfaces to show"
+        >
+          <ToggleGroupItem value="real" className="px-2.5 text-hint">
+            Real devices
+          </ToggleGroupItem>
+          <ToggleGroupItem value="all" className="px-2.5 text-hint">
+            Everything {snapshot.net.length}
+          </ToggleGroupItem>
+        </ToggleGroup>
+      </PanelToolbar>
       {/* The bleed is plain-only: inside this panel's frame the outer columns
           take the gutter from their own cell padding instead, which lands them
           in the title's column either way (§2). */}
       <PanelBody flush className="group-data-[plain]/panel:-mx-4">
-        <Table>
-          <TableHeader>
+        {/* Capped so "Everything" scrolls inside the frame rather than
+            stretching the Hardware row far past the filesystems beside it. */}
+        <Table containerClassName="max-h-[26rem]">
+          <TableHeader className={stickyTableHeader}>
             <TableRow>
               <TableHead>Interface</TableHead>
               <TableHead className="text-right">In</TableHead>
@@ -293,7 +326,7 @@ export function InterfacesPanel({ snapshot }: { snapshot: Snapshot }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {snapshot.net.map((iface) => (
+            {interfaces.map((iface) => (
               <TableRow key={iface.interface}>
                 <TableCell>
                   <div className="flex items-center gap-2">
@@ -336,7 +369,7 @@ export function InterfacesPanel({ snapshot }: { snapshot: Snapshot }) {
                 </TableCell>
               </TableRow>
             ))}
-            {snapshot.net.length === 0 && (
+            {interfaces.length === 0 && (
               <TableRow>
                 <TableCell colSpan={5} className="p-0">
                   <EmptyState title="No interfaces reported" icon={Servers} />

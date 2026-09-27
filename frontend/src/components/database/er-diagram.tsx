@@ -911,12 +911,11 @@ function Canvas({
                   variant={BackgroundVariant.Dots}
                   gap={24}
                   size={1}
-                  // A grid mark is a ruler, not a reading: at the border's
-                  // own strength the dots were the brightest thing on the
-                  // canvas and the tables sat behind them. The hairline
-                  // token is the border at seventy percent — visible when
-                  // looked for, gone when the tables are.
-                  className="[&_circle]:fill-hairline"
+                  // A prop rather than a class: React Flow's own
+                  // `.react-flow__background-pattern.dots` fill outranks a
+                  // utility on the circle, which left the dots at its default
+                  // grey — the brightest thing on the canvas.
+                  color="var(--grid-dot)"
                 />
               )}
               {doc.minimap && (

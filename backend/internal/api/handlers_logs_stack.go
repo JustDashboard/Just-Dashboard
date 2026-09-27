@@ -167,10 +167,12 @@ func (s *Server) stackSources(ctx context.Context, containers []dockerx.Containe
 }
 
 // containerImage is the reference a container's image was created from. The
-// container list reports a moved tag's image by its bare id, which says
-// nothing about what runs in it; the container's own config still has the
-// name. Answers are kept by image id, so a list of forty containers inspects
-// each such image once rather than on every poll.
+// container list already trades a moved tag's `sha256:` id for the name in the
+// container's own config, but passes an id printed bare — twelve or sixty-four
+// hex digits, no prefix — straight through, and that says nothing about what
+// runs in it either. Those are inspected here, and the answers kept by image
+// id, so a list of forty containers inspects each such image once rather than
+// on every poll.
 func (s *Server) containerImage(ctx context.Context, c dockerx.Container) string {
 	if !bareImageID(c.Image) {
 		return c.Image

@@ -9,6 +9,16 @@
       "changes": [
         {
           "kind": "fixed",
+          "text": "Boards save, images included",
+          "detail": "Every board save was refused with \"board revision and scene are required; scene must contain elements, appState, and files\": the editor wrote the scene in Excalidraw's database format, which leaves out the images for a separate store this server does not have. It now saves Excalidraw's file format, so images are kept in the board. Opening a board no longer saves it, so two people looking at one board no longer put each other into a conflict. A blank name is not sent and comes back on leaving the field, Ctrl+S saves the board instead of downloading a file, a board deleted in another tab stops autosaving and says so, a scene over 16 MiB is refused as too large rather than malformed, and when a save cannot go through, Back asks before leaving instead of doing nothing. Deleting asks for the name the server has, so an untrimmed or unsaved name no longer makes the confirmation impossible."
+        },
+        {
+          "kind": "fixed",
+          "text": "A container is drawn as what it runs after its image is pulled again",
+          "detail": "Pulling a newer image under the same tag — postgres:16-alpine, say — left every container started from the old one listed by a bare sha256 id, so the Docker page, the Overview, volumes and backups drew a Postgres database as Docker's whale, and database discovery skipped it. The container list now names it by the image it was created from, as its own page already did. A deployment's container, which is created from an image id and has no name to recover, is drawn as what its image's labels say it is — n8n, Bun, Caddy — where they say."
+        },
+        {
+          "kind": "fixed",
           "text": "Start brings back a deployment whose containers went down on their own",
           "detail": "A deployment is drawn as stopped when every container of its live release is down, which also happens without anyone pressing Stop: a Docker daemon restart that does not bring the containers back, a crash, or a docker stop. Start was offered and then refused with \"deployment runtime is not stopped\", because only a Stop run marked the release stopped, and Restart was hidden. Start now accepts a live release whose containers Docker reports all down, and still refuses one that is running."
         },
@@ -110,7 +120,7 @@
         {
           "kind": "added",
           "text": "Pull requests, their checks and the repository's issues, on the Git page and on a project's Overview",
-          "detail": "A repository's card on the Git page carries its open pull requests — author, title, branches, how the checks stand, where its preview is — with Merge, Test this pull request and Open on GitHub on each row, and a Pull requests chip narrows the list to the checkouts that have one. The workspace's GitHub tab lists the repository's open issues under the pull requests, with a comment box, and a pull request's preview reads its check runs against the exact head being looked at, each with a link to its details. A project deploying a GitHub repository shows the same pull requests on its Overview, with the preview built from each, and its card on the Projects page says how many are open. Merging from either page pins the commit that was read, so a push in between is refused rather than merged unseen."
+          "detail": "A repository's card on the Git page carries its first open pull request — author, title, how the checks stand, where its preview is — with Merge, Test this pull request and Open on GitHub on it and a count of the rest beside it, and a Pull requests chip narrows the list to the checkouts that have one. The workspace's GitHub tab lists the repository's open issues under the pull requests, with a comment box, and a pull request's preview reads its check runs against the exact head being looked at, each with a link to its details. A project deploying a GitHub repository shows the same pull requests on its Overview, with the preview built from each, and its card on the Projects page says how many are open. Merging from either page pins the commit that was read, so a push in between is refused rather than merged unseen."
         },
         {
           "kind": "changed",
@@ -135,7 +145,7 @@
         {
           "kind": "changed",
           "text": "The Git page shelves its repositories by account, as cards",
-          "detail": "The four tiles are gone; every figure they carried was already on a filter chip, which also narrows the list. The checkouts sit on one shelf per account their remote belongs to, drawn as the account's own picture, three or four cards to a row; each card carries the branch, where it lives, the last commit with its author's colour, how far it stands from its upstream and the shape of its working tree, worst first on the shelf and the shelf with something wrong on it first. A repository checked out twice draws each pull request once. Branches, commits and pull requests are drawn with real git glyphs, and a diff numbers its lines in two gutters that stay put while a long line scrolls."
+          "detail": "The four tiles are gone; every figure they carried was already on a filter chip, which also narrows the list. The checkouts sit on one shelf per account their remote belongs to, drawn as the account's own picture, three or four cards to a row; each card carries the branch, where it lives, the last commit with its author's colour, how far it stands from its upstream and the shape of its working tree, worst first on the shelf and the shelf with something wrong on it first. Every card is the same height, with or without a pull request on it. A repository checked out twice draws each pull request once. Branches, commits and pull requests are drawn with real git glyphs, and a diff numbers its lines in two gutters that stay put while a long line scrolls."
         },
         {
           "kind": "added",

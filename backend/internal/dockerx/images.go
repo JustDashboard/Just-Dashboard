@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
@@ -77,6 +78,9 @@ func (c *Client) PullImage(ctx context.Context, ref string, out chan<- PullProgr
 	if err != nil {
 		return err
 	}
+	c.forgetRegistryDigest(ref)
+	defer c.forgetRegistryDigest(ref)
+	defer c.forgetDiskUsage()
 	rc, err := cli.ImagePull(ctx, ref, image.PullOptions{})
 	if err != nil {
 		return err
@@ -113,11 +117,11 @@ func (c *Client) RemoveImage(ctx context.Context, id string, force, pruneChildre
 	if err != nil {
 		return nil, err
 	}
+	defer c.forgetDiskUsage()
 	res, err := cli.ImageRemove(ctx, id, image.RemoveOptions{Force: force, PruneChildren: pruneChildren})
 	if err != nil {
 		return nil, err
 	}
-	defer c.forgetDiskUsage()
 	out := []string{}
 	for _, r := range res {
 		if r.Deleted != "" {
@@ -153,11 +157,11 @@ func (c *Client) PruneImages(ctx context.Context, all bool) (PruneReport, error)
 	}
 	args := filters.NewArgs()
 	args.Add("dangling", boolStr(!all))
+	defer c.forgetDiskUsage()
 	rep, err := cli.ImagesPrune(ctx, args)
 	if err != nil {
 		return PruneReport{}, err
 	}
-	defer c.forgetDiskUsage()
 	out := PruneReport{Kind: "images", SpaceReclaimed: rep.SpaceReclaimed, Items: []string{}}
 	for _, d := range rep.ImagesDeleted {
 		if d.Deleted != "" {
@@ -275,11 +279,11 @@ func (c *Client) PruneVolumes(ctx context.Context) (PruneReport, error) {
 	// considers anonymous ones, which is rarely what the operator meant.
 	args := filters.NewArgs()
 	args.Add("all", "true")
+	defer c.forgetDiskUsage()
 	rep, err := cli.VolumesPrune(ctx, args)
 	if err != nil {
 		return PruneReport{}, err
 	}
-	defer c.forgetDiskUsage()
 	items := rep.VolumesDeleted
 	if items == nil {
 		items = []string{}
@@ -325,7 +329,7 @@ func (c *Client) ListNetworks(ctx context.Context) ([]Network, error) {
 	// with the container listing, the same way its mounts do for the volumes
 	// view. An inspect per network would be one round trip per row.
 	members := map[string][]string{}
-	if containers, err := c.ListContainers(ctx, true); err == nil {
+	if containers, err := c.listContainerSummaries(ctx, container.ListOptions{All: true}); err == nil {
 		for _, ct := range containers {
 			for _, name := range ct.Networks {
 				members[name] = append(members[name], ct.Name)

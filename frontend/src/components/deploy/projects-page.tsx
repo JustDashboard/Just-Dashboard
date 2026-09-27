@@ -742,8 +742,8 @@ function InProgressPanel({
                   roomy ? (
                     <>
                       {path}
-                      <span className="w-28 min-w-0 truncate">
-                        <TextShimmer className="text-xs font-medium">{stage}</TextShimmer>
+                      <span className="w-28 min-w-0 truncate text-xs">
+                        <TextShimmer className="font-medium">{stage}</TextShimmer>
                       </span>
                       {elapsed}
                     </>

@@ -1697,11 +1697,13 @@ test("the storage browser draws a directory the way the file manager does", asyn
 })
 
 /**
- * The Storage tab named every mount and showed the contents of none.
+ * The Storage tab named every mount and showed the contents of none, and then
+ * showed them only once a row was expanded.
  *
- * A row opens onto what is in it. A tmpfs row does not, and must not grow a
- * control that could only fail: it is memory in the container's namespace and
- * there is nothing on this filesystem to list.
+ * The one mount there is to look in is open with the tab, and with nothing to
+ * choose between its row is not a control. A tmpfs row never grows one either:
+ * it is memory in the container's namespace and there is nothing on this
+ * filesystem to list.
  */
 test("the storage tab opens onto what is in a mount", async ({ page }) => {
   await mockDocker(page)
@@ -1710,12 +1712,262 @@ test("the storage tab opens onto what is in a mount", async ({ page }) => {
   await page.goto("/docker/containers/1111111111111111")
   await page.getByRole("tab", { name: "Storage" }).click()
 
-  const volume = page.getByRole("button").filter({ hasText: "/usr/share/nginx/html" })
-  await expect(volume).toHaveAttribute("aria-expanded", "false")
-  await volume.click()
   await expect(page.getByRole("button", { name: "postgresql.conf" })).toBeVisible()
+  const mounts = page.getByRole("list", { name: "Mounts" })
+  await expect(mounts.getByText("/usr/share/nginx/html")).toBeVisible()
+  await expect(mounts.getByRole("button", { pressed: true })).toHaveCount(0)
+  await expect(mounts.getByRole("button").filter({ hasText: "/usr/share/nginx/html" })).toHaveCount(
+    0,
+  )
 
   // Temporary memory names itself and offers nothing to open.
   await expect(page.getByRole("button").filter({ hasText: "Temporary memory" })).toHaveCount(0)
   await expect(page.getByText("Temporary memory")).toBeVisible()
 })
+
+/**
+ * With two mounts to look in, the rows choose which one the listing shows.
+ */
+test("the storage tab switches the listing between mounts", async ({ page }) => {
+  await mockDocker(page)
+  await mockVolumeFiles(page)
+  await page.route("**/api/v1/docker/containers/1111111111111111", (route) =>
+    json(route, {
+      ...detail,
+      mounts: [
+        ...detail.mounts,
+        {
+          type: "bind",
+          name: "",
+          source: "/srv/site/config",
+          destination: "/etc/nginx/conf.d",
+          mode: "",
+          rw: false,
+        },
+      ],
+    }),
+  )
+  await page.route("**/api/v1/files/list?*", (route, request) =>
+    new URL(request.url()).searchParams.get("path") === "/srv/site/config"
+      ? json(route, { path: "/srv/site/config", entries: [entry("default.conf", false, 512)] })
+      : route.fallback(),
+  )
+  await page.goto("/docker/containers/1111111111111111")
+  await page.getByRole("tab", { name: "Storage" }).click()
+
+  const mounts = page.getByRole("list", { name: "Mounts" })
+  const volume = mounts.getByRole("button").filter({ hasText: "/usr/share/nginx/html" })
+  const bind = mounts.getByRole("button").filter({ hasText: "/etc/nginx/conf.d" })
+  await expect(volume).toHaveAttribute("aria-pressed", "true")
+  await expect(page.getByRole("button", { name: "postgresql.conf" })).toBeVisible()
+
+  await bind.click()
+  await expect(bind).toHaveAttribute("aria-pressed", "true")
+  await expect(page.getByRole("button", { name: "default.conf" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "postgresql.conf" })).toHaveCount(0)
+  await expect(mounts.getByText("read-only")).toBeVisible()
+})
+
+function usageSample(second: number, received: number) {
+  return {
+    id: detail.id,
+    name: detail.name,
+    ts: new Date(Date.now() - 4000 + second * 1000).toISOString(),
+    cpuPercent: 150,
+    cpuReady: true,
+    cpuTotal: 1000000 + second * 1000,
+    systemCpu: 100000000 + second * 8000,
+    hostCpus: 8,
+    onlineCpus: 8,
+    cpuLimit: 2,
+    cpuPeriods: second * 10,
+    cpuThrottledPeriods: second,
+    memUsage: 100 * 1024 * 1024,
+    memRaw: 128 * 1024 * 1024,
+    memCache: 28 * 1024 * 1024,
+    memRss: 80 * 1024 * 1024,
+    memSwap: null,
+    memLimit: 512 * 1024 * 1024,
+    memLimited: true,
+    memPercent: 19.53,
+    memHostPercent: 1.22,
+    pids: 12,
+    pidsLimit: 256,
+    netRx: received,
+    netTx: received / 2,
+    networkAvailable: true,
+    blockAvailable: true,
+    blockRead: received * 2,
+    blockWrite: received * 3,
+    networks: {
+      eth0: {
+        rxBytes: received,
+        txBytes: received / 2,
+        rxPackets: received / 100,
+        txPackets: received / 200,
+        rxErrors: 0,
+        txErrors: 2,
+        rxDropped: 1,
+        txDropped: 0,
+      },
+    },
+  }
+}
+
+async function mockUsage(
+  page: Page,
+  options: { host?: boolean; stopped?: boolean; disabled?: boolean; idle?: boolean } = {},
+) {
+  await mockDocker(page)
+  await page.route(`**/api/v1/docker/containers/${detail.id}`, (route) =>
+    json(route, {
+      ...detail,
+      state: options.stopped ? "exited" : "running",
+      networkMode: options.host ? "host" : "bridge",
+    }),
+  )
+  await page.route(`**/api/v1/docker/containers/${detail.id}/anomalies`, (route) =>
+    json(route, { anomalies: [] }),
+  )
+  await page.route("**/api/v1/system/metrics/events**", (route) => json(route, []))
+  await page.route(`**/api/v1/docker/containers/${detail.id}/stats/history**`, (route) => {
+    if (options.disabled)
+      return route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: { code: "metrics_history_disabled", message: "History disabled" },
+        }),
+      })
+    return json(route, {
+      name: "web",
+      from: now,
+      to: now,
+      stepSeconds: 150,
+      sampleIntervalSeconds: 15,
+      retentionSeconds: 604800,
+      earliest: now,
+      points: Array.from({ length: 24 }, (_, i) => ({
+        ts: new Date(Date.now() - (24 - i) * 150000).toISOString(),
+        samples: 10,
+        cpu: 20 + Math.sin(i) * 10,
+        cpuPeak: 70,
+        mem: 20,
+        memPeak: 25,
+        memBytes: (100 + Math.sin(i) * 8) * 1024 * 1024,
+        memBytesPeak: 140 * 1024 * 1024,
+        memLimit: 512 * 1024 * 1024,
+        pids: 12,
+        netRx: options.host ? null : options.idle ? 0 : 1024 * (20 + i),
+        netTx: options.host ? null : options.idle ? 0 : 1024 * (10 + i),
+        blockRead: 4096,
+        blockWrite: 8192,
+      })),
+    })
+  })
+  let socket: import("@playwright/test").WebSocketRoute | undefined
+  let connections = 0
+  await page.routeWebSocket(
+    new RegExp(`/api/v1/docker/containers/${detail.id}/stats/stream`),
+    (ws) => {
+      socket = ws
+      connections++
+    },
+  )
+  await page.goto(`/docker/containers/${detail.id}?tab=usage`)
+  const sampleTime = Date.now() - 4000
+  const send = async (second: number, received: number) => {
+    await expect.poll(() => !!socket).toBe(true)
+    const data = usageSample(second, received)
+    data.ts = new Date(sampleTime + second * 1000).toISOString()
+    if (options.host) {
+      data.networks = {} as typeof data.networks
+      data.networkAvailable = false
+    }
+    socket!.send(JSON.stringify({ type: "stats", data }))
+  }
+  return { send, connections: () => connections }
+}
+
+test("usage separates live rates from totals, waits for intervals, and keeps idle history", async ({
+  page,
+}) => {
+  const feed = await mockUsage(page, { idle: true })
+  const live = page.getByTestId("container-live-usage")
+  const received = live.locator('[data-slot="stat-tile"]').filter({ hasText: "Network received" })
+  await feed.send(0, 1024 * 1024)
+  await expect(received).toContainText("—")
+  await expect(received).toContainText("1.0 MB total received")
+  await feed.send(2, 1024 * 1024 + 4096)
+  await expect(received).toContainText("KB/s")
+  await expect(live.getByRole("cell", { name: "eth0", exact: true })).toBeVisible()
+  await expect(live.getByText("150.0%", { exact: true })).toBeVisible()
+  await expect(live.getByText("28.0 MB", { exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Network throughput", exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Pause readings" }).click()
+  await expect(live.getByText("Paused", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Resume readings" }).click()
+  await expect.poll(feed.connections).toBe(2)
+  await feed.send(4, 2000000)
+  await expect(received).toContainText("—")
+})
+
+test("usage stays live with history disabled and removes stale figures", async ({ page }) => {
+  await page.clock.install()
+  const feed = await mockUsage(page, { disabled: true })
+  await feed.send(0, 1000)
+  await feed.send(2, 3000)
+  const live = page.getByTestId("container-live-usage")
+  await expect(live.getByText("Live", { exact: true })).toBeVisible()
+  await expect(page.getByText(/History is not being recorded/)).toBeVisible()
+  await page.clock.fastForward(12000)
+  await expect(live.getByText("Readings stale", { exact: true })).toBeVisible()
+  await expect(live.getByText("150.0%", { exact: true })).toHaveCount(0)
+})
+
+test("host networking explains unavailable attribution and stopped containers keep history", async ({
+  page,
+}) => {
+  const feed = await mockUsage(page, { host: true })
+  await feed.send(0, 0)
+  await expect(page.getByRole("link", { name: "View host network usage" })).toHaveAttribute(
+    "href",
+    "/metrics",
+  )
+  await expect(page.getByRole("heading", { name: "Network throughput", exact: true })).toHaveCount(
+    0,
+  )
+  const stopped = await mockUsage(page, { stopped: true })
+  await expect(page.getByText("Container exited", { exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Usage history", exact: true })).toBeVisible()
+  expect(stopped.connections()).toBe(0)
+})
+
+for (const width of [1280, 1720, 390]) {
+  test(`usage has readable measurements without page overflow at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 })
+    const feed = await mockUsage(page)
+    await feed.send(0, 1024 * 1024)
+    await feed.send(2, 1024 * 1024 + 4096)
+    await expect(
+      page.getByRole("heading", { name: "Network interfaces", exact: true }),
+    ).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Usage history", exact: true })).toBeVisible()
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true)
+    await page.screenshot({
+      path: testInfo.outputPath(`container-usage-${width}.png`),
+      fullPage: true,
+    })
+    await page.getByRole("tabpanel", { name: "Usage", exact: true }).evaluate((element) => {
+      element.scrollTop = element.scrollHeight
+    })
+    await page.screenshot({
+      path: testInfo.outputPath(`container-history-${width}.png`),
+      fullPage: true,
+    })
+  })
+}

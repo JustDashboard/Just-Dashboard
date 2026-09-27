@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { NetworkDevice } from "@/components/icons"
+import { NetworkDevice, Servers } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get } from "@/lib/api"
 import type { Connections } from "@/lib/types"
@@ -13,11 +13,12 @@ import { PageContext, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel } from "@/components/state"
-import { Reach } from "@/components/security/reach"
-import { Address, ProcessList } from "@/components/security/marks"
+import { PeerIdentity, ProcessList } from "@/components/security/marks"
 import { addressVerbs, blockAddress } from "@/components/security/address-verbs"
 import { AreaFindings } from "@/components/security/posture-panel"
 import { useSecurity } from "@/components/security/security-context"
+import { ProductLogo, processProduct } from "@/components/product-logo"
+import { Meter } from "@/components/meter"
 import { VerbActions } from "@/components/verbs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
@@ -66,6 +67,7 @@ export function ConnectionsPanel() {
             .includes(q)),
     )
   }, [data?.peers, scope, query])
+  const most = Math.max(1, ...(data?.peers ?? []).map((p) => p.count))
   const fromInternet = (data?.peers ?? []).filter((p) => !p.private).length
 
   const header = <PageContext eyebrow="Security" title="Connections" />
@@ -134,7 +136,14 @@ export function ConnectionsPanel() {
       <AreaFindings posture={posture} area="ports" onFix={applyFix} />
 
       <Panel>
-        <PanelHeader title="Live connections" />
+        <PanelHeader
+          title="Live connections"
+          actions={
+            <span className="numeric text-hint text-muted-foreground">
+              {peers.length} addresses · refreshes every 10s
+            </span>
+          }
+        />
         {/* One strip, not two. The filter and the search that change which
             rows are shown belong on the same line as each other. */}
         <PanelToolbar>
@@ -178,40 +187,57 @@ export function ConnectionsPanel() {
             )
           ) : (
             <div className="min-w-0 group-data-[plain]/panel:-mx-4">
-              <Table containerClassName="max-h-[calc(100svh-28rem)]">
+              <Table containerClassName="max-h-[36rem]">
                 <TableHeader className={stickyTableHeader}>
                   <TableRow>
                     <TableHead>Remote address</TableHead>
-                    <TableHead>Origin</TableHead>
-                    <TableHead>Sockets</TableHead>
-                    <TableHead className="hidden sm:table-cell">Reaching</TableHead>
-                    <TableHead className="hidden w-full md:table-cell">Process</TableHead>
-                    <TableHead className="w-px" />
+                    <TableHead className="w-full">Destination</TableHead>
+                    <TableHead className="text-right">Sockets</TableHead>
+                    <TableHead className="w-px">
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {peers.map((peer) => (
                     <TableRow key={peer.address} className="group">
-                      <TableCell>
-                        <Address ip={peer.address} />
+                      <TableCell className="py-4">
+                        <PeerIdentity ip={peer.address} />
+                      </TableCell>
+                      <TableCell className="whitespace-normal">
+                        <div className="flex items-center gap-3">
+                          <ProductLogo
+                            id={processProduct(peer.processes[0] ?? "")}
+                            fallback={Servers}
+                            size="sm"
+                            className="hidden sm:flex"
+                          />
+                          <div className="space-y-1">
+                            <span className="text-body font-medium">
+                              {peer.processes[0] || peer.service || "Unknown process"}
+                            </span>
+                            <span className="block font-mono text-hint text-muted-foreground">
+                              {peer.ports.join(", ") || "—"}
+                              {peer.service && ` · ${peer.service}`}
+                            </span>
+                            {peer.processes.length > 1 && (
+                              <ProcessList names={peer.processes.slice(1)} />
+                            )}
+                          </div>
+                        </div>
                       </TableCell>
                       <TableCell>
-                        <Reach scope={peer.private ? "private" : "internet"} />
-                      </TableCell>
-                      <TableCell className="numeric">
-                        {peer.established}
-                        {peer.count !== peer.established && (
-                          <span className="text-muted-foreground"> / {peer.count}</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="hidden sm:table-cell">
-                        <span className="font-mono">{peer.ports.slice(0, 4).join(", ")}</span>
-                        {peer.service && (
-                          <span className="ml-1.5 text-muted-foreground">{peer.service}</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="hidden text-muted-foreground md:table-cell">
-                        <ProcessList names={peer.processes} />
+                        <div className="ml-auto w-16 space-y-2 text-right">
+                          <span className="numeric font-medium">{peer.count}</span>
+                          <Meter
+                            value={(peer.count / most) * 100}
+                            size="thin"
+                            label={`${peer.count} sockets`}
+                          />
+                          <span className="block text-hint text-muted-foreground">
+                            {peer.established} active
+                          </span>
+                        </div>
                       </TableCell>
                       <TableCell>
                         <VerbActions
@@ -236,8 +262,8 @@ export function ConnectionsPanel() {
           )}
         </PanelBody>
         <PanelFooter className="text-hint text-muted-foreground">
-          Most of a healthy host&rsquo;s connections are private, which is what makes the public
-          ones worth looking at.
+          {peers.length} of {data?.peers.length ?? 0} addresses · grouped by remote address · socket
+          counts include connections still opening or closing.
         </PanelFooter>
       </Panel>
     </>

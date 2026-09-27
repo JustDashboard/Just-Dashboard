@@ -70,7 +70,10 @@ export function SettingPicture({
           <li className="min-w-0">
             <ul className="flex flex-col gap-5 lg:items-end lg:gap-4">
               {start.map((node, index) => (
-                <li key={index} className="min-w-0">
+                // Set to the end, a node is only as wide as its words, and
+                // without a ceiling a word wider than the column pushed it
+                // out past the frame's left edge, which cut it off.
+                <li key={index} className="max-w-full min-w-0">
                   {node}
                 </li>
               ))}

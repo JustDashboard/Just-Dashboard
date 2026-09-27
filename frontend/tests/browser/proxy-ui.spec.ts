@@ -167,6 +167,7 @@ async function json(route: Route, body: unknown) {
 }
 
 async function mockProxy(page: Page, { included }: { included: boolean }) {
+  await page.routeWebSocket("**/api/v1/system/stream**", () => {})
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
     switch (path) {
@@ -372,9 +373,11 @@ test("the certificates page offers to turn the renewal timer on", async ({ page 
   await expect(page.getByRole("button", { name: "Turn it on" })).toBeVisible()
   // The installed list says which site uses a certificate, and draws each
   // as who signed it: R11 is one of Let's Encrypt's intermediates.
-  const installed = page.locator("[data-slot='cert-list'] [data-slot='row']")
+  const installed = page
+    .getByRole("list", { name: "Installed certificates" })
+    .locator("[data-slot='choice-row']")
   const row = installed.filter({ hasText: "old.example.com" })
-  await expect(row.getByText("no site")).toBeVisible()
+  await expect(row.getByText("Used by no site")).toBeVisible()
   await expect(row.locator("img[src='/logos/lets-encrypt.svg']")).toHaveCount(1)
   // And the expired one is first, over a meter with nothing left in it.
   await expect(installed.first()).toContainText("old.example.com")
@@ -420,6 +423,343 @@ test("a stream is drawn as the service its port is", async ({ page }) => {
   // A port nothing names keeps a glyph, not a guessed logo.
   await expect(cards.last().locator("img")).toHaveCount(0)
   await expect(cards.last().getByText("10.0.0.0/8")).toBeVisible()
+})
+
+const scan = {
+  domain: "app.example.com",
+  port: 443,
+  checkedAt: now,
+  reachable: true,
+  grade: "B",
+  summary: "A trusted certificate with headers to improve",
+  negotiated: "TLS 1.3",
+  cipherSuite: "TLS_AES_128_GCM_SHA256",
+  certificate: certs[0],
+  trusted: true,
+  chainComplete: true,
+  nameMatches: true,
+  keyType: "ECDSA",
+  keyBits: 256,
+  signatureAlgorithm: "ECDSA-SHA256",
+  serial: "04:D3:51:AA:12:FE:90:81",
+  fingerprint: "ab:cd:".repeat(31) + "ef",
+  ocspStapled: false,
+  protocols: [
+    { name: "TLS 1.0", status: "unknown", detail: "This client cannot test this version" },
+    { name: "TLS 1.1", status: "refused" },
+    { name: "TLS 1.2", status: "offered" },
+    { name: "TLS 1.3", status: "offered" },
+  ],
+  chain: [
+    {
+      subject: "app.example.com",
+      issuer: "R11",
+      notAfter: inThirtyDays,
+      isCa: false,
+      selfIssued: false,
+      keyType: "ECDSA",
+      keyBits: 256,
+    },
+    {
+      subject: "R11",
+      issuer: "ISRG Root X1",
+      notAfter: inThirtyDays,
+      isCa: true,
+      selfIssued: false,
+      keyType: "RSA",
+      keyBits: 2048,
+    },
+  ],
+  findings: [
+    {
+      id: "hsts",
+      level: "warning",
+      title: "HSTS is not set",
+      detail: "The endpoint does not send Strict-Transport-Security.",
+      advice: "Enable HSTS after verifying HTTPS for all covered domains.",
+    },
+  ],
+  http: {
+    statusCode: 200,
+    plainRedirects: true,
+    plainStatus: 301,
+    plainLocation: "https://app.example.com/",
+    headers: [
+      {
+        name: "X-Content-Type-Options",
+        present: true,
+        value: "nosniff",
+        level: "important",
+        detail: "Prevents MIME sniffing",
+      },
+      {
+        name: "Content-Security-Policy",
+        present: false,
+        level: "important",
+        detail: "No content security policy was sent",
+      },
+      {
+        name: "Referrer-Policy",
+        present: true,
+        value: "strict-origin-when-cross-origin",
+        level: "optional",
+        detail: "Controls referrers",
+      },
+    ],
+  },
+}
+
+async function mockShowcase(page: Page) {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/certificates/scan?*", (route) => json(route, scan))
+  await page.route("**/api/v1/certificates/watched", (route) =>
+    json(route, [{ id: 1, domain: "mail.example.com", port: 993, certificate: certs[0] }]),
+  )
+  await page.route("**/api/v1/certificates/dns-providers", (route) =>
+    json(route, [
+      {
+        key: "cloudflare",
+        name: "Cloudflare",
+        plugin: "dns-cloudflare",
+        installed: true,
+        hasCredentials: true,
+        defaultWait: 30,
+      },
+    ]),
+  )
+  await page.route("**/api/v1/proxy/auth-files/", (route) =>
+    json(route, [
+      { name: "staging", path: "/etc/nginx/auth/staging", users: ["operator", "reviewer"] },
+    ]),
+  )
+  await page.route("**/api/v1/proxy/streams/", (route) =>
+    json(route, {
+      included: true,
+      snippet,
+      dir: "/etc/nginx/streams",
+      streams: [
+        {
+          name: "postgres-replica",
+          listen: 5432,
+          protocol: "tcp",
+          upstream: "10.0.0.5:5432",
+          proxyProtocol: false,
+          allowFrom: [],
+        },
+        {
+          name: "private-redis",
+          listen: 6379,
+          protocol: "tcp",
+          upstream: "10.0.0.9:6379",
+          proxyProtocol: false,
+          allowFrom: ["10.0.0.0/8"],
+          timeout: 600,
+        },
+        {
+          name: "minecraft",
+          listen: 25565,
+          protocol: "tcp",
+          upstream: "10.0.0.6:25565",
+          proxyProtocol: true,
+          allowFrom: [],
+        },
+      ],
+    }),
+  )
+}
+
+for (const width of [390, 1280, 1720]) {
+  test(`every proxy page has readable content and contained controls at ${width}`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await mockShowcase(page)
+    const failures: string[] = []
+    page.on("pageerror", (error) => failures.push(error.message))
+    for (const path of [
+      "/proxy",
+      "/proxy/sites",
+      "/proxy/certificates",
+      "/proxy/tls?domain=app.example.com",
+      "/proxy/streams",
+      "/proxy/ports",
+    ]) {
+      await page.goto(path)
+      await expect(page.locator("[data-slot='stat-grid']")).toBeVisible()
+      await page.waitForLoadState("networkidle")
+      const overflow = await page
+        .locator("[data-slot='page']")
+        .evaluate((element) => element.scrollWidth > element.clientWidth + 1)
+      expect(overflow, `${path} overflows at ${width}`).toBe(false)
+      const unnamed = await page
+        .locator("[data-slot='page'] button")
+        .evaluateAll((buttons) =>
+          buttons
+            .filter(
+              (button) =>
+                (button as HTMLElement).offsetWidth > 0 &&
+                !button.textContent?.trim() &&
+                !button.getAttribute("aria-label") &&
+                !button.getAttribute("aria-labelledby"),
+            )
+            .map((button) => button.outerHTML),
+        )
+      expect(unnamed).toEqual([])
+      if (path === "/proxy/streams" && width >= 1280) {
+        const cards = page
+          .getByRole("list", { name: "Streams" })
+          .locator("[data-slot='choice-row']")
+        const first = await cards.nth(0).boundingBox()
+        const second = await cards.nth(1).boundingBox()
+        expect(Math.abs(first!.y - second!.y)).toBeLessThan(1)
+        expect(Math.abs(first!.height - second!.height)).toBeLessThan(1)
+      }
+      await page.screenshot({
+        path: testInfo.outputPath(`${path.split("?")[0].replaceAll("/", "-")}-${width}.png`),
+        fullPage: true,
+      })
+    }
+    expect(failures).toEqual([])
+  })
+}
+
+test("certificate cards filter, reveal complete details and link to their owning site", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await page.goto("/proxy/certificates")
+  await page.getByPlaceholder("Certificate, domain or issuer").fill("app.example.com")
+  const list = page.getByRole("list", { name: "Installed certificates" })
+  await expect(list.locator("[data-slot='choice-row']")).toHaveCount(1)
+  await list.getByRole("button", { name: "Inspect app.example.com" }).click()
+  const detail = page.getByRole("dialog")
+  await expect(detail.getByText(certs[0].path)).toBeVisible()
+  // A site is a page of its own now, which a reader without the form can open too.
+  await expect(detail.getByRole("link", { name: "app.example.com", exact: true })).toHaveAttribute(
+    "href",
+    "/proxy/sites/app.example.com",
+  )
+  await expect(detail.getByRole("link", { name: "TLS report" })).toHaveAttribute(
+    "href",
+    "/proxy/tls?domain=app.example.com",
+  )
+  await expect(detail.getByRole("button", { name: "Copy path" })).toBeVisible()
+})
+
+test("a watched service retains its port when opening the live report", async ({ page }) => {
+  await mockShowcase(page)
+  await page.goto("/proxy/certificates")
+  const watched = page.getByRole("list", { name: "Watched domains" })
+  await expect(watched.getByRole("link", { name: "Inspect mail.example.com" })).toHaveAttribute(
+    "href",
+    "/proxy/tls?domain=mail.example.com%3A993",
+  )
+})
+
+test("site routing choices keep each kind's fields and the save guard", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await page.goto("/proxy/sites")
+  await page.getByRole("button", { name: "New site", exact: true }).click()
+  const sheet = page.getByRole("dialog")
+  await expect(sheet.getByLabel("Send it to")).toBeVisible()
+  await sheet.getByRole("button", { name: "Files", exact: true }).click()
+  await expect(sheet.getByLabel("Directory", { exact: true })).toBeVisible()
+  await expect(sheet.getByLabel("Send it to")).toHaveCount(0)
+  await sheet.getByRole("button", { name: "A redirect", exact: true }).click()
+  await expect(sheet.getByLabel("Redirect to", { exact: true })).toBeVisible()
+  await expect(sheet.getByRole("button", { name: "Save and reload" })).toBeDisabled()
+})
+
+test("read-only users can inspect certificates without proxy mutation controls or network scans", async ({
+  page,
+}) => {
+  await mockShowcase(page)
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, { ...user, capabilities: ["read"], user: { ...user.user, role: "viewer" } }),
+  )
+  await page.goto("/proxy/sites")
+  await expect(page.getByRole("button", { name: "New site", exact: true })).toHaveCount(0)
+  await page.goto("/proxy/certificates")
+  await expect(page.getByRole("button", { name: "Issue certificate", exact: true })).toHaveCount(0)
+  await page.getByRole("button", { name: "Inspect app.example.com", exact: true }).click()
+  await expect(page.getByRole("dialog").getByRole("link", { name: "TLS report" })).toHaveCount(0)
+  await page.goto("/proxy/tls")
+  await expect(page.getByRole("button", { name: "Scan", exact: true })).toBeDisabled()
+  await expect(page.getByText("Scanning needs an administrator")).toBeVisible()
+})
+
+test("unreadable certificates keep their error in the detail surface without overflowing a phone", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  const message =
+    "Could not read /etc/letsencrypt/live/an-extremely-long-hostname.example.com/fullchain.pem: permission denied"
+  await page.route("**/api/v1/certificates/", (route) =>
+    json(route, [
+      {
+        ...certs[0],
+        domains: [],
+        issuer: "",
+        notBefore: "0001-01-01T00:00:00Z",
+        notAfter: "0001-01-01T00:00:00Z",
+        daysLeft: 0,
+        expired: false,
+        expiring: false,
+        error: message,
+      },
+    ]),
+  )
+  await page.goto("/proxy/certificates")
+  const inventory = page.getByRole("list", { name: "Installed certificates" })
+  await expect(inventory.getByText("unreadable")).toBeVisible()
+  await expect(inventory.getByRole("meter")).toHaveCount(0)
+  expect(
+    await page
+      .locator("[data-slot='page']")
+      .evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+  ).toBe(true)
+  await inventory.getByRole("button", { name: "Inspect app.example.com" }).click()
+  const detail = page.getByRole("dialog")
+  await expect(detail).toBeInViewport({ ratio: 1 })
+  await expect(detail.getByText(message)).toBeVisible()
+  for (const label of ["Issued", "Expires", "Self-signed"]) {
+    await expect(detail.locator(`dt:has-text("${label}") + dd`)).toHaveText("—")
+  }
+  expect(await detail.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
+    true,
+  )
+})
+
+test("proxy editors and lower sections remain usable on a phone", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockShowcase(page)
+  for (const [path, action] of [
+    ["/proxy/sites", "New site"],
+    ["/proxy/streams", "New stream"],
+    ["/proxy/certificates", "Issue certificate"],
+  ]) {
+    await page.goto(path)
+    await page.getByRole("button", { name: action, exact: true }).click()
+    const sheet = page.getByRole("dialog")
+    await expect(sheet).toBeInViewport({ ratio: 1 })
+    expect(await sheet.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
+      true,
+    )
+    await page.screenshot({
+      path: testInfo.outputPath(`${action.replaceAll(" ", "-")}-390.png`),
+      animations: "disabled",
+    })
+    await page.keyboard.press("Escape")
+  }
+  for (const path of ["/proxy/sites", "/proxy/certificates", "/proxy/tls?domain=app.example.com"]) {
+    await page.goto(path)
+    await page.waitForLoadState("networkidle")
+    await page.locator("[data-slot='page']").locator("p").last().scrollIntoViewIfNeeded()
+    await page.screenshot({
+      path: testInfo.outputPath(`${path.split("?")[0].replaceAll("/", "-")}-bottom-390.png`),
+    })
+  }
 })
 
 /*
@@ -696,7 +1036,10 @@ test("/proxy/sites/app.example.com reads the site's requests, and what nginx sai
   )
   const identity = page.locator("[data-slot='host-identity']")
   await expect(identity.getByText("reverse proxy")).toBeVisible()
-  await expect(identity.getByText("→ http://127.0.0.1:3000")).toBeVisible()
+  // Its two ends in their own columns under the line, as its card draws them.
+  const route = page.getByRole("main").locator("[data-slot='proxy-route']")
+  await expect(route.getByText("app.example.com", { exact: true })).toBeVisible()
+  await expect(route.getByText("http://127.0.0.1:3000", { exact: true })).toBeVisible()
   await expect(identity.locator("img[src='/logos/nginx.svg']")).toHaveCount(1)
   await expect(page.getByRole("button", { name: "Edit" })).toBeVisible()
 

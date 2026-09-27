@@ -5,7 +5,7 @@ import { HOST_LOG_SOURCES, mockHostLogs } from "./host-logs-fixture"
  * The Security section against a mocked API: every page renders its readings
  * from the shapes the backend sends, the joins between pages hold (an address
  * in one list is a block, a ban or a lookup in another), and the design
- * system's structural rules — no framed block on the page, every icon-only
+ * system's structural rules — framed tables and workspaces, every icon-only
  * control named, row controls reachable without a pointer — hold on all eight.
  * SSH, Firewall and Intrusion each read their service's log in place, through
  * its lens, with the day's counts in the page's one grid; the host's logs are
@@ -418,8 +418,8 @@ const readonly = {
 /**
  * The whole Security API, answered from the fixtures above; every write is
  * recorded. The session, the firewall's status and the host's log files can
- * be swapped for the case under test; what the logs routes were asked is
- * returned.
+ * be swapped for the case under test, and any route answered with a body of
+ * its own; what the logs routes were asked is returned.
  */
 async function mockSecurity(
   page: Page,
@@ -429,6 +429,7 @@ async function mockSecurity(
     firewall?: typeof firewall
     sources?: typeof HOST_LOG_SOURCES
     outside?: string[]
+    overrides?: Record<string, unknown>
   } = {},
 ) {
   await page.route("**/api/v1/**", async (route) => {
@@ -439,6 +440,8 @@ async function mockSecurity(
       mutations.push({ method: request.method(), path, body: request.postDataJSON() })
       return json(route, { output: "ok" })
     }
+    const overrides = options.overrides ?? {}
+    if (path in overrides) return json(route, overrides[path])
     switch (path) {
       case "/auth/session":
         return json(route, options.session ?? admin)
@@ -503,10 +506,9 @@ const PAGES = [
 ] as const
 
 /**
- * §2: the only block on a page that may draw a frame is a table. A grid owns a
- * scroll region, and an edge is what says where it ends — a row whose actions
- * sit past the boundary otherwise reads as a row with no actions. Everything
- * else in the page's flow stays plain, which is what the frame is read against.
+ * §2: a Panel frames a table's scroll region, so a row's offscreen actions
+ * remain visibly contained. Findings and forms stay plain; pictures and the
+ * Tools panes own their separate edges under §7.
  *
  * Asserted structurally rather than as a count, so the rule keeps holding as
  * pages gain and lose tables.
@@ -540,6 +542,16 @@ test("the overview reads as readings, findings and how the panel is reached", as
   const grid = page.locator("[data-slot=stat-grid]")
   const tiles = grid.locator("a")
   await expect(tiles).toHaveCount(5)
+  // One width and one inset for all five, the first included: the first column
+  // used to give up its left padding, which put the hover wash flush against
+  // its name.
+  const cells = await tiles.evaluateAll((links) =>
+    links.map((a) => {
+      const tile = a.querySelector("[data-slot=stat-tile]")!
+      return `${Math.round(a.getBoundingClientRect().width)} ${getComputedStyle(tile).paddingLeft}`
+    }),
+  )
+  expect(new Set(cells).size, cells.join(" | ")).toBe(1)
   await expect(grid.getByRole("link", { name: "Firewall", exact: true })).toContainText("ufw")
   await expect(grid.getByRole("link", { name: "SSH", exact: true })).toContainText("1 finding")
   await expect(grid.getByRole("link", { name: "Intrusion", exact: true })).toContainText(
@@ -558,7 +570,7 @@ test("the overview reads as readings, findings and how the panel is reached", as
 })
 
 for (const path of PAGES) {
-  test(`${path} draws no framed block on the page`, async ({ page }) => {
+  test(`${path} keeps non-table Panels plain`, async ({ page }) => {
     await mockSecurity(page)
     await page.goto(path)
     await page.waitForLoadState("networkidle")
@@ -676,7 +688,11 @@ test("an offender is blocked with a plain deny and looked up on the tools page",
   await expect(page.getByRole("textbox", { name: "Target" })).toHaveValue("203.0.113.9")
   await expect(page.getByRole("textbox", { name: "Target" })).toHaveCount(1)
   await page.getByRole("button", { name: "Every tool" }).click()
-  expect(await page.getByRole("textbox", { name: "Target" }).count()).toBeGreaterThan(10)
+  await page.getByRole("button", { name: "DNS", exact: true }).click()
+  await expect(page.getByRole("textbox", { name: "Target" })).toHaveCount(1)
+  await expect(page.getByRole("textbox", { name: "Target" })).toBeEmpty()
+  await page.getByRole("button", { name: "Ownership", exact: true }).click()
+  await expect(page.getByRole("textbox", { name: "Target" })).toHaveValue("203.0.113.9")
 })
 
 test("connections offers a block only for an address that is not private", async ({ page }) => {
@@ -1091,7 +1107,7 @@ test.describe("screenshots", () => {
   const dir = process.env.JD_SECURITY_SHOTS
   test.skip(!dir, "set JD_SECURITY_SHOTS to a directory to capture them")
 
-  for (const width of [1280, 1720]) {
+  for (const width of [390, 1280, 1720]) {
     test.describe(`${width} wide`, () => {
       test.use({ viewport: { width, height: 1000 } })
       for (const path of PAGES) {
@@ -1102,8 +1118,282 @@ test.describe("screenshots", () => {
           await page.waitForTimeout(400)
           const name = path.replace(/^\/security\/?/, "") || "overview"
           await page.screenshot({ path: `${dir}/${name}-${width}.png`, fullPage: true })
+          // The shell owns scrolling, so a full-page shot captures only the
+          // first screen. Walk the remaining content without changing layout.
+          for (let part = 1; part <= 8; part++) {
+            const moved = await page.locator("[data-slot=page]").evaluate((element) => {
+              let parent = element.parentElement
+              while (parent && !/auto|scroll/.test(getComputedStyle(parent).overflowY)) {
+                parent = parent.parentElement
+              }
+              if (!parent || parent.scrollTop + parent.clientHeight >= parent.scrollHeight - 1)
+                return false
+              parent.scrollTop += parent.clientHeight - 80
+              return true
+            })
+            if (!moved) break
+            await page.screenshot({ path: `${dir}/${name}-${width}-scroll-${part}.png` })
+          }
         })
+      }
+      test(`rule and jail dialogs at ${width}`, async ({ page }) => {
+        await mockSecurity(page)
+        await page.goto("/security/firewall")
+        await page.getByRole("button", { name: "Add rule", exact: true }).click()
+        await expect(page.getByRole("dialog")).toBeVisible()
+        await expect(page.getByRole("button", { name: "Add rule", exact: true })).toBeInViewport()
+        await page.screenshot({ path: `${dir}/rule-dialog-${width}.png` })
+        await page.getByRole("button", { name: "Use Tailnet", exact: true }).click()
+        const source = page.getByRole("textbox", { name: "Address or CIDR", exact: true })
+        await source.scrollIntoViewIfNeeded()
+        await expect(source).toHaveValue("100.64.0.0/10")
+        await page.screenshot({ path: `${dir}/rule-source-${width}.png` })
+        await page.getByRole("button", { name: "Cancel", exact: true }).click()
+        await page.goto("/security/intrusion")
+        await page.getByRole("button", { name: "Tune sshd", exact: true }).click()
+        await expect(page.getByRole("textbox", { name: "Failures", exact: true })).toHaveValue("5")
+        await expect(page.getByRole("button", { name: "Apply", exact: true })).toBeInViewport()
+        await page.screenshot({ path: `${dir}/jail-dialog-${width}.png` })
+      })
+    })
+  }
+})
+
+test("jail policy inputs keep edits and send all three values together", async ({ page }) => {
+  const mutations: Mutation[] = []
+  await mockSecurity(page, mutations)
+  await page.goto("/security/intrusion")
+  await page.getByRole("button", { name: "Tune sshd", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog.getByRole("textbox", { name: "Failures", exact: true })).toHaveValue("5")
+  await dialog.getByRole("textbox", { name: "Failures", exact: true }).fill("3")
+  await dialog.getByRole("textbox", { name: "Window", exact: true }).fill("900")
+  await dialog.getByRole("textbox", { name: "Ban for", exact: true }).fill("1800")
+  await expect(dialog.getByRole("textbox", { name: "Failures", exact: true })).toHaveValue("3")
+  await expect(dialog.getByRole("textbox", { name: "Window", exact: true })).toHaveValue("900")
+  await dialog.getByRole("button", { name: "Apply", exact: true }).click()
+  await expect
+    .poll(() => mutations.find((entry) => entry.path === "/fail2ban/sshd/config")?.body)
+    .toEqual({ params: { maxretry: 3, findtime: 900, bantime: 1800 } })
+})
+
+test("reverting an SSH setting removes the pending change", async ({ page }) => {
+  await mockSecurity(page)
+  await page.goto("/security/ssh")
+  const password = page.getByRole("radiogroup", { name: "Password authentication" })
+  await password.getByRole("radio", { name: "no", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Test and apply", exact: true })).toBeVisible()
+  await password.getByRole("radio", { name: "yes", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Test and apply", exact: true })).toHaveCount(0)
+})
+
+test("a source-only firewall deny stays editable and preserves its source", async ({ page }) => {
+  const mutations: Mutation[] = []
+  await mockSecurity(page, mutations)
+  await page.goto("/security/firewall")
+  await page
+    .getByRole("row")
+    .filter({ hasText: "repeat offender" })
+    .getByRole("button", { name: "Edit rule", exact: true })
+    .click()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog.getByRole("textbox", { name: "Address or CIDR", exact: true })).toHaveValue(
+    "203.0.113.9",
+  )
+  await dialog.getByRole("button", { name: "Save changes", exact: true }).click()
+  await expect
+    .poll(() => mutations.find((entry) => entry.path === "/firewall/rules/3")?.body)
+    .toMatchObject({ action: "deny", direction: "in", from: "203.0.113.9", port: "" })
+})
+
+test("the rule builder shows the service warning and requires a deliberate source choice", async ({
+  page,
+}) => {
+  const mutations: Mutation[] = []
+  await mockSecurity(page, mutations)
+  await page.goto("/security/firewall")
+  await page.getByRole("button", { name: "Add rule", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByRole("combobox", { name: "Service", exact: true }).click()
+  await page.getByRole("option", { name: /Redis/ }).click()
+  await expect(dialog.getByText("Redis open to the internet", { exact: true })).toBeVisible()
+  await dialog.getByRole("button", { name: "Use Tailnet", exact: true }).click()
+  await expect(dialog.getByRole("textbox", { name: "Address or CIDR", exact: true })).toHaveValue(
+    "100.64.0.0/10",
+  )
+  await expect(dialog.getByText("Redis open to the internet", { exact: true })).toHaveCount(0)
+  await dialog.getByRole("button", { name: "Add rule", exact: true }).click()
+  await expect
+    .poll(() => mutations.find((entry) => entry.path === "/firewall/rules")?.body)
+    .toMatchObject({ action: "allow", port: "6379", from: "100.64.0.0/10" })
+})
+
+test("limited readers see no SSH, diagnostic, firewall or failed-login mutations", async ({
+  page,
+}) => {
+  await mockSecurity(page, [], {
+    overrides: {
+      "/auth/session": {
+        ...admin,
+        capabilities: ["read"],
+        user: { ...admin.user, role: "viewer" },
+      },
+    },
+  })
+  await page.goto("/security/firewall")
+  await expect(page.getByRole("button", { name: "Add rule", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("switch", { name: "Firewall enabled" })).toHaveCount(0)
+  await page.goto("/security/logins")
+  await expect(page.getByRole("radio", { name: "Failed", exact: true })).toHaveCount(0)
+  await page.goto("/security/ssh")
+  await expect(page.getByText("SSH needs the admin capability", { exact: true })).toBeVisible()
+  await page.goto("/security/tools")
+  await expect(
+    page.getByText("Diagnostics need the admin capability", { exact: true }),
+  ).toBeVisible()
+})
+
+for (const [path, endpoint, reply, message] of [
+  ["firewall", "/firewall/", { available: false }, "No firewall on this host"],
+  [
+    "ssh",
+    "/ssh/config",
+    { available: false, settings: [], ports: [], keyedAccounts: [] },
+    "No SSH server on this host",
+  ],
+  ["intrusion", "/fail2ban/", { available: false }, "fail2ban is not installed"],
+] as const) {
+  test(`${path} keeps its unavailable state distinct from a healthy reading`, async ({ page }) => {
+    await mockSecurity(page, [], { overrides: { [endpoint]: reply } })
+    await page.goto(`/security/${path}`)
+    await expect(page.getByText(message, { exact: true })).toBeVisible()
+    await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
+  })
+}
+
+for (const width of [390, 1280, 1720]) {
+  for (const path of PAGES) {
+    test(`${path} keeps its content in the viewport at ${width}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 1000 })
+      await mockSecurity(page)
+      await page.goto(path)
+      await page.waitForLoadState("networkidle")
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      )
+      expect(overflow, path).toBeLessThanOrEqual(0)
+      // Tables may scroll on a phone; at desktop every action column must fit.
+      if (width >= 1280) {
+        const clipped = await page
+          .locator('[data-slot="table-container"]')
+          .evaluateAll((elements) =>
+            elements
+              .filter((element) => element.scrollWidth > element.clientWidth + 1)
+              .map((element) => element.textContent?.slice(0, 100)),
+          )
+        expect(clipped, `${path} clips a table at ${width}`).toEqual([])
       }
     })
   }
+}
+
+test("diagnostics retain drafts and finish requests while another tool is selected", async ({
+  page,
+}) => {
+  await mockSecurity(page)
+  const requests: string[] = []
+  let finishDNS: (() => void) | undefined
+  const dnsFinished = new Promise<void>((resolve) => {
+    finishDNS = resolve
+  })
+  await page.route("**/api/v1/network/probe", async (route) => {
+    const body = route.request().postDataJSON()
+    requests.push(body.tool)
+    if (body.tool === "dns") await dnsFinished
+    await json(route, {
+      ok: true,
+      tool: body.tool,
+      target: body.target,
+      duration: "12ms",
+      output: `${body.tool} result for ${body.target}`,
+    })
+  })
+  await page.goto("/security/tools")
+  await page.getByRole("textbox", { name: "Target", exact: true }).fill("example.com")
+  expect(requests).toEqual([])
+  await page.getByRole("button", { name: "Run", exact: true }).click()
+  await expect.poll(() => requests).toEqual(["dns"])
+  await page.getByRole("button", { name: "Ping", exact: true }).click()
+  await page.getByRole("textbox", { name: "Target", exact: true }).fill("other.example.com")
+  await page.getByRole("button", { name: "Run", exact: true }).click()
+  await expect(page.getByText("ping result for other.example.com", { exact: true })).toBeVisible()
+  finishDNS!()
+  await page.getByRole("button", { name: "DNS", exact: true }).click()
+  await expect(page.getByRole("textbox", { name: "Target", exact: true })).toHaveValue(
+    "example.com",
+  )
+  await expect(page.getByText("dns result for example.com", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Ping", exact: true }).click()
+  await expect(page.getByRole("textbox", { name: "Target", exact: true })).toHaveValue(
+    "other.example.com",
+  )
+})
+
+test("a new diagnostic deep link overrides only that tool's saved input and never runs itself", async ({
+  page,
+}) => {
+  const mutations: Mutation[] = []
+  await mockSecurity(page, mutations)
+  await page.goto("/security/tools?tool=dns&target=first.example.com")
+  await expect(page.getByRole("textbox", { name: "Target", exact: true })).toHaveValue(
+    "first.example.com",
+  )
+  await page.evaluate(() =>
+    window.history.pushState(
+      null,
+      "",
+      "/security/tools?tool=dns&target=second.example.com&record=MX",
+    ),
+  )
+  await expect(page.getByRole("textbox", { name: "Target", exact: true })).toHaveValue(
+    "second.example.com",
+  )
+  await expect(page.getByRole("combobox", { name: "Record type", exact: true })).toContainText("MX")
+  await page.getByRole("textbox", { name: "Target", exact: true }).fill("saved.example.com")
+  await page.evaluate(() =>
+    window.history.pushState(null, "", "/security/tools?tool=ping&target=third.example.com"),
+  )
+  await expect(page.getByRole("textbox", { name: "Target", exact: true })).toHaveValue(
+    "third.example.com",
+  )
+  await page.getByRole("button", { name: "DNS", exact: true }).click()
+  await expect(page.getByRole("textbox", { name: "Target", exact: true })).toHaveValue(
+    "saved.example.com",
+  )
+  await expect(page.getByRole("combobox", { name: "Record type", exact: true })).toContainText("MX")
+  expect(mutations).toEqual([])
+})
+
+test("firewall and SSH changes still require their typed confirmation", async ({ page }) => {
+  const mutations: Mutation[] = []
+  await mockSecurity(page, mutations)
+  await page.goto("/security/firewall")
+  await page.getByRole("switch", { name: "Firewall enabled" }).click()
+  await expect(page.getByRole("dialog")).toContainText("disable firewall")
+  await expect(
+    page.getByRole("dialog").getByRole("button", { name: "Disable", exact: true }),
+  ).toBeDisabled()
+  expect(mutations).toEqual([])
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click()
+  await page.goto("/security/ssh")
+  await page
+    .getByRole("radiogroup", { name: "Password authentication" })
+    .getByRole("radio", { name: "no", exact: true })
+    .click()
+  await page.getByRole("button", { name: "Test and apply", exact: true }).click()
+  await expect(page.getByRole("dialog")).toContainText("change ssh")
+  await expect(
+    page.getByRole("dialog").getByRole("button", { name: "Test and apply", exact: true }),
+  ).toBeDisabled()
+  expect(mutations).toEqual([])
 })

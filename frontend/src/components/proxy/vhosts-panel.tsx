@@ -5,15 +5,13 @@ import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import { Globe, Plus, ShieldCheck, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, post, put } from "@/lib/api"
-import { cn } from "@/lib/utils"
 import type { ProxyValidation, VHost } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
-import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
+import { ChoiceRow, GroupRule } from "@/components/flow"
 import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
 import { Pane, Well } from "@/components/panel"
 import { ProductGlyph, ProductLogo, ProductLogos } from "@/components/product-logo"
@@ -21,13 +19,13 @@ import { SidePanel } from "@/components/side-panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
-import { StatusDot } from "@/components/status-dot"
-import { VerbActions, VerbBar } from "@/components/verbs"
+import { VerbBar } from "@/components/verbs"
 import { AuthFilesPanel } from "@/components/proxy/auth-files-panel"
 import { siteProduct } from "@/components/proxy/marks"
 import { SiteForm } from "@/components/proxy/site-form"
 import { ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
 import { sitePath, useSiteVerbs } from "@/components/proxy/site-verbs"
+import { ProxyGrid, RoutePath } from "@/components/proxy/route-path"
 import { Button } from "@/components/ui/button"
 
 type SiteFilter = "all" | "tls" | "plain" | "disabled"
@@ -58,25 +56,12 @@ function byUrgency(a: VHost, b: VHost): number {
 }
 
 /**
- * Every site this host serves, nginx and Caddy alike: four readings, the
- * filters on the page, and the sites as cards ordered worst first.
- *
- * The cards replaced a six-column table on a wide screen and a hairlined
- * list on a phone, for the reason the Docker containers took the same pass:
- * every row here opens the site's own page — what it is, and its requests
- * and errors read there — so it is a choice and carries the lit edge §16
- * gives to things you take, and the table's header was naming six columns
- * that each card now says for itself. Each is drawn as the engine serving it
- * (nginx or Caddy), with its domains and where they go on the second line,
- * and its two states held out on the right — on TLS by whose certificate,
- * and serving — so a column of cards is still scanned down the way the table
- * was.
- *
- * A site is editable through the form that writes its config, or as raw
- * text for the ones the form does not own — a Caddyfile, a hand-written
- * nginx file. A Docker Caddy route has no file on the host at all, and used
- * to be offered an editor that could only fail; it is listed, and its verbs
- * are the ones that can work.
+ * A route needs two readable ends and commands separate from its readings.
+ * The cards retain the worst-first groups, and each opens the site's own
+ * page — what it is, and its requests and errors read there — for every site
+ * and every reader. Editing stays with its owner, as the card's verbs: nginx
+ * opens the builder, file-backed Caddy opens its file, and Docker Caddy has
+ * no editor because there is no host file to save.
  */
 export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   const { can } = useAuth()
@@ -102,8 +87,6 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     (signal) => get<VHost[]>("/proxy/vhosts", undefined, signal),
     30_000,
   )
-  // One shape per width, chosen once, so a reading is in the document once.
-  const wide = useMediaQuery("(min-width: 1024px)")
 
   const openForm = (name: string | null, copyFrom: string | null = null) => {
     setRequested(null)
@@ -273,7 +256,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     <Page className="animate-rise">
       {header}
 
-      <StatGrid columns={4}>
+      <StatGrid columns={4} dense>
         <StatTile
           label="Sites"
           value={counts.all}
@@ -333,6 +316,10 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
           {/* The filters stand on the page rather than inside a panel
               header: the list is the whole page, and the command to add to
               it sits with the filters that narrow it. */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-section font-semibold">Routing</h2>
+            {newSite}
+          </div>
           <Toolbar className="justify-between gap-x-4">
             <SearchInput
               value={filter}
@@ -348,7 +335,6 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
                   </FilterChip>
                 ))}
             </ChipStrip>
-            {newSite && <span className="ml-auto">{newSite}</span>}
           </Toolbar>
 
           {visible.length === 0 ? (
@@ -357,18 +343,20 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
             groups.map((group) => (
               <div key={group.key} className="flex min-w-0 flex-col gap-2">
                 {group.label && <GroupRule label={group.label} count={group.sites.length} />}
-                <ChoiceList aria-label={group.label || "Sites"} className="animate-rise">
+                <ProxyGrid
+                  aria-label={group.label || "Sites"}
+                  className={group.sites.length === 1 ? "xl:grid-cols-1" : undefined}
+                >
                   {group.sites.map((vhost, index) => (
                     <SiteCard
                       key={`${vhost.kind}:${vhost.name}`}
                       vhost={vhost}
                       busy={pending[vhost.name]}
-                      wide={wide}
                       index={index}
                       {...handlers}
                     />
                   ))}
-                </ChoiceList>
+                </ProxyGrid>
               </div>
             ))
           )}
@@ -404,7 +392,6 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
 type CardProps = {
   vhost: VHost
   busy?: string
-  wide: boolean
   index: number
   admin: boolean
   onEdit: (v: VHost) => void
@@ -415,59 +402,37 @@ type CardProps = {
 }
 
 /**
- * One site, as a card you open. The engine's mark, the name with its state's
- * dot, the domains and where they go; TLS and serving held out at the right
- * on a wide screen and under the name on a phone, and the verbs beside them.
- *
- * Opening it is the site's page, for every site and every reader: a Docker
- * Caddy route with no file to edit still has requests to read, and the form
- * and the file are the inline verbs beside the arrow.
+ * The route owns the body; service state and commands each have their own
+ * line. Opening it is the site's page: a Docker Caddy route with no file to
+ * edit still has requests to read.
  */
-function SiteCard({ vhost, busy, wide, index, ...handlers }: CardProps) {
+function SiteCard({ vhost, busy, index, ...handlers }: CardProps) {
   const verbs = useSiteVerbs({ vhost, busy, ...handlers })
-  const route = [vhost.serverNames.join(", "), vhost.upstreams[0]].filter(Boolean).join(" → ")
-  const states = (
-    <>
-      <span className={cn(wide && "w-24")}>
-        <SiteTLS vhost={vhost} />
-      </span>
-      <span className={cn(wide && "w-28")}>
-        <ServingStatus vhost={vhost} busy={busy} />
-      </span>
-    </>
-  )
   return (
     <ChoiceRow
       verb={`Open ${vhost.name}`}
       href={sitePath(vhost.name)}
       index={index}
-      className={cn(busy && "opacity-70")}
-      leading={<ProductLogo id={siteProduct(vhost)} size="sm" />}
-      title={
-        <span className="flex min-w-0 items-center gap-2">
-          <StatusDot state={vhost.enabled ? "running" : "stopped"} />
-          <span className="truncate">{vhost.name}</span>
-        </span>
-      }
+      busy={Boolean(busy)}
+      className="h-full gap-4 p-4"
+      leading={<ProductLogo id={siteProduct(vhost)} size="md" />}
+      title={<span className="text-title">{vhost.name}</span>}
       description={
-        <span className="font-mono">
-          {route || vhost.path || `${vhost.kind} route`}
-          {vhost.upstreams.length > 1 && (
-            <span className="numeric text-muted-foreground/60"> +{vhost.upstreams.length - 1}</span>
-          )}
-        </span>
+        vhost.kind === "nginx" ? "nginx site" : vhost.path ? "Caddyfile" : "Docker Caddy ingress"
       }
-      trailing={wide ? states : undefined}
-      actions={<VerbActions dim verbs={verbs} menuLabel={`More actions for ${vhost.name}`} />}
+      trailing={<ServingStatus vhost={vhost} busy={busy} />}
     >
-      {!wide && (
-        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 pl-11">
-          {states}
-          {vhost.path && (
-            <span className="truncate font-mono text-hint text-muted-foreground">{vhost.path}</span>
-          )}
+      <RoutePath
+        source={vhost.serverNames.join(", ") || "Default host"}
+        destination={vhost.upstreams.join(", ") || "Served by configuration"}
+      />
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-hint text-muted-foreground">
+          <SiteTLS vhost={vhost} />
+          <span className="font-mono">{vhost.listen.join(" · ") || "No listener reported"}</span>
         </div>
-      )}
+        <VerbBar verbs={verbs} menuLabel={`More actions for ${vhost.name}`} />
+      </div>
     </ChoiceRow>
   )
 }

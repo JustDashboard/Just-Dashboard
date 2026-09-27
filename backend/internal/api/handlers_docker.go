@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
@@ -427,7 +426,7 @@ func (s *Server) containerName(ctx context.Context, ref string) string {
 }
 
 // handleContainerStream is the `docker stats`-equivalent feed backing the
-// container table: one socket, one sampling loop, all running containers.
+// container table: one shared sampling loop, all running containers.
 func (s *Server) handleContainerStream(w http.ResponseWriter, r *http.Request) error {
 	conn, err := s.WS.Upgrade(w, r)
 	if err != nil {
@@ -439,36 +438,27 @@ func (s *Server) handleContainerStream(w http.ResponseWriter, r *http.Request) e
 	go conn.Keepalive(ctx)
 	go conn.DrainControl(cancel)
 
-	// A sampler per socket, so each client's CPU deltas span its own even
-	// intervals rather than whatever the last caller happened to leave behind.
-	sampler := s.modules.docker.NewStatsSampler()
-
-	t := time.NewTicker(2 * time.Second)
-	defer t.Stop()
+	updates, unsubscribe := s.modules.docker.SubscribeContainers()
+	defer unsubscribe()
 	for {
-		list, err := s.modules.docker.ListContainers(ctx, true)
-		if err != nil {
-			conn.SendError(err.Error())
-			return nil
-		}
-		if err := conn.Send("containers", list); err != nil {
-			return nil
-		}
-		ids := make([]string, 0, len(list))
-		for _, c := range list {
-			if c.State == "running" {
-				ids = append(ids, c.ID)
-			}
-		}
-		if stats, err := sampler.Sample(ctx, ids); err == nil {
-			if err := conn.Send("stats", stats); err != nil {
-				return nil
-			}
-		}
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-t.C:
+		case update, ok := <-updates:
+			if !ok {
+				return nil
+			}
+			if update.Err != nil {
+				conn.SendError(update.Err.Error())
+				return nil
+			}
+			var data any = update.Containers
+			if update.Kind == "stats" {
+				data = update.Stats
+			}
+			if err := conn.Send(update.Kind, data); err != nil {
+				return nil
+			}
 		}
 	}
 }

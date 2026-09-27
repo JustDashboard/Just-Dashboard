@@ -96,6 +96,20 @@ test("the window exports as a spreadsheet", async ({ page }) => {
   expect(text.split("\n")[0]).toMatch(/^time,cpu,cpuPeak,/)
 })
 
+test("the interfaces are the real devices until everything is asked for", async ({ page }) => {
+  await page.goto("/metrics")
+  const panel = page.locator("[data-slot=panel]", {
+    has: page.getByRole("heading", { name: "Interfaces" }),
+  })
+  await expect(panel.getByText("eth0", { exact: true })).toBeVisible({ timeout: 20_000 })
+  await expect(panel.getByText("docker0", { exact: true })).toHaveCount(0)
+  await expect(panel.getByText("veth4f14332", { exact: true })).toHaveCount(0)
+
+  await panel.getByRole("radio", { name: "Everything 3" }).click()
+  await expect(panel.getByText("docker0", { exact: true })).toBeVisible()
+  await expect(panel.getByText("veth4f14332", { exact: true })).toBeVisible()
+})
+
 test("the live feed can be paused", async ({ page }) => {
   await page.goto("/metrics")
   await expect(page.getByRole("heading", { name: "Metrics" })).toHaveClass(/sr-only/)
