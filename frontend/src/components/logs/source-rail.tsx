@@ -1,10 +1,20 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Archive, Box, Cpu, FileText, Globe, Monorepo, RefreshClockwise } from "@/components/icons"
+import {
+  Archive,
+  Box,
+  Cpu,
+  FileText,
+  Globe,
+  Layers,
+  Monorepo,
+  RefreshClockwise,
+} from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { bytes, relativeTime } from "@/lib/format"
 import type { LogSource, LogSourceIndex } from "@/lib/types"
+import { lensFor } from "@/lib/log-lenses"
 import { SearchInput } from "@/components/page"
 import { Pane, PaneHeader } from "@/components/panel"
 import { ErrorState, LoadingRows } from "@/components/state"
@@ -23,10 +33,17 @@ import { ProductLogo, imageProduct, platformProduct } from "@/components/product
  * the Overview use for the module the logs belong to — so the eye finds
  * "Containers" in the rail without reading down it.
  */
-const GROUPS: { kind: LogSource["kind"]; label: string; icon: typeof FileText }[] = [
+const GROUPS: {
+  kind: LogSource["kind"]
+  /** Kinds read through the same reader, listed with it rather than as groups of one. */
+  also?: LogSource["kind"][]
+  label: string
+  icon: typeof FileText
+}[] = [
   { kind: "system", label: "System", icon: Cpu },
-  { kind: "journal", label: "Systemd journal", icon: Monorepo },
+  { kind: "journal", also: ["journal-id", "kernel"], label: "Systemd journal", icon: Monorepo },
   { kind: "docker", label: "Containers", icon: Box },
+  { kind: "stack", label: "Stacks", icon: Layers },
   { kind: "nginx", label: "Web server", icon: Globe },
   { kind: "pm2", label: "PM2", icon: FileText },
   { kind: "app", label: "Applications", icon: FileText },
@@ -36,7 +53,10 @@ const GROUPS: { kind: LogSource["kind"]; label: string; icon: typeof FileText }[
 export const KIND_TAG: Record<LogSource["kind"], string> = {
   system: "system log",
   journal: "journal",
+  "journal-id": "journal",
+  kernel: "kernel ring",
   docker: "container",
+  stack: "stack",
   nginx: "web server",
   pm2: "pm2 process",
   app: "application",
@@ -81,7 +101,9 @@ export function SourceRail({
       s.detail?.toLowerCase().includes(needle)
 
     return GROUPS.map((group) => {
-      const items = (index?.sources ?? []).filter((s) => s.kind === group.kind && matches(s))
+      const items = (index?.sources ?? []).filter(
+        (s) => (s.kind === group.kind || group.also?.includes(s.kind)) && matches(s),
+      )
       // A running container is the one somebody came here for; a stopped one
       // still has its last words and belongs underneath rather than missing.
       items.sort((a, b) => {
@@ -177,6 +199,11 @@ export function SourceRail({
  * tile, so every name in the rail starts on one line.
  */
 function sourceProduct(source: LogSource, platform: string | undefined) {
+  // A lens names a product only where the log is that product's own — a
+  // Postgres file under /var/log/postgresql — and says nothing of auth.log,
+  // which stays the distribution that writes it.
+  const lensProduct = lensFor(source.lens)?.product
+  if (lensProduct) return lensProduct
   switch (source.kind) {
     case "docker":
       // A compose service's detail is "stack · image"; the image is the product.
@@ -185,6 +212,8 @@ function sourceProduct(source: LogSource, platform: string | undefined) {
       return "nginx-static"
     case "pm2":
       return "pm2"
+    case "stack":
+      return "docker-compose"
     case "system":
       return platformProduct(platform)
     default:

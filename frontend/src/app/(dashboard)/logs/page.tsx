@@ -6,7 +6,15 @@ import { Logs, SidebarLeftClose, SidebarLeftOpen } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, relativeTime } from "@/lib/format"
 import type { LogSource, LogSourceIndex } from "@/lib/types"
-import { EMPTY_FILTER, readLogWindow } from "@/lib/log-filter"
+import {
+  EMPTY_FILTER,
+  fieldsFromParams,
+  filterQuery,
+  levelsFromParam,
+  readLogWindow,
+} from "@/lib/log-filter"
+import { lensFor, withLensDefaults } from "@/lib/log-lenses"
+import { journalSource } from "@/lib/log-sources"
 import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useMetrics } from "@/hooks/use-metrics"
@@ -24,6 +32,24 @@ import { ExportDialog } from "@/components/logs/export-dialog"
 import { LogWorkspace } from "@/components/logs/log-workspace"
 
 const RAIL = { min: 208, max: 420, base: 272 }
+
+/** The readings a link may open on; a page view's id joins these when `/logs` offers one. */
+const MODES = ["live", "search", "insights"]
+
+function validLens(id: string | null) {
+  return id === "none" || lensFor(id ?? undefined) ? (id as string) : ""
+}
+
+/** What the server reads a source as: the unit's lens for one unit of the journal. */
+function detectedLensOf(
+  source: LogSource | null,
+  unit: string,
+  units: LogSourceIndex["units"],
+): string | undefined {
+  if (!source) return undefined
+  if (source.kind === "journal" && unit) return units.find((u) => u.name === unit)?.lens
+  return source.lens
+}
 
 function toLocalInput(date: Date) {
   const offset = date.getTimezoneOffset() * 60_000
@@ -51,7 +77,9 @@ export default function LogsPage() {
   // A link into the page is a complete question and sets the whole window;
   // arriving bare — the rail's own link — reopens the window this tab had,
   // which the effect below then writes back into the address bar.
-  const linked = ["source", "mode", "q", "unit", "since", "until"].some((key) => params.has(key))
+  const linked = ["source", "mode", "q", "unit", "since", "until", "f", "levels", "lens"].some(
+    (key) => params.has(key),
+  )
   const arrival = <T,>(value: T) => (linked ? value : undefined)
   const [picked, setPicked] = useSessionState(
     "logs.source",
@@ -62,16 +90,28 @@ export default function LogsPage() {
     "logs.mode",
     "live",
     arrival(
-      params.get("mode") === "search" || initialWindow.since || initialWindow.until
+      initialWindow.since || initialWindow.until
         ? "search"
-        : "live",
+        : MODES.includes(params.get("mode") ?? "")
+          ? (params.get("mode") as LogMode)
+          : "live",
     ),
   )
+  // A link carries the whole question — its fields and levels too — with
+  // anything the server would refuse dropped rather than sent.
   const [filter, setFilter] = useSessionState<LogFilterState>(
     "logs.filter",
     EMPTY_FILTER,
-    arrival({ ...EMPTY_FILTER, q: params.get("q") ?? "" }),
+    arrival({
+      ...EMPTY_FILTER,
+      q: params.get("q") ?? "",
+      levels: levelsFromParam(params.get("levels")),
+      fields: fieldsFromParams(params.getAll("f")),
+    }),
   )
+  // The lens is in the address only when the reader forced one: a detected
+  // lens is the source's own and would only go stale in a link.
+  const [lens, setLens] = useSessionState("logs.lens", "", arrival(validLens(params.get("lens"))))
   const [unit, setUnit] = useSessionState(
     "logs.unit",
     "",
@@ -102,7 +142,15 @@ export default function LogsPage() {
   // not. Derived rather than stored, so no effect has to sync it.
   const selected: LogSource | null = useMemo(() => {
     const list = sources.data?.sources ?? []
-    if (!picked) return list[0] ?? null
+    if (!picked) {
+      return (
+        list.find((s) => s.id === "file:/var/log/syslog") ??
+        list.find((s) => s.kind === "system" && (s.label === "syslog" || s.label === "messages")) ??
+        list.find((s) => s.kind === "journal") ??
+        list[0] ??
+        null
+      )
+    }
     return (
       list.find(
         (s) => s.id === picked || (picked.startsWith("journal:") && s.kind === "journal"),
@@ -114,18 +162,46 @@ export default function LogsPage() {
   // id rather than filling the rail with systemd's inventory.
   const sourceId = useMemo(() => {
     if (!selected) return ""
-    if (selected.kind === "journal" && unit) return `journal:${unit}`
+    if (selected.kind === "journal" && unit) return journalSource(unit)
     return selected.id
   }, [selected, unit])
+  const units = sources.data?.units
+  const detectedLens = useMemo(
+    () => detectedLensOf(selected, unit, units ?? []),
+    [selected, unit, units],
+  )
 
+  // A source read through another lens is a different vocabulary: its fields
+  // would silently empty the new one (`event:slow` on auth.log), so they go,
+  // and the new lens's own defaults take their place as chips. A lens the
+  // reader forced was forced on the source they left.
+  const switchSource = (source: LogSource, nextUnit: string) => {
+    const next = detectedLensOf(source, nextUnit, units ?? [])
+    const current = lens === "none" ? undefined : lens || detectedLens
+    if (lens) setLens("")
+    if (next !== current) {
+      setFilter((f) => withLensDefaults({ ...f, fields: {} }, lensFor(next)))
+    }
+  }
+
+  const predicates = filterQuery(filter).f
+  const predicatesKey = JSON.stringify(predicates ?? [])
   useEffect(() => {
     if (!sourceId || windowError) return
     const url = new URL(window.location.href)
     url.searchParams.set("source", sourceId)
-    if (mode === "search") url.searchParams.set("mode", "search")
+    if (mode !== "live") url.searchParams.set("mode", mode)
     else url.searchParams.delete("mode")
     if (filter.q) url.searchParams.set("q", filter.q)
     else url.searchParams.delete("q")
+    url.searchParams.delete("f")
+    for (const predicate of JSON.parse(predicatesKey) as string[]) {
+      url.searchParams.append("f", predicate)
+    }
+    if (filter.levels.length) url.searchParams.set("levels", filter.levels.join(","))
+    else url.searchParams.delete("levels")
+    if (lens) url.searchParams.set("lens", lens)
+    else url.searchParams.delete("lens")
     for (const [key, value] of Object.entries(
       range === "custom" ? { since, until } : { since: "", until: "" },
     )) {
@@ -134,7 +210,18 @@ export default function LogsPage() {
       else url.searchParams.delete(key)
     }
     window.history.replaceState(null, "", url)
-  }, [sourceId, mode, filter.q, range, since, until, windowError])
+  }, [
+    sourceId,
+    mode,
+    filter.q,
+    filter.levels,
+    predicatesKey,
+    lens,
+    range,
+    since,
+    until,
+    windowError,
+  ])
 
   const railToggle = (
     <IconAction
@@ -167,6 +254,7 @@ export default function LogsPage() {
               error={sources.error}
               selectedId={selected?.id ?? null}
               onSelect={(source) => {
+                switchSource(source, source.kind === "journal" ? unit : "")
                 setPicked(source.id)
                 if (source.kind !== "journal") setUnit("")
               }}
@@ -214,7 +302,13 @@ export default function LogsPage() {
             leading={railToggle}
             facts={<SourceFacts source={selected} />}
             actions={
-              <ExportDialog sourceId={sourceId} source={selected} filter={filter} boot={boot} />
+              <ExportDialog
+                sourceId={sourceId}
+                source={selected}
+                filter={filter}
+                boot={boot}
+                lens={lens}
+              />
             }
             source={selected}
             sourceId={sourceId}
@@ -224,7 +318,16 @@ export default function LogsPage() {
             filter={filter}
             onFilterChange={setFilter}
             unit={unit}
-            onUnitChange={setUnit}
+            onUnitChange={(next) => {
+              switchSource(selected, next)
+              setUnit(next)
+            }}
+            lens={lens}
+            onLensChange={(next) => {
+              setLens(next)
+              setFilter((f) => ({ ...f, fields: {} }))
+            }}
+            detectedLens={detectedLens}
             range={range}
             onRangeChange={setRange}
             since={since}

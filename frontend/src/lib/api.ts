@@ -132,13 +132,23 @@ export function refusedIndex(field: string | undefined, arrayName: string) {
   return Number(match[1] ?? match[2])
 }
 
+/**
+ * One query parameter's value. An array is a repeated parameter — `f=a&f=b`,
+ * the log routes' field predicates — which a record of scalars could not say
+ * without the caller joining and the server splitting on a character that
+ * might be inside a value (an IPv6 address is all colons).
+ */
+export type QueryValue = string | number | boolean | null | undefined | readonly string[]
+
+export type Query = Record<string, QueryValue>
+
 type RequestOptions = {
   method?: string
   body?: unknown
   /** Echoed in X-Confirm to satisfy a typed-confirmation endpoint. */
   confirm?: string
   signal?: AbortSignal
-  query?: Record<string, string | number | boolean | undefined | null>
+  query?: Query
 }
 
 function buildUrl(path: string, query?: RequestOptions["query"]) {
@@ -150,7 +160,9 @@ function buildUrl(path: string, query?: RequestOptions["query"]) {
   // "empty" could never be expressed, and the omission looked identical to
   // never having set the parameter.
   for (const [key, value] of Object.entries(query)) {
-    if (value !== undefined && value !== null) {
+    if (Array.isArray(value)) {
+      for (const item of value as readonly string[]) params.append(key, item)
+    } else if (value !== undefined && value !== null) {
       params.set(key, String(value))
     }
   }
