@@ -146,23 +146,37 @@ describe("which container answered", () => {
     stack: "r19",
   })
   const releases = [
-    { id: 19, activatedAt: "2026-09-27T09:00:00Z" },
-    { id: 20, activatedAt: "2026-09-27T11:00:00Z" },
+    { id: 19, number: 19, activatedAt: "2026-09-27T09:00:00Z" },
+    { id: 20, number: 20, activatedAt: "2026-09-27T11:00:00Z" },
   ]
 
   test("the release that had gone live by then, its primary service first", () => {
     const services = [db20, web20, web19]
     const lead = { primary: "web" }
-    expect(containerAt(services, releases, Date.parse("2026-09-27T10:00:00Z"), lead)).toBe(web19)
-    expect(containerAt(services, releases, Date.parse("2026-09-27T11:30:00Z"), lead)).toBe(web20)
+    expect(containerAt(services, releases, Date.parse("2026-09-27T10:00:00Z"), lead)).toEqual({
+      container: web19,
+    })
+    expect(containerAt(services, releases, Date.parse("2026-09-27T11:30:00Z"), lead)).toEqual({
+      container: web20,
+    })
   })
 
-  test("before every release, or once its containers are gone, the live one", () => {
+  test("a release whose containers are gone is named, never answered by another's", () => {
+    // Release 19 answered at ten; its container has since been removed, and
+    // the live one did not exist then.
     expect(
       containerAt([db20, web20], releases, Date.parse("2026-09-27T10:00:00Z"), { primary: "web" }),
-    ).toBe(web20)
-    expect(containerAt([web20], releases, Date.parse("2026-09-27T08:00:00Z"))).toBe(web20)
-    expect(containerAt([], releases, NOW)).toBeUndefined()
+    ).toEqual({ gone: 19 })
+    // A stopped deployment whose containers were removed: the live release's are gone too.
+    expect(containerAt([], releases, NOW)).toEqual({ gone: 20 })
+  })
+
+  test("before every release the page knows of, the live one", () => {
+    expect(containerAt([web20, web19], releases, Date.parse("2026-09-27T08:00:00Z"))).toEqual({
+      container: web20,
+    })
+    expect(containerAt([web20], [], NOW)).toEqual({ container: web20 })
+    expect(containerAt([], [], NOW)).toBeUndefined()
   })
 
   test("the picker lists the live release first and offers its stack only when it has several", () => {
@@ -215,6 +229,8 @@ describe("a crash loop", () => {
     const loop = items[1]
     expect(loop.restarts).toBe(3)
     expect(loop.exitCode).toBe("1")
+    expect(loop.clean).toBe(false)
+    expect(loop.oom).toBe(false)
     expect(loop.exit).toBe(events[2])
     expect(loopSpan(loop.spanMs)).toBe("in 5 min")
   })
@@ -252,5 +268,43 @@ describe("a crash loop", () => {
       keyOf,
     )
     expect(items.every((item) => item.kind === "event")).toBe(true)
+  })
+
+  test("an OOM loop folds with the reaper's note, in whichever order the second holds them", () => {
+    const oom = (time) => ev("oom", time, { level: "error" })
+    const die = (time) => ev("die", time, { exitCode: "137" })
+    const items = foldRestarts(
+      [
+        ev("start", at(8)),
+        die(at(7, 59)),
+        oom(at(7, 59)),
+        ev("start", at(6)),
+        oom(at(5, 59)),
+        die(at(5, 59)),
+        ev("start", at(4)),
+        die(at(3, 59)),
+        oom(at(3, 59)),
+      ],
+      keyOf,
+    )
+    expect(items.map((item) => item.kind)).toEqual(["loop"])
+    const [loop] = items
+    expect(loop.restarts).toBe(3)
+    expect(loop.exitCode).toBe("137")
+    expect(loop.oom).toBe(true)
+    // The newest exit, not the reaper's note beside it: its last lines are the container's.
+    expect(loop.exit.action).toBe("die")
+    expect(loop.exit.time).toBe(at(7, 59))
+  })
+
+  test("a job that exits cleanly and is run again is a loop, not a failure", () => {
+    const clean = (time) => ev("die", time, { exitCode: "0", level: "notice" })
+    const [loop] = foldRestarts(
+      [ev("start", at(8)), clean(at(7)), ev("start", at(6)), clean(at(5))],
+      keyOf,
+    )
+    expect(loop.kind).toBe("loop")
+    expect(loop.exitCode).toBeUndefined()
+    expect(loop.clean).toBe(true)
   })
 })

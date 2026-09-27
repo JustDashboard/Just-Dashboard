@@ -22,7 +22,6 @@ import { copyText } from "@/lib/clipboard"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
-import { Envelope, useSocket } from "@/hooks/use-socket"
 import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentEngineRun,
@@ -70,22 +69,11 @@ import {
   stepName,
   useNow,
 } from "@/components/deploy/vocabulary"
-import {
-  BuildConsole,
-  consoleRows,
-  transcriptSummary,
-  type BuildLogEvent,
-} from "@/components/deploy/build-console"
+import { BuildConsole, consoleRows, transcriptSummary } from "@/components/deploy/build-console"
 import { ReleasePipeline } from "@/components/deploy/run-pipeline"
 import { RunSteps } from "@/components/deploy/run-steps"
 import { RunLogs } from "@/components/deploy/run-logs"
-import {
-  applyEvent,
-  dedupeEvents,
-  isRunEvent,
-  isSnapshot,
-  logEvent,
-} from "@/components/deploy/run-stream"
+import { useRunStream } from "@/components/deploy/run-stream"
 import { useProjectNavScope } from "@/components/deploy/project-shell"
 import { RunMetrics } from "@/components/deploy/run-metrics"
 import { RunActorMark } from "@/components/deploy/run-marks"
@@ -149,15 +137,12 @@ export function RunPage() {
     [projectId, runId],
     { enabled: validIds },
   )
-  const [liveSnapshot, setLiveSnapshot] = useState<DeploymentRunSnapshot>()
-  const [events, setEvents] = useState<BuildLogEvent[]>([])
   const [selectedStepId, setSelectedStepId] = useState<number>()
   const [working, setWorking] = useState<"cancel" | "retry" | "redeploy" | "deploy" | "pin">()
   const checkedDeploy = useCheckedDeploy(projectId)
   // The transcript line a failure's cause points at, and a count so pressing
   // "Show the line" twice scrolls to it twice.
   const [focusLine, setFocusLine] = useState<{ seq: number; nonce: number }>()
-  const [streamComplete, setStreamComplete] = useState(false)
   const [rollbackOpen, setRollbackOpen] = useState(false)
   const [compare, setCompare] = useState<{
     open: boolean
@@ -165,9 +150,10 @@ export function RunPage() {
     fromReleaseId?: number
   }>({ open: false })
   const [view, setView] = useSessionState<View>(`deploy.run.${projectId}.${runId}.view`, "build")
-  const lastSeq = useRef(0)
-  const streamedRunState = useRef<DeploymentEngineRun["state"] | undefined>(undefined)
-  const snapshot = liveSnapshot ?? initial.data
+  const stream = useRunStream(projectId, runId, { enabled: validIds, initial: initial.data })
+  const setLiveSnapshot = stream.setSnapshot
+  const events = stream.events
+  const snapshot = stream.snapshot ?? initial.data
 
   // The project is read separately, on its own poll, purely to answer "is
   // this run's release still the one live today" — the run itself never
@@ -249,50 +235,6 @@ export function RunPage() {
       archived: Boolean(project.data.project.archivedAt),
     },
   )
-
-  const onMessage = (envelope: Envelope) => {
-    if (envelope.type === "snapshot" && isSnapshot(envelope.data)) {
-      streamedRunState.current = envelope.data.run.state
-      setLiveSnapshot(envelope.data)
-      return
-    }
-    if (envelope.type !== "events" || !Array.isArray(envelope.data)) return
-    const incoming = envelope.data.filter(isRunEvent)
-    if (incoming.length === 0) return
-    let newest = lastSeq.current
-    for (const event of incoming) newest = Math.max(newest, event.seq)
-    for (const event of incoming) {
-      if (event.type === "run.state" && typeof event.data.state === "string")
-        streamedRunState.current = event.data.state as DeploymentEngineRun["state"]
-    }
-    lastSeq.current = newest
-    // A resync replaces state rather than appending to it: the retained
-    // transcript may have been compacted since our last sequence, so the
-    // lines we were holding are no longer a prefix of the truth.
-    const resync = incoming.find((event) => event.type === "resync")
-    if (resync && isSnapshot(resync.data.snapshot)) {
-      setLiveSnapshot(resync.data.snapshot)
-      setEvents([])
-    }
-    setLiveSnapshot((current) =>
-      incoming.reduce((next, event) => applyEvent(next, event), current ?? initial.data),
-    )
-    const lines = incoming.flatMap(logEvent)
-    if (lines.length > 0) {
-      setEvents((current) => dedupeEvents([...current, ...lines]).slice(-5000))
-    }
-  }
-
-  const socket = useSocket(`/deploy/${projectId}/runs/${runId}/stream`, {
-    enabled: validIds && !streamComplete,
-    query: () => ({ after: lastSeq.current }),
-    onMessage,
-    onClose: () => {
-      if (streamedRunState.current && !isActiveRun(streamedRunState.current)) {
-        setStreamComplete(true)
-      }
-    },
-  })
 
   const attempts = useMemo(() => latestAttempts(snapshot?.steps ?? []), [snapshot?.steps])
   // The transcript is parsed once, here, for the console and for the counts
@@ -788,11 +730,11 @@ export function RunPage() {
         hidden={view !== "build"}
         rows={rows}
         summary={transcript}
-        capped={events.length >= 5000}
+        capped={stream.capped}
         steps={attempts}
         active={active}
         outcome={run.state}
-        connected={socket.state === "open"}
+        connected={stream.socket === "open"}
         startedAt={run.claimedAt ?? run.requestedAt}
         runNumber={run.runNumber}
         now={clock}

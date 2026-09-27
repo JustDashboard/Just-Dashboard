@@ -110,7 +110,7 @@ export function RequestConsole({
   onBlock,
   blocking,
   onEventsAround,
-  onOutputAround,
+  outputFor,
   renderInline,
 }: {
   entries: RequestEntry[]
@@ -135,8 +135,11 @@ export function RequestConsole({
   blocking?: string | null
   /** The Events view scoped to this request's minute. */
   onEventsAround?: (entry: RequestEntry) => void
-  /** The Output view on the container's lines around this request's minute. */
-  onOutputAround?: (entry: RequestEntry) => void
+  /**
+   * The Output view on the container's lines around this request's minute —
+   * for a request whose container is still there to read.
+   */
+  outputFor?: (entry: RequestEntry) => (() => void) | undefined
   /** What the page draws under an opened request's verbs: the lines written while it was in flight. */
   renderInline?: (entry: RequestEntry) => React.ReactNode
 }) {
@@ -377,7 +380,7 @@ export function RequestConsole({
                       onBlock={onBlock}
                       blocking={blocking}
                       onEventsAround={onEventsAround}
-                      onOutputAround={onOutputAround}
+                      onOutput={outputFor?.(entry)}
                       inline={renderInline?.(entry)}
                     />
                   )}
@@ -486,7 +489,7 @@ function RequestDetail({
   onBlock,
   blocking,
   onEventsAround,
-  onOutputAround,
+  onOutput,
   inline,
 }: {
   entry: RequestEntry
@@ -497,7 +500,7 @@ function RequestDetail({
   onBlock?: (ip: string) => void
   blocking?: string | null
   onEventsAround?: (entry: RequestEntry) => void
-  onOutputAround?: (entry: RequestEntry) => void
+  onOutput?: () => void
   inline?: React.ReactNode
 }) {
   const ip = entry.remoteIp
@@ -668,13 +671,8 @@ function RequestDetail({
         {/* The two questions a failing request raises, each one press: what
             did the container print then, and what happened to it then. Both
             stay on this page, in the views beside this one. */}
-        {onOutputAround && (
-          <Button
-            size="xs"
-            variant="outline"
-            className={action}
-            onClick={() => onOutputAround(entry)}
-          >
+        {onOutput && (
+          <Button size="xs" variant="outline" className={action} onClick={onOutput}>
             <TerminalWindow className="size-3" />
             Open in Output
           </Button>

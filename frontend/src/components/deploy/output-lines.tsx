@@ -63,15 +63,12 @@ export function OutputLines({
   const lines = answer?.lines
   const eventColumn = lines ? eventColumnFor(lines, answer?.lens) : false
   return (
-    <section aria-label={title} className="mt-3 animate-rise font-sans">
-      <div className="mb-1.5 flex min-w-0 items-center gap-2 text-hint text-muted-foreground">
-        <span className="eyebrow shrink-0">{title}</span>
-        {facts && <span className="flex min-w-0 items-center gap-1.5 truncate">{facts}</span>}
-        {lines && lines.length > 0 && (
-          <span className="numeric shrink-0">{plural(lines.length, "line")}</span>
-        )}
-        {action && <span className="ml-auto flex shrink-0 items-center">{action}</span>}
-      </div>
+    <LinesBlock
+      title={title}
+      facts={facts}
+      count={lines && lines.length > 0 ? lines.length : undefined}
+      action={action}
+    >
       {answer?.error ? (
         <p className="text-hint text-muted-foreground">
           These lines could not be read: {answer.error}
@@ -97,6 +94,38 @@ export function OutputLines({
           ))}
         </div>
       )}
+    </LinesBlock>
+  )
+}
+
+/**
+ * The block's frame: its eyebrow, where the lines came from, how many, and
+ * the verb. Drawn on its own for lines the page knows cannot be read — a
+ * container removed with what it wrote — so that is said where they would be,
+ * rather than asked for and refused.
+ */
+export function LinesBlock({
+  title,
+  facts,
+  count,
+  action,
+  children,
+}: {
+  title: string
+  facts?: React.ReactNode
+  count?: number
+  action?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <section aria-label={title} className="mt-3 animate-rise font-sans">
+      <div className="mb-1.5 flex min-w-0 items-center gap-2 text-hint text-muted-foreground">
+        <span className="eyebrow shrink-0">{title}</span>
+        {facts && <span className="flex min-w-0 items-center gap-1.5 truncate">{facts}</span>}
+        {count !== undefined && <span className="numeric shrink-0">{plural(count, "line")}</span>}
+        {action && <span className="ml-auto flex shrink-0 items-center">{action}</span>}
+      </div>
+      {children}
     </section>
   )
 }

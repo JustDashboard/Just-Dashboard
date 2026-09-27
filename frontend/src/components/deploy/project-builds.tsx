@@ -6,7 +6,6 @@ import { ArrowUpRight, Wrench } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { relativeTime, timestamp } from "@/lib/format"
 import type { DeploymentEngineRun } from "@/lib/types"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { FactDot } from "@/components/metrics/host-identity"
 import { EmptyState, LoadingRows } from "@/components/state"
 import {
@@ -17,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { BuildConsole } from "@/components/deploy/build-console"
+import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { RunActorMark } from "@/components/deploy/run-marks"
 import { useRunTranscript } from "@/components/deploy/run-stream"
 import {
@@ -40,9 +40,12 @@ import {
  * everything a transcript is not: its steps, its release, its verbs.
  *
  * The rail is the logs page's source rail in shape (a neutral fill for the
- * chosen row, a hover wash, nothing lifted); on a phone there is no width for
- * it and the runs are the header's picker instead — chosen once by width,
- * so the list is in the document once.
+ * chosen row, a hover wash, nothing lifted). Where the column has no width
+ * for it beside a readable console, the runs are the header's picker instead,
+ * each with how it ended and when — chosen once by the column's width, not
+ * the window's (§12: beside the project's navigation a 1280 window leaves
+ * this pane about 970px, a 1024 one about 720), so the list is in the
+ * document once.
  */
 export function ProjectBuilds({
   projectId,
@@ -57,26 +60,34 @@ export function ProjectBuilds({
   /** The source's remote, for a push's host on the run's mark. */
   remote?: string
 }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const [column, width] = useColumnWidth()
+  // The rail's 16rem and a console whose toolbar still fits on one line.
+  const wide = width >= RAIL_FROM
   const [picked, setPicked] = useState<number>()
   const run = runs.find((candidate) => candidate.id === picked) ?? runs[0]
 
+  // One element in every state, so the column is measured from the first
+  // paint whether the runs have arrived or not.
   if (!run) {
-    return loading ? (
-      <LoadingRows rows={6} className="p-3" />
-    ) : (
-      <div className="flex min-h-0 flex-1 items-center justify-center p-6">
-        <EmptyState
-          icon={Wrench}
-          title="Nothing has been built yet"
-          description="A deployment's first run writes its transcript here — every command the build ran and what it printed."
-        />
+    return (
+      <div ref={column} className="flex min-h-0 flex-1">
+        {loading ? (
+          <LoadingRows rows={6} className="min-w-0 flex-1 p-3" />
+        ) : (
+          <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center p-6">
+            <EmptyState
+              icon={Wrench}
+              title="Nothing has been built yet"
+              description="A deployment's first run writes its transcript here — every command the build ran and what it printed."
+            />
+          </div>
+        )}
       </div>
     )
   }
 
   return (
-    <div className="flex min-h-0 flex-1">
+    <div ref={column} className="flex min-h-0 flex-1">
       {wide && (
         <nav
           aria-label="Builds"
@@ -113,7 +124,11 @@ export function ProjectBuilds({
               </SelectTrigger>
               <SelectContent>
                 {runs.map((candidate) => (
-                  <SelectItem key={candidate.id} value={String(candidate.id)}>
+                  <SelectItem
+                    key={candidate.id}
+                    value={String(candidate.id)}
+                    hint={<RunHint run={candidate} />}
+                  >
                     {runTitle(candidate)}
                   </SelectItem>
                 ))}
@@ -131,6 +146,20 @@ export function ProjectBuilds({
         <Transcript key={run.id} projectId={projectId} run={run} />
       </div>
     </div>
+  )
+}
+
+/** Where the rail starts, in pixels of the pane's column. */
+const RAIL_FROM = 900
+
+/** How a run in the picker ended, and when it was asked for. */
+function RunHint({ run }: { run: DeploymentEngineRun }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <RunStatus state={run.state} className="shrink-0" />
+      <FactDot />
+      <span className="numeric">{relativeTime(run.requestedAt)}</span>
+    </span>
   )
 }
 

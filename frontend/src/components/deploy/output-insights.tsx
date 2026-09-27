@@ -104,7 +104,8 @@ export function OutputInsights({
   return (
     <section aria-label="Output" className="flex flex-col gap-6 border-t border-hairline px-5 py-5">
       <div className="flex min-w-0 items-baseline justify-between gap-3">
-        <h3 className="text-title font-semibold">Output</h3>
+        {/* A level above the lists it holds, which are the facets' own level. */}
+        <h2 className="text-title font-semibold">Output</h2>
         <span className="truncate text-hint text-muted-foreground">
           what {label} wrote over this window
         </span>
@@ -129,7 +130,9 @@ export function OutputInsights({
                 value: value.count.toLocaleString(),
                 share: value.count / peak(exceptions),
                 hint: seen(value, value.samples?.component),
-                title: "Read the output around the last time this was thrown",
+                // The row's name and its tooltip: the one place an exception
+                // longer than the column is read in full.
+                title: `Read the output around the last "${value.value}"`,
                 onClick: open(value),
               }))}
               emptyLabel="Nothing thrown in this window."
@@ -139,18 +142,15 @@ export function OutputInsights({
             <BarList
               items={startup.slice(0, SHOWN).map((value) => {
                 const meta = eventMeta(answer.lens ?? "app", value.value)
+                const word = meta?.label ?? value.value.replace(/_/g, " ")
                 return {
                   key: value.value,
                   mono: false,
-                  label: (
-                    <span className={cn(EVENT_WORD[meta?.tone ?? "danger"])}>
-                      {meta?.label ?? value.value.replace(/_/g, " ")}
-                    </span>
-                  ),
+                  label: <span className={cn(EVENT_WORD[meta?.tone ?? "danger"])}>{word}</span>,
                   value: value.count.toLocaleString(),
                   share: value.count / peak(startup),
                   hint: seen(value, value.samples?.error),
-                  title: "Read the output around the last time it failed to start",
+                  title: `Read the output around the last start that failed with "${word}"`,
                   onClick: open(value),
                 }
               })}

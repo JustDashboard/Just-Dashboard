@@ -3336,7 +3336,7 @@ export async function mockNewProject(page: Page) {
  * a tail latency findable — a fixture of two hundred identical 200s would pass
  * every assertion while proving none of that.
  */
-function deploymentRequests(url: URL) {
+export function deploymentRequests(url: URL) {
   const limit = Number(url.searchParams.get("limit") ?? "500")
   const base = Date.parse("2026-09-03T11:40:00Z")
   const entries = [

@@ -18,21 +18,30 @@ import {
 /**
  * A run's stream, read: its snapshot as the events move it, and the build
  * transcript as lines. The run page reads it with everything else it follows
- * about a run; the project's Builds view reads only this, for the run the
- * reader picked, through `useRunTranscript`.
+ * about a run (`useRunStream`); the project's Builds view reads only the
+ * transcript, for the run the reader picked (`useRunTranscript`). One reader
+ * for both, so the two consoles cannot come to disagree about the same run.
  */
 
 /** The most transcript events a reader holds; past it the oldest go, and the console says so. */
-export const TRANSCRIPT_CAP = 5000
+const TRANSCRIPT_CAP = 5000
 
 /**
- * One run's transcript as the stream sends it: a snapshot, the retained
- * events after it, then live ones until the run ends and the server closes.
- * Resumes from the last sequence on a reconnect, and stops reconnecting once
- * a finished run's stream has closed. Mount it per run (a `key`): a
- * different run is a different stream, and nothing of the last one carries.
+ * One run's stream as the server sends it: a snapshot, the retained events
+ * after it, then live ones until the run ends and the server closes. Resumes
+ * from the last sequence on a reconnect, and stops reconnecting once a
+ * finished run's stream has closed. Mount it per run (a `key`, or a page per
+ * run): a different run is a different stream, and nothing of the last one
+ * carries.
+ *
+ * `initial` is the run as a page already read it, which the first events
+ * move on from when they arrive before the stream's own snapshot.
  */
-export function useRunTranscript(projectId: number, runId: number) {
+export function useRunStream(
+  projectId: number,
+  runId: number,
+  { enabled = true, initial }: { enabled?: boolean; initial?: DeploymentRunSnapshot } = {},
+) {
   const [snapshot, setSnapshot] = useState<DeploymentRunSnapshot>()
   const [events, setEvents] = useState<BuildLogEvent[]>([])
   const [complete, setComplete] = useState(false)
@@ -53,12 +62,17 @@ export function useRunTranscript(projectId: number, runId: number) {
       if (event.type === "run.state" && typeof event.data.state === "string")
         state.current = event.data.state as DeploymentEngineRun["state"]
     }
+    // A resync replaces state rather than appending to it: the retained
+    // transcript may have been compacted since our last sequence, so the
+    // lines we were holding are no longer a prefix of the truth.
     const resync = incoming.find((event) => event.type === "resync")
     if (resync && isSnapshot(resync.data.snapshot)) {
       setSnapshot(resync.data.snapshot)
       setEvents([])
     }
-    setSnapshot((current) => incoming.reduce((next, event) => applyEvent(next, event), current))
+    setSnapshot((current) =>
+      incoming.reduce((next, event) => applyEvent(next, event), current ?? initial),
+    )
     const lines = incoming.flatMap(logEvent)
     if (lines.length > 0) {
       setEvents((current) => dedupeEvents([...current, ...lines]).slice(-TRANSCRIPT_CAP))
@@ -66,7 +80,7 @@ export function useRunTranscript(projectId: number, runId: number) {
   }
 
   const socket = useSocket(`/deploy/${projectId}/runs/${runId}/stream`, {
-    enabled: !complete,
+    enabled: enabled && !complete,
     query: () => ({ after: lastSeq.current }),
     onMessage,
     onClose: () => {
@@ -74,20 +88,36 @@ export function useRunTranscript(projectId: number, runId: number) {
     },
   })
 
-  const rows = useMemo(() => consoleRows(events), [events])
-  const summary = useMemo(() => transcriptSummary(rows), [rows])
-  const steps = useMemo(() => latestAttempts(snapshot?.steps ?? []), [snapshot?.steps])
   return {
     snapshot,
-    rows,
-    summary,
-    steps,
+    /** For a verb that changed the run and answered with it, ahead of the stream saying so. */
+    setSnapshot,
+    events,
     capped: events.length >= TRANSCRIPT_CAP,
-    connected: socket.state === "open",
+    socket: socket.state,
   }
 }
 
-export function applyEvent(
+/** One run's transcript, as the Builds view draws it. */
+export function useRunTranscript(projectId: number, runId: number) {
+  const stream = useRunStream(projectId, runId)
+  const rows = useMemo(() => consoleRows(stream.events), [stream.events])
+  const summary = useMemo(() => transcriptSummary(rows), [rows])
+  const steps = useMemo(
+    () => latestAttempts(stream.snapshot?.steps ?? []),
+    [stream.snapshot?.steps],
+  )
+  return {
+    snapshot: stream.snapshot,
+    rows,
+    summary,
+    steps,
+    capped: stream.capped,
+    connected: stream.socket === "open",
+  }
+}
+
+function applyEvent(
   snapshot: DeploymentRunSnapshot | undefined,
   event: DeploymentRunEvent,
 ): DeploymentRunSnapshot | undefined {
@@ -149,7 +179,7 @@ export function applyEvent(
   return { ...snapshot, steps }
 }
 
-export function logEvent(event: DeploymentRunEvent): BuildLogEvent[] {
+function logEvent(event: DeploymentRunEvent): BuildLogEvent[] {
   if (event.type !== "step.log" || typeof event.data.text !== "string") return []
   return [
     {
@@ -163,7 +193,7 @@ export function logEvent(event: DeploymentRunEvent): BuildLogEvent[] {
   ]
 }
 
-export function dedupeEvents(events: BuildLogEvent[]) {
+function dedupeEvents(events: BuildLogEvent[]) {
   const bySequence = new Map<number, BuildLogEvent>()
   for (const event of events) bySequence.set(event.seq, event)
   return [...bySequence.values()].sort((a, b) => a.seq - b.seq)
@@ -173,12 +203,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-export function isSnapshot(value: unknown): value is DeploymentRunSnapshot {
+function isSnapshot(value: unknown): value is DeploymentRunSnapshot {
   if (!isRecord(value) || !isRecord(value.run) || !Array.isArray(value.steps)) return false
   return typeof value.run.id === "number"
 }
 
-export function isRunEvent(value: unknown): value is DeploymentRunEvent {
+function isRunEvent(value: unknown): value is DeploymentRunEvent {
   if (!isRecord(value) || !isRecord(value.data)) return false
   return typeof value.seq === "number" && typeof value.type === "string"
 }

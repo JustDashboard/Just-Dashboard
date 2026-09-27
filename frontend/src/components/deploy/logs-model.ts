@@ -289,28 +289,41 @@ export function liveStack(services: DeploymentRuntimeService[]) {
 }
 
 /**
- * The container that was answering at an instant: one of the release that
- * had most recently gone live by then, else — a request older than every
- * release the page knows of, or one whose containers are gone — the live
- * release's. It is a reading, not a record: the ingress does not say which
- * container answered, so a request in the seconds of a swap may have been
- * the other one's.
+ * Which container was answering at an instant, as far as the page can say.
+ *
+ * One of the release that had most recently gone live by then — or, for a
+ * request older than every release the page knows of, the live release's.
+ * When that release is known and its containers are not, it is named
+ * instead: what they wrote went with them, and the live container's lines
+ * from before it existed would be an answer to a different question.
+ *
+ * It is a reading, not a record: the ingress does not say which container
+ * answered, so a request in the seconds of a swap may have been the other
+ * one's.
  */
+export type Answering = { container: DeploymentRuntimeService } | { gone: number }
+
 export function containerAt(
   services: DeploymentRuntimeService[],
-  releases: Pick<DeploymentRelease, "id" | "activatedAt">[],
+  releases: Pick<DeploymentRelease, "id" | "number" | "activatedAt">[],
   at: number,
   lead: Lead = {},
-) {
-  let release: { id: number; activated: number } | undefined
+): Answering | undefined {
+  let release: { id: number; number: number; activated: number } | undefined
   for (const candidate of releases) {
     const activated = candidate.activatedAt ? Date.parse(candidate.activatedAt) : NaN
     if (!Number.isFinite(activated) || activated > at) continue
-    if (!release || activated > release.activated) release = { id: candidate.id, activated }
+    if (!release || activated > release.activated) {
+      release = { id: candidate.id, number: candidate.number, activated }
+    }
   }
-  const of = release ? services.filter((service) => service.releaseId === release.id) : []
-  const pool = of.length > 0 ? of : services.filter((service) => service.liveRelease)
-  return orderedServices(pool.length > 0 ? pool : services, lead)[0]
+  if (release) {
+    const of = services.filter((service) => service.releaseId === release.id)
+    return of.length > 0 ? { container: orderedServices(of, lead)[0] } : { gone: release.number }
+  }
+  const live = services.filter((service) => service.liveRelease)
+  const pool = live.length > 0 ? live : services
+  return pool.length > 0 ? { container: orderedServices(pool, lead)[0] } : undefined
 }
 
 /** One row of the Events feed: an event, or a crash loop folded into one. */
@@ -323,7 +336,12 @@ export type FeedItem =
       /** The loop's events, newest first. */
       events: DockerEvent[]
       restarts: number
+      /** The code it kept exiting with, when that was a failure's. */
       exitCode?: string
+      /** Every exit was status 0: a job its restart policy runs again, not a crash. */
+      clean: boolean
+      /** The OOM reaper ended it: the exit code alone says only "killed". */
+      oom: boolean
       /** From the oldest exit to the newest start. */
       spanMs: number
       /** The newest exit, whose last lines say why. */
@@ -335,12 +353,20 @@ function sameObject(a: DockerEvent, b: DockerEvent) {
 }
 
 /**
+ * What Docker sends beside an exit: the OOM reaper's note and a kill. They
+ * share the exit's second, so newest first they sit on either side of it.
+ */
+const BESIDE_EXIT = new Set(["oom", "kill"])
+
+/**
  * A crash loop as the one row it is. A container that exits and is started
  * again by its restart policy, twenty times with the same code, is twenty
  * pairs of rows saying one thing — and the one row that is different, the
  * exit it finally stayed down after, is somewhere under them. Consecutive
  * pairs of an exit and the start after it, on one container with one exit
  * code, fold into "restarted ×N"; one pair is a restart and stays two rows.
+ * An OOM kill is its exit and the reaper's note together, so a loop of them
+ * folds the same way.
  *
  * The events arrive newest first, so a pair reads start-then-exit.
  */
@@ -348,42 +374,55 @@ export function foldRestarts(events: DockerEvent[], keyOf: (event: DockerEvent) 
   const out: FeedItem[] = []
   let i = 0
   while (i < events.length) {
+    const head = events[i]
     let j = i
     let pairs = 0
-    let exitCode: string | undefined
-    while (j + 1 < events.length) {
+    let exit: DockerEvent | undefined
+    let oom = false
+    while (j < events.length) {
       const start = events[j]
-      const exit = events[j + 1]
-      if (
-        start.type !== "container" ||
-        start.action !== "start" ||
-        exit.type !== "container" ||
-        exit.action !== "die" ||
-        !sameObject(start, exit) ||
-        !sameObject(start, events[i]) ||
-        (pairs > 0 && (exit.exitCode ?? "") !== (exitCode ?? ""))
-      ) {
+      if (start.type !== "container" || start.action !== "start" || !sameObject(start, head)) {
         break
       }
-      exitCode = exit.exitCode
+      // The exit this start answered, with what Docker sent beside it.
+      let k = j + 1
+      let died: DockerEvent | undefined
+      let reaped = false
+      while (k < events.length) {
+        const next = events[k]
+        const beside =
+          next.type === "container" &&
+          sameObject(next, head) &&
+          (next.action === "die" ? !died : BESIDE_EXIT.has(next.action))
+        if (!beside) break
+        if (next.action === "die") died = next
+        if (next.action === "oom") reaped = true
+        k += 1
+      }
+      if (!died || (exit && (died.exitCode ?? "") !== (exit.exitCode ?? ""))) break
+      exit ??= died
+      oom ||= reaped
       pairs += 1
-      j += 2
+      j = k
     }
-    if (pairs >= 2) {
+    if (pairs >= 2 && exit) {
       const loop = events.slice(i, j)
+      const code = exit.exitCode
       out.push({
         kind: "loop",
         key: `loop:${keyOf(loop[0])}`,
         time: loop[0].time,
         events: loop,
         restarts: pairs,
-        exitCode: exitCode || undefined,
+        exitCode: code && code !== "0" ? code : undefined,
+        clean: code === "0",
+        oom,
         spanMs: Math.max(0, Date.parse(loop[0].time) - Date.parse(loop[loop.length - 1].time)),
-        exit: loop[1],
+        exit,
       })
       i = j
     } else {
-      out.push({ kind: "event", key: keyOf(events[i]), time: events[i].time, event: events[i] })
+      out.push({ kind: "event", key: keyOf(head), time: head.time, event: head })
       i += 1
     }
   }

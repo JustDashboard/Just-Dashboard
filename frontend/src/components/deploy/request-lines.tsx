@@ -2,10 +2,11 @@
 
 import { fieldPredicates } from "@/lib/log-filter"
 import { dockerSource, fileSource } from "@/lib/log-sources"
-import type { DeploymentRequests, DeploymentRuntimeService, RequestEntry } from "@/lib/types"
+import type { DeploymentRequests, RequestEntry } from "@/lib/types"
 import { FactDot } from "@/components/metrics/host-identity"
 import { ProductGlyph } from "@/components/product-logo"
-import { OutputLines } from "@/components/deploy/output-lines"
+import { LinesBlock, OutputLines } from "@/components/deploy/output-lines"
+import type { Answering } from "@/components/deploy/logs-model"
 
 /** What Caddy names a failure it answered for: a refused dial, a timeout, any other 5xx. */
 const CADDY_FAILURES = ["upstream_refused", "upstream_timeout", "error"]
@@ -19,7 +20,11 @@ const iso = (ms: number) => new Date(ms).toISOString()
  * answered — "approximate", and said so: the ingress records no request id
  * for the application to log, so these are the lines of that stretch of
  * time, which on a busy container are other requests' too. The container is
- * the one that was live then (`containerAt`), not whichever is live now.
+ * the one that was live then (`containerAt`), not whichever is live now; when
+ * that one has been removed, the block says so rather than reading another.
+ * An ingress that records no duration (nginx's combined format) leaves only
+ * when the answer went out, so the stretch is the second either side of it,
+ * and the block's words say that instead of "in flight".
  *
  * A failure also gets what the proxy said about it: Caddy's error line for
  * the same host within two seconds, read off the ingress container's output
@@ -31,16 +36,17 @@ const iso = (ms: number) => new Date(ms).toISOString()
 export function RequestLines({
   entry,
   window,
-  container,
+  answering,
 }: {
   entry: RequestEntry
   window: DeploymentRequests
-  container?: DeploymentRuntimeService
+  answering?: Answering
 }) {
   const at = Date.parse(entry.time)
   if (!Number.isFinite(at)) return null
   const failed = entry.status >= 500
   const proxy = failed ? proxyQuery(entry, window, at) : undefined
+  const timed = entry.durationMs !== undefined
   return (
     <>
       {proxy && (
@@ -56,29 +62,45 @@ export function RequestLines({
           empty="The proxy wrote nothing about this request, so the error was the application's own answer."
         />
       )}
-      {container && (
-        <OutputLines
-          title="Lines from this request"
-          facts={
-            <span
-              className="flex min-w-0 items-center gap-1.5"
-              title="Every line the container wrote from the moment the request arrived to a second after it was answered. The proxy records no request id, so on a busy container some are other requests'."
-            >
-              <span className="shrink-0">approximate</span>
-              <FactDot />
-              <span className="truncate font-mono">{container.name}</span>
-            </span>
-          }
-          query={{
-            source: dockerSource(container.containerId),
-            since: iso(at - (entry.durationMs ?? 0) - 1000),
-            until: iso(at + 1000),
-            order: "asc",
-            limit: 50,
-          }}
-          empty="The container wrote nothing while this request was in flight."
-        />
-      )}
+      {answering &&
+        ("gone" in answering ? (
+          <LinesBlock title="Lines from this request">
+            <p className="text-hint text-muted-foreground">
+              Release #{answering.gone} was live then, and its containers have since been removed —
+              what they wrote went with them.
+            </p>
+          </LinesBlock>
+        ) : (
+          <OutputLines
+            title="Lines from this request"
+            facts={
+              <span
+                className="flex min-w-0 items-center gap-1.5"
+                title={
+                  timed
+                    ? "Every line the container wrote from the moment the request arrived to a second after it was answered. The proxy records no request id, so on a busy container some are other requests'."
+                    : "Every line the container wrote in the second either side of the answer: this proxy records no duration, so when the request arrived is not known. Nothing ties a line to a request, so on a busy container some are other requests'."
+                }
+              >
+                <span className="shrink-0">approximate</span>
+                <FactDot />
+                <span className="truncate font-mono">{answering.container.name}</span>
+              </span>
+            }
+            query={{
+              source: dockerSource(answering.container.containerId),
+              since: iso(at - (entry.durationMs ?? 0) - 1000),
+              until: iso(at + 1000),
+              order: "asc",
+              limit: 50,
+            }}
+            empty={
+              timed
+                ? "The container wrote nothing while this request was in flight."
+                : "The container wrote nothing in the second either side of the answer."
+            }
+          />
+        ))}
     </>
   )
 }

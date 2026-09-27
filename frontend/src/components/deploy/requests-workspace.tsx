@@ -71,6 +71,8 @@ import {
   type RequestQuery,
 } from "@/components/deploy/logs-model"
 
+// Where a site's page reads them: the query is the workspace's question, and
+// the deployment's page keeps its own words for it in the model beside it.
 export { EMPTY_REQUEST_QUERY, type RequestQuery } from "@/components/deploy/logs-model"
 
 /** How many live rows the pane holds before the oldest fall off the bottom. */
@@ -103,6 +105,7 @@ export function RequestsWorkspace({
   base,
   subject,
   emptyTitle = "No request record for this deployment",
+  emptyAction,
   view,
   query,
   onQueryChange,
@@ -110,7 +113,7 @@ export function RequestsWorkspace({
   alerts,
   routed,
   onEventsAround,
-  onOutputAround,
+  outputFor,
   renderInline,
   afterInsights,
 }: {
@@ -123,6 +126,11 @@ export function RequestsWorkspace({
   subject: string
   /** The empty state's title, which names what has no record. */
   emptyTitle?: string
+  /**
+   * What to press when nothing routes here — a deployment's "Add a domain".
+   * The owner's to say, because where a route is added is the owner's page.
+   */
+  emptyAction?: React.ReactNode
   view: RequestsView
   query: RequestQuery
   onQueryChange: (next: RequestQuery) => void
@@ -133,8 +141,11 @@ export function RequestsWorkspace({
   /** Whether any domain routes here; undefined while that is not yet known. */
   routed?: boolean
   onEventsAround?: (entry: RequestEntry) => void
-  /** The page's Output view opened on the container's lines around this request. */
-  onOutputAround?: (entry: RequestEntry) => void
+  /**
+   * The page's Output view opened on the container's lines around this
+   * request — for a request whose container is still there to read.
+   */
+  outputFor?: (entry: RequestEntry) => (() => void) | undefined
   /**
    * What the page draws inside an opened request, under its verbs: the lines
    * its container and its proxy wrote while it was in flight.
@@ -220,25 +231,42 @@ export function RequestsWorkspace({
     // in it yet, and there is nothing to press.
     const next =
       routed === false ? (
-        <Button size="sm" variant="outline" asChild>
-          <Link href={`${base}/settings/domains`}>Add a domain</Link>
-        </Button>
+        emptyAction
       ) : !data.driver ? (
         <Button size="sm" variant="outline" asChild>
           <Link href="/proxy">Open Proxy</Link>
         </Button>
       ) : undefined
+    const reason =
+      data.reason ??
+      "Nothing records the requests this deployment serves. A deployment gets one once it has a public route."
+    // Insights still has the page's own section to show: a worker or a
+    // deployment nobody routes to has no requests to rank, and what its
+    // containers threw is then the only ranking it has.
+    const after =
+      view === "insights" && poll.data
+        ? afterInsights?.({ since: poll.data.asked.since, until: poll.data.asked.until })
+        : undefined
+    if (after) {
+      return (
+        <div className="min-h-0 flex-1 overflow-auto">
+          <div className="flex flex-col items-start gap-3 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-start gap-3">
+              <Globe aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 space-y-1">
+                <p className="text-body leading-tight font-medium">{emptyTitle}</p>
+                <p className="text-xs leading-relaxed text-muted-foreground">{reason}</p>
+              </div>
+            </div>
+            {next && <div className="shrink-0 pl-7 sm:pl-0">{next}</div>}
+          </div>
+          {after}
+        </div>
+      )
+    }
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center p-6">
-        <EmptyState
-          icon={Globe}
-          title={emptyTitle}
-          description={
-            data.reason ??
-            "Nothing records the requests this deployment serves. A deployment gets one once it has a public route."
-          }
-          action={next}
-        />
+        <EmptyState icon={Globe} title={emptyTitle} description={reason} action={next} />
       </div>
     )
   }
@@ -337,7 +365,7 @@ export function RequestsWorkspace({
           onBlock={onBlock}
           blocking={blocking}
           onEventsAround={onEventsAround}
-          onOutputAround={onOutputAround}
+          outputFor={outputFor}
           renderInline={renderInline && ((entry) => renderInline(entry, data))}
           leading={
             <ClassChips
@@ -836,12 +864,14 @@ function TookFilter({
       <PopoverTrigger asChild>
         <FilterChip
           selected={banded}
-          aria-label="Response time"
           title="Only requests that took between two durations"
           className="shrink-0 max-sm:h-10"
         >
           <Stopwatch aria-hidden className="size-3" />
-          <span className="max-sm:hidden">Took</span>
+          {/* Out of sight on a phone rather than gone: the word is the
+              chip's name at every width, so a screen reader hears what the
+              wider layouts show. */}
+          <span className="max-sm:sr-only">Took</span>
           <ChevronDown aria-hidden className="size-3 text-muted-foreground" />
         </FilterChip>
       </PopoverTrigger>

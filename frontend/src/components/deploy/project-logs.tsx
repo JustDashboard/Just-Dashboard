@@ -159,7 +159,22 @@ export function ProjectLogs() {
   const [arrival] = useState(() => arrivalOf(search, Date.now()))
   const [asked, setAsked] = useState<LogsView | undefined>(arrival.view)
   const view = asked ?? fallback
-  const [moment, setMoment] = useState(arrival.moment)
+  // A moment belongs to the view it was sent to: Events' two minutes around a
+  // request, Output's History around one. One moment for both made pressing
+  // Output, after reading Events around a request, open History on that
+  // request's minute — on whichever service Output last showed.
+  const [eventsMoment, setEventsMoment] = useState(
+    arrival.view === "output" ? undefined : arrival.moment,
+  )
+  // Output's is kept for the tab, as the History it opened is: the pane
+  // remembers that range, and coming back to it without its moment drew the
+  // old minutes with nothing to say what they were or a way back to Live.
+  const [keptMoment, setOutputMoment] = useSessionState<string | null>(
+    `deploy.${project.projectId}.output.moment`,
+    null,
+    arrival.view === "events" ? null : arrival.moment,
+  )
+  const outputMoment = keptMoment ?? undefined
   const [service, setService] = useState(arrival.service)
   // The request query is the tab's, and a link's when it carries one: a
   // narrowing survives a reload and a trip to another view and back.
@@ -179,12 +194,13 @@ export function ProjectLogs() {
   // around the failing request were gone. Each word is written only where the
   // view on screen reads it, so the page at rest is its bare address.
   const queryWords = JSON.stringify(queryParams(query))
+  const moment = view === "events" ? eventsMoment : view === "output" ? outputMoment : undefined
   useEffect(() => {
     const url = new URL(window.location.href)
     const params = url.searchParams
     if (view === fallback) params.delete("view")
     else params.set("view", view)
-    if (moment && (view === "events" || view === "output")) params.set("moment", moment)
+    if (moment) params.set("moment", moment)
     else params.delete("moment")
     if (service && view === "output") params.set("service", service)
     else params.delete("service")
@@ -305,13 +321,17 @@ export function ProjectLogs() {
 
   // Output on one container's lines around a moment: the request it served,
   // the exit it made, the exception it threw.
-  const openOutput = (container: DeploymentRuntimeService | undefined, at: string) => {
-    if (container) setService(container.containerId)
-    setMoment(at)
+  const openOutput = (container: DeploymentRuntimeService, at: string) => {
+    setService(container.containerId)
+    setOutputMoment(at)
     setAsked("output")
   }
+  // Only once the runtime has answered: before then an empty list of
+  // containers would read as every release's having been removed.
   const answering = (entry: RequestEntry) =>
-    containerAt(services, project.releases, Date.parse(entry.time), lead)
+    runtime?.status === "available"
+      ? containerAt(services, project.releases, Date.parse(entry.time), lead)
+      : undefined
 
   const disruptions = lifecycle.data?.recent.length ?? 0
   const choose = (next: LogsView) => setAsked(next)
@@ -371,15 +391,23 @@ export function ProjectLogs() {
             markers={markers}
             alerts={alerts.data?.alerts}
             routed={routed}
+            emptyAction={
+              <Button size="sm" variant="outline" asChild>
+                <Link href={`/deploy/${project.projectId}/settings/domains`}>Add a domain</Link>
+              </Button>
+            }
             onEventsAround={(entry) => {
-              setMoment(entry.time)
+              setEventsMoment(entry.time)
               setAsked("events")
             }}
-            onOutputAround={
-              services.length > 0 ? (entry) => openOutput(answering(entry), entry.time) : undefined
-            }
+            outputFor={(entry) => {
+              const answer = answering(entry)
+              return answer && "container" in answer
+                ? () => openOutput(answer.container, entry.time)
+                : undefined
+            }}
             renderInline={(entry, window) => (
-              <RequestLines entry={entry} window={window} container={answering(entry)} />
+              <RequestLines entry={entry} window={window} answering={answering(entry)} />
             )}
             afterInsights={
               live
@@ -404,8 +432,8 @@ export function ProjectLogs() {
             lead={lead}
             service={service}
             onServiceChange={setService}
-            moment={moment}
-            onLeaveMoment={() => setMoment(undefined)}
+            moment={outputMoment}
+            onLeaveMoment={() => setOutputMoment(null)}
           />
         )}
         {view === "builds" && (
@@ -420,12 +448,19 @@ export function ProjectLogs() {
           <LifecycleFeed
             projectId={project.projectId}
             product={project.product}
-            moment={moment}
-            onClearMoment={() => setMoment(undefined)}
+            moment={eventsMoment}
+            onClearMoment={() => setEventsMoment(undefined)}
             outputFor={(event) => {
               const container = containerOf(event.id)
               return container ? () => openOutput(container, event.time) : undefined
             }}
+            // Whether the container is still there — its output with it — once
+            // the runtime has said which are.
+            exists={
+              runtime?.status === "available"
+                ? (event) => Boolean(containerOf(event.id))
+                : undefined
+            }
           />
         )}
       </Pane>
