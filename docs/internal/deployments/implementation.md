@@ -862,7 +862,11 @@ only renderer/executor/validation authority for their feature.
   records it `live` again. Both are light-slot manual actions that refuse a release target that is no
   longer live, refuse a legacy Compose or preview environment, and refuse a runtime that is not in the
   state the operation expects (`already_stopped`, `not_stopped`); a start that fails leaves the runtime
-  recorded stopped, since no compensation is possible. The fleet and workspace read models report the
+  as stopped as it was found, since no compensation is possible. A runtime still recorded `live` whose
+  release containers Docker reports all down counts as stopped for start (`ReleaseRuntimeDown`, checked
+  at admission and again in `start_candidate`): containers that exit, are stopped in Docker, or are not
+  brought back after a daemon restart never pass through a stop run, and the project page already draws
+  that observation as stopped and offers Start. The fleet and workspace read models report the
   live runtime's stopped state as `stopped`, folded into the existing batched runtime join, and the Git
   watcher persists the decision reason `stopped` instead of enqueueing an automatic deployment while the
   live runtime is stopped; a manual deploy remains allowed and, on success, leaves the new release live

@@ -1156,9 +1156,10 @@ func (e *NormalizedStepExecutor) stopLiveRuntime(ctx context.Context, execution 
 }
 
 // startLiveRuntime is start_candidate for a start run: it starts a runtime
-// this environment already recorded as stopped. There is no fresh candidate
-// and, on failure, no compensation to attempt — the runtime is left exactly
-// as stopped as it was found.
+// this environment recorded as stopped, or one still recorded live whose
+// containers Docker reports all down. There is no fresh candidate and, on
+// failure, no compensation to attempt — the runtime is left exactly as
+// stopped as it was found.
 func (e *NormalizedStepExecutor) startLiveRuntime(ctx context.Context, execution StepExecution) StepResult {
 	releaseID, err := operationTargetReleaseID(execution.Run)
 	if err != nil {
@@ -1176,7 +1177,8 @@ func (e *NormalizedStepExecutor) startLiveRuntime(ctx context.Context, execution
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
-	if runtime.State != "stopped" {
+	observer, _ := e.runtime.(RuntimeObserver)
+	if runtime.State != "stopped" && !(runtime.State == "live" && ReleaseRuntimeDown(ctx, observer, *runtime)) {
 		return StepResult{State: StepFailed, ErrorCode: "runtime_not_stopped", ErrorMessage: "the live runtime is already running"}
 	}
 	variables, err := e.runtimeVariablesForRelease(ctx, releaseID, *runtime)

@@ -139,6 +139,13 @@ func (o *DockerRuntimeOwner) WithNetworks(owner RuntimeNetworkOwner) *DockerRunt
 	return o
 }
 
+func (o *DockerRuntimeOwner) ListContainersWithLabels(ctx context.Context, labels map[string]string) ([]dockerx.Container, error) {
+	if o.client == nil {
+		return nil, ErrRuntimeUnavailable
+	}
+	return o.client.ListContainersWithLabels(ctx, labels)
+}
+
 // DiagnoseRuntime inspects every container the runtime record names and reads
 // a bounded tail of its output. It never stops, starts or removes anything.
 func (o *DockerRuntimeOwner) DiagnoseRuntime(ctx context.Context, runtime ReleaseRuntime) (RuntimeDiagnostics, error) {
