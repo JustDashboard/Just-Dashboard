@@ -278,9 +278,16 @@ test("a reset password is changed only after the account's second factor", async
 
 test("same-name PM2 applications use trusted daemon and process identities", async ({ page }) => {
   const actions: URL[] = [],
-    sockets: URL[] = []
-  await page.routeWebSocket("**/api/v1/pm2/**", (ws) => {
+    sockets: URL[] = [],
+    legacy: URL[] = []
+  // The sheet reads a process's logs as one of the host's log sources; the
+  // id it asks for is built from the daemon's account and the process id the
+  // list keyed the row on, never from the name alone.
+  await page.routeWebSocket("**/api/v1/logs/stream**", (ws) => {
     sockets.push(new URL(ws.url()))
+  })
+  await page.routeWebSocket("**/api/v1/pm2/**", (ws) => {
+    legacy.push(new URL(ws.url()))
   })
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url()),
@@ -346,8 +353,7 @@ test("same-name PM2 applications use trusted daemon and process identities", asy
   await expect(page.getByRole("dialog")).toContainText("bob #0")
   await page.getByRole("tab", { name: "Logs", exact: true }).click()
   await expect.poll(() => sockets.length).toBe(1)
-  expect(sockets[0].searchParams.get("user")).toBe("bob")
-  expect(sockets[0].searchParams.get("id")).toBe("0")
+  expect(sockets[0].searchParams.get("source")).toBe("pm2:bob/0/same-name")
   await page.keyboard.press("Escape")
   await expect(page.getByRole("dialog")).toHaveCount(0)
   const alice = page.getByRole("row").filter({ hasText: "alice" })
@@ -358,6 +364,7 @@ test("same-name PM2 applications use trusted daemon and process identities", asy
     page.getByText("Add this daemon's log directory to JD_LOG_ROOTS.", { exact: true }),
   ).toBeVisible()
   expect(sockets).toHaveLength(1)
+  expect(legacy).toEqual([])
 })
 
 test("Redis scan cursors retain all unsigned 64-bit digits in requests", async ({ page }) => {
