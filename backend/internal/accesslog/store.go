@@ -66,6 +66,13 @@ type Facts struct {
 	Format  Format `json:"format,omitempty"`
 	Latency bool   `json:"latency"`
 	Path    string `json:"path,omitempty"`
+	// Where the same server says why it failed a request. The record says a
+	// request was answered 502; Caddy's runtime log on the ingress
+	// container's output, or the error file nginx writes beside the site's
+	// access log, says the upstream refused the connection. At most one is
+	// set, by the driver that writes it.
+	Container string `json:"container,omitempty"`
+	ErrorLog  string `json:"errorLog,omitempty"`
 }
 
 // Opener resolves a route to its record. It is called once per route the

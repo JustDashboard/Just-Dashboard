@@ -32,7 +32,12 @@ func requestFilterFrom(q url.Values) accesslog.Filter {
 		Path:   strings.TrimSpace(q.Get("path")),
 		Host:   strings.TrimSpace(q.Get("host")),
 		Client: strings.TrimSpace(q.Get("client")),
-		Limit:  atoiDefault(q.Get("limit"), 500),
+		// A family ("Chrome", "Googlebot") and a site ("www.google.com"), the
+		// values the Agents and Came from lists rank, so a row of either is a
+		// filter like every other list's.
+		Agent:   strings.TrimSpace(q.Get("agent")),
+		Referer: strings.TrimSpace(q.Get("referer")),
+		Limit:   atoiDefault(q.Get("limit"), 500),
 	}
 	if methods := q.Get("methods"); methods != "" {
 		filter.Methods = strings.Split(strings.ToUpper(methods), ",")

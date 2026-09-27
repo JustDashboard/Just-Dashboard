@@ -51,14 +51,17 @@ func (s *Service) AccessLogReader(ctx context.Context, name string) (accesslog.R
 		if err != nil {
 			return nil, accesslog.Facts{}, err
 		}
-		facts := accesslog.Facts{Driver: accessDriverCaddy, Format: accesslog.FormatCaddyJSON, Latency: true, Path: path}
+		facts := accesslog.Facts{Driver: accessDriverCaddy, Format: accesslog.FormatCaddyJSON, Latency: true, Path: path, Container: edge.ID}
 		return &caddyAccessLog{edge: *edge, path: path}, facts, nil
 	}
 	if !siteNameRe.MatchString(name) {
 		return nil, accesslog.Facts{}, errors.New("invalid deployment route name")
 	}
 	path := nginxAccessLogPath(name)
-	facts := accesslog.Facts{Driver: accessDriverNginx, Format: accesslog.FormatCombined, Latency: false, Path: path}
+	facts := accesslog.Facts{
+		Driver: accessDriverNginx, Format: accesslog.FormatCombined, Latency: false, Path: path,
+		ErrorLog: nginxErrorLogPath(name),
+	}
 	return &fileAccessLog{path: path}, facts, nil
 }
 
@@ -66,6 +69,12 @@ func (s *Service) AccessLogReader(ctx context.Context, name string) (accesslog.R
 // spellings must agree, and this is the one place either is written.
 func nginxAccessLogPath(name string) string {
 	return "/var/log/nginx/" + name + ".access.log"
+}
+
+// nginxErrorLogPath is the error file the same site block names beside it
+// (`sites_render.go`), where a 502's "connect() failed (111)" is written.
+func nginxErrorLogPath(name string) string {
+	return "/var/log/nginx/" + name + ".error.log"
 }
 
 // caddyAccessLog reads a route's record out of the ingress container.
