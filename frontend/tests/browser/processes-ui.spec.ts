@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
+import { answerLogs, mockLogSockets, type LogMocks } from "./processes-logs-fixture"
 
 /**
  * The Processes section, checked in a browser against a mocked host.
@@ -11,8 +12,10 @@ import { expect, test, type Page, type Route } from "@playwright/test"
  * panel, no framed block on the page, and every row drawn as the product it
  * is where it is one (§14) — nginx's mark on the nginx process and unit,
  * Postgres's on the failed unit, Node's on a PM2 application, Let's
- * Encrypt's on certbot's timer. The screenshots at 1280 and 1720 are the
- * eyes the assertions do not have.
+ * Encrypt's on certbot's timer. Each page reads its service's logs where it
+ * is — a unit's journal and runs, a PM2 application's output, cron's log and
+ * a timer's runs — through the service logs every page embeds. The
+ * screenshots at 1280 and 1720 are the eyes the assertions do not have.
  */
 
 const now = new Date().toISOString()
@@ -307,11 +310,28 @@ async function json(route: Route, body: unknown) {
   await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
 }
 
-async function mockHost(page: Page) {
+/** A failed unit, for the sheet that reads its runs. */
+const failedDetail = {
+  unit: {
+    ...units.units[0],
+    mainPid: 0,
+    memoryBytes: 0,
+    tasks: 0,
+    fragmentPath: "/lib/systemd/system/postgresql.service",
+    result: "start-limit-hit",
+    restarts: 4,
+  },
+  properties: { Restart: "on-failure", CanReload: "yes", MemoryMax: "infinity", TasksMax: "" },
+}
+
+async function mockHost(page: Page): Promise<LogMocks> {
+  const logs: LogMocks = { sockets: [], searches: [] }
+  await mockLogSockets(page, logs)
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.replace(/^\/api\/v1/, "")
     const method = route.request().method()
+    if (answerLogs(route, path, url, logs)) return
     if (path === "/auth/session") return json(route, user)
     if (path === "/system/host") {
       return json(route, {
@@ -401,6 +421,7 @@ async function mockHost(page: Page) {
     if (path === "/systemd/") return json(route, units)
     if (path === "/systemd/timers") return json(route, timers)
     if (path === "/systemd/nginx.service") return json(route, unitDetail)
+    if (path === "/systemd/postgresql.service") return json(route, failedDetail)
     if (path === "/cron/users") return json(route, ["root", "deploy"])
     if (path === "/cron/user/root") return json(route, crontab)
     if (path === "/cron/system") {
@@ -427,6 +448,7 @@ async function mockHost(page: Page) {
     if (method !== "GET") return json(route, { exitCode: 0 })
     return json(route, [])
   })
+  return logs
 }
 
 /** Every verb this page offers has to be a word, reachable from a row. */
@@ -623,14 +645,16 @@ test("scheduled says what each schedule means and builds a new one in words", as
   await expect(page.getByText("Every hour at :17")).toBeVisible()
   await expect(page.getByText("runs certbot.service")).toBeVisible()
 
-  // Four readings over the three lists: what fires next across cron and the
-  // timers together, and the counts none of the lists says alone.
+  // Five readings over the three lists and cron's log: what fires next
+  // across cron and the timers together, and the counts none of the lists
+  // says alone — among them what cron actually started in the last day.
   const tiles = page.locator("[data-slot='stat-tile']")
-  await expect(tiles).toHaveCount(4)
+  await expect(tiles).toHaveCount(5)
   await expect(tiles.nth(0)).toContainText("Next run")
   await expect(tiles.nth(1)).toContainText("1 disabled · root")
-  await expect(tiles.nth(2)).toContainText("of 2 · 1 enabled on boot")
-  await expect(tiles.nth(3)).toContainText("1 file owned by packages")
+  await expect(tiles.nth(2)).toContainText("Cron runs")
+  await expect(tiles.nth(3)).toContainText("of 2 · 1 enabled on boot")
+  await expect(tiles.nth(4)).toContainText("1 file owned by packages")
   // certbot's timer is Let's Encrypt's renewal; a script of the operator's
   // own keeps the clock.
   await expect(page.locator("td img[src='/logos/lets-encrypt.svg']")).toBeVisible()
@@ -652,6 +676,155 @@ test("scheduled says what each schedule means and builds a new one in words", as
   await expect(dialog.getByText("Every day at 03:00")).toBeVisible()
   await expect(dialog.getByText(/^Next: /)).toBeVisible()
   await page.keyboard.press("Escape")
+})
+
+const RUN_PREDICATES = [
+  "starting",
+  "started",
+  "exited",
+  "killed",
+  "failed",
+  "stopped",
+  "deactivated",
+  "restart_scheduled",
+  "oom",
+  "start_limit",
+  "resources",
+  "core_dumped",
+].map((event) => `event:${event}`)
+
+test("a unit's journal reads its runs, folds a loop and opens one run's own lines", async ({
+  page,
+}) => {
+  const logs = await mockHost(page)
+  await page.goto("/processes/services?unit=postgresql.service")
+  const sheet = page.getByRole("dialog")
+  await sheet.getByRole("tab", { name: "Journal", exact: true }).click()
+  // The unit's own journal on the lens socket; the whole journal is the
+  // logs page's, so there is no unit to pick here.
+  await expect.poll(() => logs.sockets.at(-1)?.get("source")).toBe("journal:postgresql.service")
+  await expect(sheet.getByLabel("Unit", { exact: true })).toHaveCount(0)
+
+  await sheet.getByRole("button", { name: "Runs", exact: true }).click()
+  const runs = sheet.getByRole("list", { name: "Runs" })
+  const rows = runs.locator(":scope > li")
+  await expect(rows).toHaveCount(3)
+  // One read of the week's lifecycle lines through the systemd lens — its
+  // tail, so a loop's latest runs are the ones returned.
+  const asked = logs.searches.filter((s) => s.get("lens") === "systemd")
+  expect(asked).toHaveLength(1)
+  expect(asked[0].get("source")).toBe("journal:postgresql.service")
+  expect(asked[0].getAll("f")).toEqual(RUN_PREDICATES)
+  expect(asked[0].get("limit")).toBe("2000")
+  expect(asked[0].has("order")).toBe(false)
+  const since = Date.parse(asked[0].get("since")!)
+  expect(Date.now() - since).toBeGreaterThan(6.9 * 86_400_000)
+  expect(Date.now() - since).toBeLessThan(7.1 * 86_400_000)
+
+  // The loop is said once, with systemd having given up on it.
+  await expect(sheet.getByText("systemd stopped restarting postgresql.service")).toBeVisible()
+  // Newest first: the start limit, the four identical crashes as one row,
+  // and yesterday's run that was stopped, with what it cost.
+  await expect(rows.nth(0)).toContainText("failed")
+  await expect(rows.nth(0)).toContainText("start limit hit")
+  await expect(rows.nth(1)).toContainText("exit 1")
+  await expect(rows.nth(1)).toContainText("restart #4")
+  await expect(rows.nth(2)).toContainText("stopped")
+  await expect(rows.nth(2)).toContainText("1.2 GB peak")
+  await rows.nth(1).getByRole("button", { name: "List the 4 identical runs" }).click()
+  await expect(rows.nth(1).locator("ul > li")).toHaveCount(4)
+
+  // A run opens History on its own lines: its span, narrowed to its invocation.
+  const before = logs.searches.length
+  await rows.nth(0).getByRole("button").first().click()
+  await expect(sheet.getByRole("button", { name: "History", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect
+    .poll(() => logs.searches.slice(before).find((s) => s.getAll("f").includes("invocation:c5")))
+    .toBeTruthy()
+  const history = logs.searches.slice(before).find((s) => s.getAll("f").includes("invocation:c5"))!
+  expect(history.get("source")).toBe("journal:postgresql.service")
+  expect(Date.parse(history.get("until")!) - Date.parse(history.get("since")!)).toBeLessThan(10_000)
+  await expect(sheet.getByLabel("Log lines").getByText(/pg_filenode\.map/)).toBeVisible()
+  await expect(sheet.getByRole("button", { name: "Clear the invocation filter" })).toBeVisible()
+})
+
+test("a PM2 application's logs are its own lensed stream, beside PM2's count of its restarts", async ({
+  page,
+}) => {
+  const logs = await mockHost(page)
+  await page.goto("/processes/pm2")
+  await page.getByRole("button", { name: "worker", exact: true }).click()
+  const sheet = page.getByRole("dialog")
+  await sheet.getByRole("tab", { name: "Logs", exact: true }).click()
+  await expect.poll(() => logs.sockets.at(-1)?.get("source")).toBe("pm2:deploy/1/worker")
+  await expect(sheet.getByText("Restarted 16 times")).toBeVisible()
+  await expect(sheet.getByText("15 unstable")).toBeVisible()
+  await expect(sheet.getByLabel("Log lines").getByText(/ECONNREFUSED/)).toBeVisible()
+  // Errored, so there is no last start to read around.
+  await expect(sheet.getByRole("button", { name: "Around the last start" })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+
+  await page.getByRole("button", { name: "api", exact: true }).click()
+  await sheet.getByRole("tab", { name: "Logs", exact: true }).click()
+  await expect.poll(() => logs.sockets.at(-1)?.get("source")).toBe("pm2:deploy/0/api")
+  const around = sheet.getByRole("button", { name: "Around the last start" })
+  const before = logs.searches.length
+  await around.click()
+  await expect(around).toHaveAttribute("aria-pressed", "true")
+  await expect(sheet.getByRole("button", { name: "History", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect.poll(() => logs.searches.length).toBeGreaterThan(before)
+  const window = logs.searches.at(-1)!
+  // Up three hours: the window is the three minutes around that start.
+  const started = Date.now() - 3 * 3600_000
+  expect(Math.abs(Date.parse(window.get("since")!) - (started - 120_000))).toBeLessThan(30_000)
+  expect(Math.abs(Date.parse(window.get("until")!) - (started + 60_000))).toBeLessThan(30_000)
+  // Live lets the window go.
+  await sheet.getByRole("button", { name: "Live", exact: true }).click()
+  await expect(around).toHaveAttribute("aria-pressed", "false")
+})
+
+test("scheduled reads cron's own log and each timer's runs where they are", async ({ page }) => {
+  const logs = await mockHost(page)
+  await page.goto("/processes/scheduled")
+  // cron's log is its unit's journal, through the cron lens: its PAM
+  // sessions hidden by the lens's default, as a chip that says so.
+  await expect
+    .poll(() => logs.sockets.find((s) => s.get("source") === "journal:cron.service")?.getAll("f"))
+    .toEqual(["event:!session"])
+  const cronLog = page
+    .locator("[data-slot=panel]")
+    .filter({ has: page.getByRole("heading", { name: "Cron log", exact: true }) })
+  await expect(cronLog.getByLabel("Log lines").getByText(/usr\/local\/bin\/backup/)).toBeVisible()
+  await expect(cronLog.getByText("output lost", { exact: true })).toBeVisible()
+  // What cron started in the last day, and the runs whose output went nowhere.
+  const tile = page.locator("[data-slot='stat-tile']").filter({ hasText: "Cron runs" })
+  await expect(tile).toContainText("143")
+  await expect(tile).toContainText("2 runs with their output discarded")
+
+  // A timer opens in place on the runs of the service it fires.
+  const certbot = page.getByRole("button", { name: "certbot.timer", exact: true })
+  await certbot.click()
+  await expect(certbot).toHaveAttribute("aria-expanded", "true")
+  const runs = page.getByRole("list", { name: "Runs" })
+  const rows = runs.locator(":scope > li")
+  await expect(rows).toHaveCount(3)
+  const asked = logs.searches.find((s) => s.get("lens") === "systemd")!
+  expect(asked.get("source")).toBe("journal:certbot.service")
+  expect(asked.getAll("f")).toEqual(RUN_PREDICATES)
+  // The last two nights ran the same, the night before failed.
+  await expect(rows.nth(0)).toContainText("succeeded")
+  await expect(rows.nth(0).getByRole("button", { name: "List the 2 identical runs" })).toBeVisible()
+  await expect(rows.nth(1)).toContainText("failed")
+  await expect(rows.nth(1)).toContainText("exit 1")
+  await expect(rows.nth(1)).toContainText("2.11s CPU")
+  await certbot.click()
+  await expect(runs).toHaveCount(0)
 })
 
 test.describe("with no hover available", () => {
