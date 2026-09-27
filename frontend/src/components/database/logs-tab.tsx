@@ -1,167 +1,414 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
-import { Download, Logs } from "@/components/icons"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { Warning } from "@/components/icons"
+import { cn } from "@/lib/utils"
 import { get } from "@/lib/api"
-import type { DbAccess, DbConnection, LogLine, LogSourceIndex } from "@/lib/types"
+import { EMPTY_FILTER, fieldsEqual, fieldsOf, type LogLevel } from "@/lib/log-filter"
+import { READINGS_MINUTES, readingFilter } from "@/lib/log-insights"
+import { lensFor, type LogLens } from "@/lib/log-lenses"
+import { useSessionState } from "@/lib/view-state"
+import type { DbConnection, DbLogSource, DbLogSources } from "@/lib/types"
+import type { LogFields, LogFilterState } from "@/components/logs/types"
 import { usePoll } from "@/hooks/use-poll"
-import { useSocket, type Envelope } from "@/hooks/use-socket"
-import { useAuth } from "@/hooks/use-auth"
+import {
+  ServiceLogs,
+  type ServiceLogsContext,
+  type ServiceLogsView,
+} from "@/components/logs/service-logs"
+import { useLensReadings, type LensReadingTile } from "@/components/logs/lens-readings"
 import { Pane } from "@/components/panel"
-import { Row, RowList } from "@/components/row-list"
-import { EmptyState, LoadingPanel } from "@/components/state"
-import { Button } from "@/components/ui/button"
-import { LogViewer } from "@/components/log-viewer"
-import { ProductLogo } from "@/components/product-logo"
+import { ProductGlyph } from "@/components/product-logo"
+import { ErrorState, LoadingRows, Notice } from "@/components/state"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { DatabaseQueries } from "@/components/database/queries-view"
+import { queryNoun } from "@/components/database/queries"
 
-const LOG_LIMIT = 5000
+const WINDOW_WORDS: Record<keyof typeof READINGS_MINUTES, string> = {
+  "1h": "Last hour",
+  "24h": "Last 24 hours",
+  "7d": "Last 7 days",
+}
+
+/** The readings of Live, History and Insights; a page view reads no filter. */
+const FILTERED_MODES = new Set(["live", "search", "insights"])
 
 /**
- * The server's own output — the thing to read when a connection fails and
- * the engine's refusal says less than its log does.
+ * The server's own log, read on the database's page.
  *
- * A database in a container is its container's output, streamed here the
- * way the Docker page streams it. One installed on the machine writes to
- * the journal, so the page lists the units that look like this engine's and
- * hands each to the Logs page, which already knows how to follow a unit.
+ * The server is found from the connection rather than guessed at
+ * (`GET /databases/{id}/logs/sources`): a database in a container is its
+ * container's output; one installed on the machine is the file its process
+ * writes — even when last night's rotation left it empty, since its history
+ * is in the rotated files the History reading opens — and its unit's journal
+ * beside it. A server nothing answers for is found by name instead — the
+ * container the connection is named after, or the engine's units — since
+ * a stopped server's log is read for the lines that say why. Either is read
+ * through the engine's own lens, so a Postgres log reads as its slow
+ * statements, auth failures, locks and checkpoints, with the quick views and
+ * Insights that go with them, and a line opens in place. Nothing sends the
+ * reader to the host's Logs page.
+ *
+ * The page adds its own reading of the same server: its queries, as the
+ * server recorded them. A server on another machine and a SQLite file have no
+ * log here, so they are that reading alone, with the reason said above it.
+ *
+ * The lens's readings are figures over its window — restarts, persistence
+ * failures, memory limits in the last hour — and the Databases section draws
+ * no tiles (§15's `/git` exit), so they are chips over the pane, each a
+ * press from the lines it counts.
  */
-export function LogsTab({ conn }: { conn: DbConnection }) {
-  const { can } = useAuth()
-  const admin = can("system.admin")
-  const access = usePoll(
-    (signal) => get<DbAccess>(`/databases/${conn.id}/access`, undefined, signal),
-    0,
+export function LogsTab({
+  conn,
+  onQuery,
+}: {
+  conn: DbConnection
+  onQuery?: (sql: string) => void
+}) {
+  const found = usePoll(
+    (signal) => get<DbLogSources>(`/databases/${conn.id}/logs/sources`, undefined, signal),
+    60_000,
     [conn.id],
-    { enabled: admin },
   )
-  const sources = usePoll(
-    (signal) => get<LogSourceIndex>("/logs/sources", undefined, signal),
-    0,
-    [],
-    { enabled: admin ? access.data !== undefined && !access.data.container : true },
-  )
+  // A server that stops takes its listener with it, and the next answer may
+  // find nothing left to follow. The log already open stays, with why,
+  // rather than going from under the reader just as it explains the most.
+  const [held, setHeld] = useState<{ id: number; found: DbLogSources } | null>(null)
+  const latest = found.data
+  if (latest && latest.sources.length > 0 && (held?.found !== latest || held.id !== conn.id)) {
+    setHeld({ id: conn.id, found: latest })
+  }
+  const kept = held?.id === conn.id ? held.found : undefined
 
-  if (!admin) {
+  if (found.error && !latest) return <ErrorState error={found.error} />
+  if (!latest) {
     return (
-      <EmptyState
-        icon={Logs}
-        title="Logs are read by an administrator"
-        description="Reading a server's output means reading its container or the system journal, which this account cannot."
-      />
+      <Pane className="h-full">
+        <LoadingRows rows={8} className="p-3" />
+      </Pane>
     )
   }
-  if (access.loading && !access.data) return <LoadingPanel />
-  if (access.data?.container) return <ContainerLogs container={access.data.container} />
-
-  const wanted = journalNeedles(conn.driver)
-  const units = (sources.data?.units ?? []).filter((u) =>
-    wanted.some((w) => u.name.toLowerCase().includes(w)),
-  )
-  if (sources.loading && !sources.data) return <LoadingPanel />
-  if (units.length === 0) {
-    return (
-      <EmptyState
-        icon={Logs}
-        title="No log for this server here"
-        description={
-          conn.driver === "sqlite"
-            ? "A SQLite database is a file and writes no log of its own."
-            : access.data?.exposure === "remote"
-              ? "The server is on another machine; its log is there."
-              : "No container and no systemd unit on this machine looks like this engine's. The Logs page lists every source it can read."
-        }
-      />
-    )
+  if (latest.sources.length > 0) {
+    return <ServerLogs conn={conn} found={latest} onQuery={onQuery} />
+  }
+  if (kept) {
+    const note =
+      "Nothing answers for this connection any more, so the server may have stopped. This is the log it was writing."
+    return <ServerLogs conn={conn} found={{ ...kept, note }} onQuery={onQuery} />
   }
   return (
-    <RowList>
-      {units.map((u) => (
-        <Row
-          key={u.name}
-          href={`/logs?source=journal:${encodeURIComponent(u.name)}`}
-          leading={<ProductLogo id={conn.driver} size="sm" />}
-          title={u.name}
-          subtitle={u.description || u.active}
-        />
+    <QueriesAlone conn={conn} reason={latest.reason} refused={latest.refused} onQuery={onQuery} />
+  )
+}
+
+function ServerLogs({
+  conn,
+  found,
+  onQuery,
+}: {
+  conn: DbConnection
+  found: DbLogSources
+  onQuery?: (sql: string) => void
+}) {
+  const router = useRouter()
+  const pathname = usePathname()
+  const params = useSearchParams()
+  const noun = queryNoun(conn.driver)
+  const storageKey = `databases.${conn.id}.logs`
+  const sources = found.sources
+
+  // What the pane is on when the address names nothing: ServiceLogs keeps its
+  // source and its reading under the storage key, and the chips over it must
+  // count, and press for, the same source it shows.
+  const [storedSource, setStoredSource] = useSessionState(`${storageKey}.source`, "")
+  const [storedMode] = useSessionState(`${storageKey}.mode`, "live")
+  const sourceParam = params.get("source")
+  const mode = params.get("view") ?? storedMode
+  const gone = sourceParam !== null && !sources.some((s) => s.id === sourceParam)
+  const picked = sources.find((s) => s.id === (sourceParam ?? storedSource)) ?? sources[0]
+  const primary = sources.find((s) => s.primary)
+
+  // The page owns its address: the view and the source are in it, so a link
+  // opens on the same reading. One press can change both — "Server log
+  // around this" opens History on the server's own log — and two replaces
+  // built from the same address would each undo the other, so the changes
+  // of one press are gathered and written once.
+  const pending = useRef<URLSearchParams | null>(null)
+  const write = (key: string, value: string) => {
+    if (!pending.current) {
+      const next = new URLSearchParams(params.toString())
+      pending.current = next
+      queueMicrotask(() => {
+        pending.current = null
+        router.replace(`${pathname}?${next.toString()}`, { scroll: false })
+      })
+    }
+    pending.current.set(key, value)
+  }
+
+  const archivesFor = useArchivesWhenEmpty(storageKey, picked)
+
+  // A statement's rows came from the server's own log, so the log around one
+  // is that log — not the journal beside it, which holds systemd's starts and
+  // stops. The source is chosen in the kept state as well as the address, so
+  // the pane opens History once, on the right log, rather than first on the
+  // one it was showing.
+  const onServerLog = (ctx: ServiceLogsContext): ServiceLogsContext =>
+    !primary || ctx.sourceId === primary.id
+      ? ctx
+      : {
+          ...ctx,
+          openHistory: (at) => {
+            setStoredSource(primary.id)
+            write("source", primary.id)
+            archivesFor(primary)
+            ctx.openHistory(at)
+          },
+        }
+
+  const views: ServiceLogsView[] = [
+    {
+      id: "queries",
+      label: noun.view,
+      render: (ctx) => <DatabaseQueries conn={conn} ctx={onServerLog(ctx)} onQuery={onQuery} />,
+    },
+  ]
+
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      {found.note && (
+        <Notice tone="warning" icon={Warning} title="The server is not answering">
+          <p className="max-w-3xl text-pretty">{found.note}</p>
+        </Notice>
+      )}
+      <ReadingChips
+        sourceId={gone ? "" : picked.id}
+        lens={lensFor(picked.lens)}
+        forcedLens={picked.lens}
+        storageKey={storageKey}
+        onLive={FILTERED_MODES.has(mode) ? undefined : () => write("view", "live")}
+        refused={found.refused}
+      />
+      <ServiceLogs
+        sources={sources}
+        source={sourceParam ?? picked.id}
+        onSourceChange={(id) => write("source", id)}
+        view={params.get("view")}
+        onViewChange={(id) => write("view", id)}
+        storageKey={storageKey}
+        views={views}
+        pickerLabel="Server log"
+        className="min-h-0 flex-1"
+      />
+    </div>
+  )
+}
+
+/**
+ * A file logrotate emptied opens its History on the rotated files as well:
+ * the operator's own server wrote its last lines to yesterday's file, and a
+ * History of the empty live one answered "no matches" about a busy night.
+ * Once per source per visit, so turning the archives off again sticks. The
+ * function it returns does the same for a source a press is about to open
+ * History on, before the pane has shown it.
+ */
+function useArchivesWhenEmpty(storageKey: string, source: DbLogSource) {
+  // ServiceLogs keeps the switch under its storage key; it has no prop for
+  // a History that should start with the archives in.
+  const [, setArchives] = useSessionState(`${storageKey}.archives`, false)
+  const seen = useRef<string | null>(null)
+  const emptied = isEmptied(source)
+  useEffect(() => {
+    if (seen.current === source.id) return
+    seen.current = source.id
+    if (emptied) setArchives(true)
+  }, [source.id, emptied, setArchives])
+  return (next: DbLogSource) => {
+    if (seen.current === next.id) return
+    seen.current = next.id
+    if (isEmptied(next)) setArchives(true)
+  }
+}
+
+function isEmptied(source: DbLogSource) {
+  return Boolean(source.path) && !source.size && (source.archives ?? 0) > 0
+}
+
+/** A question as a quick view, a reading and a filter each put it: fields and levels. */
+type Question = { fields?: LogFields; levels?: readonly LogLevel[] }
+
+function sameQuestion(a: Question, b: Question) {
+  const levels = a.levels ?? []
+  const others = b.levels ?? []
+  return (
+    fieldsEqual(a.fields ?? {}, b.fields ?? {}) &&
+    levels.length === others.length &&
+    levels.every((level) => others.includes(level))
+  )
+}
+
+/**
+ * The lens's readings as chips over the pane: the figure for its window, in
+ * its tone once it is above zero, and a press that narrows the pane to the
+ * lines it counts — or lets them go again. On the Queries view the filter is
+ * out of sight, so a press goes to the live lines as well.
+ *
+ * A reading whose question one of the lens's quick views already asks is
+ * left to the quick view, whose chip carries its own count: the same chip
+ * twice, counted over two windows, read as two answers. What is left here
+ * are the readings nothing else on screen counts — restarts, persistence
+ * failures, memory limits. A phone has no room for the row; its quick views
+ * are the same questions.
+ */
+function ReadingChips({
+  sourceId,
+  lens,
+  forcedLens,
+  storageKey,
+  onLive,
+  refused,
+}: {
+  sourceId: string
+  lens: LogLens | undefined
+  /** The lens the pane asks for by name, so the figures count what it shows. */
+  forcedLens?: string
+  storageKey: string
+  /** Set while a page view is on screen, where the filter a chip sets is not. */
+  onLive?: () => void
+  refused?: DbLogSources["refused"]
+}) {
+  const unasked = useMemo(
+    () =>
+      lens && {
+        ...lens,
+        readings: lens.readings?.filter(
+          (reading) =>
+            !lens.views.some((view) => view.q === undefined && sameQuestion(view, reading)),
+        ),
+      },
+    [lens],
+  )
+  const readings = useLensReadings(sourceId, unasked, { forcedLens })
+  // The pane's own filter, which ServiceLogs keeps under its storage key and
+  // offers no prop for: the chip and the lens's quick views are one question.
+  const [filter, setFilter] = useSessionState<LogFilterState>(`${storageKey}.filter`, EMPTY_FILTER)
+  const tiles = sourceId ? readings.tiles : []
+  if (tiles.length === 0 && !refused?.length) return null
+
+  return (
+    <div
+      className={cn(
+        "flex min-w-0 shrink-0 flex-wrap items-center gap-x-4 gap-y-1",
+        !refused?.length && "max-sm:hidden",
+      )}
+    >
+      {tiles.length > 0 && (
+        <ChipStrip
+          aria-label="Readings"
+          className="min-w-0 max-sm:hidden sm:-my-1 sm:flex-nowrap sm:overflow-x-auto sm:py-1"
+        >
+          <span className="shrink-0 pr-1 text-hint text-muted-foreground">
+            {WINDOW_WORDS[readings.window]}
+          </span>
+          {tiles.map((tile) => {
+            const pressed = sameQuestion(
+              { fields: fieldsOf(filter), levels: filter.levels },
+              tile.reading,
+            )
+            return (
+              <FilterChip
+                key={tile.reading.id}
+                selected={pressed}
+                title={titleOf(tile)}
+                onClick={() => {
+                  setFilter(
+                    pressed
+                      ? { ...filter, fields: {}, levels: [] }
+                      : readingFilter(filter, tile.reading),
+                  )
+                  if (!pressed) onLive?.()
+                }}
+              >
+                {tile.reading.label}
+                <ReadingCount tile={tile} />
+              </FilterChip>
+            )
+          })}
+        </ChipStrip>
+      )}
+      {refused?.map((r) => (
+        <p
+          key={r.path}
+          className="min-w-0 flex-1 basis-80 text-hint text-pretty text-muted-foreground sm:text-right"
+        >
+          Also writes <span className="font-mono wrap-anywhere">{r.path}</span>, which is {r.reason}
+        </p>
       ))}
-    </RowList>
+    </div>
   )
 }
 
-function journalNeedles(driver: string): string[] {
-  switch (driver) {
-    case "postgres":
-      return ["postgres"]
-    case "mysql":
-      return ["mysql", "mariadb"]
-    case "redis":
-      return ["redis", "valkey", "keydb"]
-    case "mongodb":
-      return ["mongod"]
-    case "clickhouse":
-      return ["clickhouse"]
-    case "sqlserver":
-      return ["mssql"]
-    case "oracle":
-      return ["oracle"]
-  }
-  return []
+function ReadingCount({ tile }: { tile: LensReadingTile }) {
+  const figure = tile.figure
+  if (!figure) return null
+  const value = figure.value
+  return (
+    <ChipCount
+      className={cn(
+        value > 0 && tile.reading.tone === "danger" && "text-destructive opacity-100",
+        value > 0 && tile.reading.tone === "warning" && "text-warning opacity-100",
+      )}
+    >
+      {value.toLocaleString()}
+      {figure.capped ? "+" : ""}
+    </ChipCount>
+  )
 }
 
-function ContainerLogs({ container }: { container: string }) {
-  const [lines, setLines] = useState<LogLine[]>([])
-  const [timestamps, setTimestamps] = useState(true)
-  const onMessage = useCallback((envelope: Envelope) => {
-    if (envelope.type !== "logs") return
-    const batch = envelope.data as { stream: string; text: string }[]
-    setLines((prev) => {
-      const next = [...prev, ...batch.map((l) => ({ text: l.text }))]
-      return next.length > LOG_LIMIT ? next.slice(next.length - LOG_LIMIT) : next
-    })
-  }, [])
-  const query = useMemo(
-    () => ({ tail: 500, timestamps: timestamps ? "true" : "false" }),
-    [timestamps],
-  )
-  const { state } = useSocket(`/docker/containers/${encodeURIComponent(container)}/logs/stream`, {
-    onMessage,
-    query,
-  })
-  const save = () => {
-    const blob = new Blob([lines.map((l) => l.text).join("\n")], { type: "text/plain" })
-    const a = document.createElement("a")
-    a.href = URL.createObjectURL(blob)
-    a.download = `${container}.log`
-    a.click()
-    URL.revokeObjectURL(a.href)
+function titleOf(tile: LensReadingTile) {
+  const { reading, figure } = tile
+  if (figure && figure.value === 0 && reading.requires) {
+    return `Logged only with ${reading.requires} set`
   }
+  return reading.hint
+}
+
+/**
+ * A database with no log on this machine — on another machine, or a SQLite
+ * file — is its queries alone, in a pane of the same shape, with why there
+ * is no log said beside the name, wrapping rather than cut: it is the one
+ * sentence the reader came for.
+ */
+function QueriesAlone({
+  conn,
+  reason,
+  refused,
+  onQuery,
+}: {
+  conn: DbConnection
+  reason?: string
+  refused?: DbLogSources["refused"]
+  onQuery?: (sql: string) => void
+}) {
+  const noun = queryNoun(conn.driver)
+  const why = reason ?? (refused?.length ? `${refused[0].path} is ${refused[0].reason}.` : "")
   return (
     <Pane className="h-full min-h-[24rem]">
-      <LogViewer
-        className="h-full"
-        lines={lines}
-        showTimestamps={false}
-        onClear={() => setLines([])}
-        emptyMessage={state === "open" ? "No output yet." : "Connecting…"}
-        toolbar={
-          <>
-            <Button
-              size="xs"
-              variant="ghost"
-              onClick={() => {
-                setLines([])
-                setTimestamps((t) => !t)
-              }}
-            >
-              {timestamps ? "Hide times" : "Show times"}
-            </Button>
-            <Button size="xs" variant="ghost" onClick={save} disabled={lines.length === 0}>
-              <Download className="size-3" />
-              Save
-            </Button>
-          </>
-        }
-      />
+      <div className="flex shrink-0 items-start gap-x-2 border-b border-hairline px-2.5 py-2.5">
+        <ProductGlyph id={conn.driver} className="mt-px" />
+        <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3 gap-y-0.5">
+          <span className="shrink-0 text-body font-medium">
+            {conn.driver === "sqlite" ? "Statements run from here" : noun.title}
+          </span>
+          {why && (
+            <span className="min-w-0 basis-64 text-hint text-pretty text-muted-foreground max-sm:basis-full sm:flex-1">
+              {why}
+            </span>
+          )}
+        </div>
+      </div>
+      <DatabaseQueries conn={conn} onQuery={onQuery} />
     </Pane>
   )
 }

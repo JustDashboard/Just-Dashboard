@@ -5540,6 +5540,53 @@ export type DbStatements = {
   totalMs: number
 }
 
+/**
+ * The logs a database's server writes, as GET /databases/{id}/logs/sources
+ * follows the connection to them: its container, or the file its process
+ * holds open, the file its package writes and its unit's journal. `primary`
+ * is where the server writes its own lines — the file even while logrotate
+ * has left it empty.
+ */
+export type DbLogSource = LogSource & { primary?: boolean }
+
+export type DbLogSources = {
+  sources: DbLogSource[]
+  /** Logs the server writes that the log roots do not reach. */
+  refused?: { path: string; reason: string }[]
+  /** Why there is no source, when there is none. */
+  reason?: string
+  /** What the sources are when nothing answers for the connection: a stopped server's log. */
+  note?: string
+}
+
+/** One statement the server itself recorded as slow — or, for ClickHouse, as run. */
+export type DbQueryEntry = {
+  at: string
+  durationMs: number
+  query: string
+  fp?: string
+  user?: string
+  db?: string
+  client?: string
+  rows?: number
+  examined?: number
+  error?: string
+  code?: string
+}
+
+/** GET /databases/{id}/querylog: the statements, where they were read, and what keeps them empty. */
+export type DbQueryLog = {
+  supported: boolean
+  reason?: string
+  source: "log" | "slowlog" | "query_log" | "slow_log" | "statements_history" | ""
+  /** The setting that keeps the log empty, and the statement that changes it. */
+  enable?: { setting: string; current: string; sql: string }
+  /** How slow a statement has to be to be recorded, in the engine's words. */
+  threshold?: string
+  entries: DbQueryEntry[]
+  truncated: boolean
+}
+
 export type DbBackupFile = {
   file: string
   size: number

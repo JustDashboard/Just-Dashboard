@@ -455,9 +455,17 @@ function TableSizeDialog({
  * running all week, which is the other question — a query that takes ten
  * milliseconds and runs ten thousand times an hour never appears above and
  * is the top row here. Drawn as a ranked list with a bar, the honest way to
- * show a top ten, in the shape the request log's facets take.
+ * show a top ten, in the shape the request log's facets take. The Logs
+ * page's Queries view shows the same list beside the statements the server
+ * logged one by one, under its own title.
  */
-function StatementsPanel({ conn }: { conn: DbConnection }) {
+export function StatementsPanel({
+  conn,
+  title = "Slowest statements",
+}: {
+  conn: DbConnection
+  title?: string
+}) {
   const [detail, setDetail] = useState<DbStatement | null>(null)
   const statements = usePoll(
     (signal) => get<DbStatements>(`/databases/${conn.id}/statements`, { limit: 15 }, signal),
@@ -469,7 +477,7 @@ function StatementsPanel({ conn }: { conn: DbConnection }) {
   if (!data.supported) {
     return (
       <Panel plain>
-        <PanelHeader title="Slowest statements" />
+        <PanelHeader title={title} />
         <p className="text-hint text-muted-foreground">
           {data.reason ?? "This engine keeps no per-statement statistics."}
         </p>
@@ -480,7 +488,7 @@ function StatementsPanel({ conn }: { conn: DbConnection }) {
   return (
     <Panel plain className="animate-rise">
       <PanelHeader
-        title="Slowest statements"
+        title={title}
         actions={
           <span className="numeric text-hint text-muted-foreground">
             {duration(data.totalMs / 1000)} of query time tracked
