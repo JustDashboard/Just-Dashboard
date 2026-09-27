@@ -38,7 +38,7 @@ func TestClassifyInterface(t *testing.T) {
 		"veth9f2a": "virtual",
 	}
 	for name, want := range cases {
-		if got := classifyInterface(name); got != want {
+		if got := ClassifyInterface(name); got != want {
 			t.Errorf("%s = %q, want %q", name, got, want)
 		}
 	}
