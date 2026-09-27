@@ -34,6 +34,70 @@ describe("the server's vocabulary", () => {
     for (const id of Object.keys(golden)) expect(lensFor(id)?.id).toBe(id)
   })
 
+  test("every lens here is one the server registers", () => {
+    for (const { id } of LENS_CHOICES) expect(`${id}:${Boolean(golden[id])}`).toBe(`${id}:true`)
+  })
+
+  // What a lens's lines can carry: its own vocabulary and that of every lens
+  // it hands lines on to, plus the keys the engine answers for every line.
+  const reach = (id, seen = new Set()) => {
+    if (seen.has(id)) return { events: new Set(), attrs: new Set() }
+    seen.add(id)
+    const events = new Set(golden[id]?.events ?? [])
+    const attrs = new Set(golden[id]?.attrs ?? [])
+    for (const included of lensFor(id)?.includes ?? []) {
+      const more = reach(included, seen)
+      for (const e of more.events) events.add(e)
+      for (const a of more.attrs) attrs.add(a)
+    }
+    return { events, attrs }
+  }
+  const ENGINE_KEYS = new Set(["event", "level", "stream", "source", "pattern"])
+
+  test("every event a view, reading, group or default names is one the parser emits", () => {
+    for (const lens of lenses.filter((l) => l.id !== STACK_LENS)) {
+      const { events } = reach(lens.id)
+      const named = [
+        ...lens.views.map((v) => v.fields),
+        ...(lens.readings ?? []).map((r) => r.fields),
+        ...(lens.groups ?? []).map((g) => g.fields),
+        lens.defaults?.fields,
+      ].flatMap((fields) => fields?.event ?? [])
+      const missing = named.map((raw) => raw.replace(/^!/, "")).filter((id) => !events.has(id))
+      expect({ lens: lens.id, missing }).toEqual({ lens: lens.id, missing: [] })
+    }
+  })
+
+  test("every event word here is for an event the parser emits", () => {
+    for (const lens of lenses.filter((l) => l.id !== STACK_LENS)) {
+      const stale = Object.keys(lens.events).filter((id) => !golden[lens.id]?.events.includes(id))
+      expect({ lens: lens.id, stale }).toEqual({ lens: lens.id, stale: [] })
+    }
+  })
+
+  test("every key a lens ranks, samples, shows or filters on is one its lines carry", () => {
+    for (const lens of lenses.filter((l) => l.id !== STACK_LENS)) {
+      const { attrs } = reach(lens.id)
+      const keys = [
+        ...lens.facets,
+        ...(lens.columns ?? []),
+        ...(lens.groups ?? []).flatMap((g) =>
+          [g.by, ...(g.sample ?? []), g.measure].filter(Boolean),
+        ),
+        ...(lens.readings ?? []).map((r) => r.distinct).filter(Boolean),
+        ...(lens.measure ? [lens.measure.key] : []),
+        ...[
+          ...lens.views.map((v) => v.fields),
+          ...(lens.readings ?? []).map((r) => r.fields),
+          ...(lens.groups ?? []).map((g) => g.fields),
+          lens.defaults?.fields,
+        ].flatMap((fields) => Object.keys(fields ?? {})),
+      ]
+      const missing = [...new Set(keys)].filter((key) => !ENGINE_KEYS.has(key) && !attrs.has(key))
+      expect({ lens: lens.id, missing }).toEqual({ lens: lens.id, missing: [] })
+    }
+  })
+
   for (const [id, { events = [], attrs = [] }] of Object.entries(golden)) {
     test(`${id}: every event has a word`, () => {
       const unnamed = (events ?? []).filter((event) => !eventMeta(id, event))

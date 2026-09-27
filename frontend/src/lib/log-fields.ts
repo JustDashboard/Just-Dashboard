@@ -130,6 +130,7 @@ export const LOG_FIELDS: Record<string, LogField> = {
   command: { label: "command", kind: "query" },
   runas: { label: "as user", kind: "lane" },
   tty: { label: "terminal", kind: "code" },
+  pwd: { label: "directory", kind: "text" },
 
   // Packages.
   package: { label: "package", kind: "product", product: "package" },

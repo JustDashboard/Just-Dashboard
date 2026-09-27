@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -24,9 +25,42 @@ func readThrough(t *testing.T, id string, texts ...string) []Line {
 	for _, text := range texts {
 		l := ParseLine(text, "")
 		r.Read(&l)
+		checkDeclared(t, id, &l)
 		out = append(out, l)
 	}
 	return out
+}
+
+// checkDeclared fails a test whose lens names an event or records an attr its
+// registration does not declare. The golden file is written from the
+// declarations, and the frontend labels only what the golden file lists, so
+// an undeclared name reaches the page as a bare id. A line a composite handed
+// on is held to the vocabulary of the lens that read it as well. given lists
+// keys that were on the line before the lens saw it, as a journal entry's are.
+func checkDeclared(t *testing.T, id string, l *Line, given ...string) {
+	t.Helper()
+	var vocab []*Lens
+	for _, name := range []string{id, l.Lens} {
+		if lens, _ := LensByID(name); lens != nil {
+			vocab = append(vocab, lens)
+		}
+	}
+	declares := func(list func(*Lens) []string, name string) bool {
+		for _, lens := range vocab {
+			if slices.Contains(list(lens), name) {
+				return true
+			}
+		}
+		return false
+	}
+	if l.Event != "" && !declares(func(lens *Lens) []string { return lens.Events }, l.Event) {
+		t.Errorf("%s: event %q is not declared by %s (%q)", id, l.Event, l.Lens, l.Text)
+	}
+	for key := range l.Attrs {
+		if !slices.Contains(given, key) && !declares(func(lens *Lens) []string { return lens.Attrs }, key) {
+			t.Errorf("%s: attr %q is not declared by %s (%q)", id, key, l.Lens, l.Text)
+		}
+	}
 }
 
 // TestLensGolden writes the vocabulary every lens declares to a file the

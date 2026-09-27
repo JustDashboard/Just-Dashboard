@@ -130,5 +130,9 @@
   {"name": "an IPv6 prefix as contains", "line": {"attrs": {"client": "2001:db8::1"}}, "f": ["client:~2001:db8:"], "match": true},
   {"name": "a mapped IPv4 address contains the IPv4 one", "line": {"attrs": {"client": "::ffff:10.0.0.2"}}, "f": ["client:~10.0.0.2"], "match": true},
   {"name": "a mapped IPv4 address is not the IPv4 one", "line": {"attrs": {"client": "::ffff:10.0.0.2"}}, "f": ["client:10.0.0.2"], "match": false},
-  {"name": "an escaped IPv6 value", "line": {"attrs": {"client": "::1"}}, "f": ["client:=::1"], "match": true}
+  {"name": "an escaped IPv6 value", "line": {"attrs": {"client": "::1"}}, "f": ["client:=::1"], "match": true},
+  {"name": "a value spelled Inf compares as infinite, as ParseFloat reads it", "line": {"attrs": {"duration_ms": "Inf"}}, "f": ["duration_ms:>1000"], "match": true},
+  {"name": "a value spelled NaN is above and below nothing", "line": {"attrs": {"duration_ms": "NaN"}}, "f": ["duration_ms:<1000"], "match": false},
+  {"name": "a leading space is not a number", "line": {"attrs": {"status": " 500"}}, "f": ["status:>=500"], "match": false},
+  {"name": "a thousands separator is not a number", "line": {"attrs": {"bytes": "1,000"}}, "f": ["bytes:>1"], "match": false}
 ]

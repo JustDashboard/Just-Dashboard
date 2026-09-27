@@ -199,8 +199,10 @@ export function parsePredicate(raw: string): Predicate | null {
   if (raw.startsWith("~")) return raw.length > 1 ? { op: "has", value: raw.slice(1) } : null
   for (const [prefix, op] of COMPARISONS) {
     if (raw.startsWith(prefix)) {
+      // A line's value may read as an infinity, as it does on the server, but
+      // a bound may not: the server refuses `>inf` rather than match everything.
       const n = parseNumber(raw.slice(prefix.length))
-      return n === undefined ? null : { op, value: n }
+      return n === undefined || !Number.isFinite(n) ? null : { op, value: n }
     }
   }
   if (raw.startsWith("=")) return raw.length > 1 ? { op: "eq", value: raw.slice(1) } : null

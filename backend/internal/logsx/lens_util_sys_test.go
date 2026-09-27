@@ -88,10 +88,13 @@ func sysReadJournal(t *testing.T, id string, entries ...sysEntry) []Line {
 		if l.levelFrom != levelFromStructured {
 			l.Level, l.levelFrom = LevelFromPriority(e.priority), levelFromPriority
 		}
+		given := make([]string, 0, len(e.fields))
 		for k, v := range e.fields {
 			l.SetAttr(k, v)
+			given = append(given, k)
 		}
 		r.Read(&l)
+		checkDeclared(t, id, &l, given...)
 		out = append(out, l)
 	}
 	return out

@@ -1,0 +1,531 @@
+{
+  "app": {
+    "events": [
+      "request",
+      "exception",
+      "startup",
+      "shutdown",
+      "oom",
+      "port_in_use",
+      "db_unreachable",
+      "schema_missing",
+      "env_missing",
+      "deprecation"
+    ],
+    "attrs": [
+      "method",
+      "path",
+      "status",
+      "class",
+      "duration_ms",
+      "client",
+      "component",
+      "error",
+      "port",
+      "table"
+    ]
+  },
+  "auth": {
+    "events": [
+      "ssh_accepted",
+      "ssh_failed",
+      "ssh_invalid_user",
+      "ssh_preauth_closed",
+      "ssh_disconnected",
+      "ssh_max_attempts",
+      "ssh_scan",
+      "session_opened",
+      "session_closed",
+      "sudo",
+      "sudo_failed",
+      "su",
+      "account",
+      "login",
+      "cron_session"
+    ],
+    "attrs": [
+      "user",
+      "client",
+      "port",
+      "method",
+      "key",
+      "program",
+      "pid",
+      "command",
+      "runas",
+      "tty",
+      "pwd"
+    ]
+  },
+  "caddy": {
+    "events": [
+      "request",
+      "client_error",
+      "server_error",
+      "probe",
+      "upstream_refused",
+      "upstream_timeout",
+      "error",
+      "cert_obtained",
+      "cert_renewed",
+      "cert_failed",
+      "startup",
+      "config"
+    ],
+    "attrs": [
+      "method",
+      "path",
+      "status",
+      "class",
+      "bytes",
+      "client",
+      "agent",
+      "bot",
+      "referer",
+      "host",
+      "proto",
+      "duration_ms",
+      "logger",
+      "domain",
+      "error",
+      "upstream"
+    ]
+  },
+  "certbot": {
+    "events": [
+      "renewing",
+      "not_due",
+      "renewed",
+      "obtained",
+      "renew_failed",
+      "challenge_failed",
+      "rate_limited",
+      "error"
+    ],
+    "attrs": [
+      "domain",
+      "error"
+    ]
+  },
+  "clickhouse": {
+    "events": [
+      "startup",
+      "ready",
+      "shutdown",
+      "query",
+      "exception",
+      "merge",
+      "memory_limit",
+      "too_many_parts",
+      "auth_failed"
+    ],
+    "attrs": [
+      "thread",
+      "query_id",
+      "component",
+      "code",
+      "duration_ms",
+      "rows",
+      "user",
+      "client",
+      "port",
+      "query",
+      "fp",
+      "table"
+    ]
+  },
+  "cron": {
+    "events": [
+      "run",
+      "output_discarded",
+      "session",
+      "error"
+    ],
+    "attrs": [
+      "user",
+      "command",
+      "pid"
+    ]
+  },
+  "fail2ban": {
+    "events": [
+      "ban",
+      "unban",
+      "restore_ban",
+      "increase",
+      "found",
+      "ignore",
+      "already_banned",
+      "jail_started",
+      "jail_stopped",
+      "error"
+    ],
+    "attrs": [
+      "jail",
+      "client",
+      "pid"
+    ]
+  },
+  "firewall": {
+    "events": [
+      "block",
+      "allow",
+      "audit",
+      "limit"
+    ],
+    "attrs": [
+      "client",
+      "dst",
+      "dpt",
+      "spt",
+      "proto",
+      "iface",
+      "flags",
+      "len"
+    ]
+  },
+  "http-access": {
+    "events": [
+      "request",
+      "client_error",
+      "server_error",
+      "probe"
+    ],
+    "attrs": [
+      "method",
+      "path",
+      "status",
+      "class",
+      "bytes",
+      "client",
+      "agent",
+      "bot",
+      "referer",
+      "host",
+      "proto",
+      "duration_ms"
+    ]
+  },
+  "kernel": {
+    "events": [
+      "oom_kill",
+      "oom",
+      "segfault",
+      "io_error",
+      "fs_error",
+      "readonly_fs",
+      "link_down",
+      "link_up",
+      "apparmor_denied",
+      "hung_task",
+      "mce"
+    ],
+    "attrs": [
+      "pid",
+      "program",
+      "memory",
+      "dev",
+      "unit",
+      "container"
+    ]
+  },
+  "mongodb": {
+    "events": [
+      "connection",
+      "disconnection",
+      "client_metadata",
+      "slow",
+      "authorized",
+      "auth_failed",
+      "startup",
+      "ready",
+      "shutdown",
+      "checkpoint",
+      "replication",
+      "index"
+    ],
+    "attrs": [
+      "component",
+      "ctx",
+      "ns",
+      "plan",
+      "duration_ms",
+      "docs_examined",
+      "keys_examined",
+      "rows",
+      "client",
+      "port",
+      "app",
+      "user",
+      "code",
+      "query",
+      "fp"
+    ]
+  },
+  "mssql": {
+    "events": [
+      "startup",
+      "ready",
+      "recovery",
+      "backup",
+      "log_full",
+      "io_slow",
+      "auth_failed",
+      "error"
+    ],
+    "attrs": [
+      "component",
+      "client",
+      "code",
+      "user"
+    ]
+  },
+  "mysql": {
+    "events": [
+      "startup",
+      "ready",
+      "shutdown",
+      "crash",
+      "innodb",
+      "deadlock",
+      "aborted_connection",
+      "too_many_connections",
+      "auth_failed",
+      "replication",
+      "config_warning",
+      "error"
+    ],
+    "attrs": [
+      "thread",
+      "code",
+      "component",
+      "user",
+      "client",
+      "db"
+    ]
+  },
+  "nginx": {
+    "events": [
+      "request",
+      "client_error",
+      "server_error",
+      "probe",
+      "upstream_refused",
+      "upstream_timeout",
+      "upstream_closed",
+      "no_live_upstreams",
+      "ssl_error",
+      "body_too_large",
+      "rate_limited",
+      "not_found",
+      "forbidden",
+      "config",
+      "startup",
+      "reload",
+      "error"
+    ],
+    "attrs": [
+      "method",
+      "path",
+      "status",
+      "class",
+      "bytes",
+      "client",
+      "agent",
+      "bot",
+      "referer",
+      "host",
+      "proto",
+      "duration_ms",
+      "upstream",
+      "conn",
+      "code",
+      "pid"
+    ]
+  },
+  "nginx-error": {
+    "events": [
+      "upstream_refused",
+      "upstream_timeout",
+      "upstream_closed",
+      "no_live_upstreams",
+      "ssl_error",
+      "body_too_large",
+      "rate_limited",
+      "not_found",
+      "forbidden",
+      "config",
+      "startup",
+      "reload",
+      "error"
+    ],
+    "attrs": [
+      "client",
+      "host",
+      "method",
+      "path",
+      "upstream",
+      "conn",
+      "code",
+      "pid"
+    ]
+  },
+  "packages": {
+    "events": [
+      "transaction_start",
+      "command",
+      "install",
+      "upgrade",
+      "remove",
+      "purge",
+      "transaction_end",
+      "configure",
+      "unattended_run",
+      "unattended_done",
+      "error"
+    ],
+    "attrs": [
+      "package",
+      "version",
+      "old_version",
+      "packages",
+      "command",
+      "user",
+      "duration_ms"
+    ]
+  },
+  "pm2": {
+    "events": [
+      "request",
+      "exception",
+      "startup",
+      "shutdown",
+      "oom",
+      "port_in_use",
+      "db_unreachable",
+      "schema_missing",
+      "env_missing",
+      "deprecation"
+    ],
+    "attrs": [
+      "method",
+      "path",
+      "status",
+      "class",
+      "duration_ms",
+      "client",
+      "component",
+      "error",
+      "port",
+      "table"
+    ]
+  },
+  "postgres": {
+    "events": [
+      "startup",
+      "ready",
+      "shutdown",
+      "crash",
+      "oom",
+      "disk_full",
+      "checkpoint",
+      "autovacuum",
+      "autoanalyze",
+      "connection",
+      "authorized",
+      "disconnection",
+      "auth_failed",
+      "too_many_clients",
+      "deadlock",
+      "lock_wait",
+      "slow",
+      "duration",
+      "statement",
+      "temp_file",
+      "cancel",
+      "terminated",
+      "replication",
+      "archive_failed",
+      "config",
+      "error",
+      "fatal"
+    ],
+    "attrs": [
+      "pid",
+      "user",
+      "db",
+      "client",
+      "port",
+      "app",
+      "code",
+      "severity",
+      "duration_ms",
+      "query",
+      "fp",
+      "table",
+      "bytes",
+      "buffers",
+      "write_s",
+      "sync_s",
+      "total_s"
+    ]
+  },
+  "redis": {
+    "events": [
+      "startup",
+      "ready",
+      "shutdown",
+      "loading",
+      "saved",
+      "bgsave",
+      "aof",
+      "persistence_failed",
+      "memory_warning",
+      "replication",
+      "security_attack",
+      "client_closed",
+      "crash"
+    ],
+    "attrs": [
+      "pid",
+      "role"
+    ]
+  },
+  "syslog": {
+    "events": [],
+    "attrs": [
+      "program",
+      "pid"
+    ]
+  },
+  "systemd": {
+    "events": [
+      "starting",
+      "started",
+      "stopping",
+      "stopped",
+      "deactivated",
+      "reloading",
+      "reloaded",
+      "exited",
+      "killed",
+      "failed",
+      "restart_scheduled",
+      "start_limit",
+      "oom",
+      "resources",
+      "core_dumped"
+    ],
+    "attrs": [
+      "unit",
+      "exit_code",
+      "exit_status",
+      "signal",
+      "result",
+      "restarts",
+      "cpu",
+      "memory",
+      "invocation"
+    ]
+  }
+}
