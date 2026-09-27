@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
@@ -738,6 +740,89 @@ func TestStartRefusedWhenRuntimeIsNotStopped(t *testing.T) {
 	result := executor.startCandidate(context.Background(), execution, mustExecutionPlan(t, fixture, *claimed))
 	if result.State != StepFailed || result.ErrorCode != "runtime_not_stopped" {
 		t.Fatalf("start over a running runtime = %#v", result)
+	}
+}
+
+// observedRuntimeOwner adds the Docker observation start_candidate consults
+// for a runtime that is still recorded live.
+type observedRuntimeOwner struct {
+	*orderingRuntimeOwner
+	containers []dockerx.Container
+}
+
+func (o *observedRuntimeOwner) ListContainersWithLabels(context.Context, map[string]string) ([]dockerx.Container, error) {
+	return o.containers, nil
+}
+
+// A runtime recorded live whose containers went down outside a stop run — a
+// Docker daemon restart, a crash, `docker stop` — is what the page draws as
+// stopped, so start brings it back instead of refusing it as running.
+func TestStartBringsBackALiveRuntimeDockerReportsDown(t *testing.T) {
+	t.Parallel()
+	fixture := newReleaseStoreFixture(t)
+	plan := RuntimePlanConfig{
+		InternalPort: 3000, HostPort: 31997, BindAddress: "127.0.0.1",
+		Strategy: StrategyStopFirst, Command: []string{}, Capabilities: []string{}, Devices: []string{}, Mounts: []RuntimeMount{},
+	}
+	fixture.addPlanWithRuntime(t, 1, strings.Repeat("i", 40), plan)
+	deployRun, deployLease := fixture.claimedRun(t, 1)
+	live := createRuntimeCandidate(t, fixture, *deployRun, deployLease, plan, "start-down")
+	if _, err := fixture.runs.RecordCandidateRuntime(context.Background(), *deployRun, deployLease.Token,
+		ReleaseRuntimeInput{
+			ReleaseID: live.Release.ID, Kind: "container", RuntimeID: "start-down-runtime",
+			Host: "127.0.0.1", Port: plan.HostPort, Metadata: json.RawMessage(`{"version":1}`),
+		}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.runs.ActivateCandidate(context.Background(), deployRun.ID, deployLease.Token, live.Release.ID); err != nil {
+		t.Fatal(err)
+	}
+	fixture.finishActivatedRun(t, deployRun.ID, live.Release.ID, deployLease.Token)
+
+	startRun, _, err := fixture.runs.Enqueue(context.Background(), RunRequest{
+		ProjectID: fixture.projectID, EnvironmentID: fixture.envID,
+		Operation: OperationStart, Trigger: TriggerManual, Actor: "admin",
+		RequestDigest: "start-down-runtime", PlanRevision: 1,
+		VariableSnapshotRunID: deployRun.ID, SlotClass: SlotLight,
+		Metadata: mustJSON(map[string]any{"targetReleaseId": live.Release.ID}),
+		Steps:    []StepKey{StepStartCandidate, StepVerifyReadiness, StepVerifySmoke, StepRecordRelease},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	startLease, err := fixture.runs.ClaimNext(context.Background(), "start-down-worker", QueueBudget{}, time.Minute)
+	if err != nil || startLease == nil {
+		t.Fatalf("start lease = %#v, error=%v", startLease, err)
+	}
+	claimed, _ := fixture.runs.Run(context.Background(), startRun.ID)
+	container := dockerx.Container{ID: "start-down-runtime", State: "running", Labels: map[string]string{
+		"io.just-dashboard.managed":        "true",
+		"io.just-dashboard.environment-id": strconv.FormatInt(fixture.envID, 10),
+		"io.just-dashboard.release-id":     strconv.FormatInt(live.Release.ID, 10),
+	}}
+	owner := &observedRuntimeOwner{
+		orderingRuntimeOwner: &orderingRuntimeOwner{running: map[string]bool{"start-down-runtime": false}},
+		containers:           []dockerx.Container{container},
+	}
+	executor := &NormalizedStepExecutor{store: fixture.runs, variables: fixture.variables, runtime: owner}
+	execution := StepExecution{Run: *claimed, ClaimToken: startLease.Token, Output: discardStepOutput{}}
+	if result := executor.startCandidate(context.Background(), execution, mustExecutionPlan(t, fixture, *claimed)); result.State != StepFailed || result.ErrorCode != "runtime_not_stopped" {
+		t.Fatalf("start over a live runtime Docker reports running = %#v", result)
+	}
+
+	owner.containers[0].State = "exited"
+	if result := executor.startCandidate(context.Background(), execution, mustExecutionPlan(t, fixture, *claimed)); result.State != StepPassed {
+		t.Fatalf("start over a live runtime Docker reports down = %#v", result)
+	}
+	owner.mu.Lock()
+	running := owner.running["start-down-runtime"]
+	owner.mu.Unlock()
+	if !running {
+		t.Fatal("start did not bring the live runtime back up")
+	}
+	runtime, err := fixture.runs.RuntimeForRelease(context.Background(), live.Release.ID)
+	if err != nil || runtime.State != "live" {
+		t.Fatalf("runtime state = %#v, error=%v", runtime, err)
 	}
 }
 

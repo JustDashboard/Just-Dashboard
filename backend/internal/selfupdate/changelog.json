@@ -8,6 +8,11 @@
       "summary": "The Git workspace could commit, branch, merge and push, and everything past that was a terminal. 0.7.0 brings the rest into the same three columns: conflicts resolved side by side, single lines staged, local history rebased behind a recovery branch, worktrees, submodules, LFS and patches, reviews on GitHub pull requests and on GitLab and Gitea requests. Every reviewed template now declares how its first sign-in works, the five that could not say are no longer offered, and nine new ones join the catalogue. New project opens on whatever is still unanswered and checks the plan the moment Review is reached. A deployment's Logs page answers from the requests the proxy actually served, with insights, marks on the chart and traffic alerts. A container, a compose stack and a backup job are pages of their own, every page remembers what you were doing on it, and the rail's top level is twelve rows instead of seventeen.",
       "changes": [
         {
+          "kind": "fixed",
+          "text": "Start brings back a deployment whose containers went down on their own",
+          "detail": "A deployment is drawn as stopped when every container of its live release is down, which also happens without anyone pressing Stop: a Docker daemon restart that does not bring the containers back, a crash, or a docker stop. Start was offered and then refused with \"deployment runtime is not stopped\", because only a Stop run marked the release stopped, and Restart was hidden. Start now accepts a live release whose containers Docker reports all down, and still refuses one that is running."
+        },
+        {
           "kind": "added",
           "text": "Terminal sessions keep running when the dashboard restarts",
           "detail": "A terminal's shell used to end whenever the dashboard restarted — an upgrade, a settings change, a rebuild — taking whatever ran in it along, an agent included. Each session's terminal is now held on the server by a small process of its own, so a session keeps running with every browser closed and across restarts and upgrades, and the dashboard picks it back up, with what it printed meanwhile, when it comes back. A session ends when you close it or its shell exits. A dropped connection reconnects by itself instead of waiting for a click."

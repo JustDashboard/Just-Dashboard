@@ -76,3 +76,31 @@ func TestRuntimeServicesScopeAvailabilityAndSecretFreeProjection(t *testing.T) {
 		t.Fatal("invalid environment queried Docker")
 	}
 }
+
+func TestReleaseRuntimeDownNeedsEveryObservedContainerDown(t *testing.T) {
+	container := func(release, state string) dockerx.Container {
+		return dockerx.Container{ID: release + "-" + state, State: state, Labels: map[string]string{
+			"io.just-dashboard.managed": "true", "io.just-dashboard.environment-id": "7",
+			"io.just-dashboard.release-id": release,
+		}}
+	}
+	runtime := ReleaseRuntime{ReleaseID: 10, EnvironmentID: 7}
+	for _, test := range []struct {
+		name  string
+		owner RuntimeObserver
+		want  bool
+	}{
+		{"exited", &runtimeObservationFake{items: []dockerx.Container{container("10", "exited")}}, true},
+		{"one service still running", &runtimeObservationFake{items: []dockerx.Container{
+			container("10", "exited"), container("10", "running")}}, false},
+		{"only another release running", &runtimeObservationFake{items: []dockerx.Container{
+			container("10", "exited"), container("11", "running")}}, true},
+		{"no containers", &runtimeObservationFake{}, false},
+		{"Docker unreadable", &runtimeObservationFake{err: errors.New("down")}, false},
+		{"no Docker", nil, false},
+	} {
+		if got := ReleaseRuntimeDown(t.Context(), test.owner, runtime); got != test.want {
+			t.Errorf("%s: down = %v, want %v", test.name, got, test.want)
+		}
+	}
+}

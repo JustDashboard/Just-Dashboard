@@ -42,6 +42,24 @@ func ObserveRuntimeServices(ctx context.Context, owner RuntimeObserver, environm
 	return observeRuntimeServices(ctx, owner, environmentID, liveReleaseID, 0)
 }
 
+// ReleaseRuntimeDown is true when Docker holds the release's containers and
+// none of them is running. A runtime recorded live goes down without a stop
+// run when its containers exit, are stopped in Docker, or are not brought back
+// after a daemon restart; the project page reads that as stopped and offers
+// Start, so start admission has to accept the same observation.
+func ReleaseRuntimeDown(ctx context.Context, owner RuntimeObserver, runtime ReleaseRuntime) bool {
+	observed := observeRuntimeServices(ctx, owner, runtime.EnvironmentID, runtime.ReleaseID, runtime.ReleaseID)
+	if observed.Status != "available" || len(observed.Services) == 0 {
+		return false
+	}
+	for _, service := range observed.Services {
+		if service.State == "running" {
+			return false
+		}
+	}
+	return true
+}
+
 func observeRuntimeServices(ctx context.Context, owner RuntimeObserver, environmentID, liveReleaseID, onlyReleaseID int64) RuntimeServices {
 	result := RuntimeServices{Status: "unavailable", Services: []RuntimeService{}}
 	if owner == nil {

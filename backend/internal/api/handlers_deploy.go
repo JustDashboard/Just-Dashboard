@@ -865,7 +865,13 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 			return nil, deploy.ErrAlreadyStopped
 		}
 		if operation == deploy.OperationStart && runtime.State != "stopped" {
-			return nil, deploy.ErrNotStopped
+			var observer deploy.RuntimeObserver
+			if s.modules.docker != nil {
+				observer = s.modules.docker
+			}
+			if runtime.State != "live" || !deploy.ReleaseRuntimeDown(ctx, observer, *runtime) {
+				return nil, deploy.ErrNotStopped
+			}
 		}
 	case deploy.OperationRollback:
 		if targetReleaseID <= 0 || targetReleaseID == target.LiveReleaseID {
