@@ -20,8 +20,8 @@ import { Row, ROW_BLEED, RowList } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { AreaFindings } from "@/components/security/posture-panel"
-import { authLogSource } from "@/components/security/host-logs"
-import { HostLogSection, useAddressLineVerbs, useHostLogs } from "@/components/security/log-section"
+import { AUTH_LOG } from "@/components/security/host-logs"
+import { HostLogSection, useAddressLineVerbs, useHostLog } from "@/components/security/log-section"
 import { ReadingTile, useLensReadings } from "@/components/logs/lens-readings"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -61,7 +61,8 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
  * lens — who signed in and how, who tried and failed, the addresses behind
  * the failures, every sudo — with the day's counts as a second row of the
  * readings, so "passwords on" sits above "412 failed attempts" rather than
- * a page away from it. An address in it is blocked from the line it is on.
+ * a page away from it. An attacker's address in it is blocked from the line
+ * it is on.
  */
 export function SSHPanel({
   posture,
@@ -84,13 +85,12 @@ export function SSHPanel({
   const [busy, setBusy] = useState(false)
   const console_ = useJobConsole()
   // Asked beside the config, not after it: the grid's second row waits on it.
-  const logs = useHostLogs(admin)
-  const authLog = useMemo(() => authLogSource(logs.data), [logs.data])
-  const readings = useLensReadings(authLog?.id ?? "", AUTH_LENS, {
+  const authLog = useHostLog(AUTH_LOG, admin)
+  const readings = useLensReadings(authLog.data?.id ?? "", AUTH_LENS, {
     forcedLens: "auth",
-    enabled: Boolean(authLog) && Boolean(data?.available),
+    enabled: Boolean(authLog.data) && Boolean(data?.available),
   })
-  const lineVerbs = useAddressLineVerbs({ comment: "blocked from the auth log" })
+  const lineVerbs = useAddressLineVerbs({ comment: "blocked from the auth log", blockOn: ATTACKS })
 
   // The effective configuration is only right once sshd has reloaded.
   const jobStatus = console_.job?.status
@@ -264,10 +264,11 @@ export function SSHPanel({
       {/* The four facts an attacker cares about, before the twelve settings
           that produce them — and under them, from the auth log, what the
           last day made of those facts. One grid: the log's counts are
-          readings of the same server, not a second block of figures. Held
-          while the host's logs are being listed, so the row does not arrive
-          after the page has settled; dropped only where there is no log. */}
-      <StatGrid columns={4}>
+          readings of the same server, not a second block of figures, drawn
+          while the log is still being found so the row does not arrive after
+          the page has settled. Two-up on a phone: eight figures one-up are a
+          screen and a half before the finding they explain. */}
+      <StatGrid columns={4} dense>
         <StatTile
           label="Port"
           value={data.ports.join(", ") || "22"}
@@ -291,7 +292,9 @@ export function SSHPanel({
         />
         <StatTile
           label="Root login"
-          value={root?.value ?? "—"}
+          // Two-up on a phone, "prohibit-password" breaks at its hyphen
+          // rather than losing its second half to an ellipsis.
+          value={<span className="whitespace-normal">{root?.value ?? "—"}</span>}
           tone={root?.value === "yes" ? "danger" : "default"}
           hint={root?.value === "yes" ? "every bot tries root first" : "root cannot use a password"}
         />
@@ -305,12 +308,11 @@ export function SSHPanel({
               : `${data.keyedAccounts.reduce((n, a) => n + a.keys, 0)} authorized keys in total`
           }
         />
-        {authLog !== null &&
-          readings.tiles
-            .filter((tile) => SSH_READINGS.includes(tile.reading.id))
-            .map((tile) => (
-              <ReadingTile key={tile.reading.id} tile={tile} window={readings.window} />
-            ))}
+        {readings.tiles
+          .filter((tile) => SSH_READINGS.includes(tile.reading.id))
+          .map((tile) => (
+            <ReadingTile key={tile.reading.id} tile={tile} window={readings.window} />
+          ))}
       </StatGrid>
 
       <AreaFindings posture={posture} area="ssh" onFix={onFix} />
@@ -435,14 +437,8 @@ export function SSHPanel({
 
       <HostLogSection
         title="Auth log"
-        logs={logs}
-        source={authLog}
+        log={authLog}
         storageKey="security.ssh.log"
-        missing={{
-          title: "No auth log on this host",
-          description:
-            "There is no auth.log or secure the dashboard may read, and no journal to ask sshd's lines of instead. If the file exists, it is outside JD_LOG_ROOTS.",
-        }}
         lineVerbs={lineVerbs}
       />
 
@@ -460,6 +456,20 @@ const AUTH_LENS = lensFor("auth")
  * quick view away in the log.
  */
 const SSH_READINGS = ["accepted", "failed", "invalid", "attackers"]
+
+/**
+ * The lines whose address a deny answers: a wrong password, an account that
+ * does not exist, a connection that ran out of tries or gave up before
+ * authenticating. A login is not one of them — the address a deploy key or
+ * the operator signs in from is the last one to refuse.
+ */
+const ATTACKS = [
+  "ssh_failed",
+  "ssh_invalid_user",
+  "ssh_max_attempts",
+  "ssh_preauth_closed",
+  "ssh_scan",
+]
 
 /**
  * One sshd directive as a row in a plain divided list.

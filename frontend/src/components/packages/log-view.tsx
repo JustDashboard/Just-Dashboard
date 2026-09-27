@@ -2,13 +2,15 @@
 
 import { useEffect, useMemo } from "react"
 import { Logs } from "@/components/icons"
-import { get } from "@/lib/api"
-import type { LogSourceIndex } from "@/lib/types"
 import { useSessionState } from "@/lib/view-state"
-import { usePoll } from "@/hooks/use-poll"
 import type { LogTimeRange } from "@/components/logs/types"
 import { ServiceLogs } from "@/components/logs/service-logs"
-import { packageLogSources } from "@/components/packages/package-logs"
+import {
+  PACKAGE_LOGS,
+  packageLogSources,
+  packageLogsOutsideRoots,
+} from "@/components/packages/package-logs"
+import { useLogFiles } from "@/components/security/log-section"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 
 /** Where the view's reading is kept for the tab. */
@@ -26,23 +28,29 @@ const STORAGE_KEY = "packages.log"
  * and one strip over another both saying History is two places with one name.
  */
 export function PackageLogView({ product }: { product?: string }) {
-  const index = usePoll<LogSourceIndex>((signal) => get("/logs/sources", undefined, signal), 0)
+  const files = useLogFiles(PACKAGE_LOGS)
   const sources = useMemo(
-    () => (index.data ? packageLogSources(index.data, product) : undefined),
-    [index.data, product],
+    () => (files.data ? packageLogSources(files.data, product) : undefined),
+    [files.data, product],
   )
   const opened = useOpeningRange(STORAGE_KEY, "all")
 
-  if (index.error && !index.data) {
-    return <ErrorState error={index.error} onRetry={index.refresh} />
+  if (files.error && !files.data) {
+    return <ErrorState error={files.error} onRetry={files.refresh} />
   }
   if (!sources || !opened) return <LoadingPanel />
   if (sources.length === 0) {
-    return (
+    return files.data && packageLogsOutsideRoots(files.data) ? (
+      <EmptyState
+        icon={Logs}
+        title="The package logs are outside JD_LOG_ROOTS"
+        description="apt, dpkg and dnf write under /var/log, and the dashboard reads logs only inside the directories JD_LOG_ROOTS names. Add /var/log to it to read them here."
+      />
+    ) : (
       <EmptyState
         icon={Logs}
         title="No package log on this host"
-        description={`apt keeps its transactions in /var/log/apt/history.log, dpkg in /var/log/dpkg.log and dnf in /var/log/dnf.log, and none of them is among the files the dashboard may read under ${index.data?.roots.join(", ") || "its log roots"}.`}
+        description="apt keeps its transactions in /var/log/apt/history.log, dpkg in /var/log/dpkg.log and dnf in /var/log/dnf.log, and none of them is on this host."
       />
     )
   }

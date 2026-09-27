@@ -212,6 +212,20 @@ function ufw(
   )
 }
 
+/**
+ * ufw's AUDIT of a packet this host sent, which it writes from logging
+ * medium up: `IN=` is empty, and SRC — the lens's `client` — is the host.
+ */
+function ufwOut(minutes: number, dst: string, proto: string, spt: string, dpt: string): Line {
+  return syslog(
+    minutes,
+    "kernel",
+    `[UFW AUDIT] IN= OUT=ens3 SRC=198.51.100.87 DST=${dst} LEN=76 TOS=0x00 PREC=0x00 TTL=64 ID=40212 DF PROTO=${proto} SPT=${spt} DPT=${dpt} LEN=56 `,
+    "audit",
+    { client: "198.51.100.87", dpt, dst, iface: "ens3", len: "76", proto, spt },
+  )
+}
+
 export const FIREWALL_LINES: Line[] = [
   ufw(1200, "BLOCK", "203.0.113.11", "TCP", "54703", "4448"),
   ufw(900, "BLOCK", "203.0.113.27", "UDP", "60800", "5060"),
@@ -219,6 +233,7 @@ export const FIREWALL_LINES: Line[] = [
   ufw(420, "BLOCK", "203.0.113.11", "TCP", "54711", "23"),
   ufw(181, "LIMIT BLOCK", "198.51.100.61", "TCP", "40112", "22"),
   ufw(120, "ALLOW", "198.51.100.20", "TCP", "50122", "22"),
+  ufwOut(60, "203.0.113.53", "UDP", "41234", "53"),
   ufw(40, "BLOCK", "203.0.113.27", "TCP", "61022", "8080"),
   ufw(9, "LIMIT BLOCK", "203.0.113.197", "TCP", "9051", "22"),
 ]
@@ -264,6 +279,11 @@ export const FAIL2BAN_LINES: Line[] = [
   found(611, "203.0.113.42"),
   fail2ban(610, "actions", "992", "NOTICE", "[sshd] Ban 203.0.113.42", "ban", {
     client: "203.0.113.42",
+    jail: "sshd",
+  }),
+  // An address in the jail's ignoreip: one the operator trusts.
+  fail2ban(500, "filter", "700", "INFO", "[sshd] Ignore 198.51.100.20 by ip", "ignore", {
+    client: "198.51.100.20",
     jail: "sshd",
   }),
   found(421, "203.0.113.197"),
@@ -444,12 +464,37 @@ export const HOST_LOG_SOURCES = [
     402_993,
     "Packets the firewall blocked or allowed, if logging is on",
   ),
+]
+
+/**
+ * The journal's readings of the same programs, as `GET /logs/source`
+ * describes them: the lens each is detected as, which is what the pane reads
+ * them through when the page names none.
+ */
+const JOURNAL_SOURCES = [
   {
-    id: "journal:",
-    label: "systemd journal",
+    id: "journal-id:sshd,sshd-session,sshd-auth,sudo,su,systemd-logind",
+    label: "sshd, sshd-session, sshd-auth, sudo, su, systemd-logind",
+    kind: "journal-id",
+    detail: "The journal's lines from sshd, sshd-session, sshd-auth, sudo, su, systemd-logind",
+    lens: "auth",
+    rotated: false,
+  },
+  {
+    id: "kernel:",
+    label: "kernel",
+    kind: "kernel",
+    detail: "The kernel ring as the journal keeps it: the firewall, the OOM killer, the disks",
+    lens: "kernel",
+    rotated: false,
+  },
+  {
+    id: "journal:fail2ban.service",
+    label: "fail2ban.service",
     kind: "journal",
-    detail: "Every unit on the host — pick one below to narrow it",
-    lens: "syslog",
+    detail: "What systemd recorded for this unit, and what it printed",
+    status: "active",
+    lens: "fail2ban",
     rotated: false,
   },
 ]
@@ -604,26 +649,41 @@ export type HostLogMocks = {
 }
 
 /**
- * The logs routes over these lines. `sources` is what `/logs/sources` lists —
- * a host without auth.log, or without fail2ban's file, is the default list
- * with it taken out.
+ * The logs routes over these lines. `sources` are the files this host keeps,
+ * as `/logs/source` describes them — a host without auth.log, or without
+ * fail2ban's file, is the default list with it taken out. Any other file is
+ * not there (404), or, named in `outside`, is a path outside `JD_LOG_ROOTS`
+ * (400, whether or not it exists, as the server answers).
  */
 export async function mockHostLogs(
   page: Page,
-  { sources = HOST_LOG_SOURCES }: { sources?: typeof HOST_LOG_SOURCES } = {},
+  {
+    sources = HOST_LOG_SOURCES,
+    outside = [],
+  }: { sources?: typeof HOST_LOG_SOURCES; outside?: string[] } = {},
 ): Promise<HostLogMocks> {
   const recorded: HostLogMocks = { requests: [], sockets: [], searches: [] }
   await page.route("**/api/v1/logs/**", (route) => {
     const url = new URL(route.request().url())
     recorded.requests.push(url.pathname.replace(/^\/api\/v1/, ""))
-    const reply = (body: unknown) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
-    if (url.pathname.endsWith("/logs/sources")) {
-      return reply({ sources, units: [], roots: ["/var/log"], missing: {} })
-    }
+    const reply = (body: unknown, status = 200) =>
+      route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
     if (url.pathname.endsWith("/logs/source")) {
-      const id = url.searchParams.get("source")
-      return reply(sources.find((s) => s.id === id) ?? {})
+      const id = url.searchParams.get("source") ?? ""
+      const known = [...sources, ...JOURNAL_SOURCES].find((s) => s.id === id)
+      if (known) return reply(known)
+      const path = id.replace(/^file:/, "")
+      return outside.includes(path)
+        ? reply(
+            {
+              error: {
+                code: "bad_request",
+                message: `path "${path}" is outside the configured log roots`,
+              },
+            },
+            400,
+          )
+        : reply({ error: { code: "not_found", message: `There is no log file at ${path}.` } }, 404)
     }
     if (url.pathname.endsWith("/logs/search")) {
       recorded.searches.push(url.searchParams)

@@ -16,7 +16,7 @@ import { notify } from "@/lib/toast"
 import { del, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { lensFor } from "@/lib/log-lenses"
-import type { FirewallRule, FirewallStatus, Posture, SecurityFinding } from "@/lib/types"
+import type { FirewallRule, FirewallStatus, LogLine, Posture, SecurityFinding } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { PageContext, SearchInput } from "@/components/page"
@@ -26,8 +26,8 @@ import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { AreaFindings } from "@/components/security/posture-panel"
 import { AddRuleDialog, EditRuleDialog } from "@/components/security/rule-form"
-import { firewallLogSource } from "@/components/security/host-logs"
-import { HostLogSection, useAddressLineVerbs, useHostLogs } from "@/components/security/log-section"
+import { FIREWALL_LOG } from "@/components/security/host-logs"
+import { HostLogSection, useAddressLineVerbs, useHostLog } from "@/components/security/log-section"
 import { ReadingTile, useLensReadings } from "@/components/logs/lens-readings"
 import { Status } from "@/components/status-dot"
 import { IconAction, RowActions } from "@/components/icon-action"
@@ -102,18 +102,20 @@ export function FirewallPanel({
   // LOG rules are the operator's own, so only a firewall that says so is
   // treated as not logging.
   const silent = Boolean(status?.logging) && loggingLevel(status?.logging) === "off"
-  const logs = useHostLogs()
-  const firewallLog = useMemo(() => firewallLogSource(logs.data), [logs.data])
-  const readings = useLensReadings(firewallLog?.id ?? "", FIREWALL_LENS, {
+  const firewallLog = useHostLog(FIREWALL_LOG, Boolean(status?.available) && !silent)
+  const readings = useLensReadings(firewallLog.data?.id ?? "", FIREWALL_LENS, {
     forcedLens: "firewall",
-    enabled: Boolean(firewallLog) && Boolean(status?.available) && !silent,
+    enabled: Boolean(firewallLog.data) && Boolean(status?.available) && !silent,
   })
-  // The firewall's own drop is already the answer to the address on it; a
-  // rate limit or an allowed connection is where a deny is the next step.
+  // A drop is already the firewall's answer to the address on it, and an
+  // allowed or audited connection may be the operator's own; a rate limit
+  // is the one line where a deny is the next step. An outbound packet's
+  // source is this host, so it gets no verbs at all.
   const lineVerbs = useAddressLineVerbs({
     comment: "blocked from the firewall log",
     onBlocked: refresh,
-    withBlock: (line) => line.event !== "block",
+    blockOn: RATE_LIMITED,
+    remote: arrived,
   })
 
   // ufw prints every rule twice on a dual-stack host and distinguishes the
@@ -308,8 +310,10 @@ export function FirewallPanel({
           grid — and not while logging is off, when every one of them would be
           a zero that means "not recorded" rather than "nothing happened".
           Two-up on a phone: seven short figures one-up are a screen and a
-          half before the controls they describe. */}
-      <StatGrid columns={4} dense>
+          half before the controls they describe. Seven across four columns
+          let the last reading take the row's end rather than leave a hole
+          beside it, as the phone's odd one does. */}
+      <StatGrid columns={4} dense className="xl:[&>*:last-child:nth-child(4n+3)]:col-span-2">
         <StatTile
           label="Rules"
           value={rules.length}
@@ -347,17 +351,21 @@ export function FirewallPanel({
             hint={caps.editable ? "managed from here" : "read only from here"}
           />
         )}
+        {/* iptables names no level: what it logs is whatever its LOG rules
+            write, which "off" would misstate beside the drops counted next
+            to it. */}
         <StatTile
           label="Logging"
-          value={logging}
+          value={status.logging ? logging : "—"}
           hint={
-            logging === "off"
-              ? "a silent drop leaves no record"
-              : "refused connections are recorded"
+            !status.logging
+              ? "set by its own LOG rules"
+              : logging === "off"
+                ? "a silent drop leaves no record"
+                : "every drop is recorded"
           }
         />
-        {firewallLog !== null &&
-          !silent &&
+        {!silent &&
           readings.tiles.map((tile) => (
             <ReadingTile key={tile.reading.id} tile={tile} window={readings.window} />
           ))}
@@ -607,24 +615,20 @@ export function FirewallPanel({
 
       <HostLogSection
         title="Firewall log"
-        logs={logs}
-        source={firewallLog}
+        log={firewallLog}
         storageKey="security.firewall.log"
-        missing={{
-          title: "No firewall log on this host",
-          description:
-            "There is no ufw.log or kern.log the dashboard may read, and no journal to ask the kernel's lines of instead. If the files exist, they are outside JD_LOG_ROOTS.",
-        }}
         instead={
           silent && (
             <EmptyState
               icon={Logs}
               title={`${status.backend} is not logging`}
-              description={
+              description={`A refused connection leaves no record while logging is off, so there is nothing here to read. ${
                 writable && caps.logging
-                  ? "A refused connection leaves no record while logging is off, so there is nothing here to read. Set a level under Defaults — low records every blocked packet and every rate limit."
-                  : "A refused connection leaves no record while logging is off, so there is nothing here to read. An administrator can set a level under Defaults on this page."
-              }
+                  ? "Set a level under Defaults — low records every blocked packet and every rate limit."
+                  : caps.editable && caps.logging
+                    ? "An administrator can set a level under Defaults on this page."
+                    : `It cannot be set from here; on the host, ${LOGGING_COMMAND[status.backend] ?? `${status.backend}'s own logging setting`} turns it on.`
+              }`}
               action={
                 writable &&
                 caps.logging && (
@@ -658,6 +662,20 @@ export function FirewallPanel({
 }
 
 const FIREWALL_LENS = lensFor("firewall")
+
+/** The lines a deny answers: a connection a limit rule turned away. */
+const RATE_LIMITED = ["limit"]
+
+/** A packet that arrived: ufw, firewalld and iptables all write `IN=` empty for one this host sent. */
+function arrived(line: LogLine) {
+  return /\bIN=\S/.test(line.text)
+}
+
+/** How each backend is told to log, for a reader this page cannot set it for. */
+const LOGGING_COMMAND: Record<string, string> = {
+  ufw: "ufw logging low",
+  firewalld: "firewall-cmd --set-log-denied=all",
+}
 
 /** The logging control's id, which the log section's empty state brings into view. */
 const LOGGING_CONTROL = "firewall-logging-level"

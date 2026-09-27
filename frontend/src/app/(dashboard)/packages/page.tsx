@@ -31,7 +31,7 @@ import {
 } from "@/components/packages/marks"
 import { PackageSheet } from "@/components/packages/package-sheet"
 import { Page, PageContext, RowLink, SearchInput } from "@/components/page"
-import { Panel, PanelBody, PanelFooter, PanelToolbar } from "@/components/panel"
+import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { ProductGlyphs, platformProduct } from "@/components/product-logo"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
@@ -254,6 +254,9 @@ export default function PackagesPage() {
 
   const upgradeCount = data?.upgradeCount ?? 0
   const securityCount = data?.securityCount ?? 0
+  // An inventory that failed has answered too: its figures are dashes beside
+  // the error and the package log under it, not a load that never ends.
+  const answered = Boolean(data) || Boolean(inventory.error)
 
   return (
     <Page>
@@ -349,7 +352,7 @@ export default function PackagesPage() {
         <StatTile
           label="Installed"
           value={
-            <Figure settled={Boolean(data)}>
+            <Figure settled={answered}>
               {data?.available ? <NumberTicker value={data.packages.length} /> : "—"}
             </Figure>
           }
@@ -366,7 +369,7 @@ export default function PackagesPage() {
         <StatTile
           label="Installed by hand"
           value={
-            <Figure settled={Boolean(data)}>
+            <Figure settled={answered}>
               {knowsExplicit ? <NumberTicker value={data!.explicitCount} /> : "—"}
             </Figure>
           }
@@ -381,7 +384,7 @@ export default function PackagesPage() {
         <StatTile
           label="Updates"
           value={
-            <Figure settled={Boolean(data)}>
+            <Figure settled={answered}>
               {data?.available ? <NumberTicker value={upgradeCount} /> : "—"}
             </Figure>
           }
@@ -411,7 +414,7 @@ export default function PackagesPage() {
         <StatTile
           label="On disk"
           value={
-            <Figure settled={Boolean(data)}>{data?.totalSize ? bytes(data.totalSize) : "—"}</Figure>
+            <Figure settled={answered}>{data?.totalSize ? bytes(data.totalSize) : "—"}</Figure>
           }
           hint={
             largest?.size
@@ -479,6 +482,17 @@ export default function PackagesPage() {
       />
 
       {inventory.error && <ErrorState error={inventory.error} />}
+      {/* A package database that cannot be read is usually a transaction
+          that did not finish, and apt's own log is where it says why — so
+          the log stays on the page when the views it sits among cannot. */}
+      {inventory.error && !data && (
+        <Panel plain>
+          <PanelHeader title="Package log" />
+          <PanelBody flush className="pt-3">
+            <PackageLogView product={platformProduct(host?.platform)} />
+          </PanelBody>
+        </Panel>
+      )}
       {inventory.loading && !data && <LoadingPanel />}
 
       {data && !data.available && (

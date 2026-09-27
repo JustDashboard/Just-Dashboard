@@ -1,6 +1,5 @@
 "use client"
 
-import { useMemo } from "react"
 import { Slash } from "@/components/icons"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { ProductGlyph } from "@/components/product-logo"
@@ -15,8 +14,8 @@ import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Status } from "@/components/status-dot"
 import { ReadingTile, useLensReadings } from "@/components/logs/lens-readings"
-import { fail2banLogSource } from "@/components/security/host-logs"
-import { HostLogSection, useAddressLineVerbs, useHostLogs } from "@/components/security/log-section"
+import { FAIL2BAN_LOG } from "@/components/security/host-logs"
+import { HostLogSection, useAddressLineVerbs, useHostLog } from "@/components/security/log-section"
 import { AreaFindings } from "@/components/security/posture-panel"
 import { JailsPanel } from "@/components/security/jail-panel"
 import { OffendersPanel } from "@/components/security/offenders-panel"
@@ -41,8 +40,6 @@ import { useSecurity } from "@/components/security/security-context"
 export function IntrusionPanels() {
   const { can } = useAuth()
   const { posture, exposure, applyFix } = useSecurity()
-  const logs = useHostLogs()
-  const activity = useMemo(() => fail2banLogSource(logs.data), [logs.data])
   const { data, error, loading, refresh } = usePoll(
     (signal) =>
       get<{ available: boolean; running: boolean; jails: Fail2banJail[]; error?: string }>(
@@ -58,25 +55,21 @@ export function IntrusionPanels() {
   const failingNow = jails.reduce((n, j) => n + j.currentlyFailed, 0)
   const bansTotal = jails.reduce((n, j) => n + j.totalBanned, 0)
   const watched = new Set(jails.flatMap((j) => j.fileList)).size
-  const readings = useLensReadings(activity?.id ?? "", FAIL2BAN_LENS, {
+  const activity = useHostLog(FAIL2BAN_LOG, Boolean(data?.available))
+  const readings = useLensReadings(activity.data?.id ?? "", FAIL2BAN_LENS, {
     forcedLens: "fail2ban",
-    enabled: Boolean(activity) && Boolean(data?.running),
+    enabled: Boolean(activity.data) && Boolean(data?.running),
   })
   const lineVerbs = useAddressLineVerbs({
     comment: "blocked from fail2ban's log",
     onBlocked: refresh,
+    blockOn: OFFENCES,
   })
   const activitySection = (
     <HostLogSection
       title="Activity"
-      logs={logs}
-      source={activity}
+      log={activity}
       storageKey="security.intrusion.log"
-      missing={{
-        title: "No fail2ban log on this host",
-        description:
-          "There is no fail2ban.log the dashboard may read, and no journal to ask fail2ban's lines of instead. If the file exists, it is outside JD_LOG_ROOTS.",
-      }}
       lineVerbs={lineVerbs}
     />
   )
@@ -180,10 +173,9 @@ export function IntrusionPanels() {
           hint="attempts inside the current window"
         />
         <StatTile label="Bans in total" value={bansTotal} hint="since fail2ban last started" />
-        {activity !== null &&
-          readings.tiles.map((tile) => (
-            <ReadingTile key={tile.reading.id} tile={tile} window={readings.window} />
-          ))}
+        {readings.tiles.map((tile) => (
+          <ReadingTile key={tile.reading.id} tile={tile} window={readings.window} />
+        ))}
       </StatGrid>
 
       <AreaFindings posture={posture} area="intrusion" onFix={applyFix} />
@@ -195,13 +187,20 @@ export function IntrusionPanels() {
         onChanged={refresh}
       />
 
-      <OffendersPanel onBlocked={refresh} />
+      <OffendersPanel onBlocked={refresh} journal={activity.data?.kind === "journal"} />
       {activitySection}
     </>
   )
 }
 
 const FAIL2BAN_LENS = lensFor("fail2ban")
+
+/**
+ * The lines whose address a deny answers: every strike and ban, and the ones
+ * fail2ban let go. An address it was told to ignore is one the operator
+ * trusts, and is never offered.
+ */
+const OFFENCES = ["found", "ban", "increase", "restore_ban", "already_banned", "unban"]
 
 /** A jail's name with the mark of the service it watches, where that is one. */
 export function JailName({ name }: { name: string }) {

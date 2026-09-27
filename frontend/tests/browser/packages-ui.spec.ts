@@ -412,8 +412,11 @@ test("the Log view reads the package manager's own log in place", async ({ page 
   // file holds — a day of a package log is usually nothing — and no tail.
   const history = logs.searches[0]
   expect(history.get("source")).toBe("file:/var/log/apt/history.log")
-  expect(history.get("lens")).toBe("packages")
+  // Every package log is the packages lens's on the server; the page names none.
+  expect(history.has("lens")).toBe(false)
+  await expect(page.getByRole("button", { name: "More", exact: true })).toBeVisible()
   expect(history.has("since")).toBe(false)
+  expect(logs.requests).not.toContain("/logs/sources")
   expect(logs.sockets).toHaveLength(0)
   await expect(page.getByRole("button", { name: "Live", exact: true })).toHaveCount(0)
   // The page keeps its one run of figures.
@@ -425,6 +428,31 @@ test("the Log view reads the package manager's own log in place", async ({ page 
 
   await page.getByRole("button", { name: "Insights", exact: true }).click()
   await expect(page.getByRole("heading", { name: "By package" })).toBeVisible()
+  expect(await framedNonTables(page), "a framed block that is not a table").toEqual([])
+})
+
+test("the package log stays on the page when the inventory cannot be read", async ({ page }) => {
+  await mockHost(page)
+  await mockHostLogs(page)
+  await page.route("**/api/v1/packages/", (route) =>
+    route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: {
+          code: "internal",
+          message: "dpkg was interrupted, you must manually run dpkg --configure -a",
+        },
+      }),
+    }),
+  )
+  await page.goto("/packages")
+  await expect(page.getByText(/dpkg was interrupted/).first()).toBeVisible()
+  // The views are gone with the inventory; apt's own record of what it was
+  // doing when it stopped is not.
+  await expect(page.getByRole("navigation", { name: "Package views" })).toHaveCount(0)
+  await expect(page.getByRole("heading", { name: "Package log" })).toBeVisible()
+  await expect(page.getByLabel("Log lines").getByText("install", { exact: true })).toBeVisible()
   expect(await framedNonTables(page), "a framed block that is not a table").toEqual([])
 })
 

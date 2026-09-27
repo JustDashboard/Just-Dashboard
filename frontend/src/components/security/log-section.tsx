@@ -2,29 +2,64 @@
 
 import { useCallback, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Logs } from "@/components/icons"
-import { get } from "@/lib/api"
+import { ApiError, get } from "@/lib/api"
 import { networkOf } from "@/lib/clients"
+import { fileSource } from "@/lib/log-sources"
 import { notify } from "@/lib/toast"
-import type { LogLine, LogSourceIndex } from "@/lib/types"
+import type { LogLine } from "@/lib/types"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { ErrorState, LoadingRows } from "@/components/state"
 import { addressVerbs, blockAddress } from "@/components/security/address-verbs"
+import { hostLogSource, type HostLogPlan, type HostLogProbe } from "@/components/security/host-logs"
 import type { Verb } from "@/components/verbs"
 
 /**
- * What this host can read, asked once per visit: which of the files a
- * Security page reads exist, and whether the journal is there to fall back
- * on (`host-logs.ts`). It is the logs page's own inventory, so a file the
- * reader could not open there is not offered here either.
+ * Each of the files, asked after at once. A refusal is an answer rather
+ * than a failure: 404 is a file this host does not keep, and 400 a path the
+ * server will not read — outside `JD_LOG_ROOTS` — which is worth saying in
+ * words, since the reader who set the roots can change them.
  */
-export function useHostLogs(enabled = true) {
-  return usePoll<LogSourceIndex>((signal) => get("/logs/sources", undefined, signal), 0, [], {
-    enabled,
-  })
+function probeLogFiles(paths: string[], signal: AbortSignal) {
+  return Promise.all(
+    paths.map(async (path): Promise<HostLogProbe> => {
+      try {
+        const source = await get<ServiceLogSource>(
+          "/logs/source",
+          { source: fileSource(path) },
+          signal,
+        )
+        return { path, source }
+      } catch (err) {
+        if (!(err instanceof ApiError) || (err.status !== 400 && err.status !== 404)) throw err
+        return { path, refused: err.status === 404 ? "missing" : "outside" }
+      }
+    }),
+  )
+}
+
+/** Which of these files the dashboard may read on this host, asked once per visit. */
+export function useLogFiles(paths: string[], enabled = true) {
+  return usePoll((signal) => probeLogFiles(paths, signal), 0, [paths.join("\n")], { enabled })
+}
+
+/** The log a Security page reads (`host-logs.ts`), once its files have answered. */
+export function useHostLog(plan: HostLogPlan, enabled = true) {
+  return usePoll(
+    async (signal) =>
+      hostLogSource(
+        plan,
+        await probeLogFiles(
+          plan.files.map((file) => file.path),
+          signal,
+        ),
+      ),
+    0,
+    [plan],
+    { enabled },
+  )
 }
 
 /**
@@ -33,18 +68,27 @@ export function useHostLogs(enabled = true) {
  * address (`address-verbs.tsx`): the block inline, the lookups behind the
  * menu. Only a public address gets them: a tailnet peer or a container on
  * the bridge is not something the firewall at the edge stands in front of,
- * and "who owns 10.0.0.4" has no answer. `withBlock` leaves the block off a
- * line where it would repeat what already happened — the firewall's own drop.
+ * and "who owns 10.0.0.4" has no answer.
+ *
+ * The block is offered only on the events a deny answers — a failed
+ * password, a strike, a rate limit — never on a login, an allowed packet or
+ * an address fail2ban was told to ignore. The rule is permanent, and the
+ * server refuses only the address the dashboard is read from, not the one
+ * its operator signs in to SSH from, so one press on the wrong line locks
+ * that operator out.
  */
 export function useAddressLineVerbs({
   comment,
   onBlocked,
-  withBlock,
+  blockOn,
+  remote,
 }: {
   /** Written on the rule, which is all that says why the address is refused a month later. */
   comment: string
   onBlocked?: () => void
-  withBlock?: (line: LogLine) => boolean
+  blockOn: readonly string[]
+  /** Whether the line's address is the far end at all: an outbound packet's source is this host. */
+  remote?: (line: LogLine) => boolean
 }) {
   const { can } = useAuth()
   const router = useRouter()
@@ -72,15 +116,15 @@ export function useAddressLineVerbs({
   return useCallback(
     (line: LogLine): Verb[] => {
       const ip = line.attrs?.client
-      if (!ip || networkOf(ip).kind !== "internet") return []
+      if (!ip || networkOf(ip).kind !== "internet" || (remote && !remote(line))) return []
       return addressVerbs({
         ip,
-        block: admin && (withBlock?.(line) ?? true) ? () => void block(ip) : undefined,
+        block: admin && blockOn.includes(line.event ?? "") ? () => void block(ip) : undefined,
         blocking: blocking === ip,
         navigate: router.push,
       })
     },
-    [admin, withBlock, block, blocking, router],
+    [admin, blockOn, remote, block, blocking, router],
   )
 }
 
@@ -88,28 +132,23 @@ export function useAddressLineVerbs({
  * A service's log as a section of its Security page: a title and a hairline
  * over the pane, the way every other block in the section is drawn — the pane
  * is the one frame, because it owns its scroll (§7). What stands in for it is
- * said in the section's words: the inventory still arriving, the host keeping
- * no such log, or the page's own reason the pane would be empty (`instead`) —
- * a firewall that is not logging has nothing to show, and the control that
- * changes that is on the same page.
+ * said in the section's words: its files still being asked after, or the
+ * page's own reason the pane would be empty (`instead`) — a firewall that is
+ * not logging has nothing to show, and the control that changes that is on
+ * the same page.
  */
 export function HostLogSection({
   title,
-  logs,
-  source,
+  log,
   storageKey,
-  missing,
   instead,
   lineVerbs,
 }: {
   title: string
-  logs: PollState<LogSourceIndex>
-  /** From `host-logs.ts`: undefined until the inventory answers, null when the host has none. */
-  source: ServiceLogSource | null | undefined
+  /** From `useHostLog`. */
+  log: PollState<ServiceLogSource>
   /** Where the pane keeps its reading for the tab. */
   storageKey: string
-  /** Why there is nothing to read, for a host with none of the files and no journal. */
-  missing: { title: string; description: string }
   instead?: React.ReactNode
   lineVerbs?: (line: LogLine) => Verb[]
 }) {
@@ -119,15 +158,13 @@ export function HostLogSection({
       <PanelBody flush className="pt-3">
         {instead ? (
           instead
-        ) : logs.error && !logs.data ? (
-          <ErrorState error={logs.error} onRetry={logs.refresh} />
-        ) : source === undefined ? (
+        ) : log.error && !log.data ? (
+          <ErrorState error={log.error} onRetry={log.refresh} />
+        ) : !log.data ? (
           <LoadingRows rows={6} />
-        ) : source === null ? (
-          <EmptyState icon={Logs} title={missing.title} description={missing.description} />
         ) : (
           <ServiceLogs
-            sources={[source]}
+            sources={[log.data]}
             storageKey={storageKey}
             lineVerbs={lineVerbs}
             paneClassName="h-[min(75vh,40rem)] min-h-80"
