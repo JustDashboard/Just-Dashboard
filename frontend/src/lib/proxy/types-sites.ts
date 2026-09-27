@@ -16,6 +16,12 @@ export type VHost = {
   broken?: "dangling" | "stale"
   /** Where the link in sites-enabled points, for a broken site and a link-only one. */
   linkTarget?: string
+  /**
+   * A stale link's target is also read through another name in sites-enabled
+   * or through conf.d. Otherwise Enable, which points the link at this file,
+   * takes that target out of nginx.
+   */
+  targetServedElsewhere?: boolean
   /** Other names in sites-enabled that link to this file, each serving it; Disable takes them out. */
   linkedAs?: string[]
   /** Where the file really is, when that is outside the proxy's directories: the editor does not open it. */

@@ -215,10 +215,12 @@ export function useSiteVerbs({
   // it removes a sites-enabled entry of that name on the way — so it refuses,
   // and is not offered, where that entry is not the site's own link: a copy
   // nginx serves instead, a link to another site, or a link under another
-  // name it would leave pointing at nothing.
+  // name it would leave pointing at nothing. Nor where the file resolves
+  // outside the nginx directory, which the delete does not touch.
   const deletable =
-    (vhost.formEditable && vhost.broken !== "stale" && !vhost.linkedAs?.length) ||
-    (vhost.layout === "conf.d" && vhost.name.endsWith(".conf"))
+    !vhost.resolvesTo &&
+    ((vhost.formEditable && vhost.broken !== "stale" && !vhost.linkedAs?.length) ||
+      (vhost.layout === "conf.d" && vhost.name.endsWith(".conf")))
   if (admin && deletable && !ambiguous) {
     verbs.push({
       key: "delete",

@@ -32,6 +32,11 @@ type VHost struct {
 	// LinkTarget is where the link in sites-enabled points, absolute, for a
 	// broken site and for one that is only a link there.
 	LinkTarget string `json:"linkTarget,omitempty"`
+	// TargetServedElsewhere says the file a stale link points at is read
+	// through something besides that link too — another name in
+	// sites-enabled, or conf.d. Enabling the site points the link at its own
+	// file, and a target with no other way in stops being served.
+	TargetServedElsewhere bool `json:"targetServedElsewhere,omitempty"`
 	// LinkedAs are the other names in sites-enabled that link to this
 	// file — 00-default -> ../sites-available/default — each of which
 	// serves it as surely as a link under its own name, and each of which
@@ -165,6 +170,7 @@ func (s *Service) nginxVHosts() []VHost {
 				v.Broken, v.LinkTarget = "dangling", target
 			case linkElsewhere:
 				v.Broken, v.LinkTarget = "stale", target
+				v.TargetServedElsewhere = target != "" && servedElsewhere(links, confd, v.EnabledPath)
 			}
 			if len(v.LinkedAs) > 0 {
 				v.Enabled = true
@@ -249,6 +255,24 @@ func enabledLinks(dir string) map[string][]string {
 		}
 	}
 	return out
+}
+
+// servedElsewhere is whether nginx reads the file link resolves to through
+// something besides link: another name in sites-enabled, or conf.d, which it
+// includes as *.conf.
+func servedElsewhere(links map[string][]string, confd, link string) bool {
+	real := resolvedFile(link)
+	if len(otherNames(links[real], filepath.Base(link))) > 0 {
+		return true
+	}
+	entries, _ := os.ReadDir(confd)
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, ".") && strings.HasSuffix(name, ".conf") && resolvedFile(filepath.Join(confd, name)) == real {
+			return true
+		}
+	}
+	return false
 }
 
 // otherNames is names without name.
@@ -479,11 +503,16 @@ func (s *Service) caddySites() ([]VHost, error) {
 // http:// block that only redirects, beside the site itself; that block
 // serves nothing in plain text, as an nginx port-80 block that only
 // redirects does not make its site plain either.
+//
+// An address list may go on over several lines, each but the last ending in
+// a comma. Read line by line, its first line looked like the one-site form,
+// and every site after it was taken for one of its directives.
 func parseCaddyfile(content string) (names, upstreams []string, tls bool) {
 	names, upstreams = []string{}, []string{}
 	depth := 0
 	global, autoOff, sawSite := false, false, false
 	var site *caddySite
+	addresses := ""
 	served, secure := 0, 0
 	finish := func() {
 		if site != nil && (site.directives == 0 || site.redirects < site.directives) {
@@ -510,6 +539,15 @@ func parseCaddyfile(content string) (names, upstreams []string, tls bool) {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
+		}
+		if depth == 0 && (site == nil || !site.bare) {
+			if addresses != "" {
+				trimmed, addresses = addresses+" "+trimmed, ""
+			}
+			if strings.HasSuffix(trimmed, ",") {
+				addresses = trimmed
+				continue
+			}
 		}
 		fields := strings.Fields(trimmed)
 		if after, ok := strings.CutPrefix(trimmed, "reverse_proxy "); ok {

@@ -379,7 +379,9 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   under `auto_https off` only a block with its own `tls` counts. Caddy's one-site form without braces
   is read (the first line is the address), an `http://` block whose only directives redirect to
   `https://` is not a plain site — as an nginx port-80 block that only redirects is not — and a block
-  opened and closed on one line counts. One plain site makes the Caddyfile's single entry plain.
+  opened and closed on one line counts. An address list carried onto the next lines by trailing
+  commas is joined first; read line by line, its first line began the one-site form and every later
+  site was taken for one of its directives. One plain site makes the Caddyfile's single entry plain.
   Names are listed once, without their scheme.
 - **Certificates say who uses them.** `listCertificates` joins the sites' `ssl_certificate` paths
   onto the certificate list (`UsedBy`), through symlinks, so a certbot lineage and the site naming
@@ -398,7 +400,9 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   (`readEnabledLink`, `os.SameFile`), not by its text: serving the file is `Enabled`, a link to nothing
   is `Broken: "dangling"` — nginx refuses every reload while it is there, and Lstat used to report it as
   serving — and a link to, or a copy of, another file is `Broken: "stale"`, with `LinkTarget` saying
-  where it points; the other names in sites-enabled that link to a sites-available file are its
+  where it points and `TargetServedElsewhere` whether nginx also reads that file through another name
+  in sites-enabled or through conf.d — when it does not, the site's Enable, which points the link at
+  the site's own file, takes it out of nginx, and the page asks before it; the other names in sites-enabled that link to a sites-available file are its
   `LinkedAs`, make it `Enabled`, and are not listed as sites of their own. `ResolvesTo` is the real
   path of a file outside the proxy's directories, which the editor refuses to open while its switch
   still works. A conf.d file is listed only when it declares a `server` block (read with

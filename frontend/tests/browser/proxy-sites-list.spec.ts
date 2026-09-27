@@ -130,6 +130,17 @@ const outside = {
   serverNames: ["outside.example.com"],
 }
 
+/** The same, kept in conf.d: nginx reads it, and the delete, which stays inside the directory, would not find it. */
+const outsideConfd = {
+  ...outside,
+  name: "outside.conf",
+  path: "/etc/nginx/conf.d/outside.conf",
+  layout: "conf.d",
+  enabledPath: undefined,
+  resolvesTo: "/srv/app/deploy/conf.d.conf",
+  serverNames: ["confd.outside.example.com"],
+}
+
 /** Served through a numbered link under another name, the way 00-default -> default is. */
 const numbered = {
   ...app,
@@ -441,7 +452,7 @@ test("a copy in sites-enabled opens as the served copy and is never deleted", as
 
 test("a site file kept outside the nginx directory keeps its switch", async ({ page }) => {
   await mockProxy(page, { included: true })
-  await serveSites(page, [app, outside])
+  await serveSites(page, [app, outside, outsideConfd])
   let posted: unknown
   await page.route("**/api/v1/proxy/vhosts/outside.example.com/enabled", (route) => {
     posted = route.request().postDataJSON()
@@ -469,6 +480,112 @@ test("a site file kept outside the nginx directory keeps its switch", async ({ p
     .click()
   await expect(page.getByText("outside.example.com disabled", { exact: true })).toBeVisible()
   expect(posted).toEqual({ enabled: false, reload: true })
+
+  // In conf.d there is no switch, and the delete could only answer "no such site".
+  await expect(card(page, "outside.conf")).toContainText(
+    "conf.d/outside.conf links to /srv/app/deploy/conf.d.conf, outside the nginx directory",
+  )
+  const confdMenu = await openMenu(page, "outside.conf")
+  await expect(confdMenu.getByRole("menuitem", { name: "Open site" })).toBeVisible()
+  await expect(
+    confdMenu.getByRole("menuitem", { name: /^(Delete|Duplicate|Enable|Disable)$/ }),
+  ).toHaveCount(0)
+})
+
+test("an enable that re-points a stale link asks first when it takes another file out of nginx", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  // sites-enabled/renamed.example.com -> old.example.com, its only way in.
+  const stale = layouts[2]
+  const old = {
+    ...legacy,
+    name: "old.example.com",
+    path: "/etc/nginx/sites-available/old.example.com",
+    enabledPath: "/etc/nginx/sites-enabled/old.example.com",
+    enabled: true,
+    linkedAs: ["renamed.example.com"],
+    serverNames: ["old.example.com"],
+  }
+  const pointsOutside = {
+    ...stale,
+    name: "moved.example.com",
+    path: "/etc/nginx/sites-available/moved.example.com",
+    enabledPath: "/etc/nginx/sites-enabled/moved.example.com",
+    linkTarget: "/srv/app/deploy/nginx.conf",
+    serverNames: ["moved.example.com"],
+  }
+  const stillServed = {
+    ...stale,
+    name: "kept.example.com",
+    path: "/etc/nginx/sites-available/kept.example.com",
+    enabledPath: "/etc/nginx/sites-enabled/kept.example.com",
+    linkTarget: "/etc/nginx/conf.d/kept.conf",
+    targetServedElsewhere: true,
+    serverNames: ["kept.example.com"],
+  }
+  await serveSites(page, [app, stale, old, pointsOutside, stillServed])
+  const posted: string[] = []
+  await page.route("**/api/v1/proxy/vhosts/*/enabled", (route) => {
+    const name = decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-2) ?? "")
+    posted.push(name)
+    return json(route, {
+      name,
+      enabled: true,
+      reloaded: true,
+      reload: { validation: { ...brokenTest, valid: true }, reloaded: true, output: "" },
+    })
+  })
+  await page.goto("/proxy/sites")
+
+  await (
+    await openMenu(page, "renamed.example.com")
+  )
+    .getByRole("menuitem", { name: "Enable" })
+    .click()
+  const ask = page.getByRole("dialog", { name: "Enable renamed.example.com" })
+  await expect(ask).toContainText(
+    "sites-enabled/renamed.example.com is how nginx serves old.example.com now.",
+  )
+  await expect(ask).toContainText(
+    "old.example.com stops serving once nginx reloads, until it is enabled under its own name.",
+  )
+  // Nothing is sent until the operator says so.
+  await ask.getByRole("button", { name: "Cancel" }).click()
+  await expect(ask).toHaveCount(0)
+  expect(posted).toEqual([])
+
+  await (
+    await openMenu(page, "renamed.example.com")
+  )
+    .getByRole("menuitem", { name: "Enable" })
+    .click()
+  await page
+    .getByRole("dialog", { name: "Enable renamed.example.com" })
+    .getByRole("button", { name: "Enable and reload" })
+    .click()
+  await expect(page.getByText("renamed.example.com enabled", { exact: true })).toBeVisible()
+  expect(posted).toEqual(["renamed.example.com"])
+
+  // A file no listed site owns is named by its path.
+  await (
+    await openMenu(page, "moved.example.com")
+  )
+    .getByRole("menuitem", { name: "Enable" })
+    .click()
+  const moved = page.getByRole("dialog", { name: "Enable moved.example.com" })
+  await expect(moved).toContainText(
+    "sites-enabled/moved.example.com is how nginx serves /srv/app/deploy/nginx.conf now.",
+  )
+  await expect(moved).toContainText("nginx stops reading that file once it reloads")
+  await page.keyboard.press("Escape")
+  await expect(moved).toHaveCount(0)
+
+  // Read through conf.d as well, the target loses nothing: no question.
+  await (await openMenu(page, "kept.example.com")).getByRole("menuitem", { name: "Enable" }).click()
+  await expect(page.getByText("kept.example.com enabled", { exact: true })).toBeVisible()
+  await expect(page.getByRole("dialog", { name: "Enable kept.example.com" })).toHaveCount(0)
+  expect(posted).toEqual(["renamed.example.com", "kept.example.com"])
 })
 
 test("a site served through a link under another name reads serving and names that link", async ({

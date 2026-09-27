@@ -249,6 +249,38 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
       })
       return
     }
+    // The name in sites-enabled is how nginx reads some other file; the
+    // enable points it at this one, and that file loses its only way in.
+    if (vhost.broken === "stale" && vhost.linkTarget && !vhost.targetServedElsewhere) {
+      const displaced = hosts.find((h) => h.linkedAs?.includes(vhost.name))
+      confirm({
+        title: `Enable ${vhost.name}`,
+        confirmLabel: "Enable and reload",
+        description: (
+          <p>
+            <code className="font-mono break-all">sites-enabled/{vhost.name}</code> is how nginx
+            serves{" "}
+            {displaced ? (
+              <b>{displaced.name}</b>
+            ) : (
+              <code className="font-mono break-all">{vhost.linkTarget}</code>
+            )}{" "}
+            now. Enabling points it at this site&apos;s file, and{" "}
+            {displaced ? (
+              <>
+                <b>{displaced.name}</b> stops serving once nginx reloads, until it is enabled under
+                its own name.
+              </>
+            ) : (
+              "nginx stops reading that file once it reloads; nothing on this page links it back."
+            )}{" "}
+            If nginx refuses {vhost.name}, the link goes back and nothing changes.
+          </p>
+        ),
+        action: apply,
+      })
+      return
+    }
     void apply()
   }
 

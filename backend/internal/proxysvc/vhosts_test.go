@@ -341,6 +341,12 @@ func TestParseCaddyfileSaysWhetherEverySiteIsOnTLS(t *testing.T) {
 		{"an http block that also serves", "http://example.com {\n\tredir /old https://example.com/new\n\treverse_proxy app:80\n}\nexample.com {\n\treverse_proxy app:80\n}\n", false},
 		{"a redirect to plain http", "http://a.example.com {\n\tredir http://b.example.com{uri}\n}\n", false},
 		{"a one-line plain site", "http://example.com { reverse_proxy app:80 }\n", false},
+		// An address list carried onto the next lines by trailing commas.
+		{"an address list over two lines", "a.example.com,\nb.example.com {\n\treverse_proxy app:80\n}\n", true},
+		{"a plain site after an address list over two lines", "a.example.com,\nb.example.com {\n\treverse_proxy app:80\n}\nhttp://c.example.com {\n\treverse_proxy other:80\n}\n", false},
+		{"a plain address on the list's next line", "a.example.com,\n# the old name\n\nhttp://b.example.com {\n\treverse_proxy app:80\n}\n", false},
+		{"without braces, an address list over two lines", "a.example.com,\nb.example.com\n\nreverse_proxy app:80\n", true},
+		{"without braces, a plain address on the list's next line", "a.example.com,\nhttp://b.example.com\nreverse_proxy app:80\n", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -348,6 +354,22 @@ func TestParseCaddyfileSaysWhetherEverySiteIsOnTLS(t *testing.T) {
 				t.Errorf("tls = %v, want %v", tls, tc.tls)
 			}
 		})
+	}
+}
+
+// Caddy serves a and b on :443 and c on :80 from this file (caddy:2-alpine,
+// caddy adapt). Read line by line, `a.example.com,` began the one-site form
+// and the two blocks under it were counted as its directives.
+func TestParseCaddyfileReadsAnAddressListOverSeveralLines(t *testing.T) {
+	names, upstreams, tls := parseCaddyfile("a.example.com,\nb.example.com {\n\treverse_proxy app:80\n}\nhttp://c.example.com {\n\treverse_proxy other:80\n}\n")
+	if want := []string{"a.example.com", "b.example.com", "c.example.com"}; !slices.Equal(names, want) {
+		t.Errorf("names = %q, want %q", names, want)
+	}
+	if want := []string{"app:80", "other:80"}; !slices.Equal(upstreams, want) {
+		t.Errorf("upstreams = %q, want %q", upstreams, want)
+	}
+	if tls {
+		t.Error("a Caddyfile serving c.example.com over plain HTTP reads as TLS")
 	}
 }
 
@@ -769,6 +791,57 @@ func TestTheSwitchActsOnEveryLinkServingTheSite(t *testing.T) {
 	}
 	if got := listed(t, svc.nginxVHosts(), "sites-available", "default"); got.Enabled || len(got.LinkedAs) != 0 {
 		t.Errorf("after the disable, listed as %+v", got)
+	}
+}
+
+// Enabling a site whose name in sites-enabled links to another file points
+// that link at the site's own. The page warns when that takes the other file
+// out of nginx, so the listing says whether anything else still reads it.
+func TestAStaleLinkSaysWhetherItsTargetHasAnotherWayIn(t *testing.T) {
+	svc, root := debianTree(t)
+	nginxShim(t, "exit 0")
+	available := func(name string) string { return filepath.Join(root, "sites-available", name) }
+	enabled := func(name string) string { return filepath.Join(root, "sites-enabled", name) }
+	repo, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"alone", "other", "kept", "both", "confd", "repo", "via"} {
+		writeFile(t, available(name), "server {}\n")
+	}
+	// Only the stale link serves other: enabling alone takes it out.
+	symlink(t, "../sites-available/other", enabled("alone"))
+	// both has its own link as well.
+	symlink(t, "../sites-available/both", enabled("kept"))
+	symlink(t, "../sites-available/both", enabled("both"))
+	// nginx reads conf.d/*.conf whatever sites-enabled holds.
+	writeFile(t, filepath.Join(root, "conf.d", "shared.conf"), "server {}\n")
+	symlink(t, "../conf.d/shared.conf", enabled("confd"))
+	// A file outside the nginx directory, reached only through the link, and
+	// one conf.d links in too.
+	writeFile(t, filepath.Join(repo, "app.conf"), "server {}\n")
+	symlink(t, filepath.Join(repo, "app.conf"), enabled("repo"))
+	writeFile(t, filepath.Join(repo, "shared.conf"), "server {}\n")
+	symlink(t, filepath.Join(repo, "shared.conf"), filepath.Join(root, "conf.d", "repo.conf"))
+	symlink(t, filepath.Join(repo, "shared.conf"), enabled("via"))
+
+	hosts := svc.nginxVHosts()
+	for name, want := range map[string]bool{"alone": false, "kept": true, "confd": true, "repo": false, "via": true} {
+		got := listed(t, hosts, "sites-available", name)
+		if got.Broken != "stale" || got.TargetServedElsewhere != want {
+			t.Errorf("%s: broken %q, targetServedElsewhere %v, want stale and %v", name, got.Broken, got.TargetServedElsewhere, want)
+		}
+	}
+	if got := listed(t, hosts, "sites-available", "other"); !got.Enabled {
+		t.Fatalf("other is served through sites-enabled/alone but listed as %+v", got)
+	}
+
+	// What the warning is about: the enable leaves other with no way in.
+	if err := svc.SetVHostEnabled(context.Background(), "alone", true); err != nil {
+		t.Fatal(err)
+	}
+	if got := listed(t, svc.nginxVHosts(), "sites-available", "other"); got.Enabled || len(got.LinkedAs) != 0 {
+		t.Errorf("after enabling alone, other is listed as %+v", got)
 	}
 }
 
