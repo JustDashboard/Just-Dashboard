@@ -1,18 +1,20 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { ChevronDown, Stopwatch, Warning } from "@/components/icons"
+import { ChevronDown, RefreshClockwise, Stopwatch, Warning } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { get } from "@/lib/api"
-import { bytes, duration, plural, relativeTime, timestamp } from "@/lib/format"
+import { bytes, clock, duration, plural, relativeTime, timestamp } from "@/lib/format"
 import { journalSource } from "@/lib/log-sources"
 import { latency } from "@/lib/requests"
 import type { LogSearchResult } from "@/lib/types"
 import {
+  MANAGER_PROGRAMS,
   RUN_EVENTS,
   RUNS_DAYS,
   crashLoop,
   foldRuns,
+  managerLines,
   runLength,
   runWindow,
   unitRuns,
@@ -21,6 +23,8 @@ import {
   type UnitRun,
 } from "@/lib/unit-runs"
 import { usePoll } from "@/hooks/use-poll"
+import { useNow } from "@/components/deploy/vocabulary"
+import { IconAction } from "@/components/icon-action"
 import type { ServiceLogsContext } from "@/components/logs/service-logs"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status, type DotTone } from "@/components/status-dot"
@@ -34,6 +38,20 @@ const RUNS_LIMIT = 2000
 
 /** How many of a folded row's runs it lists when opened. */
 const FOLD_SHOWN = 50
+
+/**
+ * How often the runs are read again on their own. A week of a crash-looping
+ * unit's journal takes journalctl tens of seconds to read, so a view left
+ * open would keep one running on the host it is watching; a run that ends
+ * meanwhile is one press of the refresh away.
+ */
+const RUNS_POLL = 5 * 60_000
+
+/** The query: the lifecycle events, from the manager's own programs only. */
+const RUN_PREDICATES = [
+  ...RUN_EVENTS.map((event) => `event:${event}`),
+  ...MANAGER_PROGRAMS.map((program) => `program:${program}`),
+]
 
 const OUTCOME: Record<RunOutcome, { label: string; tone: DotTone }> = {
   running: { label: "running", tone: "running" },
@@ -62,38 +80,64 @@ const RESULT: Record<string, string> = {
  * it lasted and how it ended, newest first.
  *
  * Read in one search of the unit's journal through the systemd lens, asking
- * only for the manager's lifecycle lines, and grouped here by invocation
- * (`lib/unit-runs.ts`). The tail of the window rather than its head, because
- * a unit in a crash loop writes a week of lines in an afternoon and the runs
- * worth reading are the latest. A row opens the run's own lines in History —
- * the program's and the manager's, narrowed to its invocation — which is
- * where the reason it exited is.
+ * only for the manager's lifecycle lines — and only from the manager, since
+ * the forced lens would name the program's own "Started worker pool" a start
+ * as well — and grouped here by invocation (`lib/unit-runs.ts`). The tail of the window rather than its
+ * head, because a unit in a crash loop writes a week of lines in an
+ * afternoon and the runs worth reading are the latest. A row opens the run's
+ * own lines in History — the program's and the manager's, narrowed to its
+ * invocation — which is where the reason it exited is.
  */
 export function UnitRuns({ unit, ctx }: { unit: string; ctx: ServiceLogsContext }) {
   const read = usePoll(
-    (signal) =>
-      get<LogSearchResult>(
+    async (signal) => {
+      const since = new Date(Date.now() - RUNS_DAYS * 86_400_000).toISOString()
+      const result = await get<LogSearchResult>(
         "/logs/search",
         {
           source: journalSource(unit),
           lens: "systemd",
-          f: RUN_EVENTS.map((event) => `event:${event}`),
-          since: new Date(Date.now() - RUNS_DAYS * 86_400_000).toISOString(),
+          f: RUN_PREDICATES,
+          since,
           limit: RUNS_LIMIT,
         },
         signal,
-      ),
-    60_000,
+      )
+      return { since, result, at: Date.now() }
+    },
+    RUNS_POLL,
     [unit],
   )
-  const lines = read.data?.lines
-  const runs = useMemo(() => unitRuns(lines ?? []), [lines])
+  const result = read.data?.result
+  const lines = useMemo(() => managerLines(result?.lines ?? [], unit), [result, unit])
+  const runs = useMemo(() => unitRuns(lines), [lines])
   const groups = useMemo(() => foldRuns(runs), [runs])
-  const loop = useMemo(() => crashLoop(lines ?? []), [lines])
+  const loop = useMemo(() => crashLoop(lines), [lines])
   const failed = runs.filter((run) => run.outcome === "failed").length
+  // A running run's length is read against a clock that moves, and that
+  // is never behind the read that found it running.
+  const tick = useNow(60_000, runs.at(-1)?.outcome === "running")
+  const now = Math.max(tick, read.data?.at ?? 0)
+  // The refresh is pending until the read it asked for has answered, which
+  // replaces the result or the error it was pressed over.
+  const [asked, setAsked] = useState<{ data: unknown; error: unknown }>()
+  const pending = asked !== undefined && asked.data === read.data && asked.error === read.error
+  const again = () => {
+    setAsked({ data: read.data, error: read.error })
+    read.refresh()
+  }
+  // Short of the whole week, the count says what it is of: the runs since
+  // the oldest line a capped read kept, or at least this many when the read
+  // ran out of time before the newest.
+  const oldest = runs[0]?.start ?? runs[0]?.first
+  const count = !result?.complete
+    ? `at least ${plural(runs.length, "run")} in ${RUNS_DAYS} days`
+    : result.truncated && oldest
+      ? `${plural(runs.length, "run")} since ${when(oldest)}`
+      : `${plural(runs.length, "run")} in ${RUNS_DAYS} days`
 
   const open = (run: UnitRun) => {
-    const window = runWindow(run)
+    const window = runWindow(run, Date.now(), read.data?.since)
     if (window) ctx.openHistory({ ...window, levels: [], q: "" })
   }
 
@@ -107,15 +151,24 @@ export function UnitRuns({ unit, ctx }: { unit: string; ctx: ServiceLogsContext 
 
   return (
     <div className="@container flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-hairline px-3 py-1 text-hint">
-        {read.data ? (
+      <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-hairline py-1 pr-1.5 pl-3 text-hint">
+        {result ? (
           <span className="numeric min-w-0 truncate text-muted-foreground">
-            {plural(runs.length, "run")} in {RUNS_DAYS} days
+            {count}
             {failed > 0 && <span className="font-medium text-destructive"> · {failed} failed</span>}
           </span>
         ) : (
           <span className="text-muted-foreground">Reading the journal…</span>
         )}
+        <IconAction
+          label="Read the runs again"
+          className="ml-auto size-7"
+          pending={pending}
+          disabled={!read.data && !read.error}
+          onClick={again}
+        >
+          <RefreshClockwise />
+        </IconAction>
       </div>
 
       {loop && (
@@ -124,7 +177,7 @@ export function UnitRuns({ unit, ctx }: { unit: string; ctx: ServiceLogsContext 
         </div>
       )}
 
-      {!read.data ? (
+      {!result ? (
         <LoadingRows rows={5} className="p-3" />
       ) : groups.length === 0 ? (
         <div className="flex flex-1 items-center justify-center p-6">
@@ -140,13 +193,20 @@ export function UnitRuns({ unit, ctx }: { unit: string; ctx: ServiceLogsContext 
         </div>
       ) : (
         <ul aria-label="Runs" className="divide-y divide-hairline">
+          {/* Keyed on a group's oldest run: a loop that goes on adds newer
+              ones at its head, and the fold the reader opened stays open. */}
           {groups.map((group) => (
-            <RunGroup key={`${group[0].invocation}|${group[0].start}`} runs={group} onOpen={open} />
+            <RunGroup
+              key={`${group.at(-1)!.invocation}|${group.at(-1)!.first}`}
+              runs={group}
+              now={now}
+              onOpen={open}
+            />
           ))}
         </ul>
       )}
 
-      {read.data && !read.data.complete ? (
+      {result && !result.complete ? (
         // The journal is read oldest first, so a read cut short by its time
         // limit is missing the newest runs, not the oldest.
         <p className="border-t border-hairline px-3 py-2 text-hint text-warning">
@@ -154,11 +214,10 @@ export function UnitRuns({ unit, ctx }: { unit: string; ctx: ServiceLogsContext 
           missing. History over the last hour reads it faster.
         </p>
       ) : (
-        read.data?.truncated && (
+        result?.truncated && (
           <p className="border-t border-hairline px-3 py-2 text-hint text-muted-foreground">
-            The latest {read.data.lines.length.toLocaleString()} of{" "}
-            {read.data.matched.toLocaleString()} lifecycle lines; the runs before them are in
-            History.
+            The latest {result.lines.length.toLocaleString()} of {result.matched.toLocaleString()}{" "}
+            lifecycle lines; the runs before them are in History.
           </p>
         )
       )}
@@ -217,7 +276,15 @@ function minutesBetween(from: string, to: string) {
  * list each. A folded row keeps its length in the same column as every other
  * row's, with the count under it, so the lengths still read down the list.
  */
-function RunGroup({ runs, onOpen }: { runs: UnitRun[]; onOpen: (run: UnitRun) => void }) {
+function RunGroup({
+  runs,
+  now,
+  onOpen,
+}: {
+  runs: UnitRun[]
+  now: number
+  onOpen: (run: UnitRun) => void
+}) {
   const [open, setOpen] = useState(false)
   const [head] = runs
   const oldest = runs[runs.length - 1]
@@ -227,13 +294,14 @@ function RunGroup({ runs, onOpen }: { runs: UnitRun[]; onOpen: (run: UnitRun) =>
       <div className="flex min-w-0 items-stretch transition-colors hover:bg-row-hover">
         <RunLine
           run={head}
+          now={now}
           onOpen={onOpen}
-          since={folded ? oldest.start : undefined}
+          since={folded ? (oldest.start ?? oldest.first) : undefined}
           length={!folded}
         />
         {folded && (
           <div className="flex shrink-0 flex-col items-end gap-0.5 py-2 pr-3">
-            <RunLength run={head} />
+            <RunLength run={head} now={now} />
             <button
               type="button"
               aria-expanded={open}
@@ -256,10 +324,10 @@ function RunGroup({ runs, onOpen }: { runs: UnitRun[]; onOpen: (run: UnitRun) =>
         <ul className="divide-y divide-hairline border-t border-hairline bg-surface-sunken">
           {runs.slice(0, FOLD_SHOWN).map((run) => (
             <li
-              key={`${run.invocation}|${run.start}`}
+              key={`${run.invocation}|${run.first}`}
               className="flex min-w-0 pl-4 transition-colors hover:bg-row-hover"
             >
-              <RunLine run={run} onOpen={onOpen} length />
+              <RunLine run={run} now={now} onOpen={onOpen} length />
             </li>
           ))}
           {runs.length > FOLD_SHOWN && (
@@ -276,15 +344,18 @@ function RunGroup({ runs, onOpen }: { runs: UnitRun[]; onOpen: (run: UnitRun) =>
 /**
  * One run: how it ended, when it started and for how long on the first
  * line; what systemd said of its exit and what it cost on the second. The
- * whole of it is the press that opens its lines.
+ * whole of it is the press that opens its lines. A run whose start is older
+ * than the lines read says when it stopped instead, and has no length.
  */
 function RunLine({
   run,
+  now,
   onOpen,
   since,
   length,
 }: {
   run: UnitRun
+  now: number
   onOpen: (run: UnitRun) => void
   /** The oldest start of the identical runs this one heads. */
   since?: string
@@ -297,7 +368,7 @@ function RunLine({
     resultWords(run),
     run.restarted &&
       (run.restarts !== undefined ? `restart #${run.restarts.toLocaleString()}` : "restarted"),
-    run.cpu !== undefined && `${latency(run.cpu)} CPU`,
+    run.cpu !== undefined && `${span(run.cpu)} CPU`,
     run.memory !== undefined && `${bytes(run.memory)} peak`,
     since && `since ${when(since)}`,
   ].filter(Boolean)
@@ -305,21 +376,27 @@ function RunLine({
     <button
       type="button"
       onClick={() => onOpen(run)}
-      disabled={!run.start}
-      title={run.start ? "Open this run's lines in History" : undefined}
+      disabled={!run.first}
+      title={run.first ? "Open this run's lines in History" : undefined}
       className={cn(
         "grid min-w-0 flex-1 items-center gap-x-3 gap-y-0.5 py-2 pl-3 text-left focus-ring-inset",
         length ? "grid-cols-[5rem_minmax(0,1fr)_auto] pr-3" : "grid-cols-[5rem_minmax(0,1fr)]",
       )}
     >
       <Status tone={outcome.tone} label={outcome.label} />
-      <span
-        className="numeric min-w-0 truncate text-body"
-        title={run.start ? timestamp(run.start) : undefined}
-      >
-        {run.start ? when(run.start) : "before the window"}
-      </span>
-      {length && <RunLength run={run} />}
+      {run.start ? (
+        <span className="numeric min-w-0 truncate text-body" title={timestamp(run.start)}>
+          {when(run.start)}
+        </span>
+      ) : (
+        <span
+          className="numeric min-w-0 truncate text-body text-muted-foreground"
+          title="It started before the lines read here"
+        >
+          {run.first ? `until ${when(run.end ?? run.last ?? run.first)}` : "—"}
+        </span>
+      )}
+      {length && <RunLength run={run} now={now} />}
       {facts.length > 0 && (
         <span
           className={cn(
@@ -334,21 +411,24 @@ function RunLine({
   )
 }
 
-function RunLength({ run }: { run: UnitRun }) {
-  const ms = runLength(run)
+function RunLength({ run, now }: { run: UnitRun; now: number }) {
+  const ms = runLength(run, now)
   return (
     <span className="numeric text-right text-body text-muted-foreground">
-      {ms === undefined ? "—" : ms < 60_000 ? latency(ms) : duration(ms / 1000)}
+      {ms === undefined ? "—" : span(ms)}
     </span>
   )
+}
+
+/** A length in milliseconds: to the hundredth under a minute, in units past it. */
+function span(ms: number) {
+  return ms < 60_000 ? latency(ms) : duration(ms / 1000)
 }
 
 /** Today's runs by the clock; older ones with their day, since a week is the window. */
 function when(iso: string) {
   const d = new Date(iso)
-  if (d.toDateString() === new Date().toDateString()) {
-    return d.toLocaleTimeString(undefined, { hour12: false })
-  }
+  if (d.toDateString() === new Date().toDateString()) return clock(iso)
   return d.toLocaleString(undefined, {
     month: "short",
     day: "numeric",

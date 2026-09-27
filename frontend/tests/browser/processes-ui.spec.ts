@@ -692,7 +692,10 @@ const RUN_PREDICATES = [
   "start_limit",
   "resources",
   "core_dumped",
-].map((event) => `event:${event}`)
+]
+  .map((event) => `event:${event}`)
+  // The manager's own lines: the forced lens would name the program's too.
+  .concat("program:systemd", "program:systemd-coredump")
 
 test("a unit's journal reads its runs, folds a loop and opens one run's own lines", async ({
   page,
@@ -724,16 +727,26 @@ test("a unit's journal reads its runs, folds a loop and opens one run's own line
 
   // The loop is said once, with systemd having given up on it.
   await expect(sheet.getByText("systemd stopped restarting postgresql.service")).toBeVisible()
-  // Newest first: the start limit, the four identical crashes as one row,
-  // and yesterday's run that was stopped, with what it cost.
+  // Newest first: the crash the start limit refused to follow, the three
+  // identical crashes before it as one row, and yesterday's run that was
+  // stopped, with what it cost.
   await expect(rows.nth(0)).toContainText("failed")
+  await expect(rows.nth(0)).toContainText("exit 1")
   await expect(rows.nth(0)).toContainText("start limit hit")
+  await expect(rows.nth(0)).toContainText("restart #4")
   await expect(rows.nth(1)).toContainText("exit 1")
-  await expect(rows.nth(1)).toContainText("restart #4")
+  await expect(rows.nth(1)).toContainText("restart #3")
   await expect(rows.nth(2)).toContainText("stopped")
   await expect(rows.nth(2)).toContainText("1.2 GB peak")
-  await rows.nth(1).getByRole("button", { name: "List the 4 identical runs" }).click()
-  await expect(rows.nth(1).locator("ul > li")).toHaveCount(4)
+  await expect(rows.nth(2)).toContainText("1m 4s CPU")
+  await rows.nth(1).getByRole("button", { name: "List the 3 identical runs" }).click()
+  await expect(rows.nth(1).locator("ul > li")).toHaveCount(3)
+
+  // The week is read again on a press, not every minute.
+  await sheet.getByRole("button", { name: "Read the runs again" }).click()
+  await expect.poll(() => logs.searches.filter((s) => s.get("lens") === "systemd").length).toBe(2)
+  // The fold the reader opened stays open over the new read.
+  await expect(rows.nth(1).locator("ul > li")).toHaveCount(3)
 
   // A run opens History on its own lines: its span, narrowed to its invocation.
   const before = logs.searches.length
@@ -743,9 +756,9 @@ test("a unit's journal reads its runs, folds a loop and opens one run's own line
     "true",
   )
   await expect
-    .poll(() => logs.searches.slice(before).find((s) => s.getAll("f").includes("invocation:c5")))
+    .poll(() => logs.searches.slice(before).find((s) => s.getAll("f").includes("invocation:c4")))
     .toBeTruthy()
-  const history = logs.searches.slice(before).find((s) => s.getAll("f").includes("invocation:c5"))!
+  const history = logs.searches.slice(before).find((s) => s.getAll("f").includes("invocation:c4"))!
   expect(history.get("source")).toBe("journal:postgresql.service")
   expect(Date.parse(history.get("until")!) - Date.parse(history.get("since")!)).toBeLessThan(10_000)
   await expect(sheet.getByLabel("Log lines").getByText(/pg_filenode\.map/)).toBeVisible()

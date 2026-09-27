@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { crashLoop, foldRuns, runLength, runWindow, unitRuns } from "./unit-runs"
+import { crashLoop, foldRuns, managerLines, runLength, runWindow, unitRuns } from "./unit-runs"
 
 // Lines as the systemd lens hands them over for `journal:<unit>`: the
 // manager's sentences (the research's real ones, `research-system-logs.md`),
@@ -39,6 +39,65 @@ function crash(invocation, clock, counter) {
     line(t(6), "stopped", "Stopped nordvpnd.service - NordVPN Daemon.", { invocation }),
   ]
 }
+
+describe("managerLines", () => {
+  // The forced systemd lens reads the program's own lines too, and these
+  // are sentences it names: a start, a stop, a failure. Only the manager's
+  // are runs.
+  test("keeps the manager's lines and drops the program's, whatever they say", () => {
+    const app = (clock, event, text) => ({
+      ...line(clock, event, text, { invocation: "r1" }),
+      attrs: { unit: "nordvpnd.service", program: "node", invocation: "r1" },
+    })
+    const lines = [
+      line("10:00:00.000", "starting", "Starting nordvpnd.service...", { invocation: "r1" }),
+      app("10:00:00.500", "starting", "Starting server on :3000..."),
+      line("10:00:00.600", "started", "Started nordvpnd.service.", { invocation: "r1" }),
+      app("10:00:01.000", "started", "Listening on port 8080"),
+      app("10:30:00.000", "stopped", "Closed redis connection"),
+      app("10:31:00.000", "failed", "Failed to start HTTP server"),
+    ]
+    const own = managerLines(lines, "nordvpnd.service")
+    expect(own.map((l) => l.text)).toEqual([
+      "Starting nordvpnd.service...",
+      "Started nordvpnd.service.",
+    ])
+    // Still going: the program's "Closed …" is not the run ending.
+    const [run] = unitRuns(own)
+    expect(run.outcome).toBe("running")
+    expect(run.end).toBeUndefined()
+  })
+
+  test("keeps a core dump's report, which is systemd-coredump's", () => {
+    const dump = {
+      ...line("10:00:00.000", "core_dumped", "Process 4410 (api) of user 0 dumped core."),
+      attrs: { program: "systemd-coredump" },
+    }
+    expect(managerLines([dump], "api.service")).toHaveLength(1)
+  })
+
+  // user@1000.service's journal is the user manager speaking about every
+  // unit of the user's, all under the user manager's own invocation.
+  test("drops the lines about other units, and takes a unit named without .service", () => {
+    const lines = [
+      line("10:00:00.000", "started", "Started pipewire.service.", {
+        invocation: "mgr",
+        unit: "pipewire.service",
+      }),
+      line("10:00:01.000", "failed", "tracker-miner.service: Failed with result 'exit-code'.", {
+        invocation: "mgr",
+        unit: "tracker-miner.service",
+        result: "exit-code",
+      }),
+      line("09:59:59.000", "started", "Started user@1000.service.", {
+        invocation: "u",
+        unit: "user@1000.service",
+      }),
+    ]
+    expect(managerLines(lines, "user@1000.service").map((l) => l.attrs.invocation)).toEqual(["u"])
+    expect(managerLines([lines[2]], "user@1000")).toHaveLength(1)
+  })
+})
 
 describe("unitRuns", () => {
   test("a timer's oneshot is one run from its start to its deactivation, with its cost", () => {
@@ -126,6 +185,60 @@ describe("unitRuns", () => {
     expect(runs[1].signal).toBe("KILL")
   })
 
+  // nginx up for a month, restarted once this week: the old run's stop is
+  // in the week, its start is not.
+  test("a run that started before the lines read has no start and no length", () => {
+    const runs = unitRuns([
+      line("10:00:00.000", "deactivated", "nginx.service: Deactivated successfully.", {
+        invocation: "old",
+      }),
+      line("10:00:00.010", "stopped", "Stopped nginx.service.", { invocation: "old" }),
+      line("10:00:00.020", "resources", "nginx.service: Consumed 38min 20s CPU time.", {
+        invocation: "old",
+        cpu: "2300000",
+      }),
+      line("10:00:00.100", "starting", "Starting nginx.service...", { invocation: "new" }),
+      line("10:00:00.200", "started", "Started nginx.service.", { invocation: "new" }),
+    ])
+    expect(runs[0]).toMatchObject({
+      outcome: "stopped",
+      first: at("10:00:00.000"),
+      end: at("10:00:00.000"),
+    })
+    expect(runs[0].start).toBeUndefined()
+    expect(runLength(runs[0])).toBeUndefined()
+    // Its lines reach back to where the read did, to its end.
+    expect(runWindow(runs[0], Date.now(), at("16:43:00.000", "13"))).toEqual({
+      since: at("16:42:59.000", "13"),
+      until: at("10:00:02.000"),
+      fields: { invocation: ["old"] },
+    })
+    expect(runs[1]).toMatchObject({ outcome: "running", start: at("10:00:00.100") })
+  })
+
+  // Refused by the start limit, systemd starts nothing: no new invocation,
+  // no "Starting" — the refusal is written under the run that crashed last.
+  test("a start limit is the last crashed run's, as systemd writes it", () => {
+    const runs = unitRuns([
+      ...crash("c1", "00:54:30", 4),
+      line("00:54:36.500", "start_limit", "nordvpnd.service: Start request repeated too quickly.", {
+        invocation: "c1",
+      }),
+      line("00:54:36.501", "failed", "nordvpnd.service: Failed with result 'start-limit-hit'.", {
+        invocation: "c1",
+        result: "start-limit-hit",
+      }),
+    ])
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).toMatchObject({
+      outcome: "failed",
+      exitStatus: "1",
+      result: "start-limit-hit",
+      start: at("00:54:30.000"),
+      end: at("00:54:31.000"),
+    })
+  })
+
   test("a journal without invocations is sequenced from one start to the next", () => {
     const plain = (clock, event, text) => ({ ...line(clock, event, text), attrs: {} })
     const runs = unitRuns([
@@ -184,6 +297,19 @@ describe("crashLoop", () => {
 
   test("the same burst a day ago is a loop that stopped", () => {
     expect(crashLoop(loop, Date.parse(at("00:58:00.000", "21")))?.ongoing).toBe(false)
+  })
+
+  // Fixed at 00:54:40 and up since: seven minutes later it is not
+  // "restarting", though the loop is inside the ten minutes.
+  test("a unit that has stayed up for two turns of the loop is out of it", () => {
+    const fixed = [
+      ...loop,
+      line("00:54:40.000", "starting", "Starting nordvpnd.service...", { invocation: "ok" }),
+      line("00:54:40.100", "started", "Started nordvpnd.service.", { invocation: "ok" }),
+    ]
+    expect(crashLoop(fixed, Date.parse(at("01:01:00.000")))?.ongoing).toBe(false)
+    // Ten seconds a turn: fifteen seconds up is not yet out of it.
+    expect(crashLoop(fixed, Date.parse(at("00:54:55.000")))?.ongoing).toBe(true)
   })
 
   test("restarts spread over hours are not a loop", () => {

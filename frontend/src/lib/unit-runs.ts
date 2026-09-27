@@ -30,6 +30,15 @@ export const RUN_EVENTS = [
   "core_dumped",
 ] as const
 
+/**
+ * The programs whose lines are the manager's: systemd itself, and the core
+ * dump handler that reports a crash for it. A forced lens reads every line
+ * of the unit's journal, the program's own included, and "Started worker
+ * pool" or "Closed redis connection" from the program is a sentence the
+ * systemd lens would read as a start or a stop.
+ */
+export const MANAGER_PROGRAMS = ["systemd", "systemd-coredump"] as const
+
 /** How far back the runs are read: far enough for a weekly timer to have fired. */
 export const RUNS_DAYS = 7
 
@@ -47,8 +56,10 @@ export type RunOutcome =
 export type UnitRun = {
   /** The invocation id; "" for a run on a journal too old to tag one. */
   invocation: string
-  /** When it was started, or the first line of it the window holds. */
+  /** When systemd started it; unset for a run that started before the lines read. */
   start?: string
+  /** The first line of it the read holds, which is its start when it has one. */
+  first?: string
   /** When it ended — its exit, its failure, its deactivation — if it has. */
   end?: string
   /** The last line of it, which a restart's "Scheduled restart job" can come well after. */
@@ -84,6 +95,27 @@ const ENDINGS = new Set([
 
 const FAILURES = ["failed", "oom", "start_limit", "core_dumped"]
 
+/** "nginx" is how journalctl -u takes "nginx.service", and the journal names it the long way. */
+function sameUnit(named: string, unit: string) {
+  return named === unit || (!unit.includes(".") && named === `${unit}.service`)
+}
+
+/**
+ * The lines of a unit's journal that are the manager speaking about that
+ * unit. The read asks for the manager's programs already; this holds for
+ * lines from anywhere else, and drops what `user@1000.service`'s journal is
+ * mostly made of: the user manager's lines about the user's own units, each
+ * with the user manager's invocation, which would all read as one run.
+ */
+export function managerLines(lines: readonly LogLine[], unit: string): LogLine[] {
+  return lines.filter((line) => {
+    const program = line.attrs?.program
+    if (program && !(MANAGER_PROGRAMS as readonly string[]).includes(program)) return false
+    const named = line.attrs?.unit
+    return !named || sameUnit(named, unit)
+  })
+}
+
 function numberOf(value: string | undefined): number | undefined {
   if (value === undefined || value === "") return undefined
   const n = Number(value)
@@ -91,13 +123,15 @@ function numberOf(value: string | undefined): number | undefined {
 }
 
 /**
- * The runs in a unit's lifecycle lines, oldest first.
+ * The runs in a unit's lifecycle lines (`managerLines`), oldest first.
  *
  * A line tagged with an invocation belongs to that run wherever it falls. A
  * line without one — systemd before 232 wrote none — is sequenced: a start
  * opens a run and everything until the next start is part of it. A oneshot's
  * "Finished" is the lens's `started` and comes after its deactivation, so
- * only a second `started` opens another run.
+ * only a second `started` opens another run. Only a start says when a run
+ * started: a unit up for a month and stopped this week has its stop in the
+ * window and its start a month back.
  */
 export function unitRuns(lines: readonly LogLine[]): UnitRun[] {
   const drafts: Draft[] = []
@@ -132,7 +166,8 @@ export function unitRuns(lines: readonly LogLine[]): UnitRun[] {
     run.events.add(event)
     const at = line.timestamp
     if (at) {
-      run.start ??= at
+      run.first ??= at
+      if (event === "starting" || event === "started") run.start ??= at
       // The first ending is when the process went: the restart job's
       // "Stopped" lands RestartSec later and is not how long it ran.
       if (ENDINGS.has(event)) run.end ??= at
@@ -212,35 +247,52 @@ export type CrashLoop = {
   count: number
   from: string
   to: string
-  /** The latest restart is inside the last ten minutes: it is looping now. */
+  /**
+   * It is looping now: the latest restart is inside the last ten minutes,
+   * and the unit has not since stayed up longer than two turns of the loop.
+   */
   ongoing: boolean
   /** systemd's restart counter at the latest restart. */
   counter?: number
+}
+
+function stamped(lines: readonly LogLine[], event: string) {
+  return lines
+    .filter((line) => line.event === event && line.timestamp && !line.cont)
+    .map((line) => ({ at: Date.parse(line.timestamp!), line }))
+    .filter((r) => !Number.isNaN(r.at))
+    .sort((a, b) => a.at - b.at)
 }
 
 /**
  * The latest burst of restarts dense enough to be a loop, or nothing. Read
  * from the restart lines themselves rather than the folded runs, since a
  * loop whose runs end two different ways is still one loop.
+ *
+ * A loop is over once the unit has stayed up for twice the longest turn it
+ * took — a start after the last restart that has lasted that long — even
+ * inside the ten minutes: a unit fixed at 10:05 is not "restarting" at
+ * 10:12. Twice, because one turn of a loop can run a little longer than the
+ * others and the notice should not flicker on it.
  */
 export function crashLoop(lines: readonly LogLine[], now = Date.now()): CrashLoop | undefined {
-  const restarts = lines
-    .filter((line) => line.event === "restart_scheduled" && line.timestamp && !line.cont)
-    .map((line) => ({ at: Date.parse(line.timestamp!), line }))
-    .filter((r) => !Number.isNaN(r.at))
-    .sort((a, b) => a.at - b.at)
+  const restarts = stamped(lines, "restart_scheduled")
   const span = CRASH_LOOP.minutes * 60_000
   for (let last = restarts.length - 1; last >= CRASH_LOOP.restarts - 1; last--) {
     let first = last
     while (first > 0 && restarts[last].at - restarts[first - 1].at <= span) first--
     const count = last - first + 1
     if (count < CRASH_LOOP.restarts) continue
+    let turn = 0
+    for (let i = first; i < last; i++) turn = Math.max(turn, restarts[i + 1].at - restarts[i].at)
+    const since = stamped(lines, "started").find((s) => s.at > restarts[last].at)
+    const settled = since !== undefined && now - since.at > 2 * turn
     const newest = restarts[last].line
     return {
       count,
       from: restarts[first].line.timestamp!,
       to: newest.timestamp!,
-      ongoing: now - restarts[last].at <= span,
+      ongoing: now - restarts[last].at <= span && !settled,
       counter: numberOf(newest.attrs?.restarts),
     }
   }
@@ -260,15 +312,19 @@ export function runLength(run: UnitRun, now = Date.now()): number | undefined {
  * manager's, narrowed to its invocation where the journal tagged one. A
  * second either side, because the manager's stamp and the program's last
  * line can be the same second read two ways, and on whole seconds, which is
- * what the window's fields show.
+ * what the window's fields show. A run that started before the read reaches
+ * back to where the read did (`floor`), since what it printed before it
+ * stopped is the reason it is being opened.
  */
 export function runWindow(
   run: UnitRun,
   now = Date.now(),
+  floor?: string,
 ): { since: string; until: string; fields: Record<string, string[]> } | undefined {
-  if (!run.start) return undefined
-  const since = Math.floor((Date.parse(run.start) - 1000) / 1000) * 1000
-  const last = run.outcome === "running" ? now : Date.parse(run.last ?? run.end ?? run.start)
+  const from = run.start ?? floor ?? run.first
+  if (!from) return undefined
+  const since = Math.floor((Date.parse(from) - 1000) / 1000) * 1000
+  const last = run.outcome === "running" ? now : Date.parse(run.last ?? run.end ?? from)
   return {
     since: new Date(since).toISOString(),
     until: new Date(Math.ceil((Math.max(last, since) + 1000) / 1000) * 1000).toISOString(),

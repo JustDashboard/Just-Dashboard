@@ -80,7 +80,12 @@ function crash(invocation: string, at: number, counter: number): Line[] {
   ]
 }
 
-/** The unit's week: a clean stop yesterday, then a loop, then the start limit. */
+/**
+ * The unit's week: a clean stop yesterday, then a loop, then the start
+ * limit. systemd refuses the fifth start without starting anything — no new
+ * invocation, no "Starting" — so the refusal is written under the run that
+ * crashed last.
+ */
 export const POSTGRES_RUNS: Line[] = [
   manager("postgresql.service", 26 * HOUR, "starting", "Starting postgresql.service...", {
     invocation: "a0",
@@ -111,23 +116,20 @@ export const POSTGRES_RUNS: Line[] = [
   ...crash("c2", 2 * MIN - 10_000, 2),
   ...crash("c3", 2 * MIN - 20_000, 3),
   ...crash("c4", 2 * MIN - 30_000, 4),
-  manager("postgresql.service", 60_000, "starting", "Starting postgresql.service...", {
-    invocation: "c5",
-  }),
   manager(
     "postgresql.service",
-    59_000,
+    2 * MIN - 36_000,
     "start_limit",
     "postgresql.service: Start request repeated too quickly.",
-    { invocation: "c5" },
+    { invocation: "c4" },
     "error",
   ),
   manager(
     "postgresql.service",
-    58_990,
+    2 * MIN - 36_010,
     "failed",
     "postgresql.service: Failed with result 'start-limit-hit'.",
-    { invocation: "c5", result: "start-limit-hit" },
+    { invocation: "c4", result: "start-limit-hit" },
     "error",
   ),
 ]
@@ -136,11 +138,11 @@ export const POSTGRES_RUNS: Line[] = [
 export const POSTGRES_RUN_LINES: Line[] = [
   {
     text: '2026-09-27 10:00:00.140 UTC [4410] FATAL:  could not open file "global/pg_filenode.map": Permission denied',
-    timestamp: ago(59_500),
+    timestamp: ago(2 * MIN - 30_400),
     level: "critical",
     source: "postgres[4410]",
     event: "fatal",
-    attrs: { unit: "postgresql.service", program: "postgres", pid: "4410", invocation: "c5" },
+    attrs: { unit: "postgresql.service", program: "postgres", pid: "4410", invocation: "c4" },
   },
 ]
 
