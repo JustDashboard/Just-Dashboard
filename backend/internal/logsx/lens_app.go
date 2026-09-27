@@ -606,15 +606,19 @@ var appMissingTablePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`no such table: ([A-Za-z0-9_.]+)`),                            // SQLite
 }
 
-var appPendingMigrationRE = regexp.MustCompile(`You have \d+ unapplied migration|ActiveRecord::PendingMigrationError|Migrations are pending`)
-
+// appSchemaMissing is a missing table, or a framework refusing to run with
+// migrations it has not applied: Django's "You have 3 unapplied
+// migration(s)", Rails's PendingMigrationError.
 func appSchemaMissing(s string) bool {
-	for _, pattern := range appMissingTablePatterns {
-		if pattern.MatchString(s) {
-			return true
+	if strings.Contains(s, "exist") || strings.Contains(s, "no such table: ") {
+		for _, pattern := range appMissingTablePatterns {
+			if pattern.MatchString(s) {
+				return true
+			}
 		}
 	}
-	return appPendingMigrationRE.MatchString(s)
+	return strings.Contains(s, "unapplied migration") || strings.Contains(s, "PendingMigrationError") ||
+		strings.Contains(s, "Migrations are pending")
 }
 
 // appDatabasePorts are the ports a refused connection names a database by.
@@ -666,10 +670,32 @@ var (
 )
 
 func appEnvMissing(s string) bool {
-	if appEnvMissingRE.MatchString(s) {
+	if (strings.Contains(s, "nvironment variable") || strings.Contains(s, "SECRET_KEY setting") ||
+		strings.Contains(s, "secret_key_base") || strings.Contains(s, "MissingSecret") || strings.Contains(s, "LEPTOS_")) &&
+		appEnvMissingRE.MatchString(s) {
 		return true
 	}
+	if !(strings.Contains(s, " is not set") || strings.Contains(s, " must be set") || strings.Contains(s, " is required") ||
+		strings.Contains(s, " variable")) || !appCapitals(s) {
+		return false
+	}
 	return appGenericEnvRE.MatchString(s) && !appWarningWordRE.MatchString(s)
+}
+
+// appCapitals says s has three capitals in a row, which every variable name
+// the generic sentences are about does — and "Password is required" does not.
+func appCapitals(s string) bool {
+	run := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 'A' && s[i] <= 'Z' {
+			if run++; run == 3 {
+				return true
+			}
+		} else {
+			run = 0
+		}
+	}
+	return false
 }
 
 // appDeprecation is a runtime's own deprecation notice: Node's
@@ -762,6 +788,13 @@ func appStartup(s string, m appWords) (port string, ms float64, ready bool, carr
 	}
 	if strings.Contains(s, "Nest application successfully started") || strings.Contains(s, "ready to handle connections") {
 		return "", ms, true, ""
+	}
+	// Both need the verb followed by "on" or "at", which most lines that say
+	// "Running" or "started" do not have.
+	if !(strings.Contains(s, "ing on") || strings.Contains(s, "ing at") || strings.Contains(s, "ted on") ||
+		strings.Contains(s, "ted at") || strings.Contains(s, "ver on") || strings.Contains(s, "ver at") ||
+		strings.Contains(s, "HTTP on")) {
+		return "", ms, false, ""
 	}
 	if g := appListenRE.FindStringSubmatch(s); g != nil {
 		return g[1] + g[2], ms, true, ""
