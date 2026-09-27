@@ -4,7 +4,7 @@ import { useMemo } from "react"
 import { get } from "@/lib/api"
 import type { LogSearchResult } from "@/lib/types"
 import type { LogFilterState } from "@/components/logs/types"
-import { fieldsEqual, fieldsOf } from "@/lib/log-filter"
+import { fieldsOf } from "@/lib/log-filter"
 import {
   READINGS_MINUTES,
   readingFigure,
@@ -13,6 +13,7 @@ import {
   type ReadingFigure,
 } from "@/lib/log-insights"
 import type { LensReading, LogLens } from "@/lib/log-lenses"
+import { readingShown, sameQuestion } from "@/components/logs/logs-model"
 import { usePoll } from "@/hooks/use-poll"
 import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { TileTrend } from "@/components/metrics/sparkline"
@@ -28,7 +29,7 @@ const TILE_MIN = 200
 
 type Window = NonNullable<LogLens["readingsWindow"]>
 
-const WINDOW_WORDS: Record<Window, { short: string; long: string }> = {
+export const WINDOW_WORDS: Record<Window, { short: string; long: string }> = {
   "1h": { short: "in 1h", long: "the last hour" },
   "24h": { short: "in 24h", long: "the last 24 hours" },
   "7d": { short: "in 7d", long: "the last 7 days" },
@@ -57,13 +58,21 @@ export type LensReadingsState = {
  * five tiles cost two or three scans, read again each minute. A page with a
  * `StatGrid` of its own takes the tiles from here and draws them into it
  * with `ReadingTile`; `LensReadings` is the grid for a page without one.
+ * A page that draws only some of them names those (`only`), and the others
+ * are not searched for: each is a scan a minute for a figure nobody sees.
  */
 export function useLensReadings(
   sourceId: string,
   lens: LogLens | undefined,
-  options: { forcedLens?: string; enabled?: boolean } = {},
+  options: { forcedLens?: string; enabled?: boolean; only?: readonly string[] } = {},
 ): LensReadingsState {
-  const readings = lens?.readings ?? NO_READINGS
+  const onlyKey = options.only?.join(",")
+  const readings = useMemo(() => {
+    const all = lens?.readings ?? NO_READINGS
+    if (onlyKey === undefined) return all
+    const wanted = onlyKey.split(",")
+    return all.filter((reading) => wanted.includes(reading.id))
+  }, [lens, onlyKey])
   const window = lens?.readingsWindow ?? "1h"
   const searches = useMemo(() => readingSearches(readings), [readings])
   const forced = options.forcedLens || undefined
@@ -91,7 +100,7 @@ export function useLensReadings(
       return figures
     },
     REFRESH,
-    [sourceId, lens?.id, forced],
+    [sourceId, lens?.id, forced, onlyKey],
     { enabled: (options.enabled ?? true) && Boolean(sourceId) && searches.length > 0 },
   )
 
@@ -151,13 +160,8 @@ export function LensReadings({
   )
 }
 
-function readingPressed(reading: LensReading, filter: LogFilterState) {
-  const levels = reading.levels ?? []
-  return (
-    fieldsEqual(fieldsOf(filter), reading.fields ?? {}) &&
-    filter.levels.length === levels.length &&
-    levels.every((level) => filter.levels.includes(level))
-  )
+export function readingPressed(reading: LensReading, filter: LogFilterState) {
+  return sameQuestion({ fields: fieldsOf(filter), levels: filter.levels }, reading)
 }
 
 /**
@@ -182,14 +186,7 @@ export function ReadingTile({
   const { reading, figure } = tile
   const words = WINDOW_WORDS[window]
   const perMinute = reading.figure === "per_minute"
-  const value = figure ? (perMinute ? figure.value / READINGS_MINUTES[window] : figure.value) : 0
-  const shown = !figure
-    ? "—"
-    : perMinute
-      ? value.toLocaleString(undefined, {
-          maximumFractionDigits: value < 10 ? 2 : value < 100 ? 1 : 0,
-        })
-      : `${value.toLocaleString()}${figure.capped ? "+" : ""}`
+  const { value, text: shown } = readingShown(reading, figure, window)
   const hint =
     figure && value === 0 && reading.requires
       ? `Logged only with ${reading.requires} set`

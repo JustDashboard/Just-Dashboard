@@ -121,6 +121,8 @@ export function SiteLogs({
     )
       setView("live")
   }
+  // The minute either side, every level, narrowed as the lines under the
+  // request were: a log other sites share is this site's names in it.
   const openAround = (entry: RequestEntry) => {
     if (!errors) return
     const at = Date.parse(entry.time)
@@ -131,6 +133,9 @@ export function SiteLogs({
       since: iso(at - AROUND_OPEN),
       until: iso(at + AROUND_OPEN),
       label: "Around a failed request",
+      fields: requestFields(entry, errors),
+      levels: [],
+      q: "",
     })
   }
 
@@ -212,10 +217,7 @@ export function SiteLogs({
         storageKey={`proxy.site.${name}`}
         views={views}
         window={around}
-        onLeaveWindow={() => {
-          setAround(undefined)
-          setView("live")
-        }}
+        onLeaveWindow={() => setAround(undefined)}
         pickerLabel="Site log"
         paneClassName="h-[min(78vh,48rem)] min-h-[28rem]"
       />
@@ -260,23 +262,18 @@ function SiteReadings({
   )
   // Only the figure this grid draws: each of the lens's other readings is a
   // search of the error log a minute, for a tile nobody sees.
-  const lens = useMemo(() => {
-    const full = lensFor(errors?.lens)
-    // The lens's own hint, in a quarter of the row, was cut off before it
-    // said what failed.
-    const upstream = full?.readings?.find((r) => r.id === "upstream")
-    return (
-      full && {
-        ...full,
-        readings: upstream ? [{ ...upstream, hint: "Refused, timed out, closed" }] : [],
-      }
-    )
-  }, [errors?.lens])
-  const readings = useLensReadings(errors?.source ?? "", lens, {
+  const readings = useLensReadings(errors?.source ?? "", lensFor(errors?.lens), {
     forcedLens: errors?.lens,
     enabled: Boolean(errors),
+    only: UPSTREAM,
   })
-  const upstream = readings.tiles.find((tile) => tile.reading.id === "upstream")
+  const failed = readings.tiles.find((t) => t.reading.id === "upstream")
+  // The lens's own hint, in a quarter of the row, was cut off before it
+  // said what failed.
+  const upstream = failed && {
+    ...failed,
+    reading: { ...failed.reading, hint: "Refused, timed out, closed" },
+  }
 
   const summary = hour.data?.status === "available" ? hour.data.summary : undefined
   const buckets = summary?.buckets ?? []
@@ -373,6 +370,18 @@ function SiteReadings({
   )
 }
 
+/** The one reading the site's grid draws of its error log. */
+const UPSTREAM = ["upstream"]
+
+/**
+ * What in the error log is about one request's site: Caddy records the host
+ * it answered for; nginx's combined line does not, and a shared log is
+ * narrowed by the site's names instead.
+ */
+function requestFields(entry: RequestEntry, errors: SiteErrorLog): LogFields {
+  return entry.host && errors.fields.host ? { ...errors.fields, host: [entry.host] } : errors.fields
+}
+
 /**
  * What the proxy wrote in its error log in the second a failed request was
  * answered in — "connect() failed (111: Connection refused) while connecting
@@ -399,10 +408,7 @@ function FailedRequestLines({
   // row above already says when; nginx's own stamp stays in its line.
   const wide = useMediaQuery("(min-width: 640px)")
   const at = Date.parse(entry.time)
-  // Caddy records the host it answered for; nginx's combined line does not,
-  // and a shared log is narrowed by the site's names instead.
-  const fields: LogFields =
-    entry.host && errors.fields.host ? { ...errors.fields, host: [entry.host] } : errors.fields
+  const fields = requestFields(entry, errors)
   const said = usePoll(
     (signal) =>
       get<LogSearchResult>(

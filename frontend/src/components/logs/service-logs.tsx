@@ -1,21 +1,23 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Logs } from "@/components/icons"
+import { LockClosed, Logs } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { get } from "@/lib/api"
+import { ApiError, get } from "@/lib/api"
 import { minuteSpan } from "@/lib/format"
 import type { LogLine, LogSource } from "@/lib/types"
-import { EMPTY_FILTER, fieldsOf, resolveRange, type LogLevel } from "@/lib/log-filter"
+import { EMPTY_FILTER, filterEquals, resolveRange } from "@/lib/log-filter"
 import { STACK_LENS, lensFor, withLensDefaults, type LogLens } from "@/lib/log-lenses"
 import { useSessionState } from "@/lib/view-state"
-import type { LogFields, LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
+import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
 import type { Tone } from "@/components/tone"
 import type { Verb } from "@/components/verbs"
 import { usePoll } from "@/hooks/use-poll"
+import { useMediaQuery } from "@/hooks/use-mobile"
 import { ExportDialog } from "@/components/logs/export-dialog"
 import { LensReadings, useLensReadings } from "@/components/logs/lens-readings"
 import { LogWorkspace } from "@/components/logs/log-workspace"
+import { askOf, emptiedFile, withAsk, type LogAsk } from "@/components/logs/logs-model"
 import { SourceFacts } from "@/components/logs/source-facts"
 import { Pane } from "@/components/panel"
 import { ProductGlyph } from "@/components/product-logo"
@@ -28,11 +30,29 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 
-/** A source a page offers: what `/logs/sources` would list, and the product it is. */
-export type ServiceLogSource = Omit<LogSource, "rotated"> & { rotated?: boolean; product?: string }
+export type { LogAsk }
 
-/** A stretch of time a page opens History on: a run's activation, a request's moment. */
-export type LogWindow = { since: string; until: string; label?: string }
+/**
+ * A source a page offers: what `/logs/sources` would list, and the product it is.
+ *
+ * `described` says the page asked `GET /logs/source` itself and this is the
+ * answer — the pane does not ask a second time, and its `lens` is the one
+ * the server detects rather than one the page reads it through. A page that
+ * reads a source through a lens of its own leaves it off, so Auto under
+ * "Read as" still knows what the server would have detected.
+ */
+export type ServiceLogSource = Omit<LogSource, "rotated"> & {
+  rotated?: boolean
+  product?: string
+  described?: boolean
+}
+
+/**
+ * A stretch of time a page opens History on — a run's activation, a
+ * request's moment — narrowed there when the page knows to: the minute
+ * around a failed request, in a log other sites share, to this site's names.
+ */
+export type LogWindow = LogAsk & { since: string; until: string; label?: string }
 
 /** A page's own reading of the source — a database's queries, a unit's runs — beside the three. */
 export type ServiceLogsView = {
@@ -54,8 +74,11 @@ export type ServiceLogsContext = {
   filter: LogFilterState
   window: { since?: string; until?: string }
   setFilter(filter: LogFilterState): void
-  /** History on a stretch of time — "the server log around this query" — narrowed if asked. */
-  openHistory(at: LogWindow & { fields?: LogFields; levels?: LogLevel[]; q?: string }): void
+  /**
+   * History on a stretch of time — "the server log around this query" — on
+   * another of the page's sources when it names one, narrowed if asked.
+   */
+  openHistory(at: LogWindow & { source?: string }): void
   openLive(): void
 }
 
@@ -80,10 +103,27 @@ export type ServiceLogsProps = {
   views?: ServiceLogsView[]
   /** History on this window, each time it changes; gone again, back to Live. */
   window?: LogWindow
-  /** Live pressed while a window is set: the page lets go of it. */
+  /**
+   * The reader moved off the window — Live, another range, a zoom, History
+   * on another moment: the page lets go of it. The move stands, so letting
+   * go must withdraw `window`.
+   */
   onLeaveWindow?(): void
-  /** The lens's readings above the pane, for a page with no figures of its own. */
-  readings?: boolean
+  /**
+   * The lens's readings: as tiles above the pane (`true`) for a page with no
+   * figures of its own, from `sm` up — on a phone they were the whole first
+   * screen; or as the figures on the lens row's chips (`"chips"`) where the
+   * section draws no tiles.
+   */
+  readings?: boolean | "chips"
+  /** The window History opens on until the reader picks another: a log written weekly reads empty over a day. */
+  initialRange?: LogTimeRange
+  /**
+   * A narrowing from outside the pane — a reading pressed on the page's own
+   * grid — applied each time its key changes, in the first reading that
+   * shows the filter.
+   */
+  ask?: LogAsk & { key: string }
   /** A sheet: no readings, no value columns, no facts beside the name. */
   layout?: "page" | "sheet"
   facts?: React.ReactNode
@@ -95,7 +135,7 @@ export type ServiceLogsProps = {
   flush?: boolean
   /** The column the readings and the pane stand in. */
   className?: string
-  /** The pane's own size — a page sets its floor here. */
+  /** The pane's own size — its height, or the floor it fills the column from. */
   paneClassName?: string
 }
 
@@ -108,6 +148,9 @@ type Handed = {
   range?: LogTimeRange
   since?: string
   until?: string
+  /** The window the kept range was handed for, or "" once it is the reader's own. */
+  windowed?: string
+  archives?: boolean
 }
 const ALL_MODES: ("live" | "search" | "insights")[] = ["live", "search", "insights"]
 
@@ -133,6 +176,13 @@ function describedOver(given: ServiceLogSource, described: unknown): ServiceLogS
   return out as ServiceLogSource
 }
 
+/** The lens the server says it reads a source through, from its description. */
+function detectedOf(described: unknown): string | undefined {
+  if (!described || typeof described !== "object") return undefined
+  const lens = (described as { lens?: unknown }).lens
+  return typeof lens === "string" && lens ? lens : undefined
+}
+
 function productOf(source: ServiceLogSource) {
   return source.product ?? lensFor(source.lens)?.product
 }
@@ -152,7 +202,8 @@ function productOf(source: ServiceLogSource) {
  * described by the server (`GET /logs/source`: the file's size, its rotated
  * set, the lens it detects) and merged under what the page said — a page
  * that answers `{}`, or a server without the route, loses the facts and
- * nothing else. Nothing is searched on arrival but History's own run.
+ * nothing else; one the server refuses is said to be refused, and nothing
+ * is read. Nothing is searched on arrival but History's own run.
  *
  * A lens's defaults (the auth log's scans hidden) are applied the first time
  * a source is read through it, as chips the reader can press away; a source
@@ -163,37 +214,48 @@ export function ServiceLogs(props: ServiceLogsProps) {
   const { sources, storageKey } = props
   const sheet = props.layout === "sheet"
   const modes = props.modes ?? ALL_MODES
+  const opening = props.initialRange ?? DEFAULT_RANGE
+  const wide = useMediaQuery("(min-width: 640px)")
 
   const [storedPicked, setPicked] = useKept(storageKey, "source", "")
   const [storedMode, setMode] = useKept<LogMode>(storageKey, "mode", modes[0])
   const [filter, setFilter] = useKept<LogFilterState>(storageKey, "filter", EMPTY_FILTER)
   // The lens the filter's fields were written in, or null before the first.
   const [filterLens, setFilterLens] = useKept<string | null>(storageKey, "filterLens", null)
+  // "" reads the source as the page named it; "auto" as the server detects
+  // it, over a lens the page named; "none" as plain text; else that lens.
   const [readAs, setReadAs] = useKept(storageKey, "lens", "")
-  const [storedRange, setRange] = useKept<LogTimeRange>(storageKey, "range", DEFAULT_RANGE)
+  const [storedRange, setRange] = useKept<LogTimeRange>(storageKey, "range", opening)
   const [storedSince, setSince] = useKept(storageKey, "since", "")
   const [storedUntil, setUntil] = useKept(storageKey, "until", "")
+  const [storedWindowed, setWindowed] = useKept(storageKey, "windowed", "")
   const [context, setContext] = useKept(storageKey, "context", 0)
-  const [archives, setArchives] = useKept(storageKey, "archives", false)
+  const [storedArchives, setArchives] = useKept(storageKey, "archives", false)
   const [boot, setBoot] = useKept(storageKey, "boot", false)
   // A jump to a moment is a History run of its own, which a pane already on
   // History would not make: the pane starts again on it.
   const [jump, setJump] = useState(0)
+  // A narrowing handed in — with a window, from `ask`, from `openHistory` —
+  // waiting for the lens it is read in to be known, so a source switched to
+  // with it does not drop it as the last vocabulary's fields.
+  const [asking, setAsking] = useState<LogAsk | null>(null)
 
-  // What the page hands over — its source, its view, a window — is applied
-  // each time it changes, the way `useSessionState`'s arrival is: noticed
-  // during render, so the first frame is already the right one, and written
-  // to the kept state after it, since that may be the session store and a
-  // store written mid-render updates its other readers mid-render. Until the
-  // store holds a handed value, the handed value is what is read.
+  // What the page hands over — its source, its view, a window, an ask — is
+  // applied each time it changes, the way `useSessionState`'s arrival is:
+  // noticed during render, so the first frame is already the right one, and
+  // written to the kept state after it, since that may be the session store
+  // and a store written mid-render updates its other readers mid-render.
+  // Until the store holds a handed value, the handed value is what is read.
   const sourceArrival = props.source ?? null
   const viewArrival = props.view ?? null
   const windowKey = props.window ? `${props.window.since}|${props.window.until}` : ""
-  const [prev, setPrev] = useState<{ source: string | null; view: string | null; window: string }>({
-    source: null,
-    view: null,
-    window: "",
-  })
+  const askKey = props.ask?.key ?? ""
+  const [prev, setPrev] = useState<{
+    source: string | null
+    view: string | null
+    window: string
+    ask: string
+  }>({ source: null, view: null, window: "", ask: "" })
   const [handed, setHanded] = useState<Handed>({})
   const stored: Required<Handed> = {
     picked: storedPicked,
@@ -201,8 +263,31 @@ export function ServiceLogs(props: ServiceLogsProps) {
     range: storedRange,
     since: storedSince,
     until: storedUntil,
+    windowed: storedWindowed,
+    archives: storedArchives,
   }
-  if (prev.source !== sourceArrival || prev.view !== viewArrival || prev.window !== windowKey) {
+  const windowed = handed.windowed ?? storedWindowed
+  const offered = [...modes, ...(props.views ?? []).map((v) => v.id)]
+  // Whether a reading shows the filter: a page view that reads none would
+  // take a narrowing out of sight.
+  const shows = (mode: LogMode) =>
+    (modes as LogMode[]).includes(mode) ||
+    Boolean(props.views?.find((view) => view.id === mode)?.filtered)
+  // Out of the window: History on it goes back to Live, and the window's
+  // bounds go, so the next History is not the old moment.
+  const outOfWindow = (next: Handed) => {
+    if ((next.mode ?? storedMode) === "search") next.mode = "live"
+    next.range = opening
+    next.since = ""
+    next.until = ""
+    next.windowed = ""
+  }
+  if (
+    prev.source !== sourceArrival ||
+    prev.view !== viewArrival ||
+    prev.window !== windowKey ||
+    prev.ask !== askKey
+  ) {
     const next: Handed = { ...handed }
     if (sourceArrival !== null && sourceArrival !== prev.source) next.picked = sourceArrival
     if (viewArrival !== null && viewArrival !== prev.view) next.mode = viewArrival
@@ -212,16 +297,33 @@ export function ServiceLogs(props: ServiceLogsProps) {
         next.range = "custom"
         next.since = props.window.since
         next.until = props.window.until
+        next.windowed = windowKey
+        // A new window is a History run of its own, whatever the pane was on.
+        setJump((n) => n + 1)
+        const ask = askOf(props.window)
+        if (ask) setAsking(ask)
       } else {
-        // Out of the window: History on it goes back to Live, and the
-        // window's bounds go, so the next History is not the old moment.
-        if ((next.mode ?? storedMode) === "search") next.mode = "live"
-        next.range = DEFAULT_RANGE
-        next.since = ""
-        next.until = ""
+        outOfWindow(next)
       }
     }
-    setPrev({ source: sourceArrival, view: viewArrival, window: windowKey })
+    if (askKey !== prev.ask && props.ask) {
+      const ask = askOf(props.ask)
+      if (ask) {
+        setAsking(ask)
+        setJump((n) => n + 1)
+        const mode = next.mode ?? storedMode
+        if (!shows(offered.includes(mode) ? mode : offered[0])) next.mode = modes[0]
+      }
+    }
+    setPrev({ source: sourceArrival, view: viewArrival, window: windowKey, ask: askKey })
+    setHanded(next)
+  } else if (!props.window && windowed !== "") {
+    // Mounted without the window the kept range was handed for — the page
+    // let go of it while this pane was not on screen — so the pane does not
+    // come back on an old moment with nothing to say what it was. A reading
+    // the address asks for by name is still the one opened.
+    const next: Handed = { ...handed, range: opening, since: "", until: "", windowed: "" }
+    if (next.mode === undefined && storedMode === "search") next.mode = "live"
     setHanded(next)
   } else {
     // What the kept state has caught up with is read from it again.
@@ -240,15 +342,17 @@ export function ServiceLogs(props: ServiceLogsProps) {
     if (handed.range !== undefined) setRange(handed.range)
     if (handed.since !== undefined) setSince(handed.since)
     if (handed.until !== undefined) setUntil(handed.until)
-  }, [handed, setPicked, setMode, setRange, setSince, setUntil])
+    if (handed.windowed !== undefined) setWindowed(handed.windowed)
+    if (handed.archives !== undefined) setArchives(handed.archives)
+  }, [handed, setPicked, setMode, setRange, setSince, setUntil, setWindowed, setArchives])
 
   const picked = handed.picked ?? storedPicked
-  const offered = [...modes, ...(props.views ?? []).map((v) => v.id)]
   const wantedMode = handed.mode ?? storedMode
   const mode = offered.includes(wantedMode) ? wantedMode : offered[0]
   const range = handed.range ?? storedRange
   const since = handed.since ?? storedSince
   const until = handed.until ?? storedUntil
+  const archives = handed.archives ?? storedArchives
 
   // A remembered id that went is quietly the first source again; one the
   // page asked for by name is said to be gone, because opening another in
@@ -262,68 +366,103 @@ export function ServiceLogs(props: ServiceLogsProps) {
     (signal) => get<unknown>("/logs/source", { source: sourceId }, signal),
     60_000,
     [sourceId],
-    { enabled: Boolean(sourceId) },
+    { enabled: Boolean(sourceId) && !given?.described },
   )
   const source = useMemo(
     () => (given ? describedOver(given, described.data) : undefined),
     [given, described.data],
   )
+  // A read the server refuses — login records, for anyone but an
+  // administrator — is said to be refused, in the server's words, and
+  // nothing is opened: a socket retrying a refusal says the tunnel dropped.
+  const refused =
+    described.error instanceof ApiError && described.error.status === 403
+      ? described.error
+      : undefined
 
-  // The lens the page named is the one asked for; the reader's "Read as"
-  // overrides it. Until the server has said what it detects — when the page
-  // named none — the pane waits, so the first socket is already the right
-  // question, defaults and all.
-  const forced = readAs || given?.lens || ""
-  const settled = described.data !== undefined || described.error !== undefined
-  const lensKnown = Boolean(readAs || given?.lens) || settled
+  // Nothing is read before the server has described the source: whether
+  // this reader may read it at all, and the lens it detects where nothing
+  // named one, so the first socket is already the right question, defaults
+  // and all. The lens the page named is the one asked for; the reader's
+  // "Read as" overrides it, Auto included.
+  const ready =
+    Boolean(given?.described) || described.data !== undefined || described.error !== undefined
+  const pageLens = given?.described ? "" : (given?.lens ?? "")
+  const forced = readAs === "auto" ? "" : readAs || pageLens
+  const detected = given?.described ? given.lens : detectedOf(described.data)
   const lensId =
     readAs === "none"
       ? undefined
-      : readAs || source?.lens || (source?.kind === "stack" ? STACK_LENS : undefined)
+      : forced || detected || (source?.kind === "stack" ? STACK_LENS : undefined)
   const lens = lensFor(lensId)
 
-  const lensKey = lensKnown ? (lensId ?? "") : null
+  const lensKey = ready ? (lensId ?? "") : null
   const relens = lensKey !== null && filterLens !== lensKey
-  const shown = useMemo(
-    () =>
-      relens
-        ? withLensDefaults(filterLens === null ? filter : { ...filter, fields: {} }, lens)
-        : filter,
-    [relens, filterLens, filter, lens],
-  )
+  const applying = asking !== null && ready
+  const shown = useMemo(() => {
+    const base = relens
+      ? withLensDefaults(filterLens === null ? filter : { ...filter, fields: {} }, lens)
+      : filter
+    return applying ? withAsk(base, asking) : base
+  }, [relens, filterLens, filter, lens, applying, asking])
+  // The narrowing is let go once the kept filter holds it.
+  if (applying && !relens && filterEquals(filter, shown)) setAsking(null)
   useEffect(() => {
-    if (!relens) return
+    if (!relens && !applying) return
     setFilter(shown)
-    setFilterLens(lensKey)
-  }, [relens, shown, lensKey, setFilter, setFilterLens])
+    if (relens) setFilterLens(lensKey)
+  }, [relens, applying, shown, lensKey, setFilter, setFilterLens])
 
+  // A file logrotate has just emptied is read with its rotated set: the
+  // server's last lines are in yesterday's file, and a History of the empty
+  // one answered "no matches" about a busy night. Once per source a visit,
+  // so switching the archives off again sticks.
+  const [archivesFor, setArchivesFor] = useState<string | null>(null)
+  if (source && archivesFor !== sourceId && emptiedFile(source)) {
+    setArchivesFor(sourceId)
+    setHanded((h) => ({ ...h, archives: true }))
+  }
+
+  const asTiles = props.readings === true && wide && !sheet
+  const asChips = props.readings === "chips" && !sheet
   const readings = useLensReadings(sourceId, lens, {
     forcedLens: forced,
-    enabled: Boolean(props.readings) && !sheet && lensKnown,
+    enabled: (asTiles || asChips) && ready && !refused,
   })
 
+  // The reader moved off the window the page handed. The page lets go of
+  // it, and the move stands: the arrival its letting go would otherwise be
+  // — back to Live, the window's bounds cleared — has already been seen.
+  const leaveWindow = () => {
+    if (!props.window || !props.onLeaveWindow) return false
+    props.onLeaveWindow()
+    setPrev((p) => ({ ...p, window: "" }))
+    setHanded((h) => ({ ...h, windowed: "" }))
+    return true
+  }
+
   const changeMode = (next: LogMode) => {
-    if (next === "live" && props.window && props.onLeaveWindow) {
-      props.onLeaveWindow()
-      return
+    if (next === "live" && leaveWindow()) {
+      setRange(opening)
+      setSince("")
+      setUntil("")
     }
     setMode(next)
     props.onViewChange?.(next)
   }
 
   const openHistory: ServiceLogsContext["openHistory"] = (at) => {
+    leaveWindow()
+    if (at.source && at.source !== sourceId) {
+      setPicked(at.source)
+      props.onSourceChange?.(at.source)
+    }
     setMode("search")
     setRange("custom")
     setSince(at.since)
     setUntil(at.until)
-    if (at.fields || at.levels || at.q !== undefined) {
-      setFilter({
-        ...shown,
-        fields: at.fields ?? fieldsOf(shown),
-        levels: at.levels ?? shown.levels,
-        q: at.q ?? shown.q,
-      })
-    }
+    const ask = askOf(at)
+    if (ask) setAsking(ask)
     setJump((n) => n + 1)
     props.onViewChange?.("search")
   }
@@ -357,7 +496,9 @@ export function ServiceLogs(props: ServiceLogsProps) {
       </Select>
     ) : undefined
 
-  const paneClass = cn("min-h-0 flex-1", props.paneClassName)
+  // The pane's own height, where the page gives one, is its height: a flex
+  // basis of zero made it whatever the column was, or the whole log tall.
+  const paneClass = cn("min-h-0 flex-auto", props.paneClassName)
 
   if (!source) {
     if (!missing) return null
@@ -379,6 +520,29 @@ export function ServiceLogs(props: ServiceLogsProps) {
     )
   }
 
+  const product = productOf(source)
+  const name = picker ?? <span className="truncate text-body font-medium">{source.label}</span>
+
+  if (refused) {
+    return (
+      <div className={cn("flex min-h-0 min-w-0 flex-col", props.className)}>
+        <Pane flush={props.flush} className={paneClass}>
+          <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-hairline px-2">
+            {!picker && product && <ProductGlyph id={product} />}
+            {name}
+          </div>
+          <div className="flex flex-1 items-center justify-center p-6">
+            <EmptyState
+              icon={LockClosed}
+              title="You cannot read this log"
+              description={refused.message}
+            />
+          </div>
+        </Pane>
+      </div>
+    )
+  }
+
   const window = resolveRange(range, since, until)
   const ctx: ServiceLogsContext = {
     source,
@@ -390,33 +554,44 @@ export function ServiceLogs(props: ServiceLogsProps) {
     openHistory,
     openLive: () => changeMode("live"),
   }
-  const product = productOf(source)
+  // The window's name only while the pane is on it: a range picked since,
+  // or bounds typed over it, are not the moment the page named.
+  const onWindow =
+    props.window !== undefined &&
+    range === "custom" &&
+    since === props.window.since &&
+    until === props.window.until
   const facts = sheet
     ? undefined
     : (props.facts ??
-      (props.window?.label ? (
-        <span className="numeric shrink-0 text-hint text-muted-foreground">
+      (onWindow && props.window?.label ? (
+        <span className="numeric min-w-0 truncate text-hint text-muted-foreground max-sm:hidden">
           {props.window.label} · {minuteSpan(props.window.since, props.window.until)}
         </span>
       ) : (
         <SourceFacts source={source} />
       )))
+  // A page view that reads no filter has its own commands — a request log
+  // exports its own rows — and the log's export beside them was a second
+  // button saying the same word about other lines.
+  const view = props.views?.find((v) => v.id === mode)
+  const exportable = !sheet && (!view || view.filtered)
 
   return (
     <div className={cn("flex min-h-0 min-w-0 flex-col gap-4", props.className)}>
-      {props.readings && !sheet && readings.tiles.length > 0 && (
+      {asTiles && readings.tiles.length > 0 && (
         <LensReadings readings={readings} filter={shown} onFilterChange={setFilter} />
       )}
-      {!lensKnown ? (
+      {!ready ? (
         <Pane flush={props.flush} className={paneClass}>
           <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-hairline px-2">
-            {picker ?? <span className="truncate text-body font-medium">{source.label}</span>}
+            {name}
           </div>
           <LoadingRows rows={6} className="p-3" />
         </Pane>
       ) : (
         <LogWorkspace
-          key={`${sourceId}|${windowKey}|${jump}`}
+          key={`${sourceId}|${jump}`}
           className={paneClass}
           flush={props.flush}
           compact={sheet}
@@ -424,10 +599,10 @@ export function ServiceLogs(props: ServiceLogsProps) {
           name={picker}
           facts={facts}
           actions={
-            (props.actions || !sheet) && (
+            (props.actions || exportable) && (
               <>
                 {props.actions}
-                {!sheet && (
+                {exportable && (
                   <ExportDialog
                     sourceId={sourceId}
                     source={{ ...source, rotated: source.rotated ?? false }}
@@ -451,16 +626,32 @@ export function ServiceLogs(props: ServiceLogsProps) {
           filter={shown}
           onFilterChange={setFilter}
           lens={forced}
-          onLensChange={setReadAs}
-          detectedLens={source.lens}
+          pageLens={pageLens}
+          onLensChange={(next) =>
+            // Auto over a lens the page named is a choice of its own; the
+            // page's lens chosen again is the page's reading back.
+            setReadAs(next === "" && pageLens ? "auto" : next === pageLens ? "" : next)
+          }
+          detectedLens={detected}
+          readings={asChips ? readings : undefined}
           lineVerbs={props.lineVerbs}
           range={range}
-          onRangeChange={setRange}
+          onRangeChange={(next) => {
+            leaveWindow()
+            setRange(next)
+          }}
           since={since}
           until={until}
-          onSinceChange={setSince}
-          onUntilChange={setUntil}
+          onSinceChange={(value) => {
+            leaveWindow()
+            setSince(value)
+          }}
+          onUntilChange={(value) => {
+            leaveWindow()
+            setUntil(value)
+          }}
           onCustomRange={(from, to) => {
+            leaveWindow()
             setRange("custom")
             setSince(from.toISOString())
             setUntil(to.toISOString())

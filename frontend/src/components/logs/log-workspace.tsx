@@ -42,6 +42,7 @@ import { FilterBar, LevelChips, claimPane } from "@/components/logs/filter-bar"
 import { Histogram } from "@/components/logs/histogram"
 import { Insights } from "@/components/logs/insights"
 import { LensBar } from "@/components/logs/lens-bar"
+import type { LensReadingsState } from "@/components/logs/lens-readings"
 import { LineDetail } from "@/components/logs/line-detail"
 import { LogConsole } from "@/components/logs/log-console"
 import { RetentionNote } from "@/components/logs/retention-note"
@@ -111,6 +112,8 @@ type WorkspaceProps = {
   lens?: string
   /** Offers "Read as" in the filter's More row. */
   onLensChange?: (lens: string) => void
+  /** The lens the page named for its source: where the pane starts, not a setting the reader changed. */
+  pageLens?: string
   /** What the source was detected as, where the page knows better than `source.lens` (a unit). */
   detectedLens?: string
   /** Which of the three readings are offered; all of them unless a page says otherwise. */
@@ -122,6 +125,8 @@ type WorkspaceProps = {
    * room above its workbench. A service page draws them above its pane.
    */
   insightReadings?: boolean
+  /** The lens's readings as the figures on the lens row's chips, for a page that draws no tiles. */
+  readings?: LensReadingsState
   /** A page's verbs for one line — "Block this address" on an auth line. */
   lineVerbs?: (line: LogLine) => Verb[]
   /** One column of a workbench that draws the frame: no frame of its own. */
@@ -317,21 +322,30 @@ export function LogWorkspace(props: WorkspaceProps) {
   return (
     <Pane
       flush={props.flush}
-      className={cn("min-h-0 flex-1", props.className)}
+      // Its rows' scroll edges cover with the pane's own card, not the plain
+      // section around it: that ground showed as a dark block at the end of
+      // every chip row on a Security page.
+      className={cn("min-h-0 flex-1 [--panel-ground:var(--card)]", props.className)}
       onPointerDownCapture={() => claimPane(paneId)}
       onFocusCapture={() => claimPane(paneId)}
     >
       {/* The strip names what is being read and which question is being
           asked of it. The tabs are the section-tab underline because Live and
-          History are two places within the source, not two commands. */}
-      <div className="flex min-h-10 shrink-0 items-stretch border-b border-hairline pr-1 pl-2">
-        <div className="@container flex min-w-0 flex-1 items-center gap-2 py-1.5">
+          History are two places within the source, not two commands. Where
+          the pane is too narrow for the name beside every tab — a phone, a
+          sheet — the tabs take a line of their own under it rather than
+          squeezing the name to its chevron. */}
+      <div className="flex min-h-10 shrink-0 flex-wrap items-stretch border-b border-hairline pr-1 pl-2">
+        <div className="@container flex min-w-[min(10rem,100%)] flex-1 items-center gap-2 py-1.5">
           {props.leading}
           {props.name ?? <span className="truncate text-body font-medium">{source.label}</span>}
           {props.facts}
         </div>
         {props.actions && <div className="flex shrink-0 items-center gap-2">{props.actions}</div>}
-        <nav aria-label="Log mode" className="flex shrink-0 items-stretch overflow-x-auto">
+        <nav
+          aria-label="Log mode"
+          className="flex max-w-full shrink-0 items-stretch overflow-x-auto"
+        >
           {modes.map((id) => (
             <button
               key={id}
@@ -409,6 +423,7 @@ export function LogWorkspace(props: WorkspaceProps) {
           paneId={paneId}
           fieldKeys={fieldKeys}
           lens={forced}
+          pageLens={props.pageLens}
           detectedLens={detected}
           onLensChange={props.onLensChange}
         />
@@ -428,6 +443,7 @@ export function LogWorkspace(props: WorkspaceProps) {
                 ? insightFacets
                 : undefined
           }
+          readings={props.readings}
         />
       )}
 

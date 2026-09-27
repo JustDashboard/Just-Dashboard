@@ -1409,6 +1409,34 @@ test("the failure's notice opens the logs on its window", async ({ page }) => {
 })
 
 /**
+ * The pane keeps its reading for the tab, and a window it was handed is the
+ * page's: gone by the time the page is back, it is not restored as an old
+ * moment with nothing naming it.
+ */
+test("a crash window let go of while the page was away is not what it opens on", async ({
+  page,
+}) => {
+  await mockDocker(page)
+  await mockServiceLogs(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto(`/docker/containers/${DB}?tab=logs`)
+  const chip = page.getByRole("button", { name: "Crash window" })
+  await chip.click()
+  await expect(page.getByRole("button", { name: "History", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+
+  await page.reload()
+  await expect(page.getByRole("button", { name: "Live", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect(chip).toHaveAttribute("aria-pressed", "false")
+  await expect(page.getByText(/^Crash window · /)).toHaveCount(0)
+})
+
+/**
  * A stack's Logs tab is one log of every container, each line in its
  * service's lane rather than behind a `web | ` prefix, from the stack's own
  * source — not a socket of the stack page's own. The service is a field to

@@ -1,9 +1,7 @@
 "use client"
 
-import { useEffect, useMemo } from "react"
+import { useMemo } from "react"
 import { Logs } from "@/components/icons"
-import { useSessionState } from "@/lib/view-state"
-import type { LogTimeRange } from "@/components/logs/types"
 import { ServiceLogs } from "@/components/logs/service-logs"
 import {
   PACKAGE_LOGS,
@@ -33,12 +31,10 @@ export function PackageLogView({ product }: { product?: string }) {
     () => (files.data ? packageLogSources(files.data, product) : undefined),
     [files.data, product],
   )
-  const opened = useOpeningRange(STORAGE_KEY, "all")
-
   if (files.error && !files.data) {
     return <ErrorState error={files.error} onRetry={files.refresh} />
   }
-  if (!sources || !opened) return <LoadingPanel />
+  if (!sources) return <LoadingPanel />
   if (sources.length === 0) {
     return files.data && packageLogsOutsideRoots(files.data) ? (
       <EmptyState
@@ -59,23 +55,12 @@ export function PackageLogView({ product }: { product?: string }) {
       sources={sources}
       storageKey={STORAGE_KEY}
       modes={["search", "insights"]}
+      // A package log a day long is usually empty: History opens on all the
+      // live file holds, a month of apt's transactions, until the reader
+      // picks another window.
+      initialRange="all"
       pickerLabel="Package log"
       paneClassName="h-[min(75vh,40rem)] min-h-80"
     />
   )
-}
-
-/**
- * The window History first opens on. `ServiceLogs` opens every source on the
- * last day and takes no other, and a package log a day long is usually empty
- * — so, once per tab, the range it keeps under this key is written first as
- * everything the live file holds, a month of apt's transactions. The reader's
- * own choice is what is kept after that.
- */
-function useOpeningRange(storageKey: string, range: LogTimeRange) {
-  const [kept, setKept] = useSessionState<string>(`${storageKey}.range`, "")
-  useEffect(() => {
-    if (kept === "") setKept(range)
-  }, [kept, range, setKept])
-  return kept !== ""
 }

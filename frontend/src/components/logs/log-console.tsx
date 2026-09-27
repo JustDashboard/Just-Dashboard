@@ -15,7 +15,7 @@ import {
   Play,
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { timestamp } from "@/lib/format"
+import { plural, timestamp } from "@/lib/format"
 import type { LogLine } from "@/lib/types"
 import {
   LEVEL_EDGE,
@@ -37,6 +37,7 @@ import {
   structuredText,
 } from "@/components/logs/log-text"
 import { FieldValue } from "@/components/logs/field-value"
+import { eventColumnFor } from "@/components/logs/logs-model"
 import { LOG_TIMES, TIME_WIDTH, formatLogTime, setLogView, useLogView } from "@/lib/log-view"
 import type { LogTime } from "@/lib/log-view"
 import { useMetrics } from "@/hooks/use-metrics"
@@ -206,14 +207,10 @@ function markable(line: LogLine, lens: string | undefined) {
   return meta && meta.mark !== false ? meta : undefined
 }
 
-/**
- * Whether the level column widens for event words. Only while a line on
- * screen has one, as the file column appears only for a rotated set: a column
- * of blanks is width taken from the text.
- */
-export function eventColumnFor(lines: LogLine[], lens: string | undefined) {
-  return lines.some((line) => markable(line, lens))
-}
+// The level column widens for event words only while a line on screen has
+// one, as the file column appears only for a rotated set: a column of blanks
+// is width taken from the text.
+export { eventColumnFor }
 
 const COLUMN_WIDTH: Partial<Record<LogFieldKind, string>> = {
   address: "w-28",
@@ -327,8 +324,9 @@ export function LogConsole({
     if (el) el.scrollTop = el.scrollHeight
   }, [])
 
+  // With no lines the pane holds a sentence, read from its start.
   useLayoutEffect(() => {
-    if (following) toBottom()
+    if (following && lines.length > 0) toBottom()
   }, [lines, following, toBottom])
 
   // The opened line's detail is as wide as the pane, not as the longest line:
@@ -353,7 +351,7 @@ export function LogConsole({
   const copyAll = () =>
     copyText(
       lines.map((l) => lineToText(l, showTime)).join("\n"),
-      `Copied ${lines.length.toLocaleString()} lines`,
+      `Copied ${plural(lines.length, "line")}`,
     )
 
   // Ranges come from the server for a search — it can re-run its own regular
@@ -438,13 +436,16 @@ export function LogConsole({
   }
 
   return (
-    <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", className)}>
+    <div className={cn("@container flex min-h-0 min-w-0 flex-1 flex-col", className)}>
       {/* One row that scrolls sideways rather than wrapping: on a phone the
           chips are the thing to reach, and two more rows of chrome above the
-          lines were two more rows of lines lost. */}
-      <div className="flex min-h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-hairline px-2 py-1">
-        {leading}
-        <div className="min-w-2 flex-1" />
+          lines were two more rows of lines lost. The chips scroll and the
+          toggles stay: in a sheet's narrow column the chips pushed Wrap off
+          the end, and it is the toggle a narrow pane needs most. */}
+      <div className="flex min-h-9 shrink-0 items-center gap-1 border-b border-hairline px-2 py-1">
+        <div className="scroll-affordance flex min-w-0 flex-1 [scrollbar-width:none] items-center overflow-x-auto [&::-webkit-scrollbar]:hidden">
+          {leading}
+        </div>
         {onPausedChange && (
           <ToolbarToggle
             active={paused}
@@ -505,7 +506,10 @@ export function LogConsole({
         className="@container min-h-0 flex-1 overflow-auto bg-surface-sunken font-mono text-xs leading-relaxed focus-ring-inset"
       >
         {lines.length === 0 ? (
-          <div className="flex h-full items-center justify-center p-6">{empty}</div>
+          // At least the pane's height, so the sentence sits in the middle,
+          // and taller when a phone's chrome leaves the pane less than the
+          // sentence needs: it scrolls rather than losing its first lines.
+          <div className="flex min-h-full items-center justify-center p-6">{empty}</div>
         ) : (
           // Keyed on arrival so the block rises once when the first lines
           // land and then holds still while the tail appends to it.
@@ -576,7 +580,7 @@ export function LogConsole({
       <PaneFooter className="gap-x-4 gap-y-1 px-3 text-hint text-muted-foreground">
         <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           {status}
-          <span className="numeric whitespace-nowrap">{lines.length.toLocaleString()} lines</span>
+          <span className="numeric whitespace-nowrap">{plural(lines.length, "line")}</span>
         </span>
         {footer}
       </PaneFooter>
@@ -661,7 +665,8 @@ type LineProps = {
   /** Set when the hits have to be found here rather than sent by the server. */
   filter?: LogFilterState
   lens?: string
-  eventColumn?: boolean
+  /** The event column's width in characters (`eventColumnFor`); none, the level's own. */
+  eventColumn?: number | false
   columns?: string[]
   repeat?: number
   since?: string
@@ -721,6 +726,12 @@ export const LogRow = memo(function LogRow({
   const event = markable(line, lens)
   const showTime = time !== "off"
   const flow = wrap ? "wrap-anywhere whitespace-pre-wrap" : "whitespace-pre"
+  // In a narrow pane — a phone, a sheet — a row whose event word and lane
+  // come before the message puts the message on a line of its own under
+  // them, where it starts at the edge rather than past it; the lines of a
+  // record under its head keep only their text.
+  const stack = Boolean(eventColumn) || Boolean(showSource)
+  const beside = stack && cont ? "@max-md:hidden" : undefined
   return (
     <div
       data-row-key={rowKey}
@@ -728,7 +739,8 @@ export const LogRow = memo(function LogRow({
       aria-current={open ? "true" : undefined}
       onClick={rowKey === undefined || !onPress ? undefined : () => onPress(rowKey)}
       className={cn(
-        "flex items-start gap-3 py-px pr-4 transition-colors [contain-intrinsic-size:auto_20px] [content-visibility:auto]",
+        "relative flex items-start gap-x-3 py-px pr-4 pl-3.5 transition-colors [contain-intrinsic-size:auto_20px] [content-visibility:auto]",
+        stack && "@max-md:flex-wrap @max-md:gap-x-2 @max-md:pl-2.5",
         onPress ? "cursor-pointer focus-ring-inset" : "cursor-default",
         loud && "bg-wash-danger",
         warned && "bg-wash-warning",
@@ -741,19 +753,23 @@ export const LogRow = memo(function LogRow({
       <span
         aria-hidden
         className={cn(
-          "w-0.5 shrink-0 self-stretch",
+          "absolute inset-y-0 left-0 w-0.5",
           line.level ? LEVEL_EDGE[line.level] : "bg-transparent",
         )}
       />
       {showLineNumbers && (
-        <span className="numeric w-12 shrink-0 text-right text-muted-foreground/40 select-none">
+        <span className="numeric w-12 shrink-0 text-right text-muted-foreground/40 select-none @max-lg:hidden">
           {line.no ?? ""}
         </span>
       )}
       {showTime && (
         <span
           title={line.timestamp ? timestamp(line.timestamp) : undefined}
-          className={cn("numeric shrink-0 text-muted-foreground/70 select-none", TIME_WIDTH[time])}
+          className={cn(
+            "numeric shrink-0 text-muted-foreground/70 select-none",
+            TIME_WIDTH[time],
+            beside,
+          )}
         >
           {formatLogTime(line.timestamp, time, prev)}
         </span>
@@ -764,7 +780,10 @@ export const LogRow = memo(function LogRow({
           the column — "deadlock" says more than "err" — and the level stays
           as the edge and the wash. Coloured, it is a word at the line's own
           size; a 10px tag beside 12px text was the quietest thing on the row. */}
-      <span className={cn("flex shrink-0 select-none", eventColumn ? "w-24" : "w-10")}>
+      <span
+        className={cn("flex shrink-0 select-none", !eventColumn && "w-10", beside)}
+        style={eventColumn ? { width: `${eventColumn}ch` } : undefined}
+      >
         {cont ? null : event ? (
           highlight ? (
             <span
@@ -805,13 +824,16 @@ export const LogRow = memo(function LogRow({
           )
         })}
       {showFile && line.file && (
-        <span className="w-28 shrink-0 truncate text-muted-foreground/70" title={line.file}>
+        <span
+          className="w-28 shrink-0 truncate text-muted-foreground/70 @max-xl:hidden"
+          title={line.file}
+        >
           {line.file}
         </span>
       )}
       {showSource && line.source && (
         <span
-          className="max-w-40 shrink-0 truncate font-medium text-muted-foreground"
+          className={cn("max-w-40 shrink-0 truncate font-medium text-muted-foreground", beside)}
           style={highlight ? laneStyle(line.source) : undefined}
           title={line.source}
         >
@@ -840,10 +862,17 @@ export const LogRow = memo(function LogRow({
           // line, which on syslog was a third of the width.
           skipTime={showTime && Boolean(line.timestamp) && !structured}
           hostname={hostname}
-          className={cn("min-w-0 text-foreground", flow)}
+          className={cn("min-w-0 text-foreground", flow, stack && !cont && "@max-md:basis-full")}
         />
       ) : (
-        <span className={cn("min-w-0", flow, line.level && LEVEL_TEXT[line.level])}>
+        <span
+          className={cn(
+            "min-w-0",
+            flow,
+            line.level && LEVEL_TEXT[line.level],
+            stack && !cont && "@max-md:basis-full",
+          )}
+        >
           {segmentLine(line.text, ranges).map((part, k) =>
             part.hit ? (
               <mark key={k} className="rounded-sm bg-mark px-px text-foreground">
@@ -934,7 +963,9 @@ function ToolbarToggle({
           <Icon className="size-3" />
           <span className="hidden 2xl:inline">{label}</span>
           {extra}
-          {active && !extra && <Check className="size-3 2xl:hidden" />}
+          {/* In a narrow pane the ground says it is on, and the tick was
+              width the chips beside it needed. */}
+          {active && !extra && <Check className="size-3 2xl:hidden @max-lg:hidden" />}
         </Button>
       </TooltipTrigger>
       <TooltipContent>{hint}</TooltipContent>

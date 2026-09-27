@@ -21,11 +21,13 @@ test("apt's transactions come first, then dpkg, then what ran unattended", () =>
   ])
 })
 
-test("each is drawn as the distribution, and read as the server detects it", () => {
+test("each is drawn as the distribution, and is the server's description, not asked again", () => {
   const [source] = packageLogSources([found("/var/log/dnf.log", "dnf")], "fedora")
   expect(source.id).toBe("file:/var/log/dnf.log")
   expect(source.product).toBe("fedora")
-  expect(source.lens).toBeUndefined()
+  // The lens the server detected, as it described the file.
+  expect(source.lens).toBe("packages")
+  expect(source.described).toBe(true)
 })
 
 test("a host with no package log offers none, and says when the roots are why", () => {

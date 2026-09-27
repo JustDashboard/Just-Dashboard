@@ -21,14 +21,14 @@ export const PACKAGE_LOGS = [
 
 /**
  * The package logs this host keeps, in the list's order, each drawn as the
- * distribution's mark. The lens is left for the server to detect, which it
- * does for every one of them: a lens the page names is the pane's "Read as"
- * set for the reader.
+ * distribution's mark. Each is the server's own description of the file,
+ * lens and all — it reads every one of them as a package log — so the pane
+ * does not ask for it again.
  */
 export function packageLogSources(probes: HostLogProbe[], product?: string): ServiceLogSource[] {
   return probes.flatMap((probe) =>
     "source" in probe
-      ? [{ ...probe.source, id: fileSource(probe.path), lens: undefined, product }]
+      ? [{ ...probe.source, id: fileSource(probe.path), product, described: true }]
       : [],
   )
 }

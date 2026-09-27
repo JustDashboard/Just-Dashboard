@@ -21,7 +21,12 @@ import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { AreaFindings } from "@/components/security/posture-panel"
 import { AUTH_LOG } from "@/components/security/host-logs"
-import { HostLogSection, useAddressLineVerbs, useHostLog } from "@/components/security/log-section"
+import {
+  HostLogSection,
+  useAddressLineVerbs,
+  useHostLog,
+  useReadingPress,
+} from "@/components/security/log-section"
 import { ReadingTile, useLensReadings } from "@/components/logs/lens-readings"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -91,6 +96,7 @@ export function SSHPanel({
     enabled: Boolean(authLog.data) && Boolean(data?.available),
   })
   const lineVerbs = useAddressLineVerbs({ comment: "blocked from the auth log", blockOn: ATTACKS })
+  const [ask, press] = useReadingPress()
 
   // The effective configuration is only right once sshd has reloaded.
   const jobStatus = console_.job?.status
@@ -311,7 +317,12 @@ export function SSHPanel({
         {readings.tiles
           .filter((tile) => SSH_READINGS.includes(tile.reading.id))
           .map((tile) => (
-            <ReadingTile key={tile.reading.id} tile={tile} window={readings.window} />
+            <ReadingTile
+              key={tile.reading.id}
+              tile={tile}
+              window={readings.window}
+              onPick={() => press(tile.reading)}
+            />
           ))}
       </StatGrid>
 
@@ -440,6 +451,7 @@ export function SSHPanel({
         log={authLog}
         storageKey="security.ssh.log"
         lineVerbs={lineVerbs}
+        ask={ask}
       />
 
       {dialog}

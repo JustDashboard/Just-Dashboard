@@ -18,8 +18,16 @@ import {
   type LogLevel,
 } from "@/lib/log-filter"
 import { fieldOf, isFilterable } from "@/lib/log-fields"
+import { readingFilter } from "@/lib/log-insights"
 import type { LensView, LogLens } from "@/lib/log-lenses"
 import { FieldValue } from "@/components/logs/field-value"
+import {
+  WINDOW_WORDS,
+  readingPressed,
+  type LensReadingTile,
+  type LensReadingsState,
+} from "@/components/logs/lens-readings"
+import { readingFor, readingShown, unaskedReadings } from "@/components/logs/logs-model"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { IconAction } from "@/components/icon-action"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -36,6 +44,7 @@ import {
 const TOP = 8
 
 const NO_VIEWS: LensView[] = []
+const NO_TILES: LensReadingTile[] = []
 
 function sameLevels(a: readonly string[], b: readonly string[]) {
   return a.length === b.length && a.every((level) => b.includes(level))
@@ -128,6 +137,18 @@ function tally(lines: LogLine[], key: string): { values: Tally[]; missing: numbe
  *
  * Counts in History come from the search's facets; in Live they are tallied
  * here over the lines on screen — the popover's only while it is open.
+ *
+ * What is narrowed leads the row, with Fields beside it and the views after:
+ * on a phone the row is a few chips wide, and a filter scrolled out of sight
+ * is lines missing for no reason the reader can see. Fields sits by it
+ * because the popover, closing, hands the focus back to Fields, and one at
+ * the far end of the row scrolled the narrowing away as it came into view.
+ *
+ * Handed the lens's readings (a page whose section draws no tiles), the row
+ * carries them too: a view whose question a reading asks shows the
+ * reading's figure over its window instead of a count of the screen, and a
+ * reading no view asks is a chip of its own — one chip per question, never
+ * two with two different counts.
  */
 export function LensBar({
   lens,
@@ -136,6 +157,7 @@ export function LensBar({
   onFilterChange,
   lines,
   facets,
+  readings,
 }: {
   lens: LogLens | undefined
   /** The lens the lines were read through, which names event values. */
@@ -146,9 +168,13 @@ export function LensBar({
   lines?: LogLine[]
   /** History's facets over every match; absent in Live. */
   facets?: Record<string, LogFacet>
+  /** The lens's readings, drawn as the chips' figures. */
+  readings?: LensReadingsState
 }) {
   const fields = fieldsOf(filter)
   const views = lens?.views ?? NO_VIEWS
+  const tiles = readings?.tiles ?? NO_TILES
+  const unasked = useMemo(() => unaskedReadings(views, tiles), [views, tiles])
 
   const counts = useMemo(() => {
     const out = new Map<string, number>()
@@ -177,40 +203,21 @@ export function LensBar({
     fieldsEqual(fields, defaults.fields ?? {}) &&
     (!defaults.levels || sameLevels(filter.levels, defaults.levels))
   const selectedView = views.find((view) => viewSelected(view, filter))
-  const predicateKeys = selectedView || onDefaults ? [] : Object.keys(fields)
+  const selectedReading = unasked.find((tile) => readingPressed(tile.reading, filter))
+  const predicateKeys = selectedView || selectedReading || onDefaults ? [] : Object.keys(fields)
 
-  if (views.length === 0 && !lens?.facets.length && Object.keys(fields).length === 0) return null
+  if (
+    views.length === 0 &&
+    unasked.length === 0 &&
+    !lens?.facets.length &&
+    Object.keys(fields).length === 0
+  )
+    return null
 
   const setFields = (next: LogFields) => onFilterChange({ ...filter, fields: next })
 
   return (
     <ChipStrip className="scroll-affordance shrink-0 border-b border-hairline px-2 py-1 max-sm:mx-0 max-sm:my-0 max-sm:px-2 max-sm:py-1 sm:flex-nowrap sm:overflow-x-auto">
-      {views.map((view) => {
-        const count = counts.get(view.id)
-        return (
-          <FilterChip
-            key={view.id}
-            selected={selectedView === view}
-            onClick={() => onFilterChange(applyView(filter, view))}
-            title={view.requires ? `Logged only with ${view.requires} set` : undefined}
-          >
-            {view.label}
-            {count !== undefined && count > 0 && <ChipCount>{count.toLocaleString()}</ChipCount>}
-          </FilterChip>
-        )
-      })}
-
-      {lens && lens.facets.length > 0 && (
-        <FieldsPopover
-          lens={lens}
-          lensId={lensId}
-          fields={fields}
-          onFieldsChange={setFields}
-          lines={lines}
-          facets={facets}
-        />
-      )}
-
       {onDefaults && (
         <FilterChip
           selected
@@ -244,7 +251,99 @@ export function LensBar({
           </FilterChip>
         )
       })}
+
+      {lens && lens.facets.length > 0 && (
+        <FieldsPopover
+          lens={lens}
+          lensId={lensId}
+          fields={fields}
+          onFieldsChange={setFields}
+          lines={lines}
+          facets={facets}
+        />
+      )}
+
+      {views.map((view) => {
+        const tile = readingFor(view, tiles)
+        const count = counts.get(view.id)
+        return (
+          <FilterChip
+            key={view.id}
+            selected={selectedView === view}
+            onClick={() => onFilterChange(applyView(filter, view))}
+            title={
+              tile && readings
+                ? readingTitle(tile, readings.window)
+                : view.requires
+                  ? `Logged only with ${view.requires} set`
+                  : undefined
+            }
+          >
+            {view.label}
+            {tile && readings ? (
+              <ReadingCount tile={tile} window={readings.window} />
+            ) : (
+              count !== undefined && count > 0 && <ChipCount>{count.toLocaleString()}</ChipCount>
+            )}
+          </FilterChip>
+        )
+      })}
+
+      {readings &&
+        unasked.map((tile) => {
+          const pressed = selectedReading === tile
+          return (
+            <FilterChip
+              key={tile.reading.id}
+              selected={pressed}
+              title={readingTitle(tile, readings.window)}
+              onClick={() =>
+                onFilterChange(
+                  pressed
+                    ? { ...filter, fields: {}, levels: [] }
+                    : readingFilter(filter, tile.reading),
+                )
+              }
+            >
+              {tile.reading.label}
+              <ReadingCount tile={tile} window={readings.window} />
+            </FilterChip>
+          )
+        })}
     </ChipStrip>
+  )
+}
+
+type Window = LensReadingsState["window"]
+
+/** What a reading's figure on a chip is over, and why a zero may not be good news. */
+function readingTitle(tile: LensReadingTile, window: Window) {
+  const { reading, figure } = tile
+  if (!figure) return reading.hint
+  if (figure.value === 0 && reading.requires) return `Logged only with ${reading.requires} set`
+  const { text } = readingShown(reading, figure, window)
+  return reading.figure === "per_minute"
+    ? `${text} a minute over ${WINDOW_WORDS[window].long} — ${reading.hint}`
+    : `${text} in ${WINDOW_WORDS[window].long} — ${reading.hint}`
+}
+
+/**
+ * A reading's figure on its chip, in the reading's tone once it is above
+ * zero: "Errors 3" in red says which three before the chip is pressed.
+ */
+function ReadingCount({ tile, window }: { tile: LensReadingTile; window: Window }) {
+  if (!tile.figure) return null
+  const { value, text } = readingShown(tile.reading, tile.figure, window)
+  const tone = value > 0 ? tile.reading.tone : undefined
+  return (
+    <ChipCount
+      className={cn(
+        tone === "danger" && "text-destructive opacity-100",
+        tone === "warning" && "text-warning opacity-100",
+      )}
+    >
+      {text}
+    </ChipCount>
   )
 }
 

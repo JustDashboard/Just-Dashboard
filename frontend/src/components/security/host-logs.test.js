@@ -49,10 +49,12 @@ test("a file outside the log roots is named as the reason, not called missing", 
   expect(source.detail).not.toContain("keeps no")
 })
 
-test("a lens is named only where the page reads a file otherwise than the server", () => {
-  // auth.log is the auth lens's on the server too: naming it would mark the
-  // pane's Read as as changed by the reader.
-  expect(hostLogSource(AUTH_LOG, [found("/var/log/auth.log", "auth")]).lens).toBeUndefined()
+test("a file read as the server reads it is its description, not asked for again", () => {
+  const auth = hostLogSource(AUTH_LOG, [found("/var/log/auth.log", "auth")])
+  expect(auth.lens).toBe("auth")
+  expect(auth.described).toBe(true)
+  // The journal was never asked after, so the pane asks.
+  expect(hostLogSource(AUTH_LOG, []).described).toBeUndefined()
   expect(hostLogSource(AUTH_LOG, []).lens).toBeUndefined()
   expect(hostLogSource(FAIL2BAN_LOG, []).lens).toBeUndefined()
 })
@@ -63,7 +65,8 @@ test("the firewall's lines are read as the firewall's wherever they are written"
     found("/var/log/kern.log", "kernel"),
   ])
   expect(ufw.id).toBe("file:/var/log/ufw.log")
-  expect(ufw.lens).toBeUndefined()
+  expect(ufw.lens).toBe("firewall")
+  expect(ufw.described).toBe(true)
   // kern.log is the kernel's, and the ring is too; the page asks the
   // firewall's questions of both.
   const kern = hostLogSource(FIREWALL_LOG, [
@@ -72,6 +75,8 @@ test("the firewall's lines are read as the firewall's wherever they are written"
   ])
   expect(kern.id).toBe("file:/var/log/kern.log")
   expect(kern.lens).toBe("firewall")
+  // Read otherwise than the server would: the pane asks what it detects.
+  expect(kern.described).toBeUndefined()
   const ring = hostLogSource(FIREWALL_LOG, [
     missing("/var/log/ufw.log"),
     missing("/var/log/kern.log"),

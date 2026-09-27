@@ -27,7 +27,12 @@ import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/compo
 import { AreaFindings } from "@/components/security/posture-panel"
 import { AddRuleDialog, EditRuleDialog } from "@/components/security/rule-form"
 import { FIREWALL_LOG } from "@/components/security/host-logs"
-import { HostLogSection, useAddressLineVerbs, useHostLog } from "@/components/security/log-section"
+import {
+  HostLogSection,
+  useAddressLineVerbs,
+  useHostLog,
+  useReadingPress,
+} from "@/components/security/log-section"
 import { ReadingTile, useLensReadings } from "@/components/logs/lens-readings"
 import { Status } from "@/components/status-dot"
 import { IconAction, RowActions } from "@/components/icon-action"
@@ -107,6 +112,7 @@ export function FirewallPanel({
     forcedLens: "firewall",
     enabled: Boolean(firewallLog.data) && Boolean(status?.available) && !silent,
   })
+  const [ask, press] = useReadingPress()
   // A drop is already the firewall's answer to the address on it, and an
   // allowed or audited connection may be the operator's own; a rate limit
   // is the one line where a deny is the next step. An outbound packet's
@@ -367,7 +373,12 @@ export function FirewallPanel({
         />
         {!silent &&
           readings.tiles.map((tile) => (
-            <ReadingTile key={tile.reading.id} tile={tile} window={readings.window} />
+            <ReadingTile
+              key={tile.reading.id}
+              tile={tile}
+              window={readings.window}
+              onPick={() => press(tile.reading)}
+            />
           ))}
       </StatGrid>
 
@@ -617,6 +628,7 @@ export function FirewallPanel({
         title="Firewall log"
         log={firewallLog}
         storageKey="security.firewall.log"
+        ask={ask}
         instead={
           silent && (
             <EmptyState
