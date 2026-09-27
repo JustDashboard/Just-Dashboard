@@ -20,8 +20,10 @@ import {
   LOG_LEVELS,
   TIME_RANGES,
   logTimeInput,
+  withFieldTokens,
   type LogLevel,
 } from "@/lib/log-filter"
+import { LENS_CHOICES, lensFor } from "@/lib/log-lenses"
 import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
 import { SearchInput } from "@/components/page"
 import { ChipCount, FilterChip } from "@/components/tabs"
@@ -49,6 +51,24 @@ import {
 } from "@/components/ui/select"
 
 const CONTEXT_CHOICES = [0, 2, 5, 10]
+
+// Which workspace "/" belongs to. A page can show two logs at once — a
+// deployment's output beside its proxy's — and one keydown listener per
+// search box meant the key focused whichever box registered last, not the
+// pane the reader was in. The pane pressed or focused last owns it, and the
+// first one mounted until then.
+const panes: string[] = []
+let activePane: string | null = null
+
+/** Called by a workspace on any press or focus inside it. */
+export function claimPane(id: string) {
+  activePane = id
+}
+
+function ownsSlash(id: string) {
+  const owner = activePane && panes.includes(activePane) ? activePane : panes[0]
+  return owner === id
+}
 
 /**
  * One filter for both questions.
@@ -88,11 +108,17 @@ export function FilterBar({
   onArchivesChange,
   boot,
   onBootChange,
+  paneId,
+  fieldKeys,
+  lens,
+  detectedLens,
+  onLensChange,
 }: {
   mode: LogMode
   filter: LogFilterState
   onFilterChange: (filter: LogFilterState) => void
-  onSubmit: () => void
+  /** Enter, or Search: with the filter as it stands once `key:value` words became fields. */
+  onSubmit: (filter: LogFilterState) => void
   searching: boolean
   source: LogSource | null
   units: LogJournalUnit[]
@@ -110,6 +136,16 @@ export function FilterBar({
   onArchivesChange: (value: boolean) => void
   boot: boolean
   onBootChange: (value: boolean) => void
+  /** The workspace this bar belongs to, for "/" (`claimPane`). */
+  paneId?: string
+  /** The keys a `key:value` word in the search box may name. */
+  fieldKeys?: ReadonlySet<string>
+  /** The lens the reader forced: "" for the detected one, "none" for none. */
+  lens?: string
+  /** The lens the source was detected as, for the Auto choice's words. */
+  detectedLens?: string
+  /** Offers "Read as" when set. */
+  onLensChange?: (lens: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const queryRef = useRef<HTMLInputElement>(null)
@@ -117,27 +153,44 @@ export function FilterBar({
   // "/" is the search key everywhere a log is read; without it the operator's
   // hand leaves the keyboard for every narrowing.
   useEffect(() => {
+    const id = paneId ?? ""
+    panes.push(id)
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null
-      const typing = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA"
-      if (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey) {
+      const typing =
+        target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable
+      if (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey && ownsSlash(id)) {
         e.preventDefault()
         queryRef.current?.focus()
         queryRef.current?.select()
       }
     }
     window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [])
+    return () => {
+      window.removeEventListener("keydown", onKey)
+      panes.splice(panes.indexOf(id), 1)
+      if (activePane === id) activePane = null
+    }
+  }, [paneId])
 
   const set = (patch: Partial<LogFilterState>) => onFilterChange({ ...filter, ...patch })
+  const submit = () => {
+    const next = fieldKeys ? withFieldTokens(filter, fieldKeys) : filter
+    if (next !== filter) onFilterChange(next)
+    onSubmit(next)
+  }
   const isJournal = source?.kind === "journal"
   const hasArchives = (source?.archives ?? 0) > 0
   const advancedCount =
     (filter.exclude ? 1 : 0) +
     (context > 0 ? 1 : 0) +
     (archives && hasArchives ? 1 : 0) +
-    (boot && isJournal ? 1 : 0)
+    (boot && isJournal ? 1 : 0) +
+    (lens && onLensChange ? 1 : 0)
+  const detected = lensFor(detectedLens)?.label
+  // History and Insights both read a window of the file; Live reads its end.
+  const windowed = mode === "search" || mode === "insights"
+  const customRow = windowed && range === "custom"
 
   return (
     <>
@@ -146,7 +199,7 @@ export function FilterBar({
           className="relative flex min-w-56 flex-1 items-center"
           onSubmit={(e) => {
             e.preventDefault()
-            onSubmit()
+            submit()
           }}
         >
           <SearchInput
@@ -157,7 +210,9 @@ export function FilterBar({
             placeholder={
               mode === "live"
                 ? "Filter the stream — matched on the server, press / to focus"
-                : "Search this log's history — press Enter"
+                : fieldKeys?.size
+                  ? "Search this log's history — words, or user:postgres — press Enter"
+                  : "Search this log's history — press Enter"
             }
             className="pr-18"
             containerClassName="sm:w-full"
@@ -192,9 +247,11 @@ export function FilterBar({
           />
         </form>
 
-        {isJournal && <UnitPicker units={units} value={unit} onChange={onUnitChange} />}
+        {isJournal && units.length > 0 && (
+          <UnitPicker units={units} value={unit} onChange={onUnitChange} />
+        )}
 
-        {mode === "search" && (
+        {windowed && (
           <>
             <Select value={range} onValueChange={(v) => onRangeChange(v as LogTimeRange)}>
               <SelectTrigger size="sm" className="w-40" aria-label="Window">
@@ -208,7 +265,7 @@ export function FilterBar({
                 ))}
               </SelectContent>
             </Select>
-            <Button size="sm" onClick={onSubmit} pending={searching} className="h-8">
+            <Button size="sm" onClick={submit} pending={searching} className="h-8">
               <MagnifyingGlass className="size-3.5" />
               Search
             </Button>
@@ -223,15 +280,19 @@ export function FilterBar({
           onClick={() => setOpen((v) => !v)}
         >
           <SettingsSliders className="size-3.5" />
-          More
+          {/* On a phone the window and Search take the second row, and the
+              word left "More" alone on a third. */}
+          <span className="max-sm:sr-only">More</span>
           {advancedCount > 0 && <ChipCount>{advancedCount}</ChipCount>}
           <ChevronDown className={cn("size-3 transition-transform", open && "rotate-180")} />
         </Button>
       </div>
 
-      {(open || range === "custom") && (
+      {/* The custom window's fields are History's; in Live the row would be
+          an empty strip with a border, which is what it used to draw. */}
+      {(open || customRow) && (
         <div className="flex shrink-0 animate-rise flex-wrap items-center gap-x-4 gap-y-2 border-b border-hairline px-3 py-2">
-          {mode === "search" && range === "custom" && (
+          {customRow && (
             <>
               <Field label="From">
                 <Input
@@ -286,7 +347,7 @@ export function FilterBar({
                 </Field>
               )}
 
-              {mode === "search" && hasArchives && (
+              {windowed && hasArchives && (
                 <label className="flex items-center gap-2 text-xs">
                   <Switch size="sm" checked={archives} onCheckedChange={onArchivesChange} />
                   <span>
@@ -295,6 +356,32 @@ export function FilterBar({
                     <span className="text-muted-foreground"> ({bytes(source?.archiveBytes)})</span>
                   </span>
                 </label>
+              )}
+
+              {onLensChange && (
+                <Field label="Read as">
+                  <Select
+                    value={lens || "auto"}
+                    onValueChange={(v) => onLensChange(v === "auto" ? "" : v)}
+                  >
+                    <SelectTrigger size="sm" className="w-52" aria-label="Read as">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto" hint={detected ? `detected ${detected}` : undefined}>
+                        Auto
+                      </SelectItem>
+                      {LENS_CHOICES.map((choice) => (
+                        <SelectItem key={choice.id} value={choice.id}>
+                          {choice.label}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value="none" hint="the text as written">
+                        None
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
               )}
 
               {isJournal && (

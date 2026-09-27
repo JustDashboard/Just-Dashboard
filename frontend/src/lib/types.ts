@@ -1356,7 +1356,19 @@ export type Crontab = {
 export type LogSource = {
   id: string
   label: string
-  kind: "system" | "nginx" | "app" | "pm2" | "docker" | "journal"
+  kind:
+    | "system"
+    | "nginx"
+    | "app"
+    | "pm2"
+    | "docker"
+    | "journal"
+    /** Every container of one compose project, merged by time. */
+    | "stack"
+    /** The journal of one or more syslog identifiers (`journalctl -t`). */
+    | "journal-id"
+    /** The kernel ring (`journalctl -k`). */
+    | "kernel"
   path?: string
   size?: number
   modified?: string
@@ -1368,12 +1380,22 @@ export type LogSource = {
   detail?: string
   /** A live source's state — a stopped container still has logs worth reading. */
   status?: string
+  /**
+   * The lens the server reads this source through (`lib/log-lenses.ts`) —
+   * detected from the path, the image or the unit. Absent where none applies,
+   * and for a stack whose containers disagree.
+   */
+  lens?: string
+  /** A stack's services' images, for drawing it as the products it runs. */
+  images?: string[]
 }
 
 export type LogJournalUnit = {
   name: string
   description: string
   active: string
+  /** The lens `journal:<unit>` is read through. */
+  lens?: string
 }
 
 /**
@@ -1418,9 +1440,25 @@ export type LogLine = {
    */
   message?: string
   fields?: Record<string, string>
+  /**
+   * What the line records, in its lens's words ("auth_failed", "slow",
+   * "ban"), and the values the lens read out of its text. A plain line keeps
+   * being drawn as the text it is; these are what it can be filtered,
+   * counted and labelled by.
+   */
+  event?: string
+  attrs?: Record<string, string>
+  /**
+   * The line continues the record above it — a Postgres DETAIL, a stack
+   * frame. It carries its head's level, took its head's verdict under the
+   * filter, and is folded under it.
+   */
+  cont?: boolean
+  /** The lens that named `event`, where it is not the stream's own (a syslog line read as auth). */
+  lens?: string
 }
 
-/** One column of the search histogram, counted by level. */
+/** One column of the search histogram, counted by level — or by `histogramBy`'s values. */
 export type LogBucket = {
   start: string
   total: number
@@ -1450,6 +1488,50 @@ export type LogSearchResult = {
   first?: string
   last?: string
   tookMillis: number
+  /** Top values per asked-for key, over every match in the window (`facets=`). */
+  facets?: Record<string, LogFacet>
+  /** The distribution of a numeric key over the matches (`measure=`). */
+  measure?: LogMeasure
+  /** The lens the search read the source through. */
+  lens?: string
+  /** What the histogram's counts are keyed by, when it is not the level. */
+  histogramBy?: string
+}
+
+export type LogFacetValue = {
+  value: string
+  count: number
+  /** How many of those lines were errors or worse. */
+  errors: number
+  sum?: number
+  max?: number
+  first?: string
+  last?: string
+  /** The last value seen of each `sample=` key, beside this one. */
+  samples?: Record<string, string>
+}
+
+export type LogFacet = {
+  values: LogFacetValue[]
+  distinct: number
+  /** The distinct count stopped being exact past the server's budget. */
+  distinctCapped?: boolean
+  /** Matches whose value is not among `values`. */
+  other: number
+  /** Matches that carry no value for the key at all. */
+  missing: number
+}
+
+export type LogMeasure = {
+  key: string
+  count: number
+  p50: number
+  p75: number
+  p90: number
+  p95: number
+  p99: number
+  max: number
+  mean: number
 }
 
 /** The frame the live socket opens with, before any lines. */
@@ -1461,6 +1543,8 @@ export type LogStreamMeta = {
   prefill?: { lines: number; complete: boolean }
   archives?: number
   note?: string
+  /** The lens the stream reads its lines through. */
+  lens?: string
 }
 
 export type LogRotateRule = {

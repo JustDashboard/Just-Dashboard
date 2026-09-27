@@ -1,17 +1,34 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Archive, Box, Cpu, FileText, Globe, Monorepo, RefreshClockwise } from "@/components/icons"
+import {
+  Archive,
+  Box,
+  Cpu,
+  FileText,
+  Globe,
+  Layers,
+  Monorepo,
+  RefreshClockwise,
+} from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { bytes, relativeTime } from "@/lib/format"
 import type { LogSource, LogSourceIndex } from "@/lib/types"
+import { lensFor } from "@/lib/log-lenses"
+import { journalIdSource, kernelSource } from "@/lib/log-sources"
 import { SearchInput } from "@/components/page"
 import { Pane, PaneHeader } from "@/components/panel"
 import { ErrorState, LoadingRows } from "@/components/state"
 import { StatusDot } from "@/components/status-dot"
 import { IconAction } from "@/components/icon-action"
 import { ChipCount } from "@/components/tabs"
-import { ProductLogo, imageProduct, platformProduct } from "@/components/product-logo"
+import {
+  ProductLogo,
+  ProductLogos,
+  imageProduct,
+  imageProducts,
+  platformProduct,
+} from "@/components/product-logo"
 
 /**
  * The groups, in the order somebody actually looks. The raw kind strings are
@@ -23,10 +40,17 @@ import { ProductLogo, imageProduct, platformProduct } from "@/components/product
  * the Overview use for the module the logs belong to — so the eye finds
  * "Containers" in the rail without reading down it.
  */
-const GROUPS: { kind: LogSource["kind"]; label: string; icon: typeof FileText }[] = [
+const GROUPS: {
+  kind: LogSource["kind"]
+  /** Kinds read through the same reader, listed with it rather than as groups of one. */
+  also?: LogSource["kind"][]
+  label: string
+  icon: typeof FileText
+}[] = [
   { kind: "system", label: "System", icon: Cpu },
-  { kind: "journal", label: "Systemd journal", icon: Monorepo },
+  { kind: "journal", also: ["journal-id", "kernel"], label: "Systemd journal", icon: Monorepo },
   { kind: "docker", label: "Containers", icon: Box },
+  { kind: "stack", label: "Stacks", icon: Layers },
   { kind: "nginx", label: "Web server", icon: Globe },
   { kind: "pm2", label: "PM2", icon: FileText },
   { kind: "app", label: "Applications", icon: FileText },
@@ -36,10 +60,87 @@ const GROUPS: { kind: LogSource["kind"]; label: string; icon: typeof FileText }[
 export const KIND_TAG: Record<LogSource["kind"], string> = {
   system: "system log",
   journal: "journal",
+  "journal-id": "journal",
+  kernel: "kernel ring",
   docker: "container",
+  stack: "stack",
   nginx: "web server",
   pm2: "pm2 process",
   app: "application",
+}
+
+/**
+ * The journal read by program rather than by unit, for a host whose
+ * programs write nowhere else: Debian without rsyslog has no auth.log, no
+ * kern.log and no cron file, and "sshd's lines" was a search through the
+ * whole journal. Each is offered only where no file already holds the same
+ * lines — two rows that read one log are a choice with no difference — and
+ * the SSH log only to an administrator, since the server refuses it to
+ * anyone else (a failed username is often a typed password).
+ */
+const JOURNAL_READINGS: {
+  source: LogSource
+  /** The lens of the file that makes the row redundant, and that file's names. */
+  file: { lens: string; names: string[] }
+  admin?: boolean
+}[] = [
+  {
+    source: {
+      id: journalIdSource(["sshd", "sshd-session", "sshd-auth"]),
+      label: "SSH log",
+      kind: "journal-id",
+      lens: "auth",
+      detail: "sshd's lines, through the journal",
+      rotated: false,
+    },
+    file: { lens: "auth", names: ["auth.log", "secure"] },
+    admin: true,
+  },
+  {
+    source: {
+      id: kernelSource(),
+      label: "Kernel ring",
+      kind: "kernel",
+      lens: "kernel",
+      detail: "The firewall, the OOM killer, the disks",
+      rotated: false,
+    },
+    file: { lens: "kernel", names: ["kern.log"] },
+  },
+  {
+    source: {
+      id: journalIdSource(["CRON", "crond"]),
+      label: "Cron",
+      kind: "journal-id",
+      lens: "cron",
+      detail: "Each job cron ran, through the journal",
+      rotated: false,
+    },
+    file: { lens: "cron", names: ["cron", "cron.log"] },
+  },
+]
+
+/**
+ * The sources the rail lists: the server's inventory, and the journal's
+ * readings by program where the host has a journal and no file for them.
+ * The page looks its selection up in the same list, so a row the rail
+ * draws is a row a link can open.
+ */
+export function railSources(index: LogSourceIndex | undefined, admin: boolean): LogSource[] {
+  const listed = index?.sources ?? []
+  if (!listed.some((s) => s.kind === "journal")) return listed
+  const hasFile = ({ lens, names }: { lens: string; names: string[] }) =>
+    listed.some(
+      (s) =>
+        s.path && (s.lens === lens || names.includes(s.path.slice(s.path.lastIndexOf("/") + 1))),
+    )
+  const extra = JOURNAL_READINGS.filter(
+    (reading) =>
+      (admin || !reading.admin) &&
+      !hasFile(reading.file) &&
+      !listed.some((s) => s.id === reading.source.id),
+  ).map((reading) => reading.source)
+  return extra.length ? [...listed, ...extra] : listed
 }
 
 /**
@@ -51,6 +152,7 @@ export const KIND_TAG: Record<LogSource["kind"], string> = {
  */
 export function SourceRail({
   index,
+  sources,
   loading,
   error,
   selectedId,
@@ -60,6 +162,8 @@ export function SourceRail({
   className,
 }: {
   index: LogSourceIndex | undefined
+  /** The rows to draw, from `railSources`: the inventory and the journal's readings. */
+  sources: LogSource[]
   /** The host's distribution, whose mark the system logs carry. */
   platform?: string
   loading: boolean
@@ -70,7 +174,7 @@ export function SourceRail({
   className?: string
 }) {
   const [filter, setFilter] = useState("")
-  const total = index?.sources.length ?? 0
+  const total = sources.length
 
   const groups = useMemo(() => {
     const needle = filter.trim().toLowerCase()
@@ -81,16 +185,20 @@ export function SourceRail({
       s.detail?.toLowerCase().includes(needle)
 
     return GROUPS.map((group) => {
-      const items = (index?.sources ?? []).filter((s) => s.kind === group.kind && matches(s))
+      const items = sources.filter(
+        (s) => (s.kind === group.kind || group.also?.includes(s.kind)) && matches(s),
+      )
       // A running container is the one somebody came here for; a stopped one
       // still has its last words and belongs underneath rather than missing.
+      // The whole journal leads its own group, before its readings by program.
       items.sort((a, b) => {
         const live = (s: LogSource) => (s.status === "running" || s.status === "online" ? 0 : 1)
-        return live(a) - live(b) || a.label.localeCompare(b.label)
+        const own = (s: LogSource) => (s.kind === group.kind ? 0 : 1)
+        return live(a) - live(b) || own(a) - own(b) || a.label.localeCompare(b.label)
       })
       return { ...group, items }
     }).filter((g) => g.items.length > 0 || (index?.missing[g.kind] && !needle))
-  }, [index, filter])
+  }, [index, sources, filter])
 
   return (
     <Pane flush aria-label="Log sources" className={cn("w-full", className)}>
@@ -177,6 +285,11 @@ export function SourceRail({
  * tile, so every name in the rail starts on one line.
  */
 function sourceProduct(source: LogSource, platform: string | undefined) {
+  // A lens names a product only where the log is that product's own — a
+  // Postgres file under /var/log/postgresql — and says nothing of auth.log,
+  // which stays the distribution that writes it.
+  const lensProduct = lensFor(source.lens)?.product
+  if (lensProduct) return lensProduct
   switch (source.kind) {
     case "docker":
       // A compose service's detail is "stack · image"; the image is the product.
@@ -185,6 +298,11 @@ function sourceProduct(source: LogSource, platform: string | undefined) {
       return "nginx-static"
     case "pm2":
       return "pm2"
+    case "stack":
+      return "docker-compose"
+    case "kernel":
+      // The ring is the kernel's own, whatever distribution it boots.
+      return "linux"
     case "system":
       return platformProduct(platform)
     default:
@@ -203,7 +321,10 @@ function SourceRow({
   selected: boolean
   onSelect: () => void
 }) {
-  const group = GROUPS.find((g) => g.kind === source.kind)
+  const group = GROUPS.find((g) => g.kind === source.kind || g.also?.includes(source.kind))
+  // A stack is what it runs: its services' products overlapping, as the
+  // Docker page draws a project (§14), the one it is named for whole.
+  const stack = source.kind === "stack" && source.images?.length ? source.images : undefined
   return (
     <button
       type="button"
@@ -214,11 +335,18 @@ function SourceRow({
       // takes — the terminal's active session, a table's chosen row — so
       // "you are here" reads the same way on every rail.
       className={cn(
-        "flex w-full min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 text-left focus-ring-inset transition-colors",
+        "group flex w-full min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 text-left focus-ring-inset transition-colors",
         selected ? "bg-accent text-foreground" : "hover:bg-row-hover",
       )}
     >
-      <ProductLogo id={sourceProduct(source, platform)} size="sm" fallback={group?.icon} />
+      {stack ? (
+        <ProductLogos
+          ids={imageProducts(stack)}
+          ring={selected ? "ring-accent" : "ring-card group-hover:ring-row-hover"}
+        />
+      ) : (
+        <ProductLogo id={sourceProduct(source, platform)} size="sm" fallback={group?.icon} />
+      )}
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="flex min-w-0 items-center gap-1.5">
           <span className={cn("truncate text-body leading-tight", selected && "font-medium")}>

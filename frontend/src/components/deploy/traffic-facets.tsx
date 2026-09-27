@@ -376,7 +376,7 @@ export function TrafficFacets({
  * as the fleet's cards do (§11 *arrived*); the whole set remounts when the
  * window moves, so a new window arrives the same way.
  */
-function Facet({
+export function Facet({
   title,
   reading,
   index,
