@@ -18,7 +18,19 @@ import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { VerbBar, type Verb } from "@/components/verbs"
 import { DANGEROUS_PORTS } from "@/components/proxy/attention"
-import { dangerousPorts, exposedHint, reachVerdict } from "@/components/proxy/ports"
+import {
+  dangerousPorts,
+  foldDualStack,
+  internetHint,
+  networkWords,
+  privateHint,
+  reachGroup,
+  reachVerdict,
+  reachWords,
+  socketAddresses,
+  tallyReach,
+  type Socket,
+} from "@/components/proxy/ports"
 import {
   stickyTableHeader,
   Table,
@@ -29,15 +41,19 @@ import {
   TableRow,
 } from "@/components/ui/table"
 
-type Reach = "all" | "exposed" | "loopback" | "tcp" | "udp"
+type Filter = "all" | "internet" | "private" | "local" | "tcp" | "udp"
 
-const REACH_LABEL: Record<Reach, string> = {
+const FILTER_LABEL: Record<Filter, string> = {
   all: "All",
-  exposed: "Exposed",
-  loopback: "Loopback",
+  internet: "Internet-facing",
+  private: "Private networks",
+  local: "This server",
   tcp: "TCP",
   udp: "UDP",
 }
+
+/** Worst first: what the posture would flag, then what the internet can reach. */
+const VERDICT_RANK = { critical: 0, warning: 1, notice: 2 } as const
 
 /**
  * Every listening socket on the host, and whether it faces off the machine.
@@ -48,50 +64,49 @@ const REACH_LABEL: Record<Reach, string> = {
  */
 export function PortsPage() {
   const router = useRouter()
-  const [filter, setFilter] = useSessionState("proxy.ports.query", "")
-  const [reach, setReach] = useSessionState<Reach>("proxy.ports.reach", "all")
+  const [query, setQuery] = useSessionState("proxy.ports.query", "")
+  const [filter, setFilter] = useSessionState<Filter>("proxy.ports.where", "all")
   const { data, error, loading, refresh } = usePoll(
     (signal) => get<Listener[]>("/ports", undefined, signal),
     15_000,
   )
 
-  const all = useMemo(() => data ?? [], [data])
-  const counts = useMemo(
-    () => ({
-      all: all.length,
-      exposed: all.filter((l) => l.exposed).length,
-      loopback: all.filter((l) => !l.exposed).length,
-      tcp: all.filter((l) => l.protocol === "tcp").length,
-      udp: all.filter((l) => l.protocol === "udp").length,
-    }),
-    [all],
-  )
-  const dangerous = useMemo(() => dangerousPorts(all), [all])
+  const listeners = useMemo(() => data ?? [], [data])
+  // A service on 0.0.0.0 and :: is one row and one count.
+  const all = useMemo(() => foldDualStack(listeners), [listeners])
+  const counts = useMemo(() => tallyReach(all), [all])
+  const dangerous = useMemo(() => dangerousPorts(listeners), [listeners])
   const visible = useMemo(() => {
-    const needle = filter.trim().toLowerCase()
+    const needle = query.trim().toLowerCase()
     return all
       .filter((l) => {
-        if (reach === "exposed" && !l.exposed) return false
-        if (reach === "loopback" && l.exposed) return false
-        if (reach === "tcp" && l.protocol !== "tcp") return false
-        if (reach === "udp" && l.protocol !== "udp") return false
+        if (
+          (filter === "internet" || filter === "private" || filter === "local") &&
+          reachGroup(l) !== filter
+        ) {
+          return false
+        }
+        if ((filter === "tcp" || filter === "udp") && l.protocol !== filter) return false
         if (!needle) return true
         return (
           String(l.port).includes(needle) ||
           (l.process ?? "").toLowerCase().includes(needle) ||
           (l.cmdline ?? "").toLowerCase().includes(needle) ||
           (l.user ?? "").toLowerCase().includes(needle) ||
-          l.address.includes(needle)
+          socketAddresses(l).some((address) => address.includes(needle)) ||
+          reachWords(l).toLowerCase().includes(needle)
         )
       })
       .sort((a, b) => {
-        const rank = (listener: Listener) =>
-          listener.exposed ? (DANGEROUS_PORTS[listener.port] ? 0 : 1) : 2
+        const rank = (socket: Socket) => {
+          const verdict = reachVerdict(socket)
+          return verdict ? VERDICT_RANK[verdict] : 3
+        }
         return rank(a) - rank(b) || a.port - b.port
       })
-  }, [all, filter, reach])
+  }, [all, query, filter])
 
-  const verbsFor = (l: Listener): Verb[] => {
+  const verbsFor = (l: Socket): Verb[] => {
     const verbs: Verb[] = []
     if (l.pid > 0) {
       verbs.push({
@@ -143,16 +158,12 @@ export function PortsPage() {
           hint={`${counts.tcp} TCP · ${counts.udp} UDP`}
         />
         <StatTile
-          label="Exposed"
-          value={counts.exposed}
-          tone={counts.exposed > 0 ? "warning" : "success"}
-          hint={exposedHint(all)}
+          label="Internet-facing"
+          value={counts.internet}
+          tone={counts.internet > 0 ? "warning" : "success"}
+          hint={internetHint(all)}
         />
-        <StatTile
-          label="Loopback"
-          value={counts.loopback}
-          hint="reachable from this machine only"
-        />
+        <StatTile label="Private networks" value={counts.private} hint={privateHint(all)} />
         <StatTile
           label="Databases exposed"
           value={dangerous.length}
@@ -174,16 +185,18 @@ export function PortsPage() {
         />
         <Toolbar className="justify-between gap-x-4">
           <SearchInput
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
             placeholder="Port, process, user or address"
           />
           <ChipStrip>
-            {(Object.keys(REACH_LABEL) as Reach[]).map((key) => (
-              <FilterChip key={key} selected={reach === key} onClick={() => setReach(key)}>
-                {REACH_LABEL[key]} <ChipCount>{counts[key]}</ChipCount>
-              </FilterChip>
-            ))}
+            {(Object.keys(FILTER_LABEL) as Filter[])
+              .filter((key) => key === "all" || key === filter || counts[key] > 0)
+              .map((key) => (
+                <FilterChip key={key} selected={filter === key} onClick={() => setFilter(key)}>
+                  {FILTER_LABEL[key]} <ChipCount>{counts[key]}</ChipCount>
+                </FilterChip>
+              ))}
           </ChipStrip>
         </Toolbar>
         <PanelBody flush>
@@ -201,7 +214,7 @@ export function PortsPage() {
                     <TableRow>
                       <TableHead className="w-[20%]">Endpoint</TableHead>
                       <TableHead>Application</TableHead>
-                      <TableHead className="w-44">Reach</TableHead>
+                      <TableHead className="w-56">Reach</TableHead>
                       <TableHead className="w-36">
                         <span className="sr-only">Actions</span>
                       </TableHead>
@@ -224,9 +237,9 @@ export function PortsPage() {
                           </div>
                           <p
                             className="mt-1 truncate font-mono text-hint text-muted-foreground"
-                            title={listener.address}
+                            title={socketAddresses(listener).join(", ")}
                           >
-                            {listener.address || "*"}
+                            {socketAddresses(listener).join(", ")}
                           </p>
                         </TableCell>
                         <TableCell>
@@ -250,7 +263,7 @@ export function PortsPage() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <ReachStatus listener={listener} />
+                          <ReachStatus socket={listener} />
                         </TableCell>
                         <TableCell>
                           <VerbBar
@@ -284,12 +297,12 @@ export function PortsPage() {
                           this page exists — it must not be the line that gets
                           dropped on a narrow screen. */}
                       <p className="truncate font-mono text-hint text-muted-foreground">
-                        {listener.address || "*"}
+                        {socketAddresses(listener).join(", ")}
                         <span className="uppercase"> · {listener.protocol}</span>
                         {listener.user && ` · ${listener.user}`}
                       </p>
                       <div className="mt-1.5">
-                        <ReachStatus listener={listener} />
+                        <ReachStatus socket={listener} />
                       </div>
                     </div>
                     <VerbBar verbs={verbsFor(listener)} className="shrink-0" />
@@ -315,12 +328,33 @@ function ProcessMark({ listener }: { listener: Listener }) {
   return <ProductLogo id={product} size="sm" fallback={Router} />
 }
 
-/** Coloured by who can connect, as the posture levels the same socket. */
-function ReachStatus({ listener }: { listener: Listener }) {
-  const verdict = reachVerdict(listener)
-  if (!verdict) return <span className="text-xs text-muted-foreground">loopback</span>
-  const service = DANGEROUS_PORTS[listener.port]
+/**
+ * Where the socket answers, coloured by who can connect as the posture levels
+ * the same socket, with the interface the address is on beneath it. The
+ * label wraps rather than running into the next column: "the Docker API ·
+ * Private network" is wider than the column.
+ */
+function ReachStatus({ socket }: { socket: Socket }) {
+  const verdict = reachVerdict(socket)
+  if (!verdict) return <span className="text-xs text-muted-foreground">{networkWords(socket)}</span>
+  const service = DANGEROUS_PORTS[socket.port]
+  const words = networkWords(socket)
   return (
-    <Status verdict={verdict} label={service ? `${service} exposed` : "exposed"} icon={Router} />
+    <div className="min-w-0">
+      <Status
+        verdict={verdict}
+        label={service ? `${service} · ${words}` : words}
+        icon={Router}
+        className="max-w-full whitespace-normal"
+      />
+      {socket.interface && (
+        <p
+          className="mt-0.5 truncate pl-5 font-mono text-hint text-muted-foreground"
+          title={socket.interface}
+        >
+          {socket.interface}
+        </p>
+      )}
+    </div>
   )
 }

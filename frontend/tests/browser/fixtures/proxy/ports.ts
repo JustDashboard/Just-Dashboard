@@ -3,6 +3,7 @@ import { json, type ProxyRoutes } from "./shared"
 export const ports = [
   {
     protocol: "tcp",
+    family: "ipv4",
     address: "0.0.0.0",
     port: 443,
     pid: 812,
@@ -11,10 +12,12 @@ export const ports = [
     user: "root",
     scope: "all",
     reach: "all",
+    network: "all",
     exposed: true,
   },
   {
     protocol: "tcp",
+    family: "ipv4",
     address: "127.0.0.1",
     port: 3000,
     pid: 1400,
@@ -23,10 +26,12 @@ export const ports = [
     user: "app",
     scope: "loopback",
     reach: "loopback",
+    network: "loopback",
     exposed: false,
   },
   {
     protocol: "tcp",
+    family: "ipv4",
     address: "0.0.0.0",
     port: 5432,
     pid: 900,
@@ -35,18 +40,22 @@ export const ports = [
     user: "postgres",
     scope: "all",
     reach: "all",
+    network: "all",
     exposed: true,
   },
 ]
 
 /**
  * Sockets as a real host lists them: sshd on every interface in both
- * families, caddy on the tailnet address, the DHCP client on the public
- * address, Redis on a public address of its own, and two on loopback.
+ * families, caddy on the tailnet's IPv4 and IPv6 addresses, the DHCP client
+ * on the public address, Redis on a public address of its own, a metrics
+ * exporter on Docker's bridge, and two on loopback — nine sockets, seven
+ * services.
  */
 export const hostPorts = [
   {
     protocol: "tcp",
+    family: "ipv4",
     address: "0.0.0.0",
     port: 22,
     pid: 2450808,
@@ -55,10 +64,12 @@ export const hostPorts = [
     user: "root",
     scope: "all",
     reach: "all",
+    network: "all",
     exposed: true,
   },
   {
     protocol: "tcp",
+    family: "ipv6",
     address: "::",
     port: 22,
     pid: 2450808,
@@ -67,10 +78,12 @@ export const hostPorts = [
     user: "root",
     scope: "all",
     reach: "all",
+    network: "all",
     exposed: true,
   },
   {
     protocol: "udp",
+    family: "ipv4",
     address: "127.0.0.53",
     port: 53,
     pid: 4412,
@@ -79,10 +92,12 @@ export const hostPorts = [
     user: "systemd-resolve",
     scope: "loopback",
     reach: "loopback",
+    network: "loopback",
     exposed: false,
   },
   {
     protocol: "udp",
+    family: "ipv4",
     address: "57.131.21.87",
     port: 68,
     pid: 998,
@@ -91,10 +106,13 @@ export const hostPorts = [
     user: "systemd-network",
     scope: "interface",
     reach: "public",
+    network: "public",
+    interface: "ens3",
     exposed: true,
   },
   {
     protocol: "tcp",
+    family: "ipv4",
     address: "127.0.0.1",
     port: 5432,
     pid: 3100,
@@ -103,10 +121,12 @@ export const hostPorts = [
     user: "postgres",
     scope: "loopback",
     reach: "loopback",
+    network: "loopback",
     exposed: false,
   },
   {
     protocol: "tcp",
+    family: "ipv4",
     address: "203.0.113.5",
     port: 6379,
     pid: 3200,
@@ -115,10 +135,13 @@ export const hostPorts = [
     user: "redis",
     scope: "interface",
     reach: "public",
+    network: "public",
+    interface: "ens3",
     exposed: true,
   },
   {
     protocol: "tcp",
+    family: "ipv4",
     address: "100.110.34.31",
     port: 8443,
     pid: 2066,
@@ -127,6 +150,38 @@ export const hostPorts = [
     user: "caddy",
     scope: "interface",
     reach: "network",
+    network: "tailnet",
+    interface: "tailscale0",
+    exposed: true,
+  },
+  {
+    protocol: "tcp",
+    family: "ipv6",
+    address: "fd7a:115c:a1e0::9e37:2220",
+    port: 8443,
+    pid: 2066,
+    process: "caddy",
+    cmdline: "/usr/bin/caddy run --config /etc/caddy/Caddyfile",
+    user: "caddy",
+    scope: "interface",
+    reach: "network",
+    network: "tailnet",
+    interface: "tailscale0",
+    exposed: true,
+  },
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "10.0.0.1",
+    port: 9100,
+    pid: 5120,
+    process: "node_exporter",
+    cmdline: "/usr/bin/node_exporter --web.listen-address=10.0.0.1:9100",
+    user: "prometheus",
+    scope: "interface",
+    reach: "host",
+    network: "docker",
+    interface: "docker0",
     exposed: true,
   },
 ]
@@ -140,6 +195,7 @@ export const hostPorts = [
 export const bridgedDatabases = [
   {
     protocol: "tcp",
+    family: "ipv4",
     address: "0.0.0.0",
     port: 5432,
     pid: 3100,
@@ -148,10 +204,12 @@ export const bridgedDatabases = [
     user: "postgres",
     scope: "all",
     reach: "all",
+    network: "all",
     exposed: true,
   },
   {
     protocol: "tcp",
+    family: "ipv6",
     address: "::",
     port: 5432,
     pid: 3100,
@@ -160,10 +218,12 @@ export const bridgedDatabases = [
     user: "postgres",
     scope: "all",
     reach: "all",
+    network: "all",
     exposed: true,
   },
   {
     protocol: "tcp",
+    family: "ipv4",
     address: "10.0.0.1",
     port: 6379,
     pid: 3200,
@@ -172,10 +232,13 @@ export const bridgedDatabases = [
     user: "redis",
     scope: "interface",
     reach: "host",
+    network: "docker",
+    interface: "docker0",
     exposed: true,
   },
   {
     protocol: "tcp",
+    family: "ipv4",
     address: "10.0.2.1",
     port: 6379,
     pid: 3200,
@@ -184,10 +247,13 @@ export const bridgedDatabases = [
     user: "redis",
     scope: "interface",
     reach: "host",
+    network: "docker",
+    interface: "br-b05f8e098ad7",
     exposed: true,
   },
   {
     protocol: "tcp",
+    family: "ipv6",
     address: "fe80::b482:4dff:fe92:4281",
     port: 27017,
     pid: 3300,
@@ -196,6 +262,47 @@ export const bridgedDatabases = [
     user: "mongodb",
     scope: "interface",
     reach: "host",
+    network: "docker",
+    interface: "docker0",
+    exposed: true,
+  },
+]
+
+/**
+ * The longest reach a row can read, on a cloud host's private uplink: the
+ * Docker API on a private address a provider may map, and Elasticsearch on a
+ * VPN — for the phone width, where the label must not push the page wider.
+ */
+export const privateUplink = [
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "172.31.5.9",
+    port: 2375,
+    pid: 700,
+    process: "dockerd",
+    cmdline: "/usr/bin/dockerd -H tcp://172.31.5.9:2375",
+    user: "root",
+    scope: "interface",
+    reach: "network",
+    network: "private",
+    interface: "enp0s31f6",
+    exposed: true,
+  },
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "10.8.0.1",
+    port: 9200,
+    pid: 710,
+    process: "java",
+    cmdline:
+      "/usr/share/elasticsearch/jdk/bin/java -Xms1g -Xmx1g org.elasticsearch.bootstrap.Elasticsearch",
+    user: "elasticsearch",
+    scope: "interface",
+    reach: "network",
+    network: "vpn",
+    interface: "wg0",
     exposed: true,
   },
 ]

@@ -1,6 +1,6 @@
 import type { Listener } from "@/lib/types"
 import { type ProxyFinding } from "@/components/proxy/findings/shared"
-import { dangerousPorts, type DangerousPort } from "@/components/proxy/ports"
+import { dangerousPorts, reachWords, type DangerousPort } from "@/components/proxy/ports"
 
 export type PortFindingInput = { ports?: Listener[] }
 
@@ -8,7 +8,9 @@ export type PortFindingInput = { ports?: Listener[] }
  * A database or control port answering off this machine — on every
  * interface, or on one address, which reaches as far as that address does.
  * Counted per port, not per socket: a database bound to two addresses, or to
- * 0.0.0.0 and ::, is one database.
+ * 0.0.0.0 and ::, is one database. Levelled as the security posture levels
+ * the same sockets: critical where the internet can reach one, a warning
+ * where only a tailnet, a LAN or a bridge can.
  */
 export function portFindings({ ports }: PortFindingInput): ProxyFinding[] {
   const out: ProxyFinding[] = []
@@ -18,7 +20,7 @@ export function portFindings({ ports }: PortFindingInput): ProxyFinding[] {
     const everywhere = dangerous.every(onEveryInterface)
     out.push({
       id: "ports.dangerous",
-      level: "warning",
+      level: dangerous.some((d) => d.internet) ? "critical" : "warning",
       title:
         dangerous.length === 1
           ? `${dangerous[0].service} answers on ${where(dangerous[0])}`
@@ -26,7 +28,7 @@ export function portFindings({ ports }: PortFindingInput): ProxyFinding[] {
       detail: dangerous
         .map(
           (d) =>
-            `${d.port}/${d.protocol} ${d.sockets[0].process || "unknown"}${onEveryInterface(d) ? "" : ` on ${d.sockets.map((l) => l.address).join(", ")}`}`,
+            `${d.port}/${d.protocol} ${d.sockets[0].process || "unknown"}${onEveryInterface(d) ? "" : ` on ${placed(d.sockets)}`}`,
         )
         .join(", "),
       // A socket already on one address is not fixed by binding it to "a
@@ -50,4 +52,20 @@ function onEveryInterface(port: DangerousPort): boolean {
 function where(port: DangerousPort): string {
   if (onEveryInterface(port)) return "every interface"
   return port.sockets.length === 1 ? port.sockets[0].address : `${port.sockets.length} addresses`
+}
+
+/**
+ * Each address with the network it is on, one network named once: a Redis on
+ * the tailnet's two addresses is "100.110.34.31 and fd7a:… (Tailnet only ·
+ * tailscale0)".
+ */
+function placed(sockets: Listener[]): string {
+  const byNetwork = new Map<string, string[]>()
+  for (const socket of sockets) {
+    const words = reachWords(socket)
+    byNetwork.set(words, [...(byNetwork.get(words) ?? []), socket.address])
+  }
+  return [...byNetwork]
+    .map(([words, addresses]) => `${addresses.join(" and ")} (${words})`)
+    .join(", ")
 }

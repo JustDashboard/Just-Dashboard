@@ -23,6 +23,7 @@ import { certificateProduct, siteProduct } from "@/components/proxy/marks"
 import { RoutePath } from "@/components/proxy/route-path"
 import { ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
 import { foldProxyFindings } from "@/components/proxy/attention"
+import { foldDualStack } from "@/components/proxy/ports"
 
 /**
  * Readings first, then the engine and its commands. Routes own the wide column;
@@ -55,7 +56,10 @@ export default function ProxyOverviewPage() {
   const hosts = vhosts.data ?? []
   const onTls = hosts.filter((v) => v.tls).length
   const disabled = hosts.filter((v) => v.kind === "nginx" && !v.enabled && v.enabledPath).length
-  const exposed = useMemo(() => (ports.data ?? []).filter((l) => l.exposed), [ports.data])
+  const exposed = useMemo(
+    () => foldDualStack(ports.data ?? []).filter((l) => l.exposed),
+    [ports.data],
+  )
   const badCerts = useMemo(
     () => (certs.data ?? []).filter((c) => c.expired || c.expiring || c.error),
     [certs.data],
@@ -204,7 +208,7 @@ export default function ProxyOverviewPage() {
             hint={
               ports.data
                 ? exposed.length
-                  ? `of ${ports.data.length} listening, off the machine`
+                  ? `of ${foldDualStack(ports.data).length} listening, off the machine`
                   : "everything on loopback"
                 : undefined
             }

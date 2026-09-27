@@ -281,10 +281,16 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   loopback. It used to mean "bound to a wildcard", which drew caddy on the tailnet address as loopback and
   let a database on a public IP raise nothing in the posture or the attention list. `Listener.Reach` is
   netsec's grade of the address (`loopback`, `host` for a bridge, `network`, `public`, `all`, see
-  observability-security.md); it needs the interfaces, so `GET /ports` fills it and `ListListeners`
-  leaves it empty. The ports page colours a socket by it, so it cannot call critical what the posture
-  calls a warning. A UDP socket on port 0 is not listed, and `GET /ports` gives the walk ten seconds
-  before a retryable 504, which the page offers to try again.
+  observability-security.md), and `Listener.Network` and `Listener.Interface` name what it is made of
+  (`tailnet` on `tailscale0`, `docker` on `docker0` or a `br-<network id>`, `public` on `ens3`, `vpn`,
+  `private`, another `bridge`, `link-local`, `loopback`, `all`); all three come from one
+  `HostNetwork.Place`, which needs the interfaces, so `GET /ports` fills them and `ListListeners` leaves
+  them empty. The ports page colours and words a socket by them ("Tailnet only · tailscale0"), so it
+  cannot call critical what the posture calls a warning. `Listener.Family` (`ipv4`/`ipv6`) is the kernel
+  table the socket is in; the page folds a service's two families on one network into one row and one
+  count, and the overview's Exposed ports tile counts the same folded rows. A UDP socket on port 0 is not
+  listed, and `GET /ports` gives the walk ten seconds before a retryable 504, which the page offers to
+  try again.
   `TestListListenersNamesTheDaemonNotInitOnThisHost` checks the owner on the real host and runs only as
   root; it reads `/proc` and changes nothing.
 - **Site builder** (`sites.go`, `sites_render.go`, `sites_parse.go`, `sites_apply.go`). `SiteSpec` is our

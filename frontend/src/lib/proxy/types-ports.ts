@@ -13,8 +13,20 @@ export type ListenerScope = "loopback" | "interface" | "all"
  */
 export type ListenerReach = "loopback" | "host" | "network" | "public" | "all"
 
+/**
+ * What a reach is made of, as the posture names it: `private` is a LAN or a
+ * cloud's private address on the uplink (which a provider may map a public
+ * address onto), `docker` Docker's own bridge (docker0, br-<network id>),
+ * `bridge` any other bridge or veth only this host's guests are on, and
+ * `link-local` a link-local address on a link to other machines.
+ */
+export type ListenerNetwork =
+  "loopback" | "all" | "public" | "tailnet" | "vpn" | "private" | "docker" | "bridge" | "link-local"
+
 export type Listener = {
   protocol: string
+  /** The socket's family: a service on 0.0.0.0 and :: is one of each. */
+  family: "ipv4" | "ipv6"
   address: string
   port: number
   pid: number
@@ -23,6 +35,9 @@ export type Listener = {
   user?: string
   scope: ListenerScope
   reach: ListenerReach
+  network: ListenerNetwork
+  /** The device holding the address; absent for a wildcard or loopback bind. */
+  interface?: string
   /** Every scope but loopback: reachable from off this machine. */
   exposed: boolean
 }

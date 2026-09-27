@@ -60,6 +60,45 @@ func (r Reach) rank() int {
 // InternetFacing is a reach the whole internet shares.
 func (r Reach) InternetFacing() bool { return r.rank() >= ReachPublic.rank() }
 
+// Network is the kind of network a bind address is on: what a reach is made
+// of, in the words an operator knows it by. Reach says "network"; this says
+// whether that is the tailnet, a VPN or the LAN, and "host" whether it is
+// Docker's bridge or libvirt's.
+type Network string
+
+const (
+	NetworkLoopback Network = "loopback"
+	// NetworkAll is 0.0.0.0 or ::.
+	NetworkAll    Network = "all"
+	NetworkPublic Network = "public"
+	// NetworkTailnet is an address in Tailscale's ranges, on a tunnel or on
+	// no interface the host listed.
+	NetworkTailnet Network = "tailnet"
+	// NetworkVPN is any other tunnel: WireGuard, OpenVPN, ZeroTier.
+	NetworkVPN Network = "vpn"
+	// NetworkPrivate is a private address on the uplink or a LAN, or on no
+	// interface the host listed: the one a provider may map a public
+	// address onto.
+	NetworkPrivate Network = "private"
+	// NetworkDocker is Docker's own bridge: docker0, or br-<network id>.
+	NetworkDocker Network = "docker"
+	// NetworkBridge is any other bridge, or a veth, that only this host's
+	// containers and virtual machines are on.
+	NetworkBridge Network = "bridge"
+	// NetworkLinkLocal is a link-local address on a link to other machines.
+	NetworkLinkLocal Network = "link-local"
+)
+
+// Placement is where a bind address sits: how far it reaches, the kind of
+// network that is, and the interface holding the address.
+type Placement struct {
+	Reach   Reach
+	Network Network
+	// Interface is empty for a wildcard or loopback bind, and for an address
+	// on no interface the host listed.
+	Interface string
+}
+
 // HostNetwork is which interface holds each of the host's addresses and
 // which interfaces carry a default route: what it takes to tell a bridge
 // address from an uplink one. The zero value knows nothing, and every private
@@ -83,6 +122,13 @@ type HostAddress struct {
 // Reach grades a bind address.
 func (n HostNetwork) Reach(address string) Reach { return n.reachOf(address).class }
 
+// Place grades a bind address and names its network and interface — the
+// judgement the posture levels a finding by, in the ports page's terms.
+func (n HostNetwork) Place(address string) Placement {
+	r := n.reachOf(address)
+	return Placement{Reach: r.class, Network: r.network, Interface: r.iface}
+}
+
 func (n HostNetwork) interfaceOf(ip net.IP) (HostAddress, bool) {
 	for _, a := range n.Addresses {
 		if a.IP.Equal(ip) {
@@ -93,7 +139,10 @@ func (n HostNetwork) interfaceOf(ip net.IP) (HostAddress, bool) {
 }
 
 type bindReach struct {
-	class Reach
+	class   Reach
+	network Network
+	// iface holds the address, when the host listed it.
+	iface string
 	// where finishes "listening on …".
 	where string
 	// who names what can connect, for a reach short of the internet.
@@ -107,37 +156,53 @@ func (n HostNetwork) reachOf(address string) bindReach {
 	ip := net.ParseIP(address)
 	switch {
 	case address == "" || address == "*" || ip != nil && ip.IsUnspecified():
-		return bindReach{class: ReachAll, where: "every interface"}
-	case ip == nil || isGloballyRoutable(address):
-		return bindReach{class: ReachPublic, where: "a public address"}
+		return bindReach{class: ReachAll, network: NetworkAll, where: "every interface"}
+	case ip == nil:
+		return bindReach{class: ReachPublic, network: NetworkPublic, where: "a public address"}
 	case ip.IsLoopback():
-		return bindReach{class: ReachLoopback, where: "loopback", who: "this machine only"}
+		return bindReach{class: ReachLoopback, network: NetworkLoopback, where: "loopback", who: "this machine only"}
 	}
 	iface, known := n.interfaceOf(ip)
+	if isGloballyRoutable(address) {
+		return bindReach{class: ReachPublic, network: NetworkPublic, iface: iface.Interface, where: "a public address"}
+	}
 	hostOnly := known && !iface.DefaultRoute && (iface.Kind == "bridge" || iface.Kind == "virtual")
 	switch {
-	case ip.IsLinkLocalUnicast() && hostOnly:
-		return bindReach{class: ReachHost, where: "a link-local address",
-			who: "the containers and virtual machines on " + iface.Interface}
+	case hostOnly:
+		where := "a bridge address"
+		if ip.IsLinkLocalUnicast() {
+			where = "a link-local address"
+		}
+		return bindReach{class: ReachHost, network: guestNetwork(iface.Interface), iface: iface.Interface,
+			where: where, who: "the containers and virtual machines on " + iface.Interface}
 	case ip.IsLinkLocalUnicast():
 		// Link-local is never routed, so no provider can forward to it.
-		return bindReach{class: ReachNetwork, where: "a link-local address",
-			who: "the machines on the same link"}
-	case hostOnly:
-		return bindReach{class: ReachHost, where: "a bridge address",
-			who: "the containers and virtual machines on " + iface.Interface}
+		return bindReach{class: ReachNetwork, network: NetworkLinkLocal, iface: iface.Interface,
+			where: "a link-local address", who: "the machines on the same link"}
 	case known && !iface.DefaultRoute && iface.Kind == "tunnel":
 		if isTailnet(ip) || strings.HasPrefix(iface.Interface, "tailscale") {
-			return bindReach{class: ReachNetwork, where: "a tailnet address", who: "every device on the tailnet"}
+			return bindReach{class: ReachNetwork, network: NetworkTailnet, iface: iface.Interface,
+				where: "a tailnet address", who: "every device on the tailnet"}
 		}
-		return bindReach{class: ReachNetwork, where: "a VPN address", who: "the peers on " + iface.Interface}
+		return bindReach{class: ReachNetwork, network: NetworkVPN, iface: iface.Interface,
+			where: "a VPN address", who: "the peers on " + iface.Interface}
 	case !known && isTailnet(ip):
-		return bindReach{class: ReachNetwork, where: "a tailnet address", who: "every device on the tailnet"}
+		return bindReach{class: ReachNetwork, network: NetworkTailnet, where: "a tailnet address", who: "every device on the tailnet"}
 	}
 	// A cloud instance sees only its private address on the uplink, and the
 	// provider forwards the public one onto it.
-	return bindReach{class: ReachNetwork, where: "a private address", forwarded: true,
+	return bindReach{class: ReachNetwork, network: NetworkPrivate, iface: iface.Interface,
+		where: "a private address", forwarded: true,
 		who: "the machines on that network, and the internet if the provider maps a public address onto it"}
+}
+
+// guestNetwork names a bridge only this host's guests are on: Docker's by the
+// names Docker gives its own, any other — libvirt's, LXD's, a veth — plainly.
+func guestNetwork(name string) Network {
+	if strings.HasPrefix(name, "docker") || isDockerNetworkBridge(name) {
+		return NetworkDocker
+	}
+	return NetworkBridge
 }
 
 func isTailnet(ip net.IP) bool {

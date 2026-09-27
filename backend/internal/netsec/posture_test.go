@@ -330,12 +330,15 @@ func TestAssessReportsADatabaseBoundTwiceOnceAtItsWidest(t *testing.T) {
 // a libvirt bridge and a WireGuard tunnel of the kind other hosts have.
 var thisHost = HostNetwork{Addresses: []HostAddress{
 	{IP: mustIP("57.131.21.87"), Interface: "ens3", Kind: "physical", DefaultRoute: true},
+	{IP: mustIP("2001:41d0:2005:100::13"), Interface: "ens3", Kind: "physical", DefaultRoute: true},
 	{IP: mustIP("fe80::f816:3eff:fee3:1a48"), Interface: "ens3", Kind: "physical", DefaultRoute: true},
 	{IP: mustIP("10.0.0.1"), Interface: "docker0", Kind: "bridge"},
 	{IP: mustIP("fe80::b482:4dff:fe92:4281"), Interface: "docker0", Kind: "bridge"},
 	{IP: mustIP("10.0.2.1"), Interface: "br-b05f8e098ad7", Kind: "bridge"},
 	{IP: mustIP("fe80::4047:75ff:fe8e:bb04"), Interface: "vethba736b3", Kind: "virtual"},
 	{IP: mustIP("100.110.34.31"), Interface: "tailscale0", Kind: "tunnel"},
+	{IP: mustIP("fd7a:115c:a1e0::9e37:2220"), Interface: "tailscale0", Kind: "tunnel"},
+	{IP: mustIP("fe80::1890:7917:9cdb:1fa5"), Interface: "tailscale0", Kind: "tunnel"},
 	{IP: mustIP("192.168.122.1"), Interface: "virbr0", Kind: "bridge"},
 	{IP: mustIP("10.8.0.1"), Interface: "wg0", Kind: "tunnel"},
 	// A cloud instance's private address on its uplink, and an ISP's CGNAT
@@ -544,6 +547,85 @@ func TestReachGradesABindForThePortsPage(t *testing.T) {
 	// Knowing no interfaces, a private address is judged as the uplink's.
 	if got := (HostNetwork{}).Reach("10.0.0.1"); got != ReachNetwork {
 		t.Errorf("Reach(10.0.0.1) on an unknown network = %q, want network", got)
+	}
+}
+
+// Each bind names the network it is on and the interface holding it, so the
+// ports page can say "Tailnet only · tailscale0" where the grade alone says
+// "network". The addresses are this host's: its public uplink ens3 in both
+// families, the tailnet in both, docker0 and a compose network's bridge.
+func TestPlaceNamesTheNetworkAndItsInterface(t *testing.T) {
+	for _, c := range []struct {
+		address string
+		want    Placement
+	}{
+		{"0.0.0.0", Placement{ReachAll, NetworkAll, ""}},
+		{"::", Placement{ReachAll, NetworkAll, ""}},
+		{"127.0.0.53", Placement{ReachLoopback, NetworkLoopback, ""}},
+		{"::1", Placement{ReachLoopback, NetworkLoopback, ""}},
+		{"57.131.21.87", Placement{ReachPublic, NetworkPublic, "ens3"}},
+		{"2001:41d0:2005:100::13", Placement{ReachPublic, NetworkPublic, "ens3"}},
+		{"100.110.34.31", Placement{ReachNetwork, NetworkTailnet, "tailscale0"}},
+		{"fd7a:115c:a1e0::9e37:2220", Placement{ReachNetwork, NetworkTailnet, "tailscale0"}},
+		{"10.8.0.1", Placement{ReachNetwork, NetworkVPN, "wg0"}},
+		{"10.0.0.1", Placement{ReachHost, NetworkDocker, "docker0"}},
+		{"fe80::b482:4dff:fe92:4281", Placement{ReachHost, NetworkDocker, "docker0"}},
+		{"10.0.2.1", Placement{ReachHost, NetworkDocker, "br-b05f8e098ad7"}},
+		{"192.168.122.1", Placement{ReachHost, NetworkBridge, "virbr0"}},
+		{"fe80::4047:75ff:fe8e:bb04", Placement{ReachHost, NetworkBridge, "vethba736b3"}},
+		{"fe80::f816:3eff:fee3:1a48", Placement{ReachNetwork, NetworkLinkLocal, "ens3"}},
+		{"fe80::1890:7917:9cdb:1fa5", Placement{ReachNetwork, NetworkLinkLocal, "tailscale0"}},
+		{"172.31.5.9", Placement{ReachNetwork, NetworkPrivate, "eth0"}},
+		// A second NIC on an ISP's CGNAT, which shares Tailscale's range, is
+		// that ISP's network and not the tailnet.
+		{"100.72.0.5", Placement{ReachNetwork, NetworkPrivate, "eth1"}},
+		// A bridge that carries the default route is the uplink.
+		{"192.168.1.20", Placement{ReachNetwork, NetworkPrivate, "br-lan"}},
+		// On no interface the host listed: graded by the address alone.
+		{"10.99.0.1", Placement{ReachNetwork, NetworkPrivate, ""}},
+		{"203.0.113.5", Placement{ReachPublic, NetworkPublic, ""}},
+		{"100.64.1.2", Placement{ReachNetwork, NetworkTailnet, ""}},
+	} {
+		if got := thisHost.Place(c.address); got != c.want {
+			t.Errorf("Place(%s) = %+v, want %+v", c.address, got, c.want)
+		}
+		if got := thisHost.Reach(c.address); got != c.want.Reach {
+			t.Errorf("Reach(%s) = %q, Place says %q", c.address, got, c.want.Reach)
+		}
+	}
+	// Knowing no interfaces — the list could not be read — the address
+	// alone still tells the tailnet from a private network, and names none.
+	for address, want := range map[string]Placement{
+		"100.110.34.31": {ReachNetwork, NetworkTailnet, ""},
+		"10.0.0.1":      {ReachNetwork, NetworkPrivate, ""},
+		"57.131.21.87":  {ReachPublic, NetworkPublic, ""},
+	} {
+		if got := (HostNetwork{}).Place(address); got != want {
+			t.Errorf("Place(%s) on an unknown network = %+v, want %+v", address, got, want)
+		}
+	}
+}
+
+// The posture's finding names the interface a database is bound on, as the
+// ports page does, and levels it by the same placement: a tailnet address is
+// a warning, a public one critical.
+func TestAssessNamesTheInterfaceADatabaseIsBoundOn(t *testing.T) {
+	for _, c := range []struct {
+		address, level, detail string
+	}{
+		{"100.110.34.31", "warning", "TCP/6379 is bound to 100.110.34.31 on tailscale0 by redis-server"},
+		{"57.131.21.87", "critical", "TCP/6379 is bound to 57.131.21.87 on ens3 by redis-server"},
+		{"10.0.2.1", "warning", "TCP/6379 is bound to 10.0.2.1 on br-b05f8e098ad7 by redis-server"},
+		{"0.0.0.0", "critical", "TCP/6379 is bound to every interface by redis-server"},
+		{"10.99.0.1", "warning", "TCP/6379 is bound to 10.99.0.1 by redis-server"},
+	} {
+		p := Assess(AssessInput{Network: thisHost, Listeners: []ExposedPort{
+			{Port: 6379, Protocol: "tcp", Address: c.address, Process: "redis-server", Exposed: true},
+		}})
+		f, ok := findingByID(p, "ports.exposed.tcp.6379")
+		if !ok || f.Level != c.level || f.Detail != c.detail {
+			t.Errorf("Redis on %s = %+v (found %v), want %s %q", c.address, f, ok, c.level, c.detail)
+		}
 	}
 }
 

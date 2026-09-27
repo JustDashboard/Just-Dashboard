@@ -70,7 +70,9 @@ type ExposedPort struct {
 	Address  string
 	Process  string
 	// Exposed is any bind but loopback. How far it reaches — every
-	// interface, a public address, a tailnet — is read from Address.
+	// interface, a public address, a tailnet — is read from Address against
+	// AssessInput.Network, by the same HostNetwork.Place the ports page's
+	// listing is graded with, so the two cannot disagree.
 	Exposed bool
 }
 
@@ -492,6 +494,9 @@ func assessPorts(in AssessInput) []SecurityFinding {
 		e := widest[id]
 		l, port := e.listener, strconv.FormatUint(uint64(e.listener.Port), 10)
 		detail := fmt.Sprintf("%s/%d is bound to %s", strings.ToUpper(l.Protocol), l.Port, addressLabel(l.Address))
+		if e.reach.iface != "" {
+			detail += " on " + e.reach.iface
+		}
 		if l.Process != "" {
 			detail += " by " + l.Process
 		}

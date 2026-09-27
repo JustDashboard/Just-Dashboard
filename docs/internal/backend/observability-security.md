@@ -113,8 +113,12 @@ position sell a score out of a hundred, which is a number to optimise rather tha
   level keeps the catalogue's `Danger` in the advice. A preset marked `InternetOnly` (DNS as an open
   resolver, RDP, VNC — their danger is strangers, their advice a VPN) is not a finding at a reach the
   internet cannot share, so libvirt's dnsmasq on `virbr0` raises nothing. A port bound to several
-  addresses is one finding at its widest, as its ID is per port. `GET /ports` returns the same grade as
-  `Listener.Reach`.
+  addresses is one finding at its widest, as its ID is per port, and its detail names the interface the
+  address is on ("TCP/6379 is bound to 100.110.34.31 on tailscale0"). `HostNetwork.Place` returns the
+  grade with the network it is made of — `tailnet`, `vpn`, `private`, `docker` (Docker's `docker0` or
+  `br-<network id>`), another `bridge`, `link-local` — and the interface, and `GET /ports` returns all
+  three as `Listener.Reach`, `Network` and `Interface`, so the ports page words a socket as the posture
+  judges it.
 - **A check that could not run is not a pass.** `Posture.Skipped` says which is which, because a zero and
   an unanswerable question look identical: `SecurityFiltering` is false on Alpine/Arch (no advisory
   data), `LoginRecordRead` false wherever `last`/`lastb` are missing (util-linux-extra, absent from

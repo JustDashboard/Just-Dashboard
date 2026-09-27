@@ -97,22 +97,25 @@ func TestBindScopeTellsLoopbackFromOneAddressFromEveryInterface(t *testing.T) {
 
 func TestListenersFromKeepsWhatAcceptsAndSaysHowFarItReaches(t *testing.T) {
 	sockets := []socketRow{
-		{proto: "tcp", address: "0.0.0.0", port: 22, state: "0A", inode: 10},
-		{proto: "tcp", address: "100.110.34.31", port: 8443, state: "0A", inode: 11},
-		{proto: "tcp", address: "127.0.0.1", port: 5432, state: "0A", inode: 12},
+		{proto: "tcp", family: "ipv4", address: "0.0.0.0", port: 22, state: "0A", inode: 10},
+		// sshd's other family: the same service, a socket of its own.
+		{proto: "tcp", family: "ipv6", address: "::", port: 22, state: "0A", inode: 19},
+		{proto: "tcp", family: "ipv4", address: "100.110.34.31", port: 8443, state: "0A", inode: 11},
+		{proto: "tcp", family: "ipv4", address: "127.0.0.1", port: 5432, state: "0A", inode: 12},
 		// Two workers with SO_REUSEPORT: one endpoint, one row.
-		{proto: "tcp", address: "0.0.0.0", port: 80, state: "0A", inode: 13},
-		{proto: "tcp", address: "0.0.0.0", port: 80, state: "0A", inode: 14},
+		{proto: "tcp", family: "ipv4", address: "0.0.0.0", port: 80, state: "0A", inode: 13},
+		{proto: "tcp", family: "ipv4", address: "0.0.0.0", port: 80, state: "0A", inode: 14},
 		// An established connection is not a listener.
-		{proto: "tcp", address: "10.0.0.1", port: 22, remotePort: 51000, state: "01", inode: 15},
-		{proto: "udp", address: "57.131.21.87", port: 68, inode: 16},
+		{proto: "tcp", family: "ipv4", address: "10.0.0.1", port: 22, remotePort: 51000, state: "01", inode: 15},
+		{proto: "udp", family: "ipv4", address: "57.131.21.87", port: 68, inode: 16},
 		// A connected UDP socket is a DNS lookup, not a service.
-		{proto: "udp", address: "10.0.0.1", port: 40000, remotePort: 53, state: "01", inode: 17},
+		{proto: "udp", family: "ipv4", address: "10.0.0.1", port: 40000, remotePort: 53, state: "01", inode: 17},
 		// Created and never bound: it listens on nothing.
-		{proto: "udp", address: "0.0.0.0", port: 0, inode: 18},
+		{proto: "udp", family: "ipv4", address: "0.0.0.0", port: 0, inode: 18},
 	}
 	holders := map[uint64][]int32{
 		10: {1, 2450808},
+		19: {1, 2450808},
 		11: {2066},
 		13: {900},
 		14: {901},
@@ -121,11 +124,12 @@ func TestListenersFromKeepsWhatAcceptsAndSaysHowFarItReaches(t *testing.T) {
 	// The two port-80 workers are siblings forked by 900.
 	got := listenersFrom(sockets, holders, map[int32]int32{2450808: 1, 900: 1, 901: 900})
 	want := []Listener{
-		{Protocol: "tcp", Address: "0.0.0.0", Port: 22, PID: 2450808, Scope: ScopeAll, Exposed: true},
-		{Protocol: "udp", Address: "57.131.21.87", Port: 68, PID: 998, Scope: ScopeInterface, Exposed: true},
-		{Protocol: "tcp", Address: "0.0.0.0", Port: 80, PID: 900, Scope: ScopeAll, Exposed: true},
-		{Protocol: "tcp", Address: "127.0.0.1", Port: 5432, PID: 0, Scope: ScopeLoopback, Exposed: false},
-		{Protocol: "tcp", Address: "100.110.34.31", Port: 8443, PID: 2066, Scope: ScopeInterface, Exposed: true},
+		{Protocol: "tcp", Family: "ipv4", Address: "0.0.0.0", Port: 22, PID: 2450808, Scope: ScopeAll, Exposed: true},
+		{Protocol: "tcp", Family: "ipv6", Address: "::", Port: 22, PID: 2450808, Scope: ScopeAll, Exposed: true},
+		{Protocol: "udp", Family: "ipv4", Address: "57.131.21.87", Port: 68, PID: 998, Scope: ScopeInterface, Exposed: true},
+		{Protocol: "tcp", Family: "ipv4", Address: "0.0.0.0", Port: 80, PID: 900, Scope: ScopeAll, Exposed: true},
+		{Protocol: "tcp", Family: "ipv4", Address: "127.0.0.1", Port: 5432, PID: 0, Scope: ScopeLoopback, Exposed: false},
+		{Protocol: "tcp", Family: "ipv4", Address: "100.110.34.31", Port: 8443, PID: 2066, Scope: ScopeInterface, Exposed: true},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d listeners, want %d: %+v", len(got), len(want), got)
@@ -133,6 +137,32 @@ func TestListenersFromKeepsWhatAcceptsAndSaysHowFarItReaches(t *testing.T) {
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("listener %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// Each socket's family is the kernel table it is in: tcp and udp are IPv4,
+// tcp6 and udp6 IPv6. The page folds a service's two into one row by it.
+func TestListListenersReadsEachSocketsFamilyFromItsTable(t *testing.T) {
+	root := fakeProc(t, map[string]string{"tcp": hostTCP, "tcp6": hostTCP6, "udp": hostUDP}, nil)
+	t.Setenv("HOST_PROC", root)
+	listeners, err := ListListeners(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, l := range listeners {
+		got[endpointKey(l.Protocol, l.Address, l.Port)] = l.Family
+	}
+	for key, family := range map[string]string{
+		"tcp 0.0.0.0:22":                        "ipv4",
+		"tcp [::]:22":                           "ipv6",
+		"tcp 100.110.34.31:8443":                "ipv4",
+		"tcp [fd7a:115c:a1e0::9e37:2220]:52463": "ipv6",
+		"udp 57.131.21.87:68":                   "ipv4",
+	} {
+		if got[key] != family {
+			t.Errorf("%s family = %q, want %q", key, got[key], family)
 		}
 	}
 }

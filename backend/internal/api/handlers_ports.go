@@ -36,10 +36,14 @@ func (s *Server) handlePortList(w http.ResponseWriter, r *http.Request) error {
 		return httpx.Internal(err)
 	}
 	// Graded by the posture's own judgement, so the page cannot call a
-	// database critical that the posture calls a warning.
+	// database critical that the posture calls a warning, and named by it:
+	// the tailnet on tailscale0, Docker's bridge docker0.
 	network := netsec.ReadHostNetwork(ctx)
 	for i := range listeners {
-		listeners[i].Reach = string(network.Reach(listeners[i].Address))
+		place := network.Place(listeners[i].Address)
+		listeners[i].Reach = string(place.Reach)
+		listeners[i].Network = string(place.Network)
+		listeners[i].Interface = place.Interface
 	}
 	httpx.JSON(w, http.StatusOK, listeners)
 	return nil

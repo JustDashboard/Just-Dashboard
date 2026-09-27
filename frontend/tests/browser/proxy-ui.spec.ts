@@ -137,8 +137,8 @@ test("the ports page filters what it lists and names a database on a public addr
   await page.goto("/proxy/ports")
 
   const table = page.getByRole("table")
-  await expect(table.getByText("PostgreSQL exposed")).toBeVisible()
-  await page.getByRole("button", { name: /^Loopback/ }).click()
+  await expect(table.getByText("PostgreSQL · Every interface")).toBeVisible()
+  await page.getByRole("button", { name: /^This server/ }).click()
   await expect(table.getByText("node server.js")).toBeVisible()
   await expect(table.getByText("nginx: master process")).toHaveCount(0)
   await page.getByPlaceholder("Port, process, user or address").fill("5432")

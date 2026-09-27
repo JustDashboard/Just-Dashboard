@@ -20,12 +20,16 @@ import (
 // answers, and it is the first question during an incident.
 type Listener struct {
 	Protocol string `json:"protocol"`
-	Address  string `json:"address"`
-	Port     uint32 `json:"port"`
-	PID      int32  `json:"pid"`
-	Process  string `json:"process"`
-	Cmdline  string `json:"cmdline,omitempty"`
-	User     string `json:"user,omitempty"`
+	// Family is the socket's, ipv4 or ipv6: the kernel table it is in. A
+	// service on 0.0.0.0 and :: is two sockets, one of each, and the page
+	// counts it once.
+	Family  string `json:"family"`
+	Address string `json:"address"`
+	Port    uint32 `json:"port"`
+	PID     int32  `json:"pid"`
+	Process string `json:"process"`
+	Cmdline string `json:"cmdline,omitempty"`
+	User    string `json:"user,omitempty"`
 	// Scope is how far the bind reaches, as far as its address can say.
 	Scope BindScope `json:"scope"`
 	// Exposed is every scope but loopback. A socket on one tailnet or public
@@ -37,6 +41,13 @@ type Listener struct {
 	// needs the host's interfaces and routes. GET /ports fills it; the
 	// listing itself leaves it empty.
 	Reach string `json:"reach,omitempty"`
+	// Network and Interface name what Reach is made of — the tailnet on
+	// tailscale0, Docker's bridge docker0, a public address on ens3 — so a
+	// socket can say where it answers rather than only how far. GET /ports
+	// fills them beside Reach; Interface stays empty for a wildcard or
+	// loopback bind and an address on no interface the host listed.
+	Network   string `json:"network,omitempty"`
+	Interface string `json:"interface,omitempty"`
 }
 
 // BindScope is where a socket can be reached from, judged from the address it
@@ -123,12 +134,12 @@ func ListListeners(ctx context.Context) ([]Listener, error) {
 // listing those turned a page about what the server is accepting on into a
 // page of the machine's own outbound traffic.
 //
-// Sockets sharing a protocol, address and port are one row: with
+// Sockets sharing a protocol, family, address and port are one row: with
 // SO_REUSEPORT each worker holds its own socket on the same endpoint.
 func listenersFrom(sockets []socketRow, holders map[uint64][]int32, parents map[int32]int32) []Listener {
 	type endpoint struct {
-		proto, address string
-		port           uint32
+		proto, family, address string
+		port                   uint32
 	}
 	order := []endpoint{}
 	held := map[endpoint][]int32{}
@@ -136,7 +147,7 @@ func listenersFrom(sockets []socketRow, holders map[uint64][]int32, parents map[
 		if !s.listening() {
 			continue
 		}
-		key := endpoint{s.proto, s.address, s.port}
+		key := endpoint{s.proto, s.family, s.address, s.port}
 		if _, ok := held[key]; !ok {
 			order = append(order, key)
 			held[key] = []int32{}
@@ -148,6 +159,7 @@ func listenersFrom(sockets []socketRow, holders map[uint64][]int32, parents map[
 		scope := bindScope(key.address)
 		out = append(out, Listener{
 			Protocol: key.proto,
+			Family:   key.family,
 			Address:  key.address,
 			Port:     key.port,
 			PID:      ownerOf(held[key], parents),
@@ -169,7 +181,10 @@ func listenersFrom(sockets []socketRow, holders map[uint64][]int32, parents map[
 
 // socketRow is one line of /proc/net/{tcp,tcp6,udp,udp6}.
 type socketRow struct {
-	proto      string
+	proto string
+	// family is the table's: ipv4 for tcp and udp, ipv6 for tcp6 and udp6,
+	// whose v4-mapped addresses read as IPv4 but belong to an IPv6 socket.
+	family     string
 	address    string
 	port       uint32
 	remotePort uint32
@@ -206,8 +221,8 @@ func procRoot() string {
 func readSockets(root string) ([]socketRow, error) {
 	out := []socketRow{}
 	for _, table := range []struct {
-		file, proto string
-	}{{"tcp", "tcp"}, {"tcp6", "tcp"}, {"udp", "udp"}, {"udp6", "udp"}} {
+		file, proto, family string
+	}{{"tcp", "tcp", "ipv4"}, {"tcp6", "tcp", "ipv6"}, {"udp", "udp", "ipv4"}, {"udp6", "udp", "ipv6"}} {
 		content, err := os.ReadFile(filepath.Join(root, "net", table.file))
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) && strings.HasSuffix(table.file, "6") {
@@ -215,7 +230,11 @@ func readSockets(root string) ([]socketRow, error) {
 			}
 			return nil, err
 		}
-		out = append(out, parseSocketTable(content, table.proto)...)
+		rows := parseSocketTable(content, table.proto)
+		for i := range rows {
+			rows[i].family = table.family
+		}
+		out = append(out, rows...)
 	}
 	return out, nil
 }
