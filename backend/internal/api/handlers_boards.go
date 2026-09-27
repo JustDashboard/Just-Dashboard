@@ -144,6 +144,10 @@ func decodeBoardPut(w http.ResponseWriter, r *http.Request, dst any) error {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBoardSceneBytes+(1<<20)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return errBoardTooLarge()
+		}
 		return httpx.BadRequest("malformed board: %v", err)
 	}
 	var trailing any
@@ -153,9 +157,16 @@ func decodeBoardPut(w http.ResponseWriter, r *http.Request, dst any) error {
 	return nil
 }
 
+// The shape error blamed a missing field for a scene that was only too big,
+// which sent the operator looking for a bug instead of at their images.
+func errBoardTooLarge() error {
+	return httpx.Err(http.StatusRequestEntityTooLarge, "board_too_large",
+		"this board is larger than 16 MiB; remove or shrink some images before saving")
+}
+
 func validBoardScene(raw json.RawMessage) bool {
 	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || len(raw) > maxBoardSceneBytes || trimmed[0] != '{' {
+	if len(trimmed) == 0 || trimmed[0] != '{' {
 		return false
 	}
 	var scene struct {
@@ -187,6 +198,9 @@ func (s *Server) handleBoardPut(w http.ResponseWriter, r *http.Request) error {
 	name, err := boardName(req.Name)
 	if err != nil {
 		return err
+	}
+	if len(req.Scene) > maxBoardSceneBytes {
+		return errBoardTooLarge()
 	}
 	if req.Revision < 1 || !validBoardScene(req.Scene) {
 		return httpx.BadRequest("board revision and scene are required; scene must contain elements, appState, and files")
