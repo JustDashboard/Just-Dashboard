@@ -12,6 +12,12 @@ export type ProxyStatus = {
   certbot: boolean
   /** The public Caddy container deployments share, where one owns ports 80 and 443. */
   ingressContainer?: string
+  /**
+   * Whether that ingress exists: `running`, or `provisionable` when none does
+   * and the first deployment that routes a domain would start one — which is
+   * neither Caddy nor a container yet, and names none.
+   */
+  ingressState?: "running" | "provisionable"
 }
 
 /**
@@ -25,6 +31,8 @@ export type ProxyStatus = {
  */
 export type ProxyContextValue = {
   status: ProxyStatus | undefined
+  /** Why the last read of the status failed; a page with no status says so rather than rendering nothing. */
+  error: Error | undefined
   loading: boolean
   hasNginx: boolean
   refresh: () => void
@@ -50,4 +58,15 @@ export function engineUnit(status: ProxyStatus | undefined): string | undefined 
   if (status.nginx) return "nginx.service"
   if (status.caddy && !status.ingressContainer) return "caddy.service"
   return undefined
+}
+
+/**
+ * Which engine the config test and reload act on — the one the overview
+ * draws. A Caddy that is the shared Docker ingress is tested and reloaded
+ * inside its container; the host usually has no caddy of its own, and its
+ * Caddyfile is not what the container serves.
+ */
+export function engineKind(status: ProxyStatus): "nginx" | "caddy" | "caddy-ingress" {
+  if (status.nginx) return "nginx"
+  return status.ingressContainer ? "caddy-ingress" : "caddy"
 }

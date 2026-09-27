@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { DANGEROUS_PORTS, foldProxyFindings } from "./attention"
+import { DANGEROUS_PORTS, findingAction, foldProxyFindings, unreadableSource } from "./attention"
 
 // The fold as it stood before each area's findings moved into findings/:
 // these outputs were taken from that version, and the split must not change
@@ -346,5 +346,90 @@ describe("foldProxyFindings", () => {
   test("the dangerous ports are still exported for the pages that draw them", () => {
     expect(DANGEROUS_PORTS[5432]).toBe("PostgreSQL")
     expect(DANGEROUS_PORTS[443]).toBeUndefined()
+  })
+})
+
+describe("sources the overview could not read", () => {
+  const unreadable = [
+    { source: "sites", message: "could not determine Docker ingress ownership" },
+    { source: "certificates", message: "internal error" },
+    { source: "renewal", message: "certbot certificates timed out" },
+    { source: "streams", message: "Service Unavailable" },
+    { source: "ports", message: "Failed to fetch" },
+  ]
+
+  // With every source failing there is nothing to judge, and the list used
+  // to come up empty — the green "all within limits" about a host it could
+  // not see. Each failure is a finding instead, with its reason.
+  test("each is a finding of its own, so the list is never empty", () => {
+    const findings = foldProxyFindings({ unreadable })
+    expect(findings.map((f) => f.title)).toEqual([
+      "Sites could not be read",
+      "Certificates could not be read",
+      "Certificate renewal could not be read",
+      "Streams could not be read",
+      "Listening ports could not be read",
+    ])
+    expect(findings[0]).toEqual({
+      id: "source.unreadable.sites",
+      level: "warning",
+      title: "Sites could not be read",
+      detail: "could not determine Docker ingress ownership",
+      advice:
+        "Until it can be read, this list cannot show a site that is disabled or serves plain HTTP.",
+      meta: "sites",
+      href: "/proxy/sites",
+    })
+    expect(findings.map(unreadableSource)).toEqual([
+      "sites",
+      "certificates",
+      "renewal",
+      "streams",
+      "ports",
+    ])
+  })
+
+  test("an unreadable source ranks with the warnings the others raise", () => {
+    const findings = foldProxyFindings({
+      ...inputs.oneStreamNotIncluded,
+      unreadable: [{ source: "sites", message: "internal error" }],
+    })
+    expect(findings.map((f) => f.id)).toEqual([
+      "certbot.no-timer",
+      "streams.not-included",
+      "ports.dangerous",
+      "source.unreadable.sites",
+    ])
+    expect(findings.filter((f) => unreadableSource(f)).length).toBe(1)
+  })
+
+  test("nothing failing adds nothing", () => {
+    expect(foldProxyFindings({ ...inputs.healthy, unreadable: [] })).toEqual([])
+  })
+})
+
+describe("finding actions", () => {
+  // The button read `Open ${meta}`: "Open renewal", "Open ports". Every area's
+  // label now has words for where the button leads.
+  test("every finding the fold can raise names where it leads", () => {
+    const labels = Object.fromEntries(
+      foldProxyFindings({
+        ...inputs.everything,
+        unreadable: [
+          { source: "sites", message: "x" },
+          { source: "certificates", message: "x" },
+        ],
+      }).map((f) => [f.meta, findingAction(f)]),
+    )
+    expect(labels).toEqual({
+      certificate: "Open certificates",
+      renewal: "Open certificates",
+      site: "Open site",
+      streams: "Open streams",
+      stream: "Open streams",
+      ports: "Open ports",
+      sites: "Open sites",
+      certificates: "Open certificates",
+    })
   })
 })

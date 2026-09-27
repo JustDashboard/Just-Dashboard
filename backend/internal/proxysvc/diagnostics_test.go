@@ -134,13 +134,16 @@ func TestValidationCarriesTheTestsDiagnostics(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	res := service.Test(context.Background(), KindNginx)
+	res, err := service.Test(context.Background(), KindNginx)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !res.Valid || res.Warnings != 1 || len(res.Diagnostics) != 1 || res.Diagnostics[0].Level != "warn" {
 		t.Fatalf("a duplicate server name should pass with one warning: %+v", res)
 	}
 
 	broken := filepath.Join(root, "conf.d", "b.conf")
-	res, err := service.Validate(context.Background(), KindNginx, broken,
+	res, err = service.Validate(context.Background(), KindNginx, broken,
 		"server {\n    listen 127.0.0.1:18081;\n    frobnicate on;\n}\n")
 	if err != nil {
 		t.Fatal(err)
@@ -178,12 +181,21 @@ func TestValidationPlacesADiagnosticInTheLinkedSiteFile(t *testing.T) {
 // fakeCaddy puts a caddy first on PATH that answers `caddy validate --config
 // <file>` with Caddy 2's own lines, captured from caddy:2-alpine, naming the
 // file it was given: an error for a candidate with an unknown subdirective,
-// otherwise a pass with a formatting warning.
-func fakeCaddy(t *testing.T) {
+// otherwise a pass with a formatting warning. Each file it is given is noted
+// in its directory's "configs" with that file's mode and its directory's, and
+// candidates are copied under a scratch root of the test's own.
+func fakeCaddy(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
+	// t.TempDir honours the umask, which may leave it group-writable.
+	scratch := filepath.Join(t.TempDir(), "scratch")
+	if err := os.Mkdir(scratch, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	useCaddyScratch(t, scratch)
 	script := `#!/bin/sh
 config=$3
+echo "$config $(stat -c %a "$config") $(stat -c %a "$(dirname "$config")")" >> "$(dirname "$0")/configs"
 echo '{"level":"info","ts":1790531705.7703078,"msg":"using config from file","file":"'"$config"'"}'
 if grep -q frob "$config"; then
 	echo "Error: adapting config using caddyfile: parsing caddyfile tokens for 'reverse_proxy': unrecognized subdirective frob, at $config:3" >&2
@@ -196,6 +208,84 @@ echo '{"level":"warn","ts":1790526498.0933943,"msg":"Caddyfile input is not form
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return filepath.Join(dir, "configs")
+}
+
+// useCaddyScratch points candidate copies at root for one test.
+func useCaddyScratch(t *testing.T, root string) {
+	t.Helper()
+	previous := caddyScratchRoot
+	caddyScratchRoot = root
+	t.Cleanup(func() { caddyScratchRoot = previous })
+}
+
+// The candidate used to be written to os.CreateTemp(""), the container's own
+// /tmp, while caddy — not in the image — ran on the host through nsenter and
+// looked for it in the host's /tmp: every check of a Caddyfile edit failed on
+// a file that was not there. It goes under the directory mounted at the same
+// path on both sides, in a directory of its own that nobody else can read,
+// and nothing of it is left behind.
+func TestCaddyCandidateIsCheckedWhereTheHostCanSeeIt(t *testing.T) {
+	configs := fakeCaddy(t)
+	dir := t.TempDir()
+	caddyfile := filepath.Join(dir, "Caddyfile")
+	service := New(filepath.Join(dir, "nginx"), caddyfile)
+
+	res, err := service.Validate(context.Background(), KindCaddy, caddyfile, "example.test {\n\trespond ok\n}\n")
+	if err != nil || !res.Valid {
+		t.Fatalf("got %+v, %v", res, err)
+	}
+	seen, err := os.ReadFile(configs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := strings.Fields(string(seen))
+	if len(fields) != 3 || !strings.HasPrefix(fields[0], caddyScratchRoot+string(os.PathSeparator)) {
+		t.Fatalf("caddy was given %q, want a file under %s", seen, caddyScratchRoot)
+	}
+	if fields[1] != "600" || fields[2] != "700" {
+		t.Fatalf("the candidate was mode %s in a directory of mode %s, want 600 in 700", fields[1], fields[2])
+	}
+	if left, _ := os.ReadDir(caddyScratchRoot); len(left) != 0 {
+		t.Fatalf("the check left %d entries behind in the scratch root", len(left))
+	}
+}
+
+// The root is /tmp/just-dashboard on the host, in a directory every account
+// can write to. One another account created, or can write into, could read a
+// candidate or swap it before caddy reads it, so it is refused — before caddy
+// is run on anything.
+func TestCaddyCandidateIsNotWrittenWhereAnotherAccountCouldReachIt(t *testing.T) {
+	configs := fakeCaddy(t)
+	dir := t.TempDir()
+	caddyfile := filepath.Join(dir, "Caddyfile")
+	service := New(filepath.Join(dir, "nginx"), caddyfile)
+
+	shared := filepath.Join(t.TempDir(), "shared")
+	if err := os.Mkdir(shared, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(shared, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(elsewhere, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, root := range []string{shared, link} {
+		useCaddyScratch(t, root)
+		if _, err := service.Validate(context.Background(), KindCaddy, caddyfile, "example.test {\n}\n"); err == nil ||
+			!strings.Contains(err.Error(), "only the dashboard can write to") {
+			t.Fatalf("scratch root %s was accepted: %v", root, err)
+		}
+	}
+	if _, err := os.Stat(configs); !os.IsNotExist(err) {
+		t.Fatalf("caddy was run although the candidate had nowhere safe to go: %v", err)
+	}
+	if left, _ := os.ReadDir(elsewhere); len(left) != 0 {
+		t.Fatalf("a candidate was written through the symlinked root")
+	}
 }
 
 // Caddy validates a temporary copy and names it in every message. The result
@@ -218,7 +308,7 @@ func TestCaddyValidationNamesTheFileNotItsCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Diagnostic{{Level: "error", Message: message, File: caddyfile, Line: 3}}
-	if res.Valid || !reflect.DeepEqual(res.Diagnostics, want) || strings.Contains(res.Output, "vpsd-caddy") {
+	if res.Valid || !reflect.DeepEqual(res.Diagnostics, want) || strings.Contains(res.Output, caddyScratchRoot) {
 		t.Fatalf("got %+v\n%s", res.Diagnostics, res.Output)
 	}
 

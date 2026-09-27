@@ -4,9 +4,9 @@ import { useMemo } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowRight, Globe } from "@/components/icons"
-import { ApiError, get } from "@/lib/api"
+import { ApiError, errorMessage, get } from "@/lib/api"
 import type { Certificate, CertbotState, Listener, StreamStatus, VHost } from "@/lib/types"
-import { usePoll } from "@/hooks/use-poll"
+import { usePoll, type PollState } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Page, PageContext, PageState } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -14,7 +14,7 @@ import { BarList, type BarListItem } from "@/components/bar-list"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { FindingList } from "@/components/finding-list"
-import { EmptyState } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useProxy } from "@/components/proxy/proxy-context"
 import { EngineActions, EngineIdentity, useEngineUnit } from "@/components/proxy/engine"
@@ -22,14 +22,33 @@ import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { certificateProduct, siteProduct } from "@/components/proxy/marks"
 import { RoutePath } from "@/components/proxy/route-path"
 import { ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
-import { foldProxyFindings } from "@/components/proxy/attention"
+import {
+  findingAction,
+  foldProxyFindings,
+  unreadableSource,
+  type ProxySource,
+  type UnreadableSource,
+} from "@/components/proxy/attention"
+
+/**
+ * What a poll last answered, or nothing when its last read failed. A source
+ * that failed is unknown, not what it said before: judged from a stale answer
+ * or from none, the page read "all within limits" and "nothing configured"
+ * about a host it could not see.
+ */
+function readable<T>(poll: PollState<T>): T | undefined {
+  return poll.error ? undefined : poll.data
+}
+
+/** A tile's hint when its source failed; the reason is in Needs attention. */
+const UNREAD = "couldn't read"
 
 /**
  * Readings first, then the engine and its commands. Routes own the wide column;
  * findings and expiry share the rail so a list of warnings never pushes every route off screen.
  */
 export default function ProxyOverviewPage() {
-  const { status, loading, refresh: refreshStatus } = useProxy()
+  const { status, error: statusError, refresh: refreshStatus } = useProxy()
   const { can } = useAuth()
   const router = useRouter()
   const admin = can("system.admin")
@@ -52,20 +71,24 @@ export default function ProxyOverviewPage() {
   )
   const ports = usePoll<Listener[]>((signal) => get("/ports", undefined, signal), 30_000)
 
-  const hosts = vhosts.data ?? []
+  const sites = readable(vhosts)
+  const certificates = readable(certs)
+  const streamStatus = readable(streams)
+  const listeners = readable(ports)
+  const hosts = sites ?? []
   const onTls = hosts.filter((v) => v.tls).length
   const disabled = hosts.filter((v) => v.kind === "nginx" && !v.enabled && v.enabledPath).length
-  const exposed = useMemo(() => (ports.data ?? []).filter((l) => l.exposed), [ports.data])
+  const exposed = useMemo(() => (listeners ?? []).filter((l) => l.exposed), [listeners])
   const badCerts = useMemo(
-    () => (certs.data ?? []).filter((c) => c.expired || c.expiring || c.error),
-    [certs.data],
+    () => (certificates ?? []).filter((c) => c.expired || c.expiring || c.error),
+    [certificates],
   )
   // The certificates as a reading rather than a count. `share` is life left
   // against the longest term on this host, floored at the ninety days certbot
   // issues for, so a host whose certificates are all nearly due reads as a run
   // of short bars instead of one full-length bar the rest are measured against.
   const certExpiry = useMemo<BarListItem[]>(() => {
-    const all = certs.data ?? []
+    const all = certificates ?? []
     const horizon = Math.max(...all.map((c) => c.daysLeft), 90)
     return [...all]
       .sort((a, b) => a.daysLeft - b.daysLeft)
@@ -93,27 +116,57 @@ export default function ProxyOverviewPage() {
               : cert.source,
         }
       })
-  }, [certs.data])
+  }, [certificates])
   // certbot being absent is a fact about the host, not a failure to report.
   const certbotGone =
     certbot.error instanceof ApiError && certbot.error.code === "certbot_unavailable"
+  const renewal = readable(certbot)
+  const unreadable = useMemo(() => {
+    const failed: [ProxySource, Error | undefined][] = [
+      ["sites", vhosts.error],
+      ["certificates", certs.error],
+      ["renewal", certbotGone ? undefined : certbot.error],
+      ["streams", streams.error],
+      ["ports", ports.error],
+    ]
+    return failed.flatMap(([source, error]): UnreadableSource[] =>
+      error ? [{ source, message: errorMessage(error) }] : [],
+    )
+  }, [vhosts.error, certs.error, certbot.error, certbotGone, streams.error, ports.error])
   const findings = useMemo(
     () =>
       foldProxyFindings({
-        certs: certs.data,
-        certbot: certbotGone ? null : certbot.data,
-        vhosts: vhosts.data,
-        streams: streams.data,
-        ports: ports.data,
+        certs: certificates,
+        certbot: certbotGone ? null : renewal,
+        vhosts: sites,
+        streams: streamStatus,
+        ports: listeners,
+        unreadable,
       }),
-    [certs.data, certbot.data, certbotGone, vhosts.data, streams.data, ports.data],
+    [certificates, renewal, certbotGone, sites, streamStatus, listeners, unreadable],
   )
-  const settled = !vhosts.loading && !certs.loading && !streams.loading && !ports.loading
-
-  if (loading && !status) {
-    return <PageState eyebrow="Advanced" title="Proxy & TLS" />
+  const retry: Record<ProxySource, () => void> = {
+    sites: vhosts.refresh,
+    certificates: certs.refresh,
+    renewal: certbot.refresh,
+    streams: streams.refresh,
+    ports: ports.refresh,
   }
-  if (!status) return null
+  const settled =
+    !vhosts.loading && !certs.loading && !certbot.loading && !streams.loading && !ports.loading
+
+  // Loading until the status first answers, and its error once it fails —
+  // the page used to render nothing at all.
+  if (!status) {
+    return (
+      <PageState
+        eyebrow="Advanced"
+        title="Proxy & TLS"
+        error={statusError}
+        onRetry={refreshStatus}
+      />
+    )
+  }
 
   const hasEngine = status.nginx || status.caddy
   const refreshAll = () => {
@@ -131,17 +184,17 @@ export default function ProxyOverviewPage() {
           <StatTile
             className="h-full transition-colors group-hover:bg-row-hover"
             label="Sites"
-            value={
-              <Figure settled={!vhosts.loading}>{vhosts.data ? hosts.length : undefined}</Figure>
-            }
+            value={<Figure settled={!vhosts.loading}>{sites ? hosts.length : undefined}</Figure>}
             hint={
-              vhosts.data
-                ? disabled > 0
-                  ? `${onTls} on TLS · ${disabled} disabled`
-                  : `${onTls} on TLS`
-                : undefined
+              vhosts.error
+                ? UNREAD
+                : sites
+                  ? disabled > 0
+                    ? `${onTls} on TLS · ${disabled} disabled`
+                    : `${onTls} on TLS`
+                  : undefined
             }
-            tone={disabled > 0 ? "warning" : "default"}
+            tone={vhosts.error || disabled > 0 ? "warning" : "default"}
           />
         </StatLink>
         <StatLink href="/proxy/certificates" label="Certificates">
@@ -149,21 +202,25 @@ export default function ProxyOverviewPage() {
             className="h-full transition-colors group-hover:bg-row-hover"
             label="Certificates"
             value={
-              <Figure settled={!certs.loading}>{certs.data ? certs.data.length : undefined}</Figure>
+              <Figure settled={!certs.loading}>
+                {certificates ? certificates.length : undefined}
+              </Figure>
             }
             hint={
-              certs.data
-                ? badCerts.length > 0
-                  ? `${badCerts.length} need attention`
-                  : certs.data.length > 0
-                    ? "all valid"
-                    : "none issued"
-                : undefined
+              certs.error
+                ? UNREAD
+                : certificates
+                  ? badCerts.length > 0
+                    ? `${badCerts.length} need attention`
+                    : certificates.length > 0
+                      ? "all valid"
+                      : "none issued"
+                  : undefined
             }
             tone={
               badCerts.some((c) => c.expired || c.error)
                 ? "danger"
-                : badCerts.length
+                : certs.error || badCerts.length
                   ? "warning"
                   : "default"
             }
@@ -175,20 +232,23 @@ export default function ProxyOverviewPage() {
             label="Streams"
             value={
               <Figure settled={!streams.loading}>
-                {streams.data ? streams.data.streams.length : undefined}
+                {streamStatus ? streamStatus.streams.length : undefined}
               </Figure>
             }
             hint={
-              streams.data
-                ? streams.data.streams.length === 0
-                  ? "nothing forwarded"
-                  : streams.data.included
-                    ? "read by nginx"
-                    : "not read by nginx"
-                : undefined
+              streams.error
+                ? UNREAD
+                : streamStatus
+                  ? streamStatus.streams.length === 0
+                    ? "nothing forwarded"
+                    : streamStatus.included
+                      ? "read by nginx"
+                      : "not read by nginx"
+                  : undefined
             }
             tone={
-              streams.data && streams.data.streams.length > 0 && !streams.data.included
+              streams.error ||
+              (streamStatus && streamStatus.streams.length > 0 && !streamStatus.included)
                 ? "warning"
                 : "default"
             }
@@ -199,15 +259,18 @@ export default function ProxyOverviewPage() {
             className="h-full transition-colors group-hover:bg-row-hover"
             label="Exposed ports"
             value={
-              <Figure settled={!ports.loading}>{ports.data ? exposed.length : undefined}</Figure>
+              <Figure settled={!ports.loading}>{listeners ? exposed.length : undefined}</Figure>
             }
             hint={
-              ports.data
-                ? exposed.length
-                  ? `of ${ports.data.length} listening, off the machine`
-                  : "everything on loopback"
-                : undefined
+              ports.error
+                ? UNREAD
+                : listeners
+                  ? exposed.length
+                    ? `of ${listeners.length} listening, off the machine`
+                    : "everything on loopback"
+                  : undefined
             }
+            tone={ports.error ? "warning" : "default"}
           />
         </StatLink>
       </StatGrid>
@@ -216,8 +279,8 @@ export default function ProxyOverviewPage() {
         status={status}
         unit={engine.unit}
         fetchedAt={engine.fetchedAt}
-        certbotVersion={certbot.data?.version}
-        renewSource={certbot.data ? (certbot.data.renewSource ?? null) : undefined}
+        certbotVersion={renewal?.version}
+        renewSource={renewal ? (renewal.renewSource ?? null) : undefined}
         actions={
           admin &&
           hasEngine && (
@@ -253,6 +316,8 @@ export default function ProxyOverviewPage() {
                 <Skeleton className="h-4 w-64" />
                 <Skeleton className="h-4 w-48" />
               </div>
+            ) : vhosts.error ? (
+              <ErrorState error={vhosts.error} onRetry={vhosts.refresh} className="mt-2" />
             ) : hosts.length === 0 ? (
               <EmptyState
                 icon={Globe}
@@ -312,10 +377,15 @@ export default function ProxyOverviewPage() {
               ) : (
                 <div className="animate-rise">
                   <FindingList
-                    findings={findings.map((f) => ({
-                      ...f,
-                      action: { label: `Open ${f.meta}`, onClick: () => router.push(f.href) },
-                    }))}
+                    findings={findings.map((f) => {
+                      const source = unreadableSource(f)
+                      return {
+                        ...f,
+                        action: source
+                          ? { label: "Try again", onClick: retry[source] }
+                          : { label: findingAction(f), onClick: () => router.push(f.href) },
+                      }
+                    })}
                     emptyLabel="Certificates, renewal, sites, streams and exposed ports all within limits"
                   />
                 </div>
@@ -348,6 +418,8 @@ export default function ProxyOverviewPage() {
                   <Skeleton className="h-4 w-48" />
                   <Skeleton className="h-4 w-56" />
                 </div>
+              ) : certs.error ? (
+                <ErrorState error={certs.error} onRetry={certs.refresh} className="mt-2" />
               ) : (
                 <BarList
                   className="animate-rise"

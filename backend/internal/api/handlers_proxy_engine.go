@@ -2,16 +2,19 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/go-chi/chi/v5"
 )
 
 // mountEngineRoutes is the engine itself: what it is, its config test and
-// reload, and the raw configuration editor.
+// reload, its service, and the raw configuration editor.
 func (s *Server) mountEngineRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/status", s.handle(s.handleProxyStatus))
 	r.Method(http.MethodGet, "/config", s.handle(s.handleProxyConfigRead))
@@ -28,6 +31,14 @@ func (s *Server) mountEngineRoutes(r chi.Router) {
 		// reload, so it is gated with it.
 		r.Method(http.MethodPost, "/test", s.handle(s.handleProxyTest))
 		r.Method(http.MethodPost, "/reload", s.handle(s.handleProxyReload))
+		// The engine's own service, resolved here rather than named by the
+		// caller. Start and restart run the config test first; stop and
+		// restart take every site offline, so they sit behind destructive.
+		r.Method(http.MethodPost, "/engine/start", s.handle(s.handleProxyEngine(procs.UnitStart)))
+		s.destructive(r, func(r chi.Router) {
+			r.Method(http.MethodPost, "/engine/restart", s.handle(s.handleProxyEngine(procs.UnitRestart)))
+			r.Method(http.MethodPost, "/engine/stop", s.handle(s.handleProxyEngine(procs.UnitStop)))
+		})
 	})
 }
 
@@ -106,17 +117,34 @@ type reloadRequest struct {
 	Kind proxysvc.Kind `json:"kind"`
 }
 
-// handleProxyTest answers "would a reload succeed right now" without
-// reloading: the server's own config test against the files on disk.
-func (s *Server) handleProxyTest(w http.ResponseWriter, r *http.Request) error {
-	var req reloadRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
+// decode reads which engine a test or reload is for: nginx when unnamed, and
+// never an engine the service does not know, which used to fall through to
+// nginx and test the wrong server.
+func (req *reloadRequest) decode(r *http.Request) error {
+	if err := httpx.DecodeJSON(r, req); err != nil {
 		return err
 	}
 	if req.Kind == "" {
 		req.Kind = proxysvc.KindNginx
 	}
-	res := s.modules.proxy.Test(r.Context(), req.Kind)
+	if !req.Kind.Known() {
+		return httpx.BadRequest("unknown engine %q", req.Kind)
+	}
+	return nil
+}
+
+// handleProxyTest answers "would a reload succeed right now" without
+// reloading: the server's own config test against the files on disk.
+func (s *Server) handleProxyTest(w http.ResponseWriter, r *http.Request) error {
+	var req reloadRequest
+	if err := req.decode(r); err != nil {
+		return err
+	}
+	res, err := s.modules.proxy.Test(r.Context(), req.Kind)
+	if err != nil {
+		httpx.SetAudit(r, "proxy.config.test", string(req.Kind), map[string]any{"result": "failed"})
+		return mapProxyError(err)
+	}
 	httpx.SetAudit(r, "proxy.config.test", string(req.Kind), map[string]any{"valid": res.Valid})
 	httpx.JSON(w, http.StatusOK, res)
 	return nil
@@ -124,21 +152,70 @@ func (s *Server) handleProxyTest(w http.ResponseWriter, r *http.Request) error {
 
 func (s *Server) handleProxyReload(w http.ResponseWriter, r *http.Request) error {
 	var req reloadRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
+	if err := req.decode(r); err != nil {
 		return err
-	}
-	if req.Kind == "" {
-		req.Kind = proxysvc.KindNginx
 	}
 	res, err := s.modules.proxy.Reload(r.Context(), req.Kind)
 	if err != nil {
 		httpx.SetAudit(r, "proxy.reload", string(req.Kind), map[string]any{"result": "failed"})
-		if errors.Is(err, proxysvc.ErrInvalidConf) {
+		switch {
+		case errors.Is(err, proxysvc.ErrInvalidConf):
 			return httpx.Err(http.StatusUnprocessableEntity, "invalid_config", res.Validation.Output)
+		case errors.Is(err, proxysvc.ErrNoIngress):
+			return mapProxyError(err)
 		}
 		return httpx.Err(http.StatusBadGateway, "reload_failed", err.Error())
 	}
 	httpx.SetAudit(r, "proxy.reload", string(req.Kind), nil)
 	httpx.JSON(w, http.StatusOK, res)
 	return nil
+}
+
+// engineDone is what a refused action did not do, for its sentence.
+var engineDone = map[procs.UnitAction]string{
+	procs.UnitStart: "started", procs.UnitRestart: "restarted", procs.UnitStop: "stopped",
+}
+
+// handleProxyEngine starts, restarts or stops the engine's systemd unit.
+//
+// The overview used to post to /systemd/{unit}/restart, which ran systemctl
+// straight away. This host's nginx.service tests its configuration before it
+// starts, so a restart over a broken file stopped nginx and could not bring
+// it back, where Reload had always refused. Start and restart are refused
+// with nginx's own words when the test fails, and systemctl never runs.
+func (s *Server) handleProxyEngine(action procs.UnitAction) httpx.Handler {
+	return func(w http.ResponseWriter, r *http.Request) error {
+		engine, err := s.modules.proxy.Engine()
+		if err != nil {
+			return httpx.Err(http.StatusConflict, "no_engine_unit", err.Error())
+		}
+		event := "proxy.engine." + string(action)
+		var out *procs.CommandResult
+		control := func() error {
+			var err error
+			out, err = s.modules.systemd.Control(r.Context(), engine.Unit, action)
+			return err
+		}
+		if action == procs.UnitStop {
+			err = control()
+		} else {
+			var res *proxysvc.ValidationResult
+			res, err = s.modules.proxy.WithTestedConfig(r.Context(), engine.Kind, control)
+			if errors.Is(err, proxysvc.ErrInvalidConf) {
+				httpx.SetAudit(r, event, engine.Unit, map[string]any{"result": "refused", "valid": false})
+				return httpx.Err(http.StatusUnprocessableEntity, "invalid_config",
+					fmt.Sprintf("%s was not %s: its configuration test failed.\n%s", engine.Name, engineDone[action], res.Output))
+			}
+		}
+		if err != nil {
+			httpx.SetAudit(r, event, engine.Unit, map[string]any{"result": "failed"})
+			return mapProcsError(err)
+		}
+		httpx.SetAudit(r, event, engine.Unit, map[string]any{"exitCode": out.ExitCode})
+		httpx.JSON(w, http.StatusOK, map[string]any{
+			"action": action, "unit": engine.Unit,
+			"output": strings.TrimSpace(out.Stdout + out.Stderr),
+		})
+		return nil
+	}
 }

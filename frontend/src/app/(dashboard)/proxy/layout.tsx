@@ -20,6 +20,7 @@ export default function ProxyLayout({ children }: { children: React.ReactNode })
     <ProxyProvider
       value={{
         status: status.data,
+        error: status.error,
         loading: status.loading,
         hasNginx: status.data?.nginx ?? false,
         refresh: status.refresh,

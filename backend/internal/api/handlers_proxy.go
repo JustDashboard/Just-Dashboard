@@ -58,6 +58,8 @@ func mapProxyError(err error) error {
 		return httpx.Err(http.StatusForbidden, "protected_file", err.Error())
 	case errors.Is(err, proxysvc.ErrNoProxy):
 		return httpx.Err(http.StatusServiceUnavailable, "no_proxy", err.Error())
+	case errors.Is(err, proxysvc.ErrNoIngress):
+		return httpx.Err(http.StatusConflict, "no_ingress", err.Error())
 	default:
 		return httpx.BadRequest("%v", err)
 	}

@@ -333,8 +333,22 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `nginx -t` passes a file it never reads, and a dry run that says "valid" about a disabled site is
   a false reassurance. `POST /proxy/test` runs the engine's own test against what is on disk without
   staging or reloading anything (admin, audited as `proxy.config.test`); the overview's Test config
-  button and the reload/restart/start/stop verbs sit beside it, the last four through the existing
-  `/systemd/{unit}` routes so the two pages never disagree about the unit.
+  and Reload buttons post it and `/proxy/reload` with the engine's kind, and a kind the service does
+  not know is a 400 rather than nginx. For the shared Docker Caddy that kind is `caddy-ingress`
+  (`docker_caddy_engine.go`): `caddy validate` and `caddy reload` run inside the running container
+  against its own `/etc/caddy/Caddyfile`, never the host's caddy, and with no ingress running both
+  answer 409 `no_ingress`. `Availability` names an ingress only once it runs (`ingressState:
+  "running"`); one the first deployment would start is `ingressState: "provisionable"` with neither
+  `caddy` nor `ingressContainer` set, and deploy preflight counts either state as a proxy that can
+  serve and certify the domain. Start, restart and stop go through `POST /proxy/engine/{start|
+  restart|stop}`, which resolves the unit itself (`Service.Engine`: `nginx.service` where nginx is
+  installed, else `caddy.service`; 409 `no_engine_unit` otherwise) and runs start and restart through
+  `WithTestedConfig` — the config test under the service lock, then systemctl only if it passed.
+  This host's `nginx.service` runs `nginx -t` before it starts, so a restart over a broken file used
+  to stop nginx and leave every site down; now it is a 422 `invalid_config` carrying nginx's output
+  and systemctl never runs. Start needs `system.admin`; restart and stop are destructive as well;
+  each is audited as `proxy.engine.<action>`. The unit's state is still read from `/systemd/{unit}`,
+  so the Services page and the overview never disagree about it.
 - **`ParseSiteSpec` reads what hand-written files actually look like.** A line holding a whole
   block — `location / { proxy_pass http://x; }` — is split into statements before it is read
   (`splitInline`, quote-aware, since a Content-Security-Policy value carries semicolons of its
@@ -412,9 +426,13 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   its `Error:` line, best effort, taking the position after `, at ` before any other path-like text so an
   upstream URL is never read as one. A diagnostic's file is named with its symlinks resolved, the form
   `allowedPath` gives the file being edited, so a Debian site's error names its sites-available file
-  rather than the sites-enabled link nginx included. Caddy is validated against a temporary copy, and
-  `validateCaddy` replaces the copy's name with the file's throughout the result; `Validate` holds a
-  Caddy path to the proxy's directories as it does an nginx one.
+  rather than the sites-enabled link nginx included. Caddy is validated against a copy in a private
+  directory under `/tmp/just-dashboard`, the one temporary directory docker-compose mounts at the same
+  path in the container and on the host, where caddy runs through nsenter — a copy in the container's
+  own /tmp was invisible to it, so every Caddyfile check failed. That root must be a real directory the
+  dashboard's user owns and nobody else can write to, or nothing is written or run. `validateCaddy`
+  replaces the copy's name with the file's throughout the result; `Validate` holds a Caddy path to
+  the proxy's directories as it does an nginx one.
 - **The configuration nginx actually loads.** `EffectiveConfig` (`effective.go`) runs `nginx -T` through
   `hostexec` under the service lock — so it never dumps a candidate `Validate` has staged — splits it into
   `ConfigFile`s byte for byte (`ParseEffective`, which takes a `# configuration file` line as a file only

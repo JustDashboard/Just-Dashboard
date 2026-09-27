@@ -14,7 +14,7 @@ import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-ident
 import { engineProduct } from "@/components/proxy/marks"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
-import { engineUnit, type ProxyStatus } from "@/components/proxy/proxy-context"
+import { engineKind, engineUnit, type ProxyStatus } from "@/components/proxy/proxy-context"
 
 /**
  * The engine itself: whether it is running, and the three things done to it.
@@ -103,6 +103,9 @@ export function EngineIdentity({
   actions?: React.ReactNode
 }) {
   const engine = status.nginx || status.caddy
+  // The ingress's Caddyfile is the container's own, not the host path the
+  // dashboard is configured with, so that path says nothing about it.
+  const ingress = !status.nginx && Boolean(status.ingressContainer)
   const name = status.nginx ? "nginx" : status.caddy ? "Caddy" : "No reverse proxy"
   const version = status.nginx
     ? status.nginxVersion
@@ -135,7 +138,7 @@ export function EngineIdentity({
           ) : (
             <span>nothing found on this host</span>
           )}
-          {engine && (
+          {engine && !ingress && (
             <>
               <FactDot />
               <HostFact>
@@ -151,6 +154,12 @@ export function EngineIdentity({
               <HostFact product="docker">
                 ingress <span className="font-mono">{status.ingressContainer}</span>
               </HostFact>
+            </>
+          )}
+          {status.ingressState === "provisionable" && (
+            <>
+              <FactDot />
+              <HostFact product="docker">a Caddy ingress starts with the first deployment</HostFact>
             </>
           )}
           <FactDot />
@@ -181,6 +190,11 @@ export function EngineIdentity({
  * reload are the daily two and stand inline; the rest are words with a
  * sentence, and the two that take every site offline for a moment confirm
  * first, through the same dialog the Services page uses for the same unit.
+ *
+ * Start, restart and stop go through the proxy's own route, which picks the
+ * unit itself and runs the config test before a start or restart: this host's
+ * nginx.service tests before it starts, so a restart over a broken file used
+ * to stop nginx and leave every site down.
  */
 export function EngineActions({
   status,
@@ -196,7 +210,7 @@ export function EngineActions({
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
   const [busy, setBusy] = useState<"test" | "reload" | "">("")
-  const kind = status.nginx ? "nginx" : "caddy"
+  const kind = engineKind(status)
   const engine = status.nginx ? "nginx" : "Caddy"
 
   const test = async () => {
@@ -233,7 +247,7 @@ export function EngineActions({
   }
 
   const control = (action: "restart" | "start" | "stop") =>
-    post(`/systemd/${unitName}/${action}`).then(() => onChanged())
+    post(`/proxy/engine/${action}`).then(() => onChanged())
 
   const running = unit?.activeState === "active"
   const verbs: Verb[] = []
@@ -246,7 +260,7 @@ export function EngineActions({
         run: () =>
           control("start")
             .then(() => notify.success(`${engine} started`))
-            .catch((err) => notify.error("Could not start", err)),
+            .catch((err) => notify.error(`${engine} did not start`, err)),
       })
     }
     verbs.push({
@@ -259,10 +273,16 @@ export function EngineActions({
           title: `Restart ${engine}`,
           confirmLabel: "Restart",
           description: (
-            <p>
-              Every connection is dropped and every site is unreachable until the process is back. A
-              reload applies configuration changes without either.
-            </p>
+            <>
+              <p>
+                Every connection is dropped and every site is unreachable until the process is back.
+                A reload applies configuration changes without either.
+              </p>
+              <p>
+                The configuration is tested first. If {engine} refuses it, nothing is restarted and
+                the reason is shown.
+              </p>
+            </>
           ),
           action: () => control("restart"),
         }),

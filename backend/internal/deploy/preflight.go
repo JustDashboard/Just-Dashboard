@@ -250,8 +250,10 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 		if o.proxy != nil {
 			proxyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			availability := o.proxy.Availability(proxyCtx)
-			proxyAvailable = availability.Nginx || availability.Caddy
-			certificateAutomation = availability.Certbot || availability.IngressContainer != ""
+			// An ingress the release itself would start serves and certifies
+			// the domain as one already running does.
+			proxyAvailable = availability.Nginx || availability.Caddy || availability.IngressState != ""
+			certificateAutomation = availability.Certbot || availability.IngressState != ""
 			vhosts, err := o.proxy.ListVHosts(proxyCtx)
 			cancel()
 			if err == nil {
