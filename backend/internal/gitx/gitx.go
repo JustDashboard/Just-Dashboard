@@ -255,7 +255,7 @@ func (s *Service) Discover(ctx context.Context) ([]Repo, error) {
 	}
 	sort.Strings(found)
 
-	// A summary is half a dozen git invocations, and a server with thirty
+	// A summary uses several git invocations, and a server with thirty
 	// checkouts was spending two seconds answering a list that polls. Four at
 	// a time keeps the total under the poll interval without turning a
 	// rescan into a load spike.
@@ -314,24 +314,27 @@ func (s *Service) Summary(ctx context.Context, path string) (*Repo, error) {
 		r.Branch = strings.TrimSpace(out)
 	} else {
 		r.Detached = true
-		if sha, err := s.run(ctx, path, "rev-parse", "--short", "HEAD"); err == nil {
-			r.Branch = "detached at " + strings.TrimSpace(sha)
-		}
 	}
-	if sha, err := s.run(ctx, path, "rev-parse", "--short", "HEAD"); err == nil {
-		r.Head = strings.TrimSpace(sha)
-	} else {
-		r.Empty = true
-	}
-	// %x1f is a unit separator: safe against subjects containing anything.
-	if out, err := s.run(ctx, path, "log", "-1", "--pretty=format:%s%x1f%an%x1f%ct"); err == nil {
+	// The log already reads HEAD; return its abbreviation with the commit
+	// metadata instead of launching another process for the same revision.
+	if out, err := s.run(ctx, path, "log", "-1", "--pretty=format:%h%x1f%s%x1f%an%x1f%ct"); err == nil {
 		parts := strings.Split(strings.TrimSpace(out), "\x1f")
-		if len(parts) == 3 {
-			r.Subject, r.Author = parts[0], parts[1]
-			if secs, err := strconv.ParseInt(parts[2], 10, 64); err == nil {
+		if len(parts) == 4 {
+			r.Head, r.Subject, r.Author = parts[0], parts[1], parts[2]
+			if secs, err := strconv.ParseInt(parts[3], 10, 64); err == nil {
 				r.CommitAt = time.Unix(secs, 0).UTC()
 			}
 		}
+	}
+	if r.Head == "" {
+		if sha, err := s.run(ctx, path, "rev-parse", "--short", "HEAD"); err == nil {
+			r.Head = strings.TrimSpace(sha)
+		} else {
+			r.Empty = true
+		}
+	}
+	if r.Detached && r.Head != "" {
+		r.Branch = "detached at " + r.Head
 	}
 	if out, err := s.run(ctx, path, "remote", "get-url", "origin"); err == nil {
 		r.Remote = scrubRemote(strings.TrimSpace(out))
@@ -362,16 +365,23 @@ func (s *Service) Summary(ctx context.Context, path string) (*Repo, error) {
 			if len(parts) == 2 {
 				r.Upstream = parts[0]
 				r.Gone = strings.Contains(parts[1], "gone")
+				for _, count := range strings.Split(strings.Trim(parts[1], "[]"), ",") {
+					fields := strings.Fields(count)
+					if len(fields) != 2 {
+						continue
+					}
+					n, _ := strconv.Atoi(fields[1])
+					switch fields[0] {
+					case "ahead":
+						r.Ahead = n
+					case "behind":
+						r.Behind = n
+					}
+				}
 			}
 		}
 	}
-	if out, err := s.run(ctx, path, "rev-list", "--left-right", "--count", "@{upstream}...HEAD"); err == nil {
-		fields := strings.Fields(strings.TrimSpace(out))
-		if len(fields) == 2 {
-			r.Behind, _ = strconv.Atoi(fields[0])
-			r.Ahead, _ = strconv.Atoi(fields[1])
-		}
-	}
+
 	return r, nil
 }
 

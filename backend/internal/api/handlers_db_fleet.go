@@ -85,6 +85,7 @@ func (s *Server) handleDBFleet(w http.ResponseWriter, r *http.Request) error {
 	httpx.SkipAudit(r)
 	ctx, cancel := timeoutCtx(r, 45*time.Second)
 	defer cancel()
+	ctx = s.modules.docker.WithReadSnapshot(ctx)
 	conns, err := s.existingConnections(ctx)
 	if err != nil {
 		return err
@@ -433,6 +434,7 @@ func (s *Server) handleDBTopology(w http.ResponseWriter, r *http.Request) error 
 	httpx.SkipAudit(r)
 	ctx, cancel := timeoutCtx(r, 45*time.Second)
 	defer cancel()
+	ctx = s.modules.docker.WithReadSnapshot(ctx)
 	conns, err := s.existingConnections(ctx)
 	if err != nil {
 		return err
@@ -457,6 +459,7 @@ func (s *Server) handleDBConsumers(w http.ResponseWriter, r *http.Request) error
 	}
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
+	ctx = s.modules.docker.WithReadSnapshot(ctx)
 	out, err := s.topology(ctx, []*dbConnection{conn})
 	if err != nil {
 		return err

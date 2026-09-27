@@ -1,14 +1,12 @@
 "use client"
 
-import { MoreHorizontal } from "@/components/icons"
 import { bytes, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileEntry } from "@/lib/types"
-import { Checkbox } from "@/components/ui/checkbox"
-import { FileActionsMenu, type FileActions, type RowCaps } from "@/components/files/file-actions"
+import { FileSelection } from "@/components/files/file-selection"
+import { useNearViewport } from "@/hooks/use-near-viewport"
+import { FileActionsButton, type FileActions, type RowCaps } from "@/components/files/file-actions"
 import { Thumbnail } from "@/components/files/thumbnail"
-import { Button } from "@/components/ui/button"
-import { DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { rowReveal } from "@/components/icon-action"
 import { useDropTarget, type DropMode } from "@/components/files/dnd"
 
@@ -113,6 +111,7 @@ function Tile({
   onDropFiles?: (transfer: DataTransfer, dir: string) => void
   actions: FileActions
 }) {
+  const [viewportRef, near] = useNearViewport<HTMLDivElement>()
   const drop = useDropTarget({
     dir: entry.isDir ? entry.path : null,
     onDropPaths,
@@ -125,6 +124,7 @@ function Tile({
   // to a screen reader as one control's label.
   return (
     <div
+      ref={viewportRef}
       data-entry-path={entry.path}
       data-state={selected ? "selected" : undefined}
       draggable={caps.write && !!onDragStart}
@@ -147,7 +147,7 @@ function Tile({
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => e.stopPropagation()}
       >
-        <Checkbox
+        <FileSelection
           checked={selected}
           onCheckedChange={(v) => onToggle(v === true)}
           aria-label={`Select ${entry.name}`}
@@ -160,21 +160,26 @@ function Tile({
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => e.stopPropagation()}
       >
-        <FileActionsMenu entry={entry} caps={caps} actions={actions}>
-          <DropdownMenuTrigger asChild>
-            <Button
-              size="icon-xs"
-              variant="ghost"
-              aria-label={`Actions for ${entry.name}`}
-              className="bg-card/80 text-muted-foreground hover:text-foreground"
-            >
-              <MoreHorizontal />
-            </Button>
-          </DropdownMenuTrigger>
-        </FileActionsMenu>
+        <FileActionsButton
+          entry={entry}
+          caps={caps}
+          actions={actions}
+          label={`Actions for ${entry.name}`}
+          className="bg-card/80 text-muted-foreground hover:text-foreground"
+        />
       </span>
 
-      <Thumbnail entry={entry} size={size} hoverPlay />
+      {near || active ? (
+        <Thumbnail entry={entry} size={size} hoverPlay />
+      ) : (
+        <span
+          aria-hidden
+          className={cn(
+            "w-full shrink-0",
+            size === "sm" ? "h-16" : size === "lg" ? "h-32" : "h-24",
+          )}
+        />
+      )}
 
       <span className="w-full min-w-0">
         <button

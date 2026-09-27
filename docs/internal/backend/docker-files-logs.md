@@ -6,6 +6,13 @@
 compose, the streaming compose runner, and `Build` — because the Engine API has no equivalent; all three
 build argv explicitly.
 
+Container-table WebSockets share one two-second inventory/stats sampler while viewers are connected.
+Each cycle still reads Docker, including changes made outside the dashboard, and sends inventory before
+stats in the existing envelopes. New viewers receive the current sample; a slow viewer retains only
+the latest pair and cannot block collection. The final unsubscribe cancels the sampler and drops the
+snapshot. Direct reads and mutation checks remain fresh. Read-only database discovery can separately
+opt into a request-scoped inventory/inspection snapshot; it never survives that request.
+
 - **`ContainerSpec` is the dashboard's shape, not `container.Config` + `HostConfig`.** Those are split on
   the historical accident of which fields the daemon could change after creation, and rendering them as a
   form is how Portainer's create page became twelve accordions. `toEngine` translates and warns about
@@ -245,6 +252,14 @@ rather than a live parameter pipeline — that is what makes undo a stack of bit
 rotate again" behaves the way it looks; saving goes through the ordinary upload route with
 `overwrite=true`, so owner and mode survive.
 
+Large listings keep every filename and metadata cell mounted: native find, sorting, filtering, range
+selection and select-all still address the complete directory. One shared intersection observer defers
+offscreen thumbnails and heavier row controls; keyboard focus keeps its current control mounted.
+The row/tile checkbox is a controlled two-state button, while select-all keeps its mixed state.
+Overflow menus instantiate on first activation and remain mounted afterwards for focus restoration.
+The listing API still returns the complete directory; these rendering savings do not reduce its disk
+reads or response bytes.
+
 ## Logs
 
 `logsx` + `handlers_logs.go` were three products wearing one page: the grep box and level chips applied
@@ -307,6 +322,9 @@ this host's. Error and critical rows are washed, warnings too. A line the server
 field first — except in a History result, whose match ranges are over the raw JSON. Tokens are cached by
 text, because a server's log repeats itself, and each row is memoised, because the live tail appends. A
 "Colour" toggle, persisted with Wrap and Time in `lib/log-view.ts`, shows every line exactly as written.
+Rows are keyed by arrival identity rather than buffer position, so evicting old lines at the 4,000-line
+cap reuses retained rows and keeps the marked line attached to its text. Weakly held identities do not
+retain evicted history; identical messages from separate arrivals remain separate rows.
 The source rail draws each source as its product (a container as its image, nginx, PM2, the system files
 as the host's distribution). The console uses `content-visibility` rather than a virtualiser: off-screen rows skip layout while the scrollbar
 stays honest, wrapped rows keep real heights, and the browser's own find still works. The level chips on

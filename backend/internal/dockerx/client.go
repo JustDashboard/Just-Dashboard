@@ -30,6 +30,9 @@ type Client struct {
 	host string
 	err  error
 
+	feedMu sync.Mutex
+	feed   *containerFeed
+
 	// Disk usage is the one Docker query that walks every layer and volume on
 	// disk; on a modest server it takes seconds. It is cached because the
 	// volume list needs it only to answer "how big, and is anything using
@@ -184,6 +187,11 @@ func (c *Client) Close() error {
 	if c == nil {
 		return nil
 	}
+	c.feedMu.Lock()
+	if c.feed != nil {
+		c.feed.cancel()
+	}
+	c.feedMu.Unlock()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.cli != nil {

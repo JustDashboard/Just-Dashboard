@@ -67,6 +67,15 @@ type Container struct {
 }
 
 func (c *Client) ListContainers(ctx context.Context, all bool) ([]Container, error) {
+	if snapshot := c.snapshot(ctx); snapshot != nil {
+		index := 0
+		if all {
+			index = 1
+		}
+		return snapshot.lists[index].get(ctx, snapshot.ctx, func(ctx context.Context) ([]Container, error) {
+			return c.listContainers(ctx, container.ListOptions{All: all})
+		})
+	}
 	return c.listContainers(ctx, container.ListOptions{All: all})
 }
 
@@ -155,16 +164,12 @@ func (c *Client) listContainers(ctx context.Context, options container.ListOptio
 // for information nobody is reading; `Inspected` marks the difference so the
 // UI never renders an absence as an answer.
 func (c *Client) enrichUptime(ctx context.Context, list []Container) {
-	cli, err := c.api()
-	if err != nil {
-		return
-	}
 	for i := range list {
 		list[i].Exposure = DescribePorts(list[i].Ports)
 		if list[i].State != "running" {
 			continue
 		}
-		insp, err := cli.ContainerInspect(ctx, list[i].ID)
+		insp, err := c.inspectContainer(ctx, list[i].ID)
 		if err != nil || insp.State == nil {
 			continue
 		}
@@ -300,11 +305,7 @@ func RedactEnv(env []string) []string {
 // system.admin, and why the UI keeps even an admin's copy behind a deliberate
 // reveal rather than printing it on screen.
 func (c *Client) Inspect(ctx context.Context, id string) (*ContainerDetail, error) {
-	cli, err := c.api()
-	if err != nil {
-		return nil, err
-	}
-	insp, err := cli.ContainerInspect(ctx, id)
+	insp, err := c.inspectContainer(ctx, id)
 	if err != nil {
 		return nil, err
 	}

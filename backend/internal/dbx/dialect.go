@@ -67,6 +67,7 @@ type Dialect interface {
 	PrimaryKey(ctx context.Context, db *sql.DB, schema, table string) ([]string, error)
 	Indexes(ctx context.Context, db *sql.DB, schema, table string) ([]Index, error)
 	ForeignKeys(ctx context.Context, db *sql.DB, schema, table string) ([]ForeignKey, error)
+	schemaQueries() schemaQueries
 	// CreateSQL returns DDL recreating the table. Engines that keep the original
 	// text hand it back; the rest synthesise it from the introspected structure.
 	CreateSQL(ctx context.Context, db *sql.DB, schema, table string, d *TableDetail) (string, error)

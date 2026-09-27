@@ -51,7 +51,8 @@ type Store = {
 }
 
 /**
- * One JSON document under one key, read once and then kept in memory.
+ * Read once, then persist each value independently. Typing in a filter must
+ * not serialize every saved editor draft in the tab.
  *
  * `area` is called rather than captured: the server has no Web Storage, a
  * private window may refuse it, and asking each time is what lets the same
@@ -60,6 +61,10 @@ type Store = {
 export function createStore(area: () => Storage | null, storageKey: string): Store {
   let state: Record<string, unknown> | null = null
   const listeners = new Set<Listener>()
+  const prefix = `${storageKey}.entry.`
+  let separate = true
+
+  const entryKey = (key: string) => `${prefix}${encodeURIComponent(key)}`
 
   const load = (): Record<string, unknown> => {
     if (state) return state
@@ -69,9 +74,43 @@ export function createStore(area: () => Storage | null, storageKey: string): Sto
     try {
       const raw = storage.getItem(storageKey)
       if (raw) {
-        const parsed = JSON.parse(raw) as unknown
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          state = { ...(parsed as Record<string, unknown>) }
+        try {
+          const parsed = JSON.parse(raw) as unknown
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            state = { ...(parsed as Record<string, unknown>) }
+          }
+        } catch {
+          // Still recover independently stored values below.
+        }
+      }
+      const storedKeys: string[] = []
+      for (let i = 0; i < storage.length; i++) {
+        const key = storage.key(i)
+        if (key?.startsWith(prefix)) storedKeys.push(key)
+      }
+      for (const key of storedKeys) {
+        try {
+          state[decodeURIComponent(key.slice(prefix.length))] = JSON.parse(storage.getItem(key)!)
+        } catch {
+          // A damaged entry must not discard the other drafts.
+        }
+      }
+      if (raw) {
+        // Migration is synchronous, like the writes it replaces. Free the
+        // old document's quota first, and restore it if splitting cannot fit.
+        const backup = JSON.stringify(state)
+        const written: string[] = []
+        try {
+          storage.removeItem(storageKey)
+          for (const [key, value] of Object.entries(state)) {
+            const target = entryKey(key)
+            storage.setItem(target, JSON.stringify(value))
+            written.push(target)
+          }
+        } catch {
+          separate = false
+          for (const key of new Set([...storedKeys, ...written])) storage.removeItem(key)
+          storage.setItem(storageKey, backup)
         }
       }
     } catch {
@@ -80,11 +119,13 @@ export function createStore(area: () => Storage | null, storageKey: string): Sto
     return state
   }
 
-  const persist = () => {
+  const persist = (key: string, value: unknown) => {
     const storage = area()
     if (!storage) return
     try {
-      storage.setItem(storageKey, JSON.stringify(state ?? {}))
+      if (!separate) storage.setItem(storageKey, JSON.stringify(state ?? {}))
+      else if (value === undefined) storage.removeItem(entryKey(key))
+      else storage.setItem(entryKey(key), JSON.stringify(value))
     } catch {
       // Private browsing or a full quota. The choice still applies for this
       // session, which beats refusing to close the panel.
@@ -98,21 +139,20 @@ export function createStore(area: () => Storage | null, storageKey: string): Sto
   return {
     read: (key) => load()[key],
     write: (key, value) => {
-      state = { ...load(), [key]: value }
-      persist()
+      load()[key] = value
+      persist(key, value)
       notify()
     },
     forget: (prefix) => {
       const current = load()
-      const next: Record<string, unknown> = {}
       let dropped = false
-      for (const [key, value] of Object.entries(current)) {
-        if (key.startsWith(prefix)) dropped = true
-        else next[key] = value
+      for (const key of Object.keys(current)) {
+        if (!key.startsWith(prefix)) continue
+        delete current[key]
+        persist(key, undefined)
+        dropped = true
       }
       if (!dropped) return
-      state = next
-      persist()
       notify()
     },
     subscribe: (listener) => {

@@ -6,19 +6,24 @@ function fakeStorage() {
   return {
     getItem: (key) => (map.has(key) ? map.get(key) : null),
     setItem: (key, value) => map.set(key, String(value)),
+    removeItem: (key) => map.delete(key),
+    key: (i) => [...map.keys()][i] ?? null,
+    get length() {
+      return map.size
+    },
     map,
   }
 }
 
 describe("the remembered-state store", () => {
-  test("a written value comes back, is persisted as one document, and is announced", () => {
+  test("a written value comes back, is persisted independently, and is announced", () => {
     const storage = fakeStorage()
     const store = createStore(() => storage, "jd.test")
     let announced = 0
     store.subscribe(() => announced++)
     store.write("docker.containers.query", "nginx")
     expect(store.read("docker.containers.query")).toBe("nginx")
-    expect(JSON.parse(storage.map.get("jd.test"))).toEqual({ "docker.containers.query": "nginx" })
+    expect(JSON.parse(storage.map.get("jd.test.entry.docker.containers.query"))).toBe("nginx")
     expect(announced).toBe(1)
   })
 
@@ -38,7 +43,9 @@ describe("the remembered-state store", () => {
     expect(store.read("deploy.new.flow")).toBeUndefined()
     expect(store.read("deploy.new.git.url")).toBeUndefined()
     expect(store.read("deploy.fleet.query")).toBe("sh")
-    expect(JSON.parse(storage.map.get("jd.test"))).toEqual({ "deploy.fleet.query": "sh" })
+    const reloaded = createStore(() => storage, "jd.test")
+    expect(reloaded.read("deploy.new.flow")).toBeUndefined()
+    expect(reloaded.read("deploy.fleet.query")).toBe("sh")
   })
 
   test("without a storage area the store still works for the life of the page", () => {
@@ -56,6 +63,45 @@ describe("the remembered-state store", () => {
     expect(store.read("anything")).toBeUndefined()
     store.write("anything", 1)
     expect(store.read("anything")).toBe(1)
+  })
+
+  test("existing documents migrate and small writes never rewrite unrelated drafts", () => {
+    const storage = fakeStorage()
+    const draft = "select ".repeat(150_000)
+    storage.setItem("jd.test", JSON.stringify({ draft, query: "old" }))
+    const store = createStore(() => storage, "jd.test")
+    expect(store.read("draft")).toBe(draft)
+    const writes = []
+    const set = storage.setItem
+    storage.setItem = (key, value) => {
+      writes.push([key, value])
+      set(key, value)
+    }
+    store.write("query", "new")
+    expect(writes).toEqual([["jd.test.entry.query", '"new"']])
+    expect(storage.getItem("jd.test")).toBeNull()
+    const reloaded = createStore(() => storage, "jd.test")
+    expect(reloaded.read("draft")).toBe(draft)
+    expect(reloaded.read("query")).toBe("new")
+    store.forget("")
+    expect(storage.length).toBe(0)
+  })
+
+  test("failed migration restores the old document and continues persisting", () => {
+    const storage = fakeStorage()
+    storage.setItem("jd.test", JSON.stringify({ a: "draft", b: "another" }))
+    const set = storage.setItem
+    storage.setItem = (key, value) => {
+      if (key.endsWith(".b")) throw new Error("quota")
+      set(key, value)
+    }
+    const store = createStore(() => storage, "jd.test")
+    expect(store.read("a")).toBe("draft")
+    expect(JSON.parse(storage.getItem("jd.test"))).toEqual({ a: "draft", b: "another" })
+    store.write("a", "edited")
+    expect(createStore(() => storage, "jd.test").read("a")).toBe("edited")
+    store.forget("")
+    expect(createStore(() => storage, "jd.test").read("a")).toBeUndefined()
   })
 })
 

@@ -200,8 +200,9 @@ func Outline(ctx context.Context, db *sql.DB, driver Driver, schema string) (*Sc
 		return nil, err
 	}
 	out := &SchemaOutline{Schema: schema, Tables: map[string][]string{}}
+	catalog := withSchemaCatalog(ctx, db, d, tables, false)
 	for _, t := range tables {
-		cols, err := d.Columns(ctx, db, t.Schema, t.Name)
+		cols, err := catalog.Columns(ctx, db, t.Schema, t.Name)
 		if err != nil {
 			// A table whose columns cannot be read still belongs in the
 			// completion list by name; dropping it would make the editor claim
@@ -289,6 +290,7 @@ func BuildSchemaGraph(ctx context.Context, db *sql.DB, driver Driver, schema str
 	if len(tables) > maxGraphTables {
 		tables, out.Truncated = tables[:maxGraphTables], true
 	}
+	catalog := withSchemaCatalog(ctx, db, d, tables, true)
 
 	// Which columns are unique decides whether a reference is one-to-one or
 	// many-to-one, and it is read from the indexes that are being fetched
@@ -300,20 +302,20 @@ func BuildSchemaGraph(ctx context.Context, db *sql.DB, driver Driver, schema str
 			return nil, err
 		}
 		gt := GraphTable{Schema: t.Schema, Name: t.Name, Type: t.Type, Rows: t.Rows, Columns: []GraphColumn{}}
-		cols, err := d.Columns(ctx, db, t.Schema, t.Name)
+		cols, err := catalog.Columns(ctx, db, t.Schema, t.Name)
 		if err != nil {
 			// A table whose columns will not read is still part of the shape:
 			// dropping it would silently delete a box other tables point at.
 			out.Tables = append(out.Tables, gt)
 			continue
 		}
-		pk, _ := d.PrimaryKey(ctx, db, t.Schema, t.Name)
+		pk, _ := catalog.PrimaryKey(ctx, db, t.Schema, t.Name)
 		isPK := map[string]bool{}
 		for _, c := range pk {
 			isPK[c] = true
 		}
 		uniq := map[string]bool{}
-		if indexes, err := d.Indexes(ctx, db, t.Schema, t.Name); err == nil {
+		if indexes, err := catalog.Indexes(ctx, db, t.Schema, t.Name); err == nil {
 			for _, ix := range indexes {
 				if ix.Unique && len(ix.Columns) == 1 {
 					uniq[ix.Columns[0]] = true
@@ -323,7 +325,7 @@ func BuildSchemaGraph(ctx context.Context, db *sql.DB, driver Driver, schema str
 		uniqueCols[t.Name] = uniq
 
 		fkOf := map[string]string{}
-		if fks, err := d.ForeignKeys(ctx, db, t.Schema, t.Name); err == nil {
+		if fks, err := catalog.ForeignKeys(ctx, db, t.Schema, t.Name); err == nil {
 			for _, fk := range fks {
 				for i, col := range fk.Columns {
 					refCol := ""
