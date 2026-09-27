@@ -71,6 +71,11 @@ type DomainRoute struct {
 	// same certificate as its name, so the issuer is observed rather than
 	// inferred from the domain's ownership.
 	CertificateIssuer string `json:"certificateIssuer,omitempty"`
+	// CertificateRenewedBy is "caddy" when the covering certificate is the
+	// copy a Docker Caddy release kept. Caddy renews the certificate it serves
+	// and never that copy, so the copy's expiry is not the domain's and the
+	// row carries no days left.
+	CertificateRenewedBy string `json:"certificateRenewedBy,omitempty"`
 }
 
 type StorageSummary struct {
@@ -452,12 +457,17 @@ func observeDomainRoutes(
 				if certificate.Error != "" || !certificateCoversDomain(certificate.Domains, hostname) {
 					continue
 				}
-				row.CertificateName, row.CertificateDaysLeft = certificate.Name, certificate.DaysLeft
-				row.CertificateIssuer = certificate.Issuer
-				// Caddy's release copy is not on the Certificates page.
-				if !certificate.CaddyEvidence() {
-					row.CertificateLink = "/proxy/certificates"
+				row.CertificateName, row.CertificateIssuer = certificate.Name, certificate.Issuer
+				// Caddy's release copy proves Caddy obtained a certificate for
+				// the name. Graded by its own expiry it read as expiring once
+				// the release aged, for a certificate Caddy had already
+				// replaced, and it is not on the Certificates page to link to.
+				if certificate.CaddyEvidence() {
+					row.Certificate, row.CertificateRenewedBy = "valid", "caddy"
+					break
 				}
+				row.CertificateDaysLeft = certificate.DaysLeft
+				row.CertificateLink = "/proxy/certificates"
 				switch {
 				case certificate.Expired:
 					row.Certificate = "expired"

@@ -2772,6 +2772,11 @@ export type DeploymentDomainRoute = {
   certificateDaysLeft?: number
   /** Who issued the covering certificate, read from the certificate itself. */
   certificateIssuer?: string
+  /**
+   * The copy a Docker Caddy release kept covers the name. Caddy renews what it
+   * serves and never the copy, so there are no days left to show.
+   */
+  certificateRenewedBy?: "caddy"
   deepLink?: string
   certificateLink?: string
   protected?: boolean

@@ -383,7 +383,9 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `keepCaddyEvidence`. `ListCertificates` keeps them: deployment activation
   (`ResolveDeploymentCertificate`), preflight, the route summary and the hostname suggestions find a
   release's certificate there, and on a Docker Caddy host a copy is the only pair covering its domains
-  (the route summary names it without a link to the Certificates page, which does not list it).
+  (the route summary names it with `certificateRenewedBy: "caddy"` and neither days left, a link to the
+  Certificates page, which does not list it, nor an expiry finding: the copy is refreshed only when a
+  release runs, and graded by its own expiry it warned about a certificate Caddy had already renewed).
   `CertificateInventory` — `GET /certificates/` and the security posture — leaves out the copies no
   nginx site names, since Caddy renews what it serves and never these, and listed they raised an expiry
   finding apiece; their names are refused to an operator's import.

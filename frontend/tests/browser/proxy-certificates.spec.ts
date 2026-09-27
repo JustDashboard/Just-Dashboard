@@ -1,6 +1,8 @@
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test"
 import { certs, inThirtyDays, json, mockProxy, mockShowcase, now } from "./proxy-fixtures"
 import { certbotJob, certbotState } from "./fixtures/proxy/certs"
+import { healthyOperations, mockProject } from "./deploy-fixture"
+import type { DeploymentDomainRoute } from "../../src/lib/types"
 
 /**
  * The Certificates page's certbot controls, checked against what they send
@@ -414,4 +416,76 @@ test("the DNS issue form fits a phone with its wait field", async ({ page }) => 
   expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
     true,
   )
+})
+
+/**
+ * A Docker Caddy release keeps a copy of the certificate Caddy issued, and
+ * Caddy renews the one it serves, never the copy. A deployment covered by a
+ * copy says who renews it instead of counting down the copy's days, and it
+ * offers no link to the Certificates page, which does not list the copy.
+ */
+const caddyRoute: DeploymentDomainRoute = {
+  hostname: "api.example.test",
+  https: true,
+  ownership: "managed",
+  route: "served",
+  servedBy: "just-dashboard-env-12.conf",
+  certificate: "valid",
+  certificateName: "caddy-0da2f3126af1d760c968313b",
+  certificateIssuer: "E6",
+  certificateRenewedBy: "caddy",
+  deepLink: "/proxy/sites?site=just-dashboard-env-12.conf",
+}
+const caddyOperations = {
+  ...healthyOperations,
+  domains: { ...healthyOperations.domains, domains: [caddyRoute] },
+}
+
+test("a deployment domain Caddy renews says so, with no days left and no certificate link", async ({
+  page,
+}) => {
+  await mockProject(page, { operations: caddyOperations })
+  await page.goto("/deploy/7/settings/domains")
+
+  const form = page.getByRole("form", { name: "Domains" })
+  await expect(form.getByText("Certificate valid", { exact: true })).toBeVisible()
+  await expect(form.getByText("Renewed by Caddy", { exact: true })).toBeVisible()
+  await expect(page.getByText(/\bdays? left$/)).toHaveCount(0)
+  // The figure over the list names the domain rather than "No certificate".
+  await expect(page.getByText("api.example.test · renewed by Caddy", { exact: true })).toBeVisible()
+  await expect(page.getByText("No certificate observed yet", { exact: true })).toHaveCount(0)
+
+  await page.getByRole("button", { name: "Actions for api.example.test" }).click()
+  await expect(page.getByRole("menuitem", { name: "Open the serving site" })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: "Open the certificate" })).toHaveCount(0)
+})
+
+test("the runtime page's domain row says Caddy renews it, and fits at every width", async ({
+  page,
+}) => {
+  await mockProject(page, { operations: caddyOperations })
+  await page.routeWebSocket(/\/api\/v1\/docker\/containers\/.*\/stats\/stream/, () => {})
+
+  for (const width of [390, 1280, 1600]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/deploy/7/runtime")
+    const domains = page.getByRole("list", { name: "Deployment domains" })
+    const renewed = domains.getByText("Renewed by Caddy", { exact: true })
+    await expect(renewed).toBeVisible()
+    await expect(domains.getByText(/\bdays? left$/)).toHaveCount(0)
+    // The reading sits in a fixed column on a wide row; it must not run out of it.
+    expect(
+      await renewed.evaluate((element) => {
+        const reading = element.parentElement!.getBoundingClientRect()
+        const column = element.parentElement!.parentElement!.getBoundingClientRect()
+        return (
+          element.getBoundingClientRect().right <= column.right + 1 &&
+          reading.right <= column.right + 1
+        )
+      }),
+    ).toBe(true)
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true)
+  }
 })

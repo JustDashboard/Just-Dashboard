@@ -1148,7 +1148,10 @@ only renderer/executor/validation authority for their feature.
   named unavailable evidence rather than an empty success. A domain row names who issued its
   certificate (`certificateIssuer`, the issuer's common name — `R10`, `E6` for Let's Encrypt — read
   from the same certificate as its name and days left), so the issuer is observed rather than
-  inferred from how the domain is owned. A dependency's `deepLink` is the page that owns it: a backup
+  inferred from how the domain is owned. A domain covered by the copy a Docker Caddy release kept reads
+  `valid` with `certificateRenewedBy: "caddy"` and no days left or certificate link: Caddy renews the
+  certificate it serves and never the copy, so the copy's expiry is not the domain's and raises no
+  finding. A dependency's `deepLink` is the page that owns it: a backup
   job's own page (`/backups/<id>`) and Databases with the connection selected
   (`/databases/connection?conn=<id>`), each only once the resource is known to exist and the list page
   until then. The connection link used to be `/databases/<id>`, which is not a route, because the
