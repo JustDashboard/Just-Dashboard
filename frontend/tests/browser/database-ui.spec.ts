@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
+import { PG_LINES } from "./logs-lens-fixture"
 
 /**
  * The databases section, after its redesign: the connection is the workbench location, the
@@ -224,6 +225,50 @@ const topology = {
   ],
 }
 
+/** The container behind the connection, as the server resolves its log. */
+const containerLog = {
+  sources: [
+    {
+      id: "docker:shop-db",
+      label: "shop-db",
+      kind: "docker",
+      detail: "postgres:16",
+      status: "running",
+      lens: "postgres",
+      primary: true,
+      rotated: false,
+    },
+  ],
+}
+
+const emptyQueryLog = { supported: true, source: "log", entries: [], truncated: false }
+
+/**
+ * A log search: the lens's readings ask for event counts and level counts
+ * over the last hour; History asks for lines, which this server has none of.
+ */
+function logSearch(url: URL) {
+  const events = [
+    { value: "slow", count: 12, errors: 0 },
+    { value: "auth_failed", count: 1, errors: 1 },
+    { value: "startup", count: 1, errors: 0 },
+  ]
+  return {
+    lines: [],
+    scanned: 4200,
+    matched: url.searchParams.get("levels") ? 3 : 14,
+    truncated: false,
+    complete: true,
+    files: [],
+    histogram: [],
+    tookMillis: 3,
+    facets:
+      url.searchParams.get("facets") === "event"
+        ? { event: { values: events, distinct: events.length, other: 0, missing: 0 } }
+        : undefined,
+  }
+}
+
 async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
 }
@@ -244,14 +289,41 @@ async function mockDatabases(
     exports?: string[]
     /** Every /browse request's query string, for the paging assertions. */
     browses?: string[]
+    /** What GET /databases/1/logs/sources answers; the container by default. */
+    logSources?: unknown
+    queryLog?: unknown
+    /** Every live log socket's query and every log search, in order. */
+    sockets?: URLSearchParams[]
+    searches?: URLSearchParams[]
   },
 ) {
+  // The server log's live tail: a Postgres log's own lines, already read
+  // through its lens, for any source the page opens.
+  await page.routeWebSocket("**/api/v1/logs/stream**", (socket) => {
+    const params = new URL(socket.url()).searchParams
+    state.sockets?.push(params)
+    socket.send(
+      JSON.stringify({
+        type: "meta",
+        data: { kind: "docker", label: params.get("source"), lens: params.get("lens") },
+        ts: Date.now(),
+      }),
+    )
+    socket.send(JSON.stringify({ type: "logs", data: PG_LINES, ts: Date.now() }))
+  })
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.replace(/^\/api\/v1/, "")
     const method = route.request().method()
     if (path === "/auth/session") return json(route, user)
     if (path === "/databases/1/access") return json(route, state.access ?? localAccess)
+    if (path === "/databases/1/logs/sources") return json(route, state.logSources ?? containerLog)
+    if (path === "/databases/1/querylog") return json(route, state.queryLog ?? emptyQueryLog)
+    if (path === "/logs/source" || path === "/logs/retention") return json(route, {})
+    if (path === "/logs/search") {
+      state.searches?.push(url.searchParams)
+      return json(route, logSearch(url))
+    }
     if (path === "/databases/1/url") {
       const target = url.searchParams.get("target")
       const host = target === "public" ? "203.0.113.9" : "127.0.0.1"
@@ -1021,6 +1093,245 @@ test("the advisor draws findings with their fix", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Open in the console" })).toBeVisible()
 })
 
+/**
+ * `/databases/logs`: the server's own log on the database's page, found from
+ * the connection and read through its engine's lens — its container's output
+ * or the file and the journal its process writes — with its queries beside
+ * it, and never a link that leaves for the host's Logs page.
+ */
+const SLOW_SQL =
+  "SELECT o.id, o.total\n  FROM orders o\n  JOIN customers c ON c.id = o.customer_id\n WHERE c.region = 'eu'"
+
+const slowLog = {
+  supported: true,
+  source: "log",
+  enable: {
+    setting: "log_min_duration_statement",
+    current: "-1",
+    sql: "ALTER SYSTEM SET log_min_duration_statement = '250ms';\nSELECT pg_reload_conf();",
+  },
+  entries: [
+    {
+      at: "2026-09-27T10:01:03.221Z",
+      durationMs: 1843.221,
+      query: SLOW_SQL,
+      fp: "3f2a9c1d0b7e",
+      user: "postgres",
+      db: "shop",
+      client: "172.18.0.5",
+    },
+    {
+      at: "2026-09-27T09:58:40.000Z",
+      durationMs: 312,
+      query: "UPDATE stock SET qty = qty - 1 WHERE sku = 'A-1'",
+      fp: "9a0b1c2d3e4f",
+      user: "app",
+      db: "shop",
+    },
+  ],
+  truncated: false,
+}
+
+test("/databases/logs reads a container database's output through its engine's lens", async ({
+  page,
+}) => {
+  const sockets: URLSearchParams[] = []
+  await mockDatabases(page, { layout: null, puts: [], sockets })
+  await page.goto("/databases/logs?conn=1")
+
+  const lines = page.getByLabel("Log lines")
+  await expect(lines.getByText("deadlock", { exact: true })).toBeVisible({ timeout: 15_000 })
+  // The container, asked for by name, read as the engine the page knows it is.
+  expect(sockets[0].get("source")).toBe("docker:shop-db")
+  expect(sockets[0].get("lens")).toBe("postgres")
+
+  // The lens's figures are counts on chips over the pane — the section draws
+  // no tiles — and a press narrows the stream to the lines one counts.
+  const readings = page.locator('[aria-label="Readings"]')
+  const slow = readings.getByRole("button", { name: /^Slow statements/ })
+  await expect(slow).toContainText("12")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  await slow.click()
+  await expect(slow).toHaveAttribute("aria-pressed", "true")
+  await expect.poll(() => sockets.at(-1)?.getAll("f")).toEqual(["event:slow"])
+  // The lens's own quick view agrees about the question on screen.
+  await expect(page.getByRole("button", { name: /^Slow( \d+)?$/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect(page.locator('[data-slot=page] a[href^="/logs"]')).toHaveCount(0)
+})
+
+test("/databases/logs offers a host database's file and its unit's journal, and no link to /logs", async ({
+  page,
+}) => {
+  const sockets: URLSearchParams[] = []
+  const searches: URLSearchParams[] = []
+  const file = "/var/log/postgresql/postgresql-17-main.log"
+  await mockDatabases(page, {
+    layout: null,
+    puts: [],
+    sockets,
+    searches,
+    logSources: {
+      sources: [
+        {
+          id: `file:${file}`,
+          label: "postgresql-17-main.log",
+          kind: "app",
+          path: file,
+          size: 0,
+          modified: now,
+          archives: 1,
+          archiveBytes: 1297,
+          lens: "postgres",
+          detail: "Empty since it was last rotated — History reads the rotated files too",
+          primary: true,
+          rotated: true,
+        },
+        {
+          id: "journal:postgresql@17-main.service",
+          label: "postgresql@17-main.service",
+          kind: "journal",
+          lens: "postgres",
+          detail:
+            "What systemd recorded starting and stopping it; the server's own lines are in postgresql-17-main.log",
+          rotated: false,
+        },
+      ],
+    },
+  })
+  await page.goto("/databases/logs?conn=1")
+  await expect(page.getByLabel("Log lines").getByText("deadlock", { exact: true })).toBeVisible({
+    timeout: 15_000,
+  })
+  expect(sockets[0].get("source")).toBe(`file:${file}`)
+
+  const picker = page.getByRole("combobox", { name: "Server log" })
+  await picker.click()
+  await page.getByRole("option", { name: "postgresql@17-main.service" }).click()
+  await expect.poll(() => sockets.at(-1)?.get("source")).toBe("journal:postgresql@17-main.service")
+  await expect(page).toHaveURL(/source=journal%3Apostgresql%4017-main\.service/)
+
+  // The file logrotate emptied opens its History on the rotated one too.
+  await picker.click()
+  await page.getByRole("option", { name: "postgresql-17-main.log" }).click()
+  await page.getByRole("button", { name: "History", exact: true }).click()
+  await expect
+    .poll(() => searches.find((s) => s.get("limit") === "3000")?.get("archives"))
+    .toBe("true")
+  expect(searches.find((s) => s.get("limit") === "3000")?.get("source")).toBe(`file:${file}`)
+  await expect(page.locator('[data-slot=page] a[href^="/logs"]')).toHaveCount(0)
+})
+
+test("/databases/logs lists the slow statements and says which setting keeps them from the log", async ({
+  page,
+}) => {
+  const searches: URLSearchParams[] = []
+  await mockDatabases(page, { layout: null, puts: [], searches, queryLog: slowLog })
+  await page.goto("/databases/logs?conn=1&view=queries")
+  await expect(page.getByRole("button", { name: "Queries", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+    { timeout: 15_000 },
+  )
+
+  const notice = page.getByText("Slow statements are not being logged")
+  await expect(notice).toBeVisible()
+  await expect(page.getByText(/log_min_duration_statement, which is -1/)).toBeVisible()
+
+  // A row is one line; opened, it is the whole statement and what came with it.
+  const row = page.getByRole("button", { name: /SELECT o\.id, o\.total FROM orders o JOIN/ })
+  await expect(row).toBeVisible()
+  await expect(row).toContainText("1.84s")
+  await row.click()
+  await expect(
+    page.getByText("JOIN customers c ON c.id = o.customer_id", { exact: false }).last(),
+  ).toBeVisible()
+  await expect(page.getByText("172.18.0.5").last()).toBeVisible()
+  await page.screenshot({ path: "test-results/database-logs-queries-1280.png", fullPage: true })
+
+  // The server log a minute either side, every line of it.
+  await page.getByRole("button", { name: "Server log around this" }).click()
+  await expect(page.getByRole("button", { name: "History", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect
+    .poll(() => searches.find((s) => s.get("limit") === "3000")?.get("since"))
+    .toBe("2026-09-27T10:00:03.221Z")
+  const history = searches.find((s) => s.get("limit") === "3000")!
+  expect(history.get("until")).toBe("2026-09-27T10:02:03.221Z")
+  expect(history.getAll("f")).toEqual([])
+
+  // The fix is the advisor's: the statement, run in the query console.
+  await page.getByRole("button", { name: "Queries", exact: true }).click()
+  await page.getByRole("button", { name: "Top statements" }).click()
+  await expect(page.getByRole("heading", { name: "Top statements" })).toBeVisible()
+  await expect(page.getByText("SELECT * FROM orders WHERE customer_id = $1")).toBeVisible()
+  await page.getByRole("button", { name: "Latest" }).click()
+  await page.getByRole("button", { name: "Open in Query" }).first().click()
+  await expect(page).toHaveURL(
+    /\/databases\/query\?conn=1&sql=ALTER\+SYSTEM|\/databases\/query\?conn=1&sql=ALTER%20SYSTEM/,
+  )
+})
+
+test("/databases/logs on a SQLite file lists what was run from here, with no log pane", async ({
+  page,
+}) => {
+  const sockets: URLSearchParams[] = []
+  await mockDatabases(page, {
+    layout: null,
+    puts: [],
+    sockets,
+    logSources: {
+      sources: [],
+      reason: "A SQLite database is a file, not a server: it writes no log of its own.",
+    },
+  })
+  const notes = {
+    ...connection,
+    name: "notes",
+    driver: "sqlite",
+    host: "",
+    port: "",
+    user: "",
+    database: "/srv/notes.db",
+  }
+  await page.route("**/api/v1/databases/", (route) => json(route, [notes]))
+  await page.route("**/api/v1/databases/1/history**", (route) =>
+    json(route, [
+      {
+        id: 2,
+        sql: "DELETE FROM notes WHERE archived",
+        risk: "critical",
+        success: false,
+        durationMs: 2,
+        rowCount: 0,
+        ranAt: now,
+      },
+      {
+        id: 1,
+        sql: "SELECT * FROM notes WHERE id = 3",
+        risk: "safe",
+        success: true,
+        durationMs: 4,
+        rowCount: 1,
+        ranAt: now,
+      },
+    ]),
+  )
+  await page.goto("/databases/logs?conn=1")
+  await expect(page.getByText("Statements run from here")).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText(/writes no log of its own/)).toBeVisible()
+  await expect(
+    page.getByRole("button", { name: /SELECT \* FROM notes WHERE id = 3/ }),
+  ).toBeVisible()
+  await expect(page.getByRole("button", { name: /DELETE FROM notes/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Live", exact: true })).toHaveCount(0)
+  expect(sockets).toHaveLength(0)
+})
+
 for (const path of [
   "/databases",
   "/databases/overview?conn=1",
@@ -1031,6 +1342,7 @@ for (const path of [
   "/databases/server?conn=1",
   "/databases/advisor?conn=1",
   "/databases/backups?conn=1",
+  "/databases/logs?conn=1",
 ]) {
   test(`every icon-only control on ${path} has an accessible name`, async ({ page }) => {
     await mockDatabases(page, { layout: null, puts: [] })
