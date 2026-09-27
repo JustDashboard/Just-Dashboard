@@ -65,7 +65,8 @@ func (r *cronReader) Read(l *Line) {
 			if len(r.jobs) >= cronJobsCap {
 				clear(r.jobs)
 			}
-			r.jobs[m.pid] = job
+			// Copied, because the line they are cut from is not kept.
+			r.jobs[strings.Clone(m.pid)] = cronJob{user: strings.Clone(job.user), command: strings.Clone(job.command)}
 		}
 	default:
 		return
