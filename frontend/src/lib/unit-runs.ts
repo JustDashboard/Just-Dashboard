@@ -31,13 +31,15 @@ export const RUN_EVENTS = [
 ] as const
 
 /**
- * The programs whose lines are the manager's: systemd itself, and the core
- * dump handler that reports a crash for it. A forced lens reads every line
+ * The program whose lines are the manager's. A forced lens reads every line
  * of the unit's journal, the program's own included, and "Started worker
  * pool" or "Closed redis connection" from the program is a sentence the
- * systemd lens would read as a start or a stop.
+ * systemd lens would read as a start or a stop. A core dump's report is not
+ * among them: systemd-coredump writes it under its own unit and invocation,
+ * which would be a run of its own, and the manager's `code=dumped` already
+ * says it of the run that crashed.
  */
-export const MANAGER_PROGRAMS = ["systemd", "systemd-coredump"] as const
+export const MANAGER = "systemd"
 
 /** How far back the runs are read: far enough for a weekly timer to have fired. */
 export const RUNS_DAYS = 7
@@ -102,15 +104,15 @@ function sameUnit(named: string, unit: string) {
 
 /**
  * The lines of a unit's journal that are the manager speaking about that
- * unit. The read asks for the manager's programs already; this holds for
- * lines from anywhere else, and drops what `user@1000.service`'s journal is
+ * unit. The read asks for the manager's lines already; this holds for a
+ * line from anywhere else, and drops what `user@1000.service`'s journal is
  * mostly made of: the user manager's lines about the user's own units, each
  * with the user manager's invocation, which would all read as one run.
  */
 export function managerLines(lines: readonly LogLine[], unit: string): LogLine[] {
   return lines.filter((line) => {
     const program = line.attrs?.program
-    if (program && !(MANAGER_PROGRAMS as readonly string[]).includes(program)) return false
+    if (program && program !== MANAGER) return false
     const named = line.attrs?.unit
     return !named || sameUnit(named, unit)
   })

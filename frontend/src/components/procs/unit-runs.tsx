@@ -9,7 +9,7 @@ import { journalSource } from "@/lib/log-sources"
 import { latency } from "@/lib/requests"
 import type { LogSearchResult } from "@/lib/types"
 import {
-  MANAGER_PROGRAMS,
+  MANAGER,
   RUN_EVENTS,
   RUNS_DAYS,
   crashLoop,
@@ -47,11 +47,8 @@ const FOLD_SHOWN = 50
  */
 const RUNS_POLL = 5 * 60_000
 
-/** The query: the lifecycle events, from the manager's own programs only. */
-const RUN_PREDICATES = [
-  ...RUN_EVENTS.map((event) => `event:${event}`),
-  ...MANAGER_PROGRAMS.map((program) => `program:${program}`),
-]
+/** The query: the lifecycle events, from the manager only. */
+const RUN_PREDICATES = [...RUN_EVENTS.map((event) => `event:${event}`), `program:${MANAGER}`]
 
 const OUTCOME: Record<RunOutcome, { label: string; tone: DotTone }> = {
   running: { label: "running", tone: "running" },

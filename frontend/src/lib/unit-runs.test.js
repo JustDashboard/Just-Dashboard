@@ -68,12 +68,38 @@ describe("managerLines", () => {
     expect(run.end).toBeUndefined()
   })
 
-  test("keeps a core dump's report, which is systemd-coredump's", () => {
-    const dump = {
-      ...line("10:00:00.000", "core_dumped", "Process 4410 (api) of user 0 dumped core."),
-      attrs: { program: "systemd-coredump" },
-    }
-    expect(managerLines([dump], "api.service")).toHaveLength(1)
+  // systemd-coredump reports a crash as a unit of its own, with its own
+  // invocation; the manager's exit line is what says the run dumped core.
+  test("drops a core dump's report and keeps the manager's word for it", () => {
+    const lines = [
+      line("10:00:00.000", "starting", "Starting api.service...", {
+        invocation: "a",
+        unit: "api.service",
+      }),
+      line(
+        "10:00:01.000",
+        "killed",
+        "api.service: Main process exited, code=dumped, status=11/SEGV",
+        {
+          invocation: "a",
+          unit: "api.service",
+          exit_code: "dumped",
+          exit_status: "11",
+          signal: "SEGV",
+        },
+      ),
+      {
+        ...line("10:00:01.200", "core_dumped", "Process 4410 (api) of user 0 dumped core."),
+        attrs: {
+          program: "systemd-coredump",
+          unit: "systemd-coredump@0-4411-0.service",
+          invocation: "dump",
+        },
+      },
+    ]
+    const runs = unitRuns(managerLines(lines, "api.service"))
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).toMatchObject({ invocation: "a", exitCode: "dumped", signal: "SEGV" })
   })
 
   // user@1000.service's journal is the user manager speaking about every

@@ -695,7 +695,7 @@ const RUN_PREDICATES = [
 ]
   .map((event) => `event:${event}`)
   // The manager's own lines: the forced lens would name the program's too.
-  .concat("program:systemd", "program:systemd-coredump")
+  .concat("program:systemd")
 
 test("a unit's journal reads its runs, folds a loop and opens one run's own lines", async ({
   page,
