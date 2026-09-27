@@ -255,7 +255,7 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 	// As typed: a path on the upstream is how nginx is told to replace the
 	// location's own prefix, and trimming its slash turned /app/ into /app,
 	// which sent /page to the application as /apppage.
-	l.add("        proxy_pass %s;", proxyPassTarget(loc.Upstream))
+	l.add("        proxy_pass %s;", proxyPassTarget(loc.Path, loc.Upstream))
 	l.add("        proxy_http_version 1.1;")
 	l.add("        # The application sees the visitor's address and scheme rather")
 	l.add("        # than the proxy's, which is what makes redirects, cookies and")
@@ -288,13 +288,45 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 	l.add("    }")
 }
 
-// proxyPassTarget is the upstream as proxy_pass spells it. nginx refuses a
-// bare unix: address ("invalid URL prefix"); a socket is http://unix:<path>.
-func proxyPassTarget(upstream string) string {
+// proxyPassTarget is the upstream as proxy_pass spells it for a location at
+// path. nginx refuses a bare unix: address ("invalid URL prefix"); a socket is
+// http://unix:<path>.
+//
+// A path on the upstream that is the location's own prefix is left off. The
+// swap it asks for changes nothing, and it is not free: nginx forwards the
+// request exactly as the client sent it only to an upstream without a path,
+// and to one with a path it sends the path decoded, so http://x/ on / turned
+// /pkg/%40scope%2Fname into /pkg/@scope/name — the pasted form of an address
+// quietly breaking every registry and repository path that carries a %2F.
+func proxyPassTarget(path, upstream string) string {
+	if address, uri := splitUpstream(upstream); uri == path {
+		upstream = address
+	}
 	if strings.HasPrefix(upstream, "unix:") {
 		return "http://" + upstream
 	}
 	return upstream
+}
+
+// splitUpstream parts an upstream into its address and the path after it,
+// where nginx reads them apart: after the host of a URL, and after the colon
+// that ends a socket's path in unix:/run/app.sock:/uri.
+func splitUpstream(upstream string) (address, uri string) {
+	if socket, ok := strings.CutPrefix(upstream, "unix:"); ok {
+		if i := strings.Index(socket, ":"); i >= 0 {
+			return "unix:" + socket[:i], socket[i+1:]
+		}
+		return upstream, ""
+	}
+	scheme := strings.Index(upstream, "://")
+	if scheme < 0 {
+		return upstream, ""
+	}
+	host := scheme + len("://")
+	if i := strings.Index(upstream[host:], "/"); i >= 0 {
+		return upstream[:host+i], upstream[host+i:]
+	}
+	return upstream, ""
 }
 
 func renderExploitBlocks(l *lines) {

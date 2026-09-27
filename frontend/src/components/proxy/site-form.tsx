@@ -141,8 +141,9 @@ function SiteFormBody({
   const [fixed, setFixed] = useSessionState<IdentityFixed>(`${draft}.fixed`, FOLLOW_DOMAINS)
   const [busy, setBusy] = useState(false)
   const [loaded, setLoaded] = useState(source === null)
-  // A save nginx would half ignore, refused with the server's sentence. Kept
-  // with the spec it was about, so any edit puts the question away.
+  // A save refused over a name another server block claims, with the
+  // server's sentence saying which of the two nginx answers. Kept with the
+  // spec it was about, so any edit puts the question away.
   const [conflict, setConflict] = useState<{
     message: string
     reload: boolean
@@ -288,8 +289,13 @@ function SiteFormBody({
     }
   }
 
+  // The refusal is said where the question is: focus moves onto it, so the
+  // next Tab reaches "Save anyway" and a screen reader reads it, instead of
+  // staying on a footer button that simply comes back enabled.
   useEffect(() => {
-    if (conflict) conflictRef.current?.scrollIntoView({ block: "nearest" })
+    if (!conflict) return
+    conflictRef.current?.scrollIntoView({ block: "nearest" })
+    conflictRef.current?.focus({ preventScroll: true })
   }, [conflict])
   const conflictShown = conflict?.spec === spec ? conflict : null
 
@@ -333,7 +339,7 @@ function SiteFormBody({
       <div className="min-h-0 flex-1 overflow-y-auto p-4 lg:w-[26rem] lg:shrink-0 lg:border-r lg:border-hairline">
         <div className="space-y-6">
           {conflictShown && (
-            <div ref={conflictRef}>
+            <div ref={conflictRef} role="alert" tabIndex={-1} className="rounded-lg focus-ring">
               <Notice tone="warning" icon={Warning} title="Already served elsewhere">
                 {conflictShown.message}
                 <div className="mt-2">

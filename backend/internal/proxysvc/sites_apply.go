@@ -30,24 +30,45 @@ type SiteResult struct {
 	Enabled      bool         `json:"enabled"`
 	Reloaded     bool         `json:"reloaded"`
 	// ReloadError is why nginx did not reload a configuration that tested
-	// clean. The site is written and in place, and nginx goes on serving
-	// what it served before until something reloads it.
+	// clean. The site is written and in place, and nginx has not picked it
+	// up: a running nginx serves what it served before, and one that is not
+	// running — the usual cause — serves nothing until it is started.
 	ReloadError string `json:"reloadError,omitempty"`
 	Output      string `json:"output,omitempty"`
 }
 
 // ServerNameConflict is one of a site's names that another server block
-// already answers on the same address.
+// also claims on the same address.
 type ServerNameConflict struct {
 	Domain string `json:"domain"`
 	// Listen is the address as nginx names it: 0.0.0.0:80, [::]:443.
 	Listen string `json:"listen"`
-	// Site is the other enabled site serving the name there, when one of the
-	// listed sites does; it may also be a block in nginx.conf or elsewhere.
+	// Site is the listed site behind the other claim; empty when the other
+	// block is not one of the listed sites, such as one in nginx.conf.
 	Site string `json:"site,omitempty"`
+	// Effect is which of the two nginx answers the name from: ConflictIgnored,
+	// ConflictTakes or ConflictKeeps. Empty when the order nginx reads the
+	// two in could not be read, and then the conflict says only that both
+	// claim the name.
+	Effect string `json:"effect,omitempty"`
 }
 
-// ErrServerNameConflict refuses a save nginx would half ignore.
+// nginx answers a name on an address from the first server block it reads
+// that claims it, in include order, and ignores the rest.
+const (
+	// ConflictIgnored: the other block comes first and keeps the name; this
+	// site's claim is ignored.
+	ConflictIgnored = "ignored"
+	// ConflictTakes: this site comes first and takes the name from the
+	// other block, which answered it until now.
+	ConflictTakes = "takes"
+	// ConflictKeeps: this site already answered the name and still does;
+	// the other block's claim was ignored before the save and still is.
+	ConflictKeeps = "keeps"
+)
+
+// ErrServerNameConflict refuses a save that changes which block answers a
+// name, or whose own claim nginx would ignore.
 var ErrServerNameConflict = errors.New("another server block already answers to one of this site's names")
 
 // errSiteReloadFailed marks a save that tested clean and is in place, and
@@ -63,8 +84,9 @@ type SiteSave struct {
 	Reload bool
 	// Overwrite replaces a site of the same name; without it one is refused.
 	Overwrite bool
-	// AllowConflict saves a site even when one of its names is already
-	// answered on the same address by another server block.
+	// AllowConflict saves a site even when another server block claims one
+	// of its names on the same address and the save changes who answers it
+	// or leaves this site's claim ignored.
 	AllowConflict bool
 }
 
@@ -136,6 +158,13 @@ func (s *Service) saveSiteLocked(ctx context.Context, spec *SiteSpec, content st
 		return nil, fmt.Errorf("a site called %s already exists", spec.Name)
 	}
 	link := filepath.Join(s.nginxDir, "sites-enabled", spec.Name)
+	// What nginx read of this file before the save: a name the site wins
+	// after it is only taken from someone if the site did not answer it
+	// already.
+	var previous []Directive
+	if existed && (!strings.Contains(full, "sites-available") || resolvedFile(link) == full) {
+		previous, _ = ParseNginxFile(full, original, []string{"http"})
+	}
 	if !enable {
 		// Leaving the link as it was: a site that has one is enabled, and
 		// relinking it makes sure the link names the file being saved.
@@ -177,11 +206,16 @@ func (s *Service) saveSiteLocked(ctx context.Context, spec *SiteSpec, content st
 		return res, ErrInvalidConf
 	}
 	// nginx passes a second server block claiming a name on an address the
-	// first already answers it on, and serves only one of them. Which one is
-	// include order, so saving could as easily take a domain from a working
-	// site as leave the new one unreachable.
+	// first already answers it on, and serves only the first in include
+	// order. A save that takes a domain from a working site, or whose own
+	// claim is ignored, is refused unless allowed; one that leaves a name
+	// with the site that already answered it is not, since refusing it
+	// blocks an edit to the site that is serving.
 	res.Conflicts = s.serverNameConflicts(res.Validation, spec.Domains, content, full)
-	if len(res.Conflicts) > 0 && !opts.AllowConflict {
+	if len(res.Conflicts) > 0 {
+		s.orderConflicts(ctx, res.Conflicts, full, previous)
+	}
+	if refusesConflicts(res.Conflicts) && !opts.AllowConflict {
 		undoLink()
 		restoreConfig(full, original, existed)
 		res.Enabled = false
@@ -304,29 +338,176 @@ func listenPort(address string) string {
 	return address[strings.LastIndex(address, ":")+1:]
 }
 
-// ConflictSummary says who already answers each conflicting name, in one
-// sentence the form can show as it is.
-func ConflictSummary(conflicts []ServerNameConflict) string {
-	type owner struct{ domain, site string }
-	var order []owner
-	listens := map[owner][]string{}
+// orderConflicts says for each conflict which of the two claims nginx
+// answers from, reading the order from `nginx -T`: nginx keeps the first
+// server block it reads that claims a name on an address, and the dump's
+// tree is that order, includes and all — sites-enabled/* sorted, a conf.d
+// file before it or after it as nginx.conf includes them. It names the other
+// claim's site from the same tree, which beats the listing: the listing
+// cannot tell the site that answers from the one that is ignored.
+//
+// previous is the file as nginx read it before the save, nil when it did not
+// read it at all. A conflict whose order cannot be read is left without an
+// Effect, and with the site the listing gave it.
+func (s *Service) orderConflicts(ctx context.Context, conflicts []ServerNameConflict, full string, previous []Directive) {
+	files, err := s.dumpNginx(ctx)
+	if err != nil {
+		return
+	}
+	tree, err := NginxTree(files)
+	if err != nil {
+		return
+	}
+	blocks := serverBlocks(tree)
+	self := resolvedFile(full)
+	var sites []VHost
+	listed := false
+	for i := range conflicts {
+		c := &conflicts[i]
+		mineFirst, mineSeen := false, false
+		var other *Directive
+		for j := range blocks {
+			if !claimsName(blocks[j], c.Domain, c.Listen) {
+				continue
+			}
+			mine := resolvedFile(blocks[j].File) == self
+			if !mineSeen && other == nil {
+				mineFirst = mine
+			}
+			if mine {
+				mineSeen = true
+			} else if other == nil {
+				other = &blocks[j]
+			}
+		}
+		if !mineSeen || other == nil {
+			continue
+		}
+		if !listed {
+			sites, listed = s.nginxVHosts(), true
+		}
+		c.Site = siteOfFile(sites, other.File)
+		switch {
+		case !mineFirst:
+			c.Effect = ConflictIgnored
+		case claimsIn(serverBlocks(previous), c.Domain, c.Listen):
+			c.Effect = ConflictKeeps
+		default:
+			c.Effect = ConflictTakes
+		}
+	}
+}
+
+// refusesConflicts says whether a save is refused over its conflicts: every
+// one that is not the site keeping a name it already answered.
+func refusesConflicts(conflicts []ServerNameConflict) bool {
 	for _, c := range conflicts {
-		key := owner{c.Domain, c.Site}
+		if c.Effect != ConflictKeeps {
+			return true
+		}
+	}
+	return false
+}
+
+// serverBlocks are a tree's http server blocks, in the order nginx reads them.
+func serverBlocks(directives []Directive) []Directive {
+	var out []Directive
+	for _, d := range directives {
+		if d.Block == nil {
+			continue
+		}
+		if d.Name == "server" {
+			if len(d.Context) > 0 && d.Context[len(d.Context)-1] == "http" {
+				out = append(out, d)
+			}
+			continue
+		}
+		out = append(out, serverBlocks(d.Block)...)
+	}
+	return out
+}
+
+// claimsName says whether a server block claims name on address. A block
+// with no listen is on *:80, or *:8000 when nginx is not run as root; and
+// ".example.com" claims example.com as well as its subdomains.
+func claimsName(block Directive, name, address string) bool {
+	named, listens := false, false
+	onAddress := false
+	for _, d := range block.Block {
+		switch d.Name {
+		case "server_name":
+			for _, arg := range d.Args {
+				arg = strings.ToLower(arg)
+				named = named || arg == name || arg == "."+name || (strings.HasPrefix(arg, ".") && name == "*"+arg)
+			}
+		case "listen":
+			listens = true
+			onAddress = onAddress || listenAddress(strings.Join(d.Args, " ")) == address
+		}
+	}
+	if !listens {
+		onAddress = address == "0.0.0.0:80" || address == "0.0.0.0:8000"
+	}
+	return named && onAddress
+}
+
+func claimsIn(blocks []Directive, name, address string) bool {
+	for _, b := range blocks {
+		if claimsName(b, name, address) {
+			return true
+		}
+	}
+	return false
+}
+
+// siteOfFile is the listed site whose file is file, or "" for a block that is
+// not one of the listed sites.
+func siteOfFile(sites []VHost, file string) string {
+	resolved := resolvedFile(file)
+	for _, v := range sites {
+		if resolvedFile(v.Path) == resolved {
+			return v.Name
+		}
+	}
+	return ""
+}
+
+// ConflictSummary says, for each conflicting name, which claim nginx answers
+// and what saving anyway would do, in sentences the form shows as they are.
+func ConflictSummary(conflicts []ServerNameConflict) string {
+	type group struct{ domain, site, effect string }
+	var order []group
+	listens := map[group][]string{}
+	for _, c := range conflicts {
+		key := group{c.Domain, c.Site, c.Effect}
 		if _, ok := listens[key]; !ok {
 			order = append(order, key)
 		}
 		listens[key] = append(listens[key], c.Listen)
 	}
-	parts := make([]string, 0, len(order))
+	sentences := make([]string, 0, len(order))
 	for _, key := range order {
 		site := key.site
 		if site == "" {
 			site = "another server block"
 		}
-		parts = append(parts, fmt.Sprintf("%s is already served by %s on %s",
-			key.domain, site, strings.Join(listens[key], " and ")))
+		at := key.domain + " on " + strings.Join(listens[key], " and ")
+		switch key.effect {
+		case ConflictIgnored:
+			sentences = append(sentences, fmt.Sprintf(
+				"nginx answers %s from %s, which it reads first, and ignores this site's claim.", at, site))
+		case ConflictTakes:
+			sentences = append(sentences, fmt.Sprintf(
+				"Saving anyway takes %s from %s, since nginx reads this site first.", at, site))
+		case ConflictKeeps:
+			sentences = append(sentences, fmt.Sprintf(
+				"This site goes on answering %s; nginx ignores %s's claim to it, as before.", at, site))
+		default:
+			sentences = append(sentences, fmt.Sprintf(
+				"%s is also claimed by %s, and nginx answers it from only one of the two.", at, site))
+		}
 	}
-	return strings.Join(parts, "; ") + ". nginx answers a name from one server block and ignores the other."
+	return strings.Join(sentences, " ")
 }
 
 // warningsIn are the test's warnings placed in file.

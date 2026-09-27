@@ -44,13 +44,20 @@ export type SiteSpec = {
   custom?: string
 }
 
-/** One of a site's names another server block already answers on the same address. */
+/** One of a site's names another server block also claims on the same address. */
 export type ServerNameConflict = {
   domain: string
   /** The address as nginx names it: 0.0.0.0:80, [::]:443. */
   listen: string
-  /** The other enabled site serving it, when one of the listed sites does. */
+  /** The listed site behind the other claim; absent for a block that is not a listed site. */
   site?: string
+  /**
+   * Which claim nginx answers from — it keeps the first block it reads:
+   * `ignored`, the other site keeps the name; `takes`, this site took it;
+   * `keeps`, this site already answered it. Absent when the order could not
+   * be read.
+   */
+  effect?: "ignored" | "takes" | "keeps"
 }
 
 export type SiteResult = {
@@ -59,7 +66,7 @@ export type SiteResult = {
   content: string
   warnings: string[]
   validation?: ProxyValidation
-  /** Names saved anyway although another server block answers them. */
+  /** Names another server block also claims, saved anyway or kept. */
   conflicts?: ServerNameConflict[]
   /** nginx's test warnings placed in this site's own file. */
   testWarnings?: ProxyDiagnostic[]

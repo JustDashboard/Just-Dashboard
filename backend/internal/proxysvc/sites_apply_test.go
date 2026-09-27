@@ -13,7 +13,9 @@ import (
 
 // siteNginx puts an nginx first on PATH that answers `nginx -t` with the
 // given lines and exit code and `nginx -s reload` with its own, and returns
-// a Service over a Debian layout in a temporary directory.
+// a Service over a Debian layout in a temporary directory. Its `nginx -T`
+// prints what nginx would: nginx.conf, then every file in sites-enabled in
+// sorted order, which nginx.conf includes inside http.
 func siteNginx(t *testing.T, test string, testExit int, reload string, reloadExit int) (*Service, string) {
 	t.Helper()
 	root := t.TempDir()
@@ -22,8 +24,16 @@ func siteNginx(t *testing.T, test string, testExit int, reload string, reloadExi
 			t.Fatal(err)
 		}
 	}
+	conf := "events {}\nhttp {\n    include " + filepath.Join(root, "sites-enabled") + "/*;\n}\n"
+	if err := os.WriteFile(filepath.Join(root, "nginx.conf"), []byte(conf), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	script := "#!/bin/sh\n" +
 		"if [ \"$1\" = \"-t\" ]; then printf '%s\\n' \"$JD_TEST_OUT\"; exit $JD_TEST_EXIT; fi\n" +
+		"if [ \"$1\" = \"-T\" ]; then printf '%s\\n' \"$JD_TEST_OUT\" >&2\n" +
+		"  for f in '" + root + "/nginx.conf' '" + root + "'/sites-enabled/*; do\n" +
+		"    [ -e \"$f\" ] || continue; printf '# configuration file %s:\\n' \"$f\"; cat \"$f\"; printf '\\n'\n" +
+		"  done; exit $JD_TEST_EXIT; fi\n" +
 		"if [ \"$1\" = \"-s\" ]; then printf '%s\\n' \"$JD_TEST_RELOAD_OUT\"; exit $JD_TEST_RELOAD_EXIT; fi\n" +
 		"exit 0\n"
 	if err := os.WriteFile(filepath.Join(root, "bin", "nginx"), []byte(script), 0o755); err != nil {
@@ -126,35 +136,44 @@ func TestSaveSiteReportsAFailedReloadAsAResult(t *testing.T) {
 	}
 }
 
-// nginx exits 0 through a second claim on a name and serves one of the two.
-// The save is refused and taken back, naming who holds the name, unless the
-// operator says to save anyway.
-func TestSaveSiteRefusesANameAnotherSiteServes(t *testing.T) {
-	warn := `nginx: [warn] conflicting server name "app.example.com" on 0.0.0.0:80, ignored` + "\n" +
-		`nginx: [warn] conflicting server name "app.example.com" on [::]:80, ignored` + "\n" + cleanTest
-	service, root := siteNginx(t, warn, 0, "", 0)
+// conflictWarning is what nginx -t says about a second claim on name on :80.
+func conflictWarning(name string) string {
+	return `nginx: [warn] conflicting server name "` + name + `" on 0.0.0.0:80, ignored` + "\n" +
+		`nginx: [warn] conflicting server name "` + name + `" on [::]:80, ignored` + "\n" + cleanTest
+}
+
+func enableSite(t *testing.T, root string, spec *SiteSpec) {
+	t.Helper()
+	content, _ := RenderNginx(spec)
+	available := filepath.Join(root, "sites-available", spec.Name)
+	if err := os.WriteFile(available, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(available, filepath.Join(root, "sites-enabled", spec.Name)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// nginx exits 0 through a second claim on a name and serves the first block
+// it reads. A new site that sorts before the one holding the name takes it,
+// and the refusal says so rather than that the holder goes on serving it.
+func TestSaveSiteRefusesToTakeANameFromTheSiteServingIt(t *testing.T) {
+	service, root := siteNginx(t, conflictWarning("app.example.com"), 0, "", 0)
 	ctx := context.Background()
-	legacy := plainSpec("legacy", "app.example.com")
-	content, _ := RenderNginx(legacy)
-	if err := os.WriteFile(filepath.Join(root, "sites-available", "legacy"), []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(root, "sites-available", "legacy"), filepath.Join(root, "sites-enabled", "legacy")); err != nil {
-		t.Fatal(err)
-	}
+	enableSite(t, root, plainSpec("legacy", "app.example.com"))
 
 	res, err := service.SaveSite(ctx, plainSpec("app", "App.Example.com"), SiteSave{Enable: true, Reload: true})
 	if !errors.Is(err, ErrServerNameConflict) {
 		t.Fatalf("got %v, want a name conflict", err)
 	}
-	want := []ServerNameConflict{{Domain: "app.example.com", Listen: "0.0.0.0:80", Site: "legacy"}}
+	want := []ServerNameConflict{{Domain: "app.example.com", Listen: "0.0.0.0:80", Site: "legacy", Effect: ConflictTakes}}
 	if !reflect.DeepEqual(res.Conflicts, want) {
 		t.Fatalf("conflicts = %+v, want %+v", res.Conflicts, want)
 	}
 	if _, err := os.Stat(filepath.Join(root, "sites-available", "app")); !os.IsNotExist(err) || isLinked(t, root, "app") {
 		t.Fatal("a refused save left its file or link behind")
 	}
-	if got := ConflictSummary(res.Conflicts); got != "app.example.com is already served by legacy on 0.0.0.0:80. nginx answers a name from one server block and ignores the other." {
+	if got := ConflictSummary(res.Conflicts); got != "Saving anyway takes app.example.com on 0.0.0.0:80 from legacy, since nginx reads this site first." {
 		t.Fatalf("summary = %q", got)
 	}
 
@@ -162,8 +181,69 @@ func TestSaveSiteRefusesANameAnotherSiteServes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("saving anyway was refused: %v", err)
 	}
-	if len(res.Conflicts) != 1 || !isLinked(t, root, "app") {
+	if !reflect.DeepEqual(res.Conflicts, want) || !isLinked(t, root, "app") {
 		t.Fatalf("saved anyway without saying so: %+v", res)
+	}
+}
+
+// A site that sorts after the holder is the one nginx ignores, and the
+// refusal says the holder keeps the name.
+func TestSaveSiteRefusesANameItsHolderKeeps(t *testing.T) {
+	service, root := siteNginx(t, conflictWarning("app.example.com"), 0, "", 0)
+	enableSite(t, root, plainSpec("legacy", "app.example.com"))
+
+	res, err := service.SaveSite(context.Background(), plainSpec("zz", "app.example.com"), SiteSave{Enable: true})
+	if !errors.Is(err, ErrServerNameConflict) {
+		t.Fatalf("got %v, want a name conflict", err)
+	}
+	want := []ServerNameConflict{{Domain: "app.example.com", Listen: "0.0.0.0:80", Site: "legacy", Effect: ConflictIgnored}}
+	if !reflect.DeepEqual(res.Conflicts, want) {
+		t.Fatalf("conflicts = %+v, want %+v", res.Conflicts, want)
+	}
+	if got := ConflictSummary(res.Conflicts); got != "nginx answers app.example.com on 0.0.0.0:80 from legacy, which it reads first, and ignores this site's claim." {
+		t.Fatalf("summary = %q", got)
+	}
+}
+
+// The site nginx answers a name from is not refused an edit because a later
+// site claims the same name: the edit changes nothing about who answers it,
+// and the other site is the one being ignored. Adding a name it did not
+// answer before is taking it, and is refused.
+func TestSaveSiteLetsTheSiteAnsweringANameBeEdited(t *testing.T) {
+	service, root := siteNginx(t, cleanTest, 0, "", 0)
+	ctx := context.Background()
+	first := plainSpec("c1", "conf.test")
+	if _, err := service.SaveSite(ctx, first, SiteSave{Enable: true}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("JD_TEST_OUT", conflictWarning("conf.test"))
+	second := plainSpec("c2", "conf.test")
+	second.Domains = []string{"conf.test", "b.test"}
+	if _, err := service.SaveSite(ctx, second, SiteSave{Enable: true, AllowConflict: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	first.ClientMaxBody = "10m"
+	res, err := service.SaveSite(ctx, first, SiteSave{Overwrite: true, Reload: true})
+	if err != nil {
+		t.Fatalf("an edit to the site answering the name was refused: %v", err)
+	}
+	want := []ServerNameConflict{{Domain: "conf.test", Listen: "0.0.0.0:80", Site: "c2", Effect: ConflictKeeps}}
+	if !reflect.DeepEqual(res.Conflicts, want) {
+		t.Fatalf("conflicts = %+v, want %+v", res.Conflicts, want)
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, "sites-available", "c1")); !strings.Contains(string(b), "client_max_body_size 10m;") {
+		t.Fatalf("the edit was not written:\n%s", b)
+	}
+
+	t.Setenv("JD_TEST_OUT", conflictWarning("b.test"))
+	first.Domains = []string{"conf.test", "b.test"}
+	res, err = service.SaveSite(ctx, first, SiteSave{Overwrite: true})
+	if !errors.Is(err, ErrServerNameConflict) {
+		t.Fatalf("taking b.test from c2 was not refused: %v", err)
+	}
+	if got := ConflictSummary(res.Conflicts); got != "Saving anyway takes b.test on 0.0.0.0:80 from c2, since nginx reads this site first." {
+		t.Fatalf("summary = %q", got)
 	}
 }
 
@@ -188,22 +268,80 @@ func TestServerNameConflictsAreOnlyThisSites(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want only the name on the site's own address", got)
 	}
-	if got := ConflictSummary(got); !strings.HasPrefix(got, "app.example.com is already served by another server block on [::]:80.") {
+	if got := ConflictSummary(got); got != "app.example.com on [::]:80 is also claimed by another server block, and nginx answers it from only one of the two." {
 		t.Fatalf("summary = %q", got)
 	}
 }
 
 func TestConflictSummaryGroupsTheAddressesOfOneOwner(t *testing.T) {
 	got := ConflictSummary([]ServerNameConflict{
-		{Domain: "app.example.com", Listen: "0.0.0.0:80", Site: "legacy"},
-		{Domain: "app.example.com", Listen: "0.0.0.0:443", Site: "legacy"},
-		{Domain: "www.example.com", Listen: "0.0.0.0:80"},
+		{Domain: "app.example.com", Listen: "0.0.0.0:80", Site: "legacy", Effect: ConflictIgnored},
+		{Domain: "app.example.com", Listen: "0.0.0.0:443", Site: "legacy", Effect: ConflictIgnored},
+		{Domain: "www.example.com", Listen: "0.0.0.0:80", Effect: ConflictTakes},
+		{Domain: "old.example.com", Listen: "0.0.0.0:80", Site: "c2", Effect: ConflictKeeps},
 	})
-	want := "app.example.com is already served by legacy on 0.0.0.0:80 and 0.0.0.0:443; " +
-		"www.example.com is already served by another server block on 0.0.0.0:80. " +
-		"nginx answers a name from one server block and ignores the other."
+	want := "nginx answers app.example.com on 0.0.0.0:80 and 0.0.0.0:443 from legacy, which it reads first, and ignores this site's claim. " +
+		"Saving anyway takes www.example.com on 0.0.0.0:80 from another server block, since nginx reads this site first. " +
+		"This site goes on answering old.example.com on 0.0.0.0:80; nginx ignores c2's claim to it, as before."
 	if got != want {
 		t.Fatalf("got  %q\nwant %q", got, want)
+	}
+}
+
+// The first block nginx reads that claims a name on an address answers it,
+// wherever the include put it: a block in nginx.conf after the include of
+// sites-enabled comes after every site, and one before it before them.
+func TestOrderConflictsReadsTheOrderNginxReadsIn(t *testing.T) {
+	service, root := siteNginx(t, cleanTest, 0, "", 0)
+	sites := filepath.Join(root, "sites-enabled")
+	inline := "server {\n    listen 80;\n    server_name inline.test;\n}\n"
+	for _, tc := range []struct {
+		conf   string
+		effect string
+		site   string
+	}{
+		{"events {}\nhttp {\n    include " + sites + "/*;\n" + inline + "}\n", ConflictTakes, ""},
+		{"events {}\nhttp {\n" + inline + "    include " + sites + "/*;\n}\n", ConflictIgnored, ""},
+	} {
+		if err := os.WriteFile(filepath.Join(root, "nginx.conf"), []byte(tc.conf), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("JD_TEST_OUT", conflictWarning("inline.test"))
+		res, err := service.SaveSite(context.Background(), plainSpec("app", "inline.test"), SiteSave{Enable: true})
+		if !errors.Is(err, ErrServerNameConflict) {
+			t.Fatalf("got %v, want a name conflict", err)
+		}
+		want := []ServerNameConflict{{Domain: "inline.test", Listen: "0.0.0.0:80", Site: tc.site, Effect: tc.effect}}
+		if !reflect.DeepEqual(res.Conflicts, want) {
+			t.Fatalf("%s: conflicts = %+v, want %+v", tc.effect, res.Conflicts, want)
+		}
+	}
+}
+
+func TestClaimsNameAsNginxMatchesIt(t *testing.T) {
+	block := func(body string) Directive {
+		parsed, err := ParseNginxFile("/x", "server {\n"+body+"}\n", []string{"http"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return parsed[0]
+	}
+	for _, tc := range []struct {
+		body, name, address string
+		want                bool
+	}{
+		{"listen 80; server_name App.Test;", "app.test", "0.0.0.0:80", true},
+		{"listen 80; server_name app.test;", "app.test", "[::]:80", false},
+		{"listen [::]:80; server_name app.test;", "app.test", "[::]:80", true},
+		{"listen 127.0.0.1:8080; server_name app.test;", "app.test", "0.0.0.0:8080", false},
+		{"server_name app.test;", "app.test", "0.0.0.0:80", true},
+		{"listen 80; server_name .app.test;", "app.test", "0.0.0.0:80", true},
+		{"listen 80; server_name .app.test;", "*.app.test", "0.0.0.0:80", true},
+		{"listen 80; server_name www.app.test;", "app.test", "0.0.0.0:80", false},
+	} {
+		if got := claimsName(block(tc.body), tc.name, tc.address); got != tc.want {
+			t.Errorf("%q claims %s on %s = %v, want %v", tc.body, tc.name, tc.address, got, tc.want)
+		}
 	}
 }
 

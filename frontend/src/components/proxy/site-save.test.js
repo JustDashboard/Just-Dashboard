@@ -62,12 +62,17 @@ describe("what a save says", () => {
   })
 
   test("a failed reload after a clean test is its own state", () => {
-    const outcome = saveOutcome(result({ reloaded: false, reloadError: "invalid PID number" }), {
-      existing: true,
+    const reloadError =
+      'nginx: [error] open() "/run/nginx.pid" failed (2: No such file or directory)'
+    const outcome = saveOutcome(result({ reloaded: false, reloadError }), { existing: true })
+    expect(outcome).toEqual({
+      tone: "warning",
+      title: "app.example.com saved and tested; reload failed",
+      description: `nginx did not pick it up; start or reload nginx to apply it. ${reloadError}`,
     })
-    expect(outcome.tone).toBe("warning")
-    expect(outcome.title).toBe("app.example.com saved and tested; reload failed")
-    expect(outcome.description).toContain("invalid PID number")
+    // The usual cause is an nginx that is not running, which serves nothing:
+    // the toast must not say what nginx is serving.
+    expect(outcome.description).not.toMatch(/serving|served/)
   })
 
   test("a disabled site says it stays disabled", () => {
@@ -77,12 +82,14 @@ describe("what a save says", () => {
   })
 
   test("a conflict saved anyway and the test's warnings are warnings", () => {
-    const conflicts = [{ domain: "app.example.com", listen: "0.0.0.0:80", site: "legacy" }]
+    const conflicts = [
+      { domain: "app.example.com", listen: "0.0.0.0:80", site: "legacy", effect: "takes" },
+    ]
     expect(saveOutcome(result({ conflicts }), { existing: false })).toEqual({
       tone: "warning",
       title: "app.example.com is live with a name conflict",
       description:
-        "app.example.com is also served by legacy on 0.0.0.0:80. nginx answers each name from one of them.",
+        "nginx now answers app.example.com on 0.0.0.0:80 from app.example.com, not legacy.",
     })
     const testWarnings = [
       { level: "warn", message: "protocol options redefined", line: 12 },
@@ -104,9 +111,36 @@ describe("what a save says", () => {
     )
   })
 
-  test("a conflict with no named owner says another server block", () => {
-    expect(conflictsText([{ domain: "a.example.com", listen: "[::]:443" }])).toBe(
-      "a.example.com is also served by another server block on [::]:443. nginx answers each name from one of them.",
+  test("a conflict says which site nginx answers the name from", () => {
+    const conflict = (effect) => [{ domain: "v.test", listen: "0.0.0.0:80", site: "va", effect }]
+    const live = { name: "a0", reloaded: true }
+    expect(conflictsText(conflict("takes"), live)).toBe(
+      "nginx now answers v.test on 0.0.0.0:80 from a0, not va.",
+    )
+    expect(conflictsText(conflict("takes"), { name: "a0", reloaded: false })).toBe(
+      "After a reload nginx answers v.test on 0.0.0.0:80 from a0, not va.",
+    )
+    expect(conflictsText(conflict("ignored"), live)).toBe(
+      "nginx answers v.test on 0.0.0.0:80 from va, not a0.",
+    )
+    expect(conflictsText(conflict("keeps"), live)).toBe(
+      "nginx goes on answering v.test on 0.0.0.0:80 from a0 and ignores va's claim.",
+    )
+    // Never "is also served by" the other site, which was false whenever the
+    // site saved anyway sorted first.
+    for (const effect of ["takes", "ignored", "keeps", undefined]) {
+      expect(conflictsText(conflict(effect), live)).not.toContain("served by")
+    }
+  })
+
+  test("a conflict whose order is unknown says only that both claim it", () => {
+    expect(
+      conflictsText([{ domain: "a.example.com", listen: "[::]:443" }], {
+        name: "app",
+        reloaded: true,
+      }),
+    ).toBe(
+      "a.example.com on [::]:443 is also claimed by another server block; nginx answers it from only one of the two.",
     )
   })
 })

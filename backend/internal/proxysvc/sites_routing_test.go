@@ -46,6 +46,81 @@ func TestUpstreamPathsAreWrittenAsTyped(t *testing.T) {
 	}
 }
 
+// An upstream pasted with a slash, on /, asks nginx to swap / for / — which
+// changes nothing but costs the request its encoding: nginx forwards the
+// path as the client sent it only to an upstream without a path. So a path
+// that is the location's own is left off, and every other one is kept.
+func TestAnUpstreamPathThatIsTheLocationsOwnIsLeftOff(t *testing.T) {
+	spec := proxySpec()
+	spec.Upstream = "http://127.0.0.1:3000/"
+	spec.Locations = []SiteLocation{
+		{Path: "/pkg/", Upstream: "http://127.0.0.1:4000/pkg/"},
+		{Path: "/api", Upstream: "http://127.0.0.1:5000/api"},
+		{Path: "/sock/", Upstream: "unix:/run/app.sock:/sock/"},
+		{Path: "/v2/", Upstream: "http://127.0.0.1:6000/v1/"},
+	}
+	parsed, out := roundTrip(t, spec)
+	for _, want := range []string{
+		"location / {\n        proxy_pass http://127.0.0.1:3000;",
+		"location /pkg/ {\n        proxy_pass http://127.0.0.1:4000;",
+		"location /api {\n        proxy_pass http://127.0.0.1:5000;",
+		"location /sock/ {\n        proxy_pass http://unix:/run/app.sock;",
+		"location /v2/ {\n        proxy_pass http://127.0.0.1:6000/v1/;",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q from:\n%s", want, out)
+		}
+	}
+	if parsed.Upstream != "http://127.0.0.1:3000" {
+		t.Fatalf("read back as %q", parsed.Upstream)
+	}
+}
+
+func TestSplitUpstreamIsWhereNginxReadsThePath(t *testing.T) {
+	for _, tc := range []struct{ upstream, address, uri string }{
+		{"http://127.0.0.1:3000", "http://127.0.0.1:3000", ""},
+		{"http://127.0.0.1:3000/", "http://127.0.0.1:3000", "/"},
+		{"https://app.internal/v1/", "https://app.internal", "/v1/"},
+		{"unix:/run/app.sock", "unix:/run/app.sock", ""},
+		{"unix:/run/app.sock:/", "unix:/run/app.sock", "/"},
+		{"unix:/run/app.sock:/app/", "unix:/run/app.sock", "/app/"},
+	} {
+		address, uri := splitUpstream(tc.upstream)
+		if address != tc.address || uri != tc.uri {
+			t.Errorf("%s split as %q %q, want %q %q", tc.upstream, address, uri, tc.address, tc.uri)
+		}
+	}
+}
+
+func TestUpstreamDecodeWarning(t *testing.T) {
+	for _, tc := range []struct{ path, upstream, want string }{
+		{"/", "http://127.0.0.1:3000", ""},
+		{"/", "http://127.0.0.1:3000/", ""},
+		{"/api/", "http://127.0.0.1:4000/api/", ""},
+		{"/", "unix:/run/app.sock", ""},
+		{"/", "http://127.0.0.1:3000/app/", "/a%2Fb reaches the application as /app/a/b:"},
+		{"/api/", "http://127.0.0.1:4000/", "/api/a%2Fb reaches the application as /a/b:"},
+		{"/api", "http://127.0.0.1:4000/v1", "/api/a%2Fb reaches the application as /v1/a/b:"},
+		{"/sock/", "unix:/run/app.sock:/", "/sock/a%2Fb reaches the application as /a/b:"},
+	} {
+		got := upstreamDecodeWarning(tc.path, tc.upstream)
+		if (tc.want == "") != (got == "") || !strings.HasPrefix(got, tc.want) {
+			t.Errorf("%s → %s: got %q, want %q", tc.path, tc.upstream, got, tc.want)
+		}
+	}
+	spec := proxySpec()
+	spec.Upstream = "http://127.0.0.1:3000/"
+	spec.Locations = []SiteLocation{{Path: "/api/", Upstream: "http://127.0.0.1:4000/"}}
+	warnings := SpecWarnings(spec)
+	if !containsSubstring(warnings, "/api/a%2Fb reaches the application as /a/b") {
+		t.Fatalf("the decoding is not among the warnings: %v", warnings)
+	}
+	// Only /api/: the slash on / is left off, so there is nothing to say.
+	if n := strings.Count(strings.Join(warnings, "\n"), "%2F kept"); n != 1 {
+		t.Fatalf("%d decoding warnings, want 1: %v", n, warnings)
+	}
+}
+
 // nginx refuses `proxy_pass unix:/run/app.sock` with "invalid URL prefix";
 // the form offered unix: and every such save failed its test.
 func TestAUnixSocketUpstreamIsSpelledAsNginxWantsIt(t *testing.T) {

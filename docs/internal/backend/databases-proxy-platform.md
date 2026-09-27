@@ -280,17 +280,29 @@ ownership and cleanup, then removes its own containers/volumes/networks.
     `POST /proxy/sites/` takes `enable: "enable" | "keep"`; the old `true`/`false` still parse, and
     `false` always meant keep (it declined to make a link and never removed one). A site that has a link
     keeps it, relinked to the file being saved, and `SiteResult.enabled` says which it is.
-  - **A name another server block already answers is refused**, 409 `name_conflict` with
-    `ConflictSummary`'s sentence ("app.example.com is already served by legacy on 0.0.0.0:80"). `nginx -t`
-    passes a second claim on a name with only `[warn] conflicting server name … ignored` and serves one of
-    the two by include order, so the save could as easily take a working site's domain as leave its own
-    unreachable. The conflicts are nginx's own warnings for this site's names on the addresses its file
-    listens on — nginx already knows a wildcard `:80` and `127.0.0.1:80` are separate — and the holder is
-    looked up among the enabled sites. The file and link are taken back; `allowConflict: true` saves anyway
-    and the result lists `conflicts`. `ValidateSpec` refuses a domain listed twice, which nginx warns
-    about the same way. Deployment cutovers (`applySiteLocked`) are not refused over a conflict.
+  - **A name another server block also claims is refused when the save changes who answers it**, 409
+    `name_conflict` with `ConflictSummary`'s sentences. `nginx -t` passes a second claim on a name with only
+    `[warn] conflicting server name … ignored` and answers from the **first** block it reads, so the save
+    could as easily take a working site's domain as leave its own unreachable. The conflicts are nginx's own
+    warnings for this site's names on the addresses its file listens on — nginx already knows a wildcard
+    `:80` and `127.0.0.1:80` are separate. `orderConflicts` then reads which claim wins from `nginx -T`
+    (`dumpNginx` under the held lock, then `NginxTree`, so `sites-enabled/*` sorted, a
+    `conf.d` include before or after it and a block inline in `nginx.conf` all fall where nginx reads them),
+    names the other claim's site from that tree, and sets `effect`: `ignored` (the other keeps the name:
+    "nginx answers app.example.com on 0.0.0.0:80 from legacy, which it reads first, and ignores this site's
+    claim."), `takes` (this site sorts first and takes it: "Saving anyway takes … from legacy, since nginx
+    reads this site first.") or `keeps` (this site already answered the name before the save — read from the
+    file as nginx loaded it — and still does). A `keeps` conflict alone is **not** refused: an edit to the
+    site that is serving a name was refused in the name of the site nginx ignores. When the order cannot be
+    read the conflict has no `effect` and says only that both claim the name. The file and link are taken
+    back on a refusal; `allowConflict: true` saves anyway and the result lists `conflicts`, which the toast
+    words by `effect` (checked against a running nginx in `TestLiveNameConflictSaysWhichSiteNginxAnswers`).
+    `ValidateSpec` refuses a domain listed twice, which nginx warns about the same way. Deployment cutovers
+    (`applySiteLocked`) are not refused over a conflict.
   - **A reload that fails after a clean test is a saved site**, 200 with `reloaded: false` and
-    `reloadError`, where it was a 400 "Not applied" over a file that was written and linked. The
+    `reloadError`, where it was a 400 "Not applied" over a file that was written and linked. The toast
+    says nginx did not pick it up and to start or reload it, never what nginx is serving: the usual cause
+    is an nginx that is not running (`open() "/run/nginx.pid" failed`), which serves nothing. The
     deployment cutovers still get the error, since their recovery is built on it.
   - `testWarnings` are the test's warnings placed in the site's own file, so "is live" is said only when
     nginx had nothing to say about it.
@@ -299,11 +311,17 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   - The ACME challenge location goes **above** the catch-all redirect, or renewal silently stops and
     nobody finds out for sixty days.
   - `http2 on;` is a directive, not a `listen` parameter (nginx 1.25 warns on every reload).
-  - **`proxy_pass` is the upstream exactly as typed.** Its path is how nginx is told to replace the
-    location's prefix: `/api/` to `http://127.0.0.1:4000/` sends `/api/users` as `/users`. Trimming its
-    slash sent `/page` to `http://…/app/` as `/apppage`. When the path and the upstream disagree about a
-    trailing slash, `SpecWarnings` says what a request becomes. A `unix:` upstream is written
-    `http://unix:…`, the only spelling nginx accepts, and read back as `unix:`.
+  - **`proxy_pass` is the upstream as typed, less a path that is the location's own.** Its path is how
+    nginx is told to replace the location's prefix: `/api/` to `http://127.0.0.1:4000/` sends `/api/users`
+    as `/users`. Trimming its slash sent `/page` to `http://…/app/` as `/apppage`. When the path and the
+    upstream disagree about a trailing slash, `SpecWarnings` says what a request becomes. nginx forwards
+    the request exactly as sent **only to an upstream without a path**; to one with a path it sends the
+    path decoded, so `%2F` arrives as `/` (npm/Verdaccio scoped packages, GitLab project paths). An
+    upstream path equal to the location's prefix — `http://x/` pasted on `/`, `http://x/pkg/` on `/pkg/`
+    — swaps nothing, so it is left off and the request goes through raw; any other path is kept and
+    `SpecWarnings` says `/a%2Fb` reaches the application decoded (both checked against a running nginx).
+    A `unix:` upstream is written `http://unix:…`, the only spelling nginx accepts, and read back as
+    `unix:`.
   - **A folder is served at its path**: `alias <folder>/;` in `location <path>/`, both ending in a slash
     so a neighbour such as `/assets-private` is never read through `/assets` (checked against a running
     nginx). `root` appended the path, so `/assets` with `/var/www/assets` looked in

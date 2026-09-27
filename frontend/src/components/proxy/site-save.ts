@@ -35,12 +35,34 @@ export function saveRequest(
 
 export type SaveOutcome = { tone: "success" | "warning"; title: string; description?: string }
 
-/** Who else answers each name, in the words the conflict refusal uses. */
-export function conflictsText(conflicts: ServerNameConflict[]): string {
-  const parts = conflicts.map(
-    (c) => `${c.domain} is also served by ${c.site ?? "another server block"} on ${c.listen}`,
-  )
-  return `${parts.join("; ")}. nginx answers each name from one of them.`
+/**
+ * Which site nginx answers each contested name from after the save. nginx
+ * keeps the first server block it reads, so "is also served by" was false
+ * one way round or the other: a site saved anyway that sorts first has taken
+ * the name, and one that sorts after it is the site being ignored.
+ */
+export function conflictsText(
+  conflicts: ServerNameConflict[],
+  { name, reloaded }: { name: string; reloaded: boolean },
+): string {
+  return conflicts
+    .map((c) => {
+      const at = `${c.domain} on ${c.listen}`
+      const other = c.site ?? "another server block"
+      switch (c.effect) {
+        case "ignored":
+          return `nginx answers ${at} from ${other}, not ${name}.`
+        case "takes":
+          return reloaded
+            ? `nginx now answers ${at} from ${name}, not ${other}.`
+            : `After a reload nginx answers ${at} from ${name}, not ${other}.`
+        case "keeps":
+          return `nginx goes on answering ${at} from ${name} and ignores ${other}'s claim.`
+        default:
+          return `${at} is also claimed by ${other}; nginx answers it from only one of the two.`
+      }
+    })
+    .join(" ")
 }
 
 function warningsText(warnings: ProxyDiagnostic[]): string {
@@ -55,10 +77,12 @@ function warningsText(warnings: ProxyDiagnostic[]): string {
 export function saveOutcome(res: SiteResult, { existing }: { existing: boolean }): SaveOutcome {
   const name = res.name
   if (res.reloadError) {
+    // Nothing about what nginx is serving: the usual cause is an nginx that
+    // is not running, which serves nothing at all.
     return {
       tone: "warning",
       title: `${name} saved and tested; reload failed`,
-      description: `nginx is still serving what it served before. ${res.reloadError}`,
+      description: `nginx did not pick it up; start or reload nginx to apply it. ${res.reloadError}`,
     }
   }
   if (!res.enabled) {
@@ -73,7 +97,7 @@ export function saveOutcome(res: SiteResult, { existing }: { existing: boolean }
     return {
       tone: "warning",
       title: `${name} ${state} with a name conflict`,
-      description: conflictsText(res.conflicts),
+      description: conflictsText(res.conflicts, { name, reloaded: res.reloaded }),
     }
   }
   const warnings = res.testWarnings ?? []

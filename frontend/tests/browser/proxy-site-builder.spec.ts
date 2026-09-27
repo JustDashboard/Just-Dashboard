@@ -141,14 +141,11 @@ test("editing a disabled site keeps it disabled and says so", async ({ page }) =
 
 test("a reload that fails after a clean test is reported as saved", async ({ page }) => {
   await mockProxy(page, { included: true })
+  // What nginx says when it is not running: the most common reload failure,
+  // and one where nothing at all is being served.
+  const reloadError = 'nginx: [error] open() "/run/nginx.pid" failed (2: No such file or directory)'
   await capture(page, "**/api/v1/proxy/sites/", (route) =>
-    json(
-      route,
-      siteResult({
-        reloaded: false,
-        reloadError: 'nginx: [error] invalid PID number "" in "/run/nginx.pid"',
-      }),
-    ),
+    json(route, siteResult({ reloaded: false, reloadError })),
   )
   await page.goto("/proxy/sites")
   await page.getByRole("button", { name: "Open app.example.com" }).click()
@@ -156,7 +153,10 @@ test("a reload that fails after a clean test is reported as saved", async ({ pag
   await expect(sheet.getByLabel("Domains")).toHaveValue("app.example.com")
   await sheet.getByRole("button", { name: "Save and reload" }).click()
   await expect(page.getByText("app.example.com saved and tested; reload failed")).toBeVisible()
-  await expect(page.getByText(/invalid PID number/)).toBeVisible()
+  await expect(
+    page.getByText(`nginx did not pick it up; start or reload nginx to apply it. ${reloadError}`),
+  ).toBeVisible()
+  await expect(page.getByText(/still serving/)).toHaveCount(0)
   await expect(page.getByText("Not applied")).toHaveCount(0)
   await expect(sheet).toBeHidden()
 })
@@ -164,8 +164,10 @@ test("a reload that fails after a clean test is reported as saved", async ({ pag
 test("a name another site serves is refused until the operator saves anyway", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mockProxy(page, { included: true })
+  // legacy.example.com sorts first in sites-enabled, so nginx keeps
+  // answering the name from it and ignores the new site's claim.
   const refusal =
-    "legacy.example.com is already served by legacy.example.com on 0.0.0.0:80. nginx answers a name from one server block and ignores the other."
+    "nginx answers legacy.example.com on 0.0.0.0:80 from legacy.example.com, which it reads first, and ignores this site's claim."
   const saved = await capture(page, "**/api/v1/proxy/sites/", (route, body, index) =>
     index === 0
       ? route.fulfill({
@@ -178,7 +180,12 @@ test("a name another site serves is refused until the operator saves anyway", as
           siteResult({
             name: "www.legacy.example.com",
             conflicts: [
-              { domain: "legacy.example.com", listen: "0.0.0.0:80", site: "legacy.example.com" },
+              {
+                domain: "legacy.example.com",
+                listen: "0.0.0.0:80",
+                site: "legacy.example.com",
+                effect: "ignored",
+              },
             ],
             reloaded: body.reload,
           }),
@@ -188,14 +195,24 @@ test("a name another site serves is refused until the operator saves anyway", as
   await sheet.getByLabel("Domains").fill("www.legacy.example.com legacy.example.com")
   await sheet.getByRole("button", { name: "Save and reload" }).click()
 
-  const notice = sheet.getByText(refusal)
-  await expect(notice).toBeVisible()
+  // Announced, and focus moves onto it from the footer button that was
+  // pressed, so the next Tab is the question it asks.
+  const alert = sheet.getByRole("alert")
+  await expect(alert).toContainText(refusal)
+  await expect(alert).toBeFocused()
   await expect(sheet).toBeVisible()
   expect(await sheet.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
     true,
   )
-  await sheet.getByRole("button", { name: "Save anyway" }).click()
+  await page.keyboard.press("Tab")
+  await expect(sheet.getByRole("button", { name: "Save anyway" })).toBeFocused()
+  await page.keyboard.press("Enter")
   await expect(page.getByText("www.legacy.example.com is live with a name conflict")).toBeVisible()
+  await expect(
+    page.getByText(
+      "nginx answers legacy.example.com on 0.0.0.0:80 from legacy.example.com, not www.legacy.example.com.",
+    ),
+  ).toBeVisible()
   expect(saved).toHaveLength(2)
   expect(saved[0]).not.toHaveProperty("allowConflict")
   expect(saved[1]).toMatchObject({ allowConflict: true, reload: true, enable: "enable" })
@@ -208,7 +225,11 @@ test("changing the domains puts a refused save's question away", async ({ page }
       status: 409,
       contentType: "application/json",
       body: JSON.stringify({
-        error: { code: "name_conflict", message: "app.example.com is already served by legacy" },
+        error: {
+          code: "name_conflict",
+          message:
+            "Saving anyway takes app.example.com on 0.0.0.0:80 from legacy, since nginx reads this site first.",
+        },
       }),
     }),
   )

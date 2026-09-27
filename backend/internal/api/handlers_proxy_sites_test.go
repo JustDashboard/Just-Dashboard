@@ -13,7 +13,8 @@ import (
 
 // siteFormServer is a signed-in admin against a Debian nginx layout in a
 // temporary directory, with an nginx first on PATH whose test prints
-// $JD_TEST_OUT and whose reload exits $JD_TEST_RELOAD_EXIT.
+// $JD_TEST_OUT, whose dump prints nginx.conf and sites-enabled in the order
+// nginx reads them, and whose reload exits $JD_TEST_RELOAD_EXIT.
 func siteFormServer(t *testing.T) (*client, string) {
 	t.Helper()
 	s := testServer(t)
@@ -23,8 +24,15 @@ func siteFormServer(t *testing.T) (*client, string) {
 			t.Fatal(err)
 		}
 	}
+	conf := "events {}\nhttp {\n    include " + filepath.Join(dir, "sites-enabled") + "/*;\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "nginx.conf"), []byte(conf), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	script := "#!/bin/sh\n" +
 		"if [ \"$1\" = \"-t\" ]; then printf '%s\\n' \"$JD_TEST_OUT\"; exit 0; fi\n" +
+		"if [ \"$1\" = \"-T\" ]; then for f in '" + dir + "/nginx.conf' '" + dir + "'/sites-enabled/*; do\n" +
+		"  [ -e \"$f\" ] || continue; printf '# configuration file %s:\\n' \"$f\"; cat \"$f\"; printf '\\n'\n" +
+		"done; exit 0; fi\n" +
 		"if [ \"$1\" = \"-s\" ]; then echo 'nginx: [error] invalid PID number \"\" in \"/run/nginx.pid\"'; exit ${JD_TEST_RELOAD_EXIT:-0}; fi\n" +
 		"exit 0\n"
 	if err := os.WriteFile(filepath.Join(dir, "bin", "nginx"), []byte(script), 0o755); err != nil {
@@ -113,8 +121,9 @@ func TestSiteSaveAnswersAFailedReloadWithTheSavedSite(t *testing.T) {
 	}
 }
 
-// nginx's warning about a name already served becomes a 409 naming the
-// site that serves it, and allowConflict saves anyway.
+// nginx's warning about a name already served becomes a 409 that says what
+// saving would do — app sorts before legacy, so it would take the name — and
+// allowConflict saves anyway.
 func TestSiteSaveRefusesANameAnotherSiteServes(t *testing.T) {
 	c, dir := siteFormServer(t)
 	if w := c.do(http.MethodPost, "/api/v1/proxy/sites/", siteBody(t, "legacy", "app.example.com", `"enable"`, nil), nil); w.Code != http.StatusOK {
@@ -131,7 +140,7 @@ func TestSiteSaveRefusesANameAnotherSiteServes(t *testing.T) {
 	}
 	decodeSite(t, w, &refusal)
 	if refusal.Error.Code != "name_conflict" ||
-		!strings.HasPrefix(refusal.Error.Message, "app.example.com is already served by legacy on 0.0.0.0:80.") {
+		refusal.Error.Message != "Saving anyway takes app.example.com on 0.0.0.0:80 from legacy, since nginx reads this site first." {
 		t.Fatalf("refusal = %+v", refusal.Error)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "sites-available", "app")); !os.IsNotExist(err) {
@@ -145,7 +154,7 @@ func TestSiteSaveRefusesANameAnotherSiteServes(t *testing.T) {
 	}
 	var res proxysvc.SiteResult
 	decodeSite(t, w, &res)
-	if len(res.Conflicts) != 1 || res.Conflicts[0].Site != "legacy" {
+	if len(res.Conflicts) != 1 || res.Conflicts[0].Site != "legacy" || res.Conflicts[0].Effect != proxysvc.ConflictTakes {
 		t.Fatalf("saved anyway without saying so: %+v", res)
 	}
 }

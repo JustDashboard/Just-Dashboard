@@ -296,13 +296,16 @@ func SpecWarnings(spec *SiteSpec) []string {
 			"The upstream is not on this machine. That is fine for a gateway, and a mistake if you meant 127.0.0.1.")
 	}
 	if spec.Kind == "proxy" {
-		for _, loc := range spec.Locations {
-			if warning := upstreamSlashWarning(loc.Path, loc.Upstream); warning != "" {
-				warnings = append(warnings, warning)
+		routes := append([]SiteLocation{}, spec.Locations...)
+		for _, loc := range append(routes, SiteLocation{Path: "/", Upstream: spec.Upstream}) {
+			for _, warning := range []string{
+				upstreamSlashWarning(loc.Path, loc.Upstream),
+				upstreamDecodeWarning(loc.Path, loc.Upstream),
+			} {
+				if warning != "" {
+					warnings = append(warnings, warning)
+				}
 			}
-		}
-		if warning := upstreamSlashWarning("/", spec.Upstream); warning != "" {
-			warnings = append(warnings, warning)
 		}
 	}
 	if spec.WebSockets && spec.ProxyTimeout > 0 && spec.ProxyTimeout < 60 {
@@ -355,6 +358,22 @@ func upstreamSlashWarning(path, upstream string) string {
 	sent := u.Path + strings.TrimPrefix(request, path)
 	return fmt.Sprintf("%s reaches the application as %s. End both the path and the upstream with a slash, or neither.",
 		request, sent)
+}
+
+// upstreamDecodeWarning says what nginx does to the path it forwards to an
+// upstream with a path of its own: it sends the path decoded and normalised
+// rather than as the client sent it, so an encoded slash arrives as a slash.
+// A path that is the location's own prefix is not written (proxyPassTarget),
+// and is not warned about.
+func upstreamDecodeWarning(path, upstream string) string {
+	_, uri := splitUpstream(upstream)
+	if uri == "" || uri == path {
+		return ""
+	}
+	prefix := strings.TrimSuffix(path, "/")
+	sent := uri + strings.TrimPrefix(prefix+"/a/b", path)
+	return fmt.Sprintf("%s/a%%2Fb reaches the application as %s: an upstream with a path gets the request's path decoded. An application that needs %%2F kept needs the upstream without a path.",
+		prefix, sent)
 }
 
 func isPublicUpstream(raw string) bool {
