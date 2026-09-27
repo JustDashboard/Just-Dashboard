@@ -357,7 +357,9 @@ func appEnvKeyError(message string) bool {
 }
 
 // appRaise files a failure at error. A critical level the line stated —
-// Node's "FATAL ERROR" — stays: it already says more.
+// Node's "FATAL ERROR" — stays: it already says more. A missing variable is
+// not passed here unless it is an exception's message: "SENTRY_DSN is not
+// set" on its own is a sentence a program may print and carry on after.
 func appRaise(l *Line) {
 	if l.Level == "critical" {
 		l.SetLevel("critical")
@@ -392,7 +394,9 @@ func (r *appReader) classify(l *Line, msg string, m appWords) string {
 	}
 	if event != "" {
 		r.problemAttrs(l, event, msg)
-		appRaise(l)
+		if event != "env_missing" || errText != "" {
+			appRaise(l)
+		}
 		r.port = ""
 		return event
 	}
@@ -974,7 +978,9 @@ func (r *appReader) structured(l *Line) string {
 			// the specific ones: a Go service's `"err":"failed to connect to …"`.
 			if event := appProblem(value, appTriggers(value)); event != "" {
 				r.problemAttrs(l, event, value)
-				appRaise(l)
+				if event != "env_missing" {
+					appRaise(l)
+				}
 				return event
 			}
 		} else if strings.Contains(value, `"stack"`) {

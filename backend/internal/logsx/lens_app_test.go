@@ -382,7 +382,7 @@ func TestLensAppFailures(t *testing.T) {
 		{event: "schema_missing", level: "error", attrs: map[string]string{"table": "orders"}},
 		{event: "schema_missing", level: "error", attrs: map[string]string{"table": "sessions", "error": "SqliteError: no such table: sessions"}},
 		{event: "schema_missing", level: "error"},
-		{event: "env_missing", level: "error"},
+		{event: "env_missing"},
 		{event: "env_missing", level: "error", attrs: map[string]string{"error": "Error: Missing required environment variable: DATABASE_URL"}},
 		{level: "warn"},
 		{event: "deprecation", level: "warn"},
