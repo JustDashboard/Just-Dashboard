@@ -45,12 +45,13 @@ unless it can say why it needs an edge.** The host Overview ended 0.6.7 with no 
 above its Services row and none in it — see §15 for what that took. Three kinds of thing stopped
 taking a frame:
 
-- a run of figures — `StatGrid` draws hairlines *between* tiles and nothing around them, and the
-  first column starts on the page's own content edge (`framed` restores the box for
-  the one case a run sits inside another surface). The first-column rule is written twice, for a tile
-  inside a `StatLink` and for a tile that *is* the cell: the descendant form alone never matched the
-  second, so until the Security pass every grid of bare tiles started a step in from the content it
-  was meant to line up with. The Overview's Services row is one of these too:
+- a run of figures — `StatGrid` draws hairlines *between* tiles and nothing around them (`framed`
+  restores the box for the one case a run sits inside another surface). Every tile keeps the same
+  inset, the first in a row included: the first column used to drop its left padding to line its
+  name up with the title, and on a `StatLink` that put the hover wash flush against the name, one
+  tile of the row drawn tighter than the rest. A tile left alone on the last row takes the whole row
+  rather than sit beside a hole — five two-up is two, two and one. The Overview's Services row is one
+  of these too:
   a module's headline figure is a reading, and eight framed cards under a page that had just stopped
   drawing boxes were eight boxes. Each is a `StatLink`, so the arrow says it goes somewhere;
 - a list that is the whole of a section — `Panel plain` keeps the panel's anatomy (header, toolbar,
@@ -1344,8 +1345,8 @@ The passes, in order. Each one is a diff you can review on its own.
    side are both plain; the gap between them is the separation. A framed block that survives this pass
    has a sentence in a comment saying why.
 2. **Figures are tiles.** Any set of headline numbers — utilisation, counts, one-per-module "service
-   cards" — is a `StatGrid` of `StatTile`s: hairlines between, nothing around, the first column on the
-   page's own edge. A tile that is a destination is wrapped in `StatLink` and takes
+   cards" — is a `StatGrid` of `StatTile`s: hairlines between, nothing around, every tile the same
+   inset. A tile that is a destination is wrapped in `StatLink` and takes
    `className="h-full transition-colors group-hover:bg-row-hover"`; the arrow is the link's, not yours.
    The figure is 24px (`text-2xl`): `text-xl` is not on the ladder. A state colours the figure through
    `tone`, never through a badge beside it.
@@ -1453,8 +1454,8 @@ The passes, in order. Each one is a diff you can review on its own.
 8. **Data, not captions.** No sentence under a title (§5). What the reader needs is a `Tag`, a
    `Status`, a hint on a tile, or a `Notice`. What the page *is* — a hostname, a kernel, a platform —
    is its own row.
-9. **Alignment.** Tiles top-align so a row of names is a row; hints truncate rather than wrap; the
-   first column starts at the page gutter.
+9. **Alignment.** Tiles top-align so a row of names is a row; hints truncate rather than wrap; every
+   tile in a row, the first included, keeps the same inset.
 10. **Verify.** `scripts/test-changed.sh` (it runs `tests/browser/design-system.spec.ts` for any
     UI change), then a screenshot at 1280 and 1720 wide against a mocked
     API in the pattern `mockShell` uses, and look at it: a scrollbar where none belongs, a label a
