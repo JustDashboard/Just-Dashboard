@@ -2,9 +2,11 @@ package proxysvc
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -90,6 +92,20 @@ Error: adapting config using caddyfile: syntax error: unexpected token '127.0.0.
 			want: []Diagnostic{{Level: "error", Message: "adapting config using caddyfile: syntax error: unexpected token '127.0.0.1:3000', expecting '}', at /etc/caddy/Caddyfile:2 import chain: ['']", File: "/etc/caddy/Caddyfile", Line: 2}},
 		},
 		{
+			// "//127.0.0.1:3000" inside the URL used to be read as file
+			// "//127.0.0.1", line 3000.
+			name: "an unclosed block after an upstream URL",
+			output: `{"level":"info","ts":1790531706.5374622,"msg":"using config from file","file":"/etc/caddy/c1"}
+Error: adapting config using caddyfile: syntax error: unexpected token 'http://127.0.0.1:3000', expecting '}', at /etc/caddy/c1:2 import chain: ['']`,
+			want: []Diagnostic{{Level: "error", Message: "adapting config using caddyfile: syntax error: unexpected token 'http://127.0.0.1:3000', expecting '}', at /etc/caddy/c1:2 import chain: ['']", File: "/etc/caddy/c1", Line: 2}},
+		},
+		{
+			name: "an upstream URL with a path",
+			output: `{"level":"info","ts":1790531708.0319908,"msg":"using config from file","file":"/etc/caddy/c2"}
+Error: adapting config using caddyfile: parsing caddyfile tokens for 'reverse_proxy': parsing upstream 'http://127.0.0.1:3000/api': for now, URLs for proxy upstreams only support scheme, host, and port components, at /etc/caddy/c2:2`,
+			want: []Diagnostic{{Level: "error", Message: "adapting config using caddyfile: parsing caddyfile tokens for 'reverse_proxy': parsing upstream 'http://127.0.0.1:3000/api': for now, URLs for proxy upstreams only support scheme, host, and port components, at /etc/caddy/c2:2", File: "/etc/caddy/c2", Line: 2}},
+		},
+		{
 			name: "a valid file with a formatting warning",
 			output: `{"level":"info","ts":1790526498.089536,"msg":"using config from file","file":"/etc/caddy/Caddyfile"}
 Valid configuration
@@ -132,5 +148,97 @@ func TestValidationCarriesTheTestsDiagnostics(t *testing.T) {
 	want := []Diagnostic{{Level: "emerg", Message: `unknown directive "frobnicate"`, File: broken, Line: 3}}
 	if res.Valid || res.Warnings != 0 || !reflect.DeepEqual(res.Diagnostics, want) {
 		t.Fatalf("got %+v, want the emergency placed at %s:3", res, broken)
+	}
+}
+
+// A Debian site is included through its sites-enabled link, and nginx names
+// the link. The diagnostic has to name the file the editor opened, which is
+// the sites-available one, or the page can never mark its line.
+func TestValidationPlacesADiagnosticInTheLinkedSiteFile(t *testing.T) {
+	root := liveNginx(t)
+	service := New(root, filepath.Join(root, "Caddyfile"))
+	site := filepath.Join(root, "sites-available", "app")
+	if err := os.WriteFile(site, []byte("server {\n    listen 127.0.0.1:18095;\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(site, filepath.Join(root, "sites-enabled", "app")); err != nil {
+		t.Fatal(err)
+	}
+	res, err := service.Validate(context.Background(), KindNginx, site,
+		"server {\n    listen 127.0.0.1:18095;\n    frobnicate on;\n}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Diagnostic{{Level: "emerg", Message: `unknown directive "frobnicate"`, File: site, Line: 3}}
+	if res.Valid || !reflect.DeepEqual(res.Diagnostics, want) {
+		t.Fatalf("got %+v, want the emergency placed at %s:3", res.Diagnostics, site)
+	}
+}
+
+// fakeCaddy puts a caddy first on PATH that answers `caddy validate --config
+// <file>` with Caddy 2's own lines, captured from caddy:2-alpine, naming the
+// file it was given: an error for a candidate with an unknown subdirective,
+// otherwise a pass with a formatting warning.
+func fakeCaddy(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	script := `#!/bin/sh
+config=$3
+echo '{"level":"info","ts":1790531705.7703078,"msg":"using config from file","file":"'"$config"'"}'
+if grep -q frob "$config"; then
+	echo "Error: adapting config using caddyfile: parsing caddyfile tokens for 'reverse_proxy': unrecognized subdirective frob, at $config:3" >&2
+	exit 1
+fi
+echo "Valid configuration"
+echo '{"level":"warn","ts":1790526498.0933943,"msg":"Caddyfile input is not formatted; run '"'caddy fmt --overwrite'"' to fix inconsistencies","adapter":"caddyfile","file":"'"$config"'","line":2}'
+`
+	if err := os.WriteFile(filepath.Join(dir, "caddy"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// Caddy validates a temporary copy and names it in every message. The result
+// has to name the Caddyfile instead: the copy is deleted before anyone reads
+// it, and the page is looking for the file it opened.
+func TestCaddyValidationNamesTheFileNotItsCopy(t *testing.T) {
+	fakeCaddy(t)
+	dir := t.TempDir()
+	caddyfile := filepath.Join(dir, "Caddyfile")
+	original := "example.test {\n\treverse_proxy 127.0.0.1:3000\n}\n"
+	if err := os.WriteFile(caddyfile, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	service := New(filepath.Join(dir, "nginx"), caddyfile)
+	broken := "example.test {\n\treverse_proxy 127.0.0.1:3000 {\n\t\tfrob on\n\t}\n}\n"
+	message := "adapting config using caddyfile: parsing caddyfile tokens for 'reverse_proxy': unrecognized subdirective frob, at " + caddyfile + ":3"
+
+	res, err := service.Validate(context.Background(), KindCaddy, caddyfile, broken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Diagnostic{{Level: "error", Message: message, File: caddyfile, Line: 3}}
+	if res.Valid || !reflect.DeepEqual(res.Diagnostics, want) || strings.Contains(res.Output, "vpsd-caddy") {
+		t.Fatalf("got %+v\n%s", res.Diagnostics, res.Output)
+	}
+
+	res, err = service.WriteConfig(context.Background(), KindCaddy, caddyfile, broken)
+	if !errors.Is(err, ErrInvalidConf) || !reflect.DeepEqual(res.Diagnostics, want) {
+		t.Fatalf("a refused save got %v with %+v", err, res.Diagnostics)
+	}
+	if b, _ := os.ReadFile(caddyfile); string(b) != original {
+		t.Fatalf("a refused save changed the file: %q", b)
+	}
+
+	res, err = service.Validate(context.Background(), KindCaddy, caddyfile, original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Valid || res.Warnings != 1 || res.Diagnostics[0].File != caddyfile || res.Diagnostics[0].Line != 2 {
+		t.Fatalf("the formatting warning is not placed in the Caddyfile: %+v", res.Diagnostics)
+	}
+
+	if _, err := service.Validate(context.Background(), KindCaddy, "/srv/app/Caddyfile", original); !errors.Is(err, ErrUnsafePath) {
+		t.Fatalf("a path outside the proxy directories was accepted: %v", err)
 	}
 }

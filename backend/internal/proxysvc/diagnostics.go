@@ -2,6 +2,7 @@ package proxysvc
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -55,12 +56,30 @@ func ParseNginxDiagnostics(output string) []Diagnostic {
 	return out
 }
 
-// caddyLocation finds a Caddyfile position inside an error message, which
-// Caddy writes as "/etc/caddy/Caddyfile:3: unrecognized directive" or as
-// "... at /etc/caddy/Caddyfile:2 import chain". A path is required to start
-// with a slash or name a Caddyfile so a listen address such as 127.0.0.1:443
-// is not taken for one.
-var caddyLocation = regexp.MustCompile(`(/[^\s:'"]+|[^\s:'"]*Caddyfile[^\s:'"]*):(\d+)`)
+// Caddy writes a Caddyfile position into an error message in one of two
+// places. Where it can, it appends it: "…, at /etc/caddy/Caddyfile:2 import
+// chain", and that is read first, because the message before it can quote an
+// upstream such as 'http://127.0.0.1:3000' whose "//127.0.0.1:3000" reads
+// like a path and a line. Otherwise the position leads: "/etc/caddy/
+// Caddyfile:3: unrecognized directive". There a path must start a word and
+// start with a slash or name a Caddyfile, so neither a listen address such
+// as 127.0.0.1:443 nor the "//" of a URL is taken for one.
+var (
+	caddyAt       = regexp.MustCompile(`, at (\S+):(\d+)(?:\s|$)`)
+	caddyLocation = regexp.MustCompile(`(?:^|[\s'"(])(/[^\s:'"]+|[^\s:'"]*Caddyfile[^\s:'"]*):(\d+)`)
+)
+
+// caddyPosition is the file and line an error message points at, if any.
+func caddyPosition(message string) (string, int) {
+	var m []string
+	if all := caddyAt.FindAllStringSubmatch(message, -1); len(all) > 0 {
+		m = all[len(all)-1]
+	} else if m = caddyLocation.FindStringSubmatch(message); m == nil {
+		return "", 0
+	}
+	line, _ := strconv.Atoi(m[2])
+	return m[1], line
+}
 
 // ParseCaddyDiagnostics reads `caddy validate` output: its JSON log lines at
 // warn and above, which carry file and line as fields, and the one `Error:`
@@ -94,10 +113,7 @@ func ParseCaddyDiagnostics(output string) []Diagnostic {
 			out = append(out, d)
 		case strings.HasPrefix(line, "Error: "):
 			d := Diagnostic{Level: "error", Message: strings.TrimPrefix(line, "Error: ")}
-			if m := caddyLocation.FindStringSubmatch(d.Message); m != nil {
-				d.File = m[1]
-				d.Line, _ = strconv.Atoi(m[2])
-			}
+			d.File, d.Line = caddyPosition(d.Message)
 			out = append(out, d)
 		}
 	}
@@ -105,15 +121,32 @@ func ParseCaddyDiagnostics(output string) []Diagnostic {
 }
 
 // diagnose fills a validation result's diagnostics from its output.
+//
+// A diagnostic's file is named with its symlinks resolved, the way
+// allowedPath names the file being edited. nginx names the path it included,
+// which for a Debian site is the sites-enabled link, so a page comparing that
+// with the sites-available file it opened would never find its line.
 func (r *ValidationResult) diagnose(engine string) {
 	if engine == "caddy" {
 		r.Diagnostics = ParseCaddyDiagnostics(r.Output)
 	} else {
 		r.Diagnostics = ParseNginxDiagnostics(r.Output)
 	}
-	for _, d := range r.Diagnostics {
+	for i, d := range r.Diagnostics {
+		if d.File != "" {
+			r.Diagnostics[i].File = resolvedFile(d.File)
+		}
 		if d.Level == "warn" {
 			r.Warnings++
 		}
 	}
+}
+
+// resolvedFile is path with its symlinks resolved, or path itself when it
+// cannot be: a file the engine names need not exist where this process looks.
+func resolvedFile(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return path
 }

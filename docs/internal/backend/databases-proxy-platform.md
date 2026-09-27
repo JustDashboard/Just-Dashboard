@@ -409,7 +409,12 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   "ignoring", and that site then never serves. nginx writes a test's messages as `nginx: [warn] … in
   /path:12` when it can open its startup error log (root on the host) and as the timestamped error-log
   line when it cannot; both are read. `ParseCaddyDiagnostics` reads `caddy validate`'s JSON warnings and
-  its `Error:` line, best effort.
+  its `Error:` line, best effort, taking the position after `, at ` before any other path-like text so an
+  upstream URL is never read as one. A diagnostic's file is named with its symlinks resolved, the form
+  `allowedPath` gives the file being edited, so a Debian site's error names its sites-available file
+  rather than the sites-enabled link nginx included. Caddy is validated against a temporary copy, and
+  `validateCaddy` replaces the copy's name with the file's throughout the result; `Validate` holds a
+  Caddy path to the proxy's directories as it does an nginx one.
 - **The configuration nginx actually loads.** `EffectiveConfig` (`effective.go`) runs `nginx -T` through
   `hostexec` under the service lock — so it never dumps a candidate `Validate` has staged — splits it into
   `ConfigFile`s byte for byte (`ParseEffective`, which takes a `# configuration file` line as a file only

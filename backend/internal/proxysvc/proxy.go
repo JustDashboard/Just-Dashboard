@@ -273,7 +273,18 @@ type ValidationResult struct {
 // the result was Valid and the rollback never ran.
 func (s *Service) Validate(ctx context.Context, kind Kind, path, content string) (*ValidationResult, error) {
 	if kind == KindCaddy {
-		return s.validateCaddy(ctx, content)
+		// The path only names the file in the result, but it is still held
+		// to the proxy's directories: a name the editor could never save to
+		// is not one to resolve on a caller's say-so.
+		target := s.caddyFile
+		if path != "" {
+			full, err := s.allowedPath(path)
+			if err != nil {
+				return nil, err
+			}
+			target = full
+		}
+		return s.validateCaddy(ctx, target, content)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -324,7 +335,11 @@ func (s *Service) stageNginx(full, content string) (func(), error) {
 	}, nil
 }
 
-func (s *Service) validateCaddy(ctx context.Context, content string) (*ValidationResult, error) {
+// validateCaddy tests content as the file at target. Caddy can be pointed at
+// a copy, so nothing is staged, but it names the copy in every message it
+// writes: a file the caller never saw, and one that is gone by the time the
+// result is read. The copy's name is replaced by target's throughout.
+func (s *Service) validateCaddy(ctx context.Context, target, content string) (*ValidationResult, error) {
 	tmp, err := os.CreateTemp("", "vpsd-caddy-*")
 	if err != nil {
 		return nil, err
@@ -335,7 +350,16 @@ func (s *Service) validateCaddy(ctx context.Context, content string) (*Validatio
 		return nil, err
 	}
 	tmp.Close()
-	return runValidator(ctx, "caddy", "validate", "--config", tmp.Name(), "--adapter", "caddyfile"), nil
+	res := runValidator(ctx, "caddy", "validate", "--config", tmp.Name(), "--adapter", "caddyfile")
+	staged, target := resolvedFile(tmp.Name()), resolvedFile(target)
+	res.Output = strings.ReplaceAll(res.Output, tmp.Name(), target)
+	for i, d := range res.Diagnostics {
+		if d.File == staged {
+			res.Diagnostics[i].File = target
+		}
+		res.Diagnostics[i].Message = strings.ReplaceAll(d.Message, tmp.Name(), target)
+	}
+	return res, nil
 }
 
 func runValidator(ctx context.Context, name string, args ...string) *ValidationResult {
@@ -365,7 +389,7 @@ func (s *Service) WriteConfig(ctx context.Context, kind Kind, path, content stri
 		return nil, err
 	}
 	if kind == KindCaddy {
-		res, err := s.validateCaddy(ctx, content)
+		res, err := s.validateCaddy(ctx, full, content)
 		if err != nil {
 			return nil, err
 		}
