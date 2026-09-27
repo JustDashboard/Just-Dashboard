@@ -74,9 +74,11 @@ export function ExportDialog({
 
   return (
     <>
+      {/* The glyph alone on a phone, where the strip's width is the
+          source's name's: the word stays the button's name. */}
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
         <Download className="size-4" />
-        Export
+        <span className="max-sm:sr-only">Export</span>
       </Button>
       <Modal
         open={open}

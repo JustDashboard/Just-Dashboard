@@ -394,6 +394,7 @@ function LinesAround({
               highlight={highlight}
               lens={lens}
               eventColumn={eventColumn}
+              cont={Boolean(l.cont) && i > 0}
             />
           ))}
         </div>

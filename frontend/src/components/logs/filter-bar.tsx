@@ -280,7 +280,9 @@ export function FilterBar({
           onClick={() => setOpen((v) => !v)}
         >
           <SettingsSliders className="size-3.5" />
-          More
+          {/* On a phone the window and Search take the second row, and the
+              word left "More" alone on a third. */}
+          <span className="max-sm:sr-only">More</span>
           {advancedCount > 0 && <ChipCount>{advancedCount}</ChipCount>}
           <ChevronDown className={cn("size-3 transition-transform", open && "rotate-180")} />
         </Button>

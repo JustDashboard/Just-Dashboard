@@ -14,6 +14,7 @@ import {
 } from "@/lib/log-insights"
 import type { LensReading, LogLens } from "@/lib/log-lenses"
 import { usePoll } from "@/hooks/use-poll"
+import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { TileTrend } from "@/components/metrics/sparkline"
 import { StatButton, StatGrid, StatTile } from "@/components/stat-tile"
 
@@ -21,6 +22,9 @@ const NO_READINGS: LensReading[] = []
 
 /** How often the figures are read again: a minute, as the Overview's tiles are. */
 const REFRESH = 60_000
+
+/** The narrowest a reading's tile reads whole: its name, its figure and its line. */
+const TILE_MIN = 200
 
 type Window = NonNullable<LogLens["readingsWindow"]>
 
@@ -115,10 +119,16 @@ export function LensReadings({
   className?: string
 }) {
   const { tiles, window } = readings
+  const [ref, width] = useColumnWidth()
   if (tiles.length === 0) return null
-  const columns = Math.min(Math.max(tiles.length, 2), 5) as 2 | 3 | 4 | 5
+  // As many to a row as the column they stand in holds, in rows as even as
+  // they can be: five readings beside the logs page's rail are three and two,
+  // where five across cut "Deadlocks & lock waits" to its first word.
+  const fit = width > 0 ? Math.max(2, Math.floor(width / TILE_MIN)) : 5
+  const rows = Math.ceil(tiles.length / Math.min(fit, 5))
+  const columns = Math.min(Math.max(Math.ceil(tiles.length / rows), 2), 5) as 2 | 3 | 4 | 5
   return (
-    <StatGrid columns={columns} dense className={className}>
+    <StatGrid ref={ref} columns={columns} dense className={className}>
       {tiles.map((tile) => {
         const pressed = readingPressed(tile.reading, filter)
         return (

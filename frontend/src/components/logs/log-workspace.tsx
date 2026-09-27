@@ -325,7 +325,7 @@ export function LogWorkspace(props: WorkspaceProps) {
           asked of it. The tabs are the section-tab underline because Live and
           History are two places within the source, not two commands. */}
       <div className="flex min-h-10 shrink-0 items-stretch border-b border-hairline pr-1 pl-2">
-        <div className="flex min-w-0 flex-1 items-center gap-2 py-1.5">
+        <div className="@container flex min-w-0 flex-1 items-center gap-2 py-1.5">
           {props.leading}
           {props.name ?? <span className="truncate text-body font-medium">{source.label}</span>}
           {props.facts}
@@ -337,7 +337,7 @@ export function LogWorkspace(props: WorkspaceProps) {
               key={id}
               type="button"
               aria-pressed={mode === id}
-              className={tabClasses(mode === id, "h-10")}
+              className={cn(tabClasses(mode === id, "h-10"), "max-sm:px-2")}
               onClick={() => switchMode(id)}
             >
               {MODE_LABEL[id]}
@@ -348,7 +348,7 @@ export function LogWorkspace(props: WorkspaceProps) {
               key={v.id}
               type="button"
               aria-pressed={mode === v.id}
-              className={tabClasses(mode === v.id, "h-10")}
+              className={cn(tabClasses(mode === v.id, "h-10"), "max-sm:px-2")}
               onClick={() => switchMode(v.id)}
             >
               {v.label}

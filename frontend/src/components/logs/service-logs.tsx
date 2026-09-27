@@ -253,9 +253,8 @@ export function ServiceLogs(props: ServiceLogsProps) {
   // A remembered id that went is quietly the first source again; one the
   // page asked for by name is said to be gone, because opening another in
   // its place would answer a question nobody asked.
-  const wanted = picked
-  const found = sources.find((s) => s.id === wanted)
-  const missing = !found && wanted !== "" && wanted === sourceArrival
+  const found = sources.find((s) => s.id === picked)
+  const missing = !found && picked !== "" && picked === sourceArrival
   const given = found ?? (missing ? undefined : sources[0])
   const sourceId = given?.id ?? ""
 
@@ -372,7 +371,7 @@ export function ServiceLogs(props: ServiceLogsProps) {
             <EmptyState
               icon={Logs}
               title="This log source is no longer available"
-              description={`${wanted} is not among this page's sources any more — it may have been removed or replaced. Choose another to read its logs.`}
+              description={`${picked} is not among this page's sources any more — it may have been removed or replaced. Choose another to read its logs.`}
             />
           </div>
         </Pane>
