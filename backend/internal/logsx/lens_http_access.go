@@ -205,12 +205,14 @@ func httpAccessLevel(status int) string {
 
 const httpAccessTimeLayout = "02/Jan/2006:15:04:05 -0700"
 
-// httpAccessWithoutRequest reads the one combined line accesslog.Parse turns
-// away on purpose: a connection that sent no request at all, which nginx
-// records as `""` (Apache as `"-"`) with a 400. The Requests page is right to
-// skip it — it is not a request — but on a public host it is a steady share of
-// the log, port scanners and clients that gave up, and a probe the lens cannot
-// name is noise the page cannot fold away.
+// httpAccessWithoutRequest reads the combined lines accesslog.Parse turns away
+// on purpose, because what the client sent was not a request: nothing at all
+// (nginx records `""`, Apache `"-"`), or one token of something else — the
+// start of an RDP handshake, a scanner's "MGLNDD_…" banner. The Requests page
+// is right to skip them, but on a public host they are one line in sixty of
+// the log, and a probe the lens cannot name is noise the page cannot fold
+// away. nginx escapes a quote inside the request as \x22, so the first quote
+// followed by a space is the one that closes it.
 func httpAccessWithoutRequest(l *Line) {
 	text := l.Text
 	open := strings.Index(text, " [")
@@ -218,13 +220,8 @@ func httpAccessWithoutRequest(l *Line) {
 	if open <= 0 || closing < open {
 		return
 	}
-	rest := text[closing+3:]
-	switch {
-	case strings.HasPrefix(rest, `" `):
-		rest = rest[2:]
-	case strings.HasPrefix(rest, `-" `):
-		rest = rest[3:]
-	default:
+	_, rest, found := strings.Cut(text[closing+3:], `" `)
+	if !found {
 		return
 	}
 	statusText, rest, _ := strings.Cut(rest, " ")

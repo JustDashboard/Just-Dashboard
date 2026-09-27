@@ -155,6 +155,18 @@ func webHTTPAccessLines() []webLensLine {
 			attrs: map[string]string{"status": "400", "class": "4xx", "bytes": "0", "client": "18.218.118.203"},
 		},
 		{
+			// One token of something else: a scanner's banner, and the start
+			// of an RDP handshake with no space in it to split on.
+			text:  `20.65.193.0 - - [26/Aug/2026:00:49:33 +0000] "MGLNDD_57.131.21.87_443" 400 166 "-" "-"`,
+			level: "warn", at: time.Date(2026, 8, 26, 0, 49, 33, 0, time.UTC), event: "probe",
+			attrs: map[string]string{"status": "400", "class": "4xx", "bytes": "166", "client": "20.65.193.0"},
+		},
+		{
+			text:  `160.119.76.24 - - [26/Aug/2026:00:18:28 +0000] "\x03\x00\x00\x13\x0E\xE0\x00\x00\x00\x00\x00\x01\x00\x08\x00\x02\x00\x00\x00" 400 166 "-" "-"`,
+			level: "warn", at: time.Date(2026, 8, 26, 0, 18, 28, 0, time.UTC), event: "probe",
+			attrs: map[string]string{"status": "400", "class": "4xx", "bytes": "166", "client": "160.119.76.24"},
+		},
+		{
 			// An address the generic stamp scan does not start on.
 			text:  `::1 - - [27/Nov/2024:06:21:42 +0000] "GET /combined HTTP/1.1" 200 2 "-" "curl/8.7.1"`,
 			level: "info", at: time.Date(2024, 11, 27, 6, 21, 42, 0, time.UTC), event: "request",
