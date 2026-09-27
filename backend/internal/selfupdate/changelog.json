@@ -120,7 +120,7 @@
         {
           "kind": "added",
           "text": "Pull requests, their checks and the repository's issues, on the Git page and on a project's Overview",
-          "detail": "A repository's card on the Git page carries its open pull requests — author, title, branches, how the checks stand, where its preview is — with Merge, Test this pull request and Open on GitHub on each row, and a Pull requests chip narrows the list to the checkouts that have one. The workspace's GitHub tab lists the repository's open issues under the pull requests, with a comment box, and a pull request's preview reads its check runs against the exact head being looked at, each with a link to its details. A project deploying a GitHub repository shows the same pull requests on its Overview, with the preview built from each, and its card on the Projects page says how many are open. Merging from either page pins the commit that was read, so a push in between is refused rather than merged unseen."
+          "detail": "A repository's card on the Git page carries its first open pull request — author, title, how the checks stand, where its preview is — with Merge, Test this pull request and Open on GitHub on it and a count of the rest beside it, and a Pull requests chip narrows the list to the checkouts that have one. The workspace's GitHub tab lists the repository's open issues under the pull requests, with a comment box, and a pull request's preview reads its check runs against the exact head being looked at, each with a link to its details. A project deploying a GitHub repository shows the same pull requests on its Overview, with the preview built from each, and its card on the Projects page says how many are open. Merging from either page pins the commit that was read, so a push in between is refused rather than merged unseen."
         },
         {
           "kind": "changed",
@@ -145,7 +145,7 @@
         {
           "kind": "changed",
           "text": "The Git page shelves its repositories by account, as cards",
-          "detail": "The four tiles are gone; every figure they carried was already on a filter chip, which also narrows the list. The checkouts sit on one shelf per account their remote belongs to, drawn as the account's own picture, three or four cards to a row; each card carries the branch, where it lives, the last commit with its author's colour, how far it stands from its upstream and the shape of its working tree, worst first on the shelf and the shelf with something wrong on it first. A repository checked out twice draws each pull request once. Branches, commits and pull requests are drawn with real git glyphs, and a diff numbers its lines in two gutters that stay put while a long line scrolls."
+          "detail": "The four tiles are gone; every figure they carried was already on a filter chip, which also narrows the list. The checkouts sit on one shelf per account their remote belongs to, drawn as the account's own picture, three or four cards to a row; each card carries the branch, where it lives, the last commit with its author's colour, how far it stands from its upstream and the shape of its working tree, worst first on the shelf and the shelf with something wrong on it first. Every card is the same height, with or without a pull request on it. A repository checked out twice draws each pull request once. Branches, commits and pull requests are drawn with real git glyphs, and a diff numbers its lines in two gutters that stay put while a long line scrolls."
         },
         {
           "kind": "added",

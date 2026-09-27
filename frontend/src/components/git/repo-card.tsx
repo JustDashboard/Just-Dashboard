@@ -5,14 +5,14 @@ import { useRouter } from "next/navigation"
 import { ArrowRight, External, Play, RotateCounterClockwise } from "@/components/icons"
 import { post } from "@/lib/api"
 import { plural } from "@/lib/format"
-import type { RepoPulls } from "@/lib/git-repos"
+import { parseRemote, type RepoPulls } from "@/lib/git-repos"
 import { canTest, cleanupFailed, previewHeld, previewOutOfDate } from "@/lib/pull-requests"
 import { notify } from "@/lib/toast"
 import type { DeploymentEngineRun, DeploymentPreview, GitPullRequest, GitRepo } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { AheadBehind } from "@/components/git/ahead-behind"
-import { SourceMerge } from "@/components/git/glyphs"
+import { SourceMerge, SourcePull } from "@/components/git/glyphs"
 import { BranchChip, CommitLine, WorkingTreeBar } from "@/components/git/marks"
 import { MergePullDialog } from "@/components/git/merge-pull-dialog"
 import { PullRequestRow } from "@/components/git/pull-request-row"
@@ -27,9 +27,6 @@ import type { Verb } from "@/components/verbs"
 
 type Deployment = RepoPulls["deployments"][number]
 
-/** How many pull requests a card shows before it says "and N more". */
-const STRIP = 3
-
 /**
  * The grid a shelf of cards is laid out in — beside the card, as `ChoiceGrid`
  * keeps its own. As many columns as the width holds at twenty-two rems each:
@@ -37,11 +34,12 @@ const STRIP = 3
  * phone, where `min(…, 100%)` gives a screen narrower than a card a column
  * rather than a sideways scroll. Twenty was the first measure and made four
  * columns at 1720, where a pull request's title on the card's foot was three
- * words and an ellipsis. The rows are equal, so a card with a pull request on
- * it does not push its neighbours' feet out of line.
+ * words and an ellipsis. The rows are not forced equal: every card is one
+ * height of its own making (see the foot), and equal rows let the tallest card
+ * on a shelf set the height of all of them.
  */
 export const REPO_GRID =
-  "grid min-w-0 auto-rows-fr gap-3 grid-cols-[repeat(auto-fill,minmax(min(22rem,100%),1fr))]"
+  "grid min-w-0 gap-3 grid-cols-[repeat(auto-fill,minmax(min(22rem,100%),1fr))]"
 
 /**
  * One checkout on this host, as a card on a shelf of its account's.
@@ -60,16 +58,20 @@ export const REPO_GRID =
  * out at the right. **Where HEAD is**, with the shape of the working tree
  * held out beside it — the two readings that decide whether to open it, one
  * per line, so a shelf of cards is scanned across. Where on disk. **What last
- * happened**, as a forge draws a commit. And on the foot, when GitHub has
- * open pull requests for the checkout, up to three of them: what is waiting
- * to be merged is the other half of "which of these needs me", and it used
- * to be a tab inside the workspace, one click and a scroll away. Each is a
- * choice of its own with its own verbs — test it as a preview, merge it,
+ * happened**, as a forge draws a commit. And on the foot, **what is waiting
+ * to be merged**: the other half of "which of these needs me", which used to
+ * be a tab inside the workspace, one click and a scroll away. The request is
+ * a choice of its own with its own verbs — test it as a preview, merge it,
  * open it — inside a container that stops the press reaching the card,
  * because a card that opens the repository when its "Merge" is pressed is
- * the defect `ChoiceRow`'s actions slot exists to prevent. The strip sits on
- * the foot rather than under the commit so a row of cards shares one
- * baseline whether or not each has something to merge.
+ * the defect `ChoiceRow`'s actions slot exists to prevent.
+ *
+ * The foot is one line of one height whatever it holds, so every card on the
+ * page is the same height. It used to stack up to three requests, and a card
+ * with them stood twice the height of its neighbours, with the equal rows
+ * stretching the rest of its shelf into empty space to match — while the
+ * next shelf's cards stayed short. Now the first request is drawn and the
+ * rest are counted beside it, and a card with none says why in a quiet word.
  *
  * It is a **choice**, not a reading: every card is a repository to enter,
  * which §15 pass 3 and §16 both settle — the lit edge belongs to things you
@@ -103,8 +105,19 @@ export function RepoCard({
   // The retry in flight, so no row offers a second one until it answers.
   const [retrying, setRetrying] = useState(false)
   const open = pulls?.pulls ?? []
+  const [first] = open
+  const more = `${open.length - 1} more ${open.length > 2 ? "pull requests" : "pull request"}`
   const deployments = pulls?.deployments ?? []
   const changed = () => onPullsChanged?.()
+  // What the foot says with no request to draw. Nothing while a GitHub
+  // checkout's summary is on its way: "none" before gh has answered is a guess.
+  const quiet = pulls?.error
+    ? "pull requests unavailable"
+    : pulls
+      ? "no open pull requests"
+      : /^(www\.)?github\.com$/.test(parseRemote(repo.remote)?.host ?? "")
+        ? undefined
+        : "not on GitHub"
 
   // A failed removal is retried as the run it was, through the run's own
   // retry route — as the Overview retries it — against the project the
@@ -217,11 +230,11 @@ export function RepoCard({
 
             {/* Where HEAD is, and the shape of the tree on it. */}
             <div className="flex min-w-0 items-start gap-2">
-              <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+              {/* One line: a long branch name gives way before a card grows. */}
+              <span className="flex min-w-0 flex-1 items-center gap-2">
                 <BranchChip
                   branch={repo.branch}
                   detached={repo.detached}
-                  className="max-w-full"
                   title={
                     repo.detached
                       ? "Detached HEAD"
@@ -233,13 +246,19 @@ export function RepoCard({
                 {/* Only the states that change what the next push does get a
                     word. "tracks origin/main" is the normal case and is already
                     on the branch chip's tooltip. */}
-                {repo.detached && <Tag tone="danger">detached</Tag>}
-                {repo.gone && <Tag tone="danger">upstream gone</Tag>}
-                {!repo.detached && !repo.empty && !repo.upstream && <Tag>not published</Tag>}
-                {/* gh could not answer for this checkout — not signed in as its
-                    owner, most often. One quiet word, with gh's own sentence a
-                    hover away; the card is still the repository. */}
-                {pulls?.error && <Tag title={pulls.error}>pull requests unavailable</Tag>}
+                {repo.detached && (
+                  <Tag tone="danger" className="shrink-0">
+                    detached
+                  </Tag>
+                )}
+                {repo.gone && (
+                  <Tag tone="danger" className="shrink-0">
+                    upstream gone
+                  </Tag>
+                )}
+                {!repo.detached && !repo.empty && !repo.upstream && (
+                  <Tag className="shrink-0">not published</Tag>
+                )}
               </span>
               <span className="flex shrink-0 items-center gap-1.5 leading-[1.6]">
                 <WorkingTreeBar repo={repo} />
@@ -262,9 +281,10 @@ export function RepoCard({
               {repo.path}
             </p>
 
-            {/* What last happened. */}
+            {/* What last happened, at the height of a commit with its marks,
+                which "no commits yet" alone is not. */}
             <CommitLine
-              className="min-w-0"
+              className="min-h-4.5 min-w-0"
               sha={repo.head}
               subject={repo.subject}
               author={repo.author}
@@ -272,37 +292,51 @@ export function RepoCard({
               empty={repo.empty}
             />
 
-            {/* What is waiting to be merged. The container swallows the
-                press: each row and each verb in it is a control of its own,
-                and none of them is "open the repository". */}
-            {open.length > 0 && (
-              <div
-                onClick={(event) => event.stopPropagation()}
-                className="mt-auto border-t border-hairline pt-2.5"
-              >
-                <ChoiceList aria-label={`Pull requests in ${repo.name}`}>
-                  {open.slice(0, STRIP).map((p) => (
+            {/* What is waiting to be merged. The line is the height of one
+                compact request whatever it holds, which is what keeps every
+                card one height. */}
+            <div className="mt-auto border-t border-hairline pt-2.5">
+              {first ? (
+                // The container swallows the press: the row and each verb in
+                // it is a control of its own, and none of them is "open the
+                // repository".
+                <div
+                  onClick={(event) => event.stopPropagation()}
+                  className="flex h-[2.875rem] min-w-0 items-center gap-1"
+                >
+                  <ChoiceList aria-label={`Pull requests in ${repo.name}`} className="flex-1">
                     <PullRequestRow
-                      key={p.number}
                       compact
-                      pull={p}
-                      verbs={verbsFor(p)}
-                      onOpen={onOpenPull ? () => onOpenPull(p.number) : undefined}
+                      pull={first}
+                      verbs={verbsFor(first)}
+                      onOpen={onOpenPull ? () => onOpenPull(first.number) : undefined}
                     />
-                  ))}
-                </ChoiceList>
-                {open.length > STRIP && onOpenPull && (
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    className="mt-1 text-muted-foreground"
-                    onClick={() => onOpenPull()}
-                  >
-                    and {open.length - STRIP} more
-                  </Button>
-                )}
-              </div>
-            )}
+                  </ChoiceList>
+                  {open.length > 1 && onOpenPull && (
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      className="numeric shrink-0 text-muted-foreground"
+                      aria-label={more}
+                      title={more}
+                      onClick={() => onOpenPull()}
+                    >
+                      +{open.length - 1}
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <p
+                  className="flex h-[2.875rem] min-w-0 items-center gap-1.5 text-hint text-muted-foreground"
+                  // gh could not answer for this checkout — not signed in as
+                  // its owner, most often: its own sentence is a hover away.
+                  title={pulls?.error}
+                >
+                  {quiet && <SourcePull aria-hidden className="size-3.5 shrink-0 opacity-70" />}
+                  <span className="truncate">{quiet}</span>
+                </p>
+              )}
+            </div>
           </div>
         </SpotlightBorder>
       </BlurFade>
