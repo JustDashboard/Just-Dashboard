@@ -111,6 +111,7 @@ export function RequestConsole({
   blocking,
   outputHref,
   onEventsAround,
+  detail,
 }: {
   entries: RequestEntry[]
   summary: RequestSummary
@@ -136,6 +137,12 @@ export function RequestConsole({
   outputHref?: (entry: RequestEntry) => string | undefined
   /** The Events view scoped to this request's minute. */
   onEventsAround?: (entry: RequestEntry) => void
+  /**
+   * What the page knows about one request that the record does not — a
+   * site's error log beside a failed one — drawn in the opened row under its
+   * facts. Called only for the row that is open.
+   */
+  detail?: (entry: RequestEntry) => React.ReactNode
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [following, setFollowing] = useState(true)
@@ -375,6 +382,7 @@ export function RequestConsole({
                       blocking={blocking}
                       outputHref={outputHref?.(entry)}
                       onEventsAround={onEventsAround}
+                      extra={detail?.(entry)}
                     />
                   )}
                 </div>
@@ -480,6 +488,7 @@ function RequestDetail({
   blocking,
   outputHref,
   onEventsAround,
+  extra,
 }: {
   entry: RequestEntry
   summary: RequestSummary
@@ -490,6 +499,7 @@ function RequestDetail({
   blocking?: string | null
   outputHref?: string
   onEventsAround?: (entry: RequestEntry) => void
+  extra?: React.ReactNode
 }) {
   const ip = entry.remoteIp
   const scanner = ip ? summary.scanners.some((s) => s.value === ip) : false
@@ -654,6 +664,8 @@ function RequestDetail({
           </div>
         ))}
       </dl>
+
+      {extra}
 
       <div className="mt-3 flex flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center">
         {/* The two questions a failing request raises, each one press: what

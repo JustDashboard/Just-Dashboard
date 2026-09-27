@@ -44,6 +44,7 @@ import {
 } from "@/components/proxy/certbot-panel"
 import { CertLife, ExpiryStatus } from "@/components/proxy/expiry-status"
 import { ImportDialog } from "@/components/proxy/import-dialog"
+import { RenewalLog } from "@/components/proxy/renewal-log"
 import { certificateProduct } from "@/components/proxy/marks"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -52,10 +53,10 @@ type Watched = { id: number; domain: string; port: number; certificate?: Certifi
 
 /**
  * Every certificate on the host and everything done to one: four readings,
- * certbot's lineages with their verbs, what is installed and which site uses
- * it, the domains checked with a live handshake — which catches one renewed
- * on disk but never reloaded, the failure that is invisible in a file — and
- * the DNS plugins a wildcard needs.
+ * certbot's lineages with their verbs, the log of every renewal certbot ran,
+ * what is installed and which site uses it, the domains checked with a live
+ * handshake — which catches one renewed on disk but never reloaded, the
+ * failure that is invisible in a file — and the DNS plugins a wildcard needs.
  */
 export function CertificatesPage() {
   const { can } = useAuth()
@@ -246,9 +247,9 @@ export function CertificatesPage() {
         <RenewalNotice state={certbot.data} admin={admin} onChanged={certbot.refresh} />
       )}
 
-      {/* Four plain sections, each a title and a hairline (§15 pass 1), in
-          the order a certificate's life runs: issued here, installed on the
-          host, checked from outside, and the DNS plugins an issuance can
+      {/* Plain sections, each a title and a hairline (§15 pass 1), in the
+          order a certificate's life runs: issued here, renewed, installed on
+          the host, checked from outside, and the DNS plugins an issuance can
           need. The frames around them opened the page with a stack of four
           boxes under four figures. */}
       <Panel plain>
@@ -300,6 +301,10 @@ export function CertificatesPage() {
           ) : null}
         </PanelBody>
       </Panel>
+
+      {/* Every renewal certbot ran, not only the ones started from this
+          page: the timer's runs are the ones nobody was watching. */}
+      {!certbotGone && <RenewalLog certbot={certbot.data} />}
 
       <Panel plain>
         <PanelHeader

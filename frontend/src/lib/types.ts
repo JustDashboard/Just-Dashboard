@@ -6068,6 +6068,13 @@ export type SiteSpec = {
   basicAuthFile?: string
   basicAuthRealm?: string
   accessLog: boolean
+  /**
+   * Where the site's access_log and error_log write, read back from its file
+   * — never set by the form. Absent when it logs nowhere of its own: off,
+   * syslog, or nginx's shared log.
+   */
+  accessLogPath?: string
+  errorLogPath?: string
   locations: SiteLocation[]
   custom?: string
 }

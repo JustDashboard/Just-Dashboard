@@ -116,6 +116,7 @@ export function RequestsWorkspace({
   routed,
   outputHref,
   onEventsAround,
+  detail,
 }: {
   /**
    * Where this record lives on the API — `/deploy/12` or `/proxy/sites/shop` —
@@ -137,6 +138,8 @@ export function RequestsWorkspace({
   routed?: boolean
   outputHref?: (entry: RequestEntry) => string | undefined
   onEventsAround?: (entry: RequestEntry) => void
+  /** What the record's owner knows about one request, in its opened row. */
+  detail?: (entry: RequestEntry) => React.ReactNode
 }) {
   const { can } = useAuth()
   const [live, setLive] = useState(false)
@@ -325,6 +328,7 @@ export function RequestsWorkspace({
           blocking={blocking}
           outputHref={outputHref}
           onEventsAround={onEventsAround}
+          detail={detail}
           leading={
             <ClassChips
               selected={query.classes}
@@ -351,7 +355,7 @@ export function RequestsWorkspace({
               description={
                 narrowed
                   ? "Nothing matched. Widen the window or clear the filters."
-                  : "Nothing has asked for this deployment in the window you chose. Widen it, or turn Live on and watch for the first request."
+                  : "No request arrived in the window you chose. Widen it, or turn Live on and watch for the first one."
               }
             />
           }
