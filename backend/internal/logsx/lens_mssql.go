@@ -41,10 +41,10 @@ func (r *mssqlReader) Read(l *Line) {
 	text := l.Text
 	at, source, msg, ok := mssqlParse(text)
 	if !ok {
-		// The version banner's continuation is indented with a tab.
-		if r.open && strings.HasPrefix(text, "\t") {
+		// The version banner carries on over lines indented with a tab.
+		if strings.HasPrefix(text, "\t") {
 			l.Cont = true
-			if r.level != "" {
+			if r.open && r.level != "" {
 				l.SetLevel(r.level)
 			}
 			return

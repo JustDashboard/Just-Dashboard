@@ -75,7 +75,7 @@ func (r *redisReader) Read(l *Line) {
 		// Valkey 8.1 can log as JSON; ParseLine has already read its level
 		// and message, and the words are the same.
 		if l.Message != "" && l.Fields["role"] != "" && l.Fields["pid"] != "" {
-			r.name(l, l.Message)
+			redisName(l, l.Message)
 			dbSetWord(l, "pid", l.Fields["pid"])
 			dbSetWord(l, "role", redisRole(l.Fields["role"]))
 		}
@@ -103,10 +103,12 @@ func (r *redisReader) Read(l *Line) {
 	case 'X':
 		dbSetWord(l, "role", "sentinel")
 	}
-	r.name(l, h.msg)
+	redisName(l, h.msg)
 }
 
-func (r *redisReader) name(l *Line, msg string) {
+// redisName names the message and raises the level where the event is worse
+// than the "#" Redis gave it.
+func redisName(l *Line, msg string) {
 	l.Event = redisEvent(msg)
 	switch l.Event {
 	case "crash":
