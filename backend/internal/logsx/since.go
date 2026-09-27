@@ -58,7 +58,7 @@ func sinceOffset(file *os.File, since time.Time, f *Filter) (int64, int) {
 	}
 	probes := []probe{{0, first}}
 	lo, hi := int64(0), size
-	for range sinceProbes {
+	for range sinceProbes - 1 {
 		if hi-lo <= sinceProbe {
 			break
 		}

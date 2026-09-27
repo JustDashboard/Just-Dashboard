@@ -94,6 +94,11 @@ func (o SearchOptions) Validate() error {
 	if _, err := NewFilter(o.Filter); err != nil {
 		return err
 	}
+	return o.validateInsight()
+}
+
+// validateInsight checks the facet, measure and histogram options.
+func (o SearchOptions) validateInsight() error {
 	if len(o.Facets) > maxFacets {
 		return fmt.Errorf("at most %d facets, got %d", maxFacets, len(o.Facets))
 	}

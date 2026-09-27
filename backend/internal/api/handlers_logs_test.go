@@ -375,6 +375,7 @@ func TestAuthLogsNeedAnAdministrator(t *testing.T) {
 	writeLog(t, authLog, "2026-09-27T00:21:02.476539+00:00 vps sshd-session[78923]: Invalid user hunter2 from 203.0.113.7 port 30358")
 	writeLog(t, filepath.Join(root, "auth.log.1"), "yesterday")
 	writeLog(t, filepath.Join(root, "app.log"), "hello")
+	writeLog(t, filepath.Join(root, "secure-api.log"), "an application that happens to be called secure-api")
 	if err := os.Symlink(authLog, filepath.Join(root, "innocent.log")); err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +400,7 @@ func TestAuthLogsNeedAnAdministrator(t *testing.T) {
 	}
 	// What is not auth data stays readable, including the whole journal and
 	// the cron identifier.
-	for _, source := range []string{filepath.Join(root, "app.log"), "journal:cron.service", "journal-id:CRON", "kernel:", "journal:"} {
+	for _, source := range []string{filepath.Join(root, "app.log"), filepath.Join(root, "secure-api.log"), "journal:cron.service", "journal-id:CRON", "kernel:", "journal:"} {
 		if rec := reader.do("GET", "/api/v1/logs/source?source="+url.QueryEscape(source), "", nil); rec.Code == http.StatusForbidden {
 			t.Errorf("reader %s was refused", source)
 		}

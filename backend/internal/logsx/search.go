@@ -250,11 +250,11 @@ type Collector struct {
 }
 
 func NewCollector(opts SearchOptions) (*Collector, error) {
-	if err := opts.Validate(); err != nil {
-		return nil, err
-	}
 	f, err := NewFilter(opts.Filter)
 	if err != nil {
+		return nil, err
+	}
+	if err := opts.validateInsight(); err != nil {
 		return nil, err
 	}
 	limit := opts.Limit

@@ -280,8 +280,9 @@ func authJournalUnit(unit string) bool {
 }
 
 // authLogFile judges the file and anything it resolves to, and the rotated
-// generations too: auth.log.1 is the same data a day older, and a symlink
-// named app.log pointing at auth.log is still auth.log.
+// generations too: auth.log.1 and secure-20240612 are the same data a day
+// older, and a symlink named app.log pointing at auth.log is still auth.log.
+// A generation is a number after the name, so secure-api.log is not one.
 func authLogFile(path string) bool {
 	if path == "" {
 		return false
@@ -292,7 +293,11 @@ func authLogFile(path string) bool {
 	}
 	for _, name := range names {
 		for _, base := range []string{"auth.log", "secure"} {
-			if name == base || strings.HasPrefix(name, base+".") || strings.HasPrefix(name, base+"-") {
+			rest, ok := strings.CutPrefix(name, base)
+			if !ok {
+				continue
+			}
+			if rest == "" || (len(rest) > 1 && (rest[0] == '.' || rest[0] == '-') && rest[1] >= '0' && rest[1] <= '9') {
 				return true
 			}
 		}
