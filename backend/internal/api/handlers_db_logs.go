@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"math"
 	"net/http"
@@ -60,23 +61,52 @@ type dbLogSources struct {
 	Refused []dbLogRefusal `json:"refused,omitempty"`
 	// Reason says why there is no source, in a sentence the page prints.
 	Reason string `json:"reason,omitempty"`
+	// Note says what the sources are when nothing answers for the
+	// connection: the log of a server that has stopped, found without a
+	// process to follow, rather than one that has gone quiet.
+	Note string `json:"note,omitempty"`
 }
 
 // dbHostProbe is what following a server on the machine to its log reads off
-// the machine: who listens on a port, which unit a process belongs to, and
-// the files it has open. A test hands in a machine of its own.
+// the machine: who listens on a port, which unit a process belongs to, the
+// files it has open, and the units systemd has. A test hands in a machine of
+// its own.
 type dbHostProbe struct {
 	listeners func(context.Context) ([]proxysvc.Listener, error)
 	managerOf func(pid int32, cmdline string) (manager, name string)
-	proc      string
-	logDir    string
+	// systemd reports whether there is a journal to read and units to ask
+	// for; units lists them, stopped and failed ones included.
+	systemd func() bool
+	units   func(context.Context) ([]procs.Unit, error)
+	proc    string
+	logDir  string
 }
+
+// journal reports whether the machine has systemd to ask.
+func (p dbHostProbe) journal() bool { return p.systemd != nil && p.systemd() }
+
+var hostSystemd = procs.NewSystemd()
 
 var hostLogProbe = dbHostProbe{
 	listeners: proxysvc.ListListeners,
 	managerOf: procs.ManagerOf,
+	systemd:   hostSystemd.Available,
+	units:     hostSystemd.List,
 	proc:      "/proc",
 	logDir:    "/var/log",
+}
+
+// dbLogSourcesFresh is how long one resolution answers for a connection. The
+// page asks for the sources each minute and its Queries view for the log
+// behind them twice as often, and each asking walks every process's sockets,
+// the server's descriptors and Docker's list; a server does not move its log
+// between two of them.
+const dbLogSourcesFresh = 45 * time.Second
+
+type dbLogSourcesKept struct {
+	dsn     [sha256.Size]byte
+	at      time.Time
+	sources dbLogSources
 }
 
 // driverLens is the lens an engine's log is read through. The page knows the
@@ -116,7 +146,25 @@ func (s *Server) handleDBLogSources(w http.ResponseWriter, r *http.Request) erro
 	return nil
 }
 
+// dbLogSourcesFor is the connection's logs, as last resolved while that is
+// fresh. The kept answer is shared: callers read it and never change it.
 func (s *Server) dbLogSourcesFor(ctx context.Context, conn *dbConnection, dsn string, probe dbHostProbe) dbLogSources {
+	sum := sha256.Sum256([]byte(dsn))
+	if v, ok := s.dbLogSourcesKept.Load(conn.ID); ok {
+		if kept := v.(dbLogSourcesKept); kept.dsn == sum && time.Since(kept.at) < dbLogSourcesFresh {
+			return kept.sources
+		}
+	}
+	out := s.resolveDBLogSources(ctx, conn, dsn, probe)
+	// An answer cut short by the request's deadline is not kept: the next
+	// asking may have the time this one did not.
+	if ctx.Err() == nil {
+		s.dbLogSourcesKept.Store(conn.ID, dbLogSourcesKept{dsn: sum, at: time.Now(), sources: out})
+	}
+	return out
+}
+
+func (s *Server) resolveDBLogSources(ctx context.Context, conn *dbConnection, dsn string, probe dbHostProbe) dbLogSources {
 	out := dbLogSources{Sources: []dbLogSource{}}
 	if conn.Driver == dbx.DriverSQLite {
 		out.Reason = "A SQLite database is a file, not a server: it writes no log of its own."
@@ -136,12 +184,15 @@ func (s *Server) dbLogSourcesFor(ctx context.Context, conn *dbConnection, dsn st
 		out.Sources = append(out.Sources, s.dbContainerLog(ctx, *server.container, lens))
 		return out
 	}
-	if !databaseLoopback(info.Host) {
-		out.Reason = fmt.Sprintf("No container on this machine answers at %s: the server is elsewhere on the network, and its log is there.", info.Host)
-		return out
+	if databaseLoopback(info.Host) {
+		port, _ := strconv.Atoi(info.Port)
+		return s.dbHostLogs(ctx, conn, port, lens, probe)
 	}
-	port, _ := strconv.Atoi(info.Port)
-	return s.dbHostLogs(ctx, conn.Driver, port, lens, probe)
+	if c := s.containerNamed(ctx, conn); c != nil {
+		return s.dbNamedContainerLog(ctx, *c, lens)
+	}
+	out.Reason = fmt.Sprintf("No container on this machine answers at %s: the server is elsewhere on the network, and its log is there.", info.Host)
+	return out
 }
 
 // dbContainerLog is a container's output, asked for by name: a recreated
@@ -158,7 +209,7 @@ func (s *Server) dbContainerLog(ctx context.Context, c dockerx.Container, lens s
 
 // dbHostLogs follows a port on this machine to the logs of the process
 // listening on it.
-func (s *Server) dbHostLogs(ctx context.Context, driver dbx.Driver, port int, lens string, probe dbHostProbe) dbLogSources {
+func (s *Server) dbHostLogs(ctx context.Context, conn *dbConnection, port int, lens string, probe dbHostProbe) dbLogSources {
 	out := dbLogSources{Sources: []dbLogSource{}}
 	if port <= 0 {
 		out.Reason = "The saved connection names no port, so the server listening for it cannot be found."
@@ -171,8 +222,7 @@ func (s *Server) dbHostLogs(ctx context.Context, driver dbx.Driver, port int, le
 	}
 	l := listenerOn(listeners, port)
 	if l == nil {
-		out.Reason = fmt.Sprintf("Nothing on this machine is listening on port %d, so there is no process to follow to its log. The server may be stopped.", port)
-		return out
+		return s.dbLogsWithoutListener(ctx, conn, port, lens, listeners, probe)
 	}
 	// A published container answers on the host through docker-proxy, whose
 	// own unit is docker.service: following it would read Docker's journal
@@ -206,71 +256,278 @@ func (s *Server) dbHostLogs(ctx context.Context, driver dbx.Driver, port int, le
 		unit = ""
 	}
 
-	seen := map[string]bool{}
-	addFile := func(path, detail string) {
-		path = filepath.Clean(path)
-		if seen[path] {
-			return
-		}
-		seen[path] = true
-		if err := s.modules.logs.Allow(path); err != nil {
-			out.Refused = append(out.Refused, dbLogRefusal{
-				Path:   path,
-				Reason: "outside the log roots (" + strings.Join(s.modules.logs.Roots(), ", ") + ")",
-			})
-			return
-		}
-		src, ok, err := s.modules.logs.Describe(path)
-		if err != nil || !ok {
-			return
-		}
-		src.ID = "file:" + path
-		src.Label = filepath.Base(path)
-		if lens != "" {
-			src.Lens = lens
-		}
-		src.Detail = detail
-		if src.Size == 0 && src.Archives > 0 {
-			// The operator's own case: logrotate emptied it overnight, and
-			// an empty live file reads as a server that logs nothing.
-			src.Detail = "Empty since it was last rotated — History reads the rotated files too"
-		}
-		out.Sources = append(out.Sources, dbLogSource{Source: src})
-	}
+	set := s.newDBLogSet(lens)
 	for _, path := range appendedLogFiles(probe.proc, l.PID) {
-		addFile(path, "The file "+l.Process+" writes its log to")
+		set.addFile(path, "The file "+l.Process+" writes its log to")
 	}
-	for _, path := range conventionLogPaths(probe.logDir, driver, unit) {
+	set.addConventional(probe.logDir, conn.Driver, unit)
+	if unit != "" && probe.journal() {
+		set.addJournal(unit, "What systemd recorded for this unit, and what it printed")
+	}
+	out = set.result()
+	switch {
+	case len(out.Sources) > 0:
+	case len(out.Refused) > 0:
+		out.Reason = refusedReason(l.Process, out.Refused[0])
+	default:
+		out.Reason = fmt.Sprintf("Port %d is served by %s (pid %d), which has no log file open under the log roots and runs under no systemd unit.",
+			port, l.Process, l.PID)
+	}
+	return out
+}
+
+func refusedReason(who string, r dbLogRefusal) string {
+	return fmt.Sprintf("%s writes its log to %s, which is %s. An administrator can add its directory to JD_LOG_ROOTS.", who, r.Path, r.Reason)
+}
+
+// dbLogsWithoutListener finds the log of a server nothing answers for:
+// stopped, crashed, or still starting — which is when its log is read most,
+// for the lines that say which. With no process to follow, it is found the
+// ways a stopped server can be: a container publishing the port without
+// docker-proxy, the container the connection is named after (the sync names
+// an adopted container's connection after it, and a stopped one publishes
+// nothing to be found by), or the engine's units by name with the files
+// their packages write.
+func (s *Server) dbLogsWithoutListener(ctx context.Context, conn *dbConnection, port int, lens string, listeners []proxysvc.Listener, probe dbHostProbe) dbLogSources {
+	// With the userland proxy off, Docker publishes a port in the kernel's
+	// tables alone, and nothing is listening on it to be found.
+	if c := s.containerPublishing(ctx, port); c != nil {
+		return dbLogSources{Sources: []dbLogSource{s.dbContainerLog(ctx, *c, lens)}}
+	}
+	if c := s.containerNamed(ctx, conn); c != nil {
+		return s.dbNamedContainerLog(ctx, *c, lens)
+	}
+	units := engineUnits(ctx, conn.Driver, port, listeners, probe)
+	set := s.newDBLogSet(lens)
+	names := make([]string, 0, len(units))
+	for _, u := range units {
+		set.addConventional(probe.logDir, conn.Driver, u.Name)
+		names = append(names, u.Name+" ("+u.ActiveState+")")
+	}
+	if len(units) == 0 {
+		set.addConventional(probe.logDir, conn.Driver, "")
+	}
+	for _, u := range units {
+		set.addJournal(u.Name, fmt.Sprintf("What systemd recorded for this unit, which is %s now", u.ActiveState))
+	}
+	out := set.result()
+	switch {
+	case len(out.Sources) == 0 && len(out.Refused) > 0:
+		out.Reason = refusedReason("The server", out.Refused[0])
+	case len(out.Sources) > 0 && len(names) > 0:
+		out.Note = fmt.Sprintf("Nothing on this machine is listening on port %d, so the server may be stopped or starting. These are the logs of %s, found by name.",
+			port, strings.Join(names, ", "))
+	case len(out.Sources) > 0:
+		out.Note = fmt.Sprintf("Nothing on this machine is listening on port %d, so the server may be stopped or starting. This is where its package writes its log.", port)
+	default:
+		out.Reason = fmt.Sprintf("Nothing on this machine is listening on port %d, and no unit of this engine's was found by name, so there is no process or unit to follow to its log. The server may be stopped.", port)
+	}
+	return out
+}
+
+// dbLogSet gathers a server's logs on the machine: each file once and only
+// through the log roots, a file the roots refuse named rather than dropped,
+// and the unit's journal after the files.
+type dbLogSet struct {
+	s    *Server
+	lens string
+	seen map[string]bool
+	out  dbLogSources
+	// journals are added last, told whose lines are where once the files
+	// are known.
+	journals []dbLogSource
+}
+
+func (s *Server) newDBLogSet(lens string) *dbLogSet {
+	return &dbLogSet{s: s, lens: lens, seen: map[string]bool{}, out: dbLogSources{Sources: []dbLogSource{}}}
+}
+
+func (set *dbLogSet) addFile(path, detail string) {
+	path = filepath.Clean(path)
+	if set.seen[path] {
+		return
+	}
+	set.seen[path] = true
+	logs := set.s.modules.logs
+	if err := logs.Allow(path); err != nil {
+		set.out.Refused = append(set.out.Refused, dbLogRefusal{
+			Path:   path,
+			Reason: "outside the log roots (" + strings.Join(logs.Roots(), ", ") + ")",
+		})
+		return
+	}
+	src, ok, err := logs.Describe(path)
+	if err != nil || !ok {
+		return
+	}
+	src.ID = "file:" + path
+	src.Label = filepath.Base(path)
+	if set.lens != "" {
+		src.Lens = set.lens
+	}
+	src.Detail = detail
+	if src.Size == 0 && src.Archives > 0 {
+		// The operator's own case: logrotate emptied it overnight, and
+		// an empty live file reads as a server that logs nothing.
+		src.Detail = "Empty since it was last rotated — History reads the rotated files too"
+	}
+	set.out.Sources = append(set.out.Sources, dbLogSource{Source: src})
+}
+
+// addConventional adds the files the engine's package writes that exist.
+func (set *dbLogSet) addConventional(dir string, driver dbx.Driver, unit string) {
+	for _, path := range conventionLogPaths(dir, driver, unit) {
 		if _, err := os.Stat(path); err == nil {
-			addFile(path, "Where this engine's package writes its log")
+			set.addFile(path, "Where this engine's package writes its log")
 		}
 	}
-	if unit != "" && s.modules.systemd.Available() {
-		detail := "What systemd recorded for this unit, and what it printed"
-		if len(out.Sources) > 0 {
-			// A server that writes its own file sends the journal nothing
-			// but systemd's starts and stops — Debian's Postgres writes no
-			// line there at all — and an empty journal should not read as
-			// a quiet server.
-			detail = "What systemd recorded starting and stopping it; the server's own lines are in " + out.Sources[0].Label
-		}
-		out.Sources = append(out.Sources, dbLogSource{Source: logsx.Source{
-			ID: "journal:" + unit, Label: unit, Kind: logsx.KindJournal, Lens: lens, Detail: detail,
-		}})
+}
+
+func (set *dbLogSet) addJournal(unit, detail string) {
+	id := "journal:" + unit
+	if set.seen[id] {
+		return
 	}
-	if len(out.Sources) > 0 {
-		// The file even when it is empty: it is where the server writes, and
-		// its rotated generations hold what was written before.
+	set.seen[id] = true
+	set.journals = append(set.journals, dbLogSource{Source: logsx.Source{
+		ID: id, Label: unit, Kind: logsx.KindJournal, Lens: set.lens, Detail: detail,
+	}})
+}
+
+// result is the set in reading order, with the log the server writes its own
+// lines to marked primary: the first file, even when it is empty, since it is
+// where the server writes and its rotated generations hold what was written
+// before. A journal is primary only when no file is the server's — a server
+// that writes its own file sends the journal nothing but systemd's starts
+// and stops (Debian's Postgres writes no line there at all), and one whose
+// file the roots refuse has its statements in that file, not in the journal.
+func (set *dbLogSet) result() dbLogSources {
+	out := set.out
+	for _, j := range set.journals {
+		switch {
+		case len(out.Sources) > 0:
+			j.Detail = "What systemd recorded starting and stopping it; the server's own lines are in " + out.Sources[0].Label
+		case len(out.Refused) > 0:
+			j.Detail = "What systemd recorded starting and stopping it; the server's own lines are in " + out.Refused[0].Path + ", outside the log roots"
+		}
+		out.Sources = append(out.Sources, j)
+	}
+	if len(out.Sources) > 0 && (out.Sources[0].Kind != logsx.KindJournal || len(out.Refused) == 0) {
 		out.Sources[0].Primary = true
-		return out
 	}
-	if len(out.Refused) > 0 {
-		out.Reason = fmt.Sprintf("%s writes its log to %s, which is outside the log roots. An administrator can add its directory to JD_LOG_ROOTS.",
-			l.Process, out.Refused[0].Path)
-		return out
+	return out
+}
+
+// engineUnits are the machine's units that run the connection's engine and
+// are not serving another port: a second cluster listening elsewhere is not
+// the one this connection is to. Debian's postgresql.service starts nothing
+// itself — each cluster is a postgresql@ instance, and the umbrella's journal
+// is empty — so it is left out beside them.
+func engineUnits(ctx context.Context, driver dbx.Driver, port int, listeners []proxysvc.Listener, probe dbHostProbe) []procs.Unit {
+	prefixes := engineUnitPrefixes(driver)
+	if len(prefixes) == 0 || !probe.journal() || probe.units == nil {
+		return nil
 	}
-	out.Reason = fmt.Sprintf("Port %d is served by %s (pid %d), which has no log file open under the log roots and runs under no systemd unit.",
-		port, l.Process, l.PID)
+	all, err := probe.units(ctx)
+	if err != nil {
+		return nil
+	}
+	named := []procs.Unit{}
+	instances := false
+	for _, u := range all {
+		if u.LoadState == "loaded" && engineUnit(u.Name, prefixes) {
+			named = append(named, u)
+			instances = instances || strings.HasPrefix(u.Name, "postgresql@")
+		}
+	}
+	if len(named) == 0 {
+		return nil
+	}
+	busy := map[string]bool{}
+	asked := map[int32]bool{}
+	for _, l := range listeners {
+		if l.PID <= 0 || int(l.Port) == port || asked[l.PID] {
+			continue
+		}
+		asked[l.PID] = true
+		if manager, unit := probe.managerOf(l.PID, l.Cmdline); manager == "systemd" {
+			busy[unit] = true
+		}
+	}
+	out := []procs.Unit{}
+	for _, u := range named {
+		if busy[u.Name] || (instances && u.Name == "postgresql.service") {
+			continue
+		}
+		out = append(out, u)
+	}
+	return out
+}
+
+// engineUnitPrefixes are the names each engine's packages give their units.
+func engineUnitPrefixes(driver dbx.Driver) []string {
+	switch driver {
+	case dbx.DriverPostgres:
+		return []string{"postgresql"}
+	case dbx.DriverMySQL:
+		return []string{"mysql", "mariadb"}
+	case dbx.DriverRedis:
+		return []string{"redis", "valkey", "keydb"}
+	case dbx.DriverMongo:
+		return []string{"mongod"}
+	case dbx.DriverClickHouse:
+		return []string{"clickhouse-server"}
+	case dbx.DriverMSSQL:
+		return []string{"mssql-server"}
+	}
+	return nil
+}
+
+// engineUnit is a unit named for the engine, and not the sentinel or the
+// metrics exporter that are often installed beside it under the same name.
+func engineUnit(name string, prefixes []string) bool {
+	name = strings.TrimSuffix(name, ".service")
+	if strings.Contains(name, "sentinel") || strings.Contains(name, "exporter") {
+		return false
+	}
+	for _, p := range prefixes {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// containerNamed is the container the connection is named after, running or
+// not, when its image is the connection's engine.
+func (s *Server) containerNamed(ctx context.Context, conn *dbConnection) *dockerx.Container {
+	if s.modules.docker == nil || conn.Name == "" {
+		return nil
+	}
+	containers, err := s.modules.docker.ListContainers(ctx, true)
+	if err != nil {
+		return nil
+	}
+	for i := range containers {
+		c := &containers[i]
+		if c.Name != conn.Name {
+			continue
+		}
+		if cand, _ := dbx.Detect(c.Name, s.containerImage(ctx, *c), nil, nil, nil); cand != nil && cand.Driver == conn.Driver {
+			return c
+		}
+	}
+	return nil
+}
+
+// dbNamedContainerLog is the log of the container found by the connection's
+// name, said to be stopped when it is: its output runs up to the moment it
+// stopped, and those last lines are why it is being read.
+func (s *Server) dbNamedContainerLog(ctx context.Context, c dockerx.Container, lens string) dbLogSources {
+	out := dbLogSources{Sources: []dbLogSource{s.dbContainerLog(ctx, c, lens)}}
+	if c.State != "running" {
+		out.Note = fmt.Sprintf("%s is %s, so nothing answers for this connection. Its output runs up to the moment it stopped.", c.Name, c.State)
+	}
 	return out
 }
 
@@ -555,9 +812,17 @@ func (s *Server) postgresQueryLog(ctx context.Context, conn *dbConnection, dsn s
 	sources := s.dbLogSourcesFor(ctx, conn, dsn, probe)
 	primary := primaryLog(sources)
 	if primary == nil {
-		// The log sources' own reason says why — another machine, a file
-		// outside the roots — and the page prints it beside this one.
 		out.Supported = false
+		if len(sources.Refused) > 0 {
+			// Red Hat's default: the collector writes under the data
+			// directory, and the unit's journal beside it holds only systemd's
+			// lines — searched, it would say the server ran nothing slowly.
+			r := sources.Refused[0]
+			out.Reason = fmt.Sprintf("Postgres writes its statements to %s, which is %s. An administrator can add its directory to JD_LOG_ROOTS.", r.Path, r.Reason)
+			return out
+		}
+		// The log sources' own reason says why — another machine, no
+		// server found — and the page prints it beside this one.
 		out.Reason = "Postgres writes its slow statements to its server log, which this machine cannot read."
 		return out
 	}
@@ -569,12 +834,9 @@ func (s *Server) postgresQueryLog(ctx context.Context, conn *dbConnection, dsn s
 			}
 		}
 	}
-	entries, truncated, err := s.slowFromLog(ctx, *primary, "postgres", w)
-	if err != nil {
+	if err := s.slowFromLog(ctx, *primary, "postgres", w, out); err != nil {
 		out.Reason = "The server log could not be searched: " + err.Error()
-		return out
 	}
-	out.Entries, out.Truncated = entries, truncated
 	return out
 }
 
@@ -584,12 +846,9 @@ func (s *Server) postgresQueryLog(ctx context.Context, conn *dbConnection, dsn s
 func (s *Server) mongoQueryLog(ctx context.Context, conn *dbConnection, dsn string, w dbx.QueryLogWindow, probe dbHostProbe) *dbx.QueryLog {
 	out := &dbx.QueryLog{Supported: true, Source: dbx.QuerySourceLog, Entries: []dbx.QueryEntry{}}
 	if primary := primaryLog(s.dbLogSourcesFor(ctx, conn, dsn, probe)); primary != nil {
-		entries, truncated, err := s.slowFromLog(ctx, *primary, "mongodb", w)
-		if err != nil {
+		if err := s.slowFromLog(ctx, *primary, "mongodb", w, out); err != nil {
 			out.Reason = "The server log could not be searched: " + err.Error()
-			return out
 		}
-		out.Entries, out.Truncated = entries, truncated
 		return out
 	}
 	client, err := dbx.MongoClient(ctx, dsn)
@@ -626,20 +885,31 @@ func primaryLog(sources dbLogSources) *dbLogSource {
 	return nil
 }
 
+// statementLines is how many lines the search keeps for each row asked for.
+// Its budget is lines, and a statement is its head and every line it goes
+// on in: asked for the newest 200 lines, twenty ten-line statements came
+// back as the tails of the oldest and no head at all. The rows are counted
+// once they are joined.
+const statementLines = 50
+
+// maxStatementLines is the most lines one search keeps (the collector's own
+// cap).
+const maxStatementLines = 20_000
+
 // slowFromLog searches a server log for its slow statements through the
 // engine's lens, the rotated files included — the answer to "what was slow
-// last night" is usually in yesterday's file.
-func (s *Server) slowFromLog(ctx context.Context, src dbLogSource, lens string, w dbx.QueryLogWindow) ([]dbx.QueryEntry, bool, error) {
+// last night" is usually in yesterday's file — and writes them into out.
+func (s *Server) slowFromLog(ctx context.Context, src dbLogSource, lens string, w dbx.QueryLogWindow, out *dbx.QueryLog) error {
 	fields := []string{"event:slow"}
 	if w.MinMs > 0 {
 		fields = append(fields, "duration_ms:>="+strconv.FormatFloat(w.MinMs, 'f', -1, 64))
 	}
 	opts := logsx.SearchOptions{
 		Filter: logsx.Filter{Lens: lens, Fields: fields},
-		Since:  w.Since, Until: w.Until, Limit: w.Limit, Archives: true,
+		Since:  w.Since, Until: w.Until, Limit: min(w.Limit*statementLines, maxStatementLines), Archives: true,
 	}
 	if err := opts.Validate(); err != nil {
-		return nil, false, err
+		return err
 	}
 	var (
 		res *logsx.SearchResult
@@ -657,9 +927,18 @@ func (s *Server) slowFromLog(ctx context.Context, src dbLogSource, lens string, 
 		res, err = s.modules.logs.Search(ctx, src.Path, opts)
 	}
 	if err != nil {
-		return nil, false, err
+		return err
 	}
-	return slowEntries(res.Lines), res.Truncated, nil
+	entries := slowEntries(res.Lines)
+	out.Truncated = res.Truncated || len(entries) > w.Limit
+	out.Entries = entries[:min(len(entries), w.Limit)]
+	if !res.Complete {
+		// The files, the container and the journal are all read oldest
+		// first, so a search the deadline stopped is missing the newest.
+		out.Truncated = true
+		out.Reason = "The search ran out of time before the end of the window, so the newest statements may be missing. A shorter window reads faster."
+	}
+	return nil
 }
 
 // slowEntries turns the lens's slow lines into rows, newest first. A

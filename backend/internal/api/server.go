@@ -65,6 +65,10 @@ type Server struct {
 	// the first thing a database page would get wrong.
 	logImageRefs sync.Map
 
+	// Each database connection's logs as last resolved, by connection id,
+	// for the page's two polls to share (handlers_db_logs.go).
+	dbLogSourcesKept sync.Map
+
 	modules moduleSet
 }
 

@@ -194,9 +194,13 @@ func mysqlSlowLog(ctx context.Context, db *sql.DB, w QueryLogWindow) ([]QueryEnt
 	         CONVERT(LEFT(sql_text, 8192) USING utf8mb4)
 	  FROM mysql.slow_log
 	  WHERE start_time >= FROM_UNIXTIME(?) AND start_time <= FROM_UNIXTIME(?)
+	    AND query_time >= SEC_TO_TIME(? / 1000)
 	  ORDER BY start_time DESC LIMIT ?`
+	// The floor is part of the question rather than a sieve over its answer:
+	// kept back from the newest few hundred rows, it would return fewer than
+	// the table holds and call the list complete.
 	since, until := windowBounds(w)
-	rows, err := db.QueryContext(ctx, query, since, until, w.Limit+1)
+	rows, err := db.QueryContext(ctx, query, since, until, w.MinMs, w.Limit+1)
 	if err != nil {
 		return nil, false, err
 	}
@@ -211,9 +215,6 @@ func mysqlSlowLog(ctx context.Context, db *sql.DB, w QueryLogWindow) ([]QueryEnt
 		)
 		if err := rows.Scan(&at, &ms, &userHost, &e.DB, &sent, &examined, &text); err != nil {
 			return nil, false, err
-		}
-		if ms < w.MinMs {
-			continue
 		}
 		e.At = unixSeconds(at)
 		e.DurationMs = ms
@@ -297,12 +298,17 @@ func mysqlUserHost(s string) (user, client string) {
 	return user, strings.TrimSpace(where)
 }
 
+// clickhouseQueryLogMark names this read inside its own text. query_log
+// records every query a client asks for, this one included, and a list read
+// every half minute would otherwise fill with the reads of itself.
+const clickhouseQueryLogMark = "just-dashboard: query log"
+
 // ClickHouseQueryLog reads system.query_log, which ClickHouse keeps on by
 // default: every finished or failed query the clients asked for, not the
 // ones the server ran on their behalf.
 func ClickHouseQueryLog(ctx context.Context, db *sql.DB, w QueryLogWindow) (*QueryLog, error) {
 	since, until := windowBounds(w)
-	rows, err := db.QueryContext(ctx, `
+	rows, err := db.QueryContext(ctx, `/* `+clickhouseQueryLogMark+` */
 	  SELECT toUnixTimestamp64Micro(event_time_microseconds), toFloat64(query_duration_ms),
 	         substring(query, 1, 8192), lower(hex(normalized_query_hash)), user, current_database,
 	         IPv6NumToString(address), toInt64(result_rows), toInt64(read_rows),
@@ -310,11 +316,11 @@ func ClickHouseQueryLog(ctx context.Context, db *sql.DB, w QueryLogWindow) (*Que
 	  FROM system.query_log
 	  WHERE is_initial_query AND type != 'QueryStart'
 	    AND event_date >= toDate(toDateTime(?)) AND event_time >= toDateTime(?) AND event_time <= toDateTime(?)
-	    AND query_duration_ms >= ?
+	    AND query_duration_ms >= ? AND position(query, ?) = 0
 	  ORDER BY event_time_microseconds DESC LIMIT ?`,
-		int64(since), int64(since), int64(math.Ceil(until)), w.MinMs, w.Limit+1)
+		int64(since), int64(since), int64(math.Ceil(until)), w.MinMs, clickhouseQueryLogMark, w.Limit+1)
 	if err != nil {
-		return &QueryLog{Source: QuerySourceQueryLog, Entries: []QueryEntry{}, Reason: err.Error()}, nil
+		return nil, err
 	}
 	defer rows.Close()
 	out := &QueryLog{Supported: true, Source: QuerySourceQueryLog, Entries: []QueryEntry{}}
@@ -380,8 +386,7 @@ func RedisQueryLog(ctx context.Context, client *redis.Client, w QueryLogWindow) 
 	}
 	logs, err := client.SlowLogGet(ctx, redisSlowlogDepth).Result()
 	if err != nil {
-		return &QueryLog{Source: QuerySourceSlowlog, Entries: []QueryEntry{},
-			Reason: "SLOWLOG could not be read: " + err.Error()}, nil
+		return nil, err
 	}
 	for _, l := range logs {
 		e := redisSlowEntry(l)
