@@ -347,8 +347,45 @@ func TestAgentFamilyGroups(t *testing.T) {
 		"": "",
 	}
 	for agent, want := range cases {
-		if got := agentFamily(agent); got != want {
-			t.Errorf("agentFamily(%q) = %q, want %q", agent, got, want)
+		if got := AgentFamily(agent); got != want {
+			t.Errorf("AgentFamily(%q) = %q, want %q", agent, got, want)
+		}
+	}
+}
+
+// The agents are from this project's public hosts: the crawlers name
+// themselves, the scanners name their tool, the scripts send a library's
+// default — and the browsers, old and new, are people.
+func TestIsBotTellsProgramsFromBrowsers(t *testing.T) {
+	bots := []string{
+		"Mozilla/5.0 (compatible; Googlebot/2.1; +https://www.google.com/bot.html)",
+		"Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ClaudeBot/1.0; +claudebot@anthropic.com)",
+		"Mozilla/5.0 (compatible; GenomeCrawlerd/1.0; +https://www.nokia.com/genomecrawler)",
+		"Mozilla/5.0 (compatible; Infrawatch/1.0; +https://infrawat.ch/)",
+		"Hello from Palo Alto Networks, find out more about our scans in https://docs-cortex.paloaltonetworks.com/r/1/Cortex-Xpanse/Scanning-activity",
+		"Mozilla/5.0 (l9scan/2.0.7383e21323e2133313e27353; +https://leakix.net)",
+		"l9explore/1.2.2",
+		"Mozilla/5.0 zgrab/0.x",
+		"feroxbuster/2.13.1",
+		"libredtail-http",
+		"curl/8.7.1",
+		"Go-http-client/1.1",
+		"Python-urllib/3.14",
+	}
+	people := []string{
+		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+		"Mozilla/5.0 (X11; Linux x86_64; rv:129.0.0) Gecko/20100101 Firefox/129.0.0",
+		"Mozilla/5.0 (iPhone; CPU iPhone OS 18_3_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3.1 Mobile/15E148 Safari/604.1",
+		"",
+	}
+	for _, agent := range bots {
+		if !IsBot(agent) {
+			t.Errorf("IsBot(%q) = false, want true", agent)
+		}
+	}
+	for _, agent := range people {
+		if IsBot(agent) {
+			t.Errorf("IsBot(%q) = true, want false", agent)
 		}
 	}
 }
