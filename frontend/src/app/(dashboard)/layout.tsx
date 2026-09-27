@@ -11,6 +11,7 @@ import { Logo } from "@/components/logo"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { CommandPaletteProvider } from "@/components/command-palette"
 import { NavScopeProvider } from "@/components/nav-scope"
+import { SavedFolderColours } from "@/components/files/folder-colour"
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { status, loading } = useAuth()
@@ -67,7 +68,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               page ask for the remaining height (`<Page fill>`) instead of
               growing past the viewport. */}
               <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
-                {children}
+                {/* A folder coloured in Files is that colour on every page
+                  that draws it, not only on the one that coloured it. */}
+                <SavedFolderColours>{children}</SavedFolderColours>
               </div>
             </SidebarInset>
           </SidebarProvider>

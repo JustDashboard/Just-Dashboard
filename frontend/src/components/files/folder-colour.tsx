@@ -1,10 +1,16 @@
 "use client"
 
+import { useEffect, useRef } from "react"
+import { usePathname } from "next/navigation"
 import { Check } from "@/components/icons"
+import { get } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import type { FilePlaces } from "@/lib/types"
+import { usePoll } from "@/hooks/use-poll"
 import {
   FOLDER_COLOURS,
   FOLDER_COLOUR_NAMES,
+  FolderColourProvider,
   FolderSwatch,
   type FolderColour,
 } from "@/components/files/file-icon"
@@ -87,5 +93,36 @@ export function FolderColourMenu({
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+/**
+ * The saved labels for every page in the shell, not just Files: the terminal's
+ * and a working copy's tree, a volume's or a stack's browser and a deployment's
+ * storage draw the same folders, and one that is red in Files and blue beside
+ * the shell it was opened from is a label nobody can trust.
+ *
+ * Files is where a colour changes, and it draws its own edits under a provider
+ * of its own before the round trip lands. So this reads again on each
+ * navigation rather than on a timer: leaving Files is the moment the rest of
+ * the dashboard needs the answer, and nothing else moves it.
+ */
+export function SavedFolderColours({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname()
+  const places = usePoll((signal) => get<FilePlaces>("/files/places", undefined, signal), 0)
+  const { refresh } = places
+  const readOn = useRef(pathname)
+  useEffect(() => {
+    if (readOn.current === pathname) return
+    readOn.current = pathname
+    refresh()
+  }, [pathname, refresh])
+  return (
+    <FolderColourProvider
+      colours={places.data?.colours ?? {}}
+      defaultColour={places.data?.defaultColour}
+    >
+      {children}
+    </FolderColourProvider>
   )
 }

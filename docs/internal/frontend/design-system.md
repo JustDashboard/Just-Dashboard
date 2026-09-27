@@ -1301,7 +1301,10 @@ already knows the format by is a legend they do not have to learn.
 
 A folder's colour is a **label**, and §3's tag argument is why it is the operator's: "the red one is
 production" is a fact about this server, so it is stored there (`files.colours`) and drawn wherever the
-folder is — the listing, the tiles, the sidebar, the inspector, the strip, the finder, the terminal's tree.
+folder is — the listing, the tiles, the sidebar, the inspector, the strip, the finder, the terminal's and
+a checkout's tree, a volume's or a stack's browser, a deployment's storage. The shell provides the saved
+labels to every page (`SavedFolderColours`, read again on each navigation); Files nests its own provider
+over it so a colour it picks is drawn before the round trip lands.
 The strip's compact folder button sets one colour for every folder, stores it as `files.defaultColour`,
 and clears old individual labels. A folder can then be labelled on its own in its inspector or menu;
 that label takes precedence until another global choice. Nine names (`--folder-*`, one value each;
