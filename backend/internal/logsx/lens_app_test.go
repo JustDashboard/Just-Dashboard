@@ -172,6 +172,8 @@ func TestLensAppStructured(t *testing.T) {
 }
 
 func TestLensAppJavaScriptRecords(t *testing.T) {
+	// Nest's stamp is toLocaleString's: the host's time, three hours east here.
+	appLensZone(t)
 	appLensCheck(t, "app", []string{
 		" ⨯ Error: Invalid email or password",
 		"    at authorize (/app/.next/server/chunks/123.js:1:2345) {",
@@ -216,7 +218,7 @@ func TestLensAppJavaScriptRecords(t *testing.T) {
 		{level: "error", cont: true},
 		{level: "error", cont: true},
 		{event: "startup", attrs: map[string]string{"port": "3000"}},
-		{level: "error", at: "2026-09-27T10:00:01Z", attrs: map[string]string{"component": "ExceptionsHandler"}},
+		{level: "error", at: "2026-09-27T07:00:01Z", attrs: map[string]string{"component": "ExceptionsHandler"}},
 		{event: "exception", level: "error", attrs: map[string]string{"error": "TypeError: Cannot read properties of undefined (reading 'id')"}},
 		{level: "error", cont: true},
 		{level: "error"},
