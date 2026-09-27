@@ -160,6 +160,11 @@
      has to hold its own as an outline against the page. */
   --hairline: color-mix(in oklab, var(--border) 70%, transparent);
 
+  /* The dots of a diagram's grid. A grid mark is a ruler, not a reading, and it
+     repeats across the whole plane, so it sits below even the hairline: there
+     when looked for, gone when the tables are. */
+  --grid-dot: color-mix(in oklab, var(--border) 45%, transparent);
+
   /* The border an interactive card takes under the pointer: a step up from
      `--border`, so a card that leads somewhere answers the hover the way a
      link does — by getting a little more present, not by lifting. */
@@ -834,12 +839,11 @@
 }
 
 /* The ground a wiring picture is drawn on: the ER diagram's dot grid, as a
- * utility for a picture that is not a React Flow canvas. A grid mark is a
- * ruler, not a reading, so the dots are the hairline — seen when looked for,
- * gone when the nodes are — and they fade out toward the edges so the plane
- * has a middle rather than a border. */
+ * utility for a picture that is not a React Flow canvas. The dots take the
+ * same `--grid-dot` as the diagram, and they fade out toward the edges so the
+ * plane has a middle rather than a border. */
 .wire-grid {
-  background-image: radial-gradient(circle, var(--hairline) 1px, transparent 1.5px);
+  background-image: radial-gradient(circle, var(--grid-dot) 1px, transparent 1.5px);
   background-size: 24px 24px;
   background-position: 12px 12px;
   mask-image: radial-gradient(80% 80% at 50% 50%, black 40%, transparent 100%);
