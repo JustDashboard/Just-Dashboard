@@ -86,10 +86,10 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 		l.add("    }")
 	default:
 		for _, loc := range spec.Locations {
-			renderLocation(l, loc.Path, loc.Upstream, loc.Root, loc.WebSockets, spec)
+			renderLocation(l, loc, spec)
 			l.blank()
 		}
-		renderLocation(l, "/", spec.Upstream, "", spec.WebSockets, spec)
+		renderLocation(l, SiteLocation{Path: "/", Upstream: spec.Upstream, WebSockets: spec.WebSockets}, spec)
 	}
 
 	if spec.BlockExploits {
@@ -176,28 +176,25 @@ func renderHeaders(l *lines, spec *SiteSpec) {
 }
 
 func renderServerOptions(l *lines, spec *SiteSpec) {
-	wrote := false
 	if spec.ClientMaxBody != "" {
 		l.add("    client_max_body_size %s;", spec.ClientMaxBody)
-		wrote = true
 	}
 	if spec.Gzip {
 		l.add("    gzip on;")
 		l.add("    gzip_vary on;")
 		l.add("    gzip_types text/plain text/css application/json application/javascript text/xml application/xml image/svg+xml;")
-		wrote = true
+	} else {
+		// Said rather than left out: Debian's nginx.conf turns gzip on for
+		// the whole http block, and a site saying nothing inherits it.
+		l.add("    gzip off;")
 	}
 	if spec.AccessLog {
 		l.add("    access_log /var/log/nginx/%s.access.log;", spec.Name)
 		l.add("    error_log  /var/log/nginx/%s.error.log;", spec.Name)
-		wrote = true
 	} else {
 		l.add("    access_log off;")
-		wrote = true
 	}
-	if wrote {
-		l.blank()
-	}
+	l.blank()
 }
 
 func renderAccess(l *lines, spec *SiteSpec) {
@@ -243,15 +240,22 @@ func renderAccess(l *lines, spec *SiteSpec) {
 	}
 }
 
-func renderLocation(l *lines, path, upstream, root string, websockets bool, spec *SiteSpec) {
-	l.add("    location %s {", path)
-	if root != "" {
-		l.add("        root %s;", root)
+func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
+	l.add("    location %s {", loc.renderedPath())
+	if loc.servesFolder() {
+		if loc.RootMode == "root" {
+			l.add("        root %s;", loc.Root)
+		} else {
+			l.add("        alias %s/;", strings.TrimSuffix(loc.Root, "/"))
+		}
 		l.add("        try_files $uri $uri/ =404;")
 		l.add("    }")
 		return
 	}
-	l.add("        proxy_pass %s;", strings.TrimSuffix(upstream, "/"))
+	// As typed: a path on the upstream is how nginx is told to replace the
+	// location's own prefix, and trimming its slash turned /app/ into /app,
+	// which sent /page to the application as /apppage.
+	l.add("        proxy_pass %s;", proxyPassTarget(loc.Upstream))
 	l.add("        proxy_http_version 1.1;")
 	l.add("        # The application sees the visitor's address and scheme rather")
 	l.add("        # than the proxy's, which is what makes redirects, cookies and")
@@ -261,12 +265,12 @@ func renderLocation(l *lines, path, upstream, root string, websockets bool, spec
 	l.add("        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;")
 	l.add("        proxy_set_header X-Forwarded-Proto $scheme;")
 	l.add("        proxy_set_header X-Forwarded-Host  $host;")
-	if websockets {
+	if loc.WebSockets {
 		l.add("        # Passing the client's own Connection header through, rather than")
-		l.add("        # the usual $connection_upgrade map: a map is only legal in the")
-		l.add("        # http block, and a site file cannot reach there. This form keeps")
-		l.add("        # keep-alive working for ordinary requests and upgrades the ones")
-		l.add("        # that ask to be upgraded.")
+		l.add("        # the usual $connection_upgrade map: a map's variable is shared by")
+		l.add("        # every site, and the last file to define it silently decides for")
+		l.add("        # all of them. This keeps keep-alive working for ordinary requests")
+		l.add("        # and upgrades the ones that ask to be upgraded.")
 		l.add("        proxy_set_header Upgrade    $http_upgrade;")
 		l.add("        proxy_set_header Connection $http_connection;")
 	}
@@ -282,6 +286,15 @@ func renderLocation(l *lines, path, upstream, root string, websockets bool, spec
 		l.add("        proxy_buffering off;")
 	}
 	l.add("    }")
+}
+
+// proxyPassTarget is the upstream as proxy_pass spells it. nginx refuses a
+// bare unix: address ("invalid URL prefix"); a socket is http://unix:<path>.
+func proxyPassTarget(upstream string) string {
+	if strings.HasPrefix(upstream, "unix:") {
+		return "http://" + upstream
+	}
+	return upstream
 }
 
 func renderExploitBlocks(l *lines) {

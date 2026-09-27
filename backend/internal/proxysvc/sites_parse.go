@@ -31,6 +31,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	sawTLSListen := false
 	sawPlainRedirect := false
 	sawAccessLog := false
+	sawGzip := false
 	var custom []string
 	inCustom := false
 
@@ -104,6 +105,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		case "client_max_body_size":
 			spec.ClientMaxBody = value
 		case "gzip":
+			sawGzip = true
 			spec.Gzip = value == "on"
 		case "access_log":
 			sawAccessLog = true
@@ -137,13 +139,24 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			} else if location == "" || location == "/" {
 				spec.Root = value
 			} else if current != nil {
-				current.Root = value
+				// nginx appends the whole path to a root, so this one is
+				// kept as a root: saving it as a folder served at the path
+				// would move every file the location answers with.
+				current.Root, current.RootMode = value, "root"
+			}
+		case "alias":
+			if current != nil {
+				current.Root, current.RootMode = strings.TrimSuffix(value, "/"), ""
 			}
 		case "proxy_pass":
+			upstream := strings.TrimPrefix(value, "http://unix:")
+			if upstream != value {
+				upstream = "unix:" + upstream
+			}
 			if current != nil {
-				current.Upstream = value
+				current.Upstream = upstream
 			} else if location == "/" || location == "" {
-				rootLocationUpstream = value
+				rootLocationUpstream = upstream
 			}
 		case "proxy_set_header":
 			if strings.HasPrefix(value, "Upgrade") {
@@ -205,6 +218,13 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	// only ever decides for the ones the form did not write.
 	if !managed && !sawAccessLog {
 		spec.AccessLog = true
+	}
+	// The same for compression: a hand-written site without a gzip line
+	// inherits the http block's, which is on in Debian's nginx.conf. A
+	// managed file always says, so one without the line predates `gzip off;`
+	// and was written with the switch off.
+	if !managed && !sawGzip {
+		spec.Gzip = true
 	}
 	if spec.Kind != "redirect" {
 		if spec.Upstream == "" && spec.Root != "" {

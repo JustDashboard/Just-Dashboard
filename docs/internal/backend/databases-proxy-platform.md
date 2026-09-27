@@ -271,12 +271,48 @@ ownership and cleanup, then removes its own containers/volumes/networks.
 - **Site builder** (`sites.go`, `sites_render.go`, `sites_parse.go`, `sites_apply.go`). `SiteSpec` is our
   shape, not nginx's, for the reason `ContainerSpec` is not `container.Config`; rendering happens **on the
   server** so a spec has one meaning, and the output is hand-written rather than templated because order
-  carries meaning to whoever maintains the file after this dashboard is gone. `ApplySite` puts the **symlink in
-  before `nginx -t`** — a new file in `sites-available` is not in the include tree, so the test has
-  nothing to say about it — and undoes both together on failure. Four renderer details:
+  carries meaning to whoever maintains the file after this dashboard is gone. `SaveSite` (`ApplySite` is
+  its positional form) puts the **symlink in before `nginx -t`** — a new file in `sites-available` is not
+  in the include tree, so the test has nothing to say about it — and undoes both together on failure.
+  What a save does, and says, beyond that:
+  - **The link is left as it was unless the save asks to enable.** The site form used to post
+    `enable: true` for every save, so fixing one field of a disabled site put it back on the internet.
+    `POST /proxy/sites/` takes `enable: "enable" | "keep"`; the old `true`/`false` still parse, and
+    `false` always meant keep (it declined to make a link and never removed one). A site that has a link
+    keeps it, relinked to the file being saved, and `SiteResult.enabled` says which it is.
+  - **A name another server block already answers is refused**, 409 `name_conflict` with
+    `ConflictSummary`'s sentence ("app.example.com is already served by legacy on 0.0.0.0:80"). `nginx -t`
+    passes a second claim on a name with only `[warn] conflicting server name … ignored` and serves one of
+    the two by include order, so the save could as easily take a working site's domain as leave its own
+    unreachable. The conflicts are nginx's own warnings for this site's names on the addresses its file
+    listens on — nginx already knows a wildcard `:80` and `127.0.0.1:80` are separate — and the holder is
+    looked up among the enabled sites. The file and link are taken back; `allowConflict: true` saves anyway
+    and the result lists `conflicts`. `ValidateSpec` refuses a domain listed twice, which nginx warns
+    about the same way. Deployment cutovers (`applySiteLocked`) are not refused over a conflict.
+  - **A reload that fails after a clean test is a saved site**, 200 with `reloaded: false` and
+    `reloadError`, where it was a 400 "Not applied" over a file that was written and linked. The
+    deployment cutovers still get the error, since their recovery is built on it.
+  - `testWarnings` are the test's warnings placed in the site's own file, so "is live" is said only when
+    nginx had nothing to say about it.
+
+  Renderer details:
   - The ACME challenge location goes **above** the catch-all redirect, or renewal silently stops and
     nobody finds out for sixty days.
   - `http2 on;` is a directive, not a `listen` parameter (nginx 1.25 warns on every reload).
+  - **`proxy_pass` is the upstream exactly as typed.** Its path is how nginx is told to replace the
+    location's prefix: `/api/` to `http://127.0.0.1:4000/` sends `/api/users` as `/users`. Trimming its
+    slash sent `/page` to `http://…/app/` as `/apppage`. When the path and the upstream disagree about a
+    trailing slash, `SpecWarnings` says what a request becomes. A `unix:` upstream is written
+    `http://unix:…`, the only spelling nginx accepts, and read back as `unix:`.
+  - **A folder is served at its path**: `alias <folder>/;` in `location <path>/`, both ending in a slash
+    so a neighbour such as `/assets-private` is never read through `/assets` (checked against a running
+    nginx). `root` appended the path, so `/assets` with `/var/www/assets` looked in
+    `/var/www/assets/assets`. A location read back from a file that used `root` keeps it
+    (`SiteLocation.RootMode = "root"`), since rewriting it as the folder itself would move every file it
+    serves; a hand-written `alias` is read back as a folder.
+  - **Compression off is written `gzip off;`**: Debian's `nginx.conf` turns gzip on for the whole http
+    block, and a site saying nothing inherits it. A managed file with no gzip line predates this and was
+    written with the switch off; a hand-written one reads back as on.
   - WebSocket upgrades pass `$http_connection` through rather than a `$connection_upgrade` map. The
     reason once given here — that a `map` is only legal in the `http` block and a site file cannot reach
     it — is **false**: `sites-enabled/*` and `conf.d/*.conf` are both included *inside* `http {}`, so the
@@ -284,8 +320,8 @@ ownership and cleanup, then removes its own containers/volumes/networks.
     `limit_req_zone`, `limit_conn_zone`, `proxy_cache_path`, `geo` and `log_format` written there pass
     `nginx -t` (checked on nginx 1.26.3) and are deleted with the site. Their names are global to the
     whole configuration and a duplicate zone is an emergency, so each is named with `NginxIdent(site)`.
-    The comment the renderer writes into the generated file still carries the old reason; it is output,
-    and changes with the renderer.
+    A `map` variable defined twice is not an error: the last file to define it decides for every site,
+    which is the reason the generated comment now gives.
   - **An `allow` list is fenced with `deny all`.** nginx stops at the first match and otherwise permits,
     so a site restricted to `10.0.0.0/8` was reachable from anywhere; expecting the operator to write the
     fence themselves into a box labelled "Deny" fails too, since `0.0.0.0/0` lets in every IPv6 client.
@@ -302,6 +338,15 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   carries our marker so the UI can say a hand-written file may not survive, and leaves an `allow`/`deny`
   inside a location where it is — hoisting it into the site-wide list applied one path's restriction to
   the whole site on the next save.
+
+  The form's side of this lives in two pure modules beside `site-form.tsx`, tested with bun:
+  `site-identity.ts` works a new site's file name and certificate paths out of its whole first domain on
+  every change, for each part not typed by hand (keeping the first value named a site typed as
+  app.example.com "a", after one keystroke), and `site-save.ts` builds the request — `keep` for an
+  existing site, HSTS only with TLS, since the switch is drawn only under HTTPS and its hidden default
+  warned on every plain-HTTP site — and turns the result into what the toast says. A refused conflict is
+  a Notice in the form with **Save anyway**. `tests/browser/proxy-site-builder.spec.ts` checks each
+  state against mocks from `tests/browser/fixtures/proxy/siteform.ts`.
 - **`tlsscan.go` — what the domain actually serves.** Everything else on the page reads files, which
   cannot see a certificate renewed and never reloaded, a proxy still offering TLS 1.0, or a redirect that
   quietly stopped. Each version is probed on a connection pinned to exactly that version; a version this
@@ -360,7 +405,7 @@ ownership and cleanup, then removes its own containers/volumes/networks.
 - **Two layouts, and files that are not sites.** `nginxVHosts` (`vhosts.go`, with the rest of the
   listing and `SetVHostEnabled`) reads sites-available where it exists and conf.d where it does not
   (every RPM distro, Alpine, Arch — most of the servers this runs on); the difference reaches the UI as an
-  empty `EnabledPath`, because conf.d has no symlink and a switch that can only error is worse than none. `confdPath` stops `app.conf` becoming `app.conf.conf`. The listing
+  empty `EnabledPath`, because conf.d has no symlink and a switch that can only error is worse than none. `confdPath` stops `app.conf` becoming `app.conf.conf`, and `ReadSiteSpec` reads the listing's `app.conf` back as a spec called `app`, the name a save writes to — the spec kept `.conf` once, and the next save renamed the site's logs to `app.conf.access.log`. The listing
   **skips backups** (`isBackupFile`: `.bak`, `~`, `.dpkg-old`, `.rpmsave`) — nginx reads none of them, and
   since delete keeps `<name>.bak`, without the filter deleting a site produced a second site.
 - **A password file must be readable by the account that reads it.** nginx opens `auth_basic_user_file` in
@@ -431,7 +476,7 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   included by, `./` and `../` left in, so includes and printed paths are compared cleaned; the files are
   indexed once by path and directory, which keeps thousands of sites linear.
 - **Every change to a configuration file is offered to a `ChangeRecorder`** (`changes.go`) once it is
-  committed — `WriteConfig`, `ApplySite` and deployment cutovers through `applySiteLocked`, `DeleteSite`,
+  committed — `WriteConfig`, `SaveSite` and deployment cutovers through `applySiteLocked`, `DeleteSite`,
   `SetVHostEnabled` (which now takes the service lock like every other change, resolves the site file
   as the writes do, and records nothing for a toggle that leaves the link as it was), `ApplyStream`,
   `DeleteStream`, and a deployment route's restore — with its prior content and the actor

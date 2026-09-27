@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -36,28 +35,10 @@ func (s *Server) handleSiteSpec(w http.ResponseWriter, r *http.Request) error {
 	if name == "" || strings.ContainsAny(name, "/\\") {
 		return httpx.BadRequest("invalid site name")
 	}
-	// Read through the same allowlist the config editor uses rather than
-	// joining a path here: this endpoint takes a name, and a name that turns
-	// out to be a path is exactly what that check exists for.
-	var content string
-	var err error
-	// Both spellings of the conf.d layout: the listing on such a host reports
-	// a name that already ends in .conf, and a host that was set up by hand
-	// may have a file without it.
-	for _, candidate := range []string{
-		filepath.Join(s.Cfg.NginxDir, "sites-available", name),
-		filepath.Join(s.Cfg.NginxDir, "conf.d", name),
-		filepath.Join(s.Cfg.NginxDir, "conf.d", name+".conf"),
-	} {
-		content, err = s.modules.proxy.ReadConfig(candidate)
-		if err == nil {
-			break
-		}
-	}
+	spec, managed, content, err := s.modules.proxy.ReadSiteSpec(name)
 	if err != nil {
 		return httpx.ErrNotFound
 	}
-	spec, managed := proxysvc.ParseSiteSpec(name, content)
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"spec": spec, "managed": managed, "content": content,
 		"warnings": proxysvc.SpecWarnings(spec),
@@ -66,10 +47,29 @@ func (s *Server) handleSiteSpec(w http.ResponseWriter, r *http.Request) error {
 }
 
 type siteRequest struct {
-	Spec      proxysvc.SiteSpec `json:"spec"`
-	Enable    bool              `json:"enable"`
-	Reload    bool              `json:"reload"`
-	Overwrite bool              `json:"overwrite"`
+	Spec          proxysvc.SiteSpec `json:"spec"`
+	Enable        siteEnable        `json:"enable"`
+	Reload        bool              `json:"reload"`
+	Overwrite     bool              `json:"overwrite"`
+	AllowConflict bool              `json:"allowConflict"`
+}
+
+// siteEnable is what a save does to the site's sites-enabled link: "enable"
+// links it, "keep" leaves it as it was. The booleans are the older spelling
+// of the same two, and false always meant keep — it declined to make a link,
+// it never removed one.
+type siteEnable bool
+
+func (e *siteEnable) UnmarshalJSON(raw []byte) error {
+	switch string(raw) {
+	case "true", `"enable"`:
+		*e = true
+	case "false", `"keep"`:
+		*e = false
+	default:
+		return errors.New(`enable must be "enable" or "keep"`)
+	}
+	return nil
 }
 
 // handleSitePreview shows the config a spec would produce, live, as the form
@@ -98,18 +98,34 @@ func (s *Server) handleSiteApply(w http.ResponseWriter, r *http.Request) error {
 	}
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
-	res, err := s.modules.proxy.ApplySite(ctx, &req.Spec, req.Enable, req.Reload, req.Overwrite)
+	res, err := s.modules.proxy.SaveSite(ctx, &req.Spec, proxysvc.SiteSave{
+		Enable: bool(req.Enable), Reload: req.Reload, Overwrite: req.Overwrite,
+		AllowConflict: req.AllowConflict,
+	})
 	if err != nil {
-		if errors.Is(err, proxysvc.ErrInvalidConf) {
+		switch {
+		case errors.Is(err, proxysvc.ErrInvalidConf):
 			httpx.SetAudit(r, "proxy.site.apply", req.Spec.Name, map[string]any{"result": "rejected"})
 			return httpx.Err(http.StatusUnprocessableEntity, "invalid_config", res.Validation.Output)
+		case errors.Is(err, proxysvc.ErrServerNameConflict):
+			httpx.SetAudit(r, "proxy.site.apply", req.Spec.Name, map[string]any{
+				"result": "name_conflict", "conflicts": res.Conflicts,
+			})
+			return httpx.Err(http.StatusConflict, "name_conflict", proxysvc.ConflictSummary(res.Conflicts))
 		}
 		return mapProxyError(err)
 	}
-	httpx.SetAudit(r, "proxy.site.apply", req.Spec.Name, map[string]any{
+	detail := map[string]any{
 		"domains": req.Spec.Domains, "kind": req.Spec.Kind,
-		"tls": req.Spec.TLS, "reloaded": res.Reloaded,
-	})
+		"tls": req.Spec.TLS, "enabled": res.Enabled, "reloaded": res.Reloaded,
+	}
+	if res.ReloadError != "" {
+		detail["reloadError"] = res.ReloadError
+	}
+	if len(res.Conflicts) > 0 {
+		detail["conflicts"] = res.Conflicts
+	}
+	httpx.SetAudit(r, "proxy.site.apply", req.Spec.Name, detail)
 	httpx.JSON(w, http.StatusOK, res)
 	return nil
 }

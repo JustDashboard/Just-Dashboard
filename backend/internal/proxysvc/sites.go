@@ -71,10 +71,32 @@ type SiteSpec struct {
 
 // SiteLocation is an extra path handled differently from the site's default.
 type SiteLocation struct {
-	Path       string `json:"path"`
-	Upstream   string `json:"upstream,omitempty"`
-	Root       string `json:"root,omitempty"`
+	Path     string `json:"path"`
+	Upstream string `json:"upstream,omitempty"`
+	// Root is a folder served at Path: /assets/app.css is <Root>/app.css.
+	Root string `json:"root,omitempty"`
+	// RootMode "root" keeps nginx's own reading of a folder, read back from a
+	// file that used `root`: the path is appended to the folder, so
+	// /assets/app.css is <Root>/assets/app.css. Rewriting such a location as
+	// the folder itself would move every file it serves.
+	RootMode   string `json:"rootMode,omitempty"`
 	WebSockets bool   `json:"webSockets"`
+}
+
+// servesFolder says whether a location serves files rather than forwarding.
+func (loc SiteLocation) servesFolder() bool {
+	return loc.Upstream == "" && loc.Root != ""
+}
+
+// renderedPath is the path the location block is written for. A folder served
+// at its path ends in a slash, and so does the folder: `location /assets`
+// with `alias /var/www/assets` would also answer /assets-private/key.pem from
+// /var/www/assets-private, which is a neighbouring folder nobody offered.
+func (loc SiteLocation) renderedPath() string {
+	if loc.servesFolder() && loc.RootMode == "" && !strings.HasSuffix(loc.Path, "/") {
+		return loc.Path + "/"
+	}
+	return loc.Path
 }
 
 // managedMarker is written into every generated file and read back when the
@@ -111,10 +133,17 @@ func ValidateSpec(spec *SiteSpec) error {
 	if len(spec.Domains) == 0 {
 		return fmt.Errorf("at least one domain is required")
 	}
+	seenDomain := map[string]bool{}
 	for _, d := range spec.Domains {
 		if !domainRe.MatchString(d) {
 			return fmt.Errorf("%q is not a valid domain name", d)
 		}
+		// nginx lowercases server names and warns that the second copy is
+		// "conflicting" and ignored, which reads as another site owning it.
+		if seenDomain[strings.ToLower(d)] {
+			return fmt.Errorf("%s is listed twice", d)
+		}
+		seenDomain[strings.ToLower(d)] = true
 	}
 	switch spec.Kind {
 	case "proxy":
@@ -165,13 +194,18 @@ func ValidateSpec(spec *SiteSpec) error {
 		if !locationPathRe.MatchString(loc.Path) {
 			return fmt.Errorf("location %q must be a path starting with /", loc.Path)
 		}
-		if seenLocation[loc.Path] {
+		if loc.RootMode != "" && loc.RootMode != "root" {
+			return fmt.Errorf("location %s: rootMode must be empty or root", loc.Path)
+		}
+		// Compared as written, since a folder's path gains its slash there:
+		// /assets and /assets/ as two folders are one block nginx refuses.
+		if seenLocation[loc.renderedPath()] {
 			if loc.Path == "/" {
 				return fmt.Errorf("everything not matched by another path already goes to the site's main upstream — remove the location for /")
 			}
-			return fmt.Errorf("two locations both handle %s; nginx would use the first and ignore the second", loc.Path)
+			return fmt.Errorf("two locations both handle %s; nginx would use the first and ignore the second", loc.renderedPath())
 		}
-		seenLocation[loc.Path] = true
+		seenLocation[loc.renderedPath()] = true
 		if loc.Upstream != "" {
 			if err := validUpstream(loc.Upstream); err != nil {
 				return err
@@ -261,6 +295,16 @@ func SpecWarnings(spec *SiteSpec) []string {
 		warnings = append(warnings,
 			"The upstream is not on this machine. That is fine for a gateway, and a mistake if you meant 127.0.0.1.")
 	}
+	if spec.Kind == "proxy" {
+		for _, loc := range spec.Locations {
+			if warning := upstreamSlashWarning(loc.Path, loc.Upstream); warning != "" {
+				warnings = append(warnings, warning)
+			}
+		}
+		if warning := upstreamSlashWarning("/", spec.Upstream); warning != "" {
+			warnings = append(warnings, warning)
+		}
+	}
 	if spec.WebSockets && spec.ProxyTimeout > 0 && spec.ProxyTimeout < 60 {
 		warnings = append(warnings,
 			"A short read timeout closes idle WebSocket connections. Sixty seconds or more is usual for anything long-lived.")
@@ -290,6 +334,27 @@ func SpecWarnings(spec *SiteSpec) []string {
 		}
 	}
 	return warnings
+}
+
+// upstreamSlashWarning explains what an upstream with a path does to the
+// requests a location forwards, when the two disagree about a trailing slash.
+//
+// The upstream is written exactly as typed, because its path is how nginx is
+// told to swap the location's prefix for another: /api/ to http://x/ sends
+// /api/users as /users. That swap is literal, so a slash on one side and not
+// the other glues two words together or doubles a slash.
+func upstreamSlashWarning(path, upstream string) string {
+	u, err := url.Parse(upstream)
+	if err != nil || strings.HasPrefix(upstream, "unix:") || u.Path == "" {
+		return ""
+	}
+	if strings.HasSuffix(path, "/") == strings.HasSuffix(u.Path, "/") {
+		return ""
+	}
+	request := strings.TrimSuffix(path, "/") + "/page"
+	sent := u.Path + strings.TrimPrefix(request, path)
+	return fmt.Sprintf("%s reaches the application as %s. End both the path and the upstream with a slash, or neither.",
+		request, sent)
 }
 
 func isPublicUpstream(raw string) bool {

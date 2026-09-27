@@ -1,11 +1,11 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
 import { ArrowRight, Code, FolderOpen, Globe, Plus, Trash, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { get, post } from "@/lib/api"
+import { ApiError, get, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type {
   AuthFile,
@@ -31,6 +31,13 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  deriveIdentity,
+  fixedFor,
+  FOLLOW_DOMAINS,
+  type IdentityFixed,
+} from "@/components/proxy/site-identity"
+import { saveOutcome, saveRequest, sendableSpec } from "@/components/proxy/site-save"
 
 /**
  * Putting a domain in front of a port, without writing nginx.
@@ -129,8 +136,19 @@ function SiteFormBody({
   const [warnings, setWarnings] = useState<string[]>([])
   const [previewError, setPreviewError] = useState("")
   const [managed, setManaged] = useSessionState(`${draft}.managed`, true)
+  // Which of the name and certificate paths the operator has set, so that
+  // typing the domains stops rewriting them.
+  const [fixed, setFixed] = useSessionState<IdentityFixed>(`${draft}.fixed`, FOLLOW_DOMAINS)
   const [busy, setBusy] = useState(false)
   const [loaded, setLoaded] = useState(source === null)
+  // A save nginx would half ignore, refused with the server's sentence. Kept
+  // with the spec it was about, so any edit puts the question away.
+  const [conflict, setConflict] = useState<{
+    message: string
+    reload: boolean
+    spec: SiteSpec
+  } | null>(null)
+  const conflictRef = useRef<HTMLDivElement>(null)
 
   const set = useCallback(
     <K extends keyof SiteSpec>(key: K, value: SiteSpec[K]) => {
@@ -163,16 +181,20 @@ function SiteFormBody({
           })
           setDomainText("")
           setManaged(true)
+          setFixed(FOLLOW_DOMAINS)
         } else {
-          setSpec({ ...BLANK, ...r.spec })
+          // A plain-HTTP site reads back with HSTS off, since nothing sends
+          // it there; turning TLS on offers it on, as for a new site.
+          setSpec({ ...BLANK, ...r.spec, hsts: r.spec.tls ? r.spec.hsts : BLANK.hsts })
           setDomainText(r.spec.domains.join(" "))
           setManaged(r.managed)
+          setFixed(fixedFor(r.spec, true))
         }
         setLoaded(true)
       })
       .catch((err) => !controller.signal.aborted && notify.error("Could not load the site", err))
     return () => controller.abort()
-  }, [open, source, copyFrom, editing, setSpec, setDomainText, setManaged])
+  }, [open, source, copyFrom, editing, setSpec, setDomainText, setManaged, setFixed])
 
   // The live preview. Debounced, because it is a request per keystroke
   // otherwise and the answer only matters once typing stops.
@@ -192,7 +214,7 @@ function SiteFormBody({
         }
         post<{ content: string; warnings: string[] }>(
           "/proxy/sites/preview",
-          { spec },
+          { spec: sendableSpec(spec) },
           { signal: controller.signal },
         )
           .then((r) => {
@@ -230,61 +252,46 @@ function SiteFormBody({
     { enabled: open && spec.tls },
   )
 
-  /**
-   * The file name the server will accept: lowercase, starting with a letter or
-   * a digit. Stripping the disallowed characters is not enough on its own —
-   * `*.example.com` becomes `.example.com`, which the server refuses, and the
-   * form has no name field to correct it in, so the first thing anybody
-   * issuing a wildcard did was hit an error they could not fix.
-   */
-  const fileNameFor = (domain: string) =>
-    domain
-      .toLowerCase()
-      .replace(/[^a-z0-9._-]/g, "")
-      .replace(/^[^a-z0-9]+/, "")
-      .slice(0, 64)
-
   const commitDomains = (text: string) => {
     setDomainText(text)
     const domains = text.split(/[\s,]+/).filter(Boolean)
-    // A wildcard certificate is issued for the parent zone, so that is where
-    // certbot puts it — /etc/letsencrypt/live/example.com, never
-    // live/*.example.com, which is not a directory name at all.
-    const lineage = domains[0]?.replace(/^\*\./, "")
-    setSpec((s) => ({
-      ...s,
-      domains,
-      // The file is named after the first domain unless somebody has already
-      // typed a name. A site called "site-1" is one nobody can find later.
-      name: s.name || (domains[0] ? fileNameFor(domains[0]) : ""),
-      certPath:
-        s.certPath || (lineage ? `/etc/letsencrypt/live/${lineage}/fullchain.pem` : undefined),
-      keyPath: s.keyPath || (lineage ? `/etc/letsencrypt/live/${lineage}/privkey.pem` : undefined),
-    }))
+    setSpec((s) => ({ ...s, domains, ...deriveIdentity(domains, s, fixed) }))
   }
 
-  const save = async (reload: boolean) => {
+  // A certificate path typed by hand stays; emptied, it follows the domains
+  // again.
+  const setCertificate = (key: "certPath" | "keyPath", value: string) => {
+    set(key, value)
+    setFixed((f) => ({ ...f, [key]: value !== "" }))
+  }
+
+  const save = async (reload: boolean, allowConflict = false) => {
     setBusy(true)
     try {
-      const res = await post<SiteResult>("/proxy/sites/", {
-        spec,
-        enable: true,
-        reload,
-        overwrite: editing !== null,
-      })
-      notify.success(res.reloaded ? `${spec.name} is live` : `${spec.name} saved`, {
-        description: res.reloaded
-          ? undefined
-          : "nginx has not reloaded yet, so the site is on disk but not serving.",
-      })
+      const existing = editing !== null
+      const res = await post<SiteResult>(
+        "/proxy/sites/",
+        saveRequest(spec, { existing, reload, allowConflict }),
+      )
+      const outcome = saveOutcome(res, { existing })
+      notify[outcome.tone](outcome.title, { description: outcome.description })
       onSaved()
       onOpenChange(false)
     } catch (err) {
-      notify.error("Not applied", err)
+      if (err instanceof ApiError && err.code === "name_conflict") {
+        setConflict({ message: err.message, reload, spec })
+      } else {
+        notify.error("Not applied", err)
+      }
     } finally {
       setBusy(false)
     }
   }
+
+  useEffect(() => {
+    if (conflict) conflictRef.current?.scrollIntoView({ block: "nearest" })
+  }, [conflict])
+  const conflictShown = conflict?.spec === spec ? conflict : null
 
   const ready = spec.domains.length > 0 && spec.name !== "" && preview !== ""
   const certKnown =
@@ -325,6 +332,23 @@ function SiteFormBody({
     >
       <div className="min-h-0 flex-1 overflow-y-auto p-4 lg:w-[26rem] lg:shrink-0 lg:border-r lg:border-hairline">
         <div className="space-y-6">
+          {conflictShown && (
+            <div ref={conflictRef}>
+              <Notice tone="warning" icon={Warning} title="Already served elsewhere">
+                {conflictShown.message}
+                <div className="mt-2">
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() => save(conflictShown.reload, true)}
+                    disabled={busy}
+                  >
+                    Save anyway
+                  </Button>
+                </div>
+              </Notice>
+            </div>
+          )}
           {editing && !managed && (
             <Notice tone="warning" icon={Warning} title="This file was written by hand">
               The form has read what it recognises. Saving replaces the file with what the form
@@ -440,7 +464,7 @@ function SiteFormBody({
                       <Input
                         id="site-cert"
                         value={spec.certPath ?? ""}
-                        onChange={(e) => set("certPath", e.target.value)}
+                        onChange={(e) => setCertificate("certPath", e.target.value)}
                         className="font-mono text-hint"
                       />
                     </Field>
@@ -448,7 +472,7 @@ function SiteFormBody({
                       <Input
                         id="site-key"
                         value={spec.keyPath ?? ""}
-                        onChange={(e) => set("keyPath", e.target.value)}
+                        onChange={(e) => setCertificate("keyPath", e.target.value)}
                         className="font-mono text-hint"
                       />
                     </Field>
@@ -859,6 +883,16 @@ function LocationsField({
               aria-label="Folder"
               className="font-mono text-xs"
             />
+          )}
+          {!loc.upstream && loc.root && loc.rootMode === "root" && (
+            <FormNote>
+              Files come from{" "}
+              <code className="font-mono">
+                {loc.root.replace(/\/$/, "")}
+                {loc.path}
+              </code>
+              , as this file was written: nginx adds the path to the folder.
+            </FormNote>
           )}
           <label className="flex items-center gap-2 text-hint text-muted-foreground">
             <Checkbox
