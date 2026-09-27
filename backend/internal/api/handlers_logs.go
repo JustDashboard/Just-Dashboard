@@ -8,10 +8,12 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/logsx"
@@ -22,6 +24,7 @@ import (
 func (s *Server) mountLogRoutes(r chi.Router) {
 	r.Route("/logs", func(r chi.Router) {
 		r.Method(http.MethodGet, "/sources", s.handle(s.handleLogSources))
+		r.Method(http.MethodGet, "/source", s.handle(s.handleLogSource))
 		r.Method(http.MethodGet, "/search", s.handle(s.handleLogSearch))
 		r.Method(http.MethodGet, "/download", s.handle(s.handleLogDownload))
 		r.Method(http.MethodGet, "/stream", s.handle(s.handleLogStream))
@@ -47,15 +50,27 @@ type logJournalUnit struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Active      string `json:"active"`
+	// Lens is what the unit's journal reads through, so the picker can offer
+	// the unit's quick views before its stream opens.
+	Lens string `json:"lens,omitempty"`
 }
 
 // handleLogSources merges file-backed sources with the live sources that are
 // not files — docker containers and PM2 processes — so the viewer offers one
 // list regardless of where the log actually lives.
 func (s *Server) handleLogSources(w http.ResponseWriter, r *http.Request) error {
-	sources, err := s.modules.logs.Discover(r.Context())
+	discovered, err := s.modules.logs.Discover(r.Context())
 	if err != nil {
 		return httpx.Internal(err)
+	}
+	// Nothing is offered that cannot be opened: auth data needs system.admin
+	// to read, so it is not listed for anyone else.
+	admin := httpx.MustPrincipal(r).Can(auth.CapSystemAdmin)
+	sources := make([]logsx.Source, 0, len(discovered))
+	for _, src := range discovered {
+		if admin || !authLogFile(src.Path) {
+			sources = append(sources, src)
+		}
 	}
 	index := logSourceIndex{
 		Sources: sources,
@@ -70,18 +85,12 @@ func (s *Server) handleLogSources(w http.ResponseWriter, r *http.Request) error 
 
 	if containers, err := s.modules.docker.ListContainers(r.Context(), true); err == nil {
 		for _, c := range containers {
-			detail := c.Image
-			if c.ComposeStack != "" {
-				detail = c.ComposeStack + " · " + c.Image
-			}
-			index.Sources = append(index.Sources, logsx.Source{
-				ID:     "docker:" + c.ID,
-				Label:  c.Name,
-				Kind:   logsx.KindDocker,
-				Detail: detail,
-				Status: c.State,
-			})
+			index.Sources = append(index.Sources, s.containerSource(r.Context(), c))
 		}
+		// A compose project is also one source, every container merged by
+		// time — "what did the stack do at 03:12" is a question about the
+		// stack. Its containers stay listed on their own too.
+		index.Sources = append(index.Sources, s.stackSources(r.Context(), containers)...)
 	} else {
 		index.Missing["docker"] = err.Error()
 	}
@@ -100,6 +109,7 @@ func (s *Server) handleLogSources(w http.ResponseWriter, r *http.Request) error 
 				index.Sources = append(index.Sources, logsx.Source{
 					ID: "pm2:" + pm2LogIdentity(p), Label: p.Name + " (" + p.DaemonID + ")", Kind: logsx.KindPM2,
 					Path: p.OutLogPath, Detail: detail, Status: p.Status,
+					Lens: logsx.DetectLens(logsx.LensTarget{Kind: logsx.KindPM2}),
 				})
 			}
 		} else {
@@ -115,11 +125,16 @@ func (s *Server) handleLogSources(w http.ResponseWriter, r *http.Request) error 
 			Label:  "systemd journal",
 			Kind:   logsx.KindJournal,
 			Detail: "Every unit on the host — pick one below to narrow it",
+			Lens:   logsx.DetectLens(logsx.LensTarget{Kind: logsx.KindJournal}),
 		})
 		if units, err := s.modules.systemd.List(r.Context()); err == nil {
 			for _, u := range units {
+				if !admin && authJournalUnit(u.Name) {
+					continue
+				}
 				index.Units = append(index.Units, logJournalUnit{
 					Name: u.Name, Description: u.Description, Active: u.ActiveState,
+					Lens: logsx.DetectLens(logsx.LensTarget{Kind: logsx.KindJournal, Unit: u.Name}),
 				})
 			}
 		}
@@ -135,11 +150,22 @@ func (s *Server) handleLogSources(w http.ResponseWriter, r *http.Request) error 
 // the stream, the search and the export agree about what "this source" means —
 // they used to each re-split the string, and only the stream knew about PM2.
 type logTarget struct {
-	kind  logsx.SourceKind
-	id    string // container id, PM2 name or systemd unit
-	path  string
-	label string
+	kind logsx.SourceKind
+	// id is the container id, PM2 identity, systemd unit or compose project.
+	id string
+	// idents are a journal-id source's syslog identifiers.
+	idents []string
+	path   string
+	label  string
 }
+
+// stackProject is what docker compose accepts as a project name, which is
+// also what keeps the id from being anything but a name.
+var stackProject = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
+
+// maxJournalIdents bounds a journal-id source. Each is its own -t, and the
+// sources the pages build name five at most.
+const maxJournalIdents = 16
 
 func parseLogTarget(raw string) (logTarget, error) {
 	raw = strings.TrimSpace(raw)
@@ -152,11 +178,39 @@ func parseLogTarget(raw string) (logTarget, error) {
 		}
 		return logTarget{kind: logsx.KindDocker, id: id, label: id}, nil
 	}
+	if project, ok := strings.CutPrefix(raw, "stack:"); ok {
+		if !stackProject.MatchString(project) {
+			return logTarget{}, httpx.BadRequest("stack source needs a compose project name")
+		}
+		return logTarget{kind: logsx.KindStack, id: project, label: project}, nil
+	}
 	if name, ok := strings.CutPrefix(raw, "pm2:"); ok {
 		if name == "" {
 			return logTarget{}, httpx.BadRequest("pm2 source needs a process name")
 		}
 		return logTarget{kind: logsx.KindPM2, id: name, label: name}, nil
+	}
+	if list, ok := strings.CutPrefix(raw, "journal-id:"); ok {
+		idents := []string{}
+		for _, ident := range strings.Split(list, ",") {
+			if ident = strings.TrimSpace(ident); ident == "" {
+				continue
+			}
+			if err := procs.ValidateName(ident); err != nil {
+				return logTarget{}, httpx.BadRequest("journal-id source: %v", err)
+			}
+			idents = append(idents, ident)
+		}
+		if len(idents) == 0 || len(idents) > maxJournalIdents {
+			return logTarget{}, httpx.BadRequest("journal-id source needs between 1 and %d syslog identifiers", maxJournalIdents)
+		}
+		return logTarget{kind: logsx.KindJournalID, idents: idents, label: strings.Join(idents, ", ")}, nil
+	}
+	if rest, ok := strings.CutPrefix(raw, "kernel:"); ok {
+		if rest != "" {
+			return logTarget{}, httpx.BadRequest("the kernel source takes nothing after kernel:")
+		}
+		return logTarget{kind: logsx.KindKernel, label: "kernel"}, nil
 	}
 	if unit, ok := strings.CutPrefix(raw, "journal:"); ok {
 		label := "systemd journal"
@@ -172,6 +226,85 @@ func parseLogTarget(raw string) (logTarget, error) {
 	return logTarget{kind: logsx.KindSystem, path: filepath.Clean(path), label: filepath.Base(path)}, nil
 }
 
+// logTargetFor parses a source id and refuses auth data to a caller without
+// system.admin. Every /logs route that reads a source goes through it — the
+// stream, the search, the export, the retention verdict and the description —
+// so there is no second door to the same lines.
+//
+// The reason is the one /logins/failed gives: "Invalid user <what was typed>"
+// is sometimes a password typed into the username prompt, and a sudo line
+// carries the command that was run. Reading those is closer to reading
+// somebody's keystrokes than to operational history. The whole journal stays
+// readable, as it was before this gate existed; narrowing it to sshd is what
+// is gated.
+func (s *Server) logTargetFor(r *http.Request, raw string) (logTarget, error) {
+	target, err := parseLogTarget(raw)
+	if err != nil {
+		return logTarget{}, err
+	}
+	if authLogTarget(target) && !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
+		return logTarget{}, httpx.Err(http.StatusForbidden, "forbidden",
+			"Login and sudo records need an administrator: failed logins can hold passwords typed into the username prompt.")
+	}
+	return target, nil
+}
+
+// authIdents are the programs whose lines are auth data.
+var authIdents = map[string]bool{
+	"sshd": true, "sshd-session": true, "sshd-auth": true, "sudo": true, "su": true,
+	"login": true, "systemd-logind": true,
+}
+
+func authLogTarget(t logTarget) bool {
+	switch t.kind {
+	case logsx.KindJournal:
+		return authJournalUnit(t.id)
+	case logsx.KindJournalID:
+		for _, ident := range t.idents {
+			if authIdents[ident] {
+				return true
+			}
+		}
+		return false
+	case logsx.KindSystem:
+		return authLogFile(t.path)
+	}
+	return false
+}
+
+// authJournalUnit is sshd's unit under either distribution's name, and the
+// per-connection instances a socket-activated sshd runs as.
+func authJournalUnit(unit string) bool {
+	name := strings.TrimSuffix(unit, ".service")
+	return name == "ssh" || name == "sshd" || strings.HasPrefix(name, "ssh@") || strings.HasPrefix(name, "sshd@")
+}
+
+// authLogFile judges the file and anything it resolves to, and the rotated
+// generations too: auth.log.1 and secure-20240612 are the same data a day
+// older, and a symlink named app.log pointing at auth.log is still auth.log.
+// A generation is a number after the name, so secure-api.log is not one.
+func authLogFile(path string) bool {
+	if path == "" {
+		return false
+	}
+	names := []string{filepath.Base(path)}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		names = append(names, filepath.Base(resolved))
+	}
+	for _, name := range names {
+		for _, base := range []string{"auth.log", "secure"} {
+			rest, ok := strings.CutPrefix(name, base)
+			if !ok {
+				continue
+			}
+			if rest == "" || (len(rest) > 1 && (rest[0] == '.' || rest[0] == '-') && rest[1] >= '0' && rest[1] <= '9') {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // logFilterFrom reads the filter every log route shares. One parser means the
 // live view, the search and the export cannot drift apart — an operator who
 // narrows a stream to one request id and then exports it gets that, not the
@@ -182,6 +315,7 @@ func logFilterFrom(q url.Values) logsx.Filter {
 		Exclude:    q.Get("exclude"),
 		Regex:      q.Get("regex") == "true",
 		IgnoreCase: q.Get("ignoreCase") != "false",
+		Fields:     q["f"],
 	}
 	if levels := q.Get("levels"); levels != "" {
 		f.Levels = strings.Split(levels, ",")
@@ -189,14 +323,40 @@ func logFilterFrom(q url.Values) logsx.Filter {
 	return f
 }
 
-func logSearchOptions(q url.Values) logsx.SearchOptions {
+// splitList reads a comma-separated parameter, dropping empty entries.
+func splitList(v string) []string {
+	if v == "" {
+		return nil
+	}
+	out := []string{}
+	for _, part := range strings.Split(v, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func logSearchOptions(q url.Values) (logsx.SearchOptions, error) {
 	opts := logsx.SearchOptions{
-		Filter:   logFilterFrom(q),
-		Limit:    atoiDefault(q.Get("limit"), 2000),
-		Before:   atoiDefault(q.Get("before"), 0),
-		After:    atoiDefault(q.Get("after"), 0),
-		Archives: q.Get("archives") == "true",
-		Head:     q.Get("order") == "asc",
+		Filter:          logFilterFrom(q),
+		Limit:           atoiDefault(q.Get("limit"), 2000),
+		Before:          atoiDefault(q.Get("before"), 0),
+		After:           atoiDefault(q.Get("after"), 0),
+		Archives:        q.Get("archives") == "true",
+		Head:            q.Get("order") == "asc",
+		Facets:          splitList(q.Get("facets")),
+		Measure:         q.Get("measure"),
+		Sample:          splitList(q.Get("sample")),
+		HistogramBy:     q.Get("histogramBy"),
+		HistogramValues: splitList(q.Get("histogramValues")),
+	}
+	if v := q.Get("facetLimit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return opts, httpx.BadRequest("facetLimit must be a positive number")
+		}
+		opts.FacetLimit = n
 	}
 	if v := q.Get("since"); v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
@@ -208,7 +368,36 @@ func logSearchOptions(q url.Values) logsx.SearchOptions {
 			opts.Until = t
 		}
 	}
-	return opts
+	return opts, nil
+}
+
+// logLens resolves the lens a read goes through: the one asked for, or the
+// one the source is detected as. An unknown lens asked for by name is the
+// caller's mistake and a 400; a detected lens this build does not register is
+// no lens, since the operator asked for nothing. A stack resolves per
+// container, so only a lens asked for applies to it as a whole.
+func (s *Server) logLens(ctx context.Context, target logTarget, asked string) (string, error) {
+	if asked != "" {
+		if _, err := logsx.LensByID(asked); err != nil {
+			return "", httpx.BadRequest("%v; this build reads %s, or none", err, strings.Join(logsx.LensIDs(), ", "))
+		}
+		return asked, nil
+	}
+	switch target.kind {
+	case logsx.KindStack:
+		return "", nil
+	case logsx.KindDocker:
+		d, err := s.modules.docker.Inspect(ctx, target.id)
+		if err != nil {
+			// The read reports the container's absence itself, in the words
+			// it always has.
+			return "", nil
+		}
+		return logsx.DetectLens(logsx.LensTarget{Kind: logsx.KindDocker, Image: d.Image}), nil
+	case logsx.KindJournalID:
+		return logsx.DetectLens(logsx.LensTarget{Kind: target.kind, Unit: target.idents[0]}), nil
+	}
+	return logsx.DetectLens(logsx.LensTarget{Kind: target.kind, Path: target.path, Unit: target.id}), nil
 }
 
 // maxJournalPriority turns the operator's level chips into the one number
@@ -247,6 +436,54 @@ func maxJournalPriority(levels []string) int {
 	return worst
 }
 
+// journalPriority is the -p pushed down for a filter. With a lens reading the
+// lines, it never narrows below 6: a lens raises lines the program filed at
+// info — Postgres writes its FATAL to stderr, which the journal files at 6 —
+// and narrowing to 0..3 would hide exactly the lines "errors" should show.
+// The exact level test still runs here. clamped reports that the chips asked
+// for less than was read, which widens the tail's window as a text filter
+// does.
+func journalPriority(spec logsx.Filter) (p int, clamped bool) {
+	p = maxJournalPriority(spec.Levels)
+	if p >= 0 && p < 6 && spec.Lens != "" && spec.Lens != logsx.LensNone {
+		return 6, true
+	}
+	return p, false
+}
+
+// journalOptionsFor is the journalctl selection a journal-kind source names.
+func journalOptionsFor(t logTarget, boot bool) procs.JournalOptions {
+	o := procs.JournalOptions{Boot: boot, MaxPriority: -1}
+	switch t.kind {
+	case logsx.KindJournal:
+		o.Unit = t.id
+	case logsx.KindJournalID:
+		o.Identifiers = t.idents
+	case logsx.KindKernel:
+		o.Kernel = true
+	}
+	return o
+}
+
+// journalRoute hands a journal line to the lens its program has when that is
+// not the stream's own. One journalctl run holds two kinds of line: -u reads
+// the manager's "Started …" and "Failed with result …" as well as the unit's
+// own output, and ssh.service's lines come from sshd-session. The manager's
+// lines always go to the systemd lens; the other programs only when the lens
+// was detected rather than forced, since forcing one is the operator saying
+// how they want the unit's own lines read. The whole journal routes only the
+// manager: its own lens is the composite that already dispatches by program.
+func journalRoute(t logTarget, forced bool) func(*logsx.Line) string {
+	perProgram := !forced && (t.kind == logsx.KindJournalID || (t.kind == logsx.KindJournal && t.id != ""))
+	return func(l *logsx.Line) string {
+		id := logsx.ProgramLens(l.Attrs["program"])
+		if id == "systemd" || perProgram {
+			return id
+		}
+		return ""
+	}
+}
+
 func (s *Server) handleLogSearch(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
 	// The old route took ?path= and nothing else, which is why the frontend
@@ -255,14 +492,27 @@ func (s *Server) handleLogSearch(w http.ResponseWriter, r *http.Request) error {
 	if raw == "" {
 		raw = q.Get("path")
 	}
-	target, err := parseLogTarget(raw)
+	target, err := s.logTargetFor(r, raw)
 	if err != nil {
 		return err
 	}
-	opts := logSearchOptions(q)
+	opts, err := logSearchOptions(q)
+	if err != nil {
+		return err
+	}
 
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
+
+	if opts.Filter.Lens, err = s.logLens(ctx, target, q.Get("lens")); err != nil {
+		return err
+	}
+	// Everything the search can be refused for is refused here, before the
+	// source is chosen: a bad expression found inside a container read would
+	// come back as a daemon error rather than as the operator's mistake.
+	if err := opts.Validate(); err != nil {
+		return httpx.BadRequest("%v", err)
+	}
 
 	switch target.kind {
 	case logsx.KindDocker:
@@ -272,8 +522,15 @@ func (s *Server) handleLogSearch(w http.ResponseWriter, r *http.Request) error {
 		}
 		httpx.JSON(w, http.StatusOK, res)
 		return nil
-	case logsx.KindJournal:
-		res, err := s.searchJournal(ctx, target.id, opts, q.Get("boot") == "true")
+	case logsx.KindStack:
+		res, err := s.searchStack(ctx, target.id, opts)
+		if err != nil {
+			return err
+		}
+		httpx.JSON(w, http.StatusOK, res)
+		return nil
+	case logsx.KindJournal, logsx.KindJournalID, logsx.KindKernel:
+		res, err := s.searchJournal(ctx, target, opts, q.Get("boot") == "true", q.Get("lens") != "")
 		if err != nil {
 			return mapProcsError(err)
 		}
@@ -324,6 +581,32 @@ func (s *Server) searchContainer(ctx context.Context, id string, opts logsx.Sear
 	if err != nil {
 		return nil, err
 	}
+	ch, closer, err := s.modules.docker.Logs(ctx, id, containerSearchOptions(opts))
+	if err != nil {
+		return nil, err
+	}
+	defer closer.Close()
+	c.NextFile(id, false, nil)
+	st := c.Stream()
+	n := 0
+	for raw := range ch {
+		if ctx.Err() != nil {
+			c.Incomplete()
+			break
+		}
+		n++
+		stamp, text := splitDockerStamp(raw.Text)
+		if c.Skip(st, text) {
+			continue
+		}
+		line := readDockerLine(stamp, text, raw, st, containerTag{})
+		line.No = n
+		c.Feed(line)
+	}
+	return c.Result(), nil
+}
+
+func containerSearchOptions(opts logsx.SearchOptions) dockerx.LogOptions {
 	logOpts := dockerx.LogOptions{Tail: "all", Timestamps: true}
 	if !opts.Since.IsZero() {
 		logOpts.Since = opts.Since.Format(time.RFC3339)
@@ -331,42 +614,22 @@ func (s *Server) searchContainer(ctx context.Context, id string, opts logsx.Sear
 	if !opts.Until.IsZero() {
 		logOpts.Until = opts.Until.Format(time.RFC3339)
 	}
-	ch, closer, err := s.modules.docker.Logs(ctx, id, logOpts)
-	if err != nil {
-		return nil, err
-	}
-	defer closer.Close()
-	c.NextFile(id, false, nil)
-	n := 0
-	for line := range ch {
-		if ctx.Err() != nil {
-			c.Incomplete()
-			break
-		}
-		n++
-		parsed := dockerLine(line)
-		parsed.No = n
-		c.Feed(parsed)
-	}
-	return c.Result(), nil
+	return logOpts
 }
 
 // searchJournal reads the window rather than a line count. A history search
 // bounded by `-n` answers "is it in the last 300 records", which is not the
 // question — so the time window is the bound here, and the absence of one is
 // reported as an incomplete answer rather than silently capped.
-func (s *Server) searchJournal(ctx context.Context, unit string, opts logsx.SearchOptions, boot bool) (*logsx.SearchResult, error) {
+func (s *Server) searchJournal(ctx context.Context, target logTarget, opts logsx.SearchOptions, boot, forced bool) (*logsx.SearchResult, error) {
 	c, err := logsx.NewCollector(opts)
 	if err != nil {
 		return nil, err
 	}
-	jopts := procs.JournalOptions{
-		Unit:        unit,
-		Boot:        boot,
-		Since:       journalTimeSpec(opts.Since),
-		Until:       journalTimeSpec(opts.Until),
-		MaxPriority: maxJournalPriority(opts.Filter.Levels),
-	}
+	jopts := journalOptionsFor(target, boot)
+	jopts.Since = journalTimeSpec(opts.Since)
+	jopts.Until = journalTimeSpec(opts.Until)
+	jopts.MaxPriority, _ = journalPriority(opts.Filter)
 	if jopts.Since == "" && !boot {
 		// journalctl with no bound at either end walks the entire persistent
 		// journal, which on a long-lived host is gigabytes. A default window
@@ -376,10 +639,15 @@ func (s *Server) searchJournal(ctx context.Context, unit string, opts logsx.Sear
 		jopts.Since = "2 days ago"
 	}
 	c.NextFile("journal", false, nil)
+	st := c.Stream()
+	st.Route(journalRoute(target, forced))
 	n := 0
 	if _, err := s.streamJournalInto(ctx, jopts, func(e procs.JournalEntry) {
 		n++
-		line := journalLine(e)
+		if c.Skip(st, e.Message) {
+			return
+		}
+		line := journalLine(e, st)
 		line.No = n
 		c.Feed(line)
 	}); err != nil {
@@ -437,11 +705,23 @@ func (s *Server) streamJournalInto(ctx context.Context, opts procs.JournalOption
 	return count, sc.Err()
 }
 
-// journalLine maps a journal record onto the viewer's one line shape. The
-// priority becomes a level so the journal's numbers and a text log's words end
-// up as one vocabulary — the same filter chips work on both, which is the
-// whole promise of a unified viewer.
-func journalLine(e procs.JournalEntry) logsx.Line {
+// journalLine maps a journal record onto the viewer's one line shape, reading
+// it through st when there is one.
+//
+// The message goes through ParseLine like any other line, so a service that
+// logs JSON under systemd gets its message and fields and a colour code is
+// stripped. The level is decided in a fixed order: what the lens read from the
+// format itself, then a level key in the message's own structure, then the
+// journal's PRIORITY — never the free-text word scan, which would let
+// "error-reporting enabled" in prose overrule a priority the program chose.
+// The priority still becomes the level of a plain line, so the journal's
+// numbers and a text log's words end up as one vocabulary and one set of
+// chips.
+//
+// The record's own fields are kept as attrs, because they are what the
+// manager's lines mean: the unit a "Failed with result" is about, the
+// invocation that groups one run's lines, the exit code.
+func journalLine(e procs.JournalEntry, st *logsx.Stream) logsx.Line {
 	source := e.Syslog
 	if source == "" {
 		source = strings.TrimSuffix(e.Unit, ".service")
@@ -449,41 +729,80 @@ func journalLine(e procs.JournalEntry) logsx.Line {
 	if e.PID != "" && source != "" {
 		source += "[" + e.PID + "]"
 	}
-	ts := e.Timestamp
-	line := logsx.Line{
-		Text:   e.Message,
-		Level:  logsx.LevelFromPriority(e.Priority),
-		Source: source,
+	line := logsx.ParseLine(e.Message, source)
+	line.ApplyPriority(e.Priority)
+	line.SetAttr("unit", defaultStr(e.About, e.Unit))
+	line.SetAttr("program", defaultStr(e.Syslog, e.Comm))
+	line.SetAttr("pid", e.PID)
+	line.SetAttr("invocation", e.Invocation)
+	line.SetAttr("message_id", e.MessageID)
+	line.SetAttr("result", e.Result)
+	line.SetAttr("exit_code", e.ExitCode)
+	line.SetAttr("exit_status", e.ExitStatus)
+	if st != nil {
+		st.Read(&line)
 	}
-	if !ts.IsZero() {
-		utc := ts.UTC()
+	// The journal's stamp is authoritative: whatever a lens or the parser
+	// found in the message text is when the program thought it was, and the
+	// journal is when it was.
+	if !e.Timestamp.IsZero() {
+		utc := e.Timestamp.UTC()
 		line.Timestamp = &utc
 	}
 	return line
 }
 
-// dockerLine strips the RFC3339 prefix Docker adds when timestamps are asked
-// for, and puts it in the field the viewer renders. Leaving it in the text
-// would draw the timestamp twice on every line, and the built-in parser cannot
-// read it: Docker emits nanoseconds, which is longer than any layout the file
-// parser knows.
-func dockerLine(l dockerx.LogLine) logsx.Line {
-	text := l.Text
-	line := logsx.Line{Stream: l.Stream, Source: l.Service}
+// splitDockerStamp strips the RFC3339 prefix Docker adds when timestamps are
+// asked for. Leaving it in the text would draw the timestamp twice on every
+// line, and the built-in parser cannot read it: Docker emits nanoseconds,
+// which is longer than any layout the file parser knows.
+func splitDockerStamp(text string) (*time.Time, string) {
 	if i := strings.IndexByte(text, ' '); i > 0 {
 		if ts, err := time.Parse(time.RFC3339Nano, text[:i]); err == nil {
 			utc := ts.UTC()
-			line.Timestamp = &utc
-			text = text[i+1:]
+			return &utc, text[i+1:]
 		}
 	}
-	parsed := logsx.ParseLine(text, l.Service)
+	return nil, text
+}
+
+// dockerLine turns one line of a container's output into the viewer's line,
+// read through st when there is one.
+func dockerLine(l dockerx.LogLine, st *logsx.Stream) logsx.Line {
+	stamp, text := splitDockerStamp(l.Text)
+	return readDockerLine(stamp, text, l, st, containerTag{})
+}
+
+// containerTag is what a stack adds to each of its containers' lines: the
+// service as the source and as an attr, the short container id, and the lens
+// the container reads through when it is not the stack's.
+type containerTag struct {
+	service   string
+	container string
+	stackLens string
+}
+
+func readDockerLine(stamp *time.Time, text string, l dockerx.LogLine, st *logsx.Stream, tag containerTag) logsx.Line {
+	source := l.Service
+	if tag.service != "" {
+		source = tag.service
+	}
 	// ParseLine strips the terminal control a build tool writes, so the text
 	// kept here is the text the level scan and the operator's search saw.
-	line.Text, line.Level = parsed.Text, parsed.Level
-	line.Message, line.Fields = parsed.Message, parsed.Fields
-	if line.Timestamp == nil {
-		line.Timestamp = parsed.Timestamp
+	line := logsx.ParseLine(text, source)
+	line.Stream = l.Stream
+	line.SetAttr("service", tag.service)
+	line.SetAttr("container", tag.container)
+	if st != nil {
+		st.Read(&line)
+		if line.Event != "" && line.Lens == "" && st.Lens() != tag.stackLens && tag.service != "" {
+			line.Lens = st.Lens()
+		}
+	}
+	// Docker's stamp is authoritative, put back after the lens for the reason
+	// journalLine gives.
+	if stamp != nil {
+		line.Timestamp = stamp
 	}
 	// stderr is deliberately *not* promoted to a level here.
 	//
@@ -506,11 +825,14 @@ func (s *Server) handleLogDownload(w http.ResponseWriter, r *http.Request) error
 	if raw == "" {
 		raw = q.Get("path")
 	}
-	target, err := parseLogTarget(raw)
+	target, err := s.logTargetFor(r, raw)
 	if err != nil {
 		return err
 	}
-	opts := logSearchOptions(q)
+	opts, err := logSearchOptions(q)
+	if err != nil {
+		return err
+	}
 	// An export is a file to keep, so it is ordered oldest-first and not
 	// capped: the cap exists to keep a browser responsive, which a download
 	// does not need.
@@ -524,20 +846,24 @@ func (s *Server) handleLogDownload(w http.ResponseWriter, r *http.Request) error
 			}
 		}
 	}
-	if _, err := logsx.NewFilter(opts.Filter); err != nil {
+
+	ctx, cancel := timeoutCtx(r, 5*time.Minute)
+	defer cancel()
+
+	if opts.Filter.Lens, err = s.logLens(ctx, target, q.Get("lens")); err != nil {
+		return err
+	}
+	if err := opts.Validate(); err != nil {
 		return httpx.BadRequest("%v", err)
 	}
 
-	name := strings.NewReplacer("/", "-", ":", "-", " ", "-").Replace(strings.TrimPrefix(target.label, "/"))
+	name := strings.NewReplacer("/", "-", ":", "-", " ", "-", ",", "-").Replace(strings.TrimPrefix(target.label, "/"))
 	if name == "" {
 		name = "logs"
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q",
 		name+"-"+time.Now().UTC().Format("20060102-150405")+".log"))
-
-	ctx, cancel := timeoutCtx(r, 5*time.Minute)
-	defer cancel()
 
 	targets := []logsx.SearchTarget{{Path: target.path}}
 	switch target.kind {
@@ -547,16 +873,19 @@ func (s *Server) handleLogDownload(w http.ResponseWriter, r *http.Request) error
 			return mapProcsError(err)
 		}
 		targets = found
-	case logsx.KindDocker, logsx.KindJournal:
-		// Neither is a file, so the export is the search result written out
+	case logsx.KindDocker, logsx.KindStack, logsx.KindJournal, logsx.KindJournalID, logsx.KindKernel:
+		// None is a file, so the export is the search result written out
 		// rather than a byte range of something on disk.
 		opts.Limit = 20000
 		var res *logsx.SearchResult
 		var err error
-		if target.kind == logsx.KindDocker {
+		switch target.kind {
+		case logsx.KindDocker:
 			res, err = s.searchContainer(ctx, target.id, opts)
-		} else {
-			res, err = s.searchJournal(ctx, target.id, opts, q.Get("boot") == "true")
+		case logsx.KindStack:
+			res, err = s.searchStack(ctx, target.id, opts)
+		default:
+			res, err = s.searchJournal(ctx, target, opts, q.Get("boot") == "true", q.Get("lens") != "")
 		}
 		if err != nil {
 			s.Log.Error("log export failed", "source", raw, "err", err)
@@ -594,6 +923,9 @@ type streamMeta struct {
 	Prefill  *logsx.Prefill   `json:"prefill,omitempty"`
 	Archives int              `json:"archives,omitempty"`
 	Note     string           `json:"note,omitempty"`
+	// Lens is the lens the lines are read through, which is what their event
+	// names mean.
+	Lens string `json:"lens,omitempty"`
 }
 
 // handleLogStream is the unified live tail. Every source kind — a file, a
@@ -608,11 +940,14 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) error {
 	if raw == "" {
 		raw = q.Get("path")
 	}
-	target, err := parseLogTarget(raw)
+	target, err := s.logTargetFor(r, raw)
 	if err != nil {
 		return err
 	}
 	spec := logFilterFrom(q)
+	if spec.Lens, err = s.logLens(r.Context(), target, q.Get("lens")); err != nil {
+		return err
+	}
 	filter, err := logsx.NewFilter(spec)
 	if err != nil {
 		// Refused before the upgrade, so a bad regular expression is an error
@@ -622,6 +957,14 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) error {
 	lines := atoiDefault(q.Get("lines"), 400)
 	if lines <= 0 || lines > 20000 {
 		lines = 400
+	}
+	var members []stackMember
+	if target.kind == logsx.KindStack {
+		// A stack with no containers is a 404 the page can show, not a
+		// socket that opens and ends.
+		if members, err = s.stackMembers(r.Context(), target.id); err != nil {
+			return err
+		}
 	}
 
 	conn, err := s.WS.Upgrade(w, r)
@@ -636,6 +979,9 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) error {
 
 	out := make(chan logsx.Line, 512)
 	meta := streamMeta{Kind: target.kind, Label: target.label, Path: target.path, Filtered: !filter.Empty()}
+	if spec.Lens != logsx.LensNone {
+		meta.Lens = spec.Lens
+	}
 
 	switch target.kind {
 	case logsx.KindDocker:
@@ -643,14 +989,16 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) error {
 			conn.SendError(err.Error())
 			return nil
 		}
+	case logsx.KindStack:
+		meta.Lens = stackLens(members, filter)
+		s.followStack(ctx, members, filter, lines, out)
 	case logsx.KindPM2:
 		if err := s.followPM2(ctx, target.id, lines, filter, out); err != nil {
 			conn.SendError(err.Error())
 			return nil
 		}
-	case logsx.KindJournal:
-		meta.Label = target.label
-		if err := s.followJournal(ctx, target.id, lines, spec, filter, q.Get("boot") == "true", out); err != nil {
+	case logsx.KindJournal, logsx.KindJournalID, logsx.KindKernel:
+		if err := s.followJournal(ctx, target, lines, spec, filter, q.Get("boot") == "true", q.Get("lens") != "", out); err != nil {
 			conn.SendError(err.Error())
 			return nil
 		}
@@ -722,6 +1070,8 @@ func (s *Server) followPM2(ctx context.Context, name string, n int, f *logsx.Fil
 	return nil
 }
 
+// followContainer follows one container. Its single producer closes out when
+// the container's log ends, which is what sends eof.
 func (s *Server) followContainer(ctx context.Context, id string, n int, f *logsx.Filter, out chan<- logsx.Line) error {
 	ch, closer, err := s.modules.docker.Logs(ctx, id, dockerx.LogOptions{
 		Tail:       strconv.Itoa(n),
@@ -731,38 +1081,54 @@ func (s *Server) followContainer(ctx context.Context, id string, n int, f *logsx
 	if err != nil {
 		return err
 	}
+	st := f.Stream("")
 	go func() {
+		defer close(out)
 		defer closer.Close()
-		for line := range ch {
-			parsed := dockerLine(line)
-			if !f.Match(parsed) {
-				continue
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case out <- parsed:
-			}
-		}
-		close(out)
+		pumpContainer(ctx, ch, st, containerTag{}, time.Time{}, out)
 	}()
 	return nil
 }
 
-func (s *Server) followJournal(ctx context.Context, unit string, n int, spec logsx.Filter, f *logsx.Filter, boot bool, out chan<- logsx.Line) error {
-	opts := procs.JournalOptions{
-		Unit:        unit,
-		Lines:       n,
-		Follow:      true,
-		Boot:        boot,
-		MaxPriority: maxJournalPriority(spec.Levels),
+// pumpContainer reads one container's log into out through st. It never
+// closes out: a stack has one producer per container on one channel, and the
+// first container to stop must not end the others' — or panic them, sending
+// on a closed channel. The caller closes out once every producer returned.
+// Lines stamped at or before after are dropped before anything reads them:
+// the stack's opening window already sent them.
+func pumpContainer(ctx context.Context, in <-chan dockerx.LogLine, st *logsx.Stream, tag containerTag, after time.Time, out chan<- logsx.Line) {
+	for raw := range in {
+		stamp, text := splitDockerStamp(raw.Text)
+		if !after.IsZero() && stamp != nil && !stamp.After(after) {
+			continue
+		}
+		if st.Skip(text) {
+			continue
+		}
+		line := readDockerLine(stamp, text, raw, st, tag)
+		if keep, _ := st.Keep(&line, true); !keep {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case out <- line:
+		}
 	}
+}
+
+func (s *Server) followJournal(ctx context.Context, target logTarget, n int, spec logsx.Filter, f *logsx.Filter, boot, forced bool, out chan<- logsx.Line) error {
+	opts := journalOptionsFor(target, boot)
+	opts.Lines, opts.Follow = n, true
+	var clamped bool
+	opts.MaxPriority, clamped = journalPriority(spec)
 	// A text filter cannot be pushed into journalctl portably — `-g` needs a
 	// build with PCRE2 and a version nobody can assume — so the window is
 	// widened instead and the exact test happens here. Without that, "the last
 	// 400 records, of which two mention this container" is an empty page in
-	// front of a journal that has the answer.
-	if spec.Query != "" || spec.Exclude != "" {
+	// front of a journal that has the answer. Field predicates and a level
+	// the lens keeps from being pushed down narrow the same way.
+	if spec.Query != "" || spec.Exclude != "" || len(spec.Fields) > 0 || clamped {
 		opts.Lines = n * 25
 		if opts.Lines > 20000 {
 			opts.Lines = 20000
@@ -779,6 +1145,8 @@ func (s *Server) followJournal(ctx context.Context, unit string, n int, spec log
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	st := f.Stream("")
+	st.Route(journalRoute(target, forced))
 	go func() {
 		// Killing the process group on exit stops journalctl -f; otherwise it
 		// would linger after the browser tab closes.
@@ -793,11 +1161,11 @@ func (s *Server) followJournal(ctx context.Context, unit string, n int, spec log
 		sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 		for sc.Scan() {
 			e, ok := procs.ParseJournalLine(sc.Bytes())
-			if !ok {
+			if !ok || st.Skip(e.Message) {
 				continue
 			}
-			line := journalLine(e)
-			if !f.Match(line) {
+			line := journalLine(e, st)
+			if keep, _ := st.Keep(&line, true); !keep {
 				continue
 			}
 			select {
@@ -880,7 +1248,7 @@ func (s *Server) handleLogrotate(w http.ResponseWriter, r *http.Request) error {
 // is exactly the entry a rule list cannot show, because it is the one that is
 // not there.
 func (s *Server) handleLogRetention(w http.ResponseWriter, r *http.Request) error {
-	target, err := parseLogTarget(defaultStr(r.URL.Query().Get("source"), r.URL.Query().Get("path")))
+	target, err := s.logTargetFor(r, defaultStr(r.URL.Query().Get("source"), r.URL.Query().Get("path")))
 	if err != nil {
 		return err
 	}
@@ -907,6 +1275,106 @@ func (s *Server) handleLogRetention(w http.ResponseWriter, r *http.Request) erro
 	}
 	httpx.JSON(w, http.StatusOK, logsx.MatchRetention(st, target.path, size))
 	return nil
+}
+
+// handleLogSource describes one source the way /logs/sources would list it,
+// for a page that embeds a single log — a database's, a site's, a unit's — and
+// needs its lens, size and archives without walking every root and asking
+// Docker, PM2 and systemd about everything else on the host.
+func (s *Server) handleLogSource(w http.ResponseWriter, r *http.Request) error {
+	target, err := s.logTargetFor(r, r.URL.Query().Get("source"))
+	if err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 20*time.Second)
+	defer cancel()
+	src, err := s.describeLogSource(ctx, target)
+	if err != nil {
+		return err
+	}
+	httpx.JSON(w, http.StatusOK, src)
+	return nil
+}
+
+func (s *Server) describeLogSource(ctx context.Context, t logTarget) (logsx.Source, error) {
+	switch t.kind {
+	case logsx.KindDocker:
+		d, err := s.modules.docker.Inspect(ctx, t.id)
+		if err != nil {
+			return logsx.Source{}, s.dockerErr(err)
+		}
+		src := s.containerSource(ctx, d.Container)
+		// The page asked by the id it holds, which may be a name; answering
+		// under another id would make the two look like different sources.
+		src.ID = "docker:" + t.id
+		return src, nil
+	case logsx.KindStack:
+		members, err := s.stackMembers(ctx, t.id)
+		if err != nil {
+			return logsx.Source{}, err
+		}
+		containers := make([]dockerx.Container, len(members))
+		for i, m := range members {
+			containers[i] = m.container
+		}
+		return s.stackSources(ctx, containers)[0], nil
+	case logsx.KindPM2:
+		name, daemon, id, err := parsePM2LogIdentity(t.id)
+		if err != nil {
+			return logsx.Source{}, err
+		}
+		list, err := s.modules.pm2.List(ctx)
+		if err != nil {
+			return logsx.Source{}, mapProcsError(err)
+		}
+		for _, p := range list {
+			if p.Name != name || (daemon != "" && (p.DaemonID != daemon || p.ID != id)) {
+				continue
+			}
+			src := logsx.Source{
+				ID: "pm2:" + t.id, Label: p.Name + " (" + p.DaemonID + ")", Kind: logsx.KindPM2,
+				Path: p.OutLogPath, Detail: "stdout and stderr, merged", Status: p.Status,
+				Lens: logsx.DetectLens(logsx.LensTarget{Kind: logsx.KindPM2}),
+			}
+			if err := s.checkPM2LogPaths(p.OutLogPath, p.ErrLogPath); err != nil {
+				src.Detail = "Logs unavailable: ask an administrator to include this log directory in JD_LOG_ROOTS."
+			} else if file, ok, _ := s.modules.logs.Describe(p.OutLogPath); ok {
+				src.Size, src.Modified = file.Size, file.Modified
+				src.Archives, src.ArchiveBytes, src.Rotated = file.Archives, file.ArchiveBytes, file.Rotated
+			}
+			return src, nil
+		}
+		return logsx.Source{}, httpx.Err(http.StatusNotFound, "not_found", "PM2 has no process "+name+".")
+	case logsx.KindJournal, logsx.KindJournalID, logsx.KindKernel:
+		lens, _ := s.logLens(ctx, t, "")
+		src := logsx.Source{Label: t.label, Kind: t.kind, Lens: lens}
+		switch t.kind {
+		case logsx.KindJournal:
+			src.ID = "journal:" + t.id
+			src.Detail = "Every unit on the host — pick one below to narrow it"
+			if t.id != "" {
+				src.Detail = "What systemd recorded for this unit, and what it printed"
+				if u, _, err := s.modules.systemd.Show(ctx, t.id); err == nil {
+					src.Status = u.ActiveState
+				}
+			}
+		case logsx.KindJournalID:
+			src.ID = "journal-id:" + strings.Join(t.idents, ",")
+			src.Detail = "The journal's lines from " + t.label
+		case logsx.KindKernel:
+			src.ID = "kernel:"
+			src.Detail = "The kernel ring as the journal keeps it: the firewall, the OOM killer, the disks"
+		}
+		return src, nil
+	}
+	src, ok, err := s.modules.logs.Describe(t.path)
+	if err != nil {
+		return logsx.Source{}, httpx.BadRequest("%v", err)
+	}
+	if !ok {
+		return logsx.Source{}, httpx.Err(http.StatusNotFound, "not_found", "There is no log file at "+t.path+".")
+	}
+	return src, nil
 }
 
 // PM2 metadata belongs to a host user. It cannot expand the reader's log roots.

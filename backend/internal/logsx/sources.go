@@ -20,6 +20,16 @@ const (
 	KindPM2     SourceKind = "pm2"
 	KindDocker  SourceKind = "docker"
 	KindJournal SourceKind = "journal"
+	// KindStack is every container of one compose project, merged by time.
+	KindStack SourceKind = "stack"
+	// KindJournalID is the journal narrowed by syslog identifier rather than
+	// by unit. sshd, sudo, su and logind write under no unit of their own that
+	// holds all of them, and on a host with no auth.log that is the only way to
+	// read "who logged in" as one source.
+	KindJournalID SourceKind = "journal-id"
+	// KindKernel is the kernel ring as the journal keeps it — the firewall's
+	// drops and the OOM killer on a host with no kern.log.
+	KindKernel SourceKind = "kernel"
 )
 
 // Source is one thing the unified viewer can open. Docker containers and the
@@ -47,6 +57,12 @@ type Source struct {
 	// has logs worth reading and no new lines coming, and saying so is the
 	// difference between "stopped" and "the page is broken".
 	Status string `json:"status,omitempty"`
+	// Lens is the lens the source reads through when none is forced, so the
+	// page can offer the right quick views before the first line arrives.
+	Lens string `json:"lens,omitempty"`
+	// Images are a stack's container images, which is what a stack is to the
+	// reader choosing one: "postgres, redis, the app".
+	Images []string `json:"images,omitempty"`
 }
 
 // wellKnown are the files an operator expects to find without hunting. Any
@@ -70,6 +86,11 @@ var wellKnown = []struct {
 	{"/var/log/fail2ban.log", "fail2ban", KindSystem, "Bans, unbans and the jails that issued them"},
 	{"/var/log/cloud-init.log", "cloud-init", KindSystem, "What the provider's first-boot provisioning did"},
 	{"/var/log/unattended-upgrades/unattended-upgrades.log", "unattended-upgrades", KindSystem, "Automatic security updates: what was applied overnight"},
+	{"/var/log/apt/term.log", "apt term", KindSystem, "What apt printed while it ran — the error behind a failed upgrade"},
+	{"/var/log/dnf.log", "dnf", KindSystem, "Package transactions as dnf recorded them"},
+	{"/var/log/dnf.rpm.log", "dnf rpm", KindSystem, "Every package dnf installed, upgraded or removed"},
+	{"/var/log/cron", "cron", KindSystem, "The RPM world's cron log: every scheduled job that ran"},
+	{"/var/log/letsencrypt/letsencrypt.log", "certbot", KindSystem, "Certificate renewals: which domains renewed, and why one did not"},
 	{"/var/log/nginx/access.log", "nginx access", KindNginx, "Every request nginx served, with status and timing"},
 	{"/var/log/nginx/error.log", "nginx error", KindNginx, "Upstream failures, certificate problems, refused requests"},
 	{"/var/log/caddy/access.log", "caddy access", KindNginx, "Every request Caddy served"},
@@ -95,23 +116,11 @@ func (s *Service) Discover(ctx context.Context) ([]Source, error) {
 		if err := s.Allow(p); err != nil {
 			return
 		}
-		st, err := os.Stat(p)
-		if err != nil || st.IsDir() {
+		src, ok := describeFile(p, label, kind, detail)
+		if !ok {
 			return
 		}
 		seen[p] = true
-		mod := st.ModTime().UTC()
-		src := Source{
-			ID: p, Label: label, Kind: kind, Path: p, Detail: detail,
-			Size: st.Size(), Modified: &mod,
-		}
-		for _, a := range Archives(p) {
-			src.Archives++
-			if ast, err := os.Stat(a); err == nil {
-				src.ArchiveBytes += ast.Size()
-			}
-		}
-		src.Rotated = src.Archives > 0
 		out = append(out, src)
 	}
 
@@ -139,11 +148,7 @@ func (s *Service) Discover(ctx context.Context) ([]Source, error) {
 			if Compressed(p) {
 				return nil
 			}
-			kind := KindApp
-			if strings.Contains(p, "nginx") || strings.Contains(p, "caddy") {
-				kind = KindNginx
-			}
-			add(p, strings.TrimPrefix(p, root+string(os.PathSeparator)), kind, "")
+			add(p, strings.TrimPrefix(p, root+string(os.PathSeparator)), fileKind(p), "")
 			return nil
 		})
 	}
@@ -154,6 +159,60 @@ func (s *Service) Discover(ctx context.Context) ([]Source, error) {
 		return out[i].Label < out[j].Label
 	})
 	return out, nil
+}
+
+// Describe answers one file source the way Discover would list it, for the
+// page that embeds a single log and needs its size, archives and lens without
+// walking every root to find them. ok is false when the file is not there.
+func (s *Service) Describe(p string) (Source, bool, error) {
+	p = filepath.Clean(p)
+	if err := s.Allow(p); err != nil {
+		return Source{}, false, err
+	}
+	for _, wk := range wellKnown {
+		if wk.path == p {
+			src, ok := describeFile(p, wk.label, wk.kind, wk.detail)
+			return src, ok, nil
+		}
+	}
+	label := filepath.Base(p)
+	for _, root := range s.roots {
+		if rel, err := filepath.Rel(root, p); err == nil && !strings.HasPrefix(rel, "..") {
+			label = rel
+			break
+		}
+	}
+	src, ok := describeFile(p, label, fileKind(p), "")
+	return src, ok, nil
+}
+
+// fileKind is the group a discovered file is listed under.
+func fileKind(p string) SourceKind {
+	if strings.Contains(p, "nginx") || strings.Contains(p, "caddy") {
+		return KindNginx
+	}
+	return KindApp
+}
+
+func describeFile(p, label string, kind SourceKind, detail string) (Source, bool) {
+	st, err := os.Stat(p)
+	if err != nil || st.IsDir() {
+		return Source{}, false
+	}
+	mod := st.ModTime().UTC()
+	src := Source{
+		ID: p, Label: label, Kind: kind, Path: p, Detail: detail,
+		Size: st.Size(), Modified: &mod,
+		Lens: DetectLens(LensTarget{Kind: kind, Path: p}),
+	}
+	for _, a := range Archives(p) {
+		src.Archives++
+		if ast, err := os.Stat(a); err == nil {
+			src.ArchiveBytes += ast.Size()
+		}
+	}
+	src.Rotated = src.Archives > 0
+	return src, true
 }
 
 // RotateRule is one logrotate stanza, paired with what is currently on disk so
