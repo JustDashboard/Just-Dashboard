@@ -153,7 +153,7 @@ export function SiteLogs({
           query={query}
           onQueryChange={setQuery}
           markers={[]}
-          detail={
+          renderInline={
             errors
               ? (entry) =>
                   entry.status >= 500 ? (
@@ -392,7 +392,7 @@ function requestFields(entry: RequestEntry, errors: SiteErrorLog): LogFields {
  * explains. Nothing found says so, and what that means: the failure came
  * from behind the proxy.
  */
-function FailedRequestLines({
+export function FailedRequestLines({
   entry,
   errors,
   engine,

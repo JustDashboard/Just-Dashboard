@@ -3,7 +3,9 @@
 import { useMemo, useState } from "react"
 import {
   Archive,
+  ArrowLeftRight,
   Box,
+  CloudUpload,
   Cpu,
   FileText,
   Globe,
@@ -16,6 +18,7 @@ import { bytes, relativeTime } from "@/lib/format"
 import type { LogSource, LogSourceIndex } from "@/lib/types"
 import { lensFor } from "@/lib/log-lenses"
 import { journalIdSource, kernelSource } from "@/lib/log-sources"
+import type { RequestRecord } from "@/components/logs/service-views-model"
 import { SearchInput } from "@/components/page"
 import { Pane, PaneHeader } from "@/components/panel"
 import { ErrorState, LoadingRows } from "@/components/state"
@@ -55,6 +58,9 @@ const GROUPS: {
   { kind: "pm2", label: "PM2", icon: FileText },
   { kind: "app", label: "Applications", icon: FileText },
 ]
+
+/** Where the Requests group goes among them: before the web server's raw files. */
+const REQUESTS_BEFORE = GROUPS.findIndex((group) => group.kind === "nginx")
 
 /** What one source is, as a word beside its name. */
 export const KIND_TAG: Record<LogSource["kind"], string> = {
@@ -153,10 +159,13 @@ export function railSources(index: LogSourceIndex | undefined, admin: boolean): 
 export function SourceRail({
   index,
   sources,
+  records = [],
   loading,
   error,
   selectedId,
   onSelect,
+  selectedRecord,
+  onSelectRecord,
   onRescan,
   platform,
   className,
@@ -164,17 +173,21 @@ export function SourceRail({
   index: LogSourceIndex | undefined
   /** The rows to draw, from `railSources`: the inventory and the journal's readings. */
   sources: LogSource[]
+  /** The Requests group: the deployments' and the sites' request records. */
+  records?: RequestRecord[]
   /** The host's distribution, whose mark the system logs carry. */
   platform?: string
   loading: boolean
   error: Error | undefined
   selectedId: string | null
   onSelect: (source: LogSource) => void
+  selectedRecord?: string | null
+  onSelectRecord?: (record: RequestRecord) => void
   onRescan: () => void
   className?: string
 }) {
   const [filter, setFilter] = useState("")
-  const total = sources.length
+  const total = sources.length + records.length
 
   const groups = useMemo(() => {
     const needle = filter.trim().toLowerCase()
@@ -199,6 +212,54 @@ export function SourceRail({
       return { ...group, items }
     }).filter((g) => g.items.length > 0 || (index?.missing[g.kind] && !needle))
   }, [index, sources, filter])
+
+  const shownRecords = useMemo(() => {
+    const needle = filter.trim().toLowerCase()
+    return records.filter(
+      (r) =>
+        !needle ||
+        r.label.toLowerCase().includes(needle) ||
+        r.detail?.toLowerCase().includes(needle),
+    )
+  }, [records, filter])
+  // The request records sit among the logs of what writes them: after the
+  // containers and stacks that answer a deployment's requests, before the
+  // web server's raw files they are read from.
+  const requestsAt = groups.findIndex(
+    (g) => GROUPS.findIndex((each) => each.kind === g.kind) >= REQUESTS_BEFORE,
+  )
+  const before = requestsAt < 0 ? groups : groups.slice(0, requestsAt)
+  const after = requestsAt < 0 ? [] : groups.slice(requestsAt)
+
+  const renderGroup = (group: (typeof groups)[number]) => (
+    <div key={group.kind}>
+      <p className="eyebrow mb-0.5 flex items-center gap-1.5 px-2 py-1">
+        <group.icon aria-hidden className="size-3 shrink-0" />
+        <span className="truncate">{group.label}</span>
+        {group.items.length > 0 && <ChipCount>{group.items.length}</ChipCount>}
+      </p>
+      {group.items.length === 0 ? (
+        // An absent kind explains itself rather than simply not being
+        // there: "no containers" and "no Docker on this host" call for
+        // completely different next moves.
+        <p className="px-2 pb-1 text-hint leading-snug text-muted-foreground">
+          {index?.missing[group.kind]}
+        </p>
+      ) : (
+        <div className="space-y-px">
+          {group.items.map((source) => (
+            <SourceRow
+              key={source.id}
+              source={source}
+              platform={platform}
+              selected={selectedId === source.id}
+              onSelect={() => onSelect(source)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
 
   return (
     <Pane flush aria-label="Log sources" className={cn("w-full", className)}>
@@ -236,36 +297,28 @@ export function SourceRail({
         {error && <ErrorState error={error} className="m-1" />}
         {index && (
           <div className="animate-rise space-y-3">
-            {groups.map((group) => (
-              <div key={group.kind}>
+            {before.map(renderGroup)}
+            {shownRecords.length > 0 && (
+              <div>
                 <p className="eyebrow mb-0.5 flex items-center gap-1.5 px-2 py-1">
-                  <group.icon aria-hidden className="size-3 shrink-0" />
-                  <span className="truncate">{group.label}</span>
-                  {group.items.length > 0 && <ChipCount>{group.items.length}</ChipCount>}
+                  <ArrowLeftRight aria-hidden className="size-3 shrink-0" />
+                  <span className="truncate">Requests</span>
+                  <ChipCount>{shownRecords.length}</ChipCount>
                 </p>
-                {group.items.length === 0 ? (
-                  // An absent kind explains itself rather than simply not being
-                  // there: "no containers" and "no Docker on this host" call for
-                  // completely different next moves.
-                  <p className="px-2 pb-1 text-hint leading-snug text-muted-foreground">
-                    {index.missing[group.kind]}
-                  </p>
-                ) : (
-                  <div className="space-y-px">
-                    {group.items.map((source) => (
-                      <SourceRow
-                        key={source.id}
-                        source={source}
-                        platform={platform}
-                        selected={selectedId === source.id}
-                        onSelect={() => onSelect(source)}
-                      />
-                    ))}
-                  </div>
-                )}
+                <div className="space-y-px">
+                  {shownRecords.map((record) => (
+                    <RecordRow
+                      key={record.id}
+                      record={record}
+                      selected={selectedRecord === record.id}
+                      onSelect={() => onSelectRecord?.(record)}
+                    />
+                  ))}
+                </div>
               </div>
-            ))}
-            {groups.length === 0 && (
+            )}
+            {after.map(renderGroup)}
+            {groups.length === 0 && shownRecords.length === 0 && (
               <p className="px-2 py-6 text-center text-xs text-muted-foreground">
                 Nothing matches that filter.
               </p>
@@ -284,7 +337,7 @@ export function SourceRail({
  * application log are no product and keep their group's glyph on the same
  * tile, so every name in the rail starts on one line.
  */
-function sourceProduct(source: LogSource, platform: string | undefined) {
+export function sourceProduct(source: LogSource, platform: string | undefined) {
   // A lens names a product only where the log is that product's own — a
   // Postgres file under /var/log/postgresql — and says nothing of auth.log,
   // which stays the distribution that writes it.
@@ -367,6 +420,63 @@ function SourceRow({
           {source.size !== undefined && source.size > 0
             ? `${bytes(source.size)} · ${relativeTime(source.modified)}`
             : (source.detail ?? source.status)}
+        </span>
+      </span>
+    </button>
+  )
+}
+
+/**
+ * A request record, drawn as the thing it is the record of — the
+ * deployment as its product, a site as its engine — with its last hour's
+ * rate where the fleet's pulse has one, in the failing tone the fleet's
+ * cards use.
+ */
+function RecordRow({
+  record,
+  selected,
+  onSelect,
+}: {
+  record: RequestRecord
+  selected: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      title={record.detail}
+      aria-current={selected ? "true" : undefined}
+      className={cn(
+        "group flex w-full min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 text-left focus-ring-inset transition-colors",
+        selected ? "bg-accent text-foreground" : "hover:bg-row-hover",
+      )}
+    >
+      <ProductLogo
+        id={record.product}
+        size="sm"
+        fallback={record.deployment ? CloudUpload : Globe}
+      />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className={cn("truncate text-body leading-tight", selected && "font-medium")}>
+            {record.label}
+          </span>
+          {record.figure && (
+            <span
+              className={cn(
+                "numeric ml-auto shrink-0 text-micro text-muted-foreground",
+                record.tone === "danger" && "text-destructive",
+                record.tone === "warning" && "text-warning",
+              )}
+              title="Requests a minute over the last hour"
+            >
+              {record.figure}
+            </span>
+          )}
+        </span>
+        <span className="truncate text-hint text-muted-foreground">
+          {record.detail ?? (record.deployment ? "deployment" : "nginx site")}
         </span>
       </span>
     </button>

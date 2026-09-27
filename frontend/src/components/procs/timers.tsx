@@ -11,11 +11,7 @@ import type { SystemdTimer, SystemdUnit } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import type { PollState } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
-import {
-  ServiceLogs,
-  type ServiceLogSource,
-  type ServiceLogsView,
-} from "@/components/logs/service-logs"
+import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo, unitProduct } from "@/components/product-logo"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
@@ -32,7 +28,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { useUnitControl } from "@/components/procs/unit-actions"
-import { UnitRuns } from "@/components/procs/unit-runs"
+import { unitRunsView } from "@/components/procs/unit-runs"
 
 type ConfirmFn = (request: ConfirmRequest) => void
 
@@ -318,10 +314,7 @@ function TimerRuns({ unit }: { unit: string }) {
     () => [{ id: journalSource(unit), label: unit, kind: "journal", product: unitProduct(unit) }],
     [unit],
   )
-  const views = useMemo<ServiceLogsView[]>(
-    () => [{ id: "runs", label: "Runs", render: (ctx) => <UnitRuns unit={unit} ctx={ctx} /> }],
-    [unit],
-  )
+  const views = useMemo(() => [unitRunsView(unit)], [unit])
   // Runs is as tall as its rows, up to a limit; the lines scroll inside a
   // height of their own, so Live and History take the limit outright. Its
   // width is the table's and adds nothing to it — a table cell grows to its

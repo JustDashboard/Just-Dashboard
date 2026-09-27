@@ -22,7 +22,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
-import type { ServiceLogsContext } from "@/components/logs/service-logs"
+import type { ServiceLogsContext, ServiceLogsView } from "@/components/logs/service-logs"
 import { LogRow, eventColumnFor } from "@/components/logs/log-console"
 import { laneStyle } from "@/components/logs/log-text"
 import { EventMark, EventWho } from "@/components/docker/event-marks"
@@ -42,6 +42,21 @@ const OPEN_FAILURES = 3
 
 /** Below this, "watching since" is a restart rather than a quiet afternoon. */
 const RECENTLY_STARTED_MS = 60 * 60_000
+
+/**
+ * The Events view, as every page that reads a container's or a stack's logs
+ * offers it — the container's own page, the stack's, and `/logs` — so the
+ * view is one definition rather than one per page.
+ */
+export function containerEventsView(
+  scope: { containerId: string; healthcheck?: boolean } | { stack: string },
+): ServiceLogsView {
+  return {
+    id: "events",
+    label: "Events",
+    render: (ctx) => <ContainerEvents {...scope} ctx={ctx} />,
+  }
+}
 
 /**
  * What Docker did to one container, or to every container of a stack, as a

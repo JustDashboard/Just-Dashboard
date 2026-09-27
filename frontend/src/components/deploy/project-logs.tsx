@@ -675,7 +675,7 @@ function TrafficReadings({
         }
         hint={
           served && summary
-            ? `${summary.pages.toLocaleString()} page views in the last hour`
+            ? `${plural(summary.pages, "page view")} in the last hour`
             : requests?.reason
               ? "No request record"
               : undefined

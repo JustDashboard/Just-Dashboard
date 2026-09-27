@@ -38,11 +38,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { dockerSource } from "@/lib/log-sources"
-import {
-  ServiceLogs,
-  type ServiceLogSource,
-  type ServiceLogsView,
-} from "@/components/logs/service-logs"
+import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
 import { XtermPane } from "@/components/xterm-pane"
 import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -50,7 +46,7 @@ import { ContainerUsage } from "@/components/docker/container-usage"
 import { statusWord } from "@/components/docker/container-cells"
 import { useContainerControl, useContainerVerbs } from "@/components/docker/container-actions"
 import { ContainerFindings } from "@/components/docker/attention"
-import { ContainerEvents } from "@/components/docker/container-events"
+import { containerEventsView } from "@/components/docker/container-events"
 import { PortTag, RouteRow } from "@/components/docker/exposure"
 import { ExplainIcon, Hint, Term } from "@/components/docker/explain"
 import {
@@ -727,16 +723,8 @@ function ContainerLogs({
     ],
     [detail.id, detail.name, detail.state, detail.image],
   )
-  const views = useMemo<ServiceLogsView[]>(
-    () => [
-      {
-        id: "events",
-        label: "Events",
-        render: (ctx) => (
-          <ContainerEvents containerId={detail.id} healthcheck={detail.hasHealthcheck} ctx={ctx} />
-        ),
-      },
-    ],
+  const views = useMemo(
+    () => [containerEventsView({ containerId: detail.id, healthcheck: detail.hasHealthcheck })],
     [detail.id, detail.hasHealthcheck],
   )
   const logWindow = failure?.logWindow

@@ -10,11 +10,7 @@ import { get } from "@/lib/api"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
 import { journalSource } from "@/lib/log-sources"
 import { useConfirm } from "@/components/confirm-dialog"
-import {
-  ServiceLogs,
-  type ServiceLogSource,
-  type ServiceLogsView,
-} from "@/components/logs/service-logs"
+import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
 import { Detail, DetailList } from "@/components/page"
 import { Servers } from "@/components/icons"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
@@ -26,7 +22,7 @@ import { Tag } from "@/components/tag"
 import { VerbBar } from "@/components/verbs"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useUnitControl, useUnitVerbs } from "@/components/procs/unit-actions"
-import { UnitRuns } from "@/components/procs/unit-runs"
+import { unitRunsView } from "@/components/procs/unit-runs"
 import { authUnit } from "@/components/procs/shared"
 
 /**
@@ -306,10 +302,7 @@ function UnitLogs({ unit }: { unit: string }) {
     () => [{ id: journalSource(unit), label: unit, kind: "journal", product: unitProduct(unit) }],
     [unit],
   )
-  const views = useMemo<ServiceLogsView[]>(
-    () => [{ id: "runs", label: "Runs", render: (ctx) => <UnitRuns unit={unit} ctx={ctx} /> }],
-    [unit],
-  )
+  const views = useMemo(() => [unitRunsView(unit)], [unit])
   if (authUnit(unit) && !can("system.admin")) {
     return (
       <Notice title="Login records need an administrator">

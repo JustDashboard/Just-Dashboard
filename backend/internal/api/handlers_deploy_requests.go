@@ -90,14 +90,6 @@ func (s *Server) handleDeploymentRequests(w http.ResponseWriter, r *http.Request
 }
 
 // handleDeploymentRequestStream is the live tail of the request record.
-//
-// It continues from the cursor the window handed the page — a sequence, not a
-// timestamp — so the rows that arrived between the window being read and the
-// socket opening are neither missed nor sent twice, and two requests in the
-// same second (which is every request, in nginx's format) are two. The store
-// is the only reader: the socket asks it for what is new a few times a second,
-// and the store reads the file at most that often however many sockets and
-// pollers are open on the route.
 func (s *Server) handleDeploymentRequestStream(w http.ResponseWriter, r *http.Request) error {
 	environmentID, err := s.deploymentEnvironment(r)
 	if err != nil {
@@ -106,6 +98,33 @@ func (s *Server) handleDeploymentRequestStream(w http.ResponseWriter, r *http.Re
 	if s.modules.requests == nil {
 		return httpx.BadRequest("the proxy is unavailable, so requests cannot be followed")
 	}
+	return s.followRequests(w, r, deploy.RouteNameFor(environmentID),
+		"The request record could not be followed. Open Proxy to check the ingress is running.")
+}
+
+// handleDeploymentRequestExport streams the window as CSV.
+func (s *Server) handleDeploymentRequestExport(w http.ResponseWriter, r *http.Request) error {
+	environmentID, err := s.deploymentEnvironment(r)
+	if err != nil {
+		return err
+	}
+	if s.modules.requests == nil {
+		return httpx.BadRequest("the proxy is unavailable, so requests cannot be exported")
+	}
+	return s.exportRequests(w, r, deploy.RouteNameFor(environmentID), fmt.Sprintf("requests-%d", environmentID))
+}
+
+// followRequests is the live tail of one route's record — a deployment's or
+// a site's, which are one loop over two routes.
+//
+// It continues from the cursor the window handed the page — a sequence, not a
+// timestamp — so the rows that arrived between the window being read and the
+// socket opening are neither missed nor sent twice, and two requests in the
+// same second (which is every request, in nginx's format) are two. The store
+// is the only reader: the socket asks it for what is new a few times a second,
+// and the store reads the file at most that often however many sockets and
+// pollers are open on the route.
+func (s *Server) followRequests(w http.ResponseWriter, r *http.Request, route, failure string) error {
 	filter := requestFilterFrom(r.URL.Query())
 	// A live tail has no window: the rows are the ones arriving now, and a
 	// since bound copied from the history view would silently drop them all
@@ -128,10 +147,9 @@ func (s *Server) handleDeploymentRequestStream(w http.ResponseWriter, r *http.Re
 	go conn.Keepalive(ctx)
 	go conn.DrainControl(cancel)
 
-	name := deploy.RouteNameFor(environmentID)
-	facts, err := s.modules.requests.Facts(ctx, name)
+	facts, err := s.modules.requests.Facts(ctx, route)
 	if err != nil {
-		conn.SendError("The request record could not be followed. Open Proxy to check the ingress is running.")
+		conn.SendError(failure)
 		return nil
 	}
 	conn.Send("meta", map[string]any{
@@ -147,12 +165,13 @@ func (s *Server) handleDeploymentRequestStream(w http.ResponseWriter, r *http.Re
 			return nil
 		case <-ticker.C:
 		}
-		batch, cursor, err := s.modules.requests.After(ctx, name, after, filter, 500)
+		batch, cursor, err := s.modules.requests.After(ctx, route, after, filter, 500)
 		if err != nil {
-			// One failed read is a hiccup; a run of them is the ingress gone,
-			// and the page should hear that rather than watch a silent socket.
+			// One failed read is a hiccup; a run of them is the proxy or its
+			// log gone, and the page should hear that rather than watch a
+			// silent socket.
 			if failures++; failures >= 10 {
-				conn.SendError("The request record could not be followed. Open Proxy to check the ingress is running.")
+				conn.SendError(failure)
 				return nil
 			}
 			continue
@@ -165,28 +184,21 @@ func (s *Server) handleDeploymentRequestStream(w http.ResponseWriter, r *http.Re
 	}
 }
 
-// handleDeploymentRequestExport streams the window as CSV. Streamed rather
-// than buffered because the whole point of a download is a window bigger than
-// the page shows, and the row limit is the store's export bound rather than
-// the table's.
-func (s *Server) handleDeploymentRequestExport(w http.ResponseWriter, r *http.Request) error {
-	environmentID, err := s.deploymentEnvironment(r)
-	if err != nil {
-		return err
-	}
-	if s.modules.requests == nil {
-		return httpx.BadRequest("the proxy is unavailable, so requests cannot be exported")
-	}
+// exportRequests streams one route's window as CSV. Streamed rather than
+// buffered because the whole point of a download is a window bigger than the
+// page shows, and the row limit is the store's export bound rather than the
+// table's. A site's download and a deployment's share the columns, so they
+// open in the same spreadsheet.
+func (s *Server) exportRequests(w http.ResponseWriter, r *http.Request, route, stem string) error {
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
 	filter := requestFilterFrom(r.URL.Query())
-	name := deploy.RouteNameFor(environmentID)
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q",
-		fmt.Sprintf("requests-%d-%s.csv", environmentID, time.Now().UTC().Format("20060102-150405"))))
+		fmt.Sprintf("%s-%s.csv", stem, time.Now().UTC().Format("20060102-150405"))))
 	writer := csv.NewWriter(w)
 	_ = writer.Write([]string{"time", "method", "path", "query", "status", "durationMs", "size", "client", "host", "proto", "tls", "userAgent", "referer"})
-	_, err = s.modules.requests.Export(ctx, name, filter, 0, func(e accesslog.Entry) {
+	_, err := s.modules.requests.Export(ctx, route, filter, 0, func(e accesslog.Entry) {
 		duration := ""
 		if ms, ok := e.Duration(); ok {
 			duration = strconv.FormatFloat(ms, 'f', 3, 64)

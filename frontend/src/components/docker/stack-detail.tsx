@@ -24,10 +24,9 @@ import type { ComposeService, ComposeValidation, StackDetail } from "@/lib/types
 import { stackSource } from "@/lib/log-sources"
 import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { PortLink } from "@/components/docker/shared"
-import { ContainerEvents } from "@/components/docker/container-events"
+import { containerEventsView } from "@/components/docker/container-events"
 import { RunConsole, useRunConsole } from "@/components/docker/run-console"
 import { ContainerMenu, type ContainerVerb } from "@/components/docker/container-actions"
 import { Hint, Term } from "@/components/docker/explain"
@@ -38,11 +37,7 @@ import {
   type ComposeActionKey,
 } from "@/components/docker/stack-state"
 import { CodeEditor } from "@/components/code-editor"
-import {
-  ServiceLogs,
-  type ServiceLogSource,
-  type ServiceLogsView,
-} from "@/components/logs/service-logs"
+import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Metric, MetricStrip, Page, PageContext } from "@/components/page"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
@@ -703,25 +698,13 @@ function StackLogs({ stack }: { stack: StackDetail }) {
     ],
     [stack.name, running, images],
   )
-  const views = useMemo<ServiceLogsView[]>(
-    () => [
-      {
-        id: "events",
-        label: "Events",
-        render: (ctx) => <ContainerEvents stack={stack.name} ctx={ctx} />,
-      },
-    ],
-    [stack.name],
-  )
-  // On a phone the figures would push the pane off the screen; the quick
-  // views carry their counts on their chips there.
-  const wide = useMediaQuery("(min-width: 640px)")
+  const views = useMemo(() => [containerEventsView({ stack: stack.name })], [stack.name])
   return (
     <ServiceLogs
       sources={sources}
       storageKey={`docker.stack.${stack.name}.logs`}
       views={views}
-      readings={wide}
+      readings
       className="h-full min-h-0"
       paneClassName="min-h-[30rem]"
     />

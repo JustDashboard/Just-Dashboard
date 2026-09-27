@@ -21,7 +21,7 @@ import type { DbConnection, DbHistoryEntry, DbQueryEntry, DbQueryLog } from "@/l
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
-import type { ServiceLogsContext } from "@/components/logs/service-logs"
+import type { ServiceLogsContext, ServiceLogsView } from "@/components/logs/service-logs"
 import { laneStyle } from "@/components/logs/log-text"
 import { Address } from "@/components/deploy/request-marks"
 import { FactDot } from "@/components/metrics/host-identity"
@@ -57,6 +57,21 @@ const NOT_SQL = new Set(["redis", "mongodb"])
 const TOP_STATEMENTS = new Set(["postgres", "mysql"])
 
 type Reading = QueryOrder | "top"
+
+/**
+ * The Queries view — Commands on Redis — of a saved connection's server log,
+ * wherever that log is read: the database's page and `/logs`.
+ */
+export function databaseQueriesView(
+  conn: DbConnection,
+  onQuery?: (sql: string) => void,
+): ServiceLogsView {
+  return {
+    id: "queries",
+    label: queryNoun(conn.driver).view,
+    render: (ctx) => <DatabaseQueries conn={conn} ctx={ctx} onQuery={onQuery} />,
+  }
+}
 
 /**
  * A database's queries, the way the deployment page reads its requests.

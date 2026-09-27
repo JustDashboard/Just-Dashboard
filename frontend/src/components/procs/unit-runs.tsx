@@ -25,7 +25,7 @@ import {
 import { usePoll } from "@/hooks/use-poll"
 import { useNow } from "@/components/deploy/vocabulary"
 import { IconAction } from "@/components/icon-action"
-import type { ServiceLogsContext } from "@/components/logs/service-logs"
+import type { ServiceLogsContext, ServiceLogsView } from "@/components/logs/service-logs"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status, type DotTone } from "@/components/status-dot"
 
@@ -70,6 +70,15 @@ const RESULT: Record<string, string> = {
   resources: "resources unavailable",
   protocol: "protocol violation",
   "exec-condition": "condition failed",
+}
+
+/**
+ * The Runs view, as every page that reads a unit's journal offers it — the
+ * unit's sheet, a timer's row and `/logs` — so the view is one definition
+ * rather than one per page.
+ */
+export function unitRunsView(unit: string): ServiceLogsView {
+  return { id: "runs", label: "Runs", render: (ctx) => <UnitRuns unit={unit} ctx={ctx} /> }
 }
 
 /**
