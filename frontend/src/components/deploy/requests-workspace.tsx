@@ -105,7 +105,9 @@ export type RequestsView = "requests" | "insights"
  * each with its own mark and its own way back.
  */
 export function RequestsWorkspace({
-  projectId,
+  base,
+  subject,
+  emptyTitle = "No request record for this deployment",
   view,
   query,
   onQueryChange,
@@ -115,7 +117,15 @@ export function RequestsWorkspace({
   outputHref,
   onEventsAround,
 }: {
-  projectId: number
+  /**
+   * Where this record lives on the API — `/deploy/12` or `/proxy/sites/shop` —
+   * so a deployment's requests and a site's are one workspace over two routes.
+   */
+  base: string
+  /** What the record belongs to, in the audit comment of a block. */
+  subject: string
+  /** The empty state's title, which names what has no record. */
+  emptyTitle?: string
   view: RequestsView
   query: RequestQuery
   onQueryChange: (next: RequestQuery) => void
@@ -140,9 +150,9 @@ export function RequestsWorkspace({
   // is cheap — the server answers from what it holds and reads only what the
   // proxy appended since it last looked.
   const window = usePoll<DeploymentRequests>(
-    (signal) => get<DeploymentRequests>(`/deploy/${projectId}/requests`, params, signal),
+    (signal) => get<DeploymentRequests>(`${base}/requests`, params, signal),
     live ? 0 : 10000,
-    [projectId, JSON.stringify(params)],
+    [base, JSON.stringify(params)],
   )
   const data = window.data
 
@@ -150,7 +160,7 @@ export function RequestsWorkspace({
   // than a timestamp, because two requests can share a second and the window
   // may hold one of them; a socket that started "after the newest time" would
   // send the other again, or never.
-  const tail = useLiveRequests(projectId, live ? params : null, data?.coverage.cursor)
+  const tail = useLiveRequests(base, live ? params : null, data?.coverage.cursor)
 
   const onReset = useCallback(
     () => onQueryChange({ ...query, range: "1h", since: undefined, until: undefined }),
@@ -160,7 +170,7 @@ export function RequestsWorkspace({
   const block = async (ip: string) => {
     setBlocking(ip)
     try {
-      await blockAddress(ip, `blocked from deployment ${projectId} requests`)
+      await blockAddress(ip, `blocked from ${subject} requests`)
       notify.success(`${ip} blocked`, {
         description:
           "A deny rule now sits in front of every allow. Unlike a ban, it does not expire.",
@@ -173,7 +183,7 @@ export function RequestsWorkspace({
   }
   const onBlock = can("system.admin") ? (ip: string) => void block(ip) : undefined
 
-  const exportHref = `${API_BASE}/deploy/${projectId}/requests/export?${new URLSearchParams(
+  const exportHref = `${API_BASE}${base}/requests/export?${new URLSearchParams(
     Object.entries(params)
       .filter(([, v]) => v !== undefined)
       .map(([k, v]) => [k, String(v)]),
@@ -195,7 +205,7 @@ export function RequestsWorkspace({
     const next =
       routed === false ? (
         <Button size="sm" variant="outline" asChild>
-          <Link href={`/deploy/${projectId}/settings/domains`}>Add a domain</Link>
+          <Link href={`${base}/settings/domains`}>Add a domain</Link>
         </Button>
       ) : !data.driver ? (
         <Button size="sm" variant="outline" asChild>
@@ -206,7 +216,7 @@ export function RequestsWorkspace({
       <div className="flex min-h-0 flex-1 items-center justify-center p-6">
         <EmptyState
           icon={Globe}
-          title="No request record for this deployment"
+          title={emptyTitle}
           description={
             data.reason ??
             "Nothing records the requests this deployment serves. A deployment gets one once it has a public route."
@@ -384,7 +394,7 @@ function requestParams(query: RequestQuery) {
  * between reading a busy deployment and choosing between reading and keeping.
  */
 function useLiveRequests(
-  projectId: number,
+  base: string,
   params: Record<string, unknown> | null,
   after: number | undefined,
 ) {
@@ -427,7 +437,7 @@ function useLiveRequests(
     setEntries((prev) => cap([...incoming, ...prev]))
   }, [])
 
-  const { state } = useSocket(`/deploy/${projectId}/requests/stream`, {
+  const { state } = useSocket(`${base}/requests/stream`, {
     onMessage,
     query,
     enabled: Boolean(params),

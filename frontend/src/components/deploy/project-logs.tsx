@@ -299,7 +299,8 @@ export function ProjectLogs() {
 
         {view !== "events" && (
           <RequestsWorkspace
-            projectId={project.projectId}
+            base={`/deploy/${project.projectId}`}
+            subject={`deployment ${project.projectId}`}
             view={view}
             query={query}
             onQueryChange={setQuery}
