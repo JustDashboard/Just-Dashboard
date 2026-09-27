@@ -1069,6 +1069,7 @@ const showcaseTraffic: Record<string, TrafficPulse> = Object.fromEntries(
 )
 
 const API_CONTAINER = "c0ffee".padEnd(64, "1")
+export const INGRESS_CONTAINER = "cadd1e".padEnd(64, "3")
 const DB_CONTAINER = "d00d1e".padEnd(64, "2")
 
 /** Project 7's live release: the app and the database beside it. */
@@ -3399,6 +3400,8 @@ function deploymentRequests(url: URL) {
     driver: "docker-caddy",
     format: "caddy-json",
     latency: true,
+    // The Caddy ingress, whose own output says why it answered a 502.
+    ingress: INGRESS_CONTAINER,
     complete: true,
     observedAt: now,
     entries: entries.slice(0, Math.max(limit, 1)),

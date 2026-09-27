@@ -2,12 +2,23 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { Cross, Download, FileText, Globe, MagnifyingGlass, Stopwatch } from "@/components/icons"
+import {
+  Bug,
+  ChevronDown,
+  Cross,
+  DesktopDevice,
+  Download,
+  FileText,
+  Globe,
+  MagnifyingGlass,
+  Stopwatch,
+  Terminal,
+} from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { API_BASE, get } from "@/lib/api"
 import { minuteSpan, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import { networkOf } from "@/lib/clients"
+import { agentProduct, networkOf, refererProduct } from "@/lib/clients"
 import type { DeploymentRequests, RequestEntry, TrafficAlert } from "@/lib/types"
 import {
   CLASS_DOT,
@@ -17,7 +28,6 @@ import {
   STATUS_CLASSES,
   latency,
   latencyTone,
-  resolveRequestRange,
   statusClass,
   type RequestRange,
   type StatusClass,
@@ -36,6 +46,7 @@ import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
+  InputGroupText,
   InputGroupToggle,
 } from "@/components/ui/input-group"
 import {
@@ -46,45 +57,29 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Field } from "@/components/form"
 import { blockAddress } from "@/components/security/address-verbs"
 import { RequestChart, type ChartMarker } from "@/components/deploy/request-chart"
 import { RequestConsole } from "@/components/deploy/request-console"
 import { Address, LiveDot, socketReading } from "@/components/deploy/request-marks"
 import { TrafficFacets } from "@/components/deploy/traffic-facets"
+import {
+  isNarrowed,
+  requestNarrowing,
+  requestParams,
+  type RequestQuery,
+} from "@/components/deploy/logs-model"
+
+export { EMPTY_REQUEST_QUERY, type RequestQuery } from "@/components/deploy/logs-model"
 
 /** How many live rows the pane holds before the oldest fall off the bottom. */
 const LIVE_BUFFER = 2000
 
-export type RequestQuery = {
-  range: RequestRange
-  since?: string
-  until?: string
-  path: string
-  client: string
-  /** One of the deployment's hostnames, from the Domains list. */
-  host: string
-  /** Exact codes, from the Status codes list — "every 404", not "every 4xx". */
-  statuses: number[]
-  /** At least this slow, from a mark on the response-time ladder. */
-  minMs?: number
-  classes: StatusClass[]
-  methods: string[]
-  /** Page views only: no prefetches, scripts, icons, probes. */
-  pages: boolean
-}
-
-export const EMPTY_REQUEST_QUERY: RequestQuery = {
-  range: "1h",
-  path: "",
-  client: "",
-  host: "",
-  statuses: [],
-  classes: [],
-  methods: [],
-  pages: false,
-}
-
 export type RequestsView = "requests" | "insights"
+
+/** A window's answer, with the question it answered — what an export of it asks again. */
+type Answer = { window: DeploymentRequests; asked: ReturnType<typeof requestParams> }
 
 /**
  * The traffic a deployment served, as one pane with two readings of it.
@@ -114,8 +109,10 @@ export function RequestsWorkspace({
   markers,
   alerts,
   routed,
-  outputHref,
   onEventsAround,
+  onOutputAround,
+  renderInline,
+  afterInsights,
 }: {
   /**
    * Where this record lives on the API — `/deploy/12` or `/proxy/sites/shop` —
@@ -135,32 +132,47 @@ export function RequestsWorkspace({
   alerts?: TrafficAlert[]
   /** Whether any domain routes here; undefined while that is not yet known. */
   routed?: boolean
-  outputHref?: (entry: RequestEntry) => string | undefined
   onEventsAround?: (entry: RequestEntry) => void
+  /** The page's Output view opened on the container's lines around this request. */
+  onOutputAround?: (entry: RequestEntry) => void
+  /**
+   * What the page draws inside an opened request, under its verbs: the lines
+   * its container and its proxy wrote while it was in flight.
+   */
+  renderInline?: (entry: RequestEntry, window: DeploymentRequests) => React.ReactNode
+  /** A section the page adds at the end of Insights, over the same window. */
+  afterInsights?: (window: { since?: string; until?: string }) => React.ReactNode
 }) {
   const { can } = useAuth()
   const [live, setLive] = useState(false)
   const [blocking, setBlocking] = useState<string | null>(null)
-  const params = useMemo(() => requestParams(query), [query])
+  const narrowing = useMemo(() => requestNarrowing(query), [query])
 
   // The window reloads on its own while nothing is streaming, so the readings
   // stay true without the reader pressing anything. With the live tail open it
   // stops: the socket is already the fresher answer, and a poll landing under
   // it would swap the rows out from beneath the one being read. Ten seconds
   // is cheap — the server answers from what it holds and reads only what the
-  // proxy appended since it last looked.
-  const window = usePoll<DeploymentRequests>(
-    (signal) => get<DeploymentRequests>(`${base}/requests`, params, signal),
+  // proxy appended since it last looked. A preset is resolved here, when each
+  // poll asks, so "the last hour" moves with the clock.
+  const poll = usePoll<Answer>(
+    async (signal) => {
+      const asked = requestParams(query, Date.now())
+      return { window: await get<DeploymentRequests>(`${base}/requests`, asked, signal), asked }
+    },
     live ? 0 : 10000,
-    [base, JSON.stringify(params)],
+    [base, JSON.stringify(query)],
   )
-  const data = window.data
+  const data = poll.data?.window
+  // The window's own words, for what is keyed on it: resolved against the
+  // clock it would change on every poll, and every poll is not a new window.
+  const windowKey = `${query.range}:${query.since ?? ""}:${query.until ?? ""}`
 
   // The tail picks up exactly where the window's rows end. A cursor rather
   // than a timestamp, because two requests can share a second and the window
   // may hold one of them; a socket that started "after the newest time" would
   // send the other again, or never.
-  const tail = useLiveRequests(base, live ? params : null, data?.coverage.cursor)
+  const tail = useLiveRequests(base, live ? narrowing : null, data?.coverage.cursor)
 
   const onReset = useCallback(
     () => onQueryChange({ ...query, range: "1h", since: undefined, until: undefined }),
@@ -183,16 +195,20 @@ export function RequestsWorkspace({
   }
   const onBlock = can("system.admin") ? (ip: string) => void block(ip) : undefined
 
-  const exportHref = `${API_BASE}${base}/requests/export?${new URLSearchParams(
-    Object.entries(params)
-      .filter(([, v]) => v !== undefined)
-      .map(([k, v]) => [k, String(v)]),
-  ).toString()}`
+  // The export asks again what the rows on screen answered, so the file is
+  // the window the reader is looking at rather than a newer one.
+  const exportHref = poll.data
+    ? `${API_BASE}${base}/requests/export?${new URLSearchParams(
+        Object.entries(poll.data.asked)
+          .filter(([, v]) => v !== undefined)
+          .map(([k, v]) => [k, String(v)]),
+      ).toString()}`
+    : undefined
 
-  if (window.error && !data) {
+  if (poll.error && !data) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center p-6">
-        <ErrorState error={window.error} onRetry={window.refresh} />
+        <ErrorState error={poll.error} onRetry={poll.refresh} />
       </div>
     )
   }
@@ -232,6 +248,7 @@ export function RequestsWorkspace({
       query={query}
       onQueryChange={onQueryChange}
       methods={data?.summary.methods.map((facet) => facet.value) ?? []}
+      latencyKnown={data?.latency ?? false}
       live={live}
       liveState={tail.state}
       onLiveChange={setLive}
@@ -256,15 +273,7 @@ export function RequestsWorkspace({
   const rows = live ? mergeLive(tail.entries, data.entries, data.coverage.cursor) : data.entries
   const counts = data.summary.classes
   const threshold = alertLine(alerts)
-  const narrowed =
-    query.path !== "" ||
-    query.client !== "" ||
-    query.host !== "" ||
-    query.statuses.length > 0 ||
-    query.minMs !== undefined ||
-    query.classes.length > 0 ||
-    query.methods.length > 0 ||
-    query.pages
+  const narrowed = isNarrowed(query)
 
   return (
     <>
@@ -272,7 +281,7 @@ export function RequestsWorkspace({
 
       {data.summary.buckets.length > 0 && (
         <RequestChart
-          key={`chart:${params.since}`}
+          key={`chart:${windowKey}`}
           buckets={data.summary.buckets}
           bucketSeconds={data.summary.bucketSeconds}
           latencyKnown={data.latency}
@@ -295,7 +304,7 @@ export function RequestsWorkspace({
       )}
 
       {view === "insights" ? (
-        <div key={`insights:${params.since}`} className="min-h-0 flex-1 animate-rise overflow-auto">
+        <div key={`insights:${windowKey}`} className="min-h-0 flex-1 animate-rise overflow-auto">
           <TrafficFacets
             summary={data.summary}
             slowest={data.slowest}
@@ -304,11 +313,15 @@ export function RequestsWorkspace({
             onFilterPath={(path) => onQueryChange({ ...query, path })}
             onFilterClient={(client) => onQueryChange({ ...query, client })}
             onFilterHost={(host) => onQueryChange({ ...query, host })}
+            onFilterAgent={(agent) => onQueryChange({ ...query, agent })}
+            onFilterReferer={(referer) => onQueryChange({ ...query, referer })}
             onFilterStatus={(code) => onQueryChange({ ...query, statuses: [code] })}
             onFilterSlow={(ms) => onQueryChange({ ...query, minMs: Math.floor(ms) })}
             onBlock={onBlock}
             blocking={blocking}
           />
+          {poll.data &&
+            afterInsights?.({ since: poll.data.asked.since, until: poll.data.asked.until })}
           <WindowNotes data={data} className="border-t border-hairline px-3 py-2" />
         </div>
       ) : (
@@ -323,8 +336,9 @@ export function RequestsWorkspace({
           onFilterClient={(client) => onQueryChange({ ...query, client })}
           onBlock={onBlock}
           blocking={blocking}
-          outputHref={outputHref}
           onEventsAround={onEventsAround}
+          onOutputAround={onOutputAround}
+          renderInline={renderInline && ((entry) => renderInline(entry, data))}
           leading={
             <ClassChips
               selected={query.classes}
@@ -369,24 +383,6 @@ function alertLine(alerts: TrafficAlert[] | undefined) {
   return lines.length > 0 ? Math.min(...lines) : undefined
 }
 
-/** The query the API takes, built once so the poll, the socket and the export agree. */
-function requestParams(query: RequestQuery) {
-  const since = query.range === "custom" ? query.since : resolveRequestRange(query.range)
-  return {
-    since,
-    until: query.range === "custom" ? query.until : undefined,
-    path: query.path || undefined,
-    client: query.client || undefined,
-    host: query.host || undefined,
-    status: query.statuses.length ? query.statuses.join(",") : undefined,
-    minMs: query.minMs,
-    classes: query.classes.length ? query.classes.join(",") : undefined,
-    methods: query.methods.length ? query.methods.join(",") : undefined,
-    pages: query.pages ? "true" : undefined,
-    limit: 500,
-  }
-}
-
 /**
  * The live tail.
  *
@@ -411,8 +407,6 @@ function useLiveRequests(
       params
         ? {
             ...params,
-            since: undefined,
-            until: undefined,
             after: after === undefined ? undefined : String(after),
           }
         : {},
@@ -531,6 +525,7 @@ function RequestFilterBar({
   query,
   onQueryChange,
   methods,
+  latencyKnown,
   live,
   liveState,
   onLiveChange,
@@ -539,13 +534,20 @@ function RequestFilterBar({
   query: RequestQuery
   onQueryChange: (next: RequestQuery) => void
   methods: string[]
+  /** The record carries durations, so a band of them can be asked for. */
+  latencyKnown: boolean
   live: boolean
   liveState: SocketState
   onLiveChange: (live: boolean) => void
-  exportHref: string
+  /** Absent until the window has answered: an export repeats that answer's question. */
+  exportHref?: string
 }) {
   const network = query.client ? networkOf(query.client) : undefined
   const Place = network ? NETWORK_GLYPH[network.kind] : undefined
+  const agent = query.agent ? agentProduct(query.agent) : undefined
+  const AgentGlyph =
+    agent?.kind === "bot" ? Bug : agent?.kind === "program" ? Terminal : DesktopDevice
+  const site = query.referer ? refererProduct(query.referer) : undefined
   const chips = [
     query.client && (
       <FilterChip
@@ -591,6 +593,40 @@ function RequestFilterBar({
         <Cross aria-hidden className="size-3 text-muted-foreground" />
       </FilterChip>
     )),
+    query.agent && (
+      <FilterChip
+        key="agent"
+        selected
+        aria-label="Clear the agent filter"
+        title={`Only requests from ${query.agent} — press to clear`}
+        onClick={() => onQueryChange({ ...query, agent: "" })}
+      >
+        {agent?.product ? (
+          <ProductGlyph id={agent.product} className="size-3" />
+        ) : (
+          <AgentGlyph aria-hidden className="size-3 text-muted-foreground" />
+        )}
+        <span>{query.agent}</span>
+        <Cross aria-hidden className="size-3 text-muted-foreground" />
+      </FilterChip>
+    ),
+    query.referer && (
+      <FilterChip
+        key="referer"
+        selected
+        aria-label="Clear the referer filter"
+        title={`Only visitors who came from ${query.referer} — press to clear`}
+        onClick={() => onQueryChange({ ...query, referer: "" })}
+      >
+        {site ? (
+          <ProductGlyph id={site} className="size-3" />
+        ) : (
+          <Globe aria-hidden className="size-3 text-muted-foreground" />
+        )}
+        <span>from {query.referer}</span>
+        <Cross aria-hidden className="size-3 text-muted-foreground" />
+      </FilterChip>
+    ),
     query.minMs !== undefined && (
       <FilterChip
         key="slow"
@@ -603,6 +639,19 @@ function RequestFilterBar({
         <span className={cn("numeric", latencyTone(query.minMs) === "warning" && "text-warning")}>
           slower than {latency(query.minMs)}
         </span>
+        <Cross aria-hidden className="size-3 text-muted-foreground" />
+      </FilterChip>
+    ),
+    query.maxMs !== undefined && (
+      <FilterChip
+        key="fast"
+        selected
+        aria-label="Clear the fast filter"
+        title="Only requests at most this slow — press to clear"
+        onClick={() => onQueryChange({ ...query, maxMs: undefined })}
+      >
+        <Stopwatch aria-hidden className="size-3 text-muted-foreground" />
+        <span className="numeric">faster than {latency(query.maxMs)}</span>
         <Cross aria-hidden className="size-3 text-muted-foreground" />
       </FilterChip>
     ),
@@ -706,6 +755,8 @@ function RequestFilterBar({
             tail is open, sits still in amber while it connects, goes grey when
             the socket drops — the footer's words, in the same tones — and is
             not drawn at all while Live is off. */}
+        {latencyKnown && <TookFilter query={query} onQueryChange={onQueryChange} />}
+
         <FilterChip
           selected={live}
           onClick={() => onLiveChange(!live)}
@@ -716,24 +767,144 @@ function RequestFilterBar({
           Live
         </FilterChip>
 
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 shrink-0 px-2 text-xs max-sm:h-10 max-sm:px-3"
-          asChild
-        >
-          <a
-            href={exportHref}
-            download
+        {exportHref ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 shrink-0 px-2 text-xs max-sm:h-10 max-sm:px-3"
+            asChild
+          >
+            <a
+              href={exportHref}
+              download
+              aria-label="Export"
+              title="Download this window as CSV — every matching request, not only the rows shown"
+            >
+              <Download className="size-3.5" />
+              <span className="max-sm:hidden">Export</span>
+            </a>
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled
             aria-label="Export"
-            title="Download this window as CSV — every matching request, not only the rows shown"
+            className="h-7 shrink-0 px-2 text-xs max-sm:h-10 max-sm:px-3"
           >
             <Download className="size-3.5" />
             <span className="max-sm:hidden">Export</span>
-          </a>
-        </Button>
+          </Button>
+        )}
       </div>
     </div>
+  )
+}
+
+/**
+ * A band of response times: at least this slow, at most that. The ladder on
+ * Insights sets the floor with a press on a mark; this is where a ceiling is
+ * typed — "the requests between 200ms and a second", the middle a p95 hides —
+ * and both ends are the chips beside the path that clear them.
+ */
+function TookFilter({
+  query,
+  onQueryChange,
+}: {
+  query: RequestQuery
+  onQueryChange: (next: RequestQuery) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [min, setMin] = useState("")
+  const [max, setMax] = useState("")
+  const banded = query.minMs !== undefined || query.maxMs !== undefined
+  const read = (raw: string) => {
+    const value = Number(raw)
+    return raw.trim() !== "" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined
+  }
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        if (next) {
+          setMin(query.minMs === undefined ? "" : String(query.minMs))
+          setMax(query.maxMs === undefined ? "" : String(query.maxMs))
+        }
+        setOpen(next)
+      }}
+    >
+      <PopoverTrigger asChild>
+        <FilterChip
+          selected={banded}
+          aria-label="Response time"
+          title="Only requests that took between two durations"
+          className="shrink-0 max-sm:h-10"
+        >
+          <Stopwatch aria-hidden className="size-3" />
+          <span className="max-sm:hidden">Took</span>
+          <ChevronDown aria-hidden className="size-3 text-muted-foreground" />
+        </FilterChip>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-64 p-3">
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={(event) => {
+            event.preventDefault()
+            onQueryChange({ ...query, minMs: read(min), maxMs: read(max) })
+            setOpen(false)
+          }}
+        >
+          <Field label="At least" htmlFor="took-min">
+            <InputGroup>
+              <InputGroupInput
+                id="took-min"
+                inputMode="numeric"
+                value={min}
+                onChange={(event) => setMin(event.target.value)}
+                placeholder="any"
+                className="numeric"
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupText>ms</InputGroupText>
+              </InputGroupAddon>
+            </InputGroup>
+          </Field>
+          <Field label="At most" htmlFor="took-max">
+            <InputGroup>
+              <InputGroupInput
+                id="took-max"
+                inputMode="numeric"
+                value={max}
+                onChange={(event) => setMax(event.target.value)}
+                placeholder="any"
+                className="numeric"
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupText>ms</InputGroupText>
+              </InputGroupAddon>
+            </InputGroup>
+          </Field>
+          <div className="flex justify-end gap-2">
+            {banded && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  onQueryChange({ ...query, minMs: undefined, maxMs: undefined })
+                  setOpen(false)
+                }}
+              >
+                Clear
+              </Button>
+            )}
+            <Button type="submit" size="sm">
+              Apply
+            </Button>
+          </div>
+        </form>
+      </PopoverContent>
+    </Popover>
   )
 }
 

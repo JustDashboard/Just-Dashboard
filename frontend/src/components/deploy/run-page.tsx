@@ -28,11 +28,9 @@ import type {
   DeploymentEngineRun,
   DeploymentOperations,
   DeploymentRelease,
-  DeploymentRunEvent,
   DeploymentRunSettingsDrift,
   DeploymentRunSnapshot,
   DeploymentRunsPage,
-  DeploymentStepState,
   DeploymentSummary,
 } from "@/lib/types"
 import type { ProjectDetail } from "@/components/deploy/project-context"
@@ -81,6 +79,13 @@ import {
 import { ReleasePipeline } from "@/components/deploy/run-pipeline"
 import { RunSteps } from "@/components/deploy/run-steps"
 import { RunLogs } from "@/components/deploy/run-logs"
+import {
+  applyEvent,
+  dedupeEvents,
+  isRunEvent,
+  isSnapshot,
+  logEvent,
+} from "@/components/deploy/run-stream"
 import { useProjectNavScope } from "@/components/deploy/project-shell"
 import { RunMetrics } from "@/components/deploy/run-metrics"
 import { RunActorMark } from "@/components/deploy/run-marks"
@@ -1044,100 +1049,4 @@ function Fact({ className, children }: { className?: string; children: React.Rea
 
 function numberOf(value: unknown) {
   return typeof value === "number" && value > 0 ? value : undefined
-}
-
-function applyEvent(
-  snapshot: DeploymentRunSnapshot | undefined,
-  event: DeploymentRunEvent,
-): DeploymentRunSnapshot | undefined {
-  if (!snapshot || event.type === "resync") return snapshot
-  if (event.type === "run.state" && typeof event.data.state === "string") {
-    return {
-      ...snapshot,
-      run: {
-        ...snapshot.run,
-        state: event.data.state as DeploymentEngineRun["state"],
-        terminalCode:
-          typeof event.data.code === "string" ? event.data.code : snapshot.run.terminalCode,
-        terminalReason:
-          typeof event.data.reason === "string" ? event.data.reason : snapshot.run.terminalReason,
-      },
-    }
-  }
-  if (event.type !== "step.state") return snapshot
-  const key = typeof event.data.key === "string" ? event.data.key : ""
-  const attempt = typeof event.data.attempt === "number" ? event.data.attempt : 1
-  const state =
-    typeof event.data.state === "string" ? (event.data.state as DeploymentStepState) : undefined
-  if (!state) return snapshot
-  let found = false
-  const steps = snapshot.steps.map((step) => {
-    if (step.id !== event.stepId) return step
-    found = true
-    return {
-      ...step,
-      state,
-      attempt,
-      evidence: isRecord(event.data.evidence) ? event.data.evidence : step.evidence,
-      errorCode: typeof event.data.errorCode === "string" ? event.data.errorCode : step.errorCode,
-      errorMessage:
-        typeof event.data.errorMessage === "string" ? event.data.errorMessage : step.errorMessage,
-      lastSeq: event.seq,
-    }
-  })
-  if (!found && key) {
-    const previous = [...snapshot.steps].reverse().find((step) => step.key === key)
-    steps.push({
-      ...(previous ?? {
-        id: event.stepId ?? event.seq,
-        runId: event.runId,
-        key,
-        ordinal: snapshot.steps.length,
-        timeoutSeconds: 0,
-        evidence: {},
-      }),
-      id: event.stepId ?? event.seq,
-      state,
-      attempt,
-      errorCode: typeof event.data.errorCode === "string" ? event.data.errorCode : undefined,
-      errorMessage:
-        typeof event.data.errorMessage === "string" ? event.data.errorMessage : undefined,
-      lastSeq: event.seq,
-    })
-  }
-  return { ...snapshot, steps }
-}
-
-function logEvent(event: DeploymentRunEvent): BuildLogEvent[] {
-  if (event.type !== "step.log" || typeof event.data.text !== "string") return []
-  return [
-    {
-      seq: event.seq,
-      stepId: event.stepId ?? 0,
-      ts: event.ts,
-      stream: typeof event.data.stream === "string" ? event.data.stream : "stdout",
-      text: event.data.text,
-      truncated: event.data.truncated === true,
-    },
-  ]
-}
-
-function dedupeEvents(events: BuildLogEvent[]) {
-  const bySequence = new Map<number, BuildLogEvent>()
-  for (const event of events) bySequence.set(event.seq, event)
-  return [...bySequence.values()].sort((a, b) => a.seq - b.seq)
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
-function isSnapshot(value: unknown): value is DeploymentRunSnapshot {
-  if (!isRecord(value) || !isRecord(value.run) || !Array.isArray(value.steps)) return false
-  return typeof value.run.id === "number"
-}
-
-function isRunEvent(value: unknown): value is DeploymentRunEvent {
-  if (!isRecord(value) || !isRecord(value.data)) return false
-  return typeof value.seq === "number" && typeof value.type === "string"
 }

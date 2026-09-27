@@ -47,10 +47,11 @@ import {
  * ladder spans both, because it is the window's shape rather than one of its
  * lists.
  *
- * Every row that names a path, an address, a domain, a code or a latency
- * narrows the rows above to it on a click — through the API's own `path`,
- * `client`, `host`, `status` and `minMs` — so a spike on the chart, a failing
- * path here and the requests behind it are one motion rather than three.
+ * Every row that names a path, an address, a domain, an agent, a site, a code
+ * or a latency narrows the rows above to it on a click — through the API's
+ * own `path`, `client`, `host`, `agent`, `referer`, `status` and `minMs` — so
+ * a spike on the chart, a failing path here and the requests behind it are
+ * one motion rather than three.
  */
 export function TrafficFacets({
   summary,
@@ -60,6 +61,8 @@ export function TrafficFacets({
   onFilterPath,
   onFilterClient,
   onFilterHost,
+  onFilterAgent,
+  onFilterReferer,
   onFilterStatus,
   onFilterSlow,
   onBlock,
@@ -73,6 +76,10 @@ export function TrafficFacets({
   onFilterPath: (path: string) => void
   onFilterClient: (ip: string) => void
   onFilterHost: (host: string) => void
+  /** An agent family, as the Agents list names it. */
+  onFilterAgent: (agent: string) => void
+  /** A referring site, as Came from names it. */
+  onFilterReferer: (site: string) => void
   onFilterStatus: (code: number) => void
   onFilterSlow: (ms: number) => void
   /** Deny an address at the firewall. Absent for a role that may not. */
@@ -155,6 +162,8 @@ export function TrafficFacets({
                   label: r.value,
                   value: r.count.toLocaleString(),
                   share: r.count / peak(summary.referers),
+                  title: `Show every request that came from ${r.value}`,
+                  onClick: () => onFilterReferer(r.value),
                 }
               })}
               emptyLabel="No outside referers — direct visits and the site's own links."
@@ -311,6 +320,8 @@ export function TrafficFacets({
                   a.errors > 0 ? (
                     <span className="text-destructive">{a.errors} × 5xx</span>
                   ) : undefined,
+                title: a.value ? `Show every request from ${a.value}` : undefined,
+                onClick: a.value ? () => onFilterAgent(a.value) : undefined,
                 // The column's slot on every row, so the bars end on one line
                 // whether the row is a bot or not.
                 trailing: (

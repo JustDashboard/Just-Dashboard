@@ -1,17 +1,20 @@
 "use client"
 
-import { Fragment, useEffect, useState } from "react"
+import { Fragment, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { ArrowRight, Bell } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, plural, relativeTime } from "@/lib/format"
 import { agentProduct } from "@/lib/clients"
+import { dockerSource, stackSource } from "@/lib/log-sources"
+import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import type {
   DeploymentLifecycle,
   DeploymentRequests,
+  DeploymentRuntimeService,
   DockerEvent,
   NotificationChannel,
   RequestEntry,
@@ -31,14 +34,30 @@ import { Button } from "@/components/ui/button"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useProject } from "@/components/deploy/project-context"
-import {
-  EMPTY_REQUEST_QUERY,
-  RequestsWorkspace,
-  type RequestQuery,
-  type RequestsView,
-} from "@/components/deploy/requests-workspace"
+import { RequestsWorkspace } from "@/components/deploy/requests-workspace"
 import type { ChartMarker } from "@/components/deploy/request-chart"
 import { LifecycleFeed } from "@/components/deploy/lifecycle-feed"
+import { RequestLines } from "@/components/deploy/request-lines"
+import { ProjectOutput } from "@/components/deploy/project-output"
+import { OutputInsights } from "@/components/deploy/output-insights"
+import { ProjectBuilds } from "@/components/deploy/project-builds"
+import {
+  EMPTY_REQUEST_QUERY,
+  LOGS_VIEWS,
+  QUERY_PARAMS,
+  completeQuery,
+  containerAt,
+  defaultView,
+  liveStack,
+  orderedServices,
+  queryAround,
+  queryFromParams,
+  queryParams,
+  type Lead,
+  type LogsView,
+  type RequestQuery,
+} from "@/components/deploy/logs-model"
+import { serviceProduct } from "@/components/deploy/service-product"
 import { AddAlertSheet } from "@/components/deploy/add-alert-sheet"
 import { failingTone } from "@/components/deploy/fleet"
 import { ChannelNames, toldBy } from "@/components/deploy/settings/traffic-alerts"
@@ -49,8 +68,6 @@ import {
   isCleanExit,
   isTickEvent,
 } from "@/components/deploy/traffic-strip"
-
-type View = RequestsView | "events"
 
 /**
  * The container's own disruptions — what the Container reading counts and
@@ -67,28 +84,41 @@ function isDisruption(event: DockerEvent) {
 }
 
 /**
- * One deployment's traffic, read three ways.
+ * One deployment's logs, read five ways.
  *
  * This page used to be one thing: the live container's standard output. For a
  * modern framework that is a startup banner and then silence — a Next.js or
  * Rails production server prints nothing per request — so a healthy
  * deployment serving a thousand requests a minute showed thirty-nine lines,
- * ending at "Ready in 236ms", and never changed again. That pane is gone from
- * here. The container's lines are one press away from a failing request
- * ("output around this moment"), which is the only time anybody wanted them.
- *
- * What is here instead:
+ * ending at "Ready in 236ms", and never changed again. The request record
+ * took its place as the page's first reading; the output came back as a view
+ * of its own, beside it rather than instead of it, because a game server, a
+ * worker and a crashing release have nothing else to say.
  *
  *   **Requests** — every request the ingress answered, newest first, with the
  *   chart of them by status family and the moments that matter marked on it:
- *   a release going live, the container exiting or being restarted.
+ *   a release going live, the container exiting or being restarted. A
+ *   request opens in place on the container's lines while it was in flight,
+ *   and a failure on what the proxy said about it.
  *
  *   **Insights** — what the same window adds up to: how the response times
  *   spread, which page is failing, which client is trying doors, how much is
- *   bots, where visitors came from, which route the slow tenth belongs to.
+ *   bots, where visitors came from, which route the slow tenth belongs to —
+ *   and, at the end, the exceptions and failed starts the output holds over
+ *   the same window. One Insights on the page, not one per view.
  *
- *   **Events** — what Docker did to the container: exits with their codes,
- *   OOM kills, restart policies firing, health flips.
+ *   **Output** — what the containers wrote, per service or all of them, live
+ *   and back through history, read through each image's lens.
+ *
+ *   **Builds** — the recent runs and the chosen one's transcript.
+ *
+ *   **Events** — what Docker did to the container: exits with their codes and
+ *   last lines, OOM kills, crash loops folded into one row, health flips.
+ *
+ * The page opens on Requests where something routes to it, and on Output
+ * where nothing does. The address says which view, which moment and which
+ * service, and carries the request query, so a link pasted into a chat — an
+ * alert's among them — opens on the same question it was taken from.
  *
  * The readings above the pane come from all of it at once, because the first
  * thing a reader wants is not a view, it is whether anything is wrong. Each
@@ -113,36 +143,59 @@ export function ProjectLogs() {
   // anyone else — so the sheet is offered only to a role that can save it.
   const canAddAlert = can("system.admin")
   // Whether anything routes to this deployment, for what an empty request
-  // record asks the reader to do next. Unknown until operations are read.
+  // record asks the reader to do next and which view the page opens on.
+  // Unknown until operations are read.
   const routed =
     project.operations?.domains.status === "available"
       ? project.operations.domains.domains.length > 0
       : undefined
+  // The saved domains answer the same question before the served ones are
+  // read, so a deployment nobody routes to does not open on Requests first.
+  const planned = project.configuration ? project.configuration.domains.length > 0 : undefined
+  const fallback = defaultView(project.detail.deployment.profile, routed ?? planned)
 
-  const [view, setView] = useState<View>(() => {
-    const asked = search.get("view")
-    return asked === "insights" || asked === "events" ? asked : "requests"
-  })
-  const [query, setQuery] = useState<RequestQuery>(EMPTY_REQUEST_QUERY)
-  const [moment, setMoment] = useState<string | undefined>(() => {
-    const asked = search.get("moment")
-    return asked && Number.isFinite(Date.parse(asked)) ? asked : undefined
-  })
+  // What the address asked for, read once on arrival: afterwards the page
+  // writes it rather than reads it.
+  const [arrival] = useState(() => arrivalOf(search, Date.now()))
+  const [asked, setAsked] = useState<LogsView | undefined>(arrival.view)
+  const view = asked ?? fallback
+  const [moment, setMoment] = useState(arrival.moment)
+  const [service, setService] = useState(arrival.service)
+  // The request query is the tab's, and a link's when it carries one: a
+  // narrowing survives a reload and a trip to another view and back.
+  const [storedQuery, setQuery] = useSessionState<RequestQuery>(
+    `deploy.${project.projectId}.requests`,
+    EMPTY_REQUEST_QUERY,
+    arrival.query,
+  )
+  const query = useMemo(() => completeQuery(storedQuery), [storedQuery])
   const [adding, setAdding] = useState(false)
 
-  // The view and the instant it is scoped to are written back to the URL. A
-  // link to Events at the minute a deployment broke is the thing somebody
-  // pastes into a chat, and it was only ever readable on arrival: pressing the
-  // tab changed nothing in the address bar, so a reload landed back on
-  // Requests and the ±2 minutes around the failing request were gone.
+  // The view, the moment it is scoped to, the service and the request query
+  // are written back to the address. A link to Events at the minute a
+  // deployment broke is the thing somebody pastes into a chat, and it was
+  // only ever readable on arrival: pressing the tab changed nothing in the
+  // address bar, so a reload landed back on Requests and the ±2 minutes
+  // around the failing request were gone. Each word is written only where the
+  // view on screen reads it, so the page at rest is its bare address.
+  const queryWords = JSON.stringify(queryParams(query))
   useEffect(() => {
     const url = new URL(window.location.href)
-    if (view === "requests") url.searchParams.delete("view")
-    else url.searchParams.set("view", view)
-    if (moment) url.searchParams.set("moment", moment)
-    else url.searchParams.delete("moment")
+    const params = url.searchParams
+    if (view === fallback) params.delete("view")
+    else params.set("view", view)
+    if (moment && (view === "events" || view === "output")) params.set("moment", moment)
+    else params.delete("moment")
+    if (service && view === "output") params.set("service", service)
+    else params.delete("service")
+    for (const key of QUERY_PARAMS) params.delete(key)
+    if (view === "requests" || view === "insights") {
+      for (const [key, value] of JSON.parse(queryWords) as [string, string][]) {
+        params.set(key, value)
+      }
+    }
     window.history.replaceState(null, "", url)
-  }, [view, moment])
+  }, [view, fallback, moment, service, queryWords])
 
   // The readings are the page's own, not a view's: they hold still while the
   // reader moves between views, which is what lets the error rate be the
@@ -227,29 +280,41 @@ export function ProjectLogs() {
       })),
   ]
 
-  // The live container, for "output around this moment": the host Logs page
-  // opened on its lines for the minute either side of a request — the same
-  // handoff a run's own logs use, and the only time the container's output
-  // is what somebody wants.
-  const liveService =
-    runtime?.status === "available"
-      ? (runtime.services.find((service) => service.liveRelease) ?? runtime.services[0])
+  const services = runtime?.status === "available" ? runtime.services : []
+  const kind = project.detail.deployment.sourceKind
+  const primary = project.configuration?.build.primaryService
+  // The application among a release's containers: the service readiness
+  // follows, else the one drawn as the project itself rather than as a
+  // product of its own — the Next.js build, not the Postgres beside it.
+  const lead = useMemo<Lead>(
+    () => ({
+      primary,
+      own: (s) => serviceProduct(s.image, kind, project.product) === (project.product ?? "docker"),
+    }),
+    [primary, kind, project.product],
+  )
+  const stack = liveStack(services)
+  const live = orderedServices(
+    services.filter((s) => s.liveRelease),
+    lead,
+  )[0]
+  const containerOf = (id: string | undefined) =>
+    id
+      ? services.find((s) => s.containerId.startsWith(id) || id.startsWith(s.containerId))
       : undefined
-  const outputHref = liveService
-    ? (entry: RequestEntry) => {
-        const at = Date.parse(entry.time)
-        if (!Number.isFinite(at)) return undefined
-        const params = new URLSearchParams({
-          source: `docker:${liveService.containerId}`,
-          mode: "search",
-          since: new Date(at - 60_000).toISOString(),
-          until: new Date(at + 60_000).toISOString(),
-        })
-        return `/logs?${params.toString()}`
-      }
-    : undefined
+
+  // Output on one container's lines around a moment: the request it served,
+  // the exit it made, the exception it threw.
+  const openOutput = (container: DeploymentRuntimeService | undefined, at: string) => {
+    if (container) setService(container.containerId)
+    setMoment(at)
+    setAsked("output")
+  }
+  const answering = (entry: RequestEntry) =>
+    containerAt(services, project.releases, Date.parse(entry.time), lead)
 
   const disruptions = lifecycle.data?.recent.length ?? 0
+  const choose = (next: LogsView) => setAsked(next)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-6">
@@ -265,39 +330,38 @@ export function ProjectLogs() {
         onAdd={canAddAlert ? () => setAdding(true) : undefined}
       />
 
-      {/* A floor rather than a fill: the project shell's `Page` is a flowing
-          column, so a pane that only said `flex-1` sized itself to its rows and
-          left the rest of the viewport empty beneath it. A lower floor on a
-          phone, where four events left half the pane empty. */}
-      <Pane className="min-h-[28rem] flex-1 sm:min-h-[40rem]">
+      {/* A height of its own, the window's less the page's chrome: the
+          project shell's `Page` is a flowing column, so a pane that only said
+          `flex-1` sized itself to its rows — four events left it half empty,
+          and a live tail of four thousand lines made the page eighty thousand
+          pixels long with nothing to follow. Sized, it is the workspace §7
+          says a pane is, and each view scrolls inside it. A floor under it,
+          lower on a phone. */}
+      <Pane className={PANE_SIZE}>
         <div className="flex min-h-10 shrink-0 items-stretch border-b border-hairline pr-1 pl-2">
           <nav aria-label="Log view" className="flex min-w-0 flex-1 items-stretch overflow-x-auto">
-            <ViewTab active={view === "requests"} onClick={() => setView("requests")}>
-              Requests
-            </ViewTab>
-            <ViewTab active={view === "insights"} onClick={() => setView("insights")}>
-              Insights
-            </ViewTab>
-            <ViewTab active={view === "events"} onClick={() => setView("events")}>
-              Events
-              {/* The same number the Container reading counts, beside the
-                  word (§4). None on the other two: their window is the
-                  view's, not the page's hour, and a count that disagrees
-                  with the rows under it is worse than none. */}
-              {disruptions > 0 && (
-                <span
-                  aria-hidden
-                  title={`${plural(disruptions, "exit or restart", "exits or restarts")} in the last hour`}
-                  className="numeric text-hint text-warning"
-                >
-                  {disruptions}
-                </span>
-              )}
-            </ViewTab>
+            {LOGS_VIEWS.map((id) => (
+              <ViewTab key={id} active={view === id} onClick={() => choose(id)}>
+                {VIEW_LABEL[id]}
+                {/* The same number the Container reading counts, beside the
+                    word (§4). None on the others: their window is the view's,
+                    not the page's hour, and a count that disagrees with the
+                    rows under it is worse than none. */}
+                {id === "events" && disruptions > 0 && (
+                  <span
+                    aria-hidden
+                    title={`${plural(disruptions, "exit or restart", "exits or restarts")} in the last hour`}
+                    className="numeric text-hint text-warning"
+                  >
+                    {disruptions}
+                  </span>
+                )}
+              </ViewTab>
+            ))}
           </nav>
         </div>
 
-        {view !== "events" && (
+        {(view === "requests" || view === "insights") && (
           <RequestsWorkspace
             base={`/deploy/${project.projectId}`}
             subject={`deployment ${project.projectId}`}
@@ -307,11 +371,49 @@ export function ProjectLogs() {
             markers={markers}
             alerts={alerts.data?.alerts}
             routed={routed}
-            outputHref={outputHref}
             onEventsAround={(entry) => {
               setMoment(entry.time)
-              setView("events")
+              setAsked("events")
             }}
+            onOutputAround={
+              services.length > 0 ? (entry) => openOutput(answering(entry), entry.time) : undefined
+            }
+            renderInline={(entry, window) => (
+              <RequestLines entry={entry} window={window} container={answering(entry)} />
+            )}
+            afterInsights={
+              live
+                ? (window) => (
+                    <OutputInsights
+                      sourceId={stack ? stackSource(stack) : dockerSource(live.containerId)}
+                      label={stack ? "the live release's services" : live.name}
+                      window={window}
+                      onOpen={(at, container) => openOutput(containerOf(container) ?? live, at)}
+                    />
+                  )
+                : undefined
+            }
+          />
+        )}
+        {view === "output" && (
+          <ProjectOutput
+            projectId={project.projectId}
+            runtime={runtime}
+            kind={kind}
+            product={project.product}
+            lead={lead}
+            service={service}
+            onServiceChange={setService}
+            moment={moment}
+            onLeaveMoment={() => setMoment(undefined)}
+          />
+        )}
+        {view === "builds" && (
+          <ProjectBuilds
+            projectId={project.projectId}
+            runs={project.runs}
+            loading={project.runsLoading}
+            remote={project.detail.deployment.sourceRemote}
           />
         )}
         {view === "events" && (
@@ -320,6 +422,10 @@ export function ProjectLogs() {
             product={project.product}
             moment={moment}
             onClearMoment={() => setMoment(undefined)}
+            outputFor={(event) => {
+              const container = containerOf(event.id)
+              return container ? () => openOutput(container, event.time) : undefined
+            }}
           />
         )}
       </Pane>
@@ -336,6 +442,38 @@ export function ProjectLogs() {
       )}
     </div>
   )
+}
+
+const PANE_SIZE = "h-[max(28rem,calc(100dvh-6rem))] sm:h-[max(40rem,calc(100dvh-6rem))]"
+
+const VIEW_LABEL: Record<LogsView, string> = {
+  requests: "Requests",
+  insights: "Insights",
+  output: "Output",
+  builds: "Builds",
+  events: "Events",
+}
+
+/**
+ * What the address asked for. A service alone is a request for its output —
+ * the Runtime page's and the game console's "Logs" say only which container
+ * — and a moment on Requests is the hour around it (an alert's link), turned
+ * into the request query rather than kept as a moment.
+ */
+function arrivalOf(search: URLSearchParams, now: number) {
+  const named = search.get("view")
+  const service = search.get("service") || undefined
+  const view = LOGS_VIEWS.includes(named as LogsView)
+    ? (named as LogsView)
+    : service
+      ? "output"
+      : undefined
+  const rawMoment = search.get("moment")
+  const moment = rawMoment && Number.isFinite(Date.parse(rawMoment)) ? rawMoment : undefined
+  const onRequests = view === "requests" || view === "insights"
+  const query =
+    queryFromParams(search) ?? (onRequests && moment ? queryAround(moment, now) : undefined)
+  return { view, service, moment: onRequests ? undefined : moment, query }
 }
 
 /**
@@ -356,7 +494,7 @@ export function LogsSkeleton() {
         ))}
       </StatGrid>
       <Skeleton className="h-4 w-64" />
-      <Pane className="min-h-[28rem] flex-1 sm:min-h-[40rem]">
+      <Pane className={PANE_SIZE}>
         <div className="h-10 shrink-0 border-b border-hairline" />
         <LoadingRows rows={8} className="p-3" />
       </Pane>
