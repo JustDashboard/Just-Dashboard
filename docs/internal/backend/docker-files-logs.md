@@ -110,6 +110,34 @@ build argv explicitly.
   and slices the parameter out of the same string, so a handler receives the percent-escapes the browser
   sent. Every Docker route uses the decoding wrapper; `urlparam_test.go` pins it.
 
+### Container usage measurements
+
+`stats.go` retains the Engine's sample timestamp and raw counters. Memory working set subtracts
+`total_inactive_file` on cgroup v1 or `inactive_file` on v2, in Docker CLI precedence order; raw usage,
+excluded cache, anonymous memory and swap (when reported) are separate readings. CPU counts 100% per
+core and carries a readiness flag, quota, host core count and throttling counters. Streaming limits
+refresh every 15 seconds because Docker permits in-place resource updates.
+
+Network availability is determined by reported interfaces, never positive traffic. The stream carries
+each interface's bytes, packets, errors and drops; the Usage tab derives bytes/second and packets/second
+from successive Docker timestamps. First samples, resets, topology changes and reconnects establish a
+new baseline. Host networking has no isolated container traffic attribution; `container:` networking
+reports a shared namespace. These are interface totals including local/container/LAN traffic, not an
+internet billing meter. Block I/O is device traffic, not filesystem occupancy or cached application I/O.
+
+The definitions follow [Docker stats](https://docs.docker.com/reference/cli/docker/container/stats/),
+the [CLI calculations](https://github.com/docker/cli/blob/master/cli/command/container/stats_helpers.go),
+[runtime metrics](https://docs.docker.com/engine/containers/runmetrics/) and
+[resource constraints](https://docs.docker.com/engine/containers/resource_constraints/).
+`stats_test.go`, `metrics/container_usage_test.go`, the store migration test and
+`frontend/src/lib/container-usage.test.js` pin conversion, availability and rate boundaries. Browser
+coverage lives in `docker-ui.spec.ts`, including pause/reconnect, stale data, disabled retention,
+host networking, stopped containers and desktop/phone layouts.
+For read-only acceptance against a running container, run from `backend/`:
+`JD_DOCKER_STATS_CONTAINER=<id> go test ./internal/dockerx -run '^TestLiveContainerUsageStream$' -count=1 -v`.
+The test opens the existing stats stream, reconciles totals and memory, and checks cancellation;
+it creates or changes no containers.
+
 ## Files
 
 Copy and move pin configured roots with Go's `os.Root` while traversing entries. Copy resolves a

@@ -213,15 +213,16 @@ type ContainerPoint struct {
 
 	PIDs float64 `json:"pids"`
 
-	// Bytes per second, derived in SQL from the cumulative counters Docker
-	// reports. They are recorded as the raw totals rather than as rates
-	// because a total can be differenced later at any bucket width, whereas a
-	// rate recorded against one interval cannot be re-bucketed without
-	// pretending it was measured over the wider one.
-	NetRx      float64 `json:"netRx"`
-	NetTx      float64 `json:"netTx"`
-	BlockRead  float64 `json:"blockRead"`
-	BlockWrite float64 `json:"blockWrite"`
+	// Bytes per second, differenced before bucketing and weighted by elapsed
+	// time. Null means no valid interval, including first samples and resets.
+	NetRx          *float64 `json:"netRx"`
+	NetTx          *float64 `json:"netTx"`
+	BlockRead      *float64 `json:"blockRead"`
+	BlockWrite     *float64 `json:"blockWrite"`
+	NetRxPeak      *float64 `json:"netRxPeak"`
+	NetTxPeak      *float64 `json:"netTxPeak"`
+	BlockReadPeak  *float64 `json:"blockReadPeak"`
+	BlockWritePeak *float64 `json:"blockWritePeak"`
 }
 
 // ContainerSeries is a window of one container's history.
@@ -572,8 +573,9 @@ func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []do
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO metric_container_samples
 		  (ts, name, cpu_percent, mem_bytes, mem_limit, mem_percent, net_rx, net_tx, pids,
-		   block_read, block_write, container_id, size_rw)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+		   block_read, block_write, container_id, size_rw, network_available, block_available,
+		   mem_limited, cpu_total, sample_time)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(name, ts) DO UPDATE SET
 		  cpu_percent = excluded.cpu_percent,
 		  mem_bytes   = excluded.mem_bytes,
@@ -585,21 +587,31 @@ func (r *Recorder) writeContainers(ctx context.Context, at time.Time, stats []do
 		  block_read  = excluded.block_read,
 		  block_write = excluded.block_write,
 		  container_id = excluded.container_id,
-		  size_rw     = excluded.size_rw`)
+		  size_rw     = excluded.size_rw,
+		  network_available = excluded.network_available,
+		  block_available = excluded.block_available,
+		  mem_limited = excluded.mem_limited,
+		  cpu_total = excluded.cpu_total,
+		  sample_time = excluded.sample_time`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
-	ts := at.Unix()
 	for _, st := range stats {
 		if st.Name == "" {
 			continue // nothing to key the series on, and nothing to look it up by
 		}
-		if _, err := stmt.ExecContext(ctx, ts, st.Name, st.CPUPercent,
+		observed := at
+		if !st.TS.IsZero() {
+			observed = st.TS
+		}
+		if _, err := stmt.ExecContext(ctx, observed.Unix(), st.Name, st.CPUPercent,
 			int64(st.MemUsage), int64(st.MemLimit), st.MemPercent,
 			int64(st.NetRx), int64(st.NetTx), int64(st.PIDs),
-			int64(st.BlockRead), int64(st.BlockWrite), st.ID, st.SizeRw); err != nil {
+			int64(st.BlockRead), int64(st.BlockWrite), st.ID, st.SizeRw,
+			st.NetworkAvailable, st.BlockAvailable, st.MemLimited, int64(st.CPUTotal),
+			float64(observed.UnixNano())/1e9); err != nil {
 			return err
 		}
 	}
@@ -850,77 +862,6 @@ func (r *Recorder) window(ctx context.Context, from, to time.Time, maxPoints int
 	return w, nil
 }
 
-// ContainerRange is Range for one container, keyed by name so the series
-// survives the container being recreated under a new id.
-func (r *Recorder) ContainerRange(ctx context.Context, name string, from, to time.Time, maxPoints int) (*ContainerSeries, error) {
-	if to.Before(from) {
-		from, to = to, from
-	}
-	if maxPoints < 1 {
-		maxPoints = 1
-	}
-	window, err := r.window(ctx, from, to, maxPoints,
-		`SELECT MIN(ts) FROM metric_container_samples WHERE name = ?`, name)
-	if err != nil {
-		return nil, err
-	}
-	series := &ContainerSeries{Window: window, Name: name, Points: []ContainerPoint{}}
-
-	secs := int64(window.StepSeconds)
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT (ts / ?) * ?                          AS bucket,
-		       COUNT(*),
-		       AVG(cpu_percent), MAX(cpu_percent),
-		       AVG(mem_percent), MAX(mem_percent),
-		       AVG(mem_bytes),   MAX(mem_bytes),
-		       MAX(mem_limit),
-		       AVG(pids),
-		       MAX(net_rx) - MIN(net_rx), MAX(net_tx) - MIN(net_tx),
-		       MAX(block_read) - MIN(block_read), MAX(block_write) - MIN(block_write),
-		       MAX(size_rw)
-		  FROM metric_container_samples
-		 WHERE name = ? AND ts >= ? AND ts <= ?
-		 GROUP BY bucket
-		 ORDER BY bucket`,
-		secs, secs, name, from.Unix(), to.Unix())
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var bucket int64
-		var p ContainerPoint
-		var memBytes, memBytesPeak, memLimit float64
-		var rxSpan, txSpan, readSpan, writeSpan float64
-		var sizeRw float64
-		if err := rows.Scan(&bucket, &p.Samples,
-			&p.CPU, &p.CPUPeak,
-			&p.Mem, &p.MemPeak,
-			&memBytes, &memBytesPeak, &memLimit,
-			&p.PIDs,
-			&rxSpan, &txSpan, &readSpan, &writeSpan, &sizeRw); err != nil {
-			return nil, err
-		}
-		p.TS = time.Unix(bucket, 0).UTC()
-		p.MemBytes, p.MemBytesPeak, p.MemLimit = uint64(memBytes), uint64(memBytesPeak), uint64(memLimit)
-		p.SizeRw = uint64(sizeRw)
-		p.CPU, p.CPUPeak = round2(p.CPU), round2(p.CPUPeak)
-		p.Mem, p.MemPeak = round1(p.Mem), round1(p.MemPeak)
-		p.PIDs = round1(p.PIDs)
-		// The span within the bucket over the bucket's own width. A bucket
-		// holding a single sample has no span and reports zero, which is
-		// honest: one reading of a cumulative counter is not a rate.
-		p.NetRx, p.NetTx = spanRate(rxSpan, secs), spanRate(txSpan, secs)
-		p.BlockRead, p.BlockWrite = spanRate(readSpan, secs), spanRate(writeSpan, secs)
-		series.Points = append(series.Points, p)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return series, nil
-}
-
 // Sparkline is one container's recent shape, cheap enough to fetch for every
 // container at once.
 //
@@ -1062,19 +1003,6 @@ func round(p *Point) {
 	p.TCPConns, p.TCPConnsPeak = round1(p.TCPConns), round1(p.TCPConnsPeak)
 	p.TCPTimeWait = round1(p.TCPTimeWait)
 	p.Procs, p.ProcsPeak = round1(p.Procs), round1(p.ProcsPeak)
-}
-
-// spanRate turns the growth of a cumulative counter across one bucket into a
-// per-second rate.
-//
-// A negative span means the counter restarted — a container recreated under
-// the same name, which is precisely the case this series is keyed by name to
-// survive — and is reported as zero rather than as a negative throughput.
-func spanRate(span float64, seconds int64) float64 {
-	if span <= 0 || seconds <= 0 {
-		return 0
-	}
-	return round1(span / float64(seconds))
 }
 
 func maxf(a, b float64) float64 {

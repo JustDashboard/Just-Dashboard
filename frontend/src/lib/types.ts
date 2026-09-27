@@ -243,10 +243,14 @@ export type ContainerHistoryPoint = {
   memLimit: number
   pids: number
   /** Bytes per second, differenced from the cumulative counters Docker reports. */
-  netRx: number
-  netTx: number
-  blockRead: number
-  blockWrite: number
+  netRx: number | null
+  netTx: number | null
+  blockRead: number | null
+  blockWrite: number | null
+  netRxPeak?: number | null
+  netTxPeak?: number | null
+  blockReadPeak?: number | null
+  blockWritePeak?: number | null
 }
 
 export type ContainerHistory = {
@@ -519,7 +523,12 @@ export type ContainerStats = {
   name: string
   ts: string
   cpuPercent: number
+  cpuReady?: boolean
   memUsage: number
+  memRaw?: number
+  memCache?: number
+  memRss?: number | null
+  memSwap?: number | null
   memLimit: number
   memPercent: number
   netRx: number
@@ -538,6 +547,24 @@ export type ContainerStats = {
   /** Cumulative nanosecond totals. Only meaningful as a difference between two samples. */
   cpuTotal: number
   systemCpu: number
+  networks?: Record<string, ContainerNetworkCounters>
+  networkAvailable?: boolean
+  blockAvailable?: boolean
+  pidsLimit?: number
+  cpuPeriods?: number
+  cpuThrottledPeriods?: number
+  cpuThrottledTime?: number
+}
+
+export type ContainerNetworkCounters = {
+  rxBytes: number
+  txBytes: number
+  rxPackets: number
+  txPackets: number
+  rxErrors: number
+  txErrors: number
+  rxDropped: number
+  txDropped: number
 }
 
 export type DockerImage = {
