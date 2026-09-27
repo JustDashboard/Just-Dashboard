@@ -14,7 +14,7 @@ import { useLogView } from "@/lib/log-view"
 import { copyText } from "@/lib/clipboard"
 import { EVENT_WORD, LEVEL_WORD, laneStyle } from "@/components/logs/log-text"
 import { FieldValue } from "@/components/logs/field-value"
-import { LogRow } from "@/components/logs/log-console"
+import { LogRow, eventColumnFor } from "@/components/logs/log-console"
 import { FactDot } from "@/components/metrics/host-identity"
 import { Detail, DetailList } from "@/components/page"
 import { Well } from "@/components/panel"
@@ -278,7 +278,7 @@ function FactRow({
             <IconAction
               reveal
               label={`Only lines where ${said}`}
-              className="size-6"
+              className="-my-1 size-6"
               onClick={() => onFieldsChange(onlyField(fields, key, target))}
             >
               <Filter />
@@ -286,7 +286,7 @@ function FactRow({
             <IconAction
               reveal
               label={`Hide lines where ${said}`}
-              className="size-6"
+              className="-my-1 size-6"
               onClick={() => onFieldsChange(hideField(fields, key, target))}
             >
               <EyeOff />
@@ -338,6 +338,7 @@ function LinesAround({
 }) {
   const { wrap, highlight, time } = useLogView()
   const [state, setState] = useState<{ lines?: LogLine[]; error?: string }>({})
+  const eventColumn = state.lines ? eventColumnFor(state.lines, lens) : false
   useEffect(() => {
     const controller = new AbortController()
     const common = { source: sourceId, lens: forcedLens || undefined, limit: n }
@@ -392,6 +393,7 @@ function LinesAround({
               wrap={wrap}
               highlight={highlight}
               lens={lens}
+              eventColumn={eventColumn}
             />
           ))}
         </div>

@@ -77,7 +77,10 @@ export function lineKey(line: LogLine): number {
   return key
 }
 
-/** The run of a stack trace shown before the rest folds away. */
+/**
+ * The run of a stack trace shown before the rest folds away. A run one line
+ * longer is shown whole: a fold that hides one line costs a line to say so.
+ */
 const FOLD_AFTER = 3
 
 type Row =
@@ -148,7 +151,7 @@ function buildRows(
       let end = i
       while (end < lines.length && lines[end].cont) end++
       const run = lines.slice(i, end)
-      const long = run.length > FOLD_AFTER
+      const long = run.length > FOLD_AFTER + 1
       const expanded = long && opts.folds.has(head.key)
       // A fold that hides what the search found is a result nobody sees.
       const open = !long || expanded || run.slice(FOLD_AFTER).some((l) => hasHit(l, opts.filter))
@@ -196,18 +199,27 @@ function buildRows(
   return rows
 }
 
-/** Where the event word goes, and how wide the column is when it is there. */
+/** The event word a line draws in the level column, if its lens names one worth drawing. */
 function markable(line: LogLine, lens: string | undefined) {
   if (!line.event || line.cont) return undefined
   const meta = eventMeta(lens, line.event, line.lens)
   return meta && meta.mark !== false ? meta : undefined
 }
 
+/**
+ * Whether the level column widens for event words. Only while a line on
+ * screen has one, as the file column appears only for a rotated set: a column
+ * of blanks is width taken from the text.
+ */
+export function eventColumnFor(lines: LogLine[], lens: string | undefined) {
+  return lines.some((line) => markable(line, lens))
+}
+
 const COLUMN_WIDTH: Partial<Record<LogFieldKind, string>> = {
   address: "w-28",
   duration: "w-14",
   status: "w-10",
-  method: "w-14",
+  method: "w-20",
   code: "w-16",
 }
 
@@ -364,9 +376,14 @@ export function LogConsole({
       }),
     [lines, collapseRepeats, dedupe, lens, folds, clientFilter],
   )
-  // The event column is reserved only while a line on screen has a word for
-  // it, as the file column is: a column of blanks is width taken from the text.
-  const eventColumn = useMemo(() => lines.some((l) => markable(l, lens)), [lines, lens])
+  const eventColumn = useMemo(() => eventColumnFor(lines, lens), [lines, lens])
+  // A lens column no line on screen has a value for is not drawn either. Keyed
+  // on the names, so the array a row receives changes only when the set does.
+  const shownKey = useMemo(
+    () => (columns ?? []).filter((key) => lines.some((l) => lineValue(l, key))).join(","),
+    [columns, lines],
+  )
+  const shownColumns = useMemo(() => (shownKey ? shownKey.split(",") : undefined), [shownKey])
   const lineRows = useMemo(
     () => rows.filter((r): r is Extract<Row, { kind: "line" }> => r.kind === "line"),
     [rows],
@@ -533,7 +550,7 @@ export function LogConsole({
                   filter={clientFilter}
                   lens={lens}
                   eventColumn={eventColumn}
-                  columns={columns}
+                  columns={shownColumns}
                   renderDetail={renderDetail}
                 />
               )
@@ -780,7 +797,7 @@ export const LogRow = memo(function LogRow({
               key={key}
               className={cn(
                 "hidden shrink-0 overflow-hidden @min-[900px]:flex",
-                COLUMN_WIDTH[fieldOf(key).kind] ?? "w-20",
+                COLUMN_WIDTH[fieldOf(key).kind] ?? "w-16",
               )}
             >
               {value && <FieldValue name={key} value={value} compact lens={lens} />}

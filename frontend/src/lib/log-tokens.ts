@@ -499,6 +499,9 @@ export function pieces(
   return out
 }
 
+const ZONE_WORD =
+  /^ (?:UTC|GMT|[ECMP][SD]T|CES?T|EES?T|WES?T|BST|IST|JST|KST|MSK|AE[SD]T|HKT|SGT)(?= )/
+
 /**
  * Where the line's own prefix ends, for a console that already shows the time
  * in a column: past the timestamp, and past syslog's hostname too when it is
@@ -508,7 +511,11 @@ export function pieces(
 export function leadingTime(spans: Span[], text = "", hostname?: string): number {
   const first = spans.find((s) => s.start === 0)
   if (first?.kind !== "time") return 0
-  const at = first.end + 1
+  // Postgres's `%m` and a few others spell the zone as a word after the
+  // clock — `05:21:00.101 UTC` — which is the stamp too, not the message.
+  // Named rather than any capitals, which would take a leading `ERROR` with it.
+  const zone = ZONE_WORD.exec(text.slice(first.end))
+  const at = first.end + (zone ? zone[0].length : 0) + 1
   const host = spans.find((s) => s.start === at && s.kind === "host")
   if (host && hostname && sameHost(text.slice(host.start, host.end), hostname)) {
     return host.end + 1

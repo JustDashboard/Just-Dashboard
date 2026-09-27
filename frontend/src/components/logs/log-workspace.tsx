@@ -280,7 +280,12 @@ export function LogWorkspace(props: WorkspaceProps) {
   const switchMode = (next: LogMode, withFilter?: LogFilterState) => {
     if (next === mode) return
     onModeChange(next)
-    if (next === "search") search.run({ filter: withFilter })
+    if (next === "search") {
+      // The arrival run above is for a link that opens on History; a switch
+      // made here runs its own, and the two used to send the scan twice.
+      started.current = true
+      search.run({ filter: withFilter })
+    }
   }
 
   const view = props.views?.find((v) => v.id === mode)

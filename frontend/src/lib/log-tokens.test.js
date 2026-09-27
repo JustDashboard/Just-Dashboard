@@ -50,6 +50,13 @@ describe("syslog", () => {
     expect(line.slice(leadingTime(spans, line, "atlas"))).toStartWith("vps-07749119")
   })
 
+  test("a zone written as a word after the clock is part of the stamp", () => {
+    const pg = "2026-09-23 05:21:04.010 UTC [914] app@shop ERROR:  deadlock detected"
+    expect(pg.slice(leadingTime(tokenize(pg), pg))).toBe("[914] app@shop ERROR:  deadlock detected")
+    const level = "2026-09-23 05:21:04 ERROR the job failed"
+    expect(level.slice(leadingTime(tokenize(level), level))).toBe("ERROR the job failed")
+  })
+
   test("a systemd unit and its verdict", () => {
     const spans = read(
       "2026-09-23T05:22:31.215620+00:00 vps-07749119-vps-ovh-net systemd[1]: nordvpnd-killswitch.service: Failed with result 'exit-code'.",
