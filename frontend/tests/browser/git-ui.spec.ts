@@ -145,7 +145,11 @@ const readyPreview = {
 
 type Summary = { available: boolean; repos: ({ path: string } & Record<string, unknown>)[] }
 
-async function mockGit(page: Page, pulls: Summary = { available: true, repos: [] }) {
+async function mockGit(
+  page: Page,
+  pulls: Summary = { available: true, repos: [] },
+  checkouts: Record<string, unknown>[] = [app, lib],
+) {
   const seen: Seen[] = []
   await page.route("**/api/v1/**", async (route) => {
     const req = route.request()
@@ -156,7 +160,7 @@ async function mockGit(page: Page, pulls: Summary = { available: true, repos: []
       case "/auth/session":
         return json(route, user)
       case "/git/":
-        return json(route, { available: true, repos: [app, lib] })
+        return json(route, { available: true, repos: checkouts })
       case "/git/pull-requests": {
         // The workspace asks for its own checkout; the list asks for all.
         const one = url.searchParams.get("path")
@@ -217,8 +221,12 @@ test("the list answers what is waiting before the rows are read", async ({ page 
   const shelves = page.getByRole("list", { name: /^(acme|No remote)$/ })
   await expect(shelves).toHaveCount(2)
   await expect(shelves.first()).toHaveAttribute("aria-label", "acme")
-  await expect(page.getByRole("list", { name: "acme" }).getByRole("button", { name: "app", exact: true })).toBeVisible()
-  await expect(page.getByRole("list", { name: "No remote" }).getByRole("button", { name: "lib", exact: true })).toBeVisible()
+  await expect(
+    page.getByRole("list", { name: "acme" }).getByRole("button", { name: "app", exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole("list", { name: "No remote" }).getByRole("button", { name: "lib", exact: true }),
+  ).toBeVisible()
 
   await page.getByRole("button", { name: "Behind 1" }).click()
   await expect(page.getByRole("button", { name: "app", exact: true })).toBeVisible()
@@ -235,14 +243,17 @@ test("the list answers what is waiting before the rows are read", async ({ page 
  *
  * The pull requests used to live one click and a tab away, inside the
  * workspace, where the question the list page is opened with — is anything
- * waiting — could not see them. Now a card carries up to three of them, each a
- * choice of its own that opens the checkout *on* that request in one history
- * entry, and the strip must not disturb what the card already promised: the
- * repository's name is still the only button called that.
+ * waiting — could not see them. Now a card carries the first of them, a choice
+ * of its own that opens the checkout *on* that request in one history entry,
+ * and counts the rest. The foot must not disturb what the card already
+ * promised: the repository's name is still the only button called that, and
+ * the card is the height of every other card — three requests stacked on one
+ * used to stretch its whole shelf into empty space.
  */
 test("open pull requests sit on the card and open the checkout on them", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await mockGit(page, {
+  const web = { ...lib, path: "/srv/web", name: "web", remote: "https://github.com/acme/web.git" }
+  const pulls: Summary = {
     available: true,
     repos: [
       {
@@ -263,34 +274,49 @@ test("open pull requests sit on the card and open the checkout on them", async (
         deployments: [],
         error: "not signed in",
       },
+      {
+        path: "/srv/web",
+        repository: "acme/web",
+        pulls: [pr(20, "Fix the header")],
+        deployments: [{ projectId: 5, name: "web", environmentId: 10 }],
+      },
     ],
-  })
+  }
+  await mockGit(page, pulls, [app, lib, web])
   await page.goto("/git")
-  await expect(page.getByRole("button", { name: "Pull requests 1" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Pull requests 2" })).toBeVisible()
 
-  // Three on the card, and a word for the rest.
+  // The first on the card, and a count for the rest.
   await expect(page.getByRole("button", { name: "Open pull request #12" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Open pull request #14" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Open pull request #15" })).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "and 1 more" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Open pull request #13" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "3 more pull requests" })).toBeVisible()
   // A checkout gh could not answer for says so in one quiet word.
   await expect(page.getByText("pull requests unavailable")).toBeVisible()
-  // The strip adds no button named like a repository.
-  await expect(page.getByRole("button", { name: /^(app|lib)$/ })).toHaveCount(2)
+  // The foot adds no button named like a repository.
+  await expect(page.getByRole("button", { name: /^(app|lib|web)$/ })).toHaveCount(3)
 
-  // The strip's verbs follow the Overview's rule: a request whose preview is
+  // Four requests, one, or a word for none: every card is one height, on
+  // either shelf.
+  const cards = page.locator("ul[aria-label='acme'] > li, ul[aria-label='No remote'] > li")
+  await expect(cards).toHaveCount(3)
+  const heights = await cards.evaluateAll((lis) =>
+    lis.map((li) => Math.round(li.getBoundingClientRect().height)),
+  )
+  expect(new Set(heights).size).toBe(1)
+
+  // The foot's verbs follow the Overview's rule: a request whose preview is
   // ready at this commit has nothing to test, and one without a preview has.
   await page.getByRole("button", { name: "More actions for #12" }).click()
   await expect(page.getByRole("menuitem", { name: /^Merge/ })).toBeVisible()
   await expect(page.getByRole("menuitem", { name: /^Test this pull request/ })).toHaveCount(0)
   await page.keyboard.press("Escape")
-  await page.getByRole("button", { name: "More actions for #13" }).click()
+  await page.getByRole("button", { name: "More actions for #20" }).click()
   await expect(page.getByRole("menuitem", { name: /^Test this pull request/ })).toBeVisible()
   await page.keyboard.press("Escape")
 
   // The chip narrows to the checkouts with something to merge, and the
-  // search box finds a pull request by its number.
-  await page.getByRole("button", { name: "Pull requests 1" }).click()
+  // search box finds a pull request by its number, drawn on the card or not.
+  await page.getByRole("button", { name: "Pull requests 2" }).click()
   await expect(page.getByRole("button", { name: "lib", exact: true })).toHaveCount(0)
   await page.getByPlaceholder("Filter by name, path, branch or pull request").fill("#13")
   await expect(page.getByRole("button", { name: "app", exact: true })).toBeVisible()
