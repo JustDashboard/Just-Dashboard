@@ -2,10 +2,8 @@ package logsx
 
 import (
 	"encoding/json"
-	"math"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/accesslog"
 )
@@ -71,7 +69,6 @@ func (r *caddyReader) Read(l *Line) {
 			return
 		}
 	}
-	caddyStamp(l)
 	switch {
 	case strings.HasPrefix(logger, "http.log.error"):
 		caddyUpstream(l, logger, true)
@@ -100,30 +97,6 @@ func (r *caddyReader) Read(l *Line) {
 			l.Event = "config"
 		}
 	}
-}
-
-// caddyStamp keeps the fraction of Caddy's float "ts", which the generic
-// structured parse rounds down to the second. A second is a long time between
-// a request's access entry and the error line that says why it failed.
-func caddyStamp(l *Line) {
-	i := strings.Index(l.Text, `"ts":`)
-	if i < 0 {
-		return
-	}
-	rest := l.Text[i+len(`"ts":`):]
-	end := strings.IndexAny(rest, ",}")
-	if end <= 0 {
-		return
-	}
-	// A string stamp (time_format) fails here and keeps the one ParseLine
-	// read, which already has its fraction.
-	seconds, err := strconv.ParseFloat(rest[:end], 64)
-	if err != nil || seconds <= 0 {
-		return
-	}
-	whole := math.Floor(seconds)
-	at := time.Unix(int64(whole), int64((seconds-whole)*1e9)).UTC()
-	l.Timestamp = &at
 }
 
 // caddyFailure is what an http.log.error or reverse-proxy line says about the

@@ -162,9 +162,9 @@ func TestLensAppStructured(t *testing.T) {
 		"{\"time\":\"2026-09-27T11:20:10.607928756Z\",\"level\":\"ERROR\",\"msg\":\"request failed\",\"method\":\"GET\",\"path\":\"/api/v1/databases/8/overview\",\"err\":\"failed to connect to `user=jd database=app`: 127.0.0.1:5434 (127.0.0.1): dial error: dial tcp 127.0.0.1:5434: connect: connection refused\"}",
 		`{"time":"2026-09-27T12:32:11.363613596Z","level":"INFO","msg":"audit","user":"wayy","role":"admin","ip":"100.64.0.2","actor":"session","action":"terminal.attach"}`,
 	}, []appLensWant{
-		{event: "request", level: "info", at: "2020-06-03T14:37:41Z", attrs: map[string]string{"method": "GET", "path": "/api", "status": "200", "class": "2xx", "duration_ms": "10", "client": "10.0.0.4"}},
-		{event: "exception", level: "error", at: "2018-07-10T21:20:18Z", attrs: map[string]string{"error": "Error: test"}},
-		{event: "request", level: "info", at: "2026-08-23T07:22:21Z", attrs: map[string]string{"method": "GET", "path": "/health", "status": "200", "class": "2xx", "duration_ms": "1.234"}},
+		{event: "request", level: "info", at: "2020-06-03T14:37:41.437Z", attrs: map[string]string{"method": "GET", "path": "/api", "status": "200", "class": "2xx", "duration_ms": "10", "client": "10.0.0.4"}},
+		{event: "exception", level: "error", at: "2018-07-10T21:20:18.044Z", attrs: map[string]string{"error": "Error: test"}},
+		{event: "request", level: "info", at: "2026-08-23T07:22:21.815616Z", attrs: map[string]string{"method": "GET", "path": "/health", "status": "200", "class": "2xx", "duration_ms": "1.234"}},
 		{event: "startup", level: "info", at: "2026-09-27T10:00:00Z", attrs: map[string]string{"port": "3000"}},
 		{event: "db_unreachable", level: "error", at: "2026-09-27T11:20:10.607928756Z"},
 		{level: "info", at: "2026-09-27T12:32:11.363613596Z"},

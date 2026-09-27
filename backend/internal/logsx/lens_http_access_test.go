@@ -208,7 +208,7 @@ func webHTTPAccessLines() []webLensLine {
 			// The runtime log shares a container's stdout with the access
 			// entries; its lines are left alone rather than decoded twice.
 			text:  `{"level":"info","ts":1790380131.536519,"msg":"config is unchanged"}`,
-			level: "info", at: time.Unix(1790380131, 0), event: "",
+			level: "info", at: time.Unix(1790380131, 536519000), event: "",
 		},
 	}
 }

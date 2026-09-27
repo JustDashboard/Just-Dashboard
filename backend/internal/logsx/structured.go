@@ -2,6 +2,7 @@ package logsx
 
 import (
 	"encoding/json"
+	"math"
 	"slices"
 	"sort"
 	"strconv"
@@ -224,7 +225,11 @@ func structuredTime(stamp string) *time.Time {
 		if seconds > 1e11 {
 			seconds /= 1000
 		}
-		parsed := time.Unix(int64(seconds), 0).UTC()
+		// The fraction is kept to the microsecond a float of unix seconds
+		// can hold: Caddy writes its "ts" this way, and a second is a long
+		// time between a request's access entry and the error line that
+		// says why it failed.
+		parsed := time.UnixMicro(int64(math.Round(seconds * 1e6))).UTC()
 		return &parsed
 	}
 	return nil
