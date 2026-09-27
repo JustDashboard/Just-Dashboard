@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -45,12 +46,14 @@ type StreamSpec struct {
 	// file listening on 127.0.0.1 alone is never saved back listening on
 	// every interface.
 	Address string `json:"address,omitempty"`
-	// Protocol is tcp or udp.
+	// Protocol is tcp, udp, or both — one port taking TCP and UDP to the
+	// same upstream, as DNS and many game servers do.
 	Protocol string `json:"protocol"`
 	// UDPMode is how nginx ends a UDP session. "session" keeps one per
 	// client until it goes quiet, which is what a game server, WireGuard or
 	// VoIP needs to see one peer rather than a new one per datagram;
-	// "request" ends it at the first reply, which suits DNS. Empty for TCP.
+	// "request" ends it at the first reply, which suits DNS. It leaves TCP
+	// connections alone, and is empty for a TCP-only stream.
 	UDPMode string `json:"udpMode,omitempty"`
 	// Upstream is host:port, or unix:/path for a local socket.
 	Upstream string `json:"upstream"`
@@ -59,8 +62,8 @@ type StreamSpec struct {
 	// reads the header as the first bytes of the connection and fails in a
 	// way that looks like a protocol mismatch.
 	ProxyProtocol bool `json:"proxyProtocol"`
-	// Timeout is how long a connection may sit idle, in seconds
-	// (proxy_timeout). Zero leaves nginx's ten minutes.
+	// Timeout is the idle timeout: how long a connection may sit silent, in
+	// seconds (proxy_timeout). Zero leaves nginx's ten minutes.
 	Timeout int `json:"timeout,omitempty"`
 	// ConnectTimeout is how long to wait for the upstream to accept, in
 	// seconds (proxy_connect_timeout). Zero leaves nginx's minute. It is its
@@ -170,12 +173,12 @@ func ValidateStream(spec *StreamSpec) error {
 		spec.Address = ip.String()
 	}
 	switch strings.ToLower(spec.Protocol) {
-	case "tcp", "udp":
+	case "tcp", "udp", "both":
 		spec.Protocol = strings.ToLower(spec.Protocol)
 	case "":
 		spec.Protocol = "tcp"
 	default:
-		return fmt.Errorf("protocol must be tcp or udp")
+		return fmt.Errorf("protocol must be tcp, udp or both")
 	}
 	switch {
 	case spec.Protocol == "tcp":
@@ -253,18 +256,16 @@ func RenderStream(spec *StreamSpec) (string, error) {
 	l.add("}")
 	l.blank()
 	l.add("server {")
-	suffix := ""
-	if spec.Protocol == "udp" {
-		suffix = " udp"
-	}
-	switch ip := net.ParseIP(spec.Address); {
-	case spec.Address == "":
-		l.add("    listen %d%s;", spec.Listen, suffix)
-		l.add("    listen [::]:%d%s;", spec.Listen, suffix)
-	case ip.To4() == nil:
-		l.add("    listen [%s]:%d%s;", spec.Address, spec.Listen, suffix)
-	default:
-		l.add("    listen %s:%d%s;", spec.Address, spec.Listen, suffix)
+	for _, suffix := range streamListenSuffixes(spec.Protocol) {
+		switch ip := net.ParseIP(spec.Address); {
+		case spec.Address == "":
+			l.add("    listen %d%s;", spec.Listen, suffix)
+			l.add("    listen [::]:%d%s;", spec.Listen, suffix)
+		case ip.To4() == nil:
+			l.add("    listen [%s]:%d%s;", spec.Address, spec.Listen, suffix)
+		default:
+			l.add("    listen %s:%d%s;", spec.Address, spec.Listen, suffix)
+		}
 	}
 	if len(spec.AllowFrom) > 0 {
 		l.blank()
@@ -283,18 +284,46 @@ func RenderStream(spec *StreamSpec) (string, error) {
 		l.add("    proxy_protocol on;")
 	}
 	if spec.ConnectTimeout > 0 {
-		l.add("    proxy_connect_timeout %ds;", spec.ConnectTimeout)
+		l.add("    proxy_connect_timeout %s;", nginxDuration(spec.ConnectTimeout))
 	}
 	if spec.Timeout > 0 {
-		l.add("    proxy_timeout %ds;", spec.Timeout)
+		l.add("    proxy_timeout %s;", nginxDuration(spec.Timeout))
 	}
 	if spec.UDPMode == "request" {
-		l.add("    # One reply ends the session, so every query is a session of its")
+		l.add("    # One reply ends a UDP session, so every query is a session of its")
 		l.add("    # own. Without this a session lasts until proxy_timeout of silence.")
 		l.add("    proxy_responses 1;")
 	}
 	l.add("}")
 	return l.String(), nil
+}
+
+// streamListenSuffixes are the listen parameters each protocol needs: none
+// for TCP, udp for UDP, and a listen of each kind for both.
+func streamListenSuffixes(protocol string) []string {
+	switch protocol {
+	case "udp":
+		return []string{" udp"}
+	case "both":
+		return []string{"", " udp"}
+	}
+	return []string{""}
+}
+
+// nginxDuration writes a positive number of seconds as nginx's time syntax,
+// the way a person would: 600 as 10m and 5400 as 1h30m, not 600s and 5400s.
+func nginxDuration(seconds int) string {
+	out := ""
+	for _, unit := range []struct {
+		size int
+		name string
+	}{{3600, "h"}, {60, "m"}, {1, "s"}} {
+		if n := seconds / unit.size; n > 0 {
+			out += strconv.Itoa(n) + unit.name
+			seconds -= n * unit.size
+		}
+	}
+	return out
 }
 
 // parsedStream is a stream file as the form sees it, plus what the listing
@@ -412,10 +441,10 @@ func parseStreamFile(fileName, content string) parsedStream {
 		p.cannot("no proxy_pass")
 	}
 	p.reduceBinds()
-	if p.spec.UDPMode == "request" && p.spec.Protocol != "udp" {
+	if p.spec.UDPMode == "request" && p.spec.Protocol == "tcp" {
 		p.cannot("proxy_responses on TCP")
 	}
-	if p.spec.Protocol == "udp" && p.spec.UDPMode == "" {
+	if p.spec.Protocol != "tcp" && p.spec.UDPMode == "" {
 		p.spec.UDPMode = "session"
 	}
 	p.readAccess(rules)
@@ -481,7 +510,8 @@ func (p *parsedStream) readListen(args []string) {
 }
 
 // reduceBinds folds the sockets into the spec's one port, one protocol and
-// one address — the dashboard's pair of wildcards reading as "every address".
+// one address — the dashboard's pair of wildcards reading as "every address",
+// and TCP and UDP listens on the same addresses reading as both.
 func (p *parsedStream) reduceBinds() {
 	if len(p.binds) == 0 {
 		p.cannot("no listen")
@@ -489,25 +519,31 @@ func (p *parsedStream) reduceBinds() {
 	}
 	first := p.binds[0]
 	p.spec.Listen, p.spec.Address = first.port, first.addr
-	if first.udp {
-		p.spec.Protocol = "udp"
-	}
-	for _, b := range p.binds[1:] {
+	addrs := map[bool]map[string]bool{}
+	for _, b := range p.binds {
 		if b.port != first.port {
 			p.cannot("several listen ports")
 		}
-		if b.udp != first.udp {
-			p.cannot("both TCP and UDP")
+		if addrs[b.udp] == nil {
+			addrs[b.udp] = map[string]bool{}
 		}
+		addrs[b.udp][b.addr] = true
 	}
-	addrs := map[string]bool{}
-	for _, b := range p.binds {
-		addrs[b.addr] = true
-	}
+	tcp, udp := addrs[false], addrs[true]
 	switch {
-	case len(addrs) == 2 && addrs["0.0.0.0"] && addrs["::"]:
+	case tcp != nil && udp != nil:
+		p.spec.Protocol = "both"
+		if !maps.Equal(tcp, udp) {
+			p.cannot("TCP and UDP on different addresses")
+		}
+	case udp != nil:
+		p.spec.Protocol = "udp"
+	}
+	own := addrs[first.udp]
+	switch {
+	case len(own) == 2 && own["0.0.0.0"] && own["::"]:
 		p.spec.Address = ""
-	case len(addrs) > 1:
+	case len(own) > 1:
 		p.cannot("several listen addresses")
 	}
 }
@@ -922,7 +958,7 @@ func StreamWarnings(spec *StreamSpec) []string {
 	if preset, ok := streamDanger(spec.Listen); ok && open {
 		warnings = append(warnings, preset)
 	}
-	if spec.Protocol == "udp" && spec.ProxyProtocol {
+	if spec.Protocol != "tcp" && spec.ProxyProtocol {
 		warnings = append(warnings,
 			"On UDP, nginx puts the PROXY header in front of the first datagram of every session. Turn it on only if the backend expects it there — most UDP services read that datagram as garbage.")
 	}

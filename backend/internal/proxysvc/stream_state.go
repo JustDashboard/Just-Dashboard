@@ -192,13 +192,27 @@ type bind struct {
 	udp  bool
 }
 
-// streamBinds are the sockets a spec's listen lines ask for.
+// streamBinds are the sockets a spec's listen lines ask for: a TCP and a UDP
+// socket on each address for a stream of both.
 func streamBinds(spec *StreamSpec) []bind {
-	udp := spec.Protocol == "udp"
-	if spec.Address == "" {
-		return []bind{{"0.0.0.0", spec.Listen, udp}, {"::", spec.Listen, udp}}
+	var out []bind
+	for _, suffix := range streamListenSuffixes(spec.Protocol) {
+		udp := suffix != ""
+		if spec.Address == "" {
+			out = append(out, bind{"0.0.0.0", spec.Listen, udp}, bind{"::", spec.Listen, udp})
+		} else {
+			out = append(out, bind{spec.Address, spec.Listen, udp})
+		}
 	}
-	return []bind{{spec.Address, spec.Listen, udp}}
+	return out
+}
+
+// proto names a bind's protocol as a port is written: 53/udp.
+func (b bind) proto() string {
+	if b.udp {
+		return "udp"
+	}
+	return "tcp"
 }
 
 // bindsClash reports whether nginx could not hold both sockets. nginx's own
@@ -260,13 +274,11 @@ func otherStreamBinds(dir, skip string) map[string][]bind {
 // nil when the host's sockets could not be read.
 func streamPortConflict(dir string, spec *StreamSpec, previous string, previousBinds []bind, listeners []Listener) error {
 	others := otherStreamBinds(dir, previous)
-	wanted := streamBinds(spec)
-	proto := spec.Protocol
-	for _, b := range wanted {
+	for _, b := range streamBinds(spec) {
 		for name, binds := range others {
 			for _, o := range binds {
 				if bindsClash(b, o) {
-					return &PortInUseError{Port: b.port, Proto: proto, Owner: "the stream " + name,
+					return &PortInUseError{Port: b.port, Proto: b.proto(), Owner: "the stream " + name,
 						Suggest: freePort(spec, others, listeners, previousBinds)}
 				}
 			}
@@ -279,7 +291,7 @@ func streamPortConflict(dir string, spec *StreamSpec, previous string, previousB
 			if owner == "" {
 				owner = "another program"
 			}
-			return &PortInUseError{Port: b.port, Proto: proto, Owner: owner, PID: l.PID,
+			return &PortInUseError{Port: b.port, Proto: b.proto(), Owner: owner, PID: l.PID,
 				Suggest: freePort(spec, others, listeners, previousBinds)}
 		}
 	}

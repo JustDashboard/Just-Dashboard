@@ -1,11 +1,15 @@
 import { describe, expect, test } from "bun:test"
 import {
   byUrgency,
+  carries,
+  formatDuration,
   includedPlace,
   listenFamily,
   listenLabel,
   moduleMissing,
   moduleRemedy,
+  parseDuration,
+  protocolLabel,
   saveBlocked,
   streamBody,
   streamOutage,
@@ -72,6 +76,61 @@ describe("streamBody", () => {
     expect(streamBody(entry({ udpMode: "request" }), "").udpMode).toBeUndefined()
     expect(streamBody(entry({ protocol: "udp" }), "").udpMode).toBe("session")
     expect(streamBody(entry({ protocol: "udp", udpMode: "request" }), "").udpMode).toBe("request")
+  })
+
+  test("a stream of both protocols has UDP, so it carries the mode too", () => {
+    expect(streamBody(entry({ protocol: "both" }), "").udpMode).toBe("session")
+    expect(streamBody(entry({ protocol: "both", udpMode: "request" }), "").udpMode).toBe("request")
+  })
+})
+
+describe("protocols", () => {
+  test("both reads as TCP+UDP and counts as each", () => {
+    expect(["tcp", "udp", "both"].map(protocolLabel)).toEqual(["TCP", "UDP", "TCP+UDP"])
+    const both = entry({ protocol: "both" })
+    expect([carries(both, "tcp"), carries(both, "udp")]).toEqual([true, true])
+    expect([carries(entry({}), "tcp"), carries(entry({}), "udp")]).toEqual([true, false])
+  })
+})
+
+describe("durations", () => {
+  test("seconds, minutes and hours as nginx writes them", () => {
+    for (const [text, seconds] of [
+      ["", 0],
+      ["  ", 0],
+      ["90", 90],
+      ["90s", 90],
+      ["10m", 600],
+      ["1h30m", 5400],
+      ["1h 30m", 5400],
+      ["1m30s", 90],
+      ["1d", 86400],
+      ["24h", 86400],
+    ]) {
+      expect(parseDuration(text)).toBe(seconds)
+    }
+  })
+
+  test("anything nginx would not read, or longer than a day, is refused", () => {
+    for (const text of ["10x", "m", "30m1h", "1.5h", "-5s", "10 5", "25h", "2d", "1M", "10ms"]) {
+      expect(parseDuration(text)).toBeNull()
+    }
+  })
+
+  test("a stored timeout is shown the way it would be typed, and reads back", () => {
+    for (const [seconds, text] of [
+      [0, ""],
+      [undefined, ""],
+      [5, "5s"],
+      [90, "1m30s"],
+      [600, "10m"],
+      [3600, "1h"],
+      [3661, "1h1m1s"],
+      [86400, "24h"],
+    ]) {
+      expect(formatDuration(seconds)).toBe(text)
+      expect(parseDuration(text)).toBe(seconds ?? 0)
+    }
   })
 })
 

@@ -16,7 +16,7 @@ export const moduleNotInstalled = {
 type StreamFixture = {
   name: string
   listen: number
-  protocol: "tcp" | "udp"
+  protocol: "tcp" | "udp" | "both"
   upstream: string
   proxyProtocol?: boolean
   allowFrom?: string[]

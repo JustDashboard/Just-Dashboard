@@ -439,7 +439,7 @@ test("UDP asks how a session ends, and the preview warns in full", async ({ page
   await page.goto("/proxy/streams")
   await page.getByRole("button", { name: "New stream" }).click()
   const sheet = await fillNew(page)
-  await sheet.getByRole("radio", { name: "UDP" }).click()
+  await sheet.getByRole("radio", { name: "UDP", exact: true }).click()
   await expect(sheet.getByText("UDP sessions")).toBeVisible()
   await sheet.getByRole("radio", { name: "One reply" }).click()
   await expect(sheet.getByText(/Each reply ends the session/)).toBeVisible()
@@ -674,4 +674,188 @@ test("without nginx the page says so and offers nothing to save", async ({ page 
   await expect(page.getByText("nginx is not installed on this host")).toBeVisible()
   await expect(page.getByRole("button", { name: "Prepare a stream" })).toHaveCount(0)
   await expect(page.getByText("nginx is not reading these yet")).toHaveCount(0)
+})
+
+test("TCP+UDP is one choice, and asks how its UDP sessions end", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const bodies = await onSave(page, (route) => json(route, saved({ name: "replica" })))
+  await page.goto("/proxy/streams")
+  await page.getByRole("button", { name: "New stream" }).click()
+  const sheet = await fillNew(page)
+  await expect(sheet.getByText("UDP sessions")).toHaveCount(0)
+  await sheet.getByRole("radio", { name: "TCP+UDP" }).click()
+  await expect(sheet.getByText("UDP sessions")).toBeVisible()
+  await sheet.getByRole("radio", { name: "One reply" }).click()
+  await expect(
+    sheet.getByText(
+      "Each reply ends the session: one question, one answer, as DNS works. TCP connections are not affected.",
+    ),
+  ).toBeVisible()
+  await sheet.getByRole("button", { name: "Save and reload" }).click()
+
+  await expect(page.getByText("replica saved and reloaded")).toBeVisible()
+  const spec = bodies[0].spec as Record<string, unknown>
+  expect(spec.protocol).toBe("both")
+  expect(spec.udpMode).toBe("request")
+})
+
+test("timeouts are typed as 90s, 10m or 1h, and a wrong one is caught before the save", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const previews: { spec: Record<string, unknown> }[] = []
+  await page.route("**/api/v1/proxy/streams/preview", (route) => {
+    previews.push(route.request().postDataJSON())
+    return json(route, { content: "# Managed by Just Dashboard.\n", warnings: [] })
+  })
+  const bodies = await onSave(page, (route) => json(route, saved({ name: "replica" })))
+  await page.goto("/proxy/streams")
+  await page.getByRole("button", { name: "New stream" }).click()
+  const sheet = await fillNew(page)
+  const save = sheet.getByRole("button", { name: "Save and reload" })
+
+  await sheet.getByLabel("Idle timeout").fill("10x")
+  await expect(sheet.getByRole("alert")).toHaveText("Write it as 90s, 10m or 1h30m, up to 24h.")
+  await expect(sheet.getByLabel("Idle timeout")).toHaveAttribute("aria-invalid", "true")
+  await expect(save).toBeDisabled()
+  await expect(sheet.getByText("Correct the timeout, and the nginx appears here.")).toBeVisible()
+
+  await sheet.getByLabel("Idle timeout").fill("1h30m")
+  await sheet.getByLabel("Connect timeout").fill("5s")
+  await expect(sheet.getByRole("alert")).toHaveCount(0)
+  await expect.poll(() => previews.at(-1)?.spec.timeout).toBe(5400)
+  expect(previews.at(-1)?.spec.connectTimeout).toBe(5)
+  await save.click()
+
+  await expect(page.getByText("replica saved and reloaded")).toBeVisible()
+  const spec = bodies[0].spec as Record<string, unknown>
+  expect(spec.timeout).toBe(5400)
+  expect(spec.connectTimeout).toBe(5)
+})
+
+test("a stream's timeouts open as they would be typed, and save unchanged", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await listing(page, { streams: [{ ...bastion, timeout: 3600, connectTimeout: 90 }] })
+  const bodies = await onSave(page, (route) => json(route, saved()))
+  await page.goto("/proxy/streams")
+  const card = page.locator("[data-slot='choice-row']").first()
+  await expect(card).toContainText("1h idle timeout")
+  await expect(card).toContainText("1m 30s connect timeout")
+
+  await page.getByRole("button", { name: "Edit bastion" }).click()
+  const sheet = page.getByRole("dialog")
+  await expect(sheet.getByLabel("Idle timeout")).toHaveValue("1h")
+  await expect(sheet.getByLabel("Connect timeout")).toHaveValue("1m30s")
+  await sheet.getByRole("button", { name: "Save and reload" }).click()
+  await expect(page.getByText("bastion saved and reloaded")).toBeVisible()
+  const spec = bodies[0].spec as Record<string, unknown>
+  expect([spec.timeout, spec.connectTimeout]).toEqual([3600, 90])
+})
+
+test("a stream of both protocols counts as TCP and as UDP", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const dns = {
+    ...streamEntry({
+      name: "dns",
+      listen: 53,
+      protocol: "both",
+      upstream: "10.0.0.53:53",
+      allowFrom: ["10.0.0.0/8"],
+    }),
+    udpMode: "request",
+    open: false,
+  }
+  await listing(page, { streams: [dns, bastion] })
+  await page.goto("/proxy/streams")
+  const tiles = page.locator("[data-slot='stat-grid']")
+  await expect(tiles.getByText("TCP", { exact: true }).locator("..")).toContainText("2")
+  await expect(tiles.getByText("UDP", { exact: true }).locator("..")).toContainText("1")
+  const card = page.locator("[data-slot='choice-row']").filter({ hasText: "dns" })
+  await expect(card).toContainText("TCP+UDP forwarding · one reply per UDP session")
+
+  await page.getByRole("button", { name: "Edit dns" }).click()
+  const sheet = page.getByRole("dialog")
+  await expect(sheet.getByRole("radio", { name: "TCP+UDP" })).toBeChecked()
+  await expect(sheet.getByRole("radio", { name: "One reply" })).toBeChecked()
+})
+
+/** A stream directory the backend could not read, as it answers. */
+function unreadable(route: Route) {
+  return route.fulfill({
+    status: 500,
+    contentType: "application/json",
+    body: JSON.stringify({
+      error: {
+        code: "stream_dir_unreadable",
+        message: "open /etc/nginx/streams: permission denied",
+        operation: "read",
+        resource: "the stream directory",
+        retryable: true,
+      },
+    }),
+  })
+}
+
+test("an unreadable stream directory is an error to retry, not an empty list", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  let broken = true
+  await page.route("**/api/v1/proxy/streams/", (route) =>
+    broken ? unreadable(route) : json(route, streamStatus({ streams: [bastion] })),
+  )
+  await page.goto("/proxy/streams")
+  await expect(page.getByText("Could not read the stream directory")).toBeVisible()
+  await expect(page.getByText("open /etc/nginx/streams: permission denied")).toBeVisible()
+  await expect(page.getByText("Nothing forwarded")).toHaveCount(0)
+
+  broken = false
+  await page.getByRole("button", { name: "Try again" }).click()
+  await expect(page.locator("[data-slot='choice-row']")).toHaveCount(1)
+})
+
+test("a refresh that fails keeps the list and says it is the last read", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  let reads = 0
+  let broken = false
+  await page.route("**/api/v1/proxy/streams/", (route) => {
+    if (route.request().method() === "POST") return json(route, saved({ name: "replica" }))
+    reads++
+    return broken ? unreadable(route) : json(route, streamStatus({ streams: [bastion] }))
+  })
+  await page.goto("/proxy/streams")
+  await expect(page.locator("[data-slot='choice-row']")).toHaveCount(1)
+
+  // The save's refresh finds the directory unreadable.
+  broken = true
+  await page.getByRole("button", { name: "New stream" }).click()
+  await fillNew(page)
+  await page.getByRole("dialog").getByRole("button", { name: "Save and reload" }).click()
+  await expect(page.getByText("The list below is from the last read")).toBeVisible()
+  await expect(page.getByText("open /etc/nginx/streams: permission denied")).toBeVisible()
+  await expect(page.locator("[data-slot='choice-row']")).toHaveCount(1)
+
+  broken = false
+  const before = reads
+  await page.getByRole("button", { name: "Try again" }).click()
+  await expect(page.getByText("The list below is from the last read")).toHaveCount(0)
+  expect(reads).toBeGreaterThan(before)
+})
+
+test("the TCP+UDP form fits a phone, errors and all", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  await page.goto("/proxy/streams")
+  await page.getByRole("button", { name: "New stream" }).click()
+  const sheet = await fillNew(page)
+  await sheet.getByRole("radio", { name: "TCP+UDP" }).click()
+  await sheet.getByLabel("Idle timeout").fill("forever")
+  await sheet.getByLabel("Connect timeout").fill("2d")
+  await expect(sheet.getByRole("alert")).toHaveCount(2)
+  await expect(sheet).toBeInViewport({ ratio: 1 })
+  expect(await sheet.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
+    true,
+  )
+  // Every protocol is reachable from the keyboard.
+  await sheet.getByRole("radio", { name: "TCP+UDP" }).focus()
+  await page.keyboard.press("ArrowLeft")
+  await expect(sheet.getByRole("radio", { name: "UDP", exact: true })).toBeFocused()
 })

@@ -256,3 +256,32 @@ func TestStreamDeleteTakesEveryFileTheListingShows(t *testing.T) {
 		t.Fatalf("unreadable file answered %+v", res)
 	}
 }
+
+// A stream directory that cannot be read is an error the page can name and
+// retry, never an empty list: "nothing forwarded" is a claim.
+func TestStreamListNamesAnUnreadableDirectory(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root reads a directory whatever its mode")
+	}
+	c, dir := streamServer(t, true)
+	streams := filepath.Join(dir, "stream.d")
+	if err := os.Chmod(streams, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(streams, 0o755) })
+	w := c.do(http.MethodGet, "/api/v1/proxy/streams/", "", nil)
+	var res struct {
+		Error struct {
+			Code, Message, Operation, Resource string
+			Retryable                          bool
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	e := res.Error
+	if w.Code != http.StatusInternalServerError || e.Code != "stream_dir_unreadable" || !strings.Contains(e.Message, "permission denied") ||
+		e.Operation != "read" || e.Resource != "the stream directory" || !e.Retryable {
+		t.Fatalf("got %d %+v", w.Code, e)
+	}
+}

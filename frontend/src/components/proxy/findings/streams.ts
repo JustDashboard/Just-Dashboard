@@ -1,5 +1,11 @@
 import type { StreamStatus } from "@/lib/types"
-import { includedPlace, moduleMissing, moduleRemedy, streamOutage } from "@/lib/streams"
+import {
+  includedPlace,
+  moduleMissing,
+  moduleRemedy,
+  protocolLabel,
+  streamOutage,
+} from "@/lib/streams"
 import { DANGEROUS_PORTS, type ProxyFinding } from "@/components/proxy/findings/shared"
 
 export type StreamFindingInput = { streams?: StreamStatus }
@@ -74,7 +80,7 @@ export function streamFindings({ streams }: StreamFindingInput): ProxyFinding[] 
       id: `stream.open.${stream.name}`,
       level: service ? "warning" : "notice",
       title: `Stream ${stream.name} forwards port ${stream.listen} to anyone`,
-      detail: `${stream.protocol.toUpperCase()} ${stream.listen} → ${stream.upstream} with no allow list${service ? `, and ${stream.listen} is ${service}` : ""}.`,
+      detail: `${protocolLabel(stream.protocol)} ${stream.listen} → ${stream.upstream} with no allow list${service ? `, and ${stream.listen} is ${service}` : ""}.`,
       advice:
         "A stream has no authentication of its own. Restrict the source unless the service behind it authenticates for itself.",
       meta: "stream",

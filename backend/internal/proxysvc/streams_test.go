@@ -222,13 +222,61 @@ func TestRenderStreamUDPModes(t *testing.T) {
 	}
 }
 
+// DNS and many game servers take one port over TCP and UDP both. One stream
+// carries the two, to one upstream, and the UDP mode leaves TCP alone.
+func TestRenderStreamBothProtocols(t *testing.T) {
+	spec := tcpStream()
+	spec.Name, spec.Protocol, spec.Listen, spec.Upstream = "dns", "BOTH", 53, "10.0.0.53:53"
+	out, err := RenderStream(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Protocol != "both" || spec.UDPMode != "session" {
+		t.Fatalf("protocol %q mode %q, want both and session", spec.Protocol, spec.UDPMode)
+	}
+	for _, want := range []string{"listen 53;", "listen [::]:53;", "listen 53 udp;", "listen [::]:53 udp;"} {
+		if !strings.Contains(out, "    "+want+"\n") {
+			t.Errorf("missing %q from:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "proxy_responses") {
+		t.Fatalf("a session stream must not end at the first reply:\n%s", out)
+	}
+
+	spec.UDPMode, spec.Address = "request", "127.0.0.1"
+	out, err = RenderStream(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(out, "listen ") != 2 || !strings.Contains(out, "listen 127.0.0.1:53;") ||
+		!strings.Contains(out, "listen 127.0.0.1:53 udp;") || !strings.Contains(out, "proxy_responses 1;") {
+		t.Fatalf("one address over both protocols, one reply per UDP session:\n%s", out)
+	}
+}
+
+// Timeouts are written as a person reads them — 10m, not 600s — and read back
+// to the same number of seconds.
+func TestNginxDuration(t *testing.T) {
+	for seconds, want := range map[int]string{
+		5: "5s", 60: "1m", 90: "1m30s", 600: "10m", 3600: "1h", 5400: "1h30m", 3661: "1h1m1s", 86400: "24h",
+	} {
+		got := nginxDuration(seconds)
+		if got != want {
+			t.Errorf("%d = %q, want %q", seconds, got, want)
+		}
+		if ms, ok := parseNginxDuration(got); !ok || ms != int64(seconds)*1000 {
+			t.Errorf("%q reads back as %d ms", got, ms)
+		}
+	}
+}
+
 // One Timeout used to set proxy_timeout and proxy_connect_timeout alike, so
 // an hour of idle for SSH was also an hour's wait on a dead upstream.
 func TestRenderStreamKeepsTheTwoTimeoutsApart(t *testing.T) {
 	spec := tcpStream()
 	spec.Timeout = 3600
 	out, _ := RenderStream(spec)
-	if !strings.Contains(out, "proxy_timeout 3600s;") || strings.Contains(out, "proxy_connect_timeout") {
+	if !strings.Contains(out, "proxy_timeout 1h;") || strings.Contains(out, "proxy_connect_timeout") {
 		t.Fatalf("idle timeout leaked into the connect timeout:\n%s", out)
 	}
 	spec.ConnectTimeout = 5
@@ -243,6 +291,9 @@ func TestStreamRoundTrip(t *testing.T) {
 		"tcp":            func(s *StreamSpec) { s.ProxyProtocol, s.Timeout, s.ConnectTimeout = true, 300, 10 },
 		"udp session":    func(s *StreamSpec) { s.Protocol, s.UDPMode = "udp", "session" },
 		"udp request":    func(s *StreamSpec) { s.Protocol, s.UDPMode, s.Listen = "udp", "request", 53 },
+		"both session":   func(s *StreamSpec) { s.Protocol, s.UDPMode, s.ProxyProtocol = "both", "session", true },
+		"both request":   func(s *StreamSpec) { s.Protocol, s.UDPMode, s.Address = "both", "request", "::1" },
+		"odd durations":  func(s *StreamSpec) { s.Timeout, s.ConnectTimeout = 86400, 3661 },
 		"loopback only":  func(s *StreamSpec) { s.Address = "127.0.0.1" },
 		"ipv6 loopback":  func(s *StreamSpec) { s.Address = "::1" },
 		"ipv4 only":      func(s *StreamSpec) { s.Address = "0.0.0.0" },
@@ -384,6 +435,22 @@ server { listen 5432; proxy_pass pool; allow 10.0.0.0/8; deny all; }`,
 			unsupported: []string{"listen option ssl", "ssl_certificate", "proxy_connect_timeout 500ms"},
 		},
 		{
+			// DNS written by hand, TCP and UDP on one port: the form's both.
+			name:    "tcp and udp",
+			content: "server { listen 53; listen 53 udp; proxy_pass 10.0.0.53:53; proxy_responses 1; allow 10.0.0.0/8; deny all; }",
+			want: StreamSpec{Name: "x", Listen: 53, Address: "0.0.0.0", Protocol: "both", UDPMode: "request",
+				Upstream: "10.0.0.53:53", AllowFrom: []string{"10.0.0.0/8"}},
+		},
+		{
+			// TCP on the loopback and UDP everywhere is not a thing one
+			// address field can say; saving would widen the TCP side.
+			name:        "tcp and udp on different addresses",
+			content:     "server { listen 127.0.0.1:53; listen 53 udp; proxy_pass 10.0.0.53:53; }",
+			want:        StreamSpec{Name: "x", Listen: 53, Address: "127.0.0.1", Protocol: "both", UDPMode: "session", Upstream: "10.0.0.53:53", AllowFrom: []string{}},
+			open:        true,
+			unsupported: []string{"TCP and UDP on different addresses"},
+		},
+		{
 			name:        "port range",
 			content:     "server { listen 27015-27030 udp; proxy_pass 10.0.0.9:$server_port; }",
 			want:        StreamSpec{Name: "x", Protocol: "tcp", AllowFrom: []string{}},
@@ -481,6 +548,15 @@ func TestStreamWarnings(t *testing.T) {
 	got := StreamWarnings(udp)
 	if !containsSubstring(got, "first datagram") || containsSubstring(got, "will not see the header") {
 		t.Errorf("PROXY on UDP warning is wrong: %v", got)
+	}
+	udp.Protocol = "both"
+	if !containsSubstring(StreamWarnings(udp), "first datagram") {
+		t.Error("a stream of both protocols carries the header on UDP too")
+	}
+	tcp := tcpStream()
+	tcp.ProxyProtocol = true
+	if containsSubstring(StreamWarnings(tcp), "first datagram") {
+		t.Error("a TCP stream warned about datagrams")
 	}
 }
 

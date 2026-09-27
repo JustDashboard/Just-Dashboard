@@ -33,13 +33,66 @@ export function streamSpecOf(stream: StreamSpec): StreamSpec {
   }
 }
 
-/** What a preview or a save posts: the allow list as typed, split, and a UDP mode only for UDP. */
+/**
+ * What a preview or a save posts: the allow list as typed, split, and a UDP
+ * mode only where there is UDP.
+ */
 export function streamBody(spec: StreamSpec, allow: string): StreamSpec {
   return {
     ...streamSpecOf(spec),
-    udpMode: spec.protocol === "udp" ? (spec.udpMode ?? "session") : undefined,
+    udpMode: spec.protocol === "tcp" ? undefined : (spec.udpMode ?? "session"),
     allowFrom: allow.split(/[\s,]+/).filter(Boolean),
   }
+}
+
+/** A stream's protocol as the page writes it. */
+export function protocolLabel(protocol: StreamSpec["protocol"]): string {
+  return protocol === "both" ? "TCP+UDP" : protocol.toUpperCase()
+}
+
+/** Whether a stream takes this protocol; one of both counts as each. */
+export function carries(stream: Pick<StreamSpec, "protocol">, protocol: "tcp" | "udp"): boolean {
+  return stream.protocol === protocol || stream.protocol === "both"
+}
+
+/** The longest timeout the backend takes: a day. */
+const MAX_TIMEOUT = 86_400
+
+const DURATION = /^(?:(\d+)\s*d)?\s*(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?\s*(?:(\d+)\s*s)?$/
+
+/**
+ * A timeout as typed — "90", "90s", "10m", "1h30m" — in seconds, largest unit
+ * first as nginx writes it. A bare number is seconds, as it is to nginx. Empty
+ * is 0, which leaves nginx's own default; anything unreadable, or longer than
+ * a day, is null.
+ */
+export function parseDuration(text: string): number | null {
+  const value = text.trim()
+  if (value === "") return 0
+  const match = /^\d+$/.test(value) ? [value, "0", "0", "0", value] : DURATION.exec(value)
+  if (!match) return null
+  const [days, hours, minutes, seconds] = match.slice(1).map((part) => Number(part ?? 0))
+  const total = days * 86_400 + hours * 3600 + minutes * 60 + seconds
+  return total <= MAX_TIMEOUT ? total : null
+}
+
+/** Seconds as nginx's time syntax, the way a person writes them: 10m, 1h30m. Empty for none. */
+export function formatDuration(seconds?: number): string {
+  if (!seconds) return ""
+  let rest = seconds
+  let out = ""
+  for (const [size, unit] of [
+    [3600, "h"],
+    [60, "m"],
+    [1, "s"],
+  ] as const) {
+    const n = Math.floor(rest / size)
+    if (n > 0) {
+      out += `${n}${unit}`
+      rest -= n * size
+    }
+  }
+  return out
 }
 
 /** The module is known to be missing — not merely unknown because nginx could not be asked. */

@@ -6,16 +6,17 @@ export type StreamSpec = {
   listen: number
   /** The one address to listen on. Absent is every address of both families. */
   address?: string
-  protocol: "tcp" | "udp"
+  /** One port taking TCP, UDP, or both to the same upstream, as DNS does. */
+  protocol: "tcp" | "udp" | "both"
   /**
    * How nginx ends a UDP session: kept per client until it goes quiet, or
-   * ended at the first reply. Absent for TCP.
+   * ended at the first reply. It leaves TCP alone, and is absent for TCP only.
    */
   udpMode?: "session" | "request"
   /** host:port, or unix:/path for a local socket. */
   upstream: string
   proxyProtocol: boolean
-  /** Seconds a connection may sit idle. Absent is nginx's ten minutes. */
+  /** The idle timeout: seconds a connection may sit silent. Absent is nginx's ten minutes. */
   timeout?: number
   /** Seconds to wait for the upstream to accept. Absent is nginx's minute. */
   connectTimeout?: number

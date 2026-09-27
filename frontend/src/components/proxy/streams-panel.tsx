@@ -15,11 +15,15 @@ import type {
 } from "@/lib/types"
 import {
   byUrgency,
+  carries,
+  formatDuration,
   includedPlace,
   listenFamily,
   listenLabel,
   moduleMissing,
   moduleRemedy,
+  parseDuration,
+  protocolLabel,
   saveBlocked,
   streamBody,
   streamOutage,
@@ -86,8 +90,9 @@ export function StreamsPage() {
     const streams = data?.streams ?? []
     return {
       all: streams.length,
-      tcp: streams.filter((s) => s.protocol === "tcp").length,
-      udp: streams.filter((s) => s.protocol === "udp").length,
+      // A stream of both protocols is a TCP forward and a UDP one.
+      tcp: streams.filter((s) => carries(s, "tcp")).length,
+      udp: streams.filter((s) => carries(s, "udp")).length,
       open: streams.filter((s) => s.open).length,
     }
   }, [data])
@@ -233,6 +238,20 @@ export function StreamsPage() {
         />
       </StatGrid>
 
+      {error && (
+        // The poll failed after an earlier one did: what is below is that
+        // earlier reading, and a directory that became unreadable must not
+        // pass for one that is fine.
+        <Notice tone="warning" icon={Warning} title="The list below is from the last read">
+          <div className="space-y-2">
+            <p className="break-words">{errorMessage(error)}</p>
+            <Button size="sm" variant="outline" onClick={refresh}>
+              Try again
+            </Button>
+          </div>
+        </Notice>
+      )}
+
       {noNginx ? (
         <Notice tone="warning" icon={Warning} title="nginx is not installed on this host">
           Streams are forwarded by nginx&rsquo;s stream module, so there is nothing here to
@@ -367,8 +386,9 @@ export function StreamsPage() {
 function describe(stream: StreamEntry): string {
   if (stream.error) return "could not be read"
   return [
-    `${stream.protocol.toUpperCase()} forwarding`,
-    stream.udpMode === "request" && "one reply per session",
+    `${protocolLabel(stream.protocol)} forwarding`,
+    stream.udpMode === "request" &&
+      (stream.protocol === "both" ? "one reply per UDP session" : "one reply per session"),
     stream.proxyProtocol && "PROXY header",
     stream.timeout && `${duration(stream.timeout)} idle timeout`,
     stream.connectTimeout && `${duration(stream.connectTimeout)} connect timeout`,
@@ -593,6 +613,8 @@ const BLANK: StreamSpec = {
 
 type Preview = { content: string; warnings: string[] }
 
+const DURATION_ERROR = "Write it as 90s, 10m or 1h30m, up to 24h."
+
 function StreamForm({
   open,
   stream,
@@ -617,6 +639,12 @@ function StreamForm({
     stream ? streamSpecOf(stream) : BLANK,
   )
   const [allow, setAllow] = useSessionState(`${key}.allow`, (stream?.allowFrom ?? []).join(", "))
+  // The timeouts are kept as typed — "10m" — and read on the way out.
+  const [idle, setIdle] = useSessionState(`${key}.idle`, formatDuration(stream?.timeout))
+  const [connect, setConnect] = useSessionState(
+    `${key}.connect`,
+    formatDuration(stream?.connectTimeout),
+  )
   const [preview, setPreview] = useState<Preview | null>(null)
   const [previewError, setPreviewError] = useState("")
   const [refused, setRefused] = useState<{ field: string; message: string } | null>(null)
@@ -624,7 +652,13 @@ function StreamForm({
 
   const live = streamsLive(status)
   const blocked = saveBlocked(status)
-  const body = streamBody(spec, allow)
+  const idleSeconds = parseDuration(idle)
+  const connectSeconds = parseDuration(connect)
+  const timed = idleSeconds !== null && connectSeconds !== null
+  const body = streamBody(
+    { ...spec, timeout: idleSeconds || undefined, connectTimeout: connectSeconds || undefined },
+    allow,
+  )
   // A file the form cannot say everything about is not saved over: the
   // form would drop what it cannot show — a deny rule, a second server.
   const locked = Boolean(stream && (stream.error || stream.unsupported.length > 0))
@@ -640,7 +674,7 @@ function StreamForm({
   useEffect(() => {
     if (!open || readOnly) return
     const controller = new AbortController()
-    const ready = spec.name !== "" && spec.listen > 0 && spec.upstream !== ""
+    const ready = spec.name !== "" && spec.listen > 0 && spec.upstream !== "" && timed
     const timer = setTimeout(
       () => {
         if (!ready) {
@@ -666,7 +700,7 @@ function StreamForm({
       controller.abort()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, readOnly, spec, allow])
+  }, [open, readOnly, spec, allow, idle, connect])
 
   const save = async () => {
     setBusy(true)
@@ -737,7 +771,7 @@ function StreamForm({
           <Button
             size="sm"
             onClick={save}
-            disabled={readOnly || busy || !spec.name || !spec.listen || !spec.upstream}
+            disabled={readOnly || busy || !spec.name || !spec.listen || !spec.upstream || !timed}
             pending={busy}
           >
             {live ? "Save and reload" : "Save for later"}
@@ -843,17 +877,21 @@ function StreamForm({
                 <ToggleGroupItem value="udp" className="flex-1 text-hint">
                   UDP
                 </ToggleGroupItem>
+                <ToggleGroupItem value="both" className="flex-1 text-hint">
+                  TCP+UDP
+                </ToggleGroupItem>
               </ToggleGroup>
             </Field>
           </FieldRow>
 
-          {spec.protocol === "udp" && (
+          {spec.protocol !== "tcp" && (
             <Field
               label="UDP sessions"
               hint={
-                spec.udpMode === "request"
+                (spec.udpMode === "request"
                   ? "Each reply ends the session: one question, one answer, as DNS works."
-                  : "One session per client until it goes quiet, so a game server, WireGuard or VoIP sees one peer."
+                  : "One session per client until it goes quiet, so a game server, WireGuard or VoIP sees one peer.") +
+                (spec.protocol === "both" ? " TCP connections are not affected." : "")
               }
             >
               <ToggleGroup
@@ -915,28 +953,30 @@ function StreamForm({
             <Field
               label="Idle timeout"
               htmlFor="stream-timeout"
-              hint="Seconds of silence before nginx closes it. Empty is 10 minutes."
+              hint="Silence before nginx closes the connection, as 90s, 10m or 1h. Empty is 10m."
+              error={idleSeconds === null && DURATION_ERROR}
             >
               <Input
                 id="stream-timeout"
-                value={spec.timeout || ""}
-                inputMode="numeric"
-                onChange={(e) => edit({ timeout: Number(e.target.value) || 0 })}
-                placeholder="600"
+                value={idle}
+                onChange={(e) => setIdle(e.target.value)}
+                placeholder="10m"
+                aria-invalid={idleSeconds === null || undefined}
                 className="font-mono text-xs"
               />
             </Field>
             <Field
               label="Connect timeout"
               htmlFor="stream-connect-timeout"
-              hint="Seconds to wait for the backend to answer. Empty is 60."
+              hint="How long to wait for the backend to accept. Empty is 60s."
+              error={connectSeconds === null && DURATION_ERROR}
             >
               <Input
                 id="stream-connect-timeout"
-                value={spec.connectTimeout || ""}
-                inputMode="numeric"
-                onChange={(e) => edit({ connectTimeout: Number(e.target.value) || 0 })}
-                placeholder="60"
+                value={connect}
+                onChange={(e) => setConnect(e.target.value)}
+                placeholder="60s"
+                aria-invalid={connectSeconds === null || undefined}
                 className="font-mono text-xs"
               />
             </Field>
@@ -962,7 +1002,9 @@ function StreamForm({
             <CodeEditor className="h-full" language="ini" value={preview.content} readOnly />
           ) : (
             <EmptyNote className="my-auto">
-              Fill in a name, a port and an upstream, and the nginx appears here.
+              {timed
+                ? "Fill in a name, a port and an upstream, and the nginx appears here."
+                : "Correct the timeout, and the nginx appears here."}
             </EmptyNote>
           )}
         </Pane>

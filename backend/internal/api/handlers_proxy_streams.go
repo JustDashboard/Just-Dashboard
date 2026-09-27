@@ -32,7 +32,10 @@ func (s *Server) handleStreamList(w http.ResponseWriter, r *http.Request) error 
 	defer cancel()
 	status, err := s.modules.proxy.Streams(ctx)
 	if err != nil {
-		return httpx.Err(http.StatusInternalServerError, "stream_dir_unreadable", err.Error())
+		// Retryable: permission denied is fixed on the host, and the page
+		// should not have to be reloaded to see that it was.
+		return httpx.Err(http.StatusInternalServerError, "stream_dir_unreadable", err.Error()).
+			Describe("read", "the stream directory").Retry()
 	}
 	// Naming the package is worth a package-manager probe only when the
 	// module is missing, which is the one time the page says what to install.

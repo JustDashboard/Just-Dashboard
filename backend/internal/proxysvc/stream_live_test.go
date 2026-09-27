@@ -54,6 +54,18 @@ func liveStreamNginx(t *testing.T) (*Service, string) {
 		}
 		exec.Command("docker", "rm", "-f", name).Run()
 	})
+	// `docker run -d` returns before nginx has read its configuration. A test
+	// that changes nginx.conf or stream.d before then changed what nginx
+	// started with, and one it refuses stops the container.
+	for deadline := time.Now().Add(15 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		if _, err := os.Stat(filepath.Join(root, "nginx.pid")); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			logs, _ := exec.Command("docker", "logs", name).CombinedOutput()
+			t.Fatalf("nginx did not start: %s", logs)
+		}
+	}
 	shim := fmt.Sprintf("#!/bin/sh\nexec docker exec %s nginx -e %s/startup.log -c %s/nginx.conf \"$@\"\n", name, root, root)
 	if err := os.WriteFile(filepath.Join(root, "bin", "nginx"), []byte(shim), 0o755); err != nil {
 		t.Fatal(err)
@@ -80,6 +92,22 @@ func freeLoopbackPort(t *testing.T, network string) int {
 	return l.Addr().(*net.TCPAddr).Port
 }
 
+// freeLoopbackPortPair is a loopback port free for TCP and UDP at once, for a
+// stream or a backend of both.
+func freeLoopbackPortPair(t *testing.T) int {
+	t.Helper()
+	for attempt := 0; attempt < 20; attempt++ {
+		port := freeLoopbackPort(t, "tcp")
+		c, err := net.ListenPacket("udp4", fmt.Sprintf("127.0.0.1:%d", port))
+		if err == nil {
+			c.Close()
+			return port
+		}
+	}
+	t.Fatal("no port free for TCP and UDP both")
+	return 0
+}
+
 // Every shape the renderer writes passes a real nginx with the stream module,
 // including two streams whose names folded to one upstream before.
 func TestLiveStreamRendersPassNginx(t *testing.T) {
@@ -91,6 +119,8 @@ func TestLiveStreamRendersPassNginx(t *testing.T) {
 		{Name: "dns", Listen: freeLoopbackPort(t, "udp"), Address: "127.0.0.1", Protocol: "udp", UDPMode: "request", Upstream: "127.0.0.1:9"},
 		{Name: "game", Listen: freeLoopbackPort(t, "udp"), Address: "127.0.0.1", Protocol: "udp", ProxyProtocol: true, Upstream: "127.0.0.1:9"},
 		{Name: "socket", Listen: freeLoopbackPort(t, "tcp"), Address: "127.0.0.1", Upstream: "unix:/run/nothing.sock", AllowFrom: []string{"all"}},
+		{Name: "both", Listen: freeLoopbackPortPair(t), Address: "127.0.0.1", Protocol: "both", UDPMode: "request", Upstream: "127.0.0.1:9",
+			ConnectTimeout: 90, Timeout: 5400},
 	}
 	for _, spec := range specs {
 		res, err := svc.ApplyStream(ctx, spec, "", true)
@@ -165,6 +195,89 @@ func TestLiveUDPSessionModes(t *testing.T) {
 				t.Fatalf("%s mode: the backend saw source ports %v", tc.mode, seen)
 			}
 		})
+	}
+}
+
+// One stream of both protocols carries TCP and UDP on one port to the same
+// upstream port, as DNS runs.
+func TestLiveBothProtocolsForward(t *testing.T) {
+	svc, _ := liveStreamNginx(t)
+	port := freeLoopbackPortPair(t)
+	tcp, err := net.Listen("tcp4", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tcp.Close()
+	udp, err := net.ListenPacket("udp4", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer udp.Close()
+	go func() {
+		for {
+			conn, err := tcp.Accept()
+			if err != nil {
+				return
+			}
+			conn.Write([]byte("tcp answer\n"))
+			conn.Close()
+		}
+	}()
+	go func() {
+		buf := make([]byte, 512)
+		for {
+			n, from, err := udp.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			udp.WriteTo(append([]byte("udp answer to "), buf[:n]...), from)
+		}
+	}()
+
+	spec := &StreamSpec{Name: "dns", Listen: freeLoopbackPortPair(t), Address: "127.0.0.1", Protocol: "both", UDPMode: "request",
+		Upstream: fmt.Sprintf("127.0.0.1:%d", port), ConnectTimeout: 5, Timeout: 600}
+	res, err := svc.ApplyStream(context.Background(), spec, "", true)
+	if err != nil || !res.Reloaded {
+		t.Fatalf("%v %+v", err, res)
+	}
+	for _, want := range []string{"proxy_connect_timeout 5s;", "proxy_timeout 10m;"} {
+		if !strings.Contains(res.Content, want) {
+			t.Fatalf("missing %q:\n%s", want, res.Content)
+		}
+	}
+	addr := fmt.Sprintf("127.0.0.1:%d", spec.Listen)
+	deadline := time.Now().Add(5 * time.Second)
+	for got := ""; !strings.HasPrefix(got, "tcp answer"); {
+		if time.Now().After(deadline) {
+			t.Fatalf("no TCP answer through the stream: %q", got)
+		}
+		if conn, err := net.DialTimeout("tcp4", addr, time.Second); err == nil {
+			conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+			buf := make([]byte, 64)
+			n, _ := conn.Read(buf)
+			conn.Close()
+			got = string(buf[:n])
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	client, err := net.Dial("udp4", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	for attempt := 0; ; attempt++ {
+		client.Write([]byte("query"))
+		client.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		buf := make([]byte, 64)
+		if n, err := client.Read(buf); err == nil {
+			if got := string(buf[:n]); got != "udp answer to query" {
+				t.Fatalf("UDP answered %q", got)
+			}
+			return
+		}
+		if attempt == 10 {
+			t.Fatal("no UDP answer through the stream")
+		}
 	}
 }
 

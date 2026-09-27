@@ -270,6 +270,36 @@ func TestApplyStreamSaysWhenItCouldNotCheckTheHost(t *testing.T) {
 	}
 }
 
+// A stream of both protocols asks for a TCP and a UDP socket, and the
+// refusal names the protocol that clashed.
+func TestApplyStreamChecksBothProtocols(t *testing.T) {
+	withListeners(t, func(context.Context) ([]Listener, error) {
+		return []Listener{{Protocol: "tcp", Address: "127.0.0.1", Port: 853, PID: 70, Process: "unbound"}}, nil
+	})
+	svc, _ := streamHost(t)
+	writeStream(t, svc, "syslog", "server { listen 514 udp; proxy_pass 10.0.0.9:514; }\n")
+	both := tcpStream()
+	both.Name, both.Listen, both.Protocol = "logs", 514, "both"
+	var inUse *PortInUseError
+	if _, err := svc.ApplyStream(context.Background(), both, "", false); !errors.As(err, &inUse) {
+		t.Fatalf("got %v, want the UDP side refused", err)
+	}
+	if inUse.Proto != "udp" || inUse.Owner != "the stream syslog" || !strings.Contains(inUse.Error(), "514/udp") {
+		t.Fatalf("got %+v", inUse)
+	}
+	both.Listen = 853
+	if _, err := svc.ApplyStream(context.Background(), both, "", false); !errors.As(err, &inUse) || inUse.Proto != "tcp" || inUse.Owner != "unbound" {
+		t.Fatalf("got %v, want the TCP side refused", err)
+	}
+	both.Listen = 5353
+	if _, err := svc.ApplyStream(context.Background(), both, "", false); err != nil {
+		t.Fatalf("a free port: %v", err)
+	}
+	if got := parseStreamFile("logs.conf", mustRead(t, filepath.Join(svc.streamDir(), "logs.conf"))).binds; len(got) != 4 {
+		t.Fatalf("binds = %+v, want TCP and UDP on both families", got)
+	}
+}
+
 func TestBindsClash(t *testing.T) {
 	cases := []struct {
 		a, b bind

@@ -106,4 +106,16 @@ describe("streamFindings", () => {
     })
     expect(ids(findings)).toEqual(["warning stream.open.everyone"])
   })
+
+  test("a stream of both protocols is named as such", () => {
+    const findings = streamFindings({
+      streams: status({
+        included: true,
+        streams: [stream({ name: "dns", listen: 53, protocol: "both" })],
+      }),
+    })
+    expect(findings.map((f) => f.detail)).toEqual([
+      "TCP+UDP 53 → 10.0.0.5:5432 with no allow list.",
+    ])
+  })
 })

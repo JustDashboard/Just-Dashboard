@@ -401,8 +401,12 @@ ownership and cleanup, then removes its own containers/volumes/networks.
     reload that fails after a clean test is a 200 with `reloadError`, not "not applied". The upstream block
     is `NginxIdent(name)_backend`, so `a-b` and `a_b` no longer declare one upstream; UDP writes
     `proxy_responses 1` only in the one-reply mode (it made every datagram a new session for a game server
-    or WireGuard); the idle and connect timeouts are separate. Delete reloads only when nginx read the
-    directory, and returns a failed reload as `reloadError`.
+    or WireGuard); protocol `both` writes a TCP and a UDP listen on the same addresses, the port check asks
+    for both sockets and names the one that clashed (`514/udp`), and `proxy_responses` touches its UDP side
+    only; the idle (`timeout`) and connect timeouts are separate and written as nginx time (`10m`, `1h30m`).
+    Delete reloads only when nginx read the directory, and returns a failed reload as `reloadError`. A
+    stream directory that cannot be read is a retryable 500 `stream_dir_unreadable` ("Could not read the
+    stream directory"), never an empty list.
   - **Links and unreadable files.** The listing names a symbolic link (`link`, and "a symbolic link" in
     `unsupported`, so the form opens read-only; a save over one is `stream_handwritten`) and says a link to
     nothing links to nothing. Delete (`StreamDeletion`) removes a link as a link, leaving its target, and
