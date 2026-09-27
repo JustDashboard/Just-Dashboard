@@ -313,8 +313,4 @@ export const GLOSSARY: Record<string, { title: string; body: string }> = {
     title: "The same container, as a file",
     body: "A container created here exists only in Docker's own memory: there is no file anywhere describing it, so it cannot be committed to git, backed up, or recreated on another machine. The compose version can. Paste it into a new stack to keep it.",
   },
-  containerStorage: {
-    title: "Storage",
-    body: "Anything a container writes outside the paths you attach storage to lives in the container's own filesystem, and that is destroyed every time the container is replaced — which includes every image update. A volume is the fix: Docker keeps it outside the container, so the data survives.",
-  },
 }

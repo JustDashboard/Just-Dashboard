@@ -6,17 +6,13 @@ import { useParams, useRouter, useSearchParams } from "next/navigation"
 import {
   ArrowCircleUp,
   ArrowLeft,
-  ChevronRight,
-  Clock,
   Copy,
   Download,
   Eye,
   EyeOff,
-  FolderClosed,
   Information,
   Layers,
   Pencil,
-  Servers,
   ShieldOff,
   Warning,
 } from "@/components/icons"
@@ -57,8 +53,7 @@ import { FileBrowser } from "@/components/files/inline-browser"
 import { ProductLogo, imageProduct } from "@/components/product-logo"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Detail, DetailList, Metric, MetricStrip, Page, PageContext } from "@/components/page"
-import { Group, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { ROW_BLEED } from "@/components/row-list"
+import { Group, Well } from "@/components/panel"
 import { Tag } from "@/components/tag"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -290,9 +285,13 @@ function ContainerDetailPanel({
             <EnvironmentList env={detail.env} />
           </TabsContent>
 
-          <TabsContent value="mounts" className="min-h-0 flex-1 space-y-3 overflow-y-auto">
-            <MountList detail={detail} />
-            <WritableLayer containerId={detail.id} />
+          {/* The listing takes the tab's height and scrolls inside itself, so
+              the tab only scrolls once a writable-layer report outgrows it. */}
+          <TabsContent value="mounts" className="min-h-0 flex-1 overflow-y-auto">
+            <div className="flex h-full min-h-0 flex-col gap-3">
+              <MountList detail={detail} />
+              <WritableLayer containerId={detail.id} />
+            </div>
           </TabsContent>
 
           <TabsContent value="inspect" className="min-h-0 flex-1">
@@ -962,14 +961,13 @@ function RenameButton({ detail, onRenamed }: { detail: ContainerDetail; onRename
  *
  * So the path inside the container leads — that is the one the application's
  * own configuration refers to — the kind of storage is stated in words rather
- * than as a Docker noun, and where it actually lives is the second line. The
+ * than as a Docker noun, and where it actually lives follows it. The
  * consequence, which is the whole point, is one sentence per kind and one
  * hover card away.
  */
 const MOUNT_KIND: Record<
   string,
   {
-    icon: React.ComponentType<{ className?: string }>
     label: string
     term: string
     /** Where the data really is, in the form a person would go looking for it. */
@@ -979,7 +977,6 @@ const MOUNT_KIND: Record<
   }
 > = {
   volume: {
-    icon: Servers,
     label: "Managed volume",
     term: "volume",
     // The volume's name, not the directory Docker keeps it in. `_data` under
@@ -989,14 +986,12 @@ const MOUNT_KIND: Record<
     survives: true,
   },
   bind: {
-    icon: FolderClosed,
     label: "Folder on this server",
     term: "bind",
     where: (mount) => mount.source,
     survives: true,
   },
   tmpfs: {
-    icon: Clock,
     label: "Temporary memory",
     term: "tmpfs",
     where: () => "in RAM",
@@ -1004,158 +999,132 @@ const MOUNT_KIND: Record<
   },
 }
 
-function MountList({ detail }: { detail: ContainerDetail }) {
-  const mounts = detail.mounts
-  const kept = mounts.filter((mount) => MOUNT_KIND[mount.type]?.survives).length
-  // One at a time. Two open browsers is two listings of a hundred files each
-  // in a tab whose other half is the writable layer, and the question a row
-  // was expanded to answer is always about that row.
-  const [open, setOpen] = useState<string | null>(null)
-
-  return (
-    // Plain: the side panel is the frame, and the mount rows are the whole of
-    // this tab.
-    <Panel plain>
-      <PanelHeader
-        title={
-          <span className="inline-flex items-center gap-1.5">
-            Storage
-            <ExplainIcon name="containerStorage" />
-          </span>
-        }
-        actions={
-          mounts.length > 0 && (
-            <span className="numeric text-hint text-muted-foreground">
-              Persistent mounts {kept} / {mounts.length}
-            </span>
-          )
-        }
-      />
-      <PanelBody flush>
-        {mounts.length === 0 ? (
-          <EmptyNote>
-            Nothing is attached, so everything this container writes is destroyed when it is
-            replaced.
-          </EmptyNote>
-        ) : (
-          <ul className="divide-y divide-hairline">
-            {mounts.map((mount, i) => (
-              <MountRow
-                key={i}
-                mount={mount}
-                container={detail}
-                open={open === String(i)}
-                onOpenChange={(next) => setOpen(next ? String(i) : null)}
-              />
-            ))}
-          </ul>
-        )}
-      </PanelBody>
-    </Panel>
-  )
+/**
+ * Only a volume or a bind has somewhere to look. A tmpfs mount is memory: it
+ * exists in the container's namespace and nowhere on this filesystem, so its
+ * row never grows a control that could only fail.
+ */
+function browsable(mount: ContainerDetail["mounts"][number]) {
+  return (mount.type === "volume" || mount.type === "bind") && Boolean(mount.source)
 }
 
 /**
- * One mount, and on request what is inside it.
+ * The mounts, and what is in one of them — already open.
  *
- * The row was a label: a path in the container, a volume name, and a tag
- * saying the data outlives the container. Every one of those is a fact about
- * the storage and none of them is a fact about the *data*, which is what
- * somebody opening this tab wants — did the backup land, did the app write
- * its config, is this the volume with the database in it. The row opens onto
- * the answer rather than sending the operator to the file manager to look the
- * directory up again by a path under /var/lib/docker.
+ * Each mount was a row that had to be expanded before it showed anything, and
+ * what it expanded into was a browser indented under the row, capped at a
+ * third of the screen, with the rest of the tab empty below it. The question
+ * somebody opens this tab with — did the backup land, is this the volume with
+ * the database in it — was a click and a scroll away on every visit.
  *
- * Only a volume or a bind has somewhere to look. A tmpfs mount is memory: it
- * exists in the container's namespace and nowhere on this filesystem, so its
- * row stays what it was rather than growing a control that could only fail.
+ * So the first mount there is something to look in is open when the tab is,
+ * and the browser takes the height the tab has. The mounts sit above it as one
+ * line each; with more than one to look in, picking a line is what changes the
+ * listing, the way the file manager's sidebar does.
  */
-function MountRow({
-  mount,
-  container,
-  open,
-  onOpenChange,
-}: {
-  mount: ContainerDetail["mounts"][number]
-  container: ContainerDetail
-  open: boolean
-  onOpenChange: (open: boolean) => void
-}) {
-  const kind = MOUNT_KIND[mount.type]
-  const Icon = kind?.icon ?? Servers
-  const where = kind ? kind.where(mount) : mount.source
-  const browsable = (mount.type === "volume" || mount.type === "bind") && Boolean(mount.source)
+function MountList({ detail }: { detail: ContainerDetail }) {
+  const mounts = detail.mounts
+  const [selected, setSelected] = useState(() => mounts.findIndex(browsable))
+  const choosing = mounts.filter(browsable).length > 1
+  const mount = mounts[selected]
+
+  if (mounts.length === 0) {
+    return (
+      <EmptyNote>
+        Nothing is attached, so everything this container writes is destroyed when it is replaced.
+      </EmptyNote>
+    )
+  }
+
   // Writing into a live database's own files is how a volume stops being
   // restorable. A stopped container is not running that database, and telling
   // somebody to stop what is already stopped is noise.
   const databaseFiles =
-    container.state === "running" &&
-    looksLikeDatabase(mount.name, mount.destination, mount.source, container.image)
-
-  const body = (
-    <>
-      <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-      <span className="min-w-0 flex-1">
-        {/* The path the application inside was configured with. */}
-        <span className="block font-mono text-body break-all">{mount.destination}</span>
-        <span className="mt-0.5 block text-hint break-all text-muted-foreground">
-          {where}
-          {" · "}
-          {mount.rw ? "the container can write to it" : "read-only"}
-        </span>
-      </span>
-      <span className="flex shrink-0 items-center gap-1.5">
-        <Tag tone={kind?.survives === false ? "warning" : "default"}>
-          {kind?.label ?? mount.type}
-        </Tag>
-        {kind && <ExplainIcon name={kind.term} />}
-      </span>
-    </>
-  )
-
-  if (!browsable) {
-    return (
-      <li className={cn("flex min-w-0 items-start gap-3 px-4 py-2.5", ROW_BLEED)}>
-        <span className="w-3.5 shrink-0" aria-hidden />
-        {body}
-      </li>
-    )
-  }
+    mount &&
+    detail.state === "running" &&
+    looksLikeDatabase(mount.name, mount.destination, mount.source, detail.image)
 
   return (
-    <li className="min-w-0">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => onOpenChange(!open)}
-        className={cn(
-          "flex w-full min-w-0 items-start gap-3 px-4 py-2.5 text-left focus-ring-inset transition-colors hover:bg-row-hover",
-          ROW_BLEED,
-        )}
-      >
-        <ChevronRight
-          aria-hidden
-          className={cn(
-            "mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform",
-            open && "rotate-90",
-          )}
-        />
-        {body}
-      </button>
-      {open && (
-        <div className="space-y-1.5 px-4 pt-1 pb-3">
-          {databaseFiles && <DatabaseStorageWarning />}
-          <FileBrowser
-            root={mount.source}
-            label={mount.type === "volume" ? where : undefined}
-            emptyNote={
-              mount.type === "volume"
-                ? "Nothing has been written to this volume yet."
-                : "This folder is empty."
-            }
+    <>
+      <ul aria-label="Mounts" className="shrink-0 space-y-0.5">
+        {mounts.map((m, i) => (
+          <MountRow
+            key={i}
+            mount={m}
+            selected={choosing && i === selected}
+            onSelect={choosing && browsable(m) ? () => setSelected(i) : undefined}
           />
-        </div>
+        ))}
+      </ul>
+      {databaseFiles && <DatabaseStorageWarning />}
+      {mount && (
+        <FileBrowser
+          fill
+          className="min-h-80"
+          root={mount.source}
+          label={mount.type === "volume" ? MOUNT_KIND.volume.where(mount) : undefined}
+          emptyNote={
+            mount.type === "volume"
+              ? "Nothing has been written to this volume yet."
+              : "This folder is empty."
+          }
+        />
       )}
+    </>
+  )
+}
+
+/**
+ * One mount on one line: the path the application inside was configured with,
+ * where that really is, and what kind of storage it is at the edge.
+ */
+function MountRow({
+  mount,
+  selected,
+  onSelect,
+}: {
+  mount: ContainerDetail["mounts"][number]
+  selected: boolean
+  /** Set when there is more than one mount to look in and this is one of them. */
+  onSelect?: () => void
+}) {
+  const kind = MOUNT_KIND[mount.type]
+  const where = kind ? kind.where(mount) : mount.source
+
+  const facts = (
+    <>
+      <span className="min-w-0 truncate font-mono text-body" title={mount.destination}>
+        {mount.destination}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-hint text-muted-foreground" title={where}>
+        {where}
+      </span>
+      {!mount.rw && <Tag>read-only</Tag>}
+      <Tag tone={kind?.survives === false ? "warning" : "default"}>{kind?.label ?? mount.type}</Tag>
+    </>
+  )
+  const row = "flex min-w-0 flex-1 items-baseline gap-3 px-2.5 py-1.5"
+
+  return (
+    <li
+      className={cn(
+        "flex min-w-0 items-center rounded-md pr-2.5 transition-colors",
+        selected ? "bg-accent text-accent-foreground" : onSelect && "hover:bg-row-hover",
+      )}
+    >
+      {onSelect ? (
+        <button
+          type="button"
+          aria-pressed={selected}
+          onClick={onSelect}
+          className={cn(row, "rounded-md text-left focus-ring-inset")}
+        >
+          {facts}
+        </button>
+      ) : (
+        <span className={row}>{facts}</span>
+      )}
+      {kind && <ExplainIcon name={kind.term} />}
     </li>
   )
 }
