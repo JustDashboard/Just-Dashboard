@@ -1,19 +1,9 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
-import {
-  CheckCircle,
-  CloudUpload,
-  Globe,
-  Inspect,
-  RefreshClockwise,
-  ShieldOff,
-  Trash,
-} from "@/components/icons"
-import { notify } from "@/lib/toast"
-import { ApiError, del, get, post } from "@/lib/api"
-import { calendarDate } from "@/lib/format"
+import { useSearchParams } from "next/navigation"
+import { CheckCircle, CloudUpload, RefreshClockwise, ShieldOff } from "@/components/icons"
+import { ApiError, get, post } from "@/lib/api"
 import type { Certificate, CertbotState, DNSProvider, Job } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -21,11 +11,8 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { JobConsole, RecentJobs, useJobConsole } from "@/components/job-console"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { ProductLogo } from "@/components/product-logo"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
-import { VerbBar } from "@/components/verbs"
 import { useProxy } from "@/components/proxy/proxy-context"
 import {
   ALL_CERTS,
@@ -36,15 +23,10 @@ import {
   RenewalNotice,
   useRenew,
 } from "@/components/proxy/certbot-panel"
-import { CertLife, ExpiryStatus } from "@/components/proxy/expiry-status"
 import { CertificateInventory } from "@/components/proxy/certificate-inventory"
-import { Field, FormSection, FormSections } from "@/components/form"
 import { ImportDialog } from "@/components/proxy/import-dialog"
-import { certificateProduct } from "@/components/proxy/marks"
+import { WatchedDomains } from "@/components/proxy/watched-domains"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-
-type Watched = { id: number; domain: string; port: number; certificate?: Certificate }
 
 /**
  * Inventory and lifecycle controls sit beside each other: the certificate you
@@ -54,7 +36,6 @@ type Watched = { id: number; domain: string; port: number; certificate?: Certifi
 export function CertificatesPage() {
   const { can } = useAuth()
   const { status } = useProxy()
-  const router = useRouter()
   const params = useSearchParams()
   const { confirm, dialog } = useConfirm()
   const admin = can("system.admin")
@@ -68,14 +49,9 @@ export function CertificatesPage() {
     staging: true,
   }))
   const [importOpen, setImportOpen] = useState(false)
-  const [domain, setDomain] = useState("")
 
   const certs = usePoll(
     (signal) => get<Certificate[]>("/certificates/", undefined, signal),
-    300_000,
-  )
-  const watched = usePoll(
-    (signal) => get<Watched[]>("/certificates/watched", undefined, signal),
     300_000,
   )
   const certbot = usePoll<CertbotState>(
@@ -127,19 +103,6 @@ export function CertificatesPage() {
         console_.attach(job)
       },
     })
-
-  const addDomain = async () => {
-    // "host:port" for the services that answer TLS off 443: a mail server
-    // on 993, a database on 5432 with TLS required.
-    const [host, port] = domain.trim().split(":")
-    try {
-      await post("/certificates/watched", { domain: host, port: Number(port) || 443 })
-      setDomain("")
-      watched.refresh()
-    } catch (err) {
-      notify.error("Could not watch domain", err)
-    }
-  }
 
   // A staging run that passed is the moment to issue the real one, with the
   // same names and nothing to retype.
@@ -330,139 +293,7 @@ export function CertificatesPage() {
           )}
         </div>
       </div>
-      <FormSections>
-        <FormSection
-          aside
-          title="Watched domains"
-          hint={`${watched.data?.length ?? 0} checked every five minutes`}
-          actions={
-            watched.data &&
-            watched.data.length > 0 && (
-              <Button variant="outline" size="sm" onClick={() => watched.refresh()}>
-                <RefreshClockwise className="size-3.5" />
-                Re-check now
-              </Button>
-            )
-          }
-        >
-          {admin && (
-            <form
-              onSubmit={(event) => {
-                event.preventDefault()
-                if (domain.trim()) void addDomain()
-              }}
-              className="flex items-end gap-2"
-            >
-              <Field label="Domain to watch" htmlFor="watch-domain" className="min-w-0 flex-1">
-                <Input
-                  id="watch-domain"
-                  value={domain}
-                  onChange={(event) => setDomain(event.target.value)}
-                  placeholder="example.com or mail.example.com:993"
-                />
-              </Field>
-              <Button type="submit" size="sm" disabled={!domain.trim()}>
-                Watch
-              </Button>
-            </form>
-          )}
-          <div>
-            {watched.loading ? (
-              <LoadingRows rows={2} />
-            ) : watched.error ? (
-              <ErrorState error={watched.error} />
-            ) : !watched.data?.length ? (
-              <p className="py-2 text-body text-muted-foreground">
-                Nothing watched yet. A watched domain is checked with a real handshake every five
-                minutes, which is what catches a certificate renewed on disk and never reloaded.
-              </p>
-            ) : (
-              <ChoiceList aria-label="Watched domains" className="animate-rise">
-                {watched.data.map((row) => (
-                  <ChoiceRow
-                    key={row.id}
-                    verb={admin ? `Inspect ${row.domain}` : row.domain}
-                    disabled={!admin}
-                    href={
-                      admin
-                        ? `/proxy/tls?domain=${encodeURIComponent(row.port === 443 ? row.domain : `${row.domain}:${row.port}`)}`
-                        : undefined
-                    }
-                    leading={
-                      <ProductLogo
-                        id={certificateProduct(row.certificate)}
-                        size="sm"
-                        fallback={Globe}
-                      />
-                    }
-                    title={
-                      <>
-                        {row.domain}
-                        {row.port !== 443 && (
-                          <span className="numeric ml-1.5 font-mono text-hint text-muted-foreground">
-                            :{row.port}
-                          </span>
-                        )}
-                      </>
-                    }
-                    description={
-                      row.certificate
-                        ? [
-                            row.certificate.issuer,
-                            row.certificate.notAfter &&
-                              `until ${calendarDate(row.certificate.notAfter)}`,
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")
-                        : "not checked yet"
-                    }
-                    trailing={<ExpiryStatus cert={row.certificate} />}
-                    className="gap-3 p-4"
-                  >
-                    {row.certificate?.error && (
-                      <p className="text-hint break-all text-destructive">
-                        {row.certificate.error}
-                      </p>
-                    )}
-                    {row.certificate && !row.certificate.error && (
-                      <CertLife cert={row.certificate} className="w-full" />
-                    )}
-                    <div className="flex flex-wrap justify-end gap-2">
-                      {admin && (
-                        <VerbBar
-                          menuLabel={`More actions for ${row.domain}`}
-                          verbs={[
-                            {
-                              key: "scan",
-                              label: "TLS report",
-                              icon: Inspect,
-                              inline: true,
-                              run: () =>
-                                router.push(
-                                  `/proxy/tls?domain=${encodeURIComponent(row.port === 443 ? row.domain : `${row.domain}:${row.port}`)}`,
-                                ),
-                            },
-                            {
-                              key: "remove",
-                              label: "Stop watching",
-                              icon: Trash,
-                              danger: true,
-                              run: async () => {
-                                await del(`/certificates/watched/${row.id}`)
-                                watched.refresh()
-                              },
-                            },
-                          ]}
-                        />
-                      )}
-                    </div>
-                  </ChoiceRow>
-                ))}
-              </ChoiceList>
-            )}
-          </div>
-        </FormSection>
-      </FormSections>
+      <WatchedDomains admin={admin} />
 
       {admin && (
         <>

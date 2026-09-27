@@ -1,31 +1,30 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
-import { Globe, Plus, ShieldCheck, Warning } from "@/components/icons"
+import { Globe, Plus } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { del, get, post, put } from "@/lib/api"
-import type { ProxyValidation, VHost } from "@/lib/types"
+import { del, get, post } from "@/lib/api"
+import type { VHost } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useAuth } from "@/hooks/use-auth"
-import { useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
-import { CodeEditor } from "@/components/code-editor"
+import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceRow, GroupRule } from "@/components/flow"
 import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
-import { Pane, Well } from "@/components/panel"
 import { ProductGlyph, ProductLogo, ProductLogos } from "@/components/product-logo"
-import { SidePanel } from "@/components/side-panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
-import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { VerbBar } from "@/components/verbs"
 import { AuthFilesPanel } from "@/components/proxy/auth-files-panel"
+import { ConfigEditor } from "@/components/proxy/config-editor"
 import { siteProduct } from "@/components/proxy/marks"
 import { SiteForm } from "@/components/proxy/site-form"
 import { ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
 import { useSiteVerbs } from "@/components/proxy/site-verbs"
 import { ProxyGrid, RoutePath } from "@/components/proxy/route-path"
+import { byUrgency, isDisabled, isPlain, waiting } from "@/components/proxy/site-order"
 import { Button } from "@/components/ui/button"
 
 type SiteFilter = "all" | "tls" | "plain" | "disabled"
@@ -35,24 +34,6 @@ const FILTER_LABEL: Record<SiteFilter, string> = {
   tls: "TLS",
   plain: "Plain HTTP",
   disabled: "Disabled",
-}
-
-/** A site with something to act on: proxying an application in plain text, or on disk and not serving. */
-function isPlain(v: VHost) {
-  return v.enabled && !v.tls && v.upstreams.length > 0
-}
-function isDisabled(v: VHost) {
-  return v.kind === "nginx" && !v.enabled && Boolean(v.enabledPath)
-}
-function waiting(v: VHost) {
-  return isPlain(v) || isDisabled(v)
-}
-
-/** Worst first, then by name. The order *is* the page's answer to "which of these needs me". */
-function byUrgency(a: VHost, b: VHost): number {
-  const rank = (v: VHost) => (isPlain(v) ? 0 : isDisabled(v) ? 1 : 2)
-  if (rank(a) !== rank(b)) return rank(a) - rank(b)
-  return a.name.localeCompare(b.name)
 }
 
 /**
@@ -372,15 +353,29 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         onSaved={refresh}
       />
       <ConfigEditor
-        vhost={rawEditing}
-        admin={admin}
-        confirm={confirm}
+        open={rawEditing !== null}
         onOpenChange={closeRaw}
+        path={rawEditing?.path ?? ""}
+        kind={rawEditing?.kind ?? "nginx"}
+        title={rawEditing?.name ?? "Configuration"}
+        readOnly={!admin}
+        siteDisabled={
+          rawEditing?.kind === "nginx" && Boolean(rawEditing.enabledPath) && !rawEditing.enabled
+        }
         onSaved={refresh}
-        onEdit={(v) => {
-          setEditing(null)
-          openForm(v.name)
-        }}
+        actions={(busy) =>
+          rawEditing && (
+            <SiteFileVerbs
+              vhost={rawEditing}
+              admin={admin}
+              busy={busy}
+              onEdit={(v) => {
+                setEditing(null)
+                openForm(v.name)
+              }}
+            />
+          )
+        }
       />
       {dialog}
     </Page>
@@ -435,61 +430,23 @@ function SiteCard({ vhost, busy, index, ...handlers }: CardProps) {
 }
 
 /**
- * The file itself, for a site the form does not own — and for the operator
- * who would rather see the nginx than the form. Keyed on the file so opening
- * another vhost never inherits the previous one's buffer; saving that to the
- * wrong path would be a real outage.
+ * The site's own verbs in the raw editor's header: the ones that still make
+ * sense with the file open. Edit waits while a save is in flight.
  */
-function ConfigEditor({
+function SiteFileVerbs({
   vhost,
   admin,
-  confirm,
-  onOpenChange,
-  onSaved,
+  busy,
   onEdit,
 }: {
-  vhost: VHost | null
+  vhost: VHost
   admin: boolean
-  confirm: (request: ConfirmRequest) => void
-  onOpenChange: (open: boolean) => void
-  onSaved: () => void
+  busy: boolean
   onEdit: (vhost: VHost) => void
 }) {
-  return (
-    <ConfigEditorBody
-      key={vhost?.path ?? "none"}
-      vhost={vhost}
-      admin={admin}
-      confirm={confirm}
-      onOpenChange={onOpenChange}
-      onSaved={onSaved}
-      onEdit={onEdit}
-    />
-  )
-}
-
-function ConfigEditorBody({
-  vhost,
-  admin,
-  confirm,
-  onOpenChange,
-  onSaved,
-  onEdit,
-}: {
-  vhost: VHost | null
-  admin: boolean
-  confirm: (request: ConfirmRequest) => void
-  onOpenChange: (open: boolean) => void
-  onSaved: () => void
-  onEdit: (vhost: VHost) => void
-}) {
-  const [content, setContent] = useState("")
-  const [original, setOriginal] = useState("")
-  const [busy, setBusy] = useState(false)
-  const [validation, setValidation] = useState<ProxyValidation | null>(null)
   const noop = () => {}
   const verbs = useSiteVerbs({
-    vhost: vhost ?? EMPTY_VHOST,
+    vhost,
     admin,
     busy: busy ? "Saving" : undefined,
     onEdit,
@@ -498,165 +455,5 @@ function ConfigEditorBody({
     onToggle: noop,
     onDelete: noop,
   }).filter((v) => v.key === "open" || v.key === "scan" || v.key === "log" || v.key === "edit")
-
-  useEffect(() => {
-    if (!vhost) return
-    const controller = new AbortController()
-    get<{ content: string }>("/proxy/config", { path: vhost.path }, controller.signal)
-      .then((r) => {
-        setContent(r.content)
-        setOriginal(r.content)
-      })
-      .catch((err) => !controller.signal.aborted && notify.error("Could not read the file", err))
-    return () => controller.abort()
-  }, [vhost])
-
-  const validate = async () => {
-    if (!vhost) return
-    setBusy(true)
-    try {
-      setValidation(
-        await post<ProxyValidation>("/proxy/validate", {
-          kind: vhost.kind,
-          path: vhost.path,
-          content,
-        }),
-      )
-    } catch (err) {
-      notify.error("Validation failed", err)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const save = async (reload: boolean) => {
-    if (!vhost) return
-    setBusy(true)
-    try {
-      await put("/proxy/config", { kind: vhost.kind, path: vhost.path, content, reload })
-      notify.success(reload ? "Saved and reloaded" : "Saved")
-      setOriginal(content)
-      onSaved()
-    } catch (err) {
-      notify.error("Not applied", err)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const dirty = content !== original
-  const disabledNginx =
-    vhost?.kind === "nginx" && Boolean(vhost.enabledPath) && !vhost.enabled && !validation?.note
-
-  return (
-    <SidePanel
-      open={vhost !== null}
-      onOpenChange={(o) => !busy && onOpenChange(o)}
-      width="xl"
-      title={vhost?.name ?? "Configuration"}
-      description={vhost?.path}
-      actions={
-        vhost && (
-          <>
-            <span className="truncate font-mono text-hint text-muted-foreground">{vhost.path}</span>
-            <VerbBar verbs={verbs.map((v) => ({ ...v, inline: true }))} className="ml-auto" />
-          </>
-        )
-      }
-      bodyClassName="flex min-h-0 flex-1 flex-col gap-3 p-4"
-      footer={
-        admin && vhost ? (
-          <>
-            <Button size="sm" variant="outline" onClick={validate} pending={busy}>
-              Test config
-            </Button>
-            <span className="flex-1" />
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                dirty &&
-                confirm({
-                  title: "Discard changes",
-                  confirmLabel: "Discard",
-                  description: (
-                    <p>What you typed here is thrown away and the file is left as it is.</p>
-                  ),
-                  action: async () => {
-                    setContent(original)
-                    setValidation(null)
-                  },
-                })
-              }
-              disabled={busy || !dirty}
-            >
-              Discard
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => save(false)}
-              disabled={busy || !dirty}
-            >
-              Save only
-            </Button>
-            <Button size="sm" onClick={() => save(true)} disabled={busy || !dirty}>
-              Save and reload
-            </Button>
-          </>
-        ) : undefined
-      }
-    >
-      {admin && (
-        <Notice icon={ShieldCheck} title="Validated before it takes effect">
-          The server runs its own config test first. A config that fails is rolled back and never
-          reloaded, so a typo here cannot take your sites offline.
-        </Notice>
-      )}
-      {disabledNginx && (
-        <Notice tone="warning" icon={Warning} title="nginx is not reading this file">
-          The site is disabled, so a config test cannot see it — it will pass whatever is in it.
-          Enable the site before trusting the result.
-        </Notice>
-      )}
-
-      <Pane className="min-h-0 flex-1">
-        <CodeEditor
-          className="h-full"
-          language="ini"
-          value={content}
-          readOnly={!admin}
-          onChange={(v) => {
-            setContent(v)
-            setValidation(null)
-          }}
-        />
-      </Pane>
-
-      {validation && (
-        <Notice
-          tone={validation.valid ? "success" : "danger"}
-          title={validation.valid ? "Config is valid" : "Config is refused"}
-        >
-          {validation.note && <p>{validation.note}</p>}
-          {validation.output && (
-            <Well className="mt-2 max-h-40 whitespace-pre-wrap">{validation.output}</Well>
-          )}
-        </Notice>
-      )}
-    </SidePanel>
-  )
-}
-
-const EMPTY_VHOST: VHost = {
-  name: "",
-  kind: "nginx",
-  path: "",
-  enabled: false,
-  serverNames: [],
-  listen: [],
-  upstreams: [],
-  tls: false,
-  modified: "",
-  size: 0,
+  return <VerbBar verbs={verbs.map((v) => ({ ...v, inline: true }))} className="ml-auto" />
 }
