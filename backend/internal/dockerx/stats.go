@@ -243,10 +243,8 @@ func (s *StatsSampler) Sample(ctx context.Context, ids []string) ([]ContainerSta
 
 // applyWritableSizes folds the cached disk-usage walk into a stats batch.
 //
-// Reads the cache and never forces a refresh: a sampler running every fifteen
-// seconds must not trigger a walk of every layer on the host. A batch taken
-// before the first walk completes simply carries no size, which the history
-// records as absent rather than as zero.
+// Shares the disk cache and its background refresh: a sampler running every
+// fifteen seconds must not trigger a separate layer walk for every batch.
 func (c *Client) applyWritableSizes(ctx context.Context, out []ContainerStats) {
 	if len(out) == 0 {
 		return
@@ -269,7 +267,7 @@ func (c *Client) applyWritableSizes(ctx context.Context, out []ContainerStats) {
 // SampleAll reads every running container, which is what a recorder wants: it
 // should follow whatever is up now rather than a list captured at startup.
 func (s *StatsSampler) SampleAll(ctx context.Context) ([]ContainerStats, error) {
-	list, err := s.client.ListContainers(ctx, false)
+	list, err := s.client.listContainerSummaries(ctx, container.ListOptions{})
 	if err != nil {
 		return nil, err
 	}

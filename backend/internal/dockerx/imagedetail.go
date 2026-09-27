@@ -16,6 +16,7 @@ import (
 
 	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/client"
 )
 
 // ImageDetail is everything worth knowing about an image before running or
@@ -221,7 +222,7 @@ func cleanHistoryLine(s string) string {
 
 func (c *Client) imageUsers(ctx context.Context, imageID string) []ImageUser {
 	out := []ImageUser{}
-	list, err := c.ListContainers(ctx, true)
+	list, err := c.listContainerSummaries(ctx, container.ListOptions{All: true})
 	if err != nil {
 		return out
 	}
@@ -266,21 +267,24 @@ type UpdateStatus struct {
 }
 
 // updateCacheTTL keeps a registry answer for long enough that opening the
-// images tab twice does not spend two round trips per image — and short
+// images tab twice does not repeat the remote request per image — and short
 // enough that "check for updates" after a release means something. Docker Hub
 // rate-limits manifest requests by IP, so this is also what stops a dashboard
 // left open on a screen from burning the host's quota.
 const updateCacheTTL = 30 * time.Minute
 
 type updateEntry struct {
-	status UpdateStatus
+	digest string
 	at     time.Time
 }
 
-var (
-	updateMu    sync.Mutex
-	updateCache = map[string]updateEntry{}
-)
+type registryRead struct {
+	done   chan struct{}
+	cancel context.CancelFunc
+	entry  updateEntry
+	err    error
+	valid  bool
+}
 
 // CheckUpdate asks the registry what a tag points at now.
 //
@@ -290,22 +294,9 @@ var (
 // page for.
 func (c *Client) CheckUpdate(ctx context.Context, ref string, force bool) UpdateStatus {
 	ref = ImageRef(ref)
-	if !force {
-		updateMu.Lock()
-		entry, ok := updateCache[ref]
-		updateMu.Unlock()
-		if ok && time.Since(entry.at) < updateCacheTTL {
-			return entry.status
-		}
+	if force {
+		c.forgetRegistryDigest(ref)
 	}
-	status := c.checkUpdate(ctx, ref)
-	updateMu.Lock()
-	updateCache[ref] = updateEntry{status: status, at: time.Now()}
-	updateMu.Unlock()
-	return status
-}
-
-func (c *Client) checkUpdate(ctx context.Context, ref string) UpdateStatus {
 	out := UpdateStatus{Ref: ref, State: "unknown", CheckedAt: time.Now().UTC()}
 	// A reference that cannot move has no update to find, and reporting that
 	// as "unknown" reads as a failed check rather than as the answer. A digest
@@ -349,9 +340,7 @@ func (c *Client) checkUpdate(ctx context.Context, ref string) UpdateStatus {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	dist, err := cli.DistributionInspect(ctx, ref, "")
+	remote, err := c.registryDigest(ctx, cli, ref, out.LocalDigest)
 	if err != nil {
 		// An image built here can still carry a digest — BuildKit writes one —
 		// so "no RepoDigests" is not a reliable test for "never came from a
@@ -373,7 +362,7 @@ func (c *Client) checkUpdate(ctx context.Context, ref string) UpdateStatus {
 		out.Reason = registryReason(err)
 		return out
 	}
-	out.RemoteDigest = dist.Descriptor.Digest.String()
+	out.RemoteDigest, out.CheckedAt = remote.digest, remote.at
 	if out.RemoteDigest == "" || out.LocalDigest == "" {
 		out.Reason = "the registry did not report a digest"
 		return out
@@ -384,6 +373,83 @@ func (c *Client) checkUpdate(ctx context.Context, ref string) UpdateStatus {
 	}
 	out.State = "outdated"
 	return out
+}
+
+// Only the registry's public manifest is shared. Local image state is read
+// each time, and the cache belongs to this daemon client rather than the
+// process. A different local digest also misses: an out-of-band pull may have
+// fetched a newer manifest than the cached registry answer. Authenticated
+// registry reads would additionally need a credential-scoped key.
+func (c *Client) registryDigest(ctx context.Context, cli *client.Client, ref, localDigest string) (updateEntry, error) {
+	key := ref + "\x00" + localDigest
+	for ctx.Err() == nil {
+		c.updateMu.Lock()
+		if entry, ok := c.updates[key]; ok && time.Since(entry.at) < updateCacheTTL {
+			c.updateMu.Unlock()
+			return entry, nil
+		}
+		flight := c.updateFlights[key]
+		if flight == nil {
+			readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
+			flight = &registryRead{done: make(chan struct{}), cancel: cancel}
+			if c.updateFlights == nil {
+				c.updateFlights = map[string]*registryRead{}
+			}
+			c.updateFlights[key] = flight
+			go c.readRegistryDigest(readCtx, cli, ref, key, flight)
+		}
+		c.updateMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return updateEntry{}, ctx.Err()
+		case <-flight.done:
+			if flight.valid {
+				return flight.entry, flight.err
+			}
+		}
+	}
+	return updateEntry{}, ctx.Err()
+}
+
+func (c *Client) readRegistryDigest(ctx context.Context, cli *client.Client, ref, key string, flight *registryRead) {
+	defer flight.cancel()
+	started := time.Now().UTC()
+	dist, err := cli.DistributionInspect(ctx, ref, "")
+	if err == nil && dist.Descriptor.Digest == "" {
+		err = errors.New("the registry did not report a digest")
+	}
+	c.updateMu.Lock()
+	defer c.updateMu.Unlock()
+	flight.entry, flight.err = updateEntry{digest: dist.Descriptor.Digest.String(), at: started}, err
+	flight.valid = c.updateFlights[key] == flight
+	if flight.valid {
+		delete(c.updateFlights, key)
+		if err == nil {
+			// A miss is cheap compared with retaining every tag ever checked.
+			if c.updates == nil || len(c.updates) >= 256 {
+				c.updates = map[string]updateEntry{}
+			}
+			c.updates[key] = flight.entry
+		}
+	}
+	close(flight.done)
+}
+
+func (c *Client) forgetRegistryDigest(ref string) {
+	c.updateMu.Lock()
+	defer c.updateMu.Unlock()
+	prefix := ImageRef(ref) + "\x00"
+	for key := range c.updates {
+		if strings.HasPrefix(key, prefix) {
+			delete(c.updates, key)
+		}
+	}
+	for key := range c.updateFlights {
+		if strings.HasPrefix(key, prefix) {
+			c.updateFlights[key].cancel()
+			delete(c.updateFlights, key)
+		}
+	}
 }
 
 // isBareReference reports a reference with no registry host and no namespace,
@@ -545,6 +611,7 @@ func (c *Client) Build(ctx context.Context, opts BuildOptions, out chan<- LogLin
 	// Plain progress: the default TTY renderer redraws with escape codes that
 	// are meaningless once the output is a list of lines in a browser.
 	cmd.Env = append(os.Environ(), "BUILDKIT_PROGRESS=plain", "DOCKER_CLI_HINTS=false")
+	defer c.forgetDiskUsage()
 	return streamCommand(ctx, cmd, out)
 }
 
@@ -620,10 +687,6 @@ func (c *Client) PullAndReport(ctx context.Context, ref string, out chan<- PullP
 			res.Updated = true
 		}
 	}
-	// The cached verdict is stale the moment a pull finishes.
-	updateMu.Lock()
-	delete(updateCache, ref)
-	updateMu.Unlock()
 	return res, nil
 }
 
@@ -648,11 +711,11 @@ func (c *Client) PruneBuildCache(ctx context.Context, all bool) (PruneReport, er
 	if err != nil {
 		return PruneReport{}, err
 	}
+	defer c.forgetDiskUsage()
 	rep, err := cli.BuildCachePrune(ctx, build.CachePruneOptions{All: all})
 	if err != nil {
 		return PruneReport{}, err
 	}
-	defer c.forgetDiskUsage()
 	items := rep.CachesDeleted
 	if items == nil {
 		items = []string{}
@@ -664,7 +727,7 @@ func (c *Client) PruneBuildCache(ctx context.Context, all bool) (PruneReport, er
 // running, which is the list worth checking for updates: an image nothing uses
 // is one nobody needs told about.
 func (c *Client) containerImageRefs(ctx context.Context) []string {
-	list, err := c.ListContainers(ctx, true)
+	list, err := c.listContainerSummaries(ctx, container.ListOptions{All: true})
 	if err != nil {
 		return nil
 	}

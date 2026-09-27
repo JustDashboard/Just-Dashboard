@@ -162,6 +162,7 @@ func (s *Service) Complete(prefix string, limit int) []Entry {
 	}
 	lower := strings.ToLower(fragment)
 	out := []Entry{}
+	owners := newEntryNames()
 	for _, d := range names {
 		if len(out) >= limit {
 			break
@@ -175,7 +176,7 @@ func (s *Service) Complete(prefix string, limit int) []Entry {
 		if strings.HasPrefix(name, ".") && !strings.HasPrefix(fragment, ".") {
 			continue
 		}
-		e, err := s.entry(filepath.Join(full, name), name)
+		e, err := s.entryWithNames(filepath.Join(full, name), name, owners)
 		if err != nil {
 			continue
 		}
