@@ -709,6 +709,9 @@ test("/proxy/sites/app.example.com reads the site's requests, and what nginx sai
   )
   await expect(page.getByText("/cart", { exact: true })).toBeVisible()
   await expect(page.getByText("/.env", { exact: true })).toBeVisible()
+  // The request record exports its own rows; the log's export beside it
+  // would be a second Export about other lines.
+  await expect(page.getByText("Export", { exact: true })).toHaveCount(1)
   const readings = page.locator("[data-slot='stat-grid']")
   await expect(readings.getByText("Server errors")).toBeVisible()
   await expect(readings.getByText("Upstream failures")).toBeVisible()
@@ -1052,6 +1055,20 @@ test("/proxy/sites/just-dashboard-shop reads its route's requests, and what Cadd
   )!
   expect(around.get("lens")).toBe("caddy")
   expect(around.getAll("f")).toContain("host:shop.example.com")
+
+  // Opened in Caddy's log, the minute around it is narrowed the same way —
+  // the ingress's log is every route's — once the log's own vocabulary has
+  // replaced the access log's.
+  await said.getByRole("button", { name: "Open in Caddy's log" }).click()
+  await expect(page.getByText(/^Around a failed request/)).toBeVisible()
+  await expect
+    .poll(
+      () =>
+        logs.searches
+          .find((q) => q.get("source") === "docker:edge" && q.get("limit") === "3000")
+          ?.getAll("f") ?? [],
+    )
+    .toContain("host:shop.example.com")
 
   // Its Errors are the ingress's lines about its names, and the renewal that
   // failed for them, which a narrowing by host would have hidden.

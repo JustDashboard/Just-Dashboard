@@ -18,8 +18,7 @@ import { journalIdSource, journalSource, kernelSource } from "@/lib/log-sources"
 /**
  * One file a page would open first. `lens` is named only where the page
  * reads the file otherwise than the server would — kern.log as the
- * firewall's — because a lens the page names is the pane's "Read as" set
- * for the reader, drawn as a setting they changed and one Auto cannot undo.
+ * firewall's; everywhere else the server's own description stands.
  */
 export type HostLogFile = { path: string; lens?: string }
 
@@ -86,12 +85,20 @@ export const FAIL2BAN_LOG: HostLogPlan = {
   none: "This host keeps no fail2ban.log",
 }
 
-/** The first of the plan's files the server described, else the journal and the reason for it. */
+/**
+ * The first of the plan's files the server described, else the journal and
+ * the reason for it. A file read as the server reads it is its description,
+ * which the pane need not ask for again; one the page reads through another
+ * lens is asked about by the pane, so "Read as" still knows what the server
+ * would have detected.
+ */
 export function hostLogSource(plan: HostLogPlan, probes: HostLogProbe[]): ServiceLogSource {
   for (const file of plan.files) {
     const probe = probes.find((p) => p.path === file.path)
     if (probe && "source" in probe) {
-      return { ...probe.source, lens: file.lens }
+      return file.lens
+        ? { ...probe.source, lens: file.lens }
+        : { ...probe.source, described: true }
     }
   }
   const outside = probes.find((p) => "refused" in p && p.refused === "outside")

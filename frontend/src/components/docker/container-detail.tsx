@@ -23,7 +23,7 @@ import {
 import { notify } from "@/lib/toast"
 import { get, post, ApiError } from "@/lib/api"
 import { bytes, duration, relativeTime, timestamp } from "@/lib/format"
-import { useSessionState, useViewState } from "@/lib/view-state"
+import { useViewState } from "@/lib/view-state"
 import type {
   ContainerDetail,
   DockerDiagnosis,
@@ -40,7 +40,6 @@ import { useMediaQuery } from "@/hooks/use-mobile"
 import { dockerSource } from "@/lib/log-sources"
 import {
   ServiceLogs,
-  type LogWindow,
   type ServiceLogSource,
   type ServiceLogsView,
 } from "@/components/logs/service-logs"
@@ -153,9 +152,8 @@ function ContainerDetailPanel({
     0,
     [containerId],
   )
-  // Whether the Logs tab is handed that window rather than the tail, and
-  // how many times it has been: each handing opens History on it afresh.
-  const [crash, setCrash] = useState<CrashWindow>({ on: false, times: 0 })
+  // Whether the Logs tab is handed that window rather than the tail.
+  const [crash, setCrash] = useState(false)
 
   // Whether this page has ever had its container, so a 404 can be told apart
   // from a bad address.
@@ -286,7 +284,7 @@ function ContainerDetailPanel({
             <FailurePanel
               data={failure.data}
               onReadLogs={() => {
-                setCrash((c) => ({ on: true, times: c.times + 1 }))
+                setCrash(true)
                 setTab("logs")
               }}
             />
@@ -311,7 +309,7 @@ function ContainerDetailPanel({
               detail={detail}
               failure={failure.data}
               crash={crash}
-              onCrashChange={(on) => setCrash((c) => ({ on, times: c.times + (on ? 1 : 0) }))}
+              onCrashChange={setCrash}
             />
           </TabsContent>
 
@@ -713,7 +711,8 @@ function ContainerLogs({
 }: {
   detail: ContainerDetail
   failure?: FailureDiagnosis
-  crash: CrashWindow
+  /** Whether the pane is handed the failure's window. */
+  crash: boolean
   onCrashChange: (on: boolean) => void
 }) {
   const sources = useMemo<ServiceLogSource[]>(
@@ -746,89 +745,39 @@ function ContainerLogs({
   const crashed =
     failure?.state === "looping" || (detail.state !== "running" && detail.exitCode !== 0)
   const label = crashed ? "Crash window" : "Before it stopped"
-  // Kept for the tab, per container: the Environment tab and back is not a
-  // reason to lose the question on screen.
-  const storageKey = `docker.container.${detail.id}.logs`
-  const handed = crash.on ? logWindow : undefined
-  const onWindow = useOnWindow(storageKey, handed, crash.times)
-  // The reading on screen as the pane last said it, handed back to it as
-  // "live" when the window is let go from Events or Insights — where the
-  // pane itself, going back to Live only from History, would stay.
-  const [view, setView] = useState<string | null>(null)
-  // A window the reader moved off is opened again by starting the pane
-  // afresh on it: handing the same window twice is not a new arrival.
-  const [reopened, setReopened] = useState(0)
-  // On a phone the readings would be the whole screen above a pane the
-  // reader came for; the quick views carry the same counts on their chips.
-  const wide = useMediaQuery("(min-width: 640px)")
+  // The pane lets go of the window the moment the reader moves off it —
+  // Live, another range, a zoom, History on an event — so the chip is on
+  // exactly while the pane reads the window, and a press brings it back.
   const chip = logWindow && (
     <FilterChip
-      selected={onWindow}
-      onClick={() => {
-        if (onWindow) {
-          onCrashChange(false)
-          return
-        }
-        if (crash.on) setReopened((n) => n + 1)
-        onCrashChange(true)
-      }}
+      selected={crash}
+      onClick={() => onCrashChange(!crash)}
       title={`The logs worth reading are ${logWindow.reason}.`}
     >
       <ClockRewind aria-hidden className="size-3 text-muted-foreground" />
       {label}
     </FilterChip>
   )
+  // The pane's strip has no room for the chip beside four views on a phone.
+  const wide = useMediaQuery("(min-width: 640px)")
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
-      {/* The pane's strip has no room for it beside four views on a phone. */}
       {!wide && chip && <div className="flex shrink-0">{chip}</div>}
       <ServiceLogs
-        key={reopened}
         sources={sources}
-        storageKey={storageKey}
-        readings={wide}
+        // Kept for the tab, per container: the Environment tab and back is
+        // not a reason to lose the question on screen.
+        storageKey={`docker.container.${detail.id}.logs`}
+        readings
         views={views}
-        view={view}
-        onViewChange={setView}
-        // Named only while the pane is on it: a range picked since is not
-        // the crash window, whatever the page handed. On a phone the chip
-        // above the pane names it, where the strip has no room for the words.
-        window={handed && { ...handed, label: onWindow && wide ? label : undefined }}
-        onLeaveWindow={() => {
-          onCrashChange(false)
-          setView("live")
-        }}
+        window={crash && logWindow ? { ...logWindow, label } : undefined}
+        onLeaveWindow={() => onCrashChange(false)}
         actions={wide && chip}
         className="min-h-0 flex-1"
         paneClassName="min-h-[30rem]"
       />
     </div>
   )
-}
-
-/** The failure's window as the page hands it to the Logs tab. */
-type CrashWindow = { on: boolean; times: number }
-
-/**
- * Whether the pane is still reading the window it was handed.
- *
- * `ServiceLogs` opens History on a window and says nothing when the reader
- * moves off it — a range picked, the histogram zoomed, "Open in History"
- * from Events — so the window's name in the strip and a chip pressed on
- * would outlive what the pane shows. The pane keeps its range for the tab
- * under the page's storage key, and it is read here from there. Until the
- * pane has written the window it was last handed (`handed` counts the
- * handings), it is taken to be on it.
- */
-function useOnWindow(storageKey: string, window: LogWindow | undefined, handed: number) {
-  const [range] = useSessionState(`${storageKey}.range`, "")
-  const [since] = useSessionState(`${storageKey}.since`, "")
-  const [until] = useSessionState(`${storageKey}.until`, "")
-  const on =
-    window !== undefined && range === "custom" && since === window.since && until === window.until
-  const [seen, setSeen] = useState(0)
-  if (on && seen !== handed) setSeen(handed)
-  return window !== undefined && (on || seen !== handed)
 }
 
 /**

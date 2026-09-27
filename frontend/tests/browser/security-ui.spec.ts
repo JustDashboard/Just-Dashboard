@@ -772,14 +772,16 @@ test("the ssh page reads its auth log through the lens, the day's counts in its 
   await expect(lines.getByText(/203\.0\.113\.250/)).toHaveCount(0)
   const socket = logs.sockets.at(-1)!
   expect(socket.get("source")).toBe("file:/var/log/auth.log")
-  // auth.log is the auth lens's on the server too, so the page names none:
-  // a named lens is the pane's Read as set, and More would say so.
+  // auth.log is the auth lens's on the server too, and the page hands the
+  // pane the server's own description of it: no lens of its own, nothing
+  // under More, and the file is not asked after a second time.
   expect(socket.has("lens")).toBe(false)
   await expect(page.getByRole("button", { name: "More", exact: true })).toBeVisible()
   expect(socket.getAll("f")).toEqual(["event:!cron_session", "event:!ssh_scan"])
   // Found by asking after the two files, not by listing everything the
   // logs page could open.
   expect(logs.requests).not.toContain("/logs/sources")
+  expect(logs.requests.filter((path) => path === "/logs/source")).toHaveLength(2)
 
   // The grid's readings are the last day's, through the auth lens.
   const readings = logs.searches.filter((search) => search.get("lens") === "auth")
@@ -796,6 +798,15 @@ test("the ssh page reads its auth log through the lens, the day's counts in its 
     .poll(() => logs.sockets.at(-1)?.getAll("f"))
     .toEqual(["event:ssh_failed", "event:ssh_invalid_user", "event:ssh_max_attempts"])
   await expect(lines.getByText("sudo", { exact: true })).toHaveCount(0)
+
+  // A figure in the page's grid is a press away from the lines it counts,
+  // asked of the pane further down.
+  await page.getByRole("button", { name: "Show the lines behind accepted logins" }).click()
+  await expect.poll(() => logs.sockets.at(-1)?.getAll("f")).toEqual(["event:ssh_accepted"])
+  await expect(page.getByRole("button", { name: /^Accepted\b/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
 })
 
 test("an attacker in the auth log is blocked from its line; a tailnet address is not", async ({
@@ -937,6 +948,16 @@ test("with no ufw.log the firewall's drops are read from kern.log, then the kern
   expect(logs.sockets.at(-1)!.get("source")).toBe("file:/var/log/kern.log")
   expect(logs.sockets.at(-1)!.get("lens")).toBe("firewall")
   await expect(page.getByRole("button", { name: /^Blocked\b/ })).toBeVisible()
+
+  // The page's lens is where the pane starts, not a setting the reader
+  // changed: More is not lit for it, and Auto under Read as lets it go.
+  const more = page.getByRole("button", { name: "More", exact: true })
+  await expect(more).toBeVisible()
+  await more.click()
+  await page.getByRole("combobox", { name: "Read as" }).click()
+  await page.getByRole("option", { name: /^Auto/ }).click()
+  await expect.poll(() => logs.sockets.at(-1)?.has("lens")).toBe(false)
+  await expect(page.getByRole("button", { name: /^More\s*1$/ })).toBeVisible()
 })
 
 test("a host with neither file reads the firewall's drops from the kernel ring", async ({

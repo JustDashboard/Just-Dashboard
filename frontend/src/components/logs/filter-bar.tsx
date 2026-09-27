@@ -111,6 +111,7 @@ export function FilterBar({
   paneId,
   fieldKeys,
   lens,
+  pageLens,
   detectedLens,
   onLensChange,
 }: {
@@ -142,6 +143,11 @@ export function FilterBar({
   fieldKeys?: ReadonlySet<string>
   /** The lens the reader forced: "" for the detected one, "none" for none. */
   lens?: string
+  /**
+   * The lens the page reads its source through, which is where the pane
+   * starts rather than a setting the reader changed: More does not count it.
+   */
+  pageLens?: string
   /** The lens the source was detected as, for the Auto choice's words. */
   detectedLens?: string
   /** Offers "Read as" when set. */
@@ -186,7 +192,7 @@ export function FilterBar({
     (context > 0 ? 1 : 0) +
     (archives && hasArchives ? 1 : 0) +
     (boot && isJournal ? 1 : 0) +
-    (lens && onLensChange ? 1 : 0)
+    (onLensChange && (lens ?? "") !== (pageLens ?? "") ? 1 : 0)
   const detected = lensFor(detectedLens)?.label
   // History and Insights both read a window of the file; Live reads its end.
   const windowed = mode === "search" || mode === "insights"
@@ -301,7 +307,9 @@ export function FilterBar({
                   step="0.001"
                   aria-label="From"
                   onChange={(e) => onSinceChange(e.target.value)}
-                  className="h-8 w-52 text-body"
+                  // As wide as the reader's own clock writes it: a fixed
+                  // width cut a 12-hour locale's PM off, and 19:02 read 07:02.
+                  className="h-8 w-auto text-body"
                 />
               </Field>
               <Field label="To">
@@ -311,7 +319,7 @@ export function FilterBar({
                   step="0.001"
                   aria-label="To"
                   onChange={(e) => onUntilChange(e.target.value)}
-                  className="h-8 w-52 text-body"
+                  className="h-8 w-auto text-body"
                 />
               </Field>
             </>

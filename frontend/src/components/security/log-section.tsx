@@ -1,15 +1,20 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { ApiError, get } from "@/lib/api"
 import { networkOf } from "@/lib/clients"
 import { fileSource } from "@/lib/log-sources"
 import { notify } from "@/lib/toast"
 import type { LogLine } from "@/lib/types"
+import type { LensReading } from "@/lib/log-lenses"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
+import {
+  ServiceLogs,
+  type ServiceLogSource,
+  type ServiceLogsProps,
+} from "@/components/logs/service-logs"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ErrorState, LoadingRows } from "@/components/state"
 import { addressVerbs, blockAddress } from "@/components/security/address-verbs"
@@ -129,6 +134,26 @@ export function useAddressLineVerbs({
 }
 
 /**
+ * The page's own reading tiles as presses into its log section: a figure in
+ * the grid opens the lines it counts, narrowed in the pane further down, the
+ * way every reading is a press away from its lines. Each press is an ask of
+ * its own, so the same figure pressed again asks again.
+ */
+export function useReadingPress() {
+  const [ask, setAsk] = useState<ServiceLogsProps["ask"]>()
+  const press = useCallback(
+    (reading: LensReading) =>
+      setAsk((prev) => ({
+        key: String(Number(prev?.key ?? 0) + 1),
+        fields: reading.fields ?? {},
+        levels: reading.levels ?? [],
+      })),
+    [],
+  )
+  return [ask, press] as const
+}
+
+/**
  * A service's log as a section of its Security page: a title and a hairline
  * over the pane, the way every other block in the section is drawn — the pane
  * is the one frame, because it owns its scroll (§7). What stands in for it is
@@ -143,6 +168,7 @@ export function HostLogSection({
   storageKey,
   instead,
   lineVerbs,
+  ask,
 }: {
   title: string
   /** From `useHostLog`. */
@@ -151,9 +177,18 @@ export function HostLogSection({
   storageKey: string
   instead?: React.ReactNode
   lineVerbs?: (line: LogLine) => Verb[]
+  /** A reading pressed in the page's grid (`useReadingPress`). */
+  ask?: ServiceLogsProps["ask"]
 }) {
+  // The grid is at the top of the page and the log at the bottom: a press
+  // that narrowed lines out of sight would look like a press that did nothing.
+  const ref = useRef<HTMLElement>(null)
+  const asked = ask?.key
+  useEffect(() => {
+    if (asked) ref.current?.scrollIntoView({ block: "start" })
+  }, [asked])
   return (
-    <Panel plain>
+    <Panel plain ref={ref}>
       <PanelHeader title={title} />
       <PanelBody flush className="pt-3">
         {instead ? (
@@ -167,6 +202,7 @@ export function HostLogSection({
             sources={[log.data]}
             storageKey={storageKey}
             lineVerbs={lineVerbs}
+            ask={ask}
             paneClassName="h-[min(75vh,40rem)] min-h-80"
           />
         )}

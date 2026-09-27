@@ -792,6 +792,56 @@ test("sshd's journal is an administrator's, and the sheet says so rather than as
   expect(logs.searches).toEqual([])
 })
 
+test("a journal the server refuses is said to be refused, in its words, and nothing is read", async ({
+  page,
+}) => {
+  const logs = await mockHost(page)
+  const refusal =
+    "Login and sudo records need an administrator: failed logins can hold passwords typed into the username prompt."
+  // Registered after the host's, so answered first.
+  await page.route(
+    (url) => url.pathname.endsWith("/api/v1/logs/source"),
+    (route) =>
+      route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { code: "forbidden", message: refusal } }),
+      }),
+  )
+  await page.goto("/processes/services?unit=postgresql.service")
+  const sheet = page.getByRole("dialog")
+  await sheet.getByRole("tab", { name: "Journal", exact: true }).click()
+  await expect(sheet.getByText(refusal)).toBeVisible()
+  // A socket retrying a refusal would say the tunnel dropped.
+  expect(logs.sockets).toEqual([])
+  expect(logs.searches).toEqual([])
+})
+
+test("on a phone a unit's lines start at the sheet's edge and its controls stay in reach", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const logs = await mockHost(page)
+  await page.goto("/processes/services?unit=postgresql.service")
+  const sheet = page.getByRole("dialog")
+  await sheet.getByRole("tab", { name: "Journal", exact: true }).click()
+  await expect.poll(() => logs.sockets.at(-1)?.get("source")).toBe("journal:postgresql.service")
+
+  const lines = sheet.getByLabel("Log lines")
+  const row = lines.locator("[data-row-key]").first()
+  await expect(row).toBeVisible()
+  // The unit and the event before it, the message on a line of its own
+  // under them, starting at the edge rather than past the pane's.
+  const pane = (await lines.boundingBox())!
+  const message = (await row.locator(":scope > :last-child").boundingBox())!
+  expect(message.x - pane.x).toBeLessThan(24)
+  expect(message.x + 40).toBeLessThan(pane.x + pane.width)
+  // Wrap is what a narrow pane needs, and the tabs are all there to press.
+  await expect(sheet.getByRole("button", { name: "Wrap" })).toBeInViewport()
+  const modes = sheet.getByRole("navigation", { name: "Log mode" })
+  await expect(modes.getByRole("button", { name: "Runs" })).toBeInViewport()
+})
+
 test("a PM2 application's logs are its own lensed stream, beside PM2's count of its restarts", async ({
   page,
 }) => {

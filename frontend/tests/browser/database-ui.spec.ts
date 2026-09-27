@@ -1145,16 +1145,15 @@ test("/databases/logs reads a container database's output through its engine's l
   expect(sockets[0].get("source")).toBe("docker:shop-db")
   expect(sockets[0].get("lens")).toBe("postgres")
 
-  // The lens's figures are counts on chips over the pane — the section draws
-  // no tiles — and a press narrows the stream to the lines one counts. A
-  // reading a quick view already asks is left to the quick view: one chip per
+  // The lens's figures are the counts on the lens row's chips — the section
+  // draws no tiles — and a press narrows the stream to the lines one counts.
+  // A reading a quick view already asks is that view's count: one chip per
   // question, not two with two different counts.
-  const readings = page.locator('[aria-label="Readings"]')
-  const restarts = readings.getByRole("button", { name: /^Restarts/ })
+  const restarts = page.getByRole("button", { name: /^Restarts\s*\d/ })
   await expect(restarts).toContainText("1")
-  await expect(readings.getByRole("button", { name: /^Slow statements/ })).toHaveCount(0)
-  await expect(readings.getByRole("button", { name: /^Errors/ })).toHaveCount(0)
-  await expect(page.getByRole("button", { name: /^Slow( \d+)?$/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Slow statements/ })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /^Slow\s*12$/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Errors\s*3$/ })).toBeVisible()
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await restarts.click()
   await expect(restarts).toHaveAttribute("aria-pressed", "true")
@@ -1441,7 +1440,7 @@ test("/databases/logs names a server found stopped as not answering", async ({ p
   await expect(page.getByLabel("Log lines").getByText("deadlock", { exact: true })).toBeVisible()
 })
 
-test("/databases/logs presses a reading from the Queries view back to the lines it counts", async ({
+test("/databases/logs keeps the readings on the lines' own row, not over the Queries view", async ({
   page,
 }) => {
   const sockets: URLSearchParams[] = []
@@ -1453,15 +1452,13 @@ test("/databases/logs presses a reading from the Queries view back to the lines 
   // opens on the reading it was left on.
   await page.goto("/databases/logs?conn=1")
   await expect(queries).toHaveAttribute("aria-pressed", "true", { timeout: 15_000 })
+  // Queries reads no filter, so nothing over it narrows lines out of sight.
+  const restarts = page.getByRole("button", { name: /^Restarts/ })
+  await expect(restarts).toHaveCount(0)
 
-  await page
-    .locator('[aria-label="Readings"]')
-    .getByRole("button", { name: /^Restarts/ })
-    .click()
-  await expect(page.getByRole("button", { name: "Live", exact: true })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
+  await page.getByRole("button", { name: "Live", exact: true }).click()
+  await restarts.click()
+  await expect(restarts).toHaveAttribute("aria-pressed", "true")
   await expect.poll(() => sockets.at(-1)?.getAll("f")).toEqual(["event:startup"])
 })
 

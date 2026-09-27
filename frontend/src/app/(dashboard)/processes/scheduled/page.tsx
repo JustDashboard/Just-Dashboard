@@ -183,9 +183,7 @@ export default function ScheduledPage() {
             <ServiceLogs
               sources={cronSources}
               storageKey="processes.cron.log"
-              // The column's height, which the pane fills: set on the pane it
-              // loses to the pane's flex basis.
-              className="h-[min(70vh,36rem)] min-h-80"
+              paneClassName="h-[min(70vh,36rem)] min-h-80"
             />
           ) : (
             // Only a host without the journal gets here: on one with it,

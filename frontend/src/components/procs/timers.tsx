@@ -323,11 +323,10 @@ function TimerRuns({ unit }: { unit: string }) {
     [unit],
   )
   // Runs is as tall as its rows, up to a limit; the lines scroll inside a
-  // height of their own, so Live and History take the limit outright. The
-  // height is the column's, which the pane fills: set on the pane itself it
-  // loses to the pane's flex basis. Its width is the table's and adds
-  // nothing to it — a table cell grows to its content's widest line, and an
-  // unwrapped log line pushed the timers' own columns off a phone.
+  // height of their own, so Live and History take the limit outright. Its
+  // width is the table's and adds nothing to it — a table cell grows to its
+  // content's widest line, and an unwrapped log line pushed the timers' own
+  // columns off a phone.
   const [reading, setReading] = useState("runs")
   return (
     <ServiceLogs
@@ -338,7 +337,8 @@ function TimerRuns({ unit }: { unit: string }) {
       modes={["live", "search"]}
       layout="sheet"
       flush
-      className={cn("[contain:inline-size]", reading === "runs" ? "max-h-[26rem]" : "h-[26rem]")}
+      className="[contain:inline-size]"
+      paneClassName={reading === "runs" ? "max-h-[26rem]" : "h-[26rem]"}
     />
   )
 }

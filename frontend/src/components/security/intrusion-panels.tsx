@@ -15,7 +15,12 @@ import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Status } from "@/components/status-dot"
 import { ReadingTile, useLensReadings } from "@/components/logs/lens-readings"
 import { FAIL2BAN_LOG } from "@/components/security/host-logs"
-import { HostLogSection, useAddressLineVerbs, useHostLog } from "@/components/security/log-section"
+import {
+  HostLogSection,
+  useAddressLineVerbs,
+  useHostLog,
+  useReadingPress,
+} from "@/components/security/log-section"
 import { AreaFindings } from "@/components/security/posture-panel"
 import { JailsPanel } from "@/components/security/jail-panel"
 import { OffendersPanel } from "@/components/security/offenders-panel"
@@ -65,12 +70,14 @@ export function IntrusionPanels() {
     onBlocked: refresh,
     blockOn: OFFENCES,
   })
+  const [ask, press] = useReadingPress()
   const activitySection = (
     <HostLogSection
       title="Activity"
       log={activity}
       storageKey="security.intrusion.log"
       lineVerbs={lineVerbs}
+      ask={ask}
     />
   )
 
@@ -174,7 +181,12 @@ export function IntrusionPanels() {
         />
         <StatTile label="Bans in total" value={bansTotal} hint="since fail2ban last started" />
         {readings.tiles.map((tile) => (
-          <ReadingTile key={tile.reading.id} tile={tile} window={readings.window} />
+          <ReadingTile
+            key={tile.reading.id}
+            tile={tile}
+            window={readings.window}
+            onPick={() => press(tile.reading)}
+          />
         ))}
       </StatGrid>
 
