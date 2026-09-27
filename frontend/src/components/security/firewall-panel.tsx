@@ -5,6 +5,7 @@ import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import {
   FirewallCheck,
   LockClosed,
+  Logs,
   Pencil,
   RotateCounterClockwise,
   Shield,
@@ -14,7 +15,8 @@ import {
 import { notify } from "@/lib/toast"
 import { del, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import type { FirewallRule, FirewallStatus, Posture, SecurityFinding } from "@/lib/types"
+import { lensFor } from "@/lib/log-lenses"
+import type { FirewallRule, FirewallStatus, LogLine, Posture, SecurityFinding } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { PageContext, SearchInput } from "@/components/page"
@@ -24,6 +26,9 @@ import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { AreaFindings } from "@/components/security/posture-panel"
 import { AddRuleDialog, EditRuleDialog } from "@/components/security/rule-form"
+import { FIREWALL_LOG } from "@/components/security/host-logs"
+import { HostLogSection, useAddressLineVerbs, useHostLog } from "@/components/security/log-section"
+import { ReadingTile, useLensReadings } from "@/components/logs/lens-readings"
 import { Status } from "@/components/status-dot"
 import { IconAction, RowActions } from "@/components/icon-action"
 import { Tag } from "@/components/tag"
@@ -62,6 +67,12 @@ import {
  * ground, and offers the controls that set them, where this backend can be
  * told to, in one plain block under the tiles. The rules follow, as a table
  * that bleeds to the page edge, with the command that adds one in its header.
+ *
+ * Then what the rules did: the firewall's log, read through its lens — each
+ * drop and rate limit as the address, the port and the protocol it was — with
+ * the day's counts as a second row of the readings. A firewall that is not
+ * logging has no such log, and the section says so and points at the control
+ * that changes it rather than drawing an empty pane.
  */
 export function FirewallPanel({
   status,
@@ -86,6 +97,26 @@ export function FirewallPanel({
   )
   const [query, setQuery] = useSessionState("security.firewall.query", "")
   const admin = can("system.admin")
+
+  // ufw and firewalld both say "off" in words; iptables says nothing, and its
+  // LOG rules are the operator's own, so only a firewall that says so is
+  // treated as not logging.
+  const silent = Boolean(status?.logging) && loggingLevel(status?.logging) === "off"
+  const firewallLog = useHostLog(FIREWALL_LOG, Boolean(status?.available) && !silent)
+  const readings = useLensReadings(firewallLog.data?.id ?? "", FIREWALL_LENS, {
+    forcedLens: "firewall",
+    enabled: Boolean(firewallLog.data) && Boolean(status?.available) && !silent,
+  })
+  // A drop is already the firewall's answer to the address on it, and an
+  // allowed or audited connection may be the operator's own; a rate limit
+  // is the one line where a deny is the next step. An outbound packet's
+  // source is this host, so it gets no verbs at all.
+  const lineVerbs = useAddressLineVerbs({
+    comment: "blocked from the firewall log",
+    onBlocked: refresh,
+    blockOn: RATE_LIMITED,
+    remote: arrived,
+  })
 
   // ufw prints every rule twice on a dual-stack host and distinguishes the
   // pair only by a "(v6)" suffix. Folding the duplicate away is what keeps
@@ -274,8 +305,15 @@ export function FirewallPanel({
           backends (iptables) used to show none of this — a "·"-joined string
           in a description — so the same facts now read the same way on every
           host. Amber only where the reading is the finding: an inbound default
-          of allow makes the deny rules a blocklist rather than a fence. */}
-      <StatGrid columns={4}>
+          of allow makes the deny rules a blocklist rather than a fence. Under
+          them, what the log says the rules did over the last day, in the same
+          grid — and not while logging is off, when every one of them would be
+          a zero that means "not recorded" rather than "nothing happened".
+          Two-up on a phone: seven short figures one-up are a screen and a
+          half before the controls they describe. Seven across four columns
+          let the last reading take the row's end rather than leave a hole
+          beside it, as the phone's odd one does. */}
+      <StatGrid columns={4} dense className="xl:[&>*:last-child:nth-child(4n+3)]:col-span-2">
         <StatTile
           label="Rules"
           value={rules.length}
@@ -313,15 +351,24 @@ export function FirewallPanel({
             hint={caps.editable ? "managed from here" : "read only from here"}
           />
         )}
+        {/* iptables names no level: what it logs is whatever its LOG rules
+            write, which "off" would misstate beside the drops counted next
+            to it. */}
         <StatTile
           label="Logging"
-          value={logging}
+          value={status.logging ? logging : "—"}
           hint={
-            logging === "off"
-              ? "a silent drop leaves no record"
-              : "refused connections are recorded"
+            !status.logging
+              ? "set by its own LOG rules"
+              : logging === "off"
+                ? "a silent drop leaves no record"
+                : "every drop is recorded"
           }
         />
+        {!silent &&
+          readings.tiles.map((tile) => (
+            <ReadingTile key={tile.reading.id} tile={tile} window={readings.window} />
+          ))}
       </StatGrid>
 
       <AreaFindings posture={posture} area="firewall" onFix={onFix} />
@@ -355,6 +402,7 @@ export function FirewallPanel({
             )}
             {caps.logging && (
               <PolicyField
+                id={LOGGING_CONTROL}
                 label="Logging"
                 hint="How much is written about what was dropped"
                 value={logging}
@@ -565,6 +613,36 @@ export function FirewallPanel({
         )}
       </Panel>
 
+      <HostLogSection
+        title="Firewall log"
+        log={firewallLog}
+        storageKey="security.firewall.log"
+        instead={
+          silent && (
+            <EmptyState
+              icon={Logs}
+              title={`${status.backend} is not logging`}
+              description={`A refused connection leaves no record while logging is off, so there is nothing here to read. ${
+                writable && caps.logging
+                  ? "Set a level under Defaults — low records every blocked packet and every rate limit."
+                  : caps.editable && caps.logging
+                    ? "An administrator can set a level under Defaults on this page."
+                    : `It cannot be set from here; on the host, ${LOGGING_COMMAND[status.backend] ?? `${status.backend}'s own logging setting`} turns it on.`
+              }`}
+              action={
+                writable &&
+                caps.logging && (
+                  <Button size="sm" variant="outline" onClick={pointAtLogging}>
+                    Choose a logging level
+                  </Button>
+                )
+              }
+            />
+          )
+        }
+        lineVerbs={lineVerbs}
+      />
+
       {dialog}
       {editing && (
         <EditRuleDialog
@@ -583,6 +661,31 @@ export function FirewallPanel({
   )
 }
 
+const FIREWALL_LENS = lensFor("firewall")
+
+/** The lines a deny answers: a connection a limit rule turned away. */
+const RATE_LIMITED = ["limit"]
+
+/** A packet that arrived: ufw, firewalld and iptables all write `IN=` empty for one this host sent. */
+function arrived(line: LogLine) {
+  return /\bIN=\S/.test(line.text)
+}
+
+/** How each backend is told to log, for a reader this page cannot set it for. */
+const LOGGING_COMMAND: Record<string, string> = {
+  ufw: "ufw logging low",
+  firewalld: "firewall-cmd --set-log-denied=all",
+}
+
+/** The logging control's id, which the log section's empty state brings into view. */
+const LOGGING_CONTROL = "firewall-logging-level"
+
+function pointAtLogging() {
+  const control = document.getElementById(LOGGING_CONTROL)
+  control?.scrollIntoView({ block: "center" })
+  control?.focus({ preventScroll: true })
+}
+
 const POLICIES = ["deny", "reject", "allow"]
 const LOG_LEVELS = ["off", "low", "medium", "high", "full"]
 // firewalld distinguishes three levels, not five; offering ufw's ladder would
@@ -595,6 +698,7 @@ const FIREWALLD_LOG_LEVELS = ["off", "low", "full"]
  * read-only host has the tiles and nothing that looks like a dead control.
  */
 function PolicyField({
+  id,
   label,
   hint,
   value,
@@ -602,6 +706,7 @@ function PolicyField({
   fallback,
   onChange,
 }: {
+  id?: string
   label: string
   hint: string
   value: string
@@ -614,7 +719,7 @@ function PolicyField({
     <div className="min-w-0 space-y-1" title={hint}>
       <p className="eyebrow">{label}</p>
       <Select value={options.includes(value) ? value : fallback} onValueChange={onChange}>
-        <SelectTrigger size="sm" className="w-32" aria-label={`${label} default`}>
+        <SelectTrigger id={id} size="sm" className="w-32" aria-label={`${label} default`}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

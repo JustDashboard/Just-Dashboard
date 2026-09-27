@@ -327,14 +327,6 @@ export type Health = {
   recorded: boolean
 }
 
-/** One ban or unban, read from fail2ban's own log rather than remembered here. */
-export type BanEvent = {
-  action: "ban" | "unban"
-  jail: string
-  ip: string
-  at: string
-}
-
 export type MetricsHistory = {
   from: string
   to: string

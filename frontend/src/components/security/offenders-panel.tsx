@@ -36,8 +36,19 @@ import {
  * way round turns it into the one question worth asking of it: this is not a
  * passing scanner, it is somebody working through your host, and a permanent
  * firewall rule is a better answer than another ten-minute ban.
+ *
+ * The fold reads fail2ban.log. Where the page's Activity reads fail2ban's
+ * journal instead (`journal`) — no file, or none the dashboard may read —
+ * an empty fold is not "nothing was banned", and Activity's Insights, which
+ * rank the addresses banned more than once, is where the same answer is.
  */
-export function OffendersPanel({ onBlocked }: { onBlocked?: () => void }) {
+export function OffendersPanel({
+  onBlocked,
+  journal,
+}: {
+  onBlocked?: () => void
+  journal?: boolean
+}) {
   const { can } = useAuth()
   const router = useRouter()
   const [blocking, setBlocking] = useState<string | null>(null)
@@ -63,8 +74,11 @@ export function OffendersPanel({ onBlocked }: { onBlocked?: () => void }) {
     }
   }
 
+  // Framed only around its table (§2): on a journal host the fold is a
+  // sentence pointing at Activity, drawn on the page like any other.
+  const pointer = journal && !data?.offenders.length
   return (
-    <Panel>
+    <Panel plain={pointer}>
       <PanelHeader title="Repeat offenders" />
       {data && data.offenders.length > 0 && (
         <PanelToolbar className="gap-x-6">
@@ -94,7 +108,12 @@ export function OffendersPanel({ onBlocked }: { onBlocked?: () => void }) {
         </PanelToolbar>
       )}
       <PanelBody flush>
-        {unavailable ? (
+        {pointer && (unavailable || data) ? (
+          <Notice tone="default" title="No bans in fail2ban.log" className="mt-3">
+            Activity below reads fail2ban&rsquo;s journal instead, and its Insights rank the
+            addresses banned more than once.
+          </Notice>
+        ) : unavailable ? (
           <Notice tone="default" title="No fail2ban log on this host" className="mt-3">
             fail2ban is not installed, or it logs only to the journal. There is no file to fold.
           </Notice>
