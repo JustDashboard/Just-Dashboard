@@ -687,6 +687,9 @@ func TestStreamRoutesLinesToAnotherLens(t *testing.T) {
 	}
 }
 
+// DetectLens answers only lenses this build registers, so every id here is
+// also held to the registry: a detection table naming "postgresql" where the
+// lens is "postgres" would read the source through nothing.
 func TestDetectLens(t *testing.T) {
 	files := map[string]string{
 		"/var/log/postgresql/postgresql-17-main.log":                "postgres",
@@ -722,7 +725,7 @@ func TestDetectLens(t *testing.T) {
 		"/var/log/cloud-init.log":                                   "app",
 	}
 	for path, want := range files {
-		if got := detectLensID(LensTarget{Kind: KindSystem, Path: path}); got != want {
+		if got := DetectLens(LensTarget{Kind: KindSystem, Path: path}); got != want {
 			t.Errorf("file %s = %q, want %q", path, got, want)
 		}
 	}
@@ -752,7 +755,7 @@ func TestDetectLens(t *testing.T) {
 		"ghcr.io/acme/shop-web:main":                 "app",
 	}
 	for image, want := range images {
-		if got := detectLensID(LensTarget{Kind: KindDocker, Image: image}); got != want {
+		if got := DetectLens(LensTarget{Kind: KindDocker, Image: image}); got != want {
 			t.Errorf("image %s = %q, want %q", image, got, want)
 		}
 	}
@@ -776,7 +779,7 @@ func TestDetectLens(t *testing.T) {
 		"api.service":                 "app",
 	}
 	for unit, want := range units {
-		if got := detectLensID(LensTarget{Kind: KindJournal, Unit: unit}); got != want {
+		if got := DetectLens(LensTarget{Kind: KindJournal, Unit: unit}); got != want {
 			t.Errorf("unit %s = %q, want %q", unit, got, want)
 		}
 	}
@@ -790,13 +793,9 @@ func TestDetectLens(t *testing.T) {
 		{Kind: KindJournalID, Unit: "CRON"}:         "cron",
 		{Kind: KindJournalID, Unit: "my-worker"}:    "app",
 	} {
-		if got := detectLensID(target); got != want {
+		if got := DetectLens(target); got != want {
 			t.Errorf("%+v = %q, want %q", target, got, want)
 		}
-	}
-	// DetectLens itself answers only what this build registers.
-	if got := DetectLens(LensTarget{Kind: KindSystem, Path: "/var/log/myapp/x.log"}); got != "" && lenses["app"] == nil {
-		t.Errorf("an unregistered lens was detected: %q", got)
 	}
 }
 

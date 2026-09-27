@@ -212,15 +212,16 @@ var unitRules = []struct {
 // ProgramLens names the lens a syslog identifier's lines read through, or ""
 // when the program has none of its own. It is how one journal run holds two
 // kinds of line: the manager's "Started postgresql@17-main.service" and the
-// postmaster's own output, or sshd's refusals inside ssh.service. The list is
-// the identifiers these programs actually log under — OpenSSH 9.8 moved almost
-// every sshd line to sshd-session, and matching only "sshd" misses nearly all
-// of them.
+// postmaster's own output, or sshd's refusals inside ssh.service; and it is
+// the table the syslog composite hands each line of a whole host's log on by.
+// The list is the identifiers these programs actually log under — OpenSSH 9.8
+// moved almost every sshd line to sshd-session and sshd-auth, and fail2ban
+// tags itself with its logger's name, so those match by prefix.
 func ProgramLens(program string) string {
 	p := strings.ToLower(program)
 	switch p {
-	case "sshd", "sshd-session", "sshd-auth", "sudo", "su", "login", "systemd-logind",
-		"useradd", "usermod", "userdel", "passwd", "chpasswd", "groupadd", "groupdel":
+	case "sudo", "su", "login", "systemd-logind", "useradd", "usermod", "userdel", "groupadd",
+		"groupmod", "groupdel", "passwd", "chpasswd", "gpasswd", "chage":
 		return "auth"
 	case "cron", "crond":
 		return "cron"
@@ -236,6 +237,8 @@ func ProgramLens(program string) string {
 		return "nginx-error"
 	}
 	switch {
+	case strings.HasPrefix(p, "sshd"):
+		return "auth"
 	case strings.HasPrefix(p, "fail2ban"):
 		return "fail2ban"
 	case strings.HasPrefix(p, "postgres"):

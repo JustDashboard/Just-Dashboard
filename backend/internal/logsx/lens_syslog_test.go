@@ -1,6 +1,7 @@
 package logsx
 
 import (
+	"maps"
 	"testing"
 	"time"
 )
@@ -120,6 +121,124 @@ func TestLensSyslogDispatchesTheJournal(t *testing.T) {
 			attrs: map[string]string{"program": "fail2ban-server", "pid": "992", "jail": "sshd", "client": "203.0.113.228"}},
 		{text: "nordvpnd", level: "info", attrs: map[string]string{"program": "nordvpnd", "pid": "3964418"}},
 	})
+}
+
+// The servers a host runs log through syslog or the journal too, and the
+// composite must reach their lenses and not only the system's: Postgres with
+// log_destination=syslog (its "[seq-part]" in front, and no prefix at all when
+// log_line_prefix is left empty), MariaDB and Redis under systemd, nginx's
+// error_log syslog: target, fail2ban and certbot. The lines are the research's
+// and this host's, put behind the envelope rsyslog writes.
+func TestLensSyslogReachesTheServersItNames(t *testing.T) {
+	sysInZone(t)
+	sysRead(t, "syslog",
+		sysWant{
+			text:  "2026-09-27T10:00:00.000100+00:00 web-1 postgres[1234]: [5-1] 2026-09-27 10:00:00.123 UTC [1234] LOG:  checkpoint starting: time",
+			event: "checkpoint", level: "info", at: "2026-09-27T10:00:00.0001Z", lens: "postgres",
+			attrs: map[string]string{"program": "postgres", "pid": "1234", "severity": "LOG"},
+		},
+		sysWant{
+			text:  `2026-09-27T10:00:00.000200+00:00 web-1 postgres[1234]: [6-1] 2026-09-27 10:00:00.200 UTC [1234] postgres@shop ERROR:  relation "orders" does not exist at character 15`,
+			event: "error", level: "error", at: "2026-09-27T10:00:00.0002Z", lens: "postgres",
+			attrs: map[string]string{"program": "postgres", "pid": "1234", "severity": "ERROR", "code": "42P01", "user": "postgres", "db": "shop"},
+		},
+		sysWant{
+			text:  "2026-09-27T10:00:00.000300+00:00 web-1 postgres[1234]: [7-1] 2026-09-27 10:00:00.200 UTC [1234] postgres@shop STATEMENT:  select * from orders",
+			level: "error", cont: true, at: "2026-09-27T10:00:00.0003Z", lens: "postgres",
+			attrs: map[string]string{"program": "postgres", "pid": "1234"},
+		},
+		sysWant{
+			text:  `2026-09-27T10:00:00.000400+00:00 web-1 postgres[1234]: [8-1] FATAL:  password authentication failed for user "bob"`,
+			event: "auth_failed", level: "error", at: "2026-09-27T10:00:00.0004Z", lens: "postgres",
+			attrs: map[string]string{"program": "postgres", "pid": "1234", "severity": "FATAL", "code": "28P01", "user": "bob"},
+		},
+		sysWant{
+			text:  "2026-09-27T10:00:01.000000+00:00 web-1 mariadbd[999]: 2026-09-27 10:00:01 0 [Note] mariadbd: ready for connections.",
+			event: "ready", level: "info", at: "2026-09-27T10:00:01Z", lens: "mysql",
+			attrs: map[string]string{"program": "mariadbd", "pid": "999"},
+		},
+		sysWant{
+			text:  "2026-09-27T10:05:00.000000+00:00 web-1 mariadbd[999]: 2026-09-27 10:05:00 7 [Warning] Access denied for user 'root'@'172.18.0.1' (using password: YES)",
+			event: "auth_failed", level: "warn", at: "2026-09-27T10:05:00Z", lens: "mysql",
+			attrs: map[string]string{"program": "mariadbd", "pid": "999", "thread": "7", "user": "root", "client": "172.18.0.1"},
+		},
+		sysWant{
+			text:  "2026-09-27T11:00:01.001000+00:00 web-1 redis-server[1]: 1:M 27 Sep 2026 11:00:01.001 * Background saving started by pid 42",
+			event: "bgsave", level: "info", at: "2026-09-27T11:00:01.001Z", lens: "redis",
+			attrs: map[string]string{"program": "redis-server", "pid": "1", "role": "primary"},
+		},
+		sysWant{
+			text:  `2026-09-27T10:00:04.000000+00:00 web-1 nginx: 2026/09/27 10:00:04 [error] 12#12: *7 connect() failed (111: Connection refused) while connecting to upstream, client: 203.0.113.9, server: example.com, request: "GET / HTTP/1.1", upstream: "http://127.0.0.1:3000/", host: "example.com"`,
+			event: "upstream_refused", level: "error", at: "2026-09-27T10:00:04Z", lens: "nginx-error",
+			attrs: map[string]string{"program": "nginx", "pid": "12", "conn": "7", "code": "111", "client": "203.0.113.9",
+				"method": "GET", "path": "/", "upstream": "127.0.0.1:3000", "host": "example.com"},
+		},
+		sysWant{
+			text:  "2026-09-27T10:00:05.000000+00:00 web-1 fail2ban-server[55]: 2026-09-27 10:00:05,123 fail2ban.actions        [55]: NOTICE  [sshd] Ban 203.0.113.9",
+			event: "ban", level: "warn", at: "2026-09-27T10:00:05Z", lens: "fail2ban",
+			attrs: map[string]string{"program": "fail2ban-server", "pid": "55", "jail": "sshd", "client": "203.0.113.9"},
+		},
+		sysWant{
+			text:  "2026-09-27T10:00:06.000000+00:00 web-1 certbot[66]: Certificate not yet due for renewal",
+			event: "not_due", level: "info", at: "2026-09-27T10:00:06Z", lens: "certbot",
+			attrs: map[string]string{"program": "certbot", "pid": "66"},
+		},
+	)
+
+	// The same servers from the journal, where the program is already known
+	// and the message is the server's own line.
+	unit := func(program, pid, unit string) map[string]string {
+		return map[string]string{"program": program, "pid": pid, "unit": unit}
+	}
+	with := func(m map[string]string, kv ...string) map[string]string {
+		out := maps.Clone(m)
+		for i := 0; i < len(kv); i += 2 {
+			out[kv[i]] = kv[i+1]
+		}
+		return out
+	}
+	pg := unit("postgres", "1234", "postgresql@17-main.service")
+	maria := unit("mariadbd", "999", "mariadb.service")
+	redis := unit("redis-server", "1", "redis-server.service")
+	got := sysReadJournal(t, "syslog",
+		sysEntry{`2026-09-27 10:00:00.200 UTC [1234] postgres@shop ERROR:  relation "orders" does not exist at character 15`, 6, pg},
+		sysEntry{"2026-09-27 10:00:00.200 UTC [1234] postgres@shop STATEMENT:  select * from orders", 6, pg},
+		sysEntry{"2026-09-27 10:05:00 7 [Warning] Access denied for user 'root'@'172.18.0.1' (using password: YES)", 4, maria},
+		sysEntry{"1:M 27 Sep 2026 11:00:01.001 * Background saving started by pid 42", 6, redis},
+	)
+	// The stamps are the lines' own; the engine puts the journal's back over
+	// them, so only what the lenses name is compared here.
+	for i := range got {
+		got[i].Timestamp = nil
+	}
+	sysCheck(t, got, []sysWant{
+		{text: "pg error", event: "error", level: "error", lens: "postgres",
+			attrs: with(pg, "severity", "ERROR", "code", "42P01", "user", "postgres", "db", "shop")},
+		{text: "pg statement", level: "error", cont: true, lens: "postgres", attrs: pg},
+		{text: "mariadb denied", event: "auth_failed", level: "warn", lens: "mysql",
+			attrs: with(maria, "thread", "7", "user", "root", "client", "172.18.0.1")},
+		{text: "redis bgsave", event: "bgsave", level: "info", lens: "redis", attrs: with(redis, "role", "primary")},
+	})
+}
+
+// Every program the composite names a lens for must reach a lens this build
+// registers: a name missing from the registry reads as nothing at all.
+func TestProgramLensNamesOnlyRegisteredLenses(t *testing.T) {
+	for _, program := range []string{
+		"sshd", "sshd-session", "sshd-auth", "sudo", "su", "login", "systemd-logind", "useradd",
+		"usermod", "userdel", "groupadd", "groupmod", "groupdel", "passwd", "chpasswd", "gpasswd",
+		"chage", "CRON", "crond", "kernel", "systemd", "systemd-coredump", "certbot", "mysqld",
+		"mariadbd", "nginx", "fail2ban-server", "fail2ban.actions", "postgres", "postgresql@17-main",
+		"redis-server", "valkey-server",
+	} {
+		id := ProgramLens(program)
+		if lens, _ := LensByID(id); lens == nil {
+			t.Errorf("%s: lens %q is not registered", program, id)
+		}
+	}
+	if id := ProgramLens("nordvpnd"); id != "" {
+		t.Errorf("a program with no lens of its own got %q", id)
+	}
 }
 
 func BenchmarkLensSyslog(b *testing.B) {

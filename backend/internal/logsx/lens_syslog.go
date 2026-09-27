@@ -1,7 +1,5 @@
 package logsx
 
-import "strings"
-
 // The syslog lens is the composite for a whole host's log — /var/log/syslog,
 // /var/log/messages, the whole journal — where sshd, the kernel, cron and the
 // service manager write one after another. It has no events of its own. It
@@ -38,40 +36,6 @@ type syslogReader struct {
 	last string
 }
 
-// syslogTarget names the lens for a syslog program. OpenSSH 9.8 and later log
-// as sshd-session and sshd-auth, and fail2ban tags itself with its logger
-// name, so those match by prefix.
-func syslogTarget(program string) string {
-	switch program {
-	case "sudo", "su", "login", "systemd-logind", "useradd", "usermod", "userdel", "groupadd",
-		"groupmod", "groupdel", "passwd", "chpasswd", "gpasswd", "chage":
-		return "auth"
-	case "CRON", "cron", "CROND", "crond":
-		return "cron"
-	case "kernel":
-		return "kernel"
-	case "systemd", "systemd-coredump":
-		return "systemd"
-	case "certbot":
-		return "certbot"
-	case "mysqld", "mariadbd":
-		return "mysql"
-	case "nginx":
-		return "nginx-error"
-	}
-	switch {
-	case strings.HasPrefix(program, "sshd"):
-		return "auth"
-	case strings.HasPrefix(program, "fail2ban"):
-		return "fail2ban"
-	case strings.HasPrefix(program, "postgres"):
-		return "postgres"
-	case strings.HasPrefix(program, "redis"), strings.HasPrefix(program, "valkey"):
-		return "redis"
-	}
-	return ""
-}
-
 func (r *syslogReader) Read(l *Line) {
 	m := sysEnvelope(l)
 	if m.program == "" {
@@ -79,7 +43,7 @@ func (r *syslogReader) Read(l *Line) {
 		return
 	}
 	sysSetOrigin(l, m, r.names)
-	target := syslogTarget(m.program)
+	target := ProgramLens(m.program)
 	reader := r.reader(target)
 	if reader == nil {
 		r.last = ""

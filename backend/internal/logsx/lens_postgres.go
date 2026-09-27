@@ -77,9 +77,12 @@ func (r *postgresReader) Read(l *Line) {
 		r.open = false
 		return
 	}
+	// With log_destination=syslog every line starts "[seq-part] ", and a
+	// message longer than one line goes out as parts 2, 3… of the same seq.
+	text, part := pgSyslogSeq(text)
 	// Postgres puts a tab after every newline it writes inside a message, so
 	// a line starting with one continues whatever came before it.
-	if text[0] == '\t' {
+	if part > 1 || text != "" && text[0] == '\t' {
 		l.Cont = true
 		if r.open && r.level != "" {
 			l.SetLevel(r.level)
@@ -543,16 +546,51 @@ func pgParse(text string) (pgHead, bool) {
 	return pgHead{}, false
 }
 
+// pgSyslogSeq takes off the "[5-1] " Postgres writes before each line it
+// sends to syslog, answering the part number, or 0 when there is none.
+func pgSyslogSeq(text string) (string, int) {
+	if len(text) < 6 || text[0] != '[' {
+		return text, 0
+	}
+	seq := dbDigits(text[1:])
+	if seq == 0 || 1+seq >= len(text) || text[1+seq] != '-' {
+		return text, 0
+	}
+	rest := text[2+seq:]
+	n := dbDigits(rest)
+	if n == 0 || n+1 >= len(rest) || rest[n] != ']' || rest[n+1] != ' ' {
+		return text, 0
+	}
+	part, _ := strconv.Atoi(rest[:n])
+	return rest[n+2:], part
+}
+
 func pgParseText(text string) (pgHead, bool) {
 	var h pgHead
 	if len(text) < 26 || text[0] < '0' || text[0] > '9' {
+		// A syslog line may have no prefix at all: syslog stamps it, so
+		// log_line_prefix is often left empty there.
+		if pgBareSeverity(text) {
+			return pgParseRest(h, text)
+		}
 		return h, false
 	}
 	at, n := pgStamp(text)
 	if at == nil || n >= len(text) || text[n] != ' ' {
 		return h, false
 	}
-	rest := text[n+1:]
+	h.at = at
+	return pgParseRest(h, text[n+1:])
+}
+
+// pgBareSeverity says whether a line starts with a severity and its colon,
+// which is how a message with no prefix before it begins.
+func pgBareSeverity(text string) bool {
+	word, _, ok := strings.Cut(text, ":  ")
+	return ok && !strings.Contains(word, " ") && (pgLevel(word) != "" || pgPart(word))
+}
+
+func pgParseRest(h pgHead, rest string) (pgHead, bool) {
 	// The severity is the word before the first colon followed by two
 	// spaces; everything between the stamp and it is the rest of the prefix.
 	sevEnd := strings.Index(rest, ":  ")
@@ -562,9 +600,8 @@ func pgParseText(text string) (pgHead, bool) {
 	sevStart := strings.LastIndexByte(rest[:sevEnd], ' ') + 1
 	h.severity = rest[sevStart:sevEnd]
 	if pgLevel(h.severity) == "" && !pgPart(h.severity) {
-		return h, false
+		return pgHead{}, false
 	}
-	h.at = at
 	h.msg = rest[sevEnd+3:]
 	pgPrefix(&h, rest[:sevStart])
 	return h, true
