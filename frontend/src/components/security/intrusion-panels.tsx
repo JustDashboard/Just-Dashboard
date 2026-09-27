@@ -5,9 +5,9 @@ import { useSessionState } from "@/lib/view-state"
 import { ClockRewind, Slash } from "@/components/icons"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { ProductGlyph } from "@/components/product-logo"
-import { Address, jailProduct } from "@/components/security/marks"
+import { PeerIdentity, Address, jailProduct } from "@/components/security/marks"
 import { get, ApiError } from "@/lib/api"
-import { timestamp } from "@/lib/format"
+import { relativeTime, timestamp } from "@/lib/format"
 import type { BanEvent, Fail2banJail } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -131,7 +131,7 @@ export function IntrusionPanels() {
             )}
           </>
         }
-        aside={<Status tone="running" live label="running" className="text-body" />}
+        aside={<Status tone="running" label="running" className="text-body" />}
       />
 
       {/* The four numbers the rest of the page is an explanation of. They were
@@ -162,8 +162,10 @@ export function IntrusionPanels() {
         onChanged={refresh}
       />
 
-      <OffendersPanel onBlocked={refresh} />
-      <BanHistoryPanel />
+      <div className="grid min-w-0 items-start gap-6 2xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+        <OffendersPanel onBlocked={refresh} />
+        <BanHistoryPanel />
+      </div>
     </>
   )
 }
@@ -260,29 +262,29 @@ function BanHistoryPanel() {
             <Table containerClassName="max-h-[24rem]">
               <TableHeader className={stickyTableHeader}>
                 <TableRow>
-                  <TableHead>When</TableHead>
-                  <TableHead>Action</TableHead>
-                  <TableHead>Address</TableHead>
-                  <TableHead className="w-full">Jail</TableHead>
+                  <TableHead className="w-full">Address</TableHead>
+                  <TableHead>Event</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {shown.map((event, i) => (
                   <TableRow key={`${event.at}-${event.ip}-${i}`}>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {timestamp(event.at)}
+                    <TableCell className="py-4">
+                      <PeerIdentity ip={event.ip} detail={<JailName name={event.jail} />} />
                     </TableCell>
                     <TableCell>
-                      <Status
-                        state={event.action === "ban" ? "failed" : "exited"}
-                        label={event.action === "ban" ? "banned" : "released"}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Address ip={event.ip} />
-                    </TableCell>
-                    <TableCell className="text-body text-muted-foreground">
-                      <JailName name={event.jail} />
+                      <div className="space-y-1.5">
+                        <Status
+                          tone={event.action === "ban" ? "warning" : "stopped"}
+                          label={event.action === "ban" ? "banned" : "released"}
+                        />
+                        <span
+                          className="block text-hint text-muted-foreground"
+                          title={timestamp(event.at)}
+                        >
+                          {relativeTime(event.at)}
+                        </span>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
