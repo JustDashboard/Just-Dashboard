@@ -279,7 +279,8 @@ test("a reset password is changed only after the account's second factor", async
 test("same-name PM2 applications use trusted daemon and process identities", async ({ page }) => {
   const actions: URL[] = [],
     sockets: URL[] = [],
-    legacy: URL[] = []
+    legacy: URL[] = [],
+    reads: URL[] = []
   // The sheet reads a process's logs as one of the host's log sources; the
   // id it asks for is built from the daemon's account and the process id the
   // list keyed the row on, never from the name alone.
@@ -301,6 +302,10 @@ test("same-name PM2 applications use trusted daemon and process identities", asy
         }),
       })
     let body: unknown = []
+    if (path.startsWith("/logs/")) {
+      reads.push(url)
+      body = {}
+    }
     if (path === "/auth/session") body = signedIn
     if (path === "/pm2/")
       body = {
@@ -365,6 +370,10 @@ test("same-name PM2 applications use trusted daemon and process identities", asy
   ).toBeVisible()
   expect(sockets).toHaveLength(1)
   expect(legacy).toEqual([])
+  // Nor is it described or searched: the sentence is the whole of the tab.
+  expect(reads.filter((read) => read.searchParams.get("source")?.startsWith("pm2:alice/"))).toEqual(
+    [],
+  )
 })
 
 test("Redis scan cursors retain all unsigned 64-bit digits in requests", async ({ page }) => {

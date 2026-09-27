@@ -42,6 +42,11 @@ type PM2Process struct {
 	Autorestart      bool   `json:"autorestart"`
 	MaxMemoryRestart int64  `json:"maxMemoryRestart,omitempty"`
 	CreatedAtMS      int64  `json:"createdAtMs,omitempty"`
+	// LogTimes is PM2 prefixing each line it writes with the time (`--time`
+	// or `log_date_format`). Without it a line carries only whatever time the
+	// application printed itself, so a window of the log is not a question
+	// its lines can answer.
+	LogTimes bool `json:"logTimes"`
 }
 
 // pm2Raw mirrors the subset of `pm2 jlist` output we consume. PM2's schema is
@@ -74,6 +79,8 @@ type pm2Raw struct {
 		Autorestart      any    `json:"autorestart"`
 		MaxMemoryRestart any    `json:"max_memory_restart"`
 		CreatedAt        int64  `json:"created_at"`
+		Time             any    `json:"time"`
+		LogDateFormat    string `json:"log_date_format"`
 	} `json:"pm2_env"`
 }
 
@@ -186,6 +193,7 @@ func parsePM2List(data []byte, nowMilli int64, fallbackUser string) ([]PM2Proces
 		// an absent value is "yes" rather than "no".
 		proc.Autorestart = r.PM2Env.Autorestart == nil || coerceBool(r.PM2Env.Autorestart)
 		proc.MaxMemoryRestart = int64(coerceInt(r.PM2Env.MaxMemoryRestart))
+		proc.LogTimes = coerceBool(r.PM2Env.Time) || r.PM2Env.LogDateFormat != ""
 		out = append(out, proc)
 	}
 	return out, nil

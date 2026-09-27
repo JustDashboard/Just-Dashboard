@@ -173,6 +173,7 @@ const pm2 = {
       autorestart: true,
       maxMemoryRestart: 314572800,
       createdAtMs: Date.now() - 86400_000,
+      logTimes: true,
     },
     {
       id: 1,

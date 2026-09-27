@@ -382,6 +382,11 @@ function ScaleDialog({
  * its daemon log is not read — and while it is up, the minutes around its
  * last start are one press away, which is where the crash that caused a
  * restart is.
+ *
+ * That press is offered only when PM2 stamps the lines (`--time`,
+ * `log_date_format`). Without a stamp a line has no time to fall in a
+ * window by, History keeps every such line, and "the three minutes around
+ * the last start" would be the file's last lines under that name.
  */
 function PM2Logs({ process }: { process: PM2Process }) {
   const id = pm2Source(process.daemonId, process.id, process.name)
@@ -421,7 +426,7 @@ function PM2Logs({ process }: { process: PM2Process }) {
         {process.uptimeMs > 0 && (
           <span className="numeric">up {duration(process.uptimeMs / 1000)}</span>
         )}
-        {(process.uptimeMs > 0 || around) && (
+        {process.logTimes && (process.uptimeMs > 0 || around) && (
           <FilterChip selected={Boolean(around)} onClick={aroundLastStart} className="ml-auto">
             Around the last start
           </FilterChip>
