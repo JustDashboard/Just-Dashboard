@@ -11,6 +11,11 @@ directory or worktree file; `ResolveDir` is the containment half alone, for a cl
 `init` target that is not a repository yet. Remote URLs are scrubbed before they are returned because
 credentials embedded in HTTPS remotes must not reach the list page.
 
+Summary reads combine the abbreviated HEAD with commit metadata in one `log` call and use
+`for-each-ref`'s upstream tracking counts for divergence. A normal attached summary needs five Git
+commands, with fresh status on every request. Empty repositories, detached HEAD and gone upstreams
+retain their previous meanings; a failed metadata read can still recover HEAD with `rev-parse`.
+
 The read surface reports repository summary/status, commit history, local and remote branches, tags,
 stashes, remotes, one commit's detail, a two-branch comparison, diffs, and a bounded topological graph
 whose lane layout spans branches and tags. Status is read from `git status --porcelain=v1 -z`: the

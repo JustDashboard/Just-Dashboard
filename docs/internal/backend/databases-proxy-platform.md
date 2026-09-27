@@ -31,6 +31,14 @@ overflowing cursors.
 `internal/dbx` drives PostgreSQL, MySQL/MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and
 Redis on pure-Go drivers, so the image still needs no CGO.
 
+Pool initialization is coordinated per connection ID. Dialing and pinging do not hold the manager's
+map lock, and waiters can cancel independently. Closing or editing a connection invalidates an
+initialization already in progress; its old credentials cannot publish a pool afterwards.
+Completion and diagram reads batch catalogue facts for up to 500 table names per query, with the
+diagram's existing 120-table cap applied first. Each dialect keeps its type spelling, key order and
+referential actions. A refused bulk read falls back to the existing per-table reads so restricted
+accounts retain partial results. Full table details and mutation preconditions use fresh dialect reads.
+
 - **`Dialect` is the whole abstraction**: driver name, quote character, bind marker, pagination tail,
   catalogue queries, DDL keywords, session list, size query — one method each, six implementations. The
   old shape was a `switch driver` inside a dozen functions; it worked at three engines and broke at seven,
@@ -150,6 +158,9 @@ Redis on pure-Go drivers, so the image still needs no CGO.
   containers by IP, to this host for loopback and bridge-gateway addresses, or to another
   machine. A binding's word (`connected`, `stale`, `broken`) outranks an observation's. Both are
   on the read surface; the detected-but-unconnected half is filled only for `system.admin`.
+  Fleet, topology and consumer reads reuse one Docker list and one inspection per container within
+  their request, including the fleet's administrator-only discovery. Each request starts fresh; the
+  snapshot is never used for access-changing actions.
 - **The server behind a connection.** `dbx.Admin` is an optional second interface a dialect
   implements — Postgres, MySQL/MariaDB, ClickHouse and SQL Server do; SQLite has no server and
   Oracle's account model does not fit — with Mongo (`usersInfo`/`createUser`/`grantRolesToUser`)

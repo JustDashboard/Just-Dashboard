@@ -11,6 +11,10 @@
   retain the same resource's data. Cleanup aborts the request and ignores late responses.
 - `useSocket` — reconnect with backoff (these sockets ride a tunnel that drops routinely), handlers in a
   ref so a fresh closure does not rebuild the socket.
+- Persisted view/session values use individual Web Storage entries, so changing a small filter does not
+  serialize unrelated editor drafts. Writes remain synchronous for reload persistence. Existing single
+  documents migrate on first read, with restoration and the old persistence path if splitting exceeds
+  quota. Prefix deletion and sign-out remove the same values; the memory store never writes to storage.
 - `lib/view-state.ts` is what a page remembers about itself, in three stores drawn by how long the
   thing should live. `useViewState` is **how the page is arranged** — a hidden panel, a chosen tab, a
   sort order, a toggle — in localStorage, so a reload keeps it. `useSessionState` is **what you were

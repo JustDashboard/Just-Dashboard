@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -59,6 +60,16 @@ type Table struct {
 	mu      sync.Mutex
 	samples map[int32]ioSample
 	now     func() time.Time
+	scanMu  sync.Mutex
+	scan    *processScan
+}
+
+type processScan struct {
+	done    chan struct{}
+	cancel  context.CancelFunc
+	readers int
+	rows    []Process
+	err     error
 }
 
 func NewTable() *Table {
@@ -69,6 +80,54 @@ func NewTable() *Table {
 // a short-lived process disappearing mid-scan is normal, not a failure of the
 // whole listing.
 func (t *Table) Snapshot(ctx context.Context) ([]Process, error) {
+	return t.sharedSnapshot(ctx, t.snapshot)
+}
+
+func (t *Table) sharedSnapshot(ctx context.Context, read func(context.Context) ([]Process, error)) ([]Process, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	t.scanMu.Lock()
+	scan := t.scan
+	if scan == nil {
+		owner, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		scan = &processScan{done: make(chan struct{}), cancel: cancel}
+		t.scan = scan
+		go func() {
+			defer cancel()
+			scan.rows, scan.err = read(owner)
+			t.scanMu.Lock()
+			if t.scan == scan {
+				t.scan = nil
+			}
+			close(scan.done)
+			t.scanMu.Unlock()
+		}()
+	}
+	scan.readers++
+	t.scanMu.Unlock()
+	defer func() {
+		t.scanMu.Lock()
+		defer t.scanMu.Unlock()
+		scan.readers--
+		if scan.readers == 0 {
+			scan.cancel()
+			if t.scan == scan {
+				t.scan = nil
+			}
+		}
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-scan.done:
+		// Handlers overlay PM2 ownership and sort in place. Each gets its own
+		// rows while simultaneous readers share only the expensive OS scan.
+		return slices.Clone(scan.rows), scan.err
+	}
+}
+
+func (t *Table) snapshot(ctx context.Context) ([]Process, error) {
 	procs, err := process.ProcessesWithContext(ctx)
 	if err != nil {
 		return nil, err
@@ -110,6 +169,9 @@ func (t *Table) Snapshot(ctx context.Context) ([]Process, error) {
 		row.State = processState(row.Status)
 		row.Manager, row.ManagerName = processManager(row.PID, row.Cmdline)
 		out = append(out, row)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	t.applyIORates(out)
 	return out, nil
