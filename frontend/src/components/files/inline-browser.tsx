@@ -74,9 +74,21 @@ type BrowserProps = {
   label?: string
   className?: string
   emptyNote?: React.ReactNode
+  /**
+   * Take the height the parent gives it rather than stopping at a panel's.
+   * A browser that is the whole of a tab otherwise ends a third of the way
+   * down the screen and scrolls a short box above empty ground.
+   */
+  fill?: boolean
 }
 
-function Browser({ root, label, className, emptyNote = "This directory is empty." }: BrowserProps) {
+function Browser({
+  root,
+  label,
+  className,
+  emptyNote = "This directory is empty.",
+  fill,
+}: BrowserProps) {
   const { can } = useAuth()
   const base = cleanPath(root)
   const [dir, setDir] = useState(base)
@@ -139,7 +151,7 @@ function Browser({ root, label, className, emptyNote = "This directory is empty.
     // with its location across the top, the listing in the middle and what is
     // in it along the foot — so a volume opened from Docker reads like the
     // same directory opened in Files, with the same marks and the same words.
-    <Pane className={cn("min-w-0", className)}>
+    <Pane className={cn("min-w-0", fill && "flex-1", className)}>
       <PaneHeader className="gap-1 px-2">
         <nav
           aria-label="Location inside this storage"
@@ -206,7 +218,12 @@ function Browser({ root, label, className, emptyNote = "This directory is empty.
         </span>
       </PaneHeader>
 
-      <div className="@container max-h-96 min-h-0 min-w-0 overflow-y-auto overscroll-contain">
+      <div
+        className={cn(
+          "@container min-h-0 min-w-0 overflow-y-auto overscroll-contain",
+          fill ? "flex-1" : "max-h-96",
+        )}
+      >
         <Contents
           loading={loading}
           entries={data ? entries : undefined}

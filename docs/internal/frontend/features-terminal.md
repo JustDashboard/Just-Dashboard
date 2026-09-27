@@ -93,11 +93,13 @@ that does something.
   Update/Duplicate/Rename — the last two behind a statement of consequence when compose owns the
   container, because the next deploy silently undoes them days later. Its Storage tab leads with the path
   *inside* the container — the one the application's own configuration names — states the kind of storage
-  in words rather than as a Docker noun, and puts where it actually lives on the second line; the header
-  answers the question the tab is opened with, which is how much of this survives a rebuild. A volume or
-  bind row also opens onto what is *in* it — `files/inline-browser.tsx`, the same component the volume
-  panel and the stack's Files tab use, drawn as the file manager's own listing in a pane — because naming a mount does not answer whether the backup landed or what the application
-  wrote; a tmpfs row does not, since memory has nowhere on this filesystem to look. Storage that looks
+  in words rather than as a Docker noun, and puts where it actually lives beside it, one line per mount with
+  the kind at the row's edge (amber for memory, which does not survive a rebuild). Under the mounts, the
+  first volume or bind is already open in `files/inline-browser.tsx` — the same component the volume
+  panel and the stack's Files tab use, drawn as the file manager's own listing in a pane, here in its
+  `fill` form so the listing takes the tab's height — because naming a mount does not answer whether the
+  backup landed or what the application wrote. With more than one to look in, the rows are the switch
+  between them; a tmpfs row never is, since memory has nowhere on this filesystem to look. Storage that looks
   like a database's own files is named as such above the browser while the container is running
   (`docker/shared.tsx`). Its Usage
   tab drops the network chart entirely for a container on the host's network namespace: Docker reports no

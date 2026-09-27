@@ -1168,11 +1168,13 @@ test("the storage browser draws a directory the way the file manager does", asyn
 })
 
 /**
- * The Storage tab named every mount and showed the contents of none.
+ * The Storage tab named every mount and showed the contents of none, and then
+ * showed them only once a row was expanded.
  *
- * A row opens onto what is in it. A tmpfs row does not, and must not grow a
- * control that could only fail: it is memory in the container's namespace and
- * there is nothing on this filesystem to list.
+ * The one mount there is to look in is open with the tab, and with nothing to
+ * choose between its row is not a control. A tmpfs row never grows one either:
+ * it is memory in the container's namespace and there is nothing on this
+ * filesystem to list.
  */
 test("the storage tab opens onto what is in a mount", async ({ page }) => {
   await mockDocker(page)
@@ -1181,12 +1183,58 @@ test("the storage tab opens onto what is in a mount", async ({ page }) => {
   await page.goto("/docker/containers/1111111111111111")
   await page.getByRole("tab", { name: "Storage" }).click()
 
-  const volume = page.getByRole("button").filter({ hasText: "/usr/share/nginx/html" })
-  await expect(volume).toHaveAttribute("aria-expanded", "false")
-  await volume.click()
   await expect(page.getByRole("button", { name: "postgresql.conf" })).toBeVisible()
+  const mounts = page.getByRole("list", { name: "Mounts" })
+  await expect(mounts.getByText("/usr/share/nginx/html")).toBeVisible()
+  await expect(mounts.getByRole("button", { pressed: true })).toHaveCount(0)
+  await expect(mounts.getByRole("button").filter({ hasText: "/usr/share/nginx/html" })).toHaveCount(
+    0,
+  )
 
   // Temporary memory names itself and offers nothing to open.
   await expect(page.getByRole("button").filter({ hasText: "Temporary memory" })).toHaveCount(0)
   await expect(page.getByText("Temporary memory")).toBeVisible()
+})
+
+/**
+ * With two mounts to look in, the rows choose which one the listing shows.
+ */
+test("the storage tab switches the listing between mounts", async ({ page }) => {
+  await mockDocker(page)
+  await mockVolumeFiles(page)
+  await page.route("**/api/v1/docker/containers/1111111111111111", (route) =>
+    json(route, {
+      ...detail,
+      mounts: [
+        ...detail.mounts,
+        {
+          type: "bind",
+          name: "",
+          source: "/srv/site/config",
+          destination: "/etc/nginx/conf.d",
+          mode: "",
+          rw: false,
+        },
+      ],
+    }),
+  )
+  await page.route("**/api/v1/files/list?*", (route, request) =>
+    new URL(request.url()).searchParams.get("path") === "/srv/site/config"
+      ? json(route, { path: "/srv/site/config", entries: [entry("default.conf", false, 512)] })
+      : route.fallback(),
+  )
+  await page.goto("/docker/containers/1111111111111111")
+  await page.getByRole("tab", { name: "Storage" }).click()
+
+  const mounts = page.getByRole("list", { name: "Mounts" })
+  const volume = mounts.getByRole("button").filter({ hasText: "/usr/share/nginx/html" })
+  const bind = mounts.getByRole("button").filter({ hasText: "/etc/nginx/conf.d" })
+  await expect(volume).toHaveAttribute("aria-pressed", "true")
+  await expect(page.getByRole("button", { name: "postgresql.conf" })).toBeVisible()
+
+  await bind.click()
+  await expect(bind).toHaveAttribute("aria-pressed", "true")
+  await expect(page.getByRole("button", { name: "default.conf" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "postgresql.conf" })).toHaveCount(0)
+  await expect(mounts.getByText("read-only")).toBeVisible()
 })
