@@ -790,26 +790,26 @@ const AUTH: LogLens = {
       fields: event("ssh_accepted"),
       hint: "SSH sessions that signed in",
     },
+    // Untoned for the reason the events' levels stay info: a public SSH port
+    // is tried all day, and the page that shows it must not read as alarmed.
     {
       id: "failed",
       label: "Failed attempts",
       fields: event(...sshFailures),
-      tone: "warning",
-      hint: "Wrong passwords, unknown users, too many tries",
+      hint: "Wrong passwords and users",
     },
     {
       id: "invalid",
       label: "Invalid users",
       fields: event("ssh_invalid_user"),
-      hint: "Attempts for accounts this host does not have",
+      hint: "Names with no account here",
     },
     {
       id: "attackers",
-      label: "Attacking addresses",
+      label: "Attackers",
       fields: event(...sshFailures),
       distinct: "client",
-      tone: "warning",
-      hint: "Distinct addresses behind the failures",
+      hint: "Distinct failing addresses",
     },
     {
       id: "sudo-failed",
@@ -873,7 +873,7 @@ const FIREWALL: LogLens = {
       label: "Sources",
       fields: event("block"),
       distinct: "client",
-      hint: "Distinct addresses behind the drops",
+      hint: "Distinct addresses dropped",
     },
     {
       id: "limited",
@@ -1077,7 +1077,9 @@ const APP: LogLens = {
   views: [
     errorsView,
     { id: "exceptions", label: "Exceptions", fields: event("exception") },
-    { id: "requests", label: "Requests", fields: event("request") },
+    // Not "Requests": a page that shows this lens beside its own Requests
+    // view would offer two buttons of one name.
+    { id: "requests", label: "HTTP", fields: event("request") },
     { id: "5xx", label: "5xx", fields: { class: ["5xx"] } },
     {
       id: "startup",
@@ -1334,14 +1336,54 @@ const SYSLOG: LogLens = {
 
 /**
  * A stack's containers each have their own lens — the database's, the
- * app's — and the one thing they share is which service spoke.
+ * app's — and the one thing they share is which service spoke. Its readings
+ * are the ones that add up across a database and a web server: levels, which
+ * every lens sets, how many services the errors came from, and the start-ups
+ * every container lens names.
  */
 const STACK: LogLens = {
   id: "stack",
   label: "Compose stack",
+  // The lenses a container is read through: each line names its own, and
+  // these are what the stack's own readings are named in.
+  includes: [
+    "app",
+    "postgres",
+    "mysql",
+    "redis",
+    "mongodb",
+    "clickhouse",
+    "mssql",
+    "nginx",
+    "caddy",
+  ],
   facets: ["service", "event", "level"],
   views: [errorsView],
   events: {},
+  readings: [
+    errorsReading,
+    {
+      id: "failing",
+      label: "Services with errors",
+      levels: ERRORS,
+      distinct: "service",
+      tone: "danger",
+      hint: "How many of its services logged one",
+    },
+    {
+      id: "warnings",
+      label: "Warnings",
+      levels: ["warn"],
+      tone: "warning",
+      hint: "Lines at warning level",
+    },
+    {
+      id: "starts",
+      label: "Starts",
+      fields: event("startup"),
+      hint: "Times a service said it was starting",
+    },
+  ],
 }
 
 const LENSES: Record<string, LogLens> = Object.fromEntries(

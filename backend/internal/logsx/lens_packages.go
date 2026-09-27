@@ -29,7 +29,7 @@ func init() {
 		Events: []string{"transaction_start", "command", "install", "upgrade", "remove", "purge", "transaction_end",
 			"configure", "unattended_run", "unattended_done", "error"},
 		// duration_ms is a transaction's length, End-Date less Start-Date.
-		Attrs: []string{"package", "version", "old_version", "packages", "command", "user", "duration_ms"},
+		Attrs: []string{"package", "version", "old_version", "packages", "package_list", "command", "user", "duration_ms"},
 		New:   func() Reader { return &packagesReader{} },
 	})
 }
@@ -201,8 +201,11 @@ func packagesList(value string, upgrade bool) []packagesEntry {
 
 // packagesListAttrs records a transaction line's packages: how many, and
 // which — the ones asked for before the ones pulled in, so "apt install cloc"
-// reads as cloc rather than as its first Perl dependency. One package also
-// carries its versions.
+// reads as cloc rather than as its first Perl dependency. One package is the
+// line's package, with its versions; several are a list beside it, so that
+// "By package" ranks packages rather than the transactions that named them
+// together, and "only this package" is not missing the lines that also
+// named another.
 func packagesListAttrs(l *Line, entries []packagesEntry) {
 	if len(entries) == 0 {
 		return
@@ -223,7 +226,7 @@ func packagesListAttrs(l *Line, entries []packagesEntry) {
 			}
 			if list.Len()+len(entry.name)+2 > packagesListCap {
 				list.WriteString(" +" + strconv.Itoa(len(entries)-written) + " more")
-				l.SetAttr("package", list.String())
+				l.SetAttr("package_list", list.String())
 				return
 			}
 			if list.Len() > 0 {
@@ -233,7 +236,7 @@ func packagesListAttrs(l *Line, entries []packagesEntry) {
 			written++
 		}
 	}
-	l.SetAttr("package", list.String())
+	l.SetAttr("package_list", list.String())
 }
 
 // term reads apt's term.log — dpkg's own output during a transaction — and

@@ -389,6 +389,7 @@
       "version",
       "old_version",
       "packages",
+      "package_list",
       "command",
       "user",
       "duration_ms"

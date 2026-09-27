@@ -11,7 +11,6 @@ import {
   foldRestarts,
   healthOf,
   lastLinesSearch,
-  linesBefore,
   spanWords,
   type ContainerHealth,
   type EventEntry,
@@ -483,8 +482,7 @@ function LastLines({
       { source, ...lastLinesSearch(event.time) },
       controller.signal,
     ).then(
-      (result) =>
-        setState({ lines: linesBefore(result.lines ?? [], event.time), lens: result.lens }),
+      (result) => setState({ lines: result.lines ?? [], lens: result.lens }),
       (err) => {
         if (controller.signal.aborted) return
         setState({

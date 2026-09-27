@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test"
 import { AUTH_LOG, FAIL2BAN_LOG, FIREWALL_LOG, SSH_IDENTS, hostLogSource } from "./host-logs"
 
-/** The server's description of a file it may read, under the bare path it lists files by. */
+/** The server's description of a file it may read, under the id it was asked by. */
 const found = (path, lens) => ({
   path,
   source: {
-    id: path,
+    id: `file:${path}`,
     label: path.slice(path.lastIndexOf("/") + 1),
     kind: "system",
     path,

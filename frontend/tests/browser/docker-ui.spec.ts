@@ -1016,10 +1016,9 @@ const dbEvents = (() => {
 })()
 
 /**
- * What the database wrote around an exit, as a last-lines search finds it:
- * the search starts a minute before the exit and runs to the end of the
- * exit's second, so it also finds the next attempt starting up a moment
- * after — which the page must not show as the minute before.
+ * What the database wrote around an exit: the minute before it, and the next
+ * attempt starting up a moment after — which a last-lines search, bounded at
+ * the exit, must not bring back as the minute before.
  */
 const lastLines = (since: number) => [
   {
@@ -1043,7 +1042,7 @@ const lastLines = (since: number) => [
 ]
 
 /** How a last-lines search is told apart from the pane's own: it asks for this many. */
-const LAST_LINES_LIMIT = "200"
+const LAST_LINES_LIMIT = "20"
 
 const dbFailure = {
   containerId: DB,
@@ -1191,7 +1190,13 @@ async function mockServiceLogs(page: Page): Promise<ServiceLogMocks> {
     if (url.pathname.endsWith("/logs/search")) {
       recorded.searches.push(url.searchParams)
       const before = url.searchParams.get("limit") === LAST_LINES_LIMIT
-      const found = before ? lastLines(Date.parse(url.searchParams.get("since")!)) : []
+      // Up to the bound and no further, as the server reads it.
+      const until = Date.parse(url.searchParams.get("until") ?? "")
+      const found = before
+        ? lastLines(Date.parse(url.searchParams.get("since")!)).filter(
+            (line) => !(Date.parse(line.timestamp) > until),
+          )
+        : []
       const facet = url.searchParams.get("facets")
       return json(route, {
         facets: facet
@@ -1305,15 +1310,10 @@ test("a container's events fold its restart loop under its health check", async 
   const before = mocks.searches.filter((s) => s.get("limit") === LAST_LINES_LIMIT)
   expect(before).toHaveLength(2)
   expect(before.map((s) => s.get("source"))).toEqual([`docker:${DB}`, `docker:${DB}`])
-  // Docker is handed whole seconds, so the search runs to the end of the
-  // exit's own second rather than being cut back to its start.
+  // The minute runs to the exit itself, as the event wrote it.
   const exit = Date.parse(dbEvents[0].time)
   const last = before.find((s) => Date.parse(s.get("since")!) === exit - 60_000)
-  expect(last).toBeDefined()
-  const until = Date.parse(last!.get("until")!)
-  expect(until % 1000).toBe(0)
-  expect(until).toBeGreaterThan(exit)
-  expect(until - exit).toBeLessThanOrEqual(1000)
+  expect(last?.get("until")).toBe(dbEvents[0].time)
 
   // The failure's window: History on it, in the pane, named as what it is.
   await page.getByRole("button", { name: "Crash window" }).click()

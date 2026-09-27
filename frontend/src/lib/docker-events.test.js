@@ -5,7 +5,6 @@ import {
   foldRestarts,
   healthOf,
   lastLinesSearch,
-  linesBefore,
   spanWords,
 } from "./docker-events"
 
@@ -162,32 +161,15 @@ test("a kill for memory is one row on the exit it caused, and an OOM the contain
   ).toEqual(["shop-db-1 start", "shop-db-1 die", "shop-db-1 oom"])
 })
 
-test("the minute before an exit runs to the end of its second, and stops at the exit", () => {
+test("the minute before an exit stops at the exit, to the nanosecond", () => {
   const exit = "2026-09-27T10:00:05.310456789Z"
   const search = lastLinesSearch(exit)
-  // Docker is handed whole seconds, so the second the exit fell in is asked
-  // for whole: its first 310 ms are the ones that say why.
-  expect(search.until).toBe("2026-09-27T10:00:06.000Z")
+  // The server hands Docker the bound as it is written, so the part of a
+  // second before the exit is read and the next attempt's start-up, a tenth
+  // of a second on, is not.
+  expect(search.until).toBe(exit)
   expect(search.since).toBe("2026-09-27T09:59:05.310Z")
-  expect(search.limit).toBeGreaterThan(LAST_LINES)
-
-  const line = (stamp, text) => ({ timestamp: stamp, text })
-  const found = [
-    ...Array.from({ length: 30 }, (_, i) =>
-      line(`2026-09-27T10:00:0${Math.floor(i / 10)}.${String(i).padStart(3, "0")}Z`, `line ${i}`),
-    ),
-    line("2026-09-27T10:00:05.300123Z", "FATAL: could not write to file: No space left on device"),
-    line(undefined, "\tcontinued"),
-    // The restart policy's next attempt, a hundred milliseconds on.
-    line("2026-09-27T10:00:05.412Z", "starting PostgreSQL 16.4"),
-    line("2026-09-27T10:00:05.500Z", "listening on IPv4 address"),
-  ]
-  const kept = linesBefore(found, exit)
-  expect(kept).toHaveLength(LAST_LINES)
-  expect(kept.at(-2).text).toMatch(/^FATAL/)
-  expect(kept.at(-1).text).toBe("\tcontinued")
-  expect(kept.some((l) => l.text.startsWith("starting"))).toBe(false)
-  expect(linesBefore([], exit)).toEqual([])
+  expect(search.limit).toBe(LAST_LINES)
 })
 
 test("the polled copy of an event wins over the socket's, and the feed is newest first", () => {

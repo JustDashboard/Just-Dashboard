@@ -760,7 +760,7 @@ test("the ssh page reads its auth log through the lens, the day's counts in its 
   // Wrong passwords, unknown accounts and a connection that ran out of tries.
   await expect(tile(page, "Failed attempts")).toContainText("8")
   await expect(tile(page, "Invalid users")).toContainText("2")
-  await expect(tile(page, "Attacking addresses")).toContainText("3")
+  await expect(tile(page, "Attackers")).toContainText("3")
 
   // The lines as what they record, the lens's noise hidden as a chip.
   const lines = page.getByLabel("Log lines")

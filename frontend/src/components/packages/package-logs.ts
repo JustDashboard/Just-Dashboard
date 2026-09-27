@@ -1,6 +1,5 @@
 import type { ServiceLogSource } from "@/components/logs/service-logs"
 import type { HostLogProbe } from "@/components/security/host-logs"
-import { fileSource } from "@/lib/log-sources"
 
 /**
  * The files the Log view offers, in the order a reader wants them: apt's
@@ -27,9 +26,7 @@ export const PACKAGE_LOGS = [
  */
 export function packageLogSources(probes: HostLogProbe[], product?: string): ServiceLogSource[] {
   return probes.flatMap((probe) =>
-    "source" in probe
-      ? [{ ...probe.source, id: fileSource(probe.path), lens: undefined, product }]
-      : [],
+    "source" in probe ? [{ ...probe.source, lens: undefined, product }] : [],
   )
 }
 

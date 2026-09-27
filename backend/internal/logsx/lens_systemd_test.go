@@ -217,6 +217,36 @@ func TestLensSystemdKeysOnMessageID(t *testing.T) {
 	})
 }
 
+// Forced onto a unit's journal, the lens meets the program's own lines as
+// well as the manager's, and a program's "Closed redis connection" or
+// "Starting worker pool..." is not its unit stopping or starting. Only what
+// systemd and systemd-coredump write is named; a line with no program to go
+// by is still read, as a syslog file's bare sentence is.
+func TestLensSystemdNamesOnlyTheManagersLines(t *testing.T) {
+	app := func(program string) map[string]string {
+		return map[string]string{"program": program, "pid": "4211", "unit": "worker.service", "invocation": "3f1c"}
+	}
+	entries := []sysEntry{
+		{"Closed redis connection", 6, app("node")},
+		{"Starting worker pool...", 6, app("node")},
+		{"Stopped target queue consumer.", 6, app("worker")},
+		{"worker.service: Failed with result 'exit-code'.", 4, app("worker-wrapper")},
+		{"Started worker.service - Queue worker.", 6,
+			map[string]string{"program": "systemd", "pid": "1", "unit": "worker.service", "invocation": "3f1c"}},
+	}
+	sysCheck(t, sysReadJournal(t, "systemd", entries...), []sysWant{
+		{text: "closed", level: "info", attrs: entries[0].fields},
+		{text: "starting", level: "info", attrs: entries[1].fields},
+		{text: "stopped", level: "info", attrs: entries[2].fields},
+		{text: "failed", level: "warn", attrs: entries[3].fields},
+		{text: "started", event: "started", level: "info", attrs: entries[4].fields},
+	})
+	sysRead(t, "systemd",
+		sysWant{text: "2026-09-20T01:02:03.000000+00:00 web-1 worker[4211]: Stopping consumers...", at: "2026-09-20T01:02:03Z"},
+		sysWant{text: "Started the queue worker.", event: "started"},
+	)
+}
+
 func BenchmarkLensSystemd(b *testing.B) {
 	benchmarkSysLens(b, "systemd", []string{
 		"2026-09-20T00:54:38.653921+00:00 web-1 systemd[1]: nordvpnd.service: Scheduled restart job, restart counter is at 48215.",

@@ -3,7 +3,7 @@ import { PACKAGE_LOGS, packageLogSources, packageLogsOutsideRoots } from "./pack
 
 const found = (path, label) => ({
   path,
-  source: { id: path, label, kind: "system", path, lens: "packages", rotated: false },
+  source: { id: `file:${path}`, label, kind: "system", path, lens: "packages", rotated: false },
 })
 const missing = (path) => ({ path, refused: "missing" })
 

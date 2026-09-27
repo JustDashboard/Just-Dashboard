@@ -746,7 +746,9 @@ function LastLines({ event, onOutput }: { event: DockerEvent; onOutput?: () => v
       query={{
         source: dockerSource(event.id),
         since: new Date(at - 60_000).toISOString(),
-        until: new Date(at + 1000).toISOString(),
+        // The exit itself, as the event wrote it: the next attempt starts up
+        // a moment later and is not why it stopped.
+        until: event.time,
         limit: 20,
       }}
       empty="The container wrote nothing in the minute before it stopped."

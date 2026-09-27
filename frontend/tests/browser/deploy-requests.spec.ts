@@ -473,9 +473,12 @@ test.describe("a deployment's traffic", () => {
     expect(url.searchParams.get("service")).toBe("abc123")
     expect(url.searchParams.get("moment")).toBe("2026-09-03T11:59:31Z")
 
+    // The output's own quick view for its request lines is "HTTP", so the
+    // page's Requests view is the one button of that name.
+    await expect(page.getByRole("button", { name: /^HTTP/ })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Requests", exact: true })).toHaveCount(1)
+
     // The other question a failure raises: what happened to the container then.
-    // (The page's views by their strip: the output's own quick views name
-    // its request lines "Requests" too.)
     await page
       .getByRole("navigation", { name: "Log view" })
       .getByRole("button", { name: "Requests", exact: true })
@@ -873,7 +876,7 @@ test.describe("a deployment's traffic", () => {
     await expect(last.getByText("Error: connect ECONNREFUSED 10.0.4.7:5432")).toBeVisible()
     const read = searches.find((q) => q.get("source") === "docker:c0ffee")!
     expect(read.get("since")).toBe("2026-09-03T11:08:00.000Z")
-    expect(read.get("until")).toBe("2026-09-03T11:09:01.000Z")
+    expect(read.get("until")).toBe("2026-09-03T11:09:00Z")
   })
 
   test("events name the exit code, and say whether the dashboard or Docker did it", async ({

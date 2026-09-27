@@ -124,12 +124,11 @@ export function UnitRuns({ unit, ctx }: { unit: string; ctx: ServiceLogsContext 
     read.refresh()
   }
   // Short of the whole week, the count says what it is of: the runs since
-  // the oldest line a capped read kept, or at least this many when the read
-  // ran out of time before the newest.
+  // the oldest line read. A capped read keeps the newest lines, and so does
+  // one that ran out of time, since the journal is read newest first.
   const oldest = runs[0]?.start ?? runs[0]?.first
-  const count = !result?.complete
-    ? `at least ${plural(runs.length, "run")} in ${RUNS_DAYS} days`
-    : result.truncated && oldest
+  const count =
+    result && (result.truncated || !result.complete) && oldest
       ? `${plural(runs.length, "run")} since ${when(oldest)}`
       : `${plural(runs.length, "run")} in ${RUNS_DAYS} days`
 
@@ -204,11 +203,11 @@ export function UnitRuns({ unit, ctx }: { unit: string; ctx: ServiceLogsContext 
       )}
 
       {result && !result.complete ? (
-        // The journal is read oldest first, so a read cut short by its time
-        // limit is missing the newest runs, not the oldest.
+        // The journal is read newest first, so a read cut short by its time
+        // limit is missing the week's oldest runs, not the latest.
         <p className="border-t border-hairline px-3 py-2 text-hint text-warning">
-          The journal took longer to read than a search is allowed, so the newest runs may be
-          missing. History over the last hour reads it faster.
+          The journal took longer to read than a search is allowed, so the week&apos;s oldest runs
+          are missing. History reads a shorter stretch in full.
         </p>
       ) : (
         result?.truncated && (
