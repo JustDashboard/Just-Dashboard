@@ -4,6 +4,7 @@ import { useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { CheckCircle, CloudUpload, RefreshClockwise, ShieldOff } from "@/components/icons"
 import { ApiError, get, post } from "@/lib/api"
+import { certbotRunning } from "@/lib/certificates"
 import type { Certificate, CertbotState, DNSProvider, Job } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -73,6 +74,7 @@ export function CertificatesPage() {
     },
   })
   const { busy, renew } = useRenew(console_.attach)
+  const certbotBusy = certbotRunning(console_.job)
   const certbotGone =
     certbot.error instanceof ApiError && certbot.error.code === "certbot_unavailable"
 
@@ -104,7 +106,18 @@ export function CertificatesPage() {
       },
     })
 
-  // A staging run that passed is the moment to issue the real one, with the
+  // ?issue= is a one-shot hand-off from the site form. Left in the address,
+  // a reload opened the form again after it had been closed or used.
+  const setIssueOpen = (open: boolean) => {
+    setIssue((s) => ({ ...s, open }))
+    if (!open && params.get("issue") !== null) {
+      const url = new URL(window.location.href)
+      url.searchParams.delete("issue")
+      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`)
+    }
+  }
+
+  // A test run that passed is the moment to issue the real one, with the
   // same names and nothing to retype.
   const job = console_.job
   const testPassed =
@@ -177,14 +190,11 @@ export function CertificatesPage() {
       />
 
       {testPassed && admin && (
-        <Notice
-          tone="success"
-          icon={CheckCircle}
-          title={`The test issuance for ${testPassed} passed`}
-        >
+        <Notice tone="success" icon={CheckCircle} title={`The test run for ${testPassed} passed`}>
           <div className="flex flex-wrap items-center gap-2">
             <span>
-              Let&rsquo;s Encrypt&rsquo;s staging authority signed it, so the real one will work.
+              The authority went through the whole exchange and nothing was saved, so the real
+              issuance should pass too.
             </span>
             <Button
               size="xs"
@@ -250,8 +260,13 @@ export function CertificatesPage() {
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={busy !== ""}
-                        pending={busy === ALL_CERTS}
+                        disabled={busy !== "" || certbotBusy}
+                        pending={
+                          busy === ALL_CERTS ||
+                          (certbotBusy &&
+                            job?.kind === "certbot.renew" &&
+                            job.target === "every certificate due")
+                        }
                         onClick={() => renew(ALL_CERTS, false)}
                       >
                         <RefreshClockwise className="size-3.5" />
@@ -277,6 +292,7 @@ export function CertificatesPage() {
                   state={certbot.data}
                   admin={admin}
                   busy={busy}
+                  job={console_.job}
                   onRenew={renew}
                   onRevoke={revoke}
                 />
@@ -291,6 +307,14 @@ export function CertificatesPage() {
               onChanged={providers.refresh}
             />
           )}
+          {admin && providers.error && (
+            <Panel plain>
+              <PanelHeader title="DNS challenge providers" />
+              <PanelBody flush>
+                <ErrorState error={providers.error} onRetry={providers.refresh} />
+              </PanelBody>
+            </Panel>
+          )}
         </div>
       </div>
       <WatchedDomains admin={admin} />
@@ -299,11 +323,12 @@ export function CertificatesPage() {
         <>
           <IssueDialog
             open={issue.open}
-            onOpenChange={(open) => setIssue((s) => ({ ...s, open }))}
+            onOpenChange={setIssueOpen}
             initialDomains={issue.domains}
             initialStaging={issue.staging}
             hasNginx={hasNginx}
             providers={providers.data ?? []}
+            certbotBusy={certbotBusy}
             onStarted={(job) => {
               console_.attach(job)
               providers.refresh()

@@ -93,9 +93,11 @@ func (d ACMEDirectory) caddyIssuer() string {
 }
 
 // certbotArgs is the same choice for certbot: the directory to order from.
-// Staging keeps its own flag, because certbot knows that endpoint by name.
-func (d ACMEDirectory) certbotArgs(staging bool) []string {
-	if !d.configured() || staging {
+// A test run names it too — certbot's --dry-run goes to the staging endpoint
+// only when no other server is given, so a rehearsal exercises the authority
+// the real order will use.
+func (d ACMEDirectory) certbotArgs() []string {
+	if !d.configured() {
 		return nil
 	}
 	return []string{"--server", d.URL}

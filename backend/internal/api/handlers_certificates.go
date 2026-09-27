@@ -2,8 +2,11 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -79,43 +82,98 @@ func (s *Server) handleCertIssue(w http.ResponseWriter, r *http.Request) error {
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	args, err := s.modules.proxy.IssueArgs(req)
+	ctx, cancel := timeoutCtx(r, 90*time.Second)
+	defer cancel()
+	args, err := s.modules.proxy.IssueArgs(ctx, req)
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
+	// Checked with the rest of the request and saved by the job, first
+	// thing: a refused request, or one that finds certbot busy, leaves no
+	// token on disk.
+	var credentials *proxysvc.DNSCredentials
+	if req.Method == "dns" && strings.TrimSpace(req.Credentials) != "" {
+		checked, err := proxysvc.CheckDNSCredentials(req.DNSProvider, req.Credentials)
+		if err != nil {
+			return httpx.BadRequest("%v", err)
+		}
+		credentials = &checked
+	}
 	target := strings.Join(req.Domains, ", ")
 	httpx.SetAudit(r, "certificates.issue", target,
-		map[string]any{"method": req.Method, "staging": req.Staging, "streamed": true})
+		map[string]any{"method": req.Method, "testRun": req.Staging, "credentialsSaved": credentials != nil, "streamed": true})
 
 	title := "Issuing a certificate for " + target
 	if req.Staging {
 		title = "Test issuance for " + target
 	}
-	s.startJob(w, r, jobs.Spec{
+	return s.startCertbotJob(w, r, jobs.Spec{
 		Kind: "certbot.issue", Title: title, Target: target, Timeout: 10 * time.Minute,
 	}, func(ctx context.Context, out jobs.Emitter) error {
-		if req.Staging {
-			out.Status("Using Let's Encrypt's staging authority: the certificate will not be trusted by browsers, and this run does not count against the rate limit.")
+		if credentials != nil {
+			path, err := credentials.Save()
+			if err != nil {
+				return fmt.Errorf("the %s credentials could not be saved: %w", credentials.Provider().Name, err)
+			}
+			out.Status("Saved the %s credentials to %s, readable by root only.", credentials.Provider().Name, path)
 		}
-		return certbotJob(ctx, out, args)
+		kept := ""
+		switch {
+		case req.Staging:
+			out.Status("A test run: certbot goes through the whole exchange with the test authority and saves nothing — no certificate is written, and nothing counts against the rate limit.")
+		case slices.Contains(args, "--force-renewal"):
+			out.Status("These names have a test certificate from a staging authority. certbot replaces it with a real one rather than keeping it until it is due.")
+		default:
+			kept = "certbot did not issue a new certificate: the one these names already have is not due for renewal yet, so it was kept as it is."
+		}
+		return certbotJob(ctx, out, args, kept)
 	})
+}
+
+// startCertbotJob starts a certbot job unless another is running. A second
+// certbot fails on the lock the first holds, and the page's console would
+// swap the running job for the one that is about to fail.
+func (s *Server) startCertbotJob(w http.ResponseWriter, r *http.Request, spec jobs.Spec, run jobs.Runner) error {
+	spec.StartedBy = httpx.MustPrincipal(r).Username()
+	job, ok := s.modules.jobs.StartExclusive("certbot.", spec, run)
+	if !ok {
+		return httpx.Err(http.StatusConflict, "certbot_busy",
+			fmt.Sprintf("certbot is already running (%s, started by %s). Wait for it to finish.", job.Title, job.StartedBy))
+	}
+	httpx.JSON(w, http.StatusAccepted, job)
 	return nil
 }
 
 // certbotJob runs certbot and turns a non-zero exit into an error, so a failed
 // order reads as a failed job rather than as a job that succeeded while
 // printing a problem.
-func certbotJob(ctx context.Context, out jobs.Emitter, args []string) error {
+//
+// kept, when set, is what to say if certbot exits 0 having replaced nothing.
+// It does that when a certificate is not due — "no action taken" on an
+// issuance, "not due for renewal" on a renewal — and the job read as a
+// success that had done what was asked. The lineages' serials, compared
+// before and after, tell the two apart whatever certbot's wording.
+func certbotJob(ctx context.Context, out jobs.Emitter, args []string, kept string) error {
 	environment, err := proxysvc.CertbotEnvironment()
 	if err != nil {
 		return err
 	}
-	code, err := out.RunEnv(ctx, environment, "certbot", args...)
+	cmd, err := proxysvc.CertbotCommand(ctx, environment, args...)
+	if err != nil {
+		return err
+	}
+	before, beforeErr := proxysvc.CertbotSerials()
+	code, err := out.RunCmd(cmd, append([]string{"certbot"}, args...))
 	if err != nil {
 		return err
 	}
 	if code != 0 {
 		return fmt.Errorf("certbot exited %d — the last lines above say why", code)
+	}
+	if kept != "" && beforeErr == nil {
+		if after, err := proxysvc.CertbotSerials(); err == nil && len(before) > 0 && maps.Equal(before, after) {
+			out.Status("%s", kept)
+		}
 	}
 	return nil
 }
@@ -146,7 +204,15 @@ func (s *Server) handleCertRenew(w http.ResponseWriter, r *http.Request) error {
 	if req.DryRun {
 		title = "Dry run: renewing " + target
 	}
-	s.startJob(w, r, jobs.Spec{
+	kept := ""
+	switch {
+	case req.DryRun || req.Force:
+	case req.Name == "":
+		kept = "Nothing was due for renewal, so certbot changed nothing."
+	default:
+		kept = req.Name + " is not due for renewal yet, so certbot left it as it was."
+	}
+	return s.startCertbotJob(w, r, jobs.Spec{
 		Kind: "certbot.renew", Title: title, Target: target, Timeout: 10 * time.Minute,
 	}, func(ctx context.Context, out jobs.Emitter) error {
 		if req.DryRun {
@@ -155,9 +221,8 @@ func (s *Server) handleCertRenew(w http.ResponseWriter, r *http.Request) error {
 		if req.Force {
 			out.Status("Forced renewal spends one of the five duplicate certificates Let's Encrypt allows per week.")
 		}
-		return certbotJob(ctx, out, args)
+		return certbotJob(ctx, out, args, kept)
 	})
-	return nil
 }
 
 type revokeRequest struct {
@@ -180,17 +245,22 @@ func (s *Server) handleCertRevoke(w http.ResponseWriter, r *http.Request) error 
 		return httpx.BadRequest("%v", err)
 	}
 	httpx.SetAudit(r, "certificates.revoke", req.Name, map[string]any{"streamed": true})
-	s.startJob(w, r, jobs.Spec{
+	return s.startCertbotJob(w, r, jobs.Spec{
 		Kind: "certbot.revoke", Title: "Revoking " + req.Name, Target: req.Name,
 		Timeout: 5 * time.Minute,
 	}, func(ctx context.Context, out jobs.Emitter) error {
-		return certbotJob(ctx, out, args)
+		return certbotJob(ctx, out, args, "")
 	})
-	return nil
 }
 
 func (s *Server) handleDNSProviders(w http.ResponseWriter, r *http.Request) error {
-	httpx.JSON(w, http.StatusOK, s.modules.proxy.ListDNSProviders())
+	ctx, cancel := timeoutCtx(r, 90*time.Second)
+	defer cancel()
+	providers, err := s.modules.proxy.ListDNSProviders(ctx)
+	if err != nil {
+		return httpx.Err(http.StatusBadGateway, "certbot_plugins", err.Error()).Retry()
+	}
+	httpx.JSON(w, http.StatusOK, providers)
 	return nil
 }
 
@@ -231,6 +301,9 @@ type certImportRequest struct {
 	Name        string `json:"name"`
 	Certificate string `json:"certificate"`
 	Key         string `json:"key"`
+	// Replace overwrites an import of the same name, keeping the previous
+	// pair beside it as .bak. Without it an existing name is a 409.
+	Replace bool `json:"replace"`
 }
 
 // handleCertImport takes a certificate somebody bought or was given.
@@ -243,12 +316,16 @@ func (s *Server) handleCertImport(w http.ResponseWriter, r *http.Request) error 
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	res, err := proxysvc.ImportCertificate(req.Name, req.Certificate, req.Key)
+	res, err := proxysvc.ImportCertificate(req.Name, req.Certificate, req.Key, req.Replace)
+	var exists *proxysvc.ExistingImportError
+	if errors.As(err, &exists) {
+		return httpx.Err(http.StatusConflict, "certificate_exists", err.Error())
+	}
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
-	httpx.SetAudit(r, "certificates.import", req.Name,
-		map[string]any{"domains": res.Cert.Domains, "expires": res.Cert.NotAfter})
+	httpx.SetAudit(r, "certificates.import", res.Name,
+		map[string]any{"domains": res.Cert.Domains, "expires": res.Cert.NotAfter, "replaced": res.Replaced})
 	httpx.JSON(w, http.StatusOK, res)
 	return nil
 }

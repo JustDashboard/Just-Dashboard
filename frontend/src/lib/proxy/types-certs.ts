@@ -27,6 +27,10 @@ export type CertbotCert = {
   certPath?: string
   keyPath?: string
   serial?: string
+  /** A test certificate from a staging authority: browsers refuse it whatever its days. */
+  staging?: boolean
+  /** Why the lineage's certificate could not be read. */
+  error?: string
 }
 
 export type CertbotState = {
@@ -38,7 +42,7 @@ export type CertbotState = {
   renewSource?: string
   /** A certbot timer systemd knows but is not running: the thing to turn on. */
   renewUnit?: string
-  raw?: string
+  /** Why the lineages could not be read; the renewal fields are answered regardless. */
   error?: string
 }
 
@@ -60,5 +64,7 @@ export type ImportResult = {
   keyPath: string
   certificate: Certificate
   chainComplete: boolean
+  /** An import of the same name was overwritten; nginx serves the new one after a reload. */
+  replaced: boolean
   warnings: string[]
 }

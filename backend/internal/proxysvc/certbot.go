@@ -1,12 +1,10 @@
 package proxysvc
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -22,8 +20,8 @@ import (
 // on a host running nginx binds port 80 and fails, --force-renewal against
 // Let's Encrypt's rate limit locks the domain out for a week.
 
-// CertbotCert is one lineage as certbot itself describes it, which includes
-// the renewal configuration the PEM files on disk do not reveal.
+// CertbotCert is one lineage: the renewal configuration certbot keeps, and
+// the certificate it points at.
 type CertbotCert struct {
 	Name     string    `json:"name"`
 	Domains  []string  `json:"domains"`
@@ -33,6 +31,11 @@ type CertbotCert struct {
 	CertPath string    `json:"certPath,omitempty"`
 	KeyPath  string    `json:"keyPath,omitempty"`
 	Serial   string    `json:"serial,omitempty"`
+	// Staging is a test certificate: renewed from a staging authority, or
+	// signed by one. Browsers refuse it however many days it has left.
+	Staging bool `json:"staging,omitempty"`
+	// Error is why the lineage's certificate could not be read.
+	Error string `json:"error,omitempty"`
 }
 
 // CertbotState is everything the Certificates tab needs about certbot.
@@ -49,99 +52,32 @@ type CertbotState struct {
 	// the thing to turn on when AutoRenew is false. Empty when nothing is
 	// scheduled and there is no unit to enable either.
 	RenewUnit string `json:"renewUnit,omitempty"`
-	Raw       string `json:"raw,omitempty"`
-	Error     string `json:"error,omitempty"`
+	// Error is why the lineages could not be read. The renewal fields are
+	// answered regardless: they come from systemd and cron, not from certbot.
+	Error string `json:"error,omitempty"`
 }
 
 func (s *Service) CertbotState(ctx context.Context) *CertbotState {
 	state := &CertbotState{Certs: []CertbotCert{}}
-	if !hostexec.Available("certbot") {
+	rt, _ := loadCertbotRuntime(ctx)
+	if rt == nil {
 		return state
 	}
 	state.Available = true
-	if out, err := hostexec.Command(ctx, "certbot", "--version").CombinedOutput(); err == nil {
-		state.Version = strings.TrimSpace(string(out))
-	}
-	out, err := certbotRun(ctx, 60*time.Second, "certificates")
-	if err != nil {
-		state.Error = err.Error()
-		state.Raw = out
-		return state
-	}
-	state.Raw = out
-	state.Certs = ParseCertbotCertificates(out)
+	state.Version = rt.version
+	// Before the lineages, and whatever they say: whether anything renews
+	// them is a separate question, and a lineage read that failed used to
+	// return before it was asked — every certbot run read as "renewal off".
 	state.AutoRenew, state.RenewSource = renewalScheduled(ctx)
 	if !state.AutoRenew {
 		state.RenewUnit = renewalCandidate(ctx)
 	}
+	certs, err := readCertbotLineages(letsencryptDir)
+	if err != nil {
+		state.Error = err.Error()
+	}
+	state.Certs = certs
 	return state
-}
-
-var (
-	certbotNameRe   = regexp.MustCompile(`^\s*Certificate Name:\s*(\S+)`)
-	certbotExpiryRe = regexp.MustCompile(`Expiry Date:\s*([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]{8})[^(]*\(([^)]*)\)`)
-)
-
-// ParseCertbotCertificates reads `certbot certificates`, whose output is a
-// labelled block per lineage. Parsed by label rather than by position: the
-// order of the lines has changed between certbot releases and the labels have
-// not.
-func ParseCertbotCertificates(out string) []CertbotCert {
-	certs := []CertbotCert{}
-	var current *CertbotCert
-	flush := func() {
-		if current != nil {
-			certs = append(certs, *current)
-			current = nil
-		}
-	}
-	sc := bufio.NewScanner(strings.NewReader(out))
-	for sc.Scan() {
-		line := sc.Text()
-		if m := certbotNameRe.FindStringSubmatch(line); m != nil {
-			flush()
-			current = &CertbotCert{Name: m[1], Domains: []string{}}
-			continue
-		}
-		if current == nil {
-			continue
-		}
-		trimmed := strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(trimmed, "Domains:"):
-			current.Domains = strings.Fields(strings.TrimPrefix(trimmed, "Domains:"))
-		case strings.HasPrefix(trimmed, "Serial Number:"):
-			current.Serial = strings.TrimSpace(strings.TrimPrefix(trimmed, "Serial Number:"))
-		case strings.HasPrefix(trimmed, "Certificate Path:"):
-			current.CertPath = strings.TrimSpace(strings.TrimPrefix(trimmed, "Certificate Path:"))
-		case strings.HasPrefix(trimmed, "Private Key Path:"):
-			current.KeyPath = strings.TrimSpace(strings.TrimPrefix(trimmed, "Private Key Path:"))
-		case strings.HasPrefix(trimmed, "Expiry Date:"):
-			if m := certbotExpiryRe.FindStringSubmatch(trimmed); m != nil {
-				if t, err := time.Parse("2006-01-02 15:04:05", m[1]); err == nil {
-					current.Expiry = t.UTC()
-				}
-				note := m[2]
-				current.Valid = !strings.Contains(strings.ToUpper(note), "INVALID")
-				current.DaysLeft = parseDaysLeft(note)
-			}
-		}
-	}
-	flush()
-	return certs
-}
-
-// parseDaysLeft reads certbot's parenthetical, which is "VALID: 43 days" or
-// "INVALID: EXPIRED".
-func parseDaysLeft(note string) int {
-	fields := strings.Fields(note)
-	for i, f := range fields {
-		if n, err := strconv.Atoi(f); err == nil && i+1 < len(fields) &&
-			strings.HasPrefix(fields[i+1], "day") {
-			return n
-		}
-	}
-	return 0
 }
 
 // certbotTimers are the units certbot's packages install, in the order the
@@ -209,10 +145,16 @@ type IssueRequest struct {
 	DNSProvider string `json:"dnsProvider,omitempty"`
 	// DNSWait overrides the provider's default propagation delay.
 	DNSWait int `json:"dnsWait,omitempty"`
-	// Staging issues from Let's Encrypt's test authority, which is not
-	// trusted by browsers and is not rate-limited. It is the right first
-	// attempt for anybody who has not done this before, because the real
-	// limit is five failures an hour and it is easy to reach.
+	// Credentials, when set, are the DNS provider's to save before the
+	// challenge. They stand in for saved ones here and are written only once
+	// the whole request has been accepted, so a refused request leaves no
+	// token on disk.
+	Credentials string `json:"credentials,omitempty"`
+	// Staging asks for a test run: certbot's --dry-run, the whole exchange
+	// against the staging authority with nothing saved and nothing counted
+	// against the rate limit. It is the right first attempt for anybody who
+	// has not done this before, because the real limit is five failures an
+	// hour and it is easy to reach.
 	Staging bool `json:"staging"`
 	// Install lets certbot edit the nginx config to use the new certificate.
 	// Off by default: this dashboard writes those files, and two things
@@ -233,7 +175,7 @@ var (
 // to answer the request synchronously — a bad email or a wildcard over HTTP is
 // a 400, not a job that fails a minute later — while the command itself
 // belongs to a job that outlives the request.
-func (s *Service) IssueArgs(req IssueRequest) ([]string, error) {
+func (s *Service) IssueArgs(ctx context.Context, req IssueRequest) ([]string, error) {
 	if len(req.Domains) == 0 {
 		return nil, fmt.Errorf("at least one domain is required")
 	}
@@ -256,13 +198,15 @@ func (s *Service) IssueArgs(req IssueRequest) ([]string, error) {
 		return nil, fmt.Errorf("a wildcard certificate can only be issued with a DNS challenge — Let's Encrypt will not sign one any other way")
 	}
 	if !emailRe.MatchString(req.Email) {
-		return nil, fmt.Errorf("a contact email is required — it is where expiry warnings go")
+		return nil, fmt.Errorf("a contact email is required for the ACME account")
 	}
 
 	args := []string{}
-	// A DNS challenge has no web server to install into; certonly is the only
-	// shape it takes.
-	if req.Install && req.Method == "nginx" {
+	// A DNS challenge has no web server to install into, and a test run
+	// installs nothing (certbot refuses --dry-run outside certonly and
+	// renew): certonly is the only shape either takes.
+	plugin := req.Method
+	if req.Install && req.Method == "nginx" && !req.Staging {
 		args = append(args, "--nginx")
 	} else {
 		args = append(args, "certonly")
@@ -281,10 +225,7 @@ func (s *Service) IssueArgs(req IssueRequest) ([]string, error) {
 			if !ok {
 				return nil, fmt.Errorf("choose a DNS provider for the challenge")
 			}
-			if !provider.Installed && !certbotPluginInstalled(provider.Plugin) {
-				return nil, fmt.Errorf("certbot's %s plugin is not installed on this host", provider.Plugin)
-			}
-			if provider.Key != "route53" && !HasDNSCredentials(provider.Key) {
+			if provider.Key != "route53" && !HasDNSCredentials(provider.Key) && strings.TrimSpace(req.Credentials) == "" {
 				return nil, fmt.Errorf("%s has no credentials saved yet", provider.Name)
 			}
 			wait := req.DNSWait
@@ -294,9 +235,24 @@ func (s *Service) IssueArgs(req IssueRequest) ([]string, error) {
 			if wait > 3600 {
 				return nil, fmt.Errorf("the propagation wait is too long")
 			}
+			plugin = provider.Plugin
 			args = append(args, dnsIssueArgs(provider, wait)...)
 		default:
 			return nil, fmt.Errorf("method must be nginx, webroot, standalone or dns")
+		}
+	}
+	// webroot and standalone are part of certbot itself; the nginx and DNS
+	// plugins are packages the certbot that runs the job has or has not got.
+	if plugin == "nginx" || req.Method == "dns" {
+		rt, err := loadCertbotRuntime(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if rt == nil {
+			return nil, fmt.Errorf("certbot is not installed on this host")
+		}
+		if !rt.authenticators[plugin] {
+			return nil, fmt.Errorf("the certbot that runs here (%s) has no %s plugin", rt.where(), plugin)
 		}
 	}
 	args = append(args, "--non-interactive", "--agree-tos", "-m", req.Email,
@@ -305,9 +261,17 @@ func (s *Service) IssueArgs(req IssueRequest) ([]string, error) {
 		// may press twice.
 		"--keep-until-expiring")
 	if req.Staging {
-		args = append(args, "--staging")
+		// Not --staging: that wrote a real lineage holding an untrusted
+		// certificate, left it where sites could name it, and made the real
+		// issuance that followed a no-op — the lineage was not due.
+		args = append(args, "--dry-run")
+	} else if lineage, ok := lineageFor(letsencryptDir, req.Domains); ok && lineage.staging() {
+		// These names already have a test certificate from a staging
+		// authority, and certbot keeps a lineage until it is due whatever
+		// signed it. Replacing it is the point of asking for a real one.
+		args = append(args, "--force-renewal")
 	}
-	args = append(args, acmeDirectory().certbotArgs(req.Staging)...)
+	args = append(args, acmeDirectory().certbotArgs()...)
 	for _, d := range req.Domains {
 		args = append(args, "-d", d)
 	}
@@ -345,20 +309,6 @@ func (s *Service) RevokeArgs(name string) ([]string, error) {
 		return nil, fmt.Errorf("invalid certificate name")
 	}
 	return []string{"revoke", "--non-interactive", "--cert-name", name, "--delete-after-revoke"}, nil
-}
-
-func certbotRun(ctx context.Context, limit time.Duration, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, limit)
-	defer cancel()
-	out, err := hostexec.Command(ctx, "certbot", args...).CombinedOutput()
-	text := strings.TrimSpace(string(out))
-	if err != nil {
-		if text == "" {
-			text = err.Error()
-		}
-		return text, fmt.Errorf("certbot: %s", lastMeaningfulLine(text))
-	}
-	return text, nil
 }
 
 // lastMeaningfulLine picks the line worth putting in an error toast. certbot

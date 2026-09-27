@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/pem"
 	"fmt"
 	"net"
 	"os"
@@ -48,10 +47,8 @@ const expiryWarningDays = 30
 // referenced by the proxy config, so a manually installed certificate is not
 // invisible just because certbot does not know about it.
 func (s *Service) ListCertificates(ctx context.Context) ([]Certificate, error) {
-	return listCertificates(letsencryptLiveDir, importedDir, s.nginxVHosts()), nil
+	return listCertificates(filepath.Join(letsencryptDir, "live"), importedDir, s.nginxVHosts()), nil
 }
-
-const letsencryptLiveDir = "/etc/letsencrypt/live"
 
 // listCertificates is ListCertificates with its directories as arguments, so
 // the join between certificates and the sites that use them can be tested
@@ -102,9 +99,13 @@ func listCertificates(liveDir, imported string, vhosts []VHost) []Certificate {
 	// renewal run must never be able to prune one it did not issue — which
 	// means they have to be looked for separately or they would be invisible
 	// until a vhost happened to reference one.
+	//
+	// Caddy's release copies share the directory and are not imports: Caddy
+	// renews the certificate it serves, never these, so listing them raised
+	// an expiry alarm for every one, named by hash and used by nothing.
 	if entries, err := os.ReadDir(imported); err == nil {
 		for _, e := range entries {
-			if e.IsDir() {
+			if e.IsDir() && !isCaddyEvidence(e.Name()) {
 				add(filepath.Join(imported, e.Name(), "fullchain.pem"), "imported", "")
 			}
 		}
@@ -143,15 +144,7 @@ func certificateName(path string) string {
 }
 
 func readCertificate(path string) (*Certificate, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	block, _ := pem.Decode(raw)
-	if block == nil {
-		return nil, fmt.Errorf("not a PEM certificate")
-	}
-	parsed, err := x509.ParseCertificate(block.Bytes)
+	parsed, err := readLeaf(path)
 	if err != nil {
 		return nil, err
 	}

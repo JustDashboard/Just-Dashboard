@@ -1,13 +1,14 @@
 "use client"
 
 import { useState } from "react"
-import { CheckCircle, Warning } from "@/components/icons"
+import { CheckCircle, RefreshClockwise, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { post } from "@/lib/api"
+import { ApiError, post } from "@/lib/api"
 import type { ImportResult } from "@/lib/types"
 import { Field } from "@/components/form"
 import { Notice } from "@/components/state"
 import { Modal } from "@/components/modal"
+import { useProxy } from "@/components/proxy/proxy-context"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -22,6 +23,9 @@ import { Textarea } from "@/components/ui/textarea"
  * The key is checked against the certificate before either is written, because
  * a mismatched pair is accepted by every text editor and refused by nginx at
  * reload — which on a live server means finding out during an outage.
+ *
+ * A name already in use is not overwritten on the way through: the server
+ * says what is there, and replacing it is a second, deliberate press.
  */
 export function ImportDialog({
   open,
@@ -46,11 +50,22 @@ function ImportDialogBody({
   onOpenChange: (open: boolean) => void
   onDone: () => void
 }) {
+  const { hasNginx } = useProxy()
   const [name, setName] = useState("")
   const [certificate, setCertificate] = useState("")
   const [key, setKey] = useState("")
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<ImportResult | null>(null)
+  // The server's sentence about the import already under this name, until
+  // the name or the files change.
+  const [existing, setExisting] = useState("")
+  const [reloading, setReloading] = useState(false)
+  const [reloaded, setReloaded] = useState(false)
+
+  const edit = (set: (value: string) => void) => (value: string) => {
+    set(value)
+    setExisting("")
+  }
 
   const submit = async () => {
     setBusy(true)
@@ -59,16 +74,36 @@ function ImportDialogBody({
         name: name.trim(),
         certificate,
         key,
+        replace: existing !== "",
       })
       setResult(res)
-      notify.success(`${res.name} imported`, {
-        description: "Point a site at the paths below to start serving it.",
+      notify.success(res.replaced ? `${res.name} replaced` : `${res.name} imported`, {
+        description: res.replaced
+          ? "nginx keeps serving the previous one until it reloads."
+          : "Point a site at the paths below to start serving it.",
       })
       onDone()
     } catch (err) {
-      notify.error("Not imported", err)
+      if (err instanceof ApiError && err.code === "certificate_exists") {
+        setExisting(err.message)
+      } else {
+        notify.error("Not imported", err)
+      }
     } finally {
       setBusy(false)
+    }
+  }
+
+  const reload = async () => {
+    setReloading(true)
+    try {
+      await post("/proxy/reload", { kind: "nginx" })
+      setReloaded(true)
+      notify.success("nginx reloaded")
+    } catch (err) {
+      notify.error("nginx did not reload", err)
+    } finally {
+      setReloading(false)
     }
   }
 
@@ -84,18 +119,23 @@ function ImportDialogBody({
           <Button onClick={() => onOpenChange(false)}>Done</Button>
         ) : (
           <Button
+            variant={existing ? "destructive" : undefined}
             onClick={submit}
             disabled={busy || !name.trim() || !certificate.trim() || !key.trim()}
             pending={busy}
           >
-            Check and import
+            {existing ? "Replace it" : "Check and import"}
           </Button>
         )
       }
     >
       {result ? (
         <div className="space-y-3">
-          <Notice tone="success" icon={CheckCircle} title={`${result.name} is on disk`}>
+          <Notice
+            tone="success"
+            icon={CheckCircle}
+            title={result.replaced ? `${result.name} was replaced` : `${result.name} is on disk`}
+          >
             <div className="space-y-1">
               <p>
                 Certificate: <code className="font-mono">{result.certPath}</code>
@@ -109,6 +149,28 @@ function ImportDialogBody({
               </p>
             </div>
           </Notice>
+          {result.replaced &&
+            (reloaded ? (
+              <Notice tone="success" icon={CheckCircle} title="nginx reloaded">
+                Sites using this certificate serve the new one now. The previous pair is kept beside
+                it as <code className="font-mono">.bak</code>.
+              </Notice>
+            ) : (
+              <Notice tone="warning" icon={RefreshClockwise} title="Sites pick it up on a reload">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span>
+                    A site using this certificate keeps serving the old one until nginx reloads. The
+                    previous pair is kept beside the new one as{" "}
+                    <code className="font-mono">.bak</code>.
+                  </span>
+                  {hasNginx && (
+                    <Button size="xs" variant="outline" onClick={reload} pending={reloading}>
+                      Reload nginx
+                    </Button>
+                  )}
+                </div>
+              </Notice>
+            ))}
           {result.warnings.map((warning) => (
             <Notice key={warning} tone="warning" icon={Warning} title="Worth knowing">
               {warning}
@@ -125,7 +187,7 @@ function ImportDialogBody({
             <Input
               id="import-name"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => edit(setName)(e.target.value)}
               placeholder="example-com"
               className="font-mono text-xs"
             />
@@ -133,12 +195,12 @@ function ImportDialogBody({
           <Field
             label="Certificate"
             htmlFor="import-cert"
-            hint="Paste the full chain if your authority gave you one — leaf first, then the intermediates. Desktop browsers paper over a missing intermediate from cache; phones, curl and payment gateways do not."
+            hint="Paste the full chain if your authority gave you one, in any order: it is saved leaf first, without the root. Desktop browsers paper over a missing intermediate from cache; phones, curl and payment gateways do not."
           >
             <Textarea
               id="import-cert"
               value={certificate}
-              onChange={(e) => setCertificate(e.target.value)}
+              onChange={(e) => edit(setCertificate)(e.target.value)}
               rows={6}
               className="font-mono text-micro"
               placeholder={"-----BEGIN CERTIFICATE-----\n…"}
@@ -148,12 +210,18 @@ function ImportDialogBody({
             <Textarea
               id="import-key"
               value={key}
-              onChange={(e) => setKey(e.target.value)}
+              onChange={(e) => edit(setKey)(e.target.value)}
               rows={5}
               className="font-mono text-micro"
               placeholder={"-----BEGIN PRIVATE KEY-----\n…"}
             />
           </Field>
+          {existing && (
+            <Notice tone="warning" icon={Warning} title="That name is taken">
+              {existing} The pair there now is kept beside the new one as{" "}
+              <code className="font-mono">.bak</code>.
+            </Notice>
+          )}
         </div>
       )}
     </Modal>

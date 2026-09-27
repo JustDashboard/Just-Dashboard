@@ -108,6 +108,12 @@ type Emitter interface {
 	// RunEnv is Run with extra environment, for the tools that need
 	// DEBIAN_FRONTEND or a plain progress renderer.
 	RunEnv(ctx context.Context, env []string, name string, args ...string) (int, error)
+	// RunCmd streams a command the caller built, for a tool whose side of the
+	// namespace boundary is the caller's decision rather than always the
+	// host's: certbot runs wherever the page read it from. The command must
+	// carry the job's context, so cancelling the job stops it. shown is the
+	// argv the console prints, without the plumbing that reaches the host.
+	RunCmd(cmd *exec.Cmd, shown []string) (int, error)
 }
 
 // Runner is the work itself. Returning an error fails the job; the error text
@@ -154,14 +160,39 @@ func New(log *slog.Logger) *Manager {
 
 // Start begins a job and returns immediately.
 func (m *Manager) Start(spec Spec, run Runner) Job {
+	job, _ := m.start(spec, run, "")
+	return job
+}
+
+// StartExclusive begins a job unless one whose kind starts with prefix is
+// still running, in which case it starts nothing and returns that one.
+//
+// Some tools cannot run twice at once: a second certbot fails on the lock the
+// first holds, and on a page with a console the new job would replace the
+// running one on screen. Checking and starting under one lock is what keeps
+// two clicks, or two tabs, from both getting through.
+func (m *Manager) StartExclusive(prefix string, spec Spec, run Runner) (Job, bool) {
+	return m.start(spec, run, prefix)
+}
+
+func (m *Manager) start(spec Spec, run Runner, exclusive string) (Job, bool) {
 	if spec.Timeout <= 0 {
 		spec.Timeout = defaultTimeout
 	}
 	id := newID()
+
+	m.mu.Lock()
+	if exclusive != "" {
+		for _, other := range m.order {
+			if job := m.entries[other].snapshotJob(); job.Status == StatusRunning && strings.HasPrefix(job.Kind, exclusive) {
+				m.mu.Unlock()
+				return job, false
+			}
+		}
+	}
 	// From Background, not from the request: the whole point is that this
 	// outlives the call that asked for it.
 	ctx, cancel := context.WithTimeout(context.Background(), spec.Timeout)
-
 	e := &entry{
 		job: Job{
 			ID: id, Kind: spec.Kind, Title: spec.Title, Target: spec.Target,
@@ -171,8 +202,6 @@ func (m *Manager) Start(spec Spec, run Runner) Job {
 		subs:   map[chan Line]struct{}{},
 		cancel: cancel,
 	}
-
-	m.mu.Lock()
 	m.entries[id] = e
 	m.order = append(m.order, id)
 	m.prune()
@@ -193,7 +222,7 @@ func (m *Manager) Start(spec Spec, run Runner) Job {
 			m.log.Warn("job failed", "id", id, "kind", spec.Kind, "target", spec.Target, "err", err)
 		}
 	}()
-	return e.snapshotJob()
+	return e.snapshotJob(), true
 }
 
 // prune drops the oldest finished jobs. Must be called with m.mu held.
@@ -422,7 +451,16 @@ func (em *emitter) Run(ctx context.Context, name string, args ...string) (int, e
 // everywhere else in this codebase — every caller builds it from validated
 // pieces.
 func (em *emitter) RunEnv(ctx context.Context, env []string, name string, args ...string) (int, error) {
-	em.Status("$ %s %s", name, strings.Join(args, " "))
+	cmd := hostexec.CommandOnHost(ctx, name, args...)
+	if len(env) > 0 {
+		cmd.Env = append(cmd.Environ(), env...)
+	}
+	return em.RunCmd(cmd, append([]string{name}, args...))
+}
+
+func (em *emitter) RunCmd(cmd *exec.Cmd, shown []string) (int, error) {
+	name := shown[0]
+	em.Status("$ %s", strings.Join(shown, " "))
 	// The code the last command exited with is recorded on the job, because
 	// it is a field the API has always carried and nothing ever wrote: every
 	// failed job reported "exit 0", which next to "failed" is a contradiction
@@ -432,10 +470,6 @@ func (em *emitter) RunEnv(ctx context.Context, env []string, name string, args .
 	// one exited with.
 	em.lastCode = -1
 	defer func() { em.entry.setExitCode(em.lastCode) }()
-	cmd := hostexec.CommandOnHost(ctx, name, args...)
-	if len(env) > 0 {
-		cmd.Env = append(cmd.Environ(), env...)
-	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return -1, err

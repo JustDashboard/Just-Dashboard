@@ -1,3 +1,4 @@
+import { expiredAgo } from "@/lib/certificates"
 import type { Certificate, CertbotState } from "@/lib/types"
 import type { ProxyFinding } from "@/components/proxy/findings/shared"
 
@@ -29,7 +30,7 @@ export function certificateFindings({ certs, certbot }: CertificateFindingInput)
         id: `cert.expired.${cert.path}`,
         level: "critical",
         title: `${cert.name} has expired`,
-        detail: `Expired ${-cert.daysLeft} day${cert.daysLeft === -1 ? "" : "s"} ago; every browser refuses it now.${usedBy}`,
+        detail: `Expired ${expiredAgo(cert.notAfter)}; every browser refuses it now.${usedBy}`,
         advice: "Renew it, then find out why the renewal did not run on its own.",
         meta: "certificate",
         href: "/proxy/certificates",

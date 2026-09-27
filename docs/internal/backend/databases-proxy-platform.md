@@ -372,15 +372,41 @@ ownership and cleanup, then removes its own containers/volumes/networks.
 - **`import.go`** checks the key against the certificate **before** writing either: a mismatched pair is
   accepted by every text editor and refused by nginx at reload, which on a live server means finding out
   during an outage. Imports live in `/etc/ssl/just-dashboard`, so a renewal run can never prune a
-  certificate it did not issue.
+  certificate it did not issue. The key is found among the blocks pasted (an `EC PARAMETERS` block in
+  front of it is skipped; an encrypted key is refused with the command that decrypts it); the leaf is the
+  certificate that key belongs to, wherever it sits in the bundle; the chain is followed by signature and
+  saved leaf first without the root; `ChainComplete` means the chain reaches a root (the bundle's own,
+  one the system trusts, or `JD_ACME_CA_ROOT`), not that more than one block was pasted. A name already
+  imported is a 409 `certificate_exists` naming what is there; `replace: true` overwrites it and keeps
+  the previous pair as `.bak`, so replacing is a write rather than a destructive act. Caddy's release
+  copies (`caddy-<24 hex>`, `docker_caddy_certs.go`) share the directory, are refreshed through
+  `keepCaddyEvidence`, are left out of `ListCertificates` — Caddy renews what it serves, never these, so
+  listed they raised an expiry finding apiece — and their names are refused to an operator's import.
 - **`streams.go`** — nginx's `stream` is a sibling of `http`, so a stream cannot live under
   sites-available. They go in `/etc/nginx/stream.d`, and the page says plainly when `nginx.conf` does not
   include it. nginx.conf itself is never edited from here: everything else on the host depends on it.
 - **`htpasswd.go`** does bcrypt in process — `htpasswd` lives in apache2-utils, is not installed on a host
   running nginx, and would put the password in a world-readable argv.
 - **`certbot.go`** issues, renews and revokes. `renewalScheduled` has its own field because it is the real
-  story behind almost every expired certificate: not a forgotten renewal, a timer that stopped months ago.
-  Issuance defaults to `--staging` in the UI (the real limit is five failures an hour). `dns.go` answers
+  story behind almost every expired certificate: not a forgotten renewal, a timer that stopped months ago;
+  `CertbotState` answers it before reading the lineages, whatever they say. Issuance defaults to a test
+  run in the UI (the real limit is five failures an hour), and a test run is `certonly --dry-run` — the
+  whole exchange, nothing saved (`--staging` used to write a lineage holding an untrusted certificate and
+  make the real issuance that followed a "no action taken" no-op). A real issuance whose names already
+  have a lineage renewed from a staging authority adds `--force-renewal`; with `JD_ACME_DIRECTORY` both
+  name `--server`. **One certbot** (`certbot_runtime.go`): the host's when the host has one, this
+  process's own otherwise, for the version, the plugin list (`certbot plugins`, cached a minute, run
+  with a private `--config-dir` so the probe never holds the lock a renewal timer needs) and the jobs,
+  which stream it through `jobs.Emitter.RunCmd`; the page used to read the image's certbot and run the
+  host's. `IssueArgs` refuses the nginx or a DNS method when that certbot lacks the plugin, naming which
+  certbot. **Lineages are read from files** (`certbot_lineages.go`: `renewal/*.conf` and the certificate
+  each names), never from `certbot certificates`, which takes certbot's lock: while any certbot ran, the
+  page said certbot managed nothing and nothing renewed it. Certbot jobs start through
+  `Manager.StartExclusive("certbot.")`, so a second one is a 409 `certbot_busy` naming the run in the
+  way, and a job whose certbot exited 0 without changing any lineage's serial says the certificate was
+  kept rather than reading as done. DNS credentials sent with an issuance are checked with the request
+  (`CheckDNSCredentials`) and saved by the job as its first step, so a refused or busy request leaves no
+  token on disk. `dns.go` answers
   "does this domain point here yet" and recognises Cloudflare explicitly, since reporting a CDN as a
   misconfiguration is the commonest false alarm of this kind.
 - **The proxy routes are mounted per area**, each from its own file beside its handlers, and composed in
@@ -459,8 +485,10 @@ again. A job inverts that — `context.Background()`, a ring buffer with a seque
 `Subscribe(id, after)` resuming from what the client already has — so closing the tab leaves the work
 running and the transcript complete.
 
-- `Manager.Start(spec, run)` returns immediately; the API answers `202`. `Emitter` gives runners `Status`,
-  `Line`, and `Run`/`RunEnv` through `hostexec`. A slow subscriber is skipped rather than allowed to stall
+- `Manager.Start(spec, run)` returns immediately; the API answers `202`. `StartExclusive(prefix, …)`
+  starts nothing while a job of that kind family runs and returns that job instead, checked and started
+  under one lock. `Emitter` gives runners `Status`, `Line`, `Run`/`RunEnv` through
+  `hostexec.CommandOnHost`, and `RunCmd` for a command the caller built on the side it chose. A slow subscriber is skipped rather than allowed to stall
   the command — the buffer is the record, the channel only the tail.
 - Bounded: 5000 lines a job, 64 KB a line, 50 jobs. `prune` runs on finish as well as on start, or a burst
   ending after the last `Start` sits over the cap until something else happens, which on an idle dashboard

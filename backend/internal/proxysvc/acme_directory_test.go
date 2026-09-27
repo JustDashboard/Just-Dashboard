@@ -1,6 +1,7 @@
 package proxysvc
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -43,8 +44,9 @@ func TestConfiguredACMEDirectoryReachesCaddyAndCertbot(t *testing.T) {
 	if err != nil || strings.Contains(plain, "issuer") {
 		t.Fatalf("default route = %q, %v", plain, err)
 	}
+	useLetsencryptDir(t, t.TempDir())
 	service := &Service{}
-	args, err := service.IssueArgs(IssueRequest{Domains: []string{"app.example.test"}, Email: "ops@example.com", Method: "standalone"})
+	args, err := service.IssueArgs(context.Background(), IssueRequest{Domains: []string{"app.example.test"}, Email: "ops@example.com", Method: "standalone"})
 	if err != nil || strings.Contains(strings.Join(args, " "), "--server") {
 		t.Fatalf("default certbot args = %v, %v", args, err)
 	}
@@ -75,13 +77,16 @@ func TestConfiguredACMEDirectoryReachesCaddyAndCertbot(t *testing.T) {
 	if err != nil || strings.Contains(http, "issuer") {
 		t.Fatalf("plain HTTP route = %q, %v", http, err)
 	}
-	args, err = service.IssueArgs(IssueRequest{Domains: []string{"app.example.test"}, Email: "ops@example.com", Method: "standalone"})
+	args, err = service.IssueArgs(context.Background(), IssueRequest{Domains: []string{"app.example.test"}, Email: "ops@example.com", Method: "standalone"})
 	if err != nil || !strings.Contains(strings.Join(args, " "), "--server https://pebble:14000/dir") {
 		t.Fatalf("certbot args = %v, %v", args, err)
 	}
-	args, err = service.IssueArgs(IssueRequest{Domains: []string{"app.example.test"}, Email: "ops@example.com", Method: "standalone", Staging: true})
-	if err != nil || strings.Contains(strings.Join(args, " "), "--server") || !strings.Contains(strings.Join(args, " "), "--staging") {
-		t.Fatalf("staging certbot args = %v, %v", args, err)
+	// A test run rehearses against the authority the real order will use:
+	// certbot's --dry-run goes to Let's Encrypt's staging endpoint only when
+	// no other server is named.
+	args, err = service.IssueArgs(context.Background(), IssueRequest{Domains: []string{"app.example.test"}, Email: "ops@example.com", Method: "standalone", Staging: true})
+	if joined := strings.Join(args, " "); err != nil || !strings.Contains(joined, "--dry-run --server https://pebble:14000/dir") || strings.Contains(joined, "--staging") {
+		t.Fatalf("test-run certbot args = %v, %v", args, err)
 	}
 
 	t.Setenv("JD_ACME_CA_ROOT", "")

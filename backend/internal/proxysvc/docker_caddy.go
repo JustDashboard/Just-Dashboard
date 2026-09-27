@@ -685,7 +685,7 @@ func (s *Service) ensureDockerCaddyCertificate(ctx context.Context, c *dockerCad
 			if err != nil {
 				continue
 			}
-			imported, err := ImportCertificate("caddy-"+strings.TrimPrefix(routeDigest(names[0]), "sha256:")[:24], certificate, key)
+			imported, err := keepCaddyEvidence("caddy-"+strings.TrimPrefix(routeDigest(names[0]), "sha256:")[:24], certificate, key)
 			if err != nil {
 				return nil, fmt.Errorf("Caddy issued the certificate for %s but it could not be kept as release evidence: %w", names[0], err)
 			}

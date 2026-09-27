@@ -14,6 +14,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
 // The job routes are what turn a half-hour apt run from a request that hangs
@@ -164,6 +165,10 @@ func TestSSHApplyRefusesALockoutBeforeStartingAJob(t *testing.T) {
 // Certificate issuance answers with a job, so the console can attach to the
 // ACME exchange rather than the browser waiting on it.
 func TestCertIssueStartsAJob(t *testing.T) {
+	// No certbot on PATH, whatever this host has: a real one would try the
+	// exchange for as long as it takes.
+	t.Setenv("PATH", t.TempDir())
+	t.Cleanup(proxysvc.UseCertificateDirsForTest(t.TempDir(), t.TempDir()))
 	c, s := newClient(t)
 	w := c.do(http.MethodPost, "/api/v1/certificates/issue",
 		`{"domains":["example.com"],"email":"ops@example.com","method":"webroot","webRoot":"/var/www/html","staging":true}`,
