@@ -104,6 +104,10 @@ build argv explicitly.
   enrichment, so a deployment detail read inspects only its matching running containers. The uptime pass
   also collects limits, health-check presence and restart policy from the inspect it was already making,
   and marks the rows it did not inspect (`Inspected`) so the UI never renders an absence as an answer.
+  It also inspects any container, stopped or not, that the Engine lists by bare `sha256:…` id — which it
+  does once the container's tag has moved on to a newer pull — and reports the name from the container's
+  own config instead, as `Inspect` does. An id named no product, so every page drew such a container as
+  Docker's whale and database discovery (which reads the engine off the name) skipped it.
   Writable-layer sizes ride along on the stats sampler from the **cached** disk walk — a sampler must
   never trigger one — which is what makes "grew 6.4 GB today" a measurement rather than a guess.
 - **`httpx.URLParam`, not `chi.URLParam`.** chi routes on `r.URL.RawPath` whenever a request carried one

@@ -49,8 +49,8 @@ import { eventColor } from "@/components/metrics/metric-chart"
 import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
 import {
   ProductGlyphs,
+  containerProducts,
   cpuProduct,
-  imageProducts,
   platformProduct,
   virtualizationProduct,
 } from "@/components/product-logo"
@@ -516,7 +516,7 @@ function DockerCard() {
     60_000,
   )
   const running = data?.filter((c) => c.state === "running")
-  const products = imageProducts((running ?? []).map((c) => c.image))
+  const products = containerProducts(running ?? [])
   return (
     <ServiceTile
       icon={Box}

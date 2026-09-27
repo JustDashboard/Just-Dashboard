@@ -15,7 +15,7 @@ import { IconAction } from "@/components/icon-action"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
-import { ProductLogo, imageProduct } from "@/components/product-logo"
+import { ProductLogo, containerProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { Detail, DetailList, SearchInput } from "@/components/page"
 import { ChipCount, FilterChip } from "@/components/tabs"
@@ -71,7 +71,7 @@ export function VolumesTab({
     30000,
   )
   const volumes = useMemo(() => data ?? [], [data])
-  // Which image each container runs, so a volume can be drawn as the product
+  // Which product each container is, so a volume can be drawn as the product
   // that keeps its data in it: `pgdata` under a Postgres logo is found before
   // its name is read. Joined here rather than on the server because the
   // volume listing already names its users and nothing else needs the image.
@@ -79,8 +79,8 @@ export function VolumesTab({
     (signal) => get<Container[]>("/docker/containers/", undefined, signal),
     60_000,
   )
-  const imageOf = useMemo(
-    () => new Map((containers.data ?? []).map((c) => [c.id, c.image])),
+  const productOf = useMemo(
+    () => new Map((containers.data ?? []).map((c) => [c.id, containerProduct(c)])),
     [containers.data],
   )
   const visible = useMemo(() => {
@@ -212,7 +212,7 @@ export function VolumesTab({
                 <VolumeCard
                   key={volume.name}
                   volume={volume}
-                  product={volumeProduct(volume, imageOf)}
+                  product={volumeProduct(volume, productOf)}
                   confirm={confirm}
                   onOpen={() => setSelected(volume.name)}
                   onChanged={refresh}
@@ -230,14 +230,13 @@ export function VolumesTab({
 }
 
 /**
- * The product a volume holds the data of: the image of the first container
- * that mounts it, when that image is one with a logo. A volume nothing mounts,
- * or one mounted only by images with no product, is storage and nothing more.
+ * The product a volume holds the data of: that of the first container that
+ * mounts it, when it has a logo. A volume nothing mounts, or one mounted only
+ * by containers with no product, is storage and nothing more.
  */
-function volumeProduct(volume: VolumeDetail, imageOf: Map<string, string>) {
+function volumeProduct(volume: VolumeDetail, productOf: Map<string, string>) {
   for (const user of volume.usedBy) {
-    const image = imageOf.get(user.id)
-    const product = image ? imageProduct(image) : undefined
+    const product = productOf.get(user.id)
     if (product && product !== "docker") return product
   }
   return undefined

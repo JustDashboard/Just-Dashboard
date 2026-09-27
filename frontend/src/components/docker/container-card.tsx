@@ -17,7 +17,7 @@ import {
   statusDetail,
   statusWord,
 } from "@/components/docker/container-cells"
-import { ProductLogo, imageProduct } from "@/components/product-logo"
+import { ProductLogo, containerProduct } from "@/components/product-logo"
 
 /**
  * One container, as a card you open — at every width.
@@ -82,7 +82,7 @@ export function ContainerCard({
       verb={container.name}
       onSelect={onOpen}
       className={cn(pending && "opacity-70")}
-      leading={<ProductLogo id={imageProduct(container.image)} size="sm" />}
+      leading={<ProductLogo id={containerProduct(container)} size="sm" />}
       title={container.name}
       description={<ContainerIdentity container={container} id={wide} />}
       trailing={

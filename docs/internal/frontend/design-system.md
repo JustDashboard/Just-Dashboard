@@ -1041,7 +1041,10 @@ owner's picture on the same reasoning: the face is the account, which a glyph co
 
 The same marks carry into Docker and Databases, because they are the same products. A container,
 an image and a stack's service are drawn as the product their image is (`imageProduct` reads the
-last segment of the reference; anything it cannot name is Docker's whale), a stack as its services'
+last segment of the reference; anything it cannot name is Docker's whale). A container whose reference
+names nothing — a deployment's is a bare image id — is what its image's OCI title or source label says
+(`containerProduct`), since the publisher wrote those and Docker copies them onto the container; the
+reference wins when it names a product, because labels are inherited from a base. A stack is drawn as its services'
 products overlapping (`ProductLogos`, the way a group of avatars overlaps; Compose's own mark when
 none has a logo), a volume as the product of the container that keeps its data there, and a
 database connection as its engine — in the workbench switcher and in every engine picker,

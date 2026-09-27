@@ -54,7 +54,7 @@ import {
   type ConfirmFn,
 } from "@/components/docker/shared"
 import { FileBrowser } from "@/components/files/inline-browser"
-import { ProductLogo, imageProduct } from "@/components/product-logo"
+import { ProductLogo, containerProduct } from "@/components/product-logo"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Detail, DetailList, Metric, MetricStrip, Page, PageContext } from "@/components/page"
 import { Group, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
@@ -222,7 +222,7 @@ function ContainerDetailPanel({
               label="Container"
               value={
                 <span className="inline-flex items-center gap-2">
-                  <ProductLogo id={imageProduct(detail.image)} />
+                  <ProductLogo id={containerProduct(detail)} />
                   {detail.name}
                 </span>
               }
