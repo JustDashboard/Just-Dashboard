@@ -81,7 +81,9 @@ var proxyRoutes = []struct {
 // routeGates counts, for each walked route, the capability checks and the rate
 // budgets in front of it. chi.Walk hands over the middlewares but not their
 // arguments, so they are told apart by the function that made them; the
-// capability names are then proven by a read-only session being refused.
+// capability names are then proven by read-only and limited sessions being
+// refused. The limited role holds file.write and service.control, so a route
+// gated on either of those instead of system.admin lets it through.
 func routeGates(t *testing.T, h http.Handler) map[string][2]int {
 	t.Helper()
 	gates := map[string][2]int{}
@@ -117,7 +119,10 @@ func TestProxyRoutesKeepTheirPaths(t *testing.T) {
 		proxyAdmin:       {1, 1},
 		proxyDestructive: {2, 2},
 	}
-	reader := &client{t: t, h: h, cookie: signInAs(t, s, "reader", auth.RoleReadOnly)}
+	refused := map[auth.Role]*client{
+		auth.RoleReadOnly: {t: t, h: h, cookie: signInAs(t, s, "reader", auth.RoleReadOnly)},
+		auth.RoleLimited:  {t: t, h: h, cookie: signInAs(t, s, "limited", auth.RoleLimited)},
+	}
 	for _, rt := range proxyRoutes {
 		key := rt.method + " " + strings.TrimSuffix(rt.path, "/")
 		got, ok := gates[key]
@@ -132,10 +137,12 @@ func TestProxyRoutesKeepTheirPaths(t *testing.T) {
 		if rt.access == proxyRead {
 			continue
 		}
-		w := reader.do(rt.method, routeParam.ReplaceAllString(rt.path, "1"), "", nil)
-		if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), `"forbidden"`) {
-			t.Errorf("%s %s: a read-only account got %d %s, want 403 forbidden",
-				rt.method, rt.path, w.Code, strings.TrimSpace(w.Body.String()))
+		for role, c := range refused {
+			w := c.do(rt.method, routeParam.ReplaceAllString(rt.path, "1"), "", nil)
+			if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), `"forbidden"`) {
+				t.Errorf("%s %s: a %s account got %d %s, want 403 forbidden",
+					rt.method, rt.path, role, w.Code, strings.TrimSpace(w.Body.String()))
+			}
 		}
 	}
 }
