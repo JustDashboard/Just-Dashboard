@@ -2,7 +2,12 @@ import { Archive, CloudUpload, Layers } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { BackupJob, BackupResource, Container } from "@/lib/types"
 import { LogoGlyph } from "@/components/logo"
-import { ProductLogo, ProductLogos, imageProduct, imageProducts } from "@/components/product-logo"
+import {
+  ProductLogo,
+  ProductLogos,
+  containerProduct,
+  containerProducts,
+} from "@/components/product-logo"
 
 /**
  * What a backup protects and where it goes, drawn as the products they are
@@ -14,9 +19,9 @@ import { ProductLogo, ProductLogos, imageProduct, imageProducts } from "@/compon
  *
  * The coverage report names things rather than images, so volumes and stacks
  * are joined to the container list: a volume's detail says which containers
- * mount it, a stack's containers carry its name. A container running from a
- * bare image id is no product, and neither is the volume it mounts — those
- * keep the kind's glyph on the same tile rather than a guessed logo.
+ * mount it, a stack's containers carry its name. A container whose image
+ * names no product is none, and neither is the volume it mounts — those keep
+ * the kind's glyph on the same tile rather than a guessed logo.
  */
 
 const ENGINE: Record<string, string> = { postgres: "postgresql" }
@@ -40,8 +45,8 @@ export function resourceProducts(
     case "repository":
       return ["git"]
     case "stack": {
-      const images = containers.filter((c) => c.composeStack === resource.name).map((c) => c.image)
-      const named = imageProducts(images).filter((id) => id !== "docker")
+      const members = containers.filter((c) => c.composeStack === resource.name)
+      const named = containerProducts(members).filter((id) => id !== "docker")
       return named.length > 0 ? named : ["docker-compose"]
     }
     case "volume": {
@@ -51,7 +56,7 @@ export function resourceProducts(
         .filter(Boolean)
       const ids = users.flatMap((name) => {
         const container = containers.find((c) => c.name === name)
-        const product = container ? imageProduct(container.image) : undefined
+        const product = container ? containerProduct(container) : undefined
         if (product && product !== "docker") return [product]
         // A database container is often run from a bare image id, and its
         // saved connection is named after it: the engine is the product.

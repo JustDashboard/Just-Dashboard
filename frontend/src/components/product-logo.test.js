@@ -6,6 +6,8 @@ import {
   ProductLogos,
   buildMethodProduct,
   channelProduct,
+  containerProduct,
+  containerProducts,
   frameworkProduct,
   gitProviderProduct,
   hasProductLogo,
@@ -325,6 +327,32 @@ test("the images the build recipes produce are drawn as their language", () => {
   for (const [image, id] of Object.entries(images)) {
     expect(seen(imageProduct(image))).toBe(id)
   }
+})
+
+test("a container its image reference cannot name is what its image's labels say", () => {
+  const id = "sha256:c9051a2ac152cb76dba839db5eea38f3b407bed22ebd38e77aa1160d60485286"
+  const title = (value) => ({ "org.opencontainers.image.title": value })
+  const source = (value) => ({ "org.opencontainers.image.source": value })
+  expect(seen(containerProduct({ image: id, labels: title("n8n") }))).toBe("n8n")
+  expect(seen(containerProduct({ image: id, labels: title("Caddy") }))).toBe("caddy")
+  expect(
+    seen(
+      containerProduct({ image: id, labels: source("https://github.com/filebrowser/filebrowser") }),
+    ),
+  ).toBe("filebrowser")
+  // The reference wins when it names a product: labels are inherited from a
+  // base image, and the reference is the one the operator chose.
+  expect(containerProduct({ image: "postgres:16-alpine", labels: title("bun") })).toBe("postgres")
+  expect(containerProduct({ image: id, labels: title("my-api") })).toBe("docker")
+  expect(containerProduct({ image: "bet-bot-tracker", labels: {} })).toBe("docker")
+  expect(
+    containerProducts([
+      { image: id, labels: title("bun") },
+      { image: "postgres:16-alpine", labels: {} },
+      { image: "oven/bun:1", labels: {} },
+      { image: "epgjauto-app", labels: {} },
+    ]),
+  ).toEqual(["bun", "postgres"])
 })
 
 test("portProduct names the services the attention list names by number", () => {

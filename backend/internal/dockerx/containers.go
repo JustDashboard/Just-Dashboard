@@ -154,6 +154,15 @@ func (c *Client) listContainers(ctx context.Context, options container.ListOptio
 // and inspecting a hundred of them to draw a table would make the page slower
 // for information nobody is reading; `Inspected` marks the difference so the
 // UI never renders an absence as an answer.
+//
+// The exception is a container the listing names by image id. The Engine
+// reports `sha256:…` in place of the reference the container was created from
+// once that tag has moved to a newer pull — a `postgres:16-alpine` database
+// started before the last `docker pull` — and an id says nothing about what
+// the container is: every page drew it as a generic Docker image, and
+// database discovery, which reads the product off the name, skipped it. The
+// name survives in the container's own config, which is what `Inspect`
+// already reports, so the listing takes it from there and the two agree.
 func (c *Client) enrichUptime(ctx context.Context, list []Container) {
 	cli, err := c.api()
 	if err != nil {
@@ -161,11 +170,18 @@ func (c *Client) enrichUptime(ctx context.Context, list []Container) {
 	}
 	for i := range list {
 		list[i].Exposure = DescribePorts(list[i].Ports)
-		if list[i].State != "running" {
+		unnamed := IsImageID(list[i].Image)
+		if list[i].State != "running" && !unnamed {
 			continue
 		}
 		insp, err := cli.ContainerInspect(ctx, list[i].ID)
-		if err != nil || insp.State == nil {
+		if err != nil {
+			continue
+		}
+		if unnamed && insp.Config != nil && Pullable(insp.Config.Image) {
+			list[i].Image = insp.Config.Image
+		}
+		if list[i].State != "running" || insp.State == nil {
 			continue
 		}
 		list[i].Inspected = true

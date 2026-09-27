@@ -9,6 +9,11 @@
       "changes": [
         {
           "kind": "fixed",
+          "text": "A container is drawn as what it runs after its image is pulled again",
+          "detail": "Pulling a newer image under the same tag — postgres:16-alpine, say — left every container started from the old one listed by a bare sha256 id, so the Docker page, the Overview, volumes and backups drew a Postgres database as Docker's whale, and database discovery skipped it. The container list now names it by the image it was created from, as its own page already did. A deployment's container, which is created from an image id and has no name to recover, is drawn as what its image's labels say it is — n8n, Bun, Caddy — where they say."
+        },
+        {
+          "kind": "fixed",
           "text": "Start brings back a deployment whose containers went down on their own",
           "detail": "A deployment is drawn as stopped when every container of its live release is down, which also happens without anyone pressing Stop: a Docker daemon restart that does not bring the containers back, a crash, or a docker stop. Start was offered and then refused with \"deployment runtime is not stopped\", because only a Stop run marked the release stopped, and Restart was hidden. Start now accepts a live release whose containers Docker reports all down, and still refuses one that is running."
         },
