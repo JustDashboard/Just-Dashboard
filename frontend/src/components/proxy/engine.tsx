@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { CheckCircle, Globe, ListOrdered, Play, RefreshClockwise, Stop } from "@/components/icons"
-import { get, post } from "@/lib/api"
+import { errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { duration } from "@/lib/format"
 import type { ProxyValidation, SystemdUnit } from "@/lib/types"
@@ -38,7 +38,10 @@ export function useEngineUnit(status: ProxyStatus | undefined) {
     [name],
     { enabled: Boolean(name) },
   )
-  const unit = poll.data?.unit
+  // A read that failed leaves the last answer in the poll; drawn, it said
+  // "running for 2h" about a unit nobody could read.
+  const current = poll.error ? undefined : poll.data
+  const unit = current?.unit
   // systemd answers `not-found` for a unit it has never seen rather than
   // failing, so a host that runs nginx from a container or a nohup has no
   // unit and gets no controls, instead of controls that cannot work.
@@ -46,7 +49,9 @@ export function useEngineUnit(status: ProxyStatus | undefined) {
   return {
     name,
     unit: known ? unit : undefined,
-    fetchedAt: poll.data?.fetchedAt,
+    fetchedAt: current?.fetchedAt,
+    /** Why the unit could not be read, when its last read failed. */
+    error: poll.error,
     refresh: poll.refresh,
   }
 }
@@ -90,6 +95,8 @@ export function EngineStatus({
 export function EngineIdentity({
   status,
   unit,
+  unitName,
+  unitError,
   fetchedAt,
   certbotVersion,
   renewSource,
@@ -97,6 +104,10 @@ export function EngineIdentity({
 }: {
   status: ProxyStatus
   unit: SystemdUnit | undefined
+  /** The engine's service, named when its state could not be read. */
+  unitName?: string
+  /** Why the service's state could not be read; neither "running" nor "no service unit" is known then. */
+  unitError?: Error
   fetchedAt?: number
   certbotVersion?: string
   renewSource?: string | null
@@ -131,7 +142,11 @@ export function EngineIdentity({
       }
       facts={
         <>
-          {unit ? (
+          {unitError && unitName ? (
+            <span className="font-medium text-warning" title={errorMessage(unitError)}>
+              {`couldn't read ${unitName}`}
+            </span>
+          ) : unit ? (
             <EngineStatus unit={unit} fetchedAt={fetchedAt} />
           ) : engine ? (
             <span>{status.ingressContainer ? "runs as a container" : "no service unit"}</span>

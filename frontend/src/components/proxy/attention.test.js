@@ -406,6 +406,25 @@ describe("sources the overview could not read", () => {
   test("nothing failing adds nothing", () => {
     expect(foldProxyFindings({ ...inputs.healthy, unreadable: [] })).toEqual([])
   })
+
+  // A status that answered once and then failed left the engine's name,
+  // version and certbot drawn from the old answer with nothing to say so.
+  test("a status read that failed says the engine facts are the last read's", () => {
+    const [finding] = foldProxyFindings({
+      unreadable: [{ source: "status", message: "Failed to fetch" }],
+    })
+    expect(finding).toEqual({
+      id: "source.unreadable.status",
+      level: "warning",
+      title: "The proxy status could not be read",
+      detail: "Failed to fetch",
+      advice:
+        "Until it can be read, the engine, its version and certbot above are as the last read found them.",
+      meta: "status",
+      href: "/proxy",
+    })
+    expect(unreadableSource(finding)).toBe("status")
+  })
 })
 
 describe("finding actions", () => {
@@ -445,5 +464,14 @@ describe("finding actions", () => {
     expect(action("served cert", "/proxy/ports")).toBe("Open ports")
     expect(action("stream readiness", "/proxy/streams?stream=db")).toBe("Open streams")
     expect(action("config", "/proxy/config?path=/etc/nginx/nginx.conf")).toBe("Open")
+  })
+
+  // A finding about one certificate opens that one once it links to it,
+  // as a finding about one site does.
+  test("a finding that names its certificate opens the certificate", () => {
+    const action = (href) => findingAction({ id: "x", level: "warning", title: "x", href })
+    expect(action("/proxy/certificates?cert=%2Fetc%2Fssl%2Fa.pem")).toBe("Open certificate")
+    expect(action("/proxy/certificates")).toBe("Open certificates")
+    expect(action("/proxy/certificates?issue=a.example.com")).toBe("Open certificates")
   })
 })

@@ -31,7 +31,13 @@ export type ProxyStatus = {
  */
 export type ProxyContextValue = {
   status: ProxyStatus | undefined
-  /** Why the last read of the status failed; a page with no status says so rather than rendering nothing. */
+  /** When `status` was read, in epoch milliseconds, so a page can say how old it is. */
+  updatedAt: number | undefined
+  /**
+   * Why the last read of the status failed; a page with no status says so
+   * rather than rendering nothing. The status keeps its last answer beside
+   * it, which a page must not present as current.
+   */
   error: Error | undefined
   loading: boolean
   hasNginx: boolean

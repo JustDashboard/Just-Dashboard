@@ -1,9 +1,9 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight, Globe } from "@/components/icons"
+import { ArrowRight, Globe, RefreshClockwise } from "@/components/icons"
 import { ApiError, errorMessage, get } from "@/lib/api"
 import type { Certificate, CertbotState, Listener, StreamStatus, VHost } from "@/lib/types"
 import { usePoll, type PollState } from "@/hooks/use-poll"
@@ -15,9 +15,12 @@ import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { FindingList } from "@/components/finding-list"
 import { EmptyState, ErrorState } from "@/components/state"
+import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useNow } from "@/components/deploy/vocabulary"
 import { useProxy } from "@/components/proxy/proxy-context"
 import { EngineActions, EngineIdentity, useEngineUnit } from "@/components/proxy/engine"
+import { ConfigEditor } from "@/components/proxy/config-editor"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { certificateProduct, siteProduct } from "@/components/proxy/marks"
 import { RoutePath } from "@/components/proxy/route-path"
@@ -29,6 +32,15 @@ import {
   type ProxySource,
   type UnreadableSource,
 } from "@/components/proxy/attention"
+import {
+  oldestReading,
+  reading,
+  stillRefreshing,
+  updatedLabel,
+  type Answer,
+  type Reading,
+} from "@/components/proxy/freshness"
+import { overviewRoutes, routeKind, routeTarget } from "@/components/proxy/overview-routes"
 
 /**
  * What a poll last answered, or nothing when its last read failed. A source
@@ -36,46 +48,97 @@ import {
  * or from none, the page read "all within limits" and "nothing configured"
  * about a host it could not see.
  */
-function readable<T>(poll: PollState<T>): T | undefined {
+function readable<T>(poll: PollState<Reading<T>>): Reading<T> | undefined {
   return poll.error ? undefined : poll.data
 }
 
-/** A tile's hint when its source failed; the reason is in Needs attention. */
-const UNREAD = "couldn't read"
+/**
+ * A tile's hint when its source failed. The reason is in Needs attention and,
+ * for a pointer resting on the tile, in the hint's own tooltip.
+ */
+function Unread({ error }: { error: Error }) {
+  return <span title={errorMessage(error)}>{"couldn't read"}</span>
+}
 
 /**
  * Readings first, then the engine and its commands. Routes own the wide column;
  * findings and expiry share the rail so a list of warnings never pushes every route off screen.
  */
 export default function ProxyOverviewPage() {
-  const { status, error: statusError, refresh: refreshStatus } = useProxy()
+  const { status, updatedAt: statusAt, error: statusError, refresh: refreshStatus } = useProxy()
   const { can } = useAuth()
   const router = useRouter()
   const admin = can("system.admin")
   const engine = useEngineUnit(status)
+  // A reader's route opens its file here, read-only; see routeTarget.
+  const [viewing, setViewing] = useState<VHost | null>(null)
 
-  const vhosts = usePoll<VHost[]>((signal) => get("/proxy/vhosts", undefined, signal), 30_000)
-  const certs = usePoll<Certificate[]>(
-    (signal) => get("/certificates/", undefined, signal),
+  const vhosts = usePoll(
+    (signal) => reading(get<VHost[]>("/proxy/vhosts", undefined, signal)),
+    30_000,
+  )
+  const certs = usePoll(
+    (signal) => reading(get<Certificate[]>("/certificates/", undefined, signal)),
     300_000,
   )
-  const certbot = usePoll<CertbotState>(
-    (signal) => get("/certificates/certbot", undefined, signal),
+  const certbot = usePoll(
+    (signal) => reading(get<CertbotState>("/certificates/certbot", undefined, signal)),
     300_000,
     [],
     { enabled: Boolean(status?.certbot) },
   )
-  const streams = usePoll<StreamStatus>(
-    (signal) => get("/proxy/streams/", undefined, signal),
+  const streams = usePoll(
+    (signal) => reading(get<StreamStatus>("/proxy/streams/", undefined, signal)),
     60_000,
   )
-  const ports = usePoll<Listener[]>((signal) => get("/ports", undefined, signal), 30_000)
+  const ports = usePoll((signal) => reading(get<Listener[]>("/ports", undefined, signal)), 30_000)
 
-  const sites = readable(vhosts)
-  const certificates = readable(certs)
-  const streamStatus = readable(streams)
-  const listeners = readable(ports)
+  // certbot being absent is a fact about the host, not a failure to report.
+  const certbotGone =
+    certbot.error instanceof ApiError && certbot.error.code === "certbot_unavailable"
+  const certbotAsked = Boolean(status?.certbot)
+
+  // Every read the page shows, by source, as Refresh waits on them: a poll
+  // that is switched off is not asked and not waited for.
+  const answers: Record<string, Answer> = {
+    status: { at: statusAt, error: statusError },
+    vhosts: { at: vhosts.data?.at, error: vhosts.error },
+    certs: { at: certs.data?.at, error: certs.error },
+    streams: { at: streams.data?.at, error: streams.error },
+    ports: { at: ports.data?.at, error: ports.error },
+    ...(engine.name ? { engine: { at: engine.fetchedAt, error: engine.error } } : {}),
+    ...(certbotAsked ? { certbot: { at: certbot.data?.at, error: certbot.error } } : {}),
+  }
+  const [asked, setAsked] = useState<Record<string, Answer>>()
+  const refreshing = asked !== undefined && stillRefreshing(asked, answers)
+  // The age the page vouches for is that of its oldest reading; a source
+  // that failed shows none of its reading, so it has no age to count.
+  const updatedAt = oldestReading([
+    statusError ? undefined : statusAt,
+    engine.fetchedAt,
+    readable(vhosts)?.at,
+    readable(certs)?.at,
+    readable(streams)?.at,
+    readable(ports)?.at,
+    certbotAsked && !certbotGone ? readable(certbot)?.at : undefined,
+  ])
+  const refreshEverything = () => {
+    setAsked(answers)
+    refreshStatus()
+    engine.refresh()
+    vhosts.refresh()
+    certs.refresh()
+    if (certbotAsked) certbot.refresh()
+    streams.refresh()
+    ports.refresh()
+  }
+
+  const sites = readable(vhosts)?.value
+  const certificates = readable(certs)?.value
+  const streamStatus = readable(streams)?.value
+  const listeners = readable(ports)?.value
   const hosts = sites ?? []
+  const routes = useMemo(() => overviewRoutes(sites ?? []), [sites])
   const onTls = hosts.filter((v) => v.tls).length
   const disabled = hosts.filter((v) => v.kind === "nginx" && !v.enabled && v.enabledPath).length
   const exposed = useMemo(() => (listeners ?? []).filter((l) => l.exposed), [listeners])
@@ -107,6 +170,10 @@ export default function ProxyOverviewPage() {
           share: cert.daysLeft / horizon,
           signal: wrong || cert.expiring ? 1 : 0,
           tone: wrong ? "danger" : "warning",
+          // Contract with the Certificates page, which opens the certificate
+          // a ?cert= link names; the page itself is the destination either way.
+          title: `Show ${cert.name} in Certificates`,
+          onClick: () => router.push(`/proxy/certificates?cert=${encodeURIComponent(cert.path)}`),
           // Where it came from, because certbot renews itself and an imported
           // file does not — which is what the days left mean differently.
           hint: cert.selfSigned
@@ -116,13 +183,13 @@ export default function ProxyOverviewPage() {
               : cert.source,
         }
       })
-  }, [certificates])
-  // certbot being absent is a fact about the host, not a failure to report.
-  const certbotGone =
-    certbot.error instanceof ApiError && certbot.error.code === "certbot_unavailable"
-  const renewal = readable(certbot)
+  }, [certificates, router])
+  const renewal = readable(certbot)?.value
   const unreadable = useMemo(() => {
     const failed: [ProxySource, Error | undefined][] = [
+      // A status that never answered is the page's own error; one that
+      // answered before goes on drawing the engine from that answer.
+      ["status", status ? statusError : undefined],
       ["sites", vhosts.error],
       ["certificates", certs.error],
       ["renewal", certbotGone ? undefined : certbot.error],
@@ -132,7 +199,16 @@ export default function ProxyOverviewPage() {
     return failed.flatMap(([source, error]): UnreadableSource[] =>
       error ? [{ source, message: errorMessage(error) }] : [],
     )
-  }, [vhosts.error, certs.error, certbot.error, certbotGone, streams.error, ports.error])
+  }, [
+    status,
+    statusError,
+    vhosts.error,
+    certs.error,
+    certbot.error,
+    certbotGone,
+    streams.error,
+    ports.error,
+  ])
   const findings = useMemo(
     () =>
       foldProxyFindings({
@@ -146,6 +222,7 @@ export default function ProxyOverviewPage() {
     [certificates, renewal, certbotGone, sites, streamStatus, listeners, unreadable],
   )
   const retry: Record<ProxySource, () => void> = {
+    status: refreshStatus,
     sites: vhosts.refresh,
     certificates: certs.refresh,
     renewal: certbot.refresh,
@@ -177,7 +254,11 @@ export default function ProxyOverviewPage() {
 
   return (
     <Page className="animate-rise">
-      <PageContext title="Proxy & TLS" />
+      <PageContext
+        title="Proxy & TLS"
+        className="justify-end"
+        actions={<Freshness at={updatedAt} refreshing={refreshing} onRefresh={refreshEverything} />}
+      />
 
       <StatGrid columns={4} dense>
         <StatLink href="/proxy/sites" label="Sites">
@@ -186,13 +267,15 @@ export default function ProxyOverviewPage() {
             label="Sites"
             value={<Figure settled={!vhosts.loading}>{sites ? hosts.length : undefined}</Figure>}
             hint={
-              vhosts.error
-                ? UNREAD
-                : sites
-                  ? disabled > 0
-                    ? `${onTls} on TLS · ${disabled} disabled`
-                    : `${onTls} on TLS`
-                  : undefined
+              vhosts.error ? (
+                <Unread error={vhosts.error} />
+              ) : sites ? (
+                disabled > 0 ? (
+                  `${onTls} on TLS · ${disabled} disabled`
+                ) : (
+                  `${onTls} on TLS`
+                )
+              ) : undefined
             }
             tone={vhosts.error || disabled > 0 ? "warning" : "default"}
           />
@@ -207,15 +290,17 @@ export default function ProxyOverviewPage() {
               </Figure>
             }
             hint={
-              certs.error
-                ? UNREAD
-                : certificates
-                  ? badCerts.length > 0
-                    ? `${badCerts.length} need attention`
-                    : certificates.length > 0
-                      ? "all valid"
-                      : "none issued"
-                  : undefined
+              certs.error ? (
+                <Unread error={certs.error} />
+              ) : certificates ? (
+                badCerts.length > 0 ? (
+                  `${badCerts.length} need attention`
+                ) : certificates.length > 0 ? (
+                  "all valid"
+                ) : (
+                  "none issued"
+                )
+              ) : undefined
             }
             tone={
               badCerts.some((c) => c.expired || c.error)
@@ -236,15 +321,17 @@ export default function ProxyOverviewPage() {
               </Figure>
             }
             hint={
-              streams.error
-                ? UNREAD
-                : streamStatus
-                  ? streamStatus.streams.length === 0
-                    ? "nothing forwarded"
-                    : streamStatus.included
-                      ? "read by nginx"
-                      : "not read by nginx"
-                  : undefined
+              streams.error ? (
+                <Unread error={streams.error} />
+              ) : streamStatus ? (
+                streamStatus.streams.length === 0 ? (
+                  "nothing forwarded"
+                ) : streamStatus.included ? (
+                  "read by nginx"
+                ) : (
+                  "not read by nginx"
+                )
+              ) : undefined
             }
             tone={
               streams.error ||
@@ -262,13 +349,15 @@ export default function ProxyOverviewPage() {
               <Figure settled={!ports.loading}>{listeners ? exposed.length : undefined}</Figure>
             }
             hint={
-              ports.error
-                ? UNREAD
-                : listeners
-                  ? exposed.length
-                    ? `of ${listeners.length} listening, off the machine`
-                    : "everything on loopback"
-                  : undefined
+              ports.error ? (
+                <Unread error={ports.error} />
+              ) : listeners ? (
+                exposed.length ? (
+                  `of ${listeners.length} listening, off the machine`
+                ) : (
+                  "everything on loopback"
+                )
+              ) : undefined
             }
             tone={ports.error ? "warning" : "default"}
           />
@@ -278,6 +367,8 @@ export default function ProxyOverviewPage() {
       <EngineIdentity
         status={status}
         unit={engine.unit}
+        unitName={engine.name}
+        unitError={engine.error}
         fetchedAt={engine.fetchedAt}
         certbotVersion={renewal?.version}
         renewSource={renewal ? (renewal.renewSource ?? null) : undefined}
@@ -301,12 +392,20 @@ export default function ProxyOverviewPage() {
             title="Routes"
             actions={
               hosts.length > 0 && (
-                <Link
-                  href="/proxy/sites"
-                  className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
-                >
-                  All sites <ArrowRight className="size-3" />
-                </Link>
+                <div className="flex items-center gap-3">
+                  {/* The eight that need the reader most, and how many the Sites page has. */}
+                  {routes.total > routes.shown.length && (
+                    <span className="numeric text-hint text-muted-foreground">
+                      Showing {routes.shown.length} of {routes.total}
+                    </span>
+                  )}
+                  <Link
+                    href="/proxy/sites"
+                    className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
+                  >
+                    All sites <ArrowRight className="size-3" />
+                  </Link>
+                </div>
               )
             }
           />
@@ -335,27 +434,32 @@ export default function ProxyOverviewPage() {
               // on a reading page as much as on a flow one. It read as a listing
               // while it was the same row the tables below it use for values.
               <ChoiceList aria-label="Sites" className="animate-rise">
-                {hosts.slice(0, 8).map((vhost) => (
-                  <ChoiceRow
-                    key={`${vhost.kind}:${vhost.name}`}
-                    href={`/proxy/sites?site=${encodeURIComponent(vhost.name)}`}
-                    verb={`Open ${vhost.name}`}
-                    className="gap-4 p-4"
-                    leading={<ProductLogo id={siteProduct(vhost)} size="md" />}
-                    title={<span className="text-title">{vhost.name}</span>}
-                    description={vhost.kind === "nginx" ? "nginx site" : "Caddy route"}
-                    trailing={<ServingStatus vhost={vhost} />}
-                  >
-                    <RoutePath
-                      source={vhost.serverNames.join(", ") || "Default host"}
-                      destination={vhost.upstreams.join(", ") || "Served by configuration"}
-                    />
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-hint text-muted-foreground">
-                      <SiteTLS vhost={vhost} />
-                      <span className="font-mono">{vhost.listen.join(" · ")}</span>
-                    </div>
-                  </ChoiceRow>
-                ))}
+                {routes.shown.map((vhost) => {
+                  const target = routeTarget(vhost, admin)
+                  return (
+                    <ChoiceRow
+                      key={`${vhost.kind}:${vhost.name}:${vhost.path}`}
+                      href={target.open === "page" ? target.href : undefined}
+                      onSelect={target.open === "file" ? () => setViewing(vhost) : undefined}
+                      disabled={target.open === "none"}
+                      verb={target.verb}
+                      className="gap-4 p-4"
+                      leading={<ProductLogo id={siteProduct(vhost)} size="md" />}
+                      title={<span className="text-title">{vhost.name}</span>}
+                      description={routeKind(vhost)}
+                      trailing={<ServingStatus vhost={vhost} />}
+                    >
+                      <RoutePath
+                        source={vhost.serverNames.join(", ") || "Default host"}
+                        destination={vhost.upstreams.join(", ") || "Served by configuration"}
+                      />
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-hint text-muted-foreground">
+                        <SiteTLS vhost={vhost} />
+                        <span className="font-mono">{vhost.listen.join(" · ")}</span>
+                      </div>
+                    </ChoiceRow>
+                  )
+                })}
               </ChoiceList>
             )}
           </PanelBody>
@@ -435,7 +539,45 @@ export default function ProxyOverviewPage() {
           </Panel>
         </div>
       </div>
+
+      <ConfigEditor
+        open={viewing !== null}
+        onOpenChange={(open) => !open && setViewing(null)}
+        path={viewing?.path ?? ""}
+        kind={viewing?.kind ?? "nginx"}
+        title={viewing?.name ?? "Configuration"}
+        readOnly
+      />
     </Page>
+  )
+}
+
+/**
+ * How old the page is, and the one press that reads every source again. The
+ * age is the oldest reading's, so a five-minute-old certificate list is not
+ * vouched for by a sites list read a moment ago; while a refresh is out it
+ * says so instead, until the last source answers.
+ */
+function Freshness({
+  at,
+  refreshing,
+  onRefresh,
+}: {
+  at: number | undefined
+  refreshing: boolean
+  onRefresh: () => void
+}) {
+  const now = useNow(1000, at !== undefined && !refreshing)
+  return (
+    <>
+      <span className="numeric text-hint text-muted-foreground">
+        {refreshing ? "Refreshing…" : at !== undefined && updatedLabel(at, now)}
+      </span>
+      <Button size="xs" variant="ghost" onClick={onRefresh} pending={refreshing}>
+        <RefreshClockwise />
+        Refresh
+      </Button>
+    </>
   )
 }
 

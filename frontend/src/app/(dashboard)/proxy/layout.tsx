@@ -3,6 +3,7 @@
 import { get } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
 import { ProxyProvider, type ProxyStatus } from "@/components/proxy/proxy-context"
+import { reading } from "@/components/proxy/freshness"
 
 /**
  * The proxy is six pages — the sites, the certificates, what a visitor
@@ -14,15 +15,19 @@ import { ProxyProvider, type ProxyStatus } from "@/components/proxy/proxy-contex
  * certificates and ports are real questions with or without a proxy installed.
  */
 export default function ProxyLayout({ children }: { children: React.ReactNode }) {
-  const status = usePoll((signal) => get<ProxyStatus>("/proxy/status", undefined, signal), 60_000)
+  const status = usePoll(
+    (signal) => reading(get<ProxyStatus>("/proxy/status", undefined, signal)),
+    60_000,
+  )
 
   return (
     <ProxyProvider
       value={{
-        status: status.data,
+        status: status.data?.value,
+        updatedAt: status.data?.at,
         error: status.error,
         loading: status.loading,
-        hasNginx: status.data?.nginx ?? false,
+        hasNginx: status.data?.value.nginx ?? false,
         refresh: status.refresh,
       }}
     >

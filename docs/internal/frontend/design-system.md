@@ -1128,7 +1128,13 @@ register and begin with four `StatTile` readings, two per row on phones. On the 
 identity and service commands sit below them, with the routes in the main column and attention and
 expiry in a narrower column. A source the overview could not read is never drawn as an empty or
 healthy one: its tile's hint reads "couldn't read", its panel shows the `ErrorState`, and attention
-carries it as a finding whose button is Try again, so the all-clear line cannot appear over it. A site's and a stream's card separates identity, route and named
+carries it as a finding whose button is Try again, so the all-clear line cannot appear over it. The
+overview's context row is its age and one ghost Refresh: "Updated 14s ago" is the oldest reading on
+the page, and while a refresh is out the line reads "Refreshing…" until every source has answered.
+Its routes are ordered worst first like the Sites cards, eight with "Showing 8 of N". An
+administrator's route opens the site on Sites and a Docker ingress route its live TLS report; a
+reader's route opens its file read-only in place rather than the site form, and a route with
+nothing a role may open is a disabled row. A site's and a stream's card separates identity, route and named
 actions into three bands: `components/proxy/route-path.tsx` gives the source and destination their
 own labelled columns (stacked on phones), so a hostname and its upstream do not compete for the same
 truncated line. Sites and streams use a two-column grid on wide screens and a single column on
@@ -1150,7 +1156,7 @@ table of readings, with fixed endpoint, application, reach and action columns an
 layout. Tables retain their scrolling boundary; forms and sections remain plain.
 `tests/browser/proxy-ui.spec.ts` covers all six populated pages at 390, 1280 and 1720, detail
 navigation, site-kind choices and read-only access; `proxy-engine-overview.spec.ts` covers the
-overview's failure states and the engine controls.
+overview's failure states, its freshness and Refresh, its routes by role and the engine controls.
 
 **What a host has installed, who is on it and what they changed are products too.** Packages
 draws a package as the software its name says it is (`packageProduct`, `components/packages/marks.tsx`:

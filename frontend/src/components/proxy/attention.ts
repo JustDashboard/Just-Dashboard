@@ -54,14 +54,15 @@ const PLACE: Record<string, string> = {
  * The words on a finding's button, from where it leads. It was `Open ${meta}`,
  * which read "Open renewal", and then a table of the metas each area used,
  * which left any meta added later with a wrench and no name. The href is the
- * one thing every finding has: a finding about one site opens that site, the
- * rest open the page that lists what they are about, and a page not named
- * here is still a button that says it opens something.
+ * one thing every finding has: a finding about one site or one certificate
+ * opens that one, the rest open the page that lists what they are about, and
+ * a page not named here is still a button that says it opens something.
  */
 export function findingAction(finding: ProxyFinding): string {
   // Any origin will do: only the path and the query are read.
   const { pathname, searchParams } = new URL(finding.href, "http://proxy.invalid")
   if (pathname === "/proxy/sites" && searchParams.has("site")) return "Open site"
+  if (pathname === "/proxy/certificates" && searchParams.has("cert")) return "Open certificate"
   const place = PLACE[pathname]
   return place ? `Open ${place}` : "Open"
 }
