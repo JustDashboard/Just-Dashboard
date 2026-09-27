@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -85,6 +86,11 @@ type StreamEntry struct {
 	Unsupported []string `json:"unsupported"`
 	// Error is why the file could not be read.
 	Error string `json:"error,omitempty"`
+	// Link is where the file points when it is a symbolic link, as an
+	// available/enabled layout links its streams in. The form does not save
+	// over one — it would put a file of its own in the link's place — and a
+	// delete removes the link, never what it points to.
+	Link string `json:"link,omitempty"`
 }
 
 // StreamStatus reports whether nginx is set up to read these at all.
@@ -703,24 +709,9 @@ func (s *Service) Streams(ctx context.Context) (*StreamStatus, error) {
 		return nil, err
 	}
 	for _, e := range entries {
-		if !streamFileName(e) {
-			continue
+		if streamFileName(e) {
+			status.Streams = append(status.Streams, listStream(dir, e))
 		}
-		path := filepath.Join(dir, e.Name())
-		b, err := os.ReadFile(path)
-		if err != nil {
-			status.Streams = append(status.Streams, StreamEntry{
-				StreamSpec:  StreamSpec{Name: strings.TrimSuffix(e.Name(), ".conf"), Protocol: "tcp", AllowFrom: []string{}},
-				Path:        path,
-				Unsupported: []string{},
-				Error:       err.Error(),
-			})
-			continue
-		}
-		p := parseStreamFile(e.Name(), string(b))
-		status.Streams = append(status.Streams, StreamEntry{
-			StreamSpec: p.spec, Path: path, Managed: p.managed, Open: p.open, Unsupported: p.unsupported,
-		})
 	}
 	sort.SliceStable(status.Streams, func(i, j int) bool {
 		return status.Streams[i].Listen < status.Streams[j].Listen
@@ -728,24 +719,71 @@ func (s *Service) Streams(ctx context.Context) (*StreamStatus, error) {
 	return status, nil
 }
 
+// streamLinked is what the form cannot keep about a stream that is a symbolic
+// link: a save would put a file of its own in the link's place.
+const streamLinked = "a symbolic link"
+
+// listStream reads one file of the stream directory for the listing. A
+// symbolic link is read through, as nginx reads it, and named as one; a link
+// to nothing says so rather than calling its own name missing.
+func listStream(dir string, e os.DirEntry) StreamEntry {
+	path := filepath.Join(dir, e.Name())
+	linked := e.Type()&os.ModeSymlink != 0
+	link := ""
+	if linked {
+		link, _ = os.Readlink(path)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		reason := err.Error()
+		if linked && errors.Is(err, fs.ErrNotExist) {
+			reason = fmt.Sprintf("it links to %s, which does not exist", link)
+		}
+		entry := StreamEntry{
+			StreamSpec:  StreamSpec{Name: strings.TrimSuffix(e.Name(), ".conf"), Protocol: "tcp", AllowFrom: []string{}},
+			Path:        path,
+			Unsupported: []string{},
+			Error:       reason,
+			Link:        link,
+		}
+		if linked {
+			entry.Unsupported = append(entry.Unsupported, streamLinked)
+		}
+		return entry
+	}
+	p := parseStreamFile(e.Name(), string(b))
+	if linked {
+		p.cannot(streamLinked)
+	}
+	return StreamEntry{
+		StreamSpec: p.spec, Path: path, Managed: p.managed, Open: p.open, Unsupported: p.unsupported, Link: link,
+	}
+}
+
 // streamFile is the file of an existing stream, found by the name the
 // listing gave it. The listing shows any *.conf, so this takes any plain file
 // name rather than only the names the form may create — a hand-made
 // Upper.conf could otherwise be listed and never edited, renamed or deleted.
-func (s *Service) streamFile(name string) (string, error) {
+//
+// The file may be a symbolic link, which linked reports: the listing shows
+// one, and a link to nothing is the one file that breaks `nginx -t` for the
+// whole host, so it has to be deletable from here. Anything else that is not
+// a regular file is refused.
+func (s *Service) streamFile(name string) (path string, linked bool, err error) {
 	if name == "" || name == "." || name == ".." || strings.HasPrefix(name, ".") ||
 		strings.ContainsAny(name, "/\\\x00") {
-		return "", fmt.Errorf("invalid stream name")
+		return "", false, fmt.Errorf("invalid stream name")
 	}
-	path := filepath.Join(s.streamDir(), name+".conf")
+	path = filepath.Join(s.streamDir(), name+".conf")
 	st, err := os.Lstat(path)
 	if err != nil {
-		return "", fmt.Errorf("%w: %s", ErrStreamNotFound, name)
+		return "", false, fmt.Errorf("%w: %s", ErrStreamNotFound, name)
 	}
-	if !st.Mode().IsRegular() {
-		return "", fmt.Errorf("%s is not a regular file — change it by hand", path)
+	linked = st.Mode()&os.ModeSymlink != 0
+	if !linked && !st.Mode().IsRegular() {
+		return "", false, fmt.Errorf("%s is not a regular file — change it by hand", path)
 	}
-	return path, nil
+	return path, linked, nil
 }
 
 // ApplyStream writes a stream, tests the whole configuration and reloads.
@@ -785,8 +823,12 @@ func (s *Service) ApplyStream(ctx context.Context, spec *StreamSpec, previous st
 	var oldBinds []bind
 	oldManaged := true
 	if previous != "" {
-		if oldPath, err = s.streamFile(previous); err != nil {
+		var linked bool
+		if oldPath, linked, err = s.streamFile(previous); err != nil {
 			return nil, err
+		}
+		if linked {
+			return nil, &HandwrittenStreamError{Name: previous, Unsupported: []string{streamLinked}}
 		}
 		b, err := os.ReadFile(oldPath)
 		if err != nil {
@@ -897,6 +939,22 @@ func streamDanger(port int) (string, bool) {
 	return "", false
 }
 
+// StreamDeletion is what a delete did with the file.
+type StreamDeletion struct {
+	// Read is whether nginx reads the stream directory, so whether stopping
+	// the stream needs a reload.
+	Read bool
+	// Backup is the .bak the content was kept in.
+	Backup string
+	// Link is where a removed symbolic link pointed. The link goes and what
+	// it points to stays, so nothing needs keeping.
+	Link string
+	// Unread is why a file's content could not be kept. The file is removed
+	// all the same: refusing for want of a backup left the one file that may
+	// be breaking nginx where it was.
+	Unread string
+}
+
 // DeleteStream removes one, keeping the previous content as .bak, and
 // reports whether nginx was reading it — a stream it never read needs no
 // reload to stop.
@@ -904,24 +962,32 @@ func streamDanger(port int) (string, bool) {
 // nginx includes stream.d/*.conf, so the backup is inert — and a forwarding
 // rule somebody spent ten minutes getting right is worth a file left behind,
 // since the delete itself is the only thing this dashboard does to a stream
-// that cannot be undone from the form.
-func (s *Service) DeleteStream(ctx context.Context, name string) (bool, error) {
+// that cannot be undone from the form. A symbolic link is removed as a link,
+// and a file that cannot be read is removed without a backup; both are
+// recorded without content.
+func (s *Service) DeleteStream(ctx context.Context, name string) (*StreamDeletion, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	path, err := s.streamFile(name)
+	path, linked, err := s.streamFile(name)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return false, err
-	}
-	if err := os.WriteFile(path+".bak", b, 0o644); err != nil {
-		return false, err
+	out := &StreamDeletion{}
+	var before []byte
+	if linked {
+		out.Link, _ = os.Readlink(path)
+	} else if b, err := os.ReadFile(path); err != nil {
+		out.Unread = err.Error()
+	} else {
+		if err := os.WriteFile(path+".bak", b, 0o644); err != nil {
+			return nil, err
+		}
+		out.Backup, before = path+".bak", b
 	}
 	if err := os.Remove(path); err != nil {
-		return false, err
+		return nil, err
 	}
-	s.recordChange(ctx, Change{Path: path, Action: ChangeDelete, Before: b, BeforeExisted: true})
-	return streamIncludeFound(s.nginxDir, s.streamDir()), nil
+	s.recordChange(ctx, Change{Path: path, Action: ChangeDelete, Before: before, BeforeExisted: true})
+	out.Read = streamIncludeFound(s.nginxDir, s.streamDir())
+	return out, nil
 }

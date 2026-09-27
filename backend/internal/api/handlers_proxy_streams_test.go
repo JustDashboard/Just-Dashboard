@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -197,5 +198,61 @@ func TestStreamListCarriesTheIncludeAndEachStreamsAccess(t *testing.T) {
 	}
 	if !status.Included || len(status.Streams) != 1 || !status.Streams[0].Open {
 		t.Fatalf("status = %+v", status)
+	}
+}
+
+// The listing shows any *.conf, and the page sends the name through
+// encodeURIComponent: chi handed a%2Bb over as sent, so a+b.conf was "no such
+// stream" and stayed. A link to nothing and a file that cannot be read are
+// deleted too, and the answer says why no copy was kept.
+func TestStreamDeleteTakesEveryFileTheListingShows(t *testing.T) {
+	c, dir := streamServer(t, false)
+	streams := filepath.Join(dir, "stream.d")
+	type answer struct {
+		Name, Backup, Link, Unread string
+	}
+	remove := func(name string) answer {
+		t.Helper()
+		// QueryEscape encodes these as encodeURIComponent does.
+		w := c.do(http.MethodDelete, "/api/v1/proxy/streams/"+url.QueryEscape(name), "", nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("delete %q: %d %s", name, w.Code, w.Body.String())
+		}
+		var res answer
+		if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Lstat(filepath.Join(streams, name+".conf")); !os.IsNotExist(err) {
+			t.Fatalf("%s.conf is still there", name)
+		}
+		return res
+	}
+
+	for _, name := range []string{"a+b", "a@b", "a:b=c&d$e,f;g"} {
+		path := filepath.Join(streams, name+".conf")
+		if err := os.WriteFile(path, []byte("server { listen 47913; proxy_pass 10.0.0.5:5432; }\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if res := remove(name); res.Name != name || res.Backup != path+".bak" {
+			t.Fatalf("delete %q answered %+v", name, res)
+		}
+	}
+
+	if err := os.Symlink("../streams-available/gone.conf", filepath.Join(streams, "dangling.conf")); err != nil {
+		t.Fatal(err)
+	}
+	if res := remove("dangling"); res.Link != "../streams-available/gone.conf" || res.Backup != "" {
+		t.Fatalf("dangling link answered %+v", res)
+	}
+
+	if os.Getuid() == 0 {
+		t.Skip("root reads a file whatever its mode")
+	}
+	locked := filepath.Join(streams, "locked.conf")
+	if err := os.WriteFile(locked, []byte("server { listen 47914; proxy_pass 10.0.0.5:5432; }\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if res := remove("locked"); !strings.Contains(res.Unread, "permission denied") || res.Backup != "" {
+		t.Fatalf("unreadable file answered %+v", res)
 	}
 }

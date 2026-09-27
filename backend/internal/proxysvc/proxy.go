@@ -219,7 +219,7 @@ func (s *Service) nginxIncluded(full string) (included, known bool) {
 	case filepath.Join(s.nginxDir, "conf.d"):
 		return strings.HasSuffix(name, ".conf"), true
 	case s.streamDir():
-		return strings.HasSuffix(name, ".conf") && streamIncludeFound(s.nginxDir, s.streamDir()), true
+		return strings.HasSuffix(name, ".conf") && streamDirRead(s.nginxDir, s.streamDir()), true
 	}
 	return false, false
 }

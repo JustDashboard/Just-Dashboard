@@ -71,9 +71,32 @@ export function moduleRemedy(module: StreamModule): string {
   return ""
 }
 
-/** Where a stream listens, the way it would be dialled. */
+/**
+ * Why nginx's test refuses every stream file here, so no save can pass: a
+ * stream block with no module to read it, or the directory included where a
+ * stream is not allowed — inside http, nginx refuses proxy_pass. Null when a
+ * save can pass.
+ */
+export function saveBlocked(status: StreamStatus): "module" | "misplaced" | null {
+  if (moduleMissing(status.module) && status.included) return "module"
+  if (status.includedIn) return "misplaced"
+  return null
+}
+
+/**
+ * The family a stream takes every address of, when it listens that way:
+ * `listen 5432;` is 0.0.0.0, every IPv4 address and no IPv6 one. Written as
+ * "0.0.0.0:5432" or "only on 0.0.0.0", that read as a restriction.
+ */
+export function listenFamily(address?: string): "IPv4" | "IPv6" | null {
+  if (address === "0.0.0.0") return "IPv4"
+  if (address === "::") return "IPv6"
+  return null
+}
+
+/** Where a stream listens, the way it would be dialled: the port alone when it takes every address. */
 export function listenLabel(stream: Pick<StreamSpec, "address" | "listen">): string {
-  if (!stream.address) return String(stream.listen)
+  if (!stream.address || listenFamily(stream.address)) return String(stream.listen)
   return stream.address.includes(":")
     ? `[${stream.address}]:${stream.listen}`
     : `${stream.address}:${stream.listen}`

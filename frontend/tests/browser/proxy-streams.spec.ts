@@ -84,18 +84,40 @@ test("a stream block nginx cannot read is an outage, said as one", async ({ page
   await page.goto("/proxy/streams")
   await expect(page.getByText("nginx.conf has a stream block this nginx cannot read")).toBeVisible()
   await expect(page.getByText(/every reload is refused/)).toBeVisible()
-  // Nothing is live, so nothing offers to reload for it.
-  await expect(page.getByRole("button", { name: "Prepare a stream" })).toBeVisible()
   await expect(page.locator("[data-slot='choice-row']").getByText("not live")).toBeVisible()
+  // nginx's test fails on the stream block for every file, so no save can
+  // pass: nothing offers to make one.
+  await expect(page.getByRole("button", { name: "Prepare a stream" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "New stream" })).toHaveCount(0)
+  await page.getByRole("button", { name: "Edit bastion" }).click()
+  const sheet = page.getByRole("dialog")
+  await expect(sheet.getByText("No stream can pass nginx’s test yet")).toBeVisible()
+  await expect(sheet.getByText("nginx’s test fails until it has the stream module.")).toBeVisible()
+  await expect(sheet.getByLabel("Listen on")).toBeDisabled()
+  await expect(sheet.getByRole("button", { name: "Save for later" })).toBeDisabled()
+  await expect(sheet.getByText("This will not forward anything yet")).toHaveCount(0)
 })
 
-test("an include inside http is named, not taken for a working one", async ({ page }) => {
+test("an include inside http is named, and nothing offers a save its test refuses", async ({
+  page,
+}) => {
   await mockProxy(page, { included: false })
   await listing(page, { included: false, includedIn: "http", streams: [bastion] })
   await page.goto("/proxy/streams")
   await expect(
     page.getByText(/includes .*inside http, where nginx does not read the files/),
   ).toBeVisible()
+  await expect(page.getByRole("button", { name: "Prepare a stream" })).toHaveCount(0)
+
+  await page.getByRole("button", { name: "Edit bastion" }).click()
+  const sheet = page.getByRole("dialog")
+  // nginx reads the directory, as http: it is not "not read yet".
+  await expect(
+    sheet.getByText("nginx reads this directory inside http, where its test refuses a stream."),
+  ).toBeVisible()
+  await expect(sheet.getByText(/does not read this directory yet/)).toHaveCount(0)
+  await expect(sheet.getByText(/includes this directory inside http/)).toBeVisible()
+  await expect(sheet.getByRole("button", { name: "Save for later" })).toBeDisabled()
 })
 
 test("save for later does not reload, and says the file was not tested", async ({ page }) => {
@@ -332,7 +354,23 @@ test("a preview refusal reads as a sentence", async ({ page }) => {
   await expect(sheet.getByText(/ApiError/)).toHaveCount(0)
 })
 
-test("an unreadable stream file is shown as one, and can still be deleted", async ({ page }) => {
+/** Answers the DELETE of one stream and records the path it was sent to. */
+async function onDelete(page: Page, answer: Record<string, unknown>) {
+  const paths: string[] = []
+  await page.route(
+    (url) => url.pathname.startsWith("/api/v1/proxy/streams/"),
+    (route) => {
+      if (route.request().method() !== "DELETE") return route.fallback()
+      paths.push(new URL(route.request().url()).pathname)
+      return json(route, answer)
+    },
+  )
+  return paths
+}
+
+test("an unreadable stream file is deleted without a port or a backup promised", async ({
+  page,
+}) => {
   await mockProxy(page, { included: true })
   await listing(page, {
     streams: [
@@ -344,13 +382,146 @@ test("an unreadable stream file is shown as one, and can still be deleted", asyn
       },
     ],
   })
+  const paths = await onDelete(page, {
+    name: "secret",
+    reloaded: true,
+    unread: "open /etc/nginx/streams/secret.conf: permission denied",
+  })
   await page.goto("/proxy/streams")
   const card = page.locator("[data-slot='choice-row']").first()
   await expect(card.getByText("unreadable")).toBeVisible()
   await expect(card.getByText(/permission denied/)).toBeVisible()
   await expect(card.getByRole("button", { name: "Edit", exact: true })).toBeDisabled()
   await page.getByRole("button", { name: "More actions for secret" }).click()
-  await expect(page.getByRole("menuitem", { name: "Delete" })).toBeEnabled()
+  await page.getByRole("menuitem", { name: "Delete" }).click()
+
+  const dialog = page.getByRole("dialog")
+  await expect(dialog).toContainText("nginx reloads without it.")
+  await expect(dialog).toContainText("It could not be read, so no copy of it is kept.")
+  await expect(dialog).not.toContainText("Port 0")
+  await expect(dialog).not.toContainText(".bak")
+  await dialog.getByRole("button", { name: "Delete and reload" }).click()
+  await expect(page.getByText("Delete secret completed")).toBeVisible()
+  await expect(page.getByText("No copy was kept")).toHaveCount(0)
+  expect(paths).toEqual(["/api/v1/proxy/streams/secret"])
+})
+
+test("a link to nothing is deleted as a link, by its encoded name", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await listing(page, {
+    streams: [
+      {
+        ...streamEntry({ name: "a+b", listen: 0, protocol: "tcp", upstream: "" }),
+        open: false,
+        managed: false,
+        link: "../streams-available/gone.conf",
+        unsupported: ["a symbolic link"],
+        error: "it links to ../streams-available/gone.conf, which does not exist",
+      },
+    ],
+  })
+  const paths = await onDelete(page, {
+    name: "a+b",
+    reloaded: true,
+    link: "../streams-available/gone.conf",
+  })
+  await page.goto("/proxy/streams")
+  const card = page.locator("[data-slot='choice-row']").first()
+  await expect(card.getByText(/which does not exist/)).toBeVisible()
+  await page.getByRole("button", { name: "More actions for a+b" }).click()
+  await page.getByRole("menuitem", { name: "Delete" }).click()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog).toContainText(
+    "This removes the link only, not ../streams-available/gone.conf.",
+  )
+  await expect(dialog).not.toContainText(".bak")
+  await dialog.getByRole("button", { name: "Delete and reload" }).click()
+  await expect(page.getByText("Delete a+b completed")).toBeVisible()
+  // The server unescapes it; sent raw, + would be read as itself or a space.
+  expect(paths).toEqual(["/api/v1/proxy/streams/a%2Bb"])
+})
+
+test("a readable file whose delete could not keep a copy says so", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await listing(page, { streams: [bastion] })
+  await onDelete(page, {
+    name: "bastion",
+    reloaded: true,
+    unread: "open /etc/nginx/streams/bastion.conf: permission denied",
+  })
+  await page.goto("/proxy/streams")
+  await page.getByRole("button", { name: "More actions for bastion" }).click()
+  await page.getByRole("menuitem", { name: "Delete" }).click()
+  await expect(page.getByRole("dialog")).toContainText("The file is kept as bastion.conf.bak.")
+  await page.getByRole("dialog").getByRole("button", { name: "Delete and reload" }).click()
+  await expect(page.getByText("No copy was kept")).toBeVisible()
+  await expect(page.getByText(/bastion.conf could not be read when it was deleted/)).toBeVisible()
+})
+
+test("a linked stream opens read-only, and its delete keeps what it points to", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const linked = {
+    ...streamEntry({
+      name: "linked",
+      listen: 20003,
+      protocol: "tcp",
+      upstream: "10.0.0.5:6000",
+      allowFrom: ["10.0.0.0/8"],
+    }),
+    managed: false,
+    link: "../streams-available/linked.conf",
+    unsupported: ["a symbolic link"],
+  }
+  await listing(page, { streams: [linked] })
+  await page.goto("/proxy/streams")
+  const card = page.locator("[data-slot='choice-row']").first()
+  await expect(card).toContainText("a symbolic link")
+
+  await page.getByRole("button", { name: "Edit linked" }).click()
+  const sheet = page.getByRole("dialog")
+  await expect(sheet.getByText(/uses a symbolic link, which this form cannot keep/)).toBeVisible()
+  await expect(sheet.getByText(/It links to \.\.\/streams-available\/linked\.conf\./)).toBeVisible()
+  await expect(sheet.getByRole("button", { name: "Save and reload" })).toBeDisabled()
+  await expect(sheet.getByRole("button", { name: "Edit the file" })).toBeVisible()
+  await page.keyboard.press("Escape")
+
+  await page.getByRole("button", { name: "More actions for linked" }).click()
+  await page.getByRole("menuitem", { name: "Delete" }).click()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog).toContainText("Port 20003 stops being forwarded as soon as nginx reloads.")
+  await expect(dialog).toContainText(
+    "This removes the link only, not ../streams-available/linked.conf.",
+  )
+})
+
+test("a plain listen port reads as every IPv4 address, not as a restriction", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const plain = {
+    ...streamEntry({
+      name: "plain",
+      listen: 20003,
+      protocol: "tcp",
+      upstream: "192.168.1.5:6000",
+      allowFrom: ["192.168.1.0/24"],
+      address: "0.0.0.0",
+    }),
+    managed: false,
+  }
+  await listing(page, { streams: [plain] })
+  await page.goto("/proxy/streams")
+  const card = page.locator("[data-slot='choice-row']").first()
+  await expect(card.getByText("Listen on every IPv4 address")).toBeVisible()
+  await expect(card.getByText("20003", { exact: true })).toBeVisible()
+  await expect(card).not.toContainText("0.0.0.0")
+
+  await page.getByRole("button", { name: "Edit plain" }).click()
+  const sheet = page.getByRole("dialog")
+  await expect(
+    sheet.getByText("Every IPv4 address, as the file has it — it has no IPv6 listen."),
+  ).toBeVisible()
+  await expect(sheet.getByText(/Only on 0\.0\.0\.0/)).toHaveCount(0)
 })
 
 test("a read-only account reads streams with no controls", async ({ page }) => {

@@ -738,3 +738,156 @@ func TestApplyStreamReportsAFailedReload(t *testing.T) {
 		t.Fatal("the tested file was removed")
 	}
 }
+
+// A delete wrote the .bak first, so a file it could not read — the listing's
+// "unreadable" — failed with permission denied and stayed, and a link to
+// nothing, the one file that fails `nginx -t` for the whole host, was refused
+// as "not a regular file". Both are removed now, without a backup, and the
+// result says why none was kept.
+func TestDeleteStreamRemovesWhatItCannotKeep(t *testing.T) {
+	svc, root := streamHost(t)
+	dir := svc.streamDir()
+
+	kept := writeStream(t, svc, "kept", "server { listen 6000; proxy_pass 10.0.0.5:6000; }\n")
+	res, err := svc.DeleteStream(context.Background(), "kept")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Backup != kept+".bak" || res.Link != "" || res.Unread != "" || !strings.Contains(mustRead(t, kept+".bak"), "listen 6000") {
+		t.Fatalf("readable file: %+v", res)
+	}
+
+	dangling := filepath.Join(dir, "dangling.conf")
+	if err := os.Symlink("../streams-available/gone.conf", dangling); err != nil {
+		t.Fatal(err)
+	}
+	res, err = svc.DeleteStream(context.Background(), "dangling")
+	if err != nil {
+		t.Fatalf("a link to nothing: %v", err)
+	}
+	if _, err := os.Lstat(dangling); !os.IsNotExist(err) {
+		t.Fatal("the dangling link is still there")
+	}
+	if res.Link != "../streams-available/gone.conf" || res.Backup != "" {
+		t.Fatalf("dangling link: %+v", res)
+	}
+
+	available := filepath.Join(root, "streams-available")
+	if err := os.MkdirAll(available, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(available, "linked.conf")
+	if err := os.WriteFile(target, []byte("server { listen 7000; proxy_pass 10.0.0.5:7000; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../streams-available/linked.conf", filepath.Join(dir, "linked.conf")); err != nil {
+		t.Fatal(err)
+	}
+	if res, err = svc.DeleteStream(context.Background(), "linked"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "linked.conf")); !os.IsNotExist(err) {
+		t.Fatal("the link is still there")
+	}
+	if !strings.Contains(mustRead(t, target), "listen 7000") || res.Backup != "" {
+		t.Fatalf("the link's target was touched, or a backup made: %+v", res)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "linked.conf.bak")); !os.IsNotExist(err) {
+		t.Fatal("a link was backed up as a file")
+	}
+
+	if os.Getuid() == 0 {
+		t.Skip("root reads a file whatever its mode")
+	}
+	locked := writeStream(t, svc, "locked", "server { listen 8000; proxy_pass 10.0.0.5:8000; }\n")
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if res, err = svc.DeleteStream(context.Background(), "locked"); err != nil {
+		t.Fatalf("an unreadable file: %v", err)
+	}
+	if _, err := os.Lstat(locked); !os.IsNotExist(err) {
+		t.Fatal("the unreadable file is still there")
+	}
+	if !strings.Contains(res.Unread, "permission denied") || res.Backup != "" {
+		t.Fatalf("unreadable file: %+v", res)
+	}
+	if _, err := os.Stat(locked + ".bak"); !os.IsNotExist(err) {
+		t.Fatal("an empty backup was left for a file never read")
+	}
+}
+
+// A linked stream was listed as editable, and both its save and its delete
+// then failed with "not a regular file". It is listed as a link now, so the
+// form opens read-only, and a save over it is refused as hand-written without
+// replacing the link with a file.
+func TestALinkedStreamIsListedAsOneAndNotSavedOver(t *testing.T) {
+	svc, root := streamHost(t)
+	dir := svc.streamDir()
+	available := filepath.Join(root, "streams-available")
+	if err := os.MkdirAll(available, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "server { listen 7000; proxy_pass 10.0.0.5:7000; }\n"
+	if err := os.WriteFile(filepath.Join(available, "linked.conf"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "linked.conf")
+	for from, to := range map[string]string{"linked": "../streams-available/linked.conf", "dangling": "../streams-available/gone.conf"} {
+		if err := os.Symlink(to, filepath.Join(dir, from+".conf")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	status, err := svc.Streams(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]StreamEntry{}
+	for _, e := range status.Streams {
+		byName[e.Name] = e
+	}
+	linked := byName["linked"]
+	if linked.Link != "../streams-available/linked.conf" || linked.Listen != 7000 || linked.Error != "" ||
+		!reflect.DeepEqual(linked.Unsupported, []string{"a symbolic link"}) {
+		t.Errorf("linked stream: %+v", linked)
+	}
+	dangling := byName["dangling"]
+	if dangling.Error != "it links to ../streams-available/gone.conf, which does not exist" ||
+		dangling.Link != "../streams-available/gone.conf" {
+		t.Errorf("dangling link: %+v", dangling)
+	}
+
+	spec, _, _ := ParseStreamSpec("linked", content)
+	var handwritten *HandwrittenStreamError
+	if _, err := svc.ApplyStream(context.Background(), spec, "linked", false); !errors.As(err, &handwritten) ||
+		!strings.Contains(err.Error(), "a symbolic link") {
+		t.Fatalf("saving over a link: %v", err)
+	}
+	if st, err := os.Lstat(link); err != nil || st.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("the link was replaced")
+	}
+}
+
+// With the stream directory included inside http, nginx reads the files and
+// its test refuses them; the save said the test could not have seen the file.
+func TestAStreamIncludedInTheWrongBlockIsTested(t *testing.T) {
+	for _, tc := range []struct {
+		conf, note string
+	}{
+		{"events {}\nhttp { include stream.d/*.conf; }\n", ""},
+		{"events {}\nstream { include stream.d/*.conf; }\n", ""},
+		{"events {}\nhttp {}\n", "not include"},
+	} {
+		svc, root := streamHost(t)
+		if err := os.WriteFile(filepath.Join(root, "nginx.conf"), []byte(tc.conf), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		res, err := svc.ApplyStream(context.Background(), tcpStream(), "", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tc.note == "" && res.Validation.Note != "" || tc.note != "" && !strings.Contains(res.Validation.Note, tc.note) {
+			t.Errorf("%q: note = %q", tc.conf, res.Validation.Note)
+		}
+	}
+}

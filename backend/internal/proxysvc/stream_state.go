@@ -147,6 +147,14 @@ func streamIncludeFound(nginxDir, dir string) bool {
 	return readStreamInclude(nginxDir, dir).included
 }
 
+// streamDirRead reports whether nginx reads the stream directory at all,
+// wherever it is included. One included inside http is still read — its test
+// refuses every stream file there — so a test of such a file is no dry run.
+func streamDirRead(nginxDir, dir string) bool {
+	include := readStreamInclude(nginxDir, dir)
+	return include.included || include.misplaced != ""
+}
+
 // streamListeners is ListListeners, replaced in tests.
 var streamListeners = ListListeners
 

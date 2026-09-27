@@ -403,6 +403,14 @@ ownership and cleanup, then removes its own containers/volumes/networks.
     `proxy_responses 1` only in the one-reply mode (it made every datagram a new session for a game server
     or WireGuard); the idle and connect timeouts are separate. Delete reloads only when nginx read the
     directory, and returns a failed reload as `reloadError`.
+  - **Links and unreadable files.** The listing names a symbolic link (`link`, and "a symbolic link" in
+    `unsupported`, so the form opens read-only; a save over one is `stream_handwritten`) and says a link to
+    nothing links to nothing. Delete (`StreamDeletion`) removes a link as a link, leaving its target, and
+    removes a file it cannot read without a `.bak`, answering `link` or `unread` in place of `backup`: a
+    dangling link fails `nginx -t` for the whole host and was the one file the page could not remove. The
+    route unescapes the name (`httpx.URLParam`), since the page encodes it and the listing shows any
+    `*.conf`. A directory included in the wrong block counts as read for the validation note
+    (`streamDirRead`): nginx reads it there, and its test refuses every stream in it.
 - **`htpasswd.go`** does bcrypt in process — `htpasswd` lives in apache2-utils, is not installed on a host
   running nginx, and would put the password in a world-readable argv.
 - **`certbot.go`** issues, renews and revokes. `renewalScheduled` has its own field because it is the real

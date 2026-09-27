@@ -15,9 +15,11 @@ import type {
 } from "@/lib/types"
 import {
   byUrgency,
+  listenFamily,
   listenLabel,
   moduleMissing,
   moduleRemedy,
+  saveBlocked,
   streamBody,
   streamSpecOf,
   streamsLive,
@@ -89,18 +91,36 @@ export function StreamsPage() {
   }, [data])
 
   const live = data ? streamsLive(data) : false
+  const blocked = data ? saveBlocked(data) : null
 
   const remove = (stream: StreamEntry) => {
     let result: StreamDeleteResult | undefined
+    // A file the listing could not read has no port to name and no content
+    // to keep; a link goes as a link, and what it points to stays.
+    const port = stream.error ? null : stream.listen
     confirm({
       title: `Delete ${stream.name}`,
       confirmLabel: live ? "Delete and reload" : "Delete",
       description: (
         <p>
-          {live
-            ? `Port ${stream.listen} stops being forwarded as soon as nginx reloads.`
-            : `nginx is not reading these, so port ${stream.listen} was never forwarded — this removes the file before it ever took effect.`}{" "}
-          The file is kept as <code className="font-mono">{stream.name}.conf.bak</code>.
+          {port === null
+            ? live
+              ? "nginx reloads without it."
+              : "nginx is not reading these, so this only removes the file."
+            : live
+              ? `Port ${port} stops being forwarded as soon as nginx reloads.`
+              : `nginx is not reading these, so port ${port} was never forwarded — this removes the file before it ever took effect.`}{" "}
+          {stream.link ? (
+            <>
+              This removes the link only, not <code className="font-mono">{stream.link}</code>.
+            </>
+          ) : stream.error ? (
+            "It could not be read, so no copy of it is kept."
+          ) : (
+            <>
+              The file is kept as <code className="font-mono">{stream.name}.conf.bak</code>.
+            </>
+          )}
         </p>
       ),
       action: async () => {
@@ -112,9 +132,16 @@ export function StreamsPage() {
       onDone: () => {
         if (result?.reloadError) {
           notify.warning("nginx did not reload", {
-            description: live
-              ? `Port ${stream.listen} is still forwarded until nginx reloads. ${result.reloadError}`
-              : result.reloadError,
+            description:
+              live && port !== null
+                ? `Port ${port} is still forwarded until nginx reloads. ${result.reloadError}`
+                : result.reloadError,
+          })
+        }
+        // The dialog promised a .bak for a file the listing could read.
+        if (result?.unread && !stream.error) {
+          notify.warning("No copy was kept", {
+            description: `${stream.name}.conf could not be read when it was deleted: ${result.unread}`,
           })
         }
       },
@@ -203,8 +230,11 @@ export function StreamsPage() {
           title="Port forwarding"
           actions={
             admin &&
-            !noNginx && (
-              // Staging a forward is still useful before nginx reads the directory.
+            !noNginx &&
+            // Staging a forward is still useful before nginx reads the
+            // directory, but not while its test refuses every file there: the
+            // notice above says why, and a form could only end in "Not saved".
+            !blocked && (
               <Button size="sm" variant={live ? "default" : "outline"} onClick={() => open(null)}>
                 <Plus className="size-4" />
                 {live ? "New stream" : "Prepare a stream"}
@@ -254,7 +284,11 @@ export function StreamsPage() {
                     <p className="text-hint break-all text-muted-foreground">{stream.error}</p>
                   ) : (
                     <RoutePath
-                      sourceLabel="Listen on this host"
+                      sourceLabel={
+                        listenFamily(stream.address)
+                          ? `Listen on every ${listenFamily(stream.address)} address`
+                          : "Listen on this host"
+                      }
                       source={
                         <span className="numeric text-2xl font-semibold">
                           {listenLabel(stream)}
@@ -322,6 +356,7 @@ function describe(stream: StreamEntry): string {
     stream.timeout && `${duration(stream.timeout)} idle timeout`,
     stream.connectTimeout && `${duration(stream.connectTimeout)} connect timeout`,
     !stream.managed && "written by hand",
+    stream.link && "a symbolic link",
   ]
     .filter(Boolean)
     .join(" · ")
@@ -374,8 +409,9 @@ function Readiness({ status }: { status: StreamStatus }) {
         {status.includedIn ? (
           <p>
             nginx.conf includes <code className="font-mono">{status.dir}</code> inside{" "}
-            {status.includedIn}, where nginx does not read the files as streams. Move the include
-            into a stream block of its own at the top level:
+            {status.includedIn}, where nginx does not read the files as streams: its test refuses
+            any file there, so nothing can be saved here until the include moves into a stream block
+            of its own at the top level:
           </p>
         ) : status.includeError ? (
           <p>
@@ -440,9 +476,36 @@ function NotLive({ status }: { status: StreamStatus }) {
         <p>
           {missing
             ? `nginx has no stream module, so nothing can read what you save here. ${moduleRemedy(status.module)} Then include this directory from a top-level stream block:`
-            : status.includedIn
-              ? `nginx.conf includes this directory inside ${status.includedIn}, where it is not read as streams. Move the include into a top-level stream block, beside the http block, and this stream starts forwarding on the next reload:`
-              : "nginx.conf has no stream block including this directory, so what you save here is written and ignored. Add this at the top level of nginx.conf — beside the http block, not inside it — and this stream starts forwarding on the next reload:"}
+            : "nginx.conf has no stream block including this directory, so what you save here is written and ignored. Add this at the top level of nginx.conf — beside the http block, not inside it — and this stream starts forwarding on the next reload:"}
+        </p>
+        <Well className="whitespace-pre">{status.snippet}</Well>
+      </div>
+    </Notice>
+  )
+}
+
+/**
+ * Why the form cannot save at all: nginx's test refuses every stream file in
+ * the directory, so the fix is outside the form and comes first.
+ */
+function SaveBlocked({ status, reason }: { status: StreamStatus; reason: "module" | "misplaced" }) {
+  if (reason === "module") {
+    return (
+      <Notice tone="danger" icon={Warning} title="No stream can pass nginx’s test yet">
+        <p>
+          nginx.conf has a stream block this nginx cannot read, so its configuration test fails for
+          every file. {moduleRemedy(status.module)} Or take the stream block out of nginx.conf.
+        </p>
+      </Notice>
+    )
+  }
+  return (
+    <Notice tone="warning" icon={Warning} title="No stream can pass nginx’s test yet">
+      <div className="space-y-2">
+        <p>
+          nginx.conf includes this directory inside {status.includedIn}, where its configuration
+          test refuses a stream. Move the include into a top-level stream block, beside the http
+          block:
         </p>
         <Well className="whitespace-pre">{status.snippet}</Well>
       </div>
@@ -491,19 +554,22 @@ function StreamForm({
   const [busy, setBusy] = useState(false)
 
   const live = streamsLive(status)
+  const blocked = saveBlocked(status)
   const body = streamBody(spec, allow)
   // A file the form cannot say everything about is not saved over: the
   // form would drop what it cannot show — a deny rule, a second server.
   const locked = Boolean(stream && (stream.error || stream.unsupported.length > 0))
+  const readOnly = locked || blocked !== null
   const renaming = stream !== null && spec.name !== stream.name
   const service = DANGEROUS_PORTS[spec.listen]
+  const family = listenFamily(spec.address)
   const edit = (change: Partial<StreamSpec>, field?: string) => {
     setSpec((s) => ({ ...s, ...change }))
     if (field && refused?.field === field) setRefused(null)
   }
 
   useEffect(() => {
-    if (!open || locked) return
+    if (!open || readOnly) return
     const controller = new AbortController()
     const ready = spec.name !== "" && spec.listen > 0 && spec.upstream !== ""
     const timer = setTimeout(
@@ -531,7 +597,7 @@ function StreamForm({
       controller.abort()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, locked, spec, allow])
+  }, [open, readOnly, spec, allow])
 
   const save = async () => {
     setBusy(true)
@@ -591,14 +657,18 @@ function StreamForm({
           <span className="mr-auto text-hint text-muted-foreground">
             {locked
               ? "This file is changed by hand."
-              : live
-                ? "Tested with nginx’s own parser before it takes effect."
-                : "nginx does not read this directory yet, so its test cannot check this file."}
+              : blocked === "module"
+                ? "nginx’s test fails until it has the stream module."
+                : blocked === "misplaced"
+                  ? `nginx reads this directory inside ${status.includedIn}, where its test refuses a stream.`
+                  : live
+                    ? "Tested with nginx’s own parser before it takes effect."
+                    : "nginx does not read this directory yet, so its test cannot check this file."}
           </span>
           <Button
             size="sm"
             onClick={save}
-            disabled={locked || busy || !spec.name || !spec.listen || !spec.upstream}
+            disabled={readOnly || busy || !spec.name || !spec.listen || !spec.upstream}
             pending={busy}
           >
             {live ? "Save and reload" : "Save for later"}
@@ -613,7 +683,8 @@ function StreamForm({
               <p>
                 {stream.error
                   ? `The file could not be read: ${stream.error}.`
-                  : `This file uses ${stream.unsupported.join(", ")}, which this form cannot keep, so it is shown read-only. Saving from here would drop them.`}
+                  : `This file uses ${stream.unsupported.join(", ")}, which this form cannot keep, so it is shown read-only.`}
+                {stream.link && !stream.error && ` It links to ${stream.link}.`}
               </p>
               {!stream.error && (
                 <Button size="sm" variant="outline" onClick={() => onRaw(stream)}>
@@ -624,15 +695,16 @@ function StreamForm({
             </div>
           </Notice>
         )}
-        {!live && !locked && <NotLive status={status} />}
-        {stream && !stream.managed && !locked && (
+        {blocked && <SaveBlocked status={status} reason={blocked} />}
+        {!live && !readOnly && <NotLive status={status} />}
+        {stream && !stream.managed && !readOnly && (
           <FormNote>
             Written by hand. Saving rewrites it in the dashboard&rsquo;s layout and keeps the
             original as <code className="font-mono">{stream.name}.conf.bak</code>.
           </FormNote>
         )}
 
-        <fieldset disabled={locked} className="min-w-0 space-y-4">
+        <fieldset disabled={readOnly} className="min-w-0 space-y-4">
           <Field
             label="Name"
             htmlFor="stream-name"
@@ -657,11 +729,13 @@ function StreamForm({
               label="Listen on"
               htmlFor="stream-listen"
               hint={
-                spec.address
-                  ? `Only on ${spec.address}, as the file has it.`
-                  : service
-                    ? `${service}'s usual port — restrict who may connect.`
-                    : "The port on this host."
+                family
+                  ? `Every ${family} address, as the file has it — it has no ${family === "IPv4" ? "IPv6" : "IPv4"} listen.`
+                  : spec.address
+                    ? `Only on ${spec.address}, as the file has it.`
+                    : service
+                      ? `${service}'s usual port — restrict who may connect.`
+                      : "The port on this host."
               }
               error={
                 refused?.field === "spec.listen" && (
@@ -811,7 +885,7 @@ function StreamForm({
         )}
       </div>
 
-      {!locked && (
+      {!readOnly && (
         <Pane className="min-h-48 flex-1">
           {previewError ? (
             <EmptyNote className="my-auto text-destructive">{previewError}</EmptyNote>

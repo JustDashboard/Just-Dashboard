@@ -33,6 +33,8 @@ export type StreamEntry = StreamSpec & {
   unsupported: string[]
   /** Why the file could not be read. */
   error?: string
+  /** Where the file points when it is a symbolic link; a delete removes the link, not that. */
+  link?: string
 }
 
 /**
@@ -83,4 +85,10 @@ export type StreamDeleteResult = {
   name: string
   reloaded: boolean
   reloadError?: string
+  /** The .bak the content was kept in. */
+  backup?: string
+  /** Where a removed symbolic link pointed; that file is untouched. */
+  link?: string
+  /** Why a file's content could not be kept; the file is removed all the same. */
+  unread?: string
 }

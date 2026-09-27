@@ -2,6 +2,7 @@ package proxysvc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -206,5 +207,50 @@ func TestLiveTCPStreamForwards(t *testing.T) {
 			t.Fatalf("nothing forwarded: %v", err)
 		}
 		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// A link in stream.d to a file that is gone fails `nginx -t` for the whole
+// host, and the page could not delete it. Deleting it from here now leaves a
+// configuration nginx passes again.
+func TestLiveADanglingStreamLinkIsDeletedAndNginxPassesAgain(t *testing.T) {
+	svc, root := liveStreamNginx(t)
+	ctx := context.Background()
+	if err := os.Symlink(filepath.Join(root, "streams-available", "gone.conf"), filepath.Join(root, "stream.d", "dangling.conf")); err != nil {
+		t.Fatal(err)
+	}
+	if res := runValidator(ctx, "nginx", "-t"); res.Valid || !strings.Contains(res.Output, "dangling.conf") {
+		t.Fatalf("a dangling link should fail the test: %+v", res)
+	}
+	deleted, err := svc.DeleteStream(ctx, "dangling")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !deleted.Read || deleted.Backup != "" {
+		t.Fatalf("deleted = %+v", deleted)
+	}
+	if res := runValidator(ctx, "nginx", "-t"); !res.Valid {
+		t.Fatalf("nginx still fails: %s", res.Output)
+	}
+}
+
+// Included inside http, the stream directory is read, and nginx refuses a
+// stream there: the save fails its test and does not claim the test missed it.
+func TestLiveAStreamIncludedInsideHTTPIsRefusedByItsTest(t *testing.T) {
+	svc, root := liveStreamNginx(t)
+	conf := fmt.Sprintf("pid %[1]s/nginx.pid;\nerror_log %[1]s/error.log;\nevents {}\nhttp {\n    include %[1]s/stream.d/*.conf;\n}\n", root)
+	if err := os.WriteFile(filepath.Join(root, "nginx.conf"), []byte(conf), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec := &StreamSpec{Name: "misplaced", Listen: freeLoopbackPort(t, "tcp"), Address: "127.0.0.1", Upstream: "127.0.0.1:9", AllowFrom: []string{"127.0.0.1"}}
+	res, err := svc.ApplyStream(context.Background(), spec, "", false)
+	if !errors.Is(err, ErrInvalidConf) {
+		t.Fatalf("got %v, want the test to refuse it", err)
+	}
+	if !strings.Contains(res.Validation.Output, "not allowed here") || res.Validation.Note != "" {
+		t.Fatalf("validation = %+v", res.Validation)
+	}
+	if _, err := os.Stat(filepath.Join(root, "stream.d", "misplaced.conf")); !os.IsNotExist(err) {
+		t.Fatal("the refused file was left behind")
 	}
 }

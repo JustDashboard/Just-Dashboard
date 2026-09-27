@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import {
   byUrgency,
+  listenFamily,
   listenLabel,
   moduleMissing,
   moduleRemedy,
+  saveBlocked,
   streamBody,
   streamSpecOf,
   streamsLive,
@@ -119,6 +121,45 @@ describe("listenLabel", () => {
     expect(listenLabel({ listen: 5432 })).toBe("5432")
     expect(listenLabel({ listen: 6000, address: "127.0.0.1" })).toBe("127.0.0.1:6000")
     expect(listenLabel({ listen: 6000, address: "::1" })).toBe("[::1]:6000")
+  })
+
+  // `listen 20003;` is 0.0.0.0: every IPv4 address, not one address to dial.
+  test("a family's wildcard is the port, with the family said beside it", () => {
+    expect(listenLabel({ listen: 20003, address: "0.0.0.0" })).toBe("20003")
+    expect(listenLabel({ listen: 20003, address: "::" })).toBe("20003")
+    expect(listenFamily("0.0.0.0")).toBe("IPv4")
+    expect(listenFamily("::")).toBe("IPv6")
+    expect(listenFamily(undefined)).toBeNull()
+    expect(listenFamily("127.0.0.1")).toBeNull()
+    expect(listenFamily("::1")).toBeNull()
+  })
+})
+
+describe("saveBlocked", () => {
+  const status = (overrides) => ({
+    included: false,
+    module: { state: "loaded", usable: true },
+    snippet: "",
+    dir: "/etc/nginx/stream.d",
+    streams: [],
+    ...overrides,
+  })
+
+  // nginx's test refuses every stream file in both, so no save can pass.
+  test("a stream block without the module, and an include in the wrong block", () => {
+    const missing = { state: "not-installed", usable: false }
+    expect(saveBlocked(status({ included: true, module: missing }))).toBe("module")
+    expect(saveBlocked(status({ includedIn: "http" }))).toBe("misplaced")
+    expect(saveBlocked(status({ includedIn: "http", module: missing }))).toBe("misplaced")
+  })
+
+  test("not while a save can pass, whether or not nginx reads it yet", () => {
+    expect(saveBlocked(status({ included: true }))).toBeNull()
+    expect(saveBlocked(status({}))).toBeNull()
+    expect(saveBlocked(status({ module: { state: "not-installed", usable: false } }))).toBeNull()
+    expect(
+      saveBlocked(status({ included: true, module: { state: "unknown", usable: false } })),
+    ).toBeNull()
   })
 })
 

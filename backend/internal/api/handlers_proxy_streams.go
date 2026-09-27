@@ -111,11 +111,14 @@ func (s *Server) handleStreamApply(w http.ResponseWriter, r *http.Request) error
 // handleStreamDelete removes the file and reloads when nginx was reading it.
 // A stream nginx never read stops forwarding nothing, and reloading for it
 // would only apply every other pending hand edit on the host.
+//
+// The name is unescaped: the listing shows any *.conf, and a+b or a@b arrive
+// percent-encoded, which chi hands over as sent.
 func (s *Server) handleStreamDelete(w http.ResponseWriter, r *http.Request) error {
-	name := chi.URLParam(r, "name")
+	name := httpx.URLParam(r, "name")
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
-	read, err := s.modules.proxy.DeleteStream(ctx, name)
+	deleted, err := s.modules.proxy.DeleteStream(ctx, name)
 	if errors.Is(err, proxysvc.ErrStreamNotFound) {
 		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
 	}
@@ -124,7 +127,12 @@ func (s *Server) handleStreamDelete(w http.ResponseWriter, r *http.Request) erro
 	}
 	out := map[string]any{"name": name, "reloaded": false}
 	detail := map[string]any{"reloaded": false}
-	if read {
+	for key, value := range map[string]string{"backup": deleted.Backup, "link": deleted.Link, "unread": deleted.Unread} {
+		if value != "" {
+			out[key], detail[key] = value, value
+		}
+	}
+	if deleted.Read {
 		reload, reloadErr := s.modules.proxy.Reload(ctx, proxysvc.KindNginx)
 		out["reload"], out["reloaded"], detail["reloaded"] = reload, reloadErr == nil, reloadErr == nil
 		if reloadErr != nil {
