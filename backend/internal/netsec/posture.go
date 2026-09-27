@@ -69,7 +69,9 @@ type ExposedPort struct {
 	Protocol string
 	Address  string
 	Process  string
-	Exposed  bool
+	// Exposed is any bind but loopback. How far it reaches — every
+	// interface, a public address, a tailnet — is read from Address.
+	Exposed bool
 }
 
 // CertSummary is the minimum netsec needs about a certificate.
@@ -450,7 +452,15 @@ func windowLabel(window time.Duration) string {
 }
 
 func assessPorts(in AssessInput) []SecurityFinding {
-	out := []SecurityFinding{}
+	// One finding per protocol and port, from its widest bind: a database on
+	// 0.0.0.0 and on :: is one exposure, and the finding's ID promises one.
+	type exposure struct {
+		listener ExposedPort
+		preset   ServicePreset
+		reach    bindReach
+	}
+	widest := map[string]exposure{}
+	order := []string{}
 	for _, l := range in.Listeners {
 		if !l.Exposed {
 			continue
@@ -459,22 +469,43 @@ func assessPorts(in AssessInput) []SecurityFinding {
 		if !ok || preset.Danger == "" {
 			continue
 		}
+		id := fmt.Sprintf("ports.exposed.%s.%d", l.Protocol, l.Port)
+		reach := reachOf(l.Address)
+		prev, seen := widest[id]
+		if !seen {
+			order = append(order, id)
+		}
+		if !seen || reach.rank > prev.reach.rank {
+			widest[id] = exposure{l, preset, reach}
+		}
+	}
+
+	out := []SecurityFinding{}
+	for _, id := range order {
+		e := widest[id]
+		l, port := e.listener, strconv.FormatUint(uint64(e.listener.Port), 10)
 		detail := fmt.Sprintf("%s/%d is bound to %s", strings.ToUpper(l.Protocol), l.Port, addressLabel(l.Address))
 		if l.Process != "" {
 			detail += " by " + l.Process
 		}
+		// A socket only one network can reach is worth knowing about, not
+		// an emergency: a database for the containers on a bridge, or for the
+		// operator's own devices on a tailnet, is often the design.
+		level := "warning"
+		if e.reach.internetFacing() {
+			level = "critical"
+		}
 		// The firewall may be refusing it anyway, and saying so is the
 		// difference between a finding and a false alarm.
-		level := "critical"
 		if in.Firewall != nil && in.Firewall.Enabled && in.Firewall.Policy.Incoming != "allow" {
 			level = "warning"
 			detail += ", though the firewall's inbound default is " + in.Firewall.Policy.Incoming
 		}
 		out = append(out, SecurityFinding{
-			ID: fmt.Sprintf("ports.exposed.%s.%d", l.Protocol, l.Port), Level: level, Area: "ports",
-			Title:  preset.Name + " is listening on every interface",
+			ID: id, Level: level, Area: "ports",
+			Title:  e.preset.Name + " is listening on " + e.reach.where,
 			Detail: detail,
-			Advice: preset.Danger + " Bind it to 127.0.0.1 instead — for a container, publish it as 127.0.0.1:" + strconv.FormatUint(uint64(l.Port), 10) + ": rather than " + strconv.FormatUint(uint64(l.Port), 10) + ":.",
+			Advice: e.reach.advice(e.preset.Danger, l.Address, port),
 		})
 	}
 	return out

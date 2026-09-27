@@ -268,6 +268,18 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   round trips through `managedAcme`; ordinary site's ACME roots remain `/var/www/html`. Docker Caddy
   ownership uses native automatic HTTPS and shared routes; unsupported owners are reported explicitly.
   See [the ingress decision](../deployments/caddy-ingress.md) for provisioning, recovery and live tests.
+- **Listening ports** (`ports.go`, `ports_owner.go`) are read from the kernel's own tables,
+  `/proc/net/{tcp,tcp6,udp,udp6}` (under `HOST_PROC` when set, the variable gopsutil reads for the
+  process details), not from gopsutil's connection list: that list keeps one holder per socket, and its
+  `/proc` walk meets PID 1 first, so a socket-activated sshd, whose port systemd holds too, was listed as
+  systemd, `/sbin/init`. `socketHolders` keeps every PID holding a listening inode and `ownerOf` names the
+  lowest that is not init (a prefork server's master), and init only when it holds the socket alone.
+  `Listener.Scope` is `loopback`, `interface` (one specific address) or `all`; `Exposed` is every scope but
+  loopback. It used to mean "bound to a wildcard", which drew caddy on the tailnet address as loopback and
+  let a database on a public IP raise nothing in the posture or the attention list. A UDP socket on port 0
+  is not listed, and `GET /ports` gives the walk ten seconds before a retryable 504.
+  `TestListListenersNamesTheDaemonNotInitOnThisHost` checks the owner on the real host and runs only as
+  root; it reads `/proc` and changes nothing.
 - **Site builder** (`sites.go`, `sites_render.go`, `sites_parse.go`, `sites_apply.go`). `SiteSpec` is our
   shape, not nginx's, for the reason `ContainerSpec` is not `container.Config`; rendering happens **on the
   server** so a spec has one meaning, and the output is hand-written rather than templated because order

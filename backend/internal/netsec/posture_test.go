@@ -267,6 +267,60 @@ func TestAssessSoftensAnExposedPortBehindADenyPolicy(t *testing.T) {
 	}
 }
 
+// Redis on the host's public address is as reachable as Redis on 0.0.0.0.
+// It used to go unreported, because only a wildcard bind counted as exposed;
+// the same database on a tailnet or a Docker bridge is reachable only from
+// that network, which is worth a warning rather than an alarm.
+func TestAssessJudgesAPortByTheAddressItIsBoundTo(t *testing.T) {
+	for _, c := range []struct {
+		address, level, title, advice string
+	}{
+		{"0.0.0.0", "critical", "Redis is listening on every interface", "rather than 6379:."},
+		{"203.0.113.5", "critical", "Redis is listening on a public address", "rather than 203.0.113.5:6379:."},
+		{"2001:db8:1::5", "critical", "Redis is listening on a public address", "rather than [2001:db8:1::5]:6379:."},
+		{"100.64.1.2", "warning", "Redis is listening on a tailnet address", "every device on the tailnet"},
+		{"fd7a:115c:a1e0::9e37:2220", "warning", "Redis is listening on a tailnet address", "every device on the tailnet"},
+		{"10.0.0.1", "warning", "Redis is listening on a private address", "if the provider maps a public address onto it"},
+	} {
+		p := Assess(AssessInput{Listeners: []ExposedPort{
+			{Port: 6379, Protocol: "tcp", Address: c.address, Process: "redis-server", Exposed: true},
+		}})
+		f, ok := findingByID(p, "ports.exposed.tcp.6379")
+		if !ok {
+			t.Errorf("Redis on %s was not reported", c.address)
+			continue
+		}
+		if f.Level != c.level || f.Title != c.title || !strings.Contains(f.Advice, c.advice) {
+			t.Errorf("Redis on %s = %q %q, advice %q; want %q %q with %q", c.address, f.Level, f.Title, f.Advice, c.level, c.title, c.advice)
+		}
+		if !strings.Contains(f.Detail, c.address) && c.address != "0.0.0.0" {
+			t.Errorf("Redis on %s: detail %q does not name the address", c.address, f.Detail)
+		}
+	}
+}
+
+// A database bound twice is one exposure, reported at its widest: the
+// finding's ID is per port, and two findings with one ID is one too many.
+func TestAssessReportsADatabaseBoundTwiceOnceAtItsWidest(t *testing.T) {
+	p := Assess(AssessInput{Listeners: []ExposedPort{
+		{Port: 5432, Protocol: "tcp", Address: "100.64.1.2", Process: "postgres", Exposed: true},
+		{Port: 5432, Protocol: "tcp", Address: "203.0.113.5", Process: "postgres", Exposed: true},
+		{Port: 5432, Protocol: "tcp", Address: "10.0.0.1", Process: "postgres", Exposed: true},
+	}})
+	count := 0
+	for _, f := range p.Findings {
+		if f.ID == "ports.exposed.tcp.5432" {
+			count++
+			if f.Level != "critical" || !strings.Contains(f.Detail, "203.0.113.5") {
+				t.Errorf("finding = %+v, want the public bind", f)
+			}
+		}
+	}
+	if count != 1 {
+		t.Errorf("PostgreSQL reported %d times, want once", count)
+	}
+}
+
 func TestAssessIntrusion(t *testing.T) {
 	stopped := Assess(AssessInput{Fail2ban: &Fail2banStatus{Available: true, Running: false}})
 	if f, ok := findingByID(stopped, "intrusion.stopped"); !ok || f.Level != "warning" {

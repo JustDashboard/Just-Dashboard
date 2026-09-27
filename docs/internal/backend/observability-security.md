@@ -94,6 +94,12 @@ position sell a score out of a hundred, which is a number to optimise rather tha
   is a lockout, not advice.
 - `ExposedPort` and `CertSummary` are declared *in* netsec rather than imported from `proxysvc`, so the
   audit has no dependency on how ports or certificates are discovered.
+- A database or control port is judged by the **address it is bound to** (`reach.go`), since
+  `ExposedPort.Exposed` is any bind but loopback: every interface or a public address is critical, a
+  tailnet address (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) or another private one a warning, because only
+  that network can connect. The advice for a private address adds that a provider mapping a public
+  address onto it makes it the internet's too. A port bound to several addresses is one finding at its
+  widest, as its ID is per port.
 - **A check that could not run is not a pass.** `Posture.Skipped` says which is which, because a zero and
   an unanswerable question look identical: `SecurityFiltering` is false on Alpine/Arch (no advisory
   data), `LoginRecordRead` false wherever `last`/`lastb` are missing (util-linux-extra, absent from

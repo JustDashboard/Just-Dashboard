@@ -18,6 +18,7 @@ import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { VerbBar, type Verb } from "@/components/verbs"
 import { DANGEROUS_PORTS } from "@/components/proxy/attention"
+import { exposedHint } from "@/components/proxy/ports"
 import {
   stickyTableHeader,
   Table,
@@ -145,7 +146,7 @@ export function PortsPage() {
           label="Exposed"
           value={counts.exposed}
           tone={counts.exposed > 0 ? "warning" : "success"}
-          hint={counts.exposed > 0 ? "bound to every interface" : "nothing off the machine"}
+          hint={exposedHint(all)}
         />
         <StatTile
           label="Loopback"
@@ -158,8 +159,8 @@ export function PortsPage() {
           tone={counts.dangerous > 0 ? "danger" : "default"}
           hint={
             counts.dangerous > 0
-              ? "a database or control port on every interface"
-              : "none on a public address"
+              ? "a database or control port off the machine"
+              : "none off the machine"
           }
         />
       </StatGrid>

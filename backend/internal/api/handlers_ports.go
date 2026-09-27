@@ -1,12 +1,20 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"net/http"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/go-chi/chi/v5"
 )
+
+// portListTimeout bounds the walk over every process's descriptors, which on
+// a host with tens of thousands of them is the slow part. The page polls it,
+// so a stuck walk must answer rather than pile up behind itself.
+const portListTimeout = 10 * time.Second
 
 // mountPortRoutes is the host's listening sockets. A subrouter rather than a
 // single route so the page's detail views can mount beside it; chi serves the
@@ -16,7 +24,13 @@ func (s *Server) mountPortRoutes(r chi.Router) {
 }
 
 func (s *Server) handlePortList(w http.ResponseWriter, r *http.Request) error {
-	listeners, err := proxysvc.ListListeners(r.Context())
+	ctx, cancel := timeoutCtx(r, portListTimeout)
+	defer cancel()
+	listeners, err := proxysvc.ListListeners(ctx)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return httpx.Err(http.StatusGatewayTimeout, "timeout",
+			"Listing the host's sockets took longer than 10 seconds.").Retry()
+	}
 	if err != nil {
 		return httpx.Internal(err)
 	}
