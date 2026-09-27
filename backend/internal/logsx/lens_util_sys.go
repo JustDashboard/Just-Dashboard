@@ -149,8 +149,8 @@ func sysTwoDigits(s string) int {
 	return int(a-'0')*10 + int(b-'0')
 }
 
-// sysNumber reads a fixed-width run of digits, answering -1 when any byte is
-// not one.
+// sysNumber reads a string that is all digits — a stamp's fields, a pid —
+// answering -1 when any byte is not one.
 func sysNumber(s string) int {
 	n := 0
 	for i := 0; i < len(s); i++ {

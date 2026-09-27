@@ -91,32 +91,33 @@ func (r *kernelReader) continues(l *Line, msg string) bool {
 }
 
 // kernelEvent names a kernel message, reading the values that go with it.
-// Each rule is gated on a literal the kernel prints, so a veth line costs a
-// handful of prefix tests.
+// Most rules are decided by the subsystem prefix the kernel prints; the few
+// messages that lead with a task or device name are found by one scan each,
+// so a veth line — most of kern.log on a Docker host — costs a handful of
+// prefix tests and four searches.
 func kernelEvent(l *Line, msg, owner string) string {
 	switch {
-	case strings.Contains(msg, "Killed process "):
+	case strings.HasPrefix(msg, "Out of memory"), strings.HasPrefix(msg, "Memory cgroup out of memory"):
 		return kernelOOMKill(l, msg, owner)
-	case strings.Contains(msg, " invoked oom-killer: "):
-		l.Event = "oom"
-		l.SetAttr("program", msg[:strings.Index(msg, " invoked oom-killer: ")])
-		l.SetLevel("error")
-		return l.Event
-	case strings.Contains(msg, "]: segfault at "):
-		program, pid := kernelTask(msg[:strings.Index(msg, ": segfault at ")])
-		return kernelCrash(l, program, pid)
-	case strings.HasPrefix(msg, "traps: ") && strings.Contains(msg, "] general protection fault "):
+	case strings.HasPrefix(msg, "traps: "):
 		// A general protection fault is a SIGSEGV by another route. The int3
 		// and invalid-opcode traps are how Chrome and Go abort on purpose,
 		// hundreds a day from a headless browser, and are left as text.
+		if !strings.Contains(msg, "] general protection fault ") {
+			return ""
+		}
 		rest := msg[len("traps: "):]
 		program, pid := kernelTask(rest[:strings.IndexByte(rest, ' ')])
 		return kernelCrash(l, program, pid)
-	case strings.HasPrefix(msg, "INFO: task ") && strings.Contains(msg, " blocked for more than "):
+	case strings.HasPrefix(msg, "INFO: task "):
 		// "INFO:" is the prefix, not the severity: the kernel prints this at
 		// KERN_ERR, and a task stuck in the kernel for minutes is a stalled
 		// disk far more often than anything informational.
-		task := msg[len("INFO: task "):strings.Index(msg, " blocked for more than ")]
+		end := strings.Index(msg, " blocked for more than ")
+		if end < 0 {
+			return ""
+		}
+		task := msg[len("INFO: task "):end]
 		if colon := strings.LastIndexByte(task, ':'); colon > 0 {
 			l.SetAttr("program", task[:colon])
 			l.SetAttr("pid", task[colon+1:])
@@ -124,25 +125,21 @@ func kernelEvent(l *Line, msg, owner string) string {
 		l.Event = "hung_task"
 		l.SetLevel("error")
 		return l.Event
-	case strings.Contains(msg, " error, dev "):
-		// blk_status_to_str's words — "I/O", "critical medium", "timeout" —
-		// all end in " error, dev sda, sector …".
-		dev := msg[strings.Index(msg, " error, dev ")+len(" error, dev "):]
-		return kernelDev(l, "io_error", "error", sysUntil(dev, ','))
+	case strings.HasPrefix(msg, "EXT4-fs "), strings.HasPrefix(msg, "EXT3-fs "), strings.HasPrefix(msg, "EXT2-fs "),
+		strings.HasPrefix(msg, "BTRFS "):
+		switch {
+		case strings.Contains(msg, "Remounting filesystem read-only"), strings.Contains(msg, "forced readonly"):
+			return kernelDev(l, "readonly_fs", "critical", kernelParenDev(msg))
+		case strings.Contains(msg, " error (device "), strings.Contains(msg, " critical (device "):
+			return kernelDev(l, "fs_error", "error", kernelParenDev(msg))
+		}
+		return ""
 	case strings.HasPrefix(msg, "Buffer I/O error on dev "):
-		dev := msg[len("Buffer I/O error on dev "):]
-		return kernelDev(l, "io_error", "error", sysUntil(dev, ','))
-	case strings.Contains(msg, "Remounting filesystem read-only"), strings.Contains(msg, "forced readonly"):
-		return kernelDev(l, "readonly_fs", "critical", kernelParenDev(msg))
-	case strings.HasPrefix(msg, "EXT4-fs error (device "), strings.HasPrefix(msg, "EXT3-fs error (device "),
-		strings.HasPrefix(msg, "EXT2-fs error (device "), strings.HasPrefix(msg, "BTRFS error (device "),
-		strings.HasPrefix(msg, "BTRFS critical (device "):
-		return kernelDev(l, "fs_error", "error", kernelParenDev(msg))
-	case strings.Contains(msg, "Link is Down"):
-		return kernelLink(l, msg, strings.Index(msg, "Link is Down"), "link_down")
-	case strings.Contains(msg, "Link is Up"):
-		return kernelLink(l, msg, strings.Index(msg, "Link is Up"), "link_up")
-	case strings.Contains(msg, `apparmor="DENIED"`):
+		return kernelDev(l, "io_error", "error", sysUntil(msg[len("Buffer I/O error on dev "):], ','))
+	case strings.HasPrefix(msg, "audit: "):
+		if !strings.Contains(msg, `apparmor="DENIED"`) {
+			return ""
+		}
 		l.Event = "apparmor_denied"
 		if i := strings.Index(msg, " pid="); i >= 0 {
 			l.SetAttr("pid", sysDigits(msg[i+len(" pid="):]))
@@ -154,10 +151,33 @@ func kernelEvent(l *Line, msg, owner string) string {
 			}
 		}
 		return l.Event
-	case strings.HasPrefix(msg, "mce: [Hardware Error]: "), strings.Contains(msg, "Machine check events logged"):
+	case strings.HasPrefix(msg, "mce: [Hardware Error]: "):
 		l.Event = "mce"
 		l.SetLevel("critical")
 		return l.Event
+	}
+	if at := strings.Index(msg, " invoked oom-killer: "); at > 0 {
+		l.Event = "oom"
+		l.SetAttr("program", msg[:at])
+		l.SetLevel("error")
+		return l.Event
+	}
+	if at := strings.Index(msg, "]: segfault at "); at > 0 {
+		program, pid := kernelTask(msg[:at+1])
+		return kernelCrash(l, program, pid)
+	}
+	if at := strings.Index(msg, " error, dev "); at > 0 {
+		// blk_status_to_str's words — "I/O", "critical medium", "timeout" —
+		// all end in " error, dev sda, sector …".
+		return kernelDev(l, "io_error", "error", sysUntil(msg[at+len(" error, dev "):], ','))
+	}
+	if at := strings.Index(msg, "Link is "); at >= 0 {
+		switch state := msg[at+len("Link is "):]; {
+		case strings.HasPrefix(state, "Down"):
+			return kernelLink(l, msg, at, "link_down")
+		case strings.HasPrefix(state, "Up"):
+			return kernelLink(l, msg, at, "link_up")
+		}
 	}
 	return ""
 }

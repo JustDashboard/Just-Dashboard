@@ -225,9 +225,17 @@ func TestLensAuthReadsSudoSuAndAccounts(t *testing.T) {
 				"command": "/usr/bin/ss -tlnp"}),
 		},
 		sysWant{
-			// sudo's split of a long command folds under the line it continues.
-			text: "2026-09-20T03:16:40.973830+00:00 web-1 sudo:   ubuntu : (command continued) /var/lib/just-dashboard/",
-			at:   "2026-09-20T03:16:40.97383Z", level: "info", cont: true, attrs: sudo(nil),
+			// A command too long for one line: sudo writes the rest as
+			// "(command continued)" lines, which fold under the one they
+			// continue. Both are this host's, cut short.
+			text:  "2026-09-20T05:01:19.421984+00:00 web-1 sudo:   ubuntu : PWD=/home/ubuntu/Just-Dashboard ; USER=root ; COMMAND=/usr/bin/grep -l snapshots/2779/fs\\\\|snapshots/457/fs /proc/1/mountinfo /proc/100/mountinfo",
+			event: "sudo", level: "info", at: "2026-09-20T05:01:19.421984Z",
+			attrs: sudo(map[string]string{"user": "ubuntu", "pwd": "/home/ubuntu/Just-Dashboard", "runas": "root",
+				"command": "/usr/bin/grep -l snapshots/2779/fs\\\\|snapshots/457/fs /proc/1/mountinfo /proc/100/mountinfo"}),
+		},
+		sysWant{
+			text: "2026-09-20T05:01:19.425293+00:00 web-1 sudo:   ubuntu : (command continued) /proc/1198487/mountinfo /proc/1198503/mountinfo ",
+			at:   "2026-09-20T05:01:19.425293Z", level: "info", cont: true, attrs: sudo(nil),
 		},
 		sysWant{
 			text:  "2026-09-20T03:16:13.171168+00:00 web-1 sudo: pam_unix(sudo:session): session opened for user root(uid=0) by (uid=1000)",
@@ -236,8 +244,8 @@ func TestLensAuthReadsSudoSuAndAccounts(t *testing.T) {
 		},
 		sysWant{
 			// Not following its sudo line, a continuation stands alone.
-			text: "2026-09-20T03:16:13.174390+00:00 web-1 sudo:   ubuntu : (command continued) --no-pager",
-			at:   "2026-09-20T03:16:13.17439Z", attrs: sudo(nil),
+			text: "2026-09-20T05:01:19.425889+00:00 web-1 sudo:   ubuntu : (command continued) /proc/1665996/mountinfo /proc/1668946/mountinfo ",
+			at:   "2026-09-20T05:01:19.425889Z", attrs: sudo(nil),
 		},
 		sysWant{
 			// The research's refusal shapes, in the BSD envelope older hosts

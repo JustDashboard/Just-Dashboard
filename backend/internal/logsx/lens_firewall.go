@@ -91,27 +91,39 @@ func firewallVerdict(prefix string) string {
 // first LEN is the IP length; UDP repeats LEN for its own header, and that
 // second one is not the packet's size. The interface is the inbound one, or
 // the outbound one for traffic the host itself sent.
+//
+// ufw.log is nothing but these lines, so the packet is copied once and every
+// value is a slice of that copy: one allocation where SetAttr would make one
+// per value, and the copy is the packet, not the line, so a tally keeping a
+// value still pins nothing large. The kernel prints the flags side by side,
+// which lets them be one slice too.
 func firewallPacket(l *Line, body string) {
-	var in, out, flags string
+	body = strings.Clone(body)
+	var in, out string
+	flagsFrom, flagsTo := -1, -1
 	seenLen := false
-	for body != "" {
-		body = strings.TrimLeft(body, " ")
-		end := strings.IndexByte(body, ' ')
+	for at := 0; at < len(body); {
+		if body[at] == ' ' {
+			at++
+			continue
+		}
+		end := strings.IndexByte(body[at:], ' ')
 		if end < 0 {
 			end = len(body)
+		} else {
+			end += at
 		}
-		token := body[:end]
-		body = body[end:]
+		token := body[at:end]
 		eq := strings.IndexByte(token, '=')
 		if eq < 0 {
 			switch token {
 			case "SYN", "ACK", "FIN", "RST", "PSH", "URG", "ECE", "CWR":
-				if flags == "" {
-					flags = token
-				} else {
-					flags += " " + token
+				if flagsFrom < 0 {
+					flagsFrom = at
 				}
+				flagsTo = end
 			}
+			at = end
 			continue
 		}
 		value := token[eq+1:]
@@ -121,26 +133,29 @@ func firewallPacket(l *Line, body string) {
 		case "OUT":
 			out = value
 		case "SRC":
-			l.SetAttr("client", value)
+			sysSetShared(l, "client", value)
 		case "DST":
-			l.SetAttr("dst", value)
+			sysSetShared(l, "dst", value)
 		case "LEN":
 			if !seenLen {
-				l.SetAttr("len", value)
+				sysSetShared(l, "len", value)
 				seenLen = true
 			}
 		case "PROTO":
-			l.SetAttr("proto", value)
+			sysSetShared(l, "proto", value)
 		case "SPT":
-			l.SetAttr("spt", value)
+			sysSetShared(l, "spt", value)
 		case "DPT":
-			l.SetAttr("dpt", value)
+			sysSetShared(l, "dpt", value)
 		}
+		at = end
 	}
 	if in != "" {
-		l.SetAttr("iface", in)
+		sysSetShared(l, "iface", in)
 	} else {
-		l.SetAttr("iface", out)
+		sysSetShared(l, "iface", out)
 	}
-	l.SetAttr("flags", flags)
+	if flagsFrom >= 0 {
+		sysSetShared(l, "flags", body[flagsFrom:flagsTo])
+	}
 }
