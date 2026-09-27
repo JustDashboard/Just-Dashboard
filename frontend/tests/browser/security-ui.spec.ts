@@ -521,6 +521,16 @@ test("the overview reads as readings, findings and how the panel is reached", as
   const grid = page.locator("[data-slot=stat-grid]")
   const tiles = grid.locator("a")
   await expect(tiles).toHaveCount(5)
+  // One width and one inset for all five, the first included: the first column
+  // used to give up its left padding, which put the hover wash flush against
+  // its name.
+  const cells = await tiles.evaluateAll((links) =>
+    links.map((a) => {
+      const tile = a.querySelector("[data-slot=stat-tile]")!
+      return `${Math.round(a.getBoundingClientRect().width)} ${getComputedStyle(tile).paddingLeft}`
+    }),
+  )
+  expect(new Set(cells).size, cells.join(" | ")).toBe(1)
   await expect(grid.getByRole("link", { name: "Firewall", exact: true })).toContainText("ufw")
   await expect(grid.getByRole("link", { name: "SSH", exact: true })).toContainText("1 finding")
   await expect(grid.getByRole("link", { name: "Intrusion", exact: true })).toContainText(

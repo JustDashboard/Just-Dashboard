@@ -169,7 +169,8 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   nothing else.
 - `components/stat-tile.tsx` — `StatTile` (a small name over a 24px figure, an optional meter and one
   hint) and `StatGrid`, which runs them across the page with a hairline between cells and no frame
-  around them, the first column on the page's own edge. `framed` restores the box. `StatLink` wraps a
+  around them, every tile the same inset and a lone last tile taking its row. `framed` restores the
+  box. `StatLink` wraps a
   tile that is also a destination — the Docker and proxy overviews, and the Services row on the host
   overview — with the revealed arrow that says so on touch. `dense` sets the tiles two to a row on a
   phone.
