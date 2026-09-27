@@ -698,10 +698,28 @@ func caddyAddressTLS(address string, explicit, autoOff bool) bool {
 // it, so the caller can say why rather than only that it did.
 type RefusedError struct {
 	Validation *ValidationResult
+	// Lead is what the refusal means for this change, where nginx's first
+	// error alone would mislead: taking a site out can break another site's
+	// file, and an enable into a configuration nginx already refuses is
+	// turned away by an error in some other file. Either way the error names
+	// a file that is not the one being switched.
+	Lead string
+}
+
+// Reason is the refusal in one line: the lead, when there is one, then
+// nginx's first error with its file and line.
+func (e *RefusedError) Reason() string {
+	if e.Lead == "" {
+		return FailureHeadline(e.Validation)
+	}
+	return e.Lead + ": " + FailureHeadline(e.Validation)
 }
 
 func (e *RefusedError) Error() string {
-	return "nginx refused the change: " + FailureHeadline(e.Validation)
+	if e.Lead != "" {
+		return e.Reason()
+	}
+	return "nginx refused the change: " + e.Reason()
 }
 
 func (e *RefusedError) Unwrap() error { return ErrInvalidConf }
@@ -824,7 +842,7 @@ func (s *Service) setVHostEnabledLocked(ctx context.Context, name, available str
 		for _, alias := range aliases {
 			links = append(links, filepath.Join(enabledDir, alias))
 		}
-		return s.unlinkLocked(ctx, links, change)
+		return s.unlinkLocked(ctx, links, name, change)
 	}
 	if state == linkServes || len(aliases) > 0 {
 		// Already on: nothing changes on disk, so nothing is recorded,
@@ -841,7 +859,15 @@ func (s *Service) setVHostEnabledLocked(ctx context.Context, name, available str
 	}
 	if res := runValidator(ctx, "nginx", "-t"); !res.Valid {
 		undo()
-		return &RefusedError{Validation: res}
+		refused := &RefusedError{Validation: res}
+		// nginx stops at its first error, so in a configuration it already
+		// refuses the enable fails on another file's error, which reads as
+		// this site's. Tested again as it was, the same error says so; a
+		// different one — or none — means the site is what nginx refused.
+		if before := runValidator(ctx, "nginx", "-t"); !before.Valid && FailureHeadline(before) == FailureHeadline(res) {
+			refused.Lead = "nginx already refuses the configuration without " + name
+		}
+		return refused
 	}
 	change.Action = ChangeEnable
 	s.recordChange(ctx, change)
@@ -880,7 +906,7 @@ func (s *Service) RemoveVHostLink(ctx context.Context, name string, reload bool)
 		content, _ := os.ReadFile(full)
 		change.Path, change.Before, change.After = full, content, content
 	}
-	if err := s.unlinkLocked(ctx, []string{link}, change); err != nil {
+	if err := s.unlinkLocked(ctx, []string{link}, "sites-enabled/"+name, change); err != nil {
 		return nil, err
 	}
 	return s.reloadLocked(ctx, reload), nil
@@ -919,8 +945,9 @@ func (s *Service) reloadLocked(ctx context.Context, reload bool) *LinkReload {
 // stay out: switching sites off is how a broken configuration gets fixed,
 // and refusing every disable until it is fixed some other way would leave
 // the page no way to do it. Nothing to take out changes nothing and records
-// nothing. Must be called with s.mu held.
-func (s *Service) unlinkLocked(ctx context.Context, links []string, change Change) error {
+// nothing. what names the links in a refusal, whose first error is in the
+// file that needed them rather than in them. Must be called with s.mu held.
+func (s *Service) unlinkLocked(ctx context.Context, links []string, what string, change Change) error {
 	type removed struct{ link, target string }
 	var present []removed
 	for _, link := range links {
@@ -967,7 +994,7 @@ func (s *Service) unlinkLocked(ctx context.Context, links []string, change Chang
 			return err
 		}
 		if before := runValidator(ctx, "nginx", "-t"); before.Valid {
-			return &RefusedError{Validation: res}
+			return &RefusedError{Validation: res, Lead: "nginx refuses the configuration without " + what}
 		}
 		for _, r := range present {
 			if err := os.Remove(r.link); err != nil {

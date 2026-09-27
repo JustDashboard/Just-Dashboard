@@ -355,7 +355,13 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   (`FailureHeadline`) as the message and the test output as `raw`. A disable is tested the same way
   and put back when it breaks a configuration nginx was loading (another site used its upstream or
   zone); out of a configuration nginx was already refusing it stands, because switching sites off is
-  how a broken configuration gets fixed. A reload that fails after a passing test is a 200 with
+  how a broken configuration gets fixed. nginx's first error names a file other than the one being
+  switched in two cases, and `RefusedError.Lead` says which, so `Reason()` — the 422's message and
+  the audit entry's `reason` — does not read as that file's fault: a refused disable or link removal
+  is "nginx refuses the configuration without <name>: …" (the error is in the site that needed it),
+  and a refused enable whose error is still the first one with the link undone (tested again, so
+  only on a refusal) is "nginx already refuses the configuration without <name>: …". An enable whose
+  own error comes first carries no lead. A reload that fails after a passing test is a 200 with
   `reloaded: false` and `reloadError` rather than a 502, since the link is in place and correct.
   A file sitting where a link belongs in `sites-enabled` is never removed as a "disable". A link
   under another name to the site's file (`00-default -> ../sites-available/default`) serves it as

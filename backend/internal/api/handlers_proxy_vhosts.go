@@ -97,8 +97,9 @@ func (out *vhostLinkResult) auditDetail(detail map[string]any) map[string]any {
 
 // refusedLinkChange answers a link change that did not happen. One nginx's
 // test turned away is a 422 whose message is nginx's own first error, file
-// and line, with the whole test output kept as the raw detail for the page to
-// show on request.
+// and line — after what it means for this change when the error is in
+// another file — with the whole test output kept as the raw detail for the
+// page to show on request.
 func refusedLinkChange(r *http.Request, action, name string, detail map[string]any, err error) error {
 	var refused *proxysvc.RefusedError
 	if !errors.As(err, &refused) {
@@ -108,8 +109,9 @@ func refusedLinkChange(r *http.Request, action, name string, detail map[string]a
 		detail = map[string]any{}
 	}
 	detail["result"] = "refused"
+	detail["reason"] = refused.Reason()
 	httpx.SetAudit(r, action, name, detail)
-	return httpx.Err(http.StatusUnprocessableEntity, "invalid_config", proxysvc.FailureHeadline(refused.Validation)).
+	return httpx.Err(http.StatusUnprocessableEntity, "invalid_config", refused.Reason()).
 		Because("nginx -t failed with the change in place, so the change was undone", refused.Validation.Output)
 }
 

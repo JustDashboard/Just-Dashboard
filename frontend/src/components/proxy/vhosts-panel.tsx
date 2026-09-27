@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import { Globe, Plus } from "@/components/icons"
 import { notify } from "@/lib/toast"
@@ -52,6 +52,14 @@ const FILTER_LABEL: Record<SiteFilter, string> = {
 type NginxOutput = { title: string; output: string }
 
 /**
+ * A verb in flight on a site. Once it has answered, the card keeps the busy
+ * word until the list is read again: dropping it on the answer drew the state
+ * from before the change — "disabled" under a toast saying enabled — until
+ * the next read arrived.
+ */
+type Busy = { verb: string; answered?: boolean; readBefore?: unknown }
+
+/**
  * A file open in the config editor: the site's own, or — for a site whose
  * name in sites-enabled holds a separate copy — the copy nginx serves.
  */
@@ -79,7 +87,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   }>("proxy.sites.form", { open: false, editing: null, copyFrom: null, session: 0 })
   const [filter, setFilter] = useSessionState("proxy.sites.query", "")
   const [chip, setChip] = useSessionState<SiteFilter>("proxy.sites.chip", "all")
-  const [pending, setPending] = useState<Record<string, string>>({})
+  const [pending, setPending] = useState<Record<string, Busy>>({})
   const [output, setOutput] = useState<NginxOutput | null>(null)
   // In the URL so a deployment finding can link straight at the site serving
   // its hostname, and so the browser's back button restores the selection.
@@ -88,6 +96,13 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     (signal) => get<VHost[]>("/proxy/vhosts", undefined, signal),
     30_000,
   )
+  // Each read of the list, failed or not, is a new object here: a failed one
+  // brings a new error and keeps the rows, a good one brings new rows.
+  const read: unknown = error ?? data
+  const lastRead = useRef<unknown>(undefined)
+  useEffect(() => {
+    lastRead.current = read
+  })
 
   const openForm = (name: string | null, copyFrom: string | null = null) => {
     setRequested(null)
@@ -157,13 +172,19 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
       .sort(byUrgency)
   }, [hosts, filter, chip])
 
-  const setBusy = (name: string, verb: string | null) =>
-    setPending((p) => {
-      const next = { ...p }
-      if (verb) next[name] = verb
-      else delete next[name]
-      return next
-    })
+  const setBusy = (name: string, verb: string) => setPending((p) => ({ ...p, [name]: { verb } }))
+  // The verb has answered: read the list again, and hold the busy word until
+  // that read is in.
+  const reread = (name: string) => {
+    const readBefore = lastRead.current
+    setPending((p) => (p[name] ? { ...p, [name]: { ...p[name], answered: true, readBefore } } : p))
+    refresh()
+  }
+  const busyOf = (name: string) => {
+    const busy = pending[name]
+    if (!busy || (busy.answered && busy.readBefore !== read)) return undefined
+    return busy.verb
+  }
 
   // The whole of what nginx printed, one press away from the toast that
   // carries its first line.
@@ -215,8 +236,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
       } catch (err) {
         reportRefusal(`Could not ${enabled ? "enable" : "disable"} ${vhost.name}`, vhost.name, err)
       } finally {
-        setBusy(vhost.name, null)
-        refresh()
+        reread(vhost.name)
       }
       return "reported"
     }
@@ -315,8 +335,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         } catch (err) {
           reportRefusal(`Could not remove sites-enabled/${vhost.name}`, vhost.name, err)
         } finally {
-          setBusy(vhost.name, null)
-          refresh()
+          reread(vhost.name)
         }
         return "reported"
       },
@@ -348,8 +367,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
           })
           return "reported"
         } finally {
-          setBusy(vhost.name, null)
-          refresh()
+          reread(vhost.name)
         }
       },
     })
@@ -509,7 +527,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
                     <SiteCard
                       key={`${vhost.kind}:${vhost.layout ?? ""}:${vhost.name}`}
                       vhost={vhost}
-                      busy={pending[vhost.name]}
+                      busy={busyOf(vhost.name)}
                       index={index}
                       ambiguous={shared.has(vhost.name)}
                       {...handlers}

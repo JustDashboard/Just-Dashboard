@@ -425,8 +425,51 @@ func TestEnablingASiteNginxRefusesTakesTheLinkBackOut(t *testing.T) {
 	if !strings.Contains(err.Error(), `unknown directive "foo"`) {
 		t.Errorf("error = %q", err)
 	}
+	// Without the link nginx loads, so the error is the site's own and says
+	// nothing more.
+	if refused.Reason() != FailureHeadline(refused.Validation) {
+		t.Errorf("reason = %q", refused.Reason())
+	}
 	if len(log.changes) != 0 {
 		t.Errorf("a refused enable was recorded: %v", log.actions())
+	}
+}
+
+// nginx stops at its first error, so an enable into a configuration it
+// already refuses was turned away with another file's error, which read as
+// the site's. The refusal now says the error is there without the site, and
+// only when it is: a site whose own error comes first is refused by that.
+func TestARefusedEnableSaysWhenNginxAlreadyRefusedTheConfiguration(t *testing.T) {
+	svc, root := debianTree(t)
+	other := filepath.Join(root, "sites-available", "other")
+	link := filepath.Join(root, "sites-enabled", "broken")
+	nginxShim(t, fmt.Sprintf(`if [ -e '%[1]s' ]; then echo 'nginx: [emerg] unknown directive "foo" in %[1]s:3' >&2; exit 1; fi
+echo 'nginx: [emerg] unknown directive "bar" in %[2]s:7' >&2
+exit 1`, link, other))
+	writeFile(t, filepath.Join(root, "sites-available", "fine"), "server {}\n")
+	writeFile(t, filepath.Join(root, "sites-available", "broken"), "server { foo bar; }\n")
+	writeFile(t, other, "server { bar; }\n")
+	ctx := context.Background()
+
+	err := svc.SetVHostEnabled(ctx, "fine", true)
+	var refused *RefusedError
+	if !errors.As(err, &refused) {
+		t.Fatalf("enable returned %v", err)
+	}
+	want := `nginx already refuses the configuration without fine: unknown directive "bar" in ` + other + ":7"
+	if refused.Reason() != want || err.Error() != want {
+		t.Errorf("reason = %q\nerror = %q\nwant %q", refused.Reason(), err, want)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "sites-enabled", "fine")); !os.IsNotExist(err) {
+		t.Fatalf("the refused link is still there: %v", err)
+	}
+
+	err = svc.SetVHostEnabled(ctx, "broken", true)
+	if !errors.As(err, &refused) {
+		t.Fatalf("enable returned %v", err)
+	}
+	if want := `unknown directive "foo" in ` + filepath.Join(root, "sites-available", "broken") + ":3"; refused.Reason() != want {
+		t.Errorf("reason = %q, want %q", refused.Reason(), want)
 	}
 }
 
@@ -484,8 +527,11 @@ func TestADisableThatBreaksAnotherSiteIsUndone(t *testing.T) {
 	if !errors.As(err, &refused) {
 		t.Fatalf("disable returned %v", err)
 	}
-	if !strings.Contains(FailureHeadline(refused.Validation), `host not found in upstream "backend"`) {
-		t.Errorf("headline = %q", FailureHeadline(refused.Validation))
+	// nginx's error is in the file that needed pool; the reason says the
+	// configuration was refused without it.
+	if want := `nginx refuses the configuration without pool: host not found in upstream "backend" in ` +
+		filepath.Join(root, "sites-available", "app") + ":7"; refused.Reason() != want {
+		t.Errorf("reason = %q\nwant %q", refused.Reason(), want)
 	}
 	if target, err := os.Readlink(link); err != nil || target != "../sites-available/pool" {
 		t.Fatalf("link = %q (%v), want it back as it was", target, err)
@@ -609,8 +655,14 @@ func TestRemoveVHostLinkIsUndoneWhenNginxRefuses(t *testing.T) {
 		link, filepath.Join(root, "sites-available", "app")))
 	writeFile(t, filepath.Join(root, "custom", "g.conf"), "limit_req_zone $binary_remote_addr zone=api:1m rate=1r/s;\n")
 	symlink(t, "../custom/g.conf", link)
-	if _, err := svc.RemoveVHostLink(context.Background(), "g", false); !errors.Is(err, ErrInvalidConf) {
+	_, err := svc.RemoveVHostLink(context.Background(), "g", false)
+	var refused *RefusedError
+	if !errors.As(err, &refused) {
 		t.Fatalf("got %v", err)
+	}
+	if want := `nginx refuses the configuration without sites-enabled/g: zone "api" is unknown in ` +
+		filepath.Join(root, "sites-available", "app") + ":4"; refused.Reason() != want {
+		t.Errorf("reason = %q\nwant %q", refused.Reason(), want)
 	}
 	if target, _ := os.Readlink(link); target != "../custom/g.conf" {
 		t.Fatalf("link = %q", target)
@@ -668,8 +720,12 @@ func TestLiveLinkChangesKeepNginxLoadable(t *testing.T) {
 	if ghost := listed(t, svc.nginxVHosts(), "sites-enabled", "ghost"); ghost.Broken != "dangling" || ghost.Enabled {
 		t.Errorf("ghost listed as %+v", ghost)
 	}
-	if err := svc.SetVHostEnabled(ctx, "good", true); !errors.Is(err, ErrInvalidConf) {
+	err = svc.SetVHostEnabled(ctx, "good", true)
+	if !errors.As(err, &refused) {
 		t.Fatalf("an enable into a configuration nginx refuses: %v", err)
+	}
+	if want := "nginx already refuses the configuration without good: open() \"" + filepath.Join(root, "sites-enabled", "ghost") + "\" failed"; !strings.HasPrefix(refused.Reason(), want) {
+		t.Errorf("reason = %q, want it to start %q", refused.Reason(), want)
 	}
 	if _, err := svc.RemoveVHostLink(ctx, "ghost", false); err != nil {
 		t.Fatal(err)
@@ -682,6 +738,46 @@ func TestLiveLinkChangesKeepNginxLoadable(t *testing.T) {
 	}
 	if good := listed(t, svc.nginxVHosts(), "sites-available", "good"); !good.Enabled || good.Broken != "" {
 		t.Errorf("good listed as %+v", good)
+	}
+}
+
+// Against the real nginx: a site whose upstream another site proxies to
+// cannot be disabled, the refusal names the file that needed it, and both
+// links stay as they were.
+func TestLiveADisableAnotherSiteNeedsIsRefusedWithItsReason(t *testing.T) {
+	root := liveNginx(t)
+	svc := New(root, filepath.Join(root, "Caddyfile"))
+	ctx := context.Background()
+	available := func(name string) string { return filepath.Join(root, "sites-available", name) }
+	writeFile(t, available("pool"), "upstream jd_lane_b_pool {\n    server 127.0.0.1:18096;\n}\n")
+	writeFile(t, available("app"), "server {\n    listen 127.0.0.1:18095;\n    location / {\n        proxy_pass http://jd_lane_b_pool;\n    }\n}\n")
+	for _, name := range []string{"pool", "app"} {
+		if err := svc.SetVHostEnabled(ctx, name, true); err != nil {
+			t.Fatalf("enabling %s: %v", name, err)
+		}
+	}
+
+	err := svc.SetVHostEnabled(ctx, "pool", false)
+	var refused *RefusedError
+	if !errors.As(err, &refused) {
+		t.Fatalf("disabling the pool: %v", err)
+	}
+	want := `nginx refuses the configuration without pool: host not found in upstream "jd_lane_b_pool" in ` + available("app") + ":4"
+	if refused.Reason() != want {
+		t.Errorf("reason = %q\nwant %q", refused.Reason(), want)
+	}
+	if pool := listed(t, svc.nginxVHosts(), "sites-available", "pool"); !pool.Enabled {
+		t.Error("the refused disable left pool out")
+	}
+	if res := svc.Test(ctx, KindNginx); !res.Valid {
+		t.Fatalf("nginx no longer loads after a refused disable:\n%s", res.Output)
+	}
+
+	if err := svc.SetVHostEnabled(ctx, "app", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SetVHostEnabled(ctx, "pool", false); err != nil {
+		t.Fatalf("with nothing proxying to it the pool comes out: %v", err)
 	}
 }
 

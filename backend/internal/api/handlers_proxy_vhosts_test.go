@@ -98,6 +98,36 @@ func TestVHostToggleSaysWhyNginxRefusedTheSite(t *testing.T) {
 	}
 }
 
+// A disable is refused when another site needs the one going out, and
+// nginx's error is then in that other site's file. The answer says the
+// configuration was refused without this site, and so does the audit entry.
+func TestVHostToggleSaysARefusedDisableWasNeededElsewhere(t *testing.T) {
+	c, s, root := vhostServer(t, func(root string) string {
+		return fmt.Sprintf(`if [ ! -e '%s' ]; then echo 'nginx: [emerg] host not found in upstream "pool" in %s:4' >&2; exit 1; fi; exit 0`,
+			filepath.Join(root, "sites-enabled", "pool"), filepath.Join(root, "sites-available", "app"))
+	})
+	if err := os.WriteFile(filepath.Join(root, "sites-available", "pool"), []byte("upstream pool { server 127.0.0.1:3000; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../sites-available/pool", filepath.Join(root, "sites-enabled", "pool")); err != nil {
+		t.Fatal(err)
+	}
+	w := c.do(http.MethodPost, "/api/v1/proxy/vhosts/pool/enabled", `{"enabled":false,"reload":true}`, nil)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("got %d: %s", w.Code, w.Body.String())
+	}
+	want := `nginx refuses the configuration without pool: host not found in upstream "pool" in ` + filepath.Join(root, "sites-available", "app") + ":4"
+	if answer := decodeLink(t, w.Body.Bytes()); answer.Error.Code != "invalid_config" || answer.Error.Message != want {
+		t.Errorf("error = %+v\nwant %q", answer.Error, want)
+	}
+	if target, err := os.Readlink(filepath.Join(root, "sites-enabled", "pool")); err != nil || target != "../sites-available/pool" {
+		t.Errorf("link = %q (%v), want it back", target, err)
+	}
+	if entry := lastAudit(t, s, "proxy.vhost.toggle"); entry.Success || !strings.Contains(entry.Detail, "without pool") {
+		t.Errorf("audit = %+v", entry)
+	}
+}
+
 // A reload that fails after a clean test is reported, not returned as a
 // failure of the toggle: the link is in place and nginx accepted it.
 func TestVHostToggleReportsAReloadThatFailed(t *testing.T) {

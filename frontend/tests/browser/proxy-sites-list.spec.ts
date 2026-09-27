@@ -243,6 +243,87 @@ test("a switch that landed but did not reload says so instead of 'completed'", a
   )
 })
 
+test("a switch keeps its card busy until the list is read again, then says what nginx serves", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  let enabled = false
+  let release = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await page.route("**/api/v1/proxy/vhosts", async (route) => {
+    // The read after the switch is held, so the page has only the answer.
+    if (enabled) await held
+    return json(route, [app, { ...off, enabled }])
+  })
+  await page.route("**/api/v1/proxy/vhosts/off.example.com/enabled", (route) => {
+    enabled = true
+    return json(route, {
+      name: "off.example.com",
+      enabled: true,
+      reloaded: true,
+      reload: { validation: { ...brokenTest, valid: true }, reloaded: true, output: "" },
+    })
+  })
+  await page.goto("/proxy/sites")
+  const site = card(page, "off.example.com")
+  await expect(site.getByText("disabled", { exact: true })).toBeVisible()
+
+  await (await openMenu(page, "off.example.com")).getByRole("menuitem", { name: "Enable" }).click()
+  await expect(
+    page.locator("[data-sonner-toast]").filter({ hasText: "off.example.com enabled" }),
+  ).toBeVisible()
+  // Answered, but not yet read back: the card must not fall back to the
+  // state from before the switch.
+  await expect(site.getByText("Enabling…", { exact: true })).toBeVisible()
+  await expect(site.getByText("disabled", { exact: true })).toHaveCount(0)
+
+  release()
+  await expect(site.getByText("serving", { exact: true })).toBeVisible()
+  await expect(site.getByText("Enabling…", { exact: true })).toHaveCount(0)
+})
+
+test("a disable another site needs is refused, says so, and leaves the site serving", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const reads = await serveSites(page, [app, legacy])
+  await page.route("**/api/v1/proxy/vhosts/app.example.com/enabled", (route) =>
+    route.fulfill({
+      status: 422,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: {
+          code: "invalid_config",
+          message:
+            'nginx refuses the configuration without app.example.com: host not found in upstream "app_pool" in /etc/nginx/sites-available/legacy.example.com:7',
+          raw:
+            'nginx: [emerg] host not found in upstream "app_pool" in /etc/nginx/sites-enabled/legacy.example.com:7\n' +
+            "nginx: configuration file /etc/nginx/nginx.conf test failed",
+        },
+      }),
+    }),
+  )
+  await page.goto("/proxy/sites")
+  const before = reads()
+
+  await (await openMenu(page, "app.example.com")).getByRole("menuitem", { name: "Disable" }).click()
+  const confirm = page.getByRole("dialog", { name: "Disable app.example.com" })
+  await expect(confirm).toContainText("the link goes back and nothing changes")
+  await confirm.getByRole("button", { name: "Disable and reload" }).click()
+  await expect(confirm).toHaveCount(0)
+
+  const refused = page
+    .locator("[data-sonner-toast]")
+    .filter({ hasText: "Could not disable app.example.com" })
+  await expect(refused).toContainText(
+    "nginx refuses the configuration without app.example.com: host not found in upstream",
+  )
+  await expect(refused).toContainText("/etc/nginx/sites-available/legacy.example.com:7")
+  await expect(page.getByText("Disable app.example.com completed")).toHaveCount(0)
+  await expect.poll(reads).toBeGreaterThan(before)
+  await expect(card(page, "app.example.com").getByText("serving", { exact: true })).toBeVisible()
+})
+
 test("a delete whose reload failed says the site is still served", async ({ page }) => {
   await mockProxy(page, { included: true })
   const reads = await serveSites(page, [app, legacy])
