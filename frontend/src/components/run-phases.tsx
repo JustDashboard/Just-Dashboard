@@ -38,7 +38,7 @@ export function RunPhases({ phases, className }: { phases: RunPhase[]; className
             {/* Wrapped rather than truncated: three stages across a phone
                 are a hundred pixels each, and "Recreate the c…" is not one. */}
             <span className="flex min-w-0 items-start gap-1.5">
-              <StepMark state={phase.state} className="mt-0.5" />
+              <StepMark state={phase.state} className="mt-px" />
               <span
                 className={cn(
                   "min-w-0 text-xs leading-snug font-medium",

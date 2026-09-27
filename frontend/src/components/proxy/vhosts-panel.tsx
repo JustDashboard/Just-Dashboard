@@ -430,10 +430,10 @@ function SiteCard({ vhost, busy, wide, index, ...handlers }: CardProps) {
   const route = [vhost.serverNames.join(", "), vhost.upstreams[0]].filter(Boolean).join(" → ")
   const states = (
     <>
-      <span className={cn(wide && "w-24")}>
+      <span className={cn("flex", wide && "w-24")}>
         <SiteTLS vhost={vhost} />
       </span>
-      <span className={cn(wide && "w-28")}>
+      <span className={cn("flex", wide && "w-28")}>
         <ServingStatus vhost={vhost} busy={busy} />
       </span>
     </>

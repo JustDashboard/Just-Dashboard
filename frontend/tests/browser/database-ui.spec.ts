@@ -512,6 +512,16 @@ test("the connection sits in the compact workbench strip and the tables are on t
     page.getByRole("button", { name: "Connection: shop. Switch connection" }),
   ).toBeVisible()
   await expect(page.getByRole("heading", { name: "Database shop" })).toHaveClass(/sr-only/)
+  // The state and the command beside it share the strip's centre line. The
+  // state was wrapped in a bare span, whose 16px line box set the 12px word
+  // three pixels below the button's label.
+  const word = page.getByText("connected", { exact: true })
+  await expect(word).toBeVisible()
+  const state = await word.boundingBox()
+  const command = await page.getByRole("button", { name: "New database" }).boundingBox()
+  expect(state && command).toBeTruthy()
+  const offset = Math.abs(state!.y + state!.height / 2 - (command!.y + command!.height / 2))
+  expect(offset, "the connection state sits off the strip's centre line").toBeLessThan(1)
   await page.screenshot({ path: "test-results/database-context-1280.png", fullPage: true })
   // The section's pages are the sidebar's, not a strip above the page, and
   // every one of them carries the connection it was opened with.

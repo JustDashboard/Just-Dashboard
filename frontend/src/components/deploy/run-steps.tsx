@@ -145,9 +145,22 @@ export function RunSteps({
               role="listitem"
               className="border-hairline"
             >
-              <AccordionTrigger className="-mx-2 items-center gap-3 px-2 py-3 hover:bg-row-hover hover:no-underline">
-                <span className="flex min-w-0 flex-1 items-center gap-3 text-body">
-                  <StepMark state={step.state} />
+              <AccordionTrigger
+                className={cn(
+                  "-mx-2 gap-3 px-2 py-3 hover:bg-row-hover hover:no-underline",
+                  // On a phone the bar runs under the name, so the mark, the
+                  // time and the chevron sit on the name's line rather than
+                  // centred on the name and its bar together.
+                  wide ? "items-center" : "items-start [&>svg]:mt-px",
+                )}
+              >
+                <span
+                  className={cn(
+                    "flex min-w-0 flex-1 gap-3 text-body",
+                    wide ? "items-center" : "items-start",
+                  )}
+                >
+                  <StepMark state={step.state} className={cn(!wide && "mt-0.5")} />
                   <span className="min-w-0 flex-1">
                     <span
                       className={cn(
@@ -168,7 +181,12 @@ export function RunSteps({
                   {wide && bar}
                   {/* One measure on every row, so each row's track ends on one line
                       and the bars share a time axis on a phone too. */}
-                  <span className="numeric w-28 shrink-0 text-right text-hint font-normal text-muted-foreground">
+                  <span
+                    className={cn(
+                      "numeric w-28 shrink-0 text-right text-hint font-normal text-muted-foreground",
+                      !wide && "mt-px",
+                    )}
+                  >
                     {step.attempt > 1 && `attempt ${step.attempt} · `}
                     {seconds !== undefined ? formatDuration(seconds) : stepStateLabel(step.state)}
                     {lines > 0 && (

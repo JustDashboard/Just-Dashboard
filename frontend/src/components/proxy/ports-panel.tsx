@@ -257,7 +257,7 @@ export function PortsPage() {
                         <span className="uppercase"> · {listener.protocol}</span>
                         {listener.user && ` · ${listener.user}`}
                       </p>
-                      <div className="mt-1.5">
+                      <div className="mt-1.5 flex">
                         <ReachStatus listener={listener} />
                       </div>
                     </div>

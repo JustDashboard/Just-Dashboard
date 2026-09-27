@@ -47,7 +47,7 @@ export function FolderColourSwatches({
               aria-label={FOLDER_COLOUR_NAMES[colour]}
               onClick={() => onPick(colour)}
               className={cn(
-                "rounded-md p-1 focus-ring transition-colors hover:bg-row-hover",
+                "flex rounded-md p-1 focus-ring transition-colors hover:bg-row-hover",
                 value === colour && "bg-accent hover:bg-accent",
               )}
             >

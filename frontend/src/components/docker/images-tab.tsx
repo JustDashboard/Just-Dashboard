@@ -306,7 +306,7 @@ function ImageCard({
       }
       trailing={
         <>
-          <span className="hidden w-32 sm:block">
+          <span className="hidden w-32 sm:flex">
             <UpdateState status={update} dangling={image.dangling} />
           </span>
           <span className="numeric w-20 text-right font-mono text-hint">{bytes(image.size)}</span>

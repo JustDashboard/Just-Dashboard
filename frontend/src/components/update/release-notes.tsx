@@ -33,9 +33,7 @@ export const KIND_STYLE: Record<ChangeKind, { label: string; className: string }
 export function ChangeLabel({ kind }: { kind: ChangeKind }) {
   const style = KIND_STYLE[kind] ?? { label: kind, className: "text-muted-foreground" }
   return (
-    <span
-      className={cn("eyebrow shrink-0 pt-0.5 text-micro leading-4 tracking-wider", style.className)}
-    >
+    <span className={cn("eyebrow shrink-0 text-micro leading-4 tracking-wider", style.className)}>
       {style.label}
     </span>
   )
@@ -94,7 +92,7 @@ export function ReleaseNotes({
 
       <ul className="space-y-2">
         {release.changes.map((change, i) => (
-          <li key={i} className="flex gap-3">
+          <li key={i} className="flex items-baseline gap-3">
             <span className="w-14 shrink-0">
               <ChangeLabel kind={change.kind} />
             </span>

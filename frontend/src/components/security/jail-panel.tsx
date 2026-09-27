@@ -211,7 +211,7 @@ export function JailsPanel({
           {canManage && selected && (
             <div className="space-y-1.5">
               <Label htmlFor="jail-ban-address">Ban an address now</Label>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
                 <Input
                   id="jail-ban-address"
                   value={banning}
@@ -509,7 +509,7 @@ function JailTuning({
               <EmptyNote className="py-2">Nothing allowlisted.</EmptyNote>
             )}
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             <Input
               value={ignore}
               onChange={(e) => setIgnore(e.target.value)}
