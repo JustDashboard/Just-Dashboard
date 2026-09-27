@@ -1,5 +1,13 @@
 import { expect, test } from "bun:test"
-import { dedupeEvents, foldRestarts, healthOf, spanWords } from "./docker-events"
+import {
+  LAST_LINES,
+  dedupeEvents,
+  foldRestarts,
+  healthOf,
+  lastLinesSearch,
+  linesBefore,
+  spanWords,
+} from "./docker-events"
 
 const base = Date.parse("2026-09-27T10:00:00Z")
 
@@ -26,7 +34,7 @@ function shape(entries) {
   return entries.map((e) =>
     e.kind === "loop"
       ? `loop ${e.name} ×${e.times} exit ${e.exitCode ?? "-"}${e.oom ? " oom" : ""}`
-      : `${e.event.name} ${e.event.action}`,
+      : `${e.event.name} ${e.event.action}${e.oom ? " +oom" : ""}`,
   )
 }
 
@@ -134,6 +142,52 @@ test("a stop that nothing restarted, and a create, stay what they are", () => {
     "shop-db-1 start",
     "shop-db-1 create",
   ])
+})
+
+test("a kill for memory is one row on the exit it caused, and an OOM the container lived through is its own", () => {
+  // Nothing brought it back: the note and the exit, Docker's two words for one death.
+  const died = foldRestarts([ev(0, "start"), ev(9.4, "oom"), ev(9.41, "die", { exitCode: "137" })])
+  expect(shape(died)).toEqual(["shop-db-1 die +oom", "shop-db-1 start"])
+  expect(died[0].oom.action).toBe("oom")
+
+  // Brought back once, which is not a loop: still one row for the death.
+  expect(
+    shape(foldRestarts([ev(9.4, "oom"), ev(9.41, "die", { exitCode: "137" }), ev(10, "start")])),
+  ).toEqual(["shop-db-1 start", "shop-db-1 die +oom"])
+
+  // The kernel chose a child and the container lived on; an exit much
+  // later is another story.
+  expect(
+    shape(foldRestarts([ev(0, "oom"), ev(600, "die", { exitCode: "1" }), ev(601, "start")])),
+  ).toEqual(["shop-db-1 start", "shop-db-1 die", "shop-db-1 oom"])
+})
+
+test("the minute before an exit runs to the end of its second, and stops at the exit", () => {
+  const exit = "2026-09-27T10:00:05.310456789Z"
+  const search = lastLinesSearch(exit)
+  // Docker is handed whole seconds, so the second the exit fell in is asked
+  // for whole: its first 310 ms are the ones that say why.
+  expect(search.until).toBe("2026-09-27T10:00:06.000Z")
+  expect(search.since).toBe("2026-09-27T09:59:05.310Z")
+  expect(search.limit).toBeGreaterThan(LAST_LINES)
+
+  const line = (stamp, text) => ({ timestamp: stamp, text })
+  const found = [
+    ...Array.from({ length: 30 }, (_, i) =>
+      line(`2026-09-27T10:00:0${Math.floor(i / 10)}.${String(i).padStart(3, "0")}Z`, `line ${i}`),
+    ),
+    line("2026-09-27T10:00:05.300123Z", "FATAL: could not write to file: No space left on device"),
+    line(undefined, "\tcontinued"),
+    // The restart policy's next attempt, a hundred milliseconds on.
+    line("2026-09-27T10:00:05.412Z", "starting PostgreSQL 16.4"),
+    line("2026-09-27T10:00:05.500Z", "listening on IPv4 address"),
+  ]
+  const kept = linesBefore(found, exit)
+  expect(kept).toHaveLength(LAST_LINES)
+  expect(kept.at(-2).text).toMatch(/^FATAL/)
+  expect(kept.at(-1).text).toBe("\tcontinued")
+  expect(kept.some((l) => l.text.startsWith("starting"))).toBe(false)
+  expect(linesBefore([], exit)).toEqual([])
 })
 
 test("the polled copy of an event wins over the socket's, and the feed is newest first", () => {

@@ -21,9 +21,10 @@ import {
 import { notify } from "@/lib/toast"
 import { get, post, put, ApiError } from "@/lib/api"
 import type { ComposeService, ComposeValidation, StackDetail } from "@/lib/types"
+import { EMPTY_FILTER } from "@/lib/log-filter"
 import { STACK_LENS, lensFor, type LogLens } from "@/lib/log-lenses"
 import { stackSource } from "@/lib/log-sources"
-import { useViewState } from "@/lib/view-state"
+import { useSessionState, useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
@@ -39,7 +40,8 @@ import {
   type ComposeActionKey,
 } from "@/components/docker/stack-state"
 import { CodeEditor } from "@/components/code-editor"
-import { ReadingTile, useLensReadings } from "@/components/logs/lens-readings"
+import { LensReadings, useLensReadings } from "@/components/logs/lens-readings"
+import type { LogFilterState } from "@/components/logs/types"
 import {
   ServiceLogs,
   type ServiceLogSource,
@@ -51,7 +53,6 @@ import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { FileBrowser } from "@/components/files/inline-browser"
 import { ProductLogo, ProductLogos, imageProduct, imageProducts } from "@/components/product-logo"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
-import { StatGrid } from "@/components/stat-tile"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -716,15 +717,16 @@ function StackLogs({ stack }: { stack: StackDetail }) {
     ],
     [stack.name],
   )
+  const storageKey = `docker.stack.${stack.name}.logs`
   // On a phone the figures would push the pane off the screen; the quick
   // views carry their counts on their chips there.
   const wide = useMediaQuery("(min-width: 640px)")
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
-      {wide && <StackReadings stack={stack.name} />}
+      {wide && <StackReadings stack={stack.name} storageKey={storageKey} />}
       <ServiceLogs
         sources={sources}
-        storageKey={`docker.stack.${stack.name}.logs`}
+        storageKey={storageKey}
         views={views}
         className="min-h-0 flex-1"
         paneClassName="min-h-[30rem]"
@@ -748,7 +750,7 @@ const STACK_READINGS: LogLens = {
       label: "Errors",
       levels: ["critical", "error"],
       tone: "danger",
-      hint: "Lines at error level or worse, from every service",
+      hint: "Lines at error level or worse",
     },
     {
       id: "failing",
@@ -775,17 +777,21 @@ const STACK_READINGS: LogLens = {
 }
 
 /**
- * The readings as figures only: pressing one cannot narrow the pane below,
- * whose filter is its own, so they read rather than act — the Errors quick
- * view in the pane is the press.
+ * The readings over the pane, pressed as a container's are: a press narrows
+ * the lines to what the figure counts. `ServiceLogs` draws readings only
+ * from its source's lens, which for a stack has none, so they are drawn
+ * here and reach the pane's filter where the pane keeps it for the tab —
+ * under its storage key, which is also how the pane hears of the press.
  */
-function StackReadings({ stack }: { stack: string }) {
+function StackReadings({ stack, storageKey }: { stack: string; storageKey: string }) {
   const readings = useLensReadings(stackSource(stack), STACK_READINGS)
+  const [filter, setFilter] = useSessionState<LogFilterState>(`${storageKey}.filter`, EMPTY_FILTER)
   return (
-    <StatGrid columns={4} dense className="shrink-0">
-      {readings.tiles.map((tile) => (
-        <ReadingTile key={tile.reading.id} tile={tile} window={readings.window} />
-      ))}
-    </StatGrid>
+    <LensReadings
+      readings={readings}
+      filter={filter}
+      onFilterChange={setFilter}
+      className="shrink-0"
+    />
   )
 }

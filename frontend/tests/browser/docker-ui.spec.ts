@@ -1015,21 +1015,35 @@ const dbEvents = (() => {
   ]
 })()
 
-/** What the database wrote in the minute before each exit. */
-const lastLines = [
+/**
+ * What the database wrote around an exit, as a last-lines search finds it:
+ * the search starts a minute before the exit and runs to the end of the
+ * exit's second, so it also finds the next attempt starting up a moment
+ * after — which the page must not show as the minute before.
+ */
+const lastLines = (since: number) => [
   {
     text: "2026-09-27 10:14:02.311 UTC [1] LOG:  starting PostgreSQL 16.4 on x86_64-pc-linux-gnu",
-    timestamp: minutesAgo(16),
+    timestamp: new Date(since + 59_000).toISOString(),
     level: "info",
     event: "startup",
   },
   {
     text: '2026-09-27 10:14:02.402 UTC [1] FATAL:  data directory "/var/lib/postgresql/data" has invalid permissions',
-    timestamp: minutesAgo(16),
+    timestamp: new Date(since + 59_990).toISOString(),
     level: "error",
     event: "fatal",
   },
+  {
+    text: "2026-09-27 10:14:02.600 UTC [1] LOG:  the next attempt, starting up",
+    timestamp: new Date(since + 60_200).toISOString(),
+    level: "info",
+    event: "startup",
+  },
 ]
+
+/** How a last-lines search is told apart from the pane's own: it asks for this many. */
+const LAST_LINES_LIMIT = "200"
 
 const dbFailure = {
   containerId: DB,
@@ -1075,6 +1089,28 @@ const dbInspect = {
   },
 }
 
+/**
+ * The stack's web service exited and came back. Its events name the
+ * container as compose did, and the service as the stack's log does.
+ */
+const stackEvents = [
+  { action: "die", at: 5, exitCode: "1", message: "running-app-web-1 exited with status 1" },
+  { action: "start", at: 4.9, message: "running-app-web-1 started" },
+].map(({ action, at, exitCode, message }) => ({
+  time: minutesAgo(at),
+  type: "container",
+  action,
+  name: "running-app-web-1",
+  service: "web",
+  id: "4444",
+  image: "web",
+  stack: "running-app",
+  exitCode,
+  message,
+  level: action === "die" ? "error" : "notice",
+  source: "daemon",
+}))
+
 /** A stack's merged log: each line carries the service it came from. */
 const stackLines = [
   {
@@ -1105,6 +1141,10 @@ type ServiceLogMocks = {
   eventSockets: URLSearchParams[]
 }
 
+/** The pane's own History searches: bounded at both ends, unlike a reading's, and not a last-lines one. */
+const historySearches = (mocks: ServiceLogMocks) =>
+  mocks.searches.filter((s) => s.has("until") && s.get("limit") !== LAST_LINES_LIMIT)
+
 /**
  * The service logs a container's and a stack's Logs tab embed, over the
  * database container and the running-app stack: `/logs/source` describes
@@ -1125,7 +1165,12 @@ async function mockServiceLogs(page: Page): Promise<ServiceLogMocks> {
       listening: true,
       since: minutesAgo(180),
       buffered: dbEvents.length,
-      events: params.get("container") === DB || params.get("stack") ? dbEvents : [],
+      events:
+        params.get("container") === DB
+          ? dbEvents
+          : params.get("stack") === "running-app"
+            ? stackEvents
+            : [],
     })
   })
   await page.routeWebSocket(/\/api\/v1\/docker\/events\/stream/, (socket) => {
@@ -1145,8 +1190,8 @@ async function mockServiceLogs(page: Page): Promise<ServiceLogMocks> {
     }
     if (url.pathname.endsWith("/logs/search")) {
       recorded.searches.push(url.searchParams)
-      // The minute before an exit is asked for by its limit.
-      const before = url.searchParams.get("limit") === "20"
+      const before = url.searchParams.get("limit") === LAST_LINES_LIMIT
+      const found = before ? lastLines(Date.parse(url.searchParams.get("since")!)) : []
       const facet = url.searchParams.get("facets")
       return json(route, {
         facets: facet
@@ -1159,9 +1204,9 @@ async function mockServiceLogs(page: Page): Promise<ServiceLogMocks> {
               },
             }
           : undefined,
-        lines: before ? lastLines : [],
+        lines: found,
         scanned: 40,
-        matched: before ? lastLines.length : 3,
+        matched: before ? found.length : 3,
         truncated: false,
         complete: true,
         files: [],
@@ -1254,11 +1299,21 @@ test("a container's events fold its restart loop under its health check", async 
   // The minute before the last two failures, read as the pane reads them.
   await expect(events.getByText("the minute before it exited")).toBeVisible()
   await expect(events.getByText("the minute before its last exit")).toBeVisible()
-  await expect(events.getByText(/has invalid permissions/).first()).toBeVisible()
-  const before = mocks.searches.filter((s) => s.get("limit") === "20")
+  await expect(events.getByText(/has invalid permissions/)).toHaveCount(2)
+  // Up to the exit and no further: the next attempt's start-up is not why it died.
+  await expect(events.getByText(/the next attempt, starting up/)).toHaveCount(0)
+  const before = mocks.searches.filter((s) => s.get("limit") === LAST_LINES_LIMIT)
   expect(before).toHaveLength(2)
-  expect(before[0].get("source")).toBe(`docker:${DB}`)
-  expect(Date.parse(before[0].get("until")!) - Date.parse(before[0].get("since")!)).toBe(60_000)
+  expect(before.map((s) => s.get("source"))).toEqual([`docker:${DB}`, `docker:${DB}`])
+  // Docker is handed whole seconds, so the search runs to the end of the
+  // exit's own second rather than being cut back to its start.
+  const exit = Date.parse(dbEvents[0].time)
+  const last = before.find((s) => Date.parse(s.get("since")!) === exit - 60_000)
+  expect(last).toBeDefined()
+  const until = Date.parse(last!.get("until")!)
+  expect(until % 1000).toBe(0)
+  expect(until).toBeGreaterThan(exit)
+  expect(until - exit).toBeLessThanOrEqual(1000)
 
   // The failure's window: History on it, in the pane, named as what it is.
   await page.getByRole("button", { name: "Crash window" }).click()
@@ -1275,9 +1330,90 @@ test("a container's events fold its restart loop under its health check", async 
 })
 
 /**
+ * The Crash window chip says what the pane is reading, and nothing else: it
+ * is on while the pane reads the window, and off the moment the reader moves
+ * to Live, to "Open in History" on an exit, or anywhere else — with the
+ * strip's "Crash window" going with it. Pressed again, it opens the window
+ * again.
+ */
+test("the crash window chip and the pane stay in step", async ({ page }) => {
+  await mockDocker(page)
+  const mocks = await mockServiceLogs(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto(`/docker/containers/${DB}?tab=logs`)
+  const chip = page.getByRole("button", { name: "Crash window" })
+  const live = page.getByRole("button", { name: "Live", exact: true })
+  const history = page.getByRole("button", { name: "History", exact: true })
+  const eventsView = page.getByRole("button", { name: "Events", exact: true })
+  const named = page.getByText(/^Crash window · /)
+  const windowSince = new Date(dbFailure.logWindow.since).toISOString()
+
+  // On, then to Events and back to Live: Live, with the chip off.
+  await chip.click()
+  await expect(history).toHaveAttribute("aria-pressed", "true")
+  await expect(chip).toHaveAttribute("aria-pressed", "true")
+  await expect(named).toBeVisible()
+  await eventsView.click()
+  await live.click()
+  await expect(live).toHaveAttribute("aria-pressed", "true")
+  await expect(chip).toHaveAttribute("aria-pressed", "false")
+  await expect(named).toHaveCount(0)
+
+  // On, then an exit's own minutes from Events: that range, not the window's.
+  await chip.click()
+  await expect(chip).toHaveAttribute("aria-pressed", "true")
+  await eventsView.click()
+  await page
+    .getByRole("region", { name: "Container events" })
+    .getByRole("button", { name: "Open in History" })
+    .first()
+    .click()
+  await expect(history).toHaveAttribute("aria-pressed", "true")
+  await expect
+    .poll(() => historySearches(mocks).at(-1)?.get("since"))
+    .toBe(new Date(Date.parse(dbEvents[0].time) - 5 * 60_000).toISOString())
+  await expect(chip).toHaveAttribute("aria-pressed", "false")
+  await expect(named).toHaveCount(0)
+
+  // And pressed again, the window again.
+  await chip.click()
+  await expect(chip).toHaveAttribute("aria-pressed", "true")
+  await expect(named).toBeVisible()
+  await expect.poll(() => historySearches(mocks).at(-1)?.get("since")).toBe(windowSince)
+})
+
+/**
+ * The Overview's account of a failure reads the lines it names in one press:
+ * the Logs tab, on the failure's window.
+ */
+test("the failure's notice opens the logs on its window", async ({ page }) => {
+  await mockDocker(page)
+  const mocks = await mockServiceLogs(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto(`/docker/containers/${DB}?tab=overview`)
+
+  await page.getByRole("button", { name: "Read those lines" }).click()
+  await expect(page.getByRole("tab", { name: "Logs" })).toHaveAttribute("data-state", "active")
+  await expect(page.getByRole("button", { name: "History", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect(page.getByRole("button", { name: "Crash window" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect(page.getByText(/^Crash window · /)).toBeVisible()
+  await expect
+    .poll(() => historySearches(mocks).at(-1)?.get("since"))
+    .toBe(new Date(dbFailure.logWindow.since).toISOString())
+})
+
+/**
  * A stack's Logs tab is one log of every container, each line in its
  * service's lane rather than behind a `web | ` prefix, from the stack's own
- * source — not a socket of the stack page's own.
+ * source — not a socket of the stack page's own. The service is a field to
+ * narrow by, the readings above narrow the pane as a container's do, and
+ * Events names each container by its service, as the lines do.
  */
 test("a stack's logs are one log with a lane per service", async ({ page }) => {
   await mockDocker(page)
@@ -1292,9 +1428,25 @@ test("a stack's logs are one log with a lane per service", async ({ page }) => {
   await expect(lines.getByText(/\| /)).toHaveCount(0)
   expect(mocks.sockets.at(-1)?.get("source")).toBe("stack:running-app")
 
+  await page.getByRole("button", { name: /^Fields/ }).click()
+  await page.getByRole("option", { name: /^web/ }).click()
+  await expect.poll(() => mocks.sockets.at(-1)?.getAll("f")).toEqual(["service:web"])
+  await page.keyboard.press("Escape")
+  await page.getByRole("button", { name: "Clear the service filter" }).click()
+  await expect.poll(() => mocks.sockets.at(-1)?.getAll("f")).toEqual([])
+
+  await page.getByRole("button", { name: "Show the lines behind errors", exact: true }).click()
+  await expect(
+    page.getByRole("button", { name: "Show every line again, not only the errors" }),
+  ).toHaveAttribute("aria-pressed", "true")
+  await expect.poll(() => mocks.sockets.at(-1)?.get("levels")).toMatch(/error/)
+
   await page.getByRole("button", { name: "Events", exact: true }).click()
-  await expect(page.getByRole("region", { name: "Stack events" })).toBeVisible()
+  const events = page.getByRole("region", { name: "Stack events" })
+  await expect(events).toBeVisible()
   expect(mocks.events.at(-1)?.get("stack")).toBe("running-app")
+  await expect(events.getByText("web", { exact: true }).first()).toBeVisible()
+  await expect(events.getByText("running-app-web-1", { exact: true })).toHaveCount(0)
 })
 
 /**

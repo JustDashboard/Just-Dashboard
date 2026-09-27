@@ -1,26 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import Link from "next/link"
-import {
-  Box,
-  CheckCircle,
-  ChevronRight,
-  ClockRewind,
-  CrossCircle,
-  Heart,
-  Link as LinkGlyph,
-  NetworkDevice,
-  Pause,
-  Play,
-  Plus,
-  RotateClockwise,
-  Stop,
-  StopCircle,
-  Trash,
-  Warning,
-  type Icon,
-} from "@/components/icons"
+import { CheckCircle, ChevronRight, ClockRewind, Warning } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { ApiError, errorMessage, get } from "@/lib/api"
 import { clock, plural, relativeTime, timestamp } from "@/lib/format"
@@ -29,6 +10,8 @@ import {
   eventKey,
   foldRestarts,
   healthOf,
+  lastLinesSearch,
+  linesBefore,
   spanWords,
   type ContainerHealth,
   type EventEntry,
@@ -43,12 +26,11 @@ import { useSocket, type Envelope } from "@/hooks/use-socket"
 import type { ServiceLogsContext } from "@/components/logs/service-logs"
 import { LogRow, eventColumnFor } from "@/components/logs/log-console"
 import { laneStyle } from "@/components/logs/log-text"
-import { InitialsMark } from "@/components/account/user-avatar"
+import { EventMark, EventWho } from "@/components/docker/event-marks"
 import { GroupRule } from "@/components/flow"
 import { InfoTip } from "@/components/form"
 import { FactDot } from "@/components/metrics/host-identity"
 import { PaneFooter } from "@/components/panel"
-import { ProductGlyph, ProductLogo, imageProduct } from "@/components/product-logo"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -58,10 +40,6 @@ import { isCleanExit } from "@/components/deploy/traffic-strip"
 
 /** How many of the newest failures open onto their last lines by themselves. */
 const OPEN_FAILURES = 3
-
-/** The minute before an exit is what "last lines" reads. */
-const LAST_LINES_MS = 60_000
-const LAST_LINES = 20
 
 /** Below this, "watching since" is a restart rather than a quiet afternoon. */
 const RECENTLY_STARTED_MS = 60 * 60_000
@@ -86,11 +64,14 @@ const RECENTLY_STARTED_MS = 60 * 60_000
 export function ContainerEvents({
   containerId,
   stack,
+  healthcheck,
   ctx,
 }: {
   containerId?: string
   /** A compose project, for the stack's view: every one of its containers. */
   stack?: string
+  /** Whether the container has a health check, when the page knows; unknown, it is looked for. */
+  healthcheck?: boolean
   ctx: ServiceLogsContext
 }) {
   const scope = useMemo(
@@ -115,7 +96,9 @@ export function ContainerEvents({
   const socket = useSocket("/docker/events/stream", { query: scope, onMessage })
 
   // Docker keeps a health check's last five probes on the container; they
-  // move with its interval, so they are read again at about that pace.
+  // move with its interval, so they are read again at about that pace — and
+  // not at all for a container the page knows has no check, since the
+  // document that holds them is the whole inspect.
   const inspect = usePoll<unknown>(
     (signal) =>
       get<unknown>(
@@ -125,7 +108,7 @@ export function ContainerEvents({
       ),
     30_000,
     [containerId],
-    { enabled: Boolean(containerId) },
+    { enabled: Boolean(containerId) && healthcheck !== false },
   )
   const health = useMemo(() => healthOf(inspect.data), [inspect.data])
 
@@ -329,99 +312,6 @@ function HealthProbes({ health }: { health: ContainerHealth }) {
 }
 
 /**
- * What happened, as the glyph in the corner of the thing it happened to, in
- * the tone of a reading of state: an exit that failed in red, a restart in
- * amber, a start or a passing check in green, the bookkeeping quiet. The
- * deployment's feed draws the same marks (`deploy/lifecycle-feed.tsx`).
- */
-const HAPPENED: Record<string, [Icon, string]> = {
-  die: [CrossCircle, "text-destructive"],
-  oom: [CrossCircle, "text-destructive"],
-  kill: [Stop, "text-muted-foreground"],
-  restart: [RotateClockwise, "text-warning"],
-  loop: [RotateClockwise, "text-warning"],
-  start: [Play, "text-success"],
-  unpause: [Play, "text-success"],
-  healthy: [Heart, "text-success"],
-  unhealthy: [Heart, "text-warning"],
-  stop: [StopCircle, "text-muted-foreground"],
-  pause: [Pause, "text-muted-foreground"],
-  create: [Plus, "text-muted-foreground"],
-  destroy: [Trash, "text-muted-foreground"],
-  connect: [LinkGlyph, "text-muted-foreground"],
-  disconnect: [LinkGlyph, "text-muted-foreground"],
-}
-
-function happened(entry: EventEntry) {
-  if (entry.kind === "loop") return HAPPENED.loop
-  const event = entry.event
-  if (isCleanExit(event)) return HAPPENED.stop
-  if (event.action.startsWith("health_status")) {
-    return HAPPENED[event.action.endsWith("unhealthy") ? "unhealthy" : "healthy"]
-  }
-  return HAPPENED[event.action]
-}
-
-/** A container is the product it runs; a network or an image keeps a glyph on the same tile. */
-function EventMark({ entry, product }: { entry: EventEntry; product?: string }) {
-  const event = entry.kind === "loop" ? entry.exit : entry.event
-  const named = event.image ? imageProduct(event.image) : undefined
-  const id =
-    event.type === "container"
-      ? named && named !== "docker"
-        ? named
-        : (product ?? "docker")
-      : undefined
-  const badge = happened(entry)
-  const Glyph = badge?.[0]
-  return (
-    <span className="relative z-10 flex shrink-0">
-      <ProductLogo id={id} size="sm" fallback={event.type === "network" ? NetworkDevice : Box} />
-      {Glyph && (
-        <span
-          aria-hidden
-          className="absolute -right-1 -bottom-1 flex size-4 items-center justify-center rounded-sm border border-hairline bg-background"
-        >
-          <Glyph className={cn("size-2.5", badge[1])} />
-        </span>
-      )}
-    </span>
-  )
-}
-
-/** Who did it: the person whose press the audit log matched, or Docker on its own. */
-function Who({ event }: { event: DockerEvent }) {
-  if (event.trigger) {
-    return (
-      <span className="flex shrink-0 items-center gap-1.5">
-        <InitialsMark name={event.trigger.actor || "?"} size="xs" />
-        <Link
-          href={`/audit?action=${encodeURIComponent(event.trigger.action)}`}
-          className="rounded-sm text-xs whitespace-nowrap text-foreground focus-ring hover:underline"
-          title={`Audit entry ${event.trigger.auditId} — ${event.trigger.action} by ${
-            event.trigger.actor || "an unnamed session"
-          }. A name and a window, so a likely cause rather than a recorded one.`}
-        >
-          this dashboard
-        </Link>
-      </span>
-    )
-  }
-  if (event.source !== "daemon") return null
-  return (
-    <span className="flex shrink-0 items-center gap-1.5">
-      <ProductGlyph id="docker" />
-      <span
-        className="text-xs whitespace-nowrap text-muted-foreground"
-        title="Docker acted on its own: a restart policy firing, a health check, or the OOM killer."
-      >
-        docker itself
-      </span>
-    </span>
-  )
-}
-
-/**
  * One row: an event, or a restart loop folded into one. On a phone what sits
  * at the row's edge — the exit, who, when — goes to a line under the name so
  * the sentence keeps its width, as the deployment's feed does.
@@ -449,21 +339,25 @@ function EventItem({
   const [unfolded, setUnfolded] = useState(false)
   const loop = entry.kind === "loop" ? entry : undefined
   const event = entry.kind === "loop" ? entry.exit : entry.event
-  // An OOM kill the container survived — a child the kernel chose — has no
-  // exit after it, so its row carries the lines as an exit's does.
+  // The kernel's note on an exit it caused; its own row only when the
+  // container lived on — a child the kernel chose — and then that row
+  // carries the lines as an exit's does.
+  const oom = entry.kind === "event" ? entry.oom : undefined
   const exited = event.action === "die" || event.action === "oom"
   const before = loop
     ? "the minute before its last exit"
-    : event.action === "oom"
+    : oom || event.action === "oom"
       ? "the minute before the kill"
       : "the minute before it exited"
-  const name = loop ? loop.name : event.name
+  // A stack's log names a container by its service, so its events do too:
+  // one name, and one lane colour, for `db` on the whole page.
+  const name = event.service || event.name
 
   const title = loop
     ? `Restarted ×${loop.times} in ${spanWords(Date.parse(loop.until) - Date.parse(loop.since))}${
         loop.exitCode ? ` · exit ${loop.exitCode}` : ""
       }${loop.oom ? " · out of memory" : ""}`
-    : event.message
+    : (oom ?? event).message
   const edge = (
     <>
       {/* An exit code is the one fact that changes what you do next, so it
@@ -473,7 +367,7 @@ function EventItem({
           exit {event.exitCode}
         </Tag>
       )}
-      <Who event={event} />
+      <EventWho event={event} />
       <span className="numeric text-hint whitespace-nowrap text-muted-foreground">
         {relativeTime(loop ? loop.until : event.time)}
       </span>
@@ -483,7 +377,7 @@ function EventItem({
   return (
     <li className={cn("relative min-w-0 py-2", arrived && "animate-rise")}>
       <div className="flex min-w-0 items-start gap-3">
-        <EventMark entry={entry} product={product} />
+        <EventMark event={event} product={product} loop={Boolean(loop)} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-body leading-5 font-medium">{title}</p>
           <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-hint text-muted-foreground">
@@ -584,18 +478,13 @@ function LastLines({
   const source = dockerSource(event.id ?? event.name)
   useEffect(() => {
     const controller = new AbortController()
-    const until = Date.parse(event.time)
     get<LogSearchResult>(
       "/logs/search",
-      {
-        source,
-        since: new Date(until - LAST_LINES_MS).toISOString(),
-        until: event.time,
-        limit: LAST_LINES,
-      },
+      { source, ...lastLinesSearch(event.time) },
       controller.signal,
     ).then(
-      (result) => setState({ lines: result.lines ?? [], lens: result.lens }),
+      (result) =>
+        setState({ lines: linesBefore(result.lines ?? [], event.time), lens: result.lens }),
       (err) => {
         if (controller.signal.aborted) return
         setState({

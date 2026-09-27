@@ -15,7 +15,13 @@ import type { DockerEvent } from "@/lib/types"
 
 /** One row of the feed: an event, or a restart loop folded into one. */
 export type EventEntry =
-  | { kind: "event"; key: string; event: DockerEvent }
+  | {
+      kind: "event"
+      key: string
+      event: DockerEvent
+      /** The OOM killer's note on the exit it caused, folded into the exit's row. */
+      oom?: DockerEvent
+    }
   | {
       kind: "loop"
       key: string
@@ -38,6 +44,9 @@ export type EventEntry =
 
 /** Two exits further apart than this are two incidents, not one loop. */
 const LOOP_GAP_MS = 10 * 60_000
+
+/** Docker notes an OOM kill and the exit it caused this close together, in either order. */
+const OOM_EXIT_MS = 1_000
 
 export function eventKey(event: DockerEvent) {
   return `${event.time}|${event.type}|${event.action}|${event.id ?? event.name}`
@@ -145,10 +154,11 @@ export function foldRestarts(events: DockerEvent[]): EventEntry[] {
   }
 
   const entries: { time: number; entry: EventEntry }[] = []
-  const single = (event: DockerEvent) =>
-    entries.push({ time: at(event), entry: { kind: "event", key: eventKey(event), event } })
 
   for (const list of byContainer.values()) {
+    // The container's events that stay rows of their own.
+    const singles: DockerEvent[] = []
+    const single = (event: DockerEvent) => singles.push(event)
     let run: Cycle[] = []
     // Health verdicts seen since the run's last cycle: folded into it if
     // another cycle follows, their own rows if the run ends here.
@@ -207,9 +217,79 @@ export function foldRestarts(events: DockerEvent[]): EventEntry[] {
       run.push(item.cycle)
     }
     close()
+    entries.push(...withOomExits(singles))
   }
 
   return entries.sort((a, b) => b.time - a.time).map((e) => e.entry)
+}
+
+/**
+ * One container's rows, with each OOM note on the exit it caused.
+ *
+ * A container the kernel killed for memory says so twice — `oom`, and `die`
+ * with 137 a moment later — and two rows, each opening onto the same minute
+ * of output, read as two incidents. So the note goes on the exit's row. An
+ * `oom` with no exit beside it is a child the kernel chose while the
+ * container lived on, and stays a row of its own.
+ */
+function withOomExits(events: DockerEvent[]): { time: number; entry: EventEntry }[] {
+  const oomOf = new Map<DockerEvent, DockerEvent>()
+  const folded = new Set<DockerEvent>()
+  for (const exit of events) {
+    if (exit.action !== "die") continue
+    const oom = events.find(
+      (e) => e.action === "oom" && !folded.has(e) && Math.abs(at(e) - at(exit)) <= OOM_EXIT_MS,
+    )
+    if (!oom) continue
+    oomOf.set(exit, oom)
+    folded.add(oom)
+  }
+  return events
+    .filter((event) => !folded.has(event))
+    .map((event) => ({
+      time: at(event),
+      entry: { kind: "event", key: eventKey(event), event, oom: oomOf.get(event) },
+    }))
+}
+
+/** The minute before an exit is what "last lines" reads. */
+export const LAST_LINES_MS = 60_000
+
+/** How much of that minute is shown: its end, where the reason is. */
+export const LAST_LINES = 20
+
+/**
+ * Asked for rather than shown: room for the next attempt's start-up in the
+ * part of a second after the exit, which `linesBefore` drops.
+ */
+const LAST_LINES_READ = 200
+
+/**
+ * The search for the minute before an exit.
+ *
+ * A container's search hands its bounds to Docker in whole seconds, which
+ * cuts `until` back to the start of the second the exit happened in — and
+ * the lines of that last part of a second are the ones that say why. So the
+ * search runs to the end of that second, and `linesBefore` drops what came
+ * after the exit: the next attempt starting up, a restart policy's hundred
+ * milliseconds later.
+ */
+export function lastLinesSearch(time: string) {
+  const exit = Date.parse(time)
+  return {
+    since: new Date(exit - LAST_LINES_MS).toISOString(),
+    until: new Date(Math.floor(exit / 1000) * 1000 + 1000).toISOString(),
+    limit: LAST_LINES_READ,
+  }
+}
+
+/** The end of what `lastLinesSearch` found, up to the exit and no further. */
+export function linesBefore<T extends { timestamp?: string }>(lines: T[], time: string): T[] {
+  const exit = Date.parse(time)
+  const after = lines.findIndex(
+    (line) => line.timestamp !== undefined && Date.parse(line.timestamp) > exit,
+  )
+  return (after < 0 ? lines : lines.slice(0, after)).slice(-LAST_LINES)
 }
 
 /** "40 s", "12 min", "2 h 5 min": how long a loop has been going. */
