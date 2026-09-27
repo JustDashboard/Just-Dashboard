@@ -98,16 +98,28 @@ test("a stream block nginx cannot read is an outage, said as one", async ({ page
   await expect(sheet.getByText("This will not forward anything yet")).toHaveCount(0)
 })
 
-test("an include inside http is named, and nothing offers a save its test refuses", async ({
+// nginx reads a file included inside http — as http — and its test refuses
+// proxy_pass there, so every reload on the host fails. Saying "nginx is not
+// reading these" beside a Reload that can only fail was the opposite of it.
+test("a stream file included inside http is an outage, said as one on every surface", async ({
   page,
 }) => {
   await mockProxy(page, { included: false })
   await listing(page, { included: false, includedIn: "http", streams: [bastion] })
   await page.goto("/proxy/streams")
+
+  await expect(page.getByText("These files stop every nginx reload")).toBeVisible()
   await expect(
-    page.getByText(/includes .*inside http, where nginx does not read the files/),
+    page.getByText(/includes \/etc\/nginx\/streams inside http, where a stream/),
   ).toBeVisible()
+  await expect(page.getByText(/every reload is refused — for every site/)).toBeVisible()
+  await expect(page.getByText(/Move the include into a stream block of its own/)).toBeVisible()
+  await expect(page.getByText("Deleting the files below also ends the refusals.")).toBeVisible()
+  await expect(page.getByText("every reload refused")).toBeVisible()
+  await expect(page.getByText(/not reading these/)).toHaveCount(0)
+  await expect(page.getByText("not read by nginx")).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Prepare a stream" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "New stream" })).toHaveCount(0)
 
   await page.getByRole("button", { name: "Edit bastion" }).click()
   const sheet = page.getByRole("dialog")
@@ -117,7 +129,114 @@ test("an include inside http is named, and nothing offers a save its test refuse
   ).toBeVisible()
   await expect(sheet.getByText(/does not read this directory yet/)).toHaveCount(0)
   await expect(sheet.getByText(/includes this directory inside http/)).toBeVisible()
+  await expect(
+    sheet.getByText(/with files there, it refuses every reload on this host/),
+  ).toBeVisible()
+  await expect(sheet.getByText(/Move the include into a top-level stream block/)).toBeVisible()
   await expect(sheet.getByRole("button", { name: "Save for later" })).toBeDisabled()
+  await page.keyboard.press("Escape")
+  await expect(sheet).toHaveCount(0)
+
+  await page.getByRole("button", { name: "More actions for bastion" }).click()
+  await page.getByRole("menuitem", { name: "Delete" }).click()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog).toContainText(
+    "nginx reads these inside http, where its test refuses them, so port 2222 was never forwarded.",
+  )
+  await expect(dialog).not.toContainText("not reading these")
+  await expect(dialog.getByRole("button", { name: "Delete and reload" })).toHaveCount(0)
+  await dialog.getByRole("button", { name: "Cancel" }).click()
+
+  // The Overview reports it with the module outage's weight, not as streams
+  // nginx merely ignores.
+  await page.goto("/proxy")
+  const finding = page.getByText(
+    "nginx refuses every reload: a stream file is included inside http",
+  )
+  await expect(finding).toBeVisible()
+  await expect(page.getByText(/written but nginx is not reading/)).toHaveCount(0)
+  await finding.click()
+  await expect(
+    page.getByText(/every reload is refused — for every site on this host/),
+  ).toBeVisible()
+  await expect(
+    page.getByText(
+      "Move the include into a top-level stream block beside the http block, or delete the stream files.",
+    ),
+  ).toBeVisible()
+})
+
+// Ubuntu's default: no stream module. Moving the include into a stream block
+// there swaps one outage for another, so the include comes out and the
+// module goes in before any stream block is offered.
+test("with no stream module, a misplaced include comes out before the module and the block", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: false })
+  await listing(page, {
+    included: false,
+    includedIn: "http",
+    module: moduleNotInstalled,
+    streams: [bastion],
+  })
+  await page.goto("/proxy/streams")
+  await expect(page.getByText("These files stop every nginx reload")).toBeVisible()
+  await expect(
+    page.getByText(
+      /Take out that include, which ends the refusals\. Install libnginx-mod-stream, the package with nginx's stream module\. Then add this/,
+    ),
+  ).toBeVisible()
+  await expect(page.getByText(/Move the include/)).toHaveCount(0)
+
+  await page.getByRole("button", { name: "Edit bastion" }).click()
+  const sheet = page.getByRole("dialog")
+  await expect(
+    sheet.getByText(
+      /Take that include out\. Install libnginx-mod-stream, the package with nginx's stream module\. Then add this stream block/,
+    ),
+  ).toBeVisible()
+  await expect(sheet.getByText(/Move the include/)).toHaveCount(0)
+  await page.keyboard.press("Escape")
+
+  await page.goto("/proxy")
+  await page.getByText("nginx refuses every reload: a stream file is included inside http").click()
+  await expect(
+    page.getByText(
+      /^Take out the include that puts \/etc\/nginx\/streams there, which ends the refusals\. Install libnginx-mod-stream/,
+    ),
+  ).toBeVisible()
+  await expect(page.getByText(/but this nginx has no stream module/)).toHaveCount(0)
+})
+
+test("an empty directory included inside http is named, and nothing offers a save", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: false })
+  await listing(page, { included: false, includedIn: "http" })
+  await page.goto("/proxy/streams")
+  // An empty directory passes nginx's test wherever it is included: no outage.
+  await expect(page.getByText("This directory is included in the wrong place")).toBeVisible()
+  await expect(
+    page.getByText(/includes \/etc\/nginx\/streams inside http, where nginx does not read/),
+  ).toBeVisible()
+  await expect(page.getByText("These files stop every nginx reload")).toHaveCount(0)
+  await expect(page.getByText(/not reading these/)).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Prepare a stream" })).toHaveCount(0)
+})
+
+test("the module notice names an include inside http on a host without the module", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: false })
+  await listing(page, { included: false, includedIn: "http", module: moduleNotInstalled })
+  await page.goto("/proxy/streams")
+  await expect(page.getByText("This nginx cannot forward streams yet")).toBeVisible()
+  await expect(page.getByText(/Install libnginx-mod-stream/)).toBeVisible()
+  await expect(
+    page.getByText(/includes \/etc\/nginx\/streams inside http instead, where its test refuses/),
+  ).toBeVisible()
+  await expect(page.getByText("These files stop every nginx reload")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Prepare a stream" })).toHaveCount(0)
 })
 
 test("save for later does not reload, and says the file was not tested", async ({ page }) => {

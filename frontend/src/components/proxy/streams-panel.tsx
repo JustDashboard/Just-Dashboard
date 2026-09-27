@@ -15,12 +15,14 @@ import type {
 } from "@/lib/types"
 import {
   byUrgency,
+  includedPlace,
   listenFamily,
   listenLabel,
   moduleMissing,
   moduleRemedy,
   saveBlocked,
   streamBody,
+  streamOutage,
   streamSpecOf,
   streamsLive,
 } from "@/lib/streams"
@@ -92,12 +94,17 @@ export function StreamsPage() {
 
   const live = data ? streamsLive(data) : false
   const blocked = data ? saveBlocked(data) : null
+  const outage = data ? streamOutage(data) : null
 
   const remove = (stream: StreamEntry) => {
     let result: StreamDeleteResult | undefined
     // A file the listing could not read has no port to name and no content
     // to keep; a link goes as a link, and what it points to stays.
     const port = stream.error ? null : stream.listen
+    // Included inside http, nginx does read these — as http, refusing them.
+    const misplaced = data?.includedIn
+      ? `nginx reads these ${includedPlace(data.includedIn)}, where its test refuses them`
+      : ""
     confirm({
       title: `Delete ${stream.name}`,
       confirmLabel: live ? "Delete and reload" : "Delete",
@@ -106,10 +113,14 @@ export function StreamsPage() {
           {port === null
             ? live
               ? "nginx reloads without it."
-              : "nginx is not reading these, so this only removes the file."
+              : misplaced
+                ? `${misplaced}, so this file never forwarded anything.`
+                : "nginx is not reading these, so this only removes the file."
             : live
               ? `Port ${port} stops being forwarded as soon as nginx reloads.`
-              : `nginx is not reading these, so port ${port} was never forwarded — this removes the file before it ever took effect.`}{" "}
+              : misplaced
+                ? `${misplaced}, so port ${port} was never forwarded.`
+                : `nginx is not reading these, so port ${port} was never forwarded — this removes the file before it ever took effect.`}{" "}
           {stream.link ? (
             <>
               This removes the link only, not <code className="font-mono">{stream.link}</code>.
@@ -202,9 +213,15 @@ export function StreamsPage() {
           label="Streams"
           value={counts.all}
           hint={
-            counts.all === 0 ? "nothing forwarded" : live ? "read by nginx" : "not read by nginx"
+            counts.all === 0
+              ? "nothing forwarded"
+              : outage
+                ? "every reload refused"
+                : live
+                  ? "read by nginx"
+                  : "not read by nginx"
           }
-          tone={counts.all > 0 && !live ? "warning" : "default"}
+          tone={counts.all === 0 ? "default" : outage ? "danger" : live ? "default" : "warning"}
         />
         <StatTile label="TCP" value={counts.tcp} hint="connection-oriented forwards" />
         <StatTile label="UDP" value={counts.udp} hint="datagram forwards" />
@@ -364,12 +381,20 @@ function describe(stream: StreamEntry): string {
 
 /**
  * What stands between this directory and a forwarded port, in the order it
- * has to be fixed: the module first, because the include snippet breaks a
- * nginx that has none; then where the directory is included.
+ * has to be fixed: an outage first — the directory stopping every reload on
+ * the host — then the module, because the include snippet breaks a nginx
+ * that has none; then where the directory is included.
  */
 function Readiness({ status }: { status: StreamStatus }) {
   const { module } = status
-  if (moduleMissing(module) && status.included) {
+  const missing = moduleMissing(module)
+  const outage = streamOutage(status)
+  const place = status.includedIn ? includedPlace(status.includedIn) : ""
+  const unchecked =
+    module.state === "unknown"
+      ? ` Whether this nginx has the stream module could not be checked (${module.detail ?? "no answer"}); if nginx then reports an unknown directive "stream", it does not.`
+      : ""
+  if (outage === "module") {
     return (
       <Notice
         tone="danger"
@@ -385,7 +410,29 @@ function Readiness({ status }: { status: StreamStatus }) {
       </Notice>
     )
   }
-  if (moduleMissing(module)) {
+  if (outage === "misplaced") {
+    // nginx does read these files, as whatever block the include sits in, and
+    // refuses them there: "not reading these" would be the opposite of it.
+    return (
+      <Notice tone="danger" icon={Warning} title="These files stop every nginx reload">
+        <div className="space-y-2">
+          <p>
+            nginx.conf includes <code className="font-mono">{status.dir}</code> {place}, where a
+            stream is not allowed, so nginx&rsquo;s configuration test fails on these files and
+            every reload is refused — for every site on this host, not only the streams.
+          </p>
+          <p>
+            {missing
+              ? `Take out that include, which ends the refusals. ${moduleRemedy(module)} Then add this at the top level of nginx.conf — beside the http block, not inside it:`
+              : "Move the include into a stream block of its own at the top level of nginx.conf — beside the http block, not inside it:"}
+          </p>
+          <Well className="whitespace-pre">{status.snippet}</Well>
+          {!missing && <p>Deleting the files below also ends the refusals.{unchecked}</p>}
+        </div>
+      </Notice>
+    )
+  }
+  if (missing) {
     return (
       <Notice tone="warning" icon={Warning} title="This nginx cannot forward streams yet">
         <div className="space-y-2">
@@ -393,6 +440,13 @@ function Readiness({ status }: { status: StreamStatus }) {
             nginx has no stream module, and a stream block in nginx.conf would fail its
             configuration test until it does. {moduleRemedy(module)}
           </p>
+          {status.includedIn && (
+            <p>
+              nginx.conf includes <code className="font-mono">{status.dir}</code> {place} instead,
+              where its test refuses any stream file, so nothing can be saved here until that
+              include comes out.
+            </p>
+          )}
           <p>
             Then add this at the top level of nginx.conf — beside the{" "}
             <code className="font-mono">http</code> block, not inside it:
@@ -404,14 +458,21 @@ function Readiness({ status }: { status: StreamStatus }) {
   }
   if (status.included) return null
   return (
-    <Notice tone="warning" icon={Warning} title="nginx is not reading these yet">
+    <Notice
+      tone="warning"
+      icon={Warning}
+      title={
+        status.includedIn
+          ? "This directory is included in the wrong place"
+          : "nginx is not reading these yet"
+      }
+    >
       <div className="space-y-2">
         {status.includedIn ? (
           <p>
-            nginx.conf includes <code className="font-mono">{status.dir}</code> inside{" "}
-            {status.includedIn}, where nginx does not read the files as streams: its test refuses
-            any file there, so nothing can be saved here until the include moves into a stream block
-            of its own at the top level:
+            nginx.conf includes <code className="font-mono">{status.dir}</code> {place}, where nginx
+            does not read the files as streams: its test refuses any file there, so nothing can be
+            saved here until the include moves into a stream block of its own at the top level:
           </p>
         ) : status.includeError ? (
           <p>
@@ -432,8 +493,7 @@ function Readiness({ status }: { status: StreamStatus }) {
           <code className="font-mono">http</code> block, not inside it. The dashboard does not edit
           nginx.conf itself: every other configuration on the host depends on that file, and a bad
           write there is a server that will not start.
-          {module.state === "unknown" &&
-            ` Whether this nginx has the stream module could not be checked (${module.detail ?? "no answer"}); if nginx then reports an unknown directive "stream", it does not.`}
+          {unchecked}
         </p>
       </div>
     </Notice>
@@ -486,7 +546,8 @@ function NotLive({ status }: { status: StreamStatus }) {
 
 /**
  * Why the form cannot save at all: nginx's test refuses every stream file in
- * the directory, so the fix is outside the form and comes first.
+ * the directory, so the fix is outside the form and comes first — and where
+ * nginx has no stream module, the module comes before the stream block.
  */
 function SaveBlocked({ status, reason }: { status: StreamStatus; reason: "module" | "misplaced" }) {
   if (reason === "module") {
@@ -499,13 +560,21 @@ function SaveBlocked({ status, reason }: { status: StreamStatus; reason: "module
       </Notice>
     )
   }
+  const outage = streamOutage(status) !== null
   return (
-    <Notice tone="warning" icon={Warning} title="No stream can pass nginx’s test yet">
+    <Notice
+      tone={outage ? "danger" : "warning"}
+      icon={Warning}
+      title="No stream can pass nginx’s test yet"
+    >
       <div className="space-y-2">
         <p>
-          nginx.conf includes this directory inside {status.includedIn}, where its configuration
-          test refuses a stream. Move the include into a top-level stream block, beside the http
-          block:
+          nginx.conf includes this directory {includedPlace(status.includedIn ?? "")}, where its
+          configuration test refuses a stream
+          {outage ? " — and with files there, it refuses every reload on this host" : ""}.{" "}
+          {moduleMissing(status.module)
+            ? `Take that include out. ${moduleRemedy(status.module)} Then add this stream block at the top level, beside the http block:`
+            : "Move the include into a top-level stream block, beside the http block:"}
         </p>
         <Well className="whitespace-pre">{status.snippet}</Well>
       </div>
@@ -660,7 +729,7 @@ function StreamForm({
               : blocked === "module"
                 ? "nginx’s test fails until it has the stream module."
                 : blocked === "misplaced"
-                  ? `nginx reads this directory inside ${status.includedIn}, where its test refuses a stream.`
+                  ? `nginx reads this directory ${includedPlace(status.includedIn ?? "")}, where its test refuses a stream.`
                   : live
                     ? "Tested with nginx’s own parser before it takes effect."
                     : "nginx does not read this directory yet, so its test cannot check this file."}

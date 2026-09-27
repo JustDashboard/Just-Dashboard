@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import {
   byUrgency,
+  includedPlace,
   listenFamily,
   listenLabel,
   moduleMissing,
   moduleRemedy,
   saveBlocked,
   streamBody,
+  streamOutage,
   streamSpecOf,
   streamsLive,
 } from "./streams"
@@ -160,6 +162,64 @@ describe("saveBlocked", () => {
     expect(
       saveBlocked(status({ included: true, module: { state: "unknown", usable: false } })),
     ).toBeNull()
+  })
+})
+
+describe("streamOutage", () => {
+  const status = (overrides) => ({
+    included: false,
+    module: { state: "loaded", usable: true },
+    snippet: "",
+    dir: "/etc/nginx/stream.d",
+    streams: [],
+    ...overrides,
+  })
+  const missing = { state: "not-installed", usable: false }
+  const file = entry({})
+
+  // nginx reads a file included inside http as http, and its test refuses
+  // proxy_pass there: every reload on the host fails, not only the streams'.
+  test("a file included in the wrong block stops every reload, with or without the module", () => {
+    expect(streamOutage(status({ includedIn: "http", streams: [file] }))).toBe("misplaced")
+    expect(streamOutage(status({ includedIn: "http", module: missing, streams: [file] }))).toBe(
+      "misplaced",
+    )
+    // An unreadable file is still a file nginx reads.
+    expect(
+      streamOutage(
+        status({ includedIn: "http", streams: [entry({ error: "permission denied" })] }),
+      ),
+    ).toBe("misplaced")
+  })
+
+  test("a stream block with no module stops every reload, files or not", () => {
+    expect(streamOutage(status({ included: true, module: missing }))).toBe("module")
+    expect(streamOutage(status({ included: true, module: missing, streams: [file] }))).toBe(
+      "module",
+    )
+  })
+
+  // An empty directory included anywhere passes nginx's test: saves are
+  // blocked, reloads are not.
+  test("nothing stops a reload while the misplaced directory is empty", () => {
+    expect(streamOutage(status({ includedIn: "http" }))).toBeNull()
+    expect(saveBlocked(status({ includedIn: "http" }))).toBe("misplaced")
+    expect(streamOutage(status({ included: true, streams: [file] }))).toBeNull()
+    expect(streamOutage(status({ streams: [file] }))).toBeNull()
+    expect(streamOutage(status({ module: missing, streams: [file] }))).toBeNull()
+    expect(
+      streamOutage(status({ included: true, module: { state: "unknown", usable: false } })),
+    ).toBeNull()
+  })
+})
+
+describe("includedPlace", () => {
+  test("a block is inside, the top level is at", () => {
+    expect(includedPlace("http")).toBe("inside http")
+    expect(includedPlace("stream › server")).toBe("inside stream › server")
+    expect(includedPlace("the top level, outside any block")).toBe(
+      "at the top level, outside any block",
+    )
   })
 })
 

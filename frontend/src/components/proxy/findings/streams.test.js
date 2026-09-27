@@ -43,12 +43,49 @@ describe("streamFindings", () => {
     expect(findings[0].detail).toContain("every reload is refused")
   })
 
-  test("the include is named when it sits in the wrong block", () => {
+  // nginx reads a file included inside http — as http — and its test refuses
+  // proxy_pass there, so this is the module outage's equal, not "not reading".
+  test("a stream file included in the wrong block is critical: every reload fails", () => {
     const findings = streamFindings({ streams: status({ includedIn: "http" }) })
-    expect(ids(findings)).toEqual(["warning streams.not-included"])
-    expect(findings[0].detail).toBe(
-      "/etc/nginx/stream.d is included inside http, where nginx does not read it as streams.",
+    expect(ids(findings)).toEqual(["critical streams.misplaced"])
+    expect(findings[0].title).toBe(
+      "nginx refuses every reload: a stream file is included inside http",
     )
+    expect(findings[0].detail).toBe(
+      "/etc/nginx/stream.d is included inside http, where a stream is not allowed, so nginx's configuration test fails and every reload is refused — for every site on this host, not only the streams.",
+    )
+    expect(findings[0].advice).toBe(
+      "Move the include into a top-level stream block beside the http block, or delete the stream files.",
+    )
+    expect(findings.map((f) => f.title).join(" ")).not.toContain("not reading")
+  })
+
+  test("the place is said as nginx has it, and files are counted", () => {
+    const two = [stream({ name: "a" }), stream({ name: "b", open: false, allowFrom: ["10.0.0.1"] })]
+    const findings = streamFindings({
+      streams: status({ includedIn: "the top level, outside any block", streams: two }),
+    })
+    expect(findings[0].title).toBe(
+      "nginx refuses every reload: 2 stream files are included at the top level, outside any block",
+    )
+  })
+
+  // Moving the include into a stream block on a host without the module
+  // swaps one outage for another: the include comes out, then the module.
+  test("without the module, the include comes out first and the module before the stream block", () => {
+    const findings = streamFindings({
+      streams: status({ includedIn: "http", module: notInstalled }),
+    })
+    expect(ids(findings)).toEqual(["critical streams.misplaced"])
+    expect(findings[0].advice).toBe(
+      "Take out the include that puts /etc/nginx/stream.d there, which ends the refusals. Install libnginx-mod-stream, the package with nginx's stream module. Then include it from a top-level stream block.",
+    )
+    expect(findings[0].advice).not.toContain("Move the include")
+  })
+
+  // An empty directory included inside http passes nginx's test.
+  test("nothing to say about an empty directory included in the wrong block", () => {
+    expect(streamFindings({ streams: status({ includedIn: "http", streams: [] }) })).toEqual([])
   })
 
   test("nothing to say about an empty directory with no module", () => {

@@ -84,6 +84,28 @@ export function saveBlocked(status: StreamStatus): "module" | "misplaced" | null
 }
 
 /**
+ * Why nginx's test fails for the whole host because of the stream directory,
+ * so every reload — every site's, not only the streams' — is refused: a
+ * stream block with no module to read it, or stream files included where a
+ * stream is not allowed. An include in the wrong block breaks nothing until a
+ * file is there; then nginx reads that file as, say, http and refuses it.
+ * Null when the directory stops no reload.
+ */
+export function streamOutage(status: StreamStatus): "module" | "misplaced" | null {
+  if (moduleMissing(status.module) && status.included) return "module"
+  if (status.includedIn && status.streams.length > 0) return "misplaced"
+  return null
+}
+
+/**
+ * Where the directory is included instead, as a phrase: "inside http", or
+ * "at the top level, outside any block" rather than "inside the top level".
+ */
+export function includedPlace(includedIn: string): string {
+  return includedIn.startsWith("the top level") ? `at ${includedIn}` : `inside ${includedIn}`
+}
+
+/**
  * The family a stream takes every address of, when it listens that way:
  * `listen 5432;` is 0.0.0.0, every IPv4 address and no IPv6 one. Written as
  * "0.0.0.0:5432" or "only on 0.0.0.0", that read as a restriction.
