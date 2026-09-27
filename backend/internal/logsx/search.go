@@ -208,12 +208,7 @@ func (c *Collector) scanFile(ctx context.Context, path, stream string, live bool
 		}
 		lineNo++
 		text := sc.Text()
-		// Parsing the level and the timestamp is the expensive part per line,
-		// and a line the text filter has already rejected needs neither —
-		// unless it is a candidate for the context window, which is the one
-		// case where a non-matching line still gets rendered.
-		if c.pending == 0 && c.before == 0 && st.Skip(text) {
-			c.scanned++
+		if c.Skip(st, text) {
 			continue
 		}
 		line := ParseLine(text, name)
@@ -340,6 +335,19 @@ func (c *Collector) FileError(err error) {
 // Incomplete marks the answer as bounded by time rather than by data, which is
 // the difference between "no more matches" and "we stopped looking".
 func (c *Collector) Incomplete() { c.res.Complete = false }
+
+// Skip is the pre-parse test for a line on its way to Feed. Parsing the level
+// and the timestamp is the expensive part per line, and a line the text
+// filter has already rejected needs neither — unless it is a candidate for
+// the context window, which is the one case where a non-matching line still
+// gets rendered. A skipped line still counts as scanned.
+func (c *Collector) Skip(st *Stream, raw string) bool {
+	if c.pending > 0 || c.before > 0 || !st.Skip(raw) {
+		return false
+	}
+	c.scanned++
+	return true
+}
 
 // Feed accepts one parsed line, in file order, already read through the
 // current file's stream.

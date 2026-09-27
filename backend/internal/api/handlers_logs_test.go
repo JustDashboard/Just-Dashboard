@@ -3,15 +3,19 @@ package api
 import (
 	"compress/gzip"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/logsx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 )
 
 func dockerxLogLine(text, stream string) dockerx.LogLine {
@@ -242,9 +246,19 @@ func TestLogTargetParsing(t *testing.T) {
 		{raw: "journal:nginx.service", kind: logsx.KindJournal, id: "nginx.service"},
 		{raw: "/var/log/syslog", kind: logsx.KindSystem, path: "/var/log/syslog"},
 		{raw: "file:/var/log/syslog", kind: logsx.KindSystem, path: "/var/log/syslog"},
+		{raw: "stack:shop", kind: logsx.KindStack, id: "shop"},
+		{raw: "stack:my_app-2", kind: logsx.KindStack, id: "my_app-2"},
+		{raw: "journal-id:sshd,sshd-session,sudo", kind: logsx.KindJournalID},
+		{raw: "kernel:", kind: logsx.KindKernel},
 		{raw: "", fails: true},
 		{raw: "relative.log", fails: true},
 		{raw: "docker:", fails: true},
+		{raw: "stack:", fails: true},
+		{raw: "stack:Shop", fails: true},
+		{raw: "stack:../etc", fails: true},
+		{raw: "journal-id:", fails: true},
+		{raw: "journal-id:--output=cat", fails: true},
+		{raw: "kernel:ring", fails: true},
 	}
 	for _, tc := range cases {
 		got, err := parseLogTarget(tc.raw)
@@ -290,7 +304,7 @@ func TestJournalPriorityNarrowing(t *testing.T) {
 // Leaving it in the text draws the timestamp twice, and the file parser cannot
 // read it — nanoseconds are longer than any layout it knows.
 func TestDockerLineSplitsTheTimestampOut(t *testing.T) {
-	got := dockerLine(dockerxLogLine("2024-06-12T10:00:02.123456789Z ERROR upstream refused", "stderr"))
+	got := dockerLine(dockerxLogLine("2024-06-12T10:00:02.123456789Z ERROR upstream refused", "stderr"), nil)
 	if got.Text != "ERROR upstream refused" {
 		t.Errorf("text = %q, want the line without its timestamp", got.Text)
 	}
@@ -303,7 +317,7 @@ func TestDockerLineSplitsTheTimestampOut(t *testing.T) {
 
 	// A container logging normally to stderr — which many do — must not be
 	// painted as an error when its own text said otherwise.
-	info := dockerLine(dockerxLogLine("2024-06-12T10:00:02Z INFO listening on 3000", "stderr"))
+	info := dockerLine(dockerxLogLine("2024-06-12T10:00:02Z INFO listening on 3000", "stderr"), nil)
 	if info.Level != "info" {
 		t.Errorf("level = %q, want the level the line itself claims", info.Level)
 	}
@@ -314,7 +328,7 @@ func TestDockerLineSplitsTheTimestampOut(t *testing.T) {
 	// project opened its Logs tab reading "13 errors", every one of them a
 	// version banner. The stream is recorded on the line and rendered; that is
 	// the honest signal.
-	bare := dockerLine(dockerxLogLine("2024-06-12T10:00:02Z something happened", "stderr"))
+	bare := dockerLine(dockerxLogLine("2024-06-12T10:00:02Z something happened", "stderr"), nil)
 	if bare.Level != "" {
 		t.Errorf("level = %q, want no level for a line that claims none", bare.Level)
 	}
@@ -327,7 +341,7 @@ func TestDockerLineSplitsTheTimestampOut(t *testing.T) {
 // stream as its output. Leaving them in draws "B[2KB[1AB[2KB[G" on the page and
 // — worse — feeds the escape bytes to the level scan and the operator's search.
 func TestDockerLineStripsTerminalControl(t *testing.T) {
-	got := dockerLine(dockerxLogLine("2024-06-12T10:00:02Z \x1b[2K\x1b[1A\x1b[32mGenerated Prisma Client\x1b[0m", "stdout"))
+	got := dockerLine(dockerxLogLine("2024-06-12T10:00:02Z \x1b[2K\x1b[1A\x1b[32mGenerated Prisma Client\x1b[0m", "stdout"), nil)
 	if got.Text != "Generated Prisma Client" {
 		t.Errorf("text = %q, want the escape sequences resolved away", got.Text)
 	}
@@ -336,7 +350,7 @@ func TestDockerLineStripsTerminalControl(t *testing.T) {
 // An application logging JSON is the common case for anything written this
 // decade, and the word scan finds either nothing or the wrong thing in one.
 func TestDockerLineReadsStructuredOutput(t *testing.T) {
-	got := dockerLine(dockerxLogLine(`2024-06-12T10:00:02Z {"level":"error","msg":"upstream timeout","requestId":"r-1"}`, "stdout"))
+	got := dockerLine(dockerxLogLine(`2024-06-12T10:00:02Z {"level":"error","msg":"upstream timeout","requestId":"r-1"}`, "stdout"), nil)
 	if got.Level != "error" {
 		t.Errorf("level = %q, want the level the JSON claims", got.Level)
 	}
@@ -345,5 +359,249 @@ func TestDockerLineReadsStructuredOutput(t *testing.T) {
 	}
 	if got.Fields["requestId"] != "r-1" {
 		t.Errorf("fields = %v, want the context that is the whole point of logging JSON", got.Fields)
+	}
+}
+
+// Failed logins can hold passwords typed into the username prompt, which is
+// why /logins/failed needs system.admin. The same lines in auth.log, sshd's
+// journal and the sshd identifiers need it too, on every route that reads a
+// source, and they are not offered to anyone who could not open them.
+func TestAuthLogsNeedAnAdministrator(t *testing.T) {
+	s := testServer(t)
+	root := s.Cfg.LogRoots[0]
+	admin := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+	reader := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "reader", auth.RoleReadOnly)}
+	authLog := filepath.Join(root, "auth.log")
+	writeLog(t, authLog, "2026-09-27T00:21:02.476539+00:00 vps sshd-session[78923]: Invalid user hunter2 from 203.0.113.7 port 30358")
+	writeLog(t, filepath.Join(root, "auth.log.1"), "yesterday")
+	writeLog(t, filepath.Join(root, "app.log"), "hello")
+	if err := os.Symlink(authLog, filepath.Join(root, "innocent.log")); err != nil {
+		t.Fatal(err)
+	}
+
+	gated := []string{
+		authLog, filepath.Join(root, "auth.log.1"), filepath.Join(root, "innocent.log"),
+		"journal:ssh.service", "journal:sshd.service", "journal:sshd@0-10.0.0.1:22-203.0.113.7:4040.service",
+		"journal-id:sshd", "journal-id:CRON,sshd-session", "journal-id:sudo", "journal-id:systemd-logind",
+	}
+	for _, source := range gated {
+		for _, route := range []string{"search", "stream", "download", "retention", "source"} {
+			rec := reader.do("GET", "/api/v1/logs/"+route+"?source="+url.QueryEscape(source), "", nil)
+			if rec.Code != http.StatusForbidden {
+				t.Errorf("reader %s %s: status %d, want 403", route, source, rec.Code)
+			}
+		}
+	}
+	for _, route := range []string{"search", "download", "retention", "source"} {
+		if rec := admin.do("GET", "/api/v1/logs/"+route+"?source="+url.QueryEscape(authLog), "", nil); rec.Code != 200 {
+			t.Errorf("admin %s: status %d: %s", route, rec.Code, rec.Body.String())
+		}
+	}
+	// What is not auth data stays readable, including the whole journal and
+	// the cron identifier.
+	for _, source := range []string{filepath.Join(root, "app.log"), "journal:cron.service", "journal-id:CRON", "kernel:", "journal:"} {
+		if rec := reader.do("GET", "/api/v1/logs/source?source="+url.QueryEscape(source), "", nil); rec.Code == http.StatusForbidden {
+			t.Errorf("reader %s was refused", source)
+		}
+	}
+
+	listed := func(c *client) map[string]bool {
+		index := decode[logSourceIndex](t, c.do("GET", "/api/v1/logs/sources", "", nil))
+		out := map[string]bool{}
+		for _, src := range index.Sources {
+			out[filepath.Base(src.Path)] = true
+		}
+		return out
+	}
+	if got := listed(reader); got["auth.log"] || !got["app.log"] {
+		t.Errorf("reader's sources = %v, want app.log and not auth.log", got)
+	}
+	if got := listed(admin); !got["auth.log"] {
+		t.Errorf("admin's sources = %v, want auth.log", got)
+	}
+}
+
+// Everything a search can be refused for is refused as a 400 before the
+// source is read — for a container that would otherwise surface as a daemon
+// error — and the stream refuses before the upgrade.
+func TestLogRoutesRefuseBadFieldsAndLensesUpFront(t *testing.T) {
+	c, root := logClient(t)
+	path := filepath.Join(root, "app.log")
+	writeLog(t, path, "anything")
+	bad := []string{
+		"f=nokey", "f=level:error", "f=status:>=five", "lens=no-such-lens",
+		"facets=" + strings.Repeat("a,", 12) + "a", "facetLimit=0", "facetLimit=51", "facetLimit=x",
+		"sample=user", "measure=a:b", "histogramValues=slow",
+	}
+	for _, query := range bad {
+		for _, route := range []string{"/api/v1/logs/search", "/api/v1/logs/download"} {
+			if rec := c.do("GET", route+"?source="+path+"&"+query, "", nil); rec.Code != 400 {
+				t.Errorf("%s?%s: status %d, want 400 — %s", route, query, rec.Code, rec.Body.String())
+			}
+		}
+	}
+	for _, query := range []string{"f=nokey", "lens=no-such-lens"} {
+		for _, source := range []string{path, "docker:web", "stack:shop", "journal:x.service"} {
+			if rec := c.do("GET", "/api/v1/logs/stream?source="+url.QueryEscape(source)+"&"+query, "", nil); rec.Code != 400 {
+				t.Errorf("stream %s?%s: status %d, want 400", source, query, rec.Code)
+			}
+		}
+	}
+	if rec := c.do("GET", "/api/v1/logs/search?source=docker:web&f=nokey", "", nil); rec.Code != 400 {
+		t.Errorf("a container search with a bad predicate: status %d, want 400", rec.Code)
+	}
+}
+
+// The predicates, the facets and the measure reach the collector from the
+// query string, and a predicate-only filter is reported as a filter.
+func TestLogSearchAppliesFieldsAndFacets(t *testing.T) {
+	c, root := logClient(t)
+	path := filepath.Join(root, "app.log")
+	writeLog(t, path,
+		`{"time":"2026-09-27T10:00:00Z","level":"info","msg":"login","user":"alice","duration_ms":10}`,
+		`{"time":"2026-09-27T10:01:00Z","level":"error","msg":"login","user":"bob","duration_ms":250}`,
+		`{"time":"2026-09-27T10:02:00Z","level":"info","msg":"login","user":"bob","duration_ms":40}`,
+		`time="2026-09-27T10:03:00Z" level=warning msg="slow login" user=bob duration_ms=900`,
+	)
+	res := decode[logsx.SearchResult](t, c.do("GET",
+		"/api/v1/logs/search?source="+path+"&f=user:bob&f=duration_ms:>=100&facets=level,user&measure=duration_ms&sample=user&histogramBy=level&lens=none", "", nil))
+	if res.Matched != 2 {
+		t.Fatalf("matched = %d, want bob's two slow logins", res.Matched)
+	}
+	levels := res.Facets["level"]
+	if levels == nil || len(levels.Values) != 2 || levels.Values[0].Samples["user"] != "bob" {
+		t.Errorf("level facet = %+v", levels)
+	}
+	if res.Measure == nil || res.Measure.Count != 2 || res.Measure.Max != 900 {
+		t.Errorf("measure = %+v", res.Measure)
+	}
+	if res.Lens != "" {
+		t.Errorf("lens = %q, want none", res.Lens)
+	}
+	var out strings.Builder
+	rec := c.do("GET", "/api/v1/logs/download?source="+path+"&f=user:alice", "", nil)
+	out.WriteString(rec.Body.String())
+	if strings.Count(out.String(), "\n") != 1 || !strings.Contains(out.String(), "alice") {
+		t.Errorf("the export ignored the predicate:\n%s", out.String())
+	}
+}
+
+func TestLogSourceDescribesOneFile(t *testing.T) {
+	c, root := logClient(t)
+	path := filepath.Join(root, "app.log")
+	writeLog(t, path, "hello")
+	writeLog(t, path+".1", "yesterday")
+	src := decode[logsx.Source](t, c.do("GET", "/api/v1/logs/source?source=file:"+path, "", nil))
+	if src.Path != path || src.Size == 0 || src.Modified == nil || src.Archives != 1 || src.Label != "app.log" {
+		t.Errorf("source = %+v", src)
+	}
+	if rec := c.do("GET", "/api/v1/logs/source?source="+filepath.Join(root, "missing.log"), "", nil); rec.Code != 404 {
+		t.Errorf("a missing file: status %d, want 404", rec.Code)
+	}
+	if rec := c.do("GET", "/api/v1/logs/source?source=/etc/shadow", "", nil); rec.Code != 400 {
+		t.Errorf("outside the roots: status %d, want 400", rec.Code)
+	}
+	unit := decode[logsx.Source](t, c.do("GET", "/api/v1/logs/source?source=journal-id:sshd-session,sudo", "", nil))
+	if unit.Kind != logsx.KindJournalID || unit.ID != "journal-id:sshd-session,sudo" || unit.Label != "sshd-session, sudo" {
+		t.Errorf("journal-id source = %+v", unit)
+	}
+}
+
+// The journal's fields become attrs, the manager's UNIT and INVOCATION_ID win
+// over the fields that name PID 1, and the level follows its precedence: a
+// structured level key over the priority, the priority over the word scan.
+func TestJournalLineFieldsAndLevel(t *testing.T) {
+	stamp := time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC)
+	manager := journalLine(procs.JournalEntry{
+		Timestamp: stamp, Priority: 4, Unit: "init.scope", Syslog: "systemd", PID: "1",
+		About: "nordvpnd-killswitch.service", Invocation: "bce17d", MessageID: "98e322203f7a4ed290d09fe03c09fe15",
+		ExitCode: "exited", ExitStatus: "1",
+		Message: "nordvpnd-killswitch.service: Main process exited, code=exited, status=1/FAILURE",
+	}, nil)
+	want := map[string]string{
+		"unit": "nordvpnd-killswitch.service", "program": "systemd", "pid": "1", "invocation": "bce17d",
+		"message_id": "98e322203f7a4ed290d09fe03c09fe15", "exit_code": "exited", "exit_status": "1",
+	}
+	for k, v := range want {
+		if manager.Attrs[k] != v {
+			t.Errorf("attr %s = %q, want %q", k, manager.Attrs[k], v)
+		}
+	}
+	if manager.Level != "warn" || manager.Source != "systemd[1]" || manager.Fields != nil {
+		t.Errorf("manager line = %+v", manager)
+	}
+
+	prose := journalLine(procs.JournalEntry{Timestamp: stamp, Priority: 6, Unit: "api.service", Comm: "node",
+		Message: "error-reporting enabled"}, nil)
+	if prose.Level != "info" || prose.Attrs["program"] != "node" || prose.Attrs["unit"] != "api.service" {
+		t.Errorf("a priority-6 line with the word error in it = %q %v", prose.Level, prose.Attrs)
+	}
+	structured := journalLine(procs.JournalEntry{Timestamp: stamp, Priority: 6,
+		Message: "\x1b[31m" + `{"level":"error","msg":"upstream timeout","time":"2020-01-01T00:00:00Z"}`}, nil)
+	if structured.Level != "error" || structured.Message != "upstream timeout" {
+		t.Errorf("a JSON line under systemd = %q %q", structured.Level, structured.Message)
+	}
+	// The journal's stamp is when it happened; the one in the message is
+	// only when the program thought it was.
+	if structured.Timestamp == nil || !structured.Timestamp.Equal(stamp) {
+		t.Errorf("timestamp = %v, want the journal's", structured.Timestamp)
+	}
+	if plain := journalLine(procs.JournalEntry{Priority: 3, Message: "something broke"}, nil); plain.Level != "error" {
+		t.Errorf("priority 3 = %q", plain.Level)
+	}
+}
+
+// The manager's lines always go to the systemd lens; a unit's other programs
+// go to theirs only when the lens was detected rather than forced; the whole
+// journal leaves the rest to its own composite lens.
+func TestJournalRouting(t *testing.T) {
+	line := func(program string) *logsx.Line {
+		l := &logsx.Line{}
+		l.SetAttr("program", program)
+		return l
+	}
+	unit := logTarget{kind: logsx.KindJournal, id: "ssh.service"}
+	whole := logTarget{kind: logsx.KindJournal}
+	cases := []struct {
+		target  logTarget
+		forced  bool
+		program string
+		want    string
+	}{
+		{unit, false, "systemd", "systemd"},
+		{unit, false, "systemd-coredump", "systemd"},
+		{unit, false, "sshd-session", "auth"},
+		{unit, false, "some-helper", ""},
+		{unit, true, "sshd-session", ""},
+		{unit, true, "systemd", "systemd"},
+		{whole, false, "sshd-session", ""},
+		{whole, false, "systemd", "systemd"},
+		{logTarget{kind: logsx.KindJournalID, idents: []string{"CRON"}}, false, "CRON", "cron"},
+	}
+	for _, tc := range cases {
+		if got := journalRoute(tc.target, tc.forced)(line(tc.program)); got != tc.want {
+			t.Errorf("%+v forced=%v %s = %q, want %q", tc.target, tc.forced, tc.program, got, tc.want)
+		}
+	}
+}
+
+// With a lens reading the lines the chips' priority is not pushed below 6: a
+// lens raises what the program filed at info, and the exact test still runs.
+func TestJournalPriorityWithALens(t *testing.T) {
+	cases := []struct {
+		spec    logsx.Filter
+		want    int
+		clamped bool
+	}{
+		{logsx.Filter{Levels: []string{"error"}}, 3, false},
+		{logsx.Filter{Levels: []string{"error"}, Lens: "postgres"}, 6, true},
+		{logsx.Filter{Levels: []string{"error"}, Lens: logsx.LensNone}, 3, false},
+		{logsx.Filter{Levels: []string{"debug"}, Lens: "postgres"}, 7, false},
+		{logsx.Filter{Lens: "postgres"}, -1, false},
+	}
+	for _, tc := range cases {
+		if got, clamped := journalPriority(tc.spec); got != tc.want || clamped != tc.clamped {
+			t.Errorf("%+v = %d %v, want %d %v", tc.spec, got, clamped, tc.want, tc.clamped)
+		}
 	}
 }

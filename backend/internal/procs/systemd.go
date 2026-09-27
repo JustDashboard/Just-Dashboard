@@ -258,6 +258,22 @@ type JournalEntry struct {
 	PID       string    `json:"pid,omitempty"`
 	Hostname  string    `json:"hostname,omitempty"`
 	Syslog    string    `json:"syslogIdentifier,omitempty"`
+
+	// The fields below are what the log viewer reads a record's meaning from,
+	// and are not part of the unit pages' wire shape.
+	//
+	// The manager's own lines about a unit — Started, Failed with result
+	// 'exit-code', Scheduled restart job — are written by PID 1, so their
+	// _SYSTEMD_UNIT is init.scope. The unit they are about is in UNIT, and
+	// the run they belong to in INVOCATION_ID; reading only the underscore
+	// fields drops exactly the lines that say how a run ended.
+	About      string `json:"-"` // UNIT ‖ USER_UNIT
+	Comm       string `json:"-"` // _COMM, the program when no identifier was given
+	Invocation string `json:"-"` // _SYSTEMD_INVOCATION_ID ‖ INVOCATION_ID ‖ USER_INVOCATION_ID
+	MessageID  string `json:"-"` // MESSAGE_ID, the stable name of a manager event
+	Result     string `json:"-"` // UNIT_RESULT
+	ExitCode   string `json:"-"` // EXIT_CODE: exited, killed or dumped
+	ExitStatus string `json:"-"` // EXIT_STATUS: a number, or a signal name
 }
 
 // JournalCommand builds a journalctl invocation. JSON output is used rather
@@ -271,8 +287,11 @@ type JournalEntry struct {
 // full of matches. Pushing the window down to journalctl is what makes "the
 // last 300 errors" mean what it says.
 type JournalOptions struct {
-	Unit       string
-	Identifier string
+	Unit string
+	// Identifiers narrow to these syslog identifiers (`-t`, repeated, OR'ed):
+	// sshd, sshd-session and sudo together are "who logged in" on a host with
+	// no auth.log.
+	Identifiers []string
 	// Lines caps the tail. Zero means no cap, which is what a search over an
 	// explicit time window wants — there the window is the bound.
 	Lines  int
@@ -307,11 +326,11 @@ func JournalCommandOpts(ctx context.Context, opts JournalOptions) (*exec.Cmd, er
 		}
 		args = append(args, "-u", opts.Unit)
 	}
-	if opts.Identifier != "" {
-		if err := ValidateName(opts.Identifier); err != nil {
+	for _, ident := range opts.Identifiers {
+		if err := ValidateName(ident); err != nil {
 			return nil, err
 		}
-		args = append(args, "-t", opts.Identifier)
+		args = append(args, "-t", ident)
 	}
 	if opts.Lines > 20000 {
 		opts.Lines = 20000
@@ -366,12 +385,27 @@ func ParseJournalLine(line []byte) (JournalEntry, bool) {
 	if err := json.Unmarshal(line, &raw); err != nil {
 		return JournalEntry{}, false
 	}
+	first := func(keys ...string) string {
+		for _, k := range keys {
+			if v := journalString(raw[k]); v != "" {
+				return v
+			}
+		}
+		return ""
+	}
 	e := JournalEntry{
-		Message:  journalString(raw["MESSAGE"]),
-		Unit:     journalString(raw["_SYSTEMD_UNIT"]),
-		PID:      journalString(raw["_PID"]),
-		Hostname: journalString(raw["_HOSTNAME"]),
-		Syslog:   journalString(raw["SYSLOG_IDENTIFIER"]),
+		Message:    journalString(raw["MESSAGE"]),
+		Unit:       journalString(raw["_SYSTEMD_UNIT"]),
+		PID:        journalString(raw["_PID"]),
+		Hostname:   journalString(raw["_HOSTNAME"]),
+		Syslog:     journalString(raw["SYSLOG_IDENTIFIER"]),
+		About:      first("UNIT", "USER_UNIT"),
+		Comm:       journalString(raw["_COMM"]),
+		Invocation: first("_SYSTEMD_INVOCATION_ID", "INVOCATION_ID", "USER_INVOCATION_ID"),
+		MessageID:  journalString(raw["MESSAGE_ID"]),
+		Result:     journalString(raw["UNIT_RESULT"]),
+		ExitCode:   journalString(raw["EXIT_CODE"]),
+		ExitStatus: journalString(raw["EXIT_STATUS"]),
 	}
 	if p, err := strconv.Atoi(journalString(raw["PRIORITY"])); err == nil {
 		e.Priority = p
