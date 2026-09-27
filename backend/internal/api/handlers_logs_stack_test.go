@@ -35,7 +35,8 @@ type fakeLogEngine struct {
 
 // serveFakeLogEngine points the server at an Engine that knows only these
 // containers, each with a TTY so its log is plain lines rather than Docker's
-// multiplexed frames. It honours tail and since the way the daemon does.
+// multiplexed frames. It honours tail, since and until the way the daemon
+// does: to the nanosecond the client sent.
 func serveFakeLogEngine(t *testing.T, s *Server, containers ...fakeLogContainer) *fakeLogEngine {
 	t.Helper()
 	fake := &fakeLogEngine{inspects: map[string]int{}}
@@ -96,15 +97,27 @@ func serveFakeLogEngine(t *testing.T, s *Server, containers ...fakeLogContainer)
 			if q.Get("follow") == "1" || q.Get("follow") == "true" {
 				lines = append(slices.Clone(lines), c.followLines...)
 			}
-			if since := q.Get("since"); since != "" {
-				secs, nanos, _ := strings.Cut(since, ".")
+			bound := func(v string) time.Time {
+				secs, nanos, _ := strings.Cut(v, ".")
 				sec, _ := strconv.ParseInt(secs, 10, 64)
 				nsec, _ := strconv.ParseInt((nanos + "000000000")[:9], 10, 64)
-				from := time.Unix(sec, nsec)
+				return time.Unix(sec, nsec)
+			}
+			for _, b := range []struct {
+				value string
+				keep  func(at, bound time.Time) bool
+			}{
+				{q.Get("since"), func(at, from time.Time) bool { return !at.Before(from) }},
+				{q.Get("until"), func(at, until time.Time) bool { return !at.After(until) }},
+			} {
+				if b.value == "" {
+					continue
+				}
+				edge := bound(b.value)
 				kept := []string{}
 				for _, l := range lines {
 					stamp, _, _ := strings.Cut(l, " ")
-					if at, err := time.Parse(time.RFC3339Nano, stamp); err == nil && !at.Before(from) {
+					if at, err := time.Parse(time.RFC3339Nano, stamp); err == nil && b.keep(at, edge) {
 						kept = append(kept, l)
 					}
 				}
@@ -400,5 +413,45 @@ func TestContainerReadsKeepRecordsTogether(t *testing.T) {
 	}
 	if head == nil || cont == nil || head.Lens != "postgres" || head.Event == "" || !cont.Cont || cont.Lens != "" {
 		t.Fatalf("stack lines = %+v", stack.Lines)
+	}
+}
+
+// A window ends where it was asked to, to the nanosecond, for a container and
+// for a stack. Handed to Docker in whole seconds, an until inside a second
+// was cut back to that second's start: the minute before a crash lost the
+// part of a second the crash was written in, and the pages asked for the
+// whole second instead and trimmed off the restart that followed.
+func TestContainerSearchEndsInsideASecond(t *testing.T) {
+	s := testServer(t)
+	exit := time.Date(2026, 9, 27, 10, 0, 5, 310456789, time.UTC)
+	base := time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC)
+	stack := shopStack(base)
+	stack = append(stack, fakeLogContainer{
+		id: "eeeeeeeeeeee5555", name: "crash-db-1", project: "crash", service: "db", state: "running",
+		image: "postgres:17", imageID: "sha256:" + strings.Repeat("b", 64), configImage: "postgres:17",
+		lines: []string{
+			stamped(exit.Add(-2*time.Second), "2026-09-27 10:00:03.310 UTC [1] LOG:  database system is ready to accept connections"),
+			stamped(exit.Add(-10*time.Millisecond), `2026-09-27 10:00:05.300 UTC [1] FATAL:  could not write to file "pg_wal/xlogtemp.1": No space left on device`),
+			// The restart policy's next attempt, a tenth of a second on.
+			stamped(exit.Add(100*time.Millisecond), "2026-09-27 10:00:05.410 UTC [1] LOG:  starting PostgreSQL 17.2"),
+		},
+	})
+	serveFakeLogEngine(t, s, stack...)
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+
+	window := "&since=" + exit.Add(-time.Minute).Format(time.RFC3339Nano) + "&until=" + exit.Format(time.RFC3339Nano)
+	res := decode[logsx.SearchResult](t, c.do("GET", "/api/v1/logs/search?source=docker:eeeeeeeeeeee5555&limit=20"+window, "", nil))
+	if len(res.Lines) != 2 || res.Lines[1].Event != "disk_full" {
+		t.Fatalf("the minute before the exit = %+v; want the start and the FATAL, not the next attempt", res.Lines)
+	}
+
+	until := base.Add(35 * time.Millisecond).Format(time.RFC3339Nano)
+	merged := decode[logsx.SearchResult](t, c.do("GET", "/api/v1/logs/search?source=stack:shop&lens=none&until="+until, "", nil))
+	got := []string{}
+	for _, l := range merged.Lines {
+		got = append(got, l.Source)
+	}
+	if strings.Join(got, ",") != "db,worker,web,web,db" {
+		t.Errorf("the stack up to 35 ms in = %v; every container is cut at the same instant", got)
 	}
 }

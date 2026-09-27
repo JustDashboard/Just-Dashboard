@@ -269,11 +269,15 @@ type JournalEntry struct {
 	// fields drops exactly the lines that say how a run ended.
 	About      string `json:"-"` // UNIT ‖ USER_UNIT
 	Comm       string `json:"-"` // _COMM, the program when no identifier was given
-	Invocation string `json:"-"` // _SYSTEMD_INVOCATION_ID ‖ INVOCATION_ID ‖ USER_INVOCATION_ID
+	Invocation string `json:"-"` // the run About names, else the writer's own: see ParseJournalLine
 	MessageID  string `json:"-"` // MESSAGE_ID, the stable name of a manager event
 	Result     string `json:"-"` // UNIT_RESULT
 	ExitCode   string `json:"-"` // EXIT_CODE: exited, killed or dumped
 	ExitStatus string `json:"-"` // EXIT_STATUS: a number, or a signal name
+	// Cursor is the record's place in the journal, which a read that meets
+	// it again from the other direction can stop at: two records can share
+	// a microsecond, and no two share a cursor.
+	Cursor string `json:"-"`
 }
 
 // JournalOptions is everything the unified log viewer can ask the journal
@@ -302,6 +306,9 @@ type JournalOptions struct {
 	MaxPriority int
 	Boot        bool
 	Kernel      bool
+	// Reverse reads newest first (`--reverse`): a search that may run out of
+	// time before the end of its window must reach the end it is for.
+	Reverse bool
 }
 
 // JournalCommandOpts builds a journalctl invocation. JSON output is used
@@ -351,6 +358,9 @@ func JournalCommandOpts(ctx context.Context, opts JournalOptions) (*exec.Cmd, er
 	if opts.Follow {
 		args = append(args, "-f")
 	}
+	if opts.Reverse {
+		args = append(args, "--reverse")
+	}
 	// The journal is host state, not container state: this image mounts
 	// /var/log but not the volatile /run/log/journal where the current boot's
 	// records live, so a container-local journalctl returns the previous
@@ -395,6 +405,15 @@ func ParseJournalLine(line []byte) (JournalEntry, bool) {
 		Result:     journalString(raw["UNIT_RESULT"]),
 		ExitCode:   journalString(raw["EXIT_CODE"]),
 		ExitStatus: journalString(raw["EXIT_STATUS"]),
+		Cursor:     journalString(raw["__CURSOR"]),
+	}
+	if e.About != "" {
+		// A manager's line about a unit carries that unit's run in
+		// INVOCATION_ID (USER_INVOCATION_ID from a user manager), and its own
+		// in _SYSTEMD_INVOCATION_ID. PID 1 has none of its own, but a user
+		// manager is user@1000.service, one run under which every run of
+		// every user unit would otherwise group into one.
+		e.Invocation = first("INVOCATION_ID", "USER_INVOCATION_ID", "_SYSTEMD_INVOCATION_ID")
 	}
 	if p, err := strconv.Atoi(journalString(raw["PRIORITY"])); err == nil {
 		e.Priority = p

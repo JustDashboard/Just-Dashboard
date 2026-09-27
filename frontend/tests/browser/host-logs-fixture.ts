@@ -349,7 +349,7 @@ export const APT_LINES: Line[] = [
       "install",
       {
         command: "apt-get install -y postgresql",
-        package: "postgresql, postgresql-client-16, postgresql-16",
+        package_list: "postgresql, postgresql-client-16, postgresql-16",
         packages: "3",
         user: "ubuntu",
       },
@@ -373,7 +373,11 @@ export const APT_LINES: Line[] = [
     [
       "Upgrade: openssl:amd64 (3.0.13-0ubuntu3, 3.0.13-0ubuntu3.4), libssl3t64:amd64 (3.0.13-0ubuntu3, 3.0.13-0ubuntu3.4)",
       "upgrade",
-      { command: "/usr/bin/unattended-upgrade", package: "openssl, libssl3t64", packages: "2" },
+      {
+        command: "/usr/bin/unattended-upgrade",
+        package_list: "openssl, libssl3t64",
+        packages: "2",
+      },
     ],
   ]),
 ]

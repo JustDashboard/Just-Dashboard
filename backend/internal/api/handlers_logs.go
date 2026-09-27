@@ -58,6 +58,10 @@ type logJournalUnit struct {
 // handleLogSources merges file-backed sources with the live sources that are
 // not files — docker containers and PM2 processes — so the viewer offers one
 // list regardless of where the log actually lives.
+//
+// The journal's readings by program — `journal-id:sshd,…`, `kernel:` — are
+// not listed: every one opens on any host with a journal, so the rail adds
+// them itself (`railSources`) where no file already holds the same lines.
 func (s *Server) handleLogSources(w http.ResponseWriter, r *http.Request) error {
 	discovered, err := s.modules.logs.Discover(r.Context())
 	if err != nil {
@@ -606,13 +610,17 @@ func (s *Server) searchContainer(ctx context.Context, id string, opts logsx.Sear
 	return c.Result(), nil
 }
 
+// containerSearchOptions hands the window to Docker to the nanosecond. In
+// whole seconds an until is cut back to the start of its second, and the
+// minute before a crash then loses the part of a second the crash was
+// written in.
 func containerSearchOptions(opts logsx.SearchOptions) dockerx.LogOptions {
 	logOpts := dockerx.LogOptions{Tail: "all", Timestamps: true}
 	if !opts.Since.IsZero() {
-		logOpts.Since = opts.Since.Format(time.RFC3339)
+		logOpts.Since = opts.Since.Format(time.RFC3339Nano)
 	}
 	if !opts.Until.IsZero() {
-		logOpts.Until = opts.Until.Format(time.RFC3339)
+		logOpts.Until = opts.Until.Format(time.RFC3339Nano)
 	}
 	return logOpts
 }
@@ -630,6 +638,7 @@ func (s *Server) searchJournal(ctx context.Context, target logTarget, opts logsx
 	jopts.Since = journalTimeSpec(opts.Since)
 	jopts.Until = journalTimeSpec(opts.Until)
 	jopts.MaxPriority, _ = journalPriority(opts.Filter)
+	from := opts.Since
 	if jopts.Since == "" && !boot {
 		// journalctl with no bound at either end walks the entire persistent
 		// journal, which on a long-lived host is gigabytes. A default window
@@ -637,12 +646,13 @@ func (s *Server) searchJournal(ctx context.Context, target logTarget, opts logsx
 		// bounded so nobody reads an empty answer as "it never happened". A
 		// boot is its own bound, so it needs no second one.
 		jopts.Since = "2 days ago"
+		from = time.Now().Add(-48 * time.Hour)
 	}
 	c.NextFile("journal", false, nil)
 	st := c.Stream()
 	st.Route(journalRoute(target, forced))
 	n := 0
-	if _, err := s.streamJournalInto(ctx, jopts, func(e procs.JournalEntry) {
+	feed := func(e procs.JournalEntry) {
 		n++
 		if c.Skip(st, e.Message) {
 			return
@@ -650,13 +660,108 @@ func (s *Server) searchJournal(ctx context.Context, target logTarget, opts logsx
 		line := journalLine(e, st)
 		line.No = n
 		c.Feed(line)
-	}); err != nil {
+	}
+	complete := true
+	if opts.Head {
+		// The oldest end is the one asked for, and the journal's own order
+		// reaches it first.
+		_, err = s.streamJournalInto(ctx, jopts, func(e procs.JournalEntry) bool {
+			feed(e)
+			return true
+		})
+	} else {
+		complete, err = s.searchJournalTail(ctx, jopts, from, feed)
+	}
+	if err != nil {
 		return nil, err
 	}
-	if ctx.Err() != nil {
+	if !complete || ctx.Err() != nil {
 		c.Incomplete()
 	}
 	return c.Result(), nil
+}
+
+// journalNewestHeld is how many records a tail search holds while it reads
+// the journal newest first: the newest end of the answer, whatever the time
+// limit then does, and a bound on what one search can take in memory.
+var journalNewestHeld = 50_000
+
+// searchJournalTail reads a tail search's window newest first. Read oldest
+// first, a window the time limit cuts short loses its newest end — the lines
+// the search is for — and a crash-looping unit writes a hundred thousand
+// lines a day, a week of which takes longer to read than a search may.
+//
+// The records still reach feed oldest first, which is the only order a lens
+// and a record can be read in. The newest journalNewestHeld are held while
+// they are read; anything older is read forward, up to the oldest held, and
+// fed before them. When the newest end took so long that the rest cannot be
+// read in the time left, it is not started: the answer is then one stretch
+// up to the window's end, marked incomplete, rather than the week's first
+// hours and its last beside a hole nobody can see.
+func (s *Server) searchJournalTail(ctx context.Context, jopts procs.JournalOptions, from time.Time, feed func(procs.JournalEntry)) (complete bool, err error) {
+	started := time.Now()
+	newest := make([]procs.JournalEntry, 0, 256)
+	full := false
+	oldest := ""
+	reverse := jopts
+	reverse.Reverse = true
+	if _, err := s.streamJournalInto(ctx, reverse, func(e procs.JournalEntry) bool {
+		if len(newest) == journalNewestHeld {
+			full = true
+			return false
+		}
+		// Only the oldest held record's cursor is needed, and a cursor is
+		// longer than most messages.
+		oldest, e.Cursor = e.Cursor, ""
+		newest = append(newest, e)
+		return true
+	}); err != nil {
+		return false, err
+	}
+	complete = ctx.Err() == nil
+	if full && complete {
+		if journalOlderFits(ctx, time.Since(started), newest, from) {
+			older := jopts
+			older.Until = journalInstant(newest[len(newest)-1].Timestamp)
+			if _, err := s.streamJournalInto(ctx, older, func(e procs.JournalEntry) bool {
+				if oldest != "" && e.Cursor == oldest {
+					return false
+				}
+				feed(e)
+				return true
+			}); err != nil {
+				return false, err
+			}
+			complete = ctx.Err() == nil
+		} else {
+			complete = false
+		}
+	}
+	for i := len(newest) - 1; i >= 0; i-- {
+		feed(newest[i])
+	}
+	return complete, nil
+}
+
+// journalOlderFits judges whether the rest of a window, older than the newest
+// records already read, can be read in the time left: reading those took
+// this long for this stretch of journal, and the rest is taken to be as
+// dense. A window with no start (a boot) cannot be judged, and is read.
+func journalOlderFits(ctx context.Context, took time.Duration, newest []procs.JournalEntry, from time.Time) bool {
+	deadline, ok := ctx.Deadline()
+	if !ok || from.IsZero() {
+		return true
+	}
+	end := newest[len(newest)-1].Timestamp
+	rest, read := end.Sub(from), newest[0].Timestamp.Sub(end)
+	if rest <= 0 {
+		return true
+	}
+	if read <= 0 {
+		return false
+	}
+	need := time.Duration(float64(took) * float64(rest) / float64(read))
+	return need <= time.Until(deadline)*3/4
 }
 
 // journalTimeSpec renders a bound in the shape journalctl's parser accepts,
@@ -669,10 +774,16 @@ func journalTimeSpec(parsed time.Time) string {
 	return parsed.UTC().Format("2006-01-02 15:04:05")
 }
 
-// streamJournalInto runs journalctl and hands each decoded record to fn. Both
-// the search and the live tail use it, so the two cannot disagree about how a
-// journal record becomes a log line.
-func (s *Server) streamJournalInto(ctx context.Context, opts procs.JournalOptions, fn func(procs.JournalEntry)) (int, error) {
+// journalInstant is a record's own stamp as a bound, to the microsecond the
+// journal keeps.
+func journalInstant(at time.Time) string {
+	return at.UTC().Format("2006-01-02 15:04:05.000000")
+}
+
+// streamJournalInto runs journalctl and hands each decoded record to fn until
+// fn answers false. Both the search and the live tail use it, so the two
+// cannot disagree about how a journal record becomes a log line.
+func (s *Server) streamJournalInto(ctx context.Context, opts procs.JournalOptions, fn func(procs.JournalEntry) bool) (int, error) {
 	cmd, err := procs.JournalCommandOpts(ctx, opts)
 	if err != nil {
 		return 0, err
@@ -699,7 +810,9 @@ func (s *Server) streamJournalInto(ctx context.Context, opts procs.JournalOption
 		}
 		if e, ok := procs.ParseJournalLine(sc.Bytes()); ok {
 			count++
-			fn(e)
+			if !fn(e) {
+				return count, nil
+			}
 		}
 	}
 	return count, sc.Err()
@@ -783,13 +896,9 @@ type containerTag struct {
 }
 
 func readDockerLine(stamp *time.Time, text string, l dockerx.LogLine, st *logsx.Stream, tag containerTag) logsx.Line {
-	source := l.Service
-	if tag.service != "" {
-		source = tag.service
-	}
 	// ParseLine strips the terminal control a build tool writes, so the text
 	// kept here is the text the level scan and the operator's search saw.
-	line := logsx.ParseLine(text, source)
+	line := logsx.ParseLine(text, tag.service)
 	line.Stream = l.Stream
 	line.SetAttr("service", tag.service)
 	line.SetAttr("container", tag.container)
@@ -1292,6 +1401,10 @@ func (s *Server) handleLogSource(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	// The page asked by the id it holds — a container by its name, a file as
+	// `file:<path>` — and an answer under another id would read as another
+	// source.
+	src.ID = strings.TrimSpace(r.URL.Query().Get("source"))
 	httpx.JSON(w, http.StatusOK, src)
 	return nil
 }
@@ -1303,11 +1416,7 @@ func (s *Server) describeLogSource(ctx context.Context, t logTarget) (logsx.Sour
 		if err != nil {
 			return logsx.Source{}, s.dockerErr(err)
 		}
-		src := s.containerSource(ctx, d.Container)
-		// The page asked by the id it holds, which may be a name; answering
-		// under another id would make the two look like different sources.
-		src.ID = "docker:" + t.id
-		return src, nil
+		return s.containerSource(ctx, d.Container), nil
 	case logsx.KindStack:
 		members, err := s.stackMembers(ctx, t.id)
 		if err != nil {
@@ -1350,7 +1459,6 @@ func (s *Server) describeLogSource(ctx context.Context, t logTarget) (logsx.Sour
 		src := logsx.Source{Label: t.label, Kind: t.kind, Lens: lens}
 		switch t.kind {
 		case logsx.KindJournal:
-			src.ID = "journal:" + t.id
 			src.Detail = "Every unit on the host — pick one below to narrow it"
 			if t.id != "" {
 				src.Detail = "What systemd recorded for this unit, and what it printed"
@@ -1359,10 +1467,8 @@ func (s *Server) describeLogSource(ctx context.Context, t logTarget) (logsx.Sour
 				}
 			}
 		case logsx.KindJournalID:
-			src.ID = "journal-id:" + strings.Join(t.idents, ",")
 			src.Detail = "The journal's lines from " + t.label
 		case logsx.KindKernel:
-			src.ID = "kernel:"
 			src.Detail = "The kernel ring as the journal keeps it: the firewall, the OOM killer, the disks"
 		}
 		return src, nil

@@ -1262,7 +1262,9 @@ format, logfmt pairs, a JSON object, bracketed and shouted levels, addresses, re
 paths, ids — as spans over the original text, so the search's match ranges still land; and
 `components/logs/log-text.tsx` colours them from one map. The **status hues** go only to what is a
 reading of state: a level, an HTTP status by its class (2xx success, 4xx warning, 5xx destructive), a
-word that says something failed or succeeded. Every other kind takes a `--tag-*` hue, which sit at one
+word that says something failed or succeeded. A word is read whole, digits and all — `fail2ban` is a
+name, not "fail" — and a firewall's `BLOCK`, `DROP` or `REJECT` is the firewall working, on every line
+of its log, so it is not a failure word. Every other kind takes a `--tag-*` hue, which sit at one
 lightness so no kind outshouts another, and what the eye should skip goes muted — the line's own
 timestamp (not drawn at all while the time column shows it), this host's name on a syslog line (not
 drawn either), the pid, the punctuation, the keys. The message stays in the foreground. A program's

@@ -496,6 +496,13 @@ func TestLogSourceDescribesOneFile(t *testing.T) {
 	if src.Path != path || src.Size == 0 || src.Modified == nil || src.Archives != 1 || src.Label != "app.log" {
 		t.Errorf("source = %+v", src)
 	}
+	// Answered under the id it was asked by, which is how the page holds it.
+	if src.ID != "file:"+path {
+		t.Errorf("id = %q, want file:%s", src.ID, path)
+	}
+	if bare := decode[logsx.Source](t, c.do("GET", "/api/v1/logs/source?source="+path, "", nil)); bare.ID != path {
+		t.Errorf("asked by the bare path, answered as %q", bare.ID)
+	}
 	if rec := c.do("GET", "/api/v1/logs/source?source="+filepath.Join(root, "missing.log"), "", nil); rec.Code != 404 {
 		t.Errorf("a missing file: status %d, want 404", rec.Code)
 	}

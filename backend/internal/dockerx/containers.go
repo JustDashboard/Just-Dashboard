@@ -492,11 +492,6 @@ type LogOptions struct {
 type LogLine struct {
 	Stream string `json:"stream"`
 	Text   string `json:"text"`
-	// Service names the compose service a line came from. Nothing sets it
-	// since a stack became a log source that tags its own lines
-	// (`stack:<project>`); the logs handler's `readDockerLine` still falls
-	// back to it, and the two go together.
-	Service string `json:"service,omitempty"`
 }
 
 // Logs returns a reader of demultiplexed log lines. The caller must drain it;

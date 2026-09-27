@@ -135,6 +135,8 @@ export const LOG_FIELDS: Record<string, LogField> = {
   // Packages.
   package: { label: "package", kind: "product", product: "package" },
   packages: { label: "packages", kind: "text" },
+  // A transaction's several packages, as one line lists them.
+  package_list: { label: "package list", kind: "text" },
   version: { label: "version", kind: "code" },
   old_version: { label: "previous version", kind: "code" },
 }

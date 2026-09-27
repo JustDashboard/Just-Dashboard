@@ -1,5 +1,5 @@
 import type { ServiceLogSource } from "@/components/logs/service-logs"
-import { fileSource, journalIdSource, journalSource, kernelSource } from "@/lib/log-sources"
+import { journalIdSource, journalSource, kernelSource } from "@/lib/log-sources"
 
 /**
  * Which log each Security page reads, out of what this host has.
@@ -91,7 +91,7 @@ export function hostLogSource(plan: HostLogPlan, probes: HostLogProbe[]): Servic
   for (const file of plan.files) {
     const probe = probes.find((p) => p.path === file.path)
     if (probe && "source" in probe) {
-      return { ...probe.source, id: fileSource(file.path), lens: file.lens }
+      return { ...probe.source, lens: file.lens }
     }
   }
   const outside = probes.find((p) => "refused" in p && p.refused === "outside")

@@ -1,13 +1,16 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -146,8 +149,13 @@ func TestFileFollowReadsThroughTheLens(t *testing.T) {
 }
 
 // fakeJournalctl puts a journalctl on PATH that prints these records as
-// `--output=json` does and exits, which is also how a follow ends. It records
-// its argv, so the test can see what was pushed down to it.
+// `--output=json` does and exits, which is also how a follow ends. It keeps
+// to --since and --until (inclusive, to the microsecond) and to --reverse, as
+// journalctl does, gives each record a cursor, and records its argv, so the
+// test can see what was pushed down to it. JD_FAKE_JOURNAL_DELAY makes it
+// wait that many seconds before its first record, and JD_FAKE_JOURNAL_STALL
+// stop after that many records and hang, as a journal too large to read in
+// time does.
 func fakeJournalctl(t *testing.T, records ...map[string]string) (argv func() string) {
 	t.Helper()
 	if os.Geteuid() == 0 {
@@ -157,20 +165,58 @@ func fakeJournalctl(t *testing.T, records ...map[string]string) (argv func() str
 	}
 	bin := t.TempDir()
 	var out strings.Builder
-	for _, r := range records {
+	for i, r := range records {
+		r = maps.Clone(r)
+		if r["__CURSOR"] == "" {
+			r["__CURSOR"] = fmt.Sprintf("s=fake;i=%x", i+1)
+		}
+		us, err := strconv.ParseInt(r["__REALTIME_TIMESTAMP"], 10, 64)
+		if err != nil {
+			t.Fatalf("record %d has no __REALTIME_TIMESTAMP: %v", i, err)
+		}
 		b, err := json.Marshal(r)
 		if err != nil {
 			t.Fatal(err)
 		}
+		// Keyed by the stamp as journalctl's bounds are written, so the
+		// script can compare them as strings.
+		out.WriteString(time.UnixMicro(us).UTC().Format("2006-01-02 15:04:05.000000") + "\t")
 		out.Write(b)
 		out.WriteByte('\n')
 	}
-	data := filepath.Join(bin, "records.json")
+	data := filepath.Join(bin, "records.tsv")
 	args := filepath.Join(bin, "argv")
 	if err := os.WriteFile(data, []byte(out.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	script := "#!/bin/sh\necho \"$@\" >> '" + args + "'\ncat '" + data + "'\n"
+	script := `#!/bin/sh
+echo "$@" >> '` + args + `'
+since= until= reverse=
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--since) since=$2; shift ;;
+	--until) until=$2; shift ;;
+	--reverse) reverse=1 ;;
+	esac
+	shift
+done
+case "$since" in *ago*) since= ;; *.*|"") ;; *) since="$since.000000" ;; esac
+case "$until" in *.*|"") ;; *) until="$until.000000" ;; esac
+window() {
+	awk -F '\t' -v s="$since" -v u="$until" '(s == "" || $1 >= s) && (u == "" || $1 <= u) { print $2 }' '` + data + `'
+}
+ordered() {
+	if [ -n "$reverse" ]; then window | tac; else window; fi
+}
+if [ -n "$JD_FAKE_JOURNAL_DELAY" ]; then
+	sleep "$JD_FAKE_JOURNAL_DELAY"
+fi
+if [ -n "$JD_FAKE_JOURNAL_STALL" ]; then
+	ordered | head -n "$JD_FAKE_JOURNAL_STALL"
+	exec sleep 30
+fi
+ordered
+`
 	if err := os.WriteFile(filepath.Join(bin, "journalctl"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -245,6 +291,129 @@ func TestJournalReadsThroughTheLens(t *testing.T) {
 	readFrame(t, conn)
 	if got := readLines(t, conn, 1); len(got) != 1 || got[0].Event != "ssh_accepted" || got[0].Attrs["user"] != "ubuntu" {
 		t.Errorf("follow with a predicate: %+v", got)
+	}
+}
+
+// restartJournal is a crash-looping unit as the journal holds it: the
+// manager's "Scheduled restart job" once every step, the counter climbing.
+func restartJournal(base time.Time, step time.Duration, n int) []map[string]string {
+	out := make([]map[string]string, n)
+	for i := range out {
+		out[i] = map[string]string{
+			"__REALTIME_TIMESTAMP": fmt.Sprint(base.Add(time.Duration(i) * step).UnixMicro()), "PRIORITY": "6",
+			"SYSLOG_IDENTIFIER": "systemd", "_PID": "1", "_SYSTEMD_UNIT": "init.scope", "UNIT": "nordvpnd.service",
+			"MESSAGE_ID": "5eb03494b6584870a536b337290809b3",
+			"MESSAGE":    fmt.Sprintf("nordvpnd.service: Scheduled restart job, restart counter is at %d.", i+1),
+		}
+	}
+	return out
+}
+
+// restartCounts are the counters a search's lines hold, in the order given.
+func restartCounts(lines []logsx.Line) string {
+	got := []string{}
+	for _, l := range lines {
+		got = append(got, l.Attrs["restarts"])
+	}
+	return strings.Join(got, ",")
+}
+
+// A tail search reads the journal newest first, holds the newest records and
+// reads what is older forward up to them, so the lines still reach the lens
+// oldest first and the answer is the whole window — the same answer the
+// journal's own order gave, bar the end it reaches first.
+func TestJournalTailSearchReadsTheNewestEndFirst(t *testing.T) {
+	base := time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC)
+	argv := fakeJournalctl(t, restartJournal(base, time.Minute, 8)...)
+	held := journalNewestHeld
+	journalNewestHeld = 3
+	t.Cleanup(func() { journalNewestHeld = held })
+	s := testServer(t)
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+
+	res := decode[logsx.SearchResult](t, c.do("GET",
+		"/api/v1/logs/search?source=journal:nordvpnd.service&since=2026-09-27T09:00:00Z&limit=4&facets=event", "", nil))
+	if got := restartCounts(res.Lines); got != "5,6,7,8" || !res.Complete || res.Matched != 8 {
+		t.Fatalf("restarts %s complete %v matched %d; want the newest four of all eight", got, res.Complete, res.Matched)
+	}
+	for i := 1; i < len(res.Lines); i++ {
+		if res.Lines[i].No <= res.Lines[i-1].No {
+			t.Errorf("lines numbered %d then %d; numbers follow the journal's order", res.Lines[i-1].No, res.Lines[i].No)
+		}
+	}
+	if f := res.Facets["event"]; f == nil || len(f.Values) != 1 || f.Values[0].Count != 8 {
+		t.Errorf("event facet = %+v; the facets count the whole window", f)
+	}
+	calls := strings.Split(strings.TrimSpace(argv()), "\n")
+	if len(calls) != 2 || !strings.Contains(calls[0], "--reverse") || strings.Contains(calls[1], "--reverse") ||
+		!strings.Contains(calls[1], "--until 2026-09-27 10:05:00.000000") {
+		t.Errorf("journalctl was run as:\n%s", strings.Join(calls, "\n"))
+	}
+
+	// A search from the start asks the journal in its own order.
+	head := decode[logsx.SearchResult](t, c.do("GET",
+		"/api/v1/logs/search?source=journal:nordvpnd.service&since=2026-09-27T09:00:00Z&limit=2&order=asc", "", nil))
+	if got := restartCounts(head.Lines); got != "1,2" {
+		t.Errorf("order=asc restarts %s, want the first two", got)
+	}
+	if calls := strings.Split(strings.TrimSpace(argv()), "\n"); strings.Contains(calls[len(calls)-1], "--reverse") {
+		t.Errorf("order=asc read the journal newest first: %s", calls[len(calls)-1])
+	}
+}
+
+// A journal too large to read in the time a search has still answers with
+// its newest end: what the time cut off is the oldest part, and the answer
+// says it is incomplete.
+func TestJournalTailSearchOutOfTimeKeepsTheNewestEnd(t *testing.T) {
+	base := time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC)
+	fakeJournalctl(t, restartJournal(base, time.Minute, 8)...)
+	t.Setenv("JD_FAKE_JOURNAL_STALL", "3")
+	s := testServer(t)
+	target, err := parseLogTarget("journal:nordvpnd.service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 1500*time.Millisecond)
+	defer cancel()
+	res, err := s.searchJournal(ctx, target, logsx.SearchOptions{Since: base.Add(-time.Hour), Limit: 20}, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := restartCounts(res.Lines); got != "6,7,8" || res.Complete {
+		t.Errorf("restarts %s complete %v; want the newest three, marked incomplete", got, res.Complete)
+	}
+}
+
+// When the newest records took so long that the rest of the window cannot be
+// read in the time left, the rest is not started: the answer is one stretch
+// up to the window's end rather than its first hours and its last with a
+// hole between them.
+func TestJournalTailSearchLeavesWhatCannotBeReadInTime(t *testing.T) {
+	base := time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC)
+	records := restartJournal(base, time.Minute, 2)
+	// The week's first restart, six days before the two read first.
+	records = append(restartJournal(base.Add(-6*24*time.Hour), time.Minute, 1), records...)
+	argv := fakeJournalctl(t, records...)
+	t.Setenv("JD_FAKE_JOURNAL_DELAY", "1")
+	held := journalNewestHeld
+	journalNewestHeld = 2
+	t.Cleanup(func() { journalNewestHeld = held })
+	s := testServer(t)
+	target, err := parseLogTarget("journal:nordvpnd.service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	res, err := s.searchJournal(ctx, target, logsx.SearchOptions{Since: base.Add(-7 * 24 * time.Hour), Limit: 20}, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := restartCounts(res.Lines); got != "1,2" || res.Complete {
+		t.Errorf("restarts %s complete %v; want the newest two alone, marked incomplete", got, res.Complete)
+	}
+	if calls := strings.Split(strings.TrimSpace(argv()), "\n"); len(calls) != 1 {
+		t.Errorf("journalctl was run %d times; a minute of journal took a second, so six days of it was not started", len(calls))
 	}
 }
 

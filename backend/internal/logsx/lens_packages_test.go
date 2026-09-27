@@ -29,7 +29,7 @@ func TestLensPackagesHistory(t *testing.T) {
 		{level: "info", at: "2026-09-25T09:31:40Z", attrs: map[string]string{"command": "apt-get install -y -q postgresql", "user": "ubuntu"}},
 		{event: "install", level: "info", at: "2026-09-25T09:31:40Z", attrs: map[string]string{
 			"command": "apt-get install -y -q postgresql", "user": "ubuntu", "packages": "14",
-			"package": "postgresql, libtypes-serialiser-perl, ssl-cert, postgresql-17, postgresql-common-dev, libjson-perl, postgresql-client-17, libcommon-sense-perl, libipc-run-perl, postgresql-common +4 more",
+			"package_list": "postgresql, libtypes-serialiser-perl, ssl-cert, postgresql-17, postgresql-common-dev, libjson-perl, postgresql-client-17, libcommon-sense-perl, libipc-run-perl, postgresql-common +4 more",
 		}},
 		{event: "transaction_end", level: "info", at: "2026-09-25T09:32:03Z", attrs: map[string]string{"command": "apt-get install -y -q postgresql", "user": "ubuntu", "duration_ms": "23000"}},
 		{},
@@ -45,7 +45,7 @@ func TestLensPackagesHistory(t *testing.T) {
 		{level: "info", at: "2026-09-02T00:46:55Z", attrs: map[string]string{"command": "apt install cloc", "user": "ubuntu"}},
 		{event: "install", level: "info", at: "2026-09-02T00:46:55Z", attrs: map[string]string{
 			"command": "apt install cloc", "user": "ubuntu", "packages": "24",
-			"package": "cloc, libvariable-magic-perl, libtry-tiny-perl, libsub-quote-perl, librole-tiny-perl, libparallel-forkmanager-perl, libb-hooks-endofscope-perl, libdevel-callchecker-perl, libdynaloader-functions-perl +15 more",
+			"package_list": "cloc, libvariable-magic-perl, libtry-tiny-perl, libsub-quote-perl, librole-tiny-perl, libparallel-forkmanager-perl, libb-hooks-endofscope-perl, libdevel-callchecker-perl, libdynaloader-functions-perl +15 more",
 		}},
 		{event: "transaction_end", level: "info", at: "2026-09-02T00:46:57Z", attrs: map[string]string{"command": "apt install cloc", "user": "ubuntu", "duration_ms": "2000"}},
 	})
@@ -163,7 +163,7 @@ func TestLensPackagesUnattended(t *testing.T) {
 		{event: "unattended_done", level: "info", at: "2026-09-01T03:33:16.526Z"},
 		{event: "error", level: "error", at: "2026-07-02T22:46:44.576Z"},
 		{event: "error", level: "error", at: "2026-07-02T22:46:44.576Z"},
-		{event: "upgrade", level: "info", at: "2026-01-07T03:56:34.512Z", attrs: map[string]string{"packages": "2", "package": "libpng16-16t64, linux-libc-dev"}},
+		{event: "upgrade", level: "info", at: "2026-01-07T03:56:34.512Z", attrs: map[string]string{"packages": "2", "package_list": "libpng16-16t64, linux-libc-dev"}},
 		{event: "unattended_done", level: "info", at: "2026-01-07T03:57:14.101Z"},
 	})
 }

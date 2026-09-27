@@ -67,6 +67,11 @@ type systemdReader struct {
 func (r *systemdReader) Read(l *Line) {
 	m := sysEnvelope(l)
 	r.sinceFail++
+	if m.program != "" && m.program != "systemd" && m.program != "systemd-coredump" {
+		// A unit's journal read as systemd holds the program's own lines
+		// too, and "Closed redis connection" is not a unit stopping.
+		return
+	}
 	event, unit := systemdText(l, m)
 	if byID, ok := systemdMessageIDs[l.Attrs["message_id"]]; ok {
 		switch {

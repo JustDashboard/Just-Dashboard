@@ -259,37 +259,17 @@ export const LAST_LINES_MS = 60_000
 export const LAST_LINES = 20
 
 /**
- * Asked for rather than shown: room for the next attempt's start-up in the
- * part of a second after the exit, which `linesBefore` drops.
- */
-const LAST_LINES_READ = 200
-
-/**
- * The search for the minute before an exit.
- *
- * A container's search hands its bounds to Docker in whole seconds, which
- * cuts `until` back to the start of the second the exit happened in — and
- * the lines of that last part of a second are the ones that say why. So the
- * search runs to the end of that second, and `linesBefore` drops what came
- * after the exit: the next attempt starting up, a restart policy's hundred
- * milliseconds later.
+ * The search for the minute before an exit: its last lines, up to the exit
+ * itself. The bound is the event's own time, to the nanosecond — the next
+ * attempt starts up a restart policy's hundred milliseconds later, and is
+ * not why it died.
  */
 export function lastLinesSearch(time: string) {
-  const exit = Date.parse(time)
   return {
-    since: new Date(exit - LAST_LINES_MS).toISOString(),
-    until: new Date(Math.floor(exit / 1000) * 1000 + 1000).toISOString(),
-    limit: LAST_LINES_READ,
+    since: new Date(Date.parse(time) - LAST_LINES_MS).toISOString(),
+    until: time,
+    limit: LAST_LINES,
   }
-}
-
-/** The end of what `lastLinesSearch` found, up to the exit and no further. */
-export function linesBefore<T extends { timestamp?: string }>(lines: T[], time: string): T[] {
-  const exit = Date.parse(time)
-  const after = lines.findIndex(
-    (line) => line.timestamp !== undefined && Date.parse(line.timestamp) > exit,
-  )
-  return (after < 0 ? lines : lines.slice(0, after)).slice(-LAST_LINES)
 }
 
 /** "40 s", "12 min", "2 h 5 min": how long a loop has been going. */

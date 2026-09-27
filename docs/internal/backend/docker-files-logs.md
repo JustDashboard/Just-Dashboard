@@ -269,10 +269,23 @@ logrotate run, which is the question that sent people back to ssh and zgrep.
   `maxJournalPriority` pushes only the *maximum* down to `journalctl -p 0..n`, since the chips are a set
   and `-p` takes a range; the exact test is still done here. A text filter is deliberately **not** pushed
   down — `journalctl -g` needs a PCRE2 build nobody can assume — so the window is widened instead.
+- **A tail search reads the journal newest first.** Read in the journal's own order, a window the
+  60-second limit cut short lost its newest end — the lines the search was for — and a crash-looping
+  unit writes a hundred thousand lines a day. `searchJournalTail` runs `journalctl --reverse`, holds the
+  newest 50 000 records, reads anything older forward up to the oldest held (stopping at its cursor),
+  and feeds the collector oldest first, since a lens and a record are only readable in that order. When
+  the newest end took so long that the rest cannot fit in the time left, the rest is not started and
+  the answer is one stretch up to the window's end, marked incomplete. `order=asc` keeps the forward
+  read. A container's window goes to Docker as RFC 3339 with nanoseconds: in whole seconds an `until`
+  was cut back to the start of its second, and "the minute before the crash" lost the crash line.
 - **Nothing is offered that cannot be opened**: `Discover` runs `Allow` over the well-known paths, or an
   install that narrowed `JD_LOG_ROOTS` gets a rail of files that refuse to open. Source kinds that cannot
   be queried return an explanation in `missing`; an installed PM2 with no managed processes reports that
-  empty state explicitly rather than disappearing from the rail.
+  empty state explicitly rather than disappearing from the rail. `/logs/sources` does not list the
+  journal's readings by program (`journal-id:sshd,…`, `journal-id:CRON,crond`, `kernel:`): any host with
+  a journal can open them, so the rail adds them client-side (`railSources` in `source-rail.tsx`) where
+  no listed file already holds the same lines. `GET /logs/source` describes one source and answers under
+  the id it was asked by — `file:<path>` stays `file:<path>`, a container asked by name keeps its name.
 - **Retention is a verdict, not a rule list.** `MatchRetention` finds the file no rule governs — precisely
   the entry a rule list cannot show. Two parser details, both found against a real host: a stanza's paths
   may be listed **one per line before the brace** (exactly how Debian ships rsyslog's, so reading only the

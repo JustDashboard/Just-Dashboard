@@ -21,10 +21,8 @@ import {
 import { notify } from "@/lib/toast"
 import { get, post, put, ApiError } from "@/lib/api"
 import type { ComposeService, ComposeValidation, StackDetail } from "@/lib/types"
-import { EMPTY_FILTER } from "@/lib/log-filter"
-import { STACK_LENS, lensFor, type LogLens } from "@/lib/log-lenses"
 import { stackSource } from "@/lib/log-sources"
-import { useSessionState, useViewState } from "@/lib/view-state"
+import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
@@ -40,8 +38,6 @@ import {
   type ComposeActionKey,
 } from "@/components/docker/stack-state"
 import { CodeEditor } from "@/components/code-editor"
-import { LensReadings, useLensReadings } from "@/components/logs/lens-readings"
-import type { LogFilterState } from "@/components/logs/types"
 import {
   ServiceLogs,
   type ServiceLogSource,
@@ -717,81 +713,17 @@ function StackLogs({ stack }: { stack: StackDetail }) {
     ],
     [stack.name],
   )
-  const storageKey = `docker.stack.${stack.name}.logs`
   // On a phone the figures would push the pane off the screen; the quick
   // views carry their counts on their chips there.
   const wide = useMediaQuery("(min-width: 640px)")
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4">
-      {wide && <StackReadings stack={stack.name} storageKey={storageKey} />}
-      <ServiceLogs
-        sources={sources}
-        storageKey={storageKey}
-        views={views}
-        className="min-h-0 flex-1"
-        paneClassName="min-h-[30rem]"
-      />
-    </div>
-  )
-}
-
-/**
- * What a stack's log adds up to, over every service. The stack's own lens
- * names no readings — each container's lens has its own, in words that do
- * not add up across a database and a web server — so these are the ones
- * that do: levels, which every lens sets, how many services the errors came
- * from, and the start-ups the app and database lenses both name.
- */
-const STACK_READINGS: LogLens = {
-  ...lensFor(STACK_LENS)!,
-  readings: [
-    {
-      id: "errors",
-      label: "Errors",
-      levels: ["critical", "error"],
-      tone: "danger",
-      hint: "Lines at error level or worse",
-    },
-    {
-      id: "failing",
-      label: "Services with errors",
-      levels: ["critical", "error"],
-      distinct: "service",
-      tone: "danger",
-      hint: "How many of its services logged one",
-    },
-    {
-      id: "warnings",
-      label: "Warnings",
-      levels: ["warn"],
-      tone: "warning",
-      hint: "Lines at warning level",
-    },
-    {
-      id: "starts",
-      label: "Starts",
-      fields: { event: ["startup"] },
-      hint: "Times a service said it was starting",
-    },
-  ],
-}
-
-/**
- * The readings over the pane, pressed as a container's are: a press narrows
- * the lines to what the figure counts. `ServiceLogs` draws readings only
- * from its source's lens, which for a stack has none, so they are drawn
- * here and reach the pane's filter where the pane keeps it for the tab —
- * under its storage key, which is also how the pane hears of the press.
- */
-function StackReadings({ stack, storageKey }: { stack: string; storageKey: string }) {
-  const readings = useLensReadings(stackSource(stack), STACK_READINGS)
-  const [filter, setFilter] = useSessionState<LogFilterState>(`${storageKey}.filter`, EMPTY_FILTER)
-  return (
-    <LensReadings
-      readings={readings}
-      filter={filter}
-      onFilterChange={setFilter}
-      className="shrink-0"
+    <ServiceLogs
+      sources={sources}
+      storageKey={`docker.stack.${stack.name}.logs`}
+      views={views}
+      readings={wide}
+      className="h-full min-h-0"
+      paneClassName="min-h-[30rem]"
     />
   )
 }
