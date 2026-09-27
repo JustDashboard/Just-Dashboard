@@ -276,9 +276,6 @@ type JournalEntry struct {
 	ExitStatus string `json:"-"` // EXIT_STATUS: a number, or a signal name
 }
 
-// JournalCommand builds a journalctl invocation. JSON output is used rather
-// than the default text so message boundaries and priorities survive
-// multi-line log records intact.
 // JournalOptions is everything the unified log viewer can ask the journal
 // for. It exists because the journal is the one source where narrowing the
 // query is not an optimisation: `journalctl -n 300` hands back the last three
@@ -307,17 +304,9 @@ type JournalOptions struct {
 	Kernel      bool
 }
 
-// JournalCommand is the tail form kept for the per-unit views, which want the
-// last n records of one unit and nothing else.
-func JournalCommand(ctx context.Context, unit string, lines int, follow bool, since string) (*exec.Cmd, error) {
-	if lines <= 0 || lines > 20000 {
-		lines = 300
-	}
-	return JournalCommandOpts(ctx, JournalOptions{
-		Unit: unit, Lines: lines, Follow: follow, Since: since, MaxPriority: -1,
-	})
-}
-
+// JournalCommandOpts builds a journalctl invocation. JSON output is used
+// rather than the default text so message boundaries and priorities survive
+// multi-line log records intact.
 func JournalCommandOpts(ctx context.Context, opts JournalOptions) (*exec.Cmd, error) {
 	args := []string{"--output=json", "--no-pager"}
 	if opts.Unit != "" {

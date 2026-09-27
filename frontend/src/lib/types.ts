@@ -1196,6 +1196,8 @@ export type PM2Process = {
   autorestart: boolean
   maxMemoryRestart?: number
   createdAtMs?: number
+  /** PM2 stamps each line it writes (`--time`, `log_date_format`), so the log can be read by time. */
+  logTimes?: boolean
 }
 
 /** One account's PM2 daemon: whether what it runs would survive a reboot. */
@@ -1577,16 +1579,6 @@ export type LogRetention = {
   level: "ok" | "warn" | "unknown"
   lastRun?: string
   available: boolean
-}
-
-export type JournalEntry = {
-  timestamp: string
-  message: string
-  priority: number
-  unit?: string
-  pid?: string
-  hostname?: string
-  syslogIdentifier?: string
 }
 
 export type FileEntry = {
