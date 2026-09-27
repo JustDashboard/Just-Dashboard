@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
+import { mockHostLogs } from "./host-logs-fixture"
 
 /**
  * The Packages page, checked in a browser against a mocked host.
@@ -11,9 +12,10 @@ import { expect, test, type Page, type Route } from "@playwright/test"
  * that every package is drawn as the software it is (§14) and an upgrade shows
  * the part of the version it changes; that the one decision worth making in a
  * hurry (security updates waiting) carries its own button above the fold; that
- * a row's fixed properties sit at its edge; and that the search, the install
- * verb and the package sheet are all reachable from the strip. The screenshots
- * at 1280 and 1720 are the eyes the assertions do not have.
+ * a row's fixed properties sit at its edge; that the search, the install
+ * verb and the package sheet are all reachable from the strip; and that the
+ * package manager's own log is read in place, through its lens. The
+ * screenshots at 1280 and 1720 are the eyes the assertions do not have.
  */
 
 const now = new Date().toISOString()
@@ -391,9 +393,45 @@ test("updates and add software are reachable from the strip", async ({ page }) =
   await expect(page.getByText("Install htop")).toBeVisible()
 })
 
+test("the Log view reads the package manager's own log in place", async ({ page }) => {
+  await mockHost(page)
+  const logs = await mockHostLogs(page)
+  await page.goto("/packages")
+  await page.waitForLoadState("networkidle")
+  // Nothing of the log is asked for until the view is.
+  expect(logs.requests).toEqual([])
+
+  const strip = page.getByRole("navigation", { name: "Package views" })
+  await strip.getByRole("button", { name: "Log", exact: true }).click()
+  const lines = page.getByLabel("Log lines")
+  await expect(lines.getByText("install", { exact: true })).toBeVisible()
+  await expect(lines.getByText("upgrade", { exact: true })).toBeVisible()
+  await expect(lines.getByText("remove", { exact: true })).toBeVisible()
+
+  // History and Insights over apt's transactions, opened on everything the
+  // file holds — a day of a package log is usually nothing — and no tail.
+  const history = logs.searches[0]
+  expect(history.get("source")).toBe("file:/var/log/apt/history.log")
+  expect(history.get("lens")).toBe("packages")
+  expect(history.has("since")).toBe(false)
+  expect(logs.sockets).toHaveLength(0)
+  await expect(page.getByRole("button", { name: "Live", exact: true })).toHaveCount(0)
+  // The page keeps its one run of figures.
+  await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(1)
+
+  await page.getByRole("combobox", { name: "Package log" }).click()
+  await page.getByRole("option", { name: "dpkg" }).click()
+  await expect(lines.getByText("configure", { exact: true })).toBeVisible()
+
+  await page.getByRole("button", { name: "Insights", exact: true }).click()
+  await expect(page.getByRole("heading", { name: "By package" })).toBeVisible()
+  expect(await framedNonTables(page), "a framed block that is not a table").toEqual([])
+})
+
 for (const width of [1280, 1720]) {
   test(`looks right at ${width}`, async ({ page }) => {
     await mockHost(page)
+    await mockHostLogs(page)
     await page.setViewportSize({ width, height: 1000 })
     await page.goto("/packages")
     await page.waitForLoadState("networkidle")
@@ -402,6 +440,7 @@ for (const width of [1280, 1720]) {
       ["installed", "Installed"],
       ["updates", "Updates"],
       ["install", "Add software"],
+      ["log", "Log"],
     ] as const) {
       await strip.getByRole("button", { name: new RegExp(`^${label}`) }).click()
       const overflow = await page.evaluate(

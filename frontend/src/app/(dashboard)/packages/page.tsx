@@ -21,6 +21,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { JobConsole, RecentJobs, useJobConsole } from "@/components/job-console"
 import { FactDot, HostIdentity, platformName } from "@/components/metrics/host-identity"
 import { InstallPanel } from "@/components/packages/install-panel"
+import { PackageLogView } from "@/components/packages/log-view"
 import {
   OriginFact,
   PackageMark,
@@ -67,8 +68,11 @@ import {
  * Drawn the way the host Overview is (design-system.md §15): the host's
  * identity line — its distribution as the mark, the manager beside the name,
  * the index's age as a fact and whether anything is owed as the verdict, with
- * the index's verbs at its end — four figures as tiles, and three views under
- * one strip of tabs, each a toolbar, a hairline and a framed table. The three
+ * the index's verbs at its end — four figures as tiles, and four views under
+ * one strip of tabs: three a toolbar, a hairline and a framed table, and the
+ * fourth the package manager's own log, read in place through its lens — what
+ * was installed, upgraded and removed, when, by which command — rather than
+ * a link to the logs page. The three
  * things worth acting on before reading any of that — security updates
  * waiting, a reboot owed, an index too old to trust — are notices, each
  * carrying its own button, rather than a framed box with a header and nothing
@@ -86,12 +90,13 @@ import {
 const MAX_ROWS = 400
 
 type Scope = "explicit" | "all" | "upgradable"
-type View = "installed" | "updates" | "install"
+type View = "installed" | "updates" | "install" | "log"
 
 const VIEWS: { key: View; label: string }[] = [
   { key: "installed", label: "Installed" },
   { key: "updates", label: "Updates" },
   { key: "install", label: "Add software" },
+  { key: "log", label: "Log" },
 ]
 
 export default function PackagesPage() {
@@ -687,6 +692,12 @@ export default function PackagesPage() {
 
           {view === "install" && (
             <InstallPanel manager={data.manager} onJob={console_.attach} onInspect={setInspect} />
+          )}
+
+          {view === "log" && (
+            <PackageLogView
+              product={platformProduct(host?.platform) ?? managerProduct(data.manager)}
+            />
           )}
         </div>
       )}
