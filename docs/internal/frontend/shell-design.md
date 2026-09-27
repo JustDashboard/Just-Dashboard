@@ -8,8 +8,10 @@ deployment detail/new wrappers remain server components and hand interaction to 
 ## The shell
 
 `(dashboard)/layout.tsx` owns `CommandPaletteProvider`, `SelfUpdateProvider`, `NavScopeProvider`,
-`SidebarProvider` + `AppSidebar`, and `MetricsStream` — which renders nothing and exists to hold the
-metrics socket open for the whole shell, so Overview's charts keep filling from other pages. Its
+`SidebarProvider` + `AppSidebar`, `MetricsStream` — which renders nothing and exists to hold the
+metrics socket open for the whole shell, so Overview's charts keep filling from other pages — and
+`SavedFolderColours` around the page, which reads the folder labels from `/files/places` and again on
+each navigation, so a folder coloured in Files is that colour in every tree and browser. Its
 redirect to `/login` is convenience, not a control; every API call behind it is authenticated server-side.
 
 **The scroll container is on the `SidebarInset`, not the document.** That is what lets a page ask for

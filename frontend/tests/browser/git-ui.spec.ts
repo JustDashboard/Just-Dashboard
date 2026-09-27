@@ -217,8 +217,12 @@ test("the list answers what is waiting before the rows are read", async ({ page 
   const shelves = page.getByRole("list", { name: /^(acme|No remote)$/ })
   await expect(shelves).toHaveCount(2)
   await expect(shelves.first()).toHaveAttribute("aria-label", "acme")
-  await expect(page.getByRole("list", { name: "acme" }).getByRole("button", { name: "app", exact: true })).toBeVisible()
-  await expect(page.getByRole("list", { name: "No remote" }).getByRole("button", { name: "lib", exact: true })).toBeVisible()
+  await expect(
+    page.getByRole("list", { name: "acme" }).getByRole("button", { name: "app", exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole("list", { name: "No remote" }).getByRole("button", { name: "lib", exact: true }),
+  ).toBeVisible()
 
   await page.getByRole("button", { name: "Behind 1" }).click()
   await expect(page.getByRole("button", { name: "app", exact: true })).toBeVisible()
@@ -328,6 +332,60 @@ test("a file staged and edited again is listed on both sides", async ({ page }) 
   await expect(page.getByRole("button", { name: /parked work/ })).toBeVisible()
   // Who the commit is recorded as, beside the button that records it.
   await expect(page.getByRole("button", { name: /^as Ada/ })).toBeVisible()
+})
+
+/**
+ * A folder coloured in Files is that colour in a checkout's tree too.
+ *
+ * The labels were only ever provided on the Files page, so every other tree
+ * drew the default blue however the folders had been coloured — and coming
+ * back from Files, where the colour was just changed, must show the new one.
+ */
+test("the tree draws folders in the colours chosen in Files", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockGit(page)
+  const palette: { defaultColour: string; colours: Record<string, string> } = {
+    defaultColour: "yellow",
+    colours: { "/srv/app/docs": "red" },
+  }
+  const folder = (name: string) => ({
+    name,
+    path: `/srv/app/${name}`,
+    size: 0,
+    mode: "drwxr-xr-x",
+    isDir: true,
+    isSymlink: false,
+    modified: now,
+  })
+  await page.route("**/api/v1/files/**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
+    if (path === "/files/places") {
+      return json(route, { home: "/srv/app", roots: ["/"], places: [], bookmarks: [], ...palette })
+    }
+    if (path === "/files/list") {
+      return json(route, { path: "/srv/app", entries: [folder("docs"), folder("src")] })
+    }
+    if (path === "/files/colours/default") {
+      palette.defaultColour = route.request().postDataJSON().colour
+      palette.colours = {}
+      return json(route, palette)
+    }
+    return route.fallback()
+  })
+  await page.goto("/git?repo=%2Fsrv%2Fapp")
+
+  const drawn = (name: string) => page.locator(`[data-entry-path='/srv/app/${name}'] [data-folder]`)
+  await expect(drawn("src")).toHaveAttribute("style", /--folder-yellow/)
+  await expect(drawn("docs")).toHaveAttribute("style", /--folder-red/)
+
+  await page.getByRole("link", { name: "Files", exact: true }).click()
+  await page.getByRole("button", { name: "Colour all folders" }).click()
+  await page.getByRole("menuitem", { name: "Green" }).click()
+  await expect.poll(() => palette.defaultColour).toBe("green")
+  await page.goBack()
+
+  await expect(drawn("src")).toHaveAttribute("style", /--folder-green/)
+  await expect(drawn("docs")).toHaveAttribute("style", /--folder-green/)
 })
 
 test("discarding a file sends the typed phrase the server demands", async ({ page }) => {
