@@ -86,7 +86,7 @@ export function PendingChanges({
       {goingLive ? (
         <Link
           href={`/deploy/${project.projectId}/runs/${activeRun.id}`}
-          className="rounded-sm focus-ring hover:underline"
+          className="flex rounded-sm focus-ring hover:underline"
         >
           <Status
             tone="running"

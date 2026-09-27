@@ -63,7 +63,7 @@ export function RestartProgress({
   return (
     <div className={cn("min-w-0 space-y-4", className)}>
       <div className="flex min-w-0 items-start gap-3">
-        <span className="pt-0.5">
+        <span className="pt-px">
           {running && <Spinner className="size-4 text-primary" />}
           {run.status === "success" && <CheckCircle className="size-4 text-success" />}
           {run.status === "failed" && <CrossCircle className="size-4 text-destructive" />}

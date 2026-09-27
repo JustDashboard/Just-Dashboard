@@ -103,7 +103,7 @@ export function RebasePreview({ ctx, onClose }: { ctx: PreviewContext; onClose: 
                       {item.message.split("\n")[0]}
                     </span>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex items-center gap-2">
                     <Select value={item.action} onValueChange={(action) => update(i, { action })}>
                       <SelectTrigger
                         aria-label={`Action for commit ${i + 1}`}

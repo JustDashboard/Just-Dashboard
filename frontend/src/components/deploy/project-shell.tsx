@@ -600,7 +600,7 @@ function AutoDeployFact({
   return (
     <Link
       href={href}
-      className="rounded-sm focus-ring"
+      className="flex rounded-sm focus-ring"
       aria-label={`${reading.label} · automatic deployment settings`}
     >
       <Status tone={reading.tone} label={reading.label} />
@@ -624,7 +624,7 @@ function Assessment({ diagnosis, href }: { diagnosis?: DeploymentDiagnosis; href
       WORST.find((level) => diagnosis.findings.some((finding) => finding.severity === level)) ??
       "notice"
     return (
-      <Link href={href} className="block rounded-sm focus-ring hover:underline">
+      <Link href={href} className="flex rounded-sm focus-ring hover:underline xl:justify-end">
         <Status
           verdict={worst}
           label={count === 1 ? "1 needs attention" : `${count} need attention`}

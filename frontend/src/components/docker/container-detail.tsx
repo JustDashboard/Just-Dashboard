@@ -482,7 +482,7 @@ function EnvironmentList({ env }: { env: string[] }) {
                 <Button
                   size="xs"
                   variant="ghost"
-                  className="ml-auto shrink-0 font-normal"
+                  className="-my-1 ml-auto shrink-0 font-normal"
                   aria-label={`Copy ${row.name}`}
                   onClick={() => void copyText(row.value, `${row.name} copied`)}
                 >
@@ -494,7 +494,7 @@ function EnvironmentList({ env }: { env: string[] }) {
                 <Button
                   size="xs"
                   variant="ghost"
-                  className="shrink-0 font-normal"
+                  className="-my-1 shrink-0 font-normal"
                   aria-label={`${revealed[row.name] ? "Hide" : "Reveal"} ${row.name}`}
                   onClick={() => setRevealed((prev) => ({ ...prev, [row.name]: !prev[row.name] }))}
                 >
@@ -1104,7 +1104,7 @@ function MountRow({
           {mount.rw ? "the container can write to it" : "read-only"}
         </span>
       </span>
-      <span className="flex shrink-0 items-center gap-1.5">
+      <span className="mt-0.5 flex shrink-0 items-center gap-1.5">
         <Tag tone={kind?.survives === false ? "warning" : "default"}>
           {kind?.label ?? mount.type}
         </Tag>

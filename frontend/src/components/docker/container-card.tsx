@@ -90,7 +90,10 @@ export function ContainerCard({
           // Each reading in its own fixed measure, so a column of cards lines
           // up the way the table's columns did.
           <>
-            <span className="w-32 min-w-0" aria-busy={pending ? true : undefined}>
+            <span
+              className="flex w-32 min-w-0 flex-col items-start"
+              aria-busy={pending ? true : undefined}
+            >
               <ContainerStatus container={container} pending={pending} />
             </span>
             <span className="w-24">

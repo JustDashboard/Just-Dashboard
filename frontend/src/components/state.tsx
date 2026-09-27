@@ -265,10 +265,10 @@ export function Notice({
         <Icon
           aria-hidden
           className={cn(
-            // Nudged onto the title's baseline rather than the box's top edge:
-            // 13px of text in an 18px line box puts its optical centre two
-            // pixels below a 16px glyph's.
-            "mt-0.5 size-4 shrink-0",
+            // No nudge: the title is `leading-tight`, a 16px line box, so a
+            // 16px glyph at the top edge already shares its centre. The
+            // `mt-0.5` this carried dropped the glyph two pixels below it.
+            "size-4 shrink-0",
             tone === "default" && "text-muted-foreground",
             tone === "warning" && "text-warning",
             tone === "danger" && "text-destructive",

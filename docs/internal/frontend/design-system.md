@@ -646,6 +646,19 @@ is opaque with is `--panel-ground` — declared by the panel (`--card` framed, `
 never assumed by the table. Reading `--card` there put a faint unexplained band across every table on
 a plain panel, overhanging the header hairline by the table's own `-mx-4` bleed.
 
+**A row's text shares one centre line.** A bare `span`, `div` or `Link` placed in a flex row is a
+block, and a block keeps the line box it inherits — the page's 16px, 24px-tall one where nothing
+set another. A 12px `Status` or `Tag` inside it rests on that box's baseline, three pixels below the
+button beside it: the database strip's "connected", a deployment's route and certificate columns,
+a container card's state, a release note's kind and the identity line's aside all shipped that way.
+A wrapper around an inline status is a flex box (`flex`, or `flex flex-col items-start` for a state
+over its detail), or it carries its content's own type size. A glyph beside a title is nudged by
+the title's line box, not by habit: `mt-0.5` centres a 16px glyph on a 20px line and drops it two
+pixels below a `leading-tight` one. A field and its button in one row are `items-center`, since the
+field is 44px on a phone and the button is not. A view strip's tabs carry `pt-0.5` against their
+2px underline, so their labels sit on the strip's centre line with whatever shares the strip.
+`design-system.spec.ts` checks the first of these on every surface it opens.
+
 `.eyebrow` is the small-caps label that opens a section, a panel header or a stat tile. `.numeric` is
 any figure meant to be compared with the one above it — tabular digits stop a polling table from
 shimmering.

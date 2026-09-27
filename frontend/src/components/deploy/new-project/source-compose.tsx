@@ -316,7 +316,7 @@ function ComposeFilesEditor({
     )
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-end justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="eyebrow">Compose files</p>
         <Button
           type="button"
@@ -360,7 +360,7 @@ function ComposeFilesEditor({
       )}
       {documents.map((document, index) => (
         <Group key={`${document.order}-${index}`}>
-          <div className="mb-2 flex gap-2">
+          <div className="mb-2 flex items-center gap-2">
             <Input
               value={document.path}
               onChange={(event) => update(index, "path", event.target.value)}

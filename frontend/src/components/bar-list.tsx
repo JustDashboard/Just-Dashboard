@@ -139,8 +139,14 @@ export function BarList({
                 )}
               </span>
             </Row>
-            {item.trailing}
-            <span className="numeric w-14 shrink-0 text-right text-hint text-muted-foreground">
+            {/* The verb and the figure are centred on the label's line — the
+                row's 6px padding and the label's 16px, 28px from the top —
+                not on the label and its bar together, which left them
+                floating between the two. */}
+            {item.trailing && (
+              <span className="flex h-7 shrink-0 items-center self-start">{item.trailing}</span>
+            )}
+            <span className="numeric flex h-7 w-14 shrink-0 items-center justify-end self-start text-hint text-muted-foreground">
               {item.value}
             </span>
           </li>

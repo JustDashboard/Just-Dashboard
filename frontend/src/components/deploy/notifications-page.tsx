@@ -1543,7 +1543,9 @@ function ChannelSheet({
                 <span>added {calendarDate(channel.createdAt)}</span>
               </div>
             </div>
-            <span className="max-sm:basis-full max-sm:pl-13">
+            {/* On the title's 22px line: a flex box drops the block's 16px
+                strut, which had set the 12px state four pixels below it. */}
+            <span className="flex max-sm:basis-full max-sm:pl-13 sm:pt-1">
               <LastDelivery channel={channel} sending={sending} switching={switching} />
             </span>
           </div>
