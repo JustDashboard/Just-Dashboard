@@ -225,11 +225,15 @@ export function UsageTiles({
         label: "Network",
         value: current?.network ? <Arrived>{rate(current.network.rx)}</Arrived> : "—",
         trailing: current?.network && "in",
-        trend: trend(
-          points.map((point) => point.netRx + point.netTx),
-          "Network",
-          "var(--chart-5)",
-        ),
+        // The compact sparkline cannot draw gaps. Leave it absent when an
+        // interval was unmeasurable; the full history chart preserves the gap.
+        trend: points.some((point) => point.netRx === null || point.netTx === null)
+          ? undefined
+          : trend(
+              points.map((point) => (point.netRx ?? 0) + (point.netTx ?? 0)),
+              "Network",
+              "var(--chart-5)",
+            ),
         hint: current?.network && `${rate(current.network.tx)} out`,
       },
     )

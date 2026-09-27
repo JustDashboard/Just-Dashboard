@@ -28,7 +28,7 @@ func inventoryTestClient(t *testing.T) (*Client, *atomic.Int32) {
 		case path == "/networks":
 			fmt.Fprint(w, `[{"Id":"network","Name":"private","IPAM":{}}]`)
 		case path == "/containers/running/stats":
-			fmt.Fprint(w, `{}`)
+			fmt.Fprint(w, `{"read":"2026-09-27T10:00:00Z","memory_stats":{"usage":524288,"limit":1048576}}`)
 		case path == "/containers/running/json":
 			inspections.Add(1)
 			fmt.Fprint(w, `{"Id":"running","State":{"Running":true,"StartedAt":"2026-09-01T00:00:00Z","Health":{"Status":"healthy"}},"Config":{"Image":"example/app:1","Healthcheck":{"Test":["CMD","true"]}},"HostConfig":{"Memory":1048576,"NanoCpus":1000000000,"RestartPolicy":{"Name":"always"}}}`)
@@ -45,11 +45,12 @@ func inventoryTestClient(t *testing.T) (*Client, *atomic.Int32) {
 	return c, &inspections
 }
 
-func TestContainerMembershipAndSamplesSkipUnusedInspections(t *testing.T) {
+func TestContainerMembershipSkipsInspectionsAndSamplesUseDeclaredLimits(t *testing.T) {
 	for _, kind := range []string{"volumes", "images", "networks", "image refs", "stats"} {
 		t.Run(kind, func(t *testing.T) {
 			c, inspections := inventoryTestClient(t)
 			ctx := cacheTestContext(t)
+			wantInspections := int32(0)
 			switch kind {
 			case "volumes":
 				users, err := c.volumeUsers(ctx)
@@ -70,13 +71,19 @@ func TestContainerMembershipAndSamplesSkipUnusedInspections(t *testing.T) {
 					t.Fatalf("image references = %+v", refs)
 				}
 			case "stats":
+				// An explicit budget equal to host RAM still is a configured limit.
+				c.hostMemory = 1 << 20
+				wantInspections = 1
 				stats, err := c.NewStatsSampler().SampleAll(ctx)
 				if err != nil || len(stats) != 1 || stats[0].ID != "running" {
 					t.Fatalf("stats = %+v, %v", stats, err)
 				}
+				if !stats[0].MemLimited || stats[0].MemLimit != 1<<20 || stats[0].MemPercent != 50 {
+					t.Fatalf("declared memory budget was lost: %+v", stats[0])
+				}
 			}
-			if got := inspections.Load(); got != 0 {
-				t.Fatalf("membership read performed %d unused inspections", got)
+			if got := inspections.Load(); got != wantInspections {
+				t.Fatalf("inspection count = %d, want %d", got, wantInspections)
 			}
 		})
 	}

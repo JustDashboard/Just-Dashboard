@@ -26,9 +26,15 @@ since a tab was opened, and charts that start empty every visit cannot show last
   CPU/memory means, peaks and sample counts; its half-open window is limited to 24 hours and requested
   resolution to 600 buckets per container. Empty series remain empty, and retention-disabled reads
   return no samples. An `(container_id, ts)` index is installed after the column migration.
-- Container network/block totals are stored as Docker's **cumulative counters** and differenced in SQL
-  (`MAX - MIN` over the bucket). A total can be re-bucketed later; a rate recorded against one interval
-  cannot.
+- Container network/block totals are stored as Docker's **cumulative counters** at Docker's sample
+  timestamp (`sample_time` retains fractional seconds; legacy rows use their integer timestamp).
+  `container_usage.go` differences consecutive samples **before** bucketing, with a bounded
+  look-behind for the first visible sample. Means are weighted by measured elapsed time; peaks are the
+  highest measured interval rate. Single-sample buckets retain the interval from their predecessor.
+  Missing counters, identity changes, backwards CPU/I/O counters and gaps over three sample intervals
+  return null rates, not zeroes or spikes. Additive nullable availability/limit/counter columns leave old
+  rows unknown; positive legacy counters can still establish availability. Only explicitly configured
+  memory limits become historical limit lines, rather than Docker's default host RAM ceiling.
 - The recorder keeps its **own** `sysinfo.Collector` and `dockerx.StatsSampler`: rates are deltas, and
   sharing with request handlers would let a one-shot `GET /system/metrics` shorten the next interval.
 

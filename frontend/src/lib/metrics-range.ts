@@ -470,6 +470,10 @@ export type ContainerRow = {
   netTx: number | null
   blockRead: number | null
   blockWrite: number | null
+  netRxPeak?: number | null
+  netTxPeak?: number | null
+  blockReadPeak?: number | null
+  blockWritePeak?: number | null
   pids: number | null
 }
 
@@ -504,6 +508,10 @@ function toContainerRow(point: ContainerHistoryPoint, ts: number, step: number):
     netTx: point.netTx,
     blockRead: point.blockRead,
     blockWrite: point.blockWrite,
+    netRxPeak: point.netRxPeak ?? point.netRx,
+    netTxPeak: point.netTxPeak ?? point.netTx,
+    blockReadPeak: point.blockReadPeak ?? point.blockRead,
+    blockWritePeak: point.blockWritePeak ?? point.blockWrite,
     pids: point.pids,
   }
 }

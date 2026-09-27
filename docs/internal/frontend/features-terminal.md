@@ -101,11 +101,14 @@ that does something.
   backup landed or what the application wrote. With more than one to look in, the rows are the switch
   between them; a tmpfs row never is, since memory has nowhere on this filesystem to look. Storage that looks
   like a database's own files is named as such above the browser while the container is running
-  (`docker/shared.tsx`). Its Usage
-  tab drops the network chart entirely for a container on the host's network namespace: Docker reports no
-  per-container interface there, and a chart-shaped hole explaining itself beside a real chart draws the
-  eye first to say "nothing here". `build-dialog.tsx` is where the git panel and Docker stop being two
-  products: a repository we already pull is a build context.
+  (`docker/shared.tsx`). Its Usage tab leads with live CPU, memory working set and network receive/send
+  tiles, then processor/task, memory and block I/O details and a per-interface table of rates, totals,
+  packet rates, errors and drops. Live readings can be paused and remain independent of history
+  retention. Host networking links to host metrics; shared container namespaces are labelled as shared.
+  Recorded charts stay visible for idle interfaces (zero is data); charts with no measurable intervals
+  are omitted with a compact explanation. CPU/memory and network/block charts share one range control,
+  carry measured peaks, and use the reading register's plain surfaces. `build-dialog.tsx` is where the
+  git panel and Docker stop being two products: a repository we already pull is a build context.
 
 Four deep links are worth preserving: `/files?path=`, `/git?repo=`, `/terminal?cwd=`, `/audit?action=`.
 All but the terminal one are read once as an initial value rather than kept in sync — the URL is where

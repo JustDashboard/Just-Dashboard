@@ -2,7 +2,8 @@
 
 import { useMemo } from "react"
 import { get, ApiError } from "@/lib/api"
-import { bytes, percent, rate } from "@/lib/format"
+import { bytes, percent } from "@/lib/format"
+import { containerRateLabel } from "@/lib/container-usage"
 import {
   containerRows,
   HISTORY_RANGES,
@@ -18,7 +19,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useMetricEvents } from "@/hooks/use-metrics-history"
 import { useMetricsWindow } from "@/hooks/use-metrics-window"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Metric, MetricStrip, Section } from "@/components/page"
+import { Section } from "@/components/page"
 import { ErrorState, Notice } from "@/components/state"
 import { ChartPanel, ChartPlaceholder } from "@/components/metrics/chart-panel"
 import { RangePicker } from "@/components/metrics/range-picker"
@@ -34,13 +35,25 @@ const memSeries: Series[] = [
 ]
 
 const netSeries: Series[] = [
-  { key: "netRx", label: "In", color: "var(--chart-2)", kind: "area" },
-  { key: "netTx", label: "Out", color: "var(--chart-5)", kind: "area" },
+  { key: "netRx", label: "Received", color: "var(--chart-2)", kind: "area", peakKey: "netRxPeak" },
+  { key: "netTx", label: "Sent", color: "var(--chart-5)", kind: "area", peakKey: "netTxPeak" },
 ]
 
 const blockSeries: Series[] = [
-  { key: "blockRead", label: "Read", color: "var(--chart-2)", kind: "area" },
-  { key: "blockWrite", label: "Write", color: "var(--chart-5)", kind: "area" },
+  {
+    key: "blockRead",
+    label: "Read",
+    color: "var(--chart-2)",
+    kind: "area",
+    peakKey: "blockReadPeak",
+  },
+  {
+    key: "blockWrite",
+    label: "Write",
+    color: "var(--chart-5)",
+    kind: "area",
+    peakKey: "blockWritePeak",
+  },
 ]
 
 // Module constants rather than inline arrows: `ChartPanel` is memoised on its
@@ -48,24 +61,11 @@ const blockSeries: Series[] = [
 // every poll of the page around it.
 const formatBytes = (v: number) => bytes(v)
 const axisBytes = (v: number) => bytes(v, 0)
-const formatRate = (v: number) => rate(v)
+const formatRate = containerRateLabel
 // Not capped at 100: a container using two cores is at 200%, and clipping
 // that would hide the thing worth seeing.
 const formatPercent = (v: number) => percent(v)
 
-/**
- * What this container was doing before you opened the panel.
- *
- * The live stats socket, like the host one, only ever describes the time since
- * this panel was mounted — so a container that was killed for exceeding its
- * memory limit at 03:00, or that pinned a core for twenty minutes overnight,
- * left no trace anywhere in the dashboard. These charts read the series the
- * backend has been recording on its own timer.
- *
- * There is no "Live" option here on purpose: nothing accumulates a container's
- * stats across a page load, so it would draw an empty chart that fills in over
- * the next few minutes — the exact behaviour this panel exists to replace.
- */
 /**
  * What this container's recorded history says has changed.
  *
@@ -108,17 +108,11 @@ function ContainerAnomalies({ containerId }: { containerId: string }) {
   )
 }
 
-/**
- * `plain` is for a page where these charts are a block of their own rather
- * than a tab's whole content — a deployment's runtime. The charts lose their
- * frames, the one range switch moves to the section's head so it plainly
- * governs all four, and Processor and Memory sit side by side on a wide
- * screen.
- */
+/** Recorded charts shared by a container's Usage tab and a deployment's runtime. */
 export function ContainerUsage({
   containerId,
   name,
-  plain,
+  plain = true,
 }: {
   containerId: string
   name: string
@@ -153,27 +147,12 @@ export function ContainerUsage({
 
   const rows = useMemo<ContainerRow[]>(() => (data ? containerRows(data) : []), [data])
   const limit = memoryLimit(data)
-  /**
-   * Whether there is a per-container network series at all.
-   *
-   * Docker omits `networks` entirely for a container sharing the host's
-   * network namespace — there is no per-container interface to measure. The
-   * panel used to stay and explain itself, which meant a chart-shaped hole
-   * with a paragraph in it sitting beside a real chart: the reader's eye goes
-   * to it first because it is the odd one out, and what it has to say is
-   * "nothing to show here". A container with no network of its own simply has
-   * no network chart, and Block I/O takes the width back.
-   *
-   * `rows.length > 0` is the guard that matters: while the history is loading
-   * there is no data either, and a panel that vanishes and then reappears a
-   * second later is worse than one that was never there.
-   */
-  const hasNetwork = useMemo(
-    () => rows.length === 0 || rows.some((r) => (r.netRx ?? 0) > 0 || (r.netTx ?? 0) > 0),
-    [rows],
-  )
+  const memoryCeiling = Math.max(limit, ...rows.map((row) => row.memPeak ?? 0))
+  // Zero is a measurement. Only null is absent; an idle interface keeps its chart.
+  const hasNetwork = rows.length === 0 || rows.some((r) => r.netRx !== null || r.netTx !== null)
+  const hasBlock =
+    rows.length === 0 || rows.some((r) => r.blockRead !== null || r.blockWrite !== null)
   const disabled = error instanceof ApiError && error.code === "metrics_history_disabled"
-  const peaks = useMemo(() => summarise(rows), [rows])
   // Scaled to the limit rather than to the data. A container sitting at a
   // quarter of its ceiling draws a short line, which is the useful picture:
   // an axis fitted to the series makes every container look equally close to
@@ -185,14 +164,19 @@ export function ContainerUsage({
     () =>
       limit > 0
         ? {
-            domain: [0, Math.round(limit * 1.04)] as [number, number],
-            ticks: [0, limit / 4, limit / 2, (limit * 3) / 4, limit],
+            domain: [0, Math.round(memoryCeiling * 1.04)] as [number, number],
+            ticks:
+              memoryCeiling === limit
+                ? [0, limit / 4, limit / 2, (limit * 3) / 4, limit]
+                : undefined,
             // The limit is the line that explains an OOM kill, so it is drawn
             // even when the series never gets near it.
-            thresholds: [{ value: limit, label: "limit", tone: "danger" as const }],
+            thresholds: [
+              { value: limit, label: "highest recorded limit", tone: "danger" as const },
+            ],
           }
         : undefined,
-    [limit],
+    [limit, memoryCeiling],
   )
 
   if (disabled) {
@@ -215,11 +199,12 @@ export function ContainerUsage({
     ? "Loading history…"
     : `Nothing recorded for ${name} in this window yet — the server samples every ${data?.sampleIntervalSeconds ?? 15}s.`
 
-  const range = <RangePicker controls={controls} ranges={HISTORY_RANGES} />
+  const range = (
+    <RangePicker controls={{ ...controls, window: effective }} ranges={HISTORY_RANGES} />
+  )
   const processor = (
     <ChartPanel
       title="Processor"
-      actions={plain ? undefined : range}
       rows={rows}
       series={cpuSeries}
       unit="%"
@@ -229,18 +214,6 @@ export function ContainerUsage({
       note={note}
       height={170}
       plain={plain}
-      // Beside Memory the strip only said again what the two charts' Max
-      // columns and the limit line say, and made Processor the taller of the
-      // pair so their axes no longer lined up.
-      footer={
-        plain ? undefined : (
-          <MetricStrip className="[&>*]:flex-1">
-            <Metric label="Peak CPU" value={peaks.cpu === null ? "—" : percent(peaks.cpu)} />
-            <Metric label="Peak memory" value={peaks.mem === null ? "—" : bytes(peaks.mem)} />
-            <Metric label="Limit" value={limit > 0 ? bytes(limit) : "none"} />
-          </MetricStrip>
-        )
-      }
     />
   )
   const memory = (
@@ -260,90 +233,64 @@ export function ContainerUsage({
       thresholds={memoryScale?.thresholds}
     />
   )
-  /*
-    Network and block throughput were being sampled for this container all
-    along and thrown away at the end of every request. They are the two
-    series that answer "is this the container saturating the host", which
-    the CPU and memory charts on their own cannot.
-  */
   const throughput = (
-    <div
-      className={cn(
-        "grid [&>*]:min-w-0",
-        plain ? "gap-6" : "gap-3",
-        hasNetwork && "lg:grid-cols-2",
-      )}
-    >
+    <div className={cn("grid gap-6 [&>*]:min-w-0", hasNetwork && hasBlock && "lg:grid-cols-2")}>
       {hasNetwork && (
         <ChartPanel
-          title="Network"
+          title="Network throughput"
           rows={rows}
           series={netSeries}
           format={formatRate}
-          axisFormat={axisBytes}
+          axisFormat={formatRate}
           events={events}
           onZoom={controls.zoomTo}
-          showPeaks={false}
           note={note}
-          height={150}
+          height={180}
           plain={plain}
         />
       )}
-      <ChartPanel
-        title="Block I/O"
-        rows={rows}
-        series={blockSeries}
-        format={formatRate}
-        axisFormat={axisBytes}
-        events={events}
-        onZoom={controls.zoomTo}
-        showPeaks={false}
-        note={note}
-        height={150}
-        plain={plain}
-      />
+      {hasBlock && (
+        <ChartPanel
+          title="Block throughput"
+          rows={rows}
+          series={blockSeries}
+          format={formatRate}
+          axisFormat={formatRate}
+          events={events}
+          onZoom={controls.zoomTo}
+          note={note}
+          height={180}
+          plain={plain}
+        />
+      )}
     </div>
   )
 
-  /*
-    Rate of change, above the charts that show it.
-    "Writable layer: 38.7 GB" is a number nobody can act on; "+6.4 GB
-    today" is. The same is true of memory — a container at 400 MB is a
-    fact, a container whose floor has doubled in a day is a leak — and the
-    history to say either has been recorded all along with nothing reading
-    it for this purpose.
-  */
-  const anomalies = <ContainerAnomalies containerId={containerId} />
-
-  if (plain) {
-    return (
-      <Section title="Usage history" actions={range}>
-        {anomalies}
-        <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
-          {processor}
-          {memory}
-        </div>
-        {throughput}
-      </Section>
-    )
-  }
   return (
-    <div className="space-y-3">
-      {anomalies}
-      {processor}
-      {memory}
+    <Section title="Usage history" actions={range}>
+      <ContainerAnomalies containerId={containerId} />
+      <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+        {processor}
+        {memory}
+      </div>
       {throughput}
-    </div>
+      {(!hasNetwork || !hasBlock) && (
+        <p className="text-xs text-muted-foreground">
+          No measurable{" "}
+          {!hasNetwork && !hasBlock
+            ? "network or block I/O"
+            : !hasNetwork
+              ? "network"
+              : "block I/O"}{" "}
+          intervals in this window. A rate needs two consecutive readings from available counters.
+        </p>
+      )}
+      <p className="text-hint text-muted-foreground">
+        Recorded every {data?.sampleIntervalSeconds ?? 15}s · chart buckets{" "}
+        {data?.stepSeconds ?? "—"}s. Means and measured peaks cover samples in each bucket, not
+        activity between samples. History follows the container name across replacements; rates
+        break at resets and missing samples.
+      </p>
+    </Section>
   )
-}
-
-/** The worst moment in the window, which is the number the charts exist to surface. */
-function summarise(rows: ContainerRow[]): { cpu: number | null; mem: number | null } {
-  let cpu: number | null = null
-  let mem: number | null = null
-  for (const row of rows) {
-    if (row.cpuPeak !== null && (cpu === null || row.cpuPeak > cpu)) cpu = row.cpuPeak
-    if (row.memPeak !== null && (mem === null || row.memPeak > mem)) mem = row.memPeak
-  }
-  return { cpu, mem }
 }
