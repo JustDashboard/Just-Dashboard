@@ -1137,7 +1137,8 @@ supports it. Unknown products keep a glyph.
 Certificates has a searchable inventory beside renewal and DNS management. Each inventory card opens
 its details — all names, dates, the full path and links to the sites using it — so it takes the lit
 edge; its issuer, expiry and lifetime meter remain on the card. An unreadable certificate carries a
-short verdict on the card and its complete error in the detail sheet; it draws no invented lifetime.
+short verdict on the card and its complete error in the detail sheet; unavailable dates and signing
+status stay unknown, and it draws no invented lifetime.
 A watched domain opens a live report and preserves its nonstandard port. Password files and
 watched-domain setup use the deployment settings' rail sections. Certificate renewal lineages and
 DNS providers remain readings with their own actions, laid out to fit the management column. The TLS

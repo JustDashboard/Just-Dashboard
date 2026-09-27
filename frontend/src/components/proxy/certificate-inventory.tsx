@@ -142,12 +142,14 @@ export function CertificateInventory({
             <div className="flex items-center gap-3">
               <ProductLogo id={certificateProduct(selectedCert)} size="md" fallback={ShieldCheck} />
               <div className="min-w-0 flex-1">
-                <p className="text-title font-medium">{selectedCert.issuer || "Unknown issuer"}</p>
+                <p className="text-title font-medium break-words">
+                  {selectedCert.issuer || "Unknown issuer"}
+                </p>
                 <ExpiryStatus cert={selectedCert} />
               </div>
             </div>
             {selectedCert.error && (
-              <Notice tone="danger" title="Unreadable certificate">
+              <Notice tone="danger" title="Unreadable certificate" className="break-all">
                 {selectedCert.error}
               </Notice>
             )}
@@ -157,10 +159,14 @@ export function CertificateInventory({
                 <span className="break-all">{selectedCert.domains.join(", ") || "—"}</span>
               </Detail>
               <Detail label="Issued">
-                {selectedCert.notBefore ? calendarDate(selectedCert.notBefore) : "—"}
+                {!selectedCert.error && selectedCert.notBefore
+                  ? calendarDate(selectedCert.notBefore)
+                  : "—"}
               </Detail>
               <Detail label="Expires">
-                {selectedCert.notAfter ? calendarDate(selectedCert.notAfter) : "—"}
+                {!selectedCert.error && selectedCert.notAfter
+                  ? calendarDate(selectedCert.notAfter)
+                  : "—"}
               </Detail>
               <Detail label="Source">{selectedCert.source}</Detail>
               <Detail label="Used by">
@@ -183,7 +189,9 @@ export function CertificateInventory({
               <Detail label="File">
                 <span className="font-mono text-hint break-all">{selectedCert.path}</span>
               </Detail>
-              <Detail label="Self-signed">{selectedCert.selfSigned ? "yes" : "no"}</Detail>
+              <Detail label="Self-signed">
+                {selectedCert.error ? "—" : selectedCert.selfSigned ? "yes" : "no"}
+              </Detail>
             </DetailList>
           </div>
         )}

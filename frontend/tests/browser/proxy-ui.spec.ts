@@ -693,7 +693,19 @@ test("unreadable certificates keep their error in the detail surface without ove
   const message =
     "Could not read /etc/letsencrypt/live/an-extremely-long-hostname.example.com/fullchain.pem: permission denied"
   await page.route("**/api/v1/certificates/", (route) =>
-    json(route, [{ ...certs[0], error: message }]),
+    json(route, [
+      {
+        ...certs[0],
+        domains: [],
+        issuer: "",
+        notBefore: "0001-01-01T00:00:00Z",
+        notAfter: "0001-01-01T00:00:00Z",
+        daysLeft: 0,
+        expired: false,
+        expiring: false,
+        error: message,
+      },
+    ]),
   )
   await page.goto("/proxy/certificates")
   const inventory = page.getByRole("list", { name: "Installed certificates" })
@@ -705,7 +717,15 @@ test("unreadable certificates keep their error in the detail surface without ove
       .evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
   ).toBe(true)
   await inventory.getByRole("button", { name: "Inspect app.example.com" }).click()
-  await expect(page.getByRole("dialog").getByText(message)).toBeVisible()
+  const detail = page.getByRole("dialog")
+  await expect(detail).toBeInViewport({ ratio: 1 })
+  await expect(detail.getByText(message)).toBeVisible()
+  for (const label of ["Issued", "Expires", "Self-signed"]) {
+    await expect(detail.locator(`dt:has-text("${label}") + dd`)).toHaveText("—")
+  }
+  expect(await detail.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
+    true,
+  )
 })
 
 test("proxy editors and lower sections remain usable on a phone", async ({ page }, testInfo) => {
