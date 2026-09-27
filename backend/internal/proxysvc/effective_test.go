@@ -2,12 +2,16 @@ package proxysvc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // liveNginx gives a test the host's real nginx against a private prefix under
@@ -70,10 +74,17 @@ func TestParseEffective(t *testing.T) {
 		"# configuration file /etc/nginx/conf.d/blank-lines.conf:\n" +
 		"\n\nserver {}\n\n" +
 		"\n"
+	// A comment reading like a marker, which real `nginx -T` prints as part
+	// of the file it is in: nginx names a file by its full path, a comment
+	// does not.
+	output += "# configuration file /etc/nginx/conf.d/commented.conf:\n" +
+		"# configuration file for the app:\nmap $host $app { default 1; }\n" +
+		"\n"
 	want := []ConfigFile{
 		{Path: "/etc/nginx/nginx.conf", Content: "events {}\nhttp {\n    include /etc/nginx/conf.d/*.conf;\n}\n"},
 		{Path: "/etc/nginx/conf.d/no-newline.conf", Content: "server {}"},
 		{Path: "/etc/nginx/conf.d/blank-lines.conf", Content: "\n\nserver {}\n\n"},
+		{Path: "/etc/nginx/conf.d/commented.conf", Content: "# configuration file for the app:\nmap $host $app { default 1; }\n"},
 	}
 	if got := ParseEffective(output); !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v\nwant %#v", got, want)
@@ -147,6 +158,128 @@ func TestEffectiveConfigFromARealDump(t *testing.T) {
 		if f.Path == site && f.Content != "server {\n    listen 127.0.0.1:18092;\n}\n" {
 			t.Fatalf("the service's own write did not forget the cache: %q", f.Content)
 		}
+	}
+}
+
+// EffectiveConfig is read by every signed-in account, so it shows what
+// ReadConfig shows and nothing more: a file nginx reads from outside the
+// proxy's directories, by an include or through a link, is left out.
+func TestEffectiveConfigShowsOnlyWhatReadConfigShows(t *testing.T) {
+	root := liveNginx(t)
+	service := New(root, filepath.Join(root, "Caddyfile"))
+	outside := t.TempDir()
+	secrets := filepath.Join(outside, "secrets.conf")
+	if err := os.WriteFile(secrets, []byte("proxy_set_header X-Api-Key \"s3cr3t\";\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "linked.conf"), []byte("map $host $jd_linked { default s3cr3t; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	including := filepath.Join(root, "conf.d", "including.conf")
+	if err := os.WriteFile(including, []byte("include "+secrets+";\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(root, "conf.d", "linked.conf")
+	if err := os.Symlink(filepath.Join(outside, "linked.conf"), linked); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := service.EffectiveConfig(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var paths []string
+	for _, f := range files {
+		paths = append(paths, f.Path)
+		if strings.Contains(f.Content, "s3cr3t") {
+			t.Fatalf("%s came back with content from outside the proxy directory", f.Path)
+		}
+	}
+	want := []string{filepath.Join(root, "nginx.conf"), including}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("returned %v, want %v", paths, want)
+	}
+	for _, path := range []string{secrets, linked} {
+		if _, err := service.ReadConfig(path); !errors.Is(err, ErrUnsafePath) {
+			t.Fatalf("ReadConfig(%s) = %v, want it refused like the dump", path, err)
+		}
+	}
+}
+
+// fakeNginx puts an nginx first on PATH whose `-T` prints dump and counts its
+// runs in the file it returns.
+func fakeNginx(t *testing.T, dump string) string {
+	t.Helper()
+	dir := t.TempDir()
+	runs := filepath.Join(dir, "runs")
+	script := fmt.Sprintf("#!/bin/sh\necho run >> '%s'\ncat <<'EOF'\n%sEOF\n", runs, dump)
+	if err := os.WriteFile(filepath.Join(dir, "nginx"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return runs
+}
+
+// A tree rooted at whichever file came after a withheld main configuration
+// would be wrong without saying so.
+func TestEffectiveConfigRefusesAMainFileOutsideTheProxyDirectory(t *testing.T) {
+	root := t.TempDir()
+	fakeNginx(t, "# configuration file /usr/local/openresty/nginx/conf/nginx.conf:\n"+
+		"http { include "+root+"/conf.d/*.conf; }\n\n"+
+		"# configuration file "+root+"/conf.d/a.conf:\nserver {}\n\n")
+	service := New(root, filepath.Join(root, "Caddyfile"))
+	if _, err := service.EffectiveConfig(context.Background()); err == nil ||
+		!strings.Contains(err.Error(), "JD_NGINX_DIR") {
+		t.Fatalf("got %v, want the main file's location explained", err)
+	}
+}
+
+// s.mu can be held for minutes by a certificate order. A reader waits no
+// longer than its own context, and the readers that queue meanwhile share one
+// `nginx -T` rather than running one each once the lock is free.
+func TestEffectiveConfigWaitsForTheLockOnlyAsLongAsItsCaller(t *testing.T) {
+	root := t.TempDir()
+	runs := fakeNginx(t, "# configuration file "+root+"/nginx.conf:\nevents {}\n\n")
+	service := New(root, filepath.Join(root, "Caddyfile"))
+
+	service.mu.Lock()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	returned := make(chan error, 1)
+	go func() {
+		_, err := service.EffectiveConfig(ctx)
+		returned <- err
+	}()
+	select {
+	case err := <-returned:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("a reader behind the lock got %v, want its own deadline", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a reader behind the lock waited past its own deadline")
+	}
+	var wg sync.WaitGroup
+	errs := make([]error, 8)
+	for i := range errs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = service.EffectiveConfig(context.Background())
+		}()
+	}
+	service.mu.Unlock()
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	b, err := os.ReadFile(runs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(b), "run"); n != 1 {
+		t.Fatalf("nginx -T ran %d times for readers that queued together, want once", n)
 	}
 }
 

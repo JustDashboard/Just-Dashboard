@@ -412,9 +412,14 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   its `Error:` line, best effort.
 - **The configuration nginx actually loads.** `EffectiveConfig` (`effective.go`) runs `nginx -T` through
   `hostexec` under the service lock — so it never dumps a candidate `Validate` has staged — splits it into
-  `ConfigFile`s byte for byte (`ParseEffective`), drops password files for the same reason `ReadConfig`
-  refuses them, and caches the result for ten seconds; every change the service makes and every reload
-  forgets it at once. `NginxTree` (`nginxconf.go`) parses those files the way nginx tokenises them
+  `ConfigFile`s byte for byte (`ParseEffective`, which takes a `# configuration file` line as a file only
+  when it names an absolute path), keeps only the files `ReadConfig` would show — no password file, and
+  nothing that resolves outside the proxy's directories, so certbot's options file or a module's
+  `load_module` file is left out with its directives — and caches the result for ten seconds; every
+  change the service makes and every reload forgets it at once. A main configuration outside
+  `JD_NGINX_DIR` is an error rather than a tree rooted at the wrong file. The service lock can be held
+  for minutes by a certificate order, so a reader waits only as long as its own context, and readers
+  that queue behind one pending dump share it. `NginxTree` (`nginxconf.go`) parses those files the way nginx tokenises them
   (quotes and their escapes, comments, `${var}`, nested blocks) into `Directive`s carrying their file,
   line and enclosing contexts, with each `include` replaced in place by the files its glob matched, sorted
   and without dotfiles as glob(3) would.
