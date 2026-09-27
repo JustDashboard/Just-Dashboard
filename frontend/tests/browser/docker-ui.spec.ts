@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
+import { PG_LINES } from "./logs-lens-fixture"
 
 /**
  * The three claims the Docker overhaul rests on, checked in a browser.
@@ -971,6 +972,332 @@ test("asking for a container's logs opens the logs", async ({ page }) => {
 })
 
 /**
+ * A database container whose restart policy keeps bringing it back: the
+ * container a Logs tab and an Events view exist for.
+ */
+const DB = "2222222222222222"
+const dbDetail = {
+  ...detail,
+  ...containers[1],
+  env: [],
+  mounts: [],
+  restartPolicy: "always",
+  restartCount: 17,
+  hasHealthcheck: true,
+}
+
+const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString()
+
+/** A loop of three restarts that exit 1, and the exit that ended it. */
+const dbEvents = (() => {
+  const at = (s: number) => new Date(Date.now() - 20 * 60_000 + s * 1000).toISOString()
+  const ev = (s: number, action: string, exitCode?: string) => ({
+    time: at(s),
+    type: "container",
+    action,
+    name: "db",
+    id: DB,
+    image: "postgres:16",
+    exitCode,
+    message: action === "die" ? "db exited with status 1" : "db started",
+    level: action === "die" ? "error" : "notice",
+    source: "daemon",
+  })
+  return [
+    ev(240, "die", "1"),
+    ev(183, "start"),
+    ev(180, "die", "1"),
+    ev(122, "start"),
+    ev(120, "die", "1"),
+    ev(61, "start"),
+    ev(60, "die", "1"),
+    ev(0, "start"),
+  ]
+})()
+
+/** What the database wrote in the minute before each exit. */
+const lastLines = [
+  {
+    text: "2026-09-27 10:14:02.311 UTC [1] LOG:  starting PostgreSQL 16.4 on x86_64-pc-linux-gnu",
+    timestamp: minutesAgo(16),
+    level: "info",
+    event: "startup",
+  },
+  {
+    text: '2026-09-27 10:14:02.402 UTC [1] FATAL:  data directory "/var/lib/postgresql/data" has invalid permissions',
+    timestamp: minutesAgo(16),
+    level: "error",
+    event: "fatal",
+  },
+]
+
+const dbFailure = {
+  containerId: DB,
+  name: "db",
+  checkedAt: minutesAgo(0),
+  state: "looping",
+  headline: "Restart loop detected: 4 starts in 4m.",
+  likely: "It exits with status 1 shortly after starting.",
+  confidence: "inferred",
+  evidence: [],
+  restarts: { count: 17, recent: 4, looping: true, window: "4m", summary: "4 starts in 4m" },
+  suggestions: [],
+  logWindow: {
+    since: minutesAgo(18),
+    until: minutesAgo(15),
+    reason: "the window around the most recent start, which is where the failure repeats",
+  },
+}
+
+const dbInspect = {
+  Id: DB,
+  Config: { Image: "postgres:16", Healthcheck: { Test: ["CMD-SHELL", "pg_isready -U postgres"] } },
+  State: {
+    Status: "running",
+    Health: {
+      Status: "unhealthy",
+      FailingStreak: 2,
+      Log: [
+        {
+          Start: "2026-09-27T10:13:30.000000001Z",
+          End: "2026-09-27T10:13:35.000000001Z",
+          ExitCode: 1,
+          Output: "/var/run/postgresql:5432 - no response\n",
+        },
+        {
+          Start: "2026-09-27T10:13:00.123456789Z",
+          End: "2026-09-27T10:13:00.456789012Z",
+          ExitCode: 0,
+          Output: "/var/run/postgresql:5432 - accepting connections\n",
+        },
+      ],
+    },
+  },
+}
+
+/** A stack's merged log: each line carries the service it came from. */
+const stackLines = [
+  {
+    text: "listening on :3000",
+    timestamp: minutesAgo(3),
+    source: "api",
+    attrs: { service: "api", container: "3333" },
+  },
+  {
+    text: "GET /orders 500 upstream timed out",
+    timestamp: minutesAgo(2),
+    source: "web",
+    level: "error",
+    attrs: { service: "web", container: "4444" },
+  },
+  {
+    text: "GET /health 200",
+    timestamp: minutesAgo(1),
+    source: "api",
+    attrs: { service: "api", container: "3333" },
+  },
+]
+
+type ServiceLogMocks = {
+  sockets: URLSearchParams[]
+  searches: URLSearchParams[]
+  events: URLSearchParams[]
+  eventSockets: URLSearchParams[]
+}
+
+/**
+ * The service logs a container's and a stack's Logs tab embed, over the
+ * database container and the running-app stack: `/logs/source` describes
+ * each as the server would (the database read as Postgres), the live socket
+ * sends their lines, and every search, event read and socket is recorded so
+ * a spec can say which question reached the server.
+ */
+async function mockServiceLogs(page: Page): Promise<ServiceLogMocks> {
+  const recorded: ServiceLogMocks = { sockets: [], searches: [], events: [], eventSockets: [] }
+  await page.route(`**/api/v1/docker/containers/${DB}`, (route) => json(route, dbDetail))
+  await page.route(`**/api/v1/docker/containers/${DB}/failure`, (route) => json(route, dbFailure))
+  await page.route(`**/api/v1/docker/containers/${DB}/raw`, (route) => json(route, dbInspect))
+  await page.route("**/api/v1/docker/stacks/running-app", (route) => json(route, stacks[0]))
+  await page.route("**/api/v1/docker/events?**", (route) => {
+    const params = new URL(route.request().url()).searchParams
+    recorded.events.push(params)
+    return json(route, {
+      listening: true,
+      since: minutesAgo(180),
+      buffered: dbEvents.length,
+      events: params.get("container") === DB || params.get("stack") ? dbEvents : [],
+    })
+  })
+  await page.routeWebSocket(/\/api\/v1\/docker\/events\/stream/, (socket) => {
+    recorded.eventSockets.push(new URL(socket.url()).searchParams)
+  })
+  await page.route("**/api/v1/logs/**", (route) => {
+    const url = new URL(route.request().url())
+    const source = url.searchParams.get("source") ?? ""
+    if (url.pathname.endsWith("/logs/source")) {
+      if (source === `docker:${DB}`) {
+        return json(route, { id: source, kind: "docker", status: "running", lens: "postgres" })
+      }
+      if (source === "stack:running-app") {
+        return json(route, { id: source, kind: "stack", status: "running", detail: "2 services" })
+      }
+      return json(route, {})
+    }
+    if (url.pathname.endsWith("/logs/search")) {
+      recorded.searches.push(url.searchParams)
+      // The minute before an exit is asked for by its limit.
+      const before = url.searchParams.get("limit") === "20"
+      const facet = url.searchParams.get("facets")
+      return json(route, {
+        facets: facet
+          ? {
+              [facet]: {
+                values: [{ value: "web", count: 1, errors: 1 }],
+                distinct: 1,
+                other: 0,
+                missing: 0,
+              },
+            }
+          : undefined,
+        lines: before ? lastLines : [],
+        scanned: 40,
+        matched: before ? lastLines.length : 3,
+        truncated: false,
+        complete: true,
+        files: [],
+        histogram: [],
+        tookMillis: 1,
+        lens: source === `docker:${DB}` ? "postgres" : undefined,
+      })
+    }
+    return json(route, {})
+  })
+  await page.routeWebSocket("**/api/v1/logs/stream**", (socket) => {
+    const params = new URL(socket.url()).searchParams
+    recorded.sockets.push(params)
+    const stack = params.get("source")?.startsWith("stack:")
+    socket.send(
+      JSON.stringify({
+        type: "meta",
+        data: {
+          kind: stack ? "stack" : "docker",
+          label: params.get("source"),
+          filtered: false,
+          lens: stack ? undefined : "postgres",
+        },
+        ts: Date.now(),
+      }),
+    )
+    socket.send(
+      JSON.stringify({ type: "logs", data: stack ? stackLines : PG_LINES, ts: Date.now() }),
+    )
+  })
+  return recorded
+}
+
+/**
+ * A container's Logs tab is the service logs every page embeds, not a raw
+ * tail: the lines are read through the lens its image names — a Postgres
+ * container's as deadlocks and failed logins — with the lens's readings over
+ * them, and the tab is still the page's own Radix tab.
+ */
+test("a container's logs read as what its image writes", async ({ page }) => {
+  await mockDocker(page)
+  const mocks = await mockServiceLogs(page)
+  await page.goto(`/docker/containers/${DB}?tab=logs`)
+
+  await expect(page.getByRole("tab", { name: "Logs" })).toHaveAttribute("data-state", "active")
+  const lines = page.getByLabel("Log lines")
+  await expect(lines.getByText("deadlock", { exact: true })).toHaveClass(/text-destructive/)
+  await expect(lines.getByText("auth failed", { exact: true })).toBeVisible()
+  expect(mocks.sockets.at(-1)?.get("source")).toBe(`docker:${DB}`)
+  // Postgres's own questions, one press each, and its readings above the pane.
+  await expect(page.getByRole("button", { name: /^Slow\b/ })).toBeVisible()
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(5)
+  await expect(page.getByText("Deadlocks & lock waits")).toBeVisible()
+})
+
+/**
+ * Events is what Docker did to the container, beside its lines: the health
+ * check's probes first because they say why "unhealthy", a restart loop as
+ * one row rather than eight, and the minute before each failed exit inline.
+ * The failure's window is one press from the pane itself.
+ */
+test("a container's events fold its restart loop under its health check", async ({ page }) => {
+  await mockDocker(page)
+  const mocks = await mockServiceLogs(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto(`/docker/containers/${DB}?tab=logs`)
+
+  await page.getByRole("button", { name: "Events", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Events", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  expect(mocks.events.at(-1)?.get("container")).toBe(DB)
+  await expect.poll(() => mocks.eventSockets.at(-1)?.get("container")).toBe(DB)
+
+  const health = page.getByRole("region", { name: "Health check" })
+  await expect(health.getByText("pg_isready -U postgres")).toBeVisible()
+  await expect(health.getByText("Unhealthy")).toBeVisible()
+  await expect(health.getByText("exit 1")).toBeVisible()
+  await expect(health.getByText("/var/run/postgresql:5432 - no response")).toBeVisible()
+  await expect(health.getByText("passed")).toBeVisible()
+
+  const events = page.getByRole("region", { name: "Container events" })
+  await expect(events.getByText(/^Restarted ×3 in 2 min · exit 1$/)).toBeVisible()
+  // Three exits folded, and the one that ended the loop still its own row.
+  await expect(events.getByText("db exited with status 1")).toHaveCount(1)
+  await events.getByRole("button", { name: "Show the 6 events" }).click()
+  await expect(events.getByText("db exited with status 1")).toHaveCount(4)
+
+  // The minute before the last two failures, read as the pane reads them.
+  await expect(events.getByText("the minute before it exited")).toBeVisible()
+  await expect(events.getByText("the minute before its last exit")).toBeVisible()
+  await expect(events.getByText(/has invalid permissions/).first()).toBeVisible()
+  const before = mocks.searches.filter((s) => s.get("limit") === "20")
+  expect(before).toHaveLength(2)
+  expect(before[0].get("source")).toBe(`docker:${DB}`)
+  expect(Date.parse(before[0].get("until")!) - Date.parse(before[0].get("since")!)).toBe(60_000)
+
+  // The failure's window: History on it, in the pane, named as what it is.
+  await page.getByRole("button", { name: "Crash window" }).click()
+  await expect(page.getByRole("button", { name: "History", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect
+    .poll(() => mocks.searches.at(-1)?.get("since"))
+    .toBe(new Date(dbFailure.logWindow.since).toISOString())
+  expect(mocks.searches.at(-1)?.get("until")).toBe(
+    new Date(dbFailure.logWindow.until).toISOString(),
+  )
+})
+
+/**
+ * A stack's Logs tab is one log of every container, each line in its
+ * service's lane rather than behind a `web | ` prefix, from the stack's own
+ * source — not a socket of the stack page's own.
+ */
+test("a stack's logs are one log with a lane per service", async ({ page }) => {
+  await mockDocker(page)
+  const mocks = await mockServiceLogs(page)
+  await page.goto("/docker/stacks/running-app")
+  await page.getByRole("tab", { name: "Logs" }).click()
+
+  const lines = page.getByLabel("Log lines")
+  await expect(lines.getByText("GET /orders 500 upstream timed out")).toBeVisible()
+  await expect(lines.getByText("api", { exact: true }).first()).toBeVisible()
+  await expect(lines.getByText("web", { exact: true })).toBeVisible()
+  await expect(lines.getByText(/\| /)).toHaveCount(0)
+  expect(mocks.sockets.at(-1)?.get("source")).toBe("stack:running-app")
+
+  await page.getByRole("button", { name: "Events", exact: true }).click()
+  await expect(page.getByRole("region", { name: "Stack events" })).toBeVisible()
+  expect(mocks.events.at(-1)?.get("stack")).toBe("running-app")
+})
+
+/**
  * Neither Docker page takes the shell sideways, at any width anybody has.
  *
  * A horizontal scrollbar on a dashboard is never local to the thing that caused
@@ -1002,6 +1329,28 @@ for (const width of [320, 390, 640, 768, 1024, 1280, 1600]) {
       )
       expect(overflow, `${path} overflows at ${width}px`).toBeLessThanOrEqual(1)
     }
+  })
+
+  test(`no Docker logs view scrolls sideways at ${width}px`, async ({ page }) => {
+    await mockDocker(page)
+    await mockServiceLogs(page)
+    await page.setViewportSize({ width, height: 900 })
+    const overflow = () =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      )
+
+    await page.goto(`/docker/containers/${DB}?tab=logs`)
+    await expect(page.getByLabel("Log lines").getByText("deadlock", { exact: true })).toBeVisible()
+    expect(await overflow(), `the container's logs overflow at ${width}px`).toBeLessThanOrEqual(1)
+    await page.getByRole("button", { name: "Events", exact: true }).click()
+    await expect(page.getByText(/^Restarted ×3/)).toBeVisible()
+    expect(await overflow(), `the container's events overflow at ${width}px`).toBeLessThanOrEqual(1)
+
+    await page.goto("/docker/stacks/running-app")
+    await page.getByRole("tab", { name: "Logs" }).click()
+    await expect(page.getByLabel("Log lines").getByText("listening on :3000")).toBeVisible()
+    expect(await overflow(), `the stack's logs overflow at ${width}px`).toBeLessThanOrEqual(1)
   })
 }
 
