@@ -59,6 +59,18 @@ export function processKey(process: { pid: number; createTime: string }): string
   return `${process.pid}-${process.createTime}`
 }
 
+/**
+ * sshd's unit under either distribution's name, and the per-connection
+ * instances a socket-activated sshd runs as: the units whose journal is
+ * login records, which the server reads to administrators only
+ * (`authJournalUnit` in `handlers_logs.go`). A page that knows it would be
+ * refused says so rather than opening a read that is.
+ */
+export function authUnit(unit: string): boolean {
+  const name = unit.replace(/\.service$/, "")
+  return name === "ssh" || name === "sshd" || name.startsWith("ssh@") || name.startsWith("sshd@")
+}
+
 /** The names cron's daemon runs under: Debian's, Red Hat's, and cronie's own. */
 const CRON_UNITS = ["cron.service", "crond.service", "cronie.service"]
 

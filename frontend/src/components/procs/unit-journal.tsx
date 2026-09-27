@@ -4,6 +4,7 @@ import { useMemo, useState } from "react"
 import { useViewState } from "@/lib/view-state"
 import Link from "next/link"
 import type { SystemdUnit, SystemdUnitDetail } from "@/lib/types"
+import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
@@ -19,13 +20,14 @@ import { Servers } from "@/components/icons"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { ProductLogo, unitProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
-import { ErrorState, LoadingRows } from "@/components/state"
+import { ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { VerbBar } from "@/components/verbs"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useUnitControl, useUnitVerbs } from "@/components/procs/unit-actions"
 import { UnitRuns } from "@/components/procs/unit-runs"
+import { authUnit } from "@/components/procs/shared"
 
 /**
  * One unit, opened: its state, how it runs, and its journal. The verbs sit in
@@ -292,8 +294,14 @@ function restartSummary(policy: string | undefined): { label: string; hint: stri
  * added up through the unit's lens — and its runs beside that: when systemd
  * started it, how long each lasted and how it ended. One unit only; the
  * whole journal is the logs page's.
+ *
+ * sshd's journal is login records, which only an administrator reads. For
+ * anyone else it opens nothing: the server refuses the read before the
+ * socket upgrades, and a pane retrying a refusal while it says the tunnel
+ * dropped is wrong twice.
  */
 function UnitLogs({ unit }: { unit: string }) {
+  const { can } = useAuth()
   const sources = useMemo<ServiceLogSource[]>(
     () => [{ id: journalSource(unit), label: unit, kind: "journal", product: unitProduct(unit) }],
     [unit],
@@ -302,6 +310,14 @@ function UnitLogs({ unit }: { unit: string }) {
     () => [{ id: "runs", label: "Runs", render: (ctx) => <UnitRuns unit={unit} ctx={ctx} /> }],
     [unit],
   )
+  if (authUnit(unit) && !can("system.admin")) {
+    return (
+      <Notice title="Login records need an administrator">
+        {unit}&apos;s journal holds every sign-in attempt, and a failed one can hold a password
+        typed into the username prompt, so only an administrator can read it.
+      </Notice>
+    )
+  }
   return (
     <ServiceLogs
       sources={sources}

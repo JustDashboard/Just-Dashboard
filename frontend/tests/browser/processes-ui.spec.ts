@@ -765,6 +765,33 @@ test("a unit's journal reads its runs, folds a loop and opens one run's own line
   await expect(sheet.getByRole("button", { name: "Clear the invocation filter" })).toBeVisible()
 })
 
+test("sshd's journal is an administrator's, and the sheet says so rather than asking", async ({
+  page,
+}) => {
+  const logs = await mockHost(page)
+  // Registered after the host's, so answered first.
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, {
+      ...user,
+      capabilities: ["read", "service.control"],
+      user: { ...user.user, username: "viewer", role: "operator" },
+    }),
+  )
+  await page.route("**/api/v1/systemd/ssh.service", (route) =>
+    json(route, {
+      ...unitDetail,
+      unit: { ...unitDetail.unit, name: "ssh.service", description: "OpenBSD Secure Shell server" },
+    }),
+  )
+  await page.goto("/processes/services?unit=ssh.service")
+  const sheet = page.getByRole("dialog")
+  await sheet.getByRole("tab", { name: "Journal", exact: true }).click()
+  await expect(sheet.getByText("Login records need an administrator")).toBeVisible()
+  // The server refuses the read before the socket upgrades: nothing is asked.
+  expect(logs.sockets).toEqual([])
+  expect(logs.searches).toEqual([])
+})
+
 test("a PM2 application's logs are its own lensed stream, beside PM2's count of its restarts", async ({
   page,
 }) => {

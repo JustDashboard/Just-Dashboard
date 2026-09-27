@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { cronLogSource, managerHref } from "./shared"
+import { authUnit, cronLogSource, managerHref } from "./shared"
 
 // Where a process row says what is supervising it. Every branch is an address
 // that has to exist: a wrong one is a dead link on a page that otherwise looks
@@ -24,6 +24,20 @@ describe("managerHref", () => {
   test("has nowhere to point for an unsupervised process", () => {
     expect(managerHref({ manager: "none", managerName: "" })).toBeNull()
     expect(managerHref({ manager: "systemd", managerName: "" })).toBeNull()
+  })
+})
+
+// The units whose journal the server reads to administrators only, as
+// `authJournalUnit` names them: a sheet that opened one for anyone else would
+// sit on a socket the server refuses, retrying.
+describe("authUnit", () => {
+  test("is sshd's unit under either name, and its per-connection instances", () => {
+    for (const unit of ["ssh.service", "sshd.service", "ssh", "sshd@3-10.0.0.1:22.service"]) {
+      expect(authUnit(unit)).toBe(true)
+    }
+    for (const unit of ["sshguard.service", "nginx.service", "ssh-keygen.service"]) {
+      expect(authUnit(unit)).toBe(false)
+    }
   })
 })
 
