@@ -64,8 +64,8 @@ taking a frame:
   whole of the Security section (the overview's exposure facts, five area tiles and findings, and on
   every area page the readings, the findings under them, the tables and the twenty probe blocks on
   Tools), every block on the proxy pages (the overview's engine facts, attention list, sites and
-  certificate expiry; the sites, certificates, streams and ports tables with their toolbars; the
-  TLS report's readings, findings, protocol, certificate, chain and HTTP rows; the password files
+  certificate expiry; the sites, certificates and streams inventories and the ports table with their
+  toolbars; the TLS report's readings, findings, protocol, certificate, chain and HTTP rows; the password files
   and DNS provider lists),
   health findings, the runtime-health bar, and every block of the deployment section — the fleet
   and its archive, Credentials and Notifications, a project's Overview, Deployments, Logs, Runtime
@@ -1140,24 +1140,31 @@ its initials in the users list's hue, and an attacker's attempts against the mos
 address's as a meter. Connections, logins, devices and routes are readings with verbs, so their
 rows stay rows.
 
-**The proxy section draws the engine and the authority.** Its things have two products between
-them — the engine serving a site and the authority that signed its certificate — and the pages draw
-those where they are true (`components/proxy/marks.ts`). The overview opens on the engine as its
-identity line (`EngineIdentity`): nginx's or Caddy's mark on the tile, the version beside the name
-the way the Overview sets the kernel beside the distribution, the unit's state, the directory it
-reads and the ingress container as facts, certbot drawn as Let's Encrypt — the mark says what it
-issues, not who wrote it — and the service verbs at the right end. A site is a card drawn as the
-engine serving it (`siteProduct`), with TLS said by whose certificate: Let's Encrypt's glyph where
-the site points at certbot's live directory (`certPathProduct`), a shield where the file is
-somebody else's. A certificate is drawn as who signed it (`certificateProduct`, through
-`issuerProduct` and certbot's directory), and an imported one from a company CA keeps a glyph rather
-than a guess. A stream is drawn as the service its port is (`portProduct`: the databases and control
-planes the attention list already names by number, and the two Minecraft editions) and a port
-nothing names keeps a bare connection. A listening socket's process is its product's glyph, read
-from the process name first and the port second, so `postgres` on an odd port is still Postgres and
-`python` on 5432 is not. Sites and streams are cards you open and take the edge; certificates,
-watched domains and sockets are readings with verbs and stay rows, with how much of its term a
-certificate has left drawn as a meter under its verdict (`CertLife`).
+**The proxy section draws routes, engines and authorities.** All six pages stay in the reading
+register and begin with four `StatTile` readings, two per row on phones. On the overview the engine
+identity and service commands sit below them, with the routes in the main column and attention and
+expiry in a narrower column. A site's and a stream's card separates identity, route and named
+actions into three bands: `components/proxy/route-path.tsx` gives the source and destination their
+own labelled columns (stacked on phones), so a hostname and its upstream do not compete for the same
+truncated line. Sites and streams use a two-column grid on wide screens and a single column on
+smaller ones. The nginx or Caddy mark names a site's engine, the stream's port names its product
+where known, and the TLS reading carries Let's Encrypt's mark only where the certificate path
+supports it. Unknown products keep a glyph.
+
+Certificates has a searchable inventory beside renewal and DNS management. Each inventory card opens
+its details — all names, dates, the full path and links to the sites using it — so it takes the lit
+edge; its issuer, expiry and lifetime meter remain on the card. An unreadable certificate carries a
+short verdict on the card and its complete error in the detail sheet; unavailable dates and signing
+status stay unknown, and it draws no invented lifetime.
+A watched domain opens a live report and preserves its nonstandard port. Password files and
+watched-domain setup use the deployment settings' rail sections. Certificate renewal lineages and
+DNS providers remain readings with their own actions, laid out to fit the management column. The TLS
+report keeps findings, protocol checks and HTTP readings beside the live certificate and its
+vertical chain; long header values wrap instead of hiding the verdict. Listening sockets stay a
+table of readings, with fixed endpoint, application, reach and action columns and a stacked phone
+layout. Tables retain their scrolling boundary; forms and sections remain plain.
+`tests/browser/proxy-ui.spec.ts` covers all six populated pages at 390, 1280 and 1720, detail
+navigation, site-kind choices and read-only access.
 
 **What a host has installed, who is on it and what they changed are products too.** Packages
 draws a package as the software its name says it is (`packageProduct`, `components/packages/marks.tsx`:

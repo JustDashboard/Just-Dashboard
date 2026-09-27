@@ -17,14 +17,14 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { Field, FormNote, OptionList, OptionRow } from "@/components/form"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { ProductLogo, ProductLogos } from "@/components/product-logo"
-import { Row, RowList, ROW_BLEED } from "@/components/row-list"
+import { ROW_BLEED } from "@/components/row-list"
 import { CertLife } from "@/components/proxy/expiry-status"
 import { dnsProviderProduct } from "@/components/proxy/marks"
 import { EmptyState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
-import { VerbActions, type Verb } from "@/components/verbs"
+import { VerbActions, VerbBar, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -156,44 +156,39 @@ export function CertbotLineages({
   ]
   return (
     <>
-      {/* Rows rather than a table: three columns naming themselves is a
-          header spent on nothing, and each lineage is what it is — a
-          Let's Encrypt certificate, drawn as one. */}
-      <RowList className="animate-rise">
+      <ul className="animate-rise divide-y divide-hairline">
         {state.certs.map((cert) => (
-          <Row
-            key={cert.name}
-            leading={<ProductLogo id="lets-encrypt" size="sm" />}
-            title={cert.name}
-            subtitle={cert.domains.join(", ")}
-            trailing={
-              <>
-                <span className="flex flex-col items-end gap-1">
-                  <Status
-                    verdict={!cert.valid ? "critical" : cert.daysLeft <= 14 ? "warning" : "ok"}
-                    label={
-                      busy === cert.name
-                        ? "Renewing…"
-                        : cert.valid
-                          ? `${cert.daysLeft}d left`
-                          : "expired"
-                    }
-                  />
-                  <LineageLife cert={cert} />
-                </span>
-                {admin && (
-                  <VerbActions
-                    dim
-                    verbs={verbsFor(cert.name)}
-                    menuLabel={`More actions for ${cert.name}`}
-                  />
-                )}
-              </>
-            }
-            className="py-2.5"
-          />
+          <li key={cert.name} className="space-y-3 py-4 first:pt-1">
+            <div className="flex min-w-0 items-center gap-3">
+              <ProductLogo id="lets-encrypt" size="sm" />
+              <div className="min-w-0 flex-1 basis-40">
+                <p className="truncate text-body font-medium" title={cert.name}>
+                  {cert.name}
+                </p>
+                <p className="text-hint break-all text-muted-foreground">
+                  {cert.domains.join(", ")}
+                </p>
+              </div>
+            </div>
+            <LineageLife cert={cert} />
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Status
+                verdict={!cert.valid ? "critical" : cert.daysLeft <= 30 ? "warning" : "ok"}
+                label={
+                  busy === cert.name
+                    ? "Renewing…"
+                    : cert.valid
+                      ? `${cert.daysLeft}d left`
+                      : "expired"
+                }
+              />
+              {admin && (
+                <VerbBar verbs={verbsFor(cert.name)} menuLabel={`More actions for ${cert.name}`} />
+              )}
+            </div>
+          </li>
         ))}
-      </RowList>
+      </ul>
       {dialog}
     </>
   )
@@ -207,6 +202,7 @@ export function CertbotLineages({
 function LineageLife({ cert }: { cert: CertbotCert }) {
   return (
     <CertLife
+      className="w-full"
       cert={{
         notBefore: new Date(new Date(cert.expiry).getTime() - 90 * 86_400_000).toISOString(),
         notAfter: cert.expiry,
@@ -256,9 +252,7 @@ export function RenewalNotice({
     <Notice tone="warning" icon={Clock} title="Nothing is scheduled to renew these">
       <div className="space-y-2">
         <p>
-          No certbot timer and no cron entry was found. Let&rsquo;s Encrypt certificates last ninety
-          days, so without a schedule every one of these expires — which is what has happened to
-          almost every expired certificate anybody has ever had.
+          No active renewal schedule was found. Enable the timer before these certificates expire.
         </p>
         {unit ? (
           <div className="flex flex-wrap items-center gap-2">
@@ -316,15 +310,15 @@ export function DnsProvidersPanel({
               <li
                 key={p.key}
                 className={cn(
-                  "group flex min-w-0 items-center gap-3 py-2.5 transition-colors hover:bg-row-hover",
+                  "group flex min-w-0 flex-wrap items-center gap-3 py-4 transition-colors hover:bg-row-hover",
                   ROW_BLEED,
                 )}
               >
                 {/* The provider as itself where it has a mark — Cloudflare,
                     Route 53 as AWS — and a key for the ones that do not. */}
                 <ProductLogo id={dnsProviderProduct(p.key)} size="sm" fallback={Key} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-baseline gap-2">
+                <div className="min-w-0 flex-1 basis-40">
+                  <div className="flex min-w-0 flex-wrap items-baseline gap-2">
                     <span className="text-body font-medium">{p.name}</span>
                     <Tag mono>{p.plugin}</Tag>
                   </div>
@@ -334,14 +328,6 @@ export function DnsProvidersPanel({
                       : `Waits ${p.defaultWait}s for the record to propagate.`}
                   </p>
                 </div>
-                <Status
-                  verdict={p.installed ? "ok" : "warning"}
-                  label={p.installed ? "plugin installed" : "plugin missing"}
-                />
-                <Status
-                  tone={p.hasCredentials ? "running" : "stopped"}
-                  label={p.hasCredentials ? "credentials saved" : "no credentials"}
-                />
                 {admin && p.hasCredentials && (
                   <VerbActions
                     dim
@@ -370,6 +356,16 @@ export function DnsProvidersPanel({
                     ]}
                   />
                 )}
+                <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-2">
+                  <Status
+                    verdict={p.installed ? "ok" : "warning"}
+                    label={p.installed ? "plugin installed" : "plugin missing"}
+                  />
+                  <Status
+                    tone={p.hasCredentials ? "running" : "stopped"}
+                    label={p.hasCredentials ? "credentials saved" : "no credentials"}
+                  />
+                </div>
               </li>
             ))}
           </ul>
