@@ -23,7 +23,9 @@ const (
 // BeforeExisted says whether there was a file to replace; for a delete, After
 // is empty. Enable and disable change the file's link in sites-enabled, not
 // the file: Path is the site file, and Before and After both hold its
-// content, which is what went live or stopped serving. Actor is who asked,
+// content, which is what went live or stopped serving — except for a site
+// file that resolves outside the proxy's directories, which is recorded
+// without content because ReadConfig will not show it. Actor is who asked,
 // from WithActor, and is empty when nobody did: a deployment cutover or a
 // background loop.
 type Change struct {

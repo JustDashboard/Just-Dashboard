@@ -232,9 +232,23 @@ func (s *Service) SetVHostEnabled(ctx context.Context, name string, enabled bool
 	// the middle of another operator's validation and is recorded in order.
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	content, _ := os.ReadFile(available)
-	change := Change{Path: available, Before: content, BeforeExisted: true, After: content}
+	// The site file may itself be a symlink, so it is resolved the way the
+	// write records resolve theirs. Reading through the link unchecked put a
+	// password file's hashes, or a file outside the proxy's directories, in
+	// front of whoever reads the history; now the first is skipped by
+	// recordChange under its real path, and the second is recorded without
+	// content, as ReadConfig refuses it.
+	change := Change{Path: available, BeforeExisted: true}
+	if full, err := s.allowedPath(available); err == nil {
+		content, _ := os.ReadFile(full)
+		change.Path, change.Before, change.After = full, content, content
+	}
 	if enabled {
+		if target, err := os.Readlink(link); err == nil && target == available {
+			// Already on: nothing changes on disk, so nothing is recorded,
+			// the same as disabling a site that is already off.
+			return nil
+		}
 		// linkEnabled rather than a bare Symlink: a link already present but
 		// pointing somewhere else — the previous file of a renamed site, a
 		// dangling target — used to be reported as "enabled" and left as it

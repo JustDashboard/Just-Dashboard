@@ -123,8 +123,73 @@ func TestRecorderSkipsPasswordFiles(t *testing.T) {
 	if _, err := service.WriteConfig(ctx, KindNginx, filepath.Join(service.authDir(), "team"), "operator:$2y$10$y\n"); err != nil {
 		t.Fatal(err)
 	}
+	// A site whose file is a link to a password file: toggling it reads the
+	// file, and must not hand what it read to the recorder.
+	if err := os.Symlink(filepath.Join(service.authDir(), "team"), filepath.Join(root, "sites-available", "app")); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.SetVHostEnabled(ctx, "app", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.SetVHostEnabled(ctx, "app", false); err != nil {
+		t.Fatal(err)
+	}
 	if len(log.changes) != 0 {
 		t.Fatalf("password material was recorded: %s", describeChanges(log.changes))
+	}
+}
+
+// A site file that links out of the proxy's directories is one ReadConfig
+// refuses to show, so its toggle is recorded without what the file says.
+func TestRecorderLeavesOutAFileOutsideTheProxyDirectory(t *testing.T) {
+	service, log, root := recordingService(t)
+	ctx := WithActor(context.Background(), "operator")
+	outside := filepath.Join(t.TempDir(), "app.conf")
+	if err := os.WriteFile(outside, []byte("server { proxy_set_header X-Api-Key s3cr3t; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	site := filepath.Join(root, "sites-available", "app")
+	if err := os.Symlink(outside, site); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ReadConfig(site); !errors.Is(err, ErrUnsafePath) {
+		t.Fatalf("ReadConfig showed a file outside the proxy directory: %v", err)
+	}
+	if err := service.SetVHostEnabled(ctx, "app", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.SetVHostEnabled(ctx, "app", false); err != nil {
+		t.Fatal(err)
+	}
+	want := []Change{
+		{Path: site, Action: ChangeEnable, Actor: "operator", BeforeExisted: true},
+		{Path: site, Action: ChangeDisable, Actor: "operator", BeforeExisted: true},
+	}
+	if !reflect.DeepEqual(log.changes, want) {
+		t.Fatalf("recorded\n%s\nwant\n%s", describeChanges(log.changes), describeChanges(want))
+	}
+}
+
+// Switching a site to the state it is already in changes nothing on disk, in
+// either direction, so the history must not say it did.
+func TestRecorderSkipsAToggleThatChangesNothing(t *testing.T) {
+	service, log, _ := recordingService(t)
+	ctx := WithActor(context.Background(), "operator")
+	spec := proxySpec()
+	if _, err := service.ApplySite(ctx, spec, true, false, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, enabled := range []bool{true, true, false, false} {
+		if err := service.SetVHostEnabled(ctx, spec.Name, enabled); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var actions []ChangeAction
+	for _, c := range log.changes {
+		actions = append(actions, c.Action)
+	}
+	if want := []ChangeAction{ChangeWrite, ChangeDisable}; !reflect.DeepEqual(actions, want) {
+		t.Fatalf("recorded %v, want %v", actions, want)
 	}
 }
 
