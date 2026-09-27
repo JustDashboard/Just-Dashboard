@@ -304,18 +304,28 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   the whole site on the next save.
 - **`tlsscan.go` — what the domain actually serves.** Everything else on the page reads files, which
   cannot see a certificate renewed and never reloaded, a proxy still offering TLS 1.0, or a redirect that
-  quietly stopped. Each version is probed on a connection pinned to exactly that version. Only the
-  server's own answer is `refused` — an alert (recognised by its `remote error` type: OpenSSL's
-  protocol_version alert reads "protocol version not supported", and matching those words once filed
-  every correct refusal as this client's), a different version picked, or the connection closed on the
-  ClientHello — with its words in `detail`. A version this client will not ask for, a probe that could
-  not connect, or one that timed out is `unknown`, **never `refused`**, since reporting it absent would
-  be false reassurance about the versions that matter most; `TestLiveNginxRefusalsAreReportedAsRefused`
-  holds this against a private real nginx. When HTTPS gives no HTTP response (`httpsError`: a mail
+  quietly stopped. Each version is probed on a connection pinned to exactly that version, offering
+  every cipher suite Go implements (`probeSuites`: Go leaves RSA key exchange, 3DES and RC4 out by
+  default, and a server taking TLS 1.0 only with AES128-SHA read as refusing it). Only the server's own
+  answer is `refused` — an alert (recognised by its `remote error` type: OpenSSL's protocol_version
+  alert reads "protocol version not supported", and matching those words once filed every correct
+  refusal as this client's), a different version picked, or the connection closed on the ClientHello —
+  with its words in `detail`. handshake_failure and insufficient_security are the exception and read
+  `unknown`: OpenSSL sends them when the version is fine and no suite is shared (a suite Go lacks, such
+  as finite-field DHE), Java 8 when it refuses a version, and the alert cannot say which. A version this
+  client will not ask for, a probe that could not connect, or one that timed out is `unknown`, **never
+  `refused`**, since reporting it absent would be false reassurance about the versions that matter most;
+  `TestLiveNginxRefusalsAreReportedAsRefused` and
+  `TestLiveNginxLegacyVersionsWithOnlyRSAKeyExchangeAreOffered` hold this against a private real nginx. When HTTPS gives no HTTP response (`httpsError`: a mail
   server on 993, or a failing site) nothing else on the HTTP side is measured or graded — no HSTS or
   header finding, no port-80 request. Otherwise the plain-HTTP side is followed by hand up to five hops
   (`redirectChain`) and passes when it reaches `https://` on any host; `plainErrorKind` says whether
-  port 80 refused, timed out or did not resolve. The serial is colon hex as openssl prints it, and the
+  port 80 refused, timed out or did not resolve. Every hop after the first goes where the remote site's
+  `Location` says, so its dial (checked on the resolved address, in a `net.Dialer` `Control` hook) may
+  reach only the address the first request reached or a public one (`hopAllowed`, `IsPublicAddress`):
+  a redirect to loopback, a private or link-local network or CGNAT is recorded as an `internal` hop and
+  not requested, and graded as a notice (`http.redirect-internal`) rather than a missing redirect,
+  because where the chain ends is not known. The serial is colon hex as openssl prints it, and the
   unstapled-OCSP notice needs a responder in the leaf (`ocspServers`; Let's Encrypt names none).
   `grade` is a pure function of the scan. The live certificate, TLS and DNS probes require
   `system.admin`: each emits traffic to a caller-chosen destination, the same scanner boundary as
@@ -330,7 +340,11 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   well. Each endpoint keeps its last check (`checked_at`, `certificate` as JSON). Only an
   administrator's `GET /certificates/watched` handshakes, and stores what it found; every other account
   reads the stored result — the list is readable by all, and the handshake is outbound traffic a
-  read-only account may not cause.
+  read-only account may not cause. The checks run eight at a time under one 30-second budget, through
+  `CheckEndpoint` (`tlsscan.go`), whose dial ends with the context — `CheckDomain`'s ignores it, and 33
+  silent endpoints once held the request 40 seconds. The stalest endpoints go first; one still in flight
+  or not started when the budget ends keeps its stored result and time, so a long list is covered over
+  successive visits. What was found is stored even if the viewer has left.
 - **`dns01.go` — wildcards and CDN-fronted domains**, which between them are most of the certificates
   people want: Let's Encrypt signs `*.example.com` only against DNS-01, and a Cloudflare-proxied domain
   never receives an HTTP challenge. Eight certbot plugins as a closed set (each names credentials and

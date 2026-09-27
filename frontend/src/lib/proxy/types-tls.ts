@@ -39,6 +39,11 @@ export type RedirectHop = {
   status?: number
   location?: string
   error?: string
+  /**
+   * Not requested: a remote site's redirect pointed at this machine or its
+   * private network, where the scan does not follow it.
+   */
+  internal?: boolean
 }
 
 export type HTTPScan = {

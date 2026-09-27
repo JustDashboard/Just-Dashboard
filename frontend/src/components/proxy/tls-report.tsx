@@ -74,8 +74,18 @@ export function TLSReportPage() {
     [target],
     { enabled: admin && scanning !== undefined },
   )
+  // usePoll reports loading only while there is nothing to show, so a scan
+  // asked for again over a report already on screen is tracked here: busy
+  // until an answer or an error replaces what it was asked over.
+  const [rescanOver, setRescanOver] = useState<Pick<typeof report, "data" | "error">>()
+  const rescanning =
+    rescanOver !== undefined && rescanOver.data === report.data && rescanOver.error === report.error
+  const rescan = () => {
+    setRescanOver({ data: report.data, error: report.error })
+    report.refresh()
+  }
   const scan = report.data ?? null
-  const busy = report.loading
+  const busy = report.loading || rescanning
   const scanned = scan ? targetLabel({ host: scan.domain, port: scan.port }) : ""
 
   const run = () => {
@@ -87,7 +97,7 @@ export function TLSReportPage() {
     const label = targetLabel(parsed.target)
     setFieldError(undefined)
     setDomain(label)
-    if (label === target) report.refresh()
+    if (label === target) rescan()
     else setTarget(label)
   }
 
@@ -230,7 +240,7 @@ export function TLSReportPage() {
             Handshaking, probing each TLS version separately, and fetching the headers…
           </p>
         )}
-        {report.error && !busy && <ErrorState error={report.error} />}
+        {report.error && !busy && <ErrorState error={report.error} onRetry={rescan} />}
         {scan && !scan.reachable && (
           <Notice tone="danger" icon={CrossCircle} title={`Nothing answered at ${scanned}`}>
             {scan.error}
@@ -281,8 +291,9 @@ export function TLSReportPage() {
                       Each version is asked for on a connection of its own, so the answer is the
                       server&rsquo;s rather than a negotiation. &ldquo;refused&rdquo; is the server
                       saying no. &ldquo;unknown&rdquo; is no answer to stand behind — the connection
-                      failed, or this dashboard&rsquo;s TLS library would not ask — and the row says
-                      which; reporting it as absent would be a false reassurance.
+                      failed, this dashboard&rsquo;s TLS library would not ask, or the
+                      server&rsquo;s answer could mean either — and the row says which; reporting it
+                      as absent would be a false reassurance.
                     </p>
                   </PanelBody>
                 </Panel>
@@ -528,9 +539,11 @@ function PlainChain({ http }: { http: HTTPScan }) {
       {http.redirectChain.map((hop) => (
         <li key={hop.url}>
           {hop.url}{" "}
-          {hop.error
-            ? "did not answer"
-            : `${hop.status}${hop.location ? ` → ${hop.location}` : ""}`}
+          {hop.internal
+            ? "not requested, on this machine or its private network"
+            : hop.error
+              ? "did not answer"
+              : `${hop.status}${hop.location ? ` → ${hop.location}` : ""}`}
         </li>
       ))}
     </ol>
@@ -556,6 +569,7 @@ function plainVerdict(http: HTTPScan): { verdict: Verdict; label: string } {
       label: hops.length > 1 ? `redirects to HTTPS in ${hops.length} hops` : "redirects to HTTPS",
     }
   }
+  if (last?.internal) return { verdict: "notice", label: "not followed to an internal address" }
   if (last?.error) return { verdict: "critical", label: "a redirect leads nowhere" }
   if (last?.status && last.status >= 300 && last.status < 400) {
     return { verdict: "critical", label: "redirects, never to HTTPS" }

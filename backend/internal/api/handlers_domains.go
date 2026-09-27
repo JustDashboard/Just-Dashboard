@@ -1,11 +1,13 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -37,9 +39,15 @@ type watchedDomain struct {
 // host off this machine, and a read-only account is not allowed to send one —
 // yet opening the Certificates page used to send one to every endpoint, and
 // again every five minutes while it stayed open. Everyone else reads the
-// stored result and the time it was taken. The checks run concurrently
-// because each is a handshake with a remote host, and twenty in sequence
-// would make the page feel broken.
+// stored result and the time it was taken.
+//
+// The checks run eight at a time under one 30-second budget, because each is
+// a handshake with a remote host and twenty in sequence would make the page
+// feel broken. The budget is real: a handshake still going when it ends is
+// abandoned, an endpoint not started is not started, and both keep the
+// result they had, so every row's time says how old its answer is. The
+// stalest go first, so a list longer than one budget is covered over the
+// next visits rather than the same tail missing every time.
 func (s *Server) handleWatchedDomains(w http.ResponseWriter, r *http.Request) error {
 	domains, err := s.watchedEndpoints(r.Context())
 	if err != nil {
@@ -48,32 +56,61 @@ func (s *Server) handleWatchedDomains(w http.ResponseWriter, r *http.Request) er
 	if r.URL.Query().Get("check") != "false" && httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
 		ctx, cancel := timeoutCtx(r, 30*time.Second)
 		defer cancel()
-		var wg sync.WaitGroup
-		sem := make(chan struct{}, 8)
-		for _, d := range domains {
-			wg.Add(1)
-			go func(d *watchedDomain) {
-				defer wg.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
-				cert, err := proxysvc.CheckDomain(ctx, d.Domain, d.Port)
-				if err != nil {
-					// A handshake with no certificate in it is a result too,
-					// and "not checked yet" would say it never happened.
-					cert = &proxysvc.Certificate{Name: d.Domain, Domains: []string{d.Domain},
-						Source: "live", UsedBy: []string{}, Error: err.Error()}
-				}
-				now := time.Now().UTC().Truncate(time.Second)
-				d.Cert, d.CheckedAt = cert, &now
-			}(d)
-		}
-		wg.Wait()
-		if err := s.storeWatchedChecks(r.Context(), domains); err != nil {
+		checked := checkWatched(ctx, domains)
+		// What was found is kept even when the viewer has gone: those
+		// handshakes were made, and the next reader should see them.
+		if err := s.storeWatchedChecks(context.WithoutCancel(r.Context()), checked); err != nil {
 			return httpx.Internal(err)
 		}
 	}
 	httpx.JSON(w, http.StatusOK, domains)
 	return nil
+}
+
+// checkWatched checks the endpoints, stalest first, until ctx ends, and
+// returns the ones that got an answer.
+func checkWatched(ctx context.Context, domains []*watchedDomain) []*watchedDomain {
+	lastChecked := func(d *watchedDomain) int64 {
+		if d.CheckedAt == nil {
+			return 0
+		}
+		return d.CheckedAt.Unix()
+	}
+	queue := slices.Clone(domains)
+	slices.SortStableFunc(queue, func(a, b *watchedDomain) int {
+		return cmp.Compare(lastChecked(a), lastChecked(b))
+	})
+	var (
+		mu      sync.Mutex
+		checked []*watchedDomain
+		wg      sync.WaitGroup
+	)
+	sem := make(chan struct{}, 8)
+	for _, d := range queue {
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+		}
+		if ctx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			cert, err := proxysvc.CheckEndpoint(ctx, d.Domain, d.Port)
+			if err != nil {
+				return
+			}
+			now := time.Now().UTC().Truncate(time.Second)
+			mu.Lock()
+			d.Cert, d.CheckedAt = cert, &now
+			checked = append(checked, d)
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	return checked
 }
 
 func (s *Server) watchedEndpoints(ctx context.Context) ([]*watchedDomain, error) {
@@ -112,9 +149,6 @@ func (s *Server) storeWatchedChecks(ctx context.Context, domains []*watchedDomai
 	}
 	defer tx.Rollback()
 	for _, d := range domains {
-		if d.Cert == nil {
-			continue
-		}
 		cert, err := json.Marshal(d.Cert)
 		if err != nil {
 			return err

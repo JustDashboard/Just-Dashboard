@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"strconv"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
@@ -161,4 +163,92 @@ func TestReadOnlyAccountsReadTheLastCheckWithoutAHandshake(t *testing.T) {
 		stored.CheckedAt == nil || !stored.CheckedAt.Equal(*checked.CheckedAt) {
 		t.Fatalf("the reader should see the last check: %+v", stored)
 	}
+}
+
+// The check was meant to stay within 30 seconds, but CheckDomain's dial
+// ignored the context: 33 endpoints that accept and never speak held an
+// administrator's request for 40 seconds, and every row was overwritten with
+// "context deadline exceeded". The budget now ends the checks, and what they
+// did not reach keeps the result it had.
+func TestTheWatchCheckKeepsToItsBudget(t *testing.T) {
+	admin, s := newClient(t)
+	silent := []int{}
+	for range 10 {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { ln.Close() })
+		go func() {
+			// Accepted and never answered, until the test ends.
+			var held []net.Conn
+			defer func() {
+				for _, conn := range held {
+					conn.Close()
+				}
+			}()
+			for {
+				conn, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				held = append(held, conn)
+			}
+		}()
+		silent = append(silent, ln.Addr().(*net.TCPAddr).Port)
+	}
+	target := httptest.NewTLSServer(http.NotFoundHandler())
+	defer target.Close()
+	targetPort := target.Listener.Addr().(*net.TCPAddr).Port
+
+	checkedAt := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	for _, port := range silent {
+		if _, err := s.Store.DB.Exec(`INSERT INTO watched_endpoints(domain, port, created_at, checked_at, certificate)
+			VALUES('127.0.0.1', ?, 1, ?, '{"name":"127.0.0.1","issuer":"the stored check","domains":[],"usedBy":[]}')`,
+			port, checkedAt.Unix()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Never checked, so it goes before the ten checked an hour ago.
+	if _, err := s.Store.DB.Exec(`INSERT INTO watched_endpoints(domain, port, created_at) VALUES('127.0.0.1', ?, 1)`,
+		targetPort); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/certificates/watched", nil).WithContext(ctx)
+	req.RemoteAddr = "127.0.0.1:5555"
+	req.Header.Set("Cookie", admin.cookie)
+	w := httptest.NewRecorder()
+	started := time.Now()
+	s.Routes().ServeHTTP(w, req)
+	if took := time.Since(started); took > 7*time.Second {
+		t.Fatalf("the check took %s on a 2s budget", took)
+	}
+	if w.Code != http.StatusOK {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+
+	check := func(body []byte) {
+		t.Helper()
+		var rows []watchedDomain
+		if err := json.Unmarshal(body, &rows); err != nil || len(rows) != 11 {
+			t.Fatalf("rows = %s (%v)", body, err)
+		}
+		for _, row := range rows {
+			if row.Port == targetPort {
+				if row.Cert == nil || row.Cert.Fingerprint == "" || row.CheckedAt == nil {
+					t.Errorf("the endpoint that answers was not checked: %+v", row)
+				}
+				continue
+			}
+			if row.Cert == nil || row.Cert.Issuer != "the stored check" || row.CheckedAt == nil || !row.CheckedAt.Equal(checkedAt) {
+				t.Errorf("port %d lost its stored check: %+v %+v", row.Port, row.Cert, row.CheckedAt)
+			}
+		}
+	}
+	check(w.Body.Bytes())
+	stored := admin.do(http.MethodGet, "/api/v1/certificates/watched?check=false", "", nil)
+	check(stored.Body.Bytes())
 }

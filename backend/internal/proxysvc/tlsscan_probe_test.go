@@ -132,8 +132,12 @@ func TestProtocolAnswer(t *testing.T) {
 	}{
 		{"an alert", &net.OpError{Op: "remote error", Err: errString("tls: protocol version not supported")},
 			"refused", "The server answered: protocol version not supported."},
+		// OpenSSL's answer when the version is fine and no cipher is shared,
+		// and Java 8's refusal: it cannot be told which.
 		{"a handshake failure alert", &net.OpError{Op: "remote error", Err: errString("tls: handshake failure")},
-			"refused", "handshake failure"},
+			"unknown", "or accepts it only with a cipher this probe cannot offer"},
+		{"an insufficient security alert", &net.OpError{Op: "remote error", Err: errString("tls: insufficient security")},
+			"unknown", "The server answered: insufficient security."},
 		{"a close on the hello", io.EOF, "refused", "closed the connection"},
 		{"a reset on the hello", &net.OpError{Op: "read", Err: syscall.ECONNRESET}, "refused", "closed the connection"},
 		{"another version picked", errString("tls: server selected unsupported protocol version 303"),
@@ -255,12 +259,17 @@ func httpsWithHeaders(t *testing.T) string {
 	return srv.URL + "/"
 }
 
-// redirects answers each path with a redirect to the mapped location, and
-// anything unmapped with 200.
+// redirects answers each path with a redirect to the mapped location, /drop
+// by closing the connection, and anything unmapped with 200.
 func redirects(t *testing.T, to func(base string) map[string]string) string {
 	t.Helper()
 	var base string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/drop" {
+			conn, _, _ := w.(http.Hijacker).Hijack()
+			conn.Close()
+			return
+		}
 		if location, ok := to(base)[r.URL.Path]; ok {
 			w.Header().Set("Location", location)
 			w.WriteHeader(http.StatusMovedPermanently)
@@ -302,7 +311,7 @@ func TestThePlainHTTPRedirectIsFollowedToHTTPS(t *testing.T) {
 			return map[string]string{"/": "/1", "/1": "/2", "/2": "/3", "/3": "/4", "/4": "/5", "/5": "/6"}
 		}, false, maxRedirectHops, "without reaching HTTPS"},
 		{"a hop that does not answer", func(string) map[string]string {
-			return map[string]string{"/": "http://127.0.0.1:1/"}
+			return map[string]string{"/": "/drop"}
 		}, false, 2, "did not answer"},
 	}
 	httpsURL := httpsWithHeaders(t)
@@ -378,6 +387,105 @@ func TestNetErrorKind(t *testing.T) {
 	} {
 		if got := netErrorKind(c.err); got != c.kind {
 			t.Errorf("%v = %s, want %s", c.err, got, c.kind)
+		}
+	}
+}
+
+// Go leaves RSA key exchange out of what it offers by default, so a server
+// taking TLS 1.0 only with AES128-SHA answered the probe with a handshake
+// failure and was reported as refusing it: grade A for a server that should
+// have had C. The probes now offer every suite Go implements.
+func TestProbeProtocolsOffersEverySuiteGoHas(t *testing.T) {
+	srv := httptest.NewUnstartedServer(http.NotFoundHandler())
+	srv.TLS = &tls.Config{
+		MinVersion: tls.VersionTLS10,
+		MaxVersion: tls.VersionTLS12,
+		CipherSuites: []uint16{
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, // TLS 1.2 only
+			tls.TLS_RSA_WITH_AES_128_CBC_SHA,          // what 1.0 and 1.1 get
+		},
+	}
+	srv.StartTLS()
+	defer srv.Close()
+
+	scan := goodScan()
+	scan.Protocols = probeProtocols(context.Background(), srv.Listener.Addr().String(), "example.com")
+	for name, want := range map[string]string{
+		"TLS 1.0": "offered", "TLS 1.1": "offered", "TLS 1.2": "offered", "TLS 1.3": "refused",
+	} {
+		if got := protocolStatus(scan.Protocols, name); got != want {
+			t.Errorf("%s = %s, want %s: %+v", name, got, want, scan.Protocols)
+		}
+	}
+	grade(scan)
+	if scan.Grade != "C" || !hasFinding(scan, "tls.old-protocol.TLS 1.0") {
+		t.Fatalf("grade %s with %+v", scan.Grade, scan.Findings)
+	}
+}
+
+// Every hop after the first goes where the remote site says. A site that
+// redirected to a service on loopback had this server GET its admin path,
+// and that service's own redirect came back in the report.
+func TestARedirectIsNotFollowedIntoThisMachine(t *testing.T) {
+	var internalHits atomic.Int32
+	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		internalHits.Add(1)
+		http.Redirect(w, r, "http://secret.internal.test/token=abc", http.StatusFound)
+	}))
+	defer internal.Close()
+	_, internalPort, _ := net.SplitHostPort(internal.Listener.Addr().String())
+	httpsURL := httpsWithHeaders(t)
+
+	for _, target := range []string{
+		internal.URL + "/admin/delete?x=1",
+		// A name is judged by the address it resolves to.
+		"http://localhost:" + internalPort + "/admin/delete?x=1",
+	} {
+		plain := redirects(t, func(string) map[string]string { return map[string]string{"/": target} })
+		result := scanHTTP(context.Background(), httpsURL, plain+"/")
+		if internalHits.Load() != 0 {
+			t.Fatalf("%s was requested", target)
+		}
+		chain := result.RedirectChain
+		if len(chain) != 2 || chain[0].Location != target || chain[1].URL != target ||
+			!chain[1].Internal || chain[1].Status != 0 || chain[1].Error != "" || result.PlainRedirects {
+			t.Fatalf("chain = %+v", chain)
+		}
+		scan := goodScan()
+		scan.HTTP = result
+		grade(scan)
+		if hasFinding(scan, "tls.no-redirect") || !hasFinding(scan, "http.redirect-internal") || scan.Grade != "A" {
+			t.Fatalf("grade %s with %+v", scan.Grade, scan.Findings)
+		}
+		for _, f := range scan.Findings {
+			if f.ID == "http.redirect-internal" && !strings.Contains(f.Detail, "private network") {
+				t.Errorf("detail %q", f.Detail)
+			}
+		}
+	}
+}
+
+func TestHopAllowed(t *testing.T) {
+	for _, c := range []struct {
+		address string
+		allowed bool
+	}{
+		{"127.0.0.1:80", true}, // where the first request went
+		{"127.0.0.1:8080", false},
+		{"[::1]:80", false},
+		{"10.0.0.5:80", false},
+		{"192.168.1.10:80", false},
+		{"169.254.169.254:80", false},
+		{"100.100.100.100:80", false},
+		{"0.0.0.0:80", false},
+		{"[fd00::1]:80", false},
+		{"[fe80::1%eth0]:80", false},
+		{"93.184.215.14:80", true},
+		{"93.184.215.14:8080", true},
+		{"[2606:4700::1]:80", true},
+	} {
+		if got := hopAllowed("127.0.0.1:80", c.address); got != c.allowed {
+			t.Errorf("%s = %v, want %v", c.address, got, c.allowed)
 		}
 	}
 }

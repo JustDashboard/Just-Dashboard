@@ -4,7 +4,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Globe, Inspect, RefreshClockwise, Trash } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { del, get, post } from "@/lib/api"
+import { ApiError, del, get, post } from "@/lib/api"
 import { calendarDate, relativeTime } from "@/lib/format"
 import { parseScanTarget, targetLabel, tlsReportHref } from "@/lib/scan-target"
 import type { Certificate } from "@/lib/types"
@@ -42,10 +42,29 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
   const [domain, setDomain] = useState("")
   const [fieldError, setFieldError] = useState<string>()
   const [adding, setAdding] = useState(false)
+  const [removing, setRemoving] = useState<number>()
+  // Endpoints removed since the list was fetched. Fetching it again would
+  // send an administrator's handshake to every other endpoint to show one
+  // fewer row, so a removal the server confirmed is taken off here instead.
+  const [removed, setRemoved] = useState<number[]>([])
   const watched = usePoll(
     (signal) => get<Watched[]>("/certificates/watched", undefined, signal),
     300_000,
   )
+  // An administrator's request handshakes with every endpoint, which can take
+  // up to half a minute; usePoll keeps the old list on screen meanwhile and
+  // does not call that loading, so the re-check is tracked here until an
+  // answer or an error replaces the list it was asked over.
+  const [recheckOver, setRecheckOver] = useState<Pick<typeof watched, "data" | "error">>()
+  const rechecking =
+    recheckOver !== undefined &&
+    recheckOver.data === watched.data &&
+    recheckOver.error === watched.error
+  const recheck = () => {
+    setRecheckOver({ data: watched.data, error: watched.error })
+    watched.refresh()
+  }
+  const rows = watched.data?.filter((row) => !removed.includes(row.id))
 
   const addDomain = async () => {
     // Read the way the TLS report reads its field: host:port for a service
@@ -68,19 +87,37 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
     }
   }
 
+  const stopWatching = async (row: Watched) => {
+    const label = targetLabel({ host: row.domain, port: row.port })
+    setRemoving(row.id)
+    try {
+      await del(`/certificates/watched/${row.id}`)
+      setRemoved((ids) => [...ids, row.id])
+      notify.success(`${label} is no longer watched`)
+    } catch (err) {
+      // Already gone — removed from another tab or by another administrator.
+      if (err instanceof ApiError && err.status === 404) {
+        setRemoved((ids) => [...ids, row.id])
+        notify.info(`${label} was already removed`)
+      } else notify.error(`Could not stop watching ${label}`, err)
+    } finally {
+      setRemoving(undefined)
+    }
+  }
+
   return (
     <FormSections>
       <FormSection
         aside
         title="Watched domains"
-        hint={`${watched.data?.length ?? 0} watched, checked while an administrator has this page open`}
+        hint={`${rows?.length ?? 0} watched, checked while an administrator has this page open`}
         actions={
           admin &&
-          watched.data &&
-          watched.data.length > 0 && (
-            <Button variant="outline" size="sm" onClick={() => watched.refresh()}>
+          rows &&
+          rows.length > 0 && (
+            <Button variant="outline" size="sm" onClick={recheck} pending={rechecking}>
               <RefreshClockwise className="size-3.5" />
-              Re-check now
+              {rechecking ? "Re-checking…" : "Re-check now"}
             </Button>
           )
         }
@@ -124,11 +161,11 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
           </form>
         )}
         <div>
-          {watched.loading ? (
+          {watched.loading || (rechecking && watched.error) ? (
             <LoadingRows rows={2} />
           ) : watched.error ? (
-            <ErrorState error={watched.error} />
-          ) : !watched.data?.length ? (
+            <ErrorState error={watched.error} onRetry={recheck} />
+          ) : !rows?.length ? (
             <p className="py-2 text-body text-muted-foreground">
               Nothing watched yet. A watched domain is checked with a real handshake when an
               administrator opens this page and every five minutes while it stays open, which is
@@ -136,7 +173,7 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
             </p>
           ) : (
             <ChoiceList aria-label="Watched domains" className="animate-rise">
-              {watched.data.map((row) => (
+              {rows.map((row) => (
                 <ChoiceRow
                   key={row.id}
                   verb={
@@ -145,6 +182,7 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
                       : row.domain
                   }
                   disabled={!admin}
+                  busy={rechecking || removing === row.id}
                   href={admin ? tlsReportHref({ host: row.domain, port: row.port }) : undefined}
                   leading={
                     <ProductLogo
@@ -164,17 +202,15 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
                     </>
                   }
                   description={
-                    row.certificate
-                      ? [
-                          row.certificate.issuer,
-                          // A handshake that failed carries Go's zero time.
-                          new Date(row.certificate.notAfter).getUTCFullYear() > 1 &&
-                            `until ${calendarDate(row.certificate.notAfter)}`,
-                          row.checkedAt && `checked ${relativeTime(row.checkedAt)}`,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")
-                      : "not checked yet"
+                    row.certificate &&
+                    [
+                      row.certificate.issuer,
+                      // A handshake that failed carries Go's zero time.
+                      new Date(row.certificate.notAfter).getUTCFullYear() > 1 &&
+                        `until ${calendarDate(row.certificate.notAfter)}`,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
                   }
                   trailing={<ExpiryStatus cert={row.certificate} />}
                   className="gap-3 p-4"
@@ -185,7 +221,17 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
                   {row.certificate && !row.certificate.error && (
                     <CertLife cert={row.certificate} className="w-full" />
                   )}
-                  <div className="flex flex-wrap justify-end gap-2">
+                  {/* How old the answer is gets a line of its own: at the end of
+                      the description it was the part a phone cut off, and for
+                      a read-only account it is the one new fact. */}
+                  <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                    <p className="text-hint text-muted-foreground">
+                      {removing === row.id
+                        ? "Removing…"
+                        : row.checkedAt
+                          ? `checked ${relativeTime(row.checkedAt)}`
+                          : "not checked yet"}
+                    </p>
                     {admin && (
                       <VerbBar
                         menuLabel={`More actions for ${targetLabel({ host: row.domain, port: row.port })}`}
@@ -203,10 +249,8 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
                             label: "Stop watching",
                             icon: Trash,
                             danger: true,
-                            run: async () => {
-                              await del(`/certificates/watched/${row.id}`)
-                              watched.refresh()
-                            },
+                            disabled: removing !== undefined,
+                            run: () => void stopWatching(row),
                           },
                         ]}
                       />

@@ -305,3 +305,208 @@ test("a read-only account reads the last check and cannot ask for another", asyn
   await expect(page.getByText("checked while an administrator has this page open")).toBeVisible()
   expect(lists.length).toBeGreaterThan(0)
 })
+
+test("a scan asked for again says it is scanning until the answer replaces the report", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  let answered = 0
+  let release: () => void = () => {}
+  await page.route("**/api/v1/certificates/scan**", async (route) => {
+    if (answered > 0) await new Promise<void>((resolve) => (release = resolve))
+    answered++
+    return json(route, {
+      ...scan,
+      summary: answered === 1 ? "The first answer" : "The second answer",
+    })
+  })
+  await page.goto("/proxy/tls?domain=app.example.com")
+  const button = page.getByRole("button", { name: "Scan", exact: true })
+  await expect(page.getByText("The first answer")).toBeVisible()
+  await expect(button).not.toHaveAttribute("aria-busy", "true")
+
+  // The field already holds the target, so this is the same report again.
+  await button.click()
+  await expect(button).toHaveAttribute("aria-busy", "true")
+  await expect(button).toBeDisabled()
+  await expect(page.getByText(/Handshaking, probing each TLS version/)).toBeVisible()
+  release()
+  await expect(button).not.toHaveAttribute("aria-busy", "true")
+  await expect(page.getByText(/Handshaking, probing each TLS version/)).toHaveCount(0)
+  await expect(page.getByText("The second answer")).toBeVisible()
+  expect(answered).toBe(2)
+})
+
+test("a scan asked for again that fails shows the error, not a spinner", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  let calls = 0
+  await page.route("**/api/v1/certificates/scan**", (route) => {
+    calls++
+    if (calls === 1) return json(route, scan)
+    return route.fulfill({
+      status: 502,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "upstream", message: "the scan could not run" } }),
+    })
+  })
+  await page.goto("/proxy/tls?domain=app.example.com")
+  await expect(page.getByRole("heading", { name: "app.example.com" })).toBeVisible()
+  await page.getByRole("button", { name: "Scan", exact: true }).click()
+  await expect(page.getByText("the scan could not run")).toBeVisible()
+  await expect(page.getByText(/Handshaking, probing each TLS version/)).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Scan", exact: true })).toBeEnabled()
+})
+
+test("a redirect into this machine reads as not followed, not as broken", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await scans(page, () => ({
+    ...scan,
+    http: {
+      ...scan.http,
+      plainRedirects: false,
+      plainStatus: 301,
+      plainLocation: "http://127.0.0.1:8080/admin",
+      redirectChain: [
+        { url: "http://app.example.com/", status: 301, location: "http://127.0.0.1:8080/admin" },
+        { url: "http://127.0.0.1:8080/admin", internal: true },
+      ],
+    },
+  }))
+  await page.goto("/proxy/tls?domain=app.example.com")
+  const plain = page.locator("li").filter({ hasText: /^Plain HTTP/ })
+  await expect(plain.getByText("not followed to an internal address")).toBeVisible()
+  await expect(
+    plain.getByText(
+      "http://127.0.0.1:8080/admin not requested, on this machine or its private network",
+    ),
+  ).toBeVisible()
+  await expect(page.getByText("a redirect leads nowhere")).toHaveCount(0)
+  await expect(page.getByText("did not answer")).toHaveCount(0)
+})
+
+/** A watch list whose GETs are counted, and whose second answer can be held. */
+async function watchList(page: Page, rows: object[]) {
+  const lists: number[] = []
+  const hold: { release?: () => void; next: boolean } = { next: false }
+  await page.route("**/api/v1/certificates/watched", async (route) => {
+    lists.push(Date.now())
+    if (hold.next) {
+      hold.next = false
+      await new Promise<void>((resolve) => (hold.release = resolve))
+    }
+    return json(route, rows)
+  })
+  return { lists, hold }
+}
+
+const mailRow = {
+  id: 1,
+  domain: "mail.example.com",
+  port: 993,
+  checkedAt: new Date(Date.now() - 3 * 60_000).toISOString(),
+  certificate: certs[0],
+}
+
+test("re-checking the watch list says so until the new checks arrive", async ({ page }) => {
+  await mockShowcase(page)
+  const { lists, hold } = await watchList(page, [mailRow])
+  await page.goto("/proxy/certificates")
+  const recheck = page.getByRole("button", { name: "Re-check now" })
+  await expect(recheck).toBeVisible()
+  hold.next = true
+  await recheck.click()
+  const busy = page.getByRole("button", { name: "Re-checking…" })
+  await expect(busy).toHaveAttribute("aria-busy", "true")
+  await expect(busy).toBeDisabled()
+  await expect.poll(() => lists.length).toBe(2)
+  hold.release?.()
+  await expect(page.getByRole("button", { name: "Re-check now" })).toBeEnabled()
+  await expect(busy).toHaveCount(0)
+})
+
+test("stopping a watch says what happened, and a failure keeps the row", async ({ page }) => {
+  await mockShowcase(page)
+  const { lists } = await watchList(page, [
+    mailRow,
+    { ...mailRow, id: 2, domain: "gone.example.com", port: 443 },
+    { ...mailRow, id: 3, domain: "stuck.example.com", port: 443 },
+  ])
+  const deleted: string[] = []
+  await page.route("**/api/v1/certificates/watched/*", (route) => {
+    const id = route.request().url().split("/").pop() ?? ""
+    deleted.push(id)
+    if (id === "1") return route.fulfill({ status: 204 })
+    if (id === "2")
+      return route.fulfill({
+        status: 404,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { code: "not_found", message: "not found" } }),
+      })
+    return route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "internal", message: "database is locked" } }),
+    })
+  })
+  const errors: string[] = []
+  page.on("pageerror", (error) => errors.push(error.message))
+  await page.goto("/proxy/certificates")
+  const list = page.getByRole("list", { name: "Watched domains" })
+  await expect(list.getByRole("listitem")).toHaveCount(3)
+  const loaded = lists.length
+
+  const stop = async (label: string) => {
+    await expect(page.getByRole("menu")).toHaveCount(0)
+    await page.getByRole("button", { name: `More actions for ${label}` }).click()
+    await page.getByRole("menuitem", { name: "Stop watching" }).click()
+  }
+
+  await stop("mail.example.com:993")
+  await expect(
+    page
+      .locator("[data-sonner-toast]")
+      .filter({ hasText: "mail.example.com:993 is no longer watched" }),
+  ).toBeVisible()
+  await expect(list.getByRole("listitem")).toHaveCount(2)
+
+  await stop("gone.example.com")
+  await expect(
+    page.locator("[data-sonner-toast]").filter({ hasText: "gone.example.com was already removed" }),
+  ).toBeVisible()
+  await expect(list.getByRole("listitem")).toHaveCount(1)
+
+  await stop("stuck.example.com")
+  await expect(
+    page
+      .locator("[data-sonner-toast]")
+      .filter({ hasText: "Could not stop watching stuck.example.com" }),
+  ).toBeVisible()
+  await expect(list.getByRole("listitem")).toHaveCount(1)
+  await expect(list.getByText("stuck.example.com")).toBeVisible()
+
+  expect(deleted).toEqual(["1", "2", "3"])
+  // A removal does not fetch the list again: for an administrator that is a
+  // handshake with every other endpoint.
+  expect(lists.length).toBe(loaded)
+  expect(errors).toEqual([])
+})
+
+test("on a phone every watched row keeps how old its check is in full", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockShowcase(page)
+  await page.route("**/api/v1/auth/session", (route) => json(route, readOnly))
+  await watchList(page, [
+    {
+      ...mailRow,
+      certificate: { ...certs[0], issuer: "A Rather Long Issuing Authority Name R11" },
+    },
+  ])
+  await page.goto("/proxy/certificates")
+  const age = page
+    .getByRole("list", { name: "Watched domains" })
+    .getByText(/^checked 3m( \d+s)? ago$/)
+  await expect(age).toBeVisible()
+  expect(await age.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+  expect(await age.evaluate((el) => getComputedStyle(el).textOverflow)).not.toBe("ellipsis")
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+})
