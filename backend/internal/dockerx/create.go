@@ -251,6 +251,7 @@ func validContainerName(name string) bool {
 // silent multi-minute wait with no progress anywhere. `progress` may be nil
 // when the caller has nowhere to show it.
 func (c *Client) Create(ctx context.Context, spec ContainerSpec, progress chan<- PullProgress) (*CreateResult, error) {
+	defer c.forgetDiskUsage()
 	cli, err := c.api()
 	if err != nil {
 		return nil, err
@@ -823,6 +824,7 @@ type RecreateOptions struct {
 // after that point goes wrong. It is only deleted once the replacement is
 // running.
 func (c *Client) Recreate(ctx context.Context, id string, opts RecreateOptions, progress chan<- PullProgress) (*CreateResult, error) {
+	defer c.forgetDiskUsage()
 	cli, err := c.api()
 	if err != nil {
 		return nil, err

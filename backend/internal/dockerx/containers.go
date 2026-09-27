@@ -81,6 +81,17 @@ func (c *Client) ListContainersWithLabels(ctx context.Context, labels map[string
 }
 
 func (c *Client) listContainers(ctx context.Context, options container.ListOptions) ([]Container, error) {
+	list, err := c.listContainerSummaries(ctx, options)
+	if err != nil {
+		return nil, err
+	}
+	c.enrichUptime(ctx, list)
+	return list, nil
+}
+
+// Membership joins and samplers need only the Engine summary. Keeping those
+// reads separate avoids inspecting every running container for unused fields.
+func (c *Client) listContainerSummaries(ctx context.Context, options container.ListOptions) ([]Container, error) {
 	cli, err := c.api()
 	if err != nil {
 		return nil, err
@@ -128,6 +139,7 @@ func (c *Client) listContainers(ctx context.Context, options container.ListOptio
 		}
 		cn.ComposeStack = it.Labels["com.docker.compose.project"]
 		cn.ComposeSvc = it.Labels["com.docker.compose.service"]
+		cn.Exposure = DescribePorts(cn.Ports)
 		out = append(out, cn)
 	}
 	// Running first, then by name — the same ordering Portainer uses, and the
@@ -138,7 +150,6 @@ func (c *Client) listContainers(ctx context.Context, options container.ListOptio
 		}
 		return out[i].Name < out[j].Name
 	})
-	c.enrichUptime(ctx, out)
 	return out, nil
 }
 
@@ -169,7 +180,6 @@ func (c *Client) enrichUptime(ctx context.Context, list []Container) {
 		return
 	}
 	for i := range list {
-		list[i].Exposure = DescribePorts(list[i].Ports)
 		unnamed := IsImageID(list[i].Image)
 		if list[i].State != "running" && !unnamed {
 			continue
@@ -184,26 +194,33 @@ func (c *Client) enrichUptime(ctx context.Context, list []Container) {
 		if list[i].State != "running" || insp.State == nil {
 			continue
 		}
-		list[i].Inspected = true
-		if started, err := time.Parse(time.RFC3339Nano, insp.State.StartedAt); err == nil {
-			s := started.UTC()
-			list[i].StartedAt = &s
-			list[i].UptimeSecond = int64(time.Since(started).Seconds())
-		}
-		if insp.State.Health != nil {
-			list[i].Health = insp.State.Health.Status
-		}
-		list[i].HasHealthchk = healthFactsOf(insp).hasCheck
-		if insp.HostConfig != nil {
-			list[i].MemoryLimit = insp.HostConfig.Memory
-			list[i].RestartPolicy = string(insp.HostConfig.RestartPolicy.Name)
-			list[i].Privileged = insp.HostConfig.Privileged
-			switch {
-			case insp.HostConfig.NanoCPUs > 0:
-				list[i].CPULimit = float64(insp.HostConfig.NanoCPUs) / 1e9
-			case insp.HostConfig.CPUQuota > 0 && insp.HostConfig.CPUPeriod > 0:
-				list[i].CPULimit = float64(insp.HostConfig.CPUQuota) / float64(insp.HostConfig.CPUPeriod)
-			}
+		enrichContainer(&list[i], insp)
+	}
+}
+
+func enrichContainer(ct *Container, insp container.InspectResponse) {
+	if insp.State == nil {
+		return
+	}
+	ct.Inspected = true
+	if started, err := time.Parse(time.RFC3339Nano, insp.State.StartedAt); err == nil {
+		s := started.UTC()
+		ct.StartedAt = &s
+		ct.UptimeSecond = int64(time.Since(started).Seconds())
+	}
+	if insp.State.Health != nil {
+		ct.Health = insp.State.Health.Status
+	}
+	ct.HasHealthchk = healthFactsOf(insp).hasCheck
+	if insp.HostConfig != nil {
+		ct.MemoryLimit = insp.HostConfig.Memory
+		ct.RestartPolicy = string(insp.HostConfig.RestartPolicy.Name)
+		ct.Privileged = insp.HostConfig.Privileged
+		switch {
+		case insp.HostConfig.NanoCPUs > 0:
+			ct.CPULimit = float64(insp.HostConfig.NanoCPUs) / 1e9
+		case insp.HostConfig.CPUQuota > 0 && insp.HostConfig.CPUPeriod > 0:
+			ct.CPULimit = float64(insp.HostConfig.CPUQuota) / float64(insp.HostConfig.CPUPeriod)
 		}
 	}
 }
@@ -458,6 +475,7 @@ func (c *Client) Lifecycle(ctx context.Context, id string, action LifecycleActio
 	if err != nil {
 		return err
 	}
+	defer c.forgetDiskUsage()
 	switch action {
 	case ActionStart:
 		return cli.ContainerStart(ctx, id, container.StartOptions{})
@@ -487,6 +505,7 @@ func (c *Client) RemoveContainer(ctx context.Context, id string, force, removeVo
 	if err != nil {
 		return err
 	}
+	defer c.forgetDiskUsage()
 	return cli.ContainerRemove(ctx, id, container.RemoveOptions{
 		Force: force, RemoveVolumes: removeVolumes,
 	})
@@ -576,11 +595,11 @@ func (c *Client) PruneContainers(ctx context.Context) (uint64, []string, error) 
 	if err != nil {
 		return 0, nil, err
 	}
+	defer c.forgetDiskUsage()
 	rep, err := cli.ContainersPrune(ctx, filters.NewArgs())
 	if err != nil {
 		return 0, nil, err
 	}
-	defer c.forgetDiskUsage()
 	deleted := rep.ContainersDeleted
 	if deleted == nil {
 		deleted = []string{}

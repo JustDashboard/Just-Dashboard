@@ -180,7 +180,8 @@ func (s *Server) handlePackageUpgrade(w http.ResponseWriter, r *http.Request) er
 	s.startJob(w, r, jobs.Spec{
 		Kind: "updates.apply", Title: title, Target: name, Timeout: 2 * time.Hour,
 	}, func(ctx context.Context, out jobs.Emitter) error {
-		defer s.modules.updates.Invalidate()
+		finish := s.modules.updates.BeginMutation()
+		defer finish()
 		code, err := out.RunEnv(ctx, env, name, args...)
 		if err != nil {
 			return err
@@ -222,7 +223,8 @@ func (s *Server) handlePackageRefresh(w http.ResponseWriter, r *http.Request) er
 		Kind: "packages.refresh", Title: "Refreshing the package index with " + name,
 		Target: name, Timeout: 15 * time.Minute,
 	}, func(ctx context.Context, out jobs.Emitter) error {
-		defer s.modules.updates.Invalidate()
+		finish := s.modules.updates.BeginMutation()
+		defer finish()
 		code, err := out.RunEnv(ctx, env, name, args...)
 		if err != nil {
 			return err
@@ -262,7 +264,8 @@ func (s *Server) handlePackageInstall(w http.ResponseWriter, r *http.Request) er
 		Kind: "packages.install", Title: "Installing " + target, Target: target,
 		Timeout: 1 * time.Hour,
 	}, func(ctx context.Context, out jobs.Emitter) error {
-		defer s.modules.updates.Invalidate()
+		finish := s.modules.updates.BeginMutation()
+		defer finish()
 		code, err := out.RunEnv(ctx, env, name, args...)
 		if err != nil {
 			return err
@@ -331,7 +334,8 @@ func (s *Server) handlePackageRemove(w http.ResponseWriter, r *http.Request) err
 	s.startJob(w, r, jobs.Spec{
 		Kind: "packages.remove", Title: title, Target: target, Timeout: 1 * time.Hour,
 	}, func(ctx context.Context, out jobs.Emitter) error {
-		defer s.modules.updates.Invalidate()
+		finish := s.modules.updates.BeginMutation()
+		defer finish()
 		code, err := out.RunEnv(ctx, env, name, args...)
 		if err != nil {
 			return err

@@ -14,10 +14,11 @@ since a tab was opened, and charts that start empty every visit cannot show last
   replaces the container and seeing across the restart is the point. Docker being absent is logged once,
   not an error. `/docker/containers/stats/history` serves a sparkline per table row in one query.
 - The sample carries `size_rw`, the writable layer, taken from the **cached** disk walk rather than by
-  asking the daemon for sizes: a sampler running every fifteen seconds must never trigger a walk of every
-  layer on the host. It is what makes "grew 6.4 GB today" a measurement — a static 38.7 GB cannot tell a
-  container that has held it for six months from one whose disk has two days left. Zero means the walk
-  had not completed when the sample was taken, and `dockerx.DetectAnomalies` treats that as an absent
+  asking the daemon for sizes per container: a sampler running every fifteen seconds shares the bounded
+  disk cache and its refresh instead of starting a separate walk per sample. It is what makes
+  "grew 6.4 GB today" a measurement — a static 38.7 GB cannot tell a container that has held it for six
+  months from one whose disk has two days left. Zero means the walk
+  was unavailable when the sample was taken, and `dockerx.DetectAnomalies` treats that as an absent
   measurement rather than as an empty layer.
 - Samples also retain the observed container ID for release attribution. The additive `container_id`
   column defaults to empty for old rows, which stay visible in name-continuous charts but cannot be
@@ -282,6 +283,13 @@ beats a page that renders empty.
 
 - **The installed set comes from the local database, never the front end** (dpkg, `rpm -qa`). Asking dnf
   needs a metadata cache present to answer a question about this disk.
+- The installed inventory is reused for up to 30 seconds, with concurrent misses sharing one read.
+  Cached and uncached answers preserve every architecture and return independent slices. Package jobs
+  invalidate at start and completion, including failure or cancellation, and suppress cache fills while
+  any job is active. A generation check rejects reads begun before invalidation. External changes are
+  picked up after expiry; pending upgrades are still read separately on each inventory request. The
+  cache belongs to this backend instance, and cancelling a waiting reader does not cancel a shared
+  package-manager read, which has its own two-minute deadline.
 - **"Installed on purpose" is a different question on each** and is what makes two thousand rows
   readable: `apt-mark showmanual`, `dnf repoquery --userinstalled`, pacman's `Install Reason`, Alpine's
   `/etc/apk/world`. zypper has no supported query, so `Explicit` stays false and the filter is hidden.
