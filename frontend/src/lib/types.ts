@@ -6327,6 +6327,13 @@ export type DeploymentRequests = {
   format?: string
   /** Whether this format carries a request duration at all. */
   latency: boolean
+  /**
+   * Where the proxy says why it failed a request: the Caddy ingress
+   * container, whose output carries its error lines, or nginx's error file
+   * for the site. At most one is set.
+   */
+  ingress?: string
+  errorLog?: string
   /** What is held reaches the start of the retained record; false means every figure is a floor. */
   complete: boolean
   observedAt: string

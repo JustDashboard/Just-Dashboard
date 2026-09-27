@@ -219,6 +219,43 @@ func TestFilterNarrows(t *testing.T) {
 	}
 }
 
+func TestFilterNarrowsToWhatTheAgentsAndCameFromListsName(t *testing.T) {
+	base := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	chrome := entry(base, "GET", "/", 200, 5)
+	chrome.Host, chrome.UserAgent = "shop.test", "Mozilla/5.0 (X11; Linux x86_64) Chrome/140.0 Safari/537.36"
+	chrome.Referer = "https://www.google.com/search?q=shop"
+	crawler := entry(base, "GET", "/robots.txt", 200, 1)
+	crawler.Host, crawler.UserAgent = "shop.test", "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+	inside := entry(base, "GET", "/b", 200, 1)
+	inside.Host, inside.UserAgent, inside.Referer = "shop.test", chrome.UserAgent, "https://shop.test/a"
+
+	// The lists rank a family and a site, so a row of either narrows to the
+	// same value, whatever case the press sends it in.
+	for _, tc := range []struct {
+		filter Filter
+		want   []string
+	}{
+		{Filter{Agent: "chrome", Limit: 10}, []string{"/b", "/"}},
+		{Filter{Agent: "Googlebot", Limit: 10}, []string{"/robots.txt"}},
+		{Filter{Referer: "WWW.GOOGLE.COM", Limit: 10}, []string{"/"}},
+		// A link followed inside the site is not a source, so it is not the
+		// site's own name either.
+		{Filter{Referer: "shop.test", Limit: 10}, nil},
+	} {
+		c := NewCollector(tc.filter)
+		for _, e := range []Entry{chrome, crawler, inside} {
+			c.Feed(e)
+		}
+		var got []string
+		for _, e := range c.Result().Entries {
+			got = append(got, e.Path)
+		}
+		if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+			t.Fatalf("%+v kept %v, want %v", tc.filter, got, tc.want)
+		}
+	}
+}
+
 func TestFilterOnLatencyDropsUntimedEntries(t *testing.T) {
 	// A combined-format log has no durations at all. Narrowing by latency must
 	// not quietly return everything.

@@ -22,6 +22,11 @@ type Filter struct {
 	Path    string
 	Host    string
 	Client  string
+	// Agent is a family as the Agents list names it (`AgentFamily`), and
+	// Referer a site as Came from names it: what those lists rank is what a
+	// press on one of their rows narrows to.
+	Agent   string
+	Referer string
 	MinMs   float64
 	MaxMs   float64
 	// PagesOnly keeps the requests a person would call a page view and drops
@@ -135,6 +140,12 @@ func (f Filter) Match(e Entry) bool {
 		return false
 	}
 	if f.Client != "" && !strings.HasPrefix(e.RemoteIP, f.Client) {
+		return false
+	}
+	if f.Agent != "" && !strings.EqualFold(f.Agent, AgentFamily(e.UserAgent)) {
+		return false
+	}
+	if f.Referer != "" && !strings.EqualFold(f.Referer, refererHost(e.Referer, e.Host)) {
 		return false
 	}
 	// "Pages" is what people opened: a document, and not a scanner's refused

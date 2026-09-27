@@ -38,6 +38,12 @@ type RequestWindow struct {
 	Driver  string `json:"driver,omitempty"`
 	Format  string `json:"format,omitempty"`
 	Latency bool   `json:"latency"`
+	// Ingress and ErrorLog are where the proxy says why it failed a request —
+	// the Caddy ingress container's own output, or nginx's error file for
+	// the site — so a 502 row can show "connection refused" beside itself
+	// rather than leave the reader to find the proxy's log on another page.
+	Ingress  string `json:"ingress,omitempty"`
+	ErrorLog string `json:"errorLog,omitempty"`
 	// Complete is false when what is held does not reach the start of the
 	// retained record — the seed budget, the cap or a roll cut it — so every
 	// figure below is a floor.
@@ -75,6 +81,7 @@ func ObserveRequests(ctx context.Context, record RequestRecord, environmentID in
 		return result
 	}
 	result.Driver, result.Format, result.Latency = window.Facts.Driver, string(window.Facts.Format), window.Facts.Latency
+	result.Ingress, result.ErrorLog = window.Facts.Container, window.Facts.ErrorLog
 	result.Coverage, result.Complete = window.Coverage, window.Coverage.Complete
 	if !window.Coverage.Exists {
 		result.Reason = "No request has been recorded for this deployment yet. A record starts with the first request through its public route."

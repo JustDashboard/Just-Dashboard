@@ -109,8 +109,9 @@ export function RequestConsole({
   onFilterClient,
   onBlock,
   blocking,
-  outputHref,
   onEventsAround,
+  outputFor,
+  renderInline,
 }: {
   entries: RequestEntry[]
   summary: RequestSummary
@@ -132,10 +133,15 @@ export function RequestConsole({
   onBlock?: (ip: string) => void
   /** The address a deny is in flight for, so the verb says it is working. */
   blocking?: string | null
-  /** The host Logs page opened on the container's lines around this request's minute. */
-  outputHref?: (entry: RequestEntry) => string | undefined
   /** The Events view scoped to this request's minute. */
   onEventsAround?: (entry: RequestEntry) => void
+  /**
+   * The Output view on the container's lines around this request's minute —
+   * for a request whose container is still there to read.
+   */
+  outputFor?: (entry: RequestEntry) => (() => void) | undefined
+  /** What the page draws under an opened request's verbs: the lines written while it was in flight. */
+  renderInline?: (entry: RequestEntry) => React.ReactNode
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [following, setFollowing] = useState(true)
@@ -373,8 +379,9 @@ export function RequestConsole({
                       onFilterClient={onFilterClient}
                       onBlock={onBlock}
                       blocking={blocking}
-                      outputHref={outputHref?.(entry)}
                       onEventsAround={onEventsAround}
+                      onOutput={outputFor?.(entry)}
+                      inline={renderInline?.(entry)}
                     />
                   )}
                 </div>
@@ -468,7 +475,10 @@ function Took({
  * data rather than strings — the code with its word, the time with where it
  * sits in the window, the lock that says whether it was encrypted, the site
  * it came from as that site. The three questions a request raises are named
- * buttons; everything else is one menu (§13).
+ * buttons; everything else is one menu (§13). Under them, what the page
+ * knows was written while it was in flight — the container's lines, and on a
+ * failure what the proxy said — so "why was this a 502" is answered in the
+ * row that asked it rather than on another page.
  */
 function RequestDetail({
   entry,
@@ -478,8 +488,9 @@ function RequestDetail({
   onFilterClient,
   onBlock,
   blocking,
-  outputHref,
   onEventsAround,
+  onOutput,
+  inline,
 }: {
   entry: RequestEntry
   summary: RequestSummary
@@ -488,8 +499,9 @@ function RequestDetail({
   onFilterClient?: (ip: string) => void
   onBlock?: (ip: string) => void
   blocking?: string | null
-  outputHref?: string
   onEventsAround?: (entry: RequestEntry) => void
+  onOutput?: () => void
+  inline?: React.ReactNode
 }) {
   const ip = entry.remoteIp
   const scanner = ip ? summary.scanners.some((s) => s.value === ip) : false
@@ -657,13 +669,12 @@ function RequestDetail({
 
       <div className="mt-3 flex flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center">
         {/* The two questions a failing request raises, each one press: what
-            did the container print then, and what happened to it then. */}
-        {outputHref && (
-          <Button size="xs" variant="outline" className={action} asChild>
-            <a href={outputHref}>
-              <TerminalWindow className="size-3" />
-              Container output around this moment
-            </a>
+            did the container print then, and what happened to it then. Both
+            stay on this page, in the views beside this one. */}
+        {onOutput && (
+          <Button size="xs" variant="outline" className={action} onClick={onOutput}>
+            <TerminalWindow className="size-3" />
+            Open in Output
           </Button>
         )}
         {onEventsAround && (
@@ -705,6 +716,8 @@ function RequestDetail({
           }
         />
       </div>
+
+      {inline}
     </div>
   )
 }

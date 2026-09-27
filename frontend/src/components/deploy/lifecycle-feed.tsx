@@ -5,6 +5,7 @@ import Link from "next/link"
 import {
   Box,
   CheckCircle,
+  ChevronDown,
   Clock,
   ClockRewind,
   Cross,
@@ -21,6 +22,7 @@ import {
   Slash,
   Stop,
   StopCircle,
+  TerminalWindow,
   Trash,
   Warning,
   type Icon,
@@ -28,6 +30,7 @@ import {
 import { get } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { clock, plural, relativeTime, timestamp } from "@/lib/format"
+import { dockerSource } from "@/lib/log-sources"
 import type { DeploymentLifecycle, DockerEvent } from "@/lib/types"
 import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
@@ -45,9 +48,12 @@ import { InfoTip } from "@/components/form"
 import { Status } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
+import { Button } from "@/components/ui/button"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { LiveDot, WrapDot, socketReading } from "@/components/deploy/request-marks"
 import { isCleanExit } from "@/components/deploy/traffic-strip"
+import { LinesBlock, OutputLines } from "@/components/deploy/output-lines"
+import { foldRestarts, loopSpan, type FeedItem } from "@/components/deploy/logs-model"
 
 /**
  * What Docker did to this deployment's containers.
@@ -76,7 +82,12 @@ import { isCleanExit } from "@/components/deploy/traffic-strip"
  * or Docker acting on its own.
  *
  * Grouped under the hour, on a rail down the marks, so an exit and the start a
- * minute after it read as one incident rather than two rows.
+ * minute after it read as one incident rather than two rows — and a crash
+ * loop, the same exit and the same start over and over, as the one row it is
+ * ("restarted ×12 in 9 min · exit 1"), which unfolds. An exit or an OOM kill
+ * carries what the container printed in the minute before it, a press away
+ * and open on the newest failure: the reason it died is almost always its
+ * own last words, and they are the one thing Docker's event does not say.
  *
  * It is searched and followed like the two views beside it. A feed that only
  * polls is a feed that tells you about the restart up to ten seconds after the
@@ -96,6 +107,8 @@ export function LifecycleFeed({
   product,
   moment,
   onClearMoment,
+  outputFor,
+  exists,
 }: {
   projectId: number
   /** What the deployment is, for a container event whose image names nothing better. */
@@ -103,6 +116,14 @@ export function LifecycleFeed({
   /** An instant to look around — a failing request's — scoping the list to ±2 minutes. */
   moment?: string
   onClearMoment?: () => void
+  /** The page's Output view on this event's container at its moment, where the page has it. */
+  outputFor?: (event: DockerEvent) => (() => void) | undefined
+  /**
+   * Whether the event's container is still there; absent while that is not
+   * known. A removed container's output went with it, so its last lines are
+   * said to be gone rather than asked for and refused.
+   */
+  exists?: (event: DockerEvent) => boolean
 }) {
   const [search, setSearch] = useSessionState("deploy.events.query", "")
   // Empty means everything, which is what the server does with no `kinds` — so
@@ -175,7 +196,17 @@ export function LifecycleFeed({
   }
 
   const filtered = needle !== "" || wanted.size > 0
-  const groups = byHour(shown)
+  const items = foldRestarts(shown, eventKey)
+  const groups = byHour(items)
+  // The newest failure opens on its last words; the rest are a press away,
+  // so a feed of forty exits is not forty reads of the containers' logs.
+  const newestFailure = items.find(
+    (item) =>
+      (item.kind === "loop" && !item.clean) ||
+      (item.kind === "event" &&
+        item.event.type === "container" &&
+        (item.event.action === "oom" || (item.event.action === "die" && !isCleanExit(item.event)))),
+  )?.key
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -273,7 +304,7 @@ export function LifecycleFeed({
           <section aria-label="Container events" className="flex flex-col gap-3">
             {groups.map((group) => (
               <div key={group.key} className="min-w-0">
-                <GroupRule label={group.label} count={group.events.length} />
+                <GroupRule label={group.label} count={group.count} />
                 <ul className="relative mt-1">
                   {/* The rail down the marks: what happened within the hour
                       reads as one run rather than separate rows. */}
@@ -281,16 +312,33 @@ export function LifecycleFeed({
                     aria-hidden
                     className="absolute top-2 bottom-2 left-4 w-px -translate-x-1/2 bg-hairline"
                   />
-                  {group.events.map((event) => (
-                    <LifecycleRow
-                      key={eventKey(event)}
-                      event={event}
-                      projectId={projectId}
-                      product={product}
-                      wide={wide}
-                      arrived={arrived.has(eventKey(event))}
-                    />
-                  ))}
+                  {group.items.map((item) =>
+                    item.kind === "loop" ? (
+                      <LoopRow
+                        key={item.key}
+                        loop={item}
+                        projectId={projectId}
+                        product={product}
+                        wide={wide}
+                        arrived={arrived.has(eventKey(item.events[0]))}
+                        lastLines={item.key === newestFailure}
+                        onOutput={outputFor?.(item.exit)}
+                        gone={exists?.(item.exit) === false}
+                      />
+                    ) : (
+                      <LifecycleRow
+                        key={item.key}
+                        event={item.event}
+                        projectId={projectId}
+                        product={product}
+                        wide={wide}
+                        arrived={arrived.has(item.key)}
+                        lastLines={item.key === newestFailure}
+                        onOutput={outputFor?.(item.event)}
+                        gone={exists?.(item.event) === false}
+                      />
+                    ),
+                  )}
                 </ul>
               </div>
             ))}
@@ -335,24 +383,27 @@ function eventKey(event: DockerEvent) {
 }
 
 /**
- * The events under the hour they happened in, newest first. A day is named
- * only when the record spans more than one, so a morning's feed reads "11:00"
- * rather than a date the reader already knows.
+ * The rows under the hour they happened in, newest first — a crash loop under
+ * the hour of its newest restart, counted as the events it holds. A day is
+ * named only when the record spans more than one, so a morning's feed reads
+ * "11:00" rather than a date the reader already knows.
  */
-function byHour(events: DockerEvent[]) {
-  const hourOf = (event: DockerEvent) => {
-    const date = new Date(event.time)
+function byHour(items: FeedItem[]) {
+  const hourOf = (item: FeedItem) => {
+    const date = new Date(item.time)
     date.setMinutes(0, 0, 0)
     return date
   }
-  const days = new Set(events.map((event) => hourOf(event).toDateString()))
-  const groups: { key: string; label: string; events: DockerEvent[] }[] = []
-  for (const event of events) {
-    const hour = hourOf(event)
+  const size = (item: FeedItem) => (item.kind === "loop" ? item.events.length : 1)
+  const days = new Set(items.map((item) => hourOf(item).toDateString()))
+  const groups: { key: string; label: string; count: number; items: FeedItem[] }[] = []
+  for (const item of items) {
+    const hour = hourOf(item)
     const key = hour.toISOString()
     const group = groups[groups.length - 1]
     if (group?.key === key) {
-      group.events.push(event)
+      group.items.push(item)
+      group.count += size(item)
       continue
     }
     const time = hour.toLocaleTimeString(undefined, {
@@ -366,7 +417,8 @@ function byHour(events: DockerEvent[]) {
         days.size > 1
           ? `${hour.toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${time}`
           : time,
-      events: [event],
+      count: size(item),
+      items: [item],
     })
   }
   return groups
@@ -483,7 +535,16 @@ function happened(event: DockerEvent) {
  * built image is named after the project, which no logo is. A network keeps
  * a glyph on the same tile, so the titles line up.
  */
-function EventMark({ event, product }: { event: DockerEvent; product?: string }) {
+function EventMark({
+  event,
+  product,
+  badge = happened(event),
+}: {
+  event: DockerEvent
+  product?: string
+  /** What happened, when it is not the event's own: a loop's restart. */
+  badge?: [Icon, string]
+}) {
   const named = event.image ? imageProduct(event.image) : undefined
   const id =
     event.type === "container"
@@ -491,7 +552,6 @@ function EventMark({ event, product }: { event: DockerEvent; product?: string })
         ? named
         : (product ?? "docker")
       : undefined
-  const badge = happened(event)
   const Glyph = badge?.[0]
   return (
     <span className="relative z-10 flex shrink-0">
@@ -522,6 +582,12 @@ function EventMark({ event, product }: { event: DockerEvent; product?: string })
  * On a phone what sits at the row's right edge — the exit code, who, when —
  * goes to a third line under the name instead, so the sentence keeps the
  * width it needs; chosen once, as `JobCard` chooses its last run's place.
+ *
+ * An exit or an OOM kill has a "Last lines" fold: what the container printed
+ * in the minute before, read when it opens — offered only while the container
+ * is there to read. Once it is removed, the newest failure says so in the
+ * fold's place and the others offer nothing: a press that can only fail is
+ * not a verb.
  */
 function LifecycleRow({
   event,
@@ -529,17 +595,29 @@ function LifecycleRow({
   product,
   wide,
   arrived,
+  lastLines,
+  onOutput,
+  gone,
 }: {
   event: DockerEvent
   projectId: number
   product?: string
   wide: boolean
   arrived: boolean
+  /** Open on the last lines: the newest failure in the feed. */
+  lastLines?: boolean
+  onOutput?: () => void
+  /** The container has been removed, and what it printed with it. */
+  gone?: boolean
 }) {
+  const [reading, setReading] = useState(Boolean(lastLines))
   const release = event.owner?.["release-number"] ?? event.owner?.["release-id"]
   const runId = event.owner?.["run-id"]
+  const stopped = event.type === "container" && (event.action === "die" || event.action === "oom")
+  const readable = stopped && Boolean(event.id) && !gone
   const edge = (
     <>
+      {readable && <LastLinesToggle open={reading} onToggle={() => setReading(!reading)} />}
       {/* An exit code is the one fact that changes what you do next, so it
           stays on the row at every width rather than inside the sentence. */}
       {event.exitCode && event.exitCode !== "0" && (
@@ -582,35 +660,223 @@ function LifecycleRow({
     <li className={cn("relative flex min-w-0 items-start gap-3 py-2", arrived && "animate-rise")}>
       <EventMark event={event} product={product} />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-body leading-5 font-medium">{event.message}</p>
-        <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-hint text-muted-foreground">
-          <span className="numeric" title={timestamp(event.time)}>
-            {clock(event.time)}
-          </span>
-          {event.name && (
-            <>
-              <FactDot />
-              <span className="truncate font-mono" style={laneStyle(event.name)}>
-                {event.name}
-              </span>
-            </>
-          )}
-          {release &&
-            (runId ? (
-              <Link
-                href={`/deploy/${projectId}/runs/${runId}`}
-                className="rounded-sm text-foreground focus-ring hover:underline"
-                title="Open the run that put this release on the server"
-              >
-                · release {release}
-              </Link>
-            ) : (
-              <span>· release {release}</span>
-            ))}
-        </p>
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-body leading-5 font-medium">{event.message}</p>
+            <EventFacts event={event} projectId={projectId} release={release} runId={runId} />
+          </div>
+          {wide && <div className="flex shrink-0 items-center gap-2 self-center">{edge}</div>}
+        </div>
         {!wide && <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">{edge}</div>}
+        {readable && reading && <LastLines event={event} onOutput={onOutput} />}
+        {stopped && gone && lastLines && <LinesGone />}
       </div>
-      {wide && <div className="flex shrink-0 items-center gap-2 self-center">{edge}</div>}
+    </li>
+  )
+}
+
+/** When, which container in its hue, and the release it belongs to as a link to its run. */
+function EventFacts({
+  event,
+  projectId,
+  release,
+  runId,
+}: {
+  event: DockerEvent
+  projectId: number
+  release?: string
+  runId?: string
+}) {
+  return (
+    <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-hint text-muted-foreground">
+      <span className="numeric" title={timestamp(event.time)}>
+        {clock(event.time)}
+      </span>
+      {event.name && (
+        <>
+          <FactDot />
+          <span className="truncate font-mono" style={laneStyle(event.name)}>
+            {event.name}
+          </span>
+        </>
+      )}
+      {release &&
+        (runId ? (
+          <Link
+            href={`/deploy/${projectId}/runs/${runId}`}
+            className="rounded-sm text-foreground focus-ring hover:underline"
+            title="Open the run that put this release on the server"
+          >
+            · release {release}
+          </Link>
+        ) : (
+          <span>· release {release}</span>
+        ))}
+    </p>
+  )
+}
+
+function LastLinesToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  return (
+    <Button
+      size="xs"
+      variant="ghost"
+      aria-expanded={open}
+      className="h-6 shrink-0 px-1.5 text-hint"
+      onClick={onToggle}
+    >
+      <TerminalWindow className="size-3" />
+      Last lines
+      <ChevronDown className={cn("size-3 transition-transform", open && "rotate-180")} />
+    </Button>
+  )
+}
+
+/**
+ * What a container printed in the minute before it stopped, through its own
+ * lens: the stack trace, the "out of memory", the port somebody else held.
+ */
+function LastLines({ event, onOutput }: { event: DockerEvent; onOutput?: () => void }) {
+  const at = Date.parse(event.time)
+  if (!event.id || !Number.isFinite(at)) return null
+  return (
+    <OutputLines
+      title="Last lines"
+      facts={<span className="numeric">the minute before {clock(event.time)}</span>}
+      query={{
+        source: dockerSource(event.id),
+        since: new Date(at - 60_000).toISOString(),
+        until: new Date(at + 1000).toISOString(),
+        limit: 20,
+      }}
+      empty="The container wrote nothing in the minute before it stopped."
+      action={
+        onOutput && (
+          <Button size="xs" variant="ghost" className="h-6 px-1.5 text-hint" onClick={onOutput}>
+            Open in Output
+          </Button>
+        )
+      }
+    />
+  )
+}
+
+/** Where the last lines would be, for a container that has been removed. */
+function LinesGone() {
+  return (
+    <LinesBlock title="Last lines">
+      <p className="text-hint text-muted-foreground">
+        This container has since been removed, and what it printed went with it.
+      </p>
+    </LinesBlock>
+  )
+}
+
+/** A loop's mark: the restart in amber when it crashes, quiet when each run ended cleanly. */
+const LOOP_BADGE: Record<"failing" | "clean", [Icon, string]> = {
+  failing: [RotateClockwise, "text-warning"],
+  clean: [RotateClockwise, "text-muted-foreground"],
+}
+
+/**
+ * A crash loop, folded: the container, how many times it was started again,
+ * over how long, and the exit it kept making — with the loop's own events a
+ * press away and the last lines before its newest exit, which are the lines
+ * that say why it keeps dying. A loop of clean exits — a job its restart
+ * policy runs again — is said as one, in no failure's tone.
+ */
+function LoopRow({
+  loop,
+  projectId,
+  product,
+  wide,
+  arrived,
+  lastLines,
+  onOutput,
+  gone,
+}: {
+  loop: Extract<FeedItem, { kind: "loop" }>
+  projectId: number
+  product?: string
+  wide: boolean
+  arrived: boolean
+  lastLines?: boolean
+  onOutput?: () => void
+  gone?: boolean
+}) {
+  const [reading, setReading] = useState(Boolean(lastLines))
+  const [unfolded, setUnfolded] = useState(false)
+  const readable = Boolean(loop.exit.id) && !gone
+  const newest = loop.events[0]
+  const release = newest.owner?.["release-number"] ?? newest.owner?.["release-id"]
+  const runId = newest.owner?.["run-id"]
+  const edge = (
+    <>
+      {readable && <LastLinesToggle open={reading} onToggle={() => setReading(!reading)} />}
+      <Button
+        size="xs"
+        variant="ghost"
+        aria-expanded={unfolded}
+        className="h-6 shrink-0 px-1.5 text-hint"
+        onClick={() => setUnfolded(!unfolded)}
+      >
+        {plural(loop.events.length, "event")}
+        <ChevronDown className={cn("size-3 transition-transform", unfolded && "rotate-180")} />
+      </Button>
+      {newest.source === "daemon" && (
+        // A restart policy is Docker acting on its own, which is the whole
+        // story of a loop nobody pressed anything for.
+        <span className="flex shrink-0 items-center gap-1.5">
+          <ProductGlyph id="docker" />
+          <span className="text-xs whitespace-nowrap text-muted-foreground">docker itself</span>
+        </span>
+      )}
+      <span className="numeric text-hint whitespace-nowrap text-muted-foreground">
+        {relativeTime(newest.time)}
+      </span>
+    </>
+  )
+  return (
+    <li className={cn("relative flex min-w-0 items-start gap-3 py-2", arrived && "animate-rise")}>
+      <EventMark
+        event={newest}
+        product={product}
+        badge={LOOP_BADGE[loop.clean ? "clean" : "failing"]}
+      />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-body leading-5 font-medium">
+              Restarted ×{loop.restarts} {loopSpan(loop.spanMs)}
+              {loop.oom && <span className="text-destructive"> · OOM-killed</span>}
+              {loop.exitCode && (
+                <span className="numeric text-destructive"> · exit {loop.exitCode}</span>
+              )}
+              {loop.clean && <span className="text-muted-foreground"> · each exit clean</span>}
+            </p>
+            <EventFacts event={newest} projectId={projectId} release={release} runId={runId} />
+          </div>
+          {wide && <div className="flex shrink-0 items-center gap-2 self-center">{edge}</div>}
+        </div>
+        {!wide && <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">{edge}</div>}
+        {readable && reading && <LastLines event={loop.exit} onOutput={onOutput} />}
+        {gone && lastLines && <LinesGone />}
+        {unfolded && (
+          <ul aria-label="The loop's events" className="mt-2 border-l border-hairline pl-3">
+            {loop.events.map((event) => (
+              <li
+                key={eventKey(event)}
+                className="flex min-w-0 items-center gap-2 py-0.5 text-hint text-muted-foreground"
+              >
+                <span className="numeric shrink-0" title={timestamp(event.time)}>
+                  {clock(event.time)}
+                </span>
+                <span className="truncate text-foreground">{event.message}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </li>
   )
 }

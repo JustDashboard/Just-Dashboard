@@ -61,7 +61,7 @@ func caddyLine(at time.Time, method, uri string, status int, seconds float64) st
 		at.Format(time.RFC3339Nano), method, uri, status, seconds)
 }
 
-var caddyFacts = accesslog.Facts{Driver: "docker-caddy", Format: accesslog.FormatCaddyJSON, Latency: true}
+var caddyFacts = accesslog.Facts{Driver: "docker-caddy", Format: accesslog.FormatCaddyJSON, Latency: true, Container: "c4ddy"}
 
 func TestObserveRequestsReadsTheEnvironmentsOwnRoute(t *testing.T) {
 	now := time.Now().UTC().Add(-time.Minute)
@@ -84,6 +84,9 @@ func TestObserveRequestsReadsTheEnvironmentsOwnRoute(t *testing.T) {
 	}
 	if !window.Latency || window.Driver != "docker-caddy" {
 		t.Fatalf("driver facts lost: %+v", window)
+	}
+	if window.Ingress != "c4ddy" || window.ErrorLog != "" {
+		t.Fatalf("the ingress whose output says why a request failed = %q / %q", window.Ingress, window.ErrorLog)
 	}
 	if len(window.Entries) != 2 || window.Entries[0].Path != "/api/save" {
 		t.Fatalf("rows wrong (newest first): %+v", window.Entries)
@@ -134,10 +137,15 @@ func TestObserveRequestsReportsAReadFailure(t *testing.T) {
 func TestObserveRequestsCarriesTheNginxFacts(t *testing.T) {
 	now := time.Now().UTC()
 	line := fmt.Sprintf("198.51.100.4 - - [%s] \"GET / HTTP/1.1\" 200 12 \"-\" \"curl\"\n", now.Format("02/Jan/2006:15:04:05 -0700"))
-	facts := accesslog.Facts{Driver: "nginx", Format: accesslog.FormatCombined, Latency: false}
+	facts := accesslog.Facts{Driver: "nginx", Format: accesslog.FormatCombined, Latency: false, ErrorLog: "/var/log/nginx/just-dashboard-env-9.conf.error.log"}
 	window := ObserveRequests(context.Background(), storeOver(&memoryRecord{data: []byte(line)}, facts), 9, accesslog.Filter{Limit: 5})
 	if window.Status != "available" || window.Latency || window.Format != "nginx-combined" {
 		t.Fatalf("nginx window: %+v", window)
+	}
+	// Where nginx says why a request failed travels with the window, so a
+	// 502 row can read it without knowing how the site was rendered.
+	if window.ErrorLog != facts.ErrorLog || window.Ingress != "" {
+		t.Fatalf("error source = %q / %q", window.ErrorLog, window.Ingress)
 	}
 	if window.Summary.Latency != nil {
 		t.Fatal("combined carries no durations; a latency block would be zeros presented as measurements")

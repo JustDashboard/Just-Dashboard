@@ -274,9 +274,9 @@ export type RequestRange = (typeof REQUEST_RANGES)[number]["id"] | "custom"
  * chosen. "Last hour" that quietly means an hour ending twenty minutes ago is
  * the kind of wrongness nobody notices until it has cost them an afternoon.
  */
-export function resolveRequestRange(range: RequestRange): string {
+export function resolveRequestRange(range: RequestRange, now = Date.now()): string {
   const preset = REQUEST_RANGES.find((r) => r.id === range) ?? REQUEST_RANGES[1]
-  return new Date(Date.now() - preset.minutes * 60_000).toISOString()
+  return new Date(now - preset.minutes * 60_000).toISOString()
 }
 
 /**
