@@ -1,20 +1,24 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Logs, SidebarLeftClose, SidebarLeftOpen } from "@/components/icons"
+import { cn } from "@/lib/utils"
 import { get } from "@/lib/api"
-import type { LogSource, LogSourceIndex } from "@/lib/types"
+import type { DbFleetEntry, LogSource, LogSourceIndex } from "@/lib/types"
 import {
   EMPTY_FILTER,
   fieldsFromParams,
+  fieldsOf,
   filterQuery,
   levelsFromParam,
   readLogWindow,
+  resolveRange,
+  type LogLevel,
 } from "@/lib/log-filter"
 import { lensFor, withLensDefaults } from "@/lib/log-lenses"
 import { journalSource } from "@/lib/log-sources"
-import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
+import type { LogFields, LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useMetrics } from "@/hooks/use-metrics"
@@ -25,15 +29,44 @@ import { EmptyState } from "@/components/state"
 import { IconAction } from "@/components/icon-action"
 import { ResizeHandle } from "@/components/resize-handle"
 import { Button } from "@/components/ui/button"
-import { SourceRail, railSources } from "@/components/logs/source-rail"
+import { SourceRail, railSources, sourceProduct } from "@/components/logs/source-rail"
 import { SourceFacts } from "@/components/logs/source-facts"
 import { ExportDialog } from "@/components/logs/export-dialog"
 import { LogWorkspace } from "@/components/logs/log-workspace"
+import type {
+  LogWindow,
+  ServiceLogSource,
+  ServiceLogsContext,
+} from "@/components/logs/service-logs"
+import { serviceViews, useServiceFinds } from "@/components/logs/service-views"
+import { RecordColumn, recordQueryKey, useRequestRecords } from "@/components/logs/request-records"
+import { railSourceFor } from "@/components/logs/service-views-model"
+import type { RequestsView } from "@/components/deploy/requests-workspace"
+import {
+  EMPTY_REQUEST_QUERY,
+  QUERY_PARAMS,
+  completeQuery,
+  queryFromParams,
+  queryParams,
+  type RequestQuery,
+} from "@/components/deploy/logs-model"
 
 const RAIL = { min: 208, max: 420, base: 272 }
 
-/** The readings a link may open on; a page view's id joins these when `/logs` offers one. */
+/** The readings every source offers; a page view's id — events, runs, queries — joins them where the source has it. */
 const MODES = ["live", "search", "insights"]
+
+/** The lines' column where it stacks under the rail: a window's height, not what is left of one. */
+const COLUMN = "max-lg:h-[max(32rem,calc(100dvh-5rem))] max-lg:flex-none"
+
+/** A page view's id as a link may name it, before the views it could name are known. */
+const VIEW_ID = /^[a-z][a-z-]{0,31}$/
+
+/** History on a stretch of time, narrowed, on this source or the one a view names. */
+type OpenAt = LogWindow & { fields?: LogFields; levels?: LogLevel[]; q?: string; source?: string }
+
+/** The words a link into a source says; a record's link says its own in their place. */
+const SOURCE_PARAMS = ["source", "mode", "q", "unit", "since", "until", "f", "levels", "lens"]
 
 function validLens(id: string | null) {
   return id === "none" || lensFor(id ?? undefined) ? (id as string) : ""
@@ -60,6 +93,12 @@ function toLocalInput(date: Date) {
  * screen, the sources down the left and the lines on the right, a hairline
  * between them. The rail hides and resizes the way the terminal's session
  * rail does, and remembers both.
+ *
+ * It is every service page's reading in one place. A source is offered the
+ * views its own page has beside Live, History and Insights — a container's
+ * Events, a unit's Runs, a saved database's Queries, a site's Requests — and
+ * the rail lists the request records beside the logs they are read from,
+ * each read in the same column under the same strip.
  */
 export default function LogsPage() {
   const params = useSearchParams()
@@ -72,16 +111,19 @@ export default function LogsPage() {
   )
   const listed = useMemo(() => railSources(sources.data, admin), [sources.data, admin])
 
+  // A link to a request record names the record and its question, in the
+  // request log's own words — whose `since` is a request window, not a log's.
+  const recordLink = params.get("requests") ?? ""
   // Keep exact instants from shared links; converting them to local input values
   // before searching would lose the offset during a repeated daylight-saving hour.
-  const [initialWindow] = useState(() => readLogWindow(params))
+  const [initialWindow] = useState(() =>
+    recordLink ? { since: "", until: "", error: undefined } : readLogWindow(params),
+  )
   const [windowError, setWindowError] = useState(initialWindow.error)
   // A link into the page is a complete question and sets the whole window;
   // arriving bare — the rail's own link — reopens the window this tab had,
   // which the effect below then writes back into the address bar.
-  const linked = ["source", "mode", "q", "unit", "since", "until", "f", "levels", "lens"].some(
-    (key) => params.has(key),
-  )
+  const linked = !recordLink && SOURCE_PARAMS.some((key) => params.has(key))
   const arrival = <T,>(value: T) => (linked ? value : undefined)
   const [picked, setPicked] = useSessionState(
     "logs.source",
@@ -94,7 +136,7 @@ export default function LogsPage() {
     arrival(
       initialWindow.since || initialWindow.until
         ? "search"
-        : MODES.includes(params.get("mode") ?? "")
+        : VIEW_ID.test(params.get("mode") ?? "")
           ? (params.get("mode") as LogMode)
           : "live",
     ),
@@ -131,12 +173,36 @@ export default function LogsPage() {
   )
   const [since, setSince] = useSessionState("logs.since", "", arrival(initialWindow.since))
   const [until, setUntil] = useSessionState("logs.until", "", arrival(initialWindow.until))
+  // The request record on screen in place of a source, when one is.
+  const [record, setRecord] = useSessionState(
+    "logs.requests",
+    "",
+    recordLink || (linked ? "" : undefined),
+  )
+  const [recordView, setRecordView] = useSessionState<RequestsView>(
+    "logs.requests.view",
+    "requests",
+    recordLink ? (params.get("mode") === "insights" ? "insights" : "requests") : undefined,
+  )
+  // Kept under the record's owner's key, so the question on a deployment's
+  // requests is the same here and on its own Logs page.
+  const [storedQuery, setRecordQuery] = useSessionState<RequestQuery>(
+    recordQueryKey(record),
+    EMPTY_REQUEST_QUERY,
+    recordLink ? queryFromParams(params) : undefined,
+  )
+  const recordQuery = useMemo(() => completeQuery(storedQuery), [storedQuery])
   const [context, setContext] = useSessionState("logs.context", 0)
   const [archives, setArchives] = useSessionState("logs.archives", false)
   const [boot, setBoot] = useSessionState("logs.boot", false)
   const [showRail, setShowRail] = useViewState("logs.rail", true)
   const [railWidth, setRailWidth, resetRailWidth] = usePanelSize("logs.rail", RAIL.base)
   const railPx = Math.max(RAIL.min, Math.min(RAIL.max, railWidth))
+  // A jump to a moment — a view's "open the log around this" — is a History
+  // run of its own, which a pane already on History would not make.
+  const [jump, setJump] = useState(0)
+  const router = useRouter()
+  const requests = useRequestRecords()
 
   // The first source is streaming before you choose one. Landing on an empty
   // pane and a "pick something" sign wastes the visit: nine times out of ten
@@ -186,13 +252,101 @@ export default function LogsPage() {
     }
   }
 
+  // The source as its own page hands it to a view: the unit rather than the
+  // whole journal, and the product and state the rail draws it with.
+  const readLens = lens === "none" ? undefined : lens || detectedLens
+  const viewSource = useMemo<ServiceLogSource | undefined>(() => {
+    if (!selected) return undefined
+    const oneUnit = selected.kind === "journal" && unit !== ""
+    return {
+      ...selected,
+      id: sourceId,
+      label: oneUnit ? unit : selected.label,
+      status: oneUnit ? units?.find((u) => u.name === unit)?.active : selected.status,
+      // What the whole journal holds is not what one unit's does.
+      detail: oneUnit ? undefined : selected.detail,
+      lens: detectedLens,
+      product: sourceProduct(selected, host?.platform),
+    }
+  }, [selected, sourceId, unit, units, detectedLens, host?.platform])
+  const finds = useServiceFinds(record ? undefined : viewSource, readLens, requests.sites)
+
+  // Another log opened on a stretch of time, from a view or a request —
+  // History on it, narrowed where the asker knows how. A source the rail
+  // does not list is said to be gone, as a link to one is, rather than
+  // swapped for another.
+  const openLog = (id: string | undefined, at: OpenAt) => {
+    setRecord("")
+    if (id !== undefined && id !== sourceId) {
+      const target = railSourceFor(listed, id)
+      if (target) switchSource(target.source, target.unit)
+      setPicked(target?.source.id ?? id)
+      setUnit(target?.unit ?? "")
+    }
+    setRange("custom")
+    setSince(at.since)
+    setUntil(at.until)
+    if (at.fields || at.levels || at.q !== undefined) {
+      setFilter((f) => ({
+        ...f,
+        fields: at.fields ?? fieldsOf(f),
+        levels: at.levels ?? f.levels,
+        q: at.q ?? f.q,
+      }))
+    }
+    setMode("search")
+    setJump((n) => n + 1)
+  }
+  const ctx: ServiceLogsContext | undefined = viewSource && {
+    source: viewSource,
+    sourceId,
+    lens: lensFor(readLens),
+    filter,
+    window: resolveRange(range, since, until),
+    setFilter,
+    // A view that names another source is heard: a database's statement
+    // opens its server's own log.
+    openHistory: (at: OpenAt) => openLog(at.source, at),
+    openLive: () => setMode("live"),
+  }
+  const views = viewSource
+    ? serviceViews(viewSource, finds, {
+        openLog,
+        onQuery: (conn: DbFleetEntry, sql: string) =>
+          router.push(`/databases/query?${new URLSearchParams({ conn: String(conn.id), sql })}`),
+      })
+    : []
+  // A view the source does not have — Events kept from a container, now on
+  // syslog — reads as Live until a source that has it is chosen again.
+  const shownMode = MODES.includes(mode) || views.some((v) => v.id === mode) ? mode : "live"
+  const shownView = views.find((v) => v.id === shownMode)
+  const found = requests.records.find((r) => r.id === record)
+
   const predicates = filterQuery(filter).f
   const predicatesKey = JSON.stringify(predicates ?? [])
+  const recordWords = JSON.stringify(record ? queryParams(recordQuery) : [])
   useEffect(() => {
-    if (!sourceId || windowError) return
+    if (windowError) return
     const url = new URL(window.location.href)
+    if (record) {
+      // A record's address is the record and its question, in the request
+      // log's own words, so a link opens on the same rows.
+      for (const key of [...SOURCE_PARAMS, ...QUERY_PARAMS]) url.searchParams.delete(key)
+      url.searchParams.set("requests", record)
+      if (recordView === "insights") url.searchParams.set("mode", "insights")
+      for (const [key, value] of JSON.parse(recordWords) as [string, string][]) {
+        url.searchParams.set(key, value)
+      }
+      window.history.replaceState(null, "", url)
+      return
+    }
+    if (!sourceId) return
+    url.searchParams.delete("requests")
+    for (const key of QUERY_PARAMS) {
+      if (!SOURCE_PARAMS.includes(key)) url.searchParams.delete(key)
+    }
     url.searchParams.set("source", sourceId)
-    if (mode !== "live") url.searchParams.set("mode", mode)
+    if (shownMode !== "live") url.searchParams.set("mode", shownMode)
     else url.searchParams.delete("mode")
     if (filter.q) url.searchParams.set("q", filter.q)
     else url.searchParams.delete("q")
@@ -213,8 +367,11 @@ export default function LogsPage() {
     }
     window.history.replaceState(null, "", url)
   }, [
+    record,
+    recordView,
+    recordWords,
     sourceId,
-    mode,
+    shownMode,
     filter.q,
     filter.levels,
     predicatesKey,
@@ -237,7 +394,11 @@ export default function LogsPage() {
   )
 
   return (
-    <Page fill className="gap-4 md:gap-5">
+    // Below `lg` the rail stacks over the lines, and the two shared the
+    // window: a request record's chart and filters left its rows no height
+    // at all. There the page scrolls, and the column under the rail keeps a
+    // window's height of its own.
+    <Page fill className="gap-4 max-lg:h-auto max-lg:overflow-visible md:gap-5">
       <PageContext eyebrow="Server" title="Logs" />
 
       {/* One frame around the whole workbench. The rail and the lines are
@@ -246,7 +407,7 @@ export default function LogsPage() {
           the page, and the screen is one working surface. */}
       <div
         style={{ "--jd-rail": `${railPx}px` } as React.CSSProperties}
-        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card lg:flex-row"
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card max-lg:flex-none lg:flex-row"
       >
         {showRail && (
           <div className="relative flex max-h-64 shrink-0 border-b border-hairline lg:max-h-none lg:w-(--jd-rail) lg:border-r lg:border-b-0">
@@ -255,12 +416,16 @@ export default function LogsPage() {
               sources={listed}
               loading={sources.loading}
               error={sources.error}
-              selectedId={selected?.id ?? null}
+              selectedId={record ? null : (selected?.id ?? null)}
               onSelect={(source) => {
+                setRecord("")
                 switchSource(source, source.kind === "journal" ? unit : "")
                 setPicked(source.id)
                 if (source.kind !== "journal") setUnit("")
               }}
+              records={requests.records}
+              selectedRecord={record || null}
+              onSelectRecord={(next) => setRecord(next.id)}
               onRescan={() => sources.refresh()}
               platform={host?.platform}
             />
@@ -298,25 +463,66 @@ export default function LogsPage() {
               }
             />
           </Blank>
+        ) : record ? (
+          found ? (
+            <RecordColumn
+              className={COLUMN}
+              key={record}
+              record={found}
+              leading={railToggle}
+              view={recordView}
+              onViewChange={setRecordView}
+              query={recordQuery}
+              onQueryChange={setRecordQuery}
+              openLog={openLog}
+            />
+          ) : (
+            <Blank leading={railToggle}>
+              <EmptyState
+                icon={Logs}
+                title={
+                  requests.settled ? "Request record unavailable" : "Looking for request records…"
+                }
+                description={
+                  requests.settled
+                    ? `The requested record (${record}) is not among this host's deployments and sites with one. The deployment may have been removed, or the site may no longer write an access log of its own.`
+                    : undefined
+                }
+              />
+            </Blank>
+          )
         ) : selected ? (
           <LogWorkspace
-            key={sourceId}
+            key={`${sourceId}|${jump}`}
+            className={COLUMN}
             flush
             leading={railToggle}
-            facts={<SourceFacts source={selected} />}
+            // A unit's journal is named as the unit: its Runs have no filter
+            // row, which is where the unit is picked, to say whose they are.
+            name={
+              viewSource && viewSource.label !== selected.label ? (
+                <span className="truncate text-body font-medium">{viewSource.label}</span>
+              ) : undefined
+            }
+            facts={<SourceFacts source={viewSource ?? selected} />}
             actions={
-              <ExportDialog
-                sourceId={sourceId}
-                source={selected}
-                filter={filter}
-                boot={boot}
-                lens={lens}
-              />
+              // A page view with its own export — a site's requests — is not
+              // the log's lines, and two Export buttons would be two answers.
+              (!shownView || shownView.filtered) && (
+                <ExportDialog
+                  sourceId={sourceId}
+                  source={selected}
+                  filter={filter}
+                  boot={boot}
+                  lens={lens}
+                />
+              )
             }
             source={selected}
             sourceId={sourceId}
             units={sources.data?.units ?? []}
-            mode={mode}
+            views={ctx && views.map((view) => ({ ...view, render: () => view.render(ctx) }))}
+            mode={shownMode}
             onModeChange={setMode}
             filter={filter}
             onFilterChange={setFilter}
@@ -379,7 +585,7 @@ export default function LogsPage() {
 /** The lines column with nothing to show: the rail toggle stays reachable. */
 function Blank({ leading, children }: { leading: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", COLUMN)}>
       <div className="flex min-h-10 shrink-0 items-center border-b border-hairline px-2">
         {leading}
       </div>

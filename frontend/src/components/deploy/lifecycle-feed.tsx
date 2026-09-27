@@ -3,33 +3,22 @@
 import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
 import {
-  Box,
   CheckCircle,
   ChevronDown,
   Clock,
   ClockRewind,
   Cross,
-  CrossCircle,
   Filter,
-  Heart,
-  Link as LinkGlyph,
   MagnifyingGlass,
-  NetworkDevice,
-  Pause,
-  Play,
-  Plus,
-  RotateClockwise,
   Slash,
-  Stop,
-  StopCircle,
   TerminalWindow,
-  Trash,
   Warning,
   type Icon,
 } from "@/components/icons"
 import { get } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { clock, plural, relativeTime, timestamp } from "@/lib/format"
+import { dedupeEvents, eventKey } from "@/lib/docker-events"
 import { dockerSource } from "@/lib/log-sources"
 import type { DeploymentLifecycle, DockerEvent } from "@/lib/types"
 import { useSessionState } from "@/lib/view-state"
@@ -37,12 +26,10 @@ import { usePoll } from "@/hooks/use-poll"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
-import { InitialsMark } from "@/components/account/user-avatar"
 import { GroupRule } from "@/components/flow"
 import { laneStyle } from "@/components/logs/log-text"
 import { FactDot } from "@/components/metrics/host-identity"
 import { PaneFooter } from "@/components/panel"
-import { ProductGlyph, ProductLogo, imageProduct } from "@/components/product-logo"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { InfoTip } from "@/components/form"
 import { Status } from "@/components/status-dot"
@@ -52,6 +39,7 @@ import { Button } from "@/components/ui/button"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { LiveDot, WrapDot, socketReading } from "@/components/deploy/request-marks"
 import { isCleanExit } from "@/components/deploy/traffic-strip"
+import { EventMark, EventWho, HAPPENED } from "@/components/docker/event-marks"
 import { LinesBlock, OutputLines } from "@/components/deploy/output-lines"
 import { foldRestarts, loopSpan, type FeedItem } from "@/components/deploy/logs-model"
 
@@ -157,7 +145,7 @@ export function LifecycleFeed({
   // log, and an arriving event has no trigger on it yet. Deduping in this order
   // means a row stops saying "docker itself" once the poll knows better,
   // instead of flickering back to it every time the socket repeats itself.
-  const all = useMemo(() => dedupe([...(data?.events ?? []), ...live]), [data?.events, live])
+  const all = useMemo(() => dedupeEvents([...(data?.events ?? []), ...live]), [data?.events, live])
 
   const needle = search.trim().toLowerCase()
   const wanted = new Set(kinds)
@@ -378,10 +366,6 @@ export function LifecycleFeed({
   )
 }
 
-function eventKey(event: DockerEvent) {
-  return `${event.time}|${event.type}|${event.action}|${event.id ?? event.name}`
-}
-
 /**
  * The rows under the hour they happened in, newest first — a crash loop under
  * the hour of its newest restart, counted as the events it holds. A day is
@@ -481,94 +465,6 @@ function emptyReading({
 }
 
 /**
- * The socket sends the buffered past on connect and the poll reads the same
- * buffer, so the two overlap by design. Identity is the timestamp plus the
- * object: Docker's own event ids are the object's, not the event's.
- */
-function dedupe(events: DockerEvent[]): DockerEvent[] {
-  const seen = new Set<string>()
-  const out: DockerEvent[] = []
-  for (const event of events) {
-    const key = eventKey(event)
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(event)
-  }
-  return out.sort((a, b) => b.time.localeCompare(a.time))
-}
-
-/**
- * What happened, as the glyph in the corner of the thing it happened to, in
- * the tone of a reading of state: an exit that failed in red, a restart in
- * amber, a start or a passing health check in green, and the bookkeeping —
- * created, removed, connected — quiet. A clean exit and a kill are
- * bookkeeping too: every stop sends both, and the server calls them notices.
- */
-const HAPPENED: Record<string, [Icon, string]> = {
-  die: [CrossCircle, "text-destructive"],
-  oom: [CrossCircle, "text-destructive"],
-  kill: [Stop, "text-muted-foreground"],
-  restart: [RotateClockwise, "text-warning"],
-  start: [Play, "text-success"],
-  unpause: [Play, "text-success"],
-  healthy: [Heart, "text-success"],
-  unhealthy: [Heart, "text-warning"],
-  stop: [StopCircle, "text-muted-foreground"],
-  pause: [Pause, "text-muted-foreground"],
-  create: [Plus, "text-muted-foreground"],
-  destroy: [Trash, "text-muted-foreground"],
-  connect: [LinkGlyph, "text-muted-foreground"],
-  disconnect: [LinkGlyph, "text-muted-foreground"],
-}
-
-function happened(event: DockerEvent) {
-  if (isCleanExit(event)) return HAPPENED.stop
-  if (event.action.startsWith("health_status")) {
-    return HAPPENED[event.action.endsWith("unhealthy") ? "unhealthy" : "healthy"]
-  }
-  return HAPPENED[event.action]
-}
-
-/**
- * A container is the product it runs: the image's own mark when its reference
- * names one (an n8n or Grafana deployment), otherwise the deployment's — a
- * built image is named after the project, which no logo is. A network keeps
- * a glyph on the same tile, so the titles line up.
- */
-function EventMark({
-  event,
-  product,
-  badge = happened(event),
-}: {
-  event: DockerEvent
-  product?: string
-  /** What happened, when it is not the event's own: a loop's restart. */
-  badge?: [Icon, string]
-}) {
-  const named = event.image ? imageProduct(event.image) : undefined
-  const id =
-    event.type === "container"
-      ? named && named !== "docker"
-        ? named
-        : (product ?? "docker")
-      : undefined
-  const Glyph = badge?.[0]
-  return (
-    <span className="relative z-10 flex shrink-0">
-      <ProductLogo id={id} size="sm" fallback={event.type === "network" ? NetworkDevice : Box} />
-      {Glyph && (
-        <span
-          aria-hidden
-          className="absolute -right-1 -bottom-1 flex size-4 items-center justify-center rounded-sm border border-hairline bg-background"
-        >
-          <Glyph className={cn("size-2.5", badge[1])} />
-        </span>
-      )}
-    </span>
-  )
-}
-
-/**
  * One event. The message is already a sentence by the time it reaches here —
  * "container exited with status 137" rather than the raw pair ("container",
  * "die") — because translating Docker's event vocabulary belongs in one place,
@@ -625,32 +521,7 @@ function LifecycleRow({
           exit {event.exitCode}
         </Tag>
       )}
-      {event.trigger ? (
-        <span className="flex shrink-0 items-center gap-1.5">
-          <InitialsMark name={event.trigger.actor || "?"} size="xs" />
-          <Link
-            href={`/audit?action=${encodeURIComponent(event.trigger.action)}`}
-            className="rounded-sm text-xs whitespace-nowrap text-foreground focus-ring hover:underline"
-            title={`Audit entry ${event.trigger.auditId} — ${event.trigger.action} by ${
-              event.trigger.actor || "an unnamed session"
-            }. A name and a window, so a likely cause rather than a recorded one.`}
-          >
-            this dashboard
-          </Link>
-        </span>
-      ) : event.source === "daemon" ? (
-        // The same slot as "this dashboard", at the same rank: both answer
-        // who did it. A small-caps tag is for a fixed property of the row.
-        <span className="flex shrink-0 items-center gap-1.5">
-          <ProductGlyph id="docker" />
-          <span
-            className="text-xs whitespace-nowrap text-muted-foreground"
-            title="Docker acted on its own: a restart policy firing, or the OOM reaper."
-          >
-            docker itself
-          </span>
-        </span>
-      ) : null}
+      <EventWho event={event} />
       <span className="numeric text-hint whitespace-nowrap text-muted-foreground">
         {relativeTime(event.time)}
       </span>
@@ -774,8 +645,8 @@ function LinesGone() {
 
 /** A loop's mark: the restart in amber when it crashes, quiet when each run ended cleanly. */
 const LOOP_BADGE: Record<"failing" | "clean", [Icon, string]> = {
-  failing: [RotateClockwise, "text-warning"],
-  clean: [RotateClockwise, "text-muted-foreground"],
+  failing: HAPPENED.restart,
+  clean: [HAPPENED.restart[0], "text-muted-foreground"],
 }
 
 /**
@@ -823,14 +694,9 @@ function LoopRow({
         {plural(loop.events.length, "event")}
         <ChevronDown className={cn("size-3 transition-transform", unfolded && "rotate-180")} />
       </Button>
-      {newest.source === "daemon" && (
-        // A restart policy is Docker acting on its own, which is the whole
-        // story of a loop nobody pressed anything for.
-        <span className="flex shrink-0 items-center gap-1.5">
-          <ProductGlyph id="docker" />
-          <span className="text-xs whitespace-nowrap text-muted-foreground">docker itself</span>
-        </span>
-      )}
+      {/* A restart policy is Docker acting on its own, which is the whole
+          story of a loop nobody pressed anything for. */}
+      <EventWho event={newest} />
       <span className="numeric text-hint whitespace-nowrap text-muted-foreground">
         {relativeTime(newest.time)}
       </span>

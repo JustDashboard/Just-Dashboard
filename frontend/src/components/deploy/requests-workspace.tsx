@@ -16,7 +16,7 @@ import {
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { API_BASE, get } from "@/lib/api"
-import { minuteSpan, relativeTime, timestamp } from "@/lib/format"
+import { minuteSpan, plural, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { agentProduct, networkOf, refererProduct } from "@/lib/clients"
 import type { DeploymentRequests, RequestEntry, TrafficAlert } from "@/lib/types"
@@ -116,7 +116,6 @@ export function RequestsWorkspace({
   outputFor,
   renderInline,
   afterInsights,
-  detail,
 }: {
   /**
    * Where this record lives on the API — `/deploy/12` or `/proxy/sites/shop` —
@@ -148,14 +147,15 @@ export function RequestsWorkspace({
    */
   outputFor?: (entry: RequestEntry) => (() => void) | undefined
   /**
-   * What the page draws inside an opened request, under its verbs: the lines
-   * its container and its proxy wrote while it was in flight.
+   * What the record's owner knows about one request that the record does
+   * not, drawn in the opened row under its verbs: the lines a deployment's
+   * container and its proxy wrote while it was in flight, what a site's
+   * error log said about a failure. Called only for the row that is open,
+   * with the window it was read in — which names the proxy that answered.
    */
   renderInline?: (entry: RequestEntry, window: DeploymentRequests) => React.ReactNode
   /** A section the page adds at the end of Insights, over the same window. */
   afterInsights?: (window: { since?: string; until?: string }) => React.ReactNode
-  /** What the record's owner knows about one request, in its opened row. */
-  detail?: (entry: RequestEntry) => React.ReactNode
 }) {
   const { can } = useAuth()
   const [live, setLive] = useState(false)
@@ -370,7 +370,6 @@ export function RequestsWorkspace({
           onEventsAround={onEventsAround}
           outputFor={outputFor}
           renderInline={renderInline && ((entry) => renderInline(entry, data))}
-          detail={detail}
           leading={
             <ClassChips
               selected={query.classes}
@@ -386,7 +385,7 @@ export function RequestsWorkspace({
               <Status {...socketReading(tail.state)} className="text-hint" />
             ) : !query.pages ? (
               <span className="numeric whitespace-nowrap">
-                {data.summary.pages.toLocaleString()} page views
+                {plural(data.summary.pages, "page view")}
               </span>
             ) : undefined
           }

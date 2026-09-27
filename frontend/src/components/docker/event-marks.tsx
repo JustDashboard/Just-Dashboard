@@ -25,9 +25,8 @@ import { isCleanExit } from "@/components/deploy/traffic-strip"
 /**
  * How a Docker event is drawn wherever one is a row: the thing it happened to
  * with what happened in its corner, and who did it. A container's and a
- * stack's Events view draw them; the deployment's feed
- * (`deploy/lifecycle-feed.tsx`) keeps its own copy of the same marks until
- * it takes these.
+ * stack's Events view draw them, and so does the deployment's feed
+ * (`deploy/lifecycle-feed.tsx`).
  */
 
 /**
@@ -35,7 +34,7 @@ import { isCleanExit } from "@/components/deploy/traffic-strip"
  * the tone of a reading of state: an exit that failed in red, a restart in
  * amber, a start or a passing check in green, the bookkeeping quiet.
  */
-const HAPPENED: Record<string, [Icon, string]> = {
+export const HAPPENED: Record<string, [Icon, string]> = {
   die: [CrossCircle, "text-destructive"],
   oom: [CrossCircle, "text-destructive"],
   kill: [Stop, "text-muted-foreground"],
@@ -70,11 +69,14 @@ export function EventMark({
   event,
   product,
   loop = false,
+  badge = happened(event, loop),
 }: {
   event: DockerEvent
   product?: string
   /** A restart loop folded into one row, drawn by its last exit. */
   loop?: boolean
+  /** What happened, where the row says it otherwise: a loop of clean exits is no restart's amber. */
+  badge?: [Icon, string]
 }) {
   const named = event.image ? imageProduct(event.image) : undefined
   const id =
@@ -83,7 +85,6 @@ export function EventMark({
         ? named
         : (product ?? "docker")
       : undefined
-  const badge = happened(event, loop)
   const Glyph = badge?.[0]
   return (
     <span className="relative z-10 flex shrink-0">

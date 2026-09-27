@@ -29,7 +29,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { PortLink } from "@/components/docker/shared"
-import { ContainerEvents } from "@/components/docker/container-events"
+import { containerEventsView } from "@/components/docker/container-events"
 import { RunConsole, useRunConsole } from "@/components/docker/run-console"
 import { ContainerMenu, type ContainerVerb } from "@/components/docker/container-actions"
 import { Hint, Term } from "@/components/docker/explain"
@@ -42,11 +42,7 @@ import {
 import { CodeEditor } from "@/components/code-editor"
 import { LensReadings, useLensReadings } from "@/components/logs/lens-readings"
 import type { LogFilterState } from "@/components/logs/types"
-import {
-  ServiceLogs,
-  type ServiceLogSource,
-  type ServiceLogsView,
-} from "@/components/logs/service-logs"
+import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Metric, MetricStrip, Page, PageContext } from "@/components/page"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
@@ -707,16 +703,7 @@ function StackLogs({ stack }: { stack: StackDetail }) {
     ],
     [stack.name, running, images],
   )
-  const views = useMemo<ServiceLogsView[]>(
-    () => [
-      {
-        id: "events",
-        label: "Events",
-        render: (ctx) => <ContainerEvents stack={stack.name} ctx={ctx} />,
-      },
-    ],
-    [stack.name],
-  )
+  const views = useMemo(() => [containerEventsView({ stack: stack.name })], [stack.name])
   const storageKey = `docker.stack.${stack.name}.logs`
   // On a phone the figures would push the pane off the screen; the quick
   // views carry their counts on their chips there.

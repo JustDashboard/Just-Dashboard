@@ -112,7 +112,6 @@ export function RequestConsole({
   onEventsAround,
   outputFor,
   renderInline,
-  detail,
 }: {
   entries: RequestEntry[]
   summary: RequestSummary
@@ -141,14 +140,13 @@ export function RequestConsole({
    * for a request whose container is still there to read.
    */
   outputFor?: (entry: RequestEntry) => (() => void) | undefined
-  /** What the page draws under an opened request's verbs: the lines written while it was in flight. */
-  renderInline?: (entry: RequestEntry) => React.ReactNode
   /**
-   * What the page knows about one request that the record does not — a
-   * site's error log beside a failed one — drawn in the opened row under its
-   * facts. Called only for the row that is open.
+   * What the page knows about one request that the record does not — the
+   * lines written while it was in flight, a site's error log beside a failed
+   * one — drawn in the opened row under its verbs. Called only for the row
+   * that is open.
    */
-  detail?: (entry: RequestEntry) => React.ReactNode
+  renderInline?: (entry: RequestEntry) => React.ReactNode
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [following, setFollowing] = useState(true)
@@ -389,7 +387,6 @@ export function RequestConsole({
                       onEventsAround={onEventsAround}
                       onOutput={outputFor?.(entry)}
                       inline={renderInline?.(entry)}
-                      extra={detail?.(entry)}
                     />
                   )}
                 </div>
@@ -499,7 +496,6 @@ function RequestDetail({
   onEventsAround,
   onOutput,
   inline,
-  extra,
 }: {
   entry: RequestEntry
   summary: RequestSummary
@@ -511,7 +507,6 @@ function RequestDetail({
   onEventsAround?: (entry: RequestEntry) => void
   onOutput?: () => void
   inline?: React.ReactNode
-  extra?: React.ReactNode
 }) {
   const ip = entry.remoteIp
   const scanner = ip ? summary.scanners.some((s) => s.value === ip) : false
@@ -676,8 +671,6 @@ function RequestDetail({
           </div>
         ))}
       </dl>
-
-      {extra}
 
       <div className="mt-3 flex flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center">
         {/* The two questions a failing request raises, each one press: what
