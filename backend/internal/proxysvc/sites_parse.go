@@ -166,6 +166,11 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 					rootLocationWS = true
 				}
 			}
+		case "try_files":
+			if location == "/" {
+				fields := strings.Fields(value)
+				spec.SPA = len(fields) > 0 && fields[len(fields)-1] == "/index.html"
+			}
 		case "proxy_read_timeout":
 			spec.ProxyTimeout = parseSeconds(value)
 		case "return":
@@ -231,6 +236,9 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			spec.Kind = "static"
 		}
 	}
+	// The fallback is a static site's; a proxy's location / answers from
+	// its upstream whatever try_files a hand-written file put beside it.
+	spec.SPA = spec.SPA && spec.Kind == "static"
 	spec.ForceHTTPS = sawTLSListen && sawPlainRedirect
 	// A file with a plain-HTTP redirect block and nothing else is a redirect
 	// site; one that also serves something is a TLS site forcing HTTPS.

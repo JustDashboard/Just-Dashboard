@@ -82,7 +82,14 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 		l.add("    index index.html index.htm;")
 		l.blank()
 		l.add("    location / {")
-		l.add("        try_files $uri $uri/ =404;")
+		if spec.SPA {
+			l.add("        # A single-page app routes in the browser: a path with no file")
+			l.add("        # of its own is answered with index.html, and the app's router")
+			l.add("        # takes it from there.")
+			l.add("        try_files $uri $uri/ /index.html;")
+		} else {
+			l.add("        try_files $uri $uri/ =404;")
+		}
 		l.add("    }")
 	default:
 		for _, loc := range spec.Locations {

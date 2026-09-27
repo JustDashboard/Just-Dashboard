@@ -52,6 +52,9 @@ export function siteResult(overrides: Record<string, unknown> = {}) {
   }
 }
 
+/** The sites the mocked host already has files for, as the preview reports them. */
+const ON_DISK = new Set(["app.example.com", "legacy.example.com"])
+
 /** The site form's own endpoints: reading a site back, its preview, and saving it. */
 export const routes: ProxyRoutes = {
   "/proxy/sites/app.example.com": (route) =>
@@ -63,6 +66,8 @@ export const routes: ProxyRoutes = {
     return json(route, {
       content: `# Site: ${spec.name}\nserver {\n    server_name ${spec.domains.join(" ")};\n}\n`,
       warnings: [],
+      path: `/etc/nginx/sites-available/${spec.name}`,
+      exists: ON_DISK.has(spec.name),
     })
   },
   "/proxy/sites/": (route) => {
@@ -79,3 +84,44 @@ export const routes: ProxyRoutes = {
 }
 
 export const showcase: ProxyRoutes = {}
+
+/**
+ * Two running containers for the upstream picker: one publishing 3000 on
+ * 8081 and exposing a debugger it does not publish, one publishing nothing.
+ * Routed per test rather than in the table — Docker's listing is not the site
+ * form's endpoint.
+ */
+export const runningContainers = [
+  {
+    id: "c0ffee",
+    names: ["/shop"],
+    name: "shop",
+    image: "ghcr.io/acme/shop:2",
+    state: "running",
+    status: "Up 3 hours",
+    ports: [
+      { ip: "0.0.0.0", privatePort: 3000, publicPort: 8081, type: "tcp" },
+      { ip: "::", privatePort: 3000, publicPort: 8081, type: "tcp" },
+      { privatePort: 9229, type: "tcp" },
+    ],
+    labels: {},
+    networks: ["bridge"],
+    exposure: [],
+    hasHealthcheck: false,
+    inspected: true,
+  },
+  {
+    id: "beef",
+    names: ["/worker"],
+    name: "worker",
+    image: "python:3.13",
+    state: "running",
+    status: "Up 3 hours",
+    ports: [{ privatePort: 8000, type: "tcp" }],
+    labels: {},
+    networks: ["bridge"],
+    exposure: [],
+    hasHealthcheck: false,
+    inspected: true,
+  },
+]

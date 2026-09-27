@@ -133,25 +133,13 @@ func (s *Service) applySiteLocked(ctx context.Context, spec *SiteSpec, content s
 
 func (s *Service) saveSiteLocked(ctx context.Context, spec *SiteSpec, content string, opts SiteSave) (*SiteResult, error) {
 	enable := opts.Enable
-	available := filepath.Join(s.nginxDir, "sites-available", spec.Name)
-	if _, err := os.Stat(filepath.Dir(available)); err != nil {
-		// A host keeping everything in conf.d has no sites-available, and
-		// there is no enable/disable there either. The suffix is added by
-		// confdPath rather than here, so editing a site the listing calls
-		// app.conf writes back over it instead of creating app.conf.conf.
-		available = s.confdPath(spec.Name)
-		enable = true
-		if _, err := os.Stat(filepath.Dir(available)); err != nil {
-			// Neither layout is present, which on a host that really runs
-			// nginx means JD_NGINX_DIR points at the wrong place. Saying
-			// which directory was looked for beats the "no such file or
-			// directory" the write would otherwise fail with.
-			return nil, fmt.Errorf("%s has neither a sites-available nor a conf.d directory — set JD_NGINX_DIR to where this host keeps its nginx configuration", s.nginxDir)
-		}
-	}
-	full, err := s.allowedPath(available)
+	full, confd, err := s.siteTarget(spec.Name)
 	if err != nil {
 		return nil, err
+	}
+	if confd {
+		// There is no enable/disable in the conf.d layout.
+		enable = true
 	}
 	original, existed := readIfPresent(full)
 	if existed && !opts.Overwrite {
@@ -519,6 +507,44 @@ func warningsIn(v *ValidationResult, file string) []Diagnostic {
 		}
 	}
 	return out
+}
+
+// siteTarget is the file a site named name is saved in: sites-available on a
+// Debian layout, and conf.d on a host that keeps everything there, where
+// every present file is active and confd says there is no link to make. The
+// suffix is added by confdPath rather than here, so editing a site the
+// listing calls app.conf writes back over it instead of creating
+// app.conf.conf.
+func (s *Service) siteTarget(name string) (full string, confd bool, err error) {
+	available := filepath.Join(s.nginxDir, "sites-available", name)
+	if _, err := os.Stat(filepath.Dir(available)); err != nil {
+		available, confd = s.confdPath(name), true
+		if _, err := os.Stat(filepath.Dir(available)); err != nil {
+			// Neither layout is present, which on a host that really runs
+			// nginx means JD_NGINX_DIR points at the wrong place. Saying
+			// which directory was looked for beats the "no such file or
+			// directory" the write would otherwise fail with.
+			return "", false, fmt.Errorf("%s has neither a sites-available nor a conf.d directory — set JD_NGINX_DIR to where this host keeps its nginx configuration", s.nginxDir)
+		}
+	}
+	full, err = s.allowedPath(available)
+	return full, confd, err
+}
+
+// SiteFile is the file saving a site named name writes, and whether one is
+// there already. The form shows the first as the site's file name and refuses
+// a new site over the second before the save does, since a derived name can
+// land on an existing site without the operator ever typing it.
+func (s *Service) SiteFile(name string) (string, bool, error) {
+	if !siteNameRe.MatchString(name) {
+		return "", false, fmt.Errorf("invalid site name")
+	}
+	full, _, err := s.siteTarget(name)
+	if err != nil {
+		return "", false, err
+	}
+	_, err = os.Stat(full)
+	return full, err == nil, nil
 }
 
 // ReadSiteSpec reads a site the listing names back into the form: its spec,

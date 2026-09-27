@@ -192,3 +192,55 @@ func TestSiteSpecReadsAConfDSiteUnderItsOwnName(t *testing.T) {
 		t.Fatalf("spec name = %q, want app", res.Spec.Name)
 	}
 }
+
+// The preview says which file a save writes, so the form can show a new
+// site's file name as a path, and that a file of that name is already there
+// before the save refuses it.
+func TestSitePreviewSaysWhichFileASaveWrites(t *testing.T) {
+	c, dir := siteFormServer(t)
+	type preview struct {
+		Content string  `json:"content"`
+		Path    *string `json:"path"`
+		Exists  *bool   `json:"exists"`
+	}
+	ask := func() preview {
+		t.Helper()
+		w := c.do(http.MethodPost, "/api/v1/proxy/sites/preview", siteBody(t, "app", "app.example.com", `"enable"`, nil), nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("got %d: %s", w.Code, w.Body.String())
+		}
+		var p preview
+		decodeSite(t, w, &p)
+		return p
+	}
+	want := filepath.Join(dir, "sites-available", "app")
+	if p := ask(); p.Path == nil || *p.Path != want || p.Exists == nil || *p.Exists {
+		t.Fatalf("before the save: %+v, want %s and not there yet", p, want)
+	}
+	if w := c.do(http.MethodPost, "/api/v1/proxy/sites/", siteBody(t, "app", "app.example.com", `"enable"`, nil), nil); w.Code != http.StatusOK {
+		t.Fatalf("save: %d %s", w.Code, w.Body.String())
+	}
+	if p := ask(); p.Exists == nil || !*p.Exists {
+		t.Fatalf("after the save the file is not reported: %+v", p)
+	}
+
+	// A conf.d host writes app.conf there.
+	if err := os.RemoveAll(filepath.Join(dir, "sites-available")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "conf.d"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if p := ask(); p.Path == nil || *p.Path != filepath.Join(dir, "conf.d", "app.conf") || *p.Exists {
+		t.Fatalf("on a conf.d host: %+v", p)
+	}
+
+	// With neither directory the preview still renders; it just cannot say
+	// where the file would go.
+	if err := os.RemoveAll(filepath.Join(dir, "conf.d")); err != nil {
+		t.Fatal(err)
+	}
+	if p := ask(); p.Content == "" || p.Path != nil || p.Exists != nil {
+		t.Fatalf("with no site directory: %+v", p)
+	}
+}

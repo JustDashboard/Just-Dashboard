@@ -21,6 +21,8 @@ export type SiteSpec = {
   kind: "proxy" | "static" | "redirect"
   upstream?: string
   root?: string
+  /** A static site whose paths with no file of their own get index.html. */
+  spa?: boolean
   redirectTo?: string
   permanent?: boolean
   tls: boolean
@@ -42,6 +44,16 @@ export type SiteSpec = {
   accessLog: boolean
   locations: SiteLocation[]
   custom?: string
+}
+
+/** What POST /proxy/sites/preview answers: the file a spec renders to, and where it goes. */
+export type SitePreview = {
+  content: string
+  warnings: string[]
+  /** The file a save writes; absent when the host has no site directory. */
+  path?: string
+  /** Whether a file is already there. */
+  exists?: boolean
 }
 
 /** One of a site's names another server block also claims on the same address. */

@@ -328,6 +328,10 @@ ownership and cleanup, then removes its own containers/volumes/networks.
     `/var/www/assets/assets`. A location read back from a file that used `root` keeps it
     (`SiteLocation.RootMode = "root"`), since rewriting it as the folder itself would move every file it
     serves; a hand-written `alias` is read back as a folder.
+  - **A static site can be a single-page app** (`SiteSpec.SPA`): its `location /` answers a path with no
+    file of its own with `/index.html` (`try_files $uri $uri/ /index.html`) instead of 404, so a deep link
+    or a reload reaches the app's router; the probe blocks still refuse `/.env` (checked against a running
+    nginx). It is read back from that `try_files` and only for a static site.
   - **Compression off is written `gzip off;`**: Debian's `nginx.conf` turns gzip on for the whole http
     block, and a site saying nothing inherits it. A managed file with no gzip line predates this and was
     written with the switch off; a hand-written one reads back as on.
@@ -357,14 +361,48 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   inside a location where it is — hoisting it into the site-wide list applied one path's restriction to
   the whole site on the next save.
 
-  The form's side of this lives in two pure modules beside `site-form.tsx`, tested with bun:
+  **`POST /proxy/sites/preview` also says where the file goes**: `path` is what a save writes
+  (`SiteFile`, through the same `siteTarget` the save uses: `sites-available/<name>`, or
+  `conf.d/<name>.conf` on a conf.d host) and `exists` whether a file is there. Both are left out when the
+  host has neither directory. A new site's name follows its domain, so it can land on an existing site
+  without the operator typing it; the form refuses that at the field before the save refuses it.
+
+  The form's side of this lives in pure modules beside `site-form.tsx`, tested with bun:
   `site-identity.ts` works a new site's file name and certificate paths out of its whole first domain on
   every change, for each part not typed by hand (keeping the first value named a site typed as
-  app.example.com "a", after one keystroke), and `site-save.ts` builds the request — `keep` for an
-  existing site, HSTS only with TLS, since the switch is drawn only under HTTPS and its hidden default
-  warned on every plain-HTTP site — and turns the result into what the toast says. A refused conflict is
-  a Notice in the form with **Save anyway**. `tests/browser/proxy-site-builder.spec.ts` checks each
-  state against mocks from `tests/browser/fixtures/proxy/siteform.ts`.
+  app.example.com "a", after one keystroke), and checks a typed name against the server's rule; the form
+  shows the name as its own **File name** field (read-only for an existing site), with **Match the
+  domain** and **Use the domain's certificate** to follow the domain again. `site-save.ts` builds the
+  request — `keep` for an existing site, HSTS only with TLS, since the switch is drawn only under HTTPS
+  and its hidden default warned on every plain-HTTP site — and turns the result into what the toast
+  says. A refused conflict is a Notice in the form with **Save anyway**.
+
+  A new site can **start from a preset** (`site-presets.ts`: Node.js app, single-page app, Grafana, Home
+  Assistant, Docker registry, MinIO, Jellyfin, redirect), a `SiteSpec` partial laid over the form. It
+  keeps the operator's name, domains, certificate, access settings and any upstream they typed, and
+  swaps only its own lines in the extra configuration (the registry and MinIO turn
+  `proxy_request_buffering` off there and lift the upload limit with `client_max_body_size 0`). Each
+  preset is checked in as `proxysvc/testdata/presets/<id>.json`, which `site-presets.test.js` holds equal
+  to the TypeScript; `TestPresetsRenderAndReadBackAsThemselves` renders every one plain and over HTTPS
+  and reads it back unchanged, `TestLivePresetsPassNginxTest` puts all of them through the host's
+  `nginx -t` with no warning, and two more live tests prove the single-page fallback and a 64 MB upload
+  through the large-upload presets (which the Node.js preset refuses with 413).
+
+  **Send it to** is an `UpstreamPicker` (`upstream-picker.tsx`) over `upstream-options.ts`: free text,
+  plus what `GET /ports` and `GET /docker/containers/?all=false` show — running containers by the port
+  they publish (a port they do not publish is listed, cannot be picked, and says to publish it on
+  127.0.0.1, since its bridge address changes with every recreate), then loopback and wildcard sockets;
+  443 and 8443 are offered as `https://`.
+  nginx's own sockets, UDP, sockets bound to one other interface and ports that answer something other
+  than HTTP (SSH, mail, databases, Docker's API) are left out. A loopback upstream nothing listens on is
+  warned about under the field, not refused: nginx answers 502 until the application starts. Both lists
+  are polled while the form is open, so an application started half-way through appears.
+
+  **`/proxy/sites?new=1&upstream=<url>&domain=<name>`** opens the form on a new site from elsewhere in
+  the dashboard (`site-link.ts`, called from the Sites page). It is read once, taken off the address, and
+  only for `system.admin` on a host with nginx; the values go in as the link spelled them, so the form and
+  preview say what is wrong with either. `tests/browser/proxy-site-builder.spec.ts` checks each state
+  against mocks from `tests/browser/fixtures/proxy/siteform.ts`.
 - **`tlsscan.go` — what the domain actually serves.** Everything else on the page reads files, which
   cannot see a certificate renewed and never reloaded, a proxy still offering TLS 1.0, or a redirect that
   quietly stopped. Each version is probed on a connection pinned to exactly that version; a version this

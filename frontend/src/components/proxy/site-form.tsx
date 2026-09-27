@@ -1,22 +1,34 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
-import { ArrowRight, Code, FolderOpen, Globe, Plus, Trash, Warning } from "@/components/icons"
+import {
+  ArrowRight,
+  Code,
+  FolderOpen,
+  Globe,
+  Plus,
+  Trash,
+  Warning,
+  type Icon,
+} from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { ApiError, get, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type {
   AuthFile,
   Certificate,
+  Container,
   DomainCheck,
+  Listener,
   SiteLocation,
+  SitePreview,
   SiteResult,
   SiteSpec,
 } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
+import { ChoiceCard, ChoiceGrid, ProductCard } from "@/components/choice-card"
 import { ProductLogo } from "@/components/product-logo"
 import { CodeEditor } from "@/components/code-editor"
 import { Field, FieldRow, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
@@ -33,11 +45,20 @@ import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   deriveIdentity,
+  fileNameProblem,
   fixedFor,
   FOLLOW_DOMAINS,
   type IdentityFixed,
 } from "@/components/proxy/site-identity"
+import { NEW_SITE_DRAFT } from "@/components/proxy/site-link"
+import { applyPreset, BLANK, presetById, PRESETS } from "@/components/proxy/site-presets"
 import { saveOutcome, saveRequest, sendableSpec } from "@/components/proxy/site-save"
+import {
+  nothingListening,
+  upstreamOptions,
+  type UpstreamOption,
+} from "@/components/proxy/upstream-options"
+import { UpstreamPicker } from "@/components/proxy/upstream-picker"
 
 /**
  * Putting a domain in front of a port, without writing nginx.
@@ -90,25 +111,11 @@ export function SiteForm({
   )
 }
 
-const BLANK: SiteSpec = {
-  name: "",
-  domains: [],
-  kind: "proxy",
-  upstream: "http://127.0.0.1:3000",
-  tls: false,
-  forceHttps: true,
-  hsts: true,
-  http2: true,
-  webSockets: true,
-  gzip: true,
-  blockExploits: true,
-  securityHeaders: true,
-  clientMaxBody: "50m",
-  proxyTimeout: 60,
-  allowFrom: [],
-  denyFrom: [],
-  accessLog: true,
-  locations: [],
+/** The glyph for a preset with no product of its own: its kind's. */
+const KIND_MARK: Record<SiteSpec["kind"], Icon> = {
+  proxy: Globe,
+  static: FolderOpen,
+  redirect: ArrowRight,
 }
 
 function SiteFormBody({
@@ -129,11 +136,15 @@ function SiteFormBody({
   // a site is a long form, and a look at a port or a certificate half-way
   // through it should not mean typing it again. An existing site is read
   // back from the server on every open, as before.
-  const draft = `proxy.site.form.${source ?? "new"}`
+  const draft = source ? `proxy.site.form.${source}` : NEW_SITE_DRAFT
   const [spec, setSpec] = useSessionState<SiteSpec>(`${draft}.spec`, BLANK)
   const [domainText, setDomainText] = useSessionState(`${draft}.domains`, "")
-  const [preview, setPreview] = useState("")
-  const [warnings, setWarnings] = useState<string[]>([])
+  // The preset last picked, drawn as the chosen card; the fields it filled
+  // stay the operator's to change.
+  const [preset, setPreset] = useSessionState<string | null>(`${draft}.preset`, null)
+  // The rendered file and where it goes, for the spec named here: a preview
+  // of another name says nothing about this one's file.
+  const [preview, setPreview] = useState<(SitePreview & { name: string }) | null>(null)
   const [previewError, setPreviewError] = useState("")
   const [managed, setManaged] = useSessionState(`${draft}.managed`, true)
   // Which of the name and certificate paths the operator has set, so that
@@ -208,24 +219,22 @@ function SiteFormBody({
     const timer = setTimeout(
       () => {
         if (!ready) {
-          setPreview("")
-          setWarnings([])
+          setPreview(null)
           setPreviewError("")
           return
         }
-        post<{ content: string; warnings: string[] }>(
+        post<SitePreview>(
           "/proxy/sites/preview",
           { spec: sendableSpec(spec) },
           { signal: controller.signal },
         )
           .then((r) => {
-            setPreview(r.content)
-            setWarnings(r.warnings)
+            setPreview({ ...r, name: spec.name })
             setPreviewError("")
           })
           .catch((err) => {
             if (controller.signal.aborted) return
-            setPreview("")
+            setPreview(null)
             setPreviewError(String(err))
           })
       },
@@ -252,6 +261,32 @@ function SiteFormBody({
     [],
     { enabled: open && spec.tls },
   )
+  // What is running for the upstream to point at, re-read while the form is
+  // open: an app started half-way through filling it in should appear, and
+  // the warning that nothing listens should go.
+  const forwards = open && spec.kind === "proxy"
+  const listeners = usePoll<Listener[]>((signal) => get("/ports", undefined, signal), 15_000, [], {
+    enabled: forwards,
+  })
+  // Docker is optional: a host without it just has no containers to offer.
+  const containers = usePoll<Container[]>(
+    (signal) => get("/docker/containers/", { all: "false" }, signal),
+    30_000,
+    [],
+    { enabled: forwards },
+  )
+  const options = useMemo(
+    () => upstreamOptions(listeners.data, containers.data),
+    [listeners.data, containers.data],
+  )
+  const picker = {
+    options,
+    listeners: listeners.data,
+    containers: containers.data,
+    loading: listeners.loading,
+    failed: Boolean(listeners.error) && !listeners.data,
+    onRetry: listeners.refresh,
+  }
 
   const commitDomains = (text: string) => {
     setDomainText(text)
@@ -264,6 +299,24 @@ function SiteFormBody({
   const setCertificate = (key: "certPath" | "keyPath", value: string) => {
     set(key, value)
     setFixed((f) => ({ ...f, [key]: value !== "" }))
+  }
+  // A name typed by hand stays whatever the domains become, emptied or not:
+  // "Match the domain" is the way back.
+  const setName = (name: string) => {
+    set("name", name)
+    setFixed((f) => ({ ...f, name: true }))
+  }
+  const follow = (parts: (keyof IdentityFixed)[]) => {
+    const unfixed = { ...fixed }
+    for (const part of parts) unfixed[part] = false
+    setFixed(unfixed)
+    setSpec((s) => ({ ...s, ...deriveIdentity(s.domains, s, unfixed) }))
+  }
+  const choosePreset = (id: string) => {
+    const chosen = presetById(id)
+    if (!chosen) return
+    setSpec((s) => applyPreset(s, chosen))
+    setPreset(id)
   }
 
   const save = async (reload: boolean, allowConflict = false) => {
@@ -299,7 +352,33 @@ function SiteFormBody({
   }, [conflict])
   const conflictShown = conflict?.spec === spec ? conflict : null
 
-  const ready = spec.domains.length > 0 && spec.name !== "" && preview !== ""
+  // What the identity would be if nothing were typed by hand, for the
+  // "Match the domain" actions.
+  const derived = deriveIdentity(spec.domains, spec, FOLLOW_DOMAINS)
+  const file = preview?.name === spec.name ? preview : null
+  const nameProblem = editing ? undefined : fileNameProblem(spec.name)
+  const nameError =
+    nameProblem && (spec.name !== "" || fixed.name)
+      ? nameProblem
+      : !editing && file?.exists
+        ? `A site called ${spec.name} already exists. Pick another name, or open that site to edit it.`
+        : undefined
+  const certificateFollows =
+    spec.domains.length === 0 ||
+    (derived.certPath === spec.certPath && derived.keyPath === spec.keyPath)
+  const idle =
+    spec.kind === "proxy"
+      ? nothingListening(spec.upstream ?? "", picker.listeners, picker.containers)
+      : undefined
+  const chosenPreset = !source ? presetById(preset) : undefined
+  const warnings = preview?.warnings ?? []
+
+  const ready =
+    spec.domains.length > 0 &&
+    spec.name !== "" &&
+    file !== null &&
+    !nameProblem &&
+    (editing !== null || !file.exists)
   const certKnown =
     !spec.tls || !spec.certPath || !certs.data || certs.data.some((c) => c.path === spec.certPath)
   const issueHref = `/proxy/certificates?issue=${encodeURIComponent(spec.domains.join(" "))}`
@@ -363,13 +442,32 @@ function SiteFormBody({
             </Notice>
           )}
 
+          {!source && (
+            <FormSection title="Start from">
+              <ChoiceGrid columns={2} className="grid-cols-2">
+                {PRESETS.map((p) => (
+                  <ProductCard
+                    key={p.id}
+                    product={p.product}
+                    fallback={KIND_MARK[p.spec.kind ?? "proxy"]}
+                    label={p.label}
+                    detail={p.detail}
+                    selected={preset === p.id}
+                    onClick={() => choosePreset(p.id)}
+                  />
+                ))}
+              </ChoiceGrid>
+              {chosenPreset?.note && <FormNote>{chosenPreset.note}</FormNote>}
+            </FormSection>
+          )}
+
           <Field
             label="Domains"
             htmlFor="site-domains"
             hint={
-              spec.name
-                ? `Space-separated. Saved as ${spec.name} in nginx's site directory.`
-                : "Space-separated. The first one names the file."
+              editing
+                ? "Space-separated."
+                : "Space-separated. The first names the file and the certificate."
             }
           >
             <Input
@@ -382,25 +480,63 @@ function SiteFormBody({
           </Field>
           {spec.domains[0] && <DNSCheck domain={spec.domains[0]} />}
 
+          <Field
+            label="File name"
+            htmlFor="site-name"
+            error={nameError}
+            hint={
+              file?.path
+                ? `Saved as ${file.path}`
+                : editing
+                  ? "The file this site is saved in."
+                  : fixed.name
+                    ? "Stays as typed, whatever the domains become."
+                    : "Follows the first domain until you change it."
+            }
+            trailing={
+              !editing &&
+              fixed.name &&
+              derived.name !== "" &&
+              derived.name !== spec.name && (
+                <Button size="xs" variant="ghost" onClick={() => follow(["name"])}>
+                  Match the domain
+                </Button>
+              )
+            }
+          >
+            <Input
+              id="site-name"
+              value={spec.name}
+              readOnly={editing !== null}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="app.example.com"
+              aria-invalid={nameError ? true : undefined}
+              className={cn("font-mono text-xs", editing && "text-muted-foreground")}
+            />
+          </Field>
+
           <FormSection title="What it serves">
             <ChoiceGrid columns={3} className="grid-cols-3">
               {(
                 [
-                  { kind: "proxy", label: "An app", icon: Globe },
-                  { kind: "static", label: "Files", icon: FolderOpen },
-                  { kind: "redirect", label: "A redirect", icon: ArrowRight },
+                  { kind: "proxy", label: "An app" },
+                  { kind: "static", label: "Files" },
+                  { kind: "redirect", label: "A redirect" },
                 ] as const
-              ).map(({ kind, label, icon: Icon }) => (
-                <ChoiceCard
-                  key={kind}
-                  selected={spec.kind === kind}
-                  onClick={() => set("kind", kind)}
-                  className="min-h-20 justify-center"
-                >
-                  <Icon aria-hidden className="size-4 text-muted-foreground" />
-                  <span className="text-body font-medium">{label}</span>
-                </ChoiceCard>
-              ))}
+              ).map(({ kind, label }) => {
+                const Mark = KIND_MARK[kind]
+                return (
+                  <ChoiceCard
+                    key={kind}
+                    selected={spec.kind === kind}
+                    onClick={() => set("kind", kind)}
+                    className="min-h-20 justify-center"
+                  >
+                    <Mark aria-hidden className="size-4 text-muted-foreground" />
+                    <span className="text-body font-medium">{label}</span>
+                  </ChoiceCard>
+                )
+              })}
             </ChoiceGrid>
           </FormSection>
 
@@ -408,27 +544,46 @@ function SiteFormBody({
             <Field
               label="Send it to"
               htmlFor="site-upstream"
-              hint="Where the application is listening. Usually loopback on this machine."
+              hint={
+                idle ? (
+                  <span className="text-warning">{idle}</span>
+                ) : (
+                  "Where the application is listening. Usually loopback on this machine."
+                )
+              }
             >
-              <Input
+              <UpstreamPicker
                 id="site-upstream"
                 value={spec.upstream ?? ""}
-                onChange={(e) => set("upstream", e.target.value)}
+                onChange={(v) => set("upstream", v)}
+                options={picker.options}
+                loading={picker.loading}
+                failed={picker.failed}
+                onRetry={picker.onRetry}
                 placeholder="http://127.0.0.1:3000"
-                className="font-mono text-xs"
               />
             </Field>
           )}
           {spec.kind === "static" && (
-            <Field label="Directory" htmlFor="site-root" hint="The folder holding index.html.">
-              <Input
-                id="site-root"
-                value={spec.root ?? ""}
-                onChange={(e) => set("root", e.target.value)}
-                placeholder="/var/www/site"
-                className="font-mono text-xs"
-              />
-            </Field>
+            <>
+              <Field label="Directory" htmlFor="site-root" hint="The folder holding index.html.">
+                <Input
+                  id="site-root"
+                  value={spec.root ?? ""}
+                  onChange={(e) => set("root", e.target.value)}
+                  placeholder="/var/www/site"
+                  className="font-mono text-xs"
+                />
+              </Field>
+              <OptionList>
+                <OptionRow
+                  title="Single-page app"
+                  hint="A path with no file of its own gets index.html, so the app's router answers deep links and reloads."
+                  checked={!!spec.spa}
+                  onCheckedChange={(v) => set("spa", v)}
+                />
+              </OptionList>
+            </>
           )}
           {spec.kind === "redirect" && (
             <>
@@ -483,6 +638,16 @@ function SiteFormBody({
                       />
                     </Field>
                   </FieldRow>
+                  {!certificateFollows && (
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      className="-ml-2"
+                      onClick={() => follow(["certPath", "keyPath"])}
+                    >
+                      Use the domain&rsquo;s certificate
+                    </Button>
+                  )}
                   {!certKnown && (
                     <FormNote tone="warning">
                       No certificate is listed at this path. If it does not exist yet, nginx refuses
@@ -637,7 +802,11 @@ function SiteFormBody({
               title="Paths that go somewhere else"
               hint="Everything not matched by one of these goes to the site's main upstream."
             >
-              <LocationsField locations={spec.locations} onChange={(v) => set("locations", v)} />
+              <LocationsField
+                locations={spec.locations}
+                onChange={(v) => set("locations", v)}
+                picker={picker}
+              />
             </FormSection>
           )}
 
@@ -681,7 +850,7 @@ function SiteFormBody({
               {previewError ? (
                 <EmptyNote className="my-auto text-destructive">{previewError}</EmptyNote>
               ) : preview ? (
-                <CodeEditor className="h-full" language="ini" value={preview} readOnly />
+                <CodeEditor className="h-full" language="ini" value={preview.content} readOnly />
               ) : (
                 <EmptyNote className="my-auto">
                   Enter a domain and the config appears here, rendered by the server that will write
@@ -844,12 +1013,24 @@ function ListField({
  * nginx matches the longest prefix regardless of order, so these are rendered
  * before the catch-all purely because that is the order a reader expects.
  */
+/** What the upstream pickers offer, read once for the whole form. */
+type Picker = {
+  options: UpstreamOption[]
+  listeners: Listener[] | undefined
+  containers: Container[] | undefined
+  loading: boolean
+  failed: boolean
+  onRetry: () => void
+}
+
 function LocationsField({
   locations,
   onChange,
+  picker,
 }: {
   locations: SiteLocation[]
   onChange: (locations: SiteLocation[]) => void
+  picker: Picker
 }) {
   const update = (i: number, patch: Partial<SiteLocation>) =>
     onChange(locations.map((loc, j) => (j === i ? { ...loc, ...patch } : loc)))
@@ -874,13 +1055,24 @@ function LocationsField({
               <Trash />
             </IconAction>
           </div>
-          <Input
+          <UpstreamPicker
             value={loc.upstream ?? ""}
-            onChange={(e) => update(i, { upstream: e.target.value, root: "" })}
+            onChange={(upstream) => update(i, { upstream, root: "" })}
+            options={picker.options}
+            loading={picker.loading}
+            failed={picker.failed}
+            onRetry={picker.onRetry}
             placeholder="http://127.0.0.1:4000 — or leave empty and give a folder"
-            aria-label="Upstream"
-            className="font-mono text-xs"
+            label="Upstream"
+            pickLabel={`Pick from running services for ${loc.path || "this path"}`}
           />
+          {loc.upstream && (
+            <IdleNote
+              upstream={loc.upstream}
+              listeners={picker.listeners}
+              containers={picker.containers}
+            />
+          )}
           {!loc.upstream && (
             <Input
               value={loc.root ?? ""}
@@ -919,4 +1111,18 @@ function LocationsField({
       </Button>
     </div>
   )
+}
+
+/** Said under a path's upstream when nothing listens behind it. */
+function IdleNote({
+  upstream,
+  listeners,
+  containers,
+}: {
+  upstream: string
+  listeners: Listener[] | undefined
+  containers: Container[] | undefined
+}) {
+  const idle = nothingListening(upstream, listeners, containers)
+  return idle ? <FormNote tone="warning">{idle}</FormNote> : null
 }

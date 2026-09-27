@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { deriveIdentity, fileNameFor, fixedFor, FOLLOW_DOMAINS, lineageFor } from "./site-identity"
+import {
+  deriveIdentity,
+  fileNameFor,
+  fileNameProblem,
+  fixedFor,
+  FOLLOW_DOMAINS,
+  lineageFor,
+} from "./site-identity"
 
 /** Replays typing the domains one character at a time, as the field does. */
 function typeDomains(text, fixed = FOLLOW_DOMAINS, start = { name: "" }) {
@@ -60,5 +67,18 @@ describe("site identity", () => {
     expect(fileNameFor("App.Example.COM")).toBe("app.example.com")
     expect(fileNameFor("-_.x")).toBe("x")
     expect(fileNameFor("a".repeat(80))).toHaveLength(64)
+  })
+
+  test("a typed file name is checked against the server's rule", () => {
+    expect(fileNameProblem("app.example.com")).toBeUndefined()
+    expect(fileNameProblem("a_b-c.1")).toBeUndefined()
+    expect(fileNameProblem("")).toBe("A site needs a file name.")
+    for (const name of ["App", ".hidden", "a/b", "a b", "a".repeat(65)]) {
+      expect(fileNameProblem(name)).toContain("Lowercase letters")
+    }
+    // Whatever a domain turns into is always a name the server accepts.
+    for (const domain of ["*.Example.com", "-x.example.com", "xn--bcher-kva.example"]) {
+      expect(fileNameProblem(fileNameFor(domain))).toBeUndefined()
+    }
   })
 })

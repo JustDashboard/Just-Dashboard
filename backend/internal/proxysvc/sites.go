@@ -33,6 +33,10 @@ type SiteSpec struct {
 
 	Upstream string `json:"upstream,omitempty"`
 	Root     string `json:"root,omitempty"`
+	// SPA answers a path with no file of its own with index.html, for a
+	// single-page app whose router runs in the browser. Static sites only:
+	// without it a deep link or a reload on /settings is nginx's 404.
+	SPA bool `json:"spa,omitempty"`
 	// RedirectTo is the destination for a redirect site, and Permanent
 	// decides 301 against 302. The distinction matters more than it looks:
 	// browsers cache a 301 more or less forever.

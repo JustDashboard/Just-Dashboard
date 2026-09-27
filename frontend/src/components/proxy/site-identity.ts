@@ -14,6 +14,19 @@ export function fileNameFor(domain: string): string {
 }
 
 /**
+ * Why the server would refuse a file name, in the form's words, or nothing.
+ * The rule is the server's siteNameRe; the server also refuses a name that
+ * looks like a backup, and the preview says so.
+ */
+export function fileNameProblem(name: string): string | undefined {
+  if (name === "") return "A site needs a file name."
+  if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(name)) {
+    return "Lowercase letters, digits, dots, dashes and underscores, starting with a letter or a digit, up to 64."
+  }
+  return undefined
+}
+
+/**
  * Where certbot keeps a domain's certificate. A wildcard is issued for the
  * parent zone, so that is the directory — /etc/letsencrypt/live/example.com,
  * never live/*.example.com, which is not a directory name at all.
