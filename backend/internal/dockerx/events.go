@@ -43,6 +43,9 @@ type Event struct {
 	Image    string `json:"image,omitempty"`
 	Stack    string `json:"stack,omitempty"`
 	ExitCode string `json:"exitCode,omitempty"`
+	// Service is the compose service, which is what a stack's log names a
+	// container by: `db`, where the event's name is `shop-db-1`.
+	Service string `json:"service,omitempty"`
 	// Message is the event as a sentence. The raw pair — "container", "die" —
 	// is precise and means nothing to somebody who has not read the event
 	// reference, and this is the layer where that gets fixed once rather than
@@ -375,6 +378,7 @@ func convertEvent(msg events.Message) Event {
 		Name:     attrs["name"],
 		Image:    attrs["image"],
 		Stack:    attrs[labelProject],
+		Service:  attrs[labelService],
 		ExitCode: attrs["exitCode"],
 	}
 	for key, value := range attrs {

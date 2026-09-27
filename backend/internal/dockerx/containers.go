@@ -492,10 +492,10 @@ type LogOptions struct {
 type LogLine struct {
 	Stream string `json:"stream"`
 	Text   string `json:"text"`
-	// Service is set only when several containers' logs are merged into one
-	// feed — a compose stack followed as a whole. Without it the merged
-	// stream is four processes talking over each other with no way to tell
-	// which said what.
+	// Service names the compose service a line came from. Nothing sets it
+	// since a stack became a log source that tags its own lines
+	// (`stack:<project>`); the logs handler's `readDockerLine` still falls
+	// back to it, and the two go together.
 	Service string `json:"service,omitempty"`
 }
 

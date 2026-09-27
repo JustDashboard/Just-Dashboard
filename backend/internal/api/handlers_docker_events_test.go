@@ -33,7 +33,11 @@ func engineEvent(at time.Time, kind, action, id string, attrs map[string]string)
 }
 
 func shopContainerEvent(at time.Time, action, id, name string, extra ...string) map[string]any {
-	attrs := map[string]string{"name": name, "image": "postgres:17", "com.docker.compose.project": "shop"}
+	attrs := map[string]string{
+		"name": name, "image": "postgres:17",
+		"com.docker.compose.project": "shop",
+		"com.docker.compose.service": strings.TrimSuffix(strings.TrimPrefix(name, "shop-"), "-1"),
+	}
 	for i := 0; i+1 < len(extra); i += 2 {
 		attrs[extra[i]] = extra[i+1]
 	}
@@ -147,6 +151,22 @@ func TestDockerEventsNarrowToAContainerOrAStack(t *testing.T) {
 		}
 	}
 
+	// A stack's page names each container by its service, as its log does.
+	var feed struct {
+		Events []dockerx.Event `json:"events"`
+	}
+	rec := c.do(http.MethodGet, "/api/v1/docker/events?stack=shop", "", nil)
+	if err := json.Unmarshal(rec.Body.Bytes(), &feed); err != nil {
+		t.Fatalf("%v: %s", err, rec.Body)
+	}
+	services := []string{}
+	for _, ev := range feed.Events {
+		services = append(services, ev.Service)
+	}
+	if want := []string{"db", "db", "db", "web"}; !slices.Equal(services, want) {
+		t.Errorf("the stack's services = %v, want %v", services, want)
+	}
+
 	for _, query := range []string{"container=../etc", "container=" + url.QueryEscape("a b"), "stack=Shop", "stack=" + url.QueryEscape("-x")} {
 		if rec := c.do(http.MethodGet, "/api/v1/docker/events?"+query, "", nil); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: %d, want 400", query, rec.Code)
@@ -199,9 +219,8 @@ func TestDockerEventStreamFollowsOneContainer(t *testing.T) {
 		t.Fatalf("the buffered past = %v", got)
 	}
 
-	// The subscription is taken after the past is sent; give it a moment so
-	// the live events below are not recorded before anybody is listening.
-	time.Sleep(100 * time.Millisecond)
+	// The subscription was taken before the past was sent, so these are
+	// followed however soon after it they are recorded.
 	now := time.Now()
 	more <- shopContainerEvent(now, "die", eventsWebID, "shop-web-1", "exitCode", "137")
 	more <- shopContainerEvent(now.Add(time.Second), "oom", eventsDBID, "shop-db-1")

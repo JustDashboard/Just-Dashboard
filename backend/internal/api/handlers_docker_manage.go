@@ -1164,6 +1164,11 @@ func (s *Server) handleDockerEventStream(w http.ResponseWriter, r *http.Request)
 	go conn.Keepalive(ctx)
 	go conn.DrainControl(cancel)
 
+	// Subscribed before the past is read, so an event recorded between the
+	// two is sent rather than lost; one recorded in that moment arrives
+	// twice, and every reader drops the second copy.
+	events, unsubscribe := s.modules.dockerEvents.Subscribe()
+	defer unsubscribe()
 	// The buffered past first, so a feed opened at 09:00 can still show the
 	// container that died at 03:00.
 	if recent := s.modules.dockerEvents.Find(200, filter); len(recent) > 0 {
@@ -1171,8 +1176,6 @@ func (s *Server) handleDockerEventStream(w http.ResponseWriter, r *http.Request)
 			return nil
 		}
 	}
-	events, unsubscribe := s.modules.dockerEvents.Subscribe()
-	defer unsubscribe()
 	for {
 		select {
 		case <-ctx.Done():
