@@ -1130,10 +1130,14 @@ expiry in a narrower column. A source the overview could not read is never drawn
 healthy one: its tile's hint reads "couldn't read", its panel shows the `ErrorState`, and attention
 carries it as a finding whose button is Try again, so the all-clear line cannot appear over it. The
 overview's context row is its age and one ghost Refresh: "Updated 14s ago" is the oldest reading on
-the page, and while a refresh is out the line reads "Refreshing…" until every source has answered.
+the page, and while a refresh is out the line reads "Refreshing…" until every source has answered,
+or, after twenty seconds, names the source that has not ("No answer from sites") and Refresh can be
+pressed again. A status that fails after answering keeps its age in the line, since the engine
+identity still draws it.
 Its routes are ordered worst first like the Sites cards, eight with "Showing 8 of N". An
 administrator's route opens the site on Sites and a Docker ingress route its live TLS report; a
-reader's route opens its file read-only in place rather than the site form, and a route with
+reader's route opens its file read-only in place rather than the site form — skeleton rows while it
+is read and an `ErrorState` with Try again when it cannot be, never an empty editor — and a route with
 nothing a role may open is a disabled row. A site's and a stream's card separates identity, route and named
 actions into three bands: `components/proxy/route-path.tsx` gives the source and destination their
 own labelled columns (stacked on phones), so a hostname and its upstream do not compete for the same

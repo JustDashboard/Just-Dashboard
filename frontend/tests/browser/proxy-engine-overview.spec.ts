@@ -15,6 +15,16 @@ function failWith(status: number, error: Record<string, unknown>) {
     route.fulfill({ status, contentType: "application/json", body: JSON.stringify({ error }) })
 }
 
+/** What GET /proxy/config answers for a file removed since the list was read. */
+const fileGone = failWith(404, {
+  code: "not_found",
+  message: "That file is not on disk.",
+  reason:
+    "It may have been removed or renamed since this page last loaded — by a site change, a deploy, or somebody in a shell.",
+  raw: "open /etc/nginx/sites-available/app.example.com: no such file or directory",
+  retryable: true,
+})
+
 async function mockStatus(page: Page, status: Record<string, unknown>) {
   await page.route("**/api/v1/proxy/status", (route) => json(route, status))
 }
@@ -386,6 +396,79 @@ test("a read-only account reads a route's file and is never sent to the site for
   await expect(sheet).toHaveCount(0)
 })
 
+test("a reader's file view shows its read in flight and why it failed, never an empty file", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, { ...user, capabilities: ["read"], user: { ...user.user, role: "viewer" } }),
+  )
+  let hold = Promise.resolve()
+  let release = () => {}
+  let gone = true
+  await page.route("**/api/v1/proxy/config?**", async (route) => {
+    await hold
+    return gone
+      ? fileGone(route)
+      : json(route, { content: "server {\n    # served-from-disk\n}\n" })
+  })
+  await page.goto("/proxy")
+
+  hold = new Promise((resolve) => (release = resolve))
+  const routes = page.getByRole("list", { name: "Sites" })
+  await routes.getByRole("button", { name: "View app.example.com", exact: true }).click()
+  const sheet = page.getByRole("dialog")
+  // While the read is out there is no editor to take for an empty file.
+  await expect(sheet.locator("[data-slot='pane'][aria-busy='true']")).toBeVisible()
+  await expect(sheet.locator(".monaco-editor")).toHaveCount(0)
+
+  // A file removed since the list was read says so, and nothing else is drawn.
+  release()
+  const failure = sheet.getByRole("alert")
+  await expect(failure).toContainText("That file is not on disk.")
+  await expect(failure).toContainText("removed or renamed since this page last loaded")
+  await expect(sheet.locator(".monaco-editor")).toHaveCount(0)
+  await expect(sheet.locator("[data-slot='pane']")).toHaveCount(0)
+  const overflow = await sheet.evaluate((element) => element.scrollWidth > element.clientWidth + 1)
+  expect(overflow).toBe(false)
+
+  // Once it is back, Try again reads it.
+  gone = false
+  await failure.getByRole("button", { name: "Try again" }).click()
+  await expect(sheet.locator(".monaco-editor .view-lines")).toContainText("served-from-disk", {
+    timeout: 20_000,
+  })
+  await expect(failure).toHaveCount(0)
+})
+
+test("the config editor offers nothing to save over a file it could not read", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  let gone = true
+  await page.route("**/api/v1/proxy/config?**", (route) =>
+    gone ? fileGone(route) : json(route, { content: "server {\n    # served-from-disk\n}\n" }),
+  )
+  await page.goto("/proxy/sites")
+  const card = page.locator("[data-slot='choice-row']").filter({ hasText: "app.example.com" })
+  await card.getByRole("button", { name: "Raw config" }).click()
+
+  const sheet = page.getByRole("dialog")
+  await expect(sheet.getByRole("alert")).toContainText("That file is not on disk.")
+  // An empty buffer was one keystroke from Save and reload over the real file.
+  for (const name of ["Test config", "Discard", "Save only", "Save and reload"]) {
+    await expect(sheet.getByRole("button", { name, exact: true })).toHaveCount(0)
+  }
+  await expect(sheet.getByText("Validated before it takes effect")).toHaveCount(0)
+
+  gone = false
+  await sheet.getByRole("button", { name: "Try again" }).click()
+  await expect(sheet.locator(".monaco-editor .view-lines")).toContainText("served-from-disk", {
+    timeout: 20_000,
+  })
+  await expect(sheet.getByRole("button", { name: "Test config" })).toBeEnabled()
+  await expect(sheet.getByRole("button", { name: "Save and reload" })).toBeDisabled()
+})
+
 test("the header says how old the page is, and Refresh reads every source again", async ({
   page,
 }) => {
@@ -441,6 +524,95 @@ test("the header says how old the page is, and Refresh reads every source again"
   await expect(refresh).not.toHaveAttribute("aria-busy", "true")
 })
 
+test("the age is the oldest reading's, which is the five-minute certificate list", async ({
+  page,
+}) => {
+  await page.clock.install()
+  await mockProxy(page, { included: true })
+  // No certbot, so the certificate list is the only reading on a five-minute poll.
+  await mockStatus(page, { ...availability, certbot: false })
+  await page.goto("/proxy")
+  const header = page.locator("[data-slot='page-context']")
+  await expect(header.getByText(/^Updated (just now|[5-9]s ago)$/)).toBeVisible()
+
+  // Answered, not only asked: until the answers land every reading is as
+  // old as the certificates, whatever the page counts.
+  const answered: string[] = []
+  page.on("requestfinished", (request) => {
+    if (request.method() === "GET")
+      answered.push(new URL(request.url()).pathname.replace(/^\/api\/v1/, ""))
+  })
+  // Past every thirty- and sixty-second poll, short of the certificates' five minutes.
+  await page.clock.fastForward(75_000)
+  await expect
+    .poll(() => answered, { timeout: 15_000 })
+    .toEqual(
+      expect.arrayContaining([
+        "/ports",
+        "/proxy/status",
+        "/proxy/streams/",
+        "/proxy/vhosts",
+        "/systemd/nginx.service",
+      ]),
+    )
+  expect(answered).not.toContain("/certificates/")
+  // A page that took its newest reading, or left the certificates out, read
+  // "just now" here: everything else was read a moment ago. Asked twice, a
+  // second apart, so the moment before the answers render cannot pass it.
+  const age = header.getByText(/^Updated 1m [1-5]\ds ago$/)
+  await expect(age).toBeVisible()
+  await page.waitForTimeout(1_000)
+  await expect(age).toBeVisible()
+})
+
+test("a source that never answers a refresh is named, and Refresh asks it again", async ({
+  page,
+}) => {
+  await page.clock.install()
+  await mockProxy(page, { included: true })
+  let hang = false
+  let release = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  let siteReads = 0
+  await page.route("**/api/v1/proxy/vhosts", async (route) => {
+    siteReads += 1
+    if (hang) {
+      await held
+      // The page gave up on this read long ago; there is nobody to answer.
+      return json(route, vhosts).catch(() => {})
+    }
+    return json(route, vhosts)
+  })
+  await page.goto("/proxy")
+  const header = page.locator("[data-slot='page-context']")
+  const refresh = header.getByRole("button", { name: "Refresh" })
+  await expect(header.getByText(/^Updated (just now|[5-9]s ago)$/)).toBeVisible()
+
+  hang = true
+  const before = siteReads
+  await refresh.click()
+  await expect(header.getByText("Refreshing…")).toBeVisible()
+  await expect(refresh).toHaveAttribute("aria-busy", "true")
+  await expect.poll(() => siteReads).toBe(before + 1)
+
+  // Neither the client nor the server gives up on a read, so this one would
+  // have kept the line on "Refreshing…" and Refresh disabled for good.
+  await page.clock.fastForward(20_000)
+  const late = header.getByText("No answer from sites", { exact: true })
+  await expect(late).toBeVisible()
+  await expect(header.getByText("Refreshing…")).toHaveCount(0)
+  await expect(refresh).toBeEnabled()
+  await expect(refresh).not.toHaveAttribute("aria-busy", "true")
+
+  // Pressing it again abandons the read that never came back and asks afresh.
+  hang = false
+  await refresh.click()
+  await expect.poll(() => siteReads).toBe(before + 2)
+  await expect(header.getByText(/^Updated (just now|[5-9]s ago)$/)).toBeVisible()
+  await expect(late).toHaveCount(0)
+  release()
+})
+
 test("an expiry bar leads to its certificate", async ({ page }) => {
   await mockProxy(page, { included: true })
   await page.goto("/proxy")
@@ -454,6 +626,7 @@ test("an expiry bar leads to its certificate", async ({ page }) => {
 test("a status that fails after answering is reported rather than drawn as current", async ({
   page,
 }) => {
+  await page.clock.install()
   await mockProxy(page, { included: true })
   let statusFails = false
   await page.route("**/api/v1/proxy/status", (route) =>
@@ -463,14 +636,22 @@ test("a status that fails after answering is reported rather than drawn as curre
   )
   await page.goto("/proxy")
   const identity = page.locator("[data-slot='host-identity']")
+  const header = page.locator("[data-slot='page-context']")
   await expect(identity.getByText("nginx/1.26.3")).toBeVisible()
+  await expect(header.getByText(/^Updated (just now|[5-9]s ago)$/)).toBeVisible()
+  await page.clock.fastForward(20_000)
 
   statusFails = true
-  await page.locator("[data-slot='page-context']").getByRole("button", { name: "Refresh" }).click()
+  await header.getByRole("button", { name: "Refresh" }).click()
   // The engine line stays — it is the last answer — and the list says so.
   await expect(page.getByText("The proxy status could not be read")).toBeVisible()
   await expect(identity.getByText("nginx/1.26.3")).toBeVisible()
   await expect(page.getByText(/all within limits/)).toHaveCount(0)
+  // Every other source answered just now, but the engine line is still the
+  // status's last answer, and the page is as old as that. It read "Updated
+  // just now" over it.
+  await expect(header.getByText(/^Updated [2-5]\ds ago$/)).toBeVisible()
+  await expect(header.getByText("Updated just now")).toHaveCount(0)
 
   statusFails = false
   await page.getByText("The proxy status could not be read").click()

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { oldestReading, reading, stillRefreshing, updatedLabel } from "./freshness"
+import { noAnswerLabel, oldestReading, reading, unanswered, updatedLabel } from "./freshness"
 
 describe("how old the overview is", () => {
   test("a reading carries the moment it answered", async () => {
@@ -45,18 +45,18 @@ describe("how old the overview is", () => {
 describe("waiting on a refresh", () => {
   const failed = new Error("refused")
 
-  test("it waits while any source has not answered since it was asked", () => {
+  test("it waits on every source that has not answered since it was asked", () => {
     const asked = {
       sites: { at: 1_000, error: undefined },
       certs: { at: 2_000, error: undefined },
     }
-    expect(stillRefreshing(asked, { ...asked })).toBe(true)
+    expect(unanswered(asked, { ...asked })).toEqual(["sites", "certs"])
     expect(
-      stillRefreshing(asked, {
+      unanswered(asked, {
         sites: { at: 9_000, error: undefined },
         certs: { at: 2_000, error: undefined },
       }),
-    ).toBe(true)
+    ).toEqual(["certs"])
   })
 
   test("an answer or a failure since both count as answered", () => {
@@ -66,7 +66,7 @@ describe("waiting on a refresh", () => {
       status: { at: undefined, error: undefined },
     }
     expect(
-      stillRefreshing(asked, {
+      unanswered(asked, {
         // A new answer.
         sites: { at: 9_000, error: undefined },
         // A new failure beside the last answer, which the poll keeps.
@@ -74,11 +74,19 @@ describe("waiting on a refresh", () => {
         // A first answer.
         status: { at: 9_500, error: undefined },
       }),
-    ).toBe(false)
+    ).toEqual([])
   })
 
   test("a source whose poll was switched off is not waited for", () => {
     const asked = { certbot: { at: undefined, error: undefined } }
-    expect(stillRefreshing(asked, {})).toBe(false)
+    expect(unanswered(asked, {})).toEqual([])
+  })
+})
+
+describe("a refresh that runs out of time", () => {
+  test("it names what it is still waiting on", () => {
+    expect(noAnswerLabel(["sites"])).toBe("No answer from sites")
+    expect(noAnswerLabel(["sites", "ports"])).toBe("No answer from sites or ports")
+    expect(noAnswerLabel(["sites", "ports", "certificates"])).toBe("No answer from 3 sources")
   })
 })

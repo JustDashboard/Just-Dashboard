@@ -328,7 +328,9 @@ ownership and cleanup, then removes its own containers/volumes/networks.
 - **The editor's read route is not a password reader.** `ReadConfig` refuses the dashboard's own
   `jd-auth` directory and any `.ht*`/`htpasswd` file with `ErrProtectedFile` (403 `protected_file`):
   `GET /proxy/config` is held by every signed-in account and a list of bcrypt hashes is not
-  configuration. `Validate` now carries a `Note` when the file is outside nginx's include tree —
+  configuration. A file inside the proxy's directories that is not on disk (removed or renamed
+  after the list naming it was read) is a 404 `not_found` marked retryable, which the editor shows
+  as an error with Try again; a missing path outside them is still 403 `outside_root`. `Validate` now carries a `Note` when the file is outside nginx's include tree —
   no `sites-enabled` link, a `conf.d` file without `.conf`, a stream with no include — because
   `nginx -t` passes a file it never reads, and a dry run that says "valid" about a disabled site is
   a false reassurance. `POST /proxy/test` runs the engine's own test against what is on disk without

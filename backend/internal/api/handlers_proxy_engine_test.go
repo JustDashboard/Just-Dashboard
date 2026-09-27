@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -190,5 +192,53 @@ func TestEngineTestAndReloadTakeOnlyAKnownEngine(t *testing.T) {
 	}
 	if !strings.Contains(shimLog(t, bin, "nginx"), "-t") {
 		t.Fatal("a save naming no engine was not tested by nginx")
+	}
+}
+
+// The overview opens a reader's route file from a list read earlier. A file
+// removed since was a 400 whose raw open error the editor put in a toast over
+// an empty buffer, which then read as an empty site file. It is a 404 worth
+// reading again, and a missing path outside the proxy's directories is still
+// refused as outside them, saying nothing about whether it exists.
+func TestConfigReadOfAFileRemovedSinceTheListIsNotFoundAndWorthRetrying(t *testing.T) {
+	s := testServer(t)
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "sites-available"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s.Cfg.NginxDir = dir
+	s.initModules()
+	reader := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "config-reader", auth.RoleReadOnly)}
+	read := func(path string) *httptest.ResponseRecorder {
+		return reader.do(http.MethodGet, "/api/v1/proxy/config?path="+url.QueryEscape(path), "", nil)
+	}
+
+	file := filepath.Join(dir, "sites-available", "gone.example.com")
+	w := read(file)
+	var failed struct {
+		Error struct {
+			Code, Message, Reason, Raw string
+			Retryable                  bool
+		}
+	}
+	if w.Code != http.StatusNotFound || json.Unmarshal(w.Body.Bytes(), &failed) != nil ||
+		failed.Error.Code != "not_found" || !failed.Error.Retryable ||
+		failed.Error.Message != "That file is not on disk." ||
+		!strings.Contains(failed.Error.Reason, "removed or renamed") ||
+		!strings.Contains(failed.Error.Raw, "no such file or directory") {
+		t.Fatalf("a file removed since the list: %d %s", w.Code, w.Body.String())
+	}
+
+	// Trying again once it is back reads it.
+	if err := os.WriteFile(file, []byte("server { listen 80; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if w := read(file); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "listen 80;") {
+		t.Fatalf("the file once it is back: %d %s", w.Code, w.Body.String())
+	}
+
+	outside := filepath.Join(t.TempDir(), "missing.conf")
+	if w := read(outside); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), `"outside_root"`) {
+		t.Fatalf("a missing file outside the proxy's directories: %d %s", w.Code, w.Body.String())
 	}
 }

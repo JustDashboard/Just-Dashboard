@@ -46,19 +46,37 @@ export function updatedLabel(at: number, now: number): string {
 export type Answer = { at: number | undefined; error: unknown }
 
 /**
- * Whether a source asked to refresh has not answered since it was asked.
+ * The sources asked to refresh that have not answered since they were asked.
  *
  * A read that succeeds is stamped later than the one before it, and one that
  * fails leaves a new error beside the last answer, so a source whose stamp
  * and error are both the ones it had when Refresh was pressed has not come
  * back yet. A source whose poll has been switched off since is not waited for.
  */
-export function stillRefreshing(
+export function unanswered(
   asked: Record<string, Answer>,
   current: Record<string, Answer>,
-): boolean {
-  return Object.entries(asked).some(([source, before]) => {
-    const now = current[source]
-    return now !== undefined && now.at === before.at && now.error === before.error
-  })
+): string[] {
+  return Object.entries(asked)
+    .filter(([source, before]) => {
+      const now = current[source]
+      return now !== undefined && now.at === before.at && now.error === before.error
+    })
+    .map(([source]) => source)
+}
+
+/**
+ * How long a refresh waits on its sources before it stops saying
+ * "Refreshing…". Neither the client nor the server puts a deadline on a
+ * read, so one that never answers kept the line busy and Refresh disabled
+ * until the page was reloaded — and pressing Refresh again is what abandons
+ * that read and asks afresh.
+ */
+export const REFRESH_DEADLINE_MS = 20_000
+
+/** "No answer from sites", for the sources still out once the wait has run out. */
+export function noAnswerLabel(sources: string[]): string {
+  if (sources.length === 1) return `No answer from ${sources[0]}`
+  if (sources.length === 2) return `No answer from ${sources[0]} or ${sources[1]}`
+  return `No answer from ${sources.length} sources`
 }

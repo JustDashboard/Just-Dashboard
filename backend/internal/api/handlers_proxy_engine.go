@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"strings"
 
@@ -53,6 +54,14 @@ func (s *Server) handleProxyConfigRead(w http.ResponseWriter, r *http.Request) e
 		return httpx.BadRequest("path query parameter is required")
 	}
 	content, err := s.modules.proxy.ReadConfig(path)
+	// The path comes from a list read earlier, and a site can be deleted or
+	// renamed in between. That is a state of the host, not a bad request,
+	// and reading again once the file is back is the remedy.
+	if errors.Is(err, fs.ErrNotExist) {
+		return httpx.Err(http.StatusNotFound, "not_found", "That file is not on disk.").
+			Because("It may have been removed or renamed since this page last loaded — by a site change, a deploy, or somebody in a shell.", err.Error()).
+			Retry()
+	}
 	if err != nil {
 		return mapProxyError(err)
 	}

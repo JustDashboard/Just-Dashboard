@@ -9,7 +9,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
 import { Pane, Well } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
-import { Notice } from "@/components/state"
+import { ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 
 type ConfigEditorProps = {
@@ -40,6 +40,10 @@ type ConfigEditorProps = {
  * stale buffer over the file on disk, or over the wrong file, would be a real
  * outage. `open` and `path` are independent, so a caller may keep the path
  * while the editor is closed.
+ *
+ * Until the read answers there is no buffer at all: an editor drawn empty
+ * while loading, or after a read that failed, read as an empty site file,
+ * and a save from it would have written that emptiness over the real one.
  */
 export function ConfigEditor(props: ConfigEditorProps) {
   return <ConfigEditorBody key={props.open ? props.path : ""} {...props} />
@@ -62,6 +66,9 @@ function ConfigEditorBody({
   const [original, setOriginal] = useState("")
   const [busy, setBusy] = useState(false)
   const [validation, setValidation] = useState<ProxyValidation | null>(null)
+  // Whether the file has been read: undefined while the read is out.
+  const [read, setRead] = useState<{ ok: true } | { ok: false; error: Error }>()
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     if (!open || !path) return
@@ -70,10 +77,19 @@ function ConfigEditorBody({
       .then((r) => {
         setContent(r.content)
         setOriginal(r.content)
+        setRead({ ok: true })
       })
-      .catch((err) => !controller.signal.aborted && notify.error("Could not read the file", err))
+      .catch((err: unknown) => {
+        if (controller.signal.aborted) return
+        setRead({ ok: false, error: err instanceof Error ? err : new Error(String(err)) })
+      })
     return () => controller.abort()
-  }, [open, path])
+  }, [open, path, attempt])
+
+  const readAgain = () => {
+    setRead(undefined)
+    setAttempt((n) => n + 1)
+  }
 
   const validate = async () => {
     setBusy(true)
@@ -100,8 +116,10 @@ function ConfigEditorBody({
     }
   }
 
+  const loaded = read?.ok === true
+  const failed = read?.ok === false ? read.error : undefined
   const dirty = content !== original
-  const unread = siteDisabled && !validation?.note
+  const unread = siteDisabled && !validation?.note && !failed
 
   return (
     <>
@@ -121,9 +139,15 @@ function ConfigEditorBody({
         }
         bodyClassName="flex min-h-0 flex-1 flex-col gap-3 p-4"
         footer={
-          !readOnly && open ? (
+          !readOnly && open && !failed ? (
             <>
-              <Button size="sm" variant="outline" onClick={validate} pending={busy}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={validate}
+                pending={busy}
+                disabled={!loaded}
+              >
                 Test config
               </Button>
               <span className="flex-1" />
@@ -163,7 +187,7 @@ function ConfigEditorBody({
           ) : undefined
         }
       >
-        {!readOnly && (
+        {!readOnly && !failed && (
           <Notice icon={ShieldCheck} title="Validated before it takes effect">
             The server runs its own config test first. A config that fails is rolled back and never
             reloaded, so a typo here cannot take your sites offline.
@@ -176,19 +200,27 @@ function ConfigEditorBody({
           </Notice>
         )}
 
-        <Pane className="min-h-0 flex-1">
-          <CodeEditor
-            className="h-full"
-            language="ini"
-            value={content}
-            readOnly={readOnly}
-            revealLine={initialLine}
-            onChange={(v) => {
-              setContent(v)
-              setValidation(null)
-            }}
-          />
-        </Pane>
+        {failed ? (
+          <ErrorState error={failed} onRetry={readAgain} />
+        ) : (
+          <Pane className="min-h-0 flex-1" aria-busy={!loaded || undefined}>
+            {loaded ? (
+              <CodeEditor
+                className="h-full"
+                language="ini"
+                value={content}
+                readOnly={readOnly}
+                revealLine={initialLine}
+                onChange={(v) => {
+                  setContent(v)
+                  setValidation(null)
+                }}
+              />
+            ) : (
+              <LoadingRows rows={8} className="p-4" />
+            )}
+          </Pane>
+        )}
 
         {validation && (
           <Notice

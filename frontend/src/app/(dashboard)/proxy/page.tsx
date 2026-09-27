@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowRight, Globe, RefreshClockwise } from "@/components/icons"
@@ -33,9 +33,11 @@ import {
   type UnreadableSource,
 } from "@/components/proxy/attention"
 import {
+  noAnswerLabel,
   oldestReading,
   reading,
-  stillRefreshing,
+  REFRESH_DEADLINE_MS,
+  unanswered,
   updatedLabel,
   type Answer,
   type Reading,
@@ -98,23 +100,38 @@ export default function ProxyOverviewPage() {
     certbot.error instanceof ApiError && certbot.error.code === "certbot_unavailable"
   const certbotAsked = Boolean(status?.certbot)
 
-  // Every read the page shows, by source, as Refresh waits on them: a poll
-  // that is switched off is not asked and not waited for.
+  // Every read the page shows, as Refresh waits on them, by the name the
+  // header gives one that does not answer in time: a poll that is switched
+  // off is not asked and not waited for.
   const answers: Record<string, Answer> = {
-    status: { at: statusAt, error: statusError },
-    vhosts: { at: vhosts.data?.at, error: vhosts.error },
-    certs: { at: certs.data?.at, error: certs.error },
+    "the proxy status": { at: statusAt, error: statusError },
+    sites: { at: vhosts.data?.at, error: vhosts.error },
+    certificates: { at: certs.data?.at, error: certs.error },
     streams: { at: streams.data?.at, error: streams.error },
     ports: { at: ports.data?.at, error: ports.error },
-    ...(engine.name ? { engine: { at: engine.fetchedAt, error: engine.error } } : {}),
-    ...(certbotAsked ? { certbot: { at: certbot.data?.at, error: certbot.error } } : {}),
+    ...(engine.name ? { [engine.name]: { at: engine.fetchedAt, error: engine.error } } : {}),
+    ...(certbotAsked ? { renewal: { at: certbot.data?.at, error: certbot.error } } : {}),
   }
-  const [asked, setAsked] = useState<Record<string, Answer>>()
-  const refreshing = asked !== undefined && stillRefreshing(asked, answers)
-  // The age the page vouches for is that of its oldest reading; a source
-  // that failed shows none of its reading, so it has no age to count.
+  // What each source had said when Refresh was pressed, and whether the wait
+  // for the rest has run out.
+  const [asked, setAsked] = useState<{ answers: Record<string, Answer>; overdue: boolean }>()
+  useEffect(() => {
+    if (!asked || asked.overdue) return
+    const timer = setTimeout(
+      () => setAsked((current) => (current === asked ? { ...asked, overdue: true } : current)),
+      REFRESH_DEADLINE_MS,
+    )
+    return () => clearTimeout(timer)
+  }, [asked])
+  const waiting = asked ? unanswered(asked.answers, answers) : []
+  const refreshing = waiting.length > 0 && !asked?.overdue
+  const late = asked?.overdue ? waiting : []
+  // The age the page vouches for is that of its oldest reading. A source
+  // that failed shows none of its reading, so it has no age to count — but
+  // the status goes on drawing the engine line from its last answer, so that
+  // answer's age still counts.
   const updatedAt = oldestReading([
-    statusError ? undefined : statusAt,
+    statusAt,
     engine.fetchedAt,
     readable(vhosts)?.at,
     readable(certs)?.at,
@@ -123,7 +140,7 @@ export default function ProxyOverviewPage() {
     certbotAsked && !certbotGone ? readable(certbot)?.at : undefined,
   ])
   const refreshEverything = () => {
-    setAsked(answers)
+    setAsked({ answers, overdue: false })
     refreshStatus()
     engine.refresh()
     vhosts.refresh()
@@ -257,7 +274,14 @@ export default function ProxyOverviewPage() {
       <PageContext
         title="Proxy & TLS"
         className="justify-end"
-        actions={<Freshness at={updatedAt} refreshing={refreshing} onRefresh={refreshEverything} />}
+        actions={
+          <Freshness
+            at={updatedAt}
+            refreshing={refreshing}
+            late={late}
+            onRefresh={refreshEverything}
+          />
+        }
       />
 
       <StatGrid columns={4} dense>
@@ -556,23 +580,34 @@ export default function ProxyOverviewPage() {
  * How old the page is, and the one press that reads every source again. The
  * age is the oldest reading's, so a five-minute-old certificate list is not
  * vouched for by a sites list read a moment ago; while a refresh is out it
- * says so instead, until the last source answers.
+ * says so instead, until the last source answers. A source still out once
+ * the wait runs out is named, and Refresh can be pressed again to ask it
+ * afresh.
  */
 function Freshness({
   at,
   refreshing,
+  late,
   onRefresh,
 }: {
   at: number | undefined
   refreshing: boolean
+  /** The sources that have not answered a refresh in time, by name. */
+  late: string[]
   onRefresh: () => void
 }) {
-  const now = useNow(1000, at !== undefined && !refreshing)
+  const now = useNow(1000, at !== undefined && !refreshing && late.length === 0)
   return (
     <>
-      <span className="numeric text-hint text-muted-foreground">
-        {refreshing ? "Refreshing…" : at !== undefined && updatedLabel(at, now)}
-      </span>
+      {late.length > 0 ? (
+        <span className="text-hint font-medium text-warning" title={late.join(", ")}>
+          {noAnswerLabel(late)}
+        </span>
+      ) : (
+        <span className="numeric text-hint text-muted-foreground">
+          {refreshing ? "Refreshing…" : at !== undefined && updatedLabel(at, now)}
+        </span>
+      )}
       <Button size="xs" variant="ghost" onClick={onRefresh} pending={refreshing}>
         <RefreshClockwise />
         Refresh
