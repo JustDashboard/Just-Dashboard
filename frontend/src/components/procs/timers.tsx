@@ -297,7 +297,7 @@ function TimerRow({
       </TableRow>
       {open && timer.activates && (
         <TableRow className="hover:bg-transparent has-aria-expanded:bg-transparent">
-          <TableCell colSpan={6} className="px-3 pt-0 pb-3 whitespace-normal">
+          <TableCell colSpan={6} className="p-0 whitespace-normal">
             <TimerRuns unit={timer.activates} />
           </TableCell>
         </TableRow>
@@ -309,7 +309,9 @@ function TimerRow({
 /**
  * The runs of what a timer fires, opened under its row: the service's own
  * journal with Runs in front, so a failed run is one press from the lines
- * it wrote, and Live beside it for a run started with "Run now".
+ * it wrote, and Live beside it for a run started with "Run now". It has no
+ * frame of its own — the table's hairlines above and below are its edges,
+ * and a frame inside the panel's would be two.
  */
 function TimerRuns({ unit }: { unit: string }) {
   const sources = useMemo<ServiceLogSource[]>(
@@ -320,16 +322,23 @@ function TimerRuns({ unit }: { unit: string }) {
     () => [{ id: "runs", label: "Runs", render: (ctx) => <UnitRuns unit={unit} ctx={ctx} /> }],
     [unit],
   )
+  // Runs is as tall as its rows, up to a limit; the lines scroll inside a
+  // height of their own, so Live and History take the limit outright. The
+  // height is the column's, which the pane fills: set on the pane itself it
+  // loses to the pane's flex basis. Its width is the table's and adds
+  // nothing to it — a table cell grows to its content's widest line, and an
+  // unwrapped log line pushed the timers' own columns off a phone.
+  const [reading, setReading] = useState("runs")
   return (
     <ServiceLogs
       sources={sources}
       views={views}
       view="runs"
+      onViewChange={setReading}
       modes={["live", "search"]}
       layout="sheet"
-      // The height is the column's, which the pane fills; set on the pane
-      // itself it loses to the pane's flex basis.
-      className="h-[26rem]"
+      flush
+      className={cn("[contain:inline-size]", reading === "runs" ? "max-h-[26rem]" : "h-[26rem]")}
     />
   )
 }

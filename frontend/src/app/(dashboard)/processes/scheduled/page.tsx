@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useEffect, useMemo } from "react"
 import Link from "next/link"
 import { get } from "@/lib/api"
 import { describeCron, nextCronRun } from "@/lib/cron"
@@ -35,6 +35,9 @@ import { cn } from "@/lib/utils"
 
 const CRON_LENS = lensFor("cron")
 
+/** How soon a log index that failed to answer is asked again. */
+const INDEX_RETRY = 30_000
+
 /**
  * Everything that runs on a clock: one account's crontab as jobs you can
  * act on, the host's systemd timers, and the package-owned cron files,
@@ -67,8 +70,15 @@ export default function ScheduledPage() {
   const timers = usePoll((signal) => get<TimerList>("/systemd/timers", undefined, signal), 30_000)
   const system = usePoll((signal) => get<Crontab[]>("/cron/system", undefined, signal), 0)
   // Where cron's log is on this host is a question the log index answers
-  // once: the daemon's unit, a cron file, or the journal by program.
+  // once: the daemon's unit, a cron file, or the journal by program. A read
+  // that failed is asked again, or the tile and the panel below would say
+  // so until the page was reloaded.
   const logs = usePoll((signal) => get<LogSourceIndex>("/logs/sources", undefined, signal), 0)
+  useEffect(() => {
+    if (!logs.error) return
+    const retry = setTimeout(logs.refresh, INDEX_RETRY)
+    return () => clearTimeout(retry)
+  }, [logs.error, logs.refresh])
   const cron = useMemo(() => cronLogSource(logs.data), [logs.data])
   const cronSources = useMemo(() => (cron ? [cron] : []), [cron])
   const cronReadings = useLensReadings(cron?.id ?? "", CRON_LENS)
@@ -128,7 +138,7 @@ export default function ScheduledPage() {
           />
           <CronRunsTile
             readings={cronReadings}
-            state={logs.data ? (cron ? "read" : "none") : logs.error ? "none" : "reading"}
+            state={logs.data ? (cron ? "read" : "none") : logs.error ? "error" : "reading"}
           />
           <StatTile
             label="Timers armed"
@@ -178,12 +188,12 @@ export default function ScheduledPage() {
               className="h-[min(70vh,36rem)] min-h-80"
             />
           ) : (
+            // Only a host without the journal gets here: on one with it,
+            // cron's lines are read out of it by program even with no unit.
             <EmptyNote className="px-0 text-left">
-              {logs.data.missing?.journal
-                ? `${logs.data.missing.journal}, and`
-                : "There is no cron unit in the journal, and"}{" "}
-              no cron log under {(logs.data.roots ?? []).join(", ") || "the log roots"} — so what
-              cron ran is not recorded anywhere this page can read.
+              {logs.data.missing?.journal ?? "There is no journal to read"}, and there is no cron
+              log under {(logs.data.roots ?? []).join(", ") || "the log roots"} — so what cron ran
+              is not recorded anywhere this page can read.
             </EmptyNote>
           )}
         </PanelBody>
@@ -274,6 +284,14 @@ function fromNow(at: Date) {
   return ms < 45_000 ? "now" : `in ${duration(ms / 1000)}`
 }
 
+/** What the tile says while it has no figure, by why. */
+const UNREAD: Record<"reading" | "read" | "none" | "error", string> = {
+  reading: "reading cron's log",
+  read: "reading cron's log",
+  none: "no cron log on this host",
+  error: "the log index did not answer",
+}
+
 /**
  * What cron started in the last day, out of its own log: the cron lens's
  * runs, with the runs whose output had nowhere to go said under the figure,
@@ -285,17 +303,11 @@ function CronRunsTile({
   state,
 }: {
   readings: LensReadingsState
-  state: "reading" | "read" | "none"
+  state: "reading" | "read" | "none" | "error"
 }) {
   const runs = readings.tiles.find((tile) => tile.reading.id === "runs")
   if (state !== "read" || !runs) {
-    return (
-      <StatTile
-        label="Cron runs"
-        value="—"
-        hint={state === "reading" ? "reading cron's log" : "no cron log on this host"}
-      />
-    )
+    return <StatTile label="Cron runs" value="—" hint={UNREAD[state]} />
   }
   const count = (id: string) =>
     readings.tiles.find((tile) => tile.reading.id === id)?.figure?.value ?? 0
