@@ -1577,16 +1577,6 @@ export type LogRetention = {
   available: boolean
 }
 
-export type JournalEntry = {
-  timestamp: string
-  message: string
-  priority: number
-  unit?: string
-  pid?: string
-  hostname?: string
-  syslogIdentifier?: string
-}
-
 export type FileEntry = {
   name: string
   path: string
