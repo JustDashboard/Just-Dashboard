@@ -61,11 +61,13 @@ taking a frame:
   volumes, networks, stacks and events lists with their toolbars; the disk breakdown above the
   images; the attention and storage blocks on a container's page), the
   whole of the Security section (the overview's exposure facts, five area tiles and findings, and on
-  every area page the readings, the findings under them, the tables and the twenty probe blocks on
-  Tools), every block on the proxy pages (the overview's engine facts, attention list, sites and
-  certificate expiry; the sites, certificates, streams and ports tables with their toolbars; the
-  TLS report's readings, findings, protocol, certificate, chain and HTTP rows; the password files
-  and DNS provider lists),
+  every area page the readings, the findings under them, the tables, the Auth log, Firewall log and
+  Activity sections — each a title over the log's `Pane` — and the twenty probe blocks on Tools),
+  every block on the proxy pages (the overview's engine facts, attention list, sites, certificate
+  expiry and Engine log; the sites, certificates, streams and ports tables with their toolbars; the
+  Renewals section on Certificates; a site's own page, its readings on the page's ground and its
+  logs one `Pane` under its identity line; the TLS report's readings, findings, protocol, certificate, chain
+  and HTTP rows; the password files and DNS provider lists),
   health findings, the runtime-health bar, and every block of the deployment section — the fleet
   and its archive, Credentials and Notifications, a project's Overview, Deployments, Logs, Runtime
   and Console, the run page, the nine settings pages and the create flow — are plain, with every
@@ -106,9 +108,12 @@ taking a frame:
   databases section's connection facts and maintenance rows, its find, monitor and generate panels,
   and every block on the four Processes pages — the live table, the PM2 applications, the systemd
   units, and the cron jobs, timers and system cron files on Scheduled, each a title, a toolbar and
-  a hairline under four `StatTile` readings (Scheduled's are what fires next across cron and the
-  timers together, the account's jobs, the timers armed and what the packages run), with a detail
-  sheet built from plain panels that opens on the thing's own mark — and the
+  a hairline under `StatTile` readings — four, and five on Scheduled (what fires next across cron and
+  the timers together, the account's jobs, the runs cron started in the last day, the timers armed
+  and what the packages run), whose Cron log is a plain panel holding the log's `Pane` and whose
+  timers open their runs inside the table's own row, framed by nothing but the row — with a detail
+  sheet built from plain panels that opens on the thing's own mark, the unit's journal and a PM2
+  application's logs a `Pane` in their sheets — and the
   two System pages follow the same shape: on System users four readings (accounts, administrators,
   who can sign in, the last sign-in) over the accounts as lit cards in a plain list, because each
   opens its keys, with its SSH-keys sheet a plain list of rows and a plain form, and on the audit
@@ -126,8 +131,9 @@ taking a frame:
   covered, every thing on it drawn as its product, with a job's own page built from a fact list and
   plain panels; the five account pages — the profile's identity line, readings and capability rows,
   sessions and keys as rows under plain panels where a framed table used to be, the users as cards
-  in a `ChoiceList`, and Security as `FormSection aside`s in a rail; and the three views on
-  Packages — the installed and updates tables and the software search, under one underlined strip
+  in a `ChoiceList`, and Security as `FormSection aside`s in a rail; and the four views on
+  Packages — the installed and updates tables, the software search and the package Log (its `Pane`
+  on the page's ground, no panel around it), under one underlined strip
   (`tabClasses`) rather than a filled tab list, beneath the host's identity line — each a toolbar
   and a hairline over a framed table or, for the search, rows on the page's own edge, with what
   needs acting on (security updates waiting, a reboot owed, a stale index) said as a `Notice` that
@@ -349,7 +355,7 @@ the pointer is on the row. A reserved column left empty reads as a layout bug, n
 | --- | --- | --- |
 | `Panel` | A block of content *on* the page: framed, header, hairline, body — or `plain`, the same anatomy with no frame | Not a working region |
 | `RowList` / `Row` | A list of rows with hairlines between them: a leading mark, a title, a second line, a trailing state | Not a table — nothing lines up in columns |
-| `Pane` | A sized region of a workspace that owns its own scrolling — session rail, file tree, log console. `flush` drops its frame for a pane that is one column of a workbench sharing a single frame, with a hairline between columns (the terminal page, the logs page's source rail beside its log workspace, and the files page's sidebar, listing and inspector under the strip that holds the page's commands) | Not a block in a page's flow |
+| `Pane` | A sized region of a workspace that owns its own scrolling — session rail, file tree, log console. `flush` drops its frame for a pane that is one column of a workbench sharing a single frame, with a hairline between columns (the terminal page, the logs page's source rail beside its log workspace, the files page's sidebar, listing and inspector under the strip that holds the page's commands, and a deployment's Output inside its Logs page's pane) | Not a block in a page's flow |
 | `Well` | Output you read: command output, a log tail, a diff, a stored secret | Not a fence around controls |
 | `Group` | A fence around part of a body: a set of ports, one release task, a repeated form row | Not a `Panel` — no header, no lift |
 | `StatTile` | One headline figure, in a `StatGrid` | Not free-form — a row of them is read as a table |
@@ -1138,7 +1144,9 @@ than a guess. A stream is drawn as the service its port is (`portProduct`: the d
 planes the attention list already names by number, and the two Minecraft editions) and a port
 nothing names keeps a bare connection. A listening socket's process is its product's glyph, read
 from the process name first and the port second, so `postgres` on an odd port is still Postgres and
-`python` on 5432 is not. Sites and streams are cards you open and take the edge; certificates,
+`python` on 5432 is not. Sites and streams are cards you open and take the edge — a site onto its own
+page, which opens on the same marks as an identity line and reads its requests and errors there, so its
+Logs verb goes to that page rather than to a file on the Logs page; certificates,
 watched domains and sockets are readings with verbs and stay rows, with how much of its term a
 certificate has left drawn as a meter under its verdict (`CertLife`).
 
@@ -1272,7 +1280,24 @@ name takes a hue by name from `LANES` (`lib/hue.ts`: the tag hues without red an
 console would read as a process that failed), so one process can be followed down a busy page — the
 same argument as `AuthorMark`, whose hash now lives there too. An error or a critical row is washed the
 way the build console washes a failing step, a warning row in amber; the level column is the level's
-word at the line's size. A structured line is drawn as its message and fields in the logfmt shape the
+word at the line's size. Where a lens named what the line records, **its event word takes that
+column** — "auth failed", "deadlock", "upstream refused" say more than "err" — at the line's size in
+the event's tone (`EVENT_WORD`: `font-medium text-destructive` for a failure, `text-warning`,
+`text-success`, muted otherwise), and the level stays as the edge and the wash; the column is as wide as
+the longest word on screen, within bounds, rather than a fixed width that cut "restart scheduled" short.
+An event a busy log says constantly and neutrally — a request, a connection, a cron session — keeps the
+level's word (`mark: false`), or the column would be a wall of words saying nothing. A value the lens
+read out of the text is drawn as what it is (`components/logs/field-value.tsx`: an address as its
+network, a status in its family's colour, a method as its word, a duration in its latency tone, a unit,
+a jail, a package or an image beside its product), the same drawing a request's client gets, so a
+Postgres client and a visitor are one mark; at most three such columns stand before the message, only in
+colour and only while a line on screen fills one. A record's continuation lines stay under their head,
+the first three shown and the rest one fold away; a lens's lifecycle event (a unit started, an
+application came up) is a hairline rule across the pane with its word and the unit's lane hue, so a
+service's runs read as runs; and in the live tail a run of identical lines is one row with a muted
+`×N`. `stderr` is a muted word, never a danger tag — Postgres writes every line there, and a red tag on
+each said a failure that was not there. None of these is a pill or a badge: a `Tag` carries the word
+only with Colour off. A structured line is drawn as its message and fields in the logfmt shape the
 tokenizer reads, most telling field first. The "Colour" toggle beside Wrap and Time turns all of it
 off and shows each line exactly as it was written.
 
@@ -1343,6 +1368,10 @@ The passes, in order. Each one is a diff you can review on its own.
    cards" — is a `StatGrid` of `StatTile`s: hairlines between, nothing around, the first column on the
    page's own edge. A tile that is a destination is wrapped in `StatLink` and takes
    `className="h-full transition-colors group-hover:bg-row-hover"`; the arrow is the link's, not yours.
+   A tile whose figure is a question about what is under it — a log's "Auth failures 12" — is a
+   `StatButton` instead: a press narrows the pane below rather than leaving the page, its revealed mark
+   is the funnel every "only lines like this" carries, and `pressed` says the figure's filter is the
+   one on screen (pressing it again lets it go).
    The figure is 24px (`text-2xl`): `text-xl` is not on the ladder. A state colours the figure through
    `tone`, never through a badge beside it.
 
@@ -1479,8 +1508,10 @@ their engines, each carrying its own three figures, an attention list under them
 here and not yet connected, and the map of what they feed — and a database opens on its own overview:
 the connection string, its facts as one list, its largest tables as bars and what reads it. The
 section took pass 2's `/git` exit on every page (the control center, the topology, a database's
-connection, backups and advisor): each figure went to the card, the header or the lane that counts
-the thing it was about, and every page's doc comment names where. Its per-connection pages keep the
+connection, backups, advisor and logs): each figure went to the card, the header or the lane that
+counts the thing it was about — on Logs, the lens's readings are the counts on its quick-view chips
+(`ServiceLogs readings="chips"`), a reading no view asks being a chip of its own — and every page's
+doc comment names where. Its per-connection pages keep the
 connection switcher, facts, status and New command in one compact strip. Flow pages keep their visible question as the `h1`, since the question is the work on that
 screen (§16).
 

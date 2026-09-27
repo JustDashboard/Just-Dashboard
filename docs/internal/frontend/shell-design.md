@@ -136,8 +136,13 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   run is one thing described the way the product describes every thing, and since 2026-09-25 that
   line is the first thing on the page — its verbs sit at the line's end beside the run's state, and
   the way back is the rail's panel and the menu's Open project rather than an eyebrow. A container,
-  a compose stack and a backup job went that way on 2026-09-21; every other detail in the product is
-  a `SidePanel` and should stay one.
+  a compose stack and a backup job went that way on 2026-09-21, and a proxy site
+  (`/proxy/sites/<name>`) on 2026-09-27, since it now holds its logs — the way back is a "Sites" link
+  beside its verbs, the form and the raw file staying sheets it opens; every other detail in the
+  product is a `SidePanel` and should stay one. A sheet that shows a log — a unit's journal, a PM2
+  application's output — draws the service logs in their `layout="sheet"` form (no readings, no value
+  columns, no facts beside the name), because the unit or the process is still the glance and the log
+  one tab of it.
 
   Their tabs stay **in** the page — they are views of one thing, which is what `tabClasses` is for.
   Do not reintroduce a route-level strip for them (see the `SectionNav` note below), and do not give
@@ -153,8 +158,9 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   accessible description and nothing is drawn. **Raw `Dialog`/`Sheet` are assembled only in those three
   components** — a page or a feature panel never opens one itself.
 - `components/tabs.tsx` — the switchers that remain, all of which switch between *views of one page*:
-  `tabClasses` (the underlined tab, for the log console's live feed against its search, the packages
-  page's installed against its updates, the deploy wizard's source kinds), `FilterChip`, `ChipCount` and
+  `tabClasses` (the underlined tab, for a log pane's Live, History and Insights and the page's own
+  views beside them, the packages page's installed, updates, search and log, the deploy wizard's source
+  kinds), `FilterChip`, `ChipCount` and
   `ChipStrip`, the run every set of chips sits in (sideways-scrolling on a phone, wrapping from `sm`).
   `SectionNav` and `TabLink` — the route-level strips — were deleted in 0.6.7 when the rail started
   drilling into sections; do not reintroduce a strip that changes the URL.
@@ -171,8 +177,9 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   hint) and `StatGrid`, which runs them across the page with a hairline between cells and no frame
   around them, the first column on the page's own edge. `framed` restores the box. `StatLink` wraps a
   tile that is also a destination — the Docker and proxy overviews, and the Services row on the host
-  overview — with the revealed arrow that says so on touch. `dense` sets the tiles two to a row on a
-  phone.
+  overview — with the revealed arrow that says so on touch; `StatButton` wraps one whose press
+  narrows what is under it (a lens's readings wherever a page draws them, a site's request figures)
+  with a revealed funnel and `aria-pressed`. `dense` sets the tiles two to a row on a phone.
 - `components/outcome-strip.tsx` — `OutcomeStrip`, the last few attempts at something as a square per
   attempt in the colour of how it ended, oldest first: a backup job's runs, a project's runs, a
   channel's messages, a webhook's deliveries, a schedule's firings. One drawing, so a strip means the

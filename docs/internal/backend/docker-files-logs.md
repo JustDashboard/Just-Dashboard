@@ -56,7 +56,21 @@ build argv explicitly.
   *held* rather than a spike, a memory floor that only rises, and a writable layer growing by the day.
 - **`events.go` keeps what Docker throws away**, so "why did this restart at 04:00" has an answer. An
   in-memory ring: an event log worth keeping across restarts belongs in the audit table. `oom` and
-  `health_status: unhealthy` justify the feature alone.
+  `health_status: unhealthy` justify the feature alone. `EventFilter{Kinds, Search, Container, Stack}`
+  is the one question every reader asks of it, and `Find` applies it **while walking the ring** rather
+  than to a slice of its newest entries — one container's events are a sliver of a busy host's, and a
+  limit taken first answered a quiet container with two hundred of everyone else's. A container matches
+  by its whole id, an id prefix of twelve characters or more, or its name; a stack by the compose
+  project label, which network events do not carry. `GET /docker/events` and `WS /docker/events/stream`
+  take `container=` and `stack=` (a name Docker would accept, and `stackProject`), refused with a 400
+  before the upgrade; asked nothing they are the host's feed as before. The socket subscribes **before**
+  it reads the buffered past, so an event recorded between the two is sent rather than lost — one
+  recorded in that instant arrives twice, and every reader drops the copy. `Event.Service` is the compose
+  service (`db`, where the event's name is `shop-db-1`), which is what a stack's log calls a container.
+- **A container's and a stack's output are log sources**, `docker:<id>` and `stack:<project>` on the
+  `/logs/*` routes (see [Logs](#logs)). `GET /docker/containers/{id}/logs`, its `/logs/stream` and
+  `GET /docker/stacks/{name}/logs/stream` are gone: a second reader of the same lines with no lens and no
+  filter, and nothing called them once both pages embedded the service logs.
 - **`CheckUpdate` compares the registry's current digest against the pulled one** — a more useful question
   than "is there a newer tag", because it catches a moving tag that moved. Cached 30 min, four-worker
   pool, because Docker Hub rate-limits by address. Unreachable or credentialed registries are `unknown`
@@ -298,42 +312,240 @@ logrotate run, which is the question that sent people back to ssh and zgrep.
   is read as a **token**, not a fixed width — slicing 25 characters chopped the zone off
   `2026-08-28T23:03:24.804642+02:00` and filed the line an hour wrong outside UTC. `Filter.Highlights`
   returns **UTF-16** offsets, because Go counts bytes and the browser slices by code unit.
+- **A lens is what the dashboard knows about one kind of log** (`lens.go`, one `lens_<id>.go` each):
+  how Postgres spells a failed login, what nginx means by `*42 upstream timed out`, which sshd line is a
+  scanner. Its `Reader` runs on every line **after `ParseLine` and before any filter test** and names
+  what the line records (`Line.Event`) and the values in it (`Line.Attrs`), so the live tail, the
+  history, the histogram, the facets and the export agree — they all read the line through the same
+  lens before anything judges it. Twenty-one are registered: `postgres`, `mysql`, `redis`, `mongodb`,
+  `clickhouse`, `mssql`; `http-access`, `nginx-error`, `nginx` (a container's access and error lines by
+  shape) and `caddy`; `auth`, `firewall`, `kernel`, `fail2ban`, `systemd`, `cron`, `certbot`,
+  `packages`; `app` and `pm2` for application output (requests, exceptions with their stack frames,
+  starts, and the failures deployments die of); and `syslog`, a composite that hands each line to the
+  lens its program has (`ProgramLens`, one table for the composite and the journal alike) and records
+  which on the line (`Line.Lens`). Readers are single-pass and forward-only — a value is carried onto
+  later lines, an emitted line is never edited — allocate attrs only for a line they recognise, and gate
+  every expression behind a cheap prefix or substring test: the budget is twice the no-lens search, and
+  `BenchmarkSearchLens` measures the shipped lenses against it over a million mixed lines (the worst was
+  about 1.6× when they landed). Parsing lives only here; the browser reads `event`/`attrs` off the
+  wire and never re-derives them. **Level precedence** is a lens's `SetLevel`
+  (the format's own severity token, or a status or crash rule), then a JSON or logfmt level key, then the
+  journal's priority, then the word scan — which files, Docker and PM2 get and journal lines never do.
+- **A record is kept or dropped whole.** A Postgres `ERROR` is followed by its `DETAIL` and `STATEMENT`,
+  a Java exception by forty frames; judged line by line, a search for "deadlock" matched the ERROR and
+  lost the DETAIL naming the processes, and a level filter dropped the STATEMENT, which has no level of
+  its own. A lens marks such lines `Cont`, and `Stream` (`stream.go`) gives each the verdict of the head
+  it follows: kept iff its head was, drawn in its head's level, never counted in `matched`, the
+  histogram, the facets or the measure. Every reader runs the same four steps — `Skip` before parsing,
+  `ParseLine`, `Read`, `Keep` — and the text pre-reject may skip a line only while no kept record is
+  open. The gate resets per file and per stream, and a continuation line at the top of a window, whose
+  head nobody saw, stands on its own. Docker's and the journal's own stamps are re-applied after the
+  reader, so no lens can move a line in time.
+- **Detection runs in the handlers, never in the search or the tail** (`DetectLens`), so those read
+  `Filter.Lens` and nothing else and the package's own tests still describe what they always did. A file
+  by its directory or basename, never a substring of the name (`/var/log/postgresql/` is Postgres,
+  `auth.log`/`secure` auth, `ufw.log` firewall; `/var/log/myapp/cronjobs.log` is an application's); a
+  container by its image's last path segment, where a list that reports the image as a bare
+  `sha256:`/hex id is looked up through inspect's `Config.Image` and kept per image id
+  (`Server.logImageRefs`) — a Postgres container read as an application is the first thing a database
+  page would get wrong; a unit by its own name; a `journal-id:` source by its first identifier; the whole
+  journal as `syslog`; PM2 as `pm2`; a stack container by container. `lens=<id>` forces one, `lens=none`
+  reads no lens, and an unknown id is a 400 from `NewFilter`, before a socket upgrades.
+- **A field predicate narrows by what was read out of a line, not by its text** (`predicate.go`):
+  `f=user:postgres` finds the lines where postgres is the user, where a search for "postgres" also finds
+  the database, the path and the comment. `f=<key>:<value>` repeats, at most 32, each value at most 256
+  bytes, split at the **first** colon (`client:2001:db8::1` is an address); keys are
+  `[A-Za-z0-9_.@-]{1,64}` and resolve through `Line.Value` — `event`, `stream`, `source`, then the attrs,
+  then a structured line's fields. `level` is not a key: the level chips are. A bare value is exact and
+  case-insensitive, `=lit` is the escape for a literal that starts with an operator, `!lit` not equal,
+  `*` present, `!*` absent, `~sub`/`!~sub` substring and not, `>n` `>=n` `<n` `<=n` numeric (a
+  non-numeric value never matches; a non-finite bound is refused). A line without the key satisfies only
+  the negations — hiding the lines where user is postgres keeps the ones with no user — and the virtual
+  `pattern` (below) is a key too, so a pattern pressed in Insights narrows. Within one key the exact and
+  substring forms are alternatives and the negations and comparisons constraints on them —
+  "status ≥ 500 and not 503" is the range meant — and different keys AND. `Match` is text, level and
+  fields; the sites that test the text before parsing call `MatchParsed`. A predicate-only filter is not
+  `Empty()`, so it takes the filtered prefill and `meta.filtered` is true. The browser evaluates the same
+  grammar over a live tail (`matchFields` in `lib/log-filter.ts`), and `testdata/predicates.json` is the
+  one set of vectors both are held to.
+- **A search can answer "who" as well as "which lines"** (`facets.go`), counted in the same pass that
+  collects the matches, from the same lens reading, so a bar in Insights and the lines under it cannot
+  disagree. `facets=` (≤ 12 keys: any field key, `level`, and the virtual `pattern` — the message with its
+  digits, hex, addresses, UUIDs and quoted strings replaced by `<*>`, computed only when asked) returns
+  each key's top `facetLimit` values (12, at most 50) with their error count, first and last stamp,
+  `distinct`, `other` and `missing`; past 20 000 distinct values or 4 MB of value bytes per key the rest
+  folds into `other` and `distinctCapped` says the ranking is approximate. `measure=<key>` adds `sum` and
+  `max` per value and the key's p50–p99, max and mean from a fixed-seed reservoir of 100 000, so asking
+  twice gives one answer; `sample=` keeps the last value of up to three keys beside each value of the
+  first facet (the statement beside its fingerprint, the usernames an attacking address tried).
+  `histogramBy=<key>` splits the columns by a key's values instead of by level — interned to 64 during
+  the scan, the top eight kept, the rest `*` — and `histogramValues=` pins exact series, which is what a
+  page's readings ask. Readings ask about the last hour on every page load, so a search with `since` on
+  a live uncompressed file first bisects on line stamps (`since.go`: at most 16 probes of 64 KB, from
+  2 MB up, backing off to the start whenever stamps are missing or run backwards) and skips an archive
+  whose mtime is older than the window.
+- **The journal's lines carry what the manager knew** (`journalLine`, `procs.ParseJournalLine`). The
+  manager's "Started …" and "Failed with result 'exit-code'" are written by PID 1, so their
+  `_SYSTEMD_UNIT` is `init.scope`; the unit and the run they are about are in `UNIT` and
+  `INVOCATION_ID`. The kept attrs are `unit` (`UNIT` ‖ `USER_UNIT` ‖ `_SYSTEMD_UNIT`), `program`, `pid`,
+  `invocation` — the named unit's run for a manager line, preferred over the writer's own, or every run
+  of a user unit folds into `user@1000.service`'s one — `message_id`, `result`, `exit_code` and
+  `exit_status`. `MESSAGE` goes through `ParseLine`. One journalctl run holds two kinds of line, so
+  `journalRoute` hands the manager's to the `systemd` lens and, where the lens was detected rather than
+  forced, every other program's to its own (`ssh.service`'s lines come from `sshd-session`); a forced
+  `systemd` lens leaves other programs' lines unnamed. With a lens reading, `-p` is never pushed below
+  6 — a lens raises lines a program filed at info, and Postgres writes its FATAL to stderr — and a
+  predicate or that clamp widens a tail's `-n` twenty-five times, as a text filter does.
+- **Three kinds of source were added.** `stack:<project>` (`handlers_logs_stack.go`, a compose project
+  name) is every container of the project from `ListContainers(all)` — replicas and exited ones, whose
+  history is the stack's too — merged by Docker's stamps, each line's `source` the service and its attrs
+  carrying `service` and the short `container`, each container read through its own lens with its own
+  record gate. The tail opens on each container's last n merged by stamp and then follows each running
+  one from its own last stamp; history and export merge into one collector, so a stack's search has one
+  limit, one histogram and one set of facets. `journal-id:<ident>[,<ident>…]` is `journalctl -t` per
+  identifier (1–16, each `procs.ValidateName`'d) and `kernel:` is `journalctl -k`; both are followable and
+  searchable like `journal:`. `/logs/sources` lists one stack per compose project with its `images` and
+  a status; `Source` and `LogJournalUnit` carry `lens`. `GET /logs/source?source=<id>` describes one
+  source — its lens, path, size, modified, archives, archive bytes and status — for a page that embeds
+  one log and should not walk every root and ask Docker, PM2 and systemd about everything else; it has
+  `/logs/sources`' capability and answers 404 for a file that is not there and 400 for one outside the
+  roots. The stream's `meta` carries the lens, and `eof` is a frame.
+- **Auth data is `system.admin`'s** (`logTargetFor`). Every `/logs` route that reads a source — the
+  stream, the search, the export, the retention verdict and `/logs/source` — parses the id through it,
+  so there is no second door to the same lines. It refuses, with a 403 for anyone else, `auth.log` and
+  `secure` (with their numbered generations, `auth.log.1` and `secure-20240612`, and any file resolving
+  to one of them), the `ssh`/`sshd` units and their `ssh@`/`sshd@` instances, and a `journal-id:` naming
+  `sshd`, `sshd-session`, `sshd-auth`, `sudo`, `su`, `login` or `systemd-logind`; `/logs/sources` leaves
+  those files and units out for a non-admin, so nothing is offered that cannot be opened. The reason is
+  `/logins/failed`'s: "Invalid user <what was typed>" is sometimes a password typed into the username
+  prompt, and a sudo line carries the command that was run. **The whole journal (`journal:`) stays
+  readable at `read`**, as it was before the gate existed — narrowing it to sshd is what is gated — and
+  that is a known gap rather than a boundary. `TestAuthLogsNeedAnAdministrator` pins each door.
 
 Frontend `components/logs/`: the page is a workbench like the terminal — one frame, the source rail
 (`source-rail.tsx`, hideable and resizable, remembered through `view-state` and `panel-size`) beside
-`log-workspace.tsx`, a hairline between them. The workspace is one pane: a strip naming the source with
-its kind, path, size and state and the Live/History tabs; `filter-bar.tsx` under it with the one filter,
-the window and the journal unit inline and the exclusion, context, archives and boot behind "More";
-the histogram; the lines; a footer carrying the stream's state, the line and error counts, the search's
-notes and the retention verdict. One filter, because "these errors are scrolling past, when did they
-start" is one thought. Live applies as you type (debounced; the socket restarts, which is what makes the
-prefill meaningful); History runs on Enter, because a keystroke-triggered full scan would queue a pass
-over gigabytes per character. `log-console.tsx` draws each line as columns — a level edge, the line
-number, the clock, the level's word in its colour (`LEVEL_MARK` in `lib/log-filter.ts`, `LEVEL_WORD` in
-`log-text.tsx`), the journal unit in its lane's hue, then the message drawn by its shapes: `lib/log-tokens.ts`
-cuts the text into spans (time, host, program, pid, level, key, string, number, address, URL, path,
-method, status, id, failure and success words) over the original string, so the server's match ranges
-still intersect them, and `log-text.tsx` colours them from one map (design-system §14). While the time
-column is on, the line's own leading timestamp is not drawn, and neither is a syslog hostname that is
-this host's. Error and critical rows are washed, warnings too. A line the server parsed as structured
-(`message` and `fields` on the wire) is drawn as its message and fields in logfmt order, most telling
-field first — except in a History result, whose match ranges are over the raw JSON. Tokens are cached by
-text, because a server's log repeats itself, and each row is memoised, because the live tail appends. A
-"Colour" toggle, persisted with Wrap and Time in `lib/log-view.ts`, shows every line exactly as written.
-The source rail draws each source as its product (a container as its image, nginx, PM2, the system files
-as the host's distribution). The console uses `content-visibility` rather than a virtualiser: off-screen rows skip layout while the scrollbar
-stays honest, wrapped rows keep real heights, and the browser's own find still works. The level chips on
-the strip above the lines carry the on-screen counts and share their swatches (`LEVEL_DOT`) with the
-level column and the histogram. **Pausing holds incoming lines instead of dropping them.**
-`histogram.tsx` is matches by level over time; clicking a column narrows the window to it. The
-deployment pages embed the same workspace framed on its own.
+`log-workspace.tsx`, a hairline between them. The workspace is one pane, and its chrome is at most three
+rows above the lines: a strip naming the source, with its facts beside the name (`source-facts.tsx`:
+kind, path, rotated set, size and state, giving way by the strip's own width rather than the window's)
+and the views as `tabClasses` buttons with `aria-pressed` — **Live**, **History**, **Insights**, then the
+page's own views — with the page's actions, Export among them, at its end; `filter-bar.tsx` with the one
+filter, the window and the journal unit inline and the exclusion, context, archives, boot and a
+**Read as** select (Auto, naming the detected lens; each lens; None) behind "More"; and `lens-bar.tsx`
+only when the lens has something to offer or a predicate is on. The histogram sits over History's lines,
+and a footer carries the stream's state, the counts, the search's notes and the retention verdict. One
+filter, because "these errors are scrolling past, when did they start" is one thought. Live applies as
+you type (debounced; the socket restarts, which is what makes the prefill meaningful); History re-runs
+when a chip, a field, the lens or the regex switch changes, and the words in the box wait for Enter,
+because a keystroke-triggered full scan would queue a pass over gigabytes per character. A `key:value`
+word typed in the box, for a key the lens reads, becomes a field chip on Enter (`12:30` stays text). `/`
+focuses the filter of the pane last pressed or focused, not the first on the page. A reconnect drops the
+lines the server replays that are already on screen rather than appending them again, and an `eof` frame
+stops the reconnecting: "Stopped", with a Reconnect button, since a container that exited would otherwise
+replay its last lines once a second.
 
-Logs accepts `source`, `since` and `until` URL parameters for deployment handoffs. Time bounds must be
-explicit ISO instants with a timezone; they select History and remain exact through search and reload,
-including during a repeated daylight-saving hour. The controls display browser-local time without
-replacing the original instants. Invalid/reversed link bounds require choosing a new window before any
-search. An explicitly requested source missing from discovery stays unavailable; only an unselected
-visit defaults to the first source. Rescan or choosing a source provides recovery.
+`log-console.tsx` draws each line as columns — a level edge, the line number, the time (`lib/log-view.ts`:
+off, clock, date, UTC, or the delta since the line above), then the **event word the lens named** in the
+level's column (`eventMeta` in `lib/log-lenses.ts`: "auth failed" says more than "err"), sized by
+`eventColumnFor` to the longest word on screen within 6–17 characters, or the level's word where no line
+names an event (`LEVEL_MARK` in `lib/log-filter.ts`, `LEVEL_WORD` in `log-text.tsx`); with Colour on, up
+to three of the lens's columns for values its text buries (a Postgres line's duration, user and
+database, drawn by `field-value.tsx`), shown only while some line on screen has one and only from 900 px
+of the console's own width; the journal unit or a stack's service in its lane's hue; then the message
+drawn by its shapes: `lib/log-tokens.ts` cuts the text into spans (time, host, program, pid, level, key,
+string, number, address, URL, path, method, status, id, failure and success words) over the original
+string, so the server's match ranges still intersect them, and `log-text.tsx` colours them from one map
+(design-system §14). In a narrow pane the message moves to a line of its own under the event word and
+the lane rather than starting past the edge. While the time column is on, the line's own leading
+timestamp is not drawn, and neither is a syslog hostname that is this host's. Error and critical rows are
+washed, warnings too; `stderr` is a muted mark, not a verdict, since Postgres writes everything there. A
+line the server parsed as structured (`message` and `fields` on the wire) is drawn as its message and
+fields in logfmt order, most telling field first — except in a History result, whose match ranges are
+over the raw JSON. A record's continuation lines stay under their head, three inline and the rest behind
+an "N more lines" fold that a search hit inside forces open; a lens's lifecycle events (`divider`: a unit
+started, an application came up) draw a rule across the pane; and in Live, consecutive repeats — same
+source, level, event and words, the leading time aside — are one row with `×N` (the Repeats toggle).
+Tokens are cached by text, because a server's log repeats itself, and each row is memoised and keyed by a
+`WeakMap` sequence on the line object rather than its index, because the live tail appends and trims. A
+"Colour" toggle, persisted with Wrap, Time and Repeats in `lib/log-view.ts`, shows every line exactly as
+written. A press on a line — only when nothing is selected, so a drag still copies — opens it **in place**
+(`line-detail.tsx`, the request row's shape): the event as its title, its values as facts drawn as what
+they are, each with "Only lines where …" and "Hide lines where …", the raw text in a `Well` (indented
+when it is JSON), and "Lines around this", two searches either side of the line's instant with nothing
+narrowing them, fetched only on the press. `j`/`k` walk the lines and Enter opens one while the
+console (`aria-label="Log lines"`) has focus. The source rail draws each source as its product (a
+container as its image, nginx, PM2, the system files as the host's distribution, a lens's product where
+it names one). The console uses `content-visibility` rather than a virtualiser: off-screen rows skip
+layout while the scrollbar stays honest, wrapped rows keep real heights, and the browser's own find
+still works. The level chips carry the on-screen counts and share their swatches (`LEVEL_DOT`) with the
+level column and the histogram. **Pausing holds incoming lines instead of dropping them.**
+`histogram.tsx` is matches over time by level, or by the key a search split them by (a status class in
+its family's colour, events by their tone); clicking a column narrows the window to it.
+
+**A lens's presentation is data** (`lib/log-lenses.ts`, types only from `lib/log-fields.ts`, which names
+each attr's label and kind): per lens, its event labels and tones (`mark: false` for the high-volume
+neutral ones — a request, a connection — which keep the level word; `divider` for the lifecycle ones),
+its **quick views** (a question as fields and levels: Postgres's Slow, Auth, Locks, Maintenance), its
+**readings** (figures over the lens's window), its **groups** (a key ranked under the group's own
+predicates, with a sample and a measure: slow statements by their shape with the query beside it,
+attackers by address with the usernames they tried), its facets, measure, columns and **defaults** (the
+auth log's scans hidden), applied on first open as chips the reader can press away. `log-lenses.test.js`
+reads the Go golden (`testdata/lenses.golden.json`) and holds the registry to what the parsers emit, both
+ways. `lens-bar.tsx` is the lens's one row, scrolling sideways: what is narrowed first, as chips that go
+on a press; one **Fields** chip opening a popover of each facet's top values (a press includes, an icon
+excludes); then the quick views with their counts — from History's facets, or tallied over the lines on
+screen in Live. Applying a view replaces the question's fields and levels; pressing it again lets them
+go. `insights.tsx` is **Insights**, any lens's version of the request log's: one overview search
+(`facets`, the measure, `histogramBy=event`) and one per group, in parallel, over the window and the
+filter on screen, drawn as the events over time, a `BarList` per key (a press narrows and stays),
+the measure's ladder where it is milliseconds, each group as a ranked table and the log's patterns last.
+`lens-readings.tsx` is the readings: those on one key share a search, those on levels another, and a
+distinct count asks on its own (`lib/log-insights.ts`), read again each minute and independent of the
+filter on screen; a page with a `StatGrid` of its own takes the tiles from `useLensReadings` (`only`
+names the ones it draws, and the rest are not searched for).
+
+**`service-logs.tsx` is the one thing a page that shows a service's log embeds** — a database's server
+log, a container's output, a site's access log, a unit's journal — so no page sends the reader to
+`/logs`. The page hands over its sources (a picker appears for several), the lens where it knows better
+than detection, its own views (`ServiceLogsView`: a database's Queries, a container's Events, a unit's
+Runs, handed a context with the source, the filter and `openHistory` — History on a stretch of time, on
+another of the page's sources if it names one, narrowed if asked), a `window` to open History on (a crash
+window, a request's moment, narrowed where the page knows how) and `onLeaveWindow` for when the reader
+moves off it, an `ask` for a reading pressed on the page's own grid, an `initialRange`, `readings`
+(`true` for tiles from `sm` up, `"chips"` for the counts on the lens row's chips), and `layout="sheet"`
+for a detail sheet. It merges `GET /logs/source` under what the page said — a page that answers `{}`,
+or a server without the route, loses the facts and nothing else; `described` skips the second read for a
+source the page already asked about; a 403 is a refusal said as the server's sentence, with no socket
+and no search — keeps its state for the tab under the page's `storageKey` (never `logs.*`, which is the
+host page's) or in React state without one, opens an emptied file with its rotated set, clears the
+fields when the source's lens changes, and issues no search on mount but History's own run.
+`service-views.tsx` is where a source's page views are defined once, for the owning page and `/logs`
+alike: `docker:` and `stack:` get Events, a unit's journal Runs, a container or a host log that is a saved
+connection's server Queries (a container through `/databases/fleet`, a file or unit by asking each of
+the host's connections of that engine for its log sources), and an nginx site's access or error log
+Requests.
+
+The page (`app/(dashboard)/logs/page.tsx`) is every service page's reading in one place. The rail groups
+sources as System, the Systemd journal (with the journal's readings by program: SSH log for an
+administrator, Kernel ring, Cron — each only where no file holds the same lines), Containers, **Stacks**,
+**Requests** (`request-records.tsx`: each deployment whose route has a record, from `/deploy/traffic`,
+and each nginx site with an access log of its own, from the vhost listing, read in the workspace column
+through the same `RequestsWorkspace` their own pages use, under the question those pages keep), the web
+server, PM2 and applications. A visit with nothing chosen opens syslog (or messages, or the journal),
+because nine times out of ten the answer is there. A source switch that changes the lens drops the
+fields and applies the new lens's defaults, and what a view or a request opens — "the server log around
+this statement", a failed request's error log — lands here, on History around the moment.
+
+The address carries `source`, `mode` (`live`, `search`, `insights` or a view's id), `q`, `unit`, `since`,
+`until`, `f` (repeated), `levels`, and `lens` only when the reader forced one; a request record is
+`?requests=deploy:<id>` or `site:<name>`, with `mode=insights` for its Insights and the request query in
+the request log's own words. Time bounds must be explicit ISO instants with a timezone; they select
+History and remain exact through search and reload, including during a repeated daylight-saving hour.
+The controls display browser-local time without replacing the original instants. Invalid/reversed link
+bounds require choosing a new window before any search. Field predicates and levels a link carries that
+the server would refuse are dropped in the browser rather than sent. An explicitly requested source
+missing from discovery stays unavailable; only an unselected visit defaults. Rescan or choosing a source
+provides recovery. The old `components/log-viewer.tsx` and `lib/log-format.ts` are gone with their last
+callers.
 
 Published port conflicts during container creation and Compose startup trigger bounded retries with
 available concrete host ports. Existing port owners stay running; bind addresses, protocols, container

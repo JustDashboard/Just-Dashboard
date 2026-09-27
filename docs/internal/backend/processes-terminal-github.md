@@ -34,7 +34,17 @@ a failed detection.
   SIGTERM, SIGKILL, SIGSTOP/SIGCONT and SIGHUP as words with a sentence each. PM2 can gracefully reload and
   `pm2 save` persists the current list for an existing startup hook; it does not install or rewrite that
   platform-specific hook. The systemd sheet reads effective runtime properties beside the journal and
-  links to the unit file; static units do not get an enable/disable control they cannot use.
+  links to the unit file; static units do not get an enable/disable control they cannot use. Its
+  journal is the unit's `journal:<unit>` source on the `/logs` routes, read through the unit's lens
+  with the manager's own lines through the `systemd` lens, and its **Runs** view
+  (`lib/unit-runs.ts`) is one `/logs/search` over a week of that journal asking for the manager's lines
+  alone (`lens=systemd`, `f=program:systemd` and the lifecycle events), grouped by `invocation` —
+  a run's start only from `starting` or `started`, lines the browser still drops when another unit or
+  another program wrote them (a user manager's journal holds every user unit's), a crash loop at three
+  scheduled restarts in ten minutes. systemd-coredump's report is left out: it carries its own unit and
+  invocation and would read as a run, and the manager's `code=dumped` exit already says the run
+  dumped core. sshd's unit is refused to anyone but `system.admin` by the log routes (see
+  [Logs](docker-files-logs.md#logs)), and the sheet says so rather than opening a socket.
 - `GET /pm2/` also carries `daemons`: per account, when `~/.pm2/dump.pm2` was last written and whether a
   `pm2-<user>.service` boot hook exists (a stat under the host's `/etc` and `/lib`); the page states
   both, because a daemon with three online applications and no saved list restores nothing. The
@@ -55,12 +65,29 @@ a failed detection.
   then uses `setpriv` to switch UID/GID and supplementary groups before loading the account's PM2
   executable. No dashboard environment is inherited, privilege escalation is disabled, and command
   output is bounded. The host must provide `/usr/bin/setpriv`; failure never falls back to root.
-- Each PM2 row carries trusted `daemonId` (the Linux username) and numeric `id`. Controls and logs pass
+- Each PM2 row carries trusted `daemonId` (the Linux username) and numeric `id`. Controls pass
   `?user=<daemonId>&id=<id>`; ambiguous name-only calls are refused. Controls refresh the process list,
   verify the name/account/id tuple, and invoke PM2 with the numeric id. `pm2 save` visits each account.
+  A process's logs are the unified source `pm2:<daemon>/<id>/<name>` (account and name path-escaped) on
+  the `/logs` routes, read through the `pm2` lens behind PM2's own timestamp prefix. `PM2Process.logTimes`
+  says whether PM2 stamps each line (`--time` or `log_date_format`): without it a line carries only
+  whatever time the application printed, so the sheet offers its "around the last start" window only
+  when it is true.
 - PM2 log filenames cannot grant access outside `JD_LOG_ROOTS`. An administrator must explicitly
   configure custom log directories; the source list and stream errors explain this requirement. Unified
   log source ids carry account, numeric id and name, while unique legacy name-only ids remain accepted.
+- **The per-feature log routes are gone.** `GET /systemd/{name}/journal`, `/systemd/{name}/journal/stream`
+  and `/pm2/{name}/logs/stream` had no caller once the sheets embedded the service logs, and they read
+  a unit's journal and a process's files around what the `/logs` routes decide — the auth-data gate
+  among it. `procs.JournalCommand`, their tail form, went with them; `JournalCommandOpts` builds every
+  journalctl run, with `Identifiers` (`-t`, repeated) for a `journal-id:` source, `Kernel` for `-k` and
+  `Reverse` for a search that must reach the newest end first.
+- **`ParseJournalLine` reads what the manager recorded about a unit**, not only who wrote the line. The
+  manager's "Started …" and "Failed with result 'exit-code'" come from PID 1 (`_SYSTEMD_UNIT` is
+  `init.scope`), so it keeps `UNIT`/`USER_UNIT`, `_COMM`, `MESSAGE_ID`, `UNIT_RESULT`, `EXIT_CODE`,
+  `EXIT_STATUS` and the cursor, and takes the invocation of the unit a manager line names
+  (`INVOCATION_ID`, then `USER_INVOCATION_ID`) over the writer's own: a user manager is
+  `user@1000.service`, one run, under which every run of every user unit would otherwise fold into one.
 - systemd grew `reset-failed` (`service.control`) and `POST /systemd/daemon-reload` (`system.admin`),
   and `GET /systemd/timers` joins `list-timers --all` (schedule) with `list-units --type=timer` (state)
   and `list-unit-files --type=timer` (startup) on the unit name. `next` and `last` are read as
@@ -76,6 +103,10 @@ a failed detection.
   browser's clock; the page says so. There is no "run now" for a cron line: a crontab command is a
   shell string, and running it would mean a request-built `sh -c`, which invariant 4 forbids. Writes use
   stdin (`crontab -u <user> -`), so a container-only temporary file or spool cannot receive a host job.
+  What cron ran is read from its own log on the Scheduled page, through the `cron` lens: the daemon's
+  unit journal (`cron`, `crond` or `cronie`), else a cron file, else the journal's `CRON`/`crond` lines
+  (`journal-id:`), chosen from `GET /logs/sources` and asked again when that read fails; a timer's row
+  opens the activated service's runs.
 
 ## The terminal
 

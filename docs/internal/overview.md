@@ -64,10 +64,27 @@ Integration families skip rather than fail when their dependencies are absent:
 Extend these when you touch the matching surface: security — `httpx/confirm_test.go`,
 `api/routes_test.go`, `api/docker_spec_test.go`, `files/files_test.go`, `safepath/safepath_test.go`,
 `dbx/classify_test.go`, `api/handlers_security_test.go` (signs a real admin in and drives whole routes,
-because a rule tested in its own package says nothing about which group the route was mounted in);
+because a rule tested in its own package says nothing about which group the route was mounted in),
+`api/handlers_logs_test.go` (`TestAuthLogsNeedAnAdministrator`: every `/logs` route that reads a
+source refuses login and sudo records to a non-administrator);
 product *claims* — `dockerx/diagnose_test.go`, `netsec/posture_test.go`, `proxysvc/tlsscan_test.go`;
 nginx rendering **including the parse back** — `proxysvc/sites_test.go`, since anything the renderer
 emits and the parser cannot read is a field silently dropped on the next save.
+
+**The log lenses are held to the browser from the Go side.** A lens change rewrites
+`backend/internal/logsx/testdata/lenses.golden.json` with
+`go test ./internal/logsx -run TestLensGolden -update` (the test fails on a stale file), and
+`frontend/src/lib/log-lenses.test.js` reads it to hold the registry to what the parsers emit both
+ways — every event labelled, every key a view, reading, group or column names one the lens's lines
+carry. `logsx/testdata/predicates.json` is one set of field-predicate
+vectors that `logsx` and `lib/log-filter.test.js` both run, so the server and a live tail cannot
+disagree about a chip. A lens's own table tests use real lines from the formats it reads, and
+`readThrough` fails a lens that emits an event or attr it does not declare. In the browser,
+`tests/browser/logs-lens.spec.ts` drives the engine on `/logs` against `logs-lens-fixture.ts`, whose
+lines carry the events, attrs and records the Go lenses produce; `logs-views.spec.ts` checks that
+`/logs` offers each source its service page's views and the Requests group; and each service page's own
+spec covers its log (`host-logs-fixture.ts` for Security and Packages, `processes-logs-fixture.ts` for
+Processes).
 
 Deployment foundation checks can be isolated while iterating:
 

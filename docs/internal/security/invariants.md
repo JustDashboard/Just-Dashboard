@@ -15,7 +15,8 @@ A change that weakens any of these has to say so explicitly.
    wrapped in `s.destructive` wholesale, so it enforces the same capability and `destrLim` budget by hand.
 4. Capability checks live on the route, never in the UI alone. Where the answer depends on what is *in* the
    request, the handler checks by hand and fails closed: `dbx.Classify` for SQL, `api.authoriseSpec` for a
-   container spec that is privileged or mounts a host path.
+   container spec that is privileged or mounts a host path, `api.logTargetFor` for a log source that is
+   login and sudo records (auth data needs `system.admin` on every `/logs` route that reads a source).
 5. Every state-changing request lands in the audit log.
 6. Client-supplied paths go through `files.Resolve` — including the ones that do not look like file
    operations (bind-mount source, build context, a new stack's directory). Host commands go through

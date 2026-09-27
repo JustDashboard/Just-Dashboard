@@ -182,6 +182,51 @@ Redis on pure-Go drivers, so the image still needs no CGO.
   `pg_stat_statements` (13+ and older column names both) or
   `performance_schema.events_statements_summary_by_digest`, top N by total time, and reports
   `supported: false` with the reason where neither is there.
+- **The server's own log, found from its connection.** `GET /databases/{id}/logs/sources`
+  (`handlers_db_logs.go`, on the read surface — reading what the server printed is what `/activity`
+  already shows any role) answers `{sources, refused?, reason?, note?}`, each source in `/logs/sources`'
+  shape plus `primary`, read through the engine's lens by the connection's driver (`driverLens` — a
+  Postgres in a custom image is still Postgres). A SQLite file and a server on another machine have none,
+  with the reason. A container behind the connection is `docker:<name>` — the name, so the log survives
+  a recreate. A server on this machine is followed from its port: the listener (`proxysvc.ListListeners`;
+  behind `docker-proxy`, the container publishing the port, whatever its image says), its process's
+  manager (`procs.ManagerOf`, where a `container` manager is `docker:<name>` again), the files it and up
+  to 64 of its children hold open **for appending** (`/proc/<pid>/fd` with `fdinfo`'s flags, log-like
+  names only — a data file is opened for writing, a log for appending), the engine package's conventional
+  files that exist (`/var/log/postgresql/postgresql-<V>-<C>.log` from the Debian unit's instance name,
+  MySQL's, Redis's, MongoDB's, ClickHouse's), then the unit's journal. The first file is primary even at
+  0 bytes — rotation just emptied it, and the page opens it with its rotated set — and a journal is
+  primary only when no file is the server's (Debian's Postgres writes nothing there but systemd's starts
+  and stops). A path the log roots refuse is listed under `refused` with the reason rather than dropped,
+  and the journal beside it is not made primary, since the statements are in that file. With nothing
+  listening — stopped, crashed or starting, which is when a log is read most — it is found the ways a
+  stopped server can be: a container publishing the port without `docker-proxy`, the container the
+  connection is named after (the sync names adopted containers so), running or not, and the engine's
+  units by name, skipping one serving another port and Debian's umbrella `postgresql.service`, with
+  their files and journals and a `note` saying the server is not answering. Nothing goes through
+  `hostexec`: `/proc` is read, the units come from the same systemd listing `/logs/sources` uses, and
+  every file through `logs.Allow`. One resolution answers for 45 seconds per connection
+  (`Server.dbLogSourcesKept`, keyed on a hash of the DSN, never stored when the request's deadline cut
+  it short), since the page and its Queries view ask on different cadences and each asking walks every
+  process's sockets.
+- **The statements it recorded.** `GET /databases/{id}/querylog?since&until&limit&minMs` (read, 15
+  seconds; no `since` is the last day, `limit` 200 up to 500, a malformed bound a 400) answers
+  `{supported, reason?, source, enable?, threshold?, entries, truncated}` from wherever the engine keeps
+  its slow statements: Postgres's server log searched through its lens for `event:slow`, rotated files
+  included, each statement rejoined from its continuation lines (the search budgets 50 lines per row,
+  capped at 20 000, and counts rows once joined) with `enable` the `ALTER SYSTEM` for
+  `log_min_duration_statement` and its current value from `pg_settings`; MySQL's `mysql.slow_log` where
+  `log_output` has `TABLE` and the slow log is on (the `minMs` floor in the SQL), else
+  `performance_schema.events_statements_history` from `long_query_time` up; MariaDB's `slow_log` only;
+  Redis's `SLOWLOG GET 128`; MongoDB's log through its lens, or `getLog global` over the connection when
+  the server is elsewhere or its file is refused; ClickHouse's `system.query_log`, initial queries past
+  `QueryStart`, with its own read marked and left out. SQL Server, Oracle and SQLite are
+  `supported: false` with the reason, and so is a Postgres whose log the roots refuse, naming the path
+  and `JD_LOG_ROOTS`. `fp` is `logsx.Fingerprint` — over the statement, over Redis's command and key
+  shape, over a Mongo command's shape — shared with the lenses, so a statement found in the log and in
+  the Queries list is one group (ClickHouse's is `normalized_query_hash` as 12 hex digits). A read that runs
+  out of time sets `truncated` with a reason rather than passing a partial list off as the window. Like
+  `/activity` and `/statements`, it returns statement text with its literals at read capability.
 - **The dumps on disk.** `GET /databases/{id}/backups` lists the connection's dump directory
   newest first with each file's size and format; `DELETE /databases/{id}/backups` (destructive,
   not typed: the database is still there to dump again) removes one, contained against that
@@ -336,7 +381,39 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   parameter — where `4430` and `127.0.0.1:8443` used to count as TLS, and the pre-1.25
   `listen 443 ssl http2` reads back as HTTP/2 on. A file with no `access_log` directive is logging
   to nginx's default, so an unmanaged file round-trips with logging on rather than the first save
-  writing `access_log off;`.
+  writing `access_log off;`. Only a server-level `access_log`/`error_log` is the site's —
+  `access_log off` under `/favicon.ico` silences one path, and read as the site's it told the form a
+  site logging to nginx's shared file kept no log at all — and the first that names a file is `SiteSpec.AccessLogPath`
+  / `ErrorLogPath` (`logFile`: `off`, `syslog:`, `stderr`, `memory:`, anything under `/dev/`, a path
+  with a variable and a relative one are not a file this can read). There is no fallback to the managed
+  names: nginx writes nothing there once the directive is gone. `VHost` carries both, read the same way
+  in the listing, so a list of sites says which keep a request record of their own without a read per
+  site; the renderer and every reader spell the managed paths through `nginxAccessLogPath` /
+  `nginxErrorLogPath`.
+- **A site's requests are read the way a deployment's are** (`site_access_log.go`,
+  `handlers_proxy_site_requests.go`). `GET /proxy/sites/{name}/requests`, `/requests/stream`
+  (WebSocket) and `/requests/export` (CSV) are reads, like the site itself, and share
+  `requestFilterFrom`, the window, the cursor tail and the export with the deployment routes (one
+  `followRequests`/`exportRequests` for both), over the one `accesslog.Store` — two stores would hold
+  two caps, and the cap bounds what the whole process keeps. `SiteRequestRoute` resolves the record
+  **from the site's file on every request**, so an edit that moves `access_log` — the form, the raw
+  sheet or an editor over SSH — reads the new file from the next poll: an nginx site is the record
+  `file:<its access log>`, refused unless `logs.Allow` accepts it; a `just-dashboard-*` site whose file
+  logs where the renderer puts it, and a Docker Caddy route with no file on the host, are the
+  deployment's own route, the record its Logs page already holds. `SiteRecordReader` asks `logs.Allow`
+  again before every open of the live file and of each rotated generation, since a generation beside
+  the file can be a link to anywhere, and generations are the names logrotate gives (`logsx.Archives`:
+  `.N` and dated), compressed ones skipped — for deployments' nginx files too. A site with no file, no
+  access log of its own (off, syslog, or nginx's shared log, whose combined lines do not say which site
+  answered) or one outside the roots answers `unavailable` with that sentence, and the stream and export
+  refuse it with a 400. The name in the URL is unescaped, so a Caddy host with a colon works. A
+  deployment's window carries `ingress` (the Caddy container) or `errorLog` (the nginx site's
+  `.error.log`), where the proxy says why it failed a request. The rest of the proxy's logs are read on
+  the pages they are about, through the `/logs` routes: a site's own page (its access and error files,
+  nginx's shared error log narrowed to its names, the ingress container or `journal:caddy.service`),
+  the overview's Engine log (nginx's two files and unit, a host Caddy's unit, and the Docker Caddy
+  ingress once `GET /logs/source` finds its container) and Certificates' Renewals (`letsencrypt.log`
+  and the renewal unit's journal, through the `certbot` lens).
 - **`SetVHostEnabled` replaces a stale link.** Enabling a site whose `sites-enabled` entry already
   existed but pointed elsewhere returned success and changed nothing; it goes through `linkEnabled`
   now, so the switch saying on means nginx reads the file. `parseCaddyfile` tracks brace depth so
