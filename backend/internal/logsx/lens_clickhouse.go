@@ -85,11 +85,11 @@ func (r *clickhouseReader) Read(l *Line) {
 
 	msg := h.msg
 	switch {
-	case strings.HasPrefix(msg, "(from "):
+	case component == "executeQuery" && strings.HasPrefix(msg, "(from "):
 		clickhouseQuery(l, msg)
 	case strings.Contains(msg, "Exception: ") || strings.HasPrefix(msg, "Code: "):
 		clickhouseException(l, msg)
-	case strings.HasPrefix(msg, "Read ") && strings.Contains(msg, " rows, ") && strings.Contains(msg, " sec."):
+	case component == "executeQuery" && strings.HasPrefix(msg, "Read ") && strings.Contains(msg, " sec."):
 		// "Read 1000000 rows, 7.63 MiB in 0.066 sec., …", the query's end.
 		l.Event = "query"
 		dbNumberAttr(l, "rows", dbBetween(msg, "Read ", " rows, "))
@@ -123,6 +123,12 @@ func clickhouseQuery(l *Line, msg string) {
 	address, rest, _ := strings.Cut(inside, ", ")
 	dbPeer(l, address)
 	l.SetAttr("user", dbWord(rest, "user: "))
+	// Newer servers put the query's comment setting before it.
+	if strings.HasPrefix(query, "(comment: ") {
+		if _, after, found := strings.Cut(query, ") "); found {
+			query = after
+		}
+	}
 	if i := strings.LastIndex(query, " (stage: "); i >= 0 {
 		query = query[:i]
 	}
