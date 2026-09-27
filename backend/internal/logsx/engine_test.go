@@ -926,7 +926,18 @@ func BenchmarkSearchLens(b *testing.B) {
 		{"lens", SearchOptions{Limit: 1, Filter: Filter{Lens: recordLens.ID}}},
 		{"lens+query", SearchOptions{Limit: 1, Filter: Filter{Lens: recordLens.ID, Query: "deadlock"}}},
 		{"lens+facets", SearchOptions{Limit: 1, Filter: Filter{Lens: recordLens.ID}, Facets: []string{"event", "pid", "level"}}},
+		// The shipped lenses over the same mixed lines, each recognising its
+		// own share and passing over the rest, which is the cost a wrong
+		// detection or a forced lens puts on a search.
+		{"postgres", SearchOptions{Limit: 1, Filter: Filter{Lens: "postgres"}}},
+		{"auth", SearchOptions{Limit: 1, Filter: Filter{Lens: "auth"}}},
+		{"syslog", SearchOptions{Limit: 1, Filter: Filter{Lens: "syslog"}}},
+		{"http-access", SearchOptions{Limit: 1, Filter: Filter{Lens: "http-access"}}},
+		{"app", SearchOptions{Limit: 1, Filter: Filter{Lens: "app"}}},
 	} {
+		if lens, _ := LensByID(run.opts.Filter.Lens); lens == nil && run.opts.Filter.Lens != "" {
+			continue
+		}
 		b.Run(run.name, func(b *testing.B) {
 			for b.Loop() {
 				if _, err := svc.Search(context.Background(), path, run.opts); err != nil {
