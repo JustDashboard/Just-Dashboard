@@ -19,6 +19,8 @@ import { EmptyState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useProxy } from "@/components/proxy/proxy-context"
 import { EngineActions, EngineIdentity, useEngineUnit } from "@/components/proxy/engine"
+import { EngineLog } from "@/components/proxy/engine-log"
+import { sitePath } from "@/components/proxy/site-verbs"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { certificateProduct, siteProduct } from "@/components/proxy/marks"
 import { SiteTLS } from "@/components/proxy/site-marks"
@@ -38,7 +40,8 @@ import { foldProxyFindings } from "@/components/proxy/attention"
  * exposed socket as needing attention. The engine is a fact, so it is in the
  * facts row; and the attention list is folded from the conditions somebody
  * would actually act on, with the same three-part shape the host's health
- * findings use.
+ * findings use. It ends on the engine's own log, read here rather than on
+ * the Logs page, because this is where "why is the proxy unhappy" is asked.
  */
 export default function ProxyOverviewPage() {
   const { status, loading, refresh: refreshStatus } = useProxy()
@@ -312,7 +315,7 @@ export default function ProxyOverviewPage() {
                 {hosts.slice(0, 8).map((vhost) => (
                   <ChoiceRow
                     key={`${vhost.kind}:${vhost.name}`}
-                    href={`/proxy/sites?site=${encodeURIComponent(vhost.name)}`}
+                    href={sitePath(vhost.name)}
                     verb={`Open ${vhost.name}`}
                     leading={<ProductLogo id={siteProduct(vhost)} size="sm" />}
                     title={
@@ -375,6 +378,8 @@ export default function ProxyOverviewPage() {
           </PanelBody>
         </Panel>
       </div>
+
+      <EngineLog status={status} />
     </Page>
   )
 }

@@ -116,6 +116,7 @@ export function RequestsWorkspace({
   outputFor,
   renderInline,
   afterInsights,
+  detail,
 }: {
   /**
    * Where this record lives on the API — `/deploy/12` or `/proxy/sites/shop` —
@@ -153,6 +154,8 @@ export function RequestsWorkspace({
   renderInline?: (entry: RequestEntry, window: DeploymentRequests) => React.ReactNode
   /** A section the page adds at the end of Insights, over the same window. */
   afterInsights?: (window: { since?: string; until?: string }) => React.ReactNode
+  /** What the record's owner knows about one request, in its opened row. */
+  detail?: (entry: RequestEntry) => React.ReactNode
 }) {
   const { can } = useAuth()
   const [live, setLive] = useState(false)
@@ -367,6 +370,7 @@ export function RequestsWorkspace({
           onEventsAround={onEventsAround}
           outputFor={outputFor}
           renderInline={renderInline && ((entry) => renderInline(entry, data))}
+          detail={detail}
           leading={
             <ClassChips
               selected={query.classes}
@@ -393,7 +397,7 @@ export function RequestsWorkspace({
               description={
                 narrowed
                   ? "Nothing matched. Widen the window or clear the filters."
-                  : "Nothing has asked for this deployment in the window you chose. Widen it, or turn Live on and watch for the first request."
+                  : "No request arrived in the window you chose. Widen it, or turn Live on and watch for the first one."
               }
             />
           }
