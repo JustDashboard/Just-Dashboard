@@ -60,6 +60,23 @@ func TestBoardsPersistAndRejectStaleSaves(t *testing.T) {
 			t.Errorf("scene %s = %d %s", scene, rec.Code, rec.Body.String())
 		}
 	}
+	image := strings.Repeat("A", maxBoardSceneBytes+2<<20)
+	for label, size := range map[string]int{"scene": maxBoardSceneBytes, "body": maxBoardSceneBytes + 2<<20} {
+		big := fmt.Sprintf(`{"name":"Too big","revision":2,"scene":{"elements":[],"appState":{},"files":{"f":{"dataURL":"%s"}}}}`, image[:size-50])
+		if rec := admin.do(http.MethodPut, path, big, nil); rec.Code != http.StatusRequestEntityTooLarge ||
+			!strings.Contains(rec.Body.String(), "board_too_large") {
+			t.Errorf("oversized %s = %d %.200s", label, rec.Code, rec.Body.String())
+		}
+	}
+	// The editor sends an Excalidraw file, whose envelope carries type, version
+	// and source beside the three fields the server checks.
+	excalidraw := `{"type":"excalidraw","version":2,"source":"https://excalidraw.com","elements":[{"type":"image","id":"i","fileId":"f"}],"appState":{"gridSize":20},"files":{"f":{"id":"f","mimeType":"image/png","dataURL":"data:image/png;base64,AA=="}}}`
+	if rec := admin.do(http.MethodPut, path, fmt.Sprintf(`{"name":"Production map","revision":2,"scene":%s}`, excalidraw), nil); rec.Code != http.StatusOK {
+		t.Fatalf("excalidraw file save = %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := admin.do(http.MethodGet, path, "", nil); !strings.Contains(rec.Body.String(), `"dataURL":"data:image/png;base64,AA=="`) {
+		t.Fatalf("saved image missing = %s", rec.Body.String())
+	}
 	if rec := reader.do(http.MethodDelete, path, "", nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("reader delete = %d %s", rec.Code, rec.Body.String())
 	}
