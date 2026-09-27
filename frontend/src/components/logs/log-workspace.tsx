@@ -4,7 +4,6 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import {
   ChartActivity,
   ClockRewind,
-  LineChart,
   MagnifyingGlass,
   MagnifyingGlassMinus,
   RefreshClockwise,
@@ -41,6 +40,7 @@ import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { FilterBar, LevelChips, claimPane } from "@/components/logs/filter-bar"
 import { Histogram } from "@/components/logs/histogram"
+import { Insights } from "@/components/logs/insights"
 import { LensBar } from "@/components/logs/lens-bar"
 import { LineDetail } from "@/components/logs/line-detail"
 import { LogConsole } from "@/components/logs/log-console"
@@ -117,17 +117,21 @@ type WorkspaceProps = {
   modes?: ("live" | "search" | "insights")[]
   /** A page's own views of the source, after the three. */
   views?: WorkspaceView[]
-  /** Insights for this source and filter. */
-  renderInsights?: (ctx: {
-    lens: LogLens | undefined
-    lensId: string | undefined
-  }) => React.ReactNode
+  /**
+   * The lens's readings at the top of Insights: the logs page, which has no
+   * room above its workbench. A service page draws them above its pane.
+   */
+  insightReadings?: boolean
   /** A page's verbs for one line — "Block this address" on an auth line. */
   lineVerbs?: (line: LogLine) => Verb[]
   /** One column of a workbench that draws the frame: no frame of its own. */
   flush?: boolean
+  /** A sheet's narrow column: the lens's value columns stay in the detail. */
+  compact?: boolean
   /** What sits before the source's name in the top strip — the rail toggle. */
   leading?: React.ReactNode
+  /** The source's name in the strip, where it is a control: the picker of a page's sources. */
+  name?: React.ReactNode
   /** The source's facts, beside its name: its kind, path, size, state. */
   facts?: React.ReactNode
   /** Commands for the source, at the end of the workbench strip. */
@@ -194,6 +198,11 @@ export function LogWorkspace(props: WorkspaceProps) {
 
   const search = useHistorySearch(props, lens, setSearchedLens)
 
+  // Insights re-reads on its own when a chip, a field or the window changes;
+  // Enter, Search and a zoom are the asks that carry the words in the box.
+  const [insightAsk, setInsightAsk] = useState(0)
+  const [insightFacets, setInsightFacets] = useState<LogSearchResult["facets"]>()
+
   // Arriving on a shared link that already says "history, this term" should
   // show the answer, not a form with the question typed into it. The workspace
   // is keyed on the source, so this fires once per source rather than on every
@@ -259,8 +268,8 @@ export function LogWorkspace(props: WorkspaceProps) {
     [source.kind],
   )
   const columns = useMemo(
-    () => lens?.columns?.filter((key) => !laneKeys.includes(key)),
-    [lens, laneKeys],
+    () => (props.compact ? undefined : lens?.columns?.filter((key) => !laneKeys.includes(key))),
+    [lens, laneKeys, props.compact],
   )
   // The words a `key:value` in the search box may name: what the lens reads,
   // and nothing at all on a source without one, where `error:` is prose.
@@ -318,7 +327,7 @@ export function LogWorkspace(props: WorkspaceProps) {
       <div className="flex min-h-10 shrink-0 items-stretch border-b border-hairline pr-1 pl-2">
         <div className="flex min-w-0 flex-1 items-center gap-2 py-1.5">
           {props.leading}
-          <span className="truncate text-body font-medium">{source.label}</span>
+          {props.name ?? <span className="truncate text-body font-medium">{source.label}</span>}
           {props.facts}
         </div>
         {props.actions && <div className="flex shrink-0 items-center gap-2">{props.actions}</div>}
@@ -365,9 +374,10 @@ export function LogWorkspace(props: WorkspaceProps) {
           onFilterChange={onFilterChange}
           onSubmit={(next) => {
             if (mode === "search") search.run({ filter: next })
+            else if (mode === "insights") setInsightAsk((n) => n + 1)
             else if (mode === "live") switchMode("search", next)
           }}
-          searching={search.loading}
+          searching={mode === "search" && search.loading}
           source={source}
           units={props.units}
           unit={props.unit}
@@ -411,7 +421,13 @@ export function LogWorkspace(props: WorkspaceProps) {
           filter={filter}
           onFilterChange={onFilterChange}
           lines={mode === "live" ? live.lines : undefined}
-          facets={mode === "search" ? search.result?.facets : undefined}
+          facets={
+            mode === "search"
+              ? search.result?.facets
+              : mode === "insights"
+                ? insightFacets
+                : undefined
+          }
         />
       )}
 
@@ -419,15 +435,30 @@ export function LogWorkspace(props: WorkspaceProps) {
         <div className="flex min-h-0 flex-1 flex-col overflow-auto">{view.render()}</div>
       ) : mode === "insights" ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-auto">
-          {props.renderInsights?.({ lens, lensId }) ?? (
-            <div className="flex flex-1 items-center justify-center p-6">
-              <EmptyState
-                icon={LineChart}
-                title="Insights"
-                description="What this log adds up to over the window: its events over time, its busiest values and its slowest records."
-              />
-            </div>
-          )}
+          <Insights
+            sourceId={sourceId}
+            lens={lens}
+            lensId={lensId}
+            forcedLens={forced}
+            filter={filter}
+            onFilterChange={onFilterChange}
+            onShowLines={(next) => {
+              onFilterChange(next)
+              switchMode("search", next)
+            }}
+            range={props.range}
+            since={props.since}
+            until={props.until}
+            archives={props.archives}
+            boot={props.boot}
+            ask={insightAsk}
+            readings={props.insightReadings}
+            onZoom={(from, to) => {
+              props.onCustomRange(from, to)
+              setInsightAsk((n) => n + 1)
+            }}
+            onOverview={(result) => setInsightFacets(result?.facets)}
+          />
         </div>
       ) : (
         <>

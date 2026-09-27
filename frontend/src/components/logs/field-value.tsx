@@ -42,12 +42,16 @@ const PRODUCT: Record<NonNullable<LogField["product"]>, (value: string) => strin
  *
  * `plain` is the console's Colour switch turned off: a failure and a slow
  * answer keep their colour, because those are readings of state (§3).
+ *
+ * `glyph={false}` is a list with a slot of its own for the mark (a `BarList`
+ * row's), which `FieldMark` fills so the names still start on one line.
  */
 export function FieldValue({
   name,
   value,
   compact,
   plain,
+  glyph = true,
   lens,
   className,
 }: {
@@ -55,6 +59,7 @@ export function FieldValue({
   value: string
   compact?: boolean
   plain?: boolean
+  glyph?: boolean
   /** The lens an `event` value is named by. */
   lens?: string
   className?: string
@@ -91,7 +96,7 @@ export function FieldValue({
 
   switch (field.kind) {
     case "address": {
-      if (compact) return <Address ip={value} plain={plain} className={className} />
+      if (compact || !glyph) return <Address ip={value} plain={plain} className={className} />
       const network = networkOf(value)
       const Place = NETWORK_GLYPH[network.kind]
       return (
@@ -162,7 +167,7 @@ export function FieldValue({
       )
     case "product": {
       const product = field.product ? PRODUCT[field.product](value) : undefined
-      if (compact || !product) {
+      if (compact || !product || !glyph) {
         return (
           <span
             title={value}
@@ -199,4 +204,23 @@ export function FieldValue({
         </span>
       )
   }
+}
+
+/**
+ * What a value is, as a mark before it: an address's network, a unit's or a
+ * package's product. Nothing for a value that is no place and no product.
+ */
+export function FieldMark({ name, value }: { name: string; value: string }) {
+  const field = fieldOf(name)
+  if (field.kind === "address") {
+    const network = networkOf(value)
+    const Place = NETWORK_GLYPH[network.kind]
+    return network.product ? (
+      <ProductGlyph id={network.product} />
+    ) : (
+      <Place aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+    )
+  }
+  const product = field.kind === "product" && field.product && PRODUCT[field.product](value)
+  return product ? <ProductGlyph id={product} /> : null
 }

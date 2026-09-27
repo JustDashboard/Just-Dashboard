@@ -188,7 +188,9 @@ export function FilterBar({
     (boot && isJournal ? 1 : 0) +
     (lens && onLensChange ? 1 : 0)
   const detected = lensFor(detectedLens)?.label
-  const customRow = mode === "search" && range === "custom"
+  // History and Insights both read a window of the file; Live reads its end.
+  const windowed = mode === "search" || mode === "insights"
+  const customRow = windowed && range === "custom"
 
   return (
     <>
@@ -245,9 +247,11 @@ export function FilterBar({
           />
         </form>
 
-        {isJournal && <UnitPicker units={units} value={unit} onChange={onUnitChange} />}
+        {isJournal && units.length > 0 && (
+          <UnitPicker units={units} value={unit} onChange={onUnitChange} />
+        )}
 
-        {mode === "search" && (
+        {windowed && (
           <>
             <Select value={range} onValueChange={(v) => onRangeChange(v as LogTimeRange)}>
               <SelectTrigger size="sm" className="w-40" aria-label="Window">
@@ -341,7 +345,7 @@ export function FilterBar({
                 </Field>
               )}
 
-              {mode === "search" && hasArchives && (
+              {windowed && hasArchives && (
                 <label className="flex items-center gap-2 text-xs">
                   <Switch size="sm" checked={archives} onCheckedChange={onArchivesChange} />
                   <span>

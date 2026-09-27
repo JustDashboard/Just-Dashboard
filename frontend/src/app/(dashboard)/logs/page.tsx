@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { Logs, SidebarLeftClose, SidebarLeftOpen } from "@/components/icons"
 import { get } from "@/lib/api"
-import { bytes, relativeTime } from "@/lib/format"
 import type { LogSource, LogSourceIndex } from "@/lib/types"
 import {
   EMPTY_FILTER,
@@ -17,17 +16,17 @@ import { lensFor, withLensDefaults } from "@/lib/log-lenses"
 import { journalSource } from "@/lib/log-sources"
 import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
 import { usePoll } from "@/hooks/use-poll"
+import { useAuth } from "@/hooks/use-auth"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePanelSize } from "@/lib/panel-size"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { Page, PageContext } from "@/components/page"
 import { EmptyState } from "@/components/state"
-import { Status } from "@/components/status-dot"
-import { Tag } from "@/components/tag"
 import { IconAction } from "@/components/icon-action"
 import { ResizeHandle } from "@/components/resize-handle"
 import { Button } from "@/components/ui/button"
-import { KIND_TAG, SourceRail } from "@/components/logs/source-rail"
+import { SourceRail, railSources } from "@/components/logs/source-rail"
+import { SourceFacts } from "@/components/logs/source-facts"
 import { ExportDialog } from "@/components/logs/export-dialog"
 import { LogWorkspace } from "@/components/logs/log-workspace"
 
@@ -65,10 +64,13 @@ function toLocalInput(date: Date) {
 export default function LogsPage() {
   const params = useSearchParams()
   const { host } = useMetrics()
+  const { can } = useAuth()
+  const admin = can("system.admin")
   const sources = usePoll(
     (signal) => get<LogSourceIndex>("/logs/sources", undefined, signal),
     60000,
   )
+  const listed = useMemo(() => railSources(sources.data, admin), [sources.data, admin])
 
   // Keep exact instants from shared links; converting them to local input values
   // before searching would lose the offset during a repeated daylight-saving hour.
@@ -141,7 +143,7 @@ export default function LogsPage() {
   // the answer is in syslog, and the operator can switch in one click if it is
   // not. Derived rather than stored, so no effect has to sync it.
   const selected: LogSource | null = useMemo(() => {
-    const list = sources.data?.sources ?? []
+    const list = listed
     if (!picked) {
       return (
         list.find((s) => s.id === "file:/var/log/syslog") ??
@@ -156,7 +158,7 @@ export default function LogsPage() {
         (s) => s.id === picked || (picked.startsWith("journal:") && s.kind === "journal"),
       ) ?? null
     )
-  }, [sources.data, picked])
+  }, [listed, picked])
 
   // The journal is one source with a thousand faces, so the unit rides on the
   // id rather than filling the rail with systemd's inventory.
@@ -250,6 +252,7 @@ export default function LogsPage() {
           <div className="relative flex max-h-64 shrink-0 border-b border-hairline lg:max-h-none lg:w-(--jd-rail) lg:border-r lg:border-b-0">
             <SourceRail
               index={sources.data}
+              sources={listed}
               loading={sources.loading}
               error={sources.error}
               selectedId={selected?.id ?? null}
@@ -328,6 +331,7 @@ export default function LogsPage() {
               setFilter((f) => ({ ...f, fields: {} }))
             }}
             detectedLens={detectedLens}
+            insightReadings
             range={range}
             onRangeChange={setRange}
             since={since}
@@ -369,39 +373,6 @@ export default function LogsPage() {
         )}
       </div>
     </Page>
-  )
-}
-
-/**
- * What the chosen source is: its kind, where it lives, how big it is and
- * whether its writer is running. The facts sit beside the name in the
- * workspace's strip rather than under a title as a caption, and truncate
- * rather than wrap so the strip stays one line.
- */
-function SourceFacts({ source }: { source: LogSource }) {
-  const hasSize = source.size !== undefined && source.size > 0
-  return (
-    <span className="hidden min-w-0 items-center gap-x-3 text-hint text-muted-foreground md:flex">
-      <Tag>{KIND_TAG[source.kind]}</Tag>
-      {source.status && <Status state={source.status} className="text-hint" />}
-      {source.path && (
-        <span className="truncate font-mono" title={source.path}>
-          {source.path}
-        </span>
-      )}
-      {hasSize ? (
-        <span className="numeric whitespace-nowrap">
-          {bytes(source.size)} · {relativeTime(source.modified)}
-        </span>
-      ) : (
-        source.detail && <span className="truncate">{source.detail}</span>
-      )}
-      {(source.archives ?? 0) > 0 && (
-        <span className="numeric whitespace-nowrap">
-          {source.archives} rotated · {bytes(source.archiveBytes)}
-        </span>
-      )}
-    </span>
   )
 }
 

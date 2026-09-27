@@ -6,6 +6,7 @@ import { clock, timestamp } from "@/lib/format"
 import type { LogBucket } from "@/lib/types"
 import { LEVEL_DOT, LEVEL_LABEL, LOG_LEVELS, type LogLevel } from "@/lib/log-filter"
 import { eventLabel, eventMeta } from "@/lib/log-lenses"
+import { fieldOf } from "@/lib/log-fields"
 import { CLASS_DOT, type StatusClass } from "@/lib/requests"
 import type { Tone } from "@/components/tone"
 
@@ -17,6 +18,13 @@ const STACK = [...LOG_LEVELS].reverse()
 
 /** The server's name for "every value past the ones it kept". */
 const REST = "*"
+
+/**
+ * The lines that carry no value for the key at all: counted in the column's
+ * total and in no series. Drawn, faintly, because a column of forty lines
+ * with three named ones is not a column of three.
+ */
+const UNKEYED = "\u0000unkeyed"
 
 const TONE_DOT: Partial<Record<Tone, string>> = {
   danger: "bg-destructive",
@@ -82,15 +90,32 @@ function seriesFor(buckets: LogBucket[], by: string | undefined, lens: string | 
       key !== REST &&
       !(by === "class" ? CLASS_DOT[key as StatusClass] : TONE_DOT[tone(key) ?? "default"]),
   )
-  return keys.map<Series>((key) => {
-    if (key === REST) return { key, label: "other", className: "bg-muted-foreground/30" }
-    const label = by === "event" ? eventLabel(lens, key) : key
-    const fixed = by === "class" ? CLASS_DOT[key as StatusClass] : TONE_DOT[tone(key) ?? "default"]
-    if (fixed) return { key, label, className: fixed }
-    // Largest neutral series first in the hue order, so the busiest keeps blue.
-    const at = neutral.length - 1 - neutral.indexOf(key)
-    return { key, label, color: NEUTRAL[at % NEUTRAL.length] }
-  })
+  const unkeyed: Series[] = buckets.some((bucket) => unkeyedOf(bucket) > 0)
+    ? [{ key: UNKEYED, label: `no ${fieldOf(by).label}`, className: "bg-muted-foreground/15" }]
+    : []
+  return [
+    ...unkeyed,
+    ...keys.map<Series>((key) => {
+      if (key === REST) return { key, label: "other", className: "bg-muted-foreground/30" }
+      const label = by === "event" ? eventLabel(lens, key) : key
+      const fixed =
+        by === "class" ? CLASS_DOT[key as StatusClass] : TONE_DOT[tone(key) ?? "default"]
+      if (fixed) return { key, label, className: fixed }
+      // Largest neutral series first in the hue order, so the busiest keeps blue.
+      const at = neutral.length - 1 - neutral.indexOf(key)
+      return { key, label, color: NEUTRAL[at % NEUTRAL.length] }
+    }),
+  ]
+}
+
+function unkeyedOf(bucket: LogBucket) {
+  let named = 0
+  for (const n of Object.values(bucket.counts)) named += n
+  return Math.max(bucket.total - named, 0)
+}
+
+function countIn(bucket: LogBucket, key: string) {
+  return key === UNKEYED ? unkeyedOf(bucket) : (bucket.counts[key] ?? 0)
 }
 
 /**
@@ -116,6 +141,7 @@ export function Histogram({
   className,
   by,
   lens,
+  title = "Matches over time",
 }: {
   buckets: LogBucket[]
   bucketSeconds: number
@@ -125,6 +151,8 @@ export function Histogram({
   by?: string
   /** The lens that names an `event` series. */
   lens?: string
+  /** What the chart counts, as its eyebrow and its accessible name. */
+  title?: string
 }) {
   const [hover, setHover] = useState<number | null>(null)
   const series = useMemo(() => seriesFor(buckets, by, lens), [buckets, by, lens])
@@ -138,9 +166,7 @@ export function Histogram({
   const last = new Date(buckets[buckets.length - 1].start)
   const sameDay = first.toDateString() === last.toDateString()
   const edge = (iso: string) => (sameDay ? clock(iso) : timestamp(iso))
-  const legend = [...series]
-    .reverse()
-    .filter((s) => buckets.some((b) => (b.counts[s.key] ?? 0) > 0))
+  const legend = [...series].reverse().filter((s) => buckets.some((b) => countIn(b, s.key) > 0))
   // Levels keep their own reading order in the legend, worst first.
   if (!by || by === "level") {
     legend.sort(
@@ -152,7 +178,7 @@ export function Histogram({
     <div className={cn("shrink-0 border-b border-hairline px-3 pt-2 pb-1.5", className)}>
       <div className="mb-1.5 flex items-baseline justify-between gap-3 text-hint">
         <span className="eyebrow">
-          Matches over time · one column is {widthLabel(bucketSeconds)}
+          {title} · one column is {widthLabel(bucketSeconds)}
         </span>
         <span className="numeric truncate text-muted-foreground">
           {active
@@ -164,7 +190,7 @@ export function Histogram({
         className="flex h-14 items-end gap-px"
         onMouseLeave={() => setHover(null)}
         role="group"
-        aria-label="Matches over time"
+        aria-label={title}
       >
         {buckets.map((bucket, i) => (
           <button
@@ -181,7 +207,7 @@ export function Histogram({
             )}
           >
             {series.map((s) => {
-              const count = bucket.counts[s.key] ?? 0
+              const count = countIn(bucket, s.key)
               if (count === 0) return null
               return (
                 <span
