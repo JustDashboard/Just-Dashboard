@@ -47,7 +47,7 @@ for the host to run. The 29 packages under
 | `netsec` | Exposure, posture, listeners, sessions/logins, firewall, fail2ban, sshd, and diagnostic probes | [`../backend/observability-security.md`](../backend/observability-security.md) |
 | `procs` | Process inventory, signals, PM2, systemd, and cron | [`../backend/processes-terminal-github.md`](../backend/processes-terminal-github.md#processes) |
 | `ptyhold` | The terminal holder: owns one session's PTY on the host, keeps its recent output, and hands the master to the dashboard over a unix socket so sessions outlive dashboard restarts; built as its own binary, `cmd/terminal-holder` | [`../backend/processes-terminal-github.md`](../backend/processes-terminal-github.md#sessions-outlive-the-dashboard) |
-| `proxysvc` | nginx sites/streams, certificates, DNS/TLS checks, ports, htpasswd, and deployment routes | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#proxy) |
+| `proxysvc` | nginx sites/streams, certificates, DNS/TLS checks, ports, htpasswd, and deployment routes, plus what the proxy pages share: config-test diagnostics, the effective configuration (`nginx -T`) and its parser, per-site nginx identifiers, and a record of every configuration change | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#proxy) |
 | `safepath` | Symlink-safe archive extraction boundary | [`../architecture/runtime-boundaries.md`](../architecture/runtime-boundaries.md#reaching-the-host-and-containing-paths) |
 | `selfcfg` | The dashboard's own settings: `.env` reading/writing, validation, restart and rebuild in a sibling container with automatic rollback, Tailscale certificate issuance/renewal, and `tailscale serve` publication of preview environments on the node's ports 21000–21999 (`tailscale_serve.go`) | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#the-dashboards-own-settings) |
 | `selfupdate` | Release checks, changelog, installer state, reconciliation, and updater | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#configuration-version-release-self-update) |
@@ -73,7 +73,7 @@ for the host to run. The 29 packages under
 | `src/proxy.ts`, `next.config.ts` | CSP nonce/policy and development API rewrite | [`../frontend/shell-design.md`](../frontend/shell-design.md), [`../overview.md`](../overview.md) |
 | `scripts/sync-monaco.mjs` | Copies the pinned Monaco worker/editor assets into the build output | [`../frontend/shell-design.md`](../frontend/shell-design.md#the-editor-is-served-from-here-not-from-a-cdn) |
 | `scripts/sync-excalidraw.mjs` | Copies the pinned Excalidraw fonts into `public/excalidraw` for local serving | [`../boards.md`](../boards.md) |
-| `tests/browser/`, `playwright.config.ts` | Chromium release journey gate and opt-in cross-browser evidence | [`../overview.md`](../overview.md) |
+| `tests/browser/`, `playwright.config.ts` | Chromium release journey gate and opt-in cross-browser evidence; mocked hosts shared between specs live beside them (`host-fixture.ts`, `proxy-fixtures.ts` with its per-area tables in `fixtures/proxy/`) | [`../overview.md`](../overview.md) |
 | `package.json`, `bun.lock`, build configs | Bun-only dependency, lint, type/build, and browser-test toolchain | [`../overview.md`](../overview.md) |
 
 ## Updating this map

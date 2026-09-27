@@ -268,17 +268,24 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   round trips through `managedAcme`; ordinary site's ACME roots remain `/var/www/html`. Docker Caddy
   ownership uses native automatic HTTPS and shared routes; unsupported owners are reported explicitly.
   See [the ingress decision](../deployments/caddy-ingress.md) for provisioning, recovery and live tests.
-- **Site builder** (`sites.go`, `sites_render.go`, `sites_apply.go`). `SiteSpec` is our shape, not
-  nginx's, for the reason `ContainerSpec` is not `container.Config`; rendering happens **on the server**
-  so a spec has one meaning, and the output is hand-written rather than templated because order carries
-  meaning to whoever maintains the file after this dashboard is gone. `ApplySite` puts the **symlink in
+- **Site builder** (`sites.go`, `sites_render.go`, `sites_parse.go`, `sites_apply.go`). `SiteSpec` is our
+  shape, not nginx's, for the reason `ContainerSpec` is not `container.Config`; rendering happens **on the
+  server** so a spec has one meaning, and the output is hand-written rather than templated because order
+  carries meaning to whoever maintains the file after this dashboard is gone. `ApplySite` puts the **symlink in
   before `nginx -t`** — a new file in `sites-available` is not in the include tree, so the test has
   nothing to say about it — and undoes both together on failure. Four renderer details:
   - The ACME challenge location goes **above** the catch-all redirect, or renewal silently stops and
     nobody finds out for sixty days.
   - `http2 on;` is a directive, not a `listen` parameter (nginx 1.25 warns on every reload).
-  - WebSocket upgrades pass `$http_connection` through rather than a `$connection_upgrade` map — a `map`
-    is only legal in the `http` block and a site file cannot reach there.
+  - WebSocket upgrades pass `$http_connection` through rather than a `$connection_upgrade` map. The
+    reason once given here — that a `map` is only legal in the `http` block and a site file cannot reach
+    it — is **false**: `sites-enabled/*` and `conf.d/*.conf` are both included *inside* `http {}`, so the
+    top of a site file, outside its `server` blocks, is http context. `map`, `upstream`,
+    `limit_req_zone`, `limit_conn_zone`, `proxy_cache_path`, `geo` and `log_format` written there pass
+    `nginx -t` (checked on nginx 1.26.3) and are deleted with the site. Their names are global to the
+    whole configuration and a duplicate zone is an emergency, so each is named with `NginxIdent(site)`.
+    The comment the renderer writes into the generated file still carries the old reason; it is output,
+    and changes with the renderer.
   - **An `allow` list is fenced with `deny all`.** nginx stops at the first match and otherwise permits,
     so a site restricted to `10.0.0.0/8` was reachable from anywhere; expecting the operator to write the
     fence themselves into a box labelled "Deny" fails too, since `0.0.0.0/0` lets in every IPv6 client.
@@ -350,10 +357,10 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   through `/systemd/{unit}/enable` and `/start`. `DNSProvider.HasCredentials` reports a saved
   token without reading it, and `DELETE /certificates/dns-credentials/{provider}` removes one
   (destructive, ordinary confirmation, audited as `certificates.dns.credentials.remove`).
-- **Two layouts, and files that are not sites.** `nginxVHosts` reads sites-available where it exists and
-  conf.d where it does not (every RPM distro, Alpine, Arch — most of the servers this runs on); the
-  difference reaches the UI as an empty `EnabledPath`, because conf.d has no symlink and a switch that can
-  only error is worse than none. `confdPath` stops `app.conf` becoming `app.conf.conf`. The listing
+- **Two layouts, and files that are not sites.** `nginxVHosts` (`vhosts.go`, with the rest of the
+  listing and `SetVHostEnabled`) reads sites-available where it exists and conf.d where it does not
+  (every RPM distro, Alpine, Arch — most of the servers this runs on); the difference reaches the UI as an
+  empty `EnabledPath`, because conf.d has no symlink and a switch that can only error is worse than none. `confdPath` stops `app.conf` becoming `app.conf.conf`. The listing
   **skips backups** (`isBackupFile`: `.bak`, `~`, `.dpkg-old`, `.rpmsave`) — nginx reads none of them, and
   since delete keeps `<name>.bak`, without the filter deleting a site produced a second site.
 - **A password file must be readable by the account that reads it.** nginx opens `auth_basic_user_file` in
@@ -376,6 +383,51 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   Issuance defaults to `--staging` in the UI (the real limit is five failures an hour). `dns.go` answers
   "does this domain point here yet" and recognises Cloudflare explicitly, since reporting a CDN as a
   misconfiguration is the commonest false alarm of this kind.
+- **The proxy routes are mounted per area**, each from its own file beside its handlers, and composed in
+  `mountProxyRoutes` (`api/handlers_proxy.go`): `mountEngineRoutes` (status, the raw config editor,
+  validate, test, reload; `handlers_proxy_engine.go`), `mountVHostRoutes` (the listing and the enable
+  switch; `handlers_proxy_vhosts.go`) and `mountProxyInsightRoutes` (`handlers_proxy_insights.go`) inside
+  `/proxy`; `mountSiteBuilderRoutes` (`handlers_proxy_sites.go`) and `mountSiteOpsRoutes`
+  (`handlers_proxy_siteops.go`) inside `/proxy/sites`; `mountStreamRoutes` (`handlers_proxy_streams.go`),
+  `mountAuthFileRoutes` (`handlers_proxy_auth.go`) and `mountProxyToolRoutes` (`handlers_tls.go`, where
+  the whole subtree is `system.admin` because every tool probes a caller-chosen destination) at
+  `/proxy/streams`, `/proxy/auth-files` and `/proxy/tools`; `mountCertificateRoutes`
+  (`handlers_certificates.go`) and `mountTLSRoutes` (`handlers_tls.go`; the watch list's handlers stay in
+  `handlers_domains.go`) inside `/certificates`; and `mountPortRoutes` (`handlers_ports.go`) at `/ports`,
+  which chi serves with and without the trailing slash. `TestProxyRoutesKeepTheirPaths` pins every path,
+  method and gate as they stood before the split. The whole group runs `withProxyActor`, which puts the
+  signed-in account on the context for the change record below. Background work and state the proxy
+  pages keep beyond `proxysvc.Service` go in `api/modules_proxy.go` (`initProxyExtras`, run last in
+  `initModules`; `startProxyExtras` from `Start`; `stopProxyExtras` from `Shutdown`, which also runs for a
+  server never started), and their tables in `store/schema_proxy.go`'s `proxySchema`, which `Open` applies
+  after `applyAddedColumns` and `TestProxySchemaIsAdditive` holds to `CREATE … IF NOT EXISTS`. A table
+  created there that later gains a column through `addedColumns` has to move into `schema` in the same
+  change, since `applyAddedColumns` runs first on a fresh install.
+- **What the engine's own test says, not only whether it passed.** `runValidator` fills
+  `ValidationResult.Diagnostics` (`diagnostics.go`: level, message, and file and line where nginx names
+  them) and `Warnings`, the warn-level count — nginx exits 0 through a conflicting server name it is
+  "ignoring", and that site then never serves. nginx writes a test's messages as `nginx: [warn] … in
+  /path:12` when it can open its startup error log (root on the host) and as the timestamped error-log
+  line when it cannot; both are read. `ParseCaddyDiagnostics` reads `caddy validate`'s JSON warnings and
+  its `Error:` line, best effort.
+- **The configuration nginx actually loads.** `EffectiveConfig` (`effective.go`) runs `nginx -T` through
+  `hostexec` under the service lock — so it never dumps a candidate `Validate` has staged — splits it into
+  `ConfigFile`s byte for byte (`ParseEffective`), drops password files for the same reason `ReadConfig`
+  refuses them, and caches the result for ten seconds; every change the service makes and every reload
+  forgets it at once. `NginxTree` (`nginxconf.go`) parses those files the way nginx tokenises them
+  (quotes and their escapes, comments, `${var}`, nested blocks) into `Directive`s carrying their file,
+  line and enclosing contexts, with each `include` replaced in place by the files its glob matched, sorted
+  and without dotfiles as glob(3) would.
+- **Every change to a configuration file is offered to a `ChangeRecorder`** (`changes.go`) once it is
+  committed — `WriteConfig`, `ApplySite` and deployment cutovers through `applySiteLocked`, `DeleteSite`,
+  `SetVHostEnabled` (which now takes the service lock like every other change), `ApplyStream`,
+  `DeleteStream`, and a deployment route's restore — with its prior content and the actor
+  `WithActor` put on the context (empty for a deployment or a background loop). Password files are never
+  recorded and the htpasswd writers do not call it; a recorder that fails is logged and the change stands.
+  No recorder is attached yet.
+- **Certificates carry their fingerprint and serial**, the SHA-256 of the DER and the serial number in
+  the uppercase colon form `openssl x509 -fingerprint -sha256` prints, which
+  `TestCertificateFingerprintMatchesOpenSSL` checks against openssl itself.
 
 ## Streaming, jobs, secrets, agent mode
 
