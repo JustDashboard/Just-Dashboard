@@ -11,11 +11,12 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { JobConsole, RecentJobs, useJobConsole } from "@/components/job-console"
+import { FormSection, FormSections, InfoTip } from "@/components/form"
 import { PageContext } from "@/components/page"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { InitialsMark } from "@/components/account/user-avatar"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
-import { Row, ROW_BLEED, RowList } from "@/components/row-list"
+import { Row, RowList } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { AreaFindings } from "@/components/security/posture-panel"
@@ -81,8 +82,18 @@ export function SSHPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobStatus])
 
-  const dirty = useMemo(() => Object.keys(pending).length > 0, [pending])
-  const insecure = data?.settings.filter((s) => !s.secure).length ?? 0
+  const changes = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(pending).filter(
+          ([key, value]) =>
+            data?.available &&
+            data.settings.some((setting) => setting.key === key && setting.value !== value),
+        ),
+      ),
+    [pending, data],
+  )
+  const dirty = Object.keys(changes).length > 0
 
   const header = <PageContext eyebrow="Security" title="SSH" />
 
@@ -128,6 +139,7 @@ export function SSHPanel({
   }
 
   const valueOf = (setting: SSHSetting) => pending[setting.key] ?? setting.value
+  const insecure = data.settings.filter((s) => !s.secure).length
   const changed = (setting: SSHSetting) =>
     pending[setting.key] !== undefined && pending[setting.key] !== setting.value
   const setting = (key: string) => data.settings.find((s) => s.key === key)
@@ -165,7 +177,7 @@ export function SSHPanel({
           // a job for the write, the sshd -t and the reload, which is the part
           // worth watching: this is the one operation where "it said it
           // worked" is not the same as knowing the daemon came back.
-          const job = await post<Job>("/ssh/config", { settings: pending }, { confirm: c })
+          const job = await post<Job>("/ssh/config", { settings: changes }, { confirm: c })
           console_.attach(job)
           setPending({})
         } finally {
@@ -206,7 +218,7 @@ export function SSHPanel({
               <>
                 <FactDot />
                 <span>
-                  writes <span className="font-mono text-foreground">{data.managedFile}</span>
+                  <InfoTip label="Where SSH changes are saved">{data.managedFile}</InfoTip>
                 </span>
               </>
             )}
@@ -269,9 +281,13 @@ export function SSHPanel({
         />
         <StatTile
           label="Root login"
-          value={root?.value ?? "—"}
+          value={root?.value === "prohibit-password" ? "Keys only" : (root?.value ?? "—")}
           tone={root?.value === "yes" ? "danger" : "default"}
-          hint={root?.value === "yes" ? "every bot tries root first" : "root cannot use a password"}
+          hint={
+            root?.value === "yes"
+              ? "direct root access permitted"
+              : "effective root authentication policy"
+          }
         />
         <StatTile
           label="Keyed accounts"
@@ -301,7 +317,6 @@ export function SSHPanel({
       <Panel plain>
         <PanelHeader
           title="Settings"
-          advanced
           actions={
             <span className="numeric text-hint text-muted-foreground">
               {data.settings.length} directives
@@ -330,32 +345,56 @@ export function SSHPanel({
           </span>
         </PanelToolbar>
         <PanelBody flush>
-          <div className="divide-y divide-hairline">
-            {shown.map((s) => (
-              <SettingRow
-                key={s.key}
-                setting={s}
-                value={valueOf(s)}
-                changed={changed(s)}
-                note={
-                  s.key === "Port" || s.key === "port"
-                    ? data.socket?.unit
-                      ? `${data.socket.unit} holds this listener, so sshd never binds a port of its own. Changing it here writes the directive and a drop-in for the socket, then restarts it — which is the half that moves where connections land.`
-                      : undefined
-                    : undefined
-                }
-                onChange={(v) => setPending((p) => ({ ...p, [s.key]: v }))}
-              />
-            ))}
+          <FormSections railFrom="xl" className="pt-5">
+            {SSH_GROUPS.map((group) => {
+              const settings = shown.filter((setting) => sshGroup(setting.key) === group.title)
+              if (settings.length === 0) return null
+              const warnings = settings.filter((setting) => !setting.secure).length
+              return (
+                <FormSection
+                  aside
+                  key={group.title}
+                  title={group.title}
+                  hint={
+                    <span className="space-y-3">
+                      <span className="numeric block">{settings.length} directives</span>
+                      <Status
+                        verdict={warnings ? "warning" : "ok"}
+                        label={warnings ? `${warnings} below recommendation` : "At recommendation"}
+                      />
+                    </span>
+                  }
+                >
+                  <div className="divide-y divide-hairline">
+                    {settings.map((s) => (
+                      <SettingRow
+                        key={s.key}
+                        setting={s}
+                        value={valueOf(s)}
+                        changed={changed(s)}
+                        note={
+                          s.key.toLowerCase() === "port" && data.socket?.unit
+                            ? `${data.socket.unit} owns this listener. Applying a port change also updates and restarts that socket.`
+                            : undefined
+                        }
+                        onChange={(value) =>
+                          setPending((previous) => ({ ...previous, [s.key]: value }))
+                        }
+                      />
+                    ))}
+                  </div>
+                </FormSection>
+              )
+            })}
             {shown.length === 0 && (
               <EmptyNote>Every setting is at or above its recommendation.</EmptyNote>
             )}
-          </div>
+          </FormSections>
         </PanelBody>
         {dirty && (
-          <PanelFooter>
-            <span className="text-xs text-muted-foreground">
-              {Object.keys(pending).length} pending — written to {data.managedFile}
+          <PanelFooter className="sticky bottom-0 z-10 bg-background">
+            <span className="text-hint text-muted-foreground">
+              {Object.keys(changes).length} unsaved changes
             </span>
             <span className="flex-1" />
             <Button size="sm" variant="outline" onClick={() => setPending({})} disabled={busy}>
@@ -410,22 +449,44 @@ export function SSHPanel({
   )
 }
 
-/**
- * One sshd directive as a row in a plain divided list.
- *
- * Three columns, always in the same place: what it is, what it is set to, and
- * — only where the value is below the recommendation — why that matters. The
- * row only raises its voice where the setting is below the recommendation: a
- * `Status` and the "recommended … because …" line appear there and nowhere
- * else. Every row used to be washed in one of two colours, which made a list
- * of twelve mostly-fine settings look like twelve problems; the one wash that
- * stays is the faint primary tint on a row you have changed and not yet
- * applied, because that is a state of the page rather than of the host.
- *
- * A two-value choice (password auth on/off, root login) is a segmented control
- * rather than a dropdown — the two states are the whole decision and both
- * should be visible without opening a menu.
- */
+const SSH_GROUPS = [
+  {
+    title: "Authentication",
+    keys: [
+      "passwordauthentication",
+      "pubkeyauthentication",
+      "permitrootlogin",
+      "kbdinteractiveauthentication",
+      "challengeresponseauthentication",
+      "permitemptypasswords",
+      "usepam",
+    ],
+  },
+  {
+    title: "Access",
+    keys: ["port", "listenaddress", "allowusers", "allowgroups", "denyusers", "denygroups"],
+  },
+  {
+    title: "Session limits",
+    keys: [
+      "maxauthtries",
+      "logingracetime",
+      "clientaliveinterval",
+      "clientalivecountmax",
+      "maxsessions",
+      "maxstartups",
+    ],
+  },
+  { title: "Other directives", keys: [] },
+]
+
+function sshGroup(key: string) {
+  return (
+    SSH_GROUPS.find((group) => group.keys.includes(key.toLowerCase()))?.title ?? "Other directives"
+  )
+}
+
+/** Keep the control in one column and its recommendation beside the setting it explains. */
 function SettingRow({
   setting,
   value,
@@ -447,30 +508,38 @@ function SettingRow({
   return (
     <div
       className={cn(
-        "grid min-w-0 grid-cols-1 items-start gap-x-6 gap-y-3 px-5 py-3 md:grid-cols-[minmax(0,1fr)_13rem] xl:grid-cols-[minmax(0,30rem)_13rem_minmax(0,1fr)]",
-        ROW_BLEED,
+        "grid min-w-0 items-center gap-x-6 gap-y-3 py-5 first:pt-0 sm:grid-cols-[minmax(0,1fr)_12rem]",
         changed && "bg-wash-primary",
       )}
     >
       <div className="min-w-0 space-y-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="text-body font-medium">{setting.label}</span>
-          <code className="font-mono text-hint text-muted-foreground">{setting.key}</code>
+          <label htmlFor={`ssh-${setting.key}`} className="text-body font-medium">
+            {setting.label}
+          </label>
+          <InfoTip label={`About ${setting.label}`}>
+            {setting.detail}
+            {note && ` ${note}`}
+          </InfoTip>
           {changed ? (
             <Tag className="text-primary">pending</Tag>
           ) : (
             below && <Status verdict="warning" label="below recommendation" />
           )}
         </div>
-        <p className="text-hint leading-relaxed text-muted-foreground">{setting.detail}</p>
-        {note && (
-          <p className="text-hint leading-relaxed text-muted-foreground/90 italic">{note}</p>
+        <code className="block font-mono text-hint text-muted-foreground">{setting.key}</code>
+        {below && (
+          <p className="max-w-md text-hint leading-relaxed text-warning">
+            Recommended {setting.recommended}.
+            {setting.risk && <span className="text-muted-foreground"> {setting.risk}</span>}
+          </p>
         )}
       </div>
 
-      <div className={cn("min-w-0", setting.kind === "list" && "xl:col-span-2")}>
+      <div className="min-w-0">
         {setting.kind === "list" ? (
           <Input
+            id={`ssh-${setting.key}`}
             value={value}
             placeholder="deploy admin — empty allows everyone"
             className="font-mono text-xs"
@@ -486,6 +555,7 @@ function SettingRow({
             size="sm"
             className="w-full"
             aria-label={setting.label}
+            id={`ssh-${setting.key}`}
           >
             {setting.options!.map((option) => (
               <ToggleGroupItem key={option} value={option} className="flex-1 text-xs capitalize">
@@ -495,7 +565,7 @@ function SettingRow({
           </ToggleGroup>
         ) : setting.kind === "choice" ? (
           <Select value={value} onValueChange={onChange}>
-            <SelectTrigger className="w-full" aria-label={setting.label}>
+            <SelectTrigger id={`ssh-${setting.key}`} className="w-full" aria-label={setting.label}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -508,6 +578,7 @@ function SettingRow({
           </Select>
         ) : (
           <Input
+            id={`ssh-${setting.key}`}
             value={value}
             inputMode="numeric"
             aria-label={setting.label}
@@ -515,18 +586,6 @@ function SettingRow({
           />
         )}
       </div>
-
-      {below && (
-        <p
-          className={cn(
-            "min-w-0 text-hint leading-relaxed",
-            setting.kind === "list" ? "md:col-span-2 xl:col-span-3" : "xl:col-start-3",
-          )}
-        >
-          <span className="font-medium text-warning">Recommended {setting.recommended}.</span>
-          {setting.risk && <span className="text-foreground/75"> {setting.risk}</span>}
-        </p>
-      )}
     </div>
   )
 }
