@@ -58,10 +58,16 @@ build argv explicitly.
   in-memory ring: an event log worth keeping across restarts belongs in the audit table. `oom` and
   `health_status: unhealthy` justify the feature alone.
 - **`CheckUpdate` compares the registry's current digest against the pulled one** — a more useful question
-  than "is there a newer tag", because it catches a moving tag that moved. Cached 30 min, four-worker
-  pool, because Docker Hub rate-limits by address. Unreachable or credentialed registries are `unknown`
-  with the reason; a locally built image is `local`, a digest reference is `pinned`, and neither is a
-  failure — reporting "not checked" for something that cannot change reads as a broken check.
+  than "is there a newer tag", because it catches a moving tag that moved. Only successful registry
+  digests are cached for 30 min, with a four-worker pool because Docker Hub rate-limits by address.
+  The bounded cache belongs to one Docker client and keys on the normalized reference and local digest;
+  local state is inspected on every check, so an external pull, tag change or removal cannot reuse an
+  old verdict. A changed local digest also refreshes the remote answer. Concurrent misses share a read;
+  forced checks and ordinary image pulls invalidate the reference and reject older in-flight fills.
+  `checkedAt` retains the registry read's timestamp on a hit. Unreachable or credentialed registries are
+  `unknown` with the reason; a locally built image is `local`, a digest reference is `pinned`, and neither is a
+  failure — reporting "not checked" for something that cannot change reads as a broken check. Errors
+  are not cached. These are anonymous registry reads; adding credentials requires a credential-scoped key.
 - **`preview.go` and `deployments.go` make a compose deploy predictable and reversible.** Docker keeps no
   history: `up` replaces what was running and the previous configuration is gone, so "what changed" and
   "roll back" have no answer. `SnapshotStack` records the compose file, the digests each service was
@@ -97,9 +103,10 @@ build argv explicitly.
   reaches, and silently building with the legacy one produces images differing from the same Dockerfile
   from a shell.
 - **Efficiency rules that are load-bearing**: `ListContainers` carries `Mounts` (the Engine summary
-  already has them, and "what uses this volume" for every volume at once is otherwise an inspect per
-  container per poll); `ListStacks` builds on `ListContainers` so it inherits resolved health and uptime;
-  `Diagnose` inspects each container once and runs every rule against that payload.
+  already has them); membership joins for volumes, networks and images, image-reference discovery,
+  and the stats sampler use the summary without fetching unused inspection fields.
+  `ListStacks` builds on `ListContainers` so it inherits resolved health and uptime;
+  `Diagnose` inspects each container once, reusing that payload for enrichment and every rule.
   `ListContainersWithLabels` applies exact label filters in the Engine list call before health/uptime
   enrichment, so a deployment detail read inspects only its matching running containers. The uptime pass
   also collects limits, health-check presence and restart policy from the inspect it was already making,
@@ -108,13 +115,26 @@ build argv explicitly.
   does once the container's tag has moved on to a newer pull — and reports the name from the container's
   own config instead, as `Inspect` does. An id named no product, so every page drew such a container as
   Docker's whale and database discovery (which reads the engine off the name) skipped it.
-  Writable-layer sizes ride along on the stats sampler from the **cached** disk walk — a sampler must
-  never trigger one — which is what makes "grew 6.4 GB today" a measurement rather than a guess.
+  Writable-layer sizes ride along on the stats sampler from the shared disk cache, rather than a
+  separate layer walk per sample, so "grew 6.4 GB today" is a measurement rather than a guess.
+- **Disk accounting has bounded staleness.** One client shares a disk walk between concurrent cold
+  readers. After 60 seconds it refreshes in the background; the previous snapshot may be reused for at
+  most three minutes from the start of its source read. Older snapshots wait for a refresh, and a failed
+  refresh then reports unavailable instead of serving old figures indefinitely. Cancelling one waiting
+  request does not cancel the shared walk, which has its own two-minute deadline. Pulls, builds,
+  container lifecycle/create/recreate/removal, volume creation/removal, prunes and Compose execution
+  invalidate on completion, including partial failures. A generation check prevents an older read from
+  restoring invalidated data. These caches are local to one backend; independent instances do not share
+  invalidation. Authorization and destructive preconditions remain outside the caches.
 - **`httpx.URLParam`, not `chi.URLParam`.** chi routes on `r.URL.RawPath` whenever a request carried one
   and slices the parameter out of the same string, so a handler receives the percent-escapes the browser
   sent. Every Docker route uses the decoding wrapper; `urlparam_test.go` pins it.
 
 ## Files
+
+Owner and group names are memoised only within a listing or completion request. The next request
+performs NSS lookups again, so account renames and reused IDs are not hidden until backend restart.
+User and group IDs have separate maps, and numeric IDs remain the filesystem identity.
 
 Copy and move pin configured roots with Go's `os.Root` while traversing entries. Copy resolves a
 destination that is intentionally followed, rejects existing symlink children and same-inode or
