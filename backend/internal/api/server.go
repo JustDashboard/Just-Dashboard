@@ -150,6 +150,9 @@ func (s *Server) Start(ctx context.Context) error {
 			s.Audit.Record(context.Background(), audit.Entry{Actor: "system", Action: "proxy.ingress.reconcile", Target: name, Success: success})
 		}, func(err error) { s.Log.Warn("deployment ingress recovery needs attention", "error", err) })
 	}()
+	if err := s.startProxyExtras(ctx); err != nil {
+		return err
+	}
 	if err := s.modules.deployPreviews.Start(ctx); err != nil {
 		return err
 	}
@@ -203,6 +206,7 @@ func (s *Server) Shutdown() {
 		s.ingressStop()
 		<-s.ingressDone
 	}
+	s.stopProxyExtras()
 	s.modules.metrics.Stop()
 	s.modules.backupSched.Stop()
 	s.modules.deploySchedule.Stop()

@@ -1,0 +1,376 @@
+package proxysvc
+
+import (
+	"bufio"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+// ParseSiteSpec reads a site file back into the form.
+//
+// Not an nginx parser — a line reader that tracks brace depth and which
+// location block it is inside, which is enough for the files this form
+// produces and for the great majority of hand-written ones. What it cannot
+// promise is that saving the form reproduces the file, so it reports whether
+// the file carries our marker: a managed file round-trips, and for anything
+// else the UI says plainly that saving will replace what is there.
+func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
+	spec := &SiteSpec{
+		Name: name, Kind: "proxy",
+		Domains: []string{}, AllowFrom: []string{}, DenyFrom: []string{}, Locations: []SiteLocation{},
+	}
+	managed := strings.Contains(content, managedMarker)
+
+	seenDomains := map[string]bool{}
+	depth := 0
+	location := ""
+	var current *SiteLocation
+	rootLocationUpstream := ""
+	rootLocationWS := false
+	sawTLSListen := false
+	sawPlainRedirect := false
+	sawAccessLog := false
+	var custom []string
+	inCustom := false
+
+	// read handles one statement. It is a closure over the reader's state so
+	// that a line carrying several statements — `location / { proxy_pass
+	// http://x; }` is common in hand-written files — can be split and each
+	// piece read in turn, where the line reader used to swallow everything
+	// after the opening brace.
+	read := func(raw string) {
+		if m := locationOpenRe.FindStringSubmatch(raw); m != nil {
+			depth++
+			location = m[1]
+			// The exploit blocks are this renderer's, not the operator's, and
+			// the switch that produced them is a field of its own. Reading
+			// them back as locations would drop them; reading them back as
+			// the flag is what makes the switch survive an edit.
+			if location == exploitDotLocation {
+				spec.BlockExploits = true
+			}
+			// The ACME challenge location belongs to the redirect block this
+			// renderer writes for a forced-HTTPS site. Reading it back as one
+			// of the operator's own locations makes a round trip emit it
+			// twice — once in the redirect server and once inside the TLS
+			// one, where it does nothing.
+			if location != "/" && location != acmeChallengePath &&
+				!strings.HasPrefix(location, "~") && locationPathRe.MatchString(location) {
+				spec.Locations = append(spec.Locations, SiteLocation{Path: location})
+				current = &spec.Locations[len(spec.Locations)-1]
+			} else {
+				current = nil
+			}
+			return
+		}
+		if strings.HasSuffix(raw, "{") {
+			depth++
+			return
+		}
+		if raw == "}" {
+			depth--
+			location, current = "", nil
+			return
+		}
+
+		directive, value := cutDirective(raw)
+		switch directive {
+		case "server_name":
+			for _, d := range strings.Fields(value) {
+				if d == "_" || seenDomains[d] {
+					return
+				}
+				seenDomains[d] = true
+				spec.Domains = append(spec.Domains, d)
+			}
+		case "listen":
+			if listenIsTLS(value) {
+				spec.TLS = true
+				sawTLSListen = true
+			}
+			// The pre-1.25 spelling. A file written when `listen 443 ssl http2`
+			// was the only form read back as HTTP/2 off, and saving it then
+			// turned HTTP/2 off for real.
+			if hasField(value, "http2") {
+				spec.HTTP2 = true
+			}
+		case "http2":
+			spec.HTTP2 = value == "on"
+		case "ssl_certificate":
+			spec.CertPath = value
+		case "ssl_certificate_key":
+			spec.KeyPath = value
+		case "client_max_body_size":
+			spec.ClientMaxBody = value
+		case "gzip":
+			spec.Gzip = value == "on"
+		case "access_log":
+			sawAccessLog = true
+			spec.AccessLog = value != "off"
+		case "auth_basic":
+			spec.BasicAuthRealm = strings.Trim(value, `"`)
+		case "auth_basic_user_file":
+			spec.BasicAuthFile = value
+		case "allow":
+			// Server level only, like deny: an allow inside a location
+			// restricts that one path, and hoisting it into the form's
+			// site-wide list would apply it to the whole site on the next
+			// save — a widening or a narrowing nobody asked for.
+			if location == "" {
+				spec.AllowFrom = append(spec.AllowFrom, value)
+			}
+		case "deny":
+			if location == "" {
+				spec.DenyFrom = append(spec.DenyFrom, value)
+			}
+		case "add_header":
+			if strings.HasPrefix(value, "Strict-Transport-Security") {
+				spec.HSTS = true
+			}
+			if strings.HasPrefix(value, "X-Content-Type-Options") {
+				spec.SecurityHeaders = true
+			}
+		case "root":
+			if location == acmeChallengePath && value == deploymentACMEWebroot {
+				spec.ManagedACME = true
+			} else if location == "" || location == "/" {
+				spec.Root = value
+			} else if current != nil {
+				current.Root = value
+			}
+		case "proxy_pass":
+			if current != nil {
+				current.Upstream = value
+			} else if location == "/" || location == "" {
+				rootLocationUpstream = value
+			}
+		case "proxy_set_header":
+			if strings.HasPrefix(value, "Upgrade") {
+				if current != nil {
+					current.WebSockets = true
+				} else {
+					rootLocationWS = true
+				}
+			}
+		case "proxy_read_timeout":
+			spec.ProxyTimeout = parseSeconds(value)
+		case "return":
+			fields := strings.Fields(value)
+			if len(fields) >= 2 {
+				target := fields[1]
+				if strings.Contains(target, "$host$request_uri") {
+					sawPlainRedirect = true
+				} else if strings.HasPrefix(target, "http") {
+					spec.Kind = "redirect"
+					spec.RedirectTo = strings.TrimSuffix(target, "$request_uri")
+					spec.Permanent = fields[0] == "301"
+				}
+			}
+		}
+	}
+
+	sc := bufio.NewScanner(strings.NewReader(content))
+	sc.Buffer(make([]byte, 0, 8192), 1<<20)
+	for sc.Scan() {
+		line := sc.Text()
+		raw := strings.TrimSpace(line)
+		// Everything after the custom marker belongs to the operator, so it is
+		// collected verbatim rather than parsed. Without this the "extra
+		// configuration" box was written to the file and silently dropped the
+		// next time anybody opened the form and saved — the form's own escape
+		// hatch was the one field an edit destroyed.
+		if inCustom {
+			custom = append(custom, strings.TrimPrefix(line, "    "))
+			continue
+		}
+		if raw == customMarker {
+			inCustom = true
+			continue
+		}
+		if raw == "" || strings.HasPrefix(raw, "#") {
+			continue
+		}
+		for _, piece := range splitInline(raw) {
+			read(piece)
+		}
+	}
+
+	spec.Upstream = rootLocationUpstream
+	spec.WebSockets = rootLocationWS
+	// A hand-written file with no access_log line is logging to nginx's
+	// default, not to nowhere. Reading it back as "off" meant the first save
+	// from the form silently wrote `access_log off;` into a site that had been
+	// logging all along. Managed files always carry the directive, so this
+	// only ever decides for the ones the form did not write.
+	if !managed && !sawAccessLog {
+		spec.AccessLog = true
+	}
+	if spec.Kind != "redirect" {
+		if spec.Upstream == "" && spec.Root != "" {
+			spec.Kind = "static"
+		}
+	}
+	spec.ForceHTTPS = sawTLSListen && sawPlainRedirect
+	// A file with a plain-HTTP redirect block and nothing else is a redirect
+	// site; one that also serves something is a TLS site forcing HTTPS.
+	if spec.Kind == "proxy" && spec.Upstream == "" && spec.Root == "" && sawPlainRedirect {
+		spec.Kind = "redirect"
+		spec.RedirectTo = "https://" + firstOr(spec.Domains, "")
+		spec.Permanent = true
+	}
+	// Extra locations that ended up with neither an upstream nor a root are
+	// something this form cannot express; dropping them is better than
+	// offering to save a location that proxies nowhere.
+	kept := spec.Locations[:0]
+	for _, loc := range spec.Locations {
+		if loc.Upstream != "" || loc.Root != "" {
+			kept = append(kept, loc)
+		}
+	}
+	spec.Locations = kept
+	// The custom block is everything between the marker and the server's
+	// closing brace, which the renderer always writes last.
+	for len(custom) > 0 && strings.TrimSpace(custom[len(custom)-1]) == "" {
+		custom = custom[:len(custom)-1]
+	}
+	if len(custom) > 0 && strings.TrimSpace(custom[len(custom)-1]) == "}" {
+		custom = custom[:len(custom)-1]
+	}
+	spec.Custom = strings.TrimRight(strings.Join(custom, "\n"), "\n")
+	return spec, managed
+}
+
+const acmeChallengePath = "/.well-known/acme-challenge/"
+
+// customMarker introduces the operator's own directives, and exploitDotLocation
+// is the first location renderExploitBlocks writes. Both are read back by the
+// parser, so they are constants shared with the renderer rather than strings
+// repeated in two files that can drift apart.
+const (
+	customMarker       = "# Added by hand from the site form."
+	exploitDotLocation = `/\.(?!well-known)`
+)
+
+var locationOpenRe = regexp.MustCompile(`^location\s+(?:[~^=*]+\s+)?(\S+)\s*\{`)
+
+// listenIsTLS reads a listen directive's value the way nginx does: the first
+// field is the address, and `ssl` is a parameter after it. `listen 4430` and
+// `listen 127.0.0.1:8443` used to count as TLS because the check was a string
+// prefix and a substring, which turned a plain-HTTP site on an odd port into
+// one the form insisted needed a certificate.
+func listenIsTLS(value string) bool {
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return false
+	}
+	if hasField(value, "ssl") {
+		return true
+	}
+	address := fields[0]
+	if i := strings.LastIndex(address, ":"); i >= 0 {
+		address = address[i+1:]
+	}
+	return address == "443"
+}
+
+func hasField(value, want string) bool {
+	for _, field := range strings.Fields(value) {
+		if field == want {
+			return true
+		}
+	}
+	return false
+}
+
+// splitInline breaks a line holding several statements into one statement
+// per element: `location / { proxy_pass http://x; }` becomes the opener,
+// the directive and the closing brace. Quotes are respected, since a
+// Content-Security-Policy value carries semicolons of its own. A line with
+// nothing after its brace, or no brace at all, is returned as it came.
+func splitInline(raw string) []string {
+	i := braceOutsideQuotes(raw)
+	if i < 0 || strings.TrimSpace(raw[i+1:]) == "" {
+		return []string{raw}
+	}
+	out := []string{strings.TrimSpace(raw[:i+1])}
+	var cur strings.Builder
+	flush := func() {
+		if s := strings.TrimSpace(cur.String()); s != "" {
+			out = append(out, s)
+		}
+		cur.Reset()
+	}
+	var quote byte
+	for j := i + 1; j < len(raw); j++ {
+		c := raw[j]
+		switch {
+		case quote != 0:
+			cur.WriteByte(c)
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+			cur.WriteByte(c)
+		case c == ';':
+			cur.WriteByte(c)
+			flush()
+		case c == '{':
+			cur.WriteByte(c)
+			flush()
+		case c == '}':
+			flush()
+			out = append(out, "}")
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	flush()
+	return out
+}
+
+// braceOutsideQuotes is the index of the first `{` that is not inside a
+// quoted string, or -1.
+func braceOutsideQuotes(raw string) int {
+	var quote byte
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == '{':
+			return i
+		}
+	}
+	return -1
+}
+
+func cutDirective(line string) (string, string) {
+	line = strings.TrimSuffix(strings.TrimSpace(line), ";")
+	name, value, ok := strings.Cut(line, " ")
+	if !ok {
+		return name, ""
+	}
+	return name, strings.TrimSpace(value)
+}
+
+func parseSeconds(value string) int {
+	value = strings.TrimSuffix(strings.TrimSpace(value), "s")
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+func firstOr(list []string, fallback string) string {
+	if len(list) == 0 {
+		return fallback
+	}
+	return list[0]
+}
