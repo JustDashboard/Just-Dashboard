@@ -135,47 +135,53 @@ under the domain field because "the name does not point here yet" causes most ce
 certbot reports it as "challenge failed". `tls-report.tsx` says out loud what `unknown` means for a
 protocol row.
 
-The security section is eight pages of one shape, the host Overview's: compact contextual state and
-controls, a run of `StatTile` readings on the page's own ground, the findings about that area
-under them (`AreaFindings`, plain), then the detail as plain tables that bleed to the page edge. The
-overview opens on how this browser reaches the panel — the exposure grade, the allowlist, the tunnel
-interfaces and **the address you arrived from** (`Exposure.client`) as a row of facts — then five
-tiles, one per area with a figure, each a `StatLink` to its page, and the whole posture as one findings
-list. There is no second list of the areas: the rail's Security panel already names every page, and the
-tiles carry the verdicts that used to sit beside seven links. The rules it follows are the ones the
-[design system](design-system.md) states, plus four of its own:
+The security section has eight reading pages (§15–16), all retaining their headline
+`StatGrid` readings. The overview adds a picture of the observed browser → access scope → dashboard
+path using the deployment section's `SettingPicture`, `WireNode` and still `AnimatedBeam` vocabulary.
+It describes access to the dashboard, not exposure of every port on the host. The finding severity
+counts and unavailable checks sit in a rail beside the findings.
 
-- **An address is the same thing on every page.** A remote peer on Connections, a repeat offender in
-  the ban log and an attacker in the failed-login record all take the verbs in `address-verbs.tsx`:
-  *block at the firewall* inline (a source-only deny the server puts in front of every allow, omitted
-  for a role that cannot write rules and for a private peer), and behind the menu the three lookups —
-  who owns it, reverse lookup, trace the route — each of which opens the Tools page narrowed to that
-  probe with the address filled in (`?tool=asn&target=…`). Arriving never runs the probe; a probe is
-  traffic this server sends to an address, and the run stays a press.
-- **The jail sheet can ban, and the tuning dialog knows who you are.** `POST /fail2ban/{jail}/ban`
-  existed since the jail controls shipped and nothing on the page reached it; the sheet has the input
-  now, with the server refusing the caller's own address. The tuning dialog's allowlist offers "Never
-  ban my address" — the exposure's `client` — because banning yourself is the commonest way to lose a
-  server you were in the middle of hardening, and its notice says what actually happens: applied to the
-  running fail2ban and written to `jail.d/99-just-dashboard.local`, not "lost at the next restart".
-- **Logins folds btmp into attackers.** Five hundred lines of the same three addresses answer nothing;
-  `GET /logins/attackers` (admin, like the listing it is folded from) gives each address its attempts,
-  the account names it tried most — "root, admin, ubuntu" is a scanner, one real name is somebody who
-  knows the host — and the block beside it.
-- **A standing fact is not a banner.** Text that never changes — the firewall's lockout guard, "a probe
-  answers outward, not inward" — is stated *once*, in the footer of the thing it qualifies or at the top
-  of the page it applies to, never repeated per block. Only a `Notice` that explains why the control
-  under it will refuse (sshd with no key on the host) stays above the control, and it sits under the
-  readings rather than above them. The firewall's defaults are readings in tiles and, where the backend
-  can take an instruction, controls in one plain "Defaults" block — a read-only host gets the tiles and
-  no row of dead controls under them.
+- **Firewall:** the rules are the working column, with default-policy and logging controls beside
+  them on wide screens. Each row groups its destination service, port and comment; actions stay
+  visible. The rule dialog groups policy, destination and source, using source choice cards
+  (Tailscale's own mark for a tailnet source) and service marks where the port identifies a product.
+  Address-only deny/reject rules can be edited without inventing a destination port. Existing
+  typed confirmations for toggle, reset and inbound-deny policy remain.
+- **SSH:** authentication, access, session limits and other directives are `FormSection aside`
+  groups. Every control occupies the same column; recommendations sit with the setting, explanatory
+  detail is available beside its label, and a sticky pending footer applies the changed values
+  together. Reverting a draft to its effective value removes it from the change set. The apply
+  dialog still requires `change ssh`; the backend tests and reloads through its existing job.
+- **Intrusion:** jail destination rows carry the watched service, current state, counts and a meter
+  of bans still held. The jail sheet retains manual ban and release actions. Its tuning form shows
+  the subject, groups the three policy numbers, and offers the browser's address for the allowlist.
+  Draft values use fail2ban's lowercase parameter names while the saved configuration uses camel
+  case. Repeat offenders and ban activity sit beside one another on wide screens.
+- **Connections:** each peer's address and network share one column, its process and ports another,
+  with a socket count and a comparative meter. **Logins** groups account/terminal, origin and session
+  age, then places attackers and login history beside one another when there is room. Addresses
+  use `PeerIdentity` or the inline `Address`; real product marks and consistent account initials
+  carry through all three pages. Address block and lookup actions remain in `address-verbs.tsx`.
+- **Network:** devices group identity, addresses/reach, link state/MTU and transferred bytes. The
+  received/sent meter compares cumulative byte counts, not bandwidth or utilization. Routes keep
+  their own table beside the resolver facts. Virtual and bridge devices remain folded by default.
+- **Tools:** 21 probes plus the browser-only subnet calculator occupy a two-pane workbench. The
+  searchable chooser selects one labelled form and result area. Other probes stay mounted while
+  hidden, preserving drafts, results and in-flight requests when switching. A new query-string
+  arrival reseeds only the requested probe. Arriving with `?tool=asn&target=…` never runs it;
+  sending traffic remains an explicit Run action. The metrics and outward-tool hint distinguish
+  outbound reachability from inbound exposure.
 
-`tests/browser/security-ui.spec.ts` drives all eight pages against a mocked API: the readings each
-page draws from the shapes the backend sends, the joins above (the block a row sends, the ban the sheet
-sends, the allowlist the tuning offers, the prefill Tools arrives with), that no block on any page is
-framed, that every icon-only control is named, that row controls are reachable without a pointer, and
-that nothing scrolls sideways on a phone. Set `JD_SECURITY_SHOTS` to a directory to have it write
-review screenshots of every page at 1280 and 1720 wide.
+Capability-gated controls, unavailable modules, backend paths and audit/confirmation boundaries
+retain their contracts. Tables keep their frames because they own scroll regions; plain findings
+and forms do not. Phone tables scroll inside those frames without expanding the page.
+
+`tests/browser/security-ui.spec.ts` checks all eight pages, their mutations and lookup handoffs,
+probe draft/request preservation, jail policy edits, SSH draft reversion, source-only rules,
+typed confirmations, limited roles and unavailable modules. It checks the viewport at 390, 1280
+and 1720, and requires desktop tables to fit their action columns. `JD_SECURITY_SHOTS` writes
+review screenshots at those three widths, including scrolled content and rule/jail dialogs.
+The changed-file gate also runs the design-system checks.
 
 **Packages.** `install-panel.tsx` updates as you type, which is not decoration: the reason people open a
 terminal instead of a package page is that they do not know the name (`postgresql-client`, not `psql`;

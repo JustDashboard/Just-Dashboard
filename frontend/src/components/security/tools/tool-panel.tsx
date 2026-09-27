@@ -4,6 +4,8 @@ import { useEffect, useRef } from "react"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { cn } from "@/lib/utils"
 
+import { Field } from "@/components/form"
+import { EmptyNote } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -18,20 +20,7 @@ import type { ToolDef } from "./tool-defs"
 import { useToolRun, type ToolPrefill } from "./use-tool-run"
 import { ToolResult } from "./tool-result"
 
-/**
- * One network tool: its own inputs, its own run, its own answer.
- *
- * Blocks share nothing — each mounts its own `useToolRun`, so a target typed
- * into DNS stays in DNS when the port check runs, and a slow traceroute never
- * disables another block's Run button.
- *
- * The form is one line, and the block is plain: a title, a hairline, the line
- * of inputs and — once there is one — the answer in the recessed well the rest
- * of the product uses for command output. It was a framed card, and twenty
- * framed cards on one page were twenty boxes with the same three inputs in
- * them. The label is the placeholder, the warning is a mark in the header, and
- * the page says the outward-only sentence once.
- */
+/** Each tool retains its inputs, result and request while another tool is selected. */
 export function ToolPanel({ def, prefill }: { def: ToolDef; prefill?: ToolPrefill }) {
   const t = useToolRun(def, prefill)
   const base = `tool-${def.key}`
@@ -56,60 +45,73 @@ export function ToolPanel({ def, prefill }: { def: ToolDef; prefill?: ToolPrefil
         }
       />
       <PanelBody className="space-y-2.5">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <p className="mb-5 text-body leading-relaxed text-muted-foreground">
+          {def.hint}.{" "}
+          {def.outward &&
+            "This tests access from this server. It does not establish what an outside visitor can reach."}
+        </p>
+        <div className="flex min-w-0 flex-wrap items-end gap-3">
           {def.needsTarget && (
-            <Input
-              ref={targetRef}
-              id={`${base}-target`}
-              aria-label="Target"
-              value={t.target}
-              onChange={(e) => t.setTarget(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && t.canRun && t.run()}
-              placeholder={def.targetPlaceholder ?? "example.com or 203.0.113.9"}
-              className="h-8 min-w-0 flex-1 font-mono text-xs"
-            />
+            <Field label="Target" htmlFor={`${base}-target`} className="min-w-48 flex-1">
+              <Input
+                ref={targetRef}
+                id={`${base}-target`}
+                aria-label="Target"
+                value={t.target}
+                onChange={(e) => t.setTarget(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && t.canRun && t.run()}
+                placeholder={def.targetPlaceholder ?? "example.com or 203.0.113.9"}
+                className="font-mono"
+              />
+            </Field>
           )}
           {def.recordOptions && (
-            <Select value={t.record} onValueChange={t.setRecord}>
-              <SelectTrigger size="sm" className="w-24" aria-label="Record type">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {def.recordOptions.map((r) => (
-                  <SelectItem key={r} value={r}>
-                    {r}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Field label="Record type">
+              <Select value={t.record} onValueChange={t.setRecord}>
+                <SelectTrigger className="w-24" aria-label="Record type">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {def.recordOptions.map((r) => (
+                    <SelectItem key={r} value={r}>
+                      {r}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
           )}
           {def.optionOptions && (
-            <Select value={t.option} onValueChange={t.setOption}>
-              <SelectTrigger size="sm" className="w-28" aria-label={def.optionLabel ?? "Option"}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {def.optionOptions.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>
-                    {o.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Field label={def.optionLabel ?? "Option"}>
+              <Select value={t.option} onValueChange={t.setOption}>
+                <SelectTrigger className="w-28" aria-label={def.optionLabel ?? "Option"}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {def.optionOptions.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
           )}
           {def.needsPort && (
-            <Input
-              id={`${base}-port`}
-              aria-label="Port"
-              value={t.port}
-              inputMode="numeric"
-              onChange={(e) => t.setPort(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && t.canRun && t.run()}
-              placeholder="port"
-              className="h-8 w-20 font-mono text-xs"
-            />
+            <Field label="Port" htmlFor={`${base}-port`}>
+              <Input
+                id={`${base}-port`}
+                aria-label="Port"
+                value={t.port}
+                inputMode="numeric"
+                onChange={(e) => t.setPort(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && t.canRun && t.run()}
+                placeholder="port"
+                className="w-24 font-mono"
+              />
+            </Field>
           )}
-          <Button size="sm" onClick={t.run} disabled={t.busy || !t.canRun} pending={t.busy}>
+          <Button onClick={t.run} disabled={t.busy || !t.canRun} pending={t.busy}>
             Run
           </Button>
           {(t.result || t.past.length > 0) && (
@@ -119,7 +121,16 @@ export function ToolPanel({ def, prefill }: { def: ToolDef; prefill?: ToolPrefil
           )}
         </div>
 
-        {t.result && <ToolResult result={t.result} />}
+        {!t.result && (
+          <EmptyNote className="mt-6 border-t border-hairline py-10">
+            {t.busy ? "Running diagnostic…" : "Ready to run. Results will appear here."}
+          </EmptyNote>
+        )}
+        {t.result && (
+          <div className="pt-5">
+            <ToolResult result={t.result} />
+          </div>
+        )}
 
         {t.past.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
@@ -129,7 +140,7 @@ export function ToolPanel({ def, prefill }: { def: ToolDef; prefill?: ToolPrefil
                 key={`${p.target}-${p.duration}`}
                 type="button"
                 onClick={() => t.restore(p)}
-                className="rounded-sm border border-hairline px-1.5 py-px font-mono text-micro text-muted-foreground transition-colors focus-ring hover:border-rule-primary hover:text-foreground"
+                className="rounded-sm border border-hairline px-1.5 py-px font-mono text-micro text-muted-foreground focus-ring transition-colors hover:border-rule-primary hover:text-foreground"
               >
                 <span className={cn("mr-1", p.ok ? "text-success" : "text-destructive")}>
                   {p.ok ? "✓" : "✗"}

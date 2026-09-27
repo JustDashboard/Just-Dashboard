@@ -14,7 +14,7 @@ import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { Notice } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ProductGlyphs, processProduct } from "@/components/product-logo"
-import { ExposureIdentity } from "@/components/security/exposure-panel"
+import { ExposureIdentity, ExposurePath } from "@/components/security/exposure-panel"
 import { PostureBadge, PosturePanel, worstLevel } from "@/components/security/posture-panel"
 import { useSecurity } from "@/components/security/security-context"
 
@@ -227,6 +227,7 @@ export default function SecurityOverviewPage() {
         />
       </StatGrid>
 
+      <ExposurePath exposure={exposure} />
       <PosturePanel posture={posture} loading={postureLoading} onFix={applyFix} />
     </Page>
   )

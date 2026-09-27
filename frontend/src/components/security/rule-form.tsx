@@ -2,17 +2,19 @@
 
 import { useMemo, useState } from "react"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
-import { ArrowUpDown, Check, Plus, Warning } from "@/components/icons"
+import { ArrowUpDown, Check, Globe, NetworkDevice, Plus, Router, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post, put } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type { AppProfile, FirewallRule, ServicePreset } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import { Field, FieldRow, FormSection, Disclosure } from "@/components/form"
+import { ChoiceGrid, ChoiceCard } from "@/components/choice-card"
+import { ProductGlyph, ProductLogo, portProduct } from "@/components/product-logo"
 import { Notice } from "@/components/state"
 import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -64,7 +66,7 @@ export function AddRuleDialog({
   }
   return (
     <>
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+      <Button size="sm" onClick={() => setOpen(true)}>
         <Plus className="size-4" />
         Add rule
       </Button>
@@ -266,13 +268,17 @@ function RuleForm({
     }
   }
 
-  const ready = mode === "service" ? port !== "" : profile !== ""
+  const ready =
+    mode === "service"
+      ? Boolean(port.trim() || (source.trim() && ["deny", "reject"].includes(action)))
+      : profile !== ""
 
   return (
     <Modal
       open={open}
       onOpenChange={onOpenChange}
-      title={edit ? `Edit rule ${edit.number}` : "New inbound rule"}
+      title={edit ? `Edit rule ${edit.number}` : "New firewall rule"}
+      size="lg"
       description={
         edit
           ? "A firewall has no edit, so this writes the replacement first and removes the original once it is in — the rule keeps its place and the port is never briefly unprotected."
@@ -280,221 +286,222 @@ function RuleForm({
       }
       footer={
         <>
-          {/* The command sits on the left and wraps: a long `ufw` line in a
-              row that cannot shrink would push the footer wider than the
-              dialog and clip the button on the right. */}
+          {/* Long source ranges must wrap without pushing the submit button out of the dialog. */}
           <code
             className={cn(
               "mr-auto min-w-0 rounded-md border border-hairline px-2 py-1 font-mono text-hint leading-relaxed break-words text-muted-foreground",
               !ready && "opacity-0",
             )}
           >
-            ufw {edit ? `insert ${edit.number} ` : position ? `insert ${position} ` : ""}
+            {edit ? `Rule ${edit.number}: ` : position ? `Position ${position}: ` : ""}
             {action} {direction}
             {source && ` from ${source}`}
+            {" to any"}
             {mode === "service"
-              ? ` to any port ${port}${protocol ? ` proto ${protocol}` : ""}`
+              ? port && ` port ${port}${protocol ? ` proto ${protocol}` : ""}`
               : ` app ${profile}`}
           </code>
-          <Button onClick={submit} disabled={!ready || busy}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={!ready || busy} pending={busy}>
             {edit ? "Save changes" : "Add rule"}
           </Button>
         </>
       }
     >
-      <div className="grid gap-3">
-        <div className="grid gap-3 sm:grid-cols-[1fr_9rem]">
-          <div className="space-y-1.5">
-            <Label>Action</Label>
-            <Select value={action} onValueChange={setAction}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="allow">allow — let it through</SelectItem>
-                <SelectItem value="limit">
-                  limit — allow, but rate-limit repeat connections
-                </SelectItem>
-                <SelectItem value="deny">deny — drop silently</SelectItem>
-                <SelectItem value="reject">reject — refuse and say so</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label>Direction</Label>
-            <Select value={direction} onValueChange={setDirection}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="in">inbound</SelectItem>
-                <SelectItem value="out">outbound</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-        {direction === "out" && (
-          <p className="-mt-1 text-hint leading-relaxed text-muted-foreground">
-            Outbound rules govern what this server may reach, not who may reach it. Restricting
-            egress breaks package updates and certificate renewal unless you allow them first.
-          </p>
-        )}
-
-        <Tabs value={mode} onValueChange={(v) => setMode(v as "service" | "profile")}>
-          <TabsList className="w-full">
-            <TabsTrigger value="service" className="flex-1">
-              Port
-            </TabsTrigger>
-            <TabsTrigger
-              value="profile"
-              className="flex-1"
-              disabled={!hasProfiles || !profiles.data?.length}
-            >
-              Application profile
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="service" className="mt-3 space-y-3">
-            <div className="space-y-1.5">
-              <Label>Service</Label>
-              <Select value={preset} onValueChange={applyPreset}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Pick one, or type a port below" />
+      <div className="space-y-6">
+        <FormSection title="Traffic policy">
+          <FieldRow>
+            <Field label="Action" htmlFor="rule-action">
+              <Select value={action} onValueChange={setAction}>
+                <SelectTrigger id="rule-action" className="w-full">
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectGroup>
-                    <SelectLabel>Common</SelectLabel>
-                    {services.data
-                      ?.filter((s) => !s.danger)
-                      .map((s) => (
-                        <SelectItem key={s.key} value={s.key}>
-                          {s.name} · {s.port}/{s.protocol}
-                        </SelectItem>
-                      ))}
-                  </SelectGroup>
-                  <SelectGroup>
-                    <SelectLabel>Keep these off the internet</SelectLabel>
-                    {services.data
-                      ?.filter((s) => s.danger)
-                      .map((s) => (
-                        <SelectItem key={s.key} value={s.key}>
-                          {s.name} · {s.port}/{s.protocol}
-                        </SelectItem>
-                      ))}
-                  </SelectGroup>
+                  <SelectItem value="allow">Allow</SelectItem>
+                  <SelectItem value="limit">Allow with rate limit</SelectItem>
+                  <SelectItem value="deny">Deny silently</SelectItem>
+                  <SelectItem value="reject">Reject with a response</SelectItem>
                 </SelectContent>
               </Select>
-              {chosen && <p className="text-hint text-muted-foreground">{chosen.detail}</p>}
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-[1fr_8rem]">
-              <div className="space-y-1.5">
-                <Label htmlFor="rule-port">Port, range or list</Label>
-                <Input
-                  id="rule-port"
-                  value={port}
-                  onChange={(e) => {
-                    setPort(e.target.value)
-                    setPreset("")
-                  }}
-                  placeholder="443, 8000:8010 or 80,443"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Protocol</Label>
-                <Select value={protocol} onValueChange={setProtocol}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="tcp">tcp</SelectItem>
-                    <SelectItem value="udp">udp</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="profile" className="mt-3 space-y-1.5">
-            <Label>Profile</Label>
-            {/* Searchable rather than a plain select: ufw defines a handful of
-                profiles and firewalld defines several hundred, and the same
-                control has to be usable for both. */}
-            <ProfilePicker profiles={profiles.data ?? []} value={profile} onChange={setProfile} />
-            <p className="text-hint text-muted-foreground">
-              A profile names its own ports, so the rule keeps meaning what it says if the package
-              later adds one.
-            </p>
-          </TabsContent>
-        </Tabs>
-
-        <div className="space-y-1.5">
-          <Label>Source</Label>
-          <div className="flex flex-wrap gap-1.5">
-            {SOURCE_PRESETS.map((p) => (
-              <Button
-                key={p.key}
-                type="button"
-                size="xs"
-                variant={sourceKind === p.key ? "default" : "outline"}
-                onClick={() => {
-                  setSourceKind(p.key)
-                  setFrom(p.value)
-                }}
-              >
-                {p.label}
-              </Button>
-            ))}
-          </div>
-          {sourceKind === "custom" || sourceKind === "private" || sourceKind === "tailnet" ? (
-            <Input
-              value={sourceKind === "custom" ? from : source}
-              onChange={(e) => {
-                setSourceKind("custom")
-                setFrom(e.target.value)
-              }}
-              placeholder="10.0.0.0/8 or 203.0.113.9"
-              className="font-mono text-xs"
-            />
-          ) : (
-            <p className="text-hint text-muted-foreground">
-              {SOURCE_PRESETS.find((p) => p.key === sourceKind)?.hint}
+            </Field>
+            <Field label="Direction" htmlFor="rule-direction">
+              <Select value={direction} onValueChange={setDirection}>
+                <SelectTrigger id="rule-direction" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="in">Inbound</SelectItem>
+                  <SelectItem value="out">Outbound</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+          </FieldRow>
+          {direction === "out" && (
+            <p className="text-hint text-warning">
+              Outbound restrictions can interrupt package updates and certificate renewal.
             </p>
           )}
-        </div>
+        </FormSection>
 
-        <div className={cn("space-y-1.5", edit && "hidden")}>
-          <Label htmlFor="rule-position">Insert at</Label>
-          <Input
-            id="rule-position"
-            value={position}
-            inputMode="numeric"
-            onChange={(e) => setPosition(e.target.value)}
-            placeholder="leave empty to add at the end"
-          />
-          <p className="text-hint leading-relaxed text-muted-foreground">
-            Rules are checked in order and the first match wins, so a deny added after a broad allow
-            does nothing at all — which looks exactly like a deny that works. Give a number to put
-            this one in front.
-          </p>
-        </div>
+        <FormSection title="Destination">
+          <Tabs value={mode} onValueChange={(value) => setMode(value as "service" | "profile")}>
+            <TabsList>
+              <TabsTrigger value="service">Port or service</TabsTrigger>
+              <TabsTrigger value="profile" disabled={!hasProfiles || !profiles.data?.length}>
+                Application profile
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="service" className="space-y-4 pt-3">
+              <Field label="Service" htmlFor="rule-service" hint={chosen?.detail}>
+                <Select value={preset} onValueChange={applyPreset}>
+                  <SelectTrigger id="rule-service" className="w-full">
+                    <SelectValue placeholder="Choose a service, or enter a port" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[false, true].map((danger) => (
+                      <SelectGroup key={String(danger)}>
+                        <SelectLabel>
+                          {danger ? "Keep off the internet" : "Common services"}
+                        </SelectLabel>
+                        {services.data
+                          ?.filter((service) => Boolean(service.danger) === danger)
+                          .map((service) => (
+                            <SelectItem key={service.key} value={service.key}>
+                              {portProduct(Number(service.port)) && (
+                                <ProductGlyph id={portProduct(Number(service.port))!} />
+                              )}
+                              {service.name} · {service.port}/{service.protocol}
+                            </SelectItem>
+                          ))}
+                      </SelectGroup>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <FieldRow>
+                <Field
+                  label="Port, range or list"
+                  htmlFor="rule-port"
+                  hint="Leave empty for an address-only deny rule."
+                >
+                  <Input
+                    id="rule-port"
+                    value={port}
+                    onChange={(event) => {
+                      setPort(event.target.value)
+                      setPreset("")
+                    }}
+                    placeholder="443, 8000:8010 or 80,443"
+                    className="font-mono"
+                  />
+                </Field>
+                <Field label="Protocol" htmlFor="rule-protocol">
+                  <Select value={protocol} onValueChange={setProtocol}>
+                    <SelectTrigger id="rule-protocol" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="tcp">TCP</SelectItem>
+                      <SelectItem value="udp">UDP</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </FieldRow>
+            </TabsContent>
+            <TabsContent value="profile" className="pt-3">
+              <Field
+                label="Application profile"
+                hint="The host's profile supplies the ports for this rule."
+              >
+                <ProfilePicker
+                  profiles={profiles.data ?? []}
+                  value={profile}
+                  onChange={setProfile}
+                />
+              </Field>
+            </TabsContent>
+          </Tabs>
+        </FormSection>
 
-        <div className="space-y-1.5">
-          <Label htmlFor="rule-comment">Comment</Label>
-          <Input
-            id="rule-comment"
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-            placeholder="What this is for"
-          />
-        </div>
+        <FormSection title="Source">
+          <ChoiceGrid columns={2}>
+            {SOURCE_PRESETS.map((preset) => (
+              <ChoiceCard
+                key={preset.key}
+                selected={sourceKind === preset.key}
+                onClick={() => {
+                  setSourceKind(preset.key)
+                  setFrom(preset.value)
+                }}
+                verb={`Use ${preset.label}`}
+                title={preset.label}
+                description={preset.hint}
+                logo={
+                  <ProductLogo
+                    id={preset.key === "tailnet" ? "tailscale" : undefined}
+                    fallback={
+                      preset.key === "anywhere"
+                        ? Globe
+                        : preset.key === "private"
+                          ? Router
+                          : NetworkDevice
+                    }
+                    size="sm"
+                  />
+                }
+              />
+            ))}
+          </ChoiceGrid>
+          {sourceKind !== "anywhere" && (
+            <Field label="Address or CIDR" htmlFor="rule-source">
+              <Input
+                id="rule-source"
+                value={sourceKind === "custom" ? from : source}
+                onChange={(event) => {
+                  setSourceKind("custom")
+                  setFrom(event.target.value)
+                }}
+                placeholder="10.0.0.0/8 or 203.0.113.9"
+                className="font-mono"
+              />
+            </Field>
+          )}
+          {dangerous && (
+            <Notice tone="danger" icon={Warning} title={`${matched?.name} open to the internet`}>
+              {matched?.danger} Restrict the source or bind the service to loopback.
+            </Notice>
+          )}
+        </FormSection>
 
-        {dangerous && (
-          <Notice tone="danger" icon={Warning} title={`${matched?.name} open to the internet`}>
-            {matched?.danger} Choose a source above, or bind the service to 127.0.0.1 instead of
-            opening the port at all.
-          </Notice>
-        )}
+        <Disclosure summary="Rule details" quiet>
+          <div className="space-y-4">
+            {!edit && (
+              <Field
+                label="Insert at"
+                htmlFor="rule-position"
+                hint="First match wins. Leave empty to append; address-only deny rules are inserted first by the server."
+              >
+                <Input
+                  id="rule-position"
+                  value={position}
+                  inputMode="numeric"
+                  onChange={(event) => setPosition(event.target.value)}
+                  placeholder="End of the rule list"
+                />
+              </Field>
+            )}
+            <Field label="Comment" htmlFor="rule-comment">
+              <Input
+                id="rule-comment"
+                value={comment}
+                onChange={(event) => setComment(event.target.value)}
+                placeholder="What this rule is for"
+              />
+            </Field>
+          </div>
+        </Disclosure>
       </div>
     </Modal>
   )
@@ -523,6 +530,7 @@ function ProfilePicker({
         <Button
           variant="outline"
           role="combobox"
+          aria-label="Application profile"
           aria-expanded={open}
           className="w-full justify-between font-normal"
         >
