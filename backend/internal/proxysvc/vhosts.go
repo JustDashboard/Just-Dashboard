@@ -700,9 +700,11 @@ type RefusedError struct {
 	Validation *ValidationResult
 	// Lead is what the refusal means for this change, where nginx's first
 	// error alone would mislead: taking a site out can break another site's
-	// file, and an enable into a configuration nginx already refuses is
-	// turned away by an error in some other file. Either way the error names
-	// a file that is not the one being switched.
+	// file, an enable into a configuration nginx already refuses is turned
+	// away by an error in some other file, and a site that clashes with
+	// another — a second default server, an upstream both define — is
+	// refused in whichever of the two nginx reads second. Each time the
+	// error names a file that is not the one being switched.
 	Lead string
 }
 
@@ -729,19 +731,28 @@ func (e *RefusedError) Unwrap() error { return ErrInvalidConf }
 // was all a refused reload used to report, which sent the operator to a
 // terminal to find out which of forty files it meant.
 func FailureHeadline(res *ValidationResult) string {
-	for _, d := range res.Diagnostics {
-		switch d.Level {
-		case "emerg", "alert", "crit", "error", "fatal", "panic":
-			if d.File != "" && d.Line > 0 {
-				return fmt.Sprintf("%s in %s:%d", d.Message, d.File, d.Line)
-			}
-			return d.Message
+	if d := firstFailure(res); d != nil {
+		if d.File != "" && d.Line > 0 {
+			return fmt.Sprintf("%s in %s:%d", d.Message, d.File, d.Line)
 		}
+		return d.Message
 	}
 	if line := firstLine(res.Output); line != "" {
 		return line
 	}
 	return "the configuration test failed"
+}
+
+// firstFailure is nginx's first error in a test, nil when it printed none
+// this can read.
+func firstFailure(res *ValidationResult) *Diagnostic {
+	for i, d := range res.Diagnostics {
+		switch d.Level {
+		case "emerg", "alert", "crit", "error", "fatal", "panic":
+			return &res.Diagnostics[i]
+		}
+	}
+	return nil
 }
 
 // linkName refuses a name that is not one entry in sites-enabled.
@@ -860,18 +871,32 @@ func (s *Service) setVHostEnabledLocked(ctx context.Context, name, available str
 	if res := runValidator(ctx, "nginx", "-t"); !res.Valid {
 		undo()
 		refused := &RefusedError{Validation: res}
-		// nginx stops at its first error, so in a configuration it already
-		// refuses the enable fails on another file's error, which reads as
-		// this site's. Tested again as it was, the same error says so; a
-		// different one — or none — means the site is what nginx refused.
-		if before := runValidator(ctx, "nginx", "-t"); !before.Valid && FailureHeadline(before) == FailureHeadline(res) {
+		// nginx stops at its first error and names the file it was reading,
+		// which need not be this site's. Tested again as it was, the same
+		// error means nginx refused the configuration before the site came
+		// in. Any other error, or none, means the site brought it, and
+		// where nginx found it somewhere else — the site clashes with
+		// another, and nginx reads that one second — the refusal says the
+		// site is what nginx will not take.
+		before := runValidator(ctx, "nginx", "-t")
+		switch {
+		case !before.Valid && FailureHeadline(before) == FailureHeadline(res):
 			refused.Lead = "nginx already refuses the configuration without " + name
+		case !failsIn(res, resolvedFile(available)):
+			refused.Lead = "nginx refuses the configuration with " + name
 		}
 		return refused
 	}
 	change.Action = ChangeEnable
 	s.recordChange(ctx, change)
 	return nil
+}
+
+// failsIn says whether nginx's first error in res is in file, a resolved
+// path. An error that names no file is in none.
+func failsIn(res *ValidationResult, file string) bool {
+	d := firstFailure(res)
+	return d != nil && d.File == file
 }
 
 // RemoveVHostLink takes out a link in sites-enabled that is not a site's own

@@ -473,6 +473,44 @@ exit 1`, link, other))
 	}
 }
 
+// A site that clashes with another — a second default server, an upstream
+// both define — is refused in whichever of the two nginx reads second, which
+// can be the other one, and read as that file's fault. Without the site nginx
+// loads, so the refusal says the site is what nginx will not take, and says
+// it too of an error that names no file.
+func TestARefusedEnableSaysTheSiteIsWhatNginxWillNotTake(t *testing.T) {
+	svc, root := debianTree(t)
+	other := filepath.Join(root, "sites-available", "zz")
+	clash := filepath.Join(root, "sites-enabled", "aa")
+	long := filepath.Join(root, "sites-enabled", "long")
+	nginxShim(t, fmt.Sprintf(`if [ -e '%[1]s' ]; then echo 'nginx: [emerg] a duplicate default server for 0.0.0.0:80 in %[2]s:2' >&2; exit 1; fi
+if [ -e '%[3]s' ]; then echo 'nginx: [emerg] could not build server_names_hash, you should increase server_names_hash_bucket_size: 64' >&2; exit 1; fi
+exit 0`, clash, filepath.Join(root, "sites-enabled", "zz"), long))
+	writeFile(t, other, "server {\n    listen 80 default_server;\n}\n")
+	symlink(t, "../sites-available/zz", filepath.Join(root, "sites-enabled", "zz"))
+	writeFile(t, filepath.Join(root, "sites-available", "aa"), "server {\n    listen 80 default_server;\n}\n")
+	writeFile(t, filepath.Join(root, "sites-available", "long"), "server { server_name a-very-long-name.example.com; }\n")
+	ctx := context.Background()
+
+	cases := []struct{ name, link, want string }{
+		{"aa", clash, "nginx refuses the configuration with aa: a duplicate default server for 0.0.0.0:80 in " + other + ":2"},
+		{"long", long, "nginx refuses the configuration with long: could not build server_names_hash, you should increase server_names_hash_bucket_size: 64"},
+	}
+	for _, c := range cases {
+		err := svc.SetVHostEnabled(ctx, c.name, true)
+		var refused *RefusedError
+		if !errors.As(err, &refused) {
+			t.Fatalf("enabling %s returned %v", c.name, err)
+		}
+		if refused.Reason() != c.want || err.Error() != c.want {
+			t.Errorf("reason = %q\nerror = %q\nwant %q", refused.Reason(), err, c.want)
+		}
+		if _, err := os.Lstat(c.link); !os.IsNotExist(err) {
+			t.Errorf("the refused link %s is still there: %v", c.link, err)
+		}
+	}
+}
+
 // A link the enable replaced comes back exactly as it was, relative target
 // and all, when nginx refuses the new one.
 func TestARefusedEnablePutsBackTheLinkItReplaced(t *testing.T) {
@@ -778,6 +816,53 @@ func TestLiveADisableAnotherSiteNeedsIsRefusedWithItsReason(t *testing.T) {
 	}
 	if err := svc.SetVHostEnabled(ctx, "pool", false); err != nil {
 		t.Fatalf("with nothing proxying to it the pool comes out: %v", err)
+	}
+}
+
+// Against the real nginx: a site that clashes with an enabled one — a second
+// default server on its address, an upstream name both define — is refused
+// in the enabled site's file, which nginx reads second. The refusal says the
+// site is what nginx will not take, nothing stays linked, and an enable
+// refused in the site's own file carries no lead.
+func TestLiveAnEnableThatClashesWithAnotherSiteSaysSo(t *testing.T) {
+	root := liveNginx(t)
+	svc := New(root, filepath.Join(root, "Caddyfile"))
+	ctx := context.Background()
+	available := func(name string) string { return filepath.Join(root, "sites-available", name) }
+	enabled := func(name string) string { return filepath.Join(root, "sites-enabled", name) }
+	// The enabled halves sort after the ones being switched, so nginx
+	// finds each clash in the file that was there first.
+	writeFile(t, available("zz"), "server {\n    listen 127.0.0.1:18097 default_server;\n}\n")
+	writeFile(t, available("aa"), "server {\n    listen 127.0.0.1:18097 default_server;\n}\n")
+	writeFile(t, available("pool-b"), "upstream jd_lane_b_dup {\n    server 127.0.0.1:18098;\n}\n")
+	writeFile(t, available("pool-a"), "upstream jd_lane_b_dup {\n    server 127.0.0.1:18099;\n}\n")
+	writeFile(t, available("own"), "server {\n    listen 127.0.0.1:18097;\n    foo bar;\n}\n")
+	for _, name := range []string{"zz", "pool-b"} {
+		if err := svc.SetVHostEnabled(ctx, name, true); err != nil {
+			t.Fatalf("enabling %s: %v", name, err)
+		}
+	}
+
+	cases := []struct{ name, want string }{
+		{"aa", "nginx refuses the configuration with aa: a duplicate default server for 127.0.0.1:18097 in " + available("zz") + ":2"},
+		{"pool-a", `nginx refuses the configuration with pool-a: duplicate upstream "jd_lane_b_dup" in ` + available("pool-b") + ":1"},
+		{"own", `unknown directive "foo" in ` + available("own") + ":3"},
+	}
+	for _, c := range cases {
+		err := svc.SetVHostEnabled(ctx, c.name, true)
+		var refused *RefusedError
+		if !errors.As(err, &refused) {
+			t.Fatalf("enabling %s: %v", c.name, err)
+		}
+		if refused.Reason() != c.want {
+			t.Errorf("reason = %q\nwant %q", refused.Reason(), c.want)
+		}
+		if _, err := os.Lstat(enabled(c.name)); !os.IsNotExist(err) {
+			t.Errorf("the refused %s is still linked: %v", c.name, err)
+		}
+	}
+	if res := svc.Test(ctx, KindNginx); !res.Valid {
+		t.Fatalf("nginx no longer loads after the refused enables:\n%s", res.Output)
 	}
 }
 

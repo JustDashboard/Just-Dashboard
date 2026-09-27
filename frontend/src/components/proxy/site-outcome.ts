@@ -49,3 +49,26 @@ export function reloadOutput(
   if (!reload.validation.valid) return reload.validation.output || undefined
   return reload.output || undefined
 }
+
+/**
+ * `nginx -s reload` signals the master process named in nginx's pid file.
+ * These are its words when there is none to signal — no pid file, an empty
+ * one, or no process at the pid it holds — in either form nginx prints them
+ * (with its prefix when it can open its startup log, timestamped when not).
+ */
+const NOT_RUNNING = [
+  /\[error\] (?:\d+#\d+: )?open\(\) "[^"]+" failed \(2: [^)]*\)$/m,
+  /\[error\] (?:\d+#\d+: )?invalid PID number /m,
+  /\[alert\] (?:\d+#\d+: )?kill\(\d+, \d+\) failed \(3: [^)]*\)$/m,
+]
+
+/**
+ * Whether a reload failed because nginx is not running. Then there is nothing
+ * serving the configuration from before, and nginx starts with the change —
+ * which is what the operator has to be told, not that nginx keeps serving.
+ */
+export function nginxNotRunning(result: Pick<SiteDeleteResult | VHostLinkResult, "reload">) {
+  const reload = result.reload
+  if (!reload || reload.reloaded || !reload.validation.valid) return false
+  return NOT_RUNNING.some((said) => said.test(reload.output))
+}

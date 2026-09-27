@@ -228,7 +228,9 @@ test("a switch that landed but did not reload says so instead of 'completed'", a
   const disabled = page
     .locator("[data-sonner-toast]")
     .filter({ hasText: "app.example.com disabled, not reloaded" })
-  await expect(disabled).toContainText("nginx keeps serving it until a reload succeeds.")
+  await expect(disabled).toContainText(
+    "If nginx is running, it still serves it until a reload succeeds.",
+  )
   await expect(disabled).toContainText(brokenReason)
   await expect(page.getByText("Disable app.example.com completed")).toHaveCount(0)
 
@@ -282,6 +284,137 @@ test("a switch keeps its card busy until the list is read again, then says what 
   await expect(site.getByText("Enabling…", { exact: true })).toHaveCount(0)
 })
 
+/** What `nginx -s reload` prints when there is no nginx to signal. */
+const noPidFile = 'nginx: [error] open() "/run/nginx.pid" failed (2: No such file or directory)'
+const notRunning = {
+  reloaded: false,
+  reloadError: `reload failed: ${noPidFile}`,
+  reload: { validation: { ...brokenTest, valid: true }, reloaded: false, output: noPidFile },
+}
+
+test("a change with no nginx running says so, not that nginx keeps serving", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await serveSites(page, [layouts[1], app, legacy, off])
+  await page.route("**/api/v1/proxy/vhosts/*/enabled", (route) => {
+    const { enabled } = route.request().postDataJSON()
+    return json(route, {
+      name: enabled ? "off.example.com" : "app.example.com",
+      enabled,
+      ...notRunning,
+    })
+  })
+  await page.route("**/api/v1/proxy/vhosts/ghost/link", (route) =>
+    json(route, { name: "ghost", enabled: false, ...notRunning }),
+  )
+  await page.route("**/api/v1/proxy/sites/*", (route) =>
+    route.request().method() === "DELETE"
+      ? json(route, { name: "legacy.example.com", ...notRunning })
+      : route.fallback(),
+  )
+  await page.goto("/proxy/sites")
+  const toast = (title: string) => page.locator("[data-sonner-toast]").filter({ hasText: title })
+
+  await (await openMenu(page, "app.example.com")).getByRole("menuitem", { name: "Disable" }).click()
+  await page.getByRole("button", { name: "Disable and reload" }).click()
+  const disabled = toast("app.example.com disabled; nginx is not running")
+  await expect(disabled).toContainText("nginx starts without it.")
+  await expect(disabled).not.toContainText(/serving|serves|not reloaded/)
+  await disabled.getByRole("button", { name: "Show nginx output" }).click()
+  const output = page.getByRole("dialog", { name: "nginx output — app.example.com" })
+  await expect(output).toContainText(noPidFile)
+  await page.keyboard.press("Escape")
+  await expect(output).toHaveCount(0)
+
+  await (await openMenu(page, "off.example.com")).getByRole("menuitem", { name: "Enable" }).click()
+  await expect(toast("off.example.com enabled; nginx is not running")).toContainText(
+    "It serves once nginx starts.",
+  )
+
+  await (await openMenu(page, "ghost")).getByRole("menuitem", { name: "Remove link" }).click()
+  await page.getByRole("button", { name: "Remove and reload" }).click()
+  const removed = toast("sites-enabled/ghost removed; nginx is not running")
+  await expect(removed).toContainText("nginx starts without it.")
+  await expect(removed).not.toContainText("configuration from before")
+
+  await (
+    await openMenu(page, "legacy.example.com")
+  )
+    .getByRole("menuitem", { name: "Delete" })
+    .click()
+  await page.getByRole("button", { name: "Delete and reload" }).click()
+  const deleted = toast("legacy.example.com deleted; nginx is not running")
+  await expect(deleted).toContainText("nginx starts without it.")
+  await expect(deleted).not.toContainText(/serving|serves/)
+  await expect(page.getByText("Delete legacy.example.com completed")).toHaveCount(0)
+})
+
+test("a switch whose list could not be read again does not show the state from before", async ({
+  page,
+}, testInfo) => {
+  // At phone width: the notice carries the server's words, which can be long.
+  await page.setViewportSize({ width: 390, height: 1000 })
+  await mockProxy(page, { included: true })
+  let enabled = false
+  let failing = false
+  await page.route("**/api/v1/proxy/vhosts", (route) =>
+    failing
+      ? route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: {
+              code: "unavailable",
+              message:
+                "backend restarting: /var/lib/just-dashboard/run/just-dashboard-backend.sock is not accepting connections",
+              retryable: true,
+            },
+          }),
+        })
+      : json(route, [app, { ...off, enabled }]),
+  )
+  await page.route("**/api/v1/proxy/vhosts/off.example.com/enabled", (route) => {
+    enabled = true
+    failing = true
+    return json(route, {
+      name: "off.example.com",
+      enabled: true,
+      reloaded: true,
+      reload: { validation: { ...brokenTest, valid: true }, reloaded: true, output: "" },
+    })
+  })
+  await page.goto("/proxy/sites")
+  const site = card(page, "off.example.com")
+  await expect(site.getByText("disabled", { exact: true })).toBeVisible()
+  await expect(page.getByText("Could not read the sites again")).toHaveCount(0)
+
+  await (await openMenu(page, "off.example.com")).getByRole("menuitem", { name: "Enable" }).click()
+  await expect(
+    page.locator("[data-sonner-toast]").filter({ hasText: "off.example.com enabled" }),
+  ).toBeVisible()
+  // The read after the switch failed: the page says so, and the card does
+  // not fall back to the rows from before the change.
+  const notice = page.getByRole("alert").filter({ hasText: "Could not read the sites again" })
+  await expect(notice).toContainText("backend restarting")
+  await expect(notice).toContainText("from the last read, and may be out of date")
+  await expect(site.getByText("not read back", { exact: true })).toBeVisible()
+  await expect(site.getByText("disabled", { exact: true })).toHaveCount(0)
+  await expect(site.getByText("Enabling…", { exact: true })).toHaveCount(0)
+  // The other card was not changed by anything, and keeps its reading.
+  await expect(card(page, "app.example.com").getByText("serving", { exact: true })).toBeVisible()
+  expect(
+    await page
+      .locator("[data-slot='page']")
+      .evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+  ).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath("sites-unread-390.png"), fullPage: true })
+
+  failing = false
+  await notice.getByRole("button", { name: "Try again" }).click()
+  await expect(site.getByText("serving", { exact: true })).toBeVisible()
+  await expect(page.getByText("Could not read the sites again")).toHaveCount(0)
+  await expect(site.getByText("not read back", { exact: true })).toHaveCount(0)
+})
+
 test("a disable another site needs is refused, says so, and leaves the site serving", async ({
   page,
 }) => {
@@ -324,7 +457,9 @@ test("a disable another site needs is refused, says so, and leaves the site serv
   await expect(card(page, "app.example.com").getByText("serving", { exact: true })).toBeVisible()
 })
 
-test("a delete whose reload failed says the site is still served", async ({ page }) => {
+test("a delete whose reload failed says a running nginx still serves the site", async ({
+  page,
+}) => {
   await mockProxy(page, { included: true })
   const reads = await serveSites(page, [app, legacy])
   let reload = false
@@ -357,7 +492,9 @@ test("a delete whose reload failed says the site is still served", async ({ page
   const toast = page
     .locator("[data-sonner-toast]")
     .filter({ hasText: "legacy.example.com deleted, not reloaded" })
-  await expect(toast).toContainText("nginx keeps serving it until a reload succeeds.")
+  await expect(toast).toContainText(
+    "If nginx is running, it still serves it until a reload succeeds.",
+  )
   await expect(toast).toContainText(brokenReason)
   await expect(page.getByText("Delete legacy.example.com completed")).toHaveCount(0)
   expect(reads()).toBeGreaterThan(1)

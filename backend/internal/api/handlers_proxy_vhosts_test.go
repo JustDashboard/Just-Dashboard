@@ -128,6 +128,35 @@ func TestVHostToggleSaysARefusedDisableWasNeededElsewhere(t *testing.T) {
 	}
 }
 
+// An enable that clashes with an enabled site is refused in that site's
+// file when nginx reads it second. The answer and the audit entry say the
+// configuration was refused with this site, not only the other file's line.
+func TestVHostToggleSaysARefusedEnableClashedWithAnotherSite(t *testing.T) {
+	c, s, root := vhostServer(t, func(root string) string {
+		return fmt.Sprintf(`if [ -e '%s' ]; then echo 'nginx: [emerg] a duplicate default server for 0.0.0.0:80 in %s:22' >&2; exit 1; fi; exit 0`,
+			filepath.Join(root, "sites-enabled", "aaa"), filepath.Join(root, "sites-available", "default"))
+	})
+	for _, name := range []string{"aaa", "default"} {
+		if err := os.WriteFile(filepath.Join(root, "sites-available", name), []byte("server { listen 80 default_server; }\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink("../sites-available/default", filepath.Join(root, "sites-enabled", "default")); err != nil {
+		t.Fatal(err)
+	}
+	w := c.do(http.MethodPost, "/api/v1/proxy/vhosts/aaa/enabled", `{"enabled":true,"reload":true}`, nil)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("got %d: %s", w.Code, w.Body.String())
+	}
+	want := "nginx refuses the configuration with aaa: a duplicate default server for 0.0.0.0:80 in " + filepath.Join(root, "sites-available", "default") + ":22"
+	if answer := decodeLink(t, w.Body.Bytes()); answer.Error.Code != "invalid_config" || answer.Error.Message != want {
+		t.Errorf("error = %+v\nwant %q", answer.Error, want)
+	}
+	if entry := lastAudit(t, s, "proxy.vhost.toggle"); entry.Success || !strings.Contains(entry.Detail, "with aaa") {
+		t.Errorf("audit = %+v", entry)
+	}
+}
+
 // A reload that fails after a clean test is reported, not returned as a
 // failure of the toggle: the link is in place and nginx accepted it.
 func TestVHostToggleReportsAReloadThatFailed(t *testing.T) {

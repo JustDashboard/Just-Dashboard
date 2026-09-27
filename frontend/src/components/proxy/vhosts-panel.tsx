@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
-import { Globe, Plus } from "@/components/icons"
+import { Globe, Plus, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { plural } from "@/lib/format"
-import { ApiError, del, get, post } from "@/lib/api"
+import { ApiError, del, errorMessage, get, post } from "@/lib/api"
 import type { SiteDeleteResult, VHost, VHostLinkResult } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useQuerySelection } from "@/hooks/use-query-selection"
@@ -18,14 +18,14 @@ import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
 import { ProductGlyph, ProductLogo, ProductLogos } from "@/components/product-logo"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { VerbBar } from "@/components/verbs"
 import { AuthFilesPanel } from "@/components/proxy/auth-files-panel"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { siteProduct } from "@/components/proxy/marks"
 import { SiteForm } from "@/components/proxy/site-form"
 import { ServingStatus, SiteLinkNote, SiteTLS, siteKind } from "@/components/proxy/site-marks"
-import { reloadFailure, reloadOutput } from "@/components/proxy/site-outcome"
+import { nginxNotRunning, reloadFailure, reloadOutput } from "@/components/proxy/site-outcome"
 import { opensFile, useSiteVerbs } from "@/components/proxy/site-verbs"
 import { ProxyGrid, RoutePath } from "@/components/proxy/route-path"
 import {
@@ -51,13 +51,23 @@ const FILTER_LABEL: Record<SiteFilter, string> = {
 /** nginx's own words about a change, kept for the operator who asks to see them. */
 type NginxOutput = { title: string; output: string }
 
+/** One read of the list: the rows, and the error when the read failed. */
+type ListRead = { read: unknown; data: unknown }
+
 /**
  * A verb in flight on a site. Once it has answered, the card keeps the busy
  * word until the list is read again: dropping it on the answer drew the state
  * from before the change — "disabled" under a toast saying enabled — until
- * the next read arrived.
+ * the next read arrived. `answered` is the read the page had then.
  */
-type Busy = { verb: string; answered?: boolean; readBefore?: unknown }
+type Busy = { verb: string; answered?: ListRead }
+
+/**
+ * What a change that landed says when nginx did not reload: `notRunning` when
+ * there was no nginx to reload, which starts with the change, and
+ * `notReloaded`, before nginx's reason, when the reload itself failed.
+ */
+type ReloadCopy = { notRunning: string; notReloaded: string }
 
 /**
  * A file open in the config editor: the site's own, or — for a site whose
@@ -99,10 +109,13 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   // Each read of the list, failed or not, is a new object here: a failed one
   // brings a new error and keeps the rows, a good one brings new rows.
   const read: unknown = error ?? data
-  const lastRead = useRef<unknown>(undefined)
+  const lastRead = useRef<ListRead>({ read, data })
   useEffect(() => {
-    lastRead.current = read
+    lastRead.current = { read, data }
   })
+  // The read Try again asked for is in once `read` moves on from this one.
+  const [retryFrom, setRetryFrom] = useState<unknown>(undefined)
+  const retrying = retryFrom !== undefined && retryFrom === read
 
   const openForm = (name: string | null, copyFrom: string | null = null) => {
     setRequested(null)
@@ -176,14 +189,22 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   // The verb has answered: read the list again, and hold the busy word until
   // that read is in.
   const reread = (name: string) => {
-    const readBefore = lastRead.current
-    setPending((p) => (p[name] ? { ...p, [name]: { ...p[name], answered: true, readBefore } } : p))
+    const answered = lastRead.current
+    setPending((p) => (p[name] ? { ...p, [name]: { ...p[name], answered } } : p))
     refresh()
   }
-  const busyOf = (name: string) => {
+  // A read that failed after the verb answered, with no good one since,
+  // leaves the card with only the rows from before the change: its state
+  // is not drawn from them, under a toast saying what the verb did.
+  const stateOf = (name: string): { busy?: string; unread?: boolean } => {
     const busy = pending[name]
-    if (!busy || (busy.answered && busy.readBefore !== read)) return undefined
-    return busy.verb
+    if (!busy) return {}
+    if (!busy.answered || busy.answered.read === read) return { busy: busy.verb }
+    return { unread: Boolean(error) && data === busy.answered.data }
+  }
+  const retry = () => {
+    setRetryFrom(read)
+    refresh()
   }
 
   // The whole of what nginx printed, one press away from the toast that
@@ -194,22 +215,44 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
       : undefined
 
   /**
+   * Says when a change that landed did not reload, and returns whether it
+   * said anything. With no nginx running there is nothing still serving the
+   * configuration from before — "keeps serving" would claim a site is up
+   * that is not — and nginx starts with the change. Any other failed reload
+   * leaves whatever nginx had loaded, if it is running, which the page
+   * cannot see from here and so does not claim.
+   */
+  const reportReload = (
+    res: VHostLinkResult | SiteDeleteResult,
+    done: string,
+    copy: ReloadCopy,
+  ): boolean => {
+    const failure = reloadFailure(res)
+    if (!failure) return false
+    const action = showOutput(res.name, reloadOutput(res))
+    if (nginxNotRunning(res)) {
+      notify.warning(`${done}; nginx is not running`, {
+        description: copy.notRunning,
+        duration: 12_000,
+        action,
+      })
+    } else {
+      notify.warning(`${done}, not reloaded`, {
+        description: `${copy.notReloaded} ${failure}`,
+        duration: 12_000,
+        action,
+      })
+    }
+    return true
+  }
+  /**
    * Says what a change to a link did. The change itself passed `nginx -t` —
    * a refused one comes back as a 422 carrying nginx's reason, and nothing
-   * changed — but the reload after it can still fail, and then nginx is
-   * running the configuration from before, which the page has to say.
+   * changed — but the reload after it can still fail, which the page has to
+   * say.
    */
-  const reportLink = (res: VHostLinkResult, done: string, notYet: string) => {
-    const failure = reloadFailure(res)
-    if (!failure) {
-      notify.success(done)
-      return
-    }
-    notify.warning(`${done}, not reloaded`, {
-      description: `${notYet} ${failure}`,
-      duration: 12_000,
-      action: showOutput(res.name, reloadOutput(res)),
-    })
+  const reportLink = (res: VHostLinkResult, done: string, copy: ReloadCopy) => {
+    if (!reportReload(res, done, copy)) notify.success(done)
   }
   const reportRefusal = (title: string, name: string, err: unknown) =>
     notify.error(title, err, {
@@ -225,13 +268,15 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
           { enabled, reload: true },
         )
         if (enabled) {
-          reportLink(res, `${vhost.name} enabled`, "It is not serving until nginx reloads.")
+          reportLink(res, `${vhost.name} enabled`, {
+            notRunning: "It serves once nginx starts.",
+            notReloaded: "It is not serving until nginx reloads.",
+          })
         } else {
-          reportLink(
-            res,
-            `${vhost.name} disabled`,
-            "nginx keeps serving it until a reload succeeds.",
-          )
+          reportLink(res, `${vhost.name} disabled`, {
+            notRunning: "nginx starts without it.",
+            notReloaded: "If nginx is running, it still serves it until a reload succeeds.",
+          })
         }
       } catch (err) {
         reportRefusal(`Could not ${enabled ? "enable" : "disable"} ${vhost.name}`, vhost.name, err)
@@ -327,11 +372,11 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
           const res = await del<VHostLinkResult>(
             `/proxy/vhosts/${encodeURIComponent(vhost.name)}/link`,
           )
-          reportLink(
-            res,
-            `sites-enabled/${vhost.name} removed`,
-            "nginx keeps running the configuration from before until a reload succeeds.",
-          )
+          reportLink(res, `sites-enabled/${vhost.name} removed`, {
+            notRunning: "nginx starts without it.",
+            notReloaded:
+              "If nginx is running, it keeps the configuration from before until a reload succeeds.",
+          })
         } catch (err) {
           reportRefusal(`Could not remove sites-enabled/${vhost.name}`, vhost.name, err)
         } finally {
@@ -356,16 +401,14 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         setBusy(vhost.name, "Deleting")
         try {
           const res = await del<SiteDeleteResult>(`/proxy/sites/${encodeURIComponent(vhost.name)}`)
-          const failure = reloadFailure(res)
-          if (!failure) return
-          // The file is gone, and nginx is still serving what it loaded:
-          // "completed" would send the operator away from a site that is up.
-          notify.warning(`${vhost.name} deleted, not reloaded`, {
-            description: `nginx keeps serving it until a reload succeeds. ${failure}`,
-            duration: 12_000,
-            action: showOutput(vhost.name, reloadOutput(res)),
+          // The file is gone, and a running nginx still serves what it
+          // loaded: "completed" would send the operator away from a site
+          // that is up.
+          const reported = reportReload(res, `${vhost.name} deleted`, {
+            notRunning: "nginx starts without it.",
+            notReloaded: "If nginx is running, it still serves it until a reload succeeds.",
           })
-          return "reported"
+          return reported ? "reported" : undefined
         } finally {
           reread(vhost.name)
         }
@@ -425,6 +468,26 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   return (
     <Page className="animate-rise">
       {header}
+
+      {/* The rows stay on a failed read, and would pass for what nginx
+          serves now: the tiles and cards below are from the last good one. */}
+      {error && (
+        <div role="alert">
+          <Notice tone="warning" icon={Warning} title="Could not read the sites again">
+            <p className="break-words">{errorMessage(error)}</p>
+            <p>The sites below are from the last read, and may be out of date.</p>
+            <Button
+              size="xs"
+              variant="outline"
+              className="mt-1.5"
+              onClick={retry}
+              disabled={retrying}
+            >
+              {retrying ? "Reading…" : "Try again"}
+            </Button>
+          </Notice>
+        </div>
+      )}
 
       <StatGrid columns={4} dense>
         <StatTile
@@ -527,7 +590,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
                     <SiteCard
                       key={`${vhost.kind}:${vhost.layout ?? ""}:${vhost.name}`}
                       vhost={vhost}
-                      busy={busyOf(vhost.name)}
+                      {...stateOf(vhost.name)}
                       index={index}
                       ambiguous={shared.has(vhost.name)}
                       {...handlers}
@@ -596,6 +659,8 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
 type CardProps = {
   vhost: VHost
   busy?: string
+  /** Changed by a verb, and not read back since: see `ServingStatus`. */
+  unread?: boolean
   index: number
   ambiguous: boolean
   admin: boolean
@@ -615,7 +680,7 @@ type CardProps = {
  * the reader may write it. A link to nothing has nothing to open, and a file
  * outside the proxy's directories is one the editor refuses.
  */
-function SiteCard({ vhost, busy, index, ambiguous, ...handlers }: CardProps) {
+function SiteCard({ vhost, busy, unread, index, ambiguous, ...handlers }: CardProps) {
   const verbs = useSiteVerbs({ vhost, busy, ambiguous, ...handlers })
   const form = handlers.admin && vhost.formEditable
   const primary = () => (form ? handlers.onEdit(vhost) : handlers.onRaw(vhost))
@@ -633,7 +698,7 @@ function SiteCard({ vhost, busy, index, ambiguous, ...handlers }: CardProps) {
       leading={<ProductLogo id={siteProduct(vhost)} size="md" />}
       title={<span className="text-title">{vhost.name}</span>}
       description={siteKind(vhost)}
-      trailing={<ServingStatus vhost={vhost} busy={busy} />}
+      trailing={<ServingStatus vhost={vhost} busy={busy} unread={unread} />}
     >
       {!linkOnly && (
         <RoutePath
