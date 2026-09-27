@@ -382,6 +382,7 @@ export type NetStats = {
   recvRate: number
   addrs: string[]
   isUp: boolean
+  kind: NetInterface["kind"]
 }
 
 export type DirEntry = {

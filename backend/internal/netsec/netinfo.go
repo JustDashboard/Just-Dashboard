@@ -79,7 +79,7 @@ func (s *Service) NetworkInfo(ctx context.Context) (*NetworkInfo, error) {
 	for _, ifc := range ifaces {
 		item := Interface{
 			Name: ifc.Name, MTU: ifc.MTU, MAC: ifc.HardwareAddr,
-			Addresses: []string{}, Kind: classifyInterface(ifc.Name),
+			Addresses: []string{}, Kind: ClassifyInterface(ifc.Name),
 		}
 		for _, f := range ifc.Flags {
 			switch f {
@@ -105,8 +105,8 @@ func (s *Service) NetworkInfo(ctx context.Context) (*NetworkInfo, error) {
 	// somebody reads them in, not the order the kernel enumerates them.
 	sort.SliceStable(info.Interfaces, func(i, j int) bool {
 		a, b := info.Interfaces[i], info.Interfaces[j]
-		if kindRank(a.Kind) != kindRank(b.Kind) {
-			return kindRank(a.Kind) < kindRank(b.Kind)
+		if KindRank(a.Kind) != KindRank(b.Kind) {
+			return KindRank(a.Kind) < KindRank(b.Kind)
 		}
 		return a.Name < b.Name
 	})
@@ -116,9 +116,9 @@ func (s *Service) NetworkInfo(ctx context.Context) (*NetworkInfo, error) {
 	return info, nil
 }
 
-// classifyInterface names a device from its name, which is what the kernel and
+// ClassifyInterface names a device from its name, which is what the kernel and
 // every tool on the host agree on and is cheaper than probing sysfs.
-func classifyInterface(name string) string {
+func ClassifyInterface(name string) string {
 	switch {
 	case name == "lo":
 		return "loopback"
@@ -136,7 +136,7 @@ func classifyInterface(name string) string {
 	return "physical"
 }
 
-func kindRank(kind string) int {
+func KindRank(kind string) int {
 	switch kind {
 	case "physical":
 		return 0

@@ -44,6 +44,11 @@ container runtime hands out the 64-bit maximum, so nothing divides by it), and `
 or thermal-zone temperature gopsutil can read, hottest first, each with the driver's own high and critical
 marks. A VPS usually reports no sensors, and the UI shows none rather than a cold machine.
 
+Each of the snapshot's `net` rows carries the `kind` the Security network page uses
+(`netsec.ClassifyInterface`: physical, tunnel, bridge, virtual) and they arrive in that order, so the
+metrics page can open on the host's own devices and set Docker's veth pairs and bridges aside — a host
+running a dozen containers otherwise lists thirty interfaces with the uplink among them.
+
 `metrics.Assess` (`GET /system/health`) turns those into findings — measured / means / do — ranked
 worst-first. It runs on the server because the thresholds are a claim the product makes, and because
 each check reads an hour of history to tell a spike from a trend. **Memory is judged on available, never
