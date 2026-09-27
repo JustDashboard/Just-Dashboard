@@ -2,17 +2,85 @@ package proxysvc
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func init() {
+	// Unit tests see only the listeners they declare. The host's own sockets
+	// — this machine runs Postgres on 5432 — would make them pass or fail by
+	// whatever else happens to be running.
+	streamListeners = func(context.Context) ([]Listener, error) { return nil, nil }
+}
+
+// withListeners makes the host look like it holds exactly these sockets.
+func withListeners(t *testing.T, listeners func(context.Context) ([]Listener, error)) {
+	t.Helper()
+	previous := streamListeners
+	streamListeners = listeners
+	t.Cleanup(func() { streamListeners = previous })
+}
 
 func tcpStream() *StreamSpec {
 	return &StreamSpec{
 		Name: "postgres-replica", Listen: 5432, Protocol: "tcp",
 		Upstream: "10.0.0.5:5432", AllowFrom: []string{"10.0.0.0/8"},
 	}
+}
+
+// streamHost is a stream directory behind an nginx shim whose -t passes
+// unless $root/fail-test exists and whose reload fails while $root/fail-reload
+// does. Every run is logged to $root/runs.
+func streamHost(t *testing.T) (*Service, string) {
+	t.Helper()
+	root := t.TempDir()
+	for _, dir := range []string{"stream.d", "bin"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	shim := fmt.Sprintf(`#!/bin/sh
+echo "$*" >> '%[1]s/runs'
+case "$1" in
+-t) if [ -e '%[1]s/fail-test' ]; then echo "nginx: [emerg] test refused" >&2; exit 1; fi ;;
+-s) if [ -e '%[1]s/fail-reload' ]; then echo "nginx: [alert] kill(1234, 1) failed (3: No such process)" >&2; exit 1; fi ;;
+esac
+exit 0
+`, root)
+	if err := os.WriteFile(filepath.Join(root, "bin", "nginx"), []byte(shim), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", filepath.Join(root, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return New(root, filepath.Join(root, "Caddyfile")), root
+}
+
+func writeStream(t *testing.T, s *Service, name, content string) string {
+	t.Helper()
+	path := filepath.Join(s.streamDir(), name+".conf")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func mustRead(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func nginxRuns(t *testing.T, root string) string {
+	t.Helper()
+	b, _ := os.ReadFile(filepath.Join(root, "runs"))
+	return string(b)
 }
 
 func TestValidateStream(t *testing.T) {
@@ -28,8 +96,13 @@ func TestValidateStream(t *testing.T) {
 		{"unknown protocol", func(s *StreamSpec) { s.Protocol = "sctp" }},
 		{"upstream with no port", func(s *StreamSpec) { s.Upstream = "10.0.0.5" }},
 		{"upstream with an injected directive", func(s *StreamSpec) { s.Upstream = "10.0.0.5:5432; root /" }},
+		{"upstream with a variable", func(s *StreamSpec) { s.Upstream = "$host:5432" }},
+		{"relative unix socket", func(s *StreamSpec) { s.Upstream = "unix:run/app.sock" }},
 		{"acl entry that is not an address", func(s *StreamSpec) { s.AllowFrom = []string{"office"} }},
-		{"timeout out of range", func(s *StreamSpec) { s.Timeout = 999999 }},
+		{"idle timeout out of range", func(s *StreamSpec) { s.Timeout = 999999 }},
+		{"connect timeout out of range", func(s *StreamSpec) { s.ConnectTimeout = -1 }},
+		{"address that is not an IP", func(s *StreamSpec) { s.Address = "localhost" }},
+		{"unknown UDP mode", func(s *StreamSpec) { s.Protocol, s.UDPMode = "udp", "burst" }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -53,14 +126,28 @@ func TestValidateStreamDefaultsToTCP(t *testing.T) {
 	}
 }
 
+// unix:/run/x.sock is a valid stream upstream (nginx 1.26 accepts it), and
+// was refused as "the upstream port is not valid".
+func TestValidateStreamAcceptsAUnixSocket(t *testing.T) {
+	spec := tcpStream()
+	spec.Upstream = "unix:/run/postgresql/.s.PGSQL.5432"
+	out, err := RenderStream(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "server unix:/run/postgresql/.s.PGSQL.5432;") {
+		t.Fatalf("socket upstream missing:\n%s", out)
+	}
+}
+
 func TestRenderStreamTCP(t *testing.T) {
 	out, err := RenderStream(tcpStream())
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		managedMarker, "listen 5432;", "server 10.0.0.5:5432;",
-		"proxy_pass postgres_replica_backend;", "allow 10.0.0.0/8;", "deny all;",
+		managedMarker, "listen 5432;", "listen [::]:5432;", "server 10.0.0.5:5432;",
+		"proxy_pass " + streamUpstreamName("postgres-replica") + ";", "allow 10.0.0.0/8;", "deny all;",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q from:\n%s", want, out)
@@ -73,73 +160,299 @@ func TestRenderStreamTCP(t *testing.T) {
 	}
 }
 
-// A dash is legal in a file name and not in an nginx identifier, so the
-// upstream block name has to be translated or the config will not parse.
-func TestRenderStreamMakesALegalUpstreamName(t *testing.T) {
-	out, _ := RenderStream(tcpStream())
-	if strings.Contains(out, "upstream postgres-replica_backend") {
-		t.Fatalf("dash left in an nginx identifier:\n%s", out)
-	}
-	if !strings.Contains(out, "upstream postgres_replica_backend {") {
-		t.Fatalf("upstream block missing:\n%s", out)
+// a-b and a_b are both legal names, and folding "-" to "_" gave both files
+// `upstream a_b_backend` — nginx then refused the second with "duplicate
+// upstream". A dot survived into the identifier as well.
+func TestStreamUpstreamNamesDoNotCollide(t *testing.T) {
+	seen := map[string]string{}
+	for _, name := range []string{"a-b", "a_b", "a.b", "ab"} {
+		spec := tcpStream()
+		spec.Name = name
+		out, err := RenderStream(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id := streamUpstreamName(name)
+		if !strings.Contains(out, "upstream "+id+" {") || !strings.Contains(out, "proxy_pass "+id+";") {
+			t.Fatalf("%s: upstream %s not used:\n%s", name, id, out)
+		}
+		if strings.ContainsAny(id, "-.") {
+			t.Errorf("%s: %q is not a plain identifier", name, id)
+		}
+		if other, taken := seen[id]; taken {
+			t.Errorf("%s and %s share upstream %s", other, name, id)
+		}
+		seen[id] = name
 	}
 }
 
-func TestRenderStreamUDP(t *testing.T) {
+// proxy_responses 1 ends a UDP session at the first reply, so every datagram
+// reached the backend from a new source port — a game server or WireGuard
+// sees a new peer each time. It is now the request/reply mode only.
+func TestRenderStreamUDPModes(t *testing.T) {
 	spec := tcpStream()
-	spec.Protocol = "udp"
-	spec.Listen = 5353
+	spec.Protocol, spec.Listen = "udp", 5353
 	out, err := RenderStream(spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "listen 5353 udp;") {
+	if spec.UDPMode != "session" {
+		t.Fatalf("a UDP stream defaults to %q, want session", spec.UDPMode)
+	}
+	if !strings.Contains(out, "listen 5353 udp;") || !strings.Contains(out, "listen [::]:5353 udp;") {
 		t.Fatalf("udp listener missing:\n%s", out)
 	}
+	if strings.Contains(out, "proxy_responses") {
+		t.Fatalf("a session stream must not end at the first reply:\n%s", out)
+	}
+
+	spec.UDPMode = "request"
+	out, err = RenderStream(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(out, "proxy_responses 1;") {
-		t.Fatalf("udp needs its own session rule:\n%s", out)
+		t.Fatalf("request mode needs proxy_responses 1:\n%s", out)
+	}
+
+	tcp := tcpStream()
+	tcp.UDPMode = "request"
+	if out, _ := RenderStream(tcp); strings.Contains(out, "proxy_responses") || tcp.UDPMode != "" {
+		t.Fatalf("a TCP stream carried a UDP mode:\n%s", out)
+	}
+}
+
+// One Timeout used to set proxy_timeout and proxy_connect_timeout alike, so
+// an hour of idle for SSH was also an hour's wait on a dead upstream.
+func TestRenderStreamKeepsTheTwoTimeoutsApart(t *testing.T) {
+	spec := tcpStream()
+	spec.Timeout = 3600
+	out, _ := RenderStream(spec)
+	if !strings.Contains(out, "proxy_timeout 3600s;") || strings.Contains(out, "proxy_connect_timeout") {
+		t.Fatalf("idle timeout leaked into the connect timeout:\n%s", out)
+	}
+	spec.ConnectTimeout = 5
+	out, _ = RenderStream(spec)
+	if !strings.Contains(out, "proxy_connect_timeout 5s;") {
+		t.Fatalf("connect timeout missing:\n%s", out)
 	}
 }
 
 func TestStreamRoundTrip(t *testing.T) {
-	original := tcpStream()
-	original.ProxyProtocol = true
-	original.Timeout = 300
-	out, err := RenderStream(original)
-	if err != nil {
-		t.Fatal(err)
+	cases := map[string]func(*StreamSpec){
+		"tcp":            func(s *StreamSpec) { s.ProxyProtocol, s.Timeout, s.ConnectTimeout = true, 300, 10 },
+		"udp session":    func(s *StreamSpec) { s.Protocol, s.UDPMode = "udp", "session" },
+		"udp request":    func(s *StreamSpec) { s.Protocol, s.UDPMode, s.Listen = "udp", "request", 53 },
+		"loopback only":  func(s *StreamSpec) { s.Address = "127.0.0.1" },
+		"ipv6 loopback":  func(s *StreamSpec) { s.Address = "::1" },
+		"ipv4 only":      func(s *StreamSpec) { s.Address = "0.0.0.0" },
+		"unix upstream":  func(s *StreamSpec) { s.Upstream = "unix:/run/app.sock" },
+		"open to anyone": func(s *StreamSpec) { s.AllowFrom = []string{} },
+		"folded name":    func(s *StreamSpec) { s.Name = "a_b.c-d" },
 	}
-	parsed := ParseStreamSpec("postgres-replica", out)
-	if parsed.Listen != 5432 || parsed.Protocol != "tcp" {
-		t.Fatalf("listener lost: %+v", parsed)
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			original := tcpStream()
+			mutate(original)
+			out, err := RenderStream(original)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parsed, managed, unsupported := ParseStreamSpec(original.Name, out)
+			if !managed || len(unsupported) != 0 {
+				t.Fatalf("managed=%v unsupported=%v", managed, unsupported)
+			}
+			if !reflect.DeepEqual(parsed, original) {
+				t.Fatalf("parsed\n%+v\nwant\n%+v", parsed, original)
+			}
+			again, err := RenderStream(parsed)
+			if err != nil || again != out {
+				t.Fatalf("second render differs (%v):\n%s\nwant\n%s", err, again, out)
+			}
+		})
 	}
-	if parsed.Upstream != "10.0.0.5:5432" {
-		t.Fatalf("upstream = %q", parsed.Upstream)
+}
+
+// A file written by an earlier version of the dashboard — the old upstream
+// name, one timeout in both directives, proxy_responses on every UDP stream —
+// still reads back as the same forward.
+func TestParseStreamSpecReadsTheOldRendering(t *testing.T) {
+	old := `# Managed by Just Dashboard.
+# Stream: dns
+upstream dns_backend {
+    server 10.0.0.53:53;
+}
+
+server {
+    listen 53 udp;
+    listen [::]:53 udp;
+    proxy_pass dns_backend;
+    proxy_timeout 30s;
+    proxy_connect_timeout 30s;
+    # UDP has no connection to close, so nginx decides a session is
+    # over by silence rather than by a shutdown.
+    proxy_responses 1;
+}
+`
+	spec, managed, unsupported := ParseStreamSpec("dns", old)
+	if !managed || len(unsupported) != 0 {
+		t.Fatalf("managed=%v unsupported=%v", managed, unsupported)
 	}
-	if !parsed.ProxyProtocol || parsed.Timeout != 300 {
-		t.Fatalf("options lost: %+v", parsed)
-	}
-	if len(parsed.AllowFrom) != 1 || parsed.AllowFrom[0] != "10.0.0.0/8" {
-		t.Fatalf("allow list lost: %v", parsed.AllowFrom)
-	}
-	if err := ValidateStream(parsed); err != nil {
-		t.Fatalf("a parsed stream should still be valid: %v", err)
+	want := &StreamSpec{Name: "dns", Listen: 53, Protocol: "udp", UDPMode: "request", Upstream: "10.0.0.53:53",
+		Timeout: 30, ConnectTimeout: 30, AllowFrom: []string{}}
+	if !reflect.DeepEqual(spec, want) {
+		t.Fatalf("parsed %+v", spec)
 	}
 }
 
 // The v4 and v6 listen lines carry the same port; reading both would leave the
 // form showing whichever came last rather than one value.
 func TestParseStreamSpecReadsOnePort(t *testing.T) {
-	spec := ParseStreamSpec("x", "server {\n listen 5432;\n listen [::]:5432;\n proxy_pass a_backend;\n}\n")
-	if spec.Listen != 5432 {
-		t.Fatalf("listen = %d", spec.Listen)
+	spec, _, unsupported := ParseStreamSpec("x", "server {\n listen 5432;\n listen [::]:5432;\n proxy_pass 10.0.0.5:5432;\n}\n")
+	if spec.Listen != 5432 || spec.Address != "" || len(unsupported) != 0 {
+		t.Fatalf("listen = %d address = %q unsupported = %v", spec.Listen, spec.Address, unsupported)
+	}
+}
+
+// The files people write by hand, as the page map found them.
+func TestParseStreamSpecHandWritten(t *testing.T) {
+	cases := []struct {
+		name        string
+		content     string
+		want        StreamSpec
+		open        bool
+		unsupported []string
+	}{
+		{
+			// A loopback bind was read as the bare port, and saving then
+			// listened on every interface.
+			name:    "loopback bind",
+			content: "server {\n    listen 127.0.0.1:6000;\n    proxy_pass 10.0.0.5:6000;\n}\n",
+			want:    StreamSpec{Name: "x", Listen: 6000, Address: "127.0.0.1", Protocol: "tcp", Upstream: "10.0.0.5:6000", AllowFrom: []string{}},
+			open:    true,
+		},
+		{
+			// One line, a direct proxy_pass and minutes: the old reader
+			// found Listen 0, no upstream and a timeout of 0.
+			name:    "one line",
+			content: "server { listen 6000; proxy_pass 10.0.0.5:6000; proxy_timeout 10m; }",
+			want:    StreamSpec{Name: "x", Listen: 6000, Address: "0.0.0.0", Protocol: "tcp", Upstream: "10.0.0.5:6000", Timeout: 600, AllowFrom: []string{}},
+			open:    true,
+		},
+		{
+			name:    "hours and minutes",
+			content: "server { listen 22 ; proxy_pass bastion:22; proxy_timeout 1h30m; proxy_connect_timeout 5s; allow 10.0.0.0/8; deny all; }",
+			want:    StreamSpec{Name: "x", Listen: 22, Address: "0.0.0.0", Protocol: "tcp", Upstream: "bastion:22", Timeout: 5400, ConnectTimeout: 5, AllowFrom: []string{"10.0.0.0/8"}},
+		},
+		{
+			// `allow all` restricts nothing, and the listing counted it as a
+			// restriction.
+			name:    "allow all",
+			content: "server { listen 6000; listen [::]:6000; allow all; deny all; proxy_pass 10.0.0.5:6000; }",
+			want:    StreamSpec{Name: "x", Listen: 6000, Protocol: "tcp", Upstream: "10.0.0.5:6000", AllowFrom: []string{}},
+			open:    true,
+		},
+		{
+			// Deny lines were dropped, and saving then let the denied in.
+			name:        "deny then allow all",
+			content:     "server { listen 6000; deny 203.0.113.0/24; allow all; proxy_pass 10.0.0.5:6000; }",
+			want:        StreamSpec{Name: "x", Listen: 6000, Address: "0.0.0.0", Protocol: "tcp", Upstream: "10.0.0.5:6000", AllowFrom: []string{"all"}},
+			open:        true,
+			unsupported: []string{"deny rules"},
+		},
+		{
+			name:        "allow with no deny all",
+			content:     "server { listen 6000; allow 10.0.0.0/8; proxy_pass 10.0.0.5:6000; }",
+			want:        StreamSpec{Name: "x", Listen: 6000, Address: "0.0.0.0", Protocol: "tcp", Upstream: "10.0.0.5:6000", AllowFrom: []string{"10.0.0.0/8"}},
+			open:        true,
+			unsupported: []string{"allow rules with no deny all after them"},
+		},
+		{
+			// `server {` was read as the upstream, and the card said
+			// "Forward to {". A pool with a backup lost its second server.
+			name: "pool with a backup",
+			content: `upstream pool { server 10.0.0.5:5432; server 10.0.0.6:5432 backup; }
+server { listen 5432; proxy_pass pool; allow 10.0.0.0/8; deny all; }`,
+			want:        StreamSpec{Name: "x", Listen: 5432, Address: "0.0.0.0", Protocol: "tcp", Upstream: "10.0.0.5:5432", AllowFrom: []string{"10.0.0.0/8"}},
+			unsupported: []string{"2 upstream servers", "upstream server options"},
+		},
+		{
+			name:        "tls and a sub-second timeout",
+			content:     "server { listen 6443 ssl; ssl_certificate /etc/ssl/a.pem; proxy_pass 10.0.0.5:6443; proxy_connect_timeout 500ms; }",
+			want:        StreamSpec{Name: "x", Listen: 6443, Address: "0.0.0.0", Protocol: "tcp", Upstream: "10.0.0.5:6443", AllowFrom: []string{}},
+			open:        true,
+			unsupported: []string{"listen option ssl", "ssl_certificate", "proxy_connect_timeout 500ms"},
+		},
+		{
+			name:        "port range",
+			content:     "server { listen 27015-27030 udp; proxy_pass 10.0.0.9:$server_port; }",
+			want:        StreamSpec{Name: "x", Protocol: "tcp", AllowFrom: []string{}},
+			open:        true,
+			unsupported: []string{"a port range", "proxy_pass with a variable", "no proxy_pass", "no listen"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := parseStreamFile("x.conf", tc.content)
+			if !reflect.DeepEqual(p.spec, tc.want) {
+				t.Errorf("spec\n%+v\nwant\n%+v", p.spec, tc.want)
+			}
+			if p.open != tc.open {
+				t.Errorf("open = %v, want %v", p.open, tc.open)
+			}
+			want := tc.unsupported
+			if want == nil {
+				want = []string{}
+			}
+			if !reflect.DeepEqual(p.unsupported, want) {
+				t.Errorf("unsupported = %q, want %q", p.unsupported, want)
+			}
+			if p.managed {
+				t.Error("a hand-written file read as the dashboard's")
+			}
+		})
+	}
+}
+
+func TestParseNginxDuration(t *testing.T) {
+	for value, want := range map[string]int64{
+		"90": 90_000, "90s": 90_000, "10m": 600_000, "1h30m": 5_400_000, "500ms": 500, "1d": 86_400_000, "2w": 1_209_600_000,
+	} {
+		if got, ok := parseNginxDuration(value); !ok || got != want {
+			t.Errorf("%s = %d (%v), want %d", value, got, ok, want)
+		}
+	}
+	for _, bad := range []string{"", "m", "10x", "1.5s", "-3s"} {
+		if _, ok := parseNginxDuration(bad); ok {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+}
+
+func TestStreamOpen(t *testing.T) {
+	for allow, want := range map[string]bool{
+		"":                     true,
+		"10.0.0.0/8":           false,
+		"10.0.0.0/8,all":       true,
+		"0.0.0.0/0":            true,
+		"::/0":                 true,
+		"10.0.0.0/8,192.0.2.1": false,
+	} {
+		spec := tcpStream()
+		spec.AllowFrom = nil
+		if allow != "" {
+			spec.AllowFrom = strings.Split(allow, ",")
+		}
+		if got := streamOpen(spec); got != want {
+			t.Errorf("allow %q: open = %v, want %v", allow, got, want)
+		}
 	}
 }
 
 func TestStreamWarnings(t *testing.T) {
 	open := tcpStream()
 	open.AllowFrom = nil
-	warnings := streamWarnings(open)
+	warnings := StreamWarnings(open)
 	if len(warnings) < 2 {
 		t.Fatalf("an unrestricted database stream should warn twice: %v", warnings)
 	}
@@ -150,66 +463,278 @@ func TestStreamWarnings(t *testing.T) {
 		t.Error("the port catalogue's judgement should carry over to streams")
 	}
 
-	if got := streamWarnings(tcpStream()); len(got) != 0 {
+	if got := StreamWarnings(tcpStream()); len(got) != 0 {
 		t.Errorf("a source-restricted stream warned anyway: %v", got)
 	}
 
+	// `allow all` restricts nothing, so it warns like an empty list.
+	everyone := tcpStream()
+	everyone.AllowFrom = []string{"all"}
+	if !containsSubstring(StreamWarnings(everyone), "database") {
+		t.Error("allow all counted as a restriction")
+	}
+
+	// nginx does send the header on UDP — in front of the first datagram of
+	// the session. The old warning said the backend would not see it.
 	udp := tcpStream()
 	udp.Protocol, udp.ProxyProtocol = "udp", true
-	if !containsSubstring(streamWarnings(udp), "PROXY protocol is a TCP thing") {
-		t.Error("PROXY protocol on UDP silently does nothing and should say so")
-	}
-}
-
-// The snippet this page prints is exactly what people paste into nginx.conf
-// commented out while they think about it. A banner that disappears then is
-// worse than none: the files go on being written and silently ignored.
-func TestStreamIncludeIgnoresACommentedOutInclude(t *testing.T) {
-	dir := t.TempDir()
-	streams := filepath.Join(dir, "stream.d")
-	write := func(body string) {
-		if err := os.WriteFile(filepath.Join(dir, "nginx.conf"), []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write("# stream {\n#     include " + streams + "/*.conf;\n# }\nhttp { }\n")
-	if streamIncludeFound(dir, streams) {
-		t.Error("a commented-out include was read as present")
-	}
-	write("stream {\n    include " + streams + "/*.conf;\n}\nhttp { }\n")
-	if !streamIncludeFound(dir, streams) {
-		t.Error("a real include was not found")
+	got := StreamWarnings(udp)
+	if !containsSubstring(got, "first datagram") || containsSubstring(got, "will not see the header") {
+		t.Errorf("PROXY on UDP warning is wrong: %v", got)
 	}
 }
 
 // The stream directory hangs off the configured nginx directory, so a host
 // with JD_NGINX_DIR set somewhere else does not write into /etc/nginx.
 func TestStreamsLiveUnderTheConfiguredNginxDir(t *testing.T) {
-	dir := t.TempDir()
-	svc := New(dir, filepath.Join(t.TempDir(), "Caddyfile"))
-	if got := svc.Streams(context.Background()).Dir; got != filepath.Join(dir, "stream.d") {
-		t.Fatalf("stream dir is %s", got)
+	svc, root := streamHost(t)
+	status, err := svc.Streams(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Dir != filepath.Join(root, "stream.d") {
+		t.Fatalf("stream dir is %s", status.Dir)
+	}
+}
+
+// Permission denied on the directory is not "nothing forwarded".
+func TestStreamsReportsAnUnreadableDirectory(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root reads a directory whatever its mode")
+	}
+	svc, _ := streamHost(t)
+	if err := os.Chmod(svc.streamDir(), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(svc.streamDir(), 0o755) })
+	if _, err := svc.Streams(context.Background()); err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("got %v, want the read error", err)
+	}
+}
+
+func TestStreamsListsEveryFileNginxWouldRead(t *testing.T) {
+	svc, _ := streamHost(t)
+	rendered, _ := RenderStream(tcpStream())
+	writeStream(t, svc, "postgres-replica", rendered)
+	writeStream(t, svc, "Upper", "server { listen 6000; deny 192.0.2.1; proxy_pass 10.0.0.5:6000; }")
+	writeStream(t, svc, "open", "server { listen 7000; allow all; deny all; proxy_pass 10.0.0.5:7000; }")
+	for _, skipped := range []string{".hidden.conf", "old.conf.bak", "notes.txt"} {
+		if err := os.WriteFile(filepath.Join(svc.streamDir(), skipped), []byte("server {}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unreadable := writeStream(t, svc, "secret", "server { listen 8000; proxy_pass 10.0.0.5:8000; }")
+	if os.Getuid() != 0 {
+		if err := os.Chmod(unreadable, 0o000); err != nil {
+			t.Fatal(err)
+		}
+	}
+	status, err := svc.Streams(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]StreamEntry{}
+	for _, e := range status.Streams {
+		byName[e.Name] = e
+	}
+	if len(byName) != 4 {
+		t.Fatalf("listed %d: %+v", len(byName), status.Streams)
+	}
+	if e := byName["postgres-replica"]; !e.Managed || e.Open || len(e.Unsupported) != 0 {
+		t.Errorf("managed stream: %+v", e)
+	}
+	if e := byName["Upper"]; e.Managed || !reflect.DeepEqual(e.Unsupported, []string{"deny rules"}) {
+		t.Errorf("hand-written stream: %+v", e)
+	}
+	if e := byName["open"]; !e.Open || len(e.AllowFrom) != 0 {
+		t.Errorf("allow all should read as open: %+v", e)
+	}
+	if e := byName["secret"]; os.Getuid() != 0 && e.Error == "" {
+		t.Errorf("an unreadable file should say so: %+v", e)
 	}
 }
 
 // "New stream" and "Edit this stream" post to one route, so without the guard
 // a new one named after an existing one replaced it in silence — a forwarding
 // rule that quietly stopped pointing where it used to.
-func TestApplyStreamRefusesToReplaceWithoutOverwrite(t *testing.T) {
-	dir := t.TempDir()
-	svc := New(dir, filepath.Join(t.TempDir(), "Caddyfile"))
-	if err := os.MkdirAll(svc.streamDir(), 0o755); err != nil {
+func TestApplyStreamRefusesToReplaceANewNameThatIsTaken(t *testing.T) {
+	svc, _ := streamHost(t)
+	path := writeStream(t, svc, "postgres-replica", "# existing\n")
+	if _, err := svc.ApplyStream(context.Background(), tcpStream(), "", false); !errors.Is(err, ErrStreamExists) {
+		t.Fatalf("got %v, want ErrStreamExists", err)
+	}
+	if got := mustRead(t, path); got != "# existing\n" {
+		t.Fatalf("the existing file was touched: %q", got)
+	}
+}
+
+// Renaming used to post overwrite with the new name: editing "bastion" and
+// calling it "postgres-replica" replaced postgres-replica's file with no
+// backup, and renaming to a free name left both files on one port.
+func TestApplyStreamRenames(t *testing.T) {
+	svc, root := streamHost(t)
+	bastion := tcpStream()
+	bastion.Name, bastion.Listen, bastion.Upstream = "bastion", 2222, "10.0.0.9:22"
+	rendered, _ := RenderStream(bastion)
+	old := writeStream(t, svc, "bastion", rendered)
+	other, _ := RenderStream(tcpStream())
+	otherPath := writeStream(t, svc, "postgres-replica", other)
+
+	onto := *bastion
+	onto.Name = "postgres-replica"
+	if _, err := svc.ApplyStream(context.Background(), &onto, "bastion", false); !errors.Is(err, ErrStreamExists) {
+		t.Fatalf("rename onto another stream: got %v", err)
+	}
+	if mustRead(t, otherPath) != other || mustRead(t, old) != rendered {
+		t.Fatal("a refused rename changed a file")
+	}
+
+	renamed := *bastion
+	renamed.Name = "ssh"
+	res, err := svc.ApplyStream(context.Background(), &renamed, "bastion", false)
+	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(svc.streamDir(), "postgres-replica.conf")
-	if err := os.WriteFile(path, []byte("# existing\n"), 0o644); err != nil {
+	if res.Renamed != "bastion" {
+		t.Errorf("renamed = %q", res.Renamed)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Error("the old file is still read by nginx")
+	}
+	if mustRead(t, old+".bak") != rendered {
+		t.Error("the old file was not kept as .bak")
+	}
+	if !strings.Contains(mustRead(t, filepath.Join(svc.streamDir(), "ssh.conf")), "# Stream: ssh") {
+		t.Error("the new file was not written")
+	}
+	if strings.Count(nginxRuns(t, root), "-t") != 1 {
+		t.Errorf("a rename is one test, got %q", nginxRuns(t, root))
+	}
+}
+
+// A rename whose test fails leaves both names exactly as they were, the
+// backup of an earlier delete included.
+func TestApplyStreamPutsARenameBackWhenTheTestFails(t *testing.T) {
+	svc, root := streamHost(t)
+	rendered, _ := RenderStream(tcpStream())
+	old := writeStream(t, svc, "postgres-replica", rendered)
+	if err := os.WriteFile(old+".bak", []byte("# deleted last week\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.ApplyStream(context.Background(), tcpStream(), false, false); err == nil {
-		t.Fatal("an existing stream was replaced without asking")
+	if err := os.WriteFile(filepath.Join(root, "fail-test"), nil, 0o644); err != nil {
+		t.Fatal(err)
 	}
-	b, err := os.ReadFile(path)
-	if err != nil || string(b) != "# existing\n" {
-		t.Fatalf("the existing file was touched: %q %v", b, err)
+	renamed := tcpStream()
+	renamed.Name = "pg"
+	if _, err := svc.ApplyStream(context.Background(), renamed, "postgres-replica", false); !errors.Is(err, ErrInvalidConf) {
+		t.Fatalf("got %v", err)
+	}
+	if mustRead(t, old) != rendered || mustRead(t, old+".bak") != "# deleted last week\n" {
+		t.Fatal("the old file or its backup changed")
+	}
+	if _, err := os.Stat(filepath.Join(svc.streamDir(), "pg.conf")); !os.IsNotExist(err) {
+		t.Fatal("the new name was left behind")
+	}
+}
+
+// A file the form cannot express is not saved over: the form would have
+// dropped its deny rules and widened the forward.
+func TestApplyStreamRefusesToOverwriteAHandWrittenFile(t *testing.T) {
+	svc, _ := streamHost(t)
+	content := "server { listen 5432; deny 203.0.113.0/24; allow all; proxy_pass 10.0.0.5:5432; }\n"
+	path := writeStream(t, svc, "postgres-replica", content)
+	var handwritten *HandwrittenStreamError
+	if _, err := svc.ApplyStream(context.Background(), tcpStream(), "postgres-replica", false); !errors.As(err, &handwritten) {
+		t.Fatalf("got %v", err)
+	}
+	if !strings.Contains(handwritten.Error(), "deny rules") {
+		t.Errorf("error does not say what would be lost: %v", handwritten)
+	}
+	if mustRead(t, path) != content {
+		t.Fatal("the hand-written file was changed")
+	}
+}
+
+// A hand-written file the form can express is rewritten in the dashboard's
+// layout, and the original is kept beside it; a loopback bind stays one.
+func TestApplyStreamKeepsTheHandWrittenOriginal(t *testing.T) {
+	svc, _ := streamHost(t)
+	content := "# the replica, only for the app on this box\nserver { listen 127.0.0.1:6000; proxy_pass 10.0.0.5:5432; }\n"
+	path := writeStream(t, svc, "replica", content)
+	spec, _, _ := ParseStreamSpec("replica", content)
+	spec.Timeout = 60
+	if _, err := svc.ApplyStream(context.Background(), spec, "replica", false); err != nil {
+		t.Fatal(err)
+	}
+	written := mustRead(t, path)
+	if !strings.Contains(written, "listen 127.0.0.1:6000;") || strings.Contains(written, "[::]") ||
+		strings.Contains(written, "listen 6000;") {
+		t.Fatalf("the loopback bind was widened:\n%s", written)
+	}
+	if mustRead(t, path+".bak") != content {
+		t.Fatal("the hand-written original was not kept")
+	}
+}
+
+// A file whose name the form would refuse can still be renamed to one it
+// accepts, and deleted.
+func TestAStreamWithAnUnusualNameCanBeRenamedAndDeleted(t *testing.T) {
+	svc, _ := streamHost(t)
+	writeStream(t, svc, "Upper", "server { listen 6000; proxy_pass 10.0.0.5:6000; }\n")
+	spec, _, _ := ParseStreamSpec("Upper", mustRead(t, filepath.Join(svc.streamDir(), "Upper.conf")))
+	spec.Name = "upper"
+	if _, err := svc.ApplyStream(context.Background(), spec, "Upper", false); err != nil {
+		t.Fatal(err)
+	}
+	writeStream(t, svc, "Other", "server { listen 7000; proxy_pass 10.0.0.5:7000; }\n")
+	if _, err := svc.DeleteStream(context.Background(), "Other"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(svc.streamDir(), "Other.conf")); !os.IsNotExist(err) {
+		t.Fatal("Other.conf is still there")
+	}
+	for _, bad := range []string{"../nginx", ".hidden", "", "a/b"} {
+		if _, err := svc.DeleteStream(context.Background(), bad); err == nil {
+			t.Errorf("deleted %q", bad)
+		}
+	}
+	if _, err := svc.DeleteStream(context.Background(), "missing"); !errors.Is(err, ErrStreamNotFound) {
+		t.Errorf("missing stream: %v", err)
+	}
+}
+
+// "Save for later" sent reload anyway; the save now reloads only when asked,
+// and says when nginx could not have tested the file.
+func TestApplyStreamReloadsOnlyWhenAsked(t *testing.T) {
+	svc, root := streamHost(t)
+	res, err := svc.ApplyStream(context.Background(), tcpStream(), "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(nginxRuns(t, root), "-s reload") || res.Reloaded {
+		t.Fatalf("reloaded without being asked: %q", nginxRuns(t, root))
+	}
+	if !strings.Contains(res.Validation.Note, "not include") {
+		t.Errorf("an untested file claimed a test: %+v", res.Validation)
+	}
+}
+
+// A reload that fails after the test passed left the file written while the
+// page said "Not applied". The file is valid and stays; the result says the
+// reload failed.
+func TestApplyStreamReportsAFailedReload(t *testing.T) {
+	svc, root := streamHost(t)
+	if err := os.WriteFile(filepath.Join(root, "fail-reload"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := svc.ApplyStream(context.Background(), tcpStream(), "", true)
+	if err != nil {
+		t.Fatalf("a failed reload is not a failed save: %v", err)
+	}
+	if res.Reloaded || !strings.Contains(res.ReloadError, "No such process") {
+		t.Fatalf("result = %+v", res)
+	}
+	if _, err := os.Stat(res.Path); err != nil {
+		t.Fatal("the tested file was removed")
 	}
 }

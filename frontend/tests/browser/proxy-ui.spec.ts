@@ -202,6 +202,7 @@ test("a stream is drawn as the service its port is", async ({ page }) => {
   await page.route("**/api/v1/proxy/streams/", (route) =>
     json(route, {
       included: true,
+      module: { state: "loaded", usable: true },
       snippet,
       dir: "/etc/nginx/streams",
       streams: [
@@ -212,6 +213,8 @@ test("a stream is drawn as the service its port is", async ({ page }) => {
           upstream: "10.0.0.5:5432",
           proxyProtocol: false,
           allowFrom: [],
+          open: true,
+          managed: true,
         },
         {
           name: "bastion",
@@ -220,6 +223,8 @@ test("a stream is drawn as the service its port is", async ({ page }) => {
           upstream: "10.0.0.9:22",
           proxyProtocol: false,
           allowFrom: ["10.0.0.0/8"],
+          open: false,
+          managed: true,
         },
       ],
     }),

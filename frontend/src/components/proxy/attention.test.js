@@ -41,6 +41,7 @@ const stream = (overrides) => ({
   upstream: "10.0.0.5:5432",
   proxyProtocol: false,
   allowFrom: [],
+  open: !overrides.allowFrom?.length,
   ...overrides,
 })
 const listener = (overrides) => ({
@@ -64,6 +65,7 @@ const inputs = {
     vhosts: [vhost({})],
     streams: {
       included: true,
+      module: { state: "static", usable: true },
       snippet: "",
       dir: "/etc/nginx/stream.d",
       streams: [stream({ allowFrom: ["10.0.0.0/8"] })],
@@ -107,6 +109,7 @@ const inputs = {
     ],
     streams: {
       included: false,
+      module: { state: "static", usable: true },
       snippet: "",
       dir: "/etc/nginx/stream.d",
       streams: [
@@ -125,6 +128,7 @@ const inputs = {
   oneStreamNotIncluded: {
     streams: {
       included: false,
+      module: { state: "static", usable: true },
       snippet: "",
       dir: "/etc/nginx/stream.d",
       streams: [stream({ allowFrom: ["1.2.3.4"] })],

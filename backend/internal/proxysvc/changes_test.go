@@ -71,7 +71,7 @@ func TestRecorderReceivesPriorContent(t *testing.T) {
 	if err := service.DeleteSite(ctx, spec.Name); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ApplyStream(ctx, tcpStream(), false, false); err != nil {
+	if _, err := service.ApplyStream(ctx, tcpStream(), "", false); err != nil {
 		t.Fatal(err)
 	}
 	stream := filepath.Join(service.streamDir(), tcpStream().Name+".conf")
@@ -79,7 +79,7 @@ func TestRecorderReceivesPriorContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := service.DeleteStream(ctx, tcpStream().Name); err != nil {
+	if _, err := service.DeleteStream(ctx, tcpStream().Name); err != nil {
 		t.Fatal(err)
 	}
 

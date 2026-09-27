@@ -374,8 +374,35 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   during an outage. Imports live in `/etc/ssl/just-dashboard`, so a renewal run can never prune a
   certificate it did not issue.
 - **`streams.go`** — nginx's `stream` is a sibling of `http`, so a stream cannot live under
-  sites-available. They go in `/etc/nginx/stream.d`, and the page says plainly when `nginx.conf` does not
+  sites-available. They go in `<JD_NGINX_DIR>/stream.d`, and the page says plainly when `nginx.conf` does not
   include it. nginx.conf itself is never edited from here: everything else on the host depends on it.
+  - **The module comes first.** Debian and Ubuntu build the stream module dynamic and ship it as
+    libnginx-mod-stream, which a plain `apt install nginx` leaves out; there a `stream` block is an unknown
+    directive, `nginx -t` fails and every reload is refused. `nginx_modules.go` (`StreamModule`) reads
+    `nginx -V` word by word (`--with-stream`, `=dynamic`; `--with-stream_ssl_module` is not the module), the
+    `load_module` lines of a `nginx -T` dump, nginx's own "unknown directive" when a block is already there,
+    and the `.so` on the host, into static / loaded / not-loaded / not-installed / absent / unknown. The
+    list handler names the package for the host's package manager. Unknown is never reported as missing.
+  - **Where stream.d is read** (`stream_state.go`) is `NginxTree` over the files on disk, with a probe file
+    placed where a new stream would go: an include inside `http` is named as misplaced, a `stream` block in
+    its own file and a relative include count, and `upstream` or `other-stream.d` no longer do. It reads
+    from disk because it is asked with the lock held (`includeNote`) and while the configuration fails.
+  - **Hand-written files** are parsed token by token. `ParseStreamSpec` returns what the form cannot express
+    (deny rules, a second upstream server, TLS, a port range, an unknown directive) and the save refuses to
+    overwrite such a file (`HandwrittenStreamError`, 409 `stream_handwritten`); the raw editor is the way
+    in. A bind address, `10m`-style times, a direct `proxy_pass`, `unix:` upstreams and the UDP mode are
+    read and written back, so a loopback forward is never saved onto every interface. A hand-written file
+    the form rewrites is kept as `.bak`.
+  - **A save** (`ApplyStream(spec, previous, reload)`) refuses a new name, or a rename, onto a taken one
+    (409 `stream_exists`) and a port another stream or another program holds (`PortInUseError`, 409
+    `port_in_use` on `spec.listen` with the next free port): `nginx -t` passes both, and the reload then
+    fails inside the master while `nginx -s reload` exits 0. A rename moves the old file to `.bak` before
+    one test and puts both back if it fails. It reloads only when asked ("Save for later" does not), and a
+    reload that fails after a clean test is a 200 with `reloadError`, not "not applied". The upstream block
+    is `NginxIdent(name)_backend`, so `a-b` and `a_b` no longer declare one upstream; UDP writes
+    `proxy_responses 1` only in the one-reply mode (it made every datagram a new session for a game server
+    or WireGuard); the idle and connect timeouts are separate. Delete reloads only when nginx read the
+    directory, and returns a failed reload as `reloadError`.
 - **`htpasswd.go`** does bcrypt in process — `htpasswd` lives in apache2-utils, is not installed on a host
   running nginx, and would put the password in a world-readable argv.
 - **`certbot.go`** issues, renews and revokes. `renewalScheduled` has its own field because it is the real

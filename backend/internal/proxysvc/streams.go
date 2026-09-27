@@ -1,8 +1,8 @@
 package proxysvc
 
 import (
-	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -39,32 +39,111 @@ type StreamSpec struct {
 	Name string `json:"name"`
 	// Listen is the port on this host.
 	Listen int `json:"listen"`
-	// Protocol is tcp or udp. UDP forwarding is stateless and needs its own
-	// timeout, which is why it is not merely a flag on the same rule.
+	// Address is the one address to listen on. Empty is every address of
+	// both families; 0.0.0.0 or :: is every address of one. It is kept so a
+	// file listening on 127.0.0.1 alone is never saved back listening on
+	// every interface.
+	Address string `json:"address,omitempty"`
+	// Protocol is tcp or udp.
 	Protocol string `json:"protocol"`
-	// Upstream is host:port.
+	// UDPMode is how nginx ends a UDP session. "session" keeps one per
+	// client until it goes quiet, which is what a game server, WireGuard or
+	// VoIP needs to see one peer rather than a new one per datagram;
+	// "request" ends it at the first reply, which suits DNS. Empty for TCP.
+	UDPMode string `json:"udpMode,omitempty"`
+	// Upstream is host:port, or unix:/path for a local socket.
 	Upstream string `json:"upstream"`
 	// ProxyProtocol prepends the PROXY header so the backend sees the real
 	// client address. It has to be turned on at both ends or the backend
 	// reads the header as the first bytes of the connection and fails in a
 	// way that looks like a protocol mismatch.
 	ProxyProtocol bool `json:"proxyProtocol"`
-	// Timeout in seconds. Zero leaves nginx's default.
+	// Timeout is how long a connection may sit idle, in seconds
+	// (proxy_timeout). Zero leaves nginx's ten minutes.
 	Timeout int `json:"timeout,omitempty"`
+	// ConnectTimeout is how long to wait for the upstream to accept, in
+	// seconds (proxy_connect_timeout). Zero leaves nginx's minute. It is its
+	// own setting because the idle timeout an SSH session needs is an hour,
+	// and a dead upstream should not hang a client for that long.
+	ConnectTimeout int `json:"connectTimeout,omitempty"`
 	// AllowFrom restricts who may connect. There is no basic auth for a raw
 	// TCP stream, so this is the only access control there is.
 	AllowFrom []string `json:"allowFrom"`
 }
 
+// StreamEntry is one file in the stream directory as the page lists it.
+type StreamEntry struct {
+	StreamSpec
+	Path string `json:"path"`
+	// Managed marks a file this dashboard wrote.
+	Managed bool `json:"managed"`
+	// Open is true when anyone may connect: no access rules, or rules that
+	// let everyone through. An allow list holding `all` restricts nothing.
+	Open bool `json:"open"`
+	// Unsupported names what the file does that the form cannot express.
+	// The form will not save over such a file: it would drop them.
+	Unsupported []string `json:"unsupported"`
+	// Error is why the file could not be read.
+	Error string `json:"error,omitempty"`
+}
+
 // StreamStatus reports whether nginx is set up to read these at all.
 type StreamStatus struct {
-	// Included reports that nginx.conf has a stream block pulling in our
+	// Included reports that a top-level stream block includes our
 	// directory. Without it the files are written and ignored.
 	Included bool `json:"included"`
-	// Snippet is what to add to nginx.conf when it is not.
-	Snippet string       `json:"snippet"`
-	Dir     string       `json:"dir"`
-	Streams []StreamSpec `json:"streams"`
+	// IncludedIn names where the directory is included instead, when that
+	// is somewhere nginx reads the files as something other than streams.
+	IncludedIn string `json:"includedIn,omitempty"`
+	// IncludeError is why nginx.conf could not be read to tell.
+	IncludeError string `json:"includeError,omitempty"`
+	// Module is whether nginx can read a stream block at all. The snippet
+	// below breaks nginx where it cannot.
+	Module StreamModule `json:"module"`
+	// Snippet is what to add to nginx.conf when it is not included.
+	Snippet string        `json:"snippet"`
+	Dir     string        `json:"dir"`
+	Streams []StreamEntry `json:"streams"`
+}
+
+// StreamResult is what a save did.
+type StreamResult struct {
+	Name       string            `json:"name"`
+	Path       string            `json:"path"`
+	Content    string            `json:"content"`
+	Warnings   []string          `json:"warnings"`
+	Validation *ValidationResult `json:"validation,omitempty"`
+	// Renamed is the name the stream had before this save renamed it. Its
+	// file is kept beside the new one as <old>.conf.bak.
+	Renamed  string `json:"renamed,omitempty"`
+	Reloaded bool   `json:"reloaded"`
+	// ReloadError is why nginx did not reload after the file passed its
+	// test. The file stays: it is valid, and it takes effect at the next
+	// reload that succeeds.
+	ReloadError string `json:"reloadError,omitempty"`
+	Output      string `json:"output,omitempty"`
+}
+
+var (
+	// ErrStreamExists refuses a new stream, or a rename, onto a name that is
+	// taken: without it the other stream's file was replaced in silence.
+	ErrStreamExists = errors.New("a stream by that name already exists")
+	// ErrStreamNotFound is a stream to edit or delete that has no file.
+	ErrStreamNotFound = errors.New("no such stream")
+)
+
+// HandwrittenStreamError refuses to save the form over a file that does more
+// than the form can say. Saving would drop every one of those things — a
+// deny rule, a second upstream server, TLS — and a forwarding rule that
+// quietly became wider than it was is the worst way this can fail.
+type HandwrittenStreamError struct {
+	Name        string
+	Unsupported []string
+}
+
+func (e *HandwrittenStreamError) Error() string {
+	return fmt.Sprintf("%s is written by hand and uses %s, which this form cannot keep — edit the file itself",
+		e.Name, strings.Join(e.Unsupported, ", "))
 }
 
 var streamNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
@@ -77,6 +156,13 @@ func ValidateStream(spec *StreamSpec) error {
 	if spec.Listen < 1 || spec.Listen > 65535 {
 		return fmt.Errorf("the listening port must be between 1 and 65535")
 	}
+	if spec.Address != "" {
+		ip := net.ParseIP(strings.Trim(spec.Address, "[]"))
+		if ip == nil {
+			return fmt.Errorf("the listening address must be an IP address")
+		}
+		spec.Address = ip.String()
+	}
 	switch strings.ToLower(spec.Protocol) {
 	case "tcp", "udp":
 		spec.Protocol = strings.ToLower(spec.Protocol)
@@ -85,21 +171,23 @@ func ValidateStream(spec *StreamSpec) error {
 	default:
 		return fmt.Errorf("protocol must be tcp or udp")
 	}
-	host, port, err := net.SplitHostPort(strings.TrimSpace(spec.Upstream))
-	if err != nil {
-		return fmt.Errorf("the upstream must look like 10.0.0.5:5432")
+	switch {
+	case spec.Protocol == "tcp":
+		spec.UDPMode = ""
+	case spec.UDPMode == "":
+		spec.UDPMode = "session"
+	case spec.UDPMode != "session" && spec.UDPMode != "request":
+		return fmt.Errorf("the UDP mode must be session or request")
 	}
-	if host == "" {
-		return fmt.Errorf("the upstream needs a host")
+	if err := validStreamUpstream(strings.TrimSpace(spec.Upstream)); err != nil {
+		return err
 	}
-	if strings.ContainsAny(spec.Upstream, " \t\n;{}") {
-		return fmt.Errorf("the upstream contains characters that are not allowed")
-	}
-	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
-		return fmt.Errorf("the upstream port is not valid")
-	}
+	spec.Upstream = strings.TrimSpace(spec.Upstream)
 	if spec.Timeout < 0 || spec.Timeout > 86400 {
-		return fmt.Errorf("the timeout is out of range")
+		return fmt.Errorf("the idle timeout must be between 0 and 86400 seconds")
+	}
+	if spec.ConnectTimeout < 0 || spec.ConnectTimeout > 86400 {
+		return fmt.Errorf("the connect timeout must be between 0 and 86400 seconds")
 	}
 	for _, entry := range spec.AllowFrom {
 		if err := validACLEntry(entry); err != nil {
@@ -109,6 +197,38 @@ func ValidateStream(spec *StreamSpec) error {
 	return nil
 }
 
+// validStreamUpstream accepts host:port and unix:/absolute/path, the two
+// shapes a stream upstream server takes.
+func validStreamUpstream(upstream string) error {
+	if strings.ContainsAny(upstream, " \t\r\n;{}#\"'$\\") {
+		return fmt.Errorf("the upstream contains characters that are not allowed")
+	}
+	if socket, ok := strings.CutPrefix(upstream, "unix:"); ok {
+		if !filepath.IsAbs(socket) {
+			return fmt.Errorf("a unix socket upstream needs an absolute path, like unix:/run/app.sock")
+		}
+		return nil
+	}
+	host, port, err := net.SplitHostPort(upstream)
+	if err != nil {
+		return fmt.Errorf("the upstream must look like 10.0.0.5:5432 or unix:/run/app.sock")
+	}
+	if host == "" {
+		return fmt.Errorf("the upstream needs a host")
+	}
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("the upstream port must be between 1 and 65535")
+	}
+	return nil
+}
+
+// streamUpstreamName is the stream's upstream block. Built by NginxIdent, so
+// a-b and a_b are two upstreams — folding "-" to "_" alone gave them one, and
+// nginx refused the second file with "duplicate upstream".
+func streamUpstreamName(name string) string {
+	return NginxIdent(name) + "_backend"
+}
+
 // RenderStream turns a spec into the nginx it means. Hand-written for the same
 // reason the site renderer is: the file outlives this dashboard and somebody
 // has to be able to read it.
@@ -116,22 +236,29 @@ func RenderStream(spec *StreamSpec) (string, error) {
 	if err := ValidateStream(spec); err != nil {
 		return "", err
 	}
+	upstream := streamUpstreamName(spec.Name)
 	l := &lines{}
 	l.add(managedMarker)
 	l.add("# Stream: %s", spec.Name)
 	l.add("# This belongs inside nginx's top-level stream block, not inside http.")
 	l.blank()
-	l.add("upstream %s_backend {", strings.ReplaceAll(spec.Name, "-", "_"))
+	l.add("upstream %s {", upstream)
 	l.add("    server %s;", spec.Upstream)
 	l.add("}")
 	l.blank()
 	l.add("server {")
+	suffix := ""
 	if spec.Protocol == "udp" {
-		l.add("    listen %d udp;", spec.Listen)
-		l.add("    listen [::]:%d udp;", spec.Listen)
-	} else {
-		l.add("    listen %d;", spec.Listen)
-		l.add("    listen [::]:%d;", spec.Listen)
+		suffix = " udp"
+	}
+	switch ip := net.ParseIP(spec.Address); {
+	case spec.Address == "":
+		l.add("    listen %d%s;", spec.Listen, suffix)
+		l.add("    listen [::]:%d%s;", spec.Listen, suffix)
+	case ip.To4() == nil:
+		l.add("    listen [%s]:%d%s;", spec.Address, spec.Listen, suffix)
+	default:
+		l.add("    listen %s:%d%s;", spec.Address, spec.Listen, suffix)
 	}
 	if len(spec.AllowFrom) > 0 {
 		l.blank()
@@ -143,138 +270,509 @@ func RenderStream(spec *StreamSpec) (string, error) {
 		l.add("    deny all;")
 	}
 	l.blank()
-	l.add("    proxy_pass %s_backend;", strings.ReplaceAll(spec.Name, "-", "_"))
+	l.add("    proxy_pass %s;", upstream)
 	if spec.ProxyProtocol {
 		l.add("    # The backend must be configured to expect this header, or it")
 		l.add("    # reads it as the first bytes of the connection.")
 		l.add("    proxy_protocol on;")
 	}
+	if spec.ConnectTimeout > 0 {
+		l.add("    proxy_connect_timeout %ds;", spec.ConnectTimeout)
+	}
 	if spec.Timeout > 0 {
 		l.add("    proxy_timeout %ds;", spec.Timeout)
-		l.add("    proxy_connect_timeout %ds;", spec.Timeout)
 	}
-	if spec.Protocol == "udp" {
-		l.add("    # UDP has no connection to close, so nginx decides a session is")
-		l.add("    # over by silence rather than by a shutdown.")
+	if spec.UDPMode == "request" {
+		l.add("    # One reply ends the session, so every query is a session of its")
+		l.add("    # own. Without this a session lasts until proxy_timeout of silence.")
 		l.add("    proxy_responses 1;")
 	}
 	l.add("}")
 	return l.String(), nil
 }
 
-// ParseStreamSpec reads a stream file back so the form can edit it.
-func ParseStreamSpec(name, content string) *StreamSpec {
-	spec := &StreamSpec{Name: name, Protocol: "tcp", AllowFrom: []string{}}
-	sc := bufio.NewScanner(strings.NewReader(content))
-	for sc.Scan() {
-		trimmed := strings.TrimSpace(sc.Text())
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		directive, value := cutDirective(trimmed)
-		switch directive {
-		case "listen":
-			fields := strings.Fields(value)
-			if len(fields) == 0 {
-				continue
-			}
-			// The v6 line repeats the port; taking the first keeps one value.
-			if spec.Listen == 0 {
-				port := fields[0]
-				if i := strings.LastIndex(port, ":"); i >= 0 {
-					port = port[i+1:]
-				}
-				spec.Listen, _ = strconv.Atoi(port)
-			}
-			if len(fields) > 1 && fields[1] == "udp" {
-				spec.Protocol = "udp"
-			}
-		case "server":
-			if spec.Upstream == "" {
-				spec.Upstream = value
-			}
-		case "allow":
-			spec.AllowFrom = append(spec.AllowFrom, value)
-		case "proxy_protocol":
-			spec.ProxyProtocol = value == "on"
-		case "proxy_timeout":
-			spec.Timeout = parseSeconds(value)
+// parsedStream is a stream file as the form sees it, plus what the listing
+// and the port check need.
+type parsedStream struct {
+	spec        StreamSpec
+	managed     bool
+	open        bool
+	unsupported []string
+	binds       []bind
+}
+
+func (p *parsedStream) cannot(what string) {
+	for _, have := range p.unsupported {
+		if have == what {
+			return
 		}
 	}
-	return spec
+	p.unsupported = append(p.unsupported, what)
+}
+
+// ParseStreamSpec reads a stream file back so the form can edit it, with
+// whether the dashboard wrote it and what in it the form cannot express.
+//
+// It reads the file as nginx does, token by token, so a one-line file, two
+// directives on a line and a quoted argument all read correctly. Everything
+// the form would drop on save is named in unsupported rather than ignored:
+// the old line reader dropped deny rules, extra upstream servers and every
+// directive it did not know, and saving then wrote a wider forward than the
+// one on disk.
+func ParseStreamSpec(name, content string) (*StreamSpec, bool, []string) {
+	p := parseStreamFile(name+".conf", content)
+	return &p.spec, p.managed, p.unsupported
+}
+
+func parseStreamFile(fileName, content string) parsedStream {
+	p := parsedStream{
+		spec:        StreamSpec{Name: strings.TrimSuffix(fileName, ".conf"), Protocol: "tcp", AllowFrom: []string{}},
+		managed:     strings.Contains(content, managedMarker),
+		unsupported: []string{},
+	}
+	directives, err := ParseNginxFile(fileName, content, []string{"stream"})
+	if err != nil {
+		p.cannot("a syntax error (" + err.Error() + ")")
+		return p
+	}
+	upstreams := map[string]Directive{}
+	var servers []Directive
+	for _, d := range directives {
+		switch {
+		case d.Name == "upstream" && d.Block != nil && len(d.Args) == 1:
+			upstreams[d.Args[0]] = d
+		case d.Name == "server" && d.Block != nil:
+			servers = append(servers, d)
+		default:
+			p.cannot(d.Name)
+		}
+	}
+	switch len(servers) {
+	case 0:
+		p.cannot("no server block")
+		return p
+	case 1:
+	default:
+		p.cannot(fmt.Sprintf("%d server blocks", len(servers)))
+	}
+
+	var rules []accessRule
+	used := map[string]bool{}
+	for _, d := range servers[0].Block {
+		switch d.Name {
+		case "listen":
+			p.readListen(d.Args)
+		case "proxy_pass":
+			if len(d.Args) != 1 {
+				p.cannot("proxy_pass")
+				continue
+			}
+			p.readProxyPass(d.Args[0], upstreams, used)
+		case "allow", "deny":
+			if len(d.Args) != 1 {
+				p.cannot(d.Name)
+				continue
+			}
+			rules = append(rules, accessRule{allow: d.Name == "allow", source: d.Args[0]})
+		case "proxy_protocol":
+			p.spec.ProxyProtocol = len(d.Args) == 1 && d.Args[0] == "on"
+		case "proxy_timeout", "proxy_connect_timeout":
+			seconds, ok := streamSeconds(d.Args)
+			if !ok {
+				p.cannot(d.Name + " " + strings.Join(d.Args, " "))
+				continue
+			}
+			if d.Name == "proxy_timeout" {
+				p.spec.Timeout = seconds
+			} else {
+				p.spec.ConnectTimeout = seconds
+			}
+		case "proxy_responses":
+			if len(d.Args) == 1 && d.Args[0] == "1" {
+				p.spec.UDPMode = "request"
+			} else {
+				p.cannot("proxy_responses " + strings.Join(d.Args, " "))
+			}
+		default:
+			p.cannot(d.Name)
+		}
+	}
+	for name := range upstreams {
+		if !used[name] {
+			p.cannot("an upstream nothing uses")
+		}
+	}
+	if p.spec.Upstream == "" {
+		p.cannot("no proxy_pass")
+	}
+	p.reduceBinds()
+	if p.spec.UDPMode == "request" && p.spec.Protocol != "udp" {
+		p.cannot("proxy_responses on TCP")
+	}
+	if p.spec.Protocol == "udp" && p.spec.UDPMode == "" {
+		p.spec.UDPMode = "session"
+	}
+	p.readAccess(rules)
+	return p
+}
+
+// readListen takes one listen line. Only the shapes RenderStream writes are
+// the form's; anything else — a port range, a host name, ssl, reuseport — is
+// named, and its socket is still read so a port check sees it.
+func (p *parsedStream) readListen(args []string) {
+	if len(args) == 0 {
+		p.cannot("listen")
+		return
+	}
+	b := bind{}
+	for _, param := range args[1:] {
+		if param == "udp" {
+			b.udp = true
+		} else {
+			p.cannot("listen option " + param)
+		}
+	}
+	addr, port := "", args[0]
+	switch {
+	case strings.HasPrefix(port, "unix:"):
+		p.cannot("a unix socket listener")
+		return
+	case strings.HasPrefix(port, "["):
+		end := strings.Index(port, "]")
+		if end < 0 || !strings.HasPrefix(port[end+1:], ":") {
+			p.cannot("listen " + args[0])
+			return
+		}
+		addr, port = port[1:end], port[end+2:]
+	case strings.Contains(port, ":"):
+		i := strings.LastIndex(port, ":")
+		addr, port = port[:i], port[i+1:]
+	}
+	if addr == "" || addr == "*" {
+		addr = "0.0.0.0"
+	}
+	if strings.Contains(port, "-") {
+		p.cannot("a port range")
+		return
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 1 || n > 65535 {
+		p.cannot("listen " + args[0])
+		return
+	}
+	ip := net.ParseIP(addr)
+	if ip == nil {
+		p.cannot("a host name in listen")
+		return
+	}
+	b.addr, b.port = ip.String(), n
+	for _, have := range p.binds {
+		if have == b {
+			return
+		}
+	}
+	p.binds = append(p.binds, b)
+}
+
+// reduceBinds folds the sockets into the spec's one port, one protocol and
+// one address — the dashboard's pair of wildcards reading as "every address".
+func (p *parsedStream) reduceBinds() {
+	if len(p.binds) == 0 {
+		p.cannot("no listen")
+		return
+	}
+	first := p.binds[0]
+	p.spec.Listen, p.spec.Address = first.port, first.addr
+	if first.udp {
+		p.spec.Protocol = "udp"
+	}
+	for _, b := range p.binds[1:] {
+		if b.port != first.port {
+			p.cannot("several listen ports")
+		}
+		if b.udp != first.udp {
+			p.cannot("both TCP and UDP")
+		}
+	}
+	addrs := map[string]bool{}
+	for _, b := range p.binds {
+		addrs[b.addr] = true
+	}
+	switch {
+	case len(addrs) == 2 && addrs["0.0.0.0"] && addrs["::"]:
+		p.spec.Address = ""
+	case len(addrs) > 1:
+		p.cannot("several listen addresses")
+	}
+}
+
+// readProxyPass takes the target either as an upstream block in this file,
+// whose one plain server is the form's upstream, or as an address written
+// straight into proxy_pass, which means the same.
+func (p *parsedStream) readProxyPass(target string, upstreams map[string]Directive, used map[string]bool) {
+	if strings.Contains(target, "$") {
+		p.cannot("proxy_pass with a variable")
+		return
+	}
+	block, ok := upstreams[target]
+	if !ok {
+		if !strings.HasPrefix(target, "unix:") && !strings.Contains(target, ":") {
+			p.cannot("an upstream defined in another file")
+		}
+		p.spec.Upstream = target
+		return
+	}
+	used[target] = true
+	var servers []Directive
+	for _, d := range block.Block {
+		if d.Name == "server" && len(d.Args) > 0 {
+			servers = append(servers, d)
+		} else {
+			p.cannot(d.Name)
+		}
+	}
+	if len(servers) == 0 {
+		p.cannot("an empty upstream")
+		return
+	}
+	p.spec.Upstream = servers[0].Args[0]
+	if len(servers) > 1 {
+		p.cannot(fmt.Sprintf("%d upstream servers", len(servers)))
+	}
+	for _, s := range servers {
+		if len(s.Args) > 1 {
+			p.cannot("upstream server options")
+		}
+	}
+}
+
+type accessRule struct {
+	allow  bool
+	source string
+}
+
+// readAccess turns allow and deny lines into the form's allow list where
+// that says the same thing, and works out who may connect either way.
+//
+// nginx takes the first rule that matches and lets through anyone none
+// matches, so: an allow list closed by `deny all` is the form's list; rules
+// that reach `allow all` before any deny let everyone in and are the form's
+// empty list; anything else — a deny list, allows with no `deny all` behind
+// them — is kept by hand.
+func (p *parsedStream) readAccess(rules []accessRule) {
+	p.open = rulesAdmitEveryone(rules)
+	var allows []string
+	onlyAllows := true
+	for i, r := range rules {
+		if r.allow && r.source == "all" && onlyAllows {
+			return
+		}
+		if r.allow {
+			allows = append(allows, r.source)
+			continue
+		}
+		if i == len(rules)-1 && r.source == "all" && len(allows) > 0 && onlyAllows {
+			p.spec.AllowFrom = allows
+			return
+		}
+		onlyAllows = false
+	}
+	if len(rules) == 0 {
+		return
+	}
+	p.spec.AllowFrom = append([]string{}, allows...)
+	if onlyAllows {
+		p.cannot("allow rules with no deny all after them")
+	} else {
+		p.cannot("deny rules")
+	}
+}
+
+// rulesAdmitEveryone walks the rules as nginx does: an allow of everyone
+// before any deny of everyone opens the port, a deny of everyone closes it,
+// and running off the end lets the client in.
+func rulesAdmitEveryone(rules []accessRule) bool {
+	deniedV4, deniedV6 := false, false
+	for _, r := range rules {
+		v4 := r.source == "all" || r.source == "0.0.0.0/0"
+		v6 := r.source == "all" || r.source == "::/0"
+		if r.allow && (v4 || v6) {
+			return true
+		}
+		if !r.allow {
+			deniedV4 = deniedV4 || v4
+			deniedV6 = deniedV6 || v6
+			if deniedV4 && deniedV6 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// streamOpen is whether anyone may connect to a spec's port.
+func streamOpen(spec *StreamSpec) bool {
+	if len(spec.AllowFrom) == 0 {
+		return true
+	}
+	rules := make([]accessRule, 0, len(spec.AllowFrom)+1)
+	for _, entry := range spec.AllowFrom {
+		rules = append(rules, accessRule{allow: true, source: strings.TrimSpace(entry)})
+	}
+	return rulesAdmitEveryone(append(rules, accessRule{source: "all"}))
+}
+
+// streamSeconds reads an nginx time — "90", "10m", "1h30m" — in whole
+// seconds. A value with milliseconds in it, or past a day, is not one the
+// form can hold.
+func streamSeconds(args []string) (int, bool) {
+	if len(args) != 1 {
+		return 0, false
+	}
+	ms, ok := parseNginxDuration(args[0])
+	if !ok || ms%1000 != 0 || ms/1000 > 86400 {
+		return 0, false
+	}
+	return int(ms / 1000), true
+}
+
+// parseNginxDuration reads nginx's time syntax into milliseconds: numbers
+// each followed by a unit — ms, s, m, h, d, w, M, y — or bare seconds.
+func parseNginxDuration(value string) (int64, bool) {
+	units := map[string]int64{
+		"ms": 1, "s": 1000, "m": 60_000, "h": 3_600_000, "d": 86_400_000,
+		"w": 7 * 86_400_000, "M": 30 * 86_400_000, "y": 365 * 86_400_000,
+	}
+	if value == "" {
+		return 0, false
+	}
+	var total int64
+	for value != "" {
+		i := 0
+		for i < len(value) && value[i] >= '0' && value[i] <= '9' {
+			i++
+		}
+		if i == 0 || i > 12 {
+			return 0, false
+		}
+		n, _ := strconv.ParseInt(value[:i], 10, 64)
+		value = value[i:]
+		unit := "s"
+		if strings.HasPrefix(value, "ms") {
+			unit, value = "ms", value[2:]
+		} else if value != "" {
+			unit, value = value[:1], value[1:]
+		}
+		scale, ok := units[unit]
+		if !ok {
+			return 0, false
+		}
+		total += n * scale
+	}
+	return total, true
+}
+
+// streamFileName is a file nginx would read from the stream directory:
+// *.conf, not a backup, and not a dotfile, which nginx's glob skips.
+func streamFileName(e os.DirEntry) bool {
+	name := e.Name()
+	return !e.IsDir() && strings.HasSuffix(name, ".conf") && !isBackupFile(name) && !strings.HasPrefix(name, ".")
 }
 
 // Streams lists what is configured, and whether nginx is reading it.
-func (s *Service) Streams(ctx context.Context) *StreamStatus {
+//
+// A stream directory that cannot be read is an error rather than an empty
+// list: "nothing forwarded" is a claim, and permission denied is not
+// evidence for it. A missing directory is the empty list — nothing has been
+// written yet.
+func (s *Service) Streams(ctx context.Context) (*StreamStatus, error) {
 	dir := s.streamDir()
 	status := &StreamStatus{
 		Dir:     dir,
-		Streams: []StreamSpec{},
+		Streams: []StreamEntry{},
 		Snippet: "stream {\n    include " + dir + "/*.conf;\n}",
 	}
-	status.Included = streamIncludeFound(s.nginxDir, dir)
+	include := readStreamInclude(s.nginxDir, dir)
+	status.Included, status.IncludedIn = include.included, include.misplaced
+	if include.err != nil {
+		status.IncludeError = include.err.Error()
+	}
+	status.Module = s.StreamModule(ctx)
 	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return status
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
 	}
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".conf") || isBackupFile(e.Name()) {
+		if !streamFileName(e) {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		path := filepath.Join(dir, e.Name())
+		b, err := os.ReadFile(path)
 		if err != nil {
+			status.Streams = append(status.Streams, StreamEntry{
+				StreamSpec:  StreamSpec{Name: strings.TrimSuffix(e.Name(), ".conf"), Protocol: "tcp", AllowFrom: []string{}},
+				Path:        path,
+				Unsupported: []string{},
+				Error:       err.Error(),
+			})
 			continue
 		}
-		status.Streams = append(status.Streams,
-			*ParseStreamSpec(strings.TrimSuffix(e.Name(), ".conf"), string(b)))
+		p := parseStreamFile(e.Name(), string(b))
+		status.Streams = append(status.Streams, StreamEntry{
+			StreamSpec: p.spec, Path: path, Managed: p.managed, Open: p.open, Unsupported: p.unsupported,
+		})
 	}
-	sort.Slice(status.Streams, func(i, j int) bool {
+	sort.SliceStable(status.Streams, func(i, j int) bool {
 		return status.Streams[i].Listen < status.Streams[j].Listen
 	})
-	return status
+	return status, nil
 }
 
-// streamIncludeFound looks for a stream block that pulls in our directory.
-//
-// Reported rather than fixed: nginx.conf is the file every other configuration
-// on the host depends on, and a dashboard that edits it silently is one bad
-// write away from a server that will not start.
-func streamIncludeFound(nginxDir, dir string) bool {
-	b, err := os.ReadFile(filepath.Join(nginxDir, "nginx.conf"))
+// streamFile is the file of an existing stream, found by the name the
+// listing gave it. The listing shows any *.conf, so this takes any plain file
+// name rather than only the names the form may create — a hand-made
+// Upper.conf could otherwise be listed and never edited, renamed or deleted.
+func (s *Service) streamFile(name string) (string, error) {
+	if name == "" || name == "." || name == ".." || strings.HasPrefix(name, ".") ||
+		strings.ContainsAny(name, "/\\\x00") {
+		return "", fmt.Errorf("invalid stream name")
+	}
+	path := filepath.Join(s.streamDir(), name+".conf")
+	st, err := os.Lstat(path)
 	if err != nil {
-		return false
+		return "", fmt.Errorf("%w: %s", ErrStreamNotFound, name)
 	}
-	// Comments are stripped first. The snippet this page prints is exactly
-	// what people paste in commented-out while they think about it, and a
-	// banner that disappears the moment the include is present-but-inert is
-	// worse than no banner: the files go on being written and ignored.
-	var live strings.Builder
-	for _, line := range strings.Split(string(b), "\n") {
-		if i := strings.IndexByte(line, '#'); i >= 0 {
-			line = line[:i]
-		}
-		live.WriteString(line)
-		live.WriteByte('\n')
+	if !st.Mode().IsRegular() {
+		return "", fmt.Errorf("%s is not a regular file — change it by hand", path)
 	}
-	text := live.String()
-	if !strings.Contains(text, "stream") {
-		return false
-	}
-	return strings.Contains(text, dir) || strings.Contains(text, "stream.d")
+	return path, nil
 }
 
-// ApplyStream writes a stream and reloads, testing first like everything else.
+// ApplyStream writes a stream, tests the whole configuration and reloads.
 //
-// overwrite is the same guard ApplySite carries and for the same reason: "New
-// stream" and "Edit this stream" post to one route, so without it a new one
-// named after an existing one replaced it silently — and a forwarding rule
-// that quietly stopped pointing where it used to is the worst shape this
-// feature can fail in.
-func (s *Service) ApplyStream(ctx context.Context, spec *StreamSpec, reload, overwrite bool) (*SiteResult, error) {
+// previous is the name the form opened on, empty for a new stream. A new
+// stream, or a rename, onto a name that is taken is refused: the form posts
+// both to one route, and without the check "New stream" — or renaming one
+// stream to another's name — replaced the other's file in silence. A rename
+// moves the old file to <old>.conf.bak before the test, so the two never
+// claim one port, and puts both back if the test fails.
+//
+// A file doing more than the form can say is refused (HandwrittenStreamError),
+// and so is a port another stream or another program already holds
+// (PortInUseError): nginx -t passes both, and nginx then ignores the stream
+// or fails the reload in a way the reload command does not report.
+//
+// A reload that fails after the test passed is reported in the result, not as
+// an error: the file is written and valid, and "not applied" was untrue.
+func (s *Service) ApplyStream(ctx context.Context, spec *StreamSpec, previous string, reload bool) (*StreamResult, error) {
 	content, err := RenderStream(spec)
 	if err != nil {
 		return nil, err
 	}
+	// Read before the lock: walking /proc takes a while, and the lock holds
+	// up every other save on the host.
+	listeners, listenErr := readListeners(ctx)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -283,48 +781,108 @@ func (s *Service) ApplyStream(ctx context.Context, spec *StreamSpec, reload, ove
 		return nil, err
 	}
 	path := filepath.Join(dir, spec.Name+".conf")
-	original, existed := readIfPresent(path)
-	if existed && !overwrite {
-		return nil, fmt.Errorf("a stream called %s already exists", spec.Name)
+	var oldPath, before string
+	var oldBinds []bind
+	oldManaged := true
+	if previous != "" {
+		if oldPath, err = s.streamFile(previous); err != nil {
+			return nil, err
+		}
+		b, err := os.ReadFile(oldPath)
+		if err != nil {
+			return nil, err
+		}
+		before = string(b)
+		old := parseStreamFile(previous+".conf", before)
+		if len(old.unsupported) > 0 {
+			return nil, &HandwrittenStreamError{Name: previous, Unsupported: old.unsupported}
+		}
+		oldBinds, oldManaged = old.binds, old.managed
 	}
-	res := &SiteResult{Name: spec.Name, Path: path, Content: content, Warnings: streamWarnings(spec)}
+	if path != oldPath {
+		if _, err := os.Lstat(path); err == nil {
+			return nil, fmt.Errorf("%w: %s", ErrStreamExists, spec.Name)
+		}
+	}
+	if err := streamPortConflict(dir, spec, oldPath, oldBinds, listeners); err != nil {
+		return nil, err
+	}
+
+	res := &StreamResult{Name: spec.Name, Path: path, Content: content, Warnings: StreamWarnings(spec)}
+	if listenErr != nil {
+		res.Warnings = append(res.Warnings, "The host's listening sockets could not be read ("+listenErr.Error()+
+			"), so a port another program holds was not checked for.")
+	}
 	if err := writeAtomic(path, content); err != nil {
 		return nil, err
 	}
-	res.Enabled = true
+	renamed := oldPath != "" && oldPath != path
+	backup := oldPath + ".bak"
+	earlierBackup, backupExisted := "", false
+	if renamed {
+		earlierBackup, backupExisted = readIfPresent(backup)
+		if err := os.Rename(oldPath, backup); err != nil {
+			os.Remove(path)
+			return nil, err
+		}
+	}
 
 	res.Validation = runValidator(ctx, "nginx", "-t")
+	res.Validation.Note = s.includeNote(path)
 	if !res.Validation.Valid {
-		restoreConfig(path, original, existed)
-		res.Enabled = false
+		if renamed {
+			os.Remove(path)
+			os.Rename(backup, oldPath)
+			restoreConfig(backup, earlierBackup, backupExisted)
+		} else {
+			restoreConfig(path, before, oldPath != "")
+		}
 		return res, ErrInvalidConf
 	}
-	s.recordChange(ctx, Change{Path: path, Action: ChangeWrite,
-		Before: []byte(original), BeforeExisted: existed, After: []byte(content)})
+	if !renamed && oldPath != "" && !oldManaged {
+		// The form rewrites a hand-written file in its own layout, comments
+		// and all; the original is worth a file left behind.
+		if err := os.WriteFile(backup, []byte(before), 0o644); err != nil {
+			res.Warnings = append(res.Warnings, "The hand-written original could not be kept: "+err.Error())
+		}
+	}
+	if renamed {
+		res.Renamed = previous
+		s.recordChange(ctx, Change{Path: oldPath, Action: ChangeDelete, Before: []byte(before), BeforeExisted: true})
+		s.recordChange(ctx, Change{Path: path, Action: ChangeWrite, After: []byte(content)})
+	} else {
+		s.recordChange(ctx, Change{Path: path, Action: ChangeWrite,
+			Before: []byte(before), BeforeExisted: oldPath != "", After: []byte(content)})
+	}
 	if reload {
 		out, err := hostexec.Command(ctx, "nginx", "-s", "reload").CombinedOutput()
 		res.Output = strings.TrimSpace(string(out))
 		if err != nil {
-			return res, fmt.Errorf("reload failed: %s", res.Output)
+			res.ReloadError = res.Output
+			if res.ReloadError == "" {
+				res.ReloadError = err.Error()
+			}
+		} else {
+			res.Reloaded = true
 		}
-		res.Reloaded = true
 	}
 	return res, nil
 }
 
-// streamWarnings are the choices that are legal and probably not intended.
-func streamWarnings(spec *StreamSpec) []string {
+// StreamWarnings are the choices that are legal and probably not intended.
+func StreamWarnings(spec *StreamSpec) []string {
 	warnings := []string{}
-	if len(spec.AllowFrom) == 0 {
+	open := streamOpen(spec)
+	if open {
 		warnings = append(warnings,
 			"A stream has no authentication of any kind — anything that can reach this port is through to the backend. Restrict the source unless the service behind it authenticates for itself.")
 	}
-	if preset, ok := streamDanger(spec.Listen); ok && len(spec.AllowFrom) == 0 {
+	if preset, ok := streamDanger(spec.Listen); ok && open {
 		warnings = append(warnings, preset)
 	}
 	if spec.Protocol == "udp" && spec.ProxyProtocol {
 		warnings = append(warnings,
-			"The PROXY protocol is a TCP thing. nginx accepts the directive on a UDP listener and the backend will not see the header.")
+			"On UDP, nginx puts the PROXY header in front of the first datagram of every session. Turn it on only if the backend expects it there — most UDP services read that datagram as garbage.")
 	}
 	return warnings
 }
@@ -339,29 +897,31 @@ func streamDanger(port int) (string, bool) {
 	return "", false
 }
 
-// DeleteStream removes one, keeping the previous content as .bak.
+// DeleteStream removes one, keeping the previous content as .bak, and
+// reports whether nginx was reading it — a stream it never read needs no
+// reload to stop.
 //
 // nginx includes stream.d/*.conf, so the backup is inert — and a forwarding
 // rule somebody spent ten minutes getting right is worth a file left behind,
 // since the delete itself is the only thing this dashboard does to a stream
 // that cannot be undone from the form.
-func (s *Service) DeleteStream(ctx context.Context, name string) error {
-	if !streamNameRe.MatchString(name) || isBackupFile(name) {
-		return fmt.Errorf("invalid stream name")
-	}
+func (s *Service) DeleteStream(ctx context.Context, name string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	path := filepath.Join(s.streamDir(), name+".conf")
-	if _, err := os.Stat(path); err != nil {
-		return fmt.Errorf("no such stream: %s", name)
+	path, err := s.streamFile(name)
+	if err != nil {
+		return false, err
 	}
-	b, readErr := os.ReadFile(path)
-	if readErr == nil {
-		os.WriteFile(path+".bak", b, 0o644)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	if err := os.WriteFile(path+".bak", b, 0o644); err != nil {
+		return false, err
 	}
 	if err := os.Remove(path); err != nil {
-		return err
+		return false, err
 	}
 	s.recordChange(ctx, Change{Path: path, Action: ChangeDelete, Before: b, BeforeExisted: true})
-	return nil
+	return streamIncludeFound(s.nginxDir, s.streamDir()), nil
 }
