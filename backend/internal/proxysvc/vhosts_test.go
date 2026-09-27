@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // nginxShim puts an nginx first on PATH that runs script, so the service's
@@ -127,9 +128,26 @@ func TestListingFindsEverySiteNginxReads(t *testing.T) {
 	if err := os.MkdirAll(enabled("folder"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// Served through a numbered link, the way 00-default -> default is: the
+	// site is serving, and the link is its, not a site of its own.
+	writeFile(t, available("numbered"), fmt.Sprintf(site, "numbered"))
+	symlink(t, "../sites-available/numbered", enabled("00-numbered"))
+	// A site file kept in an application's repository, outside the proxy's
+	// directories: the editor will not open it, the switch still moves its
+	// link.
+	repo, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(repo, "repo.conf")
+	writeFile(t, outside, fmt.Sprintf(site, "repo"))
+	symlink(t, outside, available("repo"))
+	symlink(t, "../sites-available/repo", enabled("repo"))
+	// http-level configuration in conf.d is not a site.
+	writeFile(t, filepath.Join(root, "conf.d", "log.conf"), "log_format vbfmt '$remote_addr $request';\nmap $http_upgrade $connection_upgrade { default upgrade; '' close; }\n")
 
 	hosts := svc.nginxVHosts()
-	if len(hosts) != 11 {
+	if len(hosts) != 13 {
 		t.Fatalf("listed %d entries: %s", len(hosts), describeHosts(hosts))
 	}
 
@@ -137,7 +155,10 @@ func TestListingFindsEverySiteNginxReads(t *testing.T) {
 		layout, name string
 		want         VHost
 	}{
-		{"sites-available", "linked", VHost{Path: available("linked"), EnabledPath: enabled("linked"), Enabled: true, FormEditable: true}},
+		// sites-enabled/renamed, stale for renamed, serves linked a second time.
+		{"sites-available", "linked", VHost{Path: available("linked"), EnabledPath: enabled("linked"), Enabled: true, FormEditable: true, LinkedAs: []string{"renamed"}}},
+		{"sites-available", "numbered", VHost{Path: available("numbered"), EnabledPath: enabled("numbered"), Enabled: true, FormEditable: true, LinkedAs: []string{"00-numbered"}}},
+		{"sites-available", "repo", VHost{Path: available("repo"), EnabledPath: enabled("repo"), Enabled: true, ResolvesTo: outside}},
 		{"sites-available", "off", VHost{Path: available("off"), EnabledPath: enabled("off"), FormEditable: true}},
 		{"sites-available", "gone", VHost{Path: available("gone"), EnabledPath: enabled("gone"), FormEditable: true, Broken: "dangling", LinkTarget: available("missing")}},
 		{"sites-available", "renamed", VHost{Path: available("renamed"), EnabledPath: enabled("renamed"), FormEditable: true, Broken: "stale", LinkTarget: available("linked")}},
@@ -158,6 +179,7 @@ func TestListingFindsEverySiteNginxReads(t *testing.T) {
 		pick := VHost{
 			Path: got.Path, EnabledPath: got.EnabledPath, Enabled: got.Enabled,
 			FormEditable: got.FormEditable, Broken: got.Broken, LinkTarget: got.LinkTarget,
+			LinkedAs: got.LinkedAs, ResolvesTo: got.ResolvesTo,
 		}
 		if !reflect.DeepEqual(pick, tc.want) {
 			t.Errorf("%s/%s:\n got  %+v\n want %+v", tc.layout, tc.name, pick, tc.want)
@@ -306,6 +328,19 @@ func TestParseCaddyfileSaysWhetherEverySiteIsOnTLS(t *testing.T) {
 		{"a snippet is not a site", "(common) {\n\tencode gzip\n}\nexample.com {\n\timport common\n}\n", true},
 		{"a tls block is a directive", "example.com {\n\ttls {\n\t\tprotocols tls1.2 tls1.3\n\t}\n}\n", true},
 		{"no sites", "{\n\temail ops@example.com\n}\n", false},
+		// Caddy's one-site form: no braces, the address on the first line.
+		{"one site without braces", "example.com\nreverse_proxy localhost:8080\n", true},
+		{"one plain site without braces", "http://example.com\nreverse_proxy localhost:8080\n", false},
+		{"without braces after global options", "{\n\temail ops@example.com\n}\nexample.com\nreverse_proxy app:80\n", true},
+		{"without braces, tls on a bare port", ":9443\ntls internal\nrespond ok\n", true},
+		{"without braces, a nested block", "example.com\nhandle /api/* {\n\treverse_proxy api:80\n}\nreverse_proxy app:80\n", true},
+		// Forcing HTTPS by hand: an http:// block that only redirects.
+		{"an http block that only redirects", "http://example.com {\n\tredir https://{host}{uri} permanent\n}\nexample.com {\n\treverse_proxy app:80\n}\n", true},
+		{"a one-line redirect block", "http://example.com { redir https://{host}{uri} }\nexample.com {\n\treverse_proxy app:80\n}\n", true},
+		{"a redirect behind a matcher", "http://example.com {\n\tredir * https://example.com{uri}\n}\nexample.com {\n\trespond ok\n}\n", true},
+		{"an http block that also serves", "http://example.com {\n\tredir /old https://example.com/new\n\treverse_proxy app:80\n}\nexample.com {\n\treverse_proxy app:80\n}\n", false},
+		{"a redirect to plain http", "http://a.example.com {\n\tredir http://b.example.com{uri}\n}\n", false},
+		{"a one-line plain site", "http://example.com { reverse_proxy app:80 }\n", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -497,12 +532,14 @@ func TestRemoveVHostLinkTakesOutOnlyLinksNoSiteOwns(t *testing.T) {
 	writeFile(t, enabled("copy"), "server {}\n")
 	writeFile(t, filepath.Join(root, "sites-available", "app"), "server {}\n")
 	symlink(t, "../sites-available/app", enabled("app"))
+	// A numbered link to a site is that site's too: its Disable takes it out.
+	symlink(t, "../sites-available/app", enabled("00-app"))
 	ctx := context.Background()
 
-	if err := svc.RemoveVHostLink(ctx, "ghost"); err != nil {
+	if _, err := svc.RemoveVHostLink(ctx, "ghost", false); err != nil {
 		t.Fatalf("a dangling link: %v", err)
 	}
-	if err := svc.RemoveVHostLink(ctx, "g"); err != nil {
+	if _, err := svc.RemoveVHostLink(ctx, "g", false); err != nil {
 		t.Fatalf("a link to a file elsewhere: %v", err)
 	}
 	for _, name := range []string{"ghost", "g"} {
@@ -516,19 +553,22 @@ func TestRemoveVHostLinkTakesOutOnlyLinksNoSiteOwns(t *testing.T) {
 	for name, why := range map[string]string{
 		"copy":    "is a file",
 		"app":     "disable the site",
+		"00-app":  "is how the site app is enabled",
 		"nothing": "nothing called",
 		"../app":  "invalid",
 		"":        "invalid",
 	} {
-		if err := svc.RemoveVHostLink(ctx, name); err == nil || !strings.Contains(err.Error(), why) {
+		if _, err := svc.RemoveVHostLink(ctx, name, false); err == nil || !strings.Contains(err.Error(), why) {
 			t.Errorf("RemoveVHostLink(%q) = %v, want %q", name, err, why)
 		}
 	}
 	if _, err := os.Stat(enabled("copy")); err != nil {
 		t.Error("the copy was removed")
 	}
-	if _, err := os.Lstat(enabled("app")); err != nil {
-		t.Error("the site's own link was removed")
+	for _, name := range []string{"app", "00-app"} {
+		if _, err := os.Lstat(enabled(name)); err != nil {
+			t.Errorf("the site's link %s was removed", name)
+		}
 	}
 	want := []Change{
 		{Path: enabled("ghost"), Action: ChangeDisable, BeforeExisted: true},
@@ -547,7 +587,7 @@ func TestRemoveVHostLinkIsUndoneWhenNginxRefuses(t *testing.T) {
 		link, filepath.Join(root, "sites-available", "app")))
 	writeFile(t, filepath.Join(root, "custom", "g.conf"), "limit_req_zone $binary_remote_addr zone=api:1m rate=1r/s;\n")
 	symlink(t, "../custom/g.conf", link)
-	if err := svc.RemoveVHostLink(context.Background(), "g"); !errors.Is(err, ErrInvalidConf) {
+	if _, err := svc.RemoveVHostLink(context.Background(), "g", false); !errors.Is(err, ErrInvalidConf) {
 		t.Fatalf("got %v", err)
 	}
 	if target, _ := os.Readlink(link); target != "../custom/g.conf" {
@@ -609,7 +649,7 @@ func TestLiveLinkChangesKeepNginxLoadable(t *testing.T) {
 	if err := svc.SetVHostEnabled(ctx, "good", true); !errors.Is(err, ErrInvalidConf) {
 		t.Fatalf("an enable into a configuration nginx refuses: %v", err)
 	}
-	if err := svc.RemoveVHostLink(ctx, "ghost"); err != nil {
+	if _, err := svc.RemoveVHostLink(ctx, "ghost", false); err != nil {
 		t.Fatal(err)
 	}
 	if res := svc.Test(ctx, KindNginx); !res.Valid {
@@ -620,5 +660,269 @@ func TestLiveLinkChangesKeepNginxLoadable(t *testing.T) {
 	}
 	if good := listed(t, svc.nginxVHosts(), "sites-available", "good"); !good.Enabled || good.Broken != "" {
 		t.Errorf("good listed as %+v", good)
+	}
+}
+
+// The one-site form and a redirect block beside its site name each domain
+// once, without a scheme the listing's TLS flag already says: "Open site"
+// opened https://http://example.com.
+func TestParseCaddyfileNamesEachSiteOnce(t *testing.T) {
+	cases := []struct {
+		name, content    string
+		names, upstreams []string
+	}{
+		{"one site without braces", "example.com\nreverse_proxy localhost:8080\n",
+			[]string{"example.com"}, []string{"localhost:8080"}},
+		{"without braces, a nested block",
+			"{\n\temail ops@example.com\n}\nexample.com, www.example.com\nhandle /api/* {\n\treverse_proxy api:9000\n}\nreverse_proxy app:3000\n",
+			[]string{"example.com", "www.example.com"}, []string{"api:9000", "app:3000"}},
+		{"a redirect block and its site",
+			"http://example.com {\n\tredir https://{host}{uri} permanent\n}\nexample.com {\n\treverse_proxy app:80\n}\n",
+			[]string{"example.com"}, []string{"app:80"}},
+		{"a snippet before the one site", "(common) {\n\tencode gzip\n}\nexample.com\nimport common\n",
+			[]string{"example.com"}, []string{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			names, upstreams, _ := parseCaddyfile(tc.content)
+			if !slices.Equal(names, tc.names) || !slices.Equal(upstreams, tc.upstreams) {
+				t.Errorf("names = %q upstreams = %q, want %q %q", names, upstreams, tc.names, tc.upstreams)
+			}
+		})
+	}
+}
+
+// A conf.d file that declares no server — a log_format, a map, a zone — is
+// configuration other sites lean on, not a site. It was listed as "Default
+// host", always on, with a Delete that broke the next reload.
+func TestConfDListsOnlyFilesThatDeclareAServer(t *testing.T) {
+	for _, debian := range []bool{true, false} {
+		t.Run(fmt.Sprintf("debian=%v", debian), func(t *testing.T) {
+			root := t.TempDir()
+			if debian {
+				for _, dir := range []string{"sites-available", "sites-enabled"} {
+					if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			confd := func(name string) string { return filepath.Join(root, "conf.d", name) }
+			writeFile(t, confd("site.conf"), "# log_format only\nserver {\n    listen 80;\n}\n")
+			writeFile(t, confd("compact.conf"), "server{listen 81;}\n")
+			writeFile(t, confd("log.conf"), "log_format main '$remote_addr';\n")
+			writeFile(t, confd("zones.conf"), "limit_req_zone $binary_remote_addr zone=api:10m rate=5r/s;\nupstream backend {\n    server 127.0.0.1:3000;\n}\n")
+			writeFile(t, confd("commented.conf"), "# server {\n#     listen 80;\n# }\n")
+			// nginx refuses a file it cannot parse, and the operator has to
+			// see which one.
+			writeFile(t, confd("broken.conf"), "server {\n    listen 80;\n")
+			hosts := New(root, filepath.Join(root, "Caddyfile")).nginxVHosts()
+			names := []string{}
+			for _, h := range hosts {
+				names = append(names, h.Name)
+			}
+			slices.Sort(names)
+			if want := []string{"broken.conf", "compact.conf", "site.conf"}; !slices.Equal(names, want) {
+				t.Errorf("listed %q, want %q", names, want)
+			}
+		})
+	}
+}
+
+// A site served through a link under another name — 00-default ->
+// ../sites-available/default — read "disabled", its Enable loaded it a
+// second time, and its Disable removed nothing.
+func TestTheSwitchActsOnEveryLinkServingTheSite(t *testing.T) {
+	svc, root := debianTree(t)
+	log := &linkChanges{}
+	svc.SetRecorder(log)
+	nginxShim(t, "exit 0")
+	ctx := context.Background()
+	enabled := func(name string) string { return filepath.Join(root, "sites-enabled", name) }
+	writeFile(t, filepath.Join(root, "sites-available", "default"), "server {}\n")
+	symlink(t, "../sites-available/default", enabled("00-default"))
+
+	if got := listed(t, svc.nginxVHosts(), "sites-available", "default"); !got.Enabled || !slices.Equal(got.LinkedAs, []string{"00-default"}) {
+		t.Fatalf("listed as %+v", got)
+	}
+	if err := svc.SetVHostEnabled(ctx, "default", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(enabled("default")); !os.IsNotExist(err) {
+		t.Fatalf("the enable linked a site already served, loading it twice: %v", err)
+	}
+	if len(log.changes) != 0 {
+		t.Fatalf("an enable that changed nothing was recorded: %v", log.actions())
+	}
+
+	// Served both ways: the disable takes out both.
+	symlink(t, "../sites-available/default", enabled("default"))
+	if err := svc.SetVHostEnabled(ctx, "default", false); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"default", "00-default"} {
+		if _, err := os.Lstat(enabled(name)); !os.IsNotExist(err) {
+			t.Errorf("sites-enabled/%s is still there: %v", name, err)
+		}
+	}
+	if want := []ChangeAction{ChangeDisable}; !slices.Equal(log.actions(), want) {
+		t.Errorf("recorded %v, want %v", log.actions(), want)
+	}
+	if got := listed(t, svc.nginxVHosts(), "sites-available", "default"); got.Enabled || len(got.LinkedAs) != 0 {
+		t.Errorf("after the disable, listed as %+v", got)
+	}
+}
+
+// When nginx refuses the configuration without them, every link the disable
+// took out comes back as it was.
+func TestARefusedDisablePutsBackEveryLink(t *testing.T) {
+	svc, root := debianTree(t)
+	own := filepath.Join(root, "sites-enabled", "pool")
+	alias := filepath.Join(root, "sites-enabled", "00-pool")
+	site := filepath.Join(root, "sites-available", "pool")
+	nginxShim(t, fmt.Sprintf(`if [ ! -e '%s' ] || [ ! -e '%s' ]; then echo 'nginx: [emerg] host not found in upstream "backend" in %s:7' >&2; exit 1; fi; exit 0`,
+		own, alias, filepath.Join(root, "sites-available", "app")))
+	writeFile(t, site, "upstream backend { server 127.0.0.1:3000; }\n")
+	symlink(t, "../sites-available/pool", own)
+	symlink(t, site, alias)
+
+	err := svc.SetVHostEnabled(context.Background(), "pool", false)
+	var refused *RefusedError
+	if !errors.As(err, &refused) {
+		t.Fatalf("disable returned %v", err)
+	}
+	for link, want := range map[string]string{own: "../sites-available/pool", alias: site} {
+		if target, err := os.Readlink(link); err != nil || target != want {
+			t.Errorf("%s = %q (%v), want %q", link, target, err, want)
+		}
+	}
+}
+
+// Delete removes sites-enabled/<name> by name, file or link, before its
+// backup of the site. A copy there — the configuration nginx was really
+// serving — went with no copy kept, a stale link took out the other site it
+// served, and a numbered link to the file was left pointing at nothing,
+// which stops every reload.
+func TestDeleteSiteTakesOutOnlyWhatIsTheSites(t *testing.T) {
+	svc, root := debianTree(t)
+	available := func(name string) string { return filepath.Join(root, "sites-available", name) }
+	enabled := func(name string) string { return filepath.Join(root, "sites-enabled", name) }
+	ctx := context.Background()
+	served := "server { return 200 'served copy'; }\n"
+	writeFile(t, available("copied.test"), "server { return 204; }\n")
+	writeFile(t, enabled("copied.test"), served)
+	writeFile(t, available("stale.test"), "server {}\n")
+	writeFile(t, available("other.test"), "server {}\n")
+	symlink(t, "../sites-available/other.test", enabled("stale.test"))
+	writeFile(t, available("numbered.test"), "server {}\n")
+	symlink(t, "../sites-available/numbered.test", enabled("00-numbered.test"))
+	writeFile(t, enabled("only.test"), "server {}\n")
+	writeFile(t, filepath.Join(root, "custom", "elsewhere.conf"), "server {}\n")
+	symlink(t, "../custom/elsewhere.conf", enabled("elsewhere.test"))
+
+	for name, why := range map[string]string{
+		"copied.test":    "sites-enabled/copied.test is a file of its own",
+		"stale.test":     "points at " + available("other.test"),
+		"numbered.test":  "also enabled as sites-enabled/00-numbered.test",
+		"only.test":      "sites-enabled/only.test is a file of its own",
+		"elsewhere.test": "not at this site's file",
+	} {
+		if err := svc.DeleteSite(ctx, name); err == nil || !strings.Contains(err.Error(), why) {
+			t.Errorf("DeleteSite(%q) = %v, want %q", name, err, why)
+		}
+	}
+	if b, err := os.ReadFile(enabled("copied.test")); err != nil || string(b) != served {
+		t.Errorf("the served copy is gone or changed: %q %v", b, err)
+	}
+	for _, file := range []string{available("copied.test"), available("stale.test"), available("numbered.test"), enabled("only.test")} {
+		if _, err := os.Stat(file); err != nil {
+			t.Errorf("a refused delete removed %s", file)
+		}
+	}
+	for _, link := range []string{enabled("stale.test"), enabled("00-numbered.test"), enabled("elsewhere.test")} {
+		if _, err := os.Lstat(link); err != nil {
+			t.Errorf("a refused delete removed %s", link)
+		}
+	}
+
+	// The site's own link goes with it, and so does a link to nothing.
+	writeFile(t, available("own.test"), "server {}\n")
+	symlink(t, "../sites-available/own.test", enabled("own.test"))
+	writeFile(t, available("dangling.test"), "server {}\n")
+	symlink(t, available("gone.test"), enabled("dangling.test"))
+	for _, name := range []string{"own.test", "dangling.test"} {
+		if err := svc.DeleteSite(ctx, name); err != nil {
+			t.Errorf("DeleteSite(%q) = %v", name, err)
+			continue
+		}
+		if _, err := os.Lstat(enabled(name)); !os.IsNotExist(err) {
+			t.Errorf("sites-enabled/%s is still there", name)
+		}
+		if _, err := os.Stat(available(name) + ".bak"); err != nil {
+			t.Errorf("%s was deleted without its backup", name)
+		}
+	}
+}
+
+// waitForFile waits for path to exist, for up to ten seconds.
+func waitForFile(t *testing.T, path string) {
+	t.Helper()
+	for range 400 {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("%s never appeared", path)
+}
+
+// The reload a switch or a link removal asks for runs before the service
+// lock is let go. Run after it, its test could see the candidate link of an
+// enable being tested at that moment, and call a change that had worked
+// "not reloaded" over a site nobody had enabled.
+func TestLinkChangesReloadInsideTheServiceLock(t *testing.T) {
+	svc, root := debianTree(t)
+	gate := t.TempDir()
+	nginxShim(t, fmt.Sprintf(`if [ "$1" = "-s" ]; then
+  touch '%[1]s/reloading'
+  i=0
+  while [ ! -e '%[1]s/release' ] && [ $i -lt 400 ]; do sleep 0.025; i=$((i+1)); done
+  rm -f '%[1]s/reloading' '%[1]s/release'
+fi
+exit 0`, gate))
+	ctx := context.Background()
+	writeFile(t, filepath.Join(root, "sites-available", "app"), "server {}\n")
+	symlink(t, "/nonexistent/jd-test/ghost", filepath.Join(root, "sites-enabled", "ghost"))
+
+	for _, change := range []struct {
+		name string
+		run  func() (*LinkReload, error)
+	}{
+		{"enable", func() (*LinkReload, error) { return svc.ToggleVHost(ctx, "app", true, true) }},
+		{"disable", func() (*LinkReload, error) { return svc.ToggleVHost(ctx, "app", false, true) }},
+		{"unlink", func() (*LinkReload, error) { return svc.RemoveVHostLink(ctx, "ghost", true) }},
+	} {
+		type answer struct {
+			reload *LinkReload
+			err    error
+		}
+		done := make(chan answer, 1)
+		go func() {
+			reload, err := change.run()
+			done <- answer{reload, err}
+		}()
+		waitForFile(t, filepath.Join(gate, "reloading"))
+		if svc.mu.TryLock() {
+			svc.mu.Unlock()
+			t.Errorf("%s: nginx reloaded with the service lock let go", change.name)
+		}
+		writeFile(t, filepath.Join(gate, "release"), "")
+		got := <-done
+		if got.err != nil || got.reload == nil || got.reload.Err != nil || !got.reload.Result.Reloaded {
+			t.Errorf("%s: %+v %v", change.name, got.reload, got.err)
+		}
+	}
+	// No reload asked for, none run.
+	if reload, err := svc.ToggleVHost(ctx, "app", true, false); err != nil || reload != nil {
+		t.Errorf("a switch without reload: %+v %v", reload, err)
 	}
 }

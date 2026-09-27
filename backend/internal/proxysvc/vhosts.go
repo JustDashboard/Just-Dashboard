@@ -2,6 +2,7 @@ package proxysvc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,6 +32,16 @@ type VHost struct {
 	// LinkTarget is where the link in sites-enabled points, absolute, for a
 	// broken site and for one that is only a link there.
 	LinkTarget string `json:"linkTarget,omitempty"`
+	// LinkedAs are the other names in sites-enabled that link to this
+	// file — 00-default -> ../sites-available/default — each of which
+	// serves it as surely as a link under its own name, and each of which
+	// the site's Disable takes out.
+	LinkedAs []string `json:"linkedAs,omitempty"`
+	// ResolvesTo is where the file really is when that is outside the
+	// proxy's directories — a sites-available link into an application's
+	// repository. The editor does not open such a file; the switch still
+	// works, since it moves only the link in sites-enabled.
+	ResolvesTo string `json:"resolvesTo,omitempty"`
 	// FormEditable says the site form reads this file and saves it back to
 	// the same place. The form writes to sites-available where that exists
 	// and to conf.d/<name> where it does not, so a conf.d file on a Debian
@@ -132,12 +143,21 @@ func (s *Service) nginxVHosts() []VHost {
 	debian := err == nil && info.IsDir()
 	out := []VHost{}
 	own := map[string]bool{}
+	// Names in sites-enabled that link to a sites-available file of another
+	// name. They were listed as sites of their own while the file they
+	// serve read "disabled", and its Enable loaded it a second time.
+	aliased := map[string]bool{}
 	if debian {
+		links := enabledLinks(enabled)
 		for _, name := range siteFiles(available) {
 			full := filepath.Join(available, name)
 			v := s.fileVHost(name, full, "sites-available")
 			v.EnabledPath = filepath.Join(enabled, name)
 			v.FormEditable = s.readable(full)
+			v.LinkedAs = otherNames(links[resolvedFile(full)], name)
+			for _, alias := range v.LinkedAs {
+				aliased[alias] = true
+			}
 			switch state, target := readEnabledLink(v.EnabledPath, full); state {
 			case linkServes:
 				v.Enabled = true
@@ -146,12 +166,18 @@ func (s *Service) nginxVHosts() []VHost {
 			case linkElsewhere:
 				v.Broken, v.LinkTarget = "stale", target
 			}
+			if len(v.LinkedAs) > 0 {
+				v.Enabled = true
+			}
 			own[name] = true
 			out = append(out, v)
 		}
 	}
 	for _, name := range siteFiles(confd) {
 		full := filepath.Join(confd, name)
+		if !declaresServer(full) {
+			continue
+		}
 		v := s.fileVHost(name, full, "conf.d")
 		// conf.d is included as *.conf, so the suffix is the whole
 		// difference between a file nginx reads and one it ignores. There
@@ -168,9 +194,10 @@ func (s *Service) nginxVHosts() []VHost {
 	for _, e := range entries {
 		name := e.Name()
 		// A name sites-available also has is that site's link and was
-		// judged with it. Backups are not skipped here: nginx includes
-		// sites-enabled/*, so an app.bak there is read like any other file.
-		if own[name] || strings.HasPrefix(name, ".") {
+		// judged with it, and so was a link to a site under another name.
+		// Backups are not skipped here: nginx includes sites-enabled/*, so
+		// an app.bak there is read like any other file.
+		if own[name] || aliased[name] || strings.HasPrefix(name, ".") {
 			continue
 		}
 		link := filepath.Join(enabled, name)
@@ -207,6 +234,57 @@ func siteFiles(dir string) []string {
 	return out
 }
 
+// enabledLinks are the symlinks in sites-enabled that resolve, keyed by the
+// file each one resolves to. nginx includes sites-enabled/*, which skips
+// dotfiles.
+func enabledLinks(dir string) map[string][]string {
+	out := map[string][]string{}
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".") || e.Type()&os.ModeSymlink == 0 {
+			continue
+		}
+		if real, err := filepath.EvalSymlinks(filepath.Join(dir, e.Name())); err == nil {
+			out[real] = append(out[real], e.Name())
+		}
+	}
+	return out
+}
+
+// otherNames is names without name.
+func otherNames(names []string, name string) []string {
+	var out []string
+	for _, n := range names {
+		if n != name {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// declaresServer is whether a conf.d file holds a server block of its own.
+// conf.d is included inside http, and a file there that only sets a
+// log_format, a map or a zone is configuration other sites depend on rather
+// than a site: listed as one it read "Default host", and its Delete took out
+// what the next reload needed. A file nginx could not parse is listed, so
+// the operator sees it.
+func declaresServer(path string) bool {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return true
+	}
+	directives, err := ParseNginxFile(path, string(b), []string{"http"})
+	if err != nil {
+		return true
+	}
+	for _, d := range directives {
+		if d.Name == "server" && d.Block != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // readable is whether the config editor and the site form will open path:
 // both read through allowedPath.
 func (s *Service) readable(path string) bool {
@@ -229,6 +307,9 @@ func (s *Service) fileVHost(name, path, layout string) VHost {
 		v.Modified, v.Size = info.ModTime().UTC(), info.Size()
 	} else if info, err := os.Lstat(path); err == nil {
 		v.Modified = info.ModTime().UTC()
+	}
+	if _, err := s.allowedPath(path); errors.Is(err, ErrUnsafePath) {
+		v.ResolvesTo = resolvedFile(path)
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -391,59 +472,157 @@ func (s *Service) caddySites() ([]VHost, error) {
 // line, which is enough for the files Caddy's own formatter produces; a
 // global options block, which opens with a bare `{`, is skipped by the same
 // rule since it has no name, and read only for `auto_https off`.
+//
+// Two shapes Caddy documents read as plain when they are not. A file with
+// one site may leave out its braces: the first line is the address and the
+// rest are its directives. And the usual way to force HTTPS by hand is an
+// http:// block that only redirects, beside the site itself; that block
+// serves nothing in plain text, as an nginx port-80 block that only
+// redirects does not make its site plain either.
 func parseCaddyfile(content string) (names, upstreams []string, tls bool) {
 	names, upstreams = []string{}, []string{}
 	depth := 0
-	global, autoOff, explicit := false, false, false
-	var block []string
+	global, autoOff, sawSite := false, false, false
+	var site *caddySite
 	served, secure := 0, 0
+	finish := func() {
+		if site != nil && (site.directives == 0 || site.redirects < site.directives) {
+			for _, address := range site.addresses {
+				served++
+				if caddyAddressTLS(address, site.explicit, autoOff) {
+					secure++
+				}
+			}
+		}
+		site = nil
+	}
+	start := func(addresses string, bare bool) {
+		site = &caddySite{bare: bare}
+		sawSite = true
+		for _, field := range strings.Split(addresses, ",") {
+			for _, address := range strings.Fields(field) {
+				site.addresses = append(site.addresses, address)
+				names = appendNew(names, caddyHost(address))
+			}
+		}
+	}
 	for _, line := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
+		fields := strings.Fields(trimmed)
 		if after, ok := strings.CutPrefix(trimmed, "reverse_proxy "); ok {
 			target := strings.TrimSpace(strings.TrimSuffix(after, "{"))
 			if target != "" {
 				upstreams = append(upstreams, target)
 			}
 		}
-		if depth == 1 {
-			if global && strings.Join(strings.Fields(trimmed), " ") == "auto_https off" {
+		// A block opened and closed on one line, placeholders and all:
+		// `http://example.com { redir https://{host}{uri} }`. Caddy wants
+		// its braces as tokens of their own, which is what tells them from
+		// a placeholder's.
+		open := slices.Index(fields, "{")
+		oneLine := open >= 0 && len(fields) > open+1 && fields[len(fields)-1] == "}"
+		opens := strings.HasSuffix(trimmed, "{")
+		if depth == 0 && (site == nil || !site.bare) {
+			switch {
+			case oneLine:
+				name := strings.Join(fields[:open], " ")
+				inner := fields[open+1 : len(fields)-1]
+				if name == "" && strings.Join(inner, " ") == "auto_https off" {
+					autoOff = true
+				}
+				if name != "" && !strings.ContainsAny(name, "()") {
+					start(name, false)
+					if len(inner) > 0 {
+						site.directive(inner)
+					}
+					finish()
+				}
+			case opens:
+				name := strings.TrimSpace(strings.TrimSuffix(trimmed, "{"))
+				global = name == ""
+				if !global && !strings.ContainsAny(name, "()") {
+					start(name, false)
+				}
+				depth++
+			case !sawSite && fields[0] != "import" && trimmed != "}":
+				start(trimmed, true)
+			}
+			continue
+		}
+		closes := trimmed == "}"
+		if site != nil && depth == 0 {
+			site.directive(fields)
+		}
+		if depth == 1 && !closes {
+			if global && strings.Join(fields, " ") == "auto_https off" {
 				autoOff = true
 			}
-			if directive := strings.Fields(trimmed)[0]; directive == "tls" {
-				explicit = true
-			}
-		}
-		opens := strings.HasSuffix(trimmed, "{")
-		if opens && depth == 0 {
-			name := strings.TrimSpace(strings.TrimSuffix(trimmed, "{"))
-			global, explicit, block = name == "", false, nil
-			if name != "" && !strings.ContainsAny(name, "()") {
-				for _, field := range strings.Split(name, ",") {
-					block = append(block, strings.Fields(field)...)
-				}
-				names = append(names, block...)
+			if site != nil && !site.bare {
+				site.directive(fields)
 			}
 		}
 		if opens {
 			depth++
 		}
-		if trimmed == "}" && depth > 0 {
+		if closes && depth > 0 {
 			depth--
 			if depth == 0 {
-				for _, address := range block {
-					served++
-					if caddyAddressTLS(address, explicit, autoOff) {
-						secure++
-					}
+				global = false
+				if site != nil && !site.bare {
+					finish()
 				}
-				block = nil
 			}
 		}
 	}
+	finish()
 	return names, upstreams, served > 0 && secure == served
+}
+
+// caddySite is one site block as parseCaddyfile reads it: its addresses,
+// whether it names a certificate of its own, and how many of its directives
+// only redirect to HTTPS.
+type caddySite struct {
+	addresses             []string
+	bare                  bool
+	explicit              bool
+	directives, redirects int
+}
+
+func (c *caddySite) directive(fields []string) {
+	c.directives++
+	switch fields[0] {
+	case "tls":
+		c.explicit = true
+	case "redir":
+		// `redir [matcher] <to> [code]`: the first argument that is not a
+		// matcher is where it sends the visitor.
+		for _, arg := range fields[1:] {
+			if arg == "*" || strings.HasPrefix(arg, "@") || strings.HasPrefix(arg, "/") {
+				continue
+			}
+			if strings.HasPrefix(strings.ToLower(arg), "https://") {
+				c.redirects++
+			}
+			break
+		}
+	}
+}
+
+// caddyHost is a site address as a name: without the scheme, which the
+// listing's TLS flag already says, so an http:// redirect block and the
+// site it redirects to name the domain once and "Open site" does not open
+// https://http://example.com.
+func caddyHost(address string) string {
+	lower := strings.ToLower(address)
+	for _, scheme := range []string{"https://", "http://"} {
+		if strings.HasPrefix(lower, scheme) {
+			return address[len(scheme):]
+		}
+	}
+	return address
 }
 
 // caddyAddressTLS is whether Caddy serves a site address over HTTPS. Any
@@ -517,7 +696,15 @@ func linkName(name string) error {
 	return nil
 }
 
-// SetVHostEnabled links a site into sites-enabled or takes its link out, and
+// LinkReload is how the reload a link change asked for went: Result is
+// nginx's test and reload, and Err why nginx is not running the change —
+// ErrInvalidConf when the test refused it.
+type LinkReload struct {
+	Result *ReloadResult
+	Err    error
+}
+
+// SetVHostEnabled links a site into sites-enabled or takes its links out, and
 // keeps the change only if nginx still accepts the whole configuration. Only
 // nginx has this notion; Caddy has no per-site enable, and saying so is better
 // than pretending.
@@ -530,24 +717,42 @@ func linkName(name string) error {
 // puts back the one it replaced) and returns a *RefusedError naming nginx's
 // reason.
 func (s *Service) SetVHostEnabled(ctx context.Context, name string, enabled bool) error {
+	_, err := s.ToggleVHost(ctx, name, enabled, false)
+	return err
+}
+
+// ToggleVHost is SetVHostEnabled followed, when reload is set, by nginx's
+// reload — inside the same hold of the service lock. The reload used to run
+// after the lock was let go, so its test could see a link another request
+// was testing at that moment, and report a switch that had worked as "not
+// reloaded" because of a site nobody had enabled.
+func (s *Service) ToggleVHost(ctx context.Context, name string, enabled, reload bool) (*LinkReload, error) {
 	if err := linkName(name); err != nil {
-		return err
+		return nil, err
 	}
 	available := filepath.Join(s.nginxDir, "sites-available", name)
-	link := filepath.Join(s.nginxDir, "sites-enabled", name)
 	if _, err := os.Stat(filepath.Dir(available)); err != nil {
 		// Saying which of the two layouts this host uses, rather than "no
 		// such vhost": on a conf.d host the site is there and it is the
 		// toggle that does not exist.
-		return fmt.Errorf("this host keeps its nginx sites in conf.d, where every file is active — there is no enable or disable to set. Delete the site, or rename its file so it no longer ends in .conf")
+		return nil, fmt.Errorf("this host keeps its nginx sites in conf.d, where every file is active — there is no enable or disable to set. Delete the site, or rename its file so it no longer ends in .conf")
 	}
 	if _, err := os.Stat(available); err != nil {
-		return fmt.Errorf("no such vhost: %s", name)
+		return nil, fmt.Errorf("no such vhost: %s", name)
 	}
 	// Held like every other change to the tree, so a toggle cannot land in
 	// the middle of another operator's validation and is recorded in order.
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.setVHostEnabledLocked(ctx, name, available, enabled); err != nil {
+		return nil, err
+	}
+	return s.reloadLocked(ctx, reload), nil
+}
+
+func (s *Service) setVHostEnabledLocked(ctx context.Context, name, available string, enabled bool) error {
+	enabledDir := filepath.Join(s.nginxDir, "sites-enabled")
+	link := filepath.Join(enabledDir, name)
 	// The site file may itself be a symlink, so it is resolved the way the
 	// write records resolve theirs. Reading through the link unchecked put a
 	// password file's hashes, or a file outside the proxy's directories, in
@@ -559,11 +764,31 @@ func (s *Service) SetVHostEnabled(ctx context.Context, name string, enabled bool
 		content, _ := os.ReadFile(full)
 		change.Path, change.Before, change.After = full, content, content
 	}
+	// A link under another name serves the file as surely as its own: the
+	// disable has to take it out too, and an enable would load the site a
+	// second time.
+	aliases := otherNames(enabledLinks(enabledDir)[resolvedFile(available)], name)
+	state, _ := readEnabledLink(link, available)
 	if !enabled {
 		change.Action = ChangeDisable
-		return s.unlinkLocked(ctx, link, change)
+		links := []string{}
+		switch state {
+		case linkServes, linkDangling:
+			links = append(links, link)
+		case linkElsewhere:
+			// A link to another file is that file's, and stays. A file
+			// copied in under this name is a configuration of its own:
+			// removing it to "disable" the site deleted it.
+			if info, err := os.Lstat(link); err == nil && info.Mode()&os.ModeSymlink == 0 && len(aliases) == 0 {
+				return fmt.Errorf("%s is a file, not a link, and disabling it would delete that configuration — move it to sites-available and enable it from there", link)
+			}
+		}
+		for _, alias := range aliases {
+			links = append(links, filepath.Join(enabledDir, alias))
+		}
+		return s.unlinkLocked(ctx, links, change)
 	}
-	if state, _ := readEnabledLink(link, available); state == linkServes {
+	if state == linkServes || len(aliases) > 0 {
 		// Already on: nothing changes on disk, so nothing is recorded,
 		// the same as disabling a site that is already off.
 		return nil
@@ -586,26 +811,28 @@ func (s *Service) SetVHostEnabled(ctx context.Context, name string, enabled bool
 }
 
 // RemoveVHostLink takes out a link in sites-enabled that is not a site's own
-// switch: one pointing at nothing, which makes nginx refuse every reload, or
-// one to a file kept outside sites-available. A site's own link is its
-// Disable, and a real file in sites-enabled is never deleted from here — it
-// may be the only copy of that configuration.
-func (s *Service) RemoveVHostLink(ctx context.Context, name string) error {
+// switch — one pointing at nothing, which makes nginx refuse every reload, or
+// one to a file kept outside sites-available — and reloads nginx inside the
+// same hold of the service lock when reload is set. A link to a site in
+// sites-available, under its name or another, is that site's Disable, and a
+// real file in sites-enabled is never deleted from here: it may be the only
+// copy of that configuration.
+func (s *Service) RemoveVHostLink(ctx context.Context, name string, reload bool) (*LinkReload, error) {
 	if err := linkName(name); err != nil {
-		return err
+		return nil, err
 	}
 	link := filepath.Join(s.nginxDir, "sites-enabled", name)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	info, err := os.Lstat(link)
 	if err != nil {
-		return fmt.Errorf("sites-enabled has nothing called %s", name)
+		return nil, fmt.Errorf("sites-enabled has nothing called %s", name)
 	}
 	if info.Mode()&os.ModeSymlink == 0 {
-		return fmt.Errorf("sites-enabled/%s is a file, not a link, and removing it would delete that configuration — move it to sites-available and enable it from there", name)
+		return nil, fmt.Errorf("sites-enabled/%s is a file, not a link, and removing it would delete that configuration — move it to sites-available and enable it from there", name)
 	}
-	if state, _ := readEnabledLink(link, filepath.Join(s.nginxDir, "sites-available", name)); state == linkServes {
-		return fmt.Errorf("sites-enabled/%s is how the site %s is enabled — disable the site instead", name, name)
+	if site := s.availableSiteOf(link); site != "" {
+		return nil, fmt.Errorf("sites-enabled/%s is how the site %s is enabled — disable the site instead", name, site)
 	}
 	// Recorded like a disable: the file behind the link, when there is one
 	// the editor would show, is what stopped being served.
@@ -615,46 +842,137 @@ func (s *Service) RemoveVHostLink(ctx context.Context, name string) error {
 		content, _ := os.ReadFile(full)
 		change.Path, change.Before, change.After = full, content, content
 	}
-	return s.unlinkLocked(ctx, link, change)
+	if err := s.unlinkLocked(ctx, []string{link}, change); err != nil {
+		return nil, err
+	}
+	return s.reloadLocked(ctx, reload), nil
 }
 
-// unlinkLocked takes link out of sites-enabled and keeps it out if nginx
-// accepts what is left, putting it back exactly as it was — relative target
-// and all — and returning a *RefusedError if it does not: another site may
-// use an upstream or a zone this one defines. A configuration nginx was
-// already refusing with the link in place is the exception, and the link
-// stays out: switching sites off is how a broken configuration gets fixed,
-// and refusing every disable until it is fixed some other way would leave
-// the page no way to do it. Must be called with s.mu held.
-func (s *Service) unlinkLocked(ctx context.Context, link string, change Change) error {
-	info, err := os.Lstat(link)
-	if os.IsNotExist(err) {
+// availableSiteOf is the site in sites-available that link serves, if any.
+func (s *Service) availableSiteOf(link string) string {
+	real, err := filepath.EvalSymlinks(link)
+	if err != nil {
+		return ""
+	}
+	available := filepath.Join(s.nginxDir, "sites-available")
+	for _, name := range siteFiles(available) {
+		if resolvedFile(filepath.Join(available, name)) == real {
+			return name
+		}
+	}
+	return ""
+}
+
+// reloadLocked reloads nginx for a link change, before the caller lets go of
+// s.mu. Must be called with s.mu held; Reload itself does not take it.
+func (s *Service) reloadLocked(ctx context.Context, reload bool) *LinkReload {
+	if !reload {
 		return nil
 	}
-	if err != nil {
-		return err
+	res, err := s.Reload(ctx, KindNginx)
+	return &LinkReload{Result: res, Err: err}
+}
+
+// unlinkLocked takes links out of sites-enabled and keeps them out if nginx
+// accepts what is left, putting them back exactly as they were — relative
+// targets and all — and returning a *RefusedError if it does not: another
+// site may use an upstream or a zone this one defines. A configuration nginx
+// was already refusing with the links in place is the exception, and they
+// stay out: switching sites off is how a broken configuration gets fixed,
+// and refusing every disable until it is fixed some other way would leave
+// the page no way to do it. Nothing to take out changes nothing and records
+// nothing. Must be called with s.mu held.
+func (s *Service) unlinkLocked(ctx context.Context, links []string, change Change) error {
+	type removed struct{ link, target string }
+	var present []removed
+	for _, link := range links {
+		info, err := os.Lstat(link)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			return fmt.Errorf("%s is a file, not a link, and disabling it would delete that configuration — move it to sites-available and enable it from there", link)
+		}
+		target, err := os.Readlink(link)
+		if err != nil {
+			return err
+		}
+		present = append(present, removed{link, target})
 	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		return fmt.Errorf("%s is a file, not a link, and disabling it would delete that configuration — move it to sites-available and enable it from there", link)
+	if len(present) == 0 {
+		return nil
 	}
-	target, err := os.Readlink(link)
-	if err != nil {
-		return err
+	restore := func() error {
+		for _, r := range present {
+			if _, err := os.Lstat(r.link); err == nil {
+				continue
+			}
+			if err := os.Symlink(r.target, r.link); err != nil {
+				return fmt.Errorf("nginx refused the configuration without %s, and putting the link back failed: %w", r.link, err)
+			}
+		}
+		return nil
 	}
-	if err := os.Remove(link); err != nil {
-		return err
+	for _, r := range present {
+		if err := os.Remove(r.link); err != nil {
+			if undo := restore(); undo != nil {
+				return undo
+			}
+			return err
+		}
 	}
 	if res := runValidator(ctx, "nginx", "-t"); !res.Valid {
-		if err := os.Symlink(target, link); err != nil {
-			return fmt.Errorf("nginx refused the configuration without %s, and putting the link back failed: %w", link, err)
+		if err := restore(); err != nil {
+			return err
 		}
 		if before := runValidator(ctx, "nginx", "-t"); before.Valid {
 			return &RefusedError{Validation: res}
 		}
-		if err := os.Remove(link); err != nil {
-			return err
+		for _, r := range present {
+			if err := os.Remove(r.link); err != nil {
+				return err
+			}
 		}
 	}
 	s.recordChange(ctx, change)
+	return nil
+}
+
+// checkSiteDelete refuses a DeleteSite that would take out configuration
+// other than the site's own. The delete removes sites-enabled/<name>, file
+// or link, before its backup of the site: a copy there — the file nginx
+// was really serving — went with no copy kept, and a stale link took out
+// the other site it served. A link under another name to the file would be
+// left pointing at nothing, which stops every reload. Must be called with
+// s.mu held.
+func (s *Service) checkSiteDelete(name string) error {
+	enabledDir := filepath.Join(s.nginxDir, "sites-enabled")
+	link := filepath.Join(enabledDir, name)
+	file := ""
+	for _, candidate := range []string{filepath.Join(s.nginxDir, "sites-available", name), s.confdPath(name)} {
+		if full, err := s.allowedPath(candidate); err == nil {
+			if _, err := os.Stat(full); err == nil {
+				file = candidate
+				break
+			}
+		}
+	}
+	if info, err := os.Lstat(link); err == nil {
+		if info.Mode()&os.ModeSymlink == 0 {
+			return fmt.Errorf("sites-enabled/%s is a file of its own, and it is what nginx serves under that name — deleting the site would remove it with no copy kept. Move it out of sites-enabled first", name)
+		}
+		if state, target := readEnabledLink(link, file); state == linkElsewhere {
+			return fmt.Errorf("sites-enabled/%s points at %s, not at this site's file — deleting the site would take that file out of nginx. Remove or re-point the link first", name, target)
+		}
+	}
+	if file == "" {
+		return nil
+	}
+	if aliases := otherNames(enabledLinks(enabledDir)[resolvedFile(file)], name); len(aliases) > 0 {
+		return fmt.Errorf("%s is also enabled as sites-enabled/%s, which the delete would leave pointing at nothing — disable the site first, which takes that link out too", name, strings.Join(aliases, " and sites-enabled/"))
+	}
 	return nil
 }

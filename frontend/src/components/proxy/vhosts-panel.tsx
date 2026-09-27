@@ -26,7 +26,7 @@ import { siteProduct } from "@/components/proxy/marks"
 import { SiteForm } from "@/components/proxy/site-form"
 import { ServingStatus, SiteLinkNote, SiteTLS, siteKind } from "@/components/proxy/site-marks"
 import { reloadFailure, reloadOutput } from "@/components/proxy/site-outcome"
-import { useSiteVerbs } from "@/components/proxy/site-verbs"
+import { opensFile, useSiteVerbs } from "@/components/proxy/site-verbs"
 import { ProxyGrid, RoutePath } from "@/components/proxy/route-path"
 import {
   byUrgency,
@@ -52,6 +52,12 @@ const FILTER_LABEL: Record<SiteFilter, string> = {
 type NginxOutput = { title: string; output: string }
 
 /**
+ * A file open in the config editor: the site's own, or — for a site whose
+ * name in sites-enabled holds a separate copy — the copy nginx serves.
+ */
+type OpenFile = { vhost: VHost; served?: boolean }
+
+/**
  * A route needs two readable ends and commands separate from its readings.
  * The cards retain the worst-first groups and the existing editor ownership:
  * nginx opens the builder, file-backed Caddy opens its file, and Docker Caddy
@@ -61,7 +67,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
   const admin = can("system.admin")
-  const [editing, setEditing] = useState<VHost | null>(null)
+  const [editing, setEditing] = useState<OpenFile | null>(null)
   // The form's open state and its fields are kept for the tab: a site is a
   // long form, and checking a port or a certificate half-way through it
   // should not mean typing it again. Closing it is what forgets it.
@@ -99,7 +105,10 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
       data?.find((vhost) => vhost.name === requested))
     : undefined
   const linkedForm = admin && linked?.formEditable ? linked : undefined
-  const rawEditing = editing ?? (linked && !linkedForm && linked.path ? linked : null)
+  const rawEditing: OpenFile | null =
+    editing ?? (linked && !linkedForm && opensFile(linked) ? { vhost: linked } : null)
+  const rawSite = rawEditing?.vhost
+  const rawServed = Boolean(rawEditing?.served)
   const formIsOpen = form.open || Boolean(linkedForm)
   const formEditing = form.open ? form.editing : (linkedForm?.name ?? null)
 
@@ -218,7 +227,21 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         description: (
           <p>
             <b>{vhost.name}</b> stops serving as soon as nginx reloads. The config file stays on
-            disk. If taking it out breaks a configuration nginx was loading, the link goes back and
+            disk.
+            {vhost.linkedAs?.length ? (
+              <>
+                {" "}
+                Disabling removes{" "}
+                {vhost.linkedAs.map((alias, i) => (
+                  <span key={alias}>
+                    {i > 0 && " and "}
+                    <code className="font-mono break-all">sites-enabled/{alias}</code>
+                  </span>
+                ))}
+                , which {vhost.linkedAs.length === 1 ? "serves" : "serve"} it under another name.
+              </>
+            ) : null}{" "}
+            If taking it out breaks a configuration nginx was loading, the link goes back and
             nothing changes.
           </p>
         ),
@@ -302,7 +325,8 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   const handlers = {
     admin,
     onEdit: (v: VHost) => openForm(v.name),
-    onRaw: (v: VHost) => setEditing(v),
+    onRaw: (v: VHost) => setEditing({ vhost: v }),
+    onServed: (v: VHost) => setEditing({ vhost: v, served: true }),
     onDuplicate: (v: VHost) => openForm(null, v.name),
     onToggle: toggle,
     onDelete: remove,
@@ -477,20 +501,24 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         onSaved={refresh}
       />
       <ConfigEditor
-        open={rawEditing !== null}
+        open={rawSite !== undefined}
         onOpenChange={closeRaw}
-        path={rawEditing?.path ?? ""}
-        kind={rawEditing?.kind ?? "nginx"}
-        title={rawEditing?.name ?? "Configuration"}
+        path={(rawServed ? rawSite?.enabledPath : rawSite?.path) ?? ""}
+        kind={rawSite?.kind ?? "nginx"}
+        title={rawServed ? `sites-enabled/${rawSite?.name}` : (rawSite?.name ?? "Configuration")}
         readOnly={!admin}
         siteDisabled={
-          rawEditing?.kind === "nginx" && Boolean(rawEditing.enabledPath) && !rawEditing.enabled
+          !rawServed &&
+          rawSite?.kind === "nginx" &&
+          Boolean(rawSite.enabledPath) &&
+          !rawSite.enabled
         }
         onSaved={refresh}
         actions={(busy) =>
-          rawEditing && (
+          rawSite &&
+          !rawServed && (
             <SiteFileVerbs
-              vhost={rawEditing}
+              vhost={rawSite}
               admin={admin}
               busy={busy}
               onEdit={(v) => {
@@ -523,6 +551,7 @@ type CardProps = {
   admin: boolean
   onEdit: (v: VHost) => void
   onRaw: (v: VHost) => void
+  onServed: (v: VHost) => void
   onDuplicate: (v: VHost) => void
   onToggle: (v: VHost, enabled: boolean) => void
   onDelete: (v: VHost) => void
@@ -533,13 +562,14 @@ type CardProps = {
  * The route owns the body; service state and commands each have their own
  * line. The card opens the form for an administrator and a file the form
  * saves back; everything else with a file opens that file, read-only unless
- * the reader may write it. A link to nothing has nothing to open.
+ * the reader may write it. A link to nothing has nothing to open, and a file
+ * outside the proxy's directories is one the editor refuses.
  */
 function SiteCard({ vhost, busy, index, ambiguous, ...handlers }: CardProps) {
   const verbs = useSiteVerbs({ vhost, busy, ambiguous, ...handlers })
   const form = handlers.admin && vhost.formEditable
   const primary = () => (form ? handlers.onEdit(vhost) : handlers.onRaw(vhost))
-  const canOpen = form || Boolean(vhost.path)
+  const canOpen = form || opensFile(vhost)
   // A link to nothing has no domain or upstream to draw, only where it points.
   const linkOnly = vhost.broken === "dangling" && !vhost.path
   return (
@@ -597,6 +627,7 @@ function SiteFileVerbs({
     busy: busy ? "Saving" : undefined,
     onEdit,
     onRaw: noop,
+    onServed: noop,
     onDuplicate: noop,
     onToggle: noop,
     onDelete: noop,

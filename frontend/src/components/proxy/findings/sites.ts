@@ -38,7 +38,7 @@ export function siteFindings({ vhosts }: SiteFindingInput): ProxyFinding[] {
           : `${link} is a separate file rather than a link, so nginx serves that copy and not ${vhost.path}.`,
         advice: vhost.linkTarget
           ? `Enable ${vhost.name} from Sites to point the link at this file.`
-          : `Compare the two files, then replace ${link} with a link to this one.`,
+          : `Compare this file with the served copy from Sites, then replace ${link} with a link to this one.`,
         meta: "site",
         href: "/proxy/sites",
       })

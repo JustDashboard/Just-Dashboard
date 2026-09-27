@@ -107,6 +107,40 @@ const layouts = [
   },
 ]
 
+/** A copy in sites-enabled under the site's name: nginx serves that, not this file. */
+const copied = {
+  ...legacy,
+  name: "copied.example.com",
+  path: "/etc/nginx/sites-available/copied.example.com",
+  enabledPath: "/etc/nginx/sites-enabled/copied.example.com",
+  enabled: false,
+  broken: "stale",
+  serverNames: ["copied.example.com"],
+}
+
+/** A site file linked in from an application's repository, outside the nginx directory. */
+const outside = {
+  ...legacy,
+  name: "outside.example.com",
+  path: "/etc/nginx/sites-available/outside.example.com",
+  enabledPath: "/etc/nginx/sites-enabled/outside.example.com",
+  enabled: true,
+  formEditable: false,
+  resolvesTo: "/srv/app/deploy/nginx.conf",
+  serverNames: ["outside.example.com"],
+}
+
+/** Served through a numbered link under another name, the way 00-default -> default is. */
+const numbered = {
+  ...app,
+  name: "default",
+  path: "/etc/nginx/sites-available/default",
+  enabledPath: "/etc/nginx/sites-enabled/default",
+  enabled: true,
+  linkedAs: ["00-default"],
+  serverNames: ["_"],
+}
+
 async function serveSites(page: Page, sites: unknown[]) {
   let reads = 0
   await page.route("**/api/v1/proxy/vhosts", (route) => {
@@ -368,6 +402,99 @@ test("every place nginx reads a site from is listed, a link to nothing first", a
   await expect(page.getByText("Remove sites-enabled/ghost completed")).toHaveCount(0)
 })
 
+test("a copy in sites-enabled opens as the served copy and is never deleted", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await serveSites(page, [app, copied, layouts[2]])
+  const read: string[] = []
+  await page.route("**/api/v1/proxy/config?**", (route) => {
+    const path = new URL(route.request().url()).searchParams.get("path") ?? ""
+    read.push(path)
+    return json(route, {
+      content: path.includes("sites-enabled")
+        ? "server {\n    return 200 'served copy';\n}\n"
+        : "server {\n    return 204;\n}\n",
+    })
+  })
+  await page.goto("/proxy/sites")
+
+  const menu = await openMenu(page, "copied.example.com")
+  await expect(menu.getByRole("menuitem", { name: "Served copy" })).toBeVisible()
+  // The delete would take the copy nginx serves with no backup, and an
+  // enable does not replace a file.
+  await expect(menu.getByRole("menuitem", { name: /^(Delete|Enable|Disable)$/ })).toHaveCount(0)
+  await menu.getByRole("menuitem", { name: "Served copy" }).click()
+  const served = page.getByRole("dialog", { name: /sites-enabled\/copied\.example\.com/ })
+  await expect(served.locator(".monaco-editor .view-lines")).toContainText(
+    "served copy",
+    editorLoad,
+  )
+  expect(read).toEqual(["/etc/nginx/sites-enabled/copied.example.com"])
+  await page.keyboard.press("Escape")
+  await expect(served).toHaveCount(0)
+
+  // A link to another site is that site's: deleting this one would take it
+  // out of nginx.
+  const staleMenu = await openMenu(page, "renamed.example.com")
+  await expect(staleMenu.getByRole("menuitem", { name: "Enable" })).toBeVisible()
+  await expect(staleMenu.getByRole("menuitem", { name: "Delete" })).toHaveCount(0)
+})
+
+test("a site file kept outside the nginx directory keeps its switch", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await serveSites(page, [app, outside])
+  let posted: unknown
+  await page.route("**/api/v1/proxy/vhosts/outside.example.com/enabled", (route) => {
+    posted = route.request().postDataJSON()
+    return json(route, {
+      name: "outside.example.com",
+      enabled: false,
+      reloaded: true,
+      reload: { validation: { ...brokenTest, valid: true }, reloaded: true, output: "" },
+    })
+  })
+  await page.goto("/proxy/sites")
+
+  const site = card(page, "outside.example.com")
+  await expect(site).toContainText(
+    "sites-available/outside.example.com links to /srv/app/deploy/nginx.conf, outside the nginx directory, so this page does not open it.",
+  )
+  // Nothing to open that would only answer "outside the proxy configuration directory".
+  await expect(site.getByRole("button", { name: /^(Raw config|Edit|Open outside)/ })).toHaveCount(0)
+  const menu = await openMenu(page, "outside.example.com")
+  await expect(menu.getByRole("menuitem", { name: /^(Delete|Duplicate)$/ })).toHaveCount(0)
+  await menu.getByRole("menuitem", { name: "Disable" }).click()
+  await page
+    .getByRole("dialog", { name: "Disable outside.example.com" })
+    .getByRole("button", { name: "Disable and reload" })
+    .click()
+  await expect(page.getByText("outside.example.com disabled", { exact: true })).toBeVisible()
+  expect(posted).toEqual({ enabled: false, reload: true })
+})
+
+test("a site served through a link under another name reads serving and names that link", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await serveSites(page, [numbered, legacy])
+  await page.goto("/proxy/sites")
+
+  const site = card(page, "default")
+  await expect(site.getByText("serving", { exact: true })).toBeVisible()
+  await expect(site).toContainText("nginx serves this file through sites-enabled/00-default.")
+  await expect(page.getByText("every site serving")).toBeVisible()
+  const menu = await openMenu(page, "default")
+  // Deleting it would leave 00-default pointing at nothing.
+  await expect(menu.getByRole("menuitem", { name: "Delete" })).toHaveCount(0)
+  await menu.getByRole("menuitem", { name: "Disable" }).click()
+  await expect(page.getByRole("dialog", { name: "Disable default" })).toContainText(
+    "Disabling removes sites-enabled/00-default, which serves it under another name.",
+  )
+  await page.keyboard.press("Escape")
+
+  await page.goto("/proxy")
+  await expect(page.getByText("default is on disk but not serving")).toHaveCount(0)
+})
+
 test("the overview names a link to nothing as critical", async ({ page }) => {
   await mockProxy(page, { included: true })
   await serveSites(page, layouts)
@@ -396,9 +523,10 @@ for (const width of [390, 1280]) {
   test(`every kind of entry fits the sites list at ${width}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 })
     await mockProxy(page, { included: true })
-    await serveSites(page, layouts)
+    await serveSites(page, [...layouts, copied, outside, numbered])
     await page.goto("/proxy/sites")
     await expect(card(page, "ghost")).toBeVisible()
+    await expect(card(page, "outside.example.com")).toContainText("/srv/app/deploy/nginx.conf")
     expect(
       await page
         .locator("[data-slot='page']")

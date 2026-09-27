@@ -53,32 +53,75 @@ export function siteKind(vhost: VHost): string {
   return "nginx site"
 }
 
-/** Why a broken site's name in sites-enabled does not serve it, in one line. */
+/**
+ * What the site's links in sites-enabled do that the rest of the card cannot
+ * say: a name there that does not serve its file, the other names that do,
+ * and a file the editor will not open because it lives outside the nginx
+ * directory.
+ */
 export function SiteLinkNote({ vhost }: { vhost: VHost }) {
   const link = <span className="font-mono">sites-enabled/{vhost.name}</span>
   const target = <span className="font-mono break-all">{vhost.linkTarget}</span>
+  const lines: { key: string; text: React.ReactNode }[] = []
   if (vhost.broken === "dangling") {
-    return (
-      <p className="text-hint text-muted-foreground">
-        {link} points at {target}, which is missing, so nginx refuses every reload until the link is
-        {vhost.layout === "sites-available"
-          ? " pointed back at this file or removed."
-          : " removed."}
-      </p>
-    )
+    lines.push({
+      key: "dangling",
+      text: (
+        <>
+          {link} points at {target}, which is missing, so nginx refuses every reload until the link
+          is
+          {vhost.layout === "sites-available"
+            ? " pointed back at this file or removed."
+            : " removed."}
+        </>
+      ),
+    })
+  } else if (vhost.broken === "stale") {
+    lines.push({
+      key: "stale",
+      text: vhost.linkTarget ? (
+        <>
+          {link} points at {target}, so nginx serves that file instead of this one.
+        </>
+      ) : (
+        <>{link} is a separate file rather than a link, so nginx serves that copy instead.</>
+      ),
+    })
   }
-  if (vhost.broken === "stale") {
-    return (
-      <p className="text-hint text-muted-foreground">
-        {vhost.linkTarget ? (
-          <>
-            {link} points at {target}, so nginx serves that file instead of this one.
-          </>
-        ) : (
-          <>{link} is a separate file rather than a link, so nginx serves that copy instead.</>
-        )}
-      </p>
-    )
+  if (vhost.linkedAs?.length) {
+    lines.push({
+      key: "linked",
+      text: (
+        <>
+          nginx serves this file through{" "}
+          {vhost.linkedAs.map((alias, i) => (
+            <span key={alias}>
+              {i > 0 && " and "}
+              <span className="font-mono break-all">sites-enabled/{alias}</span>
+            </span>
+          ))}
+          .
+        </>
+      ),
+    })
   }
-  return null
+  if (vhost.resolvesTo) {
+    lines.push({
+      key: "outside",
+      text: (
+        <>
+          <span className="font-mono">
+            {vhost.layout}/{vhost.name}
+          </span>{" "}
+          links to <span className="font-mono break-all">{vhost.resolvesTo}</span>, outside the
+          nginx directory, so this page does not open it.
+        </>
+      ),
+    })
+  }
+  return lines.map((line) => (
+    <p key={line.key} className="text-hint text-muted-foreground">
+      {line.text}
+    </p>
+  ))
 }

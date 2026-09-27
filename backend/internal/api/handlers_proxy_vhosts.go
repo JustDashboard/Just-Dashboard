@@ -52,7 +52,9 @@ type vhostLinkResult struct {
 }
 
 func (s *Server) handleVHostToggle(w http.ResponseWriter, r *http.Request) error {
-	name := chi.URLParam(r, "name")
+	// Decoded: chi hands back a name as the client escaped it, and
+	// "vb%3A8080" is no file in sites-available.
+	name := httpx.URLParam(r, "name")
 	var req vhostToggleRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
@@ -60,25 +62,25 @@ func (s *Server) handleVHostToggle(w http.ResponseWriter, r *http.Request) error
 	// No typed phrase: this is a toggle, and the same switch turns the site
 	// back on. Nothing is written that cannot be unwritten by clicking it
 	// again.
-	if err := s.modules.proxy.SetVHostEnabled(r.Context(), name, req.Enabled); err != nil {
+	reload, err := s.modules.proxy.ToggleVHost(r.Context(), name, req.Enabled, req.Reload)
+	if err != nil {
 		return refusedLinkChange(r, "proxy.vhost.toggle", name, map[string]any{"enabled": req.Enabled}, err)
 	}
 	out := vhostLinkResult{Name: name, Enabled: req.Enabled}
-	if req.Reload {
-		s.reloadAfterLinkChange(r, &out)
-	}
+	out.reloaded(reload)
 	httpx.SetAudit(r, "proxy.vhost.toggle", name, out.auditDetail(map[string]any{"enabled": req.Enabled}))
 	httpx.JSON(w, http.StatusOK, out)
 	return nil
 }
 
 func (s *Server) handleVHostUnlink(w http.ResponseWriter, r *http.Request) error {
-	name := chi.URLParam(r, "name")
-	if err := s.modules.proxy.RemoveVHostLink(r.Context(), name); err != nil {
+	name := httpx.URLParam(r, "name")
+	reload, err := s.modules.proxy.RemoveVHostLink(r.Context(), name, true)
+	if err != nil {
 		return refusedLinkChange(r, "proxy.vhost.unlink", name, nil, err)
 	}
 	out := vhostLinkResult{Name: name}
-	s.reloadAfterLinkChange(r, &out)
+	out.reloaded(reload)
 	httpx.SetAudit(r, "proxy.vhost.unlink", name, out.auditDetail(map[string]any{}))
 	httpx.JSON(w, http.StatusOK, out)
 	return nil
@@ -111,19 +113,21 @@ func refusedLinkChange(r *http.Request, action, name string, detail map[string]a
 		Because("nginx -t failed with the change in place, so the change was undone", refused.Validation.Output)
 }
 
-// reloadAfterLinkChange reloads nginx and records how that went. A reload
-// that fails is reported rather than returned as an error: the link change
-// is already on disk and passed the test, and answering "failed" would send
-// the operator to undo something that worked.
-func (s *Server) reloadAfterLinkChange(r *http.Request, out *vhostLinkResult) {
-	reload, err := s.modules.proxy.Reload(r.Context(), proxysvc.KindNginx)
-	out.Reload = reload
+// reloaded records how the reload after a link change went. A reload that
+// fails is reported rather than returned as an error: the link change is
+// already on disk and passed the test, and answering "failed" would send the
+// operator to undo something that worked.
+func (out *vhostLinkResult) reloaded(reload *proxysvc.LinkReload) {
+	if reload == nil {
+		return
+	}
+	out.Reload = reload.Result
 	switch {
-	case err == nil:
+	case reload.Err == nil:
 		out.Reloaded = true
-	case errors.Is(err, proxysvc.ErrInvalidConf):
-		out.ReloadError = "nginx -t failed: " + proxysvc.FailureHeadline(reload.Validation)
+	case errors.Is(reload.Err, proxysvc.ErrInvalidConf):
+		out.ReloadError = "nginx -t failed: " + proxysvc.FailureHeadline(reload.Result.Validation)
 	default:
-		out.ReloadError = err.Error()
+		out.ReloadError = reload.Err.Error()
 	}
 }

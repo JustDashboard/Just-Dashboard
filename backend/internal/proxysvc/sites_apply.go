@@ -191,6 +191,9 @@ func (s *Service) DeleteSite(ctx context.Context, name string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.checkSiteDelete(name); err != nil {
+		return err
+	}
 	removedLink := false
 	link := filepath.Join(s.nginxDir, "sites-enabled", name)
 	if _, err := os.Lstat(link); err == nil {

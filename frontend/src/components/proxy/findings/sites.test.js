@@ -63,6 +63,25 @@ describe("site findings", () => {
     )
   })
 
+  test("a copy in sites-enabled sends the operator to the served copy", () => {
+    const [finding] = siteFindings({
+      vhosts: [site({ enabled: false, broken: "stale" })],
+    })
+    expect(finding.detail).toBe(
+      "sites-enabled/app is a separate file rather than a link, so nginx serves that copy and not /etc/nginx/sites-available/app.",
+    )
+    expect(finding.advice).toBe(
+      "Compare this file with the served copy from Sites, then replace sites-enabled/app with a link to this one.",
+    )
+  })
+
+  test("a site served through a link under another name is not 'on disk but not serving'", () => {
+    const findings = siteFindings({
+      vhosts: [site({ name: "default", enabled: true, linkedAs: ["00-default"] })],
+    })
+    expect(findings).toEqual([])
+  })
+
   test("a disabled site and a plain one keep their findings", () => {
     const findings = siteFindings({
       vhosts: [site({ name: "off", enabled: false }), site({ name: "plain", tls: false })],

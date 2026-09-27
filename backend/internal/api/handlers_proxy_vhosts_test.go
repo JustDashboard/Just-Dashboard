@@ -196,3 +196,52 @@ func TestVHostUnlinkIsAdminOnlyAndDestructive(t *testing.T) {
 		t.Errorf("the route asked for a typed phrase: %d", w.Code)
 	}
 }
+
+// chi hands back a path parameter as the client escaped it, and the page
+// escapes every name, so a link called vb:8080 — which stopped every reload —
+// could not be removed: "sites-enabled has nothing called vb%3A8080".
+func TestVHostRoutesTakeTheNameUnescaped(t *testing.T) {
+	c, _, root := vhostServer(t, func(string) string { return "exit 0" })
+	enabled := func(name string) string { return filepath.Join(root, "sites-enabled", name) }
+	if err := os.Symlink("/nonexistent/jd-test/a:b", enabled("a:b")); err != nil {
+		t.Fatal(err)
+	}
+	w := c.do(http.MethodDelete, "/api/v1/proxy/vhosts/a%3Ab/link", "", nil)
+	if answer := decodeLink(t, w.Body.Bytes()); w.Code != http.StatusOK || answer.Name != "a:b" || !answer.Reloaded {
+		t.Fatalf("unlink: %d %s", w.Code, w.Body.String())
+	}
+	if _, err := os.Lstat(enabled("a:b")); !os.IsNotExist(err) {
+		t.Errorf("sites-enabled/a:b is still there: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "sites-available", "c:d"), []byte("server {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w = c.do(http.MethodPost, "/api/v1/proxy/vhosts/c%3Ad/enabled", `{"enabled":true,"reload":true}`, nil)
+	if answer := decodeLink(t, w.Body.Bytes()); w.Code != http.StatusOK || answer.Name != "c:d" || !answer.Enabled {
+		t.Fatalf("toggle: %d %s", w.Code, w.Body.String())
+	}
+	if _, err := os.Lstat(enabled("c:d")); err != nil {
+		t.Errorf("sites-enabled/c:d was not made: %v", err)
+	}
+}
+
+// A site copied into sites-enabled is what nginx serves under its name, and
+// the delete took it with no copy kept.
+func TestSiteDeleteLeavesAServedCopyAlone(t *testing.T) {
+	c, _, root := vhostServer(t, func(string) string { return "exit 0" })
+	copied := filepath.Join(root, "sites-enabled", "copy.test")
+	if err := os.WriteFile(filepath.Join(root, "sites-available", "copy.test"), []byte("server { return 204; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(copied, []byte("server { return 200; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w := c.do(http.MethodDelete, "/api/v1/proxy/sites/copy.test", "", nil)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "is a file of its own") {
+		t.Fatalf("got %d %s", w.Code, w.Body.String())
+	}
+	if b, err := os.ReadFile(copied); err != nil || string(b) != "server { return 200; }\n" {
+		t.Errorf("the served copy is gone or changed: %q %v", b, err)
+	}
+}

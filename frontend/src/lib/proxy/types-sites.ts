@@ -16,6 +16,10 @@ export type VHost = {
   broken?: "dangling" | "stale"
   /** Where the link in sites-enabled points, for a broken site and a link-only one. */
   linkTarget?: string
+  /** Other names in sites-enabled that link to this file, each serving it; Disable takes them out. */
+  linkedAs?: string[]
+  /** Where the file really is, when that is outside the proxy's directories: the editor does not open it. */
+  resolvesTo?: string
   /** The site form reads this file and saves it back to the same place. */
   formEditable: boolean
   serverNames: string[]

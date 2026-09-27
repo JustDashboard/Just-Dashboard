@@ -357,16 +357,30 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   zone); out of a configuration nginx was already refusing it stands, because switching sites off is
   how a broken configuration gets fixed. A reload that fails after a passing test is a 200 with
   `reloaded: false` and `reloadError` rather than a 502, since the link is in place and correct.
-  A file sitting where a link belongs in `sites-enabled` is never removed as a "disable".
+  A file sitting where a link belongs in `sites-enabled` is never removed as a "disable". A link
+  under another name to the site's file (`00-default -> ../sites-available/default`) serves it as
+  surely as its own: the disable takes every such link out (and puts them all back on a refusal),
+  and an enable of a site served that way changes nothing rather than loading it twice.
   `RemoveVHostLink` (`DELETE /proxy/vhosts/{name}/link`, destructive, audited as `proxy.vhost.unlink`)
   takes out a link no site's switch owns — one to nothing, or to a file outside sites-available —
-  under the same test-and-restore rule, and refuses a site's own link and any real file.
+  under the same test-and-restore rule, and refuses a link to any sites-available site and any real
+  file. The switch and the removal reload nginx through `ToggleVHost` and `RemoveVHostLink(…, reload)`
+  inside the same hold of the service lock (`reloadLocked`): run after it, the reload's test could see
+  another request's candidate link and report a change that had worked as "not reloaded". Both routes
+  read `{name}` through `httpx.URLParam`, since chi hands back the escaped segment (`vb%3A8080`).
+  `DeleteSite` asks `checkSiteDelete` first and refuses when `sites-enabled/<name>` is not the site's
+  own link — a copy there (the file nginx really serves, which it removed with no backup), a link to
+  another file (which it took out of nginx) — or when a link under another name would be left
+  pointing at nothing.
   `parseCaddyfile` tracks brace depth so only top-level blocks are site addresses — `handle`,
   `header` and `tls` blocks were listed as server names — and says whether every site address is
   served over HTTPS: an address with a host is unless it is `http://` or on port 80 (localhost and IP
   addresses included, which caddy:2 serves from its local authority), one with no host is not, and
-  under `auto_https off` only a block with its own `tls` counts. One plain site makes the Caddyfile's
-  single entry plain.
+  under `auto_https off` only a block with its own `tls` counts. Caddy's one-site form without braces
+  is read (the first line is the address), an `http://` block whose only directives redirect to
+  `https://` is not a plain site — as an nginx port-80 block that only redirects is not — and a block
+  opened and closed on one line counts. One plain site makes the Caddyfile's single entry plain.
+  Names are listed once, without their scheme.
 - **Certificates say who uses them.** `listCertificates` joins the sites' `ssl_certificate` paths
   onto the certificate list (`UsedBy`), through symlinks, so a certbot lineage and the site naming
   its `live/` path are one entry; `certificateName` names a file in a generic directory
@@ -384,8 +398,14 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   (`readEnabledLink`, `os.SameFile`), not by its text: serving the file is `Enabled`, a link to nothing
   is `Broken: "dangling"` — nginx refuses every reload while it is there, and Lstat used to report it as
   serving — and a link to, or a copy of, another file is `Broken: "stale"`, with `LinkTarget` saying
-  where it points. conf.d has no symlink, which reaches the UI as an empty `EnabledPath`, because a
-  switch that can only error is worse than none. `FormEditable` says the site form reads the file and
+  where it points; the other names in sites-enabled that link to a sites-available file are its
+  `LinkedAs`, make it `Enabled`, and are not listed as sites of their own. `ResolvesTo` is the real
+  path of a file outside the proxy's directories, which the editor refuses to open while its switch
+  still works. A conf.d file is listed only when it declares a `server` block (read with
+  `ParseNginxFile`; one it cannot parse is listed): a file holding only a `log_format`, `map` or zone
+  is configuration other sites depend on, and listed as a site it read "Default host" with a Delete.
+  conf.d has no symlink, which reaches the UI as an empty `EnabledPath`, because a switch that can only
+  error is worse than none. `FormEditable` says the site form reads the file and
   saves it back to the same place (sites-available, or a `.conf` in conf.d where there is no
   sites-available); a conf.d file on a Debian host or a file only in sites-enabled would be saved beside
   itself under the same names, so it gets the raw editor. `confdPath` stops `app.conf` becoming
@@ -468,9 +488,9 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   indexed once by path and directory, which keeps thousands of sites linear.
 - **Every change to a configuration file is offered to a `ChangeRecorder`** (`changes.go`) once it is
   committed — `WriteConfig`, `ApplySite` and deployment cutovers through `applySiteLocked`, `DeleteSite`,
-  `SetVHostEnabled` (which now takes the service lock like every other change, resolves the site file
-  as the writes do, and records nothing for a toggle that leaves the link as it was or that nginx
-  refused), `RemoveVHostLink` (recorded as a disable of the file behind the link, or of the link
+  `SetVHostEnabled`/`ToggleVHost` (which now take the service lock like every other change, resolve the
+  site file as the writes do, and record nothing for a toggle that leaves the links as they were or that
+  nginx refused), `RemoveVHostLink` (recorded as a disable of the file behind the link, or of the link
   itself when it points at nothing), `ApplyStream`,
   `DeleteStream`, and a deployment route's restore — with its prior content and the actor
   `WithActor` put on the context (empty for a deployment or a background loop). Password files are never

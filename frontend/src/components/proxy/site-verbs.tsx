@@ -32,6 +32,16 @@ export function siteUrl(vhost: VHost): string | undefined {
   return `${vhost.tls ? "https" : "http"}://${name}`
 }
 
+/**
+ * Whether the config editor opens the site's file: there is one, and it is
+ * inside the proxy's directories. A Docker Caddy route and a link to nothing
+ * have no file; a site file linked in from an application's repository is
+ * one the editor refuses.
+ */
+export function opensFile(vhost: VHost): boolean {
+  return Boolean(vhost.path) && !vhost.resolvesTo
+}
+
 /** The domain to scan, when the site has one and is on TLS. */
 export function scanDomain(vhost: VHost): string | undefined {
   if (!vhost.tls) return undefined
@@ -56,6 +66,7 @@ export function useSiteVerbs({
   ambiguous = false,
   onEdit,
   onRaw,
+  onServed,
   onDuplicate,
   onToggle,
   onDelete,
@@ -69,6 +80,8 @@ export function useSiteVerbs({
   ambiguous?: boolean
   onEdit: (vhost: VHost) => void
   onRaw: (vhost: VHost) => void
+  /** Opens the separate file sites-enabled holds under the site's name. */
+  onServed: (vhost: VHost) => void
   onDuplicate: (vhost: VHost) => void
   onToggle: (vhost: VHost, enabled: boolean) => void
   onDelete: (vhost: VHost) => void
@@ -83,10 +96,13 @@ export function useSiteVerbs({
   // A Docker Caddy route has no file on the host: its config lives inside
   // the container and is owned by the deployment that made it. Nor has a
   // link to nothing.
-  const hasFile = Boolean(vhost.path)
+  const hasFile = opensFile(vhost)
   const url = siteUrl(vhost)
   const domain = scanDomain(vhost)
-  const log = hasFile ? accessLogSource(vhost) : undefined
+  const log = vhost.path ? accessLogSource(vhost) : undefined
+  // A separate file sitting in sites-enabled under the site's name: that
+  // copy is what nginx serves, not the file the card describes.
+  const copied = vhost.broken === "stale" && !vhost.linkTarget
   // A link in sites-enabled that no site's switch owns: one to nothing, or
   // one to a file kept outside sites-available.
   const strayLink =
@@ -109,6 +125,14 @@ export function useSiteVerbs({
       icon: Code,
       inline: true,
       run: () => onRaw(vhost),
+    })
+  }
+  if (copied && vhost.enabledPath) {
+    verbs.push({
+      key: "served",
+      label: "Served copy",
+      icon: Code,
+      run: () => onServed(vhost),
     })
   }
   if (url) {
@@ -143,12 +167,19 @@ export function useSiteVerbs({
       run: () => onDuplicate(vhost),
     })
   }
-  // A conf.d host has no sites-enabled to link into, so there is nothing
-  // for a toggle to do — every file there is active. An empty enabledPath
-  // is what says which layout this is. A copy sitting where the link
-  // belongs is not replaced by an enable, which says so and changes nothing.
-  const copied = vhost.broken === "stale" && !vhost.linkTarget
-  if (form && vhost.enabledPath && !copied) {
+  // The switch moves a link in sites-enabled and nothing else, so it needs
+  // a file in sites-available, not one the form can save: a site file
+  // linked in from an application's repository is switched here too. A
+  // conf.d host has no sites-enabled to link into, and every file there is
+  // active; an empty enabledPath is what says which layout this is. A copy
+  // sitting where the link belongs is not replaced by an enable, which says
+  // so and changes nothing.
+  const switchable =
+    vhost.kind === "nginx" &&
+    vhost.layout === "sites-available" &&
+    Boolean(vhost.enabledPath) &&
+    !copied
+  if (admin && switchable) {
     verbs.push(
       vhost.enabled
         ? {
@@ -181,9 +212,13 @@ export function useSiteVerbs({
     })
   }
   // The delete acts by name: sites-available first, then conf.d/<name>, and
-  // it removes a sites-enabled entry of that name on the way.
+  // it removes a sites-enabled entry of that name on the way — so it refuses,
+  // and is not offered, where that entry is not the site's own link: a copy
+  // nginx serves instead, a link to another site, or a link under another
+  // name it would leave pointing at nothing.
   const deletable =
-    vhost.formEditable || (vhost.layout === "conf.d" && vhost.name.endsWith(".conf"))
+    (vhost.formEditable && vhost.broken !== "stale" && !vhost.linkedAs?.length) ||
+    (vhost.layout === "conf.d" && vhost.name.endsWith(".conf"))
   if (admin && deletable && !ambiguous) {
     verbs.push({
       key: "delete",
