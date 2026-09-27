@@ -427,7 +427,9 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   that queue behind one pending dump share it. `NginxTree` (`nginxconf.go`) parses those files the way nginx tokenises them
   (quotes and their escapes, comments, `${var}`, nested blocks) into `Directive`s carrying their file,
   line and enclosing contexts, with each `include` replaced in place by the files its glob matched, sorted
-  and without dotfiles as glob(3) would.
+  and without dotfiles as glob(3) would, `[!…]` included. nginx prints a file under the path it was
+  included by, `./` and `../` left in, so includes and printed paths are compared cleaned; the files are
+  indexed once by path and directory, which keeps thousands of sites linear.
 - **Every change to a configuration file is offered to a `ChangeRecorder`** (`changes.go`) once it is
   committed — `WriteConfig`, `ApplySite` and deployment cutovers through `applySiteLocked`, `DeleteSite`,
   `SetVHostEnabled` (which now takes the service lock like every other change), `ApplyStream`,

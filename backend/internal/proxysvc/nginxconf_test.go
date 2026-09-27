@@ -1,9 +1,11 @@
 package proxysvc
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A Debian-shaped configuration as nginx -T would list it: conf.d printed out
@@ -140,5 +142,82 @@ func TestNginxTreeReadsASelfIncludeOnce(t *testing.T) {
 	}
 	if http := findDirective(tree, "http"); len(http.Block) != 1 || http.Block[0].Name != "gzip" {
 		t.Fatalf("got %+v", tree)
+	}
+}
+
+// Includes spelled the ways nginx accepts, shaped on real `nginx -T` dumps:
+// nginx prints a file under the path it was included by, "./" and "../"
+// left in, and glob(3) negates a set with "!". The file under conf.d that
+// the negation excludes is printed because stream includes it by name.
+func TestNginxTreeFollowsIncludesAsNginxSpellsThem(t *testing.T) {
+	tree, err := NginxTree([]ConfigFile{
+		{Path: "/etc/nginx/nginx.conf", Content: `http {
+    include conf.d/[!_]*.conf;
+    include ./snippets/*.conf;
+    include ../shared/shared.conf;
+}
+stream {
+    include conf.d/_stream.conf;
+}
+`},
+		{Path: "/etc/nginx/conf.d/live.conf", Content: "server { listen 127.0.0.1:18380; }\n"},
+		{Path: "/etc/nginx/./snippets/s.conf", Content: "gzip on;\n"},
+		{Path: "/etc/nginx/../shared/shared.conf", Content: "map $host $jd_shared { default 1; }\n"},
+		{Path: "/etc/nginx/conf.d/_stream.conf", Content: "server { listen 5432; }\n"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, d := range findDirective(tree, "http").Block {
+		names = append(names, d.Name+" "+d.File)
+	}
+	want := []string{
+		"server /etc/nginx/conf.d/live.conf",
+		"gzip /etc/nginx/./snippets/s.conf",
+		"map /etc/nginx/../shared/shared.conf",
+	}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("http holds %q, want %q", names, want)
+	}
+	if stream := findDirective(tree, "stream"); len(stream.Block) != 1 || stream.Block[0].File != "/etc/nginx/conf.d/_stream.conf" {
+		t.Fatalf("stream holds %+v", stream.Block)
+	}
+}
+
+// Thousands of sites, each including snippets by name and by glob, is a size
+// the tree is read at while a page waits. Matching every include against
+// every file took ten seconds at 5000 sites; the bound here is far above what
+// reading them once costs.
+func TestNginxTreeScalesWithTheConfiguration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a configuration of 5000 sites")
+	}
+	const sites = 5000
+	files := []ConfigFile{{Path: "/etc/nginx/nginx.conf", Content: "http {\n    include sites-enabled/*;\n}\n"}}
+	for _, name := range []string{"proxy.conf", "tls.conf"} {
+		files = append(files, ConfigFile{Path: "/etc/nginx/snippets/" + name, Content: "gzip on;\n"})
+	}
+	for i := range 3 {
+		files = append(files, ConfigFile{Path: fmt.Sprintf("/etc/nginx/common/%d.conf", i), Content: "gzip_vary on;\n"})
+	}
+	for i := range sites {
+		files = append(files, ConfigFile{
+			Path: fmt.Sprintf("/etc/nginx/sites-enabled/site-%05d", i),
+			Content: fmt.Sprintf("server {\n    server_name site-%d.example.test;\n"+
+				"    include snippets/proxy.conf;\n    include snippets/tls.conf;\n    include common/*.conf;\n}\n", i),
+		})
+	}
+	start := time.Now()
+	tree, err := NginxTree(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("NginxTree took %s for %d sites", elapsed, sites)
+	}
+	servers := findDirective(tree, "http").Block
+	if len(servers) != sites || len(servers[sites-1].Block) != 6 {
+		t.Fatalf("got %d servers, the last holding %+v", len(servers), servers[len(servers)-1].Block)
 	}
 }

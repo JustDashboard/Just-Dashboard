@@ -216,21 +216,54 @@ func newDirective(path string, words []nginxToken, context []string) Directive {
 // keeping its own file and line.
 //
 // A relative include is resolved against the main file's directory, which is
-// where nginx resolves it. A glob is matched the way glob(3) matches for
-// nginx: sorted, and without leading-dot names unless the pattern asks for
-// them — the reason a `conf.d/.site.conf` is not read. Only files nginx
-// printed can match, since those are the ones it read.
+// where nginx resolves it. nginx prints a file under the path it was included
+// by, "./" and "../" and all, so an include and a printed path are compared
+// in their cleaned forms. A glob is matched the way glob(3) matches for
+// nginx: sorted, "[!…]" as a negated set, and without leading-dot names
+// unless the pattern asks for them — the reason a `conf.d/.site.conf` is not
+// read. Only files nginx printed can match, since those are the ones it read.
+//
+// The files are indexed once, by path and by directory, so a configuration of
+// thousands of sites costs what its size does rather than its size squared.
 func NginxTree(files []ConfigFile) ([]Directive, error) {
 	if len(files) == 0 {
 		return []Directive{}, nil
 	}
-	w := includeWalker{files: files, prefix: filepath.Dir(files[0].Path), open: map[string]bool{}}
+	w := includeWalker{
+		prefix: filepath.Dir(files[0].Path),
+		open:   map[string]bool{},
+		byPath: map[string]ConfigFile{},
+		byDir:  map[string][]ConfigFile{},
+	}
+	for _, f := range files {
+		clean := filepath.Clean(f.Path)
+		if _, seen := w.byPath[clean]; seen {
+			continue
+		}
+		w.byPath[clean] = f
+		w.byDir[filepath.Dir(clean)] = append(w.byDir[filepath.Dir(clean)], f)
+		w.sorted = append(w.sorted, f)
+	}
+	byClean := func(list []ConfigFile) {
+		sort.SliceStable(list, func(i, j int) bool {
+			return filepath.Clean(list[i].Path) < filepath.Clean(list[j].Path)
+		})
+	}
+	for _, list := range w.byDir {
+		byClean(list)
+	}
+	byClean(w.sorted)
 	return w.file(files[0], nil)
 }
 
 type includeWalker struct {
-	files  []ConfigFile
 	prefix string
+	// byPath holds each printed file under its cleaned path, byDir the same
+	// files per directory, and sorted all of them, each list sorted as
+	// glob(3) sorts.
+	byPath map[string]ConfigFile
+	byDir  map[string][]ConfigFile
+	sorted []ConfigFile
 	// open is the chain of files being expanded, so a file that includes
 	// itself is read once rather than for ever.
 	open map[string]bool
@@ -241,8 +274,9 @@ func (w *includeWalker) file(f ConfigFile, context []string) ([]Directive, error
 	if err != nil {
 		return nil, err
 	}
-	w.open[f.Path] = true
-	defer delete(w.open, f.Path)
+	clean := filepath.Clean(f.Path)
+	w.open[clean] = true
+	defer delete(w.open, clean)
 	return w.expand(directives)
 }
 
@@ -251,7 +285,7 @@ func (w *includeWalker) expand(directives []Directive) ([]Directive, error) {
 	for _, d := range directives {
 		if d.Name == "include" && d.Block == nil && len(d.Args) == 1 {
 			for _, f := range w.match(d.Args[0]) {
-				if w.open[f.Path] {
+				if w.open[filepath.Clean(f.Path)] {
 					continue
 				}
 				included, err := w.file(f, d.Context)
@@ -278,25 +312,54 @@ func (w *includeWalker) match(pattern string) []ConfigFile {
 	if !filepath.IsAbs(pattern) {
 		pattern = filepath.Join(w.prefix, pattern)
 	}
-	literal := !strings.ContainsAny(pattern, "*?[")
-	hidden := strings.HasPrefix(filepath.Base(pattern), ".")
-	seen := map[string]bool{}
-	var out []ConfigFile
-	for _, f := range w.files {
-		if seen[f.Path] {
-			continue
+	pattern = filepath.Clean(pattern)
+	if !strings.ContainsAny(pattern, "*?[") {
+		if f, ok := w.byPath[pattern]; ok {
+			return []ConfigFile{f}
 		}
-		if literal {
-			if f.Path != pattern {
-				continue
-			}
-		} else if ok, _ := filepath.Match(pattern, f.Path); !ok ||
+		return nil
+	}
+	pattern = globToMatch(pattern)
+	dir := filepath.Dir(pattern)
+	candidates := w.byDir[dir]
+	if strings.ContainsAny(dir, "*?[") {
+		candidates = w.sorted
+	}
+	hidden := strings.HasPrefix(filepath.Base(pattern), ".")
+	var out []ConfigFile
+	for _, f := range candidates {
+		if ok, _ := filepath.Match(pattern, filepath.Clean(f.Path)); !ok ||
 			(!hidden && strings.HasPrefix(filepath.Base(f.Path), ".")) {
 			continue
 		}
-		seen[f.Path] = true
 		out = append(out, f)
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out
+}
+
+// globToMatch turns a glob(3) pattern into filepath.Match's, which differs in
+// negating a bracket expression with "^" where glob(3) takes "!" — so
+// `conf.d/[!_]*.conf`, which nginx reads as every file not starting with an
+// underscore, matched nothing at all.
+func globToMatch(pattern string) string {
+	var b strings.Builder
+	inSet := false
+	for i := 0; i < len(pattern); i++ {
+		c := pattern[i]
+		b.WriteByte(c)
+		switch {
+		case c == '\\' && i+1 < len(pattern):
+			i++
+			b.WriteByte(pattern[i])
+		case c == '[' && !inSet:
+			inSet = true
+			if i+1 < len(pattern) && pattern[i+1] == '!' {
+				b.WriteByte('^')
+				i++
+			}
+		case c == ']' && inSet:
+			inSet = false
+		}
+	}
+	return b.String()
 }
