@@ -34,12 +34,15 @@ type ConfigEditorProps = {
 
 /**
  * The file itself, for a site the form does not own — and for the operator
- * who would rather see the nginx than the form. Keyed on the file so opening
- * another one never inherits the previous one's buffer; saving that to the
- * wrong path would be a real outage.
+ * who would rather see the nginx than the form. Every opening starts over:
+ * the file is read afresh and nothing typed before a close survives it, and
+ * opening another file never inherits the previous one's buffer. Saving a
+ * stale buffer over the file on disk, or over the wrong file, would be a real
+ * outage. `open` and `path` are independent, so a caller may keep the path
+ * while the editor is closed.
  */
 export function ConfigEditor(props: ConfigEditorProps) {
-  return <ConfigEditorBody key={props.path} {...props} />
+  return <ConfigEditorBody key={props.open ? props.path : ""} {...props} />
 }
 
 function ConfigEditorBody({
@@ -61,7 +64,7 @@ function ConfigEditorBody({
   const [validation, setValidation] = useState<ProxyValidation | null>(null)
 
   useEffect(() => {
-    if (!path) return
+    if (!open || !path) return
     const controller = new AbortController()
     get<{ content: string }>("/proxy/config", { path }, controller.signal)
       .then((r) => {
@@ -70,7 +73,7 @@ function ConfigEditorBody({
       })
       .catch((err) => !controller.signal.aborted && notify.error("Could not read the file", err))
     return () => controller.abort()
-  }, [path])
+  }, [open, path])
 
   const validate = async () => {
     setBusy(true)

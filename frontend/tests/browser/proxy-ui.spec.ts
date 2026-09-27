@@ -98,6 +98,38 @@ test("a Docker Caddy route is listed without an editor it cannot use", async ({ 
   await expect(page.getByText("Plain HTTP", { exact: true }).first()).toBeVisible()
 })
 
+test("the raw editor reads its file afresh on every opening", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  // A new revision on every read, so a reopened editor showing the first one
+  // is a buffer kept across the close rather than the file on disk.
+  let reads = 0
+  await page.route("**/api/v1/proxy/config?**", (route) => {
+    reads += 1
+    return json(route, { content: `# revision-${reads}\n` })
+  })
+  await page.goto("/proxy/sites")
+  const card = page.locator("[data-slot='choice-row']").filter({ hasText: "app.example.com" })
+  await expect(card).toBeVisible()
+  expect(reads).toBe(0)
+
+  await card.getByRole("button", { name: "Raw config" }).click()
+  const sheet = page.getByRole("dialog")
+  const lines = sheet.locator(".monaco-editor .view-lines")
+  await expect(lines).toContainText("revision-1")
+  await lines.click()
+  await page.keyboard.press("End")
+  await page.keyboard.type("typed-then-closed")
+  await expect(sheet.getByRole("button", { name: "Discard" })).toBeEnabled()
+  await sheet.getByRole("button", { name: "Close", exact: true }).click()
+  await expect(sheet).toHaveCount(0)
+
+  await card.getByRole("button", { name: "Raw config" }).click()
+  await expect(lines).toContainText("revision-2")
+  await expect(lines).not.toContainText("typed-then-closed")
+  await expect(sheet.getByRole("button", { name: "Discard" })).toBeDisabled()
+  expect(reads).toBe(2)
+})
+
 test("the ports page filters what it lists and names a database on a public address", async ({
   page,
 }) => {
