@@ -29,6 +29,11 @@ type ServicePreset struct {
 	// It is the reason to have a catalogue at all: the UI can warn at the
 	// moment of choosing rather than after the fact.
 	Danger string `json:"danger,omitempty"`
+	// InternetOnly says the danger is strangers on the internet — an open
+	// resolver amplifying attacks, a remote desktop brute-forced from
+	// everywhere — so a bind only a bridge, a tailnet or a VPN can reach is
+	// what the service is for rather than a risk.
+	InternetOnly bool `json:"-"`
 }
 
 // ServiceCatalogue is the whole list, ordered as it should be offered:
@@ -43,8 +48,9 @@ var ServiceCatalogue = []ServicePreset{
 	{Key: "http3", Name: "HTTP/3 (QUIC)", Port: "443", Protocol: "udp",
 		Detail: "HTTP/3 rides UDP 443. Open it alongside TCP 443 if your proxy offers QUIC."},
 	{Key: "dns", Name: "DNS", Port: "53", Protocol: "udp",
-		Detail: "Only if this host answers DNS queries for others.",
-		Danger: "An open resolver is used to amplify attacks against other people. Restrict the source."},
+		Detail:       "Only if this host answers DNS queries for others.",
+		Danger:       "An open resolver is used to amplify attacks against other people. Restrict the source.",
+		InternetOnly: true},
 	{Key: "smtp", Name: "SMTP", Port: "25", Protocol: "tcp",
 		Detail: "Mail delivery between servers."},
 	{Key: "submission", Name: "Mail submission", Port: "587", Protocol: "tcp",
@@ -77,11 +83,13 @@ var ServiceCatalogue = []ServicePreset{
 		Detail: "The Docker daemon's TCP socket.",
 		Danger: "Reaching the Docker API is equivalent to being root on this host. Never open it."},
 	{Key: "rdp", Name: "RDP", Port: "3389", Protocol: "tcp",
-		Detail: "Windows remote desktop.",
-		Danger: "Brute-forced constantly. Put it behind a VPN."},
+		Detail:       "Windows remote desktop.",
+		Danger:       "Brute-forced constantly. Put it behind a VPN.",
+		InternetOnly: true},
 	{Key: "vnc", Name: "VNC", Port: "5900", Protocol: "tcp",
-		Detail: "Remote desktop.",
-		Danger: "Weak or absent authentication in most configurations. Put it behind a VPN."},
+		Detail:       "Remote desktop.",
+		Danger:       "Weak or absent authentication in most configurations. Put it behind a VPN.",
+		InternetOnly: true},
 	{Key: "ftp", Name: "FTP", Port: "21", Protocol: "tcp",
 		Detail: "File transfer.",
 		Danger: "Credentials cross the network in plain text. Use SFTP over the SSH port instead."},

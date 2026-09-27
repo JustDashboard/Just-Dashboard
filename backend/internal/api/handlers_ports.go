@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/go-chi/chi/v5"
 )
@@ -33,6 +34,12 @@ func (s *Server) handlePortList(w http.ResponseWriter, r *http.Request) error {
 	}
 	if err != nil {
 		return httpx.Internal(err)
+	}
+	// Graded by the posture's own judgement, so the page cannot call a
+	// database critical that the posture calls a warning.
+	network := netsec.ReadHostNetwork(ctx)
+	for i := range listeners {
+		listeners[i].Reach = string(network.Reach(listeners[i].Address))
 	}
 	httpx.JSON(w, http.StatusOK, listeners)
 	return nil

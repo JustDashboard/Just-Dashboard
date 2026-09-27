@@ -272,12 +272,19 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `/proc/net/{tcp,tcp6,udp,udp6}` (under `HOST_PROC` when set, the variable gopsutil reads for the
   process details), not from gopsutil's connection list: that list keeps one holder per socket, and its
   `/proc` walk meets PID 1 first, so a socket-activated sshd, whose port systemd holds too, was listed as
-  systemd, `/sbin/init`. `socketHolders` keeps every PID holding a listening inode and `ownerOf` names the
-  lowest that is not init (a prefork server's master), and init only when it holds the socket alone.
+  systemd, `/sbin/init`. `socketHolders` keeps every PID holding a listening inode and `ownerOf` sets init
+  aside, then names the holder whose parent (`/proc/<pid>/stat`) is not itself a holder: a prefork
+  server's master, not one of the workers that inherited the socket. Not the lowest PID, because once the
+  PID counter wraps a reload's respawned workers are numbered below their master. The lowest PID decides
+  only between unrelated holders, and init only when it holds the socket alone.
   `Listener.Scope` is `loopback`, `interface` (one specific address) or `all`; `Exposed` is every scope but
   loopback. It used to mean "bound to a wildcard", which drew caddy on the tailnet address as loopback and
-  let a database on a public IP raise nothing in the posture or the attention list. A UDP socket on port 0
-  is not listed, and `GET /ports` gives the walk ten seconds before a retryable 504.
+  let a database on a public IP raise nothing in the posture or the attention list. `Listener.Reach` is
+  netsec's grade of the address (`loopback`, `host` for a bridge, `network`, `public`, `all`, see
+  observability-security.md); it needs the interfaces, so `GET /ports` fills it and `ListListeners`
+  leaves it empty. The ports page colours a socket by it, so it cannot call critical what the posture
+  calls a warning. A UDP socket on port 0 is not listed, and `GET /ports` gives the walk ten seconds
+  before a retryable 504, which the page offers to try again.
   `TestListListenersNamesTheDaemonNotInitOnThisHost` checks the owner on the real host and runs only as
   root; it reads `/proc` and changes nothing.
 - **Site builder** (`sites.go`, `sites_render.go`, `sites_parse.go`, `sites_apply.go`). `SiteSpec` is our

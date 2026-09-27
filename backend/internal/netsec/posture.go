@@ -85,11 +85,15 @@ type CertSummary struct {
 // "this could not be established", which is different from a zero value and
 // is reported as a skipped check rather than a pass.
 type AssessInput struct {
-	Exposure     *Exposure
-	Firewall     *FirewallStatus
-	Fail2ban     *Fail2banStatus
-	SSH          *SSHDConfig
-	Listeners    []ExposedPort
+	Exposure  *Exposure
+	Firewall  *FirewallStatus
+	Fail2ban  *Fail2banStatus
+	SSH       *SSHDConfig
+	Listeners []ExposedPort
+	// Network places each listener's address on its interface, which is
+	// what tells a bridge address from the uplink's. The zero value judges
+	// every private address as the uplink's.
+	Network      HostNetwork
 	Certificates []CertSummary
 	// FailedLogins is how many failed attempts the host recorded inside
 	// FailedLoginWindow, and RecentBans how many bans fail2ban issued.
@@ -469,13 +473,16 @@ func assessPorts(in AssessInput) []SecurityFinding {
 		if !ok || preset.Danger == "" {
 			continue
 		}
+		reach := in.Network.reachOf(l.Address)
+		if !reach.matters(preset) {
+			continue
+		}
 		id := fmt.Sprintf("ports.exposed.%s.%d", l.Protocol, l.Port)
-		reach := reachOf(l.Address)
 		prev, seen := widest[id]
 		if !seen {
 			order = append(order, id)
 		}
-		if !seen || reach.rank > prev.reach.rank {
+		if !seen || reach.class.rank() > prev.reach.class.rank() {
 			widest[id] = exposure{l, preset, reach}
 		}
 	}
@@ -492,7 +499,7 @@ func assessPorts(in AssessInput) []SecurityFinding {
 		// an emergency: a database for the containers on a bridge, or for the
 		// operator's own devices on a tailnet, is often the design.
 		level := "warning"
-		if e.reach.internetFacing() {
+		if e.reach.class.InternetFacing() {
 			level = "critical"
 		}
 		// The firewall may be refusing it anyway, and saying so is the

@@ -1,6 +1,8 @@
 package netsec
 
 import (
+	"fmt"
+	"net"
 	"slices"
 	"strings"
 	"testing"
@@ -318,6 +320,168 @@ func TestAssessReportsADatabaseBoundTwiceOnceAtItsWidest(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("PostgreSQL reported %d times, want once", count)
+	}
+}
+
+// thisHost is this machine's network as ReadHostNetwork reads it: the public
+// uplink ens3 with its link-local address, Docker's bridges, the tailnet, and
+// a libvirt bridge and a WireGuard tunnel of the kind other hosts have.
+var thisHost = HostNetwork{Addresses: []HostAddress{
+	{IP: mustIP("57.131.21.87"), Interface: "ens3", Kind: "physical", DefaultRoute: true},
+	{IP: mustIP("fe80::f816:3eff:fee3:1a48"), Interface: "ens3", Kind: "physical", DefaultRoute: true},
+	{IP: mustIP("10.0.0.1"), Interface: "docker0", Kind: "bridge"},
+	{IP: mustIP("fe80::b482:4dff:fe92:4281"), Interface: "docker0", Kind: "bridge"},
+	{IP: mustIP("10.0.2.1"), Interface: "br-b05f8e098ad7", Kind: "bridge"},
+	{IP: mustIP("fe80::4047:75ff:fe8e:bb04"), Interface: "vethba736b3", Kind: "virtual"},
+	{IP: mustIP("100.110.34.31"), Interface: "tailscale0", Kind: "tunnel"},
+	{IP: mustIP("192.168.122.1"), Interface: "virbr0", Kind: "bridge"},
+	{IP: mustIP("10.8.0.1"), Interface: "wg0", Kind: "tunnel"},
+	// A cloud instance's private address on its uplink, and an ISP's CGNAT
+	// address, which shares Tailscale's range, on a second NIC.
+	{IP: mustIP("172.31.5.9"), Interface: "eth0", Kind: "physical", DefaultRoute: true},
+	{IP: mustIP("100.72.0.5"), Interface: "eth1", Kind: "physical"},
+	// A bridge that carries the default route is the uplink, as on a host
+	// whose NIC is enslaved to it.
+	{IP: mustIP("192.168.1.20"), Interface: "br-lan", Kind: "bridge", DefaultRoute: true},
+}}
+
+func mustIP(s string) net.IP {
+	ip := net.ParseIP(s)
+	if ip == nil {
+		panic("bad test address " + s)
+	}
+	return ip
+}
+
+// Who can reach a private address depends on the interface it is on. A
+// provider can map a public address onto the uplink, never onto docker0 or a
+// link-local address, and the advice used to say it could for all of them —
+// while dropping the catalogue's reason the service is dangerous at all.
+func TestAssessJudgesAPrivateAddressByItsInterface(t *testing.T) {
+	const redisDanger = "Unauthenticated by default: an exposed Redis is a remote shell"
+	for _, c := range []struct {
+		address, title, who string
+		provider            bool
+	}{
+		{"10.0.0.1", "Redis is listening on a bridge address", "the containers and virtual machines on docker0", false},
+		{"10.0.2.1", "Redis is listening on a bridge address", "the containers and virtual machines on br-b05f8e098ad7", false},
+		{"fe80::b482:4dff:fe92:4281", "Redis is listening on a link-local address", "the containers and virtual machines on docker0", false},
+		{"fe80::4047:75ff:fe8e:bb04", "Redis is listening on a link-local address", "the containers and virtual machines on vethba736b3", false},
+		{"fe80::f816:3eff:fee3:1a48", "Redis is listening on a link-local address", "the machines on the same link", false},
+		{"100.110.34.31", "Redis is listening on a tailnet address", "every device on the tailnet", false},
+		{"10.8.0.1", "Redis is listening on a VPN address", "the peers on wg0", false},
+		{"172.31.5.9", "Redis is listening on a private address", "the machines on that network", true},
+		{"100.72.0.5", "Redis is listening on a private address", "the machines on that network", true},
+		{"192.168.1.20", "Redis is listening on a private address", "the machines on that network", true},
+		// An address on no interface the host listed: judged as the uplink's.
+		{"10.99.0.1", "Redis is listening on a private address", "the machines on that network", true},
+	} {
+		p := Assess(AssessInput{Network: thisHost, Listeners: []ExposedPort{
+			{Port: 6379, Protocol: "tcp", Address: c.address, Process: "redis-server", Exposed: true},
+		}})
+		f, ok := findingByID(p, "ports.exposed.tcp.6379")
+		if !ok {
+			t.Errorf("Redis on %s was not reported", c.address)
+			continue
+		}
+		if f.Level != "warning" || f.Title != c.title {
+			t.Errorf("Redis on %s = %q %q, want warning %q", c.address, f.Level, f.Title, c.title)
+		}
+		want := "Anything that can reach " + c.address + " can connect to it: " + c.who
+		if !strings.HasPrefix(f.Advice, redisDanger) || !strings.Contains(f.Advice, want) {
+			t.Errorf("Redis on %s: advice %q, want the danger and %q", c.address, f.Advice, want)
+		}
+		if got := strings.Contains(f.Advice, "provider maps a public address"); got != c.provider {
+			t.Errorf("Redis on %s: advice %q names a provider's mapping: %v, want %v", c.address, f.Advice, got, c.provider)
+		}
+	}
+}
+
+// The Docker API on a bridge is still root on the host for every container
+// on it, and the advice says so.
+func TestAssessKeepsTheDangerForAPortShortOfTheInternet(t *testing.T) {
+	p := Assess(AssessInput{Network: thisHost, Listeners: []ExposedPort{
+		{Port: 2375, Protocol: "tcp", Address: "10.0.0.1", Process: "dockerd", Exposed: true},
+	}})
+	f, ok := findingByID(p, "ports.exposed.tcp.2375")
+	if !ok || !strings.Contains(f.Advice, "Reaching the Docker API is equivalent to being root on this host.") {
+		t.Errorf("finding = %+v, want the Docker API's danger in the advice", f)
+	}
+}
+
+// An open resolver or a remote desktop is a danger from the internet. On a
+// bridge or a VPN it is doing its job — libvirt's dnsmasq answering its VMs —
+// and was a permanent warning that repeated the provider-mapping clause.
+func TestAssessPassesOverAnInternetOnlyDangerTheInternetCannotReach(t *testing.T) {
+	for _, c := range []struct {
+		port     uint32
+		protocol string
+		address  string
+		want     string
+	}{
+		{53, "udp", "192.168.122.1", ""},
+		{53, "udp", "fe80::b482:4dff:fe92:4281", ""},
+		{53, "udp", "100.110.34.31", ""},
+		{3389, "tcp", "100.110.34.31", ""},
+		{5900, "tcp", "10.8.0.1", ""},
+		{5900, "tcp", "10.0.0.1", ""},
+		// On the uplink a provider may forward it, and in public it is open.
+		{53, "udp", "172.31.5.9", "warning"},
+		{53, "udp", "57.131.21.87", "critical"},
+		{3389, "tcp", "0.0.0.0", "critical"},
+	} {
+		p := Assess(AssessInput{Network: thisHost, Listeners: []ExposedPort{
+			{Port: c.port, Protocol: c.protocol, Address: c.address, Exposed: true},
+		}})
+		id := fmt.Sprintf("ports.exposed.%s.%d", c.protocol, c.port)
+		f, ok := findingByID(p, id)
+		switch {
+		case c.want == "" && ok:
+			t.Errorf("%s on %s was reported: %+v", id, c.address, f)
+		case c.want != "" && (!ok || f.Level != c.want):
+			t.Errorf("%s on %s = %+v (found %v), want %s", id, c.address, f, ok, c.want)
+		}
+	}
+}
+
+// A database on docker0 and on the uplink's private address is one finding,
+// at the uplink's reach, which a provider may forward.
+func TestAssessPrefersTheUplinkOverABridge(t *testing.T) {
+	p := Assess(AssessInput{Network: thisHost, Listeners: []ExposedPort{
+		{Port: 5432, Protocol: "tcp", Address: "10.0.0.1", Process: "postgres", Exposed: true},
+		{Port: 5432, Protocol: "tcp", Address: "172.31.5.9", Process: "postgres", Exposed: true},
+		{Port: 5432, Protocol: "tcp", Address: "fe80::b482:4dff:fe92:4281", Process: "postgres", Exposed: true},
+	}})
+	f, ok := findingByID(p, "ports.exposed.tcp.5432")
+	if !ok || f.Title != "PostgreSQL is listening on a private address" || !strings.Contains(f.Detail, "172.31.5.9") {
+		t.Errorf("finding = %+v, want the uplink's bind", f)
+	}
+}
+
+func TestReachGradesABindForThePortsPage(t *testing.T) {
+	for address, want := range map[string]Reach{
+		"0.0.0.0":                   ReachAll,
+		"::":                        ReachAll,
+		"57.131.21.87":              ReachPublic,
+		"2001:41d0:2005:100::13":    ReachPublic,
+		"127.0.0.53":                ReachLoopback,
+		"::1":                       ReachLoopback,
+		"10.0.0.1":                  ReachHost,
+		"fe80::b482:4dff:fe92:4281": ReachHost,
+		"192.168.122.1":             ReachHost,
+		"100.110.34.31":             ReachNetwork,
+		"10.8.0.1":                  ReachNetwork,
+		"172.31.5.9":                ReachNetwork,
+		"fe80::f816:3eff:fee3:1a48": ReachNetwork,
+		"192.168.1.20":              ReachNetwork,
+	} {
+		if got := thisHost.Reach(address); got != want {
+			t.Errorf("Reach(%s) = %q, want %q", address, got, want)
+		}
+	}
+	// Knowing no interfaces, a private address is judged as the uplink's.
+	if got := (HostNetwork{}).Reach("10.0.0.1"); got != ReachNetwork {
+		t.Errorf("Reach(10.0.0.1) on an unknown network = %q, want network", got)
 	}
 }
 

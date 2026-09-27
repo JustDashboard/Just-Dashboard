@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"context"
 	"os"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -114,6 +116,86 @@ func (s *Service) NetworkInfo(ctx context.Context) (*NetworkInfo, error) {
 	info.Routes = readRoutes(ctx)
 	info.Resolvers, info.Search = readResolvers()
 	return info, nil
+}
+
+// ReadHostNetwork places every address the host holds on its interface, and
+// marks the interfaces that carry a default route.
+//
+// It reads the namespace the listening sockets are read from — Go's own
+// interface list and /proc/net/{route,ipv6_route}, under HOST_PROC when set —
+// rather than shelling to `ip` on the host as NetworkInfo does, because a
+// socket's reach is only meaningful against the interfaces of the namespace
+// it is bound in, and because the ports page asks on every poll. An interface
+// list that cannot be read leaves the network unknown, which judges every
+// private address as the uplink's: the conservative reading.
+func ReadHostNetwork(ctx context.Context) HostNetwork {
+	ifaces, err := gnet.InterfacesWithContext(ctx)
+	if err != nil {
+		return HostNetwork{}
+	}
+	root := "/proc"
+	if hostProc := os.Getenv("HOST_PROC"); hostProc != "" {
+		root = hostProc
+	}
+	route4, _ := os.ReadFile(filepath.Join(root, "net", "route"))
+	route6, _ := os.ReadFile(filepath.Join(root, "net", "ipv6_route"))
+	return hostNetworkFrom(ifaces, defaultRouteInterfaces(route4, route6))
+}
+
+func hostNetworkFrom(ifaces gnet.InterfaceStatList, uplinks map[string]bool) HostNetwork {
+	n := HostNetwork{}
+	for _, ifc := range ifaces {
+		kind := classifyInterface(ifc.Name)
+		for _, f := range ifc.Flags {
+			if f == "loopback" {
+				kind = "loopback"
+			}
+		}
+		for _, a := range ifc.Addrs {
+			ip, _, err := net.ParseCIDR(a.Addr)
+			if err != nil {
+				continue
+			}
+			n.Addresses = append(n.Addresses, HostAddress{
+				IP: ip, Interface: ifc.Name, Kind: kind, DefaultRoute: uplinks[ifc.Name],
+			})
+		}
+	}
+	return n
+}
+
+// defaultRouteInterfaces reads the kernel's main routing tables for the
+// interfaces a default route leaves by. IPv4's lists a destination and mask
+// of zero; IPv6's lists ::/0, where the kernel also keeps unreachable
+// defaults on lo, which carry RTF_REJECT and lead nowhere.
+func defaultRouteInterfaces(route4, route6 []byte) map[string]bool {
+	const rtfUp, rtfReject = 0x1, 0x200
+	up := func(hexFlags string) bool {
+		flags, err := strconv.ParseUint(hexFlags, 16, 32)
+		return err == nil && flags&rtfUp != 0 && flags&rtfReject == 0
+	}
+	out := map[string]bool{}
+	for i, line := range strings.Split(string(route4), "\n") {
+		f := strings.Fields(line)
+		// Iface Destination Gateway Flags RefCnt Use Metric Mask …
+		if i == 0 || len(f) < 8 {
+			continue
+		}
+		if f[1] == "00000000" && f[7] == "00000000" && up(f[3]) {
+			out[f[0]] = true
+		}
+	}
+	for _, line := range strings.Split(string(route6), "\n") {
+		f := strings.Fields(line)
+		// dest destlen src srclen nexthop metric refcnt use flags iface
+		if len(f) < 10 {
+			continue
+		}
+		if strings.Trim(f[0], "0") == "" && f[1] == "00" && up(f[8]) && f[9] != "lo" {
+			out[f[9]] = true
+		}
+	}
+	return out
 }
 
 // classifyInterface names a device from its name, which is what the kernel and

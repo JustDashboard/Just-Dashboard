@@ -94,12 +94,21 @@ position sell a score out of a hundred, which is a number to optimise rather tha
   is a lockout, not advice.
 - `ExposedPort` and `CertSummary` are declared *in* netsec rather than imported from `proxysvc`, so the
   audit has no dependency on how ports or certificates are discovered.
-- A database or control port is judged by the **address it is bound to** (`reach.go`), since
-  `ExposedPort.Exposed` is any bind but loopback: every interface or a public address is critical, a
-  tailnet address (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) or another private one a warning, because only
-  that network can connect. The advice for a private address adds that a provider mapping a public
-  address onto it makes it the internet's too. A port bound to several addresses is one finding at its
-  widest, as its ID is per port.
+- A database or control port is judged by the **address it is bound to and the interface that address
+  is on** (`reach.go`), since `ExposedPort.Exposed` is any bind but loopback. `ReadHostNetwork` places
+  each address on its interface (Go's interface list, `classifyInterface`) and marks the interfaces
+  carrying a default route (`/proc/net/{route,ipv6_route}`, the namespace the sockets are read in), and
+  `HostNetwork.Reach` grades a bind: `all` and `public` are critical; `network` (a tailnet — Tailscale's
+  ranges or a `tailscale*` tunnel —, another tunnel, a link-local address on the uplink, or a private
+  address on a physical or default-route interface) and `host` (an address, link-local included, on a
+  bridge or veth that carries no default route: Docker, libvirt) are warnings. Only the private address
+  on the uplink, or one on no interface the host listed, gets the clause that a provider mapping a public
+  address onto it makes it the internet's too; a bridge or link-local address cannot be mapped. Every
+  level keeps the catalogue's `Danger` in the advice. A preset marked `InternetOnly` (DNS as an open
+  resolver, RDP, VNC — their danger is strangers, their advice a VPN) is not a finding at a reach the
+  internet cannot share, so libvirt's dnsmasq on `virbr0` raises nothing. A port bound to several
+  addresses is one finding at its widest, as its ID is per port. `GET /ports` returns the same grade as
+  `Listener.Reach`.
 - **A check that could not run is not a pass.** `Posture.Skipped` says which is which, because a zero and
   an unanswerable question look identical: `SecurityFiltering` is false on Alpine/Arch (no advisory
   data), `LoginRecordRead` false wherever `last`/`lastb` are missing (util-linux-extra, absent from

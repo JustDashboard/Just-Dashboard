@@ -5,6 +5,14 @@
  */
 export type ListenerScope = "loopback" | "interface" | "all"
 
+/**
+ * Who can connect, from the address and the interface it is on — the grade
+ * the security posture levels its findings by: loopback is this machine, host
+ * a bridge only its containers and VMs reach, network a tailnet, VPN or
+ * private address, public the internet, all every interface.
+ */
+export type ListenerReach = "loopback" | "host" | "network" | "public" | "all"
+
 export type Listener = {
   protocol: string
   address: string
@@ -14,6 +22,7 @@ export type Listener = {
   cmdline?: string
   user?: string
   scope: ListenerScope
+  reach: ListenerReach
   /** Every scope but loopback: reachable from off this machine. */
   exposed: boolean
 }

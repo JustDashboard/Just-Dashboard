@@ -69,19 +69,83 @@ func socketInode(target string) (uint64, bool) {
 	return inode, err == nil
 }
 
-// ownerOf names the process to show for a socket that several hold. PID 1
-// comes last: systemd keeps every socket-activated listener it hands on, and
-// naming init sends the reader to the one process not serving the port. Among
-// the rest the lowest PID, which for a prefork server is its master rather
-// than one of its workers. When systemd is the only holder — a service not
-// started yet, or one it spawns per connection — systemd is what answers.
-// Nobody (0) means no process this account can see.
-func ownerOf(pids []int32) int32 {
-	owner := int32(0)
-	for _, pid := range pids {
-		if owner == 0 || owner == 1 || pid != 1 && pid < owner {
-			owner = pid
+// parentsOf reads each holder's parent PID from /proc/<pid>/stat. A process
+// that exited since the walk is left out, and counts as nobody's child.
+func parentsOf(root string, holders map[uint64][]int32) map[int32]int32 {
+	parents := map[int32]int32{}
+	for _, pids := range holders {
+		for _, pid := range pids {
+			if _, done := parents[pid]; done {
+				continue
+			}
+			stat, err := os.ReadFile(filepath.Join(root, strconv.Itoa(int(pid)), "stat"))
+			if err != nil {
+				continue
+			}
+			if ppid, ok := parentFromStat(string(stat)); ok {
+				parents[pid] = ppid
+			}
 		}
 	}
-	return owner
+	return parents
+}
+
+// parentFromStat reads the fourth field of "pid (comm) state ppid …". The
+// command name may hold spaces and parentheses of its own, so the fields are
+// counted from the last ")".
+func parentFromStat(stat string) (int32, bool) {
+	end := strings.LastIndexByte(stat, ')')
+	if end < 0 {
+		return 0, false
+	}
+	fields := strings.Fields(stat[end+1:])
+	if len(fields) < 2 {
+		return 0, false
+	}
+	ppid, err := strconv.ParseInt(fields[1], 10, 32)
+	return int32(ppid), err == nil
+}
+
+// ownerOf names the process to show for a socket that several hold.
+//
+// PID 1 is set aside: systemd keeps every socket-activated listener it hands
+// on, and naming init sends the reader to the one process not serving the
+// port. Of the rest, the owner is the holder whose parent is not itself a
+// holder — for a prefork server its master, whose workers inherited the
+// socket from it. Not the lowest PID: once the PID counter wraps, workers
+// respawned on a reload are numbered below the master that forked them.
+// Only when several holders are unrelated (or a parent could not be read)
+// does the lowest of them decide. When systemd is the only holder — a service
+// not started yet, or one it spawns per connection — systemd is what
+// answers. Nobody (0) means no process this account can see.
+func ownerOf(pids []int32, parents map[int32]int32) int32 {
+	held := map[int32]bool{}
+	for _, pid := range pids {
+		if pid != 1 {
+			held[pid] = true
+		}
+	}
+	if len(held) == 0 {
+		if len(pids) > 0 {
+			return 1
+		}
+		return 0
+	}
+	lowest := func(keep func(int32) bool) int32 {
+		owner := int32(0)
+		for pid := range held {
+			if keep(pid) && (owner == 0 || pid < owner) {
+				owner = pid
+			}
+		}
+		return owner
+	}
+	root := lowest(func(pid int32) bool {
+		parent, known := parents[pid]
+		return !known || !held[parent]
+	})
+	if root != 0 {
+		return root
+	}
+	return lowest(func(int32) bool { return true })
 }

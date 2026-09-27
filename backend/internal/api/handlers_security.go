@@ -112,6 +112,7 @@ func (s *Server) handleSecurityPosture(w http.ResponseWriter, r *http.Request) e
 		}
 	})
 	run(func() { in.SSH = s.modules.netsec.SSHDStatus(ctx) })
+	run(func() { in.Network = netsec.ReadHostNetwork(ctx) })
 	run(func() {
 		listeners, err := proxysvc.ListListeners(ctx)
 		if err != nil {

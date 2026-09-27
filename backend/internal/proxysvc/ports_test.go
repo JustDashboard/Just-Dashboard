@@ -118,7 +118,8 @@ func TestListenersFromKeepsWhatAcceptsAndSaysHowFarItReaches(t *testing.T) {
 		14: {901},
 		16: {998},
 	}
-	got := listenersFrom(sockets, holders)
+	// The two port-80 workers are siblings forked by 900.
+	got := listenersFrom(sockets, holders, map[int32]int32{2450808: 1, 900: 1, 901: 900})
 	want := []Listener{
 		{Protocol: "tcp", Address: "0.0.0.0", Port: 22, PID: 2450808, Scope: ScopeAll, Exposed: true},
 		{Protocol: "udp", Address: "57.131.21.87", Port: 68, PID: 998, Scope: ScopeInterface, Exposed: true},
@@ -138,20 +139,45 @@ func TestListenersFromKeepsWhatAcceptsAndSaysHowFarItReaches(t *testing.T) {
 
 // ssh.socket: systemd holds port 22 and so does the sshd it started. The
 // listing used to name PID 1, /sbin/init, because the /proc walk met it first.
+// A prefork server's owner is its master, found by parentage rather than by
+// the lowest PID: after the PID counter wraps, the workers a reload respawns
+// are numbered below the master that forked them.
 func TestOwnerOfNamesTheDaemonRatherThanInit(t *testing.T) {
 	for _, c := range []struct {
+		name    string
 		holders []int32
+		parents map[int32]int32
 		want    int32
 	}{
-		{[]int32{1, 2450808}, 2450808},
-		{[]int32{2450808, 1}, 2450808},
-		{[]int32{1, 901, 900}, 900},
-		{[]int32{1}, 1},
-		{nil, 0},
+		{"socket-activated sshd", []int32{1, 2450808}, map[int32]int32{2450808: 1}, 2450808},
+		{"init met last", []int32{2450808, 1}, map[int32]int32{2450808: 1}, 2450808},
+		{"master below its workers", []int32{1, 900, 901, 902}, map[int32]int32{900: 1, 901: 900, 902: 900}, 900},
+		{"master above its workers after a wrap", []int32{1, 3000000, 2000000, 2000001},
+			map[int32]int32{3000000: 1, 2000000: 3000000, 2000001: 3000000}, 3000000},
+		{"master whose parent could not be read", []int32{3000000, 2000000}, map[int32]int32{2000000: 3000000}, 3000000},
+		{"unrelated holders: the lowest", []int32{800, 700}, map[int32]int32{700: 1, 800: 1}, 700},
+		{"no parent known: the lowest", []int32{1, 901, 900}, nil, 900},
+		{"init alone", []int32{1}, nil, 1},
+		{"nobody", nil, nil, 0},
 	} {
-		if got := ownerOf(c.holders); got != c.want {
-			t.Errorf("ownerOf(%v) = %d, want %d", c.holders, got, c.want)
+		if got := ownerOf(c.holders, c.parents); got != c.want {
+			t.Errorf("%s: ownerOf(%v, %v) = %d, want %d", c.name, c.holders, c.parents, got, c.want)
 		}
+	}
+}
+
+func TestParentFromStatCountsPastTheCommandName(t *testing.T) {
+	for stat, want := range map[string]int32{
+		"812 (nginx) S 1 812 812 0 -1 4194624 2 0 0 0":                   1,
+		"4242 (a) b (c)) S 812 4242 4242 0 -1 4194560 118 0 0 0":         812,
+		"2000000 (nginx: worker process) S 3000000 3000000 3000000 0 -1": 3000000,
+	} {
+		if got, ok := parentFromStat(stat); !ok || got != want {
+			t.Errorf("parentFromStat(%q) = %d, %v; want %d", stat, got, ok, want)
+		}
+	}
+	if _, ok := parentFromStat("812 (nginx"); ok {
+		t.Error("a truncated stat line gave a parent")
 	}
 }
 
@@ -177,6 +203,7 @@ func fakeProc(t *testing.T, tables map[string]string, procs map[int]fakeProcess)
 		write(filepath.Join(dir, "comm"), p.name+"\n")
 		write(filepath.Join(dir, "cmdline"), strings.Join(p.cmdline, "\x00")+"\x00")
 		write(filepath.Join(dir, "status"), "Name:\t"+p.name+"\nUid:\t0\t0\t0\t0\nGid:\t0\t0\t0\t0\n")
+		write(filepath.Join(dir, "stat"), fmt.Sprintf("%d (%s) S %d %d %d 0 -1 4194560 0 0 0 0\n", pid, p.name, p.parent, pid, pid))
 		if err := os.MkdirAll(filepath.Join(dir, "fd"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -196,6 +223,7 @@ func fakeProc(t *testing.T, tables map[string]string, procs map[int]fakeProcess)
 type fakeProcess struct {
 	name    string
 	cmdline []string
+	parent  int
 	// sockets maps a descriptor number to the socket inode it holds.
 	sockets map[int]uint64
 }
@@ -209,7 +237,7 @@ func TestListListenersNamesTheSocketActivatedDaemon(t *testing.T) {
 		map[string]string{"tcp": hostTCP, "tcp6": hostTCP6, "udp": hostUDP},
 		map[int]fakeProcess{
 			1:    {name: "systemd", cmdline: []string{"/sbin/init"}, sockets: map[int]uint64{367: 127916755, 368: 127915939}},
-			sshd: {name: "sshd", cmdline: []string{"sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups"}, sockets: map[int]uint64{3: 127916755, 4: 127915939}},
+			sshd: {name: "sshd", cmdline: []string{"sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups"}, parent: 1, sockets: map[int]uint64{3: 127916755, 4: 127915939}},
 		})
 	t.Setenv("HOST_PROC", root)
 
@@ -236,6 +264,37 @@ func TestListListenersNamesTheSocketActivatedDaemon(t *testing.T) {
 	if found != 2 {
 		t.Errorf("port 22 listed %d times, want once per family: %+v", found, listeners)
 	}
+}
+
+// nginx after the PID counter wrapped: its master kept the PID it started
+// with, and the worker a reload respawned was numbered below it. The row is
+// the master's, which the old lowest-PID rule gave to the worker. The test
+// process stands in for the master, as gopsutil names only a PID that exists.
+func TestListListenersNamesTheMasterAboveItsWorkers(t *testing.T) {
+	master := os.Getpid()
+	worker := 2
+	root := fakeProc(t,
+		map[string]string{"tcp": hostTCP, "udp": hostUDP},
+		map[int]fakeProcess{
+			master: {name: "nginx", cmdline: []string{"nginx: master process /usr/sbin/nginx"}, parent: 1, sockets: map[int]uint64{6: 127916755}},
+			worker: {name: "nginx", cmdline: []string{"nginx: worker process"}, parent: master, sockets: map[int]uint64{6: 127916755}},
+		})
+	t.Setenv("HOST_PROC", root)
+
+	listeners, err := ListListeners(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range listeners {
+		if l.Port != 22 {
+			continue
+		}
+		if l.PID != int32(master) || !strings.HasPrefix(l.Cmdline, "nginx: master process") {
+			t.Errorf("port 22 is owned by PID %d %q, want the master (PID %d)", l.PID, l.Cmdline, master)
+		}
+		return
+	}
+	t.Fatalf("port 22 was not listed: %+v", listeners)
 }
 
 // A kernel booted without IPv6 has no tcp6 or udp6; that is four sockets

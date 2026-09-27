@@ -30,8 +30,13 @@ type Listener struct {
 	Scope BindScope `json:"scope"`
 	// Exposed is every scope but loopback. A socket on one tailnet or public
 	// address is reachable from off the machine as surely as one on 0.0.0.0;
-	// only who can reach it differs, and that is Scope's to say.
+	// only who can reach it differs, and that is Reach's to say.
 	Exposed bool `json:"exposed"`
+	// Reach is netsec's grade of the address — loopback, host (a bridge),
+	// network (a tailnet, VPN or private address), public or all — which
+	// needs the host's interfaces and routes. GET /ports fills it; the
+	// listing itself leaves it empty.
+	Reach string `json:"reach,omitempty"`
 }
 
 // BindScope is where a socket can be reached from, judged from the address it
@@ -83,7 +88,7 @@ func ListListeners(ctx context.Context) ([]Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := listenersFrom(sockets, holders)
+	out := listenersFrom(sockets, holders, parentsOf(root, holders))
 	cache := map[int32]*process.Process{}
 	for i := range out {
 		if err := ctx.Err(); err != nil {
@@ -120,7 +125,7 @@ func ListListeners(ctx context.Context) ([]Listener, error) {
 //
 // Sockets sharing a protocol, address and port are one row: with
 // SO_REUSEPORT each worker holds its own socket on the same endpoint.
-func listenersFrom(sockets []socketRow, holders map[uint64][]int32) []Listener {
+func listenersFrom(sockets []socketRow, holders map[uint64][]int32, parents map[int32]int32) []Listener {
 	type endpoint struct {
 		proto, address string
 		port           uint32
@@ -145,7 +150,7 @@ func listenersFrom(sockets []socketRow, holders map[uint64][]int32) []Listener {
 			Protocol: key.proto,
 			Address:  key.address,
 			Port:     key.port,
-			PID:      ownerOf(held[key]),
+			PID:      ownerOf(held[key], parents),
 			Scope:    scope,
 			Exposed:  scope != ScopeLoopback,
 		})

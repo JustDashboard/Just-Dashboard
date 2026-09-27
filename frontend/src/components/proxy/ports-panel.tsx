@@ -18,7 +18,7 @@ import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { VerbBar, type Verb } from "@/components/verbs"
 import { DANGEROUS_PORTS } from "@/components/proxy/attention"
-import { exposedHint } from "@/components/proxy/ports"
+import { dangerousPorts, exposedHint, reachVerdict } from "@/components/proxy/ports"
 import {
   stickyTableHeader,
   Table,
@@ -50,7 +50,7 @@ export function PortsPage() {
   const router = useRouter()
   const [filter, setFilter] = useSessionState("proxy.ports.query", "")
   const [reach, setReach] = useSessionState<Reach>("proxy.ports.reach", "all")
-  const { data, error, loading } = usePoll(
+  const { data, error, loading, refresh } = usePoll(
     (signal) => get<Listener[]>("/ports", undefined, signal),
     15_000,
   )
@@ -63,10 +63,10 @@ export function PortsPage() {
       loopback: all.filter((l) => !l.exposed).length,
       tcp: all.filter((l) => l.protocol === "tcp").length,
       udp: all.filter((l) => l.protocol === "udp").length,
-      dangerous: all.filter((l) => l.exposed && DANGEROUS_PORTS[l.port]).length,
     }),
     [all],
   )
+  const dangerous = useMemo(() => dangerousPorts(all), [all])
   const visible = useMemo(() => {
     const needle = filter.trim().toLowerCase()
     return all
@@ -127,7 +127,7 @@ export function PortsPage() {
     return (
       <Page>
         {header}
-        <ErrorState error={error} />
+        <ErrorState error={error} onRetry={refresh} />
       </Page>
     )
   }
@@ -155,13 +155,15 @@ export function PortsPage() {
         />
         <StatTile
           label="Databases exposed"
-          value={counts.dangerous}
-          tone={counts.dangerous > 0 ? "danger" : "default"}
-          hint={
-            counts.dangerous > 0
-              ? "a database or control port off the machine"
-              : "none off the machine"
+          value={dangerous.length}
+          tone={
+            dangerous.some((d) => d.internet)
+              ? "danger"
+              : dangerous.length > 0
+                ? "warning"
+                : "default"
           }
+          hint={dangerous.length > 0 ? "counted once per port" : "none off the machine"}
         />
       </StatGrid>
 
@@ -313,14 +315,12 @@ function ProcessMark({ listener }: { listener: Listener }) {
   return <ProductLogo id={product} size="sm" fallback={Router} />
 }
 
+/** Coloured by who can connect, as the posture levels the same socket. */
 function ReachStatus({ listener }: { listener: Listener }) {
-  if (!listener.exposed) return <span className="text-xs text-muted-foreground">loopback</span>
+  const verdict = reachVerdict(listener)
+  if (!verdict) return <span className="text-xs text-muted-foreground">loopback</span>
   const service = DANGEROUS_PORTS[listener.port]
   return (
-    <Status
-      verdict={service ? "critical" : "warning"}
-      label={service ? `${service} exposed` : "exposed"}
-      icon={Router}
-    />
+    <Status verdict={verdict} label={service ? `${service} exposed` : "exposed"} icon={Router} />
   )
 }

@@ -1,31 +1,32 @@
 import type { Listener } from "@/lib/types"
-import { DANGEROUS_PORTS, type ProxyFinding } from "@/components/proxy/findings/shared"
-import { reachWhere } from "@/components/proxy/ports"
+import { type ProxyFinding } from "@/components/proxy/findings/shared"
+import { dangerousPorts, type DangerousPort } from "@/components/proxy/ports"
 
 export type PortFindingInput = { ports?: Listener[] }
 
 /**
  * A database or control port answering off this machine — on every
  * interface, or on one address, which reaches as far as that address does.
+ * Counted per port, not per socket: a database bound to two addresses, or to
+ * 0.0.0.0 and ::, is one database.
  */
 export function portFindings({ ports }: PortFindingInput): ProxyFinding[] {
   const out: ProxyFinding[] = []
 
-  const exposed = (ports ?? []).filter((l) => l.exposed)
-  const dangerous = exposed.filter((l) => DANGEROUS_PORTS[l.port])
+  const dangerous = dangerousPorts(ports ?? [])
   if (dangerous.length > 0) {
-    const everywhere = dangerous.every((l) => l.scope !== "interface")
+    const everywhere = dangerous.every(onEveryInterface)
     out.push({
       id: "ports.dangerous",
       level: "warning",
       title:
         dangerous.length === 1
-          ? `${DANGEROUS_PORTS[dangerous[0].port]} answers on ${reachWhere(dangerous[0])}`
+          ? `${dangerous[0].service} answers on ${where(dangerous[0])}`
           : `${dangerous.length} database or control ports answer ${everywhere ? "on every interface" : "off this machine"}`,
       detail: dangerous
         .map(
-          (l) =>
-            `${l.port}/${l.protocol} ${l.process || "unknown"}${l.scope === "interface" ? ` on ${l.address}` : ""}`,
+          (d) =>
+            `${d.port}/${d.protocol} ${d.sockets[0].process || "unknown"}${onEveryInterface(d) ? "" : ` on ${d.sockets.map((l) => l.address).join(", ")}`}`,
         )
         .join(", "),
       // A socket already on one address is not fixed by binding it to "a
@@ -39,4 +40,14 @@ export function portFindings({ ports }: PortFindingInput): ProxyFinding[] {
   }
 
   return out
+}
+
+/** A wildcard bind already covers any one address the port is also on. */
+function onEveryInterface(port: DangerousPort): boolean {
+  return port.sockets.some((l) => l.scope !== "interface")
+}
+
+function where(port: DangerousPort): string {
+  if (onEveryInterface(port)) return "every interface"
+  return port.sockets.length === 1 ? port.sockets[0].address : `${port.sockets.length} addresses`
 }
