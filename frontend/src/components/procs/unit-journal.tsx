@@ -1,15 +1,19 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useMemo, useState } from "react"
 import { useViewState } from "@/lib/view-state"
 import Link from "next/link"
-import type { JournalEntry, LogLine, SystemdUnit, SystemdUnitDetail } from "@/lib/types"
-import { useSocket, type Envelope } from "@/hooks/use-socket"
+import type { SystemdUnit, SystemdUnitDetail } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
+import { journalSource } from "@/lib/log-sources"
 import { useConfirm } from "@/components/confirm-dialog"
-import { LogViewer } from "@/components/log-viewer"
+import {
+  ServiceLogs,
+  type ServiceLogSource,
+  type ServiceLogsView,
+} from "@/components/logs/service-logs"
 import { Detail, DetailList } from "@/components/page"
 import { Servers } from "@/components/icons"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
@@ -21,17 +25,7 @@ import { Tag } from "@/components/tag"
 import { VerbBar } from "@/components/verbs"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useUnitControl, useUnitVerbs } from "@/components/procs/unit-actions"
-
-const LOG_LIMIT = 5000
-
-/** syslog priorities, mapped onto the viewer's level vocabulary. */
-function levelFor(priority: number): string {
-  if (priority <= 2) return "critical"
-  if (priority === 3) return "error"
-  if (priority === 4) return "warn"
-  if (priority <= 6) return "info"
-  return "debug"
-}
+import { UnitRuns } from "@/components/procs/unit-runs"
 
 /**
  * One unit, opened: its state, how it runs, and its journal. The verbs sit in
@@ -94,7 +88,7 @@ function UnitSheet({
           <span className="min-w-0 truncate">{unit ?? "Unit"}</span>
         </>
       }
-      description="Service state, configuration and live journal"
+      description="Service state, configuration, journal and runs"
       actions={
         service && (
           <UnitSheetActions
@@ -121,7 +115,7 @@ function UnitSheet({
           </TabsContent>
           <TabsContent value="journal" className="flex min-h-0 flex-1 flex-col">
             {/* Keyed on the unit so switching units starts a clean buffer. */}
-            <JournalStream key={unit} unit={unit} />
+            <UnitLogs key={unit} unit={unit} />
           </TabsContent>
         </Tabs>
       )}
@@ -293,58 +287,28 @@ function restartSummary(policy: string | undefined): { label: string; hint: stri
   }
 }
 
-function JournalStream({ unit }: { unit: string }) {
-  const [lines, setLines] = useState<LogLine[]>([])
-  const [failed, setFailed] = useState<string | null>(null)
-
-  const onMessage = useCallback((envelope: Envelope) => {
-    // The stream was empty on every unit because the server read the journal
-    // from inside its own container, where only the previous boot's flushed
-    // entries are visible. It now reads the host's live journal, so anything
-    // still empty here is genuinely quiet — the message below says which.
-    if (envelope.type === "error" || envelope.error) {
-      setFailed(envelope.error || "The journal stream closed with an error.")
-      return
-    }
-    if (envelope.type !== "journal") return
-    const batch = envelope.data as JournalEntry[]
-    setLines((prev) => {
-      const next = [
-        ...prev,
-        ...batch.map((e) => ({
-          text: e.message,
-          level: levelFor(e.priority),
-          timestamp: e.timestamp,
-          source: e.syslogIdentifier,
-        })),
-      ]
-      return next.length > LOG_LIMIT ? next.slice(next.length - LOG_LIMIT) : next
-    })
-  }, [])
-
-  const { state } = useSocket(`/systemd/${encodeURIComponent(unit)}/journal/stream`, {
-    onMessage,
-    query: { lines: 300 },
-  })
-
-  if (failed) return <ErrorState error={new Error(failed)} />
+/**
+ * The unit's journal, read the way the logs page reads it — live, searched,
+ * added up through the unit's lens — and its runs beside that: when systemd
+ * started it, how long each lasted and how it ended. One unit only; the
+ * whole journal is the logs page's.
+ */
+function UnitLogs({ unit }: { unit: string }) {
+  const sources = useMemo<ServiceLogSource[]>(
+    () => [{ id: journalSource(unit), label: unit, kind: "journal", product: unitProduct(unit) }],
+    [unit],
+  )
+  const views = useMemo<ServiceLogsView[]>(
+    () => [{ id: "runs", label: "Runs", render: (ctx) => <UnitRuns unit={unit} ctx={ctx} /> }],
+    [unit],
+  )
   return (
-    <LogViewer
-      className="h-full min-h-80"
-      lines={lines}
-      onClear={() => setLines([])}
-      toolbar={
-        <Status
-          state={state}
-          live={state === "open"}
-          label={state === "open" ? "Live" : state === "connecting" ? "Connecting" : "Reconnecting"}
-        />
-      }
-      emptyMessage={
-        state === "open"
-          ? `No journal entries for ${unit} yet — a quiet unit logs nothing.`
-          : "Connecting to the journal…"
-      }
+    <ServiceLogs
+      sources={sources}
+      views={views}
+      layout="sheet"
+      className="min-h-0 flex-1"
+      paneClassName="min-h-80"
     />
   )
 }
