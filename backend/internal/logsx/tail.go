@@ -337,6 +337,24 @@ type Line struct {
 	// rather than making the reader parse JSON by eye.
 	Message string            `json:"message,omitempty"`
 	Fields  map[string]string `json:"fields,omitempty"`
+	// Event is the lens's name for what the line records ("auth_failed",
+	// "slow", "ban"), empty when the lens has no name for it.
+	Event string `json:"event,omitempty"`
+	// Attrs are the values a lens read out of the line's text — user, client
+	// address, duration, status. They are kept apart from Fields, a structured
+	// line's own keys, so a plain line keeps being drawn as the text it is
+	// while its values stay filterable.
+	Attrs map[string]string `json:"attrs,omitempty"`
+	// Cont marks a line that continues the record above it: a Postgres DETAIL
+	// or STATEMENT, a stack frame, an indented SQL line. It takes its head's
+	// verdict under a filter and is folded under it in the viewer.
+	Cont bool `json:"cont,omitempty"`
+	// Lens names the lens that set Event when it is not the stream's own — a
+	// stack mixes a database's lines with an app's, and the whole journal
+	// hands sshd's lines to the auth lens.
+	Lens string `json:"lens,omitempty"`
+
+	levelFrom uint8
 }
 
 // maxLine bounds one record. A binary blob written into a log file with no
@@ -448,11 +466,16 @@ func ParseLine(text, source string) Line {
 	l := Line{Text: text, Source: source}
 	if level, message, at, fields, ok := parseStructured(text); ok {
 		l.Level, l.Message, l.Fields, l.Timestamp = level, message, fields, at
-		if l.Level == "" {
+		if l.Level != "" {
+			l.levelFrom = levelFromStructured
+		} else {
 			// A structured line with no level of its own still has a sentence
 			// worth scanning, and scanning the whole JSON would find the word
 			// "error" inside a field name.
 			l.Level = detectLevel(message)
+			if l.Level != "" {
+				l.levelFrom = levelFromWord
+			}
 		}
 		if l.Timestamp == nil {
 			if ts, ok := parseTimestamp(text); ok {
@@ -462,6 +485,9 @@ func ParseLine(text, source string) Line {
 		return l
 	}
 	l.Level = detectLevel(text)
+	if l.Level != "" {
+		l.levelFrom = levelFromWord
+	}
 	if ts, ok := parseTimestamp(text); ok {
 		l.Timestamp = &ts
 	}
