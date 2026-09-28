@@ -326,6 +326,16 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   up from `from` and passing over every host port a container publishes or, stopped, keeps in its
   `PortBindings` (`dockerx.HostPortBindings`, ranges expanded); it answers `{ports, skipped,
   containersChecked}` so the page does not claim to have avoided containers when Docker did not answer.
+  Each listener carries `pids`, every process holding the socket, and on TCP `clients` — the ESTABLISHED
+  connections in the same socket tables (`countClients`: same family and local port, the exact address
+  before a wildcard listener), with the five busiest remote addresses. `POST /ports/identify`
+  `{protocol, address, port, serverName?}` (system.admin, audited as `proxy.ports.identify`: it sends
+  traffic the dashboard originates) answers 404 `not_listening` unless a TCP socket listens on exactly that
+  address and port now (`proxysvc.ListeningAt`), so it cannot be aimed elsewhere; a wildcard is dialled on
+  its family's loopback. Within 5 seconds it reads a banner (1.5 s), and only if none came, a TLS handshake
+  (certificate read, not verified; ALPN offered h2 and http/1.1; a refusal alert still means TLS) and a
+  `HEAD /` over TLS or plain, reporting status, `Server` and `Location`. `serverName` must be a DNS name and
+  is sent as SNI and Host.
   `TestListListenersNamesTheDaemonNotInitOnThisHost` checks the owner on the real host and runs only as
   root; it reads `/proc` and changes nothing.
   **Owners.** `ListListeners` also reads, once per holder, its start (`StartedAt`, the processes page's

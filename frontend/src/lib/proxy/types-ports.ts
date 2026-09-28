@@ -63,6 +63,8 @@ export type Listener = {
   port: number
   /** 0 where no process holds it that the dashboard can see, or none does. */
   pid: number
+  /** Every process holding the socket — a prefork master and its workers — lowest first. */
+  pids?: number[]
   /** The owner's parent; absent where it could not be read. */
   ppid?: number
   /** The kernel's name for the owner, as other code matches on it. */
@@ -124,6 +126,41 @@ export type Listener = {
   stream?: string
   /** On a socket nginx holds, how many enabled nginx sites listen on its port. */
   servedSites?: number
+  /** The connections established to a TCP socket when it was listed; absent on UDP. */
+  clients?: ListenerClients
+}
+
+/** Who is connected to one listening socket. */
+export type ListenerClients = {
+  count: number
+  /** The remote addresses holding the most connections, most first, at most five. */
+  peers: { address: string; count: number }[]
+}
+
+/**
+ * POST /ports/identify: what a listening TCP socket said when asked. A socket
+ * that sent a banner was not asked for TLS or HTTP; `steps` names a step that
+ * was asked and did not answer.
+ */
+export type PortIdentification = {
+  /** The address dialled: a wildcard socket is asked on its family's loopback. */
+  endpoint: string
+  connected: boolean
+  error?: string
+  banner?: string
+  tls?: {
+    /** The server refused the handshake, which still says it speaks TLS. */
+    alert?: string
+    version?: string
+    alpn?: string
+    subject?: string
+    names?: string[]
+    issuer?: string
+    notAfter?: string
+    selfSigned?: boolean
+  }
+  http?: { status: number; reason?: string; server?: string; location?: string }
+  steps?: { step: "tls" | "http"; error: string }[]
 }
 
 /** A proxy site forwarding to a socket. */

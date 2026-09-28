@@ -29,6 +29,10 @@ type Listener struct {
 	Address string `json:"address"`
 	Port    uint32 `json:"port"`
 	PID     int32  `json:"pid"`
+	// PIDs is every process holding the socket — a prefork server's master
+	// and each worker, systemd beside the service it handed a socket to —
+	// where PID is the one of them the page names.
+	PIDs []int32 `json:"pids,omitempty"`
 	// PPID is the owner's parent, 0 where it could not be read. Docker holds
 	// a published port's two families in two docker-proxy processes, one
 	// dockerd's children, and the page counts them as the one service.
@@ -114,7 +118,28 @@ type Listener struct {
 	Routes      []ListenerRoute `json:"routes,omitempty"`
 	Stream      string          `json:"stream,omitempty"`
 	ServedSites int             `json:"servedSites,omitempty"`
+	// Clients is the connections established to a TCP socket when it was
+	// listed, read from the same socket tables; nil on UDP, which has no
+	// connections to count.
+	Clients *ListenerClients `json:"clients,omitempty"`
 }
+
+// ListenerClients is who is connected to one listening socket.
+type ListenerClients struct {
+	Count int `json:"count"`
+	// Peers is the remote addresses with the most connections, most first.
+	Peers []ClientPeer `json:"peers"`
+}
+
+// ClientPeer is one remote address and how many connections it holds.
+type ClientPeer struct {
+	Address string `json:"address"`
+	Count   int    `json:"count"`
+}
+
+// clientPeersShown bounds the peers a socket carries: the listing is polled,
+// and the Connections page is where every peer is.
+const clientPeersShown = 5
 
 // ListenerFirewall is netsec's FirewallVerdict in the listing's terms.
 type ListenerFirewall struct {
@@ -179,6 +204,7 @@ func ListListeners(ctx context.Context) ([]Listener, error) {
 		return nil, err
 	}
 	out := listenersFrom(sockets, holders, parentsOf(root, holders))
+	countClients(sockets, out)
 	cache := map[int32]*ownerDetails{}
 	for i := range out {
 		if err := ctx.Err(); err != nil {
@@ -267,6 +293,7 @@ func listenersFrom(sockets []socketRow, holders map[uint64][]int32, parents map[
 	for _, key := range order {
 		scope := bindScope(key.address)
 		owner := ownerOf(held[key], parents)
+		pids := uniquePIDs(held[key])
 		out = append(out, Listener{
 			Protocol: key.proto,
 			Family:   key.family,
@@ -274,12 +301,87 @@ func listenersFrom(sockets []socketRow, holders map[uint64][]int32, parents map[
 			Port:     key.port,
 			PID:      owner,
 			PPID:     parents[owner],
+			PIDs:     pids,
 			Scope:    scope,
 			Exposed:  scope != ScopeLoopback,
 		})
 	}
 	sortListeners(out)
 	return out
+}
+
+// uniquePIDs is each holder once, lowest first; nil for none.
+func uniquePIDs(pids []int32) []int32 {
+	if len(pids) == 0 {
+		return nil
+	}
+	out := append([]int32(nil), pids...)
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	n := 1
+	for _, pid := range out[1:] {
+		if pid != out[n-1] {
+			out[n] = pid
+			n++
+		}
+	}
+	return out[:n]
+}
+
+// countClients counts the established TCP connections to each TCP listener.
+// An accepted connection sits in the listening socket's own table (a tcp6
+// listener's IPv4 clients arrive v4-mapped in tcp6) with the listener's port
+// as its local one, so it is matched on family and port, and on the address
+// unless the listener is on every address. A socket on the exact address
+// wins over a wildcard one on the same port, as the kernel's own lookup does.
+func countClients(sockets []socketRow, listeners []Listener) {
+	type key struct {
+		family, address string
+		port            uint32
+	}
+	index := map[key]int{}
+	for i := range listeners {
+		l := &listeners[i]
+		if l.Protocol != "tcp" {
+			continue
+		}
+		l.Clients = &ListenerClients{Peers: []ClientPeer{}}
+		index[key{l.Family, l.Address, l.Port}] = i
+	}
+	peers := map[int]map[string]int{}
+	for _, s := range sockets {
+		// 01 is ESTABLISHED.
+		if s.proto != "tcp" || s.state != "01" {
+			continue
+		}
+		i, ok := index[key{s.family, s.address, s.port}]
+		if !ok {
+			wildcard := "0.0.0.0"
+			if s.family == "ipv6" {
+				wildcard = "::"
+			}
+			if i, ok = index[key{s.family, wildcard, s.port}]; !ok {
+				continue
+			}
+		}
+		listeners[i].Clients.Count++
+		if peers[i] == nil {
+			peers[i] = map[string]int{}
+		}
+		peers[i][s.remoteAddress]++
+	}
+	for i, byAddress := range peers {
+		list := make([]ClientPeer, 0, len(byAddress))
+		for address, count := range byAddress {
+			list = append(list, ClientPeer{Address: address, Count: count})
+		}
+		sort.Slice(list, func(a, b int) bool {
+			if list[a].Count != list[b].Count {
+				return list[a].Count > list[b].Count
+			}
+			return list[a].Address < list[b].Address
+		})
+		listeners[i].Clients.Peers = list[:min(len(list), clientPeersShown)]
+	}
 }
 
 // sortListeners orders the listing by port, then protocol, then address.
@@ -300,10 +402,11 @@ type socketRow struct {
 	proto string
 	// family is the table's: ipv4 for tcp and udp, ipv6 for tcp6 and udp6,
 	// whose v4-mapped addresses read as IPv4 but belong to an IPv6 socket.
-	family     string
-	address    string
-	port       uint32
-	remotePort uint32
+	family        string
+	address       string
+	port          uint32
+	remoteAddress string
+	remotePort    uint32
 	// state is the kernel's hex code; 0A is TCP's LISTEN.
 	state string
 	inode uint64
@@ -409,7 +512,7 @@ func parseSocketTable(content []byte, proto string) []socketRow {
 		if err != nil {
 			continue
 		}
-		_, remotePort, err := decodeSocketAddress(fields[2])
+		remoteAddress, remotePort, err := decodeSocketAddress(fields[2])
 		if err != nil {
 			continue
 		}
@@ -418,7 +521,8 @@ func parseSocketTable(content []byte, proto string) []socketRow {
 			continue
 		}
 		out = append(out, socketRow{
-			proto: proto, address: address, port: port, remotePort: remotePort,
+			proto: proto, address: address, port: port,
+			remoteAddress: remoteAddress, remotePort: remotePort,
 			state: fields[3], inode: inode,
 		})
 	}
