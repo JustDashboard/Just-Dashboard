@@ -54,6 +54,13 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 		// The argv an issuance would run, checked as /issue checks it and
 		// run by nothing; the DNS token stays out of it, as a file path.
 		r.Method(http.MethodPost, "/issue/preview", s.handle(s.handleCertIssuePreview))
+		// What would fail the issuance, asked first: DNS and CAA queries for
+		// the caller's names, and for a webroot a challenge file written
+		// where certbot would and removed again, fetched over loopback.
+		r.Method(http.MethodPost, "/issue/preflight", s.handle(s.handleCertIssuePreflight))
+		// How close a real issuance for ?domains= is to Let's Encrypt's
+		// limits, from certbot's archive and this process's failed runs.
+		r.Method(http.MethodGet, "/rate-limits", s.handle(s.handleCertRateLimits))
 		// The ACME account's contact: certbot asks the authority for it.
 		r.Method(http.MethodGet, "/account", s.handle(s.handleCertAccount))
 		r.Method(http.MethodPost, "/import", s.handle(s.handleCertImport))
@@ -361,7 +368,7 @@ func (s *Server) handleCertIssue(w http.ResponseWriter, r *http.Request) error {
 	title := "Issuing a certificate for " + target
 	switch {
 	case req.Staging:
-		title = "Test issuance for " + target
+		title = testIssueTitle + target
 	case replacing:
 		title = "Replacing the test certificate for " + target
 	case plan.ReplacesKeyOf != "":
@@ -454,6 +461,62 @@ func (s *Server) handleCertIssuePreview(w http.ResponseWriter, r *http.Request) 
 	plan.Args = append([]string{"certbot"}, plan.Args...)
 	httpx.JSON(w, http.StatusOK, plan)
 	return nil
+}
+
+// handleCertIssuePreflight checks the request's names before a run: where
+// they resolve, their CAA records, the challenge path, the lineage certbot
+// would use and the rate limits. The challenge file it writes is removed
+// before it answers, so it records no audit entry.
+func (s *Server) handleCertIssuePreflight(w http.ResponseWriter, r *http.Request) error {
+	var req proxysvc.IssueRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 60*time.Second)
+	defer cancel()
+	result, err := s.modules.proxy.IssuePreflight(ctx, req, s.failedIssues())
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	httpx.JSON(w, http.StatusOK, result)
+	return nil
+}
+
+func (s *Server) handleCertRateLimits(w http.ResponseWriter, r *http.Request) error {
+	var domains []string
+	for _, d := range strings.Split(r.URL.Query().Get("domains"), ",") {
+		if d = strings.TrimSpace(d); d != "" {
+			domains = append(domains, d)
+		}
+	}
+	if len(domains) == 0 || len(domains) > 100 {
+		return httpx.BadRequest("name between 1 and 100 domains")
+	}
+	for _, d := range domains {
+		if !proxysvc.ValidCertDomain(d) {
+			return httpx.BadRequest("%q is not a valid domain name", d)
+		}
+	}
+	httpx.JSON(w, http.StatusOK, proxysvc.CertificateRateLimits(domains, s.failedIssues()))
+	return nil
+}
+
+// testIssueTitle opens a test run's job title, which is how a failed run
+// that counts against the real limits is told from one that does not.
+const testIssueTitle = "Test issuance for "
+
+// failedIssues is the real issuance runs that failed while this process
+// held their jobs.
+func (s *Server) failedIssues() []proxysvc.FailedIssue {
+	var failed []proxysvc.FailedIssue
+	for _, job := range s.modules.jobs.List() {
+		if job.Kind != "certbot.issue" || job.Status != jobs.StatusFailed || job.EndedAt == nil ||
+			strings.HasPrefix(job.Title, testIssueTitle) {
+			continue
+		}
+		failed = append(failed, proxysvc.FailedIssue{Domains: strings.Split(job.Target, ", "), At: *job.EndedAt})
+	}
+	return failed
 }
 
 // handleCertAccount answers with the ACME account a real issuance orders

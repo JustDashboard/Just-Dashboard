@@ -379,6 +379,23 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   and saved by the issuance job only. `GET /certificates/account` (system.admin) runs `certbot
   show_account` when an account exists (it asks the authority, briefly holding certbot's lock) and
   returns its server, URL, thumbprint and first email contact.
+  `POST /certificates/issue/preflight` (system.admin, `issue_preflight.go`) checks the same request
+  before a run and changes nothing it leaves behind: each name's resolution (`CheckDomainDNS`), its
+  CAA set (a raw CAA query to `/etc/resolv.conf`'s nameservers via `x/net/dns/dnsmessage`, climbing
+  to the first non-empty set, judged against `letsencrypt.org`; another authority's identifier is
+  unknown, so a restricting set is a warning), port 80 for the method (standalone needs it free,
+  nginx held by nginx; the nginx plugin's own challenge block is not probed), and for webroot a
+  `mktemp` token written on certbot's side under `<webroot>/.well-known/acme-challenge/`, fetched over
+  loopback with each name as Host, then removed with any folder it had to create. The lineage relation
+  (identical / replaces / expands — which certbot refuses under `--non-interactive` — / new) comes from
+  the renewal confs. `GET /certificates/rate-limits?domains=` (system.admin, `ratelimits.go`) counts
+  production certificates in `archive/*/cert*.pem` by notBefore within seven days (duplicates of the
+  exact set of 5, per registered domain by the public suffix list of 50) and failed non-test
+  `certbot.issue` jobs this process still holds within an hour (5); the preflight turns a reached limit
+  into a critical finding for a real run. No audit entry: nothing persists. The Issue dialog runs the
+  preflight as its fields settle (and on Re-check), lists what did not pass, draws the limits as
+  meters, and holds a real run on a critical finding until "Issue anyway" is switched on for that
+  exact request; the server does not enforce it.
 - **Two layouts, and files that are not sites.** `nginxVHosts` (`vhosts.go`, with the rest of the
   listing and `SetVHostEnabled`) reads sites-available where it exists and conf.d where it does not
   (every RPM distro, Alpine, Arch — most of the servers this runs on); the difference reaches the UI as an
