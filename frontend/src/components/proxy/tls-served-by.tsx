@@ -34,30 +34,8 @@ const MATCH: Record<NonNullable<TLSOrigin["match"]>, string> = {
  * the scan asked again once it is done, which is how the reader sees it took.
  */
 export function TLSServedBy({ origin, onRescan }: { origin: TLSOrigin; onRescan: () => void }) {
-  const [reloading, setReloading] = useState(false)
+  const { reloading, reload } = useNginxReload(onRescan)
   const state = STATE[origin.state]
-
-  // The test first, so a configuration nginx would refuse is shown as its own
-  // output rather than as a failed reload.
-  const reload = async () => {
-    setReloading(true)
-    try {
-      const test = await post<ProxyValidation>("/proxy/test", { kind: "nginx" })
-      if (!test.valid) {
-        notify.error("nginx refuses its configuration", undefined, {
-          description: test.output.slice(0, 400),
-        })
-        return
-      }
-      await post("/proxy/reload", { kind: "nginx" })
-      notify.success("nginx reloaded", { description: "Scanning again." })
-      onRescan()
-    } catch (err) {
-      notify.error("Reload refused", err)
-    } finally {
-      setReloading(false)
-    }
-  }
 
   return (
     <Panel plain>
@@ -111,6 +89,35 @@ export function TLSServedBy({ origin, onRescan }: { origin: TLSOrigin; onRescan:
       </PanelBody>
     </Panel>
   )
+}
+
+/**
+ * Test, then reload, then scan again. The test first, so a configuration
+ * nginx would refuse is shown as its own output rather than as a failed
+ * reload.
+ */
+export function useNginxReload(onReloaded: () => void) {
+  const [reloading, setReloading] = useState(false)
+  const reload = async () => {
+    setReloading(true)
+    try {
+      const test = await post<ProxyValidation>("/proxy/test", { kind: "nginx" })
+      if (!test.valid) {
+        notify.error("nginx refuses its configuration", undefined, {
+          description: test.output.slice(0, 400),
+        })
+        return
+      }
+      await post("/proxy/reload", { kind: "nginx" })
+      notify.success("nginx reloaded", { description: "Scanning again." })
+      onReloaded()
+    } catch (err) {
+      notify.error("Reload refused", err)
+    } finally {
+      setReloading(false)
+    }
+  }
+  return { reloading, reload }
 }
 
 function CertificateFact({ label, cert }: { label: string; cert: Certificate }) {

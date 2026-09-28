@@ -113,6 +113,18 @@ export type ScanFinding = {
   title: string
   detail: string
   advice?: string
+  /** The remedy the page can carry out for this finding, as lib/tls-fixes.ts reads it. */
+  fix?: "renew" | "issue" | "force-https" | "hsts" | "security-headers" | "fullchain" | "protocols"
+}
+
+/** Where a directive is set in the configuration nginx loads. */
+export type DirectiveUse = {
+  path: string
+  line: number
+  value: string
+  context: string
+  /** The enclosing server block's server_name. */
+  server?: string[]
 }
 
 /** One of hstspreload.org's submission rules and what the scan saw of it. */

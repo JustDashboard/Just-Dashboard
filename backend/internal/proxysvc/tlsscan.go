@@ -229,7 +229,23 @@ type ScanFinding struct {
 	Title  string `json:"title"`
 	Detail string `json:"detail"`
 	Advice string `json:"advice,omitempty"`
+	// Fix names the remedy the TLS page can carry out for this finding, one
+	// of the Fix* keys. The page decides whether it applies to the site that
+	// answered; the scan only knows what kind of problem it saw.
+	Fix string `json:"fix,omitempty"`
 }
+
+// The remedies a finding can point at. Each is carried out through an
+// endpoint that already exists, so a key is a hint and never a new power.
+const (
+	FixRenew           = "renew"
+	FixIssue           = "issue"
+	FixForceHTTPS      = "force-https"
+	FixHSTS            = "hsts"
+	FixSecurityHeaders = "security-headers"
+	FixFullchain       = "fullchain"
+	FixProtocols       = "protocols"
+)
 
 // hstsStrongMaxAge is six months, the max-age A+ asks for here, as SSL Labs'
 // does: the point at which HSTS is doing the job it exists for. The preload
@@ -957,7 +973,7 @@ func grade(scan *TLSScan) {
 	}
 	check("tls.legacy-only", "protocol", "The handshake a current client makes is accepted", "F", !scan.LegacyOnly, false)
 	if scan.LegacyOnly {
-		demote(gradeF, ScanFinding{ID: "tls.legacy-only", Level: "critical",
+		demote(gradeF, ScanFinding{ID: "tls.legacy-only", Level: "critical", Fix: FixProtocols,
 			Title:  "The handshake a current client makes is refused",
 			Detail: "The server refused the versions and cipher suites a current client offers, and took " + scan.Negotiated + " with " + scan.CipherSuite + " when older ones were offered as well.",
 			Advice: "Clients that no longer offer those — this dashboard's own TLS library among them — cannot connect. In nginx set ssl_protocols TLSv1.2 TLSv1.3 and an ssl_ciphers list with ECDHE suites, such as Mozilla's intermediate profile."})
@@ -969,7 +985,7 @@ func grade(scan *TLSScan) {
 		demote(gradeF, ScanFinding{ID: "tls.no-cert", Level: "critical",
 			Title: "No certificate was presented", Detail: "The handshake completed without one."})
 	case cert.Expired:
-		demote(gradeF, ScanFinding{ID: "tls.expired", Level: "critical",
+		demote(gradeF, ScanFinding{ID: "tls.expired", Level: "critical", Fix: FixRenew,
 			Title:  "The certificate has expired",
 			Detail: fmt.Sprintf("It expired on %s.", cert.NotAfter.Format("2 January 2006")),
 			Advice: "Every browser is refusing this site now. Renew it, then find out why the renewal did not run on its own."})
@@ -982,7 +998,7 @@ func grade(scan *TLSScan) {
 		term := termShare(window, cert.NotAfter.Sub(cert.NotBefore))
 		if left <= window/2 {
 			overdue = true
-			demote(gradeB, ScanFinding{ID: "tls.expiring", Level: "warning",
+			demote(gradeB, ScanFinding{ID: "tls.expiring", Level: "warning", Fix: FixRenew,
 				Title:  "The certificate expires in " + timeLeft(left),
 				Detail: "Renewal is due in " + term + ", and half of that has passed with this certificate still served.",
 				Advice: "Either renewal is failing, or it renewed and the proxy was never reloaded: a renewed certificate is served only after a reload. Check the renewal log, renew by hand if it failed, and reload."})
@@ -1000,7 +1016,7 @@ func grade(scan *TLSScan) {
 	check("tls.untrusted", "certificate", "The chain is trusted", "F", scan.Trusted, false)
 	check("tls.incomplete-chain", "certificate", "The intermediate certificates are sent", "B", scan.ChainComplete, false)
 	if !scan.NameMatches && cert != nil {
-		demote(gradeF, ScanFinding{ID: "tls.name-mismatch", Level: "critical",
+		demote(gradeF, ScanFinding{ID: "tls.name-mismatch", Level: "critical", Fix: FixIssue,
 			Title:  "The certificate is for a different name",
 			Detail: "It covers " + strings.Join(cert.Domains, ", ") + ".",
 			Advice: "Reissue it including " + scan.Domain + ", or point that name at the host that has a certificate for it."})
@@ -1008,14 +1024,19 @@ func grade(scan *TLSScan) {
 	if !scan.Trusted {
 		level, id := gradeF, "tls.untrusted"
 		advice := "Browsers will show a warning page. Use a certificate from a public authority — certbot issues one free."
+		// Only a self-signed leaf is sure to want a new certificate: an
+		// untrusted chain is as often a missing intermediate, which the
+		// fullchain finding already names.
+		fix := ""
 		if cert != nil && cert.SelfSigned {
 			advice = "A self-signed certificate is fine for something only you reach, and a full-page warning for anybody else."
+			fix = FixIssue
 		}
-		demote(level, ScanFinding{ID: id, Level: "critical",
+		demote(level, ScanFinding{ID: id, Level: "critical", Fix: fix,
 			Title: "The chain is not trusted", Detail: scan.TrustError, Advice: advice})
 	}
 	if !scan.ChainComplete {
-		demote(gradeB, ScanFinding{ID: "tls.incomplete-chain", Level: "warning",
+		demote(gradeB, ScanFinding{ID: "tls.incomplete-chain", Level: "warning", Fix: FixFullchain,
 			Title:  "The server did not send its intermediate certificate",
 			Detail: "Only the leaf was presented.",
 			Advice: "Point the proxy at fullchain.pem rather than cert.pem. Desktop browsers paper over this from cache; phones, curl and payment gateways do not."})
@@ -1029,7 +1050,7 @@ func grade(scan *TLSScan) {
 		switch p.Name {
 		case "TLS 1.0", "TLS 1.1":
 			oldOffered = true
-			demote(gradeC, ScanFinding{ID: "tls.old-protocol." + p.Name, Level: "warning",
+			demote(gradeC, ScanFinding{ID: "tls.old-protocol." + p.Name, Level: "warning", Fix: FixProtocols,
 				Title:  p.Name + " is still offered",
 				Detail: "Deprecated since 2021 and disabled in every current browser.",
 				Advice: "Set ssl_protocols to TLSv1.2 TLSv1.3. Nothing that can reach this site today needs the older ones."})
@@ -1042,7 +1063,7 @@ func grade(scan *TLSScan) {
 	tls13 := protocolStatus(scan.Protocols, "TLS 1.3")
 	check("tls.no-13", "protocol", "TLS 1.3 is offered", "B", tls13 == "offered", tls13 == "unknown")
 	if tls13 == "refused" {
-		demote(gradeB, ScanFinding{ID: "tls.no-13", Level: "notice",
+		demote(gradeB, ScanFinding{ID: "tls.no-13", Level: "notice", Fix: FixProtocols,
 			Title:  "TLS 1.3 is not offered",
 			Detail: "The server negotiated " + scan.Negotiated + " at best.",
 			Advice: "Add TLSv1.3 to ssl_protocols. It is faster and removes a whole category of downgrade problem."})
@@ -1077,12 +1098,12 @@ func grade(scan *TLSScan) {
 		if http.HSTS == nil {
 			// A notice rather than a demotion: HSTS is what separates A from
 			// A+, and letterFor reads the header itself for that.
-			findings = append(findings, ScanFinding{ID: "tls.no-hsts", Level: "notice",
+			findings = append(findings, ScanFinding{ID: "tls.no-hsts", Level: "notice", Fix: FixHSTS,
 				Title:  "HSTS is not set",
 				Detail: "No Strict-Transport-Security header.",
 				Advice: "Add it with a max-age of six months. Without it, the first request a visitor makes is over plain HTTP and can be intercepted before the redirect."})
 		} else if http.HSTS.MaxAge < hstsStrongMaxAge {
-			findings = append(findings, ScanFinding{ID: "tls.weak-hsts", Level: "notice",
+			findings = append(findings, ScanFinding{ID: "tls.weak-hsts", Level: "notice", Fix: FixHSTS,
 				Title:  "HSTS is set but short",
 				Detail: fmt.Sprintf("max-age is %d seconds.", http.HSTS.MaxAge),
 				Advice: "Six months (15552000) is what A+ asks for, and the preload list asks for a year (31536000)."})
@@ -1100,7 +1121,7 @@ func grade(scan *TLSScan) {
 				Advice: "Whether plain HTTP reaches HTTPS was not checked. For a public site, point the redirect at its public name."})
 		default:
 			redirectCap = "B"
-			demote(gradeB, ScanFinding{ID: "tls.no-redirect", Level: "warning",
+			demote(gradeB, ScanFinding{ID: "tls.no-redirect", Level: "warning", Fix: FixForceHTTPS,
 				Title:  "Plain HTTP does not redirect to HTTPS",
 				Detail: describePlainChain(chain),
 				Advice: "Redirect port 80 to HTTPS permanently. A certificate protects nobody who arrives on the unencrypted port."})
@@ -1109,8 +1130,10 @@ func grade(scan *TLSScan) {
 			if h.Present || h.Level != "important" {
 				continue
 			}
+			// Every header rated important is one the site form's security
+			// headers write, so the one switch answers each of them.
 			findings = append(findings, ScanFinding{ID: "http.header." + h.Name, Level: "notice",
-				Title: h.Name + " is not set", Detail: h.Detail})
+				Fix: FixSecurityHeaders, Title: h.Name + " is not set", Detail: h.Detail})
 		}
 	}
 
