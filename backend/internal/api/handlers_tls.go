@@ -139,6 +139,18 @@ func (s *Server) handleTLSScan(w http.ResponseWriter, r *http.Request) error {
 		httpx.AuditRead(s.Audit, r, "certificates.scan.connect",
 			net.JoinHostPort(target.Host, strconv.Itoa(target.Port))+" via "+connect)
 	}
+	q := r.URL.Query()
+	opts.Request, err = proxysvc.ParseRequestShape(q.Get("method"), q.Get("path"), q.Get("host"))
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	if opts.Request.Host != "" {
+		// Another Host sent to the name's server reaches whichever of its
+		// sites answers to it, which may be one the name does not front, so
+		// it leaves a trail as connect does.
+		httpx.AuditRead(s.Audit, r, "certificates.scan.host",
+			net.JoinHostPort(target.Host, strconv.Itoa(target.Port))+" as "+opts.Request.Host)
+	}
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
 	scan := proxysvc.ScanTLSWith(ctx, target.Host, target.Port, opts)

@@ -221,6 +221,18 @@ type HTTPScan struct {
 	RedirectVerdict string        `json:"redirectVerdict,omitempty"`
 	HSTS            *HSTS         `json:"hsts,omitempty"`
 	Headers         []HeaderCheck `json:"headers"`
+	// Method, Path and Host are the HTTPS request as it was sent, since a
+	// scan may ask for another path or Host than the name's front page.
+	Method string `json:"method,omitempty"`
+	Path   string `json:"path,omitempty"`
+	Host   string `json:"host,omitempty"`
+	// ResponseHeaders is every header of the HTTPS answer, cookie values
+	// redacted (responseHeaders), and HeadersTruncated says the list was cut.
+	ResponseHeaders  []ResponseHeader `json:"responseHeaders,omitempty"`
+	HeadersTruncated bool             `json:"headersTruncated,omitempty"`
+	// audit is what auditResponse read in those headers, for grade to add;
+	// the raw headers are not kept, so the cookie values never leave here.
+	audit []ScanFinding
 }
 
 // RedirectHop is one plain-HTTP request and its answer: a status and where it
@@ -277,6 +289,7 @@ const (
 	FixSecurityHeaders = "security-headers"
 	FixFullchain       = "fullchain"
 	FixProtocols       = "protocols"
+	FixServerTokens    = "server-tokens"
 )
 
 // hstsStrongMaxAge is six months, the max-age A+ asks for here, as SSL Labs'
@@ -286,10 +299,12 @@ const hstsStrongMaxAge = 15552000
 
 // ScanOptions change where a scan connects. ConnectTo is an IP address to
 // dial in place of the name's records, with the name still sent in SNI and
-// Host; AllAddresses handshakes with every A and AAAA record as well.
+// Host; AllAddresses handshakes with every A and AAAA record as well; Request
+// is the method, path and Host of the HTTPS request.
 type ScanOptions struct {
 	ConnectTo    string
 	AllAddresses bool
+	Request      RequestShape
 }
 
 // ScanTLS runs the whole examination: a handshake, a version probe, the chain,
@@ -376,8 +391,11 @@ func ScanTLSWith(ctx context.Context, domain string, port int, opts ScanOptions)
 		}
 		// The URLs name the host, so Host and SNI are the name's; connect
 		// sends their connections to the address asked for.
-		https := "https://" + net.JoinHostPort(domain, strconv.Itoa(port)) + "/"
-		scan.HTTP = scanHTTPVia(ctx, https, "http://"+urlHost(domain)+"/", offer, opts.ConnectTo)
+		// The plain half asks for / with the name's own Host whatever the
+		// HTTPS request asks: it grades the redirect a visitor typing the
+		// name gets.
+		https := "https://" + net.JoinHostPort(domain, strconv.Itoa(port)) + opts.Request.requestPath()
+		scan.HTTP = scanHTTPVia(ctx, https, "http://"+urlHost(domain)+"/", offer, opts.ConnectTo, opts.Request)
 	}
 	if preloadable && scan.HTTP.Service == "http" {
 		var rule *PreloadRule
@@ -741,13 +759,14 @@ const scanUserAgent = "Just-Dashboard TLS check"
 // follows plainURL's redirects to see whether a plain-HTTP visitor reaches
 // HTTPS.
 func scanHTTP(ctx context.Context, httpsURL, plainURL string, offer *tls.Config) *HTTPScan {
-	return scanHTTPVia(ctx, httpsURL, plainURL, offer, "")
+	return scanHTTPVia(ctx, httpsURL, plainURL, offer, "", RequestShape{})
 }
 
 // scanHTTPVia is scanHTTP with every connection to the URLs' host dialled to
-// connect instead, when it is set, as curl --connect-to does.
-func scanHTTPVia(ctx context.Context, httpsURL, plainURL string, offer *tls.Config, connect string) *HTTPScan {
-	out := &HTTPScan{Headers: []HeaderCheck{}, RedirectChain: []RedirectHop{}}
+// connect instead, when it is set, as curl --connect-to does, and the HTTPS
+// request sent with shape's method and Host.
+func scanHTTPVia(ctx context.Context, httpsURL, plainURL string, offer *tls.Config, connect string, shape RequestShape) *HTTPScan {
+	out := &HTTPScan{Headers: []HeaderCheck{}, RedirectChain: []RedirectHop{}, Method: shape.method(), Host: shape.Host}
 	// The connection keeps the first bytes the service sent, because they
 	// are what says a service is not a website: net/http's error quotes only
 	// a fragment of a first line that is not HTTP, and says nothing of one
@@ -779,12 +798,20 @@ func scanHTTPVia(ctx context.Context, httpsURL, plainURL string, offer *tls.Conf
 		},
 	})
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, httpsURL, nil)
+	req, err := http.NewRequestWithContext(ctx, shape.method(), httpsURL, nil)
 	if err != nil {
 		out.Service, out.HTTPSError = "unknown", err.Error()
 		return out
 	}
+	out.Path = req.URL.RequestURI()
 	req.Header.Set("User-Agent", scanUserAgent)
+	// Asked for by name, the encoding is left alone: net/http's own gzip
+	// request decompresses the answer and deletes Content-Encoding, which
+	// would hide whether the site compresses at all.
+	req.Header.Set("Accept-Encoding", "gzip, br")
+	if shape.Host != "" {
+		req.Host = shape.Host
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		// A mail server on a port of its own, or a site that is failing.
@@ -809,6 +836,8 @@ func scanHTTPVia(ctx context.Context, httpsURL, plainURL string, offer *tls.Conf
 		out.Location = resp.Header.Get("Location")
 	}
 	out.HSTS = parseHSTS(resp.Header.Get("Strict-Transport-Security"))
+	out.ResponseHeaders, out.HeadersTruncated = responseHeaders(resp.Header)
+	out.audit = auditResponse(shape.method(), resp.Header)
 	for _, h := range securityHeaders {
 		value := resp.Header.Get(h.name)
 		out.Headers = append(out.Headers, HeaderCheck{
@@ -1251,6 +1280,10 @@ func grade(scan *TLSScan) {
 			findings = append(findings, ScanFinding{ID: "http.header." + h.Name, Level: "notice",
 				Fix: FixSecurityHeaders, Title: h.Name + " is not set", Detail: h.Detail})
 		}
+		// The response audit reports and never demotes: the letter is the
+		// TLS grade, and a cookie flag is the application's, not the TLS
+		// configuration's.
+		findings = append(findings, http.audit...)
 	}
 
 	http := scan.HTTP

@@ -428,6 +428,20 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   injectable), returns them as `addresses`, and raises the warning `tls.address-mismatch` when
   reachable addresses serve different leaf certificates; it caps no grade, since the grade is of the
   answer this scan got.
+- **The HTTPS request can be shaped, and its answer is audited.** `?method=` (GET, HEAD or OPTIONS
+  only: a scan is a read; POST belongs to the audited request tester), `?path=` and `?host=` go
+  through `proxysvc.ParseRequestShape` and change only the HTTPS request — SNI stays the scanned
+  name, and the plain-HTTP chain still asks `/` with the name as Host. A custom Host is recorded
+  with `httpx.AuditRead`, action `certificates.scan.host`. `http.responseHeaders` lists every header
+  of that answer (150 at most, values capped at 2 KiB); Set-Cookie values are replaced with
+  `<redacted>` inside the scan and the raw headers are never kept or stored. `httpaudit.go` holds
+  the pure rules over those headers — versioned `Server` (with `fix: "server-tokens"`, which the
+  page answers by locating `server_tokens` through `/proxy/tools/directive`), `X-Powered-By` and
+  kin, cookies without Secure/HttpOnly/SameSite, CSP `'unsafe-inline'` without nonce or hash,
+  `'unsafe-eval'`, wildcard script sources, a policy with no script limit or only Report-Only,
+  uncompressed text on GET (the request sends `Accept-Encoding: gzip, br` itself so net/http does
+  not strip `Content-Encoding`), and `Access-Control-Allow-Origin: *` with credentials. They add
+  findings and cap no grade.
 - **The watch list is endpoints.** `watched_endpoints` (lane G in `proxySchema`) is a name, a port and
   an address, unique together, so a mail server can be watched on 443 and 993; `watched_domains` held
   one row per name and a second port replaced the first. Its rows are copied in on every boot with
