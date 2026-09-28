@@ -2,7 +2,7 @@
 
 import { Fragment, useMemo, useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { NetworkDevice, Servers } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get } from "@/lib/api"
@@ -51,7 +51,12 @@ export function ConnectionsPanel() {
   const { posture, applyFix } = useSecurity()
   const router = useRouter()
   const [scope, setScope] = useViewState<"all" | "public">("security.connections.scope", "all")
-  const [query, setQuery] = useSessionState("security.connections.query", "")
+  // A link from a socket's clients arrives narrowed to its port or a peer.
+  const [query, setQuery] = useSessionState(
+    "security.connections.query",
+    "",
+    useSearchParams().get("q"),
+  )
   const [blocking, setBlocking] = useState<string | null>(null)
   const { data, error, loading, refresh } = usePoll<Connections>(
     (signal) => get("/connections", undefined, signal),

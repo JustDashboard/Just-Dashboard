@@ -125,13 +125,13 @@ func TestListenersFromKeepsWhatAcceptsAndSaysHowFarItReaches(t *testing.T) {
 	// The two port-80 workers are siblings forked by 900.
 	got := listenersFrom(sockets, holders, map[int32]int32{2450808: 1, 900: 1, 901: 900})
 	want := []Listener{
-		{Protocol: "tcp", Family: "ipv4", Address: "0.0.0.0", Port: 22, PID: 2450808, PPID: 1, Scope: ScopeAll, Exposed: true},
-		{Protocol: "tcp", Family: "ipv6", Address: "::", Port: 22, PID: 2450808, PPID: 1, Scope: ScopeAll, Exposed: true},
+		{Protocol: "tcp", Family: "ipv4", Address: "0.0.0.0", Port: 22, PID: 2450808, PPID: 1, PIDs: []int32{1, 2450808}, Scope: ScopeAll, Exposed: true},
+		{Protocol: "tcp", Family: "ipv6", Address: "::", Port: 22, PID: 2450808, PPID: 1, PIDs: []int32{1, 2450808}, Scope: ScopeAll, Exposed: true},
 		// A parent that could not be read is none.
-		{Protocol: "udp", Family: "ipv4", Address: "57.131.21.87", Port: 68, PID: 998, Scope: ScopeInterface, Exposed: true},
-		{Protocol: "tcp", Family: "ipv4", Address: "0.0.0.0", Port: 80, PID: 900, PPID: 1, Scope: ScopeAll, Exposed: true},
+		{Protocol: "udp", Family: "ipv4", Address: "57.131.21.87", Port: 68, PID: 998, PIDs: []int32{998}, Scope: ScopeInterface, Exposed: true},
+		{Protocol: "tcp", Family: "ipv4", Address: "0.0.0.0", Port: 80, PID: 900, PPID: 1, PIDs: []int32{900, 901}, Scope: ScopeAll, Exposed: true},
 		{Protocol: "tcp", Family: "ipv4", Address: "127.0.0.1", Port: 5432, PID: 0, Scope: ScopeLoopback, Exposed: false},
-		{Protocol: "tcp", Family: "ipv4", Address: "100.110.34.31", Port: 8443, PID: 2066, Scope: ScopeInterface, Exposed: true},
+		{Protocol: "tcp", Family: "ipv4", Address: "100.110.34.31", Port: 8443, PID: 2066, PIDs: []int32{2066}, Scope: ScopeInterface, Exposed: true},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d listeners, want %d: %+v", len(got), len(want), got)

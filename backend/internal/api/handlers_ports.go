@@ -37,6 +37,78 @@ func (s *Server) mountPortRoutes(r chi.Router) {
 	// the caller names; only someone who can then publish on it may ask.
 	r.With(httpx.RequireCapability(auth.CapSystemAdmin)).
 		Method(http.MethodGet, "/free", s.handle(s.handlePortsFree))
+	// Identifying connects to a socket and sends it a TLS handshake and an
+	// HTTP request: traffic the dashboard originates, so an admin's, audited.
+	r.With(httpx.RequireCapability(auth.CapSystemAdmin)).
+		Method(http.MethodPost, "/identify", s.handle(s.handlePortsIdentify))
+}
+
+// portIdentifyTimeout bounds the three steps together: the banner's wait,
+// the handshake and the request.
+const portIdentifyTimeout = 5 * time.Second
+
+// portsIdentifyRequest names one listening socket as the listing does.
+type portsIdentifyRequest struct {
+	Protocol string `json:"protocol"`
+	Address  string `json:"address"`
+	Port     uint32 `json:"port"`
+	// ServerName is sent as SNI and Host, for a server that answers each
+	// name with its own certificate or refuses a handshake without one.
+	ServerName string `json:"serverName"`
+}
+
+// handlePortsIdentify asks one socket what it is. Only a socket listening
+// right now may be asked, so this cannot be pointed anywhere else.
+func (s *Server) handlePortsIdentify(w http.ResponseWriter, r *http.Request) error {
+	var req portsIdentifyRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if req.Protocol != "tcp" {
+		return httpx.BadRequest("only a TCP socket can be identified")
+	}
+	if net.ParseIP(req.Address) == nil {
+		return httpx.BadRequest("address must be an IP address")
+	}
+	if req.Port < 1 || req.Port > 65535 {
+		return httpx.BadRequest("port must be from 1 to 65535")
+	}
+	req.ServerName = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(req.ServerName)), ".")
+	if req.ServerName != "" && !validServerName(req.ServerName) {
+		return httpx.BadRequest("server name must be a DNS name")
+	}
+	listening, err := proxysvc.ListeningAt(req.Protocol, req.Address, req.Port)
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	if !listening {
+		return httpx.Err(http.StatusNotFound, "not_listening", "Nothing is listening on that socket now.")
+	}
+	target := proxysvc.IdentifyTarget(req.Address, req.Port)
+	httpx.SetAudit(r, "proxy.ports.identify", target, map[string]any{"serverName": req.ServerName})
+	ctx, cancel := timeoutCtx(r, portIdentifyTimeout)
+	defer cancel()
+	httpx.JSON(w, http.StatusOK, proxysvc.Identify(ctx, target, req.ServerName))
+	return nil
+}
+
+// validServerName is a DNS name of letters, digits, hyphens and dots, the
+// only thing SNI carries.
+func validServerName(name string) bool {
+	if len(name) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(name, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, c := range label {
+			if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // portsFirewall is the firewall as the ports page needs it: whether rules

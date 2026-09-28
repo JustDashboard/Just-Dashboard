@@ -1,4 +1,4 @@
-import type { Capability, Listener, ListenerNetwork } from "@/lib/types"
+import type { Capability, Listener, ListenerClients, ListenerNetwork } from "@/lib/types"
 import { managerHref } from "@/components/procs/shared"
 
 /**
@@ -136,6 +136,63 @@ export function socketPids(socket: Socket): number[] {
   const pids = [socket.pid]
   if (socket.twin && socket.twin.pid !== socket.pid) pids.push(socket.twin.pid)
   return pids.filter((pid) => pid > 0)
+}
+
+/**
+ * Every process holding a folded socket, from both families: the owner the
+ * row names, and the workers and supervisors holding the same socket.
+ */
+export function socketHolders(socket: Socket): number[] {
+  const all = [...(socket.pids ?? [socket.pid]), ...(socket.twin?.pids ?? [])]
+  if (socket.twin) all.push(socket.twin.pid)
+  return [...new Set(all.filter((pid) => pid > 0))].sort((a, b) => a - b)
+}
+
+/** How many peers a socket's clients line names; the backend sends at most five. */
+const CLIENT_PEERS = 5
+
+/**
+ * A folded socket's clients over both families: a dual-stack service's
+ * IPv4 callers are on one socket and its IPv6 callers on the other.
+ */
+export function socketClients(socket: Socket): ListenerClients | undefined {
+  const own = socket.clients
+  const twin = socket.twin?.clients
+  if (!own || !twin) return own ?? twin
+  const byAddress = new Map<string, number>()
+  for (const peer of [...own.peers, ...twin.peers]) {
+    byAddress.set(peer.address, (byAddress.get(peer.address) ?? 0) + peer.count)
+  }
+  const peers = [...byAddress]
+    .map(([address, count]) => ({ address, count }))
+    .sort((a, b) => b.count - a.count || a.address.localeCompare(b.address))
+    .slice(0, CLIENT_PEERS)
+  return { count: own.count + twin.count, peers }
+}
+
+/**
+ * The `?socket=` a row's detail opens at: `tcp:0.0.0.0:443`, `tcp:::22`.
+ * The protocol is before the first colon and the port after the last, so an
+ * IPv6 address needs no brackets.
+ */
+export function socketParam(socket: Pick<Listener, "protocol" | "address" | "port">): string {
+  return `${socket.protocol}:${socket.address}:${socket.port}`
+}
+
+/** The socket `?socket=` names, by either of a folded socket's addresses. */
+export function findSocket(sockets: Socket[], param: string): Socket | undefined {
+  const first = param.indexOf(":")
+  const last = param.lastIndexOf(":")
+  if (first < 0 || last <= first) return undefined
+  const protocol = param.slice(0, first)
+  const address = param.slice(first + 1, last)
+  const port = Number(param.slice(last + 1))
+  return sockets.find(
+    (s) =>
+      s.protocol === protocol &&
+      s.port === port &&
+      (s.address === address || s.twin?.address === address),
+  )
 }
 
 /** A folded socket's addresses, IPv4 first as the listing orders them. */

@@ -59,6 +59,7 @@ import { VerbActions, VerbMenu, type Verb } from "@/components/verbs"
 import {
   dangerousPorts,
   dangerousService,
+  findSocket,
   foldDualStack,
   internetHint,
   networkWords,
@@ -72,6 +73,8 @@ import {
   reachVerdict,
   reachWords,
   socketAddresses,
+  socketClients,
+  socketParam,
   socketPids,
   tallyReach,
   UPLINK_CAVEAT,
@@ -81,6 +84,7 @@ import {
 } from "@/components/proxy/ports"
 import { FirewallVerdict, firewallHandoffs, OrphanRules } from "@/components/proxy/ports-firewall"
 import { FreePortFinder, ProxyLine, proxyVerbs } from "@/components/proxy/ports-proxy"
+import { PortSheet } from "@/components/proxy/port-sheet"
 import {
   DEFAULT_SORT,
   facetCounts,
@@ -185,7 +189,10 @@ export function PortsPage() {
 
 function PortsView() {
   const router = useRouter()
-  const arrival = viewFromParams(useSearchParams())
+  const params = useSearchParams()
+  const arrival = viewFromParams(params)
+  // The open socket's detail is in the address bar too, so a link can open on it.
+  const [sheetParam, setSheetParam] = useState(() => params.get("socket"))
   const [query, setQuery] = useSessionState("proxy.ports.query", "", arrival?.q)
   const [reachValue, setReach] = useSessionState<string>("proxy.ports.reach", "all", arrival?.reach)
   const [protoValue, setProto] = useSessionState<string>("proxy.ports.proto", "all", arrival?.proto)
@@ -247,6 +254,23 @@ function PortsView() {
   const listeners = useMemo(() => data?.listeners ?? [], [data])
   // A service on 0.0.0.0 and :: is one row and one count.
   const all = useMemo(() => foldDualStack(listeners), [listeners])
+  const sheetSocket = useMemo(
+    () => (sheetParam ? findSocket(all, sheetParam) : undefined),
+    [all, sheetParam],
+  )
+  const showSocket = (socket: Socket | null) => {
+    const param = socket ? socketParam(socket) : null
+    setSheetParam(param)
+    const url = new URL(window.location.href)
+    if (param) url.searchParams.set("socket", param)
+    else url.searchParams.delete("socket")
+    window.history.replaceState(null, "", url)
+  }
+  // A click anywhere on a row opens it, except on a control of its own.
+  const rowClick = (socket: Socket) => (event: React.MouseEvent) => {
+    if ((event.target as HTMLElement).closest("button, a, [role=menuitem]")) return
+    showSocket(socket)
+  }
   const counts = useMemo(() => tallyReach(all), [all])
   const onTheUplink = useMemo(() => all.filter(onUplink).length, [all])
   const dangerous = useMemo(() => dangerousPorts(listeners), [listeners])
@@ -392,6 +416,8 @@ function PortsView() {
   // A row's menu is named by the endpoint it acts on; two programs can share
   // a port on two addresses, never an address and a port.
   const menuLabel = (l: Socket) => `Actions for ${l.protocol} ${formatEndpoint(l.address, l.port)}`
+  const detailLabel = (l: Socket) =>
+    `Details for ${l.protocol} ${formatEndpoint(l.address, l.port)}`
 
   if (loading && !data) {
     return (
@@ -668,6 +694,7 @@ function PortsView() {
                     className="w-56"
                   />
                   <TableHead className="w-60">Firewall</TableHead>
+                  <TableHead className="w-24">Clients</TableHead>
                   <TableHead className="w-28">
                     <span className="sr-only">Actions</span>
                   </TableHead>
@@ -706,17 +733,24 @@ function PortsView() {
                       </TableCell>
                       <TableCell />
                       <TableCell />
+                      <TableCell />
                     </TableRow>
                   ) : (
-                    <TableRow key={socketKey(entry.socket)} className="group">
+                    <TableRow
+                      key={socketKey(entry.socket)}
+                      className="group cursor-pointer"
+                      onClick={rowClick(entry.socket)}
+                    >
                       <TableCell className="py-4">
                         {/* A group's sockets stand behind a rule under its
                             line, as an option's revealed fields do. */}
                         <div className={cn(entry.member && "border-l border-hairline pl-4")}>
                           <div className="flex items-baseline gap-2">
-                            <span className="numeric font-mono text-title font-semibold">
-                              {entry.socket.port}
-                            </span>
+                            <DetailButton
+                              socket={entry.socket}
+                              label={detailLabel(entry.socket)}
+                              onOpen={showSocket}
+                            />
                             <span className="text-hint text-muted-foreground uppercase">
                               {entry.socket.protocol}
                             </span>
@@ -735,6 +769,9 @@ function PortsView() {
                       </TableCell>
                       <TableCell>
                         <FirewallVerdict socket={entry.socket} />
+                      </TableCell>
+                      <TableCell>
+                        <ClientsCell socket={entry.socket} />
                       </TableCell>
                       <TableCell>
                         <VerbActions
@@ -781,9 +818,10 @@ function PortsView() {
                   <li
                     key={socketKey(entry.socket)}
                     className={cn(
-                      "group flex min-w-0 items-start gap-3 py-3 transition-colors hover:bg-row-hover",
+                      "group flex min-w-0 cursor-pointer items-start gap-3 py-3 transition-colors hover:bg-row-hover",
                       ROW_BLEED,
                     )}
+                    onClick={rowClick(entry.socket)}
                   >
                     {entry.member && (
                       <span
@@ -794,8 +832,12 @@ function PortsView() {
                     {/* The protocol under the port, as the table pairs them:
                         a line of its own that nothing can push off the row. */}
                     <div className="w-14 shrink-0">
-                      <p className="numeric font-mono text-title font-semibold">
-                        {entry.socket.port}
+                      <p>
+                        <DetailButton
+                          socket={entry.socket}
+                          label={detailLabel(entry.socket)}
+                          onOpen={showSocket}
+                        />
                       </p>
                       <p className="text-hint text-muted-foreground uppercase">
                         {entry.socket.protocol}
@@ -833,6 +875,7 @@ function PortsView() {
                           <FirewallVerdict socket={entry.socket} />
                         </div>
                       )}
+                      <ClientsLine socket={entry.socket} />
                     </div>
                     <VerbActions
                       className="shrink-0"
@@ -864,8 +907,75 @@ function PortsView() {
 
       <OrphanRules firewall={firewall.data} admin={admin} onChange={firewall.refresh} />
       <PortChanges query={query} onClearQuery={() => setQuery("")} />
+      <PortSheet
+        param={sheetParam}
+        socket={sheetSocket}
+        reach={sheetSocket && <ReachStatus socket={sheetSocket} />}
+        actions={
+          sheetSocket && (
+            <VerbActions verbs={verbsFor(sheetSocket)} menuLabel={menuLabel(sheetSocket)} />
+          )
+        }
+        admin={admin}
+        onClose={() => showSocket(null)}
+      />
       {dialog}
     </Page>
+  )
+}
+
+/** The port, as the keyboard's way into a row's detail; the pointer's is the whole row. */
+function DetailButton({
+  socket,
+  label,
+  onOpen,
+}: {
+  socket: Socket
+  label: string
+  onOpen: (socket: Socket) => void
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={() => onOpen(socket)}
+      className="numeric rounded-sm font-mono text-title font-semibold focus-ring hover:underline"
+    >
+      {socket.port}
+    </button>
+  )
+}
+
+/** How many are connected to a TCP socket, and the busiest of them. */
+function ClientsCell({ socket }: { socket: Socket }) {
+  const clients = socketClients(socket)
+  if (!clients) return <span className="text-xs text-muted-foreground">—</span>
+  return (
+    <div className="min-w-0">
+      <p className={cn("numeric text-body", clients.count === 0 && "text-muted-foreground")}>
+        {clients.count}
+      </p>
+      {clients.peers[0] && (
+        <p
+          className="truncate font-mono text-hint text-muted-foreground"
+          title={clients.peers[0].address}
+        >
+          {clients.peers[0].address}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** The phone's clients line, only where someone is connected. */
+function ClientsLine({ socket }: { socket: Socket }) {
+  const clients = socketClients(socket)
+  if (!clients || clients.count === 0) return null
+  return (
+    <p className="mt-1.5 text-hint text-muted-foreground">
+      <span className="numeric">{plural(clients.count, "client connection")}</span>
+      {clients.peers[0] && <span className="font-mono"> · {clients.peers[0].address}</span>}
+    </p>
   )
 }
 
