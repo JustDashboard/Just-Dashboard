@@ -227,8 +227,11 @@ export type DangerousPort = {
   sockets: Listener[]
   /** The port's level: its highest socket's, as the posture's one finding is at its widest bind. */
   level: "critical" | "warning"
-  /** The firewall's inbound default, when it holds the port to a warning. */
+  /** The firewall's inbound default, when it holds every socket on the port to a warning. */
   inboundDefault?: string
+  /** Why the default does not hold the port, from the first socket it does not hold. */
+  pastFirewall?: Listener["pastFirewall"]
+  firewallRule?: number
 }
 
 /** The service a socket is a database or control port for, when the posture levels it. */
@@ -251,20 +254,43 @@ export function dangerousPorts(listeners: Listener[]): DangerousPort[] {
     }
     entry.sockets.push(l)
     if (l.level === "critical") entry.level = "critical"
-    entry.inboundDefault ??= l.inboundDefault
+    if (l.pastFirewall && !entry.pastFirewall) {
+      entry.pastFirewall = l.pastFirewall
+      entry.firewallRule = l.firewallRule
+    }
     byPort.set(key, entry)
   }
+  // The default holds a port only if it holds every socket on it.
+  for (const entry of byPort.values()) {
+    if (entry.sockets.every((l) => l.inboundDefault)) {
+      entry.inboundDefault = entry.sockets[0].inboundDefault
+    }
+  }
   return [...byPort.values()]
+}
+
+/**
+ * Why a firewall refusing inbound by default does not hold a socket, where
+ * the posture does not credit the default, as the ports page's row says it.
+ */
+export function pastFirewallWords(
+  port: Pick<Listener, "pastFirewall" | "firewallRule">,
+): string | undefined {
+  if (port.pastFirewall === "docker") return "Published by Docker past the firewall"
+  if (port.pastFirewall === "rule")
+    return `Firewall rule ${port.firewallRule} admits it from anywhere`
+  return undefined
 }
 
 /**
  * The verdict a listening socket is drawn with. A database or control port
  * takes the security posture's level for it, from the same rules and the same
  * firewall: critical where the internet can reach it, a warning where only a
- * tailnet, a LAN or a bridge can, or where the firewall denies inbound by
- * default. Any other socket the internet can reach, or may through the
- * private uplink, is a warning, and one only a private network reaches a
- * notice — sshd on the tailnet is not an alarm. Loopback has none.
+ * tailnet, a LAN or a bridge can, or where the firewall's inbound default
+ * refuses it — which a port Docker publishes, or one a rule admits from
+ * anywhere, gets past. Any other socket the internet can reach, or may
+ * through the private uplink, is a warning, and one only a private network
+ * reaches a notice — sshd on the tailnet is not an alarm. Loopback has none.
  */
 export function reachVerdict(
   listener: Pick<Listener, "port" | "exposed" | "reach" | "network" | "level">,

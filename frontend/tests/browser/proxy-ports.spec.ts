@@ -5,6 +5,7 @@ import {
   dockerIngress,
   firewalledDatabases,
   hostPorts,
+  pastFirewallDatabases,
   privateUplink,
 } from "./fixtures/proxy/ports"
 import { json, mockProxy } from "./proxy-fixtures"
@@ -207,6 +208,62 @@ test("a database behind a firewall denying inbound is the posture's warning ever
       "6379/tcp redis-server, 5432/tcp postgres on 57.131.21.87 (Public address · ens3), though the firewall's inbound default is deny",
     ),
   ).toBeVisible()
+})
+
+test("a database Docker publishes or a rule admits stays critical behind a firewall denying inbound", async ({
+  page,
+}) => {
+  await mockHost(page, pastFirewallDatabases)
+  await page.goto("/proxy/ports")
+
+  const rows = page.getByRole("table").locator("tbody tr")
+  await expect(rows).toHaveCount(3)
+  const postgres = rows.filter({ hasText: "PIDs 1883700, 1883706" })
+  await expect(postgres.getByText("PostgreSQL · Every interface")).toHaveClass(/text-destructive/)
+  await expect(postgres.getByText("Published by Docker past the firewall")).toBeVisible()
+  await expect(postgres.getByText(/inbound default/)).toHaveCount(0)
+  const redis = rows.filter({ hasText: "redis-server" })
+  await expect(redis.getByText("Redis · Every interface")).toHaveClass(/text-destructive/)
+  await expect(redis.getByText("Firewall rule 10 admits it from anywhere")).toBeVisible()
+  await expect(redis.getByText(/inbound default/)).toHaveCount(0)
+  const mongo = rows.filter({ hasText: "mongod" })
+  await expect(mongo.getByText("MongoDB · Every interface")).toHaveClass(/text-warning/)
+  await expect(mongo.getByText("Firewall's inbound default: deny")).toBeVisible()
+  await expect(tile(page, "Databases exposed").getByText("3", { exact: true })).toHaveClass(
+    /text-destructive/,
+  )
+
+  await page.goto("/proxy")
+  const finding = page.getByRole("button", {
+    name: /^3 database or control ports answer on every interface/,
+  })
+  await expect(finding.locator(".bg-destructive")).toHaveCount(1)
+  await finding.click()
+  await expect(
+    page.getByText(
+      "5432/tcp docker-proxy (published by Docker past the firewall), 6379/tcp redis-server (firewall rule 10 admits it from anywhere), 27017/tcp mongod (the firewall's inbound default is deny)",
+    ),
+  ).toBeVisible()
+  await expect(page.getByText(/, though the firewall's inbound default is deny/)).toHaveCount(0)
+
+  // On a phone the reasons sit whole under each reach, inside the screen.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/proxy/ports")
+  const list = page.getByRole("list")
+  for (const text of [
+    "Published by Docker past the firewall",
+    "Firewall rule 10 admits it from anywhere",
+    "Firewall's inbound default: deny",
+  ]) {
+    const line = list.getByText(text)
+    await expect(line).toBeVisible()
+    const box = await line.boundingBox()
+    expect(box && box.x + box.width).toBeLessThanOrEqual(390)
+  }
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  )
+  expect(overflow).toBe(false)
 })
 
 test("a socket on the private uplink is not said to be out of the internet's reach", async ({

@@ -59,6 +59,12 @@ type Listener struct {
 	// page and the proxy overview level a database as the posture does.
 	Level          string `json:"level,omitempty"`
 	InboundDefault string `json:"inboundDefault,omitempty"`
+	// PastFirewall is why a firewall refusing inbound by default does not
+	// hold the socket where it does not: "docker", a port Docker publishes
+	// ahead of the default, or "rule", a port FirewallRule admits from
+	// anywhere. GET /ports fills both from netsec.GradePort.
+	PastFirewall string `json:"pastFirewall,omitempty"`
+	FirewallRule int    `json:"firewallRule,omitempty"`
 }
 
 // BindScope is where a socket can be reached from, judged from the address it

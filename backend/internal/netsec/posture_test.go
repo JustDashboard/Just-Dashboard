@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -644,9 +645,18 @@ func TestGradePortIsThePosturesLevel(t *testing.T) {
 		"allow":        {Available: true, Enabled: true, Policy: DefaultPolicy{Incoming: "allow"}},
 		"inactive":     {Available: true, Enabled: false, Policy: DefaultPolicy{Incoming: "deny"}},
 		"policy unset": {Available: true, Enabled: true},
+		"deny, rule 10 allows 6379": {Backend: BackendUFW, Available: true, Enabled: true,
+			Policy: DefaultPolicy{Incoming: "deny"}, Rules: ufwRules(
+				"[ 2] OpenSSH                    ALLOW IN    Anywhere",
+				"[10] 6379/tcp                   ALLOW IN    Anywhere",
+			)},
 	}
 	sockets := []ExposedPort{
 		{Port: 6379, Protocol: "tcp", Address: "0.0.0.0", Process: "redis-server", Exposed: true},
+		// Docker's Postgres, published as -p 5432:5432.
+		{Port: 5432, Protocol: "tcp", Address: "0.0.0.0", Process: "docker-proxy", Exposed: true},
+		{Port: 5432, Protocol: "tcp", Address: "::", Process: "docker-proxy", Exposed: true},
+		{Port: 5432, Protocol: "tcp", Address: "10.0.0.1", Process: "docker-proxy", Exposed: true},
 		{Port: 6379, Protocol: "tcp", Address: "::", Process: "redis-server", Exposed: true},
 		{Port: 5432, Protocol: "tcp", Address: "57.131.21.87", Process: "postgres", Exposed: true},
 		{Port: 5432, Protocol: "tcp", Address: "100.110.34.31", Process: "postgres", Exposed: true},
@@ -679,6 +689,13 @@ func TestGradePortIsThePosturesLevel(t *testing.T) {
 			if (grade.InboundDefault != "") != strings.HasSuffix(f.Detail, clause) {
 				t.Errorf("%s: inbound default %q, the posture's detail %q", where, grade.InboundDefault, f.Detail)
 			}
+			past := map[PastFirewall]string{
+				PastFirewallDocker: ", published by Docker past the firewall's inbound default",
+				PastFirewallRule:   fmt.Sprintf(", and firewall rule %d admits it from anywhere", grade.FirewallRule),
+			}[grade.PastFirewall]
+			if (grade.PastFirewall != "") != (past != "" && strings.HasSuffix(f.Detail, past)) {
+				t.Errorf("%s: past the firewall %+v, the posture's detail %q", where, grade, f.Detail)
+			}
 		}
 	}
 
@@ -690,8 +707,161 @@ func TestGradePortIsThePosturesLevel(t *testing.T) {
 	if got := GradePort(sockets[0], thisHost, nil); got != (PortGrade{Level: "critical"}) {
 		t.Errorf("Redis on 0.0.0.0 with no firewall = %+v, want critical", got)
 	}
-	if got := GradePort(sockets[3], thisHost, nil); got != (PortGrade{Level: "warning"}) {
+	if got := GradePort(sockets[6], thisHost, nil); got != (PortGrade{Level: "warning"}) {
 		t.Errorf("Postgres on the tailnet = %+v, want a warning", got)
+	}
+
+	// Docker forwards a port it publishes before ufw's input chain, where
+	// the inbound default is, so the default holds nothing back: Docker's
+	// Postgres on every interface is the internet's whatever ufw says.
+	for _, name := range []string{"deny", "reject", "deny, rule 10 allows 6379"} {
+		for _, socket := range sockets[1:3] {
+			if got := GradePort(socket, thisHost, firewalls[name]); got != (PortGrade{Level: "critical", PastFirewall: PastFirewallDocker}) {
+				t.Errorf("docker-proxy on %s:5432 behind %s = %+v, want critical, published past the firewall", socket.Address, name, got)
+			}
+		}
+	}
+	// Published on the bridge's address, it is still only the containers'.
+	if got := GradePort(sockets[3], thisHost, firewalls["deny"]); got != (PortGrade{Level: "warning", PastFirewall: PastFirewallDocker}) {
+		t.Errorf("docker-proxy on the bridge behind deny = %+v, want a warning published past the firewall", got)
+	}
+	// A rule admitting the port from anywhere is met before the default.
+	if got := GradePort(sockets[0], thisHost, firewalls["deny, rule 10 allows 6379"]); got != (PortGrade{Level: "critical", PastFirewall: PastFirewallRule, FirewallRule: 10}) {
+		t.Errorf("Redis on 0.0.0.0 behind deny with 6379 allowed = %+v, want critical, admitted by rule 10", got)
+	}
+
+	p := Assess(AssessInput{Network: thisHost, Firewall: firewalls["deny"], Listeners: sockets[1:3]})
+	if f, _ := findingByID(p, "ports.exposed.tcp.5432"); f.Level != "critical" ||
+		f.Detail != "TCP/5432 is bound to every interface by docker-proxy, published by Docker past the firewall's inbound default" {
+		t.Errorf("Docker's Postgres behind deny = %+v, want critical and why the firewall does not hold it", f)
+	}
+	p = Assess(AssessInput{Network: thisHost, Firewall: firewalls["deny, rule 10 allows 6379"], Listeners: sockets[:1]})
+	if f, _ := findingByID(p, "ports.exposed.tcp.6379"); f.Level != "critical" ||
+		f.Detail != "TCP/6379 is bound to every interface by redis-server, and firewall rule 10 admits it from anywhere" {
+		t.Errorf("Redis behind deny with 6379 allowed = %+v, want critical and the rule named", f)
+	}
+}
+
+// ufwRules parses lines of `ufw status numbered` as the backend does.
+func ufwRules(lines ...string) []Rule {
+	rules := []Rule{}
+	for _, line := range lines {
+		m := ufwNumberedRe.FindStringSubmatch(line)
+		num, _ := strconv.Atoi(m[1])
+		r := parseUFWRule(num, m[2])
+		annotateRule(&r)
+		rules = append(rules, r)
+	}
+	return rules
+}
+
+// Which rule, if any, lets a connection from anywhere reach a database
+// before the inbound default refuses it, read from each backend's listing as
+// the backend reads it. Every case is Redis or VNC, dangerous on every
+// interface, behind a default that refuses inbound.
+func TestGradePortReadsWhichRuleAdmitsAPort(t *testing.T) {
+	redis := ExposedPort{Port: 6379, Protocol: "tcp", Address: "0.0.0.0", Process: "redis-server", Exposed: true}
+	onTailnet := ExposedPort{Port: 6379, Protocol: "tcp", Address: "100.110.34.31", Process: "redis-server", Exposed: true}
+	vnc := ExposedPort{Port: 5900, Protocol: "tcp", Address: "0.0.0.0", Process: "Xvnc", Exposed: true}
+	held := PortGrade{Level: "warning", InboundDefault: "deny"}
+	// firewalld's "default" target rejects.
+	rejected := PortGrade{Level: "warning", InboundDefault: "reject"}
+	admitted := func(rule int) PortGrade {
+		return PortGrade{Level: "critical", PastFirewall: PastFirewallRule, FirewallRule: rule}
+	}
+	ufw := func(lines ...string) *FirewallStatus {
+		return &FirewallStatus{Backend: BackendUFW, Available: true, Enabled: true,
+			Policy: DefaultPolicy{Incoming: "deny"}, Rules: ufwRules(lines...)}
+	}
+	firewalld := func(zone string) *FirewallStatus {
+		_, rules := parseFirewalldZone(zone)
+		for i := range rules {
+			rules[i].Number = i + 1
+			annotateRule(&rules[i])
+		}
+		return &FirewallStatus{Backend: BackendFirewalld, Available: true, Enabled: true,
+			Policy: firewalldPolicy("default"), Rules: rules}
+	}
+	iptables := func(listing string) *FirewallStatus {
+		withIPTablesOutput(t, listing)
+		st, err := (iptablesBackend{}).Status(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st
+	}
+	const chain = "Chain INPUT (policy DROP 0 packets, 0 bytes)\n" +
+		"num   pkts bytes target     prot opt in     out     source               destination\n"
+
+	for _, c := range []struct {
+		name     string
+		socket   ExposedPort
+		firewall *FirewallStatus
+		want     PortGrade
+	}{
+		{"ufw: the port alone, for both protocols", redis, ufw("[ 3] 6379                       ALLOW IN    Anywhere"), admitted(3)},
+		{"ufw: the port in a list", redis, ufw("[ 4] 80,443,6379/tcp            ALLOW IN    Anywhere"), admitted(4)},
+		{"ufw: the port in a range", redis, ufw("[ 5] 6000:7000/tcp              ALLOW IN    Anywhere"), admitted(5)},
+		{"ufw: rate-limited is still let in", redis, ufw("[ 1] 6379/tcp                   LIMIT IN    Anywhere"), admitted(1)},
+		{"ufw: everything from anywhere", redis, ufw("[ 1] Anywhere                   ALLOW IN    Anywhere"), admitted(1)},
+		{"ufw: the IPv6 twin alone", redis, ufw("[ 7] 6379/tcp (v6)              ALLOW IN    Anywhere (v6)"), admitted(7)},
+		{"ufw: to the public address", redis, ufw("[ 2] 57.131.21.87 6379/tcp      ALLOW IN    Anywhere"), admitted(2)},
+		{"ufw: to the private uplink a provider maps", redis, ufw("[ 2] 172.31.5.9 6379/tcp        ALLOW IN    Anywhere"), admitted(2)},
+		{"ufw: to the tailnet's address, on the tailnet socket", onTailnet,
+			ufw("[ 2] 100.110.34.31 6379/tcp     ALLOW IN    Anywhere"),
+			PortGrade{Level: "warning", PastFirewall: PastFirewallRule, FirewallRule: 2}},
+		{"ufw: a refusal met first ends it", redis, ufw(
+			"[ 1] 6379/tcp                   DENY IN     Anywhere",
+			"[ 2] 6379/tcp                   ALLOW IN    Anywhere",
+		), held},
+		{"ufw: a refusal met second does not", redis, ufw(
+			"[ 1] 6379/tcp                   ALLOW IN    Anywhere",
+			"[ 2] 6379/tcp                   DENY IN     Anywhere",
+		), admitted(1)},
+		{"ufw: a refusal on one address leaves the rest", redis, ufw(
+			"[ 1] 10.0.0.5 6379/tcp          DENY IN     Anywhere",
+			"[ 2] 6379/tcp                   ALLOW IN    Anywhere",
+		), admitted(2)},
+		{"ufw: another port", redis, ufw("[ 1] 5432/tcp                   ALLOW IN    Anywhere"), held},
+		{"ufw: the other protocol", redis, ufw("[ 1] 6379/udp                   ALLOW IN    Anywhere"), held},
+		{"ufw: from a private source", redis, ufw("[ 1] 6379/tcp                   ALLOW IN    10.0.0.0/8"), held},
+		{"ufw: outbound", redis, ufw("[ 1] 6379/tcp                   ALLOW OUT   Anywhere"), held},
+		{"ufw: a route rule", redis, ufw("[ 1] 6379/tcp                   ALLOW FWD   Anywhere"), held},
+		{"ufw: an application profile", redis, ufw("[ 1] OpenSSH                    ALLOW IN    Anywhere"), held},
+		{"ufw: on the tailnet's interface", redis, ufw("[ 1] 6379/tcp on tailscale0     ALLOW IN    Anywhere"), held},
+		{"ufw: to the tailnet's address", redis, ufw("[ 2] 100.110.34.31 6379/tcp     ALLOW IN    Anywhere"), held},
+		{"ufw: to a bridge's address", redis, ufw("[ 2] 10.0.0.1 6379/tcp          ALLOW IN    Anywhere"), held},
+
+		{"firewalld: a zone port", redis, firewalld("public (active)\n  target: default\n  services: ssh\n  ports: 6379/tcp\n"), admitted(2)},
+		{"firewalld: a port range", vnc, firewalld("public (active)\n  target: default\n  ports: 5900-5903/tcp\n"), admitted(1)},
+		{"firewalld: a predefined service", redis, firewalld("public (active)\n  target: default\n  services: ssh redis\n"), admitted(2)},
+		{"firewalld: a service over a range", vnc, firewalld("public (active)\n  target: default\n  services: vnc-server\n"), admitted(1)},
+		{"firewalld: a rich rule from anywhere", redis, firewalld("public (active)\n  target: default\n  rich rules:\n\trule family=\"ipv4\" port port=\"6379\" protocol=\"tcp\" accept\n"), admitted(1)},
+		{"firewalld: other services", redis, firewalld("public (active)\n  target: default\n  services: ssh dhcpv6-client cockpit\n"), rejected},
+		{"firewalld: a rich rule from a private source", redis, firewalld("public (active)\n  target: default\n  rich rules:\n\trule family=\"ipv4\" source address=\"10.0.0.0/8\" port port=\"6379\" protocol=\"tcp\" accept\n"), rejected},
+
+		{"iptables: INPUT accepts the port", redis, iptables(chain +
+			"1        0     0 ACCEPT     tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:6379\n"), admitted(1)},
+		{"iptables: in a multiport list", redis, iptables(chain +
+			"1        0     0 ACCEPT     tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            multiport dports 80,443,6379\n"), admitted(1)},
+		{"iptables: in a range", redis, iptables(chain +
+			"1        0     0 ACCEPT     tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpts:6000:7000\n"), admitted(1)},
+		{"iptables: a drop does not end it", redis, iptables(chain +
+			"1        0     0 DROP       tcp  --  eth1   *       0.0.0.0/0            0.0.0.0/0            tcp dpt:6379\n" +
+			"2        0     0 ACCEPT     tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:6379\n"), admitted(2)},
+		{"iptables: loopback, established and other ports", redis, iptables(chain +
+			"1        0     0 ACCEPT     all  --  lo     *       0.0.0.0/0            0.0.0.0/0\n" +
+			"2        0     0 ACCEPT     all  --  *      *       0.0.0.0/0            0.0.0.0/0            ctstate RELATED,ESTABLISHED\n" +
+			"3        0     0 ACCEPT     tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:22\n" +
+			"4        0     0 ACCEPT     tcp  --  *      *       10.0.0.0/8           0.0.0.0/0            tcp dpt:6379\n"), held},
+		{"iptables: another chain", redis, iptables(chain +
+			"\nChain ufw-user-input (1 references)\n" +
+			"num   pkts bytes target     prot opt in     out     source               destination\n" +
+			"1        0     0 ACCEPT     tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            tcp dpt:6379\n"), held},
+	} {
+		if got := GradePort(c.socket, thisHost, c.firewall); got != c.want {
+			t.Errorf("%s: %+v, want %+v (rules %+v)", c.name, got, c.want, c.firewall.Rules)
+		}
 	}
 }
 

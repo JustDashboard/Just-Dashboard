@@ -1,6 +1,11 @@
 import type { Listener } from "@/lib/types"
 import { type ProxyFinding } from "@/components/proxy/findings/shared"
-import { dangerousPorts, reachWords, type DangerousPort } from "@/components/proxy/ports"
+import {
+  dangerousPorts,
+  pastFirewallWords,
+  reachWords,
+  type DangerousPort,
+} from "@/components/proxy/ports"
 
 export type PortFindingInput = { ports?: Listener[] }
 
@@ -11,7 +16,8 @@ export type PortFindingInput = { ports?: Listener[] }
  * 0.0.0.0 and ::, is one database. Levelled by the security posture's own
  * grade of each socket, which GET /ports carries: critical where the
  * internet can reach one, a warning where only a tailnet, a LAN or a bridge
- * can, or where the firewall denies inbound by default.
+ * can, or where the firewall's inbound default refuses it. A port Docker
+ * publishes, or one a rule admits from anywhere, is past that default.
  */
 export function portFindings({ ports }: PortFindingInput): ProxyFinding[] {
   const out: ProxyFinding[] = []
@@ -19,8 +25,10 @@ export function portFindings({ ports }: PortFindingInput): ProxyFinding[] {
   const dangerous = dangerousPorts(ports ?? [])
   if (dangerous.length > 0) {
     const everywhere = dangerous.every(onEveryInterface)
-    // The firewall's default is the host's, so one port carrying it is all of them.
-    const inbound = dangerous.find((d) => d.inboundDefault)?.inboundDefault
+    // The firewall's default is the host's, said once when it holds every
+    // port and beside each port otherwise: Docker publishes past it, and a
+    // rule may admit a port before it.
+    const held = dangerous.every((d) => d.inboundDefault)
     out.push({
       id: "ports.dangerous",
       level: dangerous.some((d) => d.level === "critical") ? "critical" : "warning",
@@ -31,10 +39,12 @@ export function portFindings({ ports }: PortFindingInput): ProxyFinding[] {
       detail: dangerous
         .map(
           (d) =>
-            `${d.port}/${d.protocol} ${d.sockets[0].process || "unknown"}${onEveryInterface(d) ? "" : ` on ${placed(d.sockets)}`}`,
+            `${d.port}/${d.protocol} ${d.sockets[0].process || "unknown"}${onEveryInterface(d) ? "" : ` on ${placed(d.sockets)}`}${held ? "" : firewallNote(d)}`,
         )
         .join(", ")
-        .concat(inbound ? `, though the firewall's inbound default is ${inbound}` : ""),
+        .concat(
+          held ? `, though the firewall's inbound default is ${dangerous[0].inboundDefault}` : "",
+        ),
       // A socket already on one address is not fixed by binding it to "a
       // private address"; it may be on one.
       advice: everywhere
@@ -46,6 +56,13 @@ export function portFindings({ ports }: PortFindingInput): ProxyFinding[] {
   }
 
   return out
+}
+
+/** Where the firewall stands on one port, when it does not stand the same on all. */
+function firewallNote(port: DangerousPort): string {
+  const past = pastFirewallWords(port)
+  if (past) return ` (${past.charAt(0).toLowerCase()}${past.slice(1)})`
+  return port.inboundDefault ? ` (the firewall's inbound default is ${port.inboundDefault})` : ""
 }
 
 /** A wildcard bind already covers any one address the port is also on. */

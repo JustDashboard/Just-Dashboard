@@ -5,6 +5,7 @@ import {
   dangerousService,
   foldDualStack,
   internetHint,
+  pastFirewallWords,
   privateHint,
   privateNetworksHint,
   reachGroup,
@@ -471,6 +472,77 @@ describe("a database off this machine", () => {
     expect(finding.detail).toBe(
       "6379/tcp redis-server, 5432/tcp postgres on 57.131.21.87 (Public address · ens3), though the firewall's inbound default is deny",
     )
+  })
+
+  test("one Docker publishes behind a firewall denying inbound stays critical, and says why", () => {
+    // Docker forwards a port it publishes before ufw's inbound default is
+    // met, so the posture does not credit the default and neither does the page.
+    const docker = { process: "docker-proxy", level: "critical", pastFirewall: "docker" }
+    const sockets = [
+      listener({ port: 5432, pid: 1883700, ...docker }),
+      listener({ port: 5432, pid: 1883706, family: "ipv6", address: "::", ...docker }),
+    ]
+    expect(reachVerdict(sockets[0])).toBe("critical")
+    const [port] = dangerousPorts(sockets)
+    expect(port.level).toBe("critical")
+    expect(port.inboundDefault).toBeUndefined()
+    expect(port.pastFirewall).toBe("docker")
+    const [finding] = portFindings({ ports: sockets })
+    expect(finding.level).toBe("critical")
+    expect(finding.title).toBe("PostgreSQL answers on every interface")
+    expect(finding.detail).toBe("5432/tcp docker-proxy (published by Docker past the firewall)")
+    expect(finding.detail).not.toContain("inbound default")
+  })
+
+  test("one a rule admits from anywhere stays critical, and names the rule", () => {
+    const redis = listener({
+      port: 6379,
+      process: "redis-server",
+      level: "critical",
+      pastFirewall: "rule",
+      firewallRule: 10,
+    })
+    expect(reachVerdict(redis)).toBe("critical")
+    expect(pastFirewallWords(redis)).toBe("Firewall rule 10 admits it from anywhere")
+    const [finding] = portFindings({ ports: [redis] })
+    expect(finding.level).toBe("critical")
+    expect(finding.detail).toBe("6379/tcp redis-server (firewall rule 10 admits it from anywhere)")
+  })
+
+  test("the firewall's default is said beside the ports it holds when it does not hold all", () => {
+    const [finding] = portFindings({
+      ports: [
+        listener({ port: 6379, process: "redis-server", level: "warning", inboundDefault: "deny" }),
+        listener({
+          port: 5432,
+          process: "docker-proxy",
+          level: "critical",
+          pastFirewall: "docker",
+        }),
+      ],
+    })
+    expect(finding.level).toBe("critical")
+    expect(finding.detail).toBe(
+      "6379/tcp redis-server (the firewall's inbound default is deny), 5432/tcp docker-proxy (published by Docker past the firewall)",
+    )
+    // A port the default holds on one socket and not another is not held.
+    const [mixed] = dangerousPorts([
+      listener({ port: 5432, process: "postgres", level: "warning", inboundDefault: "deny" }),
+      listener({
+        port: 5432,
+        process: "docker-proxy",
+        address: "57.131.21.87",
+        scope: "interface",
+        reach: "public",
+        network: "public",
+        level: "critical",
+        pastFirewall: "docker",
+      }),
+    ])
+    expect(mixed.inboundDefault).toBeUndefined()
+    expect(mixed.level).toBe("critical")
+    expect(pastFirewallWords(mixed)).toBe("Published by Docker past the firewall")
+    expect(pastFirewallWords(listener({ port: 5432 }))).toBeUndefined()
   })
 
   test("two databases on three sockets are two, each named once with every address", () => {

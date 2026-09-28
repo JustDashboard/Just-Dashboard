@@ -45,11 +45,17 @@ func (s *Server) handlePortList(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return httpx.Internal(err)
 	}
-	// Graded by the posture's own judgement, so the page cannot call a
-	// database critical that the posture calls a warning, and named by it:
-	// the tailnet on tailscale0, Docker's bridge docker0.
-	network := netsec.ReadHostNetwork(ctx)
-	status := <-firewall
+	placeListeners(listeners, netsec.ReadHostNetwork(ctx), <-firewall)
+	httpx.JSON(w, http.StatusOK, listeners)
+	return nil
+}
+
+// placeListeners places each socket on its network and grades it by the
+// posture's own judgement, so the page cannot call a database critical that
+// the posture calls a warning, nor credit a firewall the posture does not:
+// the tailnet on tailscale0, Docker's bridge docker0, a port Docker
+// publishes past ufw's deny.
+func placeListeners(listeners []proxysvc.Listener, network netsec.HostNetwork, firewall *netsec.FirewallStatus) {
 	for i := range listeners {
 		l := &listeners[i]
 		place := network.Place(l.Address)
@@ -58,10 +64,10 @@ func (s *Server) handlePortList(w http.ResponseWriter, r *http.Request) error {
 		l.Interface = place.Interface
 		grade := netsec.GradePort(netsec.ExposedPort{
 			Port: l.Port, Protocol: l.Protocol, Address: l.Address, Process: l.Process, Exposed: l.Exposed,
-		}, network, status)
+		}, network, firewall)
 		l.Level = grade.Level
 		l.InboundDefault = grade.InboundDefault
+		l.PastFirewall = string(grade.PastFirewall)
+		l.FirewallRule = grade.FirewallRule
 	}
-	httpx.JSON(w, http.StatusOK, listeners)
-	return nil
 }

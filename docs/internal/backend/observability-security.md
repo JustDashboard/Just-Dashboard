@@ -120,11 +120,23 @@ position sell a score out of a hundred, which is a number to optimise rather tha
   `docker` (Docker's `docker0` or `br-<network id>`), another `bridge`, `link-local` — and the interface,
   and `GET /ports` returns all three as `Listener.Reach`, `Network` and `Interface`, so the ports page
   words a socket as the posture judges it. A firewall that is on and does not allow inbound by default
-  holds every port finding to a warning and is named in its detail; one whose inbound default could not
-  be read is not counted on. `GradePort` levels one socket by exactly these rules — the same
-  `dangerAt` and `portLevel` `assessPorts` uses — and `GET /ports` returns its result as
-  `Listener.Level` and `InboundDefault`, reading the firewall status the posture reads, so the ports
-  page and the proxy overview colour a database as the posture levels it.
+  holds a port finding to a warning and is named in its detail — unless the default is not what the
+  socket's traffic meets. A socket `docker-proxy` holds is Docker's published port, forwarded by its NAT
+  rules before the input chain the default belongs to, so it keeps its reach's level and the detail says
+  it is "published by Docker past the firewall's inbound default". A socket an inbound rule admits from
+  anywhere keeps it too, and the detail names the rule ("firewall rule 10 admits it from anywhere"):
+  `admittingRule` walks the rules in order, first match deciding as ufw and iptables do — ufw's and
+  firewalld's `ALLOW`/`LIMIT` or iptables' `ACCEPT` in `INPUT` (its port read from the match text by
+  `iptablesPort`), by a port, list or range, a firewalld service the catalogue names (`Firewalld`), or
+  no port at all; a refusal from anywhere to any address met first ends the walk (not for iptables,
+  whose interface column is not read). A rule limited to an interface, to a tailnet's or bridge's
+  destination address, or naming a ufw application profile is not weighed, so an allow on
+  `tailscale0` still leaves the internet to the default. One whose inbound default could not be read
+  is not counted on. `GradePort` levels one socket by exactly these rules — the same `dangerAt` and
+  `portLevel` `assessPorts` uses — and `GET /ports` returns its result as `Listener.Level`,
+  `InboundDefault`, `PastFirewall` (`docker` or `rule`) and `FirewallRule`, reading the firewall status
+  the posture reads, so the ports page and the proxy overview colour a database as the posture levels
+  it.
 - **A check that could not run is not a pass.** `Posture.Skipped` says which is which, because a zero and
   an unanswerable question look identical: `SecurityFiltering` is false on Alpine/Arch (no advisory
   data), `LoginRecordRead` false wherever `last`/`lastb` are missing (util-linux-extra, absent from

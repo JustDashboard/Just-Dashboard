@@ -311,3 +311,42 @@ func TestPortListLevelsADatabaseAsThePostureDoes(t *testing.T) {
 	}
 	t.Errorf("the posture raised no %s", id)
 }
+
+// GET /ports carries the posture's grade whole, why the firewall does not
+// hold a socket included. On a host whose ufw denies inbound by default, the
+// page drew amber and credited the firewall for a Postgres Docker publishes
+// on every interface — which Docker forwards before ufw's default is met —
+// and for a Redis a rule opens to anywhere.
+func TestPortListSaysWhatGetsPastTheFirewall(t *testing.T) {
+	ufw := &netsec.FirewallStatus{
+		Backend: netsec.BackendUFW, Available: true, Enabled: true,
+		Policy: netsec.DefaultPolicy{Incoming: "deny"},
+		Rules: []netsec.Rule{{Number: 10, Action: "ALLOW", Direction: "IN", From: "Anywhere",
+			To: "6379/tcp", Port: "6379", Protocol: "tcp"}},
+	}
+	listeners := []proxysvc.Listener{
+		{Protocol: "tcp", Family: "ipv4", Address: "0.0.0.0", Port: 5432, Process: "docker-proxy", Exposed: true},
+		{Protocol: "tcp", Family: "ipv4", Address: "0.0.0.0", Port: 6379, Process: "redis-server", Exposed: true},
+		{Protocol: "tcp", Family: "ipv4", Address: "0.0.0.0", Port: 27017, Process: "mongod", Exposed: true},
+	}
+	placeListeners(listeners, netsec.HostNetwork{}, ufw)
+	body, err := json.Marshal(listeners)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []map[string]any{
+		{"level": "critical", "pastFirewall": "docker"},
+		{"level": "critical", "pastFirewall": "rule", "firewallRule": float64(10)},
+		{"level": "warning", "inboundDefault": "deny"},
+	} {
+		for _, key := range []string{"level", "inboundDefault", "pastFirewall", "firewallRule"} {
+			if got[i][key] != want[key] {
+				t.Errorf("port %v: %s = %v, want %v (%s)", got[i]["port"], key, got[i][key], want[key], body)
+			}
+		}
+	}
+}

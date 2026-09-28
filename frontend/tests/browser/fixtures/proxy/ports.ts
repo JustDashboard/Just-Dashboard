@@ -402,6 +402,51 @@ export const firewalledDatabases = [
 ]
 
 /**
+ * Databases on a host whose ufw denies inbound by default, two of which get
+ * past it: Postgres Docker publishes on every interface in both families,
+ * which Docker forwards before ufw's default is met, and Redis, which ufw's
+ * rule 10 admits from anywhere. Both are the posture's critical; MongoDB,
+ * which nothing admits, is the warning the default holds it to.
+ */
+export const pastFirewallDatabases = [
+  { ...dockerProxy(5432, "ipv4", "0.0.0.0", 1883700), level: "critical", pastFirewall: "docker" },
+  { ...dockerProxy(5432, "ipv6", "::", 1883706), level: "critical", pastFirewall: "docker" },
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "0.0.0.0",
+    port: 6379,
+    pid: 3200,
+    process: "redis-server",
+    cmdline: "/usr/bin/redis-server *:6379",
+    user: "redis",
+    scope: "all",
+    reach: "all",
+    network: "all",
+    exposed: true,
+    level: "critical",
+    pastFirewall: "rule",
+    firewallRule: 10,
+  },
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "0.0.0.0",
+    port: 27017,
+    pid: 3300,
+    process: "mongod",
+    cmdline: "/usr/bin/mongod --config /etc/mongod.conf",
+    user: "mongodb",
+    scope: "all",
+    reach: "all",
+    network: "all",
+    exposed: true,
+    level: "warning",
+    inboundDefault: "deny",
+  },
+]
+
+/**
  * A service on docker0 in both families, its IPv6 half on the bridge's
  * link-local address: the longest pair of addresses a row folds.
  */

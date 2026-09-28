@@ -60,4 +60,11 @@ export type Listener = {
   level?: "critical" | "warning"
   /** The firewall's inbound default ("deny"), when it is what holds `level` to a warning. */
   inboundDefault?: string
+  /**
+   * Why a firewall refusing inbound by default does not hold the socket:
+   * Docker publishes it ahead of the default, or rule `firewallRule` admits
+   * it from anywhere. Absent where the default holds it or there is none.
+   */
+  pastFirewall?: "docker" | "rule"
+  firewallRule?: number
 }

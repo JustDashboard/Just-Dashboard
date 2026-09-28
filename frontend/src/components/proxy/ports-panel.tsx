@@ -24,6 +24,7 @@ import {
   internetHint,
   networkWords,
   onUplink,
+  pastFirewallWords,
   privateHint,
   reachGroup,
   reachVerdict,
@@ -370,13 +371,15 @@ function Pids({ socket }: { socket: Socket }) {
  * the same socket, with the interface the address is on beneath it. The
  * label wraps rather than running into the next column: "the Docker API ·
  * Private uplink" is wider than the column. A database the firewall's
- * inbound default holds to a warning says so, as the posture's finding does.
+ * inbound default holds to a warning says so, as the posture's finding does,
+ * and so does one that gets past the default.
  */
 function ReachStatus({ socket }: { socket: Socket }) {
   const verdict = reachVerdict(socket)
   const words = networkWords(socket)
   if (!verdict) return <span className="text-xs text-muted-foreground">{words}</span>
   const service = dangerousService(socket)
+  const past = pastFirewallWords(socket)
   return (
     <div className="min-w-0" title={onUplink(socket) ? UPLINK_CAVEAT : undefined}>
       <Status
@@ -398,6 +401,7 @@ function ReachStatus({ socket }: { socket: Socket }) {
           Firewall&apos;s inbound default: {socket.inboundDefault}
         </p>
       )}
+      {service && past && <p className="mt-0.5 pl-5 text-hint text-muted-foreground">{past}</p>}
     </div>
   )
 }

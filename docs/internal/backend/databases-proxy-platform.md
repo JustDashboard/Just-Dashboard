@@ -288,7 +288,9 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   interfaces, so `GET /ports` fills them and `ListListeners` leaves them empty. `GET /ports` also fills
   `Listener.Level` and `InboundDefault` from `netsec.GradePort`, with the firewall status read beside the
   walk: the posture's level for a finding on that socket (empty where it raises none) and the firewall's
-  inbound default when that is what holds it to a warning. The ports page words a socket by its network
+  inbound default when that is what holds it to a warning, or `PastFirewall` — `docker` for a port
+  docker-proxy holds, `rule` with `FirewallRule` for one a rule admits from anywhere — when the default
+  does not hold it (see observability-security.md). The ports page words a socket by its network
   ("Tailnet only · tailscale0") and colours a database by `Level`, and the overview's attention finding
   is levelled by it, so neither can call critical what the posture calls a warning. `Listener.Family`
   (`ipv4`/`ipv6`) is the kernel table the socket is in, and `Listener.PPID` the owner's parent; the page
