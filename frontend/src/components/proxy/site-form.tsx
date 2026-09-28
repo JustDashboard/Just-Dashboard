@@ -47,6 +47,13 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   deriveIdentity,
@@ -1123,6 +1130,26 @@ function SiteFormBody({
                 onCheckedChange={(v) => set("accessLog", v)}
               />
             </OptionList>
+            {spec.accessLog && (
+              <Field
+                label="Log format"
+                htmlFor="site-log-format"
+                hint="Timed is what the traffic pages read latency from."
+              >
+                <Select
+                  value={spec.logFormat ?? "timed"}
+                  onValueChange={(v) => set("logFormat", v as SiteSpec["logFormat"])}
+                >
+                  <SelectTrigger id="site-log-format" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="timed">Timed (adds response time)</SelectItem>
+                    <SelectItem value="combined">Standard</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
           </FormSection>
 
           <FormSection title="Who may reach it">

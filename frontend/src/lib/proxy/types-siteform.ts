@@ -42,6 +42,8 @@ export type SiteSpec = {
   basicAuthFile?: string
   basicAuthRealm?: string
   accessLog: boolean
+  /** Timed adds the request time traffic analytics reads latency from; empty is timed. */
+  logFormat?: "timed" | "combined"
   locations: SiteLocation[]
   custom?: string
 }

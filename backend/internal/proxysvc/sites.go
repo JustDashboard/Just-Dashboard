@@ -64,7 +64,11 @@ type SiteSpec struct {
 	BasicAuthFile  string   `json:"basicAuthFile,omitempty"`
 	BasicAuthRealm string   `json:"basicAuthRealm,omitempty"`
 
-	AccessLog bool           `json:"accessLog"`
+	AccessLog bool `json:"accessLog"`
+	// LogFormat is "timed" (combined plus the request time, which traffic
+	// analytics reads latency from) or "combined", nginx's stock format.
+	// Empty is timed, the default for a new site.
+	LogFormat string         `json:"logFormat,omitempty"`
 	Locations []SiteLocation `json:"locations"`
 	// Custom is appended verbatim inside the server block. It is the escape
 	// hatch, and it is the one field not validated beyond refusing an
@@ -85,6 +89,33 @@ type SiteLocation struct {
 	// the folder itself would move every file it serves.
 	RootMode   string `json:"rootMode,omitempty"`
 	WebSockets bool   `json:"webSockets"`
+}
+
+// timedLog says whether the access log is written in the site's timed format.
+func (spec *SiteSpec) timedLog() bool {
+	return spec.LogFormat != "combined"
+}
+
+// logFormatName and connectionVar name the http-level objects the site owns.
+func (spec *SiteSpec) logFormatName() string { return NginxIdent(spec.Name) + "_timed" }
+
+func (spec *SiteSpec) connectionVar() string { return NginxIdent(spec.Name) + "_connection" }
+
+// usesWebSockets says whether any location the renderer writes forwards
+// upgrades, which is when the site's connection map is needed.
+func (spec *SiteSpec) usesWebSockets() bool {
+	if spec.Kind != "proxy" {
+		return false
+	}
+	if spec.WebSockets {
+		return true
+	}
+	for _, loc := range spec.Locations {
+		if loc.WebSockets && !loc.servesFolder() {
+			return true
+		}
+	}
+	return false
 }
 
 // servesFolder says whether a location serves files rather than forwarding.
@@ -169,6 +200,9 @@ func ValidateSpec(spec *SiteSpec) error {
 		if !absPathRe.MatchString(spec.CertPath) || !absPathRe.MatchString(spec.KeyPath) {
 			return fmt.Errorf("a TLS site needs an absolute path to its certificate and key")
 		}
+	}
+	if spec.LogFormat != "" && spec.LogFormat != "timed" && spec.LogFormat != "combined" {
+		return fmt.Errorf("log format must be timed or combined")
 	}
 	if spec.ClientMaxBody != "" && !bodySizeRe.MatchString(spec.ClientMaxBody) {
 		return fmt.Errorf("upload limit must be a size like 50m")

@@ -34,6 +34,10 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	sawGzip := false
 	var custom []string
 	inCustom := false
+	// Depth of an http-level object at the top of the file (a map, an
+	// upstream, a zone). Its contents are its own syntax, not a server's:
+	// a map entry or a geo range read as a directive could land in a field.
+	objectDepth := 0
 
 	// read handles one statement. It is a closure over the reader's state so
 	// that a line carrying several statements — `location / { proxy_pass
@@ -41,6 +45,23 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	// piece read in turn, where the line reader used to swallow everything
 	// after the opening brace.
 	read := func(raw string) {
+		if objectDepth > 0 {
+			if strings.HasSuffix(raw, "{") {
+				objectDepth++
+			} else if raw == "}" {
+				objectDepth--
+			}
+			return
+		}
+		if depth == 0 {
+			name, _ := cutDirective(raw)
+			if httpObjects[name] {
+				if strings.HasSuffix(raw, "{") {
+					objectDepth = 1
+				}
+				return
+			}
+		}
 		if m := locationOpenRe.FindStringSubmatch(raw); m != nil {
 			depth++
 			location = m[1]
@@ -110,6 +131,10 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		case "access_log":
 			sawAccessLog = true
 			spec.AccessLog = value != "off"
+			spec.LogFormat = ""
+			if spec.AccessLog {
+				spec.LogFormat = accessLogFormat(value)
+			}
 		case "auth_basic":
 			spec.BasicAuthRealm = strings.Trim(value, `"`)
 		case "auth_basic_user_file":
@@ -228,6 +253,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	// only ever decides for the ones the form did not write.
 	if !managed && !sawAccessLog {
 		spec.AccessLog = true
+		spec.LogFormat = "combined"
 	}
 	// The same for compression: a hand-written site without a gzip line
 	// inherits the http block's, which is on in Debian's nginx.conf. A
@@ -284,6 +310,26 @@ const (
 	customMarker       = "# Added by hand from the site form."
 	exploitDotLocation = `/\.(?!well-known)`
 )
+
+// httpObjects are the http-level statements a site file may carry above its
+// servers, which the renderer writes for the site and the parser steps over.
+var httpObjects = map[string]bool{
+	"map": true, "geo": true, "upstream": true, "log_format": true,
+	"limit_req_zone": true, "limit_conn_zone": true, "proxy_cache_path": true,
+}
+
+// accessLogFormat reads which format an access_log line writes in. One of
+// this renderer's timed formats is "timed" whichever site's name it carries,
+// so a file copied under a new name keeps its format; nginx's default and
+// any format the form does not write are "combined", the one the form can
+// offer in its place.
+func accessLogFormat(value string) string {
+	fields := strings.Fields(value)
+	if len(fields) >= 2 && strings.HasPrefix(fields[1], "jd_") && strings.HasSuffix(fields[1], "_timed") {
+		return "timed"
+	}
+	return "combined"
+}
 
 var locationOpenRe = regexp.MustCompile(`^location\s+(?:[~^=*]+\s+)?(\S+)\s*\{`)
 

@@ -47,6 +47,8 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 	l.add("# form on the Proxy page reads it back either way.")
 	l.blank()
 
+	renderHTTPBlock(l, spec)
+
 	if spec.TLS && spec.ForceHTTPS {
 		renderRedirectServer(l, names, spec.ManagedACME)
 		l.blank()
@@ -112,6 +114,43 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 	}
 	l.add("}")
 	return l.String(), nil
+}
+
+// timedLogFormat is combined followed by named fields, so a reader of the
+// stock format still reads every line and one that knows the names gets the
+// request time, the upstream's share of it and the cache's verdict.
+const timedLogFormat = `'$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent" rt=$request_time urt="$upstream_response_time" host=$host cs=$upstream_cache_status'`
+
+// renderHTTPBlock writes the http-level objects the site owns, above its
+// servers. A site file is included inside http {}, so its top is http
+// context; what is defined there is deleted with the site. The names are
+// global to the whole configuration, so each carries the site's own
+// NginxIdent: a second log_format of the same name fails every reload, and a
+// map variable defined twice is decided by whichever file nginx reads last.
+func renderHTTPBlock(l *lines, spec *SiteSpec) {
+	wrote := false
+	if spec.usesWebSockets() {
+		l.add("# The standard upgrade map: a request asking to be upgraded is passed")
+		l.add("# on as one, and every other request closes its upstream connection")
+		l.add("# rather than forwarding whatever Connection header the client sent.")
+		l.add("map $http_upgrade $%s {", spec.connectionVar())
+		l.add("    default upgrade;")
+		l.add("    ''      close;")
+		l.add("}")
+		wrote = true
+	}
+	if spec.AccessLog && spec.timedLog() {
+		if wrote {
+			l.blank()
+		}
+		l.add("# nginx's combined format with the time taken added, which is what")
+		l.add("# the dashboard's traffic pages read latency from.")
+		l.add("log_format %s %s;", spec.logFormatName(), timedLogFormat)
+		wrote = true
+	}
+	if wrote {
+		l.blank()
+	}
 }
 
 // renderRedirectServer is the plain-HTTP half of a TLS site.
@@ -196,7 +235,11 @@ func renderServerOptions(l *lines, spec *SiteSpec) {
 		l.add("    gzip off;")
 	}
 	if spec.AccessLog {
-		l.add("    access_log /var/log/nginx/%s.access.log;", spec.Name)
+		if spec.timedLog() {
+			l.add("    access_log /var/log/nginx/%s.access.log %s;", spec.Name, spec.logFormatName())
+		} else {
+			l.add("    access_log /var/log/nginx/%s.access.log;", spec.Name)
+		}
 		l.add("    error_log  /var/log/nginx/%s.error.log;", spec.Name)
 	} else {
 		l.add("    access_log off;")
@@ -273,13 +316,8 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 	l.add("        proxy_set_header X-Forwarded-Proto $scheme;")
 	l.add("        proxy_set_header X-Forwarded-Host  $host;")
 	if loc.WebSockets {
-		l.add("        # Passing the client's own Connection header through, rather than")
-		l.add("        # the usual $connection_upgrade map: a map's variable is shared by")
-		l.add("        # every site, and the last file to define it silently decides for")
-		l.add("        # all of them. This keeps keep-alive working for ordinary requests")
-		l.add("        # and upgrades the ones that ask to be upgraded.")
 		l.add("        proxy_set_header Upgrade    $http_upgrade;")
-		l.add("        proxy_set_header Connection $http_connection;")
+		l.add("        proxy_set_header Connection $%s;", spec.connectionVar())
 	}
 	if spec.ProxyTimeout > 0 {
 		timeout := strconv.Itoa(spec.ProxyTimeout) + "s"

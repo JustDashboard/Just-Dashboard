@@ -12,8 +12,9 @@
 // Two formats arrive here, because the deployment section has two ingress
 // drivers. The Docker Caddy ingress writes structured JSON, which carries the
 // request duration. Managed host nginx writes the stock `combined` format,
-// which does not — so latency is an optional reading rather than a column of
-// zeros, and the page says which of the two it is looking at.
+// which does not, or the site builder's timed one, which is combined with an
+// rt= field after it — so latency is an optional reading rather than a column
+// of zeros, and the page says which of the two it is looking at.
 package accesslog
 
 import (
@@ -306,6 +307,16 @@ func parseCombined(line string) (Entry, bool) {
 	}
 	if agent, ok := quoted(&rest); ok && agent != "-" {
 		entry.UserAgent = agent
+	}
+	// The site builder's timed format is combined with named fields after
+	// it; rt= is $request_time in seconds.
+	for _, field := range strings.Fields(rest) {
+		if raw, ok := strings.CutPrefix(field, "rt="); ok {
+			if seconds, err := strconv.ParseFloat(raw, 64); err == nil {
+				entry.duration, entry.timed = seconds*1000, true
+			}
+			break
+		}
 	}
 	return entry, true
 }

@@ -26,6 +26,7 @@ export const BLANK: SiteSpec = {
   allowFrom: [],
   denyFrom: [],
   accessLog: true,
+  logFormat: "timed",
   locations: [],
 }
 

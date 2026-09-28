@@ -395,15 +395,26 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   - **Compression off is written `gzip off;`**: Debian's `nginx.conf` turns gzip on for the whole http
     block, and a site saying nothing inherits it. A managed file with no gzip line predates this and was
     written with the switch off; a hand-written one reads back as on.
-  - WebSocket upgrades pass `$http_connection` through rather than a `$connection_upgrade` map. The
-    reason once given here — that a `map` is only legal in the `http` block and a site file cannot reach
-    it — is **false**: `sites-enabled/*` and `conf.d/*.conf` are both included *inside* `http {}`, so the
-    top of a site file, outside its `server` blocks, is http context. `map`, `upstream`,
-    `limit_req_zone`, `limit_conn_zone`, `proxy_cache_path`, `geo` and `log_format` written there pass
-    `nginx -t` (checked on nginx 1.26.3) and are deleted with the site. Their names are global to the
-    whole configuration and a duplicate zone is an emergency, so each is named with `NginxIdent(site)`.
-    A `map` variable defined twice is not an error: the last file to define it decides for every site,
-    which is the reason the generated comment now gives.
+  - **A site file owns its http-level objects** (`renderHTTPBlock`, above the first `server`).
+    `sites-enabled/*` and `conf.d/*.conf` are both included *inside* `http {}`, so the top of a site
+    file is http context: `map`, `upstream`, `limit_req_zone`, `limit_conn_zone`, `proxy_cache_path`,
+    `geo` and `log_format` written there pass `nginx -t` (checked on nginx 1.26.3) and are deleted with
+    the site. Their names are global, so each is `NginxIdent(site)` plus a suffix: a second
+    `log_format` of one name fails the reload, and a `map` variable defined twice is decided by the
+    last file read. `ParseSiteSpec` steps over these statements (and whatever is inside their blocks)
+    rather than reading a map entry or a geo range as a server directive.
+  - **WebSockets use the standard upgrade map**, per site: `map $http_upgrade $jd_<id>_connection
+    { default upgrade; '' close; }`, with `Connection $jd_<id>_connection` in each upgrading location.
+    It replaces passing the client's `$http_connection` through, whose comment wrongly said a map had
+    to be shared by every site. Both forms read back as WebSockets on (the `Upgrade` header is what
+    the parser keys on), and the map is written only when a rendered proxy location upgrades.
+  - **Access logs are timed by default** (`SiteSpec.logFormat`: `timed`, the default when empty, or
+    `combined`). Timed is `log_format jd_<id>_timed` — combined followed by `rt=$request_time
+    urt="$upstream_response_time" host=$host cs=$upstream_cache_status` — so a stock combined reader
+    still reads every line and `accesslog.parseCombined` takes latency from `rt=`. An `access_log`
+    naming any `jd_*_timed` format reads back as timed; a file with none, or with another format,
+    reads back as `combined`, which the drift list already reports as the form writing its own
+    `access_log`. The form offers the choice under Hardening beside the access-log switch.
   - **An `allow` list is fenced with `deny all`.** nginx stops at the first match and otherwise permits,
     so a site restricted to `10.0.0.0/8` was reachable from anywhere; expecting the operator to write the
     fence themselves into a box labelled "Deny" fails too, since `0.0.0.0/0` lets in every IPv6 client.
