@@ -31,6 +31,7 @@ func (s *Server) mountProxyRoutes(r chi.Router) {
 			s.mountSiteBuilderRoutes(r)
 			s.mountSiteOpsRoutes(r)
 		})
+		r.Route("/proxy/realip", s.mountRealIPRoutes)
 		r.Route("/proxy/streams", s.mountStreamRoutes)
 		r.Route("/proxy/modules", s.mountModuleRoutes)
 		r.Route("/proxy/auth-files", s.mountAuthFileRoutes)

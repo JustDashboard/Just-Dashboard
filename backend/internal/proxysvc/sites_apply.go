@@ -128,6 +128,7 @@ func (s *Service) ApplySite(ctx context.Context, spec *SiteSpec, enable, reload,
 // carries what enabling it would meet.
 func (s *Service) SaveSite(ctx context.Context, spec *SiteSpec, opts SiteSave) (*SiteResult, error) {
 	s.SetPagesDir(spec)
+	s.SetRealIPDir(spec)
 	content, err := RenderNginx(spec)
 	if err != nil {
 		return nil, err
@@ -139,6 +140,9 @@ func (s *Service) SaveSite(ctx context.Context, spec *SiteSpec, opts SiteSave) (
 	}
 	if err := ensureCacheRoot(spec); err != nil {
 		return nil, fmt.Errorf("the cache folder could not be made: %w", err)
+	}
+	if err := s.ensureCloudflareRanges(spec); err != nil {
+		return nil, fmt.Errorf("Cloudflare's ranges could not be written: %w", err)
 	}
 	res, err := s.saveSiteLocked(ctx, spec, content, opts)
 	if errors.Is(err, errSiteReloadFailed) {

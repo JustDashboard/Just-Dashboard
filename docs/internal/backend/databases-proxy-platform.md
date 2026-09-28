@@ -823,6 +823,23 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   nginx takes a missing file as a MISS, but its shared-memory size accounting only catches up as the
   cache manager evicts. `VHost.cached` shows the verb.
 
+  **Visitor address** (`site_realip.go`, form "Visitor address"). `SiteSpec.RealIP{Source, Trusted,
+  Header, CloudflareOnly}`: `cloudflare` renders `include <nginxDir>/jd-realip/cloudflare.conf;` +
+  `real_ip_header CF-Connecting-IP` at server level; `proxies` renders `set_real_ip_from` per `Trusted`
+  entry (IP/CIDR, a `/0` refused), `real_ip_header <Header>` (a header name) and, for X-Forwarded-For,
+  `real_ip_recursive on`. It sits before the maintenance check, so address lists, limits, maintenance
+  bypass and the log all see the visitor. `CloudflareOnly` (Cloudflare only, warns) adds an http-level
+  `geo $realip_remote_addr $jd_<id>_edge {default 0; include …/cloudflare.geo;}` and `if ($jd_<id>_edge
+  = 0) { return 444; }` in the site server and its redirect server. PROXY protocol is not offered: nginx
+  ORs `proxy_protocol` across every server on one address:port, so one site would switch it on for all
+  of :443. The two files are owned (`# source=cloudflare|built-in fetched=<RFC3339>` header); `SaveSite`
+  writes the built-in list when a Cloudflare site needs them and they are missing. `realIPFiles` refuses
+  a `jd-realip` that does not resolve directly under the nginx directory and a non-regular file.
+  `GET /proxy/realip/cloudflare` (any signed-in account; public ranges) reads the list;
+  `POST /proxy/realip/cloudflare/refresh` (system.admin, audited `proxy.realip.refresh`) downloads
+  cloudflare.com/ips-v4 and ips-v6 (10s, 64 KiB each, every line a masked CIDR of its family, v4 ≥ /8,
+  v6 ≥ /16), writes both files, runs `nginx -t` and restores both on failure (422), then reloads.
+
   **Path routing** (`sites.go` `validLocation`/`validUpstreamTLS`, `sites_render.go` `renderLocation`/
   `renderUpstreamTLS`, form "Paths that go somewhere else" + `site-routes.ts` preview table).
   `SiteLocation.Match` is empty (prefix), `=`, `^~`, `~` or `~*`; `locationPathRe` refuses `; ' " $ ( )`

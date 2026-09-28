@@ -123,6 +123,12 @@ type SiteSpec struct {
 	// keeps the application's responses on disk. Nil sets neither.
 	StaticCache *StaticCache `json:"staticCache,omitempty"`
 	ProxyCache  *ProxyCache  `json:"proxyCache,omitempty"`
+	// RealIP puts the visitor's address back behind Cloudflare or a load
+	// balancer. Nil leaves the connecting address as it is.
+	RealIP *SiteRealIP `json:"realIp,omitempty"`
+	// RealIPDir is where the shared Cloudflare lists are. The service sets
+	// it from its own nginx directory; it is never taken from a request.
+	RealIPDir string `json:"-"`
 	// PagesDir is where the site's pages are served from. The service sets
 	// it from its own nginx directory; it is never taken from a request.
 	PagesDir string `json:"-"`
@@ -442,6 +448,9 @@ func ValidateSpec(spec *SiteSpec) error {
 	if err := validateLimits(spec); err != nil {
 		return err
 	}
+	if err := validateRealIP(spec); err != nil {
+		return err
+	}
 	if err := validateCache(spec); err != nil {
 		return err
 	}
@@ -693,6 +702,7 @@ func SpecWarnings(spec *SiteSpec) []string {
 	warnings = append(warnings, limitsWarnings(spec)...)
 	warnings = append(warnings, poolWarnings(spec)...)
 	warnings = append(warnings, cacheWarnings(spec)...)
+	warnings = append(warnings, realIPWarnings(spec)...)
 	if spec.Kind == "proxy" && (spec.UpstreamSNI || spec.UpstreamVerify) && !spec.hasHTTPSUpstream() {
 		warnings = append(warnings,
 			"The upstream TLS settings apply only to an https:// upstream, and this site forwards to none.")
