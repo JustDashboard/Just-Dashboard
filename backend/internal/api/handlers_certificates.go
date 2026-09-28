@@ -7,9 +7,11 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
@@ -24,11 +26,19 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/", s.handle(s.handleCertList))
 	r.Method(http.MethodGet, "/certbot", s.handle(s.handleCertbot))
 	r.Method(http.MethodGet, "/dns-providers", s.handle(s.handleDNSProviders))
+	// What a listed file holds, read from disk: the chain, and of the key
+	// only its path, mode and whether it matches.
+	r.Method(http.MethodGet, "/detail", s.handle(s.handleCertDetail))
+	// Decodes pasted text in memory; nothing is fetched or kept.
+	r.Method(http.MethodPost, "/decode", s.handle(s.handleCertDecode))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		// A handshake with each site that names a certificate: loopback
 		// dials only, and only the page's reload offer needs them.
 		r.Method(http.MethodGet, "/served", s.handle(s.handleCertServed))
+		// The timeline reads the audit trail and the renewal record, both
+		// administrators' reading.
+		r.Method(http.MethodGet, "/history", s.handle(s.handleCertHistory))
 		r.Method(http.MethodPost, "/issue", s.handle(s.handleCertIssue))
 		r.Method(http.MethodPost, "/import", s.handle(s.handleCertImport))
 		r.Method(http.MethodPost, "/dns-credentials", s.handle(s.handleDNSCredentials))
@@ -90,6 +100,88 @@ func (s *Server) handleCertServed(w http.ResponseWriter, r *http.Request) error 
 		return httpx.BadRequest("%v", err)
 	}
 	httpx.JSON(w, http.StatusOK, served)
+	return nil
+}
+
+// handleCertDetail answers with the certificate file at ?path=, which must be
+// one the inventory lists.
+func (s *Server) handleCertDetail(w http.ResponseWriter, r *http.Request) error {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		return httpx.BadRequest("path is required")
+	}
+	detail, err := s.modules.proxy.CertificateDetail(path)
+	if errors.Is(err, proxysvc.ErrCertificateNotListed) {
+		return httpx.Err(http.StatusForbidden, "not_listed", "Only a certificate the list shows can be read.")
+	}
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	httpx.JSON(w, http.StatusOK, detail)
+	return nil
+}
+
+// handleCertHistory is the timeline of the certificate named ?name=: the
+// versions certbot archived, what was done to it here, and the renewal runs
+// that failed it.
+func (s *Server) handleCertHistory(w http.ResponseWriter, r *http.Request) error {
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		return httpx.BadRequest("name is required")
+	}
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	events := proxysvc.ArchivedVersions(name)
+	entries, _, err := s.Audit.List(ctx, audit.Filter{Action: "certificates.", Limit: 1000})
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	for _, e := range entries {
+		// Batch actions name every certificate they touched, joined.
+		if !slices.Contains(strings.Split(e.Target, ", "), name) {
+			continue
+		}
+		title := e.Action
+		if !e.Success {
+			title += " (failed)"
+		}
+		events = append(events, proxysvc.CertificateEvent{
+			Time: e.TS, Kind: "audit", Title: title, Detail: "by " + e.Username,
+		})
+	}
+	var logNote string
+	if proxysvc.CertbotLineageExists(name) {
+		log, err := s.modules.proxy.RenewalLog(ctx)
+		if err != nil {
+			logNote = "Renewal failures could not be read: " + err.Error()
+		}
+		events = append(events, proxysvc.RenewalFailuresFor(log, name)...)
+	}
+	sort.SliceStable(events, func(i, j int) bool { return events[i].Time.After(events[j].Time) })
+	if events == nil {
+		events = []proxysvc.CertificateEvent{}
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"events": events, "note": logNote})
+	return nil
+}
+
+// handleCertDecode decodes a pasted PEM certificate chain or signing request.
+func (s *Server) handleCertDecode(w http.ResponseWriter, r *http.Request) error {
+	var req struct {
+		PEM string `json:"pem"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, proxysvc.MaxDecodeBytes+4<<10)
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if len(req.PEM) > proxysvc.MaxDecodeBytes {
+		return httpx.Err(http.StatusRequestEntityTooLarge, "too_large", "Paste at most 256 KiB.")
+	}
+	decoded, err := proxysvc.DecodePEM(req.PEM)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	httpx.JSON(w, http.StatusOK, decoded)
 	return nil
 }
 
