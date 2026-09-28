@@ -55,6 +55,7 @@ export function streamSpecOf(stream: StreamSpec): StreamSpec {
     upstreamVerify,
     upstreamCa,
     logConnections,
+    routes,
   } = stream
   return {
     name,
@@ -84,6 +85,7 @@ export function streamSpecOf(stream: StreamSpec): StreamSpec {
     upstreamVerify,
     upstreamCa,
     logConnections,
+    routes,
   }
 }
 

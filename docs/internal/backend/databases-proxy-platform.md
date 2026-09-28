@@ -474,6 +474,17 @@ ownership and cleanup, then removes its own containers/volumes/networks.
     file saved for later would otherwise fail the reload that connects the directory. `Certificate.UsedByStreams`
     lists the unpaused streams serving a certificate (source `stream:<name>` when only a stream names it).
     `proxy_ssl_verify_depth`, protocols, ciphers and client certificates are hand-written.
+  - **Routes by TLS name** (`stream_sni.go`). `Routes []{name, upstream}` writes `map
+    $ssl_preread_server_name $<ident>_sni { hostnames; <name> <ident>_sniN; default <ident>_backend; }`, one
+    `upstream <ident>_sniN` per route (a host name resolves at load, no resolver needed), and `ssl_preread on;
+    proxy_pass $<ident>_sni;` in the server. The pool is the default for any other name, no SNI, or non-TLS.
+    TCP only, refused with `TLS` or `UpstreamTLS` (the TLS passes through unopened); names are lowercased,
+    must match `domainRe` and hold a dot (so no map keyword like `default` or `include`), at most 64, no
+    duplicates; route upstreams go through `validStreamUpstream`. `StreamModule.Preread` reads
+    `--with-stream_ssl_preread_module`, and `ApplyStream` refuses routes with `ErrNoStreamPreread` (409
+    `stream_preread_missing`). The parser reads the map, the route blocks and `ssl_preread` back and names
+    any other shape. A site already on the port (443) is refused by the port check like any other holder.
+    The upstream Test dials the pool only, not the routes' backends. Audited as `routes` in `proxy.stream.apply`.
   - **Testing a stream** (`stream_dial.go`). `POST /proxy/streams/test {target, port, protocol, mode,
     query?}` (system.admin — it dials an address the caller chose — and audited `proxy.stream.test`) dials
     from the host's network namespace inside 5 s: `mode: upstream` the forward's target, `mode: nginx` the

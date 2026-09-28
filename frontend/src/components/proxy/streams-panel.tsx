@@ -94,6 +94,7 @@ import { VerbBar, VerbMenu, type Verb } from "@/components/verbs"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { StreamSetup } from "@/components/proxy/stream-setup"
 import { AccessRules } from "@/components/proxy/access-rules"
+import { StreamRoutes } from "@/components/proxy/stream-routes"
 import { StreamServers } from "@/components/proxy/stream-servers"
 import { StreamTLS } from "@/components/proxy/stream-tls"
 import { StreamTrafficPanel } from "@/components/proxy/stream-traffic"
@@ -873,6 +874,8 @@ function describe(stream: StreamEntry): string {
       (stream.protocol === "both" ? "one reply per UDP session" : "one reply per session"),
     stream.servers &&
       `${stream.servers.length} servers${stream.balance ? `, ${BALANCE_LABELS[stream.balance]}` : ""}`,
+    stream.routes &&
+      `${stream.routes.length} ${stream.routes.length === 1 ? "route" : "routes"} by TLS name`,
     stream.proxyProtocol && "PROXY header",
     stream.timeout && `${duration(stream.timeout)} idle timeout`,
     stream.connectTimeout && `${duration(stream.connectTimeout)} connect timeout`,
@@ -1310,6 +1313,7 @@ function StreamForm({
               !spec.listen ||
               !spec.upstream ||
               spec.servers?.some((server) => !server.address.trim()) ||
+              spec.routes?.some((route) => !route.name.trim() || !route.upstream.trim()) ||
               !timed ||
               accessProblem !== "" ||
               (spec.tls && (!spec.certPath || !spec.keyPath))
@@ -1483,9 +1487,11 @@ function StreamForm({
             pool={spec}
             onChange={(pool) => edit(pool)}
             hint={
-              target?.exposed
-                ? `${target.container} publishes this port on every address, so it is reachable around the stream, where these rules do not apply. Publish it on 127.0.0.1 instead.`
-                : "host:port of the service behind it, or unix:/path for a local socket."
+              spec.routes
+                ? "The default: host:port or unix:/path for any TLS name no route below matches."
+                : target?.exposed
+                  ? `${target.container} publishes this port on every address, so it is reachable around the stream, where these rules do not apply. Publish it on 127.0.0.1 instead.`
+                  : "host:port of the service behind it, or unix:/path for a local socket."
             }
             placeholder={`10.0.0.5:${presetPort ?? 5432}`}
             picker={
@@ -1522,6 +1528,8 @@ function StreamForm({
               )
             }
           />
+
+          <StreamRoutes spec={spec} module={status.module} onChange={edit} />
 
           <StreamTLS spec={spec} module={status.module} open={open} onChange={edit} />
 
