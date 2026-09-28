@@ -100,6 +100,13 @@ type Listener struct {
 	// exposed socket, for every port rather than only the dangerous ones
 	// Level grades. GET /ports fills it from netsec.JudgeFirewall.
 	Firewall *ListenerFirewall `json:"firewall,omitempty"`
+	// Routes, Stream and ServedSites are what the proxy does with the
+	// socket: the sites forwarding to it, the nginx stream listening on it,
+	// and on nginx's own sockets how many sites it serves there. GET /ports
+	// fills them from AttachProxy.
+	Routes      []ListenerRoute `json:"routes,omitempty"`
+	Stream      string          `json:"stream,omitempty"`
+	ServedSites int             `json:"servedSites,omitempty"`
 }
 
 // ListenerFirewall is netsec's FirewallVerdict in the listing's terms.

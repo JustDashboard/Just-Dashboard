@@ -1380,7 +1380,8 @@ func (s *Server) handleContainerRoutes(w http.ResponseWriter, r *http.Request) e
 			Binding:       p.Summary,
 			URL:           p.URL(),
 		}
-		if v := matchVHost(vhosts, p.HostPort); v != nil {
+		if sites := proxysvc.SitesForUpstreamPort(vhosts, p.HostPort, p.HostIP); len(sites) > 0 {
+			v := sites[0]
 			route.VHost = v.Name
 			route.TLS = v.TLS
 			if len(v.ServerNames) > 0 {
@@ -1526,28 +1527,6 @@ func judgeReach(port dockerx.PortExposure, route PortRoute) (reach, reasoning st
 		return reachExternal, "Bound to every interface, and the firewall's default incoming policy is " +
 			route.Firewall.DefaultIncoming + ".", true
 	}
-}
-
-// matchVHost finds a proxy site forwarding to a port on this machine.
-//
-// Matched on the port alone rather than on the whole address: an upstream may
-// be written as localhost:3000, 127.0.0.1:3000 or [::1]:3000, and all three
-// mean the same thing. A port collision between two sites is possible in
-// principle and is not worth guarding against — both would be pointing at the
-// same service.
-func matchVHost(vhosts []proxysvc.VHost, port int) *proxysvc.VHost {
-	needle := ":" + strconv.Itoa(port)
-	for i := range vhosts {
-		if !vhosts[i].Enabled {
-			continue
-		}
-		for _, up := range vhosts[i].Upstreams {
-			if strings.HasSuffix(up, needle) || strings.Contains(up, needle+"/") {
-				return &vhosts[i]
-			}
-		}
-	}
-	return nil
 }
 
 // Compose includes, substitutions, plugins and driver options are evaluated by

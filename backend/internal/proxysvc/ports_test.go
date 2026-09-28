@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -136,7 +137,7 @@ func TestListenersFromKeepsWhatAcceptsAndSaysHowFarItReaches(t *testing.T) {
 		t.Fatalf("got %d listeners, want %d: %+v", len(got), len(want), got)
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Errorf("listener %d = %+v, want %+v", i, got[i], want[i])
 		}
 	}

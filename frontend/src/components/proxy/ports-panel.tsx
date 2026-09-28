@@ -74,6 +74,7 @@ import {
   type Socket,
 } from "@/components/proxy/ports"
 import { FirewallVerdict, firewallHandoffs, OrphanRules } from "@/components/proxy/ports-firewall"
+import { FreePortFinder, ProxyLine, proxyVerbs } from "@/components/proxy/ports-proxy"
 import {
   DEFAULT_SORT,
   facetCounts,
@@ -353,6 +354,7 @@ function PortsView() {
       })
     }
     if (admin) verbs.push(...firewallHandoffs(l, firewall.data, (href) => router.push(href)))
+    if (admin) verbs.push(...proxyVerbs(l, (href) => router.push(href)))
     return verbs
   }
   // A row's menu is named by the endpoint it acts on; two programs can share
@@ -589,20 +591,23 @@ function PortsView() {
               Hide loopback ephemeral ports <ChipCount>{facets.ephemeral}</ChipCount>
             </FilterChip>
           )}
-          {!wide && (
-            <Select value={sortParam(sort)} onValueChange={setSort}>
-              <SelectTrigger size="sm" className="ml-auto w-48" aria-label="Sort">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {SORT_CHOICES.map((choice) => (
-                  <SelectItem key={choice.value} value={choice.value}>
-                    {choice.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {admin && <FreePortFinder />}
+            {!wide && (
+              <Select value={sortParam(sort)} onValueChange={setSort}>
+                <SelectTrigger size="sm" className="w-48" aria-label="Sort">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SORT_CHOICES.map((choice) => (
+                    <SelectItem key={choice.value} value={choice.value}>
+                      {choice.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
         </Toolbar>
         <PanelBody flush>
           {visible.length === 0 ? (
@@ -778,6 +783,7 @@ function PortsView() {
                       {/* The tag waits a line, so the owner's name keeps the
                           width a phone has for it. */}
                       <OwnerLine socket={entry.socket} tagged />
+                      <ProxyLine socket={entry.socket} />
                       {entry.socket.source === "docker-nat" && (
                         <p className="text-hint text-muted-foreground">{NAT_WORDS}</p>
                       )}
@@ -982,6 +988,7 @@ function Owner({ socket }: { socket: Socket }) {
           {socket.self && <Tag>This dashboard</Tag>}
         </p>
         <OwnerLine socket={socket} />
+        <ProxyLine socket={socket} />
         {nat ? (
           <p className="text-hint text-muted-foreground">{NAT_WORDS}</p>
         ) : (
