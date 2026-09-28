@@ -1024,3 +1024,29 @@ func TestAssessSaysNothingWhenTheRecordIsReadableAndQuiet(t *testing.T) {
 		t.Error("three attempts is background noise, not a finding")
 	}
 }
+
+// A port Docker publishes is past the inbound default whatever holds it:
+// docker-proxy where the dashboard cannot see the holder, or nothing at all
+// where the userland proxy is off and NAT rules alone forward it.
+func TestAPortDockerPublishesIsPastTheDefaultWhateverHoldsIt(t *testing.T) {
+	deny := &FirewallStatus{Available: true, Enabled: true, Policy: DefaultPolicy{Incoming: "deny"}}
+	for _, l := range []ExposedPort{
+		{Port: 5432, Protocol: "tcp", Address: "0.0.0.0", Exposed: true, Published: true},
+		{Port: 5432, Protocol: "tcp", Address: "::", Process: "dockerd", Exposed: true, Published: true},
+	} {
+		if got := GradePort(l, thisHost, deny); got != (PortGrade{Level: "critical", PastFirewall: PastFirewallDocker}) {
+			t.Errorf("published %s:5432 held by %q behind deny = %+v, want critical past the firewall", l.Address, l.Process, got)
+		}
+	}
+	nat := ExposedPort{Port: 5432, Protocol: "tcp", Address: "0.0.0.0", Exposed: true, Published: true}
+	p := Assess(AssessInput{Network: thisHost, Firewall: deny, Listeners: []ExposedPort{nat}})
+	if f, _ := findingByID(p, "ports.exposed.tcp.5432"); f.Level != "critical" ||
+		f.Detail != "TCP/5432 is bound to every interface, published by Docker past the firewall's inbound default" {
+		t.Errorf("a port Docker's NAT alone publishes = %+v", f)
+	}
+	// Unpublished, the same socket is held by the default.
+	nat.Published = false
+	if got := GradePort(nat, thisHost, deny); got != (PortGrade{Level: "warning", InboundDefault: "deny"}) {
+		t.Errorf("an unpublished socket behind deny = %+v, want the default's warning", got)
+	}
+}

@@ -5,6 +5,10 @@ import {
   dangerousService,
   foldDualStack,
   internetHint,
+  ownerLabel,
+  ownerLinks,
+  ownerTitle,
+  ownerWords,
   pastFirewallWords,
   privateHint,
   privateNetworksHint,
@@ -600,5 +604,169 @@ describe("a database off this machine", () => {
         ports: [listener({ address: "127.0.0.1", port: 5432, scope: "loopback", exposed: false })],
       }),
     ).toEqual([])
+  })
+})
+
+// Owners as this host names them: Docker's Caddy ingress publishing 80 in
+// both families through two docker-proxy processes, a deployment's container,
+// socket-activated sshd, nginx under systemd, a PM2 app whose node calls its
+// main thread MainThread, and the dashboard's own proxy on the host network.
+const ingressContainer = {
+  id: "5e3ac6b0d3f1",
+  name: "just-dashboard-ingress",
+  image: "caddy:2-alpine",
+  published: true,
+}
+const docker4 = listener({
+  port: 80,
+  pid: 1883643,
+  ppid: 1755428,
+  process: "docker-proxy",
+  cmdline: "/usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 80",
+  manager: "systemd",
+  managerName: "docker.service",
+  container: ingressContainer,
+})
+const docker6 = {
+  ...docker4,
+  family: "ipv6",
+  address: "::",
+  pid: 1883650,
+  cmdline: "/usr/bin/docker-proxy -proto tcp -host-ip :: -host-port 80",
+}
+const deployed = listener({
+  address: "127.0.0.1",
+  port: 39069,
+  pid: 0,
+  process: "",
+  container: {
+    id: "e175e175e175",
+    name: "jd-e175-r4",
+    image: "c9051a2ac152",
+    published: true,
+    deployment: { projectId: 12, project: "shop", environment: "Production" },
+  },
+})
+const sshdActivated = listener({
+  port: 22,
+  pid: 2450808,
+  process: "sshd",
+  manager: "systemd",
+  managerName: "ssh.service",
+  socketUnit: "ssh.socket",
+  activates: "ssh.service",
+})
+const sshdIdle = {
+  ...sshdActivated,
+  pid: 1,
+  process: "systemd",
+  manager: "unmanaged",
+  managerName: "",
+}
+const nginxUnit = listener({ manager: "systemd", managerName: "nginx.service" })
+const pm2App = listener({
+  address: "127.0.0.1",
+  port: 3773,
+  pid: 4242,
+  process: "MainThread",
+  displayName: "node",
+  manager: "pm2",
+  managerName: "api",
+})
+const dashboardProxy = listener({
+  address: "100.110.34.31",
+  port: 8443,
+  process: "caddy",
+  manager: "container",
+  managerName: "c13e58c8f7b4",
+  container: {
+    id: "c13e58c8f7b4",
+    name: "just-dashboard-proxy-1",
+    image: "caddy:2-alpine",
+    project: "just-dashboard",
+    service: "proxy",
+  },
+  self: true,
+})
+
+describe("who a socket answers for", () => {
+  test("each owner is headed by what is managed, and says how it runs", () => {
+    const rows = [docker4, deployed, sshdActivated, sshdIdle, nginxUnit, pm2App, dashboardProxy]
+    expect(rows.map((l) => [ownerTitle(l), ownerLabel(l)])).toEqual([
+      ["just-dashboard-ingress", "Container · caddy:2-alpine"],
+      ["jd-e175-r4", "Container · c9051a2ac152 · deployment shop"],
+      ["sshd", "ssh.socket → ssh.service"],
+      // systemd holding the socket alone is ssh.service waiting, not init.
+      ["ssh.service", "ssh.socket → ssh.service"],
+      ["nginx", "nginx.service"],
+      ["api", "PM2 · node"],
+      ["just-dashboard-proxy-1", "Container · caddy:2-alpine · stack just-dashboard"],
+    ])
+  })
+
+  test("a thread's name gives way to the program's; nothing known is unknown", () => {
+    expect(ownerTitle(listener({ process: "MainThread", displayName: "node" }))).toBe("node")
+    expect(ownerTitle(listener({ pid: 0, process: "" }))).toBe("unknown")
+    expect(ownerLabel(listener({ process: "node" }))).toBeUndefined()
+    expect(ownerLabel(listener({ manager: "session", managerName: "session-c521.scope" }))).toBe(
+      "Login session c521",
+    )
+    // Accept=yes starts a service per connection and names none.
+    const perConnection = { ...sshdIdle, socketUnit: "sshd-vsock.socket", activates: undefined }
+    expect([ownerTitle(perConnection), ownerLabel(perConnection)]).toEqual([
+      "sshd-vsock.socket",
+      "sshd-vsock.socket",
+    ])
+    expect(ownerLinks(perConnection)).toEqual([])
+  })
+
+  test("each owner links to the page it is managed from", () => {
+    const hrefs = (l) => ownerLinks(l).map((link) => [link.label, link.href])
+    expect(hrefs(docker4)).toEqual([
+      ["Open container", "/docker/containers/just-dashboard-ingress"],
+    ])
+    expect(hrefs(deployed)).toEqual([
+      ["Open container", "/docker/containers/jd-e175-r4"],
+      ["Open deployment", "/deploy/12"],
+    ])
+    expect(hrefs(sshdActivated)).toEqual([["Open unit", "/processes/services?unit=ssh.service"]])
+    expect(hrefs(sshdIdle)).toEqual([["Open unit", "/processes/services?unit=ssh.service"]])
+    expect(hrefs(nginxUnit)).toEqual([["Open unit", "/processes/services?unit=nginx.service"]])
+    expect(hrefs(pm2App)).toEqual([["Open app", "/processes/pm2?app=api"]])
+    expect(hrefs(dashboardProxy)).toEqual([
+      ["Open container", "/docker/containers/just-dashboard-proxy-1"],
+    ])
+    expect(hrefs(listener({ process: "node" }))).toEqual([])
+  })
+
+  test("a search finds an owner by every name it goes by", () => {
+    expect(ownerWords(deployed)).toEqual(["jd-e175-r4", "c9051a2ac152", "shop"])
+    expect(ownerWords(dashboardProxy)).toEqual([
+      "c13e58c8f7b4",
+      "just-dashboard-proxy-1",
+      "caddy:2-alpine",
+      "just-dashboard",
+      "proxy",
+      "this dashboard",
+    ])
+    expect(ownerWords(sshdActivated)).toEqual(["ssh.service", "ssh.socket", "ssh.service"])
+  })
+
+  test("a container's two docker-proxy sockets are one service; two containers' are not", () => {
+    expect(foldDualStack([docker4, docker6])).toHaveLength(1)
+    const other = {
+      ...docker6,
+      container: { ...ingressContainer, id: "0a0b0c0d0e0f", name: "other" },
+    }
+    expect(foldDualStack([docker4, other])).toHaveLength(2)
+    // Docker's NAT alone publishing both families is one service too.
+    const nat4 = listener({
+      pid: 0,
+      process: "",
+      source: "docker-nat",
+      container: ingressContainer,
+    })
+    const nat6 = { ...nat4, family: "ipv6", address: "::" }
+    expect(foldDualStack([nat4, nat6])).toHaveLength(1)
   })
 })

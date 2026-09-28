@@ -235,6 +235,9 @@ func fakeProc(t *testing.T, tables map[string]string, procs map[int]fakeProcess)
 		write(filepath.Join(dir, "cmdline"), strings.Join(p.cmdline, "\x00")+"\x00")
 		write(filepath.Join(dir, "status"), "Name:\t"+p.name+"\nUid:\t0\t0\t0\t0\nGid:\t0\t0\t0\t0\n")
 		write(filepath.Join(dir, "stat"), fmt.Sprintf("%d (%s) S %d %d %d 0 -1 4194560 0 0 0 0\n", pid, p.name, p.parent, pid, pid))
+		if p.cgroup != "" {
+			write(filepath.Join(dir, "cgroup"), p.cgroup)
+		}
 		if err := os.MkdirAll(filepath.Join(dir, "fd"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -257,6 +260,8 @@ type fakeProcess struct {
 	parent  int
 	// sockets maps a descriptor number to the socket inode it holds.
 	sockets map[int]uint64
+	// cgroup is /proc/<pid>/cgroup, left out when empty.
+	cgroup string
 }
 
 // The whole listing over a /proc laid out as this host's is: port 22 held by

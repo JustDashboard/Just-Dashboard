@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -404,12 +405,17 @@ func managerLabel(manager string) string {
 	}
 }
 
-// processManager reads the cgroup membership the kernel has already assigned.
-// That is more reliable than guessing from executable names: nginx started by
-// systemd and nginx started in a shell are the same binary but not the same
-// thing to restart. PM2 is overlaid by the API from PM2's own PID list.
 func processManager(pid int32, cmdline string) (string, string) {
-	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
+	return ManagerOf("/proc", pid, cmdline)
+}
+
+// ManagerOf reads the cgroup membership the kernel has already assigned,
+// under the process table at root. That is more reliable than guessing from
+// executable names: nginx started by systemd and nginx started in a shell are
+// the same binary but not the same thing to restart. PM2 is overlaid by the
+// API from PM2's own PID list.
+func ManagerOf(root string, pid int32, cmdline string) (string, string) {
+	b, err := os.ReadFile(filepath.Join(root, strconv.Itoa(int(pid)), "cgroup"))
 	if err == nil {
 		if manager, name := managerFromCgroup(string(b)); manager != "" {
 			return manager, name

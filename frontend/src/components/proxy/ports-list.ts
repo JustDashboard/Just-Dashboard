@@ -1,5 +1,7 @@
 import type { Listener, PortRange } from "@/lib/types"
 import {
+  ownerTitle,
+  ownerWords,
   reachGroup,
   reachVerdict,
   reachWords,
@@ -128,8 +130,8 @@ function readable(value: string): string {
  * One word of the search box. A field token narrows by one property —
  * `proto:udp`, `user:postgres`, `pid:812`, `port:8000-8100`, `:443`, an
  * endpoint as `ss` prints it (`0.0.0.0:80`, `[::]:22`, `*:53`) — and
- * anything else is text, looked for in the port, process, command, user,
- * addresses, endpoints and reach. A token that looks like a field but does
+ * anything else is text, looked for in the port, owner, process, command,
+ * user, addresses, endpoints and reach. A token that looks like a field but does
  * not parse (`pid:abc`) is text as typed, so it finds nothing rather than
  * being quietly dropped.
  */
@@ -230,6 +232,8 @@ function haystack(socket: Socket): string {
   return [
     String(socket.port),
     socket.protocol,
+    ownerTitle(socket),
+    ...ownerWords(socket),
     socket.process ?? "",
     socket.cmdline ?? "",
     socket.user ?? "",
@@ -345,11 +349,6 @@ function severityRank(socket: Socket): number {
   return verdict ? VERDICT_RANK[verdict] : 3
 }
 
-/** The process a row is headed by: its name, or "unknown" where it could not be read. */
-export function processName(socket: Pick<Listener, "process">): string {
-  return socket.process || "unknown"
-}
-
 /**
  * The rows in the chosen order. Reach sorts by the verdict a row is drawn
  * with, so descending is what the posture would flag first; every order falls
@@ -366,24 +365,29 @@ export function sortSockets(sockets: Socket[], sort: PortSort): Socket[] {
       case "port":
         return a.port - b.port
       case "process":
-        return processName(a).localeCompare(processName(b))
+        return ownerTitle(a).localeCompare(ownerTitle(b))
     }
   }
   return [...sockets].sort((a, b) => sign * primary(a, b) || byPort(a, b))
 }
 
-/** One application's sockets: one program run by one account. */
+/**
+ * One application's sockets: one owner — a container, a PM2 app, a program —
+ * run by one account.
+ */
 export type SocketGroup = { key: string; process: string; user: string; sockets: Socket[] }
 
 /**
  * The rows by application, in the order the first of each appears — so the
  * sort still decides which application comes first. Twenty git-daemon
- * sockets on loopback are one line to read past, not twenty.
+ * sockets on loopback are one line to read past, not twenty, and a
+ * container's ports are its own group rather than every container's
+ * docker-proxy in one.
  */
 export function groupByOwner(sockets: Socket[]): SocketGroup[] {
   const groups = new Map<string, SocketGroup>()
   for (const socket of sockets) {
-    const process = processName(socket)
+    const process = ownerTitle(socket)
     const user = socket.user ?? ""
     const key = JSON.stringify([process, user])
     const group = groups.get(key) ?? { key, process, user, sockets: [] }
@@ -442,6 +446,7 @@ const CSV_COLUMNS = [
   "user",
   "cmdline",
   "level",
+  "owner",
 ] as const
 
 /**
@@ -452,6 +457,7 @@ export function toCsv(sockets: Socket[]): string {
   const lines = unfolded(sockets).map((socket) =>
     CSV_COLUMNS.map((column) => {
       if (column === "endpoint") return csvCell(formatEndpoint(socket.address, socket.port))
+      if (column === "owner") return csvCell(ownerTitle(socket))
       const value = socket[column]
       return csvCell(value === undefined || value === null ? "" : String(value))
     }).join(","),

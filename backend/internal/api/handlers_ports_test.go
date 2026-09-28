@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
@@ -381,5 +382,101 @@ func TestPortsMetaSaysWhichPortsTheKernelHandsOut(t *testing.T) {
 	if w.Code != http.StatusOK ||
 		strings.TrimSpace(w.Body.String()) != `{"ephemeralRange":{"low":40000,"high":50000}}` {
 		t.Fatalf("GET /ports/meta = %d %s, want 40000-50000", w.Code, w.Body.String())
+	}
+}
+
+// A socket the dashboard's own process holds is marked as the dashboard's,
+// and says when its process started, as the processes page reads it.
+func TestPortListMarksTheDashboardsOwnSockets(t *testing.T) {
+	own, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("cannot listen here: %v", err)
+	}
+	defer own.Close()
+	port := uint32(own.Addr().(*net.TCPAddr).Port)
+	s := testServer(t)
+	detail, err := s.modules.table.Detail(context.Background(), int32(os.Getpid()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range listedPorts(t) {
+		if l.Address != "127.0.0.1" || l.Port != port {
+			continue
+		}
+		if !l.Self {
+			t.Errorf("the dashboard's own socket is not marked as its own: %+v", l)
+		}
+		if l.StartedAt == nil || !l.StartedAt.Equal(detail.CreateTime) {
+			t.Errorf("startedAt = %v, want the processes page's %v", l.StartedAt, detail.CreateTime)
+		}
+		return
+	}
+	t.Fatalf("own socket on port %d was not listed", port)
+}
+
+// A deployment's containers carry its environment's ID; the listing names the
+// project and environment, and a container whose environment is gone keeps
+// its container name alone. A container the dashboard did not start is not
+// taken for a deployment's by a label someone copied.
+func TestPortListNamesTheDeploymentAContainerRunsFor(t *testing.T) {
+	s := testServer(t)
+	res, err := s.Store.DB.Exec(`INSERT INTO deploy_projects(name, repo_path, hook_secret, hook_id, created_at) VALUES('shop', '/srv/shop', 'sealed', 'shop-hook', 1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := res.LastInsertId()
+	res, err = s.Store.DB.Exec(`INSERT INTO deploy_environments(project_id, name, slug, kind, created_at, updated_at) VALUES(?, 'Production', 'production-ports', 'production', 1, 1)`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	environmentID, _ := res.LastInsertId()
+
+	containers := runningContainers([]dockerx.Container{
+		{ID: "e175e175e175e175", Name: "jd-e175-r4", Image: "c9051a2ac152", Labels: map[string]string{
+			"io.just-dashboard.managed": "true", "io.just-dashboard.environment-id": fmt.Sprint(environmentID),
+		}, Ports: []dockerx.Port{{IP: "127.0.0.1", PrivatePort: 3000, PublicPort: 39069, Type: "tcp"}}},
+		{ID: "e999e999e999e999", Name: "jd-e999-r1", Image: "nginx", Labels: map[string]string{
+			"io.just-dashboard.managed": "true", "io.just-dashboard.environment-id": "999999",
+		}, Ports: []dockerx.Port{{IP: "127.0.0.1", PrivatePort: 80, PublicPort: 39070, Type: "tcp"}}},
+		{ID: "c0ffeec0ffeec0ff", Name: "copycat", Image: "nginx", Labels: map[string]string{
+			"io.just-dashboard.environment-id": fmt.Sprint(environmentID),
+		}, Ports: []dockerx.Port{{IP: "127.0.0.1", PrivatePort: 80, PublicPort: 39071, Type: "tcp"}}},
+	})
+	listeners := proxysvc.AttributeOwners(nil, proxysvc.OwnerInput{Containers: containers})
+	s.nameDeployments(context.Background(), listeners)
+
+	want := map[uint32]string{39069: fmt.Sprintf("shop/Production/%d", projectID), 39070: "", 39071: ""}
+	for _, l := range listeners {
+		got := ""
+		if d := l.Container.Deployment; d != nil {
+			got = fmt.Sprintf("%s/%s/%d", d.Project, d.Environment, d.ProjectID)
+		}
+		if got != want[l.Port] {
+			t.Errorf("port %d (%s) deployment = %q, want %q", l.Port, l.Container.Name, got, want[l.Port])
+		}
+	}
+	if len(listeners) != 3 {
+		t.Errorf("%d rows, want the three published ports", len(listeners))
+	}
+}
+
+// A port Docker publishes is graded as Docker's whatever holds it — a holder
+// this account cannot see, or none at all — as the posture grades it.
+func TestPortListGradesAPortDockerPublishesAsDockers(t *testing.T) {
+	deny := &netsec.FirewallStatus{Available: true, Enabled: true, Policy: netsec.DefaultPolicy{Incoming: "deny"}}
+	listeners := proxysvc.AttributeOwners([]proxysvc.Listener{
+		{Protocol: "tcp", Family: "ipv4", Address: "0.0.0.0", Port: 5432, Scope: proxysvc.ScopeAll, Exposed: true},
+	}, proxysvc.OwnerInput{Containers: []proxysvc.RunningContainer{{
+		ID: "9a8b7c6d5e4f3a2b", Name: "db", Image: "postgres:16-alpine",
+		Ports: []proxysvc.PublishedPort{{HostIP: "0.0.0.0", HostPort: 5432, Protocol: "tcp"}, {HostIP: "::", HostPort: 5432, Protocol: "tcp"}},
+	}}})
+	placeListeners(listeners, netsec.HostNetwork{}, deny)
+	if len(listeners) != 2 {
+		t.Fatalf("%d rows, want the socket and the NAT-only IPv6 binding: %+v", len(listeners), listeners)
+	}
+	for _, l := range listeners {
+		if l.Level != "critical" || l.PastFirewall != "docker" || l.InboundDefault != "" {
+			t.Errorf("%s:%d (%q) = level %q past %q default %q, want critical past the firewall", l.Address, l.Port, l.Source, l.Level, l.PastFirewall, l.InboundDefault)
+		}
 	}
 }

@@ -2,6 +2,7 @@ import type { Listener } from "@/lib/types"
 import { type ProxyFinding } from "@/components/proxy/findings/shared"
 import {
   dangerousPorts,
+  ownerTitle,
   pastFirewallWords,
   reachWords,
   type DangerousPort,
@@ -40,7 +41,7 @@ export function portFindings({ ports }: PortFindingInput): ProxyFinding[] {
       detail: dangerous
         .map(
           (d) =>
-            `${d.port}/${d.protocol} ${d.sockets[0].process || "unknown"}${onEveryInterface(d) ? "" : ` on ${placed(d.sockets)}`}${held ? "" : firewallNote(d)}`,
+            `${d.port}/${d.protocol} ${ownerTitle(d.sockets[0])}${onEveryInterface(d) ? "" : ` on ${placed(d.sockets)}`}${held ? "" : firewallNote(d)}`,
         )
         .join(", ")
         .concat(

@@ -1,5 +1,6 @@
 import type { Listener, ListenerNetwork } from "@/lib/types"
 import { DANGEROUS_PORTS } from "@/components/proxy/findings/shared"
+import { managerHref } from "@/components/procs/shared"
 
 /**
  * Where a socket answers, per network the backend places its address on —
@@ -82,6 +83,9 @@ export function foldDualStack(listeners: Listener[]): Socket[] {
       listener.network,
       listener.interface ?? "",
       listener.pid > 0 ? [listener.process, listener.user ?? ""] : [],
+      // Two containers publishing one port, one per family, are two services.
+      listener.container?.id ?? "",
+      listener.source ?? "",
     ])
     const waiting = unpaired.get(key) ?? []
     const first = waiting.find((s) => s.family !== listener.family && oneService(s, listener))
@@ -298,4 +302,131 @@ export function reachVerdict(
   if (!listener.exposed) return undefined
   if (listener.level && DANGEROUS_PORTS[listener.port]) return listener.level
   return internetFacing(listener) || onUplink(listener) ? "warning" : "notice"
+}
+
+/**
+ * What a socket's row is headed by: the container it answers for, the PM2
+ * app, the service a systemd socket unit starts where systemd is the only
+ * holder the dashboard can see, or the program — by its own name where the
+ * kernel's is a thread's (node's "MainThread").
+ */
+export function ownerTitle(
+  listener: Pick<
+    Listener,
+    | "pid"
+    | "process"
+    | "displayName"
+    | "manager"
+    | "managerName"
+    | "socketUnit"
+    | "activates"
+    | "container"
+  >,
+): string {
+  if (listener.container) return listener.container.name
+  if (listener.manager === "pm2" && listener.managerName) return listener.managerName
+  if (listener.socketUnit && listener.pid <= 1) return listener.activates || listener.socketUnit
+  return listener.displayName || listener.process || "unknown"
+}
+
+/**
+ * How the owner runs, for the line under its title: "Container ·
+ * caddy:2-alpine · stack just-dashboard", "ssh.socket → ssh.service",
+ * "nginx.service", "PM2 · node", "Login session c521". Nothing for a
+ * process nothing supervises.
+ */
+export function ownerLabel(
+  listener: Pick<
+    Listener,
+    "process" | "displayName" | "manager" | "managerName" | "socketUnit" | "activates" | "container"
+  >,
+): string | undefined {
+  const { container } = listener
+  if (container) {
+    const parts = ["Container", container.image]
+    if (container.deployment) parts.push(`deployment ${container.deployment.project}`)
+    else if (container.project) parts.push(`stack ${container.project}`)
+    return parts.join(" · ")
+  }
+  if (listener.manager === "pm2")
+    return `PM2 · ${listener.displayName || listener.process || "app"}`
+  if (listener.socketUnit) {
+    return listener.activates
+      ? `${listener.socketUnit} → ${listener.activates}`
+      : listener.socketUnit
+  }
+  if (listener.manager === "systemd" && listener.managerName) return listener.managerName
+  if (listener.manager === "session" && listener.managerName) {
+    return `Login session ${listener.managerName.replace(/^session-|\.scope$/g, "")}`
+  }
+  return undefined
+}
+
+/** A page the owner is managed from. */
+export type OwnerLink = {
+  key: "container" | "deployment" | "unit" | "app"
+  label: string
+  href: string
+}
+
+/**
+ * Where a socket's owner is managed from, most direct first: the container
+ * and the deployment it runs for, the PM2 app, or the service systemd starts
+ * for it. A socket unit that starts a service per connection names none,
+ * and nothing links to it.
+ */
+export function ownerLinks(
+  listener: Pick<Listener, "manager" | "managerName" | "socketUnit" | "activates" | "container">,
+): OwnerLink[] {
+  const { container } = listener
+  if (container) {
+    const links: OwnerLink[] = [
+      {
+        key: "container",
+        label: "Open container",
+        href: `/docker/containers/${encodeURIComponent(container.name)}`,
+      },
+    ]
+    if (container.deployment) {
+      links.push({
+        key: "deployment",
+        label: "Open deployment",
+        href: `/deploy/${container.deployment.projectId}`,
+      })
+    }
+    return links
+  }
+  if (listener.manager === "pm2") {
+    const href = managerHref({ manager: "pm2", managerName: listener.managerName })
+    return href ? [{ key: "app", label: "Open app", href }] : []
+  }
+  const unit = listener.socketUnit
+    ? listener.activates
+    : listener.manager === "systemd"
+      ? listener.managerName
+      : undefined
+  const href = unit ? managerHref({ manager: "systemd", managerName: unit }) : null
+  return href ? [{ key: "unit", label: "Open unit", href }] : []
+}
+
+/**
+ * The words a search finds a socket's owner by, beyond its process and
+ * command: the program's own name, the container, its image, stack,
+ * service and deployment, the units, the PM2 app — and the dashboard's own
+ * tag, so "dashboard" finds its backend, which is named jd-server.
+ */
+export function ownerWords(listener: Listener): string[] {
+  const { container } = listener
+  return [
+    listener.displayName,
+    listener.managerName,
+    listener.socketUnit,
+    listener.activates,
+    container?.name,
+    container?.image,
+    container?.project,
+    container?.service,
+    container?.deployment?.project,
+    listener.self ? "this dashboard" : undefined,
+  ].filter((word): word is string => Boolean(word))
 }

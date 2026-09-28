@@ -5,17 +5,21 @@ import { useRouter, useSearchParams } from "next/navigation"
 import {
   AcronymCsv,
   AcronymJson,
+  Box,
+  ChartActivity,
   ChevronDown,
   ChevronRight,
   ChevronUp,
   Clipboard,
   Copy,
   Download,
+  GridMasonry,
   ListOrdered,
   Pause,
   Play,
   RefreshClockwise,
   Router,
+  Servers,
   Shield,
   Warning,
 } from "@/components/icons"
@@ -33,12 +37,19 @@ import { InfoTip } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
-import { ProductLogo, portProduct, processProduct } from "@/components/product-logo"
+import {
+  ProductLogo,
+  imageProduct,
+  portProduct,
+  processProduct,
+  unitProduct,
+} from "@/components/product-logo"
 import { ROW_BLEED } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
 import { VerbActions, VerbMenu, type Verb } from "@/components/verbs"
 import {
   dangerousPorts,
@@ -47,6 +58,9 @@ import {
   internetHint,
   networkWords,
   onUplink,
+  ownerLabel,
+  ownerLinks,
+  ownerTitle,
   pastFirewallWords,
   privateHint,
   reachVerdict,
@@ -55,6 +69,7 @@ import {
   socketPids,
   tallyReach,
   UPLINK_CAVEAT,
+  type OwnerLink,
   type Socket,
 } from "@/components/proxy/ports"
 import {
@@ -70,7 +85,6 @@ import {
   parseQuery,
   parseReachFilter,
   parseSort,
-  processName,
   sinceWords,
   sortParam,
   sortSockets,
@@ -276,13 +290,23 @@ function PortsView() {
 
   const verbsFor = (l: Socket): Verb[] => {
     const endpoint = formatEndpoint(l.address, l.port)
-    const verbs: Verb[] = []
-    if (l.pid > 0) {
+    // The owner's own page first: the container, the deployment it runs
+    // for, the PM2 app or the unit, where its remedy usually is.
+    const verbs: Verb[] = ownerLinks(l).map((link, i) => ({
+      key: link.key,
+      label: link.label,
+      icon: OWNER_ICON[link.key],
+      inline: i === 0,
+      run: () => router.push(link.href),
+    }))
+    // Init holding a socket unit's socket is systemd listening, whose page
+    // is the unit's; docker-proxy is a container's plumbing, kept in the menu.
+    if (l.pid > 1 || (l.pid === 1 && !l.socketUnit)) {
       verbs.push({
         key: "process",
         label: "Process",
         icon: ListOrdered,
-        inline: true,
+        inline: !l.container,
         run: () => router.push(`/processes?pid=${l.pid}`),
       })
     }
@@ -635,24 +659,7 @@ function PortsView() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className="flex min-w-0 items-center gap-3">
-                          <ProcessMark listener={entry.socket} />
-                          <div className="min-w-0">
-                            <p className="truncate text-body font-medium">
-                              {processName(entry.socket)}
-                            </p>
-                            <p
-                              className="truncate font-mono text-hint text-muted-foreground"
-                              title={entry.socket.cmdline}
-                            >
-                              {entry.socket.cmdline || "No command reported"}
-                            </p>
-                            <p className="mt-1 text-hint text-muted-foreground">
-                              {entry.socket.user || "unknown user"}
-                              <Pids socket={entry.socket} />
-                            </p>
-                          </div>
-                        </div>
+                        <Owner socket={entry.socket} />
                       </TableCell>
                       <TableCell>
                         <ReachStatus socket={entry.socket} />
@@ -725,13 +732,19 @@ function PortsView() {
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-2 text-body">
                         <ProcessMark listener={entry.socket} />
-                        <span className="truncate">{processName(entry.socket)}</span>
+                        <span className="truncate">{ownerTitle(entry.socket)}</span>
                         {entry.socket.user && (
                           <span className="max-w-[45%] shrink-0 truncate text-hint text-muted-foreground">
                             · {entry.socket.user}
                           </span>
                         )}
                       </div>
+                      {/* The tag waits a line, so the owner's name keeps the
+                          width a phone has for it. */}
+                      <OwnerLine socket={entry.socket} tagged />
+                      {entry.socket.source === "docker-nat" && (
+                        <p className="text-hint text-muted-foreground">{NAT_WORDS}</p>
+                      )}
                       {/* Which address a port is bound to is the whole reason
                           this page exists — it must not be the line that gets
                           cut on a narrow screen. */}
@@ -899,14 +912,88 @@ function GroupReach({ group }: { group: SocketGroup }) {
   )
 }
 
+const OWNER_ICON: Record<OwnerLink["key"], Verb["icon"]> = {
+  container: Box,
+  deployment: GridMasonry,
+  unit: Servers,
+  app: ChartActivity,
+}
+
+/** Said of a port Docker publishes through its NAT rules, where the command would be. */
+const NAT_WORDS = "Forwarded by Docker's NAT rules; no process listens"
+
 /**
- * The process as the product it is, bare at the line's height — Postgres on
- * 5432, nginx on 443 — the way the identity line draws a host's facts. Read
- * from the process name first and the port second, so a `postgres` on an
- * unusual port is still Postgres and a `python` on 5432 is not.
+ * Who a socket answers for — a container, a PM2 app, the program — with the
+ * dashboard's own marked, how the owner runs, the command, and the account
+ * and process holding the socket.
+ */
+function Owner({ socket }: { socket: Socket }) {
+  const nat = socket.source === "docker-nat"
+  return (
+    <div className="flex min-w-0 items-center gap-3">
+      <ProcessMark listener={socket} />
+      <div className="min-w-0">
+        <p className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-body font-medium">{ownerTitle(socket)}</span>
+          {socket.self && <Tag>This dashboard</Tag>}
+        </p>
+        <OwnerLine socket={socket} />
+        {nat ? (
+          <p className="text-hint text-muted-foreground">{NAT_WORDS}</p>
+        ) : (
+          <>
+            <p
+              className="truncate font-mono text-hint text-muted-foreground"
+              title={socket.cmdline}
+            >
+              {socket.cmdline || "No command reported"}
+            </p>
+            <p className="mt-1 text-hint text-muted-foreground">
+              {socket.user || "unknown user"}
+              <Pids socket={socket} />
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * How the owner runs: its container's image and stack or deployment, the
+ * socket unit and the service it starts, the unit, the PM2 app's program —
+ * after the "This dashboard" tag where the title's line has no room for it.
+ */
+function OwnerLine({ socket, tagged }: { socket: Socket; tagged?: boolean }) {
+  const label = ownerLabel(socket)
+  const tag = tagged && socket.self
+  if (!label && !tag) return null
+  return (
+    <p className="flex min-w-0 items-center gap-2 text-hint text-muted-foreground">
+      {tag && <Tag>This dashboard</Tag>}
+      {label && (
+        <span className="truncate" title={label}>
+          {label}
+        </span>
+      )}
+    </p>
+  )
+}
+
+/**
+ * The owner as the product it is, bare at the line's height — Postgres on
+ * 5432, nginx on 443, Caddy for a container of its image — the way the
+ * identity line draws a host's facts. Read from the container's image or the
+ * program first and the port second, so a `postgres` on an unusual port is
+ * still Postgres and a `python` on 5432 is not.
  */
 function ProcessMark({ listener }: { listener: Listener }) {
-  const product = processProduct(listener.process ?? "") ?? portProduct(listener.port)
+  const unit = listener.activates || (listener.manager === "systemd" ? listener.managerName : "")
+  const product = listener.container
+    ? imageProduct(listener.container.image)
+    : (processProduct(listener.displayName || listener.process || "") ??
+      (unit ? unitProduct(unit) : undefined) ??
+      portProduct(listener.port))
   return <ProductLogo id={product} size="sm" fallback={Router} />
 }
 

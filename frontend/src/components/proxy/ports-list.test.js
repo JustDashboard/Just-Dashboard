@@ -187,6 +187,37 @@ describe("the search box's tokens", () => {
   })
 })
 
+describe("owners in the search box", () => {
+  const ingress = listener({
+    port: 80,
+    process: "docker-proxy",
+    container: {
+      id: "5e3ac6b0d3f1",
+      name: "just-dashboard-ingress",
+      image: "caddy:2-alpine",
+      published: true,
+    },
+  })
+  const node = loopback({ port: 3222, process: "MainThread", displayName: "node" })
+  const self = loopback({ port: 8080, process: "jd-server", self: true })
+  const matching = (query) =>
+    [ingress, node, self].filter((s) => matchesQuery(s, parseQuery(query))).map((s) => s.port)
+
+  test("a container, its image, a program under a thread's name, the dashboard", () => {
+    expect(matching("ingress")).toEqual([80])
+    expect(matching("caddy")).toEqual([80])
+    expect(matching("node")).toEqual([3222])
+    // The dashboard's own backend is named jd-server; its tag is a word too.
+    expect(matching("dashboard")).toEqual([80, 8080])
+  })
+
+  test("the application column sorts by owner", () => {
+    expect(
+      sortSockets([self, ingress, node], { key: "process", dir: "asc" }).map((s) => s.port),
+    ).toEqual([8080, 80, 3222])
+  })
+})
+
 describe("endpoints", () => {
   test("are written as a client dials them", () => {
     expect(formatEndpoint("127.0.0.1", 8080)).toBe("127.0.0.1:8080")
@@ -313,6 +344,24 @@ describe("grouping by application", () => {
     ])
   })
 
+  test("a container's ports are its own group, whatever holds them", () => {
+    const proxy = (port, name) =>
+      listener({
+        port,
+        process: "docker-proxy",
+        container: { id: name.slice(0, 12), name, image: "postgres:16-alpine", published: true },
+      })
+    const groups = groupByOwner([
+      proxy(5432, "Qhahdhhas"),
+      proxy(5433, "epgjauto-db-1"),
+      proxy(5434, "Qhahdhhas"),
+    ])
+    expect(groups.map((g) => [g.process, g.sockets.map((s) => s.port)])).toEqual([
+      ["Qhahdhhas", [5432, 5434]],
+      ["epgjauto-db-1", [5433]],
+    ])
+  })
+
   test("a group's reach is its worst socket's", () => {
     const [group] = groupByOwner([
       listener({ process: "redis-server", port: 6380, reach: "loopback", exposed: false }),
@@ -399,18 +448,18 @@ describe("exports", () => {
     const csv = toCsv([...foldDualStack([sshd, sshd6]), risky])
     const lines = csv.trimEnd().split("\n")
     expect(lines[0]).toBe(
-      "protocol,family,address,port,endpoint,reach,network,interface,process,pid,ppid,user,cmdline,level",
+      "protocol,family,address,port,endpoint,reach,network,interface,process,pid,ppid,user,cmdline,level,owner",
     )
     expect(lines[1]).toBe(
-      "tcp,ipv4,0.0.0.0,22,0.0.0.0:22,all,all,,sshd,2450808,,root,sshd: /usr/sbin/sshd -D,",
+      "tcp,ipv4,0.0.0.0,22,0.0.0.0:22,all,all,,sshd,2450808,,root,sshd: /usr/sbin/sshd -D,,sshd",
     )
     expect(lines[2]).toBe(
-      "tcp,ipv6,::,22,[::]:22,all,all,,sshd,2450808,,root,sshd: /usr/sbin/sshd -D,",
+      "tcp,ipv6,::,22,[::]:22,all,all,,sshd,2450808,,root,sshd: /usr/sbin/sshd -D,,sshd",
     )
     // A command beginning "=" is text to a spreadsheet, and a quote, comma
     // or newline stays inside its cell.
     expect(csv).toContain(
-      `tcp,ipv6,::,9999,[::]:9999,all,all,,evil,812,,'@admin,"'=HYPERLINK(""http://x"",""y""), with ""quotes""\nand a line",`,
+      `tcp,ipv6,::,9999,[::]:9999,all,all,,evil,812,,'@admin,"'=HYPERLINK(""http://x"",""y""), with ""quotes""\nand a line",,evil`,
     )
     expect(csv.endsWith("\n")).toBe(true)
   })

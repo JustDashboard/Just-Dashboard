@@ -7,6 +7,7 @@ import {
   firewalledDatabases,
   gitDaemons,
   hostPorts,
+  ownedPorts,
   pastFirewallDatabases,
   privateUplink,
 } from "./fixtures/proxy/ports"
@@ -731,7 +732,7 @@ test("the rows shown export as CSV and JSON, one line per socket", async ({ page
   // caddy's two families and node_exporter: three sockets on two rows.
   expect(lines).toHaveLength(4)
   expect(lines[0]).toBe(
-    "protocol,family,address,port,endpoint,reach,network,interface,process,pid,ppid,user,cmdline,level",
+    "protocol,family,address,port,endpoint,reach,network,interface,process,pid,ppid,user,cmdline,level,owner",
   )
   expect(lines.some((line) => line.includes("[fd7a:115c:a1e0::9e37:2220]:8443"))).toBe(true)
 
@@ -900,4 +901,147 @@ test("the list's controls are named, and a phone draws one list with no overflow
   }
   await expect(page.getByRole("table")).toHaveCount(1)
   await expect(page.getByRole("list", { name: "Listening sockets" })).toHaveCount(0)
+})
+
+test("each socket names who it answers for, not only the process holding it", async ({ page }) => {
+  await mockHost(page, ownedPorts)
+  await page.goto("/proxy/ports")
+  const rows = page.getByRole("table").locator("tbody tr")
+  // Twelve sockets, nine services: each pair of families is one row.
+  await expect(rows).toHaveCount(9)
+
+  const ingress = rows.filter({ hasText: "just-dashboard-ingress" })
+  await expect(ingress.getByText("Container · caddy:2-alpine", { exact: true })).toBeVisible()
+  await expect(ingress.locator('img[src="/logos/caddy.svg"]')).toHaveCount(1)
+  await expect(ingress.getByText("0.0.0.0, ::")).toBeVisible()
+
+  // Docker's NAT alone publishes it: no process, and it still gets past ufw.
+  const nat = rows.filter({ hasText: "epgjauto-db-1" })
+  await expect(
+    nat.getByText("Container · postgres:16-alpine · stack epgjauto", { exact: true }),
+  ).toBeVisible()
+  await expect(nat.getByText("Forwarded by Docker's NAT rules; no process listens")).toBeVisible()
+  await expect(nat.getByText("PostgreSQL · Every interface")).toHaveClass(/text-destructive/)
+  await expect(nat.getByText("Published by Docker past the firewall")).toBeVisible()
+  await expect(nat.getByText("unknown user")).toHaveCount(0)
+
+  await expect(
+    rows.filter({ hasText: "jd-e175-r4" }).getByText("Container · c9051a2ac152 · deployment shop"),
+  ).toBeVisible()
+
+  // systemd holding ssh.socket's socket alone is ssh.service waiting, not init.
+  const ssh = rows.filter({ hasText: "ssh.socket" })
+  await expect(ssh.getByText("ssh.service", { exact: true })).toBeVisible()
+  await expect(ssh.getByText("ssh.socket → ssh.service", { exact: true })).toBeVisible()
+  await expect(page.getByRole("table").getByText("systemd", { exact: true })).toHaveCount(0)
+
+  await expect(
+    rows.filter({ hasText: "nginx: master" }).getByText("nginx.service", { exact: true }),
+  ).toBeVisible()
+  const pm2 = rows.filter({ hasText: "PM2 · node" })
+  await expect(pm2.getByText("api", { exact: true })).toBeVisible()
+  await expect(pm2.locator('img[src="/logos/nodejs.svg"]')).toHaveCount(1)
+  // node calls its main thread MainThread; the program is named instead.
+  const byHand = rows.filter({ hasText: "Login session c521" })
+  await expect(byHand.getByText("node", { exact: true })).toBeVisible()
+  await expect(page.getByRole("table").getByText("MainThread", { exact: true })).toHaveCount(0)
+
+  // The dashboard's backend and the proxy its session arrives through.
+  const own = rows.filter({ hasText: "This dashboard" })
+  await expect(own).toHaveCount(2)
+  await expect(own.filter({ hasText: "jd-server" })).toHaveCount(1)
+  await expect(own.filter({ hasText: "just-dashboard-proxy-1" })).toHaveCount(1)
+})
+
+test("'Open container' opens the container a port is published for", async ({ page }) => {
+  await mockHost(page, ownedPorts)
+  await page.goto("/proxy/ports")
+  const ingress = page
+    .getByRole("table")
+    .locator("tbody tr")
+    .filter({ hasText: "just-dashboard-ingress" })
+  await ingress.getByRole("button", { name: "Open container" }).click()
+  await expect(page).toHaveURL(/\/docker\/containers\/just-dashboard-ingress$/)
+})
+
+test("a row's owner opens its own page: the deployment, the unit, the PM2 app", async ({
+  page,
+}) => {
+  await mockHost(page, ownedPorts)
+  const rows = page.getByRole("table").locator("tbody tr")
+
+  await page.goto("/proxy/ports")
+  await page.getByRole("button", { name: "Actions for tcp 127.0.0.1:39069" }).click()
+  // docker-proxy is the container's plumbing: in the menu, behind its owner.
+  await expect(page.getByRole("menuitem", { name: "Process" })).toBeVisible()
+  await page.getByRole("menuitem", { name: "Open deployment" }).click()
+  await expect(page).toHaveURL(/\/deploy\/12$/)
+
+  await page.goto("/proxy/ports")
+  const ssh = rows.filter({ hasText: "ssh.socket" })
+  // Init holding the socket is systemd listening; its process page is init's.
+  await expect(ssh.getByRole("button", { name: "Process" })).toHaveCount(0)
+  await page.getByRole("button", { name: "Actions for tcp 0.0.0.0:22" }).click()
+  await expect(page.getByRole("menuitem", { name: "Copy endpoint" })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: "Process" })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await ssh.getByRole("button", { name: "Open unit" }).click()
+  await expect(page).toHaveURL(/\/processes\/services\?unit=ssh\.service$/)
+
+  await page.goto("/proxy/ports")
+  await rows.filter({ hasText: "PM2 · node" }).getByRole("button", { name: "Open app" }).click()
+  await expect(page).toHaveURL(/\/processes\/pm2\?app=api$/)
+
+  await page.goto("/proxy/ports")
+  await rows.filter({ hasText: "nginx.service" }).getByRole("button", { name: "Process" }).click()
+  await expect(page).toHaveURL(/\/processes\?pid=812$/)
+})
+
+test("a search finds a socket by its container, image, deployment, unit or the dashboard's tag", async ({
+  page,
+}) => {
+  await mockHost(page, ownedPorts)
+  await page.goto("/proxy/ports")
+  const rows = page.getByRole("table").locator("tbody tr")
+  const search = page.getByLabel("Search sockets")
+  for (const [query, count] of [
+    ["ingress", 1],
+    ["postgres:16", 1],
+    ["shop", 1],
+    ["ssh.socket", 1],
+    // jd-server and the proxy are tagged the dashboard's; the ingress is named for it.
+    ["dashboard", 3],
+    ["node", 2],
+  ] as const) {
+    await search.fill(query)
+    await expect(rows, query).toHaveCount(count)
+  }
+})
+
+test("owners are whole on a phone, the dashboard's own marked", async ({ page }) => {
+  await mockHost(page, ownedPorts)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/proxy/ports")
+  const list = page.getByRole("list", { name: "Listening sockets" })
+  await expect(list.locator("li")).toHaveCount(9)
+  await expect(list.getByText("This dashboard")).toHaveCount(2)
+  // The tag waits a line, so the owner's name is not cut to make room.
+  const backend = list.getByText("jd-server", { exact: true })
+  expect(await backend.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true)
+  const nat = list.locator("li").filter({ hasText: "epgjauto-db-1" })
+  await expect(nat.getByText("Container · postgres:16-alpine · stack epgjauto")).toBeVisible()
+  await expect(nat.getByText("Forwarded by Docker's NAT rules; no process listens")).toBeVisible()
+  await list
+    .locator("li")
+    .filter({ hasText: "just-dashboard-ingress" })
+    .getByRole("button", { name: "Open container" })
+    .click()
+  await expect(page).toHaveURL(/\/docker\/containers\/just-dashboard-ingress$/)
+  await page.goBack()
+  await expect(list.locator("li")).toHaveCount(9)
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    ),
+  ).toBe(false)
 })

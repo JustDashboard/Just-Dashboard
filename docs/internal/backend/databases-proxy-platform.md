@@ -306,6 +306,32 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   connection's local port to the ports page only outside it, where somebody chose the port.
   `TestListListenersNamesTheDaemonNotInitOnThisHost` checks the owner on the real host and runs only as
   root; it reads `/proc` and changes nothing.
+  **Owners.** `ListListeners` also reads, once per holder, its start (`StartedAt`, the processes page's
+  own `CreateTime`, so a signal sent from the page can refuse a reused PID), its supervisor from its
+  cgroup under the same process table (`procs.ManagerOf`: `Manager`/`ManagerName`, `systemd` and a unit,
+  `container` and a short ID, `session`), and `DisplayName` — the executable's base name, or the
+  command line's first word where another account's `exe` is unreadable — where the kernel's name is a
+  thread's (node names its main thread `MainThread`); `Process` stays the raw comm, which
+  `dbx.DetectHost` and the HTTP-01 planner match on. `GET /ports` then runs `AttributeOwners` with what
+  `ownerInput` read beside the walk, each source under four seconds and left out when it fails: the
+  running containers from `dockerx.ListRunning` (the Engine's list, no inspects), `systemctl list-sockets
+  --all --show-types --output=json` through `procs.Systemd.Sockets` (read with `SocketUnitAt`: inet
+  stream and datagram addresses only), and — after the walk, and only when some owner's parent is a PM2
+  daemon (`UnderPM2`), since `pm2 jlist` starts a daemon where none runs — PM2's app PIDs. A socket systemd listens on for a service
+  carries `SocketUnit` and `Activates` (`ssh.socket` → `ssh.service`); a PM2 app's PID becomes `pm2` and
+  its name; a socket whose protocol, host address and port a container's published binding names — the
+  kernel lets one socket hold them, so whatever holds it is Docker's (docker-proxy, dockerd, or a holder
+  this account cannot see) — carries `Container` with `Published`, as does a wildcard docker-proxy or
+  unseen socket whose other family's binding names it (a Docker before 20.10 published every interface
+  as one proxy on `::`); a container on the host's network is joined by its cgroup's ID. A published
+  binding no socket stands for — the userland proxy off, NAT rules alone — becomes a row of its own with
+  `Source: "docker-nat"` and no PID. `Container.Deployment` names the project and environment its
+  `io.just-dashboard.environment-id` label (on a container also labelled `io.just-dashboard.managed`)
+  points at, looked up in `deploy_environments`. `Self` marks the dashboard's own sockets: its own PID,
+  and every container of the compose project whose container mounts `JD_DATA_DIR` (the `backend`
+  service's where several do); the ingress the dashboard creates serves deployments and is not its own.
+  The posture reads the same containers (`ownerInput` without systemd or PM2), so a published port
+  whose holder it cannot see, and a NAT-only one, is graded as Docker's there too.
 - **Site builder** (`sites.go`, `sites_render.go`, `sites_parse.go`, `sites_apply.go`). `SiteSpec` is our
   shape, not nginx's, for the reason `ContainerSpec` is not `container.Config`; rendering happens **on the
   server** so a spec has one meaning, and the output is hand-written rather than templated because order

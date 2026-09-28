@@ -121,9 +121,11 @@ position sell a score out of a hundred, which is a number to optimise rather tha
   and `GET /ports` returns all three as `Listener.Reach`, `Network` and `Interface`, so the ports page
   words a socket as the posture judges it. A firewall that is on and does not allow inbound by default
   holds a port finding to a warning and is named in its detail — unless the default is not what the
-  socket's traffic meets. A socket `docker-proxy` holds is Docker's published port, forwarded by its NAT
-  rules before the input chain the default belongs to, so it keeps its reach's level and the detail says
-  it is "published by Docker past the firewall's inbound default". A socket an inbound rule admits from
+  socket's traffic meets. A socket `docker-proxy` holds, or one `ExposedPort.Published` marks (a
+  container's published binding names it, whatever holds it, or no socket at all where Docker's NAT
+  alone publishes it), is Docker's published port, forwarded by its NAT rules before the input chain
+  the default belongs to, so it keeps its reach's level and the detail says it is "published by Docker
+  past the firewall's inbound default". A socket an inbound rule admits from
   anywhere keeps it too, and the detail names the rule ("firewall rule 10 admits it from anywhere"):
   `admittingRule` walks the rules in order, first match deciding as ufw and iptables do — ufw's and
   firewalld's `ALLOW`/`LIMIT` or iptables' `ACCEPT` in `INPUT` (its port read from the match text by

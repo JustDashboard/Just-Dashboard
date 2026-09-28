@@ -11,7 +11,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 	"github.com/shirou/gopsutil/v4/process"
 )
 
@@ -30,10 +32,39 @@ type Listener struct {
 	// PPID is the owner's parent, 0 where it could not be read. Docker holds
 	// a published port's two families in two docker-proxy processes, one
 	// dockerd's children, and the page counts them as the one service.
-	PPID    int32  `json:"ppid,omitempty"`
+	PPID int32 `json:"ppid,omitempty"`
+	// Process is the kernel's name for the owner (comm), as the database
+	// detection and the HTTP-01 planner match it: "nginx", "docker-proxy".
 	Process string `json:"process"`
-	Cmdline string `json:"cmdline,omitempty"`
-	User    string `json:"user,omitempty"`
+	// DisplayName is the program where Process is a thread's name the
+	// program gave its main thread — node's "MainThread" — and empty
+	// otherwise.
+	DisplayName string `json:"displayName,omitempty"`
+	Cmdline     string `json:"cmdline,omitempty"`
+	User        string `json:"user,omitempty"`
+	// StartedAt is when the owner started, so an action taken from the page
+	// can refuse a PID the kernel has handed to another process since.
+	StartedAt *time.Time `json:"startedAt,omitempty"`
+	// Manager and ManagerName are who supervises the owner, read from its
+	// cgroup as the processes page reads it — systemd and "nginx.service",
+	// container and a 12-character ID, session and "session-4.scope" — or
+	// from PM2's own list: pm2 and the app's name.
+	Manager     string `json:"manager,omitempty"`
+	ManagerName string `json:"managerName,omitempty"`
+	// SocketUnit is the systemd .socket unit listening on this address for
+	// the service Activates names: ssh.socket for ssh.service. systemd
+	// holds the socket itself, alone until the first connection.
+	SocketUnit string `json:"socketUnit,omitempty"`
+	Activates  string `json:"activates,omitempty"`
+	// Container is the container the socket answers for: a port Docker
+	// publishes, or a container on the host's network holding it itself.
+	Container *ListenerContainer `json:"container,omitempty"`
+	// Source is "docker-nat" for a port Docker publishes through its NAT
+	// rules alone (the userland proxy off), which no socket stands for.
+	Source string `json:"source,omitempty"`
+	// Self marks the dashboard's own sockets: this process, and the
+	// containers of the compose project it was started from.
+	Self bool `json:"self,omitempty"`
 	// Scope is how far the bind reaches, as far as its address can say.
 	Scope BindScope `json:"scope"`
 	// Exposed is every scope but loopback. A socket on one tailnet or public
@@ -117,7 +148,7 @@ func ListListeners(ctx context.Context) ([]Listener, error) {
 		return nil, err
 	}
 	out := listenersFrom(sockets, holders, parentsOf(root, holders))
-	cache := map[int32]*process.Process{}
+	cache := map[int32]*ownerDetails{}
 	for i := range out {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -126,22 +157,52 @@ func ListListeners(ctx context.Context) ([]Listener, error) {
 		if l.PID <= 0 {
 			continue
 		}
-		p, ok := cache[l.PID]
+		d, ok := cache[l.PID]
 		if !ok {
 			// A process that exited since the walk is cached as nil, so its
 			// other sockets do not ask again.
-			if np, err := process.NewProcessWithContext(ctx, l.PID); err == nil {
-				p = np
-			}
-			cache[l.PID] = p
+			d = readOwnerDetails(ctx, root, l.PID)
+			cache[l.PID] = d
 		}
-		if p != nil {
-			l.Process, _ = p.NameWithContext(ctx)
-			l.Cmdline, _ = p.CmdlineWithContext(ctx)
-			l.User, _ = p.UsernameWithContext(ctx)
+		if d != nil {
+			l.Process, l.DisplayName, l.Cmdline, l.User = d.name, d.display, d.cmdline, d.user
+			l.StartedAt, l.Manager, l.ManagerName = d.started, d.manager, d.managerName
 		}
 	}
 	return out, nil
+}
+
+// ownerDetails is what the listing says of one process, read once however
+// many sockets it holds.
+type ownerDetails struct {
+	name, display, cmdline, user string
+	started                      *time.Time
+	manager, managerName         string
+}
+
+func readOwnerDetails(ctx context.Context, root string, pid int32) *ownerDetails {
+	p, err := process.NewProcessWithContext(ctx, pid)
+	if err != nil {
+		return nil
+	}
+	d := &ownerDetails{}
+	d.name, _ = p.NameWithContext(ctx)
+	d.cmdline, _ = p.CmdlineWithContext(ctx)
+	d.user, _ = p.UsernameWithContext(ctx)
+	if created, err := p.CreateTimeWithContext(ctx); err == nil {
+		// The processes page's own reading, so the pair names one process
+		// to POST /processes/{pid}/signal.
+		started := time.UnixMilli(created).UTC()
+		d.started = &started
+	}
+	if threadName(d.name) {
+		// Another account's executable link is unreadable to a dashboard
+		// not running as root; the command line's first word still is.
+		exe, _ := p.ExeWithContext(ctx)
+		d.display = displayName(d.name, exe, d.cmdline)
+	}
+	d.manager, d.managerName = procs.ManagerOf(root, pid, d.cmdline)
+	return d
 }
 
 // listenersFrom keeps the sockets that are accepting and names each one's
@@ -186,6 +247,12 @@ func listenersFrom(sockets []socketRow, holders map[uint64][]int32, parents map[
 			Exposed:  scope != ScopeLoopback,
 		})
 	}
+	sortListeners(out)
+	return out
+}
+
+// sortListeners orders the listing by port, then protocol, then address.
+func sortListeners(out []Listener) {
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Port != out[j].Port {
 			return out[i].Port < out[j].Port
@@ -195,7 +262,6 @@ func listenersFrom(sockets []socketRow, holders map[uint64][]int32, parents map[
 		}
 		return out[i].Address < out[j].Address
 	})
-	return out
 }
 
 // socketRow is one line of /proc/net/{tcp,tcp6,udp,udp6}.

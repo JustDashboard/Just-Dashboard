@@ -72,6 +72,10 @@ type ExposedPort struct {
 	// Process names the socket's holder: docker-proxy's is a port Docker
 	// publishes, which a firewall's inbound default does not hold.
 	Process string
+	// Published is a port Docker publishes whatever holds it: docker-proxy
+	// where this account cannot see the holder, dockerd reserving it, or
+	// no socket at all where the userland proxy is off.
+	Published bool
 	// Exposed is any bind but loopback. How far it reaches — every
 	// interface, a public address, a tailnet — is read from Address against
 	// AssessInput.Network, by the same HostNetwork.Place the ports page's
@@ -539,9 +543,9 @@ type PortGrade struct {
 type PastFirewall string
 
 const (
-	// PastFirewallDocker is a port docker-proxy holds. Docker publishes it
-	// with NAT rules that forward the traffic before the input chain the
-	// inbound default belongs to is reached, so the default never sees it.
+	// PastFirewallDocker is a port Docker publishes, with NAT rules that
+	// forward the traffic before the input chain the inbound default
+	// belongs to is reached, so the default never sees it.
 	PastFirewallDocker PastFirewall = "docker"
 	// PastFirewallRule is a port a rule admits from anywhere, which a
 	// connection meets before it falls through to the default.
@@ -594,7 +598,7 @@ func portLevel(l ExposedPort, reach bindReach, network HostNetwork, firewall *Fi
 	if firewall == nil || !firewall.Enabled || firewall.Policy.Incoming == "" || firewall.Policy.Incoming == "allow" {
 		return grade
 	}
-	if l.Process == "docker-proxy" {
+	if l.Process == "docker-proxy" || l.Published {
 		grade.PastFirewall = PastFirewallDocker
 		return grade
 	}

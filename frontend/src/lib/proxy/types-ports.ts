@@ -34,18 +34,57 @@ export type ListenerNetwork =
   | "bridge"
   | "link-local"
 
+/** The container a socket answers for. */
+export type ListenerContainer = {
+  /** The short ID, as `docker ps` prints it. */
+  id: string
+  name: string
+  image: string
+  /** The compose project and service that started it. */
+  project?: string
+  service?: string
+  /**
+   * A port Docker publishes on the host (through docker-proxy, or its NAT
+   * rules alone), rather than a container on the host's network holding
+   * the socket itself.
+   */
+  published?: boolean
+  /** The dashboard deployment it runs for. */
+  deployment?: { projectId: number; project: string; environment: string }
+}
+
 export type Listener = {
   protocol: string
   /** The socket's family: a service on 0.0.0.0 and :: is one of each. */
   family: "ipv4" | "ipv6"
   address: string
   port: number
+  /** 0 where no process holds it that the dashboard can see, or none does. */
   pid: number
   /** The owner's parent; absent where it could not be read. */
   ppid?: number
+  /** The kernel's name for the owner, as other code matches on it. */
   process: string
+  /** The program, where `process` is the name of a thread (node's "MainThread"). */
+  displayName?: string
   cmdline?: string
   user?: string
+  /** When the owner started, so an action can refuse a PID reused since. */
+  startedAt?: string
+  /**
+   * Who supervises the owner, as the processes page names it: a systemd
+   * unit, a container's short ID, a login session, or a PM2 app.
+   */
+  manager?: "systemd" | "container" | "session" | "pm2" | "kernel" | "unmanaged"
+  managerName?: string
+  /** The systemd .socket unit listening here, and the service it starts. */
+  socketUnit?: string
+  activates?: string
+  container?: ListenerContainer
+  /** "docker-nat": a port Docker's NAT rules alone publish, with no socket. */
+  source?: "docker-nat"
+  /** One of the dashboard's own sockets. */
+  self?: boolean
   scope: ListenerScope
   reach: ListenerReach
   network: ListenerNetwork

@@ -1146,9 +1146,11 @@ report keeps findings, protocol checks and HTTP readings beside the live certifi
 vertical chain; long header values wrap instead of hiding the verdict. Listening sockets stay a
 table of readings, with fixed endpoint, application, reach and action columns and a stacked phone
 layout chosen once by `useMediaQuery`; the three named columns sort from their headings, which carry
-`aria-sort`, and a phone gets the same orders as one Sort menu. Grouped by application, one
-program's sockets are a line whose name is the disclosure button, unfolding its sockets indented
-beneath it. How old the list is sits in the panel header beside Refresh, Pause and Export; a failed
+`aria-sort`, and a phone gets the same orders as one Sort menu. The application cell is the owner
+drawn as its product (a container as its image's), its name with a "This dashboard" `Tag` on the
+dashboard's own, how it runs as one hint line, then the command and the account; the owner's page is
+the row's first inline verb. Grouped by application, one owner's sockets are a line whose name is the
+disclosure button, unfolding its sockets indented beneath it. How old the list is sits in the panel header beside Refresh, Pause and Export; a failed
 poll is a warning `Notice` over the rows it kept. Tables retain their scrolling boundary; forms and
 sections remain plain.
 `tests/browser/proxy-ui.spec.ts` covers all six populated pages at 390, 1280 and 1720, detail
