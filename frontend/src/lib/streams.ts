@@ -30,6 +30,8 @@ export function streamSpecOf(stream: StreamSpec): StreamSpec {
   const {
     name,
     listen,
+    listenEnd,
+    samePort,
     address,
     protocol,
     udpMode,
@@ -38,6 +40,8 @@ export function streamSpecOf(stream: StreamSpec): StreamSpec {
     balance,
     noRetry,
     proxyProtocol,
+    acceptProxy,
+    trustedProxies,
     timeout,
     connectTimeout,
     allowFrom,
@@ -60,6 +64,8 @@ export function streamSpecOf(stream: StreamSpec): StreamSpec {
   return {
     name,
     listen,
+    listenEnd,
+    samePort,
     address,
     protocol,
     udpMode,
@@ -68,6 +74,8 @@ export function streamSpecOf(stream: StreamSpec): StreamSpec {
     balance,
     noRetry,
     proxyProtocol,
+    acceptProxy,
+    trustedProxies,
     timeout,
     connectTimeout,
     allowFrom,
@@ -132,6 +140,10 @@ export function streamBody(spec: StreamSpec, access: StreamAccess): StreamSpec {
   return {
     ...streamSpecOf(spec),
     udpMode: spec.protocol === "tcp" ? undefined : (spec.udpMode ?? "session"),
+    // The list is edited one per line, blank lines and all, and sent without them.
+    trustedProxies: spec.acceptProxy
+      ? spec.trustedProxies?.map((entry) => entry.trim()).filter(Boolean)
+      : undefined,
     allowFrom: [],
     rules: access.rules.map((rule) => ({ ...rule, source: rule.source.trim() })),
     defaultAllow: access.defaultAllow,
@@ -359,11 +371,17 @@ export function listenFamily(address?: string): "IPv4" | "IPv6" | null {
 }
 
 /** Where a stream listens, the way it would be dialled: the port alone when it takes every address. */
-export function listenLabel(stream: Pick<StreamSpec, "address" | "listen">): string {
-  if (!stream.address || listenFamily(stream.address)) return String(stream.listen)
+export function listenLabel(stream: Pick<StreamSpec, "address" | "listen" | "listenEnd">): string {
+  const ports = stream.listenEnd ? `${stream.listen}-${stream.listenEnd}` : String(stream.listen)
+  if (!stream.address || listenFamily(stream.address)) return ports
   return stream.address.includes(":")
-    ? `[${stream.address}]:${stream.listen}`
-    : `${stream.address}:${stream.listen}`
+    ? `[${stream.address}]:${ports}`
+    : `${stream.address}:${ports}`
+}
+
+/** Whether a port is one a stream listens on: its port, or one of its range. */
+export function listensOn(stream: Pick<StreamSpec, "listen" | "listenEnd">, port: number): boolean {
+  return port >= stream.listen && port <= (stream.listenEnd || stream.listen)
 }
 
 /**

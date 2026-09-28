@@ -224,7 +224,12 @@ func (s *Server) handleStreamPreview(w http.ResponseWriter, r *http.Request) err
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
-	out := map[string]any{"content": content, "warnings": proxysvc.StreamWarnings(&req.Spec)}
+	warnings := proxysvc.StreamWarnings(&req.Spec)
+	// Said while the form is filled in, as the save would refuse it.
+	if err := proxysvc.StreamAddressError(&req.Spec); err != nil {
+		warnings = append(warnings, "The save will be refused: "+err.Error()+".")
+	}
+	out := map[string]any{"content": content, "warnings": warnings}
 	ctx, cancel := timeoutCtx(r, 20*time.Second)
 	defer cancel()
 	if refused := s.modules.proxy.StreamConflict(ctx, &req.Spec, req.Previous); refused != nil {
@@ -287,6 +292,12 @@ func (s *Server) handleStreamApply(w http.ResponseWriter, r *http.Request) error
 		return httpx.Err(http.StatusConflict, "stream_ssl_missing", err.Error())
 	case errors.Is(err, proxysvc.ErrNoStreamPreread):
 		return httpx.Err(http.StatusConflict, "stream_preread_missing", err.Error())
+	case errors.Is(err, proxysvc.ErrNoStreamRealIP):
+		return httpx.Err(http.StatusConflict, "stream_realip_missing", err.Error())
+	case errors.Is(err, proxysvc.ErrStreamAddressNotLocal):
+		out := httpx.Err(http.StatusUnprocessableEntity, "address_not_local", err.Error())
+		out.Field = "spec.address"
+		return out
 	case err != nil:
 		return mapProxyError(err)
 	}
@@ -297,6 +308,16 @@ func (s *Server) handleStreamApply(w http.ResponseWriter, r *http.Request) error
 	if len(req.Spec.Servers) > 0 {
 		detail["servers"] = len(req.Spec.Servers)
 		detail["balance"] = req.Spec.Balance
+	}
+	if req.Spec.ListenEnd > 0 {
+		detail["listenEnd"] = req.Spec.ListenEnd
+		detail["samePort"] = req.Spec.SamePort
+	}
+	if req.Spec.Address != "" {
+		detail["address"] = req.Spec.Address
+	}
+	if req.Spec.AcceptProxy {
+		detail["trustedProxies"] = req.Spec.TrustedProxies
 	}
 	if req.Spec.TLS {
 		detail["tls"] = req.Spec.CertPath

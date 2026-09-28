@@ -60,6 +60,10 @@ type StreamModule struct {
 	// reads the TLS name a stream routes by. Like SSL it is read from
 	// nginx -V alone.
 	Preread bool `json:"preread"`
+	// RealIP is whether the build has stream_realip_module, which takes a
+	// client's address from the PROXY header a load balancer sends. Read
+	// from nginx -V alone, as SSL is.
+	RealIP bool `json:"realip"`
 }
 
 // nginxBuild is what `nginx -V` says about how the binary was compiled.
@@ -224,14 +228,15 @@ func (s *Service) StreamModule(ctx context.Context) StreamModule {
 	build := parseNginxBuild(string(out))
 	ssl := build.modules["stream_ssl_module"] != ""
 	preread := build.modules["stream_ssl_preread_module"] != ""
+	realip := build.modules["stream_realip_module"] != ""
 	switch build.modules["stream"] {
 	case "static":
-		return StreamModule{State: ModuleStatic, Usable: true, SSL: ssl, Preread: preread}
+		return StreamModule{State: ModuleStatic, Usable: true, SSL: ssl, Preread: preread, RealIP: realip}
 	case "":
 		return StreamModule{State: ModuleAbsent}
 	}
 
-	module := StreamModule{Path: path.Join(build.modulesPath, streamModuleFile), SSL: ssl, Preread: preread}
+	module := StreamModule{Path: path.Join(build.modulesPath, streamModuleFile), SSL: ssl, Preread: preread, RealIP: realip}
 	load := readLoadedModules(ctx)
 	module.State = load.state(ctx, "stream", module.Path)
 	module.Usable = module.State == ModuleLoaded

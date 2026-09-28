@@ -258,15 +258,17 @@ type bind struct {
 }
 
 // streamBinds are the sockets a spec's listen lines ask for: a TCP and a UDP
-// socket on each address for a stream of both.
+// socket on each address for a stream of both, on every port of a range.
 func streamBinds(spec *StreamSpec) []bind {
 	var out []bind
-	for _, suffix := range streamListenSuffixes(spec.Protocol) {
-		udp := suffix != ""
-		if spec.Address == "" {
-			out = append(out, bind{"0.0.0.0", spec.Listen, udp}, bind{"::", spec.Listen, udp})
-		} else {
-			out = append(out, bind{spec.Address, spec.Listen, udp})
+	for port := spec.Listen; port <= streamLastPort(spec); port++ {
+		for _, suffix := range streamListenSuffixes(spec.Protocol) {
+			udp := suffix != ""
+			if spec.Address == "" {
+				out = append(out, bind{"0.0.0.0", port, udp}, bind{"::", port, udp})
+			} else {
+				out = append(out, bind{spec.Address, port, udp})
+			}
 		}
 	}
 	return out
@@ -399,8 +401,10 @@ func configClaims(tree []Directive, nginxDir, streamDir string) (streams, sites 
 				switch inner.Name {
 				case "listen":
 					listens++
-					if b, ok := listenBind(inner.Args, http); ok && !slices.Contains(cl.binds, b) {
-						cl.binds = append(cl.binds, b)
+					for _, b := range listenBinds(inner.Args, http) {
+						if !slices.Contains(cl.binds, b) {
+							cl.binds = append(cl.binds, b)
+						}
 					}
 				case "server_name":
 					names = append(names, inner.Args...)
@@ -599,11 +603,16 @@ func (c *portClaims) conflict(ctx context.Context, spec *StreamSpec, own []bind)
 }
 
 // freePort is the next port above the requested one that nothing holds,
-// looked for within a hundred ports.
+// looked for within a hundred ports. For a range it is the first port of the
+// next range as wide that nothing holds.
 func (c *portClaims) freePort(ctx context.Context, spec *StreamSpec, own []bind) int {
 	try := *spec
-	for port := spec.Listen + 1; port <= 65535 && port <= spec.Listen+100; port++ {
+	width := streamLastPort(spec) - spec.Listen
+	for port := spec.Listen + 1; port+width <= 65535 && port <= spec.Listen+100; port++ {
 		try.Listen = port
+		if spec.ListenEnd > 0 {
+			try.ListenEnd = port + width
+		}
 		free := true
 		for _, b := range streamBinds(&try) {
 			if c.holder(ctx, b, own) != nil {
