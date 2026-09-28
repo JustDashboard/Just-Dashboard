@@ -5,7 +5,14 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowRight, Globe } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
-import type { Certificate, CertbotState, Listener, StreamStatus, VHost } from "@/lib/types"
+import type {
+  Certificate,
+  CertbotState,
+  DefaultSite,
+  Listener,
+  StreamStatus,
+  VHost,
+} from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Page, PageContext, PageState } from "@/components/page"
@@ -30,7 +37,7 @@ import { foldProxyFindings } from "@/components/proxy/attention"
  * findings and expiry share the rail so a list of warnings never pushes every route off screen.
  */
 export default function ProxyOverviewPage() {
-  const { status, loading, refresh: refreshStatus } = useProxy()
+  const { status, loading, hasNginx, refresh: refreshStatus } = useProxy()
   const { can } = useAuth()
   const router = useRouter()
   const admin = can("system.admin")
@@ -52,6 +59,12 @@ export default function ProxyOverviewPage() {
     60_000,
   )
   const ports = usePoll<Listener[]>((signal) => get("/ports", undefined, signal), 30_000)
+  const defaultSite = usePoll<DefaultSite>(
+    (signal) => get("/proxy/default-site", undefined, signal),
+    300_000,
+    [],
+    { enabled: hasNginx },
+  )
 
   const hosts = vhosts.data ?? []
   const onTls = hosts.filter((v) => v.tls).length
@@ -106,8 +119,17 @@ export default function ProxyOverviewPage() {
         vhosts: vhosts.data,
         streams: streams.data,
         ports: ports.data,
+        defaultSite: defaultSite.data,
       }),
-    [certs.data, certbot.data, certbotGone, vhosts.data, streams.data, ports.data],
+    [
+      certs.data,
+      certbot.data,
+      certbotGone,
+      vhosts.data,
+      streams.data,
+      ports.data,
+      defaultSite.data,
+    ],
   )
   const settled = !vhosts.loading && !certs.loading && !streams.loading && !ports.loading
 

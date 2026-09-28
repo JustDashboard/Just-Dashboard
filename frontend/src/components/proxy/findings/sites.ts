@@ -1,8 +1,8 @@
-import type { VHost } from "@/lib/types"
+import type { DefaultSite, VHost } from "@/lib/types"
 import type { ProxyFinding } from "@/components/proxy/findings/shared"
 import { activeOwner } from "@/components/proxy/site-details"
 
-export type SiteFindingInput = { vhosts?: VHost[] }
+export type SiteFindingInput = { vhosts?: VHost[]; defaultSite?: DefaultSite }
 
 /**
  * A link in sites-enabled to nothing, one serving another file, a site on
@@ -14,8 +14,25 @@ export type SiteFindingInput = { vhosts?: VHost[] }
  * deployment's route is changed from its deployment, so that is where the
  * advice sends the operator.
  */
-export function siteFindings({ vhosts }: SiteFindingInput): ProxyFinding[] {
+export function siteFindings({ vhosts, defaultSite }: SiteFindingInput): ProxyFinding[] {
   const out: ProxyFinding[] = []
+
+  // Only when the catch-all was read and is absent, and nothing else claims
+  // 443: then a scanner on the bare IP gets the first TLS site's certificate.
+  const tlsSites = (vhosts ?? []).filter((v) => v.kind === "nginx" && v.enabled && v.tls)
+  const tlsFirst = defaultSite?.answering.find((a) => a.listen === "*:443")
+  if (defaultSite && !defaultSite.installed && tlsSites.length > 0 && tlsFirst?.claimed === false) {
+    const name = tlsFirst.serverNames.find((n) => n !== "_") ?? tlsFirst.file
+    out.push({
+      id: "site.catchall.missing",
+      level: "notice",
+      title: "Unknown hosts on 443 get a real site's certificate",
+      detail: `No catch-all default site is set, so a request for a name no site serves — the bare IP, a scanner — is answered by ${name}, the first server nginx reads on 443, with its certificate.`,
+      advice: "Set what unknown hosts get under Unknown hosts on Sites.",
+      meta: "site",
+      href: "/proxy/sites",
+    })
+  }
 
   for (const vhost of vhosts ?? []) {
     const owner = activeOwner(vhost)

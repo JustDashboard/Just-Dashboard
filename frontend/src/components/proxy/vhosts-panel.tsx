@@ -29,6 +29,7 @@ import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state
 import { VerbBar } from "@/components/verbs"
 import { AuthFilesPanel } from "@/components/proxy/auth-files-panel"
 import { ConfigEditor } from "@/components/proxy/config-editor"
+import { DefaultSitePanel } from "@/components/proxy/default-site"
 import { siteProduct } from "@/components/proxy/marks"
 import { SiteForm } from "@/components/proxy/site-form"
 import {
@@ -840,6 +841,8 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
           )}
         </div>
       )}
+
+      {hasNginx && <DefaultSitePanel admin={admin} />}
 
       {admin && hasNginx && <AuthFilesPanel />}
 

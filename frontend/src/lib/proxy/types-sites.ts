@@ -134,3 +134,42 @@ export type PendingFile = {
   change: "changed" | "added" | "removed"
   modified?: string
 }
+
+/** What the catch-all default site does with a request whose Host names no site. */
+export type DefaultChoice = "close" | "not_found" | "redirect" | "page"
+
+/** Who answers an unknown Host on one socket today: its default_server, or else the first server nginx read. */
+export type DefaultListener = {
+  listen: string
+  file: string
+  line: number
+  serverNames: string[]
+  claimed: boolean
+  ours: boolean
+}
+
+/** Another file's default_server on a socket the catch-all would claim. */
+export type DefaultClaim = { listen: string; file: string; line: number }
+
+/** GET /proxy/default-site: the catch-all as it stands and what an Apply would write. */
+export type DefaultSite = {
+  installed: boolean
+  path?: string
+  content?: string
+  /** Absent when the owned file was changed by hand into something the page cannot read back. */
+  choice?: DefaultChoice
+  redirectTo?: string
+  pageDir: string
+  /** The sockets an Apply would claim, e.g. "*:80", "[::]:443". */
+  covers: string[]
+  answering: DefaultListener[]
+  others: DefaultClaim[]
+  /** Sockets on a named address, which nginx matches before the catch-all's wildcard. */
+  uncovered: string[]
+  tlsSkipped?: string
+  /** Why nginx's configuration could not be read; the plan fields are then empty. */
+  error?: string
+}
+
+/** PUT and DELETE /proxy/default-site. */
+export type DefaultSiteResult = VHostLinkResult & { path: string; content?: string }

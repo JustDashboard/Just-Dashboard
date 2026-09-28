@@ -26,9 +26,16 @@ func (s *Server) mountVHostRoutes(r chi.Router) {
 	// editor's read already give every account; the reload it leads to is
 	// POST /proxy/reload, gated with the rest of the engine.
 	r.Method(http.MethodGet, "/pending", s.handle(s.handleProxyPending))
+	// What unknown hosts get: the listen lines of the files the listing and
+	// the config editor already show every account, and no probe.
+	r.Method(http.MethodGet, "/default-site", s.handle(s.handleDefaultSiteGet))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
+		r.Method(http.MethodPut, "/default-site", s.handle(s.handleDefaultSitePut))
 		s.destructive(r, func(r chi.Router) {
+			// Removing the catch-all hands unknown hosts back to whichever
+			// site nginx reads first.
+			r.Method(http.MethodDelete, "/default-site", s.handle(s.handleDefaultSiteDelete))
 			// Disabling a vhost takes a site offline, and removing a link
 			// takes whatever it pointed at out of nginx's configuration.
 			r.Method(http.MethodPost, "/vhosts/{name}/enabled", s.handle(s.handleVHostToggle))
@@ -258,4 +265,72 @@ func (out *vhostLinkResult) reloaded(reload *proxysvc.LinkReload) {
 	default:
 		out.ReloadError = reload.Err.Error()
 	}
+}
+
+func (s *Server) handleDefaultSiteGet(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	site, err := s.modules.proxy.DefaultSite(ctx)
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	httpx.JSON(w, http.StatusOK, site)
+	return nil
+}
+
+type defaultSiteRequest struct {
+	Choice     proxysvc.DefaultChoice `json:"choice"`
+	RedirectTo string                 `json:"redirectTo"`
+}
+
+// defaultSiteResult is what an Apply or a removal of the catch-all did; the
+// reload is reported the way a link change reports it.
+type defaultSiteResult struct {
+	vhostLinkResult
+	Path    string `json:"path"`
+	Content string `json:"content,omitempty"`
+}
+
+func (s *Server) handleDefaultSitePut(w http.ResponseWriter, r *http.Request) error {
+	var req defaultSiteRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 60*time.Second)
+	defer cancel()
+	detail := map[string]any{"choice": req.Choice}
+	if req.Choice == proxysvc.DefaultRedirect {
+		detail["redirectTo"] = req.RedirectTo
+	}
+	res, err := s.modules.proxy.ApplyDefaultSite(ctx, req.Choice, req.RedirectTo, true)
+	if err != nil {
+		var conflict *proxysvc.DefaultConflictError
+		if errors.As(err, &conflict) {
+			detail["result"] = "refused"
+			detail["reason"] = conflict.Error()
+			httpx.SetAudit(r, "proxy.default_site.apply", "jd-default", detail)
+			return httpx.Err(http.StatusConflict, "other_default", conflict.Error())
+		}
+		return refusedLinkChange(r, "proxy.default_site.apply", "jd-default", detail, err)
+	}
+	out := defaultSiteResult{vhostLinkResult: vhostLinkResult{Name: "jd-default", Enabled: true},
+		Path: res.Path, Content: res.Content}
+	out.reloaded(res.Reload)
+	httpx.SetAudit(r, "proxy.default_site.apply", res.Path, out.auditDetail(detail))
+	httpx.JSON(w, http.StatusOK, out)
+	return nil
+}
+
+func (s *Server) handleDefaultSiteDelete(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 60*time.Second)
+	defer cancel()
+	res, err := s.modules.proxy.RemoveDefaultSite(ctx, true)
+	if err != nil {
+		return mapProxyError(err)
+	}
+	out := defaultSiteResult{vhostLinkResult: vhostLinkResult{Name: "jd-default"}, Path: res.Path}
+	out.reloaded(res.Reload)
+	httpx.SetAudit(r, "proxy.default_site.remove", res.Path, out.auditDetail(map[string]any{}))
+	httpx.JSON(w, http.StatusOK, out)
+	return nil
 }
