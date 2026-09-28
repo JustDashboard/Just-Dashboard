@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -317,4 +318,216 @@ func siteChange(s *Service, file string, action ChangeAction) Change {
 		change.Path, change.Before, change.After = full, content, content
 	}
 	return change
+}
+
+// RenameResult is where a renamed site now lives. Name is what the Sites
+// list calls it — in conf.d that keeps the .conf suffix — and Rerendered
+// says whether the file's own mentions of its name were written again.
+type RenameResult struct {
+	Name       string
+	Path       string
+	Rerendered bool
+	// Enabled is whether nginx serves the file under its new name: a conf.d
+	// file always, a sites-available one when a link moved with it.
+	Enabled  bool
+	Warnings []string
+}
+
+// deploymentRoutePrefix begins the name deploy gives an environment's route
+// (deploy.RouteNameFor). A deploy writes that file again by its name, so a
+// renamed route would come back beside the copy, both serving the same
+// hostnames.
+const deploymentRoutePrefix = "just-dashboard-env-"
+
+// RenameSite moves a site's file to a new name as one change: the file, every
+// link in sites-enabled that serves it — its own moves with it, one under
+// another name is re-pointed — and, for a file the form wrote and still
+// reproduces, the lines that carry the name (the header and the log paths)
+// rendered again. `nginx -t` runs over the result, and a refusal puts the
+// file, its content and its links back as they were. Both layouts: a conf.d
+// file keeps its .conf suffix, which is what makes nginx include it.
+//
+// A file edited by hand since the form wrote it is moved as it is, and the
+// result says its log paths still name the old site: rewriting it would
+// replace the edits with what the form last knew.
+func (s *Service) RenameSite(ctx context.Context, from, to string, reload bool) (*RenameResult, *LinkReload, error) {
+	if err := linkName(from); err != nil {
+		return nil, nil, err
+	}
+	if !siteNameRe.MatchString(to) || isBackupFile(to) {
+		return nil, nil, fmt.Errorf("a site name is up to 64 lower-case letters, digits, dots, dashes and underscores, starting with a letter or digit, and not ending like a backup")
+	}
+	for _, name := range []string{from, to} {
+		if strings.HasPrefix(name, deploymentRoutePrefix) {
+			return nil, nil, fmt.Errorf("%s is the name a deployment gives its route — a deploy writes that file by name, so renaming onto or away from it leaves two copies serving the same hostnames", name)
+		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	oldPath, newPath, confd := "", "", false
+	available := filepath.Join(s.nginxDir, "sites-available")
+	for i, pair := range [][2]string{
+		{filepath.Join(available, from), filepath.Join(available, to)},
+		{s.confdPath(from), s.confdPath(to)},
+	} {
+		// Looked at before allowedPath, which resolves links: a link in
+		// sites-available points into somebody's repository or another
+		// directory, and renaming what it resolves to would move that file.
+		info, err := os.Lstat(pair[0])
+		if err != nil {
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			return nil, nil, fmt.Errorf("%s is a link to another file, not a site file — rename it where it lives", from)
+		}
+		if oldPath, err = s.allowedPath(pair[0]); err != nil {
+			return nil, nil, err
+		}
+		newPath, confd = pair[1], i == 1
+		break
+	}
+	if oldPath == "" {
+		return nil, nil, fmt.Errorf("no such site: %s", from)
+	}
+	if dashboardOwned(from, oldPath) {
+		return nil, nil, fmt.Errorf("%s is the dashboard's own file, written by the feature that shows it", from)
+	}
+	newPath, err := s.allowedPath(newPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	if newPath == oldPath {
+		return nil, nil, fmt.Errorf("%s already has that name", from)
+	}
+	if _, err := os.Lstat(newPath); err == nil {
+		return nil, nil, fmt.Errorf("a site called %s already exists", filepath.Base(newPath))
+	}
+	enabledDir := filepath.Join(s.nginxDir, "sites-enabled")
+	// Every name in sites-enabled that serves the file: its own follows the
+	// rename, any other keeps its name and is pointed at the new path, as
+	// the old one would be a link to nothing, which stops every reload.
+	served := enabledLinks(enabledDir)[resolvedFile(oldPath)]
+	if slices.Contains(served, from) {
+		if _, err := os.Lstat(filepath.Join(enabledDir, to)); err == nil {
+			return nil, nil, fmt.Errorf("sites-enabled/%s already exists, and the site's link would take its place", to)
+		}
+	}
+
+	content, err := os.ReadFile(oldPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	out := &RenameResult{Name: filepath.Base(newPath), Path: newPath, Enabled: confd || len(served) > 0, Warnings: []string{}}
+	after := content
+	if rendered, ok := rerenderedFor(content, from, out.Name, confd); ok {
+		after, out.Rerendered = []byte(rendered), true
+	} else if _, managed := ParseSiteSpec(from, string(content)); managed {
+		out.Warnings = append(out.Warnings, fmt.Sprintf("the file was edited by hand since the site form wrote it, so it moved as it was: its header and log paths still name %s until it is saved from the form", from))
+	}
+
+	links := make([]string, len(served))
+	for i, name := range served {
+		links[i] = filepath.Join(enabledDir, name)
+	}
+	newLinks := make([]string, 0, len(served))
+	for _, name := range served {
+		if name == from {
+			name = to
+		}
+		newLinks = append(newLinks, filepath.Join(enabledDir, name))
+	}
+	s.keepLoaded(append(append([]string{oldPath, newPath}, links...), newLinks...)...)
+	restoreLinks, err := removeLinks(links)
+	if err != nil {
+		return nil, nil, err
+	}
+	var made []string
+	undo := func() error {
+		for _, link := range made {
+			_ = os.Remove(link)
+		}
+		var failed []string
+		if _, err := os.Lstat(newPath); err == nil {
+			if err := writeAtomic(newPath, string(content)); err != nil {
+				failed = append(failed, err.Error())
+			} else if err := os.Rename(newPath, oldPath); err != nil {
+				failed = append(failed, err.Error())
+			}
+		}
+		if restoreLinks != nil {
+			if err := restoreLinks(); err != nil {
+				failed = append(failed, err.Error())
+			}
+		}
+		if len(failed) > 0 {
+			return fmt.Errorf("putting %s back failed — %s", from, strings.Join(failed, "; "))
+		}
+		return nil
+	}
+	fail := func(err error) (*RenameResult, *LinkReload, error) {
+		if undoErr := undo(); undoErr != nil {
+			return nil, nil, fmt.Errorf("%w, and %v", err, undoErr)
+		}
+		return nil, nil, err
+	}
+	if err := os.Rename(oldPath, newPath); err != nil {
+		return fail(err)
+	}
+	if out.Rerendered {
+		if err := writeAtomic(newPath, string(after)); err != nil {
+			return fail(err)
+		}
+	}
+	for _, link := range newLinks {
+		if err := os.Symlink(newPath, link); err != nil {
+			return fail(err)
+		}
+		made = append(made, link)
+	}
+
+	s.forgetEffective()
+	if res := runValidator(ctx, "nginx", "-t"); !res.Valid {
+		if err := undo(); err != nil {
+			return nil, nil, err
+		}
+		refused := &RefusedError{Validation: res, Lead: fmt.Sprintf("nginx refuses the configuration with %s renamed to %s", from, out.Name)}
+		if before := runValidator(ctx, "nginx", "-t"); !before.Valid && FailureHeadline(before) == FailureHeadline(res) {
+			refused.Lead = "nginx already refuses the configuration as it is"
+		}
+		return nil, nil, refused
+	}
+	// Two records, one per path, so each file's history reads true: the old
+	// name ends in a delete, and the new one begins with what it holds.
+	s.recordChange(ctx, Change{Path: oldPath, Action: ChangeDelete, Before: content, BeforeExisted: true})
+	s.recordChange(ctx, Change{Path: newPath, Action: ChangeRename, After: after})
+	return out, s.reloadLocked(ctx, reload), nil
+}
+
+// rerenderedFor is a managed file's content rendered again under the new
+// name, when the file is still exactly what the form renders for it under
+// the old one. conf.d files were written under their name with or without
+// the suffix, so both are tried, and the new name, to, is spelled the way
+// the old one was.
+func rerenderedFor(content []byte, from, to string, confd bool) (string, bool) {
+	names := []string{from}
+	if confd {
+		names = append(names, strings.TrimSuffix(from, ".conf"))
+	}
+	for _, name := range names {
+		spec, managed := ParseSiteSpec(name, string(content))
+		if !managed {
+			return "", false
+		}
+		if again, err := RenderNginx(spec); err != nil || again != string(content) {
+			continue
+		}
+		spec.Name = to
+		if name != from {
+			spec.Name = strings.TrimSuffix(to, ".conf")
+		}
+		rendered, err := RenderNginx(spec)
+		return rendered, err == nil
+	}
+	return "", false
 }

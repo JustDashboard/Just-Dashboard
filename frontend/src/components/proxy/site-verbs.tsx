@@ -103,6 +103,22 @@ export function siteDeletable(vhost: VHost): boolean {
   )
 }
 
+/**
+ * Whether Rename applies: an nginx site file of its own in sites-available or
+ * conf.d. Not a deployment's route, archived or not — a deploy writes that
+ * file again by its name — nor a file that resolves elsewhere, which renaming
+ * the entry here would not rename.
+ */
+export function siteRenamable(vhost: VHost): boolean {
+  return (
+    vhost.kind === "nginx" &&
+    Boolean(vhost.path) &&
+    !vhost.resolvesTo &&
+    !vhost.owner &&
+    (vhost.layout === "sites-available" || vhost.layout === "conf.d")
+  )
+}
+
 export function useSiteVerbs({
   vhost,
   admin,
@@ -117,6 +133,7 @@ export function useSiteVerbs({
   onToggle,
   onMaintenance,
   onDelete,
+  onRename,
   onUnlink,
   onOverride,
 }: {
@@ -142,6 +159,7 @@ export function useSiteVerbs({
   /** Turns the site's maintenance page on or off; left out where the verb has no place. */
   onMaintenance?: (vhost: VHost, on: boolean) => void
   onDelete: (vhost: VHost) => void
+  onRename: (vhost: VHost) => void
   onUnlink: (vhost: VHost) => void
   /** Asks first, then opens a deployment's route for editing all the same. */
   onOverride: (vhost: VHost) => void
@@ -342,6 +360,16 @@ export function useSiteVerbs({
             run: () => onMaintenance(vhost, true),
           },
     )
+  }
+  if (admin && siteRenamable(vhost) && !ambiguous) {
+    verbs.push({
+      key: "rename",
+      label: "Rename",
+      icon: Pencil,
+      progressive: "Renaming",
+      disabled: Boolean(busy),
+      run: () => onRename(vhost),
+    })
   }
   if (admin && deletable && !ambiguous && !owner) {
     verbs.push({

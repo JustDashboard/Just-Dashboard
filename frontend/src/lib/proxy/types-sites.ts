@@ -107,6 +107,19 @@ export type VHostLinkResult = {
   reload?: ProxyReload
 }
 
+/**
+ * POST /proxy/sites/{name}/rename: the file moved, with its links, behind one
+ * nginx test. `name` is the new name as the list shows it — a conf.d file
+ * keeps its .conf — and `rerendered` says the form's header and log paths
+ * were written again under it.
+ */
+export type SiteRenameResult = VHostLinkResult & {
+  from: string
+  path: string
+  rerendered: boolean
+  warnings: string[]
+}
+
 /** DELETE /proxy/sites/{name}: the file is gone; the reload may not have happened. */
 export type SiteDeleteResult = {
   name: string
