@@ -1126,7 +1126,12 @@ rows stay rows.
 **The proxy section draws routes, engines and authorities.** All six pages stay in the reading
 register and begin with four `StatTile` readings, two per row on phones. On the overview the engine
 identity and service commands sit below them, with the routes in the main column and attention and
-expiry in a narrower column. A source the overview could not read is never drawn as an empty or
+expiry in a narrower column. On an nginx host Live traffic sits between the engine line and the routes: two readings
+(requests a second, open connections) each carrying its hour as a `TileTrend`, and a hint line naming
+where the counters come from. Its switch is a `Switch` beside a `Status` in the panel header rather
+than a button, because whether nginx is counting is a state of the engine; a switch in flight reads
+"Switching on…", readings that stop keep their hour and lose their figures, and nothing on it breathes
+as live, since it is a poll. A source the overview could not read is never drawn as an empty or
 healthy one: its tile's hint reads "couldn't read", its panel shows the `ErrorState`, and attention
 carries it as a finding whose button is Try again, so the all-clear line cannot appear over it. The
 overview's context row is its age and one ghost Refresh: "Updated 14s ago" is the oldest reading on
@@ -1176,7 +1181,7 @@ layout. Tables retain their scrolling boundary; forms and sections remain plain.
 navigation, site-kind choices and read-only access; `proxy-engine-overview.spec.ts` covers the
 overview's failure states, its freshness and Refresh, its routes by role and the engine controls,
 including a stopped, failed, masked and boot-disabled unit, a refused start, restart or reload, and
-the config test panel.
+the config test panel; `proxy-insights.spec.ts` covers Live traffic, its switch and a phone.
 
 **What a host has installed, who is on it and what they changed are products too.** Packages
 draws a package as the software its name says it is (`packageProduct`, `components/packages/marks.tsx`:

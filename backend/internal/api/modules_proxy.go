@@ -1,6 +1,10 @@
 package api
 
-import "context"
+import (
+	"context"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+)
 
 // proxyExtras is what the proxy pages keep beyond proxysvc.Service itself:
 // recorders, watchers and the stores behind them. It lives apart from
@@ -9,6 +13,7 @@ import "context"
 // the proxy's areas each add to them under their own heading here instead.
 type proxyExtras struct {
 	// --- lane A: engine & insights ---
+	statusMetrics *proxysvc.StatusSampler
 
 	// --- lane B: sites list & lifecycle ---
 
@@ -28,6 +33,7 @@ type proxyExtras struct {
 // already exist.
 func (s *Server) initProxyExtras() {
 	// --- lane A: engine & insights ---
+	s.modules.proxyExtras.statusMetrics = proxysvc.NewStatusSampler(s.modules.proxy)
 
 	// --- lane B: sites list & lifecycle ---
 
@@ -48,6 +54,7 @@ func (s *Server) initProxyExtras() {
 // queued behind a schedule.
 func (s *Server) startProxyExtras(ctx context.Context) error {
 	// --- lane A: engine & insights ---
+	s.modules.proxyExtras.statusMetrics.Start(ctx)
 
 	// --- lane B: sites list & lifecycle ---
 
@@ -69,6 +76,7 @@ func (s *Server) startProxyExtras(ctx context.Context) error {
 // for work that never began.
 func (s *Server) stopProxyExtras() {
 	// --- lane A: engine & insights ---
+	s.modules.proxyExtras.statusMetrics.Stop()
 
 	// --- lane B: sites list & lifecycle ---
 

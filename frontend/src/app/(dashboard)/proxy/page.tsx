@@ -25,6 +25,7 @@ import { EngineFailure } from "@/components/proxy/engine-failure"
 import { PARTICIPLE } from "@/components/proxy/engine-lifecycle"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { useConfigTest } from "@/components/proxy/test-result"
+import { LiveTraffic } from "@/components/proxy/live-metrics"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { certificateProduct, siteProduct } from "@/components/proxy/marks"
 import { RoutePath } from "@/components/proxy/route-path"
@@ -455,6 +456,8 @@ export default function ProxyOverviewPage() {
           busy={control.pending}
         />
       )}
+
+      {status.nginx && <LiveTraffic admin={admin} />}
 
       {/* Route destinations need room for both ends; verdicts fit in the rail. */}
       <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_20rem] [&>*]:min-w-0">
