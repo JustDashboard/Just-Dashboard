@@ -2,7 +2,9 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
@@ -64,8 +66,21 @@ func (s *Server) handleAuthUserRemove(w http.ResponseWriter, r *http.Request) er
 	return nil
 }
 
+// handleAuthFileDelete refuses a file a site still names unless ?force=1:
+// nginx neither tests nor reloads any differently without it, so nothing
+// after this point would tell the operator those sites now refuse every
+// login.
 func (s *Server) handleAuthFileDelete(w http.ResponseWriter, r *http.Request) error {
 	file := chi.URLParam(r, "file")
+	force := r.URL.Query().Get("force") == "1"
+	usedBy := s.modules.proxy.AuthFileUsedBy(file)
+	if len(usedBy) > 0 && !force {
+		return httpx.Err(http.StatusConflict, "in_use", fmt.Sprintf(
+			"%s is the password file of %s; nginx keeps running without it and every login there is refused",
+			file, strings.Join(usedBy, ", ")))
+	}
+	// An access list naming the file is refused even when forced: the list
+	// would fail its next save, and nginx -t with it.
 	err := s.modules.proxy.DeleteAuthFile(file)
 	var listed *proxysvc.AuthFileListedError
 	switch {
@@ -74,7 +89,7 @@ func (s *Server) handleAuthFileDelete(w http.ResponseWriter, r *http.Request) er
 	case err != nil:
 		return httpx.BadRequest("%v", err)
 	}
-	httpx.SetAudit(r, "proxy.auth.delete", file, nil)
+	httpx.SetAudit(r, "proxy.auth.delete", file, map[string]any{"usedBy": usedBy, "force": force})
 	httpx.NoContent(w)
 	return nil
 }

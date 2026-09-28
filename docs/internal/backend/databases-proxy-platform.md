@@ -1285,6 +1285,10 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   hang off `JD_NGINX_DIR`, which exists precisely for hosts whose nginx is elsewhere. A missing file is
   not an nginx error: `nginx -t` passes, reloads succeed, and the site answers every login with 403 and
   an error line per request (checked on 1.26.3), so deleting a password file a site uses fails silently.
+  That is why `ListAuthFiles` carries `usedBy` — every nginx site (sites-available, sites-enabled,
+  conf.d, enabled or not, one include level deep, relative paths from the nginx directory) whose blocks
+  name the file — and why `DELETE /proxy/auth-files/{file}` answers 409 `in_use` for such a file unless
+  `?force=1`, auditing the sites it named. Caddy's `basic_auth` inlines its hashes and is not counted.
   Removing a file's last login keeps it empty, which asks for credentials again like a wrong password.
 - **`import.go`** checks the key against the certificate **before** writing either: a mismatched pair is
   accepted by every text editor and refused by nginx at reload, which on a live server means finding out
@@ -1509,7 +1513,9 @@ ownership and cleanup, then removes its own containers/volumes/networks.
     `*.conf`. A directory included in the wrong block counts as read for the validation note
     (`streamDirRead`): nginx reads it there, and its test refuses every stream in it.
 - **`htpasswd.go`** does bcrypt in process — `htpasswd` lives in apache2-utils, is not installed on a host
-  running nginx, and would put the password in a world-readable argv.
+  running nginx, and would put the password in a world-readable argv. Changing a password is the same
+  POST as adding a login (it replaces the user's line); the panel's 20-character generator runs in the
+  browser, so the password crosses the wire once, in that POST body, and is never stored or audited.
 - **`access_lists.go` — one list, every site that includes it.** An office range or a VPN in front of ten
   sites was ten copies of the same lines and ten edits when it changed. A list is
   `<JD_NGINX_DIR>/jd-access/<name>.conf` (name `[a-z0-9][a-z0-9_-]{0,62}`), holding only `satisfy`, the

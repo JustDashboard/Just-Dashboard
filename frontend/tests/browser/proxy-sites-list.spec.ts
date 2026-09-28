@@ -1250,7 +1250,7 @@ test("the password-file warning says what nginx really does without the file", a
   await page.getByRole("menuitem", { name: "Delete file" }).click()
   const confirm = page.getByRole("dialog", { name: "Delete staging" })
   await expect(confirm).toContainText(
-    "A site still pointing at this file keeps serving and refuses every login",
+    "nginx keeps running without it, and every login to that site is refused",
   )
   await expect(confirm).not.toContainText("stops nginx from starting")
 })

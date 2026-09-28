@@ -82,6 +82,11 @@ export const showcase: ProxyRoutes = {
     }),
   "/proxy/auth-files/": (route) =>
     json(route, [
-      { name: "staging", path: "/etc/nginx/auth/staging", users: ["operator", "reviewer"] },
+      {
+        name: "staging",
+        path: "/etc/nginx/auth/staging",
+        users: ["operator", "reviewer"],
+        usedBy: ["app.example.com"],
+      },
     ]),
 }
