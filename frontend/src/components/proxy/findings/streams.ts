@@ -128,7 +128,7 @@ export function streamFindings({ streams, streamsError }: StreamFindingInput): P
             ? "Move the stream or the site to another port, or delete one of them; until then no change to any site takes effect."
             : "Free the port, or move the stream to another one; until then no change to any site takes effect.",
         meta: "stream",
-        href: "/proxy/streams",
+        href: `/proxy/streams?stream=${encodeURIComponent(stream.name)}`,
       })
     } else if (
       stream.state === "not-read" &&
@@ -141,7 +141,7 @@ export function streamFindings({ streams, streamsError }: StreamFindingInput): P
         detail: reason,
         advice: "Fix the file in its raw editor on the Streams page, or delete it.",
         meta: "stream",
-        href: "/proxy/streams",
+        href: `/proxy/streams?stream=${encodeURIComponent(stream.name)}`,
       })
     } else if (stream.state === "not-listening") {
       out.push({
@@ -152,7 +152,7 @@ export function streamFindings({ streams, streamsError }: StreamFindingInput): P
         advice:
           "It forwards nothing until nginx holds its port. Re-check it on the Streams page once nginx has reloaded.",
         meta: "stream",
-        href: "/proxy/streams",
+        href: `/proxy/streams?stream=${encodeURIComponent(stream.name)}`,
       })
     } else if (stream.state === "shadowed" && stream.blocker) {
       out.push({
@@ -162,7 +162,7 @@ export function streamFindings({ streams, streamsError }: StreamFindingInput): P
         detail: reason,
         advice: "Move one of them to another port, or delete the one that is not needed.",
         meta: "stream",
-        href: "/proxy/streams",
+        href: `/proxy/streams?stream=${encodeURIComponent(stream.name)}`,
       })
     }
   }
@@ -177,7 +177,7 @@ export function streamFindings({ streams, streamsError }: StreamFindingInput): P
       advice:
         "A stream has no authentication of its own. Restrict the source unless the service behind it authenticates for itself.",
       meta: "stream",
-      href: "/proxy/streams",
+      href: `/proxy/streams?stream=${encodeURIComponent(stream.name)}`,
     })
   }
 
