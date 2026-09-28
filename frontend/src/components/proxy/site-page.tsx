@@ -91,6 +91,7 @@ function SiteBody({ name }: { name: string }) {
     onDelete: () => {},
     onUnlink: () => {},
     onOverride: () => {},
+    onRename: () => {},
   }).filter((verb) => PAGE_VERBS.includes(verb.key))
 
   // A route on the Docker Caddy ingress is read through the ingress the

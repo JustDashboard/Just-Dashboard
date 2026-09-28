@@ -1112,12 +1112,13 @@ function SiteFormBody({
                 onRebased={(r) => {
                   setDisk(r)
                   setBase({ digest: r.digest, spec: specFromServer(r.spec) })
-                  onSaved()
+                  // The certificate flow saves the plain-HTTP site with a reload.
+                  onSaved(true)
                 }}
                 onDone={(res) => {
                   const outcome = saveOutcome(res, { existing: true })
                   notify[outcome.tone](outcome.title, { description: outcome.description })
-                  onSaved()
+                  onSaved(res.reloaded)
                   onOpenChange(false)
                 }}
               />
