@@ -12,6 +12,7 @@ fields.
 | `install.sh`, `.env.example` | Installation: two reachability routes (Tailscale, SSH tunnel), certificate issuance, randomised internal ports, secrets, and operator configuration | [`../overview.md`](../overview.md), public [`../../../README.md`](../../../README.md) |
 | `scripts/release.sh`, `backend/scripts/` | Version update, generated changelog, build verification, and release commit preparation | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#cutting-a-release) |
 | `AGENTS.md`, `CONTRIBUTING.md` | Mandatory contributor workflow, security baseline, licensing, and the validation gate | [`../contributing/conventions.md`](../contributing/conventions.md) |
+| `.github/pull_request_template.md`, `.github/ISSUE_TEMPLATE/`, `.github/TEMPLATE_LICENSE` | PR guidance, structured bug and feature reports, private security-report routing, and upstream template attribution | [`../contributing/conventions.md`](../contributing/conventions.md#contribution-templates) |
 | `scripts/test-changed.sh` | The local validation gate: only the checks, Go tests and browser specs the diff reaches | [`../../../AGENTS.md`](../../../AGENTS.md#required-checks) |
 | `docs/plans/0.6.7-deployments/` (absent) | Historical references only; no frozen-contract or checkpoint evidence available in this checkout | [`../deployments/implementation.md`](../deployments/implementation.md) |
 
