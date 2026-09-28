@@ -603,6 +603,24 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   log-only with nothing limited. Every limit counts the address nginx sees, so a warning says so unless
   the extra configuration sets `real_ip_header`; the form cannot tell whether a CDN is in front.
   `VHost.rateLimited` puts "rate limited" on the Sites card.
+
+  **Path routing** (`sites.go` `validLocation`/`validUpstreamTLS`, `sites_render.go` `renderLocation`/
+  `renderUpstreamTLS`, form "Paths that go somewhere else" + `site-routes.ts` preview table).
+  `SiteLocation.Match` is empty (prefix), `=`, `^~`, `~` or `~*`; `locationPathRe` refuses `; ' " $ ( )`
+  in a non-regex path and a regex refuses whitespace, `; { } " ' #`. A regex path may not forward to an
+  upstream with a path (nginx refuses it); a folder at an exact/regex path is written with `root`
+  (`RootMode root`). `StripPrefix` (prefix paths only) ends both the path and the upstream in `/` and is
+  read back from the `# Strips the path before forwarding` comment; otherwise `proxy_pass` is written as
+  typed. Folders render `alias <root>/;` and `SPA` falls back to `<path>index.html`. Per path:
+  `BodyLimit`, `Timeout`, `Buffering`/`RequestBuffering` (`on`/`off`, empty = the site's — the parser
+  folds a value equal to the site's back to empty), `BasicAuthFile`, `AllowFrom`/`DenyFrom` (a path's list
+  replaces the site's, as nginx inherits it; a warning says so when both exist). Site level: `Buffering`
+  (default off, as before), `StreamUploads` (`proxy_request_buffering off`; named so its zero value is
+  nginx's default), `HostHeader` (`$host`, `upstream` = `$proxy_host`, `custom` = `HostHeaderValue`), and
+  at server level `proxy_ssl_server_name on` (`UpstreamSNI`), `proxy_ssl_name` (`UpstreamTLSName`, only
+  with SNI or verify), `proxy_ssl_verify on` + `proxy_ssl_verify_depth 3` + `proxy_ssl_trusted_certificate`
+  (`UpstreamCA`, else `/etc/ssl/certs/ca-certificates.crt`). Password-file paths are absolute-path
+  checked like the site's; the route stays system.admin.
 - **`tlsscan.go` — what the domain actually serves.** Everything else on the page reads files, which
   cannot see a certificate renewed and never reloaded, a proxy still offering TLS 1.0, or a redirect that
   quietly stopped. Each version is probed on a connection pinned to exactly that version; a version this

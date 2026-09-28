@@ -232,7 +232,7 @@ func renderLocationLimit(l *lines, loc SiteLocation, spec *SiteSpec) {
 		return
 	}
 	for i, other := range spec.Locations {
-		if other.Path == loc.Path {
+		if other.Path == loc.Path && other.Match == loc.Match {
 			l.add("        # This path's own limit, in place of the site's.")
 			l.add("        limit_req %s;", limitReqArgs(spec.locationZone(i), loc.RateLimit))
 			return

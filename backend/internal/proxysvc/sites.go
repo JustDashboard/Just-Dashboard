@@ -59,6 +59,32 @@ type SiteSpec struct {
 	SecurityHeaders bool   `json:"securityHeaders"`
 	ClientMaxBody   string `json:"clientMaxBody,omitempty"`
 	ProxyTimeout    int    `json:"proxyTimeout,omitempty"`
+	// Buffering lets nginx hold a response until it has it, which frees
+	// a slow application sooner. Off by default here, because streamed
+	// responses (server-sent events, progress output) must arrive as they
+	// are produced.
+	Buffering bool `json:"buffering,omitempty"`
+	// StreamUploads hands a request body to the application as it arrives
+	// rather than after nginx has read all of it: proxy_request_buffering
+	// off. Named for what it does so that its zero value is nginx's default.
+	StreamUploads bool `json:"streamUploads,omitempty"`
+	// HostHeader is the Host the application is sent: empty is the one the
+	// visitor asked for, "upstream" is the upstream's own name, and
+	// "custom" is HostHeaderValue.
+	HostHeader      string `json:"hostHeader,omitempty"`
+	HostHeaderValue string `json:"hostHeaderValue,omitempty"`
+	// UpstreamSNI sends the upstream's name in the TLS handshake, which
+	// nginx does not do by default; a host serving several names over
+	// HTTPS answers a handshake without one with its default certificate
+	// or refuses it.
+	UpstreamSNI bool `json:"upstreamSni,omitempty"`
+	// UpstreamVerify checks the upstream's certificate, against UpstreamCA
+	// or the system's CAs when that is empty. nginx does not by default.
+	UpstreamVerify bool   `json:"upstreamVerify,omitempty"`
+	UpstreamCA     string `json:"upstreamCa,omitempty"`
+	// UpstreamTLSName replaces the upstream's host as the name sent and
+	// checked, for an upstream addressed by IP.
+	UpstreamTLSName string `json:"upstreamTlsName,omitempty"`
 
 	AllowFrom      []string `json:"allowFrom"`
 	DenyFrom       []string `json:"denyFrom"`
@@ -95,16 +121,39 @@ type SiteSpec struct {
 
 // SiteLocation is an extra path handled differently from the site's default.
 type SiteLocation struct {
-	Path     string `json:"path"`
+	Path string `json:"path"`
+	// Match is how nginx compares Path: empty is a prefix, "=" the exact
+	// path, "^~" a prefix that wins over every regex, and "~" or "~*" a
+	// regex, case-sensitive or not.
+	Match    string `json:"match,omitempty"`
 	Upstream string `json:"upstream,omitempty"`
+	// StripPrefix forwards /api/users as /users: the path and the
+	// upstream both end in a slash, which is how nginx is told to swap one
+	// for the other.
+	StripPrefix bool `json:"stripPrefix,omitempty"`
 	// Root is a folder served at Path: /assets/app.css is <Root>/app.css.
 	Root string `json:"root,omitempty"`
 	// RootMode "root" keeps nginx's own reading of a folder, read back from a
 	// file that used `root`: the path is appended to the folder, so
 	// /assets/app.css is <Root>/assets/app.css. Rewriting such a location as
 	// the folder itself would move every file it serves.
-	RootMode   string `json:"rootMode,omitempty"`
-	WebSockets bool   `json:"webSockets"`
+	RootMode string `json:"rootMode,omitempty"`
+	// SPA answers a path under the folder that has no file of its own with
+	// the folder's index.html.
+	SPA        bool `json:"spa,omitempty"`
+	WebSockets bool `json:"webSockets"`
+	// BodyLimit, Timeout and Buffering replace the site's own on this path;
+	// empty or 0 keeps the site's. Buffering and RequestBuffering are "on"
+	// or "off".
+	BodyLimit        string `json:"bodyLimit,omitempty"`
+	Timeout          int    `json:"timeout,omitempty"`
+	Buffering        string `json:"buffering,omitempty"`
+	RequestBuffering string `json:"requestBuffering,omitempty"`
+	// BasicAuthFile, AllowFrom and DenyFrom replace the site's for this
+	// path, as nginx reads them: a location's own list is the whole list.
+	BasicAuthFile string   `json:"basicAuthFile,omitempty"`
+	AllowFrom     []string `json:"allowFrom,omitempty"`
+	DenyFrom      []string `json:"denyFrom,omitempty"`
 	// RateLimit replaces the site's request rate on this path.
 	RateLimit *RequestLimit `json:"rateLimit,omitempty"`
 }
@@ -176,15 +225,52 @@ func (loc SiteLocation) servesFolder() bool {
 	return loc.Upstream == "" && loc.Root != ""
 }
 
+// isPrefix says whether the location matches a path prefix, the only kind
+// a folder can be served at or a prefix stripped from.
+func (loc SiteLocation) isPrefix() bool { return loc.Match == "" || loc.Match == "^~" }
+
+// isRegex says whether Path is a regular expression.
+func (loc SiteLocation) isRegex() bool { return loc.Match == "~" || loc.Match == "~*" }
+
 // renderedPath is the path the location block is written for. A folder served
 // at its path ends in a slash, and so does the folder: `location /assets`
 // with `alias /var/www/assets` would also answer /assets-private/key.pem from
-// /var/www/assets-private, which is a neighbouring folder nobody offered.
+// /var/www/assets-private, which is a neighbouring folder nobody offered. A
+// stripped prefix ends in one for the same reason, and because the slash is
+// what nginx swaps for the upstream's.
 func (loc SiteLocation) renderedPath() string {
-	if loc.servesFolder() && loc.RootMode == "" && !strings.HasSuffix(loc.Path, "/") {
+	if strings.HasSuffix(loc.Path, "/") || !loc.isPrefix() {
+		return loc.Path
+	}
+	if (loc.servesFolder() && loc.RootMode == "") || (loc.StripPrefix && !loc.servesFolder()) {
 		return loc.Path + "/"
 	}
 	return loc.Path
+}
+
+// renderedUpstream is the upstream as the location forwards to it. With the
+// prefix stripped it ends in a slash, the one the path's is swapped for.
+func (loc SiteLocation) renderedUpstream() string {
+	if !loc.StripPrefix || loc.servesFolder() {
+		return loc.Upstream
+	}
+	address, uri := splitUpstream(loc.Upstream)
+	if strings.HasSuffix(uri, "/") {
+		return loc.Upstream
+	}
+	if uri == "" && strings.HasPrefix(address, "unix:") {
+		return address + ":/"
+	}
+	return address + uri + "/"
+}
+
+// blockKey is what nginx counts as the same location twice: a plain prefix
+// and a ^~ one of the same path are one block to it.
+func (loc SiteLocation) blockKey() string {
+	if loc.isPrefix() {
+		return loc.renderedPath()
+	}
+	return loc.Match + " " + loc.Path
 }
 
 // managedMarker is written into every generated file and read back when the
@@ -196,8 +282,12 @@ var (
 	siteNameRe     = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 	domainRe       = regexp.MustCompile(`^(\*\.)?[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$`)
 	bodySizeRe     = regexp.MustCompile(`^\d{1,6}[kKmMgG]?$`)
-	locationPathRe = regexp.MustCompile(`^/[A-Za-z0-9._~!$&'()*+,;=:@%/-]{0,255}$`)
-	absPathRe      = regexp.MustCompile(`^/[A-Za-z0-9._/-]{1,255}$`)
+	locationPathRe = regexp.MustCompile(`^/[A-Za-z0-9._~!&*+,=:@%/-]{0,255}$`)
+	// A regex path keeps its own punctuation; what it may not carry is what
+	// would end the directive or need quoting: whitespace, ; { } quotes, #.
+	locationRegexRe = regexp.MustCompile(`^[^\s;{}"'#]{1,255}$`)
+	hostHeaderRe    = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]{0,252})(:\d{1,5})?$`)
+	absPathRe       = regexp.MustCompile(`^/[A-Za-z0-9._/-]{1,255}$`)
 )
 
 // ValidateSpec checks everything that would otherwise become a broken config
@@ -282,32 +372,33 @@ func ValidateSpec(spec *SiteSpec) error {
 	// form shows.
 	seenLocation := map[string]bool{"/": spec.Kind != "redirect"}
 	for _, loc := range spec.Locations {
-		if !locationPathRe.MatchString(loc.Path) {
-			return fmt.Errorf("location %q must be a path starting with /", loc.Path)
-		}
-		if loc.RootMode != "" && loc.RootMode != "root" {
-			return fmt.Errorf("location %s: rootMode must be empty or root", loc.Path)
+		if err := validLocation(loc); err != nil {
+			return err
 		}
 		// Compared as written, since a folder's path gains its slash there:
 		// /assets and /assets/ as two folders are one block nginx refuses.
-		if seenLocation[loc.renderedPath()] {
-			if loc.Path == "/" {
+		if seenLocation[loc.blockKey()] {
+			if loc.Path == "/" && loc.isPrefix() {
 				return fmt.Errorf("everything not matched by another path already goes to the site's main upstream — remove the location for /")
 			}
 			return fmt.Errorf("two locations both handle %s; nginx would use the first and ignore the second", loc.renderedPath())
 		}
-		seenLocation[loc.renderedPath()] = true
-		if loc.Upstream != "" {
-			if err := validUpstream(loc.Upstream); err != nil {
-				return err
-			}
-		} else if loc.Root != "" {
-			if !absPathRe.MatchString(loc.Root) {
-				return fmt.Errorf("location %s: root must be an absolute path", loc.Path)
-			}
-		} else {
-			return fmt.Errorf("location %s needs either an upstream or a root", loc.Path)
+		seenLocation[loc.blockKey()] = true
+	}
+	if err := validUpstreamTLS(spec); err != nil {
+		return err
+	}
+	switch spec.HostHeader {
+	case "", "upstream":
+		if spec.HostHeaderValue != "" {
+			return fmt.Errorf("a Host header value is only used with the custom Host header")
 		}
+	case "custom":
+		if !hostHeaderRe.MatchString(spec.HostHeaderValue) {
+			return fmt.Errorf("the Host header must be a host name, optionally with a port")
+		}
+	default:
+		return fmt.Errorf("the Host header must be the visitor's, the upstream's or a custom one")
 	}
 	if m := spec.Maintenance; m != nil {
 		if m.RetryAfter < 0 || m.RetryAfter > 86400 {
@@ -339,6 +430,119 @@ func ValidateSpec(spec *SiteSpec) error {
 		return fmt.Errorf("the extra configuration has unbalanced braces")
 	}
 	return nil
+}
+
+// validLocation checks one extra path on its own.
+func validLocation(loc SiteLocation) error {
+	switch loc.Match {
+	case "", "=", "^~":
+		if !locationPathRe.MatchString(loc.Path) {
+			return fmt.Errorf("location %q must be a path starting with /", loc.Path)
+		}
+	case "~", "~*":
+		if !locationRegexRe.MatchString(loc.Path) {
+			return fmt.Errorf("the regex %q may not contain spaces, semicolons, braces, quotes or #", loc.Path)
+		}
+	default:
+		return fmt.Errorf("location %s: the match must be a prefix, =, ^~, ~ or ~*", loc.Path)
+	}
+	if loc.RootMode != "" && loc.RootMode != "root" {
+		return fmt.Errorf("location %s: rootMode must be empty or root", loc.Path)
+	}
+	if loc.Upstream != "" {
+		if err := validUpstream(loc.Upstream); err != nil {
+			return err
+		}
+		// nginx refuses the file outright: a regex match has no prefix
+		// for a path on the upstream to replace.
+		if _, uri := splitUpstream(loc.Upstream); loc.isRegex() && uri != "" {
+			return fmt.Errorf("location %s: a regex path forwards to an upstream without a path of its own", loc.Path)
+		}
+		if loc.StripPrefix && !loc.isPrefix() {
+			return fmt.Errorf("location %s: only a prefix path can be stripped", loc.Path)
+		}
+		if loc.StripPrefix && loc.Path == "/" {
+			return fmt.Errorf("location %s: there is no prefix to strip from /", loc.Path)
+		}
+		if loc.SPA {
+			return fmt.Errorf("location %s: the single-page fallback is for a folder", loc.Path)
+		}
+	} else if loc.Root != "" {
+		if !absPathRe.MatchString(loc.Root) {
+			return fmt.Errorf("location %s: root must be an absolute path", loc.Path)
+		}
+		// alias in an exact or regex location means something else (a file,
+		// or captures), so there a folder is nginx's root: the path is
+		// appended to it.
+		if !loc.isPrefix() && loc.RootMode != "root" {
+			return fmt.Errorf("location %s: an exact or regex path serves files with the path added to the folder", loc.Path)
+		}
+		if loc.SPA && !loc.isPrefix() {
+			return fmt.Errorf("location %s: the single-page fallback needs a prefix path", loc.Path)
+		}
+		if loc.StripPrefix || loc.BodyLimit != "" || loc.Timeout != 0 || loc.Buffering != "" || loc.RequestBuffering != "" {
+			return fmt.Errorf("location %s: stripping, upload limits, timeouts and buffering apply to a path that forwards", loc.Path)
+		}
+	} else {
+		return fmt.Errorf("location %s needs either an upstream or a root", loc.Path)
+	}
+	if loc.BodyLimit != "" && !bodySizeRe.MatchString(loc.BodyLimit) {
+		return fmt.Errorf("location %s: upload limit must be a size like 50m", loc.Path)
+	}
+	if loc.Timeout < 0 || loc.Timeout > 3600 {
+		return fmt.Errorf("location %s: timeout must be between 0 and 3600 seconds", loc.Path)
+	}
+	for _, value := range []string{loc.Buffering, loc.RequestBuffering} {
+		if value != "" && value != "on" && value != "off" {
+			return fmt.Errorf("location %s: buffering is on, off or the site's", loc.Path)
+		}
+	}
+	if loc.BasicAuthFile != "" && !absPathRe.MatchString(loc.BasicAuthFile) {
+		return fmt.Errorf("location %s: the password file must be an absolute path", loc.Path)
+	}
+	for _, list := range [][]string{loc.AllowFrom, loc.DenyFrom} {
+		for _, entry := range list {
+			if err := validACLEntry(entry); err != nil {
+				return fmt.Errorf("location %s: %w", loc.Path, err)
+			}
+		}
+	}
+	return nil
+}
+
+// validUpstreamTLS checks how the site talks to an HTTPS upstream. A name
+// or a CA with nothing that uses it would be written and do nothing.
+func validUpstreamTLS(spec *SiteSpec) error {
+	if spec.UpstreamTLSName != "" {
+		if !spec.UpstreamSNI && !spec.UpstreamVerify {
+			return fmt.Errorf("the upstream TLS name is only used when the name is sent or the certificate checked")
+		}
+		if strings.HasPrefix(spec.UpstreamTLSName, "*") || !domainRe.MatchString(spec.UpstreamTLSName) {
+			return fmt.Errorf("%q is not a valid upstream TLS name", spec.UpstreamTLSName)
+		}
+	}
+	if spec.UpstreamCA != "" {
+		if !spec.UpstreamVerify {
+			return fmt.Errorf("a CA file is only used when the upstream's certificate is checked")
+		}
+		if !absPathRe.MatchString(spec.UpstreamCA) {
+			return fmt.Errorf("the CA file must be an absolute path")
+		}
+	}
+	return nil
+}
+
+// hasHTTPSUpstream says whether any address the site forwards to is HTTPS.
+func (spec *SiteSpec) hasHTTPSUpstream() bool {
+	if strings.HasPrefix(spec.Upstream, "https://") {
+		return true
+	}
+	for _, loc := range spec.Locations {
+		if strings.HasPrefix(loc.Upstream, "https://") {
+			return true
+		}
+	}
+	return false
 }
 
 func validUpstream(raw string) error {
@@ -426,9 +630,14 @@ func SpecWarnings(spec *SiteSpec) []string {
 	if spec.Kind == "proxy" {
 		routes := append([]SiteLocation{}, spec.Locations...)
 		for _, loc := range append(routes, SiteLocation{Path: "/", Upstream: spec.Upstream}) {
+			// An exact path is replaced whole and a regex one cannot carry
+			// an upstream path, so the prefix swap below is a prefix's.
+			if loc.Upstream == "" || !loc.isPrefix() {
+				continue
+			}
 			for _, warning := range []string{
-				upstreamSlashWarning(loc.Path, loc.Upstream),
-				upstreamDecodeWarning(loc.Path, loc.Upstream),
+				upstreamSlashWarning(loc.renderedPath(), loc.renderedUpstream()),
+				upstreamDecodeWarning(loc.renderedPath(), loc.renderedUpstream()),
 			} {
 				if warning != "" {
 					warnings = append(warnings, warning)
@@ -460,6 +669,22 @@ func SpecWarnings(spec *SiteSpec) []string {
 			"Replacing the application's own error pages applies only to a site that forwards to an application; on this one only nginx's own errors get the site's pages.")
 	}
 	warnings = append(warnings, limitsWarnings(spec)...)
+	if spec.Kind == "proxy" && (spec.UpstreamSNI || spec.UpstreamVerify) && !spec.hasHTTPSUpstream() {
+		warnings = append(warnings,
+			"The upstream TLS settings apply only to an https:// upstream, and this site forwards to none.")
+	}
+	if spec.Kind == "proxy" && spec.hasHTTPSUpstream() && !spec.UpstreamVerify {
+		warnings = append(warnings,
+			"nginx does not check an HTTPS upstream's certificate unless told to, so anything answering at that address is trusted.")
+	}
+	if spec.Kind == "proxy" {
+		for _, loc := range spec.Locations {
+			if (len(loc.AllowFrom) > 0 || len(loc.DenyFrom) > 0) && (len(spec.AllowFrom) > 0 || len(spec.DenyFrom) > 0) {
+				warnings = append(warnings, fmt.Sprintf(
+					"%s has its own address list, and nginx uses only that one there: the site's list does not apply to it.", loc.Path))
+			}
+		}
+	}
 	if len(spec.AllowFrom) > 0 {
 		warnings = append(warnings,
 			"Only the listed addresses will reach this site. Everything else is refused — check the list includes however you reach it yourself.")

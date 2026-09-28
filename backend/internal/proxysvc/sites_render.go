@@ -68,6 +68,7 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 		l.blank()
 	}
 	renderServerOptions(l, spec)
+	renderUpstreamTLS(l, spec)
 	renderErrorRouting(l, spec)
 	renderAccess(l, spec)
 	renderServerLimits(l, spec)
@@ -382,28 +383,7 @@ func renderAccess(l *lines, spec *SiteSpec) {
 	if len(spec.AllowFrom) > 0 || len(spec.DenyFrom) > 0 {
 		l.add("    # nginx reads these in order and stops at the first match, so the")
 		l.add("    # exceptions come first and the fence goes last.")
-		// Denials first, because first match wins: an address that is inside
-		// an allowed range and named on the deny list is meant to be refused,
-		// and the other order would let the range answer for it.
-		for _, entry := range spec.DenyFrom {
-			entry = strings.TrimSpace(entry)
-			if entry == "all" {
-				continue
-			}
-			l.add("    deny %s;", entry)
-		}
-		for _, entry := range spec.AllowFrom {
-			l.add("    allow %s;", strings.TrimSpace(entry))
-		}
-		// An allow list with nothing after it allows everybody: nginx falls
-		// through to its default, which is to permit. The operator used to
-		// have to know that and write the fence themselves, in a box labelled
-		// "deny from" — and the address they would reach for, 0.0.0.0/0, lets
-		// in every IPv6 client on the internet. A control labelled "only these
-		// addresses" has to mean it, so the fence is written here.
-		if len(spec.AllowFrom) > 0 || containsDenyAll(spec.DenyFrom) {
-			l.add("    deny all;")
-		}
+		renderAddressList(l, "    ", spec.AllowFrom, spec.DenyFrom)
 		wrote = true
 	}
 	if wrote {
@@ -411,28 +391,105 @@ func renderAccess(l *lines, spec *SiteSpec) {
 	}
 }
 
+// renderAddressList writes allow and deny lines at indent.
+func renderAddressList(l *lines, indent string, allow, deny []string) {
+	// Denials first, because first match wins: an address that is inside
+	// an allowed range and named on the deny list is meant to be refused,
+	// and the other order would let the range answer for it.
+	for _, entry := range deny {
+		entry = strings.TrimSpace(entry)
+		if entry == "all" {
+			continue
+		}
+		l.add("%sdeny %s;", indent, entry)
+	}
+	for _, entry := range allow {
+		l.add("%sallow %s;", indent, strings.TrimSpace(entry))
+	}
+	// An allow list with nothing after it allows everybody: nginx falls
+	// through to its default, which is to permit. The operator used to
+	// have to know that and write the fence themselves, in a box labelled
+	// "deny from" — and the address they would reach for, 0.0.0.0/0, lets
+	// in every IPv6 client on the internet. A control labelled "only these
+	// addresses" has to mean it, so the fence is written here.
+	if len(allow) > 0 || containsDenyAll(deny) {
+		l.add("%sdeny all;", indent)
+	}
+}
+
+// systemCABundle is where Debian, Ubuntu and Alpine keep the system's CAs
+// as one file, which is the form proxy_ssl_trusted_certificate reads.
+const systemCABundle = "/etc/ssl/certs/ca-certificates.crt"
+
+// renderUpstreamTLS writes how nginx talks to an HTTPS upstream. At server
+// level, so every location that forwards inherits it.
+func renderUpstreamTLS(l *lines, spec *SiteSpec) {
+	if spec.Kind != "proxy" || (!spec.UpstreamSNI && !spec.UpstreamVerify) {
+		return
+	}
+	if spec.UpstreamSNI {
+		l.add("    # nginx sends no name in the handshake with an HTTPS upstream unless")
+		l.add("    # told to, and a host serving several names needs one.")
+		l.add("    proxy_ssl_server_name on;")
+	}
+	if spec.UpstreamTLSName != "" {
+		l.add("    proxy_ssl_name %s;", spec.UpstreamTLSName)
+	}
+	if spec.UpstreamVerify {
+		ca := spec.UpstreamCA
+		if ca == "" {
+			ca = systemCABundle
+		}
+		l.add("    # The upstream's certificate is checked; nginx accepts any by default.")
+		l.add("    proxy_ssl_verify on;")
+		l.add("    # The default depth of 1 fails a chain with an intermediate.")
+		l.add("    proxy_ssl_verify_depth 3;")
+		l.add("    proxy_ssl_trusted_certificate %s;", ca)
+	}
+	l.blank()
+}
+
+// stripMarker introduces the comment a stripping location carries, which is
+// how the parser tells it from an upstream that merely ends in a slash.
+const stripMarker = "# Strips the path before forwarding"
+
 func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
-	l.add("    location %s {", loc.renderedPath())
+	if loc.Match != "" {
+		l.add("    location %s %s {", loc.Match, loc.renderedPath())
+	} else {
+		l.add("    location %s {", loc.renderedPath())
+	}
 	renderLocationLimit(l, loc, spec)
+	renderLocationAccess(l, loc, spec)
 	if loc.servesFolder() {
 		if loc.RootMode == "root" {
 			l.add("        root %s;", loc.Root)
 		} else {
 			l.add("        alias %s/;", strings.TrimSuffix(loc.Root, "/"))
 		}
-		l.add("        try_files $uri $uri/ =404;")
+		if loc.SPA {
+			l.add("        # A path with no file of its own gets the folder's index.html,")
+			l.add("        # for a single-page app whose router runs in the browser.")
+			l.add("        try_files $uri $uri/ %sindex.html;", loc.renderedPath())
+		} else {
+			l.add("        try_files $uri $uri/ =404;")
+		}
 		l.add("    }")
 		return
+	}
+	if loc.StripPrefix {
+		_, uri := splitUpstream(loc.renderedUpstream())
+		l.add("        %s: %spage reaches the application as %spage.", stripMarker, loc.renderedPath(), uri)
 	}
 	// As typed: a path on the upstream is how nginx is told to replace the
 	// location's own prefix, and trimming its slash turned /app/ into /app,
 	// which sent /page to the application as /apppage.
-	l.add("        proxy_pass %s;", proxyPassTarget(loc.Path, loc.Upstream))
+	l.add("        proxy_pass %s;", proxyPassTarget(loc.renderedPath(), loc.renderedUpstream()))
 	l.add("        proxy_http_version 1.1;")
 	l.add("        # The application sees the visitor's address and scheme rather")
 	l.add("        # than the proxy's, which is what makes redirects, cookies and")
 	l.add("        # rate limits behind this proxy behave.")
-	l.add("        proxy_set_header Host              $host;")
+	l.add("        proxy_set_header Host              %s;", hostHeader(spec))
 	l.add("        proxy_set_header X-Real-IP         $remote_addr;")
 	l.add("        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;")
 	l.add("        proxy_set_header X-Forwarded-Proto $scheme;")
@@ -441,22 +498,79 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 		l.add("        proxy_set_header Upgrade    $http_upgrade;")
 		l.add("        proxy_set_header Connection $%s;", spec.connectionVar())
 	}
-	if spec.ProxyTimeout > 0 {
-		timeout := strconv.Itoa(spec.ProxyTimeout) + "s"
-		l.add("        proxy_connect_timeout %s;", timeout)
-		l.add("        proxy_send_timeout    %s;", timeout)
-		l.add("        proxy_read_timeout    %s;", timeout)
+	if loc.BodyLimit != "" {
+		l.add("        client_max_body_size %s;", loc.BodyLimit)
+	}
+	timeout := spec.ProxyTimeout
+	if loc.Timeout > 0 {
+		timeout = loc.Timeout
+	}
+	if timeout > 0 {
+		value := strconv.Itoa(timeout) + "s"
+		l.add("        proxy_connect_timeout %s;", value)
+		l.add("        proxy_send_timeout    %s;", value)
+		l.add("        proxy_read_timeout    %s;", value)
 	}
 	if spec.Kind == "proxy" && spec.InterceptErrors {
 		l.add("        # The application's own error responses get the site's pages too.")
 		l.add("        proxy_intercept_errors on;")
 	}
 	if spec.Kind == "proxy" {
-		l.add("        # Streamed responses arrive as they are produced rather than")
-		l.add("        # being held until nginx has the whole body.")
-		l.add("        proxy_buffering off;")
+		buffering := onOff(spec.Buffering)
+		if loc.Buffering != "" {
+			buffering = loc.Buffering
+		}
+		if buffering == "off" {
+			l.add("        # Streamed responses arrive as they are produced rather than")
+			l.add("        # being held until nginx has the whole body.")
+		}
+		l.add("        proxy_buffering %s;", buffering)
+		requestBuffering := onOff(!spec.StreamUploads)
+		if loc.RequestBuffering != "" {
+			requestBuffering = loc.RequestBuffering
+		}
+		// Written when it differs from nginx's default, or when the path
+		// turns back on what the site turned off.
+		if requestBuffering == "off" || spec.StreamUploads {
+			l.add("        proxy_request_buffering %s;", requestBuffering)
+		}
 	}
 	l.add("    }")
+}
+
+// renderLocationAccess writes a path's own password and address list, which
+// replace the site's there.
+func renderLocationAccess(l *lines, loc SiteLocation, spec *SiteSpec) {
+	if loc.BasicAuthFile != "" {
+		realm := spec.BasicAuthRealm
+		if realm == "" {
+			realm = "Restricted"
+		}
+		l.add("        auth_basic \"%s\";", realm)
+		l.add("        auth_basic_user_file %s;", loc.BasicAuthFile)
+	}
+	if len(loc.AllowFrom) > 0 || len(loc.DenyFrom) > 0 {
+		l.add("        # This path's own list; the site's does not apply here.")
+		renderAddressList(l, "        ", loc.AllowFrom, loc.DenyFrom)
+	}
+}
+
+// hostHeader is the Host the application is sent.
+func hostHeader(spec *SiteSpec) string {
+	switch spec.HostHeader {
+	case "upstream":
+		return "$proxy_host"
+	case "custom":
+		return spec.HostHeaderValue
+	}
+	return "$host"
+}
+
+func onOff(on bool) string {
+	if on {
+		return "on"
+	}
+	return "off"
 }
 
 // proxyPassTarget is the upstream as proxy_pass spells it for a location at
@@ -507,7 +621,7 @@ func renderExploitBlocks(l *lines) {
 	l.add("    location ~ %s {", exploitDotLocation)
 	l.add("        deny all;")
 	l.add("    }")
-	l.add("    location ~* \\.(sql|bak|old|orig|save|swp|env)$ {")
+	l.add("    location ~* %s {", exploitExtLocation)
 	l.add("        deny all;")
 	l.add("    }")
 }

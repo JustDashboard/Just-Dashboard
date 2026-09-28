@@ -3,7 +3,11 @@ import type { ProxyDiagnostic, ProxyValidation } from "./types-engine"
 /** A site as the dashboard describes it, not as nginx does. */
 export type SiteLocation = {
   path: string
+  /** How nginx compares the path: a prefix (empty), exact, a prefix that beats regexes, or a regex. */
+  match?: LocationMatch
   upstream?: string
+  /** Forward /api/users as /users: the path and the upstream both end in a slash. */
+  stripPrefix?: boolean
   /** A folder served at the path: /assets/app.css is <root>/app.css. */
   root?: string
   /**
@@ -11,10 +15,23 @@ export type SiteLocation = {
    * `root`: the path is appended, so /assets/app.css is <root>/assets/app.css.
    */
   rootMode?: "root"
+  /** A path under the folder with no file of its own gets the folder's index.html. */
+  spa?: boolean
   webSockets: boolean
+  /** In place of the site's on this path; empty keeps the site's. */
+  bodyLimit?: string
+  timeout?: number
+  buffering?: "on" | "off"
+  requestBuffering?: "on" | "off"
+  /** In place of the site's on this path, as nginx reads them: the path's list is the whole list. */
+  basicAuthFile?: string
+  allowFrom?: string[]
+  denyFrom?: string[]
   /** This path's own request rate, in place of the site's. */
   rateLimit?: RequestLimit
 }
+
+export type LocationMatch = "" | "=" | "^~" | "~" | "~*"
 
 export type SiteSpec = {
   managedAcme?: boolean
@@ -39,6 +56,20 @@ export type SiteSpec = {
   securityHeaders: boolean
   clientMaxBody?: string
   proxyTimeout?: number
+  /** Let nginx hold a response until it has it; off streams it as produced. */
+  buffering?: boolean
+  /** Hand a request body to the application as it arrives. */
+  streamUploads?: boolean
+  /** The Host the application is sent: the visitor's (empty), the upstream's, or hostHeaderValue. */
+  hostHeader?: "" | "upstream" | "custom"
+  hostHeaderValue?: string
+  /** Send the upstream's name in the TLS handshake. */
+  upstreamSni?: boolean
+  /** Check the upstream's certificate, against upstreamCa or the system's CAs. */
+  upstreamVerify?: boolean
+  upstreamCa?: string
+  /** The name sent and checked in place of the upstream's host. */
+  upstreamTlsName?: string
   allowFrom: string[]
   denyFrom: string[]
   basicAuthFile?: string
