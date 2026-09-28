@@ -34,9 +34,9 @@ const (
 	DriftSkipped DriftState = "skipped"
 )
 
-// ServedCertificate is one TLS server block of an enabled nginx site, what
+// DriftSite is one TLS server block of an enabled nginx site, what
 // the check asked it and what it found.
-type ServedCertificate struct {
+type DriftSite struct {
 	Site string `json:"site"`
 	Path string `json:"path"`
 	Line int    `json:"line"`
@@ -58,7 +58,7 @@ type ServedCertificate struct {
 // DriftReport is every checked block and when the check ran.
 type DriftReport struct {
 	CheckedAt time.Time           `json:"checkedAt"`
-	Sites     []ServedCertificate `json:"sites"`
+	Sites     []DriftSite `json:"sites"`
 }
 
 // handshakeFunc returns the leaf a TLS server presents to serverName at addr.
@@ -76,9 +76,9 @@ const (
 	driftBudget = 30 * time.Second
 )
 
-// handshake dials over TCP and reads the leaf without trusting it: an expired
+// driftHandshake dials over TCP and reads the leaf without trusting it: an expired
 // or self-signed certificate is exactly what the check is there to report.
-func handshake(ctx context.Context, addr, serverName string) (*x509.Certificate, error) {
+func driftHandshake(ctx context.Context, addr, serverName string) (*x509.Certificate, error) {
 	ctx, cancel := context.WithTimeout(ctx, driftDialTimeout)
 	defer cancel()
 	dialer := &tls.Dialer{Config: &tls.Config{ServerName: serverName, InsecureSkipVerify: true}}
@@ -119,7 +119,7 @@ func (d *DriftCheck) Report(ctx context.Context, refresh bool) DriftReport {
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), driftBudget)
 	defer cancel()
-	report := checkServedCertificates(ctx, d.svc.nginxDir, d.svc.nginxVHosts(), localAddresses(), handshake)
+	report := checkServedCertificates(ctx, d.svc.nginxDir, d.svc.nginxVHosts(), driftLocalAddresses(), driftHandshake)
 	d.report, d.gen = &report, gen
 	return report
 }
@@ -130,10 +130,10 @@ func (s *Service) effectiveGen() uint64 {
 	return s.effective.gen
 }
 
-// localAddresses are the host's own interface addresses. The backend shares
+// driftLocalAddresses are the host's own interface addresses. The backend shares
 // the host's network, so a listen bound to one of them is still a dial that
 // never leaves the machine.
-func localAddresses() map[netip.Addr]bool {
+func driftLocalAddresses() map[netip.Addr]bool {
 	out := map[netip.Addr]bool{}
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
@@ -149,7 +149,7 @@ func localAddresses() map[netip.Addr]bool {
 
 // driftTarget is one server block to ask.
 type driftTarget struct {
-	entry     ServedCertificate
+	entry     DriftSite
 	certPaths []string
 }
 
@@ -185,7 +185,7 @@ func checkServedCertificates(ctx context.Context, nginxDir string, vhosts []VHos
 		}
 	}
 
-	out := make([]ServedCertificate, len(targets))
+	out := make([]DriftSite, len(targets))
 	sem := make(chan struct{}, driftParallel)
 	var wg sync.WaitGroup
 	for i := range targets {
@@ -202,7 +202,7 @@ func checkServedCertificates(ctx context.Context, nginxDir string, vhosts []VHos
 		entry.Reason = ""
 		entry.Disk = disk[i][0]
 		wg.Add(1)
-		go func(i int, entry ServedCertificate) {
+		go func(i int, entry DriftSite) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
@@ -213,7 +213,7 @@ func checkServedCertificates(ctx context.Context, nginxDir string, vhosts []VHos
 	return DriftReport{CheckedAt: time.Now().UTC(), Sites: out}
 }
 
-func compareServed(ctx context.Context, entry ServedCertificate, disk []*Certificate, owner map[string]string, dial handshakeFunc) ServedCertificate {
+func compareServed(ctx context.Context, entry DriftSite, disk []*Certificate, owner map[string]string, dial handshakeFunc) DriftSite {
 	leaf, err := dial(ctx, entry.Address, entry.ServerName)
 	if err != nil {
 		entry.State, entry.Reason = DriftUnreachable, err.Error()
@@ -249,7 +249,7 @@ func compareServed(ctx context.Context, entry ServedCertificate, disk []*Certifi
 // block the check cannot ask comes back skipped, saying why.
 func siteTargets(v VHost, nginxDir string, local map[netip.Addr]bool) []driftTarget {
 	skipped := func(line int, reason string) driftTarget {
-		return driftTarget{entry: ServedCertificate{Site: v.Name, Path: v.Path, Line: line, State: DriftSkipped, Reason: reason}}
+		return driftTarget{entry: DriftSite{Site: v.Name, Path: v.Path, Line: line, State: DriftSkipped, Reason: reason}}
 	}
 	raw, err := os.ReadFile(v.Path)
 	if err != nil {
@@ -290,7 +290,7 @@ func siteTargets(v VHost, nginxDir string, local map[netip.Addr]bool) []driftTar
 			out = append(out, skipped(server.Line, "this server block names no certificate of its own"))
 			continue
 		}
-		t := driftTarget{entry: ServedCertificate{Site: v.Name, Path: v.Path, Line: server.Line, CertPath: certs[0]}}
+		t := driftTarget{entry: DriftSite{Site: v.Name, Path: v.Path, Line: server.Line, CertPath: certs[0]}}
 		fail := func(reason string) {
 			t.entry.State, t.entry.Reason = DriftSkipped, reason
 			out = append(out, t)

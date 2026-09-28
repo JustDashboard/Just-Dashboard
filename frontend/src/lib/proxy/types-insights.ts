@@ -13,7 +13,7 @@ import type { Certificate } from "./types-certs"
 export type DriftState = "ok" | "stale" | "mismatch" | "unreachable" | "skipped"
 
 /** One TLS server block of an enabled nginx site, as GET /proxy/tls/drift reports it. */
-export type ServedCertificate = {
+export type DriftSite = {
   site: string
   path: string
   line: number
@@ -28,4 +28,4 @@ export type ServedCertificate = {
   servedBy?: string
 }
 
-export type DriftReport = { checkedAt: string; sites: ServedCertificate[] }
+export type DriftReport = { checkedAt: string; sites: DriftSite[] }
