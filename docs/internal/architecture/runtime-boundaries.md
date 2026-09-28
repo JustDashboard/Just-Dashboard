@@ -72,6 +72,14 @@ backup restore destinations, database dump paths, bind-mount sources, build cont
 applies the same containment but returns the entry rather than its target: use it for delete, move, stat
 and chmod, which act *on* a symlink.
 
+Logs are read under their own roots: `logsx.Service.Allow` holds a path, after resolving symlinks, to
+`JD_LOG_ROOTS`. Every log file the dashboard opens passes it, including the paths no request typed — a
+PM2 process's files from its record, the files a database server holds open (read from `/proc`), the
+access and error logs a proxy site's `access_log`/`error_log` directives name, and each rotated
+generation beside a site's log, asked again before every open because a generation can be a link to
+anywhere. A directive or a process is something an operator can point anywhere, so the path it yields is
+contained like one typed into a request; a refused one is named with the reason, never read.
+
 `internal/safepath` holds the archive-unpacking rules (absolute symlink targets refused, nothing written
 through a symlink already in the destination, the final component unlinked rather than followed). Both
 `files/archive.go` and `backups/restore.go` use it; they used to carry a copy each of the same lexical

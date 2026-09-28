@@ -24,7 +24,7 @@ import { AuthFilesPanel } from "@/components/proxy/auth-files-panel"
 import { siteProduct } from "@/components/proxy/marks"
 import { SiteForm } from "@/components/proxy/site-form"
 import { ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
-import { useSiteVerbs } from "@/components/proxy/site-verbs"
+import { sitePath, useSiteVerbs } from "@/components/proxy/site-verbs"
 import { ProxyGrid, RoutePath } from "@/components/proxy/route-path"
 import { Button } from "@/components/ui/button"
 
@@ -57,9 +57,11 @@ function byUrgency(a: VHost, b: VHost): number {
 
 /**
  * A route needs two readable ends and commands separate from its readings.
- * The cards retain the worst-first groups and the existing editor ownership:
- * nginx opens the builder, file-backed Caddy opens its file, and Docker Caddy
- * has no editor because there is no host file to save.
+ * The cards retain the worst-first groups, and each opens the site's own
+ * page — what it is, and its requests and errors read there — for every site
+ * and every reader. Editing stays with its owner, as the card's verbs: nginx
+ * opens the builder, file-backed Caddy opens its file, and Docker Caddy has
+ * no editor because there is no host file to save.
  */
 export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   const { can } = useAuth()
@@ -399,16 +401,17 @@ type CardProps = {
   onDelete: (v: VHost) => void
 }
 
-/** The route owns the body; service state and commands each have their own line. */
+/**
+ * The route owns the body; service state and commands each have their own
+ * line. Opening it is the site's page: a Docker Caddy route with no file to
+ * edit still has requests to read.
+ */
 function SiteCard({ vhost, busy, index, ...handlers }: CardProps) {
   const verbs = useSiteVerbs({ vhost, busy, ...handlers })
-  const primary = () => (vhost.kind === "nginx" ? handlers.onEdit(vhost) : handlers.onRaw(vhost))
-  const canOpen = vhost.kind === "nginx" ? handlers.admin : Boolean(vhost.path)
   return (
     <ChoiceRow
-      verb={canOpen ? `Open ${vhost.name}` : vhost.name}
-      onSelect={canOpen ? primary : undefined}
-      disabled={!canOpen}
+      verb={`Open ${vhost.name}`}
+      href={sitePath(vhost.name)}
       index={index}
       busy={Boolean(busy)}
       className="h-full gap-4 p-4"
@@ -434,38 +437,29 @@ function SiteCard({ vhost, busy, index, ...handlers }: CardProps) {
   )
 }
 
-/**
- * The file itself, for a site the form does not own — and for the operator
- * who would rather see the nginx than the form. Keyed on the file so opening
- * another vhost never inherits the previous one's buffer; saving that to the
- * wrong path would be a real outage.
- */
-function ConfigEditor({
-  vhost,
-  admin,
-  confirm,
-  onOpenChange,
-  onSaved,
-  onEdit,
-}: {
+/** The site's verbs the file's sheet carries in its header. */
+const EDITOR_VERBS = ["open", "scan", "log", "edit"]
+
+type ConfigEditorProps = {
   vhost: VHost | null
   admin: boolean
   confirm: (request: ConfirmRequest) => void
   onOpenChange: (open: boolean) => void
   onSaved: () => void
   onEdit: (vhost: VHost) => void
-}) {
-  return (
-    <ConfigEditorBody
-      key={vhost?.path ?? "none"}
-      vhost={vhost}
-      admin={admin}
-      confirm={confirm}
-      onOpenChange={onOpenChange}
-      onSaved={onSaved}
-      onEdit={onEdit}
-    />
-  )
+  /** Which of the site's verbs its header carries: the site's page leaves out the way to itself. */
+  verbs?: string[]
+}
+
+/**
+ * The file itself, for a site the form does not own — and for the operator
+ * who would rather see the nginx than the form. Keyed on the file so opening
+ * another vhost never inherits the previous one's buffer; saving that to the
+ * wrong path would be a real outage. The Sites list and a site's own page
+ * open the same sheet.
+ */
+export function ConfigEditor(props: ConfigEditorProps) {
+  return <ConfigEditorBody key={props.vhost?.path ?? "none"} {...props} />
 }
 
 function ConfigEditorBody({
@@ -475,14 +469,8 @@ function ConfigEditorBody({
   onOpenChange,
   onSaved,
   onEdit,
-}: {
-  vhost: VHost | null
-  admin: boolean
-  confirm: (request: ConfirmRequest) => void
-  onOpenChange: (open: boolean) => void
-  onSaved: () => void
-  onEdit: (vhost: VHost) => void
-}) {
+  verbs: keys = EDITOR_VERBS,
+}: ConfigEditorProps) {
   const [content, setContent] = useState("")
   const [original, setOriginal] = useState("")
   const [busy, setBusy] = useState(false)
@@ -497,7 +485,7 @@ function ConfigEditorBody({
     onDuplicate: noop,
     onToggle: noop,
     onDelete: noop,
-  }).filter((v) => v.key === "open" || v.key === "scan" || v.key === "log" || v.key === "edit")
+  }).filter((v) => keys.includes(v.key))
 
   useEffect(() => {
     if (!vhost) return

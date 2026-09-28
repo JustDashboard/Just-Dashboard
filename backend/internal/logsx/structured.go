@@ -2,6 +2,8 @@ package logsx
 
 import (
 	"encoding/json"
+	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -128,12 +130,21 @@ var (
 	timeKeys    = []string{"time", "ts", "timestamp", "@timestamp", "eventTime", "asctime"}
 )
 
-// parseStructured reads a JSON log line. It answers false for anything that is
-// not one — including a line that merely starts with a brace, because a
-// pretty-printed fragment in the middle of a stack trace does too.
+// parseStructured reads a JSON or logfmt log line, and answers false for
+// anything that is neither.
 func parseStructured(text string) (level, message string, at *time.Time, fields map[string]string, ok bool) {
 	trimmed := strings.TrimSpace(text)
-	if len(trimmed) < 2 || trimmed[0] != '{' || trimmed[len(trimmed)-1] != '}' {
+	if len(trimmed) > 0 && trimmed[0] == '{' {
+		return parseJSON(trimmed)
+	}
+	return parseLogfmt(trimmed)
+}
+
+// parseJSON reads a JSON log line. It answers false for anything that is not
+// one — including a line that merely starts with a brace, because a
+// pretty-printed fragment in the middle of a stack trace does too.
+func parseJSON(trimmed string) (level, message string, at *time.Time, fields map[string]string, ok bool) {
+	if len(trimmed) < 2 || trimmed[len(trimmed)-1] != '}' {
 		return "", "", nil, nil, false
 	}
 	var raw map[string]json.RawMessage
@@ -167,17 +178,7 @@ func parseStructured(text string) (level, message string, at *time.Time, fields 
 	}
 	message, _ = pick(messageKeys)
 	if stamp, found := pick(timeKeys); found {
-		if parsed, good := parseTimestamp(stamp); good {
-			at = &parsed
-		} else if seconds, err := strconv.ParseFloat(stamp, 64); err == nil && seconds > 0 {
-			// pino writes milliseconds since the epoch; a bare seconds value
-			// is what Go's own encoders produce.
-			if seconds > 1e11 {
-				seconds /= 1000
-			}
-			parsed := time.Unix(int64(seconds), 0).UTC()
-			at = &parsed
-		}
+		at = structuredTime(stamp)
 	}
 	// Everything else is context, and context is the reason to log as JSON in
 	// the first place: a request id beside a message is what turns one line
@@ -210,6 +211,138 @@ func parseStructured(text string) (level, message string, at *time.Time, fields 
 		fields = nil
 	}
 	return level, message, at, fields, level != "" || message != ""
+}
+
+// structuredTime reads a time key's value: a timestamp in any spelling the
+// line parser knows, or a number of seconds or milliseconds since the epoch.
+func structuredTime(stamp string) *time.Time {
+	if parsed, good := parseTimestamp(stamp); good {
+		return &parsed
+	}
+	if seconds, err := strconv.ParseFloat(stamp, 64); err == nil && seconds > 0 {
+		// pino writes milliseconds since the epoch; a bare seconds value
+		// is what Go's own encoders produce.
+		if seconds > 1e11 {
+			seconds /= 1000
+		}
+		// The fraction is kept to the microsecond a float of unix seconds
+		// can hold: Caddy writes its "ts" this way, and a second is a long
+		// time between a request's access entry and the error line that
+		// says why it failed.
+		parsed := time.UnixMicro(int64(math.Round(seconds * 1e6))).UTC()
+		return &parsed
+	}
+	return nil
+}
+
+// logfmtMarkers are the keys that make a run of key=value pairs a log line
+// rather than a sentence that happens to contain one. Without them a UFW
+// line (IN=eth0 OUT= SRC=…) or systemd's "code=exited, status=1/FAILURE"
+// would be read as structure, and would render differently even with no lens.
+var logfmtMarkers = []string{"level", "lvl", "msg", "message", "time", "at"}
+
+// parseLogfmt reads a logfmt line — dockerd's `time="…" level=warning
+// msg="…"`, go-kit's, Heroku's. It is strict on purpose: the first token must
+// be a key=value pair, every token must be one, and one of the marker keys
+// must be present. A line that fails any of the three is plain text.
+func parseLogfmt(text string) (level, message string, at *time.Time, fields map[string]string, ok bool) {
+	if !logfmtStart(text) {
+		return "", "", nil, nil, false
+	}
+	type pair struct{ key, value string }
+	pairs := make([]pair, 0, 8)
+	for i := 0; i < len(text); {
+		if text[i] == ' ' || text[i] == '\t' {
+			i++
+			continue
+		}
+		start := i
+		for i < len(text) && text[i] > ' ' && text[i] != '=' && text[i] != '"' {
+			i++
+		}
+		if i == start || i >= len(text) || text[i] != '=' {
+			return "", "", nil, nil, false
+		}
+		key := text[start:i]
+		i++
+		value := ""
+		if i < len(text) && text[i] == '"' {
+			end := closingQuote(text, i)
+			if end < 0 {
+				return "", "", nil, nil, false
+			}
+			unquoted, err := strconv.Unquote(text[i : end+1])
+			if err != nil {
+				unquoted = text[i+1 : end]
+			}
+			value = unquoted
+			i = end + 1
+		} else {
+			vs := i
+			for i < len(text) && text[i] != ' ' && text[i] != '\t' {
+				i++
+			}
+			value = text[vs:i]
+		}
+		pairs = append(pairs, pair{key, value})
+	}
+	marked := false
+	for _, p := range pairs {
+		if slices.Contains(logfmtMarkers, p.key) {
+			marked = true
+			break
+		}
+	}
+	if !marked {
+		return "", "", nil, nil, false
+	}
+	fields = map[string]string{}
+	for _, p := range pairs {
+		switch {
+		case level == "" && (p.key == "level" || p.key == "lvl" || p.key == "at") && Normalise(p.value) != "":
+			// Heroku writes the level as at=error; an at= that is not a level
+			// is an ordinary field.
+			level = Normalise(p.value)
+		case message == "" && (p.key == "msg" || p.key == "message"):
+			message = p.value
+		case at == nil && (p.key == "time" || p.key == "ts" || p.key == "timestamp") && structuredTime(p.value) != nil:
+			at = structuredTime(p.value)
+		default:
+			if p.value == "" || len(fields) >= structuredCap {
+				continue
+			}
+			value := p.value
+			if len(value) > structuredValueCap {
+				value = value[:structuredValueCap] + "…"
+			}
+			fields[p.key] = value
+		}
+	}
+	if len(fields) == 0 {
+		fields = nil
+	}
+	return level, message, at, fields, true
+}
+
+// logfmtStart is the cheap first test, run on every plain line: a key in the
+// shape ^[A-Za-z_][A-Za-z0-9_.-]* followed by "=".
+func logfmtStart(text string) bool {
+	if text == "" {
+		return false
+	}
+	if c := text[0]; !(c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+		return false
+	}
+	for i := 1; i < len(text); i++ {
+		switch c := text[i]; {
+		case c == '=':
+			return true
+		case tokenByte(c), c == '.', c == '-':
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 // scalar renders a JSON value as the string a column would hold, and refuses

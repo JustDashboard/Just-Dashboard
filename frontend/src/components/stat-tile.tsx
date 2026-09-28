@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import type { Tone } from "@/components/tone"
-import { ArrowRight } from "@/components/icons"
+import { ArrowRight, Filter } from "@/components/icons"
 import { rowReveal } from "@/components/icon-action"
 import { Meter } from "@/components/meter"
 
@@ -134,6 +134,48 @@ export function StatLink({
         className={cn("absolute right-4 bottom-4 size-3.5 text-muted-foreground", rowReveal())}
       />
     </Link>
+  )
+}
+
+/**
+ * A stat tile that narrows what is under it.
+ *
+ * `StatLink`'s shape for a figure that is a question rather than a place: a
+ * log's "Auth failures 12" is the filter those twelve lines answer, and a
+ * press applies it to the pane below instead of leaving the page. The mark
+ * that appears is the funnel every "only lines like this" carries, for the
+ * same reason the link's is an arrow — a tile that washes on hover and says
+ * nothing of what a press does is a surface that only reacts. `pressed` is
+ * the figure's filter being the one on screen.
+ */
+export function StatButton({
+  label,
+  pressed,
+  onClick,
+  children,
+}: {
+  label: string
+  pressed?: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      aria-pressed={pressed}
+      className="group relative block h-full w-full min-w-0 text-left focus-ring-inset [&_[data-slot=stat-tile]>p:last-child]:pr-5"
+    >
+      {children}
+      <Filter
+        aria-hidden
+        className={cn(
+          "absolute right-4 bottom-4 size-3.5 text-muted-foreground",
+          pressed ? "text-foreground" : rowReveal(),
+        )}
+      />
+    </button>
   )
 }
 

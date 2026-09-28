@@ -167,7 +167,7 @@ func (t *Table) snapshot(ctx context.Context) ([]Process, error) {
 			row.CreateTime = time.UnixMilli(ct).UTC()
 		}
 		row.State = processState(row.Status)
-		row.Manager, row.ManagerName = processManager(row.PID, row.Cmdline)
+		row.Manager, row.ManagerName = ManagerOf(row.PID, row.Cmdline)
 		out = append(out, row)
 	}
 	if err := ctx.Err(); err != nil {
@@ -408,7 +408,7 @@ func (t *Table) Detail(ctx context.Context, pid int32) (*Process, error) {
 		row.CreateTime = time.UnixMilli(ct).UTC()
 	}
 	row.State = processState(row.Status)
-	row.Manager, row.ManagerName = processManager(row.PID, row.Cmdline)
+	row.Manager, row.ManagerName = ManagerOf(row.PID, row.Cmdline)
 	row.Listening, row.Connections = sockets(ctx, p)
 	row.OpenFilesLimit = openFilesLimit(ctx, p)
 	return row, nil
@@ -466,11 +466,14 @@ func managerLabel(manager string) string {
 	}
 }
 
-// processManager reads the cgroup membership the kernel has already assigned.
+// ManagerOf reads the cgroup membership the kernel has already assigned.
 // That is more reliable than guessing from executable names: nginx started by
 // systemd and nginx started in a shell are the same binary but not the same
 // thing to restart. PM2 is overlaid by the API from PM2's own PID list.
-func processManager(pid int32, cmdline string) (string, string) {
+//
+// Exported for the database page, which follows a listening port to the
+// unit whose journal and whose log files are that server's.
+func ManagerOf(pid int32, cmdline string) (string, string) {
 	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
 	if err == nil {
 		if manager, name := managerFromCgroup(string(b)); manager != "" {

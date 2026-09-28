@@ -27,7 +27,8 @@ strategy, and feature ownership behind those rules.
 - [`backend/observability-security.md`](backend/observability-security.md) — metrics, health, exposure,
   posture, login history, sshd, firewall/fail2ban, and six package managers.
 - [`backend/docker-files-logs.md`](backend/docker-files-logs.md) — Docker, compose, file management,
-  archives, previews, log discovery/search/tailing, and their frontend integration.
+  archives, previews, log discovery/search/tailing, the lenses that read each kind of log, and the
+  service logs every page embeds.
 - [`backend/processes-terminal-github.md`](backend/processes-terminal-github.md) — processes, systemd, PM2,
   cron, PTYs, terminal organization, and GitHub device authentication.
 - [`backend/git-backups-users.md`](backend/git-backups-users.md) — Git working copies and mutations,

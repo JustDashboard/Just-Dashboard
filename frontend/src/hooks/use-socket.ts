@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { wsUrl } from "@/lib/api"
+import { wsUrl, type Query } from "@/lib/api"
 
 export type Envelope<T = unknown> = {
   type: string
@@ -21,9 +21,7 @@ type SocketOptions = {
    * each reconnect, which lets resumable streams send their latest sequence
    * without reconnecting merely because that sequence advanced.
    */
-  query?:
-    | Record<string, string | number | boolean | undefined | null>
-    | (() => Record<string, string | number | boolean | undefined | null>)
+  query?: Query | (() => Query)
 }
 
 export type SocketState = "connecting" | "open" | "closed" | "error"

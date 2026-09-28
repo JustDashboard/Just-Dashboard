@@ -16,6 +16,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/accesslog"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/logsx"
 )
 
 // The request record, read back.
@@ -51,21 +52,31 @@ func (s *Service) AccessLogReader(ctx context.Context, name string) (accesslog.R
 		if err != nil {
 			return nil, accesslog.Facts{}, err
 		}
-		facts := accesslog.Facts{Driver: accessDriverCaddy, Format: accesslog.FormatCaddyJSON, Latency: true, Path: path}
+		facts := accesslog.Facts{Driver: accessDriverCaddy, Format: accesslog.FormatCaddyJSON, Latency: true, Path: path, Container: edge.ID}
 		return &caddyAccessLog{edge: *edge, path: path}, facts, nil
 	}
 	if !siteNameRe.MatchString(name) {
 		return nil, accesslog.Facts{}, errors.New("invalid deployment route name")
 	}
 	path := nginxAccessLogPath(name)
-	facts := accesslog.Facts{Driver: accessDriverNginx, Format: accesslog.FormatCombined, Latency: false, Path: path}
+	facts := accesslog.Facts{
+		Driver: accessDriverNginx, Format: accesslog.FormatCombined, Latency: false, Path: path,
+		ErrorLog: nginxErrorLogPath(name),
+	}
 	return &fileAccessLog{path: path}, facts, nil
 }
 
 // nginxAccessLogPath is the file `deploymentSiteSpec` asked nginx for. The two
-// spellings must agree, and this is the one place either is written.
+// spellings must agree, and this is the one place either is written — the
+// renderer, this reader and a site's request route all ask here.
 func nginxAccessLogPath(name string) string {
 	return "/var/log/nginx/" + name + ".access.log"
+}
+
+// nginxErrorLogPath is the error file the same site block names beside it
+// (`sites_render.go`), where a 502's "connect() failed (111)" is written.
+func nginxErrorLogPath(name string) string {
+	return "/var/log/nginx/" + name + ".error.log"
 }
 
 // caddyAccessLog reads a route's record out of the ingress container.
@@ -201,11 +212,24 @@ func sortGenerations(gens []accesslog.FileStat) {
 // nginx's, under a log root the dashboard mounts.
 type fileAccessLog struct {
 	path string
+	// allow, when set, is asked about every file before it is opened. A
+	// site's path comes from a file an operator edits, and a rotated
+	// generation beside it can be a link to anywhere; the live file passing
+	// once says nothing about what `access.log.1` points at.
+	allow func(string) error
+}
+
+// allowed reports whether the file may be read at all.
+func (f *fileAccessLog) allowed(path string) bool {
+	return f.allow == nil || f.allow(path) == nil
 }
 
 func (f *fileAccessLog) Read(ctx context.Context, identity string, offset, limit int64, fn func(string)) (accesslog.FileStat, accesslog.FileStat, int64, error) {
 	if offset < 0 {
 		offset = 0
+	}
+	if !f.allowed(f.path) {
+		return accesslog.FileStat{}, accesslog.FileStat{}, offset, errors.New("the request record is outside the log roots")
 	}
 	live := statPath(f.path)
 	path := f.path
@@ -258,14 +282,17 @@ func (f *fileAccessLog) Rolled(context.Context) ([]accesslog.FileStat, error) {
 }
 
 // generations lists the rotated files beside the live one that can be read
-// as text. logrotate's compressed generations are skipped: a `.gz` cannot be
+// as text. They are the names logrotate gives a file — `access.log.1`, or
+// `access.log-20260927` under dateext — and not whatever else begins with the
+// same letters: a site's path is its author's, and `access_log
+// /var/log/nginx/api;` sits beside `api-v2.access.log`, another site's
+// record entirely. The compressed generations are skipped: a `.gz` cannot be
 // read from an offset, and the newest generation is the uncompressed one
 // under `delaycompress`, which is the one a roll's tail sits in.
 func (f *fileAccessLog) generations() []string {
-	matches, _ := filepath.Glob(f.path + "*")
 	var out []string
-	for _, match := range matches {
-		if match == f.path {
+	for _, match := range logsx.Archives(f.path) {
+		if !f.allowed(match) {
 			continue
 		}
 		switch filepath.Ext(match) {

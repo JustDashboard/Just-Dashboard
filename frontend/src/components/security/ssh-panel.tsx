@@ -6,6 +6,7 @@ import Link from "next/link"
 import { ArrowRight, Key, SecureConnection, TerminalWindow, Warning } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { lensFor } from "@/lib/log-lenses"
 import type { Job, Posture, SecurityFinding, SSHDConfig, SSHSetting } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -20,6 +21,14 @@ import { Row, RowList } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { AreaFindings } from "@/components/security/posture-panel"
+import { AUTH_LOG } from "@/components/security/host-logs"
+import {
+  HostLogSection,
+  useAddressLineVerbs,
+  useHostLog,
+  useReadingPress,
+} from "@/components/security/log-section"
+import { ReadingTile, useLensReadings } from "@/components/logs/lens-readings"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -53,6 +62,13 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
  * put back if the test fails. The one refusal that is not about syntax is the
  * important one — turning off password authentication on a host where nobody
  * has a key.
+ *
+ * Last is what those settings let happen: the auth log, read through its
+ * lens — who signed in and how, who tried and failed, the addresses behind
+ * the failures, every sudo — with the day's counts as a second row of the
+ * readings, so "passwords on" sits above "412 failed attempts" rather than
+ * a page away from it. An attacker's address in it is blocked from the line
+ * it is on.
  */
 export function SSHPanel({
   posture,
@@ -74,6 +90,15 @@ export function SSHPanel({
   const [only, setOnly] = useSessionState<"all" | "attention">("security.ssh.only", "all")
   const [busy, setBusy] = useState(false)
   const console_ = useJobConsole()
+  // Asked beside the config, not after it: the grid's second row waits on it.
+  const authLog = useHostLog(AUTH_LOG, admin)
+  const readings = useLensReadings(authLog.data?.id ?? "", AUTH_LENS, {
+    forcedLens: "auth",
+    only: SSH_READINGS,
+    enabled: Boolean(authLog.data) && Boolean(data?.available),
+  })
+  const lineVerbs = useAddressLineVerbs({ comment: "blocked from the auth log", blockOn: ATTACKS })
+  const [ask, press] = useReadingPress()
 
   // The effective configuration is only right once sshd has reloaded.
   const jobStatus = console_.job?.status
@@ -103,8 +128,8 @@ export function SSHPanel({
         {header}
         <EmptyState
           icon={TerminalWindow}
-          title="SSH settings need the admin capability"
-          description="They name the accounts that hold keys, which is a map of who can reach this machine."
+          title="SSH needs the admin capability"
+          description="Its settings name the accounts that hold keys, which is a map of who can reach this machine, and its log records what was typed at the login prompt — sometimes a password."
         />
       </>
     )
@@ -256,8 +281,13 @@ export function SSHPanel({
       />
 
       {/* The four facts an attacker cares about, before the twelve settings
-          that produce them. */}
-      <StatGrid columns={4}>
+          that produce them — and under them, from the auth log, what the
+          last day made of those facts. One grid: the log's counts are
+          readings of the same server, not a second block of figures, drawn
+          while the log is still being found so the row does not arrive after
+          the page has settled. Two-up on a phone: eight figures one-up are a
+          screen and a half before the finding they explain. */}
+      <StatGrid columns={4} dense>
         <StatTile
           label="Port"
           value={data.ports.join(", ") || "22"}
@@ -299,6 +329,14 @@ export function SSHPanel({
               : `${data.keyedAccounts.reduce((n, a) => n + a.keys, 0)} authorized keys in total`
           }
         />
+        {readings.tiles.map((tile) => (
+          <ReadingTile
+            key={tile.reading.id}
+            tile={tile}
+            window={readings.window}
+            onPick={() => press(tile.reading)}
+          />
+        ))}
       </StatGrid>
 
       <AreaFindings posture={posture} area="ssh" onFix={onFix} />
@@ -444,10 +482,43 @@ export function SSHPanel({
         </PanelBody>
       </Panel>
 
+      <HostLogSection
+        title="Auth log"
+        log={authLog}
+        storageKey="security.ssh.log"
+        lineVerbs={lineVerbs}
+        ask={ask}
+        readings={readings}
+      />
+
       {dialog}
     </>
   )
 }
+
+const AUTH_LENS = lensFor("auth")
+
+/**
+ * The auth lens's readings that are about SSH, for the second row: who got
+ * in, who tried, under which names, from how many places. Its sudo failures
+ * are a reading of the host's accounts rather than of sshd, and are one
+ * quick view away in the log.
+ */
+const SSH_READINGS = ["accepted", "failed", "invalid", "attackers"]
+
+/**
+ * The lines whose address a deny answers: a wrong password, an account that
+ * does not exist, a connection that ran out of tries or gave up before
+ * authenticating. A login is not one of them — the address a deploy key or
+ * the operator signs in from is the last one to refuse.
+ */
+const ATTACKS = [
+  "ssh_failed",
+  "ssh_invalid_user",
+  "ssh_max_attempts",
+  "ssh_preauth_closed",
+  "ssh_scan",
+]
 
 const SSH_GROUPS = [
   {

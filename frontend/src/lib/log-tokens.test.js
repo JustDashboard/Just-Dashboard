@@ -50,6 +50,13 @@ describe("syslog", () => {
     expect(line.slice(leadingTime(spans, line, "atlas"))).toStartWith("vps-07749119")
   })
 
+  test("a zone written as a word after the clock is part of the stamp", () => {
+    const pg = "2026-09-23 05:21:04.010 UTC [914] app@shop ERROR:  deadlock detected"
+    expect(pg.slice(leadingTime(tokenize(pg), pg))).toBe("[914] app@shop ERROR:  deadlock detected")
+    const level = "2026-09-23 05:21:04 ERROR the job failed"
+    expect(level.slice(leadingTime(tokenize(level), level))).toBe("ERROR the job failed")
+  })
+
   test("a systemd unit and its verdict", () => {
     const spans = read(
       "2026-09-23T05:22:31.215620+00:00 vps-07749119-vps-ovh-net systemd[1]: nordvpnd-killswitch.service: Failed with result 'exit-code'.",
@@ -83,6 +90,37 @@ describe("auth.log", () => {
     expect(read("Accepted publickey for ubuntu from 100.84.53.82 port 50122 ssh2")).toContain(
       "good:Accepted",
     )
+  })
+})
+
+describe("security logs", () => {
+  test("fail2ban's own name is not a failure", () => {
+    const spans = read(
+      "2026-09-27 06:06:55,244 fail2ban.filter         [700]: INFO    [sshd] Found 203.0.113.42 - 2026-09-27 06:06:55",
+    )
+    expect(spans.some((s) => s.startsWith("bad:"))).toBe(false)
+    expect(spans).toContain("level:INFO")
+    expect(spans).toContain("ip:203.0.113.42")
+  })
+
+  test("a word keeps the digits inside it, and a failure word is still one", () => {
+    expect(read("upstream ssh2 x86_64 fail")).toEqual(["bad:fail"])
+    expect(read("Failed password for root from 203.0.113.9 port 4022 ssh2")).toEqual([
+      "bad:Failed",
+      "ip:203.0.113.9",
+    ])
+  })
+
+  test("a firewall's block is the firewall working, not a failure", () => {
+    const spans = read(
+      "2026-09-27T06:06:55.000000+00:00 web-1 kernel: [UFW BLOCK] IN=ens3 OUT= MAC=fa:16:3e:0b:31:7e:fe:54:00:3a:c1:02:08:00 SRC=203.0.113.42 DST=10.0.0.5 LEN=44 TOS=0x00 PREC=0x00 TTL=242 ID=54321 PROTO=TCP SPT=41234 DPT=3389 WINDOW=1024 RES=0x00 SYN URGP=0",
+    )
+    expect(spans.some((s) => s.startsWith("bad:"))).toBe(false)
+    expect(spans).toContain("proc:kernel")
+    expect(spans).toContain("key:SRC")
+    expect(spans).toContain("ip:203.0.113.42")
+    // Nor is a statement that drops a table.
+    expect(read('LOG:  statement: DROP TABLE "orders"')).not.toContain("bad:DROP")
   })
 })
 

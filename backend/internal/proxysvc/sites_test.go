@@ -432,6 +432,39 @@ func TestBackupsAndEditorLeftoversAreNotSites(t *testing.T) {
 	}
 }
 
+// The listing says where each nginx site writes, as its page reads it, so the
+// logs page can offer the sites that keep a request record of their own
+// without reading every site's file a second time.
+func TestVHostListingSaysWhereASiteLogs(t *testing.T) {
+	dir := t.TempDir()
+	available := filepath.Join(dir, "sites-available")
+	if err := os.MkdirAll(available, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"shop": "server {\n  server_name shop.example.com;\n" +
+			"  access_log /var/log/nginx/shop.access.log;\n  error_log /var/log/nginx/shop.error.log warn;\n" +
+			"  location / {\n    access_log off;\n  }\n}\n",
+		"quiet": "server {\n  server_name quiet.example.com;\n  access_log off;\n}\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(available, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := map[string]VHost{}
+	for _, h := range New(dir, filepath.Join(t.TempDir(), "Caddyfile")).nginxVHosts() {
+		got[h.Name] = h
+	}
+	if shop := got["shop"]; shop.AccessLogPath != "/var/log/nginx/shop.access.log" ||
+		shop.ErrorLogPath != "/var/log/nginx/shop.error.log" {
+		t.Errorf("shop: access %q, error %q", shop.AccessLogPath, shop.ErrorLogPath)
+	}
+	if quiet := got["quiet"]; quiet.AccessLogPath != "" || quiet.ErrorLogPath != "" {
+		t.Errorf("a site that logs nothing of its own named %q and %q", quiet.AccessLogPath, quiet.ErrorLogPath)
+	}
+}
+
 // Deleting a site keeps the previous content, and the copy must not be
 // deletable as if it were a site of its own.
 func TestDeleteSiteKeepsABackupAndRefusesToBackUpABackup(t *testing.T) {

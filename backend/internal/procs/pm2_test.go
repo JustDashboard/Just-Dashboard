@@ -56,6 +56,21 @@ func TestParsePM2ListFallsBackToDaemonOwner(t *testing.T) {
 	}
 }
 
+func TestParsePM2ListSaysWhetherPM2StampsTheLog(t *testing.T) {
+	doc := `[{"pm_id":0,"name":"plain","pm2_env":{"status":"online"}},` +
+		`{"pm_id":1,"name":"timed","pm2_env":{"status":"online","time":true}},` +
+		`{"pm_id":2,"name":"formatted","pm2_env":{"status":"online","log_date_format":"YYYY-MM-DD HH:mm:ss Z"}}]`
+	got, err := parsePM2List([]byte(doc), 0, "deploy")
+	if err != nil || len(got) != 3 {
+		t.Fatalf("parse: %v %+v", err, got)
+	}
+	for i, want := range []bool{false, true, true} {
+		if got[i].LogTimes != want {
+			t.Errorf("%s: logTimes = %v, want %v", got[i].Name, got[i].LogTimes, want)
+		}
+	}
+}
+
 func TestParsePM2ListRejectsGarbage(t *testing.T) {
 	if _, err := parsePM2List([]byte("not json"), 0, ""); err == nil {
 		t.Fatal("expected an error for non-JSON output")

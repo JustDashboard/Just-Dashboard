@@ -97,6 +97,11 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 		// reading the schema; only saving sits with the other writes below.
 		r.Method(http.MethodGet, "/{id}/diagram", s.handle(s.handleDBDiagramGet))
 		r.Method(http.MethodGet, "/{id}/activity", s.handle(s.handleDBActivity))
+		// The server's own log and the statements it recorded. Reading either
+		// is reading what the server printed and the statements it ran, which
+		// the activity list and /statements already show any role.
+		r.Method(http.MethodGet, "/{id}/logs/sources", s.handle(s.handleDBLogSources))
+		r.Method(http.MethodGet, "/{id}/querylog", s.handle(s.handleDBQueryLog))
 		r.Method(http.MethodGet, "/{id}/search", s.handle(s.handleDBSearch))
 		r.Method(http.MethodGet, "/{id}/overview", s.handle(s.handleDBOverview))
 		r.Method(http.MethodGet, "/orm/targets", s.handle(s.handleDBTargets))

@@ -153,18 +153,23 @@ func firstLine(s string) string {
 // symlink in sites-enabled, which is the convention Debian-family packages use
 // and the one operators expect the toggle to drive.
 type VHost struct {
-	Name        string    `json:"name"`
-	Kind        Kind      `json:"kind"`
-	Path        string    `json:"path"`
-	EnabledPath string    `json:"enabledPath,omitempty"`
-	Enabled     bool      `json:"enabled"`
-	ServerNames []string  `json:"serverNames"`
-	Listen      []string  `json:"listen"`
-	Upstreams   []string  `json:"upstreams"`
-	TLS         bool      `json:"tls"`
-	CertPath    string    `json:"certPath,omitempty"`
-	Modified    time.Time `json:"modified"`
-	Size        int64     `json:"size"`
+	Name        string   `json:"name"`
+	Kind        Kind     `json:"kind"`
+	Path        string   `json:"path"`
+	EnabledPath string   `json:"enabledPath,omitempty"`
+	Enabled     bool     `json:"enabled"`
+	ServerNames []string `json:"serverNames"`
+	Listen      []string `json:"listen"`
+	Upstreams   []string `json:"upstreams"`
+	TLS         bool     `json:"tls"`
+	CertPath    string   `json:"certPath,omitempty"`
+	// AccessLogPath and ErrorLogPath are where an nginx site writes, read as
+	// its page reads them (ParseSiteSpec), so a listing of the sites can say
+	// which keep a request record of their own without one read per site.
+	AccessLogPath string    `json:"accessLogPath,omitempty"`
+	ErrorLogPath  string    `json:"errorLogPath,omitempty"`
+	Modified      time.Time `json:"modified"`
+	Size          int64     `json:"size"`
 }
 
 var (
@@ -281,6 +286,8 @@ func (s *Service) nginxVHosts() []VHost {
 				v.TLS = true
 				v.CertPath = strings.TrimSpace(m[1])
 			}
+			spec, _ := ParseSiteSpec(e.Name(), text)
+			v.AccessLogPath, v.ErrorLogPath = spec.AccessLogPath, spec.ErrorLogPath
 		}
 		out = append(out, v)
 	}

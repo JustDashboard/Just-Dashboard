@@ -1124,10 +1124,8 @@ only renderer/executor/validation authority for their feature.
   remains `unavailable`. The overview renders these services with live/other-release labels and links to
   the exact Docker container or Compose stack panel. Empty managed inventory, unavailable evidence and
   unassessed diagnosis have distinct wording.
-  A Runtime service's Logs verb (and the game console's) opens the project's Logs page, which reads
-  only `view` and `moment`, so the `?service=` it carries selects nothing there; the exact container's
-  output is reached through Open in Docker, and a run's runtime-log sources link to the host Logs
-  page's `source=docker:<id>` (see [verification findings](../reference/verification-findings.md)).
+  A Runtime service's Logs verb (and the game console's) opens the project's Logs page with
+  `?service=<container>`, which opens its Output view on that container.
   Logs preserves explicit time-window
   links and refuses to substitute another source when the requested container is no longer discoverable;
   `GET /deploy/{id}/runs/{run}/logs` checks project membership and filters Docker by the run's own
@@ -1137,8 +1135,10 @@ only renderer/executor/validation authority for their feature.
   its persisted evidence identifies that release and contains no recovery. It never uses the current
   live release's activation timestamp to describe an older run. Missing/failed activation has no history
   link; removed runtimes point the operator to the transcript or an external log archive. The run page embeds application runtime logs separately from the orchestrator transcript, and the
-  project Logs tab embeds the observed runtime sources. Both reuse the Logs workspace for live
-  streaming, pause/resume, filters, and historical search without leaving the deployment. The run
+  project Logs page's Output view reads the observed runtime sources (the live release's containers,
+  "All services" for a stack, then older releases'). Both embed the service logs
+  (`components/logs/service-logs.tsx`) for live streaming, pause/resume, filters, each image's lens and
+  historical search without leaving the deployment. The run
   viewer uses the server-provided activation window when available. A removed selected service
   is reported as unavailable rather than silently replaced by another service.
 - `GET /deploy/{id}/operations` is the one operational read. It resolves the live release's own runtime

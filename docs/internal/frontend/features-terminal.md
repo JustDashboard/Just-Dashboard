@@ -86,10 +86,16 @@ that does something.
   rows; the preview's verdict and the network panel's shape diagram are the two `Group tinted` fences
   the section keeps, and a diff or a captured compose file sits in a `Well`.
 - `stack-detail.tsx` is a stack as the application it is: clickable ports, the compose file editable in
-  place (validated before saving — and saving is *not* deploying, which the UI says), one merged log feed
-  tagged by service, a Files tab over the stack's directory, and links to git and a shell in it. `container-detail.tsx` adds
+  place (validated before saving — and saving is *not* deploying, which the UI says), its logs as one
+  source (`stack:<name>`: every container merged by time, each line under its service in that service's
+  hue, the stack's readings over it, and an Events view of what Docker did to the project), a Files tab
+  over the stack's directory, and links to git and a shell in it. `container-detail.tsx` adds
   the reachability join (published port + the proxy site pointing at it turns "running on 3000" into a
-  URL), the writable-layer investigator, the failure diagnosis, editable limits, raw inspect, and
+  URL), the writable-layer investigator, the failure diagnosis (whose window the Logs tab opens as a
+  Crash window chip, and the Overview's notice as Read those lines), its logs through the lens its
+  image names with an Events view beside them (`container-events.tsx`: the health check's probes,
+  Docker's events for the container with crash loops folded and an exit's last lines under it),
+  editable limits, raw inspect, and
   Update/Duplicate/Rename — the last two behind a statement of consequence when compose owns the
   container, because the next deploy silently undoes them days later. Its Storage tab leads with the path
   *inside* the container — the one the application's own configuration names — states the kind of storage
@@ -118,7 +124,7 @@ event; landing on an unfiltered list of everything the dashboard has ever done i
 promised.
 
 A container and a stack are their own destinations — `/docker/containers/<id>` and
-`/docker/stacks/<name>` — since 2026-09-21: each holds a live log feed, and the container a shell and
+`/docker/stacks/<name>` — since 2026-09-21: each holds its logs, and the container a shell and
 the stack a compose editor, which is the test for a page rather than a sheet (`shell-design.md`). The
 container takes `?tab=` so a link can ask its question — "show me the logs" lands on the logs. The
 `?container=` and `?stack=` addresses those pages replaced still resolve, by redirect. Deployment
@@ -151,17 +157,33 @@ counts and unavailable checks sit in a rail beside the findings.
   visible. The rule dialog groups policy, destination and source, using source choice cards
   (Tailscale's own mark for a tailnet source) and service marks where the port identifies a product.
   Address-only deny/reject rules can be edited without inventing a destination port. Existing
-  typed confirmations for toggle, reset and inbound-deny policy remain.
+  typed confirmations for toggle, reset and inbound-deny policy remain. The page ends on the Firewall
+  log (`ufw.log`, else `kern.log`, else the kernel ring, read as the firewall lens); while ufw or
+  firewalld says logging is off, the section says so and its button brings the logging control
+  beside the rules into view instead of drawing an empty pane.
 - **SSH:** authentication, access, session limits and other directives are `FormSection aside`
   groups. Every control occupies the same column; recommendations sit with the setting, explanatory
   detail is available beside its label, and a sticky pending footer applies the changed values
   together. Reverting a draft to its effective value removes it from the change set. The apply
-  dialog still requires `change ssh`; the backend tests and reloads through its existing job.
+  dialog still requires `change ssh`; the backend tests and reloads through its existing job. For an
+  administrator the page ends on the Auth log (`auth.log` or `secure`, else the journal's sshd, sudo,
+  su and logind lines); anyone else is told the page needs an administrator and no log is asked for.
 - **Intrusion:** jail destination rows carry the watched service, current state, counts and a meter
   of bans still held. The jail sheet retains manual ban and release actions. Its tuning form shows
   the subject, groups the three policy numbers, and offers the browser's address for the allowlist.
   Draft values use fail2ban's lowercase parameter names while the saved configuration uses camel
-  case. Repeat offenders and ban activity sit beside one another on wide screens.
+  case. Repeat offenders take their row alone, and Activity — fail2ban's own log, every strike as
+  well as every ban — follows across the page; where fail2ban writes only to its journal, the
+  offenders' fold says Activity reads it instead rather than "nothing has been banned".
+- **Each area reads its own log in place.** SSH, Firewall and Intrusion read the file an operator
+  would open first, each asked after with `GET /logs/source` rather than out of the whole log index,
+  and fall back to the journal's reading of the same program, saying in the pane's facts whether the
+  file is missing or outside `JD_LOG_ROOTS` (`host-logs.ts`, `log-section.tsx`). The day's counts
+  from the log are a second run of the page's one grid, each a press that narrows the log under it.
+  The client of a line takes the same address verbs as a peer anywhere else in the section, but the
+  block only where the line is an attack a deny answers — a failed or invalid login, a strike or a
+  ban, a rate-limited packet — never an accepted login, an `ignoreip` match or an allowed packet,
+  which can be the operator's own; an outbound packet's address is this host's, and gets no verbs.
 - **Connections:** each peer's address and network share one column, its process and ports another,
   with a socket count and a comparative meter. **Logins** groups account/terminal, origin and session
   age, then places attackers and login history beside one another when there is room. Addresses
@@ -183,8 +205,10 @@ and forms do not. Phone tables scroll inside those frames without expanding the 
 
 `tests/browser/security-ui.spec.ts` checks all eight pages, their mutations and lookup handoffs,
 probe draft/request preservation, jail policy edits, SSH draft reversion, source-only rules,
-typed confirmations, limited roles and unavailable modules. It checks the viewport at 390, 1280
-and 1720, and requires desktop tables to fit their action columns. `JD_SECURITY_SHOTS` writes
+typed confirmations, limited roles and unavailable modules, and each area's log — its lens, its
+readings, its fallbacks and which lines offer a block — against the lines the Go lenses read
+(`host-logs-fixture.ts`). It checks the viewport at 390, 1280 and 1720, and requires desktop tables to
+fit their action columns. `JD_SECURITY_SHOTS` writes
 review screenshots at those three widths, including scrolled content and rule/jail dialogs.
 The changed-file gate also runs the design-system checks.
 
@@ -198,7 +222,12 @@ feature; the installed table caps at 400 rendered rows with the count said plain
 is drawn per design-system §15: the search is a plain panel of hand-laid rows (`ROW_BLEED`) whose
 install verb is an outline button — sixty brand faces in a result list would be sixty commands — and
 a started install is a `Status`, not a disabled button; the sheet's usage sections open with an eyebrow
-alone, and its copyable commands sit on the control ground.
+alone, and its copyable commands sit on the control ground. The fourth view, **Log**
+(`components/packages/log-view.tsx`), reads what the package manager did from its own logs — apt's
+history with each transaction's command and who asked, dpkg's record, the unattended runs, dnf's — in
+History and Insights only, opening on everything on disk, since a package log is written a few times
+a week and a live tail of it is an empty pane; it is named Log because the pane's own first tab is
+History.
 
 ## The terminal panel
 

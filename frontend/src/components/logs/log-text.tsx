@@ -13,6 +13,7 @@ import {
   type TokenKind,
 } from "@/lib/log-tokens"
 import type { LogLine } from "@/lib/types"
+import type { Tone } from "@/components/tone"
 
 /**
  * A log line, drawn by its shapes (`lib/log-tokens.ts`).
@@ -58,6 +59,18 @@ export const LEVEL_WORD: Record<LogLevel, string> = {
   info: "text-[var(--tag-blue)]",
   debug: "text-muted-foreground",
   unknown: "text-muted-foreground",
+}
+
+/**
+ * An event as a word in the level column (`lib/log-lenses.ts`). The status
+ * hues only for the tones that are verdicts; the rest recede, because on a
+ * page of Postgres lines "checkpoint" is context and "deadlock" is the find.
+ */
+export const EVENT_WORD: Record<Tone, string> = {
+  danger: "font-medium text-destructive",
+  warning: "text-warning",
+  success: "text-success",
+  default: "text-muted-foreground",
 }
 
 /**

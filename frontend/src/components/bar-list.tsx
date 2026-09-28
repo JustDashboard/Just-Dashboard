@@ -86,7 +86,7 @@ export function BarList({
                 pressable && "focus-ring-inset transition-colors hover:bg-row-hover",
               )}
             >
-              <span className="flex min-w-0 items-baseline gap-2">
+              <span className="flex h-4 min-w-0 flex-wrap items-baseline gap-x-2 overflow-hidden">
                 {marked && (
                   <span
                     aria-hidden
@@ -99,9 +99,12 @@ export function BarList({
                     the hint gives way first — all of it, before the name loses
                     a character: a shared shrink cut an address to
                     "198.51.100…" for two pixels of caption on a phone. The name
-                    truncates only once it alone is wider than the row. The
-                    hint's pixel of padding keeps its last glyph's overhang
-                    from being clipped by its own truncation. */}
+                    truncates only once it alone is wider than the row. A hint
+                    with less room than a few characters wraps onto a line the
+                    row does not show, rather than standing as a one-letter
+                    stub beside the name. The hint's pixel of padding keeps its
+                    last glyph's overhang from being clipped by its own
+                    truncation. */}
                 <span
                   className={cn(
                     "max-w-full min-w-0 shrink-0 truncate text-xs",
@@ -111,7 +114,7 @@ export function BarList({
                   {item.label}
                 </span>
                 {item.hint && (
-                  <span className="min-w-0 truncate pr-px text-micro text-muted-foreground">
+                  <span className="min-w-[6ch] flex-[1_1_6ch] truncate pr-px text-micro leading-4 text-muted-foreground">
                     {item.hint}
                   </span>
                 )}

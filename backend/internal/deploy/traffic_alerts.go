@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -476,8 +477,24 @@ func (e *TrafficAlertEvaluator) envelope(ctx context.Context, alert TrafficAlert
 	}
 	if e.names != nil {
 		envelope.ProjectName, envelope.EnvironmentName, envelope.URL = e.names(ctx, alert.ProjectID, alert.EnvironmentID)
+		envelope.URL = requestsAt(envelope.URL, since)
 	}
 	return envelope
+}
+
+// requestsAt opens the Logs page on the requests around the moment the rule
+// changed state. A message read an hour later that opened on "the last hour"
+// would open on a window that no longer holds what it was about.
+func requestsAt(page string, at time.Time) string {
+	link, err := url.Parse(page)
+	if page == "" || err != nil {
+		return page
+	}
+	query := link.Query()
+	query.Set("view", "requests")
+	query.Set("moment", at.UTC().Format(time.RFC3339))
+	link.RawQuery = query.Encode()
+	return link.String()
 }
 
 // TestEnvelope is what "Send test" delivers: the rule as if it had just

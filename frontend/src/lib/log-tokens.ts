@@ -154,8 +154,7 @@ const GOOD = new Set([
   "established",
   "recovered",
 ])
-// Counted only when shouted: "info" in a sentence is a word, INFO a level, and
-// "drop" is a verb where DROP is the firewall's verdict.
+// Counted only when shouted: "info" in a sentence is a word, INFO a level.
 const SHOUTED_LEVEL = new Set([
   "EMERG",
   "ALERT",
@@ -172,7 +171,6 @@ const SHOUTED_LEVEL = new Set([
   "DEBUG",
   "TRACE",
 ])
-const FIREWALL = new Set(["BLOCK", "BLOCKED", "DROP", "DROPPED", "REJECT", "DENY"])
 const BRACKETED = Object.keys(LEVEL_OF)
   .flatMap((w) => [w, w[0].toUpperCase() + w.slice(1), w.toUpperCase()])
   .join("|")
@@ -203,7 +201,8 @@ const SCAN = new RegExp(
     String.raw`(?<unit>\b\d+(?:\.\d+)?(?:\s?(?:msecs?|ms|µs|us|ns|secs?|seconds|[KMGTP]i?B|bytes)|(?:s|m|h|d|%))(?![\w.]))`,
     // Last, so every shape that starts with a letter is tried first — and a
     // word consumed whole is a word whose letters are never scanned again.
-    String.raw`(?<word>\b[A-Za-z][A-Za-z'_-]*)`,
+    // Digits belong to the word they are in: "fail2ban" is a name, not "fail".
+    String.raw`(?<word>\b[A-Za-z][\w'-]*)`,
   ].join("|"),
   "g",
 )
@@ -295,8 +294,9 @@ function scan(text: string): Span[] {
         break
       case "word": {
         const word = m[0]
+        // A firewall's BLOCK, DROP or REJECT is the firewall doing its job,
+        // on every line of its log: left as words, not painted as failures.
         if (SHOUTED_LEVEL.has(word)) spans.push({ start, end, kind: "level", level: levelOf(word) })
-        else if (FIREWALL.has(word)) spans.push({ start, end, kind: "bad" })
         else if (BAD.has(word.toLowerCase())) spans.push({ start, end, kind: "bad" })
         else if (GOOD.has(word.toLowerCase())) spans.push({ start, end, kind: "good" })
         break
@@ -499,6 +499,9 @@ export function pieces(
   return out
 }
 
+const ZONE_WORD =
+  /^ (?:UTC|GMT|[ECMP][SD]T|CES?T|EES?T|WES?T|BST|IST|JST|KST|MSK|AE[SD]T|HKT|SGT)(?= )/
+
 /**
  * Where the line's own prefix ends, for a console that already shows the time
  * in a column: past the timestamp, and past syslog's hostname too when it is
@@ -508,7 +511,11 @@ export function pieces(
 export function leadingTime(spans: Span[], text = "", hostname?: string): number {
   const first = spans.find((s) => s.start === 0)
   if (first?.kind !== "time") return 0
-  const at = first.end + 1
+  // Postgres's `%m` and a few others spell the zone as a word after the
+  // clock — `05:21:00.101 UTC` — which is the stamp too, not the message.
+  // Named rather than any capitals, which would take a leading `ERROR` with it.
+  const zone = ZONE_WORD.exec(text.slice(first.end))
+  const at = first.end + (zone ? zone[0].length : 0) + 1
   const host = spans.find((s) => s.start === at && s.kind === "host")
   if (host && hostname && sameHost(text.slice(host.start, host.end), hostname)) {
     return host.end + 1

@@ -137,7 +137,9 @@ func TestTrafficAlertFiresOnceAndRecoversOnce(t *testing.T) {
 	if len(sent.sent) != 1 || sent.sent[0].Event != NotificationEventTrafficFiring || sent.sent[0].Alert == nil || sent.sent[0].Alert.Observed != 5 {
 		t.Fatalf("firing delivery = %+v", sent.sent)
 	}
-	if sent.sent[0].ProjectName != "api" || sent.sent[0].URL != "https://dash/deploy/1/logs" {
+	// The link opens the requests at the minute the rule fired, not at
+	// whatever "the last hour" is by the time somebody reads the message.
+	if sent.sent[0].ProjectName != "api" || sent.sent[0].URL != "https://dash/deploy/1/logs?moment=2026-09-19T03%3A12%3A00Z&view=requests" {
 		t.Fatalf("names not carried: %+v", sent.sent[0])
 	}
 

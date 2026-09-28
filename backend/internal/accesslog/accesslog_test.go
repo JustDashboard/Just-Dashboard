@@ -219,6 +219,43 @@ func TestFilterNarrows(t *testing.T) {
 	}
 }
 
+func TestFilterNarrowsToWhatTheAgentsAndCameFromListsName(t *testing.T) {
+	base := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	chrome := entry(base, "GET", "/", 200, 5)
+	chrome.Host, chrome.UserAgent = "shop.test", "Mozilla/5.0 (X11; Linux x86_64) Chrome/140.0 Safari/537.36"
+	chrome.Referer = "https://www.google.com/search?q=shop"
+	crawler := entry(base, "GET", "/robots.txt", 200, 1)
+	crawler.Host, crawler.UserAgent = "shop.test", "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+	inside := entry(base, "GET", "/b", 200, 1)
+	inside.Host, inside.UserAgent, inside.Referer = "shop.test", chrome.UserAgent, "https://shop.test/a"
+
+	// The lists rank a family and a site, so a row of either narrows to the
+	// same value, whatever case the press sends it in.
+	for _, tc := range []struct {
+		filter Filter
+		want   []string
+	}{
+		{Filter{Agent: "chrome", Limit: 10}, []string{"/b", "/"}},
+		{Filter{Agent: "Googlebot", Limit: 10}, []string{"/robots.txt"}},
+		{Filter{Referer: "WWW.GOOGLE.COM", Limit: 10}, []string{"/"}},
+		// A link followed inside the site is not a source, so it is not the
+		// site's own name either.
+		{Filter{Referer: "shop.test", Limit: 10}, nil},
+	} {
+		c := NewCollector(tc.filter)
+		for _, e := range []Entry{chrome, crawler, inside} {
+			c.Feed(e)
+		}
+		var got []string
+		for _, e := range c.Result().Entries {
+			got = append(got, e.Path)
+		}
+		if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+			t.Fatalf("%+v kept %v, want %v", tc.filter, got, tc.want)
+		}
+	}
+}
+
 func TestFilterOnLatencyDropsUntimedEntries(t *testing.T) {
 	// A combined-format log has no durations at all. Narrowing by latency must
 	// not quietly return everything.
@@ -347,8 +384,45 @@ func TestAgentFamilyGroups(t *testing.T) {
 		"": "",
 	}
 	for agent, want := range cases {
-		if got := agentFamily(agent); got != want {
-			t.Errorf("agentFamily(%q) = %q, want %q", agent, got, want)
+		if got := AgentFamily(agent); got != want {
+			t.Errorf("AgentFamily(%q) = %q, want %q", agent, got, want)
+		}
+	}
+}
+
+// The agents are from this project's public hosts: the crawlers name
+// themselves, the scanners name their tool, the scripts send a library's
+// default — and the browsers, old and new, are people.
+func TestIsBotTellsProgramsFromBrowsers(t *testing.T) {
+	bots := []string{
+		"Mozilla/5.0 (compatible; Googlebot/2.1; +https://www.google.com/bot.html)",
+		"Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ClaudeBot/1.0; +claudebot@anthropic.com)",
+		"Mozilla/5.0 (compatible; GenomeCrawlerd/1.0; +https://www.nokia.com/genomecrawler)",
+		"Mozilla/5.0 (compatible; Infrawatch/1.0; +https://infrawat.ch/)",
+		"Hello from Palo Alto Networks, find out more about our scans in https://docs-cortex.paloaltonetworks.com/r/1/Cortex-Xpanse/Scanning-activity",
+		"Mozilla/5.0 (l9scan/2.0.7383e21323e2133313e27353; +https://leakix.net)",
+		"l9explore/1.2.2",
+		"Mozilla/5.0 zgrab/0.x",
+		"feroxbuster/2.13.1",
+		"libredtail-http",
+		"curl/8.7.1",
+		"Go-http-client/1.1",
+		"Python-urllib/3.14",
+	}
+	people := []string{
+		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+		"Mozilla/5.0 (X11; Linux x86_64; rv:129.0.0) Gecko/20100101 Firefox/129.0.0",
+		"Mozilla/5.0 (iPhone; CPU iPhone OS 18_3_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3.1 Mobile/15E148 Safari/604.1",
+		"",
+	}
+	for _, agent := range bots {
+		if !IsBot(agent) {
+			t.Errorf("IsBot(%q) = false, want true", agent)
+		}
+	}
+	for _, agent := range people {
+		if IsBot(agent) {
+			t.Errorf("IsBot(%q) = true, want false", agent)
 		}
 	}
 }

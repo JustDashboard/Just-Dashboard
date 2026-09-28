@@ -1,18 +1,25 @@
 "use client"
 
-import { useMemo } from "react"
+import { useEffect, useMemo } from "react"
 import Link from "next/link"
 import { get } from "@/lib/api"
 import { describeCron, nextCronRun } from "@/lib/cron"
-import { relativeTime, timestamp } from "@/lib/format"
-import type { Crontab } from "@/lib/types"
+import { duration, plural, timestamp } from "@/lib/format"
+import { lensFor } from "@/lib/log-lenses"
+import type { Crontab, LogSourceIndex } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { useConfirm } from "@/components/confirm-dialog"
+import {
+  ReadingTile,
+  useLensReadings,
+  type LensReadingsState,
+} from "@/components/logs/lens-readings"
+import { ServiceLogs } from "@/components/logs/service-logs"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
-import { EmptyNote } from "@/components/state"
+import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import {
   Table,
   TableBody,
@@ -23,7 +30,13 @@ import {
 } from "@/components/ui/table"
 import { CommandCell, CronJobsPanel } from "@/components/procs/cron-jobs"
 import { TimersPanel, type TimerList } from "@/components/procs/timers"
+import { cronLogSource } from "@/components/procs/shared"
 import { cn } from "@/lib/utils"
+
+const CRON_LENS = lensFor("cron")
+
+/** How soon a log index that failed to answer is asked again. */
+const INDEX_RETRY = 30_000
 
 /**
  * Everything that runs on a clock: one account's crontab as jobs you can
@@ -31,14 +44,18 @@ import { cn } from "@/lib/utils"
  * which are read-only here because editing them belongs to the package
  * manager.
  *
- * The page opens on four readings (§15 pass 2) that none of the three lists
+ * The page opens on five readings (§15 pass 2) that none of the three lists
  * can say alone — what fires next across cron and the timers together, how
- * many jobs this account has and how many are switched off, how many timers
- * are armed, and how much the packages run on their own — which is why the
- * crontab and the timers are polled here and handed to their panels rather
- * than fetched inside them. A job, a timer and a system cron line are each
- * drawn as the product they run (§14): the program a command starts, the
- * unit a timer activates.
+ * many jobs this account has and how many are switched off, how many jobs
+ * cron actually started in the last day, how many timers are armed, and how
+ * much the packages run on their own — which is why the crontab and the
+ * timers are polled here and handed to their panels rather than fetched
+ * inside them. A job, a timer and a system cron line are each drawn as the
+ * product they run (§14): the program a command starts, the unit a timer
+ * activates.
+ *
+ * What ran is read where it is written: cron's log under the jobs, through
+ * the cron lens, and each timer's runs under its own row.
  */
 export default function ScheduledPage() {
   const { confirm, dialog } = useConfirm()
@@ -52,6 +69,19 @@ export default function ScheduledPage() {
   )
   const timers = usePoll((signal) => get<TimerList>("/systemd/timers", undefined, signal), 30_000)
   const system = usePoll((signal) => get<Crontab[]>("/cron/system", undefined, signal), 0)
+  // Where cron's log is on this host is a question the log index answers
+  // once: the daemon's unit, a cron file, or the journal by program. A read
+  // that failed is asked again, or the tile and the panel below would say
+  // so until the page was reloaded.
+  const logs = usePoll((signal) => get<LogSourceIndex>("/logs/sources", undefined, signal), 0)
+  useEffect(() => {
+    if (!logs.error) return
+    const retry = setTimeout(logs.refresh, INDEX_RETRY)
+    return () => clearTimeout(retry)
+  }, [logs.error, logs.refresh])
+  const cron = useMemo(() => cronLogSource(logs.data), [logs.data])
+  const cronSources = useMemo(() => (cron ? [cron] : []), [cron])
+  const cronReadings = useLensReadings(cron?.id ?? "", CRON_LENS)
 
   const jobs = useMemo(() => crontab.data?.jobs ?? [], [crontab.data])
   const timerList = useMemo(() => timers.data?.timers ?? [], [timers.data])
@@ -87,10 +117,10 @@ export default function ScheduledPage() {
       <PageContext eyebrow="Processes" title="Scheduled" />
 
       {settled && (
-        <StatGrid columns={4} key="figures" className="animate-rise">
+        <StatGrid columns={5} key="figures" className="animate-rise">
           <StatTile
             label="Next run"
-            value={next ? relativeTime(next.at.toISOString()) : "Nothing"}
+            value={next ? fromNow(next.at) : "Nothing"}
             hint={
               next ? `${next.what} · ${timestamp(next.at.toISOString())}` : "no job or timer is due"
             }
@@ -105,6 +135,10 @@ export default function ScheduledPage() {
                   ? `${disabled} disabled · ${user}`
                   : `all of ${user}'s jobs enabled`
             }
+          />
+          <CronRunsTile
+            readings={cronReadings}
+            state={logs.data ? (cron ? "read" : "none") : logs.error ? "error" : "reading"}
           />
           <StatTile
             label="Timers armed"
@@ -137,6 +171,31 @@ export default function ScheduledPage() {
         adding={adding}
         onAddingChange={setAdding}
       />
+
+      <Panel plain>
+        <PanelHeader title="Cron log" />
+        <PanelBody flush className="pt-3">
+          {logs.error && !logs.data ? (
+            <ErrorState error={logs.error} />
+          ) : !logs.data ? (
+            <LoadingRows rows={4} />
+          ) : cron ? (
+            <ServiceLogs
+              sources={cronSources}
+              storageKey="processes.cron.log"
+              paneClassName="h-[min(70vh,36rem)] min-h-80"
+            />
+          ) : (
+            // Only a host without the journal gets here: on one with it,
+            // cron's lines are read out of it by program even with no unit.
+            <EmptyNote className="px-0 text-left">
+              {logs.data.missing?.journal ?? "There is no journal to read"}, and there is no cron
+              log under {(logs.data.roots ?? []).join(", ") || "the log roots"} — so what cron ran
+              is not recorded anywhere this page can read.
+            </EmptyNote>
+          )}
+        </PanelBody>
+      </Panel>
 
       <TimersPanel timers={timers} confirm={confirm} />
 
@@ -211,5 +270,57 @@ export default function ScheduledPage() {
       </Panel>
       {dialog}
     </Page>
+  )
+}
+
+/**
+ * "in 4h 59m" rather than "4h 59m from now": five figures to a row leave a
+ * tile too narrow for the longer form at a laptop's width.
+ */
+function fromNow(at: Date) {
+  const ms = at.getTime() - Date.now()
+  return ms < 45_000 ? "now" : `in ${duration(ms / 1000)}`
+}
+
+/** What the tile says while it has no figure, by why. */
+const UNREAD: Record<"reading" | "read" | "none" | "error", string> = {
+  reading: "reading cron's log",
+  read: "reading cron's log",
+  none: "no cron log on this host",
+  error: "the log index did not answer",
+}
+
+/**
+ * What cron started in the last day, out of its own log: the cron lens's
+ * runs, with the runs whose output had nowhere to go said under the figure,
+ * since a job whose error went to a mailer that is not there failed without
+ * anyone being told.
+ */
+function CronRunsTile({
+  readings,
+  state,
+}: {
+  readings: LensReadingsState
+  state: "reading" | "read" | "none" | "error"
+}) {
+  const runs = readings.tiles.find((tile) => tile.reading.id === "runs")
+  if (state !== "read" || !runs) {
+    return <StatTile label="Cron runs" value="—" hint={UNREAD[state]} />
+  }
+  const count = (id: string) =>
+    readings.tiles.find((tile) => tile.reading.id === id)?.figure?.value ?? 0
+  const discarded = count("discarded")
+  const errors = count("errors")
+  const hint =
+    discarded > 0
+      ? `${plural(discarded, "run")} with ${discarded === 1 ? "its" : "their"} output discarded`
+      : errors > 0
+        ? `${plural(errors, "error")} from cron itself`
+        : "jobs cron started"
+  return (
+    <ReadingTile
+      tile={{ reading: { ...runs.reading, label: "Cron runs", hint }, figure: runs.figure }}
+      window={readings.window}
+    />
   )
 }

@@ -30,6 +30,24 @@ type SearchOptions struct {
 	// and without this the only way to reach it is to narrow the window until
 	// the result stops being truncated.
 	Head bool
+
+	// Facets asks for the top values of these keys over every match in the
+	// window — not over the lines returned, which a limit of one makes the
+	// cheapest way to ask "who is failing to log in" of a whole day. Keys are
+	// any field key, plus "level" and the virtual "pattern".
+	Facets []string
+	// FacetLimit is how many values each facet reports (default 12).
+	FacetLimit int
+	// Measure is a numeric key summarised as percentiles, and added up per
+	// facet value — "slow statements by fingerprint, with their total time".
+	Measure string
+	// Sample keeps the last value of up to three keys beside each value of the
+	// first facet: the query behind a fingerprint, the user an address tried.
+	Sample []string
+	// HistogramBy splits the histogram's columns by a key's values instead of
+	// by level, and HistogramValues pins which values get their own series.
+	HistogramBy     string
+	HistogramValues []string
 }
 
 // Bucket is one column of the volume histogram. Counting by level rather than
@@ -67,6 +85,14 @@ type SearchResult struct {
 	First         *time.Time     `json:"first,omitempty"`
 	Last          *time.Time     `json:"last,omitempty"`
 	TookMillis    int64          `json:"tookMillis"`
+
+	// Facets, Measure and HistogramBy answer the matching options.
+	Facets      map[string]*Facet `json:"facets,omitempty"`
+	Measure     *Measure          `json:"measure,omitempty"`
+	HistogramBy string            `json:"histogramBy,omitempty"`
+	// Lens is the lens the lines were read through, which is what their
+	// event names mean.
+	Lens string `json:"lens,omitempty"`
 }
 
 // histogramCap bounds what the histogram remembers. Every match contributes a
@@ -111,11 +137,7 @@ func (s *Service) SearchTargets(ctx context.Context, targets []SearchTarget, opt
 		if err := s.Allow(target.Path); err != nil {
 			return nil, err
 		}
-		paths := []string{target.Path}
-		if opts.Archives {
-			paths = append(Archives(target.Path), target.Path)
-		}
-		for _, p := range paths {
+		for _, p := range s.searchPaths(target.Path, opts) {
 			if ctx.Err() != nil {
 				c.Incomplete()
 				return c.Result(), nil
@@ -126,7 +148,7 @@ func (s *Service) SearchTargets(ctx context.Context, targets []SearchTarget, opt
 				mod = &m
 			}
 			c.NextFile(p, p != target.Path, mod)
-			if err := c.scanFile(ctx, p, target.Stream); err != nil {
+			if err := c.scanFile(ctx, p, target.Stream, p == target.Path); err != nil {
 				c.FileError(err)
 				if ctx.Err() != nil {
 					c.Incomplete()
@@ -138,34 +160,72 @@ func (s *Service) SearchTargets(ctx context.Context, targets []SearchTarget, opt
 	return c.Result(), nil
 }
 
-func (c *Collector) scanFile(ctx context.Context, path, stream string) error {
+// searchPaths is the rotated set a search reads, oldest first. An archive last
+// written before the window opens holds nothing inside it — every line in it
+// is older than its mtime — so "the last hour" of a log with a year of
+// archives reads one file instead of fifty-three.
+func (s *Service) searchPaths(live string, opts SearchOptions) []string {
+	if !opts.Archives {
+		return []string{live}
+	}
+	paths := make([]string, 0, 8)
+	for _, a := range Archives(live) {
+		// A generation is only a name beside the live file, and a name can be
+		// a link to anywhere: the live file passing the roots says nothing
+		// about where app.log.1 leads.
+		if s.Allow(a) != nil {
+			continue
+		}
+		if !opts.Since.IsZero() {
+			if st, err := os.Stat(a); err == nil && st.ModTime().Before(opts.Since) {
+				continue
+			}
+		}
+		paths = append(paths, a)
+	}
+	return append(paths, live)
+}
+
+func (c *Collector) scanFile(ctx context.Context, path, stream string, live bool) error {
 	rc, err := openLog(path)
 	if err != nil {
 		return err
 	}
 	defer rc.Close()
+	lineNo := 0
+	if live && !c.opts.Since.IsZero() && !Compressed(path) {
+		if file, ok := rc.(*os.File); ok {
+			offset, lines := sinceOffset(file, c.opts.Since, c.filter)
+			if offset > 0 {
+				if _, err := file.Seek(offset, io.SeekStart); err != nil {
+					return err
+				}
+				lineNo = lines
+			}
+		}
+	}
 	name := filepath.Base(path)
+	st := c.st
 	sc := bufio.NewScanner(rc)
 	sc.Buffer(make([]byte, 0, 64*1024), maxLine)
-	lineNo := 0
+	// One line for the whole file: a lens reads it through an interface, so
+	// it lives on the heap, and declared per line it would be allocated per
+	// line. Everything that keeps a line keeps a copy.
+	var line Line
 	for sc.Scan() {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		lineNo++
 		text := sc.Text()
-		// Parsing the level and the timestamp is the expensive part per line,
-		// and a line the text filter has already rejected needs neither —
-		// unless it is a candidate for the context window, which is the one
-		// case where a non-matching line still gets rendered.
-		if !c.filter.MatchText(text) && c.pending == 0 && c.before == 0 {
-			c.scanned++
+		if c.Skip(st, text) {
 			continue
 		}
-		line := ParseLine(text, name)
+		line = ParseLine(text, name)
 		line.No, line.File, line.Stream = lineNo, name, stream
+		st.Read(&line)
 
-		c.Feed(line)
+		c.Feed(&line)
 	}
 	return sc.Err()
 }
@@ -182,6 +242,10 @@ type Collector struct {
 	before int
 	after  int
 	limit  int
+	// st is the current file's stream: its lens reader and record gate both
+	// start over with each file.
+	st *Stream
+	in *insight
 
 	res     *SearchResult
 	stamps  []stamp
@@ -200,32 +264,54 @@ func NewCollector(opts SearchOptions) (*Collector, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := opts.validateInsight(); err != nil {
+		return nil, err
+	}
 	limit := opts.Limit
 	if limit <= 0 || limit > 20000 {
 		limit = 2000
 	}
 	before, after := clampContext(opts.Before), clampContext(opts.After)
-	return &Collector{
+	c := &Collector{
 		filter:   f,
 		opts:     opts,
 		before:   before,
 		after:    after,
 		limit:    limit,
+		in:       newInsight(opts),
 		res:      &SearchResult{Lines: []Line{}, Files: []SearchedFile{}, Complete: true},
 		stamps:   make([]stamp, 0, 1024),
 		started:  time.Now(),
 		trailing: make([]Line, 0, before),
 		file:     -1,
-	}, nil
+	}
+	c.st = f.Stream("")
+	c.res.Lens = c.st.Lens()
+	return c, nil
 }
 
 // Filter exposes the compiled filter so a caller reading from a source that is
 // not a file can skip work the collector would discard anyway.
 func (c *Collector) Filter() *Filter { return c.filter }
 
-// NextFile starts a new file's tally. Line numbers and the context window both
-// reset: context must never bridge two files, since the last line of yesterday
-// is not the line before the first line of today.
+// Stream is the current file's stream, for a caller that parses lines itself
+// — a container, the journal — and runs them through the lens before Feed.
+func (c *Collector) Stream() *Stream { return c.st }
+
+// NewStream starts another stream feeding this collector, for a source that
+// interleaves several: a stack's containers each have their own lens and
+// their own records, merged into one answer. Their lines go in through
+// FeedFrom.
+func (c *Collector) NewStream(auto string) *Stream { return c.filter.Stream(auto) }
+
+// SetLens records the lens the answer was read through when that is not the
+// filter's own — a stack whose containers share one.
+func (c *Collector) SetLens(id string) { c.res.Lens = id }
+
+// NextFile starts a new file's tally. Line numbers, the context window and the
+// lens's state all reset: context must never bridge two files, since the last
+// line of yesterday is not the line before the first line of today, and
+// neither is a record that began in one and ends in the other.
 func (c *Collector) NextFile(path string, archive bool, mod *time.Time) {
 	c.closeFile()
 	c.res.Files = append(c.res.Files, SearchedFile{
@@ -234,6 +320,7 @@ func (c *Collector) NextFile(path string, archive bool, mod *time.Time) {
 	c.file = len(c.res.Files) - 1
 	c.trailing = c.trailing[:0]
 	c.pending, c.lastKept = 0, 0
+	c.st = c.filter.Stream("")
 }
 
 func (c *Collector) closeFile() {
@@ -259,33 +346,61 @@ func (c *Collector) FileError(err error) {
 // the difference between "no more matches" and "we stopped looking".
 func (c *Collector) Incomplete() { c.res.Complete = false }
 
-// Feed accepts one parsed line, in file order.
-func (c *Collector) Feed(line Line) {
+// Skip is the pre-parse test for a line on its way to Feed. Parsing the level
+// and the timestamp is the expensive part per line, and a line the text
+// filter has already rejected needs neither — unless it is a candidate for
+// the context window, which is the one case where a non-matching line still
+// gets rendered. A skipped line still counts as scanned.
+func (c *Collector) Skip(st *Stream, raw string) bool {
+	if c.pending > 0 || c.before > 0 || !st.Skip(raw) {
+		return false
+	}
 	c.scanned++
-	if !c.filter.Match(line) || !inWindow(line, c.opts) {
+	return true
+}
+
+// Feed accepts one parsed line, in file order, already read through the
+// current file's stream. The line is the caller's to reuse once Feed returns:
+// what is kept is copied.
+func (c *Collector) Feed(line *Line) { c.FeedFrom(c.st, line) }
+
+// FeedFrom accepts a line from one of several interleaved streams. The stream
+// decides whether it is kept, since only it knows the record the line
+// belongs to.
+func (c *Collector) FeedFrom(st *Stream, line *Line) {
+	c.scanned++
+	keep, own := st.Keep(line, inWindow(line, c.opts))
+	if !keep {
 		switch {
 		case c.pending > 0:
 			line.Context = true
-			c.keep(line)
+			c.keep(*line)
 			c.pending--
 		case c.before > 0:
 			line.Context = true
 			if len(c.trailing) == c.before {
 				c.trailing = c.trailing[1:]
 			}
-			c.trailing = append(c.trailing, line)
+			c.trailing = append(c.trailing, *line)
+		}
+		return
+	}
+	if !own {
+		// A continuation of a kept record rides with its head: not a match,
+		// not charted, and not a line of the "after" context either, which
+		// starts when the record ends.
+		if !(c.opts.Head && c.res.Truncated) {
+			c.keep(*line)
 		}
 		return
 	}
 
 	c.matched++
+	values := lineValues{l: line}
 	if line.Timestamp != nil && len(c.stamps) < histogramCap {
-		level := line.Level
-		if level == "" {
-			level = LevelUnknown
-		}
-		c.stamps = append(c.stamps, stamp{unix: line.Timestamp.Unix(), level: level})
+		c.stamps = append(c.stamps, stamp{unix: line.Timestamp.Unix(), series: c.in.seriesOf(&values)})
 	}
+	c.in.add(&values)
 	// In head mode the cap is final: the rest of the file is still counted, so
 	// the histogram and the totals describe the whole search, but nothing more
 	// is rendered.
@@ -302,7 +417,7 @@ func (c *Collector) Feed(line Line) {
 	}
 	c.trailing = c.trailing[:0]
 	line.Match = c.filter.Highlights(line.Text)
-	c.keep(line)
+	c.keep(*line)
 	c.pending = c.after
 }
 
@@ -326,7 +441,19 @@ func (c *Collector) keep(l Line) {
 
 func (c *Collector) Result() *SearchResult {
 	c.closeFile()
-	c.res.Histogram, c.res.BucketSeconds = histogram(c.stamps)
+	c.res.Histogram, c.res.BucketSeconds = histogram(c.stamps, c.in.histogramFold(c.stamps))
+	if c.in.by != "" {
+		c.res.HistogramBy = c.in.by
+	}
+	if len(c.in.facets) > 0 {
+		c.res.Facets = make(map[string]*Facet, len(c.in.facets))
+		for _, f := range c.in.facets {
+			c.res.Facets[f.key] = f.result(c.in.limit, c.in.sample)
+		}
+	}
+	if c.in.measure != nil {
+		c.res.Measure = c.in.measure.result()
+	}
 	if len(c.stamps) > 0 {
 		min, max := c.stamps[0].unix, c.stamps[0].unix
 		for _, s := range c.stamps {
@@ -344,12 +471,14 @@ func (c *Collector) Result() *SearchResult {
 	return c.res
 }
 
+// stamp is one match on the histogram: when, and the series it counts in —
+// its level, or its value of the split key ("" counts in the total only).
 type stamp struct {
-	unix  int64
-	level string
+	unix   int64
+	series string
 }
 
-func inWindow(l Line, opts SearchOptions) bool {
+func inWindow(l *Line, opts SearchOptions) bool {
 	if opts.Since.IsZero() && opts.Until.IsZero() {
 		return true
 	}
@@ -382,7 +511,7 @@ func clampContext(n int) int {
 // histogram buckets the matched timestamps into a fixed number of columns
 // across the span they cover, snapping the width to a round unit so the
 // x-axis reads as minutes or hours rather than as 37-second intervals.
-func histogram(stamps []stamp) ([]Bucket, int) {
+func histogram(stamps []stamp, fold map[string]string) ([]Bucket, int) {
 	if len(stamps) == 0 {
 		return []Bucket{}, 0
 	}
@@ -418,7 +547,13 @@ func histogram(stamps []stamp) ([]Bucket, int) {
 			continue
 		}
 		buckets[i].Total++
-		buckets[i].Counts[s.level]++
+		series := s.series
+		if f, ok := fold[series]; ok {
+			series = f
+		}
+		if series != "" {
+			buckets[i].Counts[series]++
+		}
 	}
 	return buckets, int(width)
 }
@@ -555,12 +690,8 @@ func (s *Service) RangeTargets(ctx context.Context, targets []SearchTarget, opts
 		if err := s.Allow(target.Path); err != nil {
 			return written, err
 		}
-		paths := []string{target.Path}
-		if opts.Archives {
-			paths = append(Archives(target.Path), target.Path)
-		}
-		for _, p := range paths {
-			n, err := s.rangeOne(ctx, p, f, opts, w)
+		for _, p := range s.searchPaths(target.Path, opts) {
+			n, err := s.rangeOne(ctx, p, p == target.Path, f, opts, w)
 			written += n
 			if err != nil {
 				return written, err
@@ -570,26 +701,38 @@ func (s *Service) RangeTargets(ctx context.Context, targets []SearchTarget, opts
 	return written, nil
 }
 
-func (s *Service) rangeOne(ctx context.Context, path string, f *Filter, opts SearchOptions, w io.Writer) (int, error) {
+func (s *Service) rangeOne(ctx context.Context, path string, live bool, f *Filter, opts SearchOptions, w io.Writer) (int, error) {
 	rc, err := openLog(path)
 	if err != nil {
 		return 0, err
 	}
 	defer rc.Close()
+	if live && !opts.Since.IsZero() && !Compressed(path) {
+		if file, ok := rc.(*os.File); ok {
+			if offset, _ := sinceOffset(file, opts.Since, f); offset > 0 {
+				if _, err := file.Seek(offset, io.SeekStart); err != nil {
+					return 0, err
+				}
+			}
+		}
+	}
 	name := filepath.Base(path)
+	st := f.Stream("")
 	written := 0
 	sc := bufio.NewScanner(rc)
 	sc.Buffer(make([]byte, 0, 64*1024), maxLine)
+	var line Line
 	for sc.Scan() {
 		if ctx.Err() != nil {
 			return written, ctx.Err()
 		}
 		text := sc.Text()
-		if !f.MatchText(text) {
+		if st.Skip(text) {
 			continue
 		}
-		line := ParseLine(text, name)
-		if !f.MatchLevel(line.Level) || !inWindow(line, opts) {
+		line = ParseLine(text, name)
+		st.Read(&line)
+		if keep, _ := st.Keep(&line, inWindow(&line, opts)); !keep {
 			continue
 		}
 		if _, err := io.WriteString(w, text+"\n"); err != nil {
