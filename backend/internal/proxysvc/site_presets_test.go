@@ -177,6 +177,7 @@ func presetCertificate(t *testing.T, dir string) (string, string) {
 // Every preset, plain and over HTTPS, side by side in one configuration: the
 // host's nginx passes it without a warning.
 func TestLivePresetsPassNginxTest(t *testing.T) {
+	requireLiveNginxHTTP2(t)
 	root := liveNginx(t)
 	cert, key := presetCertificate(t, root)
 	port, tlsPort := freePort(t), freePort(t)

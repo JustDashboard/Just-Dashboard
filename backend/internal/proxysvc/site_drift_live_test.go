@@ -100,20 +100,25 @@ func TestLiveMovedLinesKeepWhatTheyDid(t *testing.T) {
 	if res, err := service.Reload(context.Background(), KindNginx); err != nil {
 		t.Fatalf("the saved site did not reload: %v %+v", err, res)
 	}
-	// nginx swaps workers on a reload; the old ones may answer once more.
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		response, _ := siteGet(t, second, "app.test", "/")
-		got := <-tenants
-		if got == "" && response.Header.Get("X-Moved") == "yes" {
-			break
+	// nginx swaps workers on a reload; either port's old workers may answer
+	// once more before the new configuration serves it.
+	waitForSaved := func(port int) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			response, body := siteGet(t, port, "app.test", "/")
+			got := <-tenants
+			if body == "app" && got == "" && response.Header.Get("X-Moved") == "yes" {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("after the save on port %d: body %q, X-Tenant %q, X-Moved %q", port, body, got, response.Header.Get("X-Moved"))
+			}
+			time.Sleep(100 * time.Millisecond)
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("after the save: X-Tenant %q, X-Moved %q", got, response.Header.Get("X-Moved"))
-		}
-		time.Sleep(100 * time.Millisecond)
 	}
-	nginxAnswers(first, "yes", "")
+	waitForSaved(second)
+	waitForSaved(first)
 }
 
 // An include the form's own TLS settings repeat is not offered as a move,

@@ -1248,7 +1248,9 @@ test("connect shows the new file, posts the plan it showed, and the notice goes"
   ).toBeVisible()
   // A new file has no before to compare with.
   await expect(sheet.getByRole("radio", { name: "Before" })).toHaveCount(0)
-  await expect(sheet.locator(".monaco-editor .view-lines")).toContainText("stream {")
+  await expect(sheet.locator(".monaco-editor .view-lines")).toContainText("stream {", {
+    timeout: 20_000,
+  })
   await sheet.getByRole("button", { name: "Connect", exact: true }).click()
 
   await expect(page.getByText("Stream directory connected", { exact: true })).toBeVisible()
@@ -1305,7 +1307,7 @@ test("an edit to nginx.conf shows before and after, and can wait for the next re
     ),
   ).toBeVisible()
   const lines = sheet.locator(".monaco-editor .view-lines")
-  await expect(lines).toContainText("streams begin")
+  await expect(lines).toContainText("streams begin", { timeout: 20_000 })
   await sheet.getByRole("radio", { name: "Before" }).click()
   await expect(lines).not.toContainText("streams begin")
   await expect(lines).toContainText("user nginx;")

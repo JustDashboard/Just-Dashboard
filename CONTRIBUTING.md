@@ -94,6 +94,8 @@ to the contribution terms above, including the additional licence grant to the p
   measures itself and the runner's load rather than the read. Go and Bun come from `go.mod` and
   `package.json`; dependencies use the frozen Bun lockfile, and the module, Bun, Playwright and Next
   caches are restored between runs.
+  Real-nginx tests that use `http2 on;` probe the installed nginx first and skip if it lacks that
+  directive; the other nginx tests still run.
 - The live Docker fixtures need a real Docker daemon, so they run on a **self-hosted runner** on the
   release host (labels `self-hosted, linux, x64, just-dashboard`), a systemd service under
   `~/actions-runner` running as `ubuntu`, one job at a time. It used to take every job, one after

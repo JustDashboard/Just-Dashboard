@@ -3,6 +3,7 @@ package proxysvc
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -29,7 +30,30 @@ func openSSLNames(v VersionSuites) string {
 	return strings.Join(names, " ")
 }
 
+// HTTP/2 has its own directive only where the installed nginx supports it.
+func requireLiveNginxHTTP2(t *testing.T) {
+	t.Helper()
+	binary, err := exec.LookPath("nginx")
+	if err != nil {
+		t.Skip("nginx is not installed")
+	}
+	root := t.TempDir()
+	config := filepath.Join(root, "nginx.conf")
+	content := fmt.Sprintf("pid %[1]s/nginx.pid;\nerror_log %[1]s/error.log;\nevents {}\nhttp { access_log off; server { listen 127.0.0.1:8080; http2 on; } }\n", root)
+	if err := os.WriteFile(config, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output, err := exec.Command(binary, "-p", root, "-c", config, "-t").CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(output), `unknown directive "http2"`) {
+			t.Skip("nginx does not support the http2 on directive")
+		}
+		t.Fatalf("check nginx HTTP/2 support: %v\n%s", err, output)
+	}
+}
+
 func TestLiveDeepScanOfNginx(t *testing.T) {
+	requireLiveNginxHTTP2(t)
 	cert, _ := scanTestCert(t, 70, nil)
 	addr := scanNginx(t, cert, 1, func(ports []int, certPath, keyPath string) string {
 		return fmt.Sprintf(`    server {
