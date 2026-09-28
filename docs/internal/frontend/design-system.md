@@ -1147,12 +1147,40 @@ process and interface marks. A product is named only when it can be identified; 
 for ufw, sshd or an unknown interface. Source choices in the firewall dialog use the same lit
 `ChoiceCard` as deployment choices, with Tailscale's own mark for the tailnet.
 
-**The proxy section draws routes, engines and authorities.** All six pages stay in the reading
+**The proxy section draws routes, engines and authorities.** All seven pages stay in the reading
 register and begin with four `StatTile` readings, two per row on phones; on Sites, what the reader
 has to act on first — a failed read, nginx not running, changes on disk nginx has not loaded, with
 Test config and Reload nginx — stands above them as a `Notice`. On the overview the engine
 identity and service commands sit below them, with the routes in the main column and attention and
-expiry in a narrower column. A site's and a stream's card separates identity, route and named
+expiry in a narrower column. A source the overview could not read is never drawn as an empty or
+healthy one: its tile's hint reads "couldn't read", its panel shows the `ErrorState`, and attention
+carries it as a finding whose button is Try again, so the all-clear line cannot appear over it. The
+overview's context row is its age and one ghost Refresh: "Updated 14s ago" is the oldest reading on
+the page, and while a refresh is out the line reads "Refreshing…" until every source has answered,
+or, after twenty seconds, names the source that has not ("No answer from sites") and Refresh can be
+pressed again. A status that fails after answering keeps its age in the line, since the engine
+identity still draws it. The engine line's one brand command follows the unit: Reload while it
+runs, Start once it is stopped or failed, with Reload beside it disabled and its reason on a tooltip
+(a disabled button takes no hover, so the reason hangs on a focusable wrapper). Whether it starts at
+boot is a fact on the line, a warning with an inline Start at boot where `systemctl enable` would fix
+it. A failed unit is the one `Notice` the overview draws under the line — the reader has to act on it
+— holding systemd's reason in words, a fold that reads the journal when opened and opens scrolled to
+its newest line, and its two verbs. A start or restart the config test refuses keeps its dialog
+open on the test's diagnostics as rows (level as a `Status` verdict, file:line in mono, Open at line
+N), not a toast of nginx's output; the editor a row opens closes back into that dialog, with the
+keyboard on the row's button. Test config is a `SidePanel` of the same rows under a verdict `Notice`
+(success, warning or danger: "Valid", "Valid with 1 warning", "Fails"), with the output in a quiet
+fold, Copy output and Test again in the footer beside how long ago it ran, and a conflicting server
+name's claimants as rows indented under it behind a rule, "served by" and "ignored in" each with its
+own button (a name taken from a shared snippet adds "server_name in" the snippet's line under the
+site's); while it runs it says "Testing…" rather than keep the last verdict under a new run, and a
+test that gives no verdict is the panel's `ErrorState` with Try again, never a "Fails" `Notice`. The
+last test's warnings and failure stay in attention as one finding whose button, Open test, shows it.
+Its routes are ordered worst first like the Sites cards, eight with "Showing 8 of N". An
+administrator's route opens the site on Sites and a Docker ingress route its live TLS report; a
+reader's route opens its file read-only in place rather than the site form — skeleton rows while it
+is read and an `ErrorState` with Try again when it cannot be, never an empty editor — and a route with
+nothing a role may open is a disabled row. A site's and a stream's card separates identity, route and named
 actions into three bands: `components/proxy/route-path.tsx` gives the source and destination their
 own labelled columns (stacked on phones), so a hostname and its upstream do not compete for the same
 truncated line. Sites and streams use a two-column grid on wide screens and a single column on
@@ -1182,7 +1210,10 @@ vertical chain; long header values wrap instead of hiding the verdict. Listening
 table of readings, with fixed endpoint, application, reach and action columns and a stacked phone
 layout. Tables retain their scrolling boundary; forms and sections remain plain.
 `tests/browser/proxy-ui.spec.ts` covers all six populated pages at 390, 1280 and 1720, detail
-navigation, site-kind choices and read-only access.
+navigation, site-kind choices and read-only access; `proxy-engine-overview.spec.ts` covers the
+overview's failure states, its freshness and Refresh, its routes by role and the engine controls,
+including a stopped, failed, masked and boot-disabled unit, a refused start, restart or reload, and
+the config test panel.
 
 **What a host has installed, who is on it and what they changed are products too.** Packages
 draws a package as the software its name says it is (`packageProduct`, `components/packages/marks.tsx`:

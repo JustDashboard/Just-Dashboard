@@ -8,7 +8,6 @@
 package proxysvc
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -18,6 +17,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
@@ -38,7 +38,16 @@ type Kind string
 const (
 	KindNginx Kind = "nginx"
 	KindCaddy Kind = "caddy"
+	// KindCaddyIngress is the Docker Caddy that deployments share. It is
+	// tested and reloaded inside its container, against the Caddyfile the
+	// container serves; the host may have no caddy binary at all.
+	KindCaddyIngress Kind = "caddy-ingress"
 )
+
+// Known reports whether k is an engine the config test and reload can drive.
+func (k Kind) Known() bool {
+	return k == KindNginx || k == KindCaddy || k == KindCaddyIngress
+}
 
 type Service struct {
 	dockerIngress bool
@@ -54,6 +63,7 @@ type Service struct {
 	recorder  ChangeRecorder
 	effective effectiveCache
 	pending   pendingTracker
+	tested    testMemory
 }
 
 func New(nginxDir, caddyFile string) *Service {
@@ -75,8 +85,20 @@ func (s *Service) dockerCaddy(ctx context.Context) (*dockerCaddy, error) {
 	return discoverDockerCaddy(ctx)
 }
 
+// IngressState says whether the shared Docker Caddy exists yet.
+const (
+	// IngressRunning is a Caddy container found publishing 80 and 443.
+	IngressRunning = "running"
+	// IngressProvisionable is none running, with Docker here and 80 and 443
+	// free: the first deployment that routes a domain starts one.
+	IngressProvisionable = "provisionable"
+)
+
 type Availability struct {
+	// IngressContainer is the running Docker Caddy's name; never set for one
+	// that would only be started later.
 	IngressContainer string `json:"ingressContainer,omitempty"`
+	IngressState     string `json:"ingressState,omitempty"`
 	Nginx            bool   `json:"nginx"`
 	Caddy            bool   `json:"caddy"`
 	NginxVer         string `json:"nginxVersion,omitempty"`
@@ -106,14 +128,49 @@ func (s *Service) Availability(ctx context.Context) Availability {
 	if hostexec.Available("certbot") {
 		a.Certbot = true
 	}
-	if edge, err := s.dockerCaddy(ctx); err == nil && edge != nil {
+	edge, err := s.dockerCaddy(ctx)
+	a.setIngress(edge, err == nil && edge == nil && s.canProvisionIngress(ctx))
+	return a
+}
+
+// setIngress records the Docker Caddy: the one found running, or that the
+// first deployment would start one. The second is neither Caddy nor a
+// container — nothing serves yet — and naming the container it would be put
+// Test and Reload buttons on the overview for a Caddy that did not exist.
+func (a *Availability) setIngress(edge *dockerCaddy, provisionable bool) {
+	switch {
+	case edge != nil:
 		a.Caddy = true
 		a.IngressContainer = edge.Name
-	} else if err == nil && s.canProvisionIngress(ctx) {
-		a.Caddy = true
-		a.IngressContainer = managedIngressName
+		a.IngressState = IngressRunning
+	case provisionable:
+		a.IngressState = IngressProvisionable
 	}
-	return a
+}
+
+// ErrNoEngineUnit is a proxy the dashboard cannot start or stop as a service:
+// the Docker Caddy ingress, whose lifecycle is its container's, or none.
+var ErrNoEngineUnit = errors.New("this host's proxy is not run by a systemd unit")
+
+// EngineUnit is the service behind the engine the overview shows: its unit,
+// the kind its config test takes, and its name for a sentence.
+type EngineUnit struct {
+	Unit string
+	Kind Kind
+	Name string
+}
+
+// Engine resolves the unit on the server — nginx where it is installed, else a
+// host Caddy — so a request can only ever start or stop the proxy, never a
+// unit named by the caller.
+func (s *Service) Engine() (EngineUnit, error) {
+	if hostexec.Available("nginx") {
+		return EngineUnit{Unit: "nginx.service", Kind: KindNginx, Name: "nginx"}, nil
+	}
+	if hostexec.Available("caddy") {
+		return EngineUnit{Unit: "caddy.service", Kind: KindCaddy, Name: "Caddy"}, nil
+	}
+	return EngineUnit{}, ErrNoEngineUnit
 }
 
 // nginxVersionLine matches what `nginx -v` writes to stderr:
@@ -302,10 +359,13 @@ func (s *Service) validateNginx(ctx context.Context, path, content string) (*Val
 	if err != nil {
 		return nil, err
 	}
-	res := runValidator(ctx, "nginx", "-t")
+	res, err := runTest(ctx, "nginx", "-t")
 	// Unconditional: the caller asked whether this content would be accepted,
 	// not for it to be installed.
 	restore()
+	if err != nil {
+		return nil, err
+	}
 	res.Note = s.includeNote(full)
 	return res, nil
 }
@@ -337,47 +397,72 @@ func (s *Service) stageNginx(full, content string) (func(), error) {
 	}, nil
 }
 
+// caddyScratchRoot is where a Caddyfile candidate is copied for `caddy
+// validate`. caddy is not in the dashboard's image and runs on the host
+// through nsenter, where the container's /tmp is a different directory: a
+// copy there was a file the host's caddy could not open, so every check of an
+// edit failed. docker-compose.yml mounts this one directory at the same path
+// on both sides. A variable so tests can use their own.
+var caddyScratchRoot = "/tmp/just-dashboard"
+
+// caddyScratch makes a private directory for one candidate and returns it
+// with its removal. The root is shared with every account on the host, so it
+// must be a real directory the dashboard owns and nobody else can write to,
+// the check the terminal's clipboard makes of the same root: a directory
+// another account planted could read the candidate — a Caddyfile can hold
+// credentials — or swap it between the write and the test.
+func caddyScratch() (string, func(), error) {
+	if err := os.Mkdir(caddyScratchRoot, 0o711); err != nil && !errors.Is(err, os.ErrExist) {
+		return "", nil, err
+	}
+	info, err := os.Lstat(caddyScratchRoot)
+	if err != nil {
+		return "", nil, err
+	}
+	owner, ok := info.Sys().(*syscall.Stat_t)
+	if !info.IsDir() || !ok || owner.Uid != uint32(os.Geteuid()) || info.Mode().Perm()&0o022 != 0 {
+		return "", nil, fmt.Errorf("%s is not a directory only the dashboard can write to, so a Caddyfile cannot be checked there", caddyScratchRoot)
+	}
+	dir, err := os.MkdirTemp(caddyScratchRoot, "caddy-validate-")
+	if err != nil {
+		return "", nil, err
+	}
+	return dir, func() { os.RemoveAll(dir) }, nil
+}
+
 // validateCaddy tests content as the file at target. Caddy can be pointed at
 // a copy, so nothing is staged, but it names the copy in every message it
 // writes: a file the caller never saw, and one that is gone by the time the
 // result is read. The copy's name is replaced by target's throughout.
 func (s *Service) validateCaddy(ctx context.Context, target, content string) (*ValidationResult, error) {
-	tmp, err := os.CreateTemp("", "vpsd-caddy-*")
+	dir, remove, err := caddyScratch()
 	if err != nil {
 		return nil, err
 	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(content); err != nil {
-		tmp.Close()
+	defer remove()
+	copied := filepath.Join(dir, "Caddyfile")
+	if err := os.WriteFile(copied, []byte(content), 0o600); err != nil {
 		return nil, err
 	}
-	tmp.Close()
-	res := runValidator(ctx, "caddy", "validate", "--config", tmp.Name(), "--adapter", "caddyfile")
-	staged, target := resolvedFile(tmp.Name()), resolvedFile(target)
-	res.Output = strings.ReplaceAll(res.Output, tmp.Name(), target)
+	res, err := runTest(ctx, "caddy", "validate", "--config", copied, "--adapter", "caddyfile")
+	if err != nil {
+		return nil, err
+	}
+	staged, target := resolvedFile(copied), resolvedFile(target)
+	res.Output = strings.ReplaceAll(res.Output, copied, target)
 	for i, d := range res.Diagnostics {
 		if d.File == staged {
 			res.Diagnostics[i].File = target
 		}
-		res.Diagnostics[i].Message = strings.ReplaceAll(d.Message, tmp.Name(), target)
+		res.Diagnostics[i].Message = strings.ReplaceAll(d.Message, copied, target)
 	}
 	return res, nil
 }
 
+// runValidator is runTest for a caller that only acts on a pass: a test that
+// did not finish reads as a failure, which refuses whatever it guards.
 func runValidator(ctx context.Context, name string, args ...string) *ValidationResult {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	cmd := hostexec.Command(ctx, name, args...)
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-	err := cmd.Run()
-	res := &ValidationResult{
-		Valid:   err == nil,
-		Output:  strings.TrimSpace(buf.String()),
-		Command: name + " " + strings.Join(args, " "),
-	}
-	res.diagnose(name)
+	res, _ := runTest(ctx, name, args...)
 	return res
 }
 
@@ -423,10 +508,18 @@ func (s *Service) WriteConfig(ctx context.Context, kind Kind, path, content stri
 	if err != nil {
 		return nil, err
 	}
-	if after := runValidator(ctx, "nginx", "-t"); !after.Valid {
+	started := time.Now()
+	after, err := runTest(ctx, "nginx", "-t")
+	if err != nil {
+		restore()
+		return nil, err
+	}
+	if !after.Valid {
 		restore()
 		return after, ErrInvalidConf
 	}
+	// The file stays, so this is a test of the configuration as it now is.
+	s.remember(KindNginx, started, after)
 	s.recordChange(ctx, Change{Path: full, Action: ChangeWrite,
 		Before: []byte(original), BeforeExisted: existed, After: []byte(content)})
 	return res, nil
@@ -458,12 +551,58 @@ func writeAtomic(path, content string) error {
 
 // Test runs the server's own config test against what is on disk right now.
 // It stages nothing and reloads nothing: it is the answer to "would a reload
-// succeed", asked before pressing the button that finds out the hard way.
-func (s *Service) Test(ctx context.Context, kind Kind) *ValidationResult {
-	if kind == KindCaddy {
-		return runValidator(ctx, "caddy", "validate", "--config", s.caddyFile, "--adapter", "caddyfile")
+// succeed", asked before pressing the button that finds out the hard way. The
+// ingress is tested inside its container, and there is nothing to test until
+// one runs.
+//
+// Every test that gives a verdict is kept as the engine's last (see
+// TestRecord); one that does not is ErrTestUnfinished and kept nowhere.
+func (s *Service) Test(ctx context.Context, kind Kind) (*ValidationResult, error) {
+	started := time.Now()
+	// Once begun, a test runs to its verdict: a tab closed or refreshed while
+	// it runs would otherwise stop it, and a stopped test says nothing.
+	run := context.WithoutCancel(ctx)
+	var res *ValidationResult
+	var err error
+	switch kind {
+	case KindCaddyIngress:
+		var edge *dockerCaddy
+		if edge, err = s.ingress(ctx); err != nil {
+			return nil, err
+		}
+		res, err = edge.validate(run)
+	case KindCaddy:
+		res, err = runTest(run, "caddy", "validate", "--config", s.caddyFile, "--adapter", "caddyfile")
+	default:
+		kind = KindNginx
+		res, err = runTest(run, "nginx", "-t")
 	}
-	return runValidator(ctx, "nginx", "-t")
+	if err != nil {
+		return nil, err
+	}
+	s.remember(kind, started, res)
+	return res, nil
+}
+
+// WithTestedConfig runs start only when the engine's config test passes, and
+// holds the service lock across both, so no candidate can be staged between
+// the test and what it guards. It exists for starting and restarting the
+// engine's service: this host's nginx.service runs `nginx -t` before it
+// starts, so a restart over a broken file stops nginx and then cannot bring it
+// back — every site down until someone logs in. A failing test returns the
+// result with ErrInvalidConf and start is never called; start must not call
+// back into the Service.
+func (s *Service) WithTestedConfig(ctx context.Context, kind Kind, start func() error) (*ValidationResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	res, err := s.Test(ctx, kind)
+	if err != nil {
+		return nil, err
+	}
+	if !res.Valid {
+		return res, ErrInvalidConf
+	}
+	return res, start()
 }
 
 type ReloadResult struct {
@@ -473,19 +612,33 @@ type ReloadResult struct {
 }
 
 // Reload tests first and refuses to reload a config that does not pass. This
-// is the guard rail that makes a config editor safe to expose at all.
+// is the guard rail that makes a config editor safe to expose at all. Its test
+// is kept as the engine's last, passed or not; one that gives no verdict is
+// ErrTestUnfinished, and nothing is reloaded or kept.
 func (s *Service) Reload(ctx context.Context, kind Kind) (*ReloadResult, error) {
 	s.forgetEffective()
+	if kind == KindCaddyIngress {
+		return s.reloadIngress(ctx)
+	}
 	var validation *ValidationResult
+	var err error
 	var reload *exec.Cmd
+	started := time.Now()
+	// As Test's: a closed tab does not stop the test once begun.
+	run := context.WithoutCancel(ctx)
 	switch kind {
 	case KindCaddy:
-		validation = runValidator(ctx, "caddy", "validate", "--config", s.caddyFile, "--adapter", "caddyfile")
+		validation, err = runTest(run, "caddy", "validate", "--config", s.caddyFile, "--adapter", "caddyfile")
 		reload = hostexec.Command(ctx, "caddy", "reload", "--config", s.caddyFile)
 	default:
-		validation = runValidator(ctx, "nginx", "-t")
+		kind = KindNginx
+		validation, err = runTest(run, "nginx", "-t")
 		reload = hostexec.Command(ctx, "nginx", "-s", "reload")
 	}
+	if err != nil {
+		return nil, err
+	}
+	s.remember(kind, started, validation)
 	res := &ReloadResult{Validation: validation}
 	if !validation.Valid {
 		return res, ErrInvalidConf

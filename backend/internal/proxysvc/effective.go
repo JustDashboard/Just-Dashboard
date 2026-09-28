@@ -3,7 +3,9 @@ package proxysvc
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -69,7 +71,8 @@ const effectiveTTL = 10 * time.Second
 type effectiveCache struct {
 	mu    sync.Mutex
 	files []ConfigFile
-	at    time.Time
+	// at is when the cached dump was read.
+	at time.Time
 	// gen moves on every change, so a dump that was running while a file
 	// changed is returned to its caller but never cached as current.
 	gen uint64
@@ -81,6 +84,7 @@ type effectiveCache struct {
 type effectiveDump struct {
 	done  chan struct{}
 	files []ConfigFile
+	at    time.Time
 	err   error
 }
 
@@ -109,12 +113,19 @@ func (s *Service) forgetEffective() {
 // readers that arrive while a dump is pending share it, so a queue behind a
 // long change runs nginx once. It must not be called with s.mu held.
 func (s *Service) EffectiveConfig(ctx context.Context) ([]ConfigFile, error) {
+	files, _, err := s.EffectiveConfigAt(ctx)
+	return files, err
+}
+
+// EffectiveConfigAt is EffectiveConfig and when nginx printed it, which the
+// cache can put up to effectiveTTL in the past.
+func (s *Service) EffectiveConfigAt(ctx context.Context) ([]ConfigFile, time.Time, error) {
 	cache := &s.effective
 	cache.mu.Lock()
 	if cache.files != nil && time.Since(cache.at) < effectiveTTL {
-		files := append([]ConfigFile(nil), cache.files...)
+		files, at := append([]ConfigFile(nil), cache.files...), cache.at
 		cache.mu.Unlock()
-		return files, nil
+		return files, at, nil
 	}
 	dump := cache.running
 	if dump == nil {
@@ -127,11 +138,11 @@ func (s *Service) EffectiveConfig(ctx context.Context) ([]ConfigFile, error) {
 	select {
 	case <-dump.done:
 		if dump.err != nil {
-			return nil, dump.err
+			return nil, time.Time{}, dump.err
 		}
-		return append([]ConfigFile(nil), dump.files...), nil
+		return append([]ConfigFile(nil), dump.files...), dump.at, nil
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, time.Time{}, ctx.Err()
 	}
 }
 
@@ -148,16 +159,31 @@ func (s *Service) runEffectiveDump(dump *effectiveDump) {
 	gen := cache.gen
 	cache.mu.Unlock()
 
+	dump.at = time.Now()
 	dump.files, dump.err = s.dumpNginx(context.Background())
 
 	cache.mu.Lock()
 	if dump.err == nil && cache.gen == gen {
-		cache.files, cache.at = dump.files, time.Now()
+		cache.files, cache.at = dump.files, dump.at
 	}
 	cache.running = nil
 	cache.mu.Unlock()
 	close(dump.done)
 }
+
+// DumpRefusedError is an `nginx -T` that nginx turned down: the configuration
+// on disk fails its test, so there is nothing it loads to print. Validation is
+// that test, placed as a config test's is.
+type DumpRefusedError struct {
+	Validation *ValidationResult
+}
+
+func (e *DumpRefusedError) Error() string {
+	return "nginx -T: " + e.Validation.Output
+}
+
+// Unwrap is ErrInvalidConf: the refusal is about the configuration.
+func (e *DumpRefusedError) Unwrap() error { return ErrInvalidConf }
 
 // dumpNginx runs `nginx -T` and must be called with s.mu held.
 func (s *Service) dumpNginx(ctx context.Context) ([]ConfigFile, error) {
@@ -168,7 +194,16 @@ func (s *Service) dumpNginx(ctx context.Context) ([]ConfigFile, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		if message := strings.TrimSpace(stderr.String()); message != "" {
+		message := strings.TrimSpace(stderr.String())
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 1 && ctx.Err() == nil {
+			// nginx's own refusal: it prints what it loads only for a
+			// configuration that passes its test.
+			res := &ValidationResult{Output: message, Command: "nginx -T"}
+			res.diagnose("nginx")
+			return nil, &DumpRefusedError{Validation: res}
+		}
+		if message != "" {
 			return nil, fmt.Errorf("nginx -T: %s", message)
 		}
 		return nil, fmt.Errorf("nginx -T: %w", err)
@@ -187,4 +222,55 @@ func (s *Service) dumpNginx(ctx context.Context) ([]ConfigFile, error) {
 		}
 	}
 	return files, nil
+}
+
+// PlacedDirective is one statement of the configuration nginx loads, without
+// the statements inside it, for a search by directive: its words, where it is
+// written, and the blocks it sits in as the configuration reads them.
+type PlacedDirective struct {
+	Name string   `json:"name"`
+	Args []string `json:"args"`
+	File string   `json:"file"`
+	Line int      `json:"line"`
+	// Within names the enclosing blocks, outermost first, each with its
+	// arguments — "http", "server app.example.com", "location /api". A server
+	// block is named by its first server_name, which is how a reader tells
+	// one from the next.
+	Within []string `json:"within"`
+	// Opens marks a directive that opens a block: "server", "location /api".
+	Opens bool `json:"opens"`
+}
+
+// PlaceDirectives lists every directive of a tree NginxTree built, in the
+// order nginx reads them.
+func PlaceDirectives(tree []Directive) []PlacedDirective {
+	out := []PlacedDirective{}
+	var walk func(directives []Directive, within []string)
+	walk = func(directives []Directive, within []string) {
+		for _, d := range directives {
+			out = append(out, PlacedDirective{
+				Name: d.Name, Args: d.Args, File: d.File, Line: d.Line,
+				Within: within, Opens: d.Block != nil,
+			})
+			if d.Block != nil {
+				walk(d.Block, append(append([]string{}, within...), blockLabel(d)))
+			}
+		}
+	}
+	walk(tree, []string{})
+	return out
+}
+
+// blockLabel is how a block is named in a directive's Within.
+func blockLabel(d Directive) string {
+	words := append([]string{d.Name}, d.Args...)
+	if d.Name == "server" && len(d.Args) == 0 {
+		for _, inner := range d.Block {
+			if inner.Name == "server_name" && len(inner.Args) > 0 {
+				words = append(words, inner.Args[0])
+				break
+			}
+		}
+	}
+	return strings.Join(words, " ")
 }

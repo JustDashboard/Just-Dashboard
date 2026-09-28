@@ -3,7 +3,8 @@
 - `src/lib/api.ts` is the only fetch layer: `get/post/put/patch/del`, `credentials: "include"`,
   `X-JD-CSRF` on every mutation, URI-encoded exact `X-Confirm` with
   `X-Confirm-Encoding: uri` (including Unicode and surrounding whitespace), `ApiError` with
-  `needsConfirmation`/`isAuthProblem`/`needsTotp`; `wsUrl()` and
+  `needsConfirmation`/`isAuthProblem`/`needsTotp` and the whole parsed `body`, for a refusal that
+  carries more than the error (the proxy engine's config-test refusal carries the test); `wsUrl()` and
   `downloadUrl()` build the non-JSON URLs. A `Query` value may be an array, which is a repeated
   parameter (`f=a&f=b`, the log routes' field predicates): joining on a character and splitting it again
   on the server breaks on a value that holds it, and an IPv6 address is all colons. `useSocket` takes the

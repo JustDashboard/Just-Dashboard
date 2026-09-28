@@ -53,7 +53,7 @@ func TestLiveAccessListIsTestedWithEverySiteThatIncludesIt(t *testing.T) {
 	if after, _ := os.ReadFile(list); string(after) != string(before) {
 		t.Errorf("the refused list stayed:\n%s", after)
 	}
-	if res := svc.Test(ctx, KindNginx); !res.Valid {
+	if res, _ := svc.Test(ctx, KindNginx); !res.Valid {
 		t.Fatalf("nginx no longer loads after a refused list:\n%s", res.Output)
 	}
 	lists, err := svc.ListAccessLists()

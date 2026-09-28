@@ -650,13 +650,42 @@ ownership and cleanup, then removes its own containers/volumes/networks.
 - **The editor's read route is not a password reader.** `ReadConfig` refuses the dashboard's own
   `jd-auth` directory and any `.ht*`/`htpasswd` file with `ErrProtectedFile` (403 `protected_file`):
   `GET /proxy/config` is held by every signed-in account and a list of bcrypt hashes is not
-  configuration. `Validate` now carries a `Note` when the file is outside nginx's include tree —
+  configuration. A file inside the proxy's directories that is not on disk (removed or renamed
+  after the list naming it was read) is a 404 `not_found` marked retryable, which the editor shows
+  as an error with Try again; a missing path outside them is still 403 `outside_root`. `Validate` now carries a `Note` when the file is outside nginx's include tree —
   no `sites-enabled` link, a `conf.d` file without `.conf`, a stream with no include — because
   `nginx -t` passes a file it never reads, and a dry run that says "valid" about a disabled site is
   a false reassurance. `POST /proxy/test` runs the engine's own test against what is on disk without
   staging or reloading anything (admin, audited as `proxy.config.test`); the overview's Test config
-  button and the reload/restart/start/stop verbs sit beside it, the last four through the existing
-  `/systemd/{unit}` routes so the two pages never disagree about the unit.
+  and Reload buttons post it and `/proxy/reload` with the engine's kind, and a kind the service does
+  not know is a 400 rather than nginx. A reload the test refuses is a 422 whose body carries the test
+  beside the error, as a refused start's does (below). For the shared Docker Caddy that kind is `caddy-ingress`
+  (`docker_caddy_engine.go`): `caddy validate` and `caddy reload` run inside the running container
+  against its own `/etc/caddy/Caddyfile`, never the host's caddy, and with no ingress running both
+  answer 409 `no_ingress`. The editor's `POST /proxy/validate` and `PUT /proxy/config` take the same
+  kinds (none named is nginx, an unknown one is a 400) and refuse `caddy-ingress` with a 400 before
+  any file is touched: `WriteConfig` treats every kind but `caddy` as nginx, so the ingress kind wrote
+  an nginx file and then reloaded the container, and the ingress's Caddyfile is the deployments' to
+  write. `Availability` names an ingress only once it runs (`ingressState:
+  "running"`); one the first deployment would start is `ingressState: "provisionable"` with neither
+  `caddy` nor `ingressContainer` set, and deploy preflight counts either state as a proxy that can
+  serve and certify the domain. Start, restart, stop, enable at boot and clearing a failed state go
+  through `POST /proxy/engine/{start|restart|stop|enable|reset-failed}`, which resolves the unit
+  itself (`Service.Engine`: `nginx.service` where nginx is installed, else `caddy.service`; 409
+  `no_engine_unit` otherwise) and runs start and restart through `WithTestedConfig` — the config
+  test under the service lock, then systemctl only if it passed. This host's `nginx.service` runs
+  `nginx -t` before it starts, so a restart over a broken file used to stop nginx and leave every
+  site down; now it is a 422 whose body is `{error: {code: "invalid_config", message}, validation}`
+  — the message is the sentence plus nginx's output, and `validation` is the test itself with its
+  parsed `diagnostics`, which the overview places at their file and line — and systemctl never runs.
+  Stop, enable and reset-failed start nothing and run no test, so an engine whose file is broken can
+  still be set to start at boot or have a hand-fixed failure cleared. A systemctl that refuses (a
+  masked unit, a start that fails) is a 502 `command_failed` in systemd's words. Start, enable and
+  reset-failed need `system.admin`; restart and stop are destructive as well; each is audited as
+  `proxy.engine.<action>`, a refusal with `result: refused` and the 422. There is no disable: taking
+  the proxy out of the boot sequence is the Services page's. The unit's state, `UnitFileState`,
+  `Result` and `NRestarts` are still read from `/systemd/{unit}`, and a failed unit's last lines from
+  `/systemd/{unit}/journal?lines=30`, so the Services page and the overview never disagree about it.
 - **`ParseSiteSpec` reads what hand-written files actually look like.** A line holding a whole
   block — `location / { proxy_pass http://x; }` — is split into statements before it is read
   (`splitInline`, quote-aware, since a Content-Security-Policy value carries semicolons of its
@@ -972,18 +1001,81 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   after `applyAddedColumns` and `TestProxySchemaIsAdditive` holds to `CREATE … IF NOT EXISTS`. A table
   created there that later gains a column through `addedColumns` has to move into `schema` in the same
   change, since `applyAddedColumns` runs first on a fresh install.
-- **What the engine's own test says, not only whether it passed.** `runValidator` fills
+- **What the engine's own test says, not only whether it passed.** `runTest` (`testrun.go`) fills
   `ValidationResult.Diagnostics` (`diagnostics.go`: level, message, and file and line where nginx names
   them) and `Warnings`, the warn-level count — nginx exits 0 through a conflicting server name it is
   "ignoring", and that site then never serves. nginx writes a test's messages as `nginx: [warn] … in
   /path:12` when it can open its startup error log (root on the host) and as the timestamped error-log
-  line when it cannot; both are read. `ParseCaddyDiagnostics` reads `caddy validate`'s JSON warnings and
-  its `Error:` line, best effort, taking the position after `, at ` before any other path-like text so an
-  upstream URL is never read as one. A diagnostic's file is named with its symlinks resolved, the form
+  line when it cannot; both are read, the path whole from the last ` in /` outside the quotes nginx
+  puts round what it repeats, so a file named with a space keeps its place and a message naming two
+  places (`used in /a.conf:1 and in /a.conf:2`) opens the second, where nginx stopped.
+  `ParseCaddyDiagnostics` reads `caddy validate`'s JSON warnings and its `Error:` line, best effort,
+  taking the position after `, at ` before any other path-like text so an upstream URL is never read
+  as one. A diagnostic's file is named with its symlinks resolved, the form
   `allowedPath` gives the file being edited, so a Debian site's error names its sites-available file
-  rather than the sites-enabled link nginx included. Caddy is validated against a temporary copy, and
-  `validateCaddy` replaces the copy's name with the file's throughout the result; `Validate` holds a
-  Caddy path to the proxy's directories as it does an nginx one.
+  rather than the sites-enabled link nginx included. Caddy is validated against a copy in a private
+  directory under `/tmp/just-dashboard`, the one temporary directory docker-compose mounts at the same
+  path in the container and on the host, where caddy runs through nsenter — a copy in the container's
+  own /tmp was invisible to it, so every Caddyfile check failed. That root must be a real directory the
+  dashboard's user owns and nobody else can write to, or nothing is written or run. `validateCaddy`
+  replaces the copy's name with the file's throughout the result; `Validate` holds a Caddy path to
+  the proxy's directories as it does an nginx one.
+- **A test that gives no verdict is not a refusal.** `runTest` tells the engine's answer (exit 0, or
+  the 1 both engines refuse with) from a run that never gave one: out of its 30 seconds, stopped with
+  its caller's context, ended by a signal, not started, or exit 126/127 from nsenter or `docker exec`
+  failing to reach the binary; for the ingress, also docker's own "Error response from daemon".
+  Those are an `*UnfinishedTestError` (`ErrTestUnfinished`, unwrapping to the context's or exec's
+  error), which `mapProxyError` answers as `test_unfinished` — 504 when time ran out, 502 otherwise —
+  retryable, with the output as `raw` and no test beside it; a reload adds "so nothing was reloaded"
+  and a start or restart "so nginx was not started". It is never kept, and a reload, start or save it
+  guards does nothing (a staged candidate is put back). `Test` and `Reload` run their test under
+  `context.WithoutCancel`, so a tab closed mid-test no longer cuts it off; `WaitDelay` stops the wait
+  for a grandchild (nginx under nsenter, a shim's docker) that holds the output open after the kill.
+  `runValidator` is `runTest` for the other callers (sites, streams, deployment routes), where a test
+  that did not finish still reads as a failure and refuses what it guards.
+- **The engine's last test outlives the toast.** Every test of the files on disk is kept per engine
+  kind as a `TestRecord` (`lasttest.go`: kind, `checkedAt` — when the test began — and the result):
+  `Test`, the test `Reload` runs first (passed or refused, for nginx, a host Caddy and the ingress),
+  the one a start or restart runs under `WithTestedConfig`, and the second test `WriteConfig` runs
+  with an nginx file in place when it passes (one it refuses is put back, so the files are those the
+  last record describes). A candidate `Validate` stages and restores is not a test of the files on
+  disk and is not kept. A test begun before the kept one never replaces it, and every reader gets its
+  own copy. `GET /proxy/test/last?kind=` (admin, as the test itself — its output quotes the
+  configuration) answers the record or 204 when none has run since the dashboard started; it is held
+  in memory, so a restart forgets it rather than vouching for files it did not see. The overview's
+  finding reads it: a warning stays in Needs attention, and a failure as critical, until a test comes
+  back clean.
+- **A conflicting server name is placed at the sites that claim it.** nginx names no file for its
+  commonest warning (`conflicting server name "a.test" on 0.0.0.0:80, ignored`).
+  `PlaceNameConflicts` (`nameclaims.go`) reads the effective configuration and gives such a warning
+  `claims`: every http server block whose `server_name` names it on that address, in nginx's reading
+  order, at its `server_name` line with symlinks resolved — the first serves the name, and each after
+  it is `ignored`. A `server_name` in a file the block includes (a snippet several sites share, whose
+  one line would name every site) places the claim at the block's own `server` line instead, with the
+  snippet's line as `nameFile`/`nameLine`; claims that still land on one file and line (one file
+  enabled under two names, or included twice) cannot say which site is served, and are not given. A listen's address is read as nginx prints it (`80`, `*:80` and `0.0.0.0:80` are
+  one; no listen is `*:80`, or `*:8000` for an unprivileged nginx). nginx warns once for each block
+  after the first, so claims are given only when there are exactly one more than the warnings about
+  that name and address, and not at all when a claimant listens on a host name: a block the tree
+  cannot see would put the wrong site first. `POST /proxy/test`, `GET /proxy/test/last`,
+  `POST /proxy/reload` (passed, which its toast's Show opens, or refused) and a refused start or
+  restart place against the configuration as it is now, within three seconds (the dump waits for the
+  service lock, which the start's test has released by then); the record itself is kept as nginx
+  wrote it.
+- **The Configuration page reads the nginx directory as files.** `GET /proxy/files` (every
+  signed-in account, as `GET /proxy/config`) is `ConfigFiles` (`config_files.go`): every file three
+  folders deep under the nginx directory with its size, modification time and kind (`main`, `link`,
+  `password`, `file`), editor and package-manager backups left out unless an include reaches them.
+  Whether nginx reads a file is worked out from the disk by following nginx.conf's includes as nginx
+  does (relative to the main file, glob(3) order, inside any block), not from `nginx -T`, which prints
+  nothing for a configuration that fails its test; a file that does not parse stops the walk and
+  `includesKnown` is false with the `problem` placed. A password file is listed as `protected` and
+  never read; a file the dashboard wrote carries its marker and is `managed`. `GET /proxy/effective`
+  (admin, gated with the test because it runs the host's nginx) answers `nginx -T` file by file with
+  `checkedAt`, each link's `target`, and every directive placed with its enclosing blocks
+  (`PlaceDirectives`) for a search by directive; a configuration nginx refuses is a 422 carrying the
+  test (`DumpRefusedError`), and one held behind the service lock past 20 s is a 503 `busy`. A
+  refused `PUT /proxy/config` now carries its test beside the error, as a refused reload's does.
 - **The configuration nginx actually loads.** `EffectiveConfig` (`effective.go`) runs `nginx -T` through
   `hostexec` under the service lock — so it never dumps a candidate `Validate` has staged — splits it into
   `ConfigFile`s byte for byte (`ParseEffective`, which takes a `# configuration file` line as a file only

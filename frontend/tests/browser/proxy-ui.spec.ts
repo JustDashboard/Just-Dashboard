@@ -133,6 +133,7 @@ test("the raw editor reads its file afresh on every opening", async ({ page }) =
   await page.keyboard.type("typed-then-closed")
   await expect(sheet.getByRole("button", { name: "Discard" })).toBeEnabled()
   await sheet.getByRole("button", { name: "Close", exact: true }).click()
+  await page.getByRole("button", { name: "Close and discard" }).click()
   await expect(sheet).toHaveCount(0)
 
   await card.getByRole("button", { name: "Raw config" }).click()

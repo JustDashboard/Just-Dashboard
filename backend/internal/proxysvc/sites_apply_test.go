@@ -705,7 +705,7 @@ func TestSaveSiteTestsADisabledSiteAsEnabled(t *testing.T) {
 		t.Fatalf("result = %+v, want disabled, tested as enabled and failing", res)
 	}
 	want := Diagnostic{Level: "emerg", Message: `unknown directive "frobnicate"`, File: res.Path, Line: 3}
-	if len(res.Validation.Diagnostics) != 1 || res.Validation.Diagnostics[0] != want {
+	if len(res.Validation.Diagnostics) != 1 || !reflect.DeepEqual(res.Validation.Diagnostics[0], want) {
 		t.Fatalf("diagnostics = %+v, want %+v: the copy must still be there when nginx's file is resolved", res.Validation.Diagnostics, want)
 	}
 	wantOutput := `nginx: [emerg] unknown directive "frobnicate" in ` + filepath.Join(root, "sites-enabled", "app") + ":3\n" +
@@ -975,7 +975,7 @@ func TestSaveSiteKeepsAConfDSiteThatIsOffWhereItIs(t *testing.T) {
 		t.Fatalf("result = %+v, want off, tested as app.conf.disabled.conf and failing", res)
 	}
 	want := Diagnostic{Level: "emerg", Message: `unknown directive "frobnicate"`, File: off, Line: 3}
-	if len(res.Validation.Diagnostics) != 1 || res.Validation.Diagnostics[0] != want {
+	if len(res.Validation.Diagnostics) != 1 || !reflect.DeepEqual(res.Validation.Diagnostics[0], want) {
 		t.Fatalf("diagnostics = %+v, want %+v", res.Validation.Diagnostics, want)
 	}
 	if got := confdEntries(t, root); !reflect.DeepEqual(got, []string{"app.conf.disabled"}) {

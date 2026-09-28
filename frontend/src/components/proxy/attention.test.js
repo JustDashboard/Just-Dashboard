@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { DANGEROUS_PORTS, foldProxyFindings } from "./attention"
+import { DANGEROUS_PORTS, findingAction, foldProxyFindings, unreadableSource } from "./attention"
 
 // The fold as it stood before each area's findings moved into findings/:
 // these outputs were taken from that version, and the split must not change
@@ -346,5 +346,132 @@ describe("foldProxyFindings", () => {
   test("the dangerous ports are still exported for the pages that draw them", () => {
     expect(DANGEROUS_PORTS[5432]).toBe("PostgreSQL")
     expect(DANGEROUS_PORTS[443]).toBeUndefined()
+  })
+})
+
+describe("sources the overview could not read", () => {
+  const unreadable = [
+    { source: "sites", message: "could not determine Docker ingress ownership" },
+    { source: "certificates", message: "internal error" },
+    { source: "renewal", message: "certbot certificates timed out" },
+    { source: "streams", message: "Service Unavailable" },
+    { source: "ports", message: "Failed to fetch" },
+  ]
+
+  // With every source failing there is nothing to judge, and the list used
+  // to come up empty — the green "all within limits" about a host it could
+  // not see. Each failure is a finding instead, with its reason.
+  test("each is a finding of its own, so the list is never empty", () => {
+    const findings = foldProxyFindings({ unreadable })
+    expect(findings.map((f) => f.title)).toEqual([
+      "Sites could not be read",
+      "Certificates could not be read",
+      "Certificate renewal could not be read",
+      "Streams could not be read",
+      "Listening ports could not be read",
+    ])
+    expect(findings[0]).toEqual({
+      id: "source.unreadable.sites",
+      level: "warning",
+      title: "Sites could not be read",
+      detail: "could not determine Docker ingress ownership",
+      advice:
+        "Until it can be read, this list cannot show a site that is disabled or serves plain HTTP.",
+      meta: "sites",
+      href: "/proxy/sites",
+    })
+    expect(findings.map(unreadableSource)).toEqual([
+      "sites",
+      "certificates",
+      "renewal",
+      "streams",
+      "ports",
+    ])
+  })
+
+  test("an unreadable source ranks with the warnings the others raise", () => {
+    const findings = foldProxyFindings({
+      ...inputs.oneStreamNotIncluded,
+      unreadable: [{ source: "sites", message: "internal error" }],
+    })
+    expect(findings.map((f) => f.id)).toEqual([
+      "certbot.no-timer",
+      "streams.not-included",
+      "ports.dangerous",
+      "source.unreadable.sites",
+    ])
+    expect(findings.filter((f) => unreadableSource(f)).length).toBe(1)
+  })
+
+  test("nothing failing adds nothing", () => {
+    expect(foldProxyFindings({ ...inputs.healthy, unreadable: [] })).toEqual([])
+  })
+
+  // A status that answered once and then failed left the engine's name,
+  // version and certbot drawn from the old answer with nothing to say so.
+  test("a status read that failed says the engine facts are the last read's", () => {
+    const [finding] = foldProxyFindings({
+      unreadable: [{ source: "status", message: "Failed to fetch" }],
+    })
+    expect(finding).toEqual({
+      id: "source.unreadable.status",
+      level: "warning",
+      title: "The proxy status could not be read",
+      detail: "Failed to fetch",
+      advice:
+        "Until it can be read, the engine, its version and certbot above are as the last read found them.",
+      meta: "status",
+      href: "/proxy",
+    })
+    expect(unreadableSource(finding)).toBe("status")
+  })
+})
+
+describe("finding actions", () => {
+  // The button read `Open ${meta}`: "Open renewal", "Open ports". Every area's
+  // label now has words for where the button leads.
+  test("every finding the fold can raise names where it leads", () => {
+    const labels = Object.fromEntries(
+      foldProxyFindings({
+        ...inputs.everything,
+        unreadable: [
+          { source: "sites", message: "x" },
+          { source: "certificates", message: "x" },
+        ],
+      }).map((f) => [f.meta, findingAction(f)]),
+    )
+    expect(labels).toEqual({
+      certificate: "Open certificates",
+      renewal: "Open certificates",
+      site: "Open site",
+      streams: "Open streams",
+      stream: "Open streams",
+      ports: "Open ports",
+      sites: "Open sites",
+      certificates: "Open certificates",
+    })
+  })
+
+  // The label came from a table of the metas above, so a finding another area
+  // added with a meta of its own got a wrench-only button with no name.
+  test("a finding with a meta no area used before still names where it leads", () => {
+    const action = (meta, href) =>
+      findingAction({ id: "x", level: "notice", title: "x", meta, href })
+    expect(action("tls", "/proxy/tls")).toBe("Open TLS report")
+    expect(action("default site", "/proxy/sites?site=_")).toBe("Open site")
+    expect(action("drift", "/proxy/sites")).toBe("Open sites")
+    expect(action(undefined, "/proxy/certificates#lineage")).toBe("Open certificates")
+    expect(action("served cert", "/proxy/ports")).toBe("Open ports")
+    expect(action("stream readiness", "/proxy/streams?stream=db")).toBe("Open streams")
+    expect(action("config", "/proxy/config?path=/etc/nginx/nginx.conf")).toBe("Open")
+  })
+
+  // A finding about one certificate opens that one once it links to it,
+  // as a finding about one site does.
+  test("a finding that names its certificate opens the certificate", () => {
+    const action = (href) => findingAction({ id: "x", level: "warning", title: "x", href })
+    expect(action("/proxy/certificates?cert=%2Fetc%2Fssl%2Fa.pem")).toBe("Open certificate")
+    expect(action("/proxy/certificates")).toBe("Open certificates")
+    expect(action("/proxy/certificates?issue=a.example.com")).toBe("Open certificates")
   })
 })

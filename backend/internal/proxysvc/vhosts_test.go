@@ -746,12 +746,12 @@ func TestLiveLinkChangesKeepNginxLoadable(t *testing.T) {
 	if headline := FailureHeadline(refused.Validation); headline != `unknown directive "foo" in `+available("broken")+":3" {
 		t.Errorf("headline = %q", headline)
 	}
-	if res := svc.Test(ctx, KindNginx); !res.Valid {
+	if res, _ := svc.Test(ctx, KindNginx); !res.Valid {
 		t.Fatalf("nginx no longer loads after a refused enable:\n%s", res.Output)
 	}
 
 	symlink(t, available("missing"), filepath.Join(root, "sites-enabled", "ghost"))
-	res := svc.Test(ctx, KindNginx)
+	res, _ := svc.Test(ctx, KindNginx)
 	if res.Valid || !strings.Contains(res.Output, "No such file or directory") {
 		t.Fatalf("a dangling link should fail the test:\n%s", res.Output)
 	}
@@ -768,7 +768,7 @@ func TestLiveLinkChangesKeepNginxLoadable(t *testing.T) {
 	if _, err := svc.RemoveVHostLink(ctx, "ghost", false); err != nil {
 		t.Fatal(err)
 	}
-	if res := svc.Test(ctx, KindNginx); !res.Valid {
+	if res, _ := svc.Test(ctx, KindNginx); !res.Valid {
 		t.Fatalf("removing the dangling link did not make nginx load:\n%s", res.Output)
 	}
 	if err := svc.SetVHostEnabled(ctx, "good", true); err != nil {
@@ -807,7 +807,7 @@ func TestLiveADisableAnotherSiteNeedsIsRefusedWithItsReason(t *testing.T) {
 	if pool := listed(t, svc.nginxVHosts(), "sites-available", "pool"); !pool.Enabled {
 		t.Error("the refused disable left pool out")
 	}
-	if res := svc.Test(ctx, KindNginx); !res.Valid {
+	if res, _ := svc.Test(ctx, KindNginx); !res.Valid {
 		t.Fatalf("nginx no longer loads after a refused disable:\n%s", res.Output)
 	}
 
@@ -861,7 +861,7 @@ func TestLiveAnEnableThatClashesWithAnotherSiteSaysSo(t *testing.T) {
 			t.Errorf("the refused %s is still linked: %v", c.name, err)
 		}
 	}
-	if res := svc.Test(ctx, KindNginx); !res.Valid {
+	if res, _ := svc.Test(ctx, KindNginx); !res.Valid {
 		t.Fatalf("nginx no longer loads after the refused enables:\n%s", res.Output)
 	}
 }

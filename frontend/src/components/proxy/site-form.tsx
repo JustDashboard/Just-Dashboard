@@ -1350,9 +1350,9 @@ function SiteFormBody({
           title={fileName}
           initialLine={dropped?.[0]?.line}
           siteDisabled={disabled}
-          onSaved={() => {
+          onSaved={(reloaded) => {
             setReads((n) => n + 1)
-            onSaved(false)
+            onSaved(reloaded)
           }}
         />
       )}

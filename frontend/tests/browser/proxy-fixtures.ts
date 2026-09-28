@@ -33,6 +33,7 @@ export const PROXY_PAGES = [
   "/proxy/tls?domain=app.example.com",
   "/proxy/streams",
   "/proxy/ports",
+  "/proxy/config",
 ]
 
 const areas = [engine, sites, siteform, streams, ports, certs, tls, sitesTools]

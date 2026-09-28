@@ -439,7 +439,7 @@ func TestLiveDisabledSiteIsTestedAsEnabled(t *testing.T) {
 	}
 	full := resolvedFile(filepath.Join(root, "sites-available", "app"))
 	want := Diagnostic{Level: "emerg", Message: `unknown directive "frobnicate"`, File: full, Line: lineOf(content, "frobnicate on;")}
-	if !res.TestedAsEnabled || res.Enabled || res.Validation.Valid || len(res.Validation.Diagnostics) == 0 || res.Validation.Diagnostics[0] != want {
+	if !res.TestedAsEnabled || res.Enabled || res.Validation.Valid || len(res.Validation.Diagnostics) == 0 || !reflect.DeepEqual(res.Validation.Diagnostics[0], want) {
 		t.Fatalf("result = %+v, diagnostics %+v, want %+v\n%s", res, res.Validation.Diagnostics, want, res.Validation.Output)
 	}
 	if isLinked(t, root, "app") || res.Reloaded {
@@ -616,7 +616,7 @@ func TestLiveConfDSiteThatIsOffIsTestedAndStaysOff(t *testing.T) {
 	line := strings.Count(content[:strings.Index(content, "frobnicate on;")], "\n") + 1
 	want := Diagnostic{Level: "emerg", Message: `unknown directive "frobnicate"`, File: resolvedFile(off), Line: line}
 	if res.Enabled || !res.TestedAsEnabled || res.Validation.Valid || res.Reloaded ||
-		len(res.Validation.Diagnostics) == 0 || res.Validation.Diagnostics[0] != want {
+		len(res.Validation.Diagnostics) == 0 || !reflect.DeepEqual(res.Validation.Diagnostics[0], want) {
 		t.Fatalf("result = %+v, diagnostics %+v, want %+v\n%s", res, res.Validation.Diagnostics, want, res.Validation.Output)
 	}
 

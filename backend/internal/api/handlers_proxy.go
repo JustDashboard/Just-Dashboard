@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -51,6 +52,7 @@ func withProxyActor(next http.Handler) http.Handler {
 }
 
 func mapProxyError(err error) error {
+	var unfinished *proxysvc.UnfinishedTestError
 	switch {
 	case errors.Is(err, proxysvc.ErrUnsafePath):
 		return httpx.Err(http.StatusForbidden, "outside_root", err.Error())
@@ -58,6 +60,18 @@ func mapProxyError(err error) error {
 		return httpx.Err(http.StatusForbidden, "protected_file", err.Error())
 	case errors.Is(err, proxysvc.ErrNoProxy):
 		return httpx.Err(http.StatusServiceUnavailable, "no_proxy", err.Error())
+	case errors.Is(err, proxysvc.ErrNoIngress):
+		return httpx.Err(http.StatusConflict, "no_ingress", err.Error())
+	case errors.As(err, &unfinished):
+		// Not a refusal: the page shows it as a test that did not answer and
+		// offers it again, never as a configuration the engine turned down.
+		status := http.StatusBadGateway
+		if errors.Is(err, context.DeadlineExceeded) {
+			status = http.StatusGatewayTimeout
+		}
+		return httpx.Err(status, "test_unfinished", err.Error()).
+			Because("A test that did not finish says nothing about the configuration either way, and nothing was changed.", unfinished.Output).
+			Retry()
 	default:
 		return httpx.BadRequest("%v", err)
 	}
