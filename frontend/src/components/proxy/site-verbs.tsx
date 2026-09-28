@@ -2,7 +2,9 @@
 
 import { useRouter } from "next/navigation"
 import {
+  ChartActivity,
   CheckCircle,
+  Clock,
   CloudUpload,
   Code,
   Copy,
@@ -66,11 +68,48 @@ function logHref(path: string) {
   return `/logs?source=${encodeURIComponent(path)}`
 }
 
+/**
+ * Whether the enable switch applies. It moves a link in sites-enabled and
+ * nothing else, so it needs a file in sites-available, not one the form can
+ * save: a site file linked in from an application's repository is switched
+ * here too. A conf.d host has no sites-enabled to link into, and every file
+ * there is active; an empty enabledPath is what says which layout this is. A
+ * copy sitting where the link belongs is not replaced by an enable, which
+ * says so and changes nothing.
+ */
+export function siteSwitchable(vhost: VHost): boolean {
+  const copied = vhost.broken === "stale" && !vhost.linkTarget
+  return (
+    vhost.kind === "nginx" &&
+    vhost.layout === "sites-available" &&
+    Boolean(vhost.enabledPath) &&
+    !copied
+  )
+}
+
+/**
+ * Whether Delete applies. It acts by name: sites-available first, then
+ * conf.d/<name>, and it removes a sites-enabled entry of that name on the
+ * way — so it refuses, and is not offered, where that entry is not the
+ * site's own link: a copy nginx serves instead, a link to another site, or a
+ * link under another name it would leave pointing at nothing. Nor where the
+ * file resolves outside the nginx directory, which the delete does not touch.
+ */
+export function siteDeletable(vhost: VHost): boolean {
+  return (
+    !vhost.resolvesTo &&
+    ((vhost.formEditable && vhost.broken !== "stale" && !vhost.linkedAs?.length) ||
+      (vhost.layout === "conf.d" && vhost.name.endsWith(".conf")))
+  )
+}
+
 export function useSiteVerbs({
   vhost,
   admin,
   busy,
   ambiguous = false,
+  traffic = false,
+  history = false,
   onEdit,
   onRaw,
   onServed,
@@ -87,6 +126,13 @@ export function useSiteVerbs({
   busy?: string
   /** Another nginx entry has this name, so a verb that acts by name alone could act on it. */
   ambiguous?: boolean
+  /**
+   * The traffic summary and the configuration history answer on this
+   * host. Their pages are another part of the proxy's; a verb to one that
+   * is not there would lead nowhere.
+   */
+  traffic?: boolean
+  history?: boolean
   onEdit: (vhost: VHost) => void
   onRaw: (vhost: VHost) => void
   /** Opens the separate file sites-enabled holds under the site's name. */
@@ -207,6 +253,22 @@ export function useSiteVerbs({
       run: () => router.push(logHref(errorLog)),
     })
   }
+  if (traffic && vhost.kind === "nginx" && vhost.accessLog) {
+    verbs.push({
+      key: "traffic",
+      label: "Traffic",
+      icon: ChartActivity,
+      run: () => router.push(`/proxy/traffic?site=${encodeURIComponent(vhost.name)}`),
+    })
+  }
+  if (history && admin && hasFile) {
+    verbs.push({
+      key: "history",
+      label: "History",
+      icon: Clock,
+      run: () => router.push(`/proxy/config?history=${encodeURIComponent(vhost.path)}`),
+    })
+  }
   if (form) {
     verbs.push({
       key: "duplicate",
@@ -215,18 +277,7 @@ export function useSiteVerbs({
       run: () => onDuplicate(vhost),
     })
   }
-  // The switch moves a link in sites-enabled and nothing else, so it needs
-  // a file in sites-available, not one the form can save: a site file
-  // linked in from an application's repository is switched here too. A
-  // conf.d host has no sites-enabled to link into, and every file there is
-  // active; an empty enabledPath is what says which layout this is. A copy
-  // sitting where the link belongs is not replaced by an enable, which says
-  // so and changes nothing.
-  const switchable =
-    vhost.kind === "nginx" &&
-    vhost.layout === "sites-available" &&
-    Boolean(vhost.enabledPath) &&
-    !copied
+  const switchable = siteSwitchable(vhost)
   // An enable puts a deployment's route back the way the deployment left
   // it; a disable takes its application offline.
   if (admin && switchable && !(owner && vhost.enabled)) {
@@ -261,16 +312,7 @@ export function useSiteVerbs({
       run: () => onUnlink(vhost),
     })
   }
-  // The delete acts by name: sites-available first, then conf.d/<name>, and
-  // it removes a sites-enabled entry of that name on the way — so it refuses,
-  // and is not offered, where that entry is not the site's own link: a copy
-  // nginx serves instead, a link to another site, or a link under another
-  // name it would leave pointing at nothing. Nor where the file resolves
-  // outside the nginx directory, which the delete does not touch.
-  const deletable =
-    !vhost.resolvesTo &&
-    ((vhost.formEditable && vhost.broken !== "stale" && !vhost.linkedAs?.length) ||
-      (vhost.layout === "conf.d" && vhost.name.endsWith(".conf")))
+  const deletable = siteDeletable(vhost)
   if (admin && owner && (vhost.formEditable || hasFile)) {
     verbs.push({
       key: "override",

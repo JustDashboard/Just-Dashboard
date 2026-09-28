@@ -1136,6 +1136,16 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   now, so the switch saying on means nginx reads the file. `parseCaddyfile` tracks brace depth so
   only top-level blocks are site addresses — `handle`, `header` and `tls` blocks were listed as
   server names.
+- **Bulk site changes.** `POST /proxy/sites/bulk` (`system.admin` + destructive, audited
+  `proxy.sites.bulk` with the action, the names and what changed) takes `{action: enable|disable|delete,
+  names}` (at most 200, each once) and `BulkSites` in `sites_ops.go` applies it under the service lock
+  as one change: every site's link or file is changed with the same checks a single toggle or delete
+  makes, `nginx -t` runs once over the result, and a refusal (422, as a link change) or any site the
+  action cannot apply to (400 naming it) puts every site back and changes nothing. Unlike a single
+  disable it does not go ahead over a configuration nginx already refuses. Deletes keep `<file>.bak`
+  only once the test passed; one reload follows. Sites already as asked come back as `unchanged`.
+  The listing's `roots` and `redirects` (from `root` and `return 30x URL`) feed the list's search and
+  its Static and Redirect chips.
 - **Catch-all default site.** `default_site.go` keeps one owned file, `jd-default` (sites-available plus
   its link, or `conf.d/jd-default.conf`, first line carrying `OwnedMarker`, so the Sites list leaves it
   out). `GET /proxy/default-site` (a read every account holds: listen lines of files the listing already

@@ -43,6 +43,10 @@ export type VHost = {
   /** The upstream blocks the file declares. */
   pools?: SitePool[]
   features?: SiteFeature[]
+  /** The directories the site serves files from. */
+  roots?: string[]
+  /** Where the site's return directives send visitors. */
+  redirects?: string[]
   /** The package that installed this file, which it still matches byte for byte: the stock default site. */
   package?: string
   /** The deployment environment that writes this route. */
@@ -178,3 +182,37 @@ export type DefaultSite = {
 
 /** PUT and DELETE /proxy/default-site. */
 export type DefaultSiteResult = VHostLinkResult & { path: string; content?: string }
+
+/**
+ * POST /proxy/sites/bulk: one nginx -t over every site's change and one
+ * reload; a refusal changes nothing and comes back as a 422 or a 400.
+ * `unchanged` are sites already as asked.
+ */
+export type SitesBulkResult = {
+  action: "enable" | "disable" | "delete"
+  changed: string[]
+  unchanged: string[]
+  reloaded: boolean
+  reloadError?: string
+  reload?: ProxyReload
+}
+
+/**
+ * One route's upstream as GET /proxy/upstreams reports it. The endpoint is
+ * the engine lane's; the list reads only the fields it draws, and draws
+ * nothing where the endpoint does not answer.
+ */
+export type SiteUpstreamHealth = {
+  site: string
+  upstream: string
+  address?: string
+  state: "up" | "refused" | "timeout" | "unresolvable" | "dynamic"
+  ms?: number
+}
+
+export type SiteUpstreams = { checkedAt: string; targets: SiteUpstreamHealth[] }
+
+/** A site's last hour from GET /proxy/traffic, the engine lane's summary. */
+export type SiteTraffic = { site: string; requests: number }
+
+export type SitesTraffic = { sites: SiteTraffic[] }

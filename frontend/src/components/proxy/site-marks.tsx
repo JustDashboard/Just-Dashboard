@@ -1,10 +1,11 @@
 import { ShieldCheck } from "@/components/icons"
-import type { VHost } from "@/lib/types"
+import type { SiteUpstreamHealth, VHost } from "@/lib/types"
 import { ProductGlyph } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { certPathProduct } from "@/components/proxy/marks"
 import { FEATURE_LABEL, activeOwner } from "@/components/proxy/site-details"
+import { isDown } from "@/components/proxy/site-filters"
 
 /**
  * A site's two states, as the overview's list and the Sites cards both draw
@@ -219,4 +220,31 @@ export function SiteFeatures({ vhost }: { vhost: VHost }) {
       {FEATURE_LABEL[feature]}
     </Tag>
   ))
+}
+
+/**
+ * How the site's upstreams answered the last health check: a red dot and the
+ * failure where one refused or timed out, which is a 502 for its visitors;
+ * green where every checked one answered. Nothing where none was checked — a
+ * dynamic upstream, or a host where the check does not run.
+ */
+export function UpstreamHealth({ targets }: { targets: SiteUpstreamHealth[] }) {
+  const checked = targets.filter((t) => t.state !== "dynamic")
+  if (checked.length === 0) return null
+  const down = checked.filter(isDown)
+  if (down.length > 0) {
+    return (
+      <Status
+        verdict="critical"
+        label={down.length === 1 ? `upstream ${down[0].state}` : `${down.length} upstreams down`}
+      />
+    )
+  }
+  const only = checked.length === 1 ? checked[0] : undefined
+  return (
+    <Status
+      verdict="ok"
+      label={only?.ms !== undefined ? `upstream up ${only.ms} ms` : "upstreams up"}
+    />
+  )
 }
