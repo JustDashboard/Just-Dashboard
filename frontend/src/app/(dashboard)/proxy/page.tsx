@@ -30,7 +30,12 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useNow } from "@/components/deploy/vocabulary"
 import { useProxy } from "@/components/proxy/proxy-context"
-import { EngineActions, EngineIdentity, useEngineUnit } from "@/components/proxy/engine"
+import {
+  EngineActions,
+  EngineExtras,
+  EngineIdentity,
+  useEngineUnit,
+} from "@/components/proxy/engine"
 import { useEngineControl } from "@/components/proxy/engine-control"
 import { EngineFailure } from "@/components/proxy/engine-failure"
 import { PARTICIPLE } from "@/components/proxy/engine-lifecycle"
@@ -520,6 +525,8 @@ export default function ProxyOverviewPage() {
           )
         }
       />
+
+      <EngineExtras status={status} admin={admin} onChanged={refreshAll} />
 
       {engine.unit?.activeState === "failed" && !underWay && (
         <EngineFailure

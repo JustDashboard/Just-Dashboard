@@ -14,11 +14,20 @@ import {
 import { errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { duration, plural } from "@/lib/format"
-import type { EngineAction, ProxyReloadResult, ProxyValidation, SystemdUnit } from "@/lib/types"
+import type {
+  EngineAction,
+  Job,
+  ProxyReloadResult,
+  ProxyValidation,
+  SystemdUnit,
+  UpdatePackage,
+  UpdateReport,
+} from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Status } from "@/components/status-dot"
+import { Status, type DotTone } from "@/components/status-dot"
+import { JobConsole, useJobConsole } from "@/components/job-console"
 import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
 import { engineProduct } from "@/components/proxy/marks"
 import { VerbMenu, type Verb } from "@/components/verbs"
@@ -518,4 +527,249 @@ function Blocked({ reason, children }: { reason: string; children: React.ReactNo
       <TooltipContent>{reason}</TooltipContent>
     </Tooltip>
   )
+}
+
+/**
+ * The line under the engine's: which of the modules a proxy is usually asked
+ * for this nginx has, and the package manager's part — installing the engine
+ * and certbot where they are missing, and upgrading nginx where the host has
+ * a newer one waiting. Each install runs as a job whose output streams below.
+ *
+ * The modules come from GET /proxy/modules; a host whose nginx cannot be read
+ * that way, or a server without the route, answers an error and the line
+ * says nothing about modules rather than guessing.
+ */
+export function EngineExtras({
+  status,
+  admin,
+  onChanged,
+}: {
+  status: ProxyStatus
+  /** May install packages (system.admin). */
+  admin: boolean
+  /** Reads the status and the engine again once an install lands. */
+  onChanged: () => void
+}) {
+  const nginx = status.nginx
+  const noEngine = !status.nginx && !status.caddy
+  // certbot's nginx plugin is for nginx; Caddy issues its own certificates.
+  const wantsCertbot = !status.certbot && !status.caddy
+  const modules = usePoll(
+    (signal) => get<ModuleReport>("/proxy/modules/", undefined, signal),
+    0,
+    [],
+    { enabled: nginx },
+  )
+  const updates = usePoll(
+    (signal) => get<UpdateReport>("/packages/updates", undefined, signal),
+    0,
+    [],
+    { enabled: nginx || (admin && (noEngine || wantsCertbot)) },
+  )
+  const console_ = useJobConsole({
+    onSuccess: () => {
+      onChanged()
+      modules.refresh()
+      updates.refresh()
+    },
+  })
+  const { confirm, dialog } = useConfirm()
+  const [starting, setStarting] = useState("")
+
+  const report = updates.error ? undefined : updates.data
+  const manager = report?.available ? report.manager : undefined
+  const certbotPackages = manager ? CERTBOT_PACKAGES[manager] : undefined
+  // Only apt's install brings an installed package up to its candidate;
+  // the others' install leaves it where it is, so they get no Upgrade.
+  const upgrade =
+    nginx && manager === "apt"
+      ? report?.packages.find((p) => NGINX_PACKAGES.includes(p.name))
+      : undefined
+  const running = console_.job?.status === "running"
+
+  const install = async (key: string, packages: string[], what: string) => {
+    setStarting(key)
+    try {
+      console_.attach(await post<Job>("/packages/install", { packages }))
+    } catch (err) {
+      notify.error(`Could not install ${what}`, err)
+    } finally {
+      setStarting("")
+    }
+  }
+
+  const askUpgrade = (pkg: UpdatePackage) =>
+    confirm({
+      title: `Upgrade ${pkg.name}`,
+      confirmLabel: "Upgrade",
+      description: (
+        <p>
+          {manager} installs {pkg.name} {pkg.candidate} over {pkg.current}, keeping the
+          configuration files as they are. The package restarts nginx, so every site is offline for
+          a moment.
+        </p>
+      ),
+      action: () => install("upgrade", [pkg.name], pkg.name),
+    })
+
+  const chips = modules.error ? [] : moduleChips(modules.data)
+  const offersNginx = admin && noEngine && Boolean(manager)
+  const offersCertbot = admin && wantsCertbot && Boolean(certbotPackages)
+  if (chips.length === 0 && !upgrade && !offersNginx && !offersCertbot && !console_.job) {
+    return null
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+        {chips.length > 0 && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            {chips.map((chip) => (
+              <span key={chip.key} title={chip.detail}>
+                <Status tone={chip.tone} label={`${chip.label} ${chip.state}`} />
+              </span>
+            ))}
+          </div>
+        )}
+        {upgrade && (
+          <span className="inline-flex flex-wrap items-center gap-2">
+            <span>
+              {upgrade.name}{" "}
+              <span className="font-mono">
+                {upgrade.current} → {upgrade.candidate}
+              </span>
+            </span>
+            {admin && (
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => askUpgrade(upgrade)}
+                pending={starting === "upgrade"}
+                disabled={starting !== "" || running}
+              >
+                Upgrade
+              </Button>
+            )}
+          </span>
+        )}
+        {offersNginx && (
+          <Button
+            size="xs"
+            variant="outline"
+            title={`${manager} install nginx`}
+            onClick={() => void install("nginx", ["nginx"], "nginx")}
+            pending={starting === "nginx"}
+            disabled={starting !== "" || running}
+          >
+            Install nginx
+          </Button>
+        )}
+        {offersCertbot && certbotPackages && (
+          <Button
+            size="xs"
+            variant="outline"
+            title={`${manager} install ${certbotPackages.join(" ")}`}
+            onClick={() => void install("certbot", certbotPackages, "certbot")}
+            pending={starting === "certbot"}
+            disabled={starting !== "" || running}
+          >
+            Install certbot + nginx plugin
+          </Button>
+        )}
+      </div>
+      <JobConsole
+        job={console_.job}
+        lines={console_.lines}
+        onDismiss={console_.dismiss}
+        onCancel={console_.cancel}
+      />
+      {dialog}
+    </div>
+  )
+}
+
+/**
+ * What GET /proxy/modules answers, as far as this line reads it: each module
+ * as configure names it, and whether this nginx has it now.
+ */
+type ModuleReport = {
+  modules: {
+    name: string
+    state: "static" | "loaded" | "not-loaded" | "not-installed" | "unknown"
+    package?: string
+  }[]
+}
+
+/** The modules a reverse proxy is usually asked for, as configure names them. */
+const WATCHED_MODULES: { key: string; label: string }[] = [
+  { key: "http_v2_module", label: "HTTP/2" },
+  { key: "http_v3_module", label: "HTTP/3" },
+  { key: "stream", label: "stream" },
+  { key: "http_stub_status_module", label: "stub_status" },
+  { key: "http_realip_module", label: "realip" },
+  { key: "http_auth_request_module", label: "auth_request" },
+]
+
+type ModuleChip = { key: string; label: string; state: string; tone: DotTone; detail?: string }
+
+/**
+ * One reading per watched module. A module missing from the build list was
+ * not built into this nginx at all, which no package on the host changes.
+ */
+function moduleChips(report: ModuleReport | undefined): ModuleChip[] {
+  if (!report) return []
+  const byName = new Map(report.modules.map((m) => [m.name, m]))
+  return WATCHED_MODULES.map(({ key, label }) => {
+    const m = byName.get(key)
+    if (!m)
+      return { key, label, state: "missing", tone: "stopped", detail: "Not built into this nginx" }
+    switch (m.state) {
+      case "static":
+        return { key, label, state: "built in", tone: "running" }
+      case "loaded":
+        return { key, label, state: "loaded", tone: "running" }
+      case "not-loaded":
+        return {
+          key,
+          label,
+          state: "not loaded",
+          tone: "notice",
+          detail: "Installed as a dynamic module that no load_module line loads",
+        }
+      case "not-installed":
+        return m.package
+          ? {
+              key,
+              label,
+              state: "installable",
+              tone: "notice",
+              detail: `The ${m.package} package provides it`,
+            }
+          : {
+              key,
+              label,
+              state: "missing",
+              tone: "stopped",
+              detail:
+                "Built as a dynamic module whose file is absent, with no package that provides it",
+            }
+      default:
+        return { key, label, state: "unknown", tone: "unknown" }
+    }
+  })
+}
+
+/** The package names nginx itself goes by: Debian splits it into flavours. */
+const NGINX_PACKAGES = ["nginx", "nginx-core", "nginx-full", "nginx-light", "nginx-extras"]
+
+/**
+ * certbot and its nginx plugin, per package manager. zypper is absent because
+ * openSUSE names them by Python version, which this page cannot know.
+ */
+const CERTBOT_PACKAGES: Record<string, string[]> = {
+  apt: ["certbot", "python3-certbot-nginx"],
+  dnf: ["certbot", "python3-certbot-nginx"],
+  yum: ["certbot", "python3-certbot-nginx"],
+  apk: ["certbot", "certbot-nginx"],
+  pacman: ["certbot", "certbot-nginx"],
 }
