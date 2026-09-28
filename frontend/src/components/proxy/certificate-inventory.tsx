@@ -673,7 +673,11 @@ export function CertificateInventory({
                 {selectedCert.error ? "—" : selectedCert.selfSigned ? "yes" : "no"}
               </Detail>
             </DetailList>
-            <CertificateDetails cert={selectedCert} canReadHistory={canReadHistory} />
+            <CertificateDetails
+              cert={selectedCert}
+              canReadHistory={canReadHistory}
+              canExport={canReadHistory}
+            />
           </div>
         )}
       </SidePanel>

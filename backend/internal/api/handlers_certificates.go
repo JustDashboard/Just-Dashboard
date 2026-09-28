@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"mime"
 	"net/http"
 	"slices"
 	"sort"
@@ -31,6 +32,9 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/detail", s.handle(s.handleCertDetail))
 	// Decodes pasted text in memory; nothing is fetched or kept.
 	r.Method(http.MethodPost, "/decode", s.handle(s.handleCertDecode))
+	// The public parts of a listed file, which any TLS client is sent
+	// anyway; never its key.
+	r.Method(http.MethodGet, "/download", s.handle(s.handleCertDownload))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		// A handshake with each site that names a certificate: loopback
@@ -46,6 +50,10 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 		// The ACME account's contact: certbot asks the authority for it.
 		r.Method(http.MethodGet, "/account", s.handle(s.handleCertAccount))
 		r.Method(http.MethodPost, "/import", s.handle(s.handleCertImport))
+		// The private key, bare or sealed in a PFX: whoever holds it can
+		// impersonate the site until the certificate expires, and nothing
+		// here can take it back, so the name is typed.
+		r.Method(http.MethodPost, "/export", s.handle(s.handleCertExport))
 		r.Method(http.MethodPost, "/dns-credentials", s.handle(s.handleDNSCredentials))
 		// A DNS-01 dry run against a domain the caller names: an outbound
 		// exchange with the authority and a write to that zone's DNS.
@@ -124,6 +132,86 @@ func (s *Server) handleCertDetail(w http.ResponseWriter, r *http.Request) error 
 	}
 	httpx.JSON(w, http.StatusOK, detail)
 	return nil
+}
+
+// handleCertDownload answers with one public part of the listed certificate
+// at ?path=: ?part= is fullchain, cert or chain.
+func (s *Server) handleCertDownload(w http.ResponseWriter, r *http.Request) error {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		return httpx.BadRequest("path is required")
+	}
+	file, err := s.modules.proxy.CertificatePart(path, r.URL.Query().Get("part"))
+	if errors.Is(err, proxysvc.ErrCertificateNotListed) {
+		return httpx.Err(http.StatusForbidden, "not_listed", "Only a certificate the list shows can be downloaded.")
+	}
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	writeCertificateFile(w, file)
+	return nil
+}
+
+type certExportRequest struct {
+	Path string `json:"path"`
+	// Format is "key" for the PEM private key or "pfx".
+	Format   string `json:"format"`
+	Password string `json:"password"`
+	Legacy   bool   `json:"legacy"`
+}
+
+// handleCertExport answers with the private key of the listed certificate
+// at path, as PEM or in a password-sealed PFX, once the caller has typed
+// "export <name>". The audit entry names the certificate and the format and
+// holds neither the key nor the password.
+func (s *Server) handleCertExport(w http.ResponseWriter, r *http.Request) error {
+	var req certExportRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if req.Path == "" {
+		return httpx.BadRequest("path is required")
+	}
+	part, err := s.modules.proxy.CertificatePart(req.Path, "cert")
+	if errors.Is(err, proxysvc.ErrCertificateNotListed) {
+		return httpx.Err(http.StatusForbidden, "not_listed", "Only a certificate the list shows can be exported.")
+	}
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	if err := httpx.RequireTypedConfirmation(w, r, "export "+part.Name); err != nil {
+		return err
+	}
+	httpx.SetAudit(r, "certificates.export", part.Name,
+		map[string]any{"path": req.Path, "format": req.Format, "legacy": req.Format == "pfx" && req.Legacy})
+	var file *proxysvc.CertificateFile
+	switch req.Format {
+	case "key":
+		file, _, err = s.modules.proxy.CertificateKeyFile(req.Path)
+	case "pfx":
+		ctx, cancel := timeoutCtx(r, 30*time.Second)
+		defer cancel()
+		file, err = s.modules.proxy.CertificatePFX(ctx, req.Path, req.Password, req.Legacy)
+	default:
+		return httpx.BadRequest("format must be key or pfx, not %q", req.Format)
+	}
+	if errors.Is(err, proxysvc.ErrKeyNotFound) {
+		return httpx.Err(http.StatusNotFound, "no_key", "No private key is known for this certificate on this host.")
+	}
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	writeCertificateFile(w, file)
+	return nil
+}
+
+// writeCertificateFile sends the file as a download no cache keeps.
+func writeCertificateFile(w http.ResponseWriter, file *proxysvc.CertificateFile) {
+	w.Header().Set("Content-Type", file.Type)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": file.Filename}))
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(file.Body)
 }
 
 // handleCertHistory is the timeline of the certificate named ?name=: the

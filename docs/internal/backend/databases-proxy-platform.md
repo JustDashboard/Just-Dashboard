@@ -459,7 +459,12 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `archive/<name>/certN.pem` versions (only for a name with a renewal conf), `certificates.*` audit
   entries whose target names it, and renewal failures from the renewal record. `POST
   /certificates/decode` (read, 256 KiB) decodes a pasted PEM chain or CSR in memory and refuses to
-  read a private-key block. Back to the served check: `settle=1` asks again for up to three seconds while a site
+  read a private-key block. Downloads and export (`cert_export.go`): `GET
+  /certificates/download?path=&part=` (read) answers `fullchain`, `cert` (the leaf) or `chain` (the
+  rest) of a listed file as PEM, 403 for an unlisted path; `POST /certificates/export` (system.admin,
+  typed `export <name>`, `{path, format: key|pfx, password, legacy}`) returns the matching key as PEM
+  or a PFX (OpenSSL 3's AES-256/PBKDF2 default, or 3DES/SHA-1 with `legacy`; password at least 8
+  characters) — see invariants.md for why it is typed and how the password stays out of argv. Back to the served check: `settle=1` asks again for up to three seconds while a site
   serves anything else, since nginx swaps its workers a moment after a reload's signal. The page
   offers "Reload nginx" only while a site answers with a test certificate, and its toast says what
   the sites answered after the reload. `Certificate.Staging` (`certs.go`,

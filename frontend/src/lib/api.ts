@@ -257,6 +257,36 @@ export const patch = <T>(
 export const del = <T>(path: string, opts: Omit<RequestOptions, "method"> = {}) =>
   api<T>(path, { ...opts, method: "DELETE" })
 
+/**
+ * A POST that answers with a file rather than JSON: an export built per request, which a plain
+ * link must not reach. The filename is the server's.
+ */
+export async function postFile(
+  path: string,
+  body: unknown,
+  opts: Pick<RequestOptions, "confirm" | "signal"> = {},
+): Promise<{ blob: Blob; filename: string }> {
+  const headers: Record<string, string> = {
+    ...mutationHeaders(),
+    "Content-Type": "application/json",
+  }
+  if (opts.confirm !== undefined) {
+    headers["X-Confirm"] = encodeURIComponent(opts.confirm)
+    headers["X-Confirm-Encoding"] = "uri"
+  }
+  const res = await fetch(buildUrl(path), {
+    method: "POST",
+    headers,
+    credentials: "include",
+    signal: opts.signal,
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) return readResponse(res)
+  const disposition = res.headers.get("Content-Disposition") ?? ""
+  const filename = /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? "download"
+  return { blob: await res.blob(), filename }
+}
+
 /** A plain-text read — a transcript — through the same authenticated fetch and errors. */
 export async function getText(path: string, signal?: AbortSignal): Promise<string> {
   const res = await fetch(buildUrl(path), { credentials: "include", signal })

@@ -1,9 +1,10 @@
 "use client"
 
 import { useState } from "react"
-import { Check, Copy, Warning } from "@/components/icons"
-import { errorMessage, get, post } from "@/lib/api"
+import { Check, Copy, Download, Warning } from "@/components/icons"
+import { downloadUrl, errorMessage, get, post, postFile } from "@/lib/api"
 import { calendarDate, timestamp } from "@/lib/format"
+import { notify } from "@/lib/toast"
 import type {
   Certificate,
   CertificateChain,
@@ -16,7 +17,7 @@ import type {
 } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useCopy } from "@/hooks/use-copy"
-import { Field } from "@/components/form"
+import { Field, OptionList, OptionRow } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
 import { Detail, DetailList, Section } from "@/components/page"
@@ -24,7 +25,10 @@ import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status, type Verdict } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Textarea } from "@/components/ui/textarea"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
 const CHAIN_VERDICT: Record<ChainVerdict, { label: string; verdict: Verdict }> = {
   complete: { label: "Complete", verdict: "ok" },
@@ -234,6 +238,195 @@ function Timeline({ name }: { name: string }) {
   )
 }
 
+type CertPart = "fullchain" | "cert" | "chain"
+
+const CERT_PARTS: { part: CertPart; label: string }[] = [
+  { part: "fullchain", label: "Full chain" },
+  { part: "cert", label: "Certificate" },
+  { part: "chain", label: "Chain" },
+]
+
+/** The server refuses a shorter one: the file is the key, and it travels by mail and chat. */
+const MIN_PFX_PASSWORD = 8
+
+/** Saves a file fetched in memory: the export is a POST, which a link cannot make. */
+function saveFile(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement("a")
+  anchor.href = url
+  anchor.download = filename
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
+/**
+ * The public parts as downloads anyone signed in may take, and for an administrator the
+ * key, which is behind a typed phrase in ExportDialog.
+ */
+function CertificateFiles({
+  cert,
+  hasChain,
+  canExport,
+}: {
+  cert: Certificate
+  hasChain: boolean
+  canExport: boolean
+}) {
+  const [exporting, setExporting] = useState(false)
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-2">
+        {CERT_PARTS.filter(({ part }) => part !== "chain" || hasChain).map(({ part, label }) => (
+          <Button key={part} asChild variant="outline" size="xs">
+            <a href={downloadUrl("/certificates/download", { path: cert.path, part })} download>
+              <Download />
+              {label}
+            </a>
+          </Button>
+        ))}
+        {canExport && (
+          <Button variant="outline" size="xs" onClick={() => setExporting(true)}>
+            Export key…
+          </Button>
+        )}
+      </div>
+      <p className="text-hint text-muted-foreground">
+        PEM files: the full chain is what nginx&apos;s ssl_certificate names. None of them holds the
+        key.
+      </p>
+      {exporting && <ExportDialog cert={cert} onClose={() => setExporting(false)} />}
+    </div>
+  )
+}
+
+/**
+ * The private key, bare or sealed in a PFX. Mounted only while open, so the password is
+ * gone with the dialog.
+ */
+function ExportDialog({ cert, onClose }: { cert: Certificate; onClose: () => void }) {
+  const [format, setFormat] = useState<"pfx" | "key">("pfx")
+  const [password, setPassword] = useState("")
+  const [legacy, setLegacy] = useState(false)
+  const [typed, setTyped] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
+  const phrase = `export ${cert.name}`
+  const matches = typed === phrase
+  const passwordShort = format === "pfx" && password.length < MIN_PFX_PASSWORD
+  const run = async () => {
+    if (!matches || passwordShort || busy) return
+    setBusy(true)
+    setError("")
+    try {
+      const file = await postFile(
+        "/certificates/export",
+        { path: cert.path, format, password: format === "pfx" ? password : "", legacy },
+        { confirm: phrase },
+      )
+      saveFile(file.blob, file.filename)
+      notify.success(`Exported ${file.filename}`)
+      onClose()
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Modal
+      open
+      onOpenChange={(open) => !open && onClose()}
+      title={`Export the key of ${cert.name}`}
+      description="Downloads the private key, as a PEM file or sealed with a password in a PFX."
+      footer={
+        <Button onClick={run} disabled={!matches || passwordShort} pending={busy}>
+          Export
+        </Button>
+      }
+    >
+      <div className="space-y-6">
+        <Notice tone="warning" icon={Warning} title="Whoever holds the key can pose as these sites">
+          Until the certificate expires, and nothing here can take a copy back: revoke the
+          certificate if one leaks. The export is recorded in the audit log.
+        </Notice>
+        <Field label="Format">
+          <ToggleGroup
+            type="single"
+            value={format}
+            onValueChange={(v) => v && setFormat(v as "pfx" | "key")}
+            variant="outline"
+            size="sm"
+            aria-label="Format"
+          >
+            <ToggleGroupItem value="pfx" className="text-hint">
+              PFX (PKCS#12)
+            </ToggleGroupItem>
+            <ToggleGroupItem value="key" className="text-hint">
+              Private key (PEM)
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </Field>
+        {format === "pfx" ? (
+          <>
+            <Field
+              label="Password"
+              htmlFor="export-password"
+              hint={`At least ${MIN_PFX_PASSWORD} characters. The file holds the key, the certificate and its chain.`}
+            >
+              <Input
+                id="export-password"
+                type="password"
+                autoComplete="new-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </Field>
+            <OptionList>
+              <OptionRow
+                title="Legacy encryption"
+                hint="3DES with a SHA-1 MAC, for Windows before Server 2019, older macOS keychains and Java 8, which refuse the AES-256 default. Weaker: only where the default is refused."
+                checked={legacy}
+                onCheckedChange={setLegacy}
+              />
+            </OptionList>
+          </>
+        ) : (
+          <p className="text-hint text-muted-foreground">
+            The key alone, unencrypted, exactly as nginx reads it.
+          </p>
+        )}
+        <Field
+          htmlFor="export-phrase"
+          label={
+            <>
+              Type <code className="font-mono text-foreground">{phrase}</code> to confirm
+            </>
+          }
+          error={error || undefined}
+        >
+          <InputGroup>
+            <InputGroupInput
+              id="export-phrase"
+              autoComplete="off"
+              spellCheck={false}
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && void run()}
+              className="font-mono"
+              placeholder="Type the phrase above"
+            />
+            {matches && (
+              <InputGroupAddon align="inline-end">
+                <Check aria-hidden className="text-success" />
+              </InputGroupAddon>
+            )}
+          </InputGroup>
+        </Field>
+      </div>
+    </Modal>
+  )
+}
+
 /**
  * The sections of a certificate's sheet read from its file: identity, key, chain and,
  * for an administrator, its timeline. Fetched when the sheet opens, not with the list.
@@ -241,10 +434,13 @@ function Timeline({ name }: { name: string }) {
 export function CertificateDetails({
   cert,
   canReadHistory,
+  canExport,
 }: {
   cert: Certificate
   /** The timeline reads the audit trail, which only administrators may. */
   canReadHistory: boolean
+  /** Exporting the key is an administrator's. */
+  canExport: boolean
 }) {
   // Caddy's certificates live inside its container, where this host cannot read them.
   const readable = cert.source !== "caddy" && !cert.error
@@ -276,6 +472,13 @@ export function CertificateDetails({
           </Section>
           <Section title="Chain">
             <ChainView chain={detail.data.chain} />
+          </Section>
+          <Section title="Files">
+            <CertificateFiles
+              cert={cert}
+              hasChain={detail.data.chain.certificates.length > 1}
+              canExport={canExport && detail.data.key?.matches === true}
+            />
           </Section>
         </>
       ) : null}
