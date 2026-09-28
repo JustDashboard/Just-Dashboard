@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -135,12 +137,30 @@ func (s *Server) handleTLSScan(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	opts := proxysvc.ScanOptions{AllAddresses: r.URL.Query().Get("all") == "1"}
+	if raw := r.URL.Query().Get("connect"); raw != "" {
+		if opts.AllAddresses {
+			return httpx.BadRequest("connect to dials one address; scanning every address asks the name's own")
+		}
+		connect, err := proxysvc.ParseConnectTo(raw, target)
+		if err != nil {
+			return httpx.BadRequest("%v", err)
+		}
+		opts.ConnectTo = connect
+		// A scan is a read and the audit middleware skips reads, but this one
+		// sends the name's handshakes and requests to an address of the
+		// caller's choosing, so it leaves a trail.
+		httpx.AuditRead(s.Audit, r, "certificates.scan.connect",
+			net.JoinHostPort(target.Host, strconv.Itoa(target.Port))+" via "+connect)
+	}
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
-	scan := proxysvc.ScanTLS(ctx, target.Host, target.Port)
+	scan := proxysvc.ScanTLSWith(ctx, target.Host, target.Port, opts)
 	// A scan cut short by its caller is not what the target serves, so only
-	// one that ran to its end is kept for the history.
-	if r.Context().Err() == nil {
+	// one that ran to its end is kept for the history — and not one sent to
+	// an address of the caller's choosing, which is not what the name's own
+	// DNS would reach.
+	if r.Context().Err() == nil && opts.ConnectTo == "" {
 		if _, err := s.storeScan(context.WithoutCancel(r.Context()), scan); err != nil {
 			return httpx.Internal(err)
 		}
