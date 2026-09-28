@@ -115,7 +115,7 @@ func cspQuoted(source string) bool {
 // itself; a second proxy_set_header of one would send it twice.
 var renderedRequestHeaders = []string{
 	"Host", "X-Real-IP", "X-Forwarded-For", "X-Forwarded-Proto", "X-Forwarded-Host",
-	"Upgrade", "Connection",
+	"Upgrade", "Connection", "X-Client-Verify", "X-Client-Subject",
 }
 
 // nginxHiddenHeaders are the response headers nginx already drops from an

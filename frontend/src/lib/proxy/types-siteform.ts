@@ -99,7 +99,21 @@ export type SiteSpec = {
   allowFrom: string[]
   denyFrom: string[]
   basicAuthFile?: string
+  /** The name the browser's login prompt shows. */
   basicAuthRealm?: string
+  /** An allowed address gets in without the password, anyone else with it. */
+  satisfyAny?: boolean
+  /** A shared access list taken in by name, in place of the site's own list and password. */
+  accessList?: string
+  /** Visitors must present a certificate signed by a CA. HTTPS with HTTP redirected only. */
+  clientCert?: SiteClientCert
+  /** Requests refused by user agent. */
+  blockBots?: SiteBotBlock
+  /** Media refused to pages on other sites. Not for a redirect. */
+  hotlink?: SiteHotlink
+  /** Serve the site's own /.well-known/security.txt and /robots.txt. Not for a redirect. */
+  securityTxt?: boolean
+  robotsTxt?: boolean
   accessLog: boolean
   /**
    * Where the site's access_log and error_log write, read back from its file
@@ -304,10 +318,31 @@ export type SiteMaintenance = {
   bypassFrom: string[]
 }
 
+/** A certificate visitors must present, checked against caPath. */
+export type SiteClientCert = {
+  caPath: string
+  /** Empty refuses a request without one (400); optional lets it through for the application to judge. */
+  mode?: "optional"
+  /** Sends X-Client-Verify and X-Client-Subject to the application. Proxy sites only. */
+  passSubject?: boolean
+}
+
+/** User agents a site refuses, matched anywhere in the header regardless of case. */
+export type SiteBotBlock = {
+  ai?: boolean
+  scanners?: boolean
+  custom?: string[]
+}
+
+/** Other names whose pages may embed the site's media, beside its own. */
+export type SiteHotlink = {
+  allow?: string[]
+}
+
 export type ErrorPageCode = 404 | 502 | 503 | 504
 
 /** A page file a site serves: its maintenance page or one of its error pages. */
-export type SitePageName = "maintenance" | "404" | "502" | "503" | "504"
+export type SitePageName = "maintenance" | "404" | "502" | "503" | "504" | "security" | "robots"
 
 /** GET/PUT /proxy/sites/{name}/pages/{page}. */
 export type SitePage = {

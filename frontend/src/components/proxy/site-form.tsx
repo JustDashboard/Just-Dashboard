@@ -43,7 +43,10 @@ import type {
   SiteHeaders,
   SiteLimits,
   SiteLocation,
+  SiteBotBlock,
+  SiteClientCert,
   SiteMaintenance,
+  SitePage,
   SitePageName,
   SitePool,
   SitePreflight,
@@ -1560,47 +1563,9 @@ function SiteFormBody({
             )}
           </FormSection>
 
-          <FormSection title="Who may reach it">
-            <ListField
-              id="site-allow"
-              label="Allow only these"
-              placeholder="10.0.0.0/8"
-              values={spec.allowFrom}
-              onChange={(v) => set("allowFrom", v)}
-              hint="Filling this in refuses everything else. Include however you reach the site yourself."
-            />
-            <ListField
-              id="site-deny"
-              label="Deny"
-              placeholder="203.0.113.0/24"
-              values={spec.denyFrom}
-              onChange={(v) => set("denyFrom", v)}
-              hint="Exceptions, checked before the allow list. The fence at the end is written for you."
-            />
-            <Field
-              label="Password file"
-              htmlFor="site-auth"
-              hint={
-                authFiles.data && authFiles.data.length > 0
-                  ? "One of the files managed below, or any htpasswd file. Leave empty for no password."
-                  : "An htpasswd file. Create one in Password files below, or leave empty for no password."
-              }
-            >
-              <Input
-                id="site-auth"
-                value={spec.basicAuthFile ?? ""}
-                onChange={(e) => set("basicAuthFile", e.target.value)}
-                placeholder="/etc/nginx/jd-auth/staging"
-                list="site-auth-files"
-                className="font-mono text-hint"
-              />
-              <datalist id="site-auth-files">
-                {authFiles.data?.map((f) => (
-                  <option key={f.path} value={f.path} />
-                ))}
-              </datalist>
-            </Field>
-          </FormSection>
+          <AccessSection spec={spec} set={set} open={open} authFiles={authFiles.data} />
+
+          <CrawlerSection spec={spec} set={set} />
 
           <RealIPSection spec={spec} set={set} open={open} />
 
@@ -3624,6 +3589,310 @@ const ERROR_HINT: Record<ErrorPageCode, string> = {
  * beside the site's configuration, edited once the site exists; until then a
  * save gives it the ones the dashboard ships.
  */
+/** GET /proxy/access-lists/, as far as the form reads it. */
+type AccessListNames = { lists: { name: string }[] }
+
+function AccessSection({
+  spec,
+  set,
+  open,
+  authFiles,
+}: {
+  spec: SiteSpec
+  set: <K extends keyof SiteSpec>(key: K, value: SiteSpec[K]) => void
+  open: boolean
+  authFiles: AuthFile[] | undefined
+}) {
+  const shared = spec.accessList !== undefined
+  const lists = usePoll<AccessListNames>(
+    (signal) => get("/proxy/access-lists/", undefined, signal),
+    0,
+    [],
+    { enabled: open && shared },
+  )
+  const cert = spec.clientCert
+  const setCert = (patch: Partial<SiteClientCert>) =>
+    set("clientCert", { caPath: "", ...cert, ...patch })
+
+  return (
+    <FormSection title="Who may reach it">
+      <OptionList>
+        <OptionRow
+          title="Use a shared access list"
+          hint="The addresses and password come from a list kept on the Sites page, so one edit there changes every site that takes it in."
+          checked={shared}
+          onCheckedChange={(on) => set("accessList", on ? "" : undefined)}
+        >
+          {shared && (
+            <Field label="List" htmlFor="site-access-list">
+              <Input
+                id="site-access-list"
+                value={spec.accessList ?? ""}
+                onChange={(e) => set("accessList", e.target.value.trim())}
+                placeholder="office"
+                list="site-access-lists"
+                className="font-mono text-hint"
+              />
+              <datalist id="site-access-lists">
+                {lists.data?.lists.map((l) => (
+                  <option key={l.name} value={l.name} />
+                ))}
+              </datalist>
+            </Field>
+          )}
+        </OptionRow>
+      </OptionList>
+      {spec.accessList ? (
+        <FormNote>
+          The site&apos;s own addresses and password are cleared on save; the list decides who gets
+          in, and nginx refuses the save if there is no list by that name.
+        </FormNote>
+      ) : (
+        <>
+          <ListField
+            id="site-allow"
+            label="Allow only these"
+            placeholder="10.0.0.0/8"
+            values={spec.allowFrom}
+            onChange={(v) => set("allowFrom", v)}
+            hint="Filling this in refuses everything else. Include however you reach the site yourself."
+          />
+          <ListField
+            id="site-deny"
+            label="Deny"
+            placeholder="203.0.113.0/24"
+            values={spec.denyFrom}
+            onChange={(v) => set("denyFrom", v)}
+            hint="Exceptions, checked before the allow list. The fence at the end is written for you."
+          />
+          <Field
+            label="Password file"
+            htmlFor="site-auth"
+            hint={
+              authFiles && authFiles.length > 0
+                ? "One of the files managed below, or any htpasswd file. Leave empty for no password."
+                : "An htpasswd file. Create one in Password files below, or leave empty for no password."
+            }
+          >
+            <Input
+              id="site-auth"
+              value={spec.basicAuthFile ?? ""}
+              onChange={(e) => set("basicAuthFile", e.target.value)}
+              placeholder="/etc/nginx/jd-auth/staging"
+              list="site-auth-files"
+              className="font-mono text-hint"
+            />
+            <datalist id="site-auth-files">
+              {authFiles?.map((f) => (
+                <option key={f.path} value={f.path} />
+              ))}
+            </datalist>
+          </Field>
+          {spec.basicAuthFile && (
+            <Field
+              label="Login prompt"
+              htmlFor="site-realm"
+              hint="The name the browser's password box shows. Empty is Restricted."
+            >
+              <Input
+                id="site-realm"
+                value={spec.basicAuthRealm ?? ""}
+                onChange={(e) => set("basicAuthRealm", e.target.value || undefined)}
+                placeholder="Restricted"
+              />
+            </Field>
+          )}
+          {spec.basicAuthFile && spec.allowFrom.length > 0 && (
+            <OptionList>
+              <OptionRow
+                title="Let allowed addresses in without a password"
+                hint="An address on the allow list gets straight in and anyone else is asked for the password, on every path — a path's own list or password included. Off asks allowed addresses for the password too."
+                checked={spec.satisfyAny ?? false}
+                onCheckedChange={(v) => set("satisfyAny", v || undefined)}
+              />
+            </OptionList>
+          )}
+        </>
+      )}
+      {spec.tls && (
+        <OptionList>
+          <OptionRow
+            title="Require a client certificate"
+            hint="Visitors must present a certificate signed by your CA. Only for a site that redirects plain HTTP, which would otherwise serve it without one."
+            checked={Boolean(cert)}
+            disabled={!spec.forceHttps && !cert}
+            onCheckedChange={(on) => set("clientCert", on ? { caPath: "" } : undefined)}
+          >
+            {cert && (
+              <div className="flex flex-col gap-3">
+                {!spec.forceHttps && (
+                  <FormNote tone="warning">
+                    Redirect plain HTTP to HTTPS, or port 80 serves the site without a certificate.
+                    The save is refused until then.
+                  </FormNote>
+                )}
+                <Field
+                  label="CA certificate"
+                  htmlFor="site-client-ca"
+                  hint="The PEM file of the CA, or CAs, a client certificate must be signed by."
+                >
+                  <Input
+                    id="site-client-ca"
+                    value={cert.caPath}
+                    onChange={(e) => setCert({ caPath: e.target.value.trim() })}
+                    placeholder="/etc/nginx/client-ca.pem"
+                    className="font-mono text-hint"
+                  />
+                </Field>
+                <ToggleGroup
+                  type="single"
+                  aria-label="Without a certificate"
+                  value={cert.mode ?? "required"}
+                  onValueChange={(v) => {
+                    if (v === "required") setCert({ mode: undefined })
+                    if (v === "optional") setCert({ mode: "optional", passSubject: true })
+                  }}
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                >
+                  <ToggleGroupItem value="required" className="flex-1 text-hint">
+                    Refuse with 400
+                  </ToggleGroupItem>
+                  <ToggleGroupItem
+                    value="optional"
+                    className="flex-1 text-hint"
+                    disabled={spec.kind !== "proxy"}
+                  >
+                    Let the application decide
+                  </ToggleGroupItem>
+                </ToggleGroup>
+                {cert.mode === "optional" && (
+                  <FormNote tone="warning">
+                    A request without a valid certificate still reaches the application, which has
+                    to refuse it itself by X-Client-Verify.
+                  </FormNote>
+                )}
+                {spec.kind === "proxy" && (
+                  <OptionList>
+                    <OptionRow
+                      title="Tell the application"
+                      hint="Sends X-Client-Verify (SUCCESS, NONE or why it failed) and X-Client-Subject, replacing any the visitor sent."
+                      checked={cert.passSubject ?? false}
+                      disabled={cert.mode === "optional"}
+                      onCheckedChange={(v) => setCert({ passSubject: v || undefined })}
+                    />
+                  </OptionList>
+                )}
+              </div>
+            )}
+          </OptionRow>
+        </OptionList>
+      )}
+    </FormSection>
+  )
+}
+
+function CrawlerSection({
+  spec,
+  set,
+}: {
+  spec: SiteSpec
+  set: <K extends keyof SiteSpec>(key: K, value: SiteSpec[K]) => void
+}) {
+  const bots = spec.blockBots
+  const setBots = (patch: Partial<SiteBotBlock>) => {
+    const next = { ...bots, ...patch }
+    set("blockBots", next.ai || next.scanners || next.custom?.length ? next : undefined)
+  }
+  const hotlink = spec.hotlink
+
+  return (
+    <FormSection
+      title="Crawlers & hotlinking"
+      hint="Refused with 403 by what a request says about itself. Anything can claim to be a browser, so this stops the honest ones."
+    >
+      <OptionList>
+        <OptionRow
+          title="Block AI crawlers"
+          hint="GPTBot, ClaudeBot, CCBot, PerplexityBot, Bytespider, Amazonbot, meta-externalagent and the other AI crawlers and fetchers that name themselves."
+          checked={bots?.ai ?? false}
+          onCheckedChange={(v) => setBots({ ai: v || undefined })}
+        />
+        <OptionRow
+          title="Block scanners"
+          hint="sqlmap, Nikto, Nmap, masscan, zgrab, Nuclei, WPScan, DirBuster, gobuster and ffuf, as they announce themselves by default."
+          checked={bots?.scanners ?? false}
+          onCheckedChange={(v) => setBots({ scanners: v || undefined })}
+        />
+      </OptionList>
+      <ListField
+        id="site-bots"
+        label="Also block these user agents"
+        placeholder="SemrushBot"
+        values={bots?.custom ?? []}
+        onChange={(custom) => setBots({ custom: custom.length ? custom : undefined })}
+        hint="Matched anywhere in the User-Agent, regardless of case."
+      />
+      {spec.kind !== "redirect" && (
+        <>
+          <OptionList>
+            <OptionRow
+              title="Hotlink protection"
+              hint="Images, video and audio asked for from a page on another site get 403. A visit with no Referer, or one a firewall blanked, still gets the file."
+              checked={Boolean(hotlink)}
+              onCheckedChange={(on) => set("hotlink", on ? {} : undefined)}
+            />
+          </OptionList>
+          {hotlink && (
+            <ListField
+              id="site-hotlink"
+              label="Other sites that may embed them"
+              placeholder="*.example.org"
+              values={hotlink.allow ?? []}
+              onChange={(allow) => set("hotlink", { allow: allow.length ? allow : undefined })}
+              hint="The site's own names always may. A leading *. covers subdomains."
+            />
+          )}
+        </>
+      )}
+    </FormSection>
+  )
+}
+
+/** The pages served as files at a fixed address rather than on an error. */
+const WELL_KNOWN_PAGES: { page: SitePageName; key: "securityTxt" | "robotsTxt"; hint: string }[] = [
+  {
+    page: "security",
+    key: "securityTxt",
+    hint: "Served at /.well-known/security.txt: where to report a vulnerability. A save writes one with a contact at the site's first domain and a year's Expires; check both.",
+  },
+  {
+    page: "robots",
+    key: "robotsTxt",
+    hint: "Served at /robots.txt in place of whatever the application or folder has there.",
+  },
+]
+
+/**
+ * What is wrong with a security.txt's Expires, if anything. RFC 9116 tells
+ * readers to ignore a file past it, so a lapsed one is as good as none.
+ */
+function securityTxtWarning(content: string, now: number): string | null {
+  const line = content
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => /^expires:/i.test(l))
+  if (!line) return "security.txt has no Expires line, which it needs to be read at all."
+  const expires = Date.parse(line.slice("expires:".length).trim())
+  if (Number.isNaN(expires)) return "security.txt's Expires is not a date."
+  if (expires <= now) return "security.txt has expired, so researchers are told to ignore it."
+  if (expires - now < 30 * 86_400_000) {
+    return `security.txt expires on ${new Date(expires).toISOString().slice(0, 10)}. Move Expires on before then.`
+  }
+  return null
+}
+
 function PagesSection({
   spec,
   set,
@@ -3657,17 +3926,30 @@ function PagesSection({
       setFinding(false)
     }
   }
+  const wellKnown = spec.kind !== "redirect"
   const pages: SitePageName[] = [
     ...(maintenance ? (["maintenance"] as const) : []),
     ...codes.map((code) => String(code) as SitePageName),
+    ...(wellKnown ? WELL_KNOWN_PAGES.filter((p) => spec[p.key]).map((p) => p.page) : []),
   ]
+  const securityWarning = usePoll<string | null>(
+    (signal) =>
+      get<SitePage>(
+        `/proxy/sites/${encodeURIComponent(site ?? "")}/pages/security`,
+        undefined,
+        signal,
+      ).then((p) => securityTxtWarning(p.content, Date.now())),
+    0,
+    [site],
+    { enabled: Boolean(site && wellKnown && spec.securityTxt) },
+  )
   const edit = (name: SitePageName) => {
     setPage(name)
     setEditingPage(name)
   }
 
   return (
-    <FormSection title="Maintenance & error pages">
+    <FormSection title="Pages & files">
       <OptionList>
         <OptionRow
           title="Maintenance"
@@ -3734,7 +4016,20 @@ function PagesSection({
             onCheckedChange={(v) => set("interceptErrors", v)}
           />
         )}
+        {wellKnown &&
+          WELL_KNOWN_PAGES.map(({ page: name, key, hint }) => (
+            <OptionRow
+              key={name}
+              title={`Serve ${PAGE_LABEL[name]}`}
+              hint={hint}
+              checked={spec[key] ?? false}
+              onCheckedChange={(v) => set(key, v || undefined)}
+            />
+          ))}
       </OptionList>
+      {spec.securityTxt && securityWarning.data && (
+        <FormNote tone="warning">{securityWarning.data}</FormNote>
+      )}
       {pages.length > 0 &&
         (site ? (
           <div className="flex flex-wrap gap-2">
@@ -3753,7 +4048,11 @@ function PagesSection({
         <PageEditor
           key={`${site}:${page}`}
           open={editingPage !== null}
-          onOpenChange={(open) => !open && setEditingPage(null)}
+          onOpenChange={(open) => {
+            if (open) return
+            setEditingPage(null)
+            securityWarning.refresh()
+          }}
           site={site}
           page={page}
         />

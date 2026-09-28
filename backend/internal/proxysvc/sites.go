@@ -119,6 +119,26 @@ type SiteSpec struct {
 	DenyFrom       []string `json:"denyFrom"`
 	BasicAuthFile  string   `json:"basicAuthFile,omitempty"`
 	BasicAuthRealm string   `json:"basicAuthRealm,omitempty"`
+	// SatisfyAny lets an address on AllowFrom in without the password, and
+	// anyone else in with it: nginx's `satisfy any`. Without it an allowed
+	// address still needs the password.
+	SatisfyAny bool `json:"satisfyAny,omitempty"`
+	// AccessList is a shared access list the site takes in, by name, in
+	// place of its own allow list and password.
+	AccessList string `json:"accessList,omitempty"`
+	// AccessListDir is where the lists are. The service sets it from its own
+	// nginx directory; it is never taken from a request.
+	AccessListDir string `json:"-"`
+	// ClientCert asks every visitor for a certificate signed by a CA.
+	ClientCert *SiteClientCert `json:"clientCert,omitempty"`
+	// BlockBots refuses requests by user agent.
+	BlockBots *SiteBotBlock `json:"blockBots,omitempty"`
+	// Hotlink refuses media asked for from other sites' pages.
+	Hotlink *SiteHotlink `json:"hotlink,omitempty"`
+	// SecurityTxt and RobotsTxt serve the site's own security.txt and
+	// robots.txt from its pages folder.
+	SecurityTxt bool `json:"securityTxt,omitempty"`
+	RobotsTxt   bool `json:"robotsTxt,omitempty"`
 
 	AccessLog bool `json:"accessLog"`
 	// AccessLogPath and ErrorLogPath are the files the site's access_log and
@@ -240,7 +260,7 @@ func (spec *SiteSpec) hasErrorPage(code int) bool {
 
 // usesPages says whether the rendered site serves any page from PagesDir.
 func (spec *SiteSpec) usesPages() bool {
-	return spec.Maintenance != nil || len(spec.ErrorPages) > 0
+	return spec.Maintenance != nil || len(spec.ErrorPages) > 0 || spec.SecurityTxt || spec.RobotsTxt
 }
 
 // timedLog says whether the access log is written in the site's timed format.
@@ -492,6 +512,9 @@ func ValidateSpec(spec *SiteSpec) error {
 		return err
 	}
 	if err := validateHeaders(spec); err != nil {
+		return err
+	}
+	if err := validateAccessOptions(spec); err != nil {
 		return err
 	}
 	if spec.PagesDir != "" && !absPathRe.MatchString(spec.PagesDir) {

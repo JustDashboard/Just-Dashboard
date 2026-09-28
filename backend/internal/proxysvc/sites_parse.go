@@ -49,6 +49,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	realIP := &realIPParse{}
 	headers := &headersParse{}
 	kinds := &kindParse{}
+	access := &accessParse{}
 	// The catch-all's retry settings, which belong to the pool it forwards to.
 	var rootRetryOn []string
 	rootTries := 0
@@ -85,6 +86,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 					pools.closed()
 					cache.closed()
 					headers.closed()
+					access.closed()
 				}
 			} else if inMaintGeo {
 				if fields := strings.Fields(strings.TrimSuffix(raw, ";")); len(fields) == 2 && fields[0] != "default" {
@@ -95,6 +97,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 				pools.entry(raw)
 				cache.entry(raw)
 				headers.entry(raw)
+				access.entry(raw)
 			}
 			return
 		}
@@ -105,6 +108,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 				pools.object(name, value)
 				cache.object(name, value)
 				headers.object(name, value)
+				access.object(name, value)
 				if strings.HasSuffix(raw, "{") {
 					objectDepth = 1
 					if name == "geo" && maintGeoRe.MatchString(value) {
@@ -120,7 +124,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			depth++
 			return
 		}
-		if realIP.ifOpen(raw) {
+		if realIP.ifOpen(raw) || access.ifOpen(raw) {
 			depth++
 			return
 		}
@@ -133,6 +137,13 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			// the flag is what makes the switch survive an edit.
 			if location == exploitDotLocation {
 				spec.BlockExploits = true
+			}
+			// security.txt and robots.txt are the site's own files.
+			if page, ok := wellKnownFile(location); ok && m[1] == "=" {
+				spec.SecurityTxt = spec.SecurityTxt || page == "security"
+				spec.RobotsTxt = spec.RobotsTxt || page == "robots"
+				current = nil
+				return
 			}
 			// A page's location is the renderer's, and says the page is on.
 			if page, ok := pageFromURI(location); ok {
@@ -177,6 +188,12 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		if limits.directive(directive, value, location, current, len(spec.Locations)-1) {
 			return
 		}
+		if _, ok := wellKnownFile(location); ok && current == nil {
+			if directive == "alias" {
+				spec.PagesDir = filepath.Dir(value)
+			}
+			return
+		}
 		if _, ok := pageFromURI(location); ok {
 			switch {
 			case directive == "alias":
@@ -187,6 +204,9 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			return
 		}
 		if cache.directive(directive, value, location) {
+			return
+		}
+		if access.directive(spec, directive, value, location == "" && current == nil) {
 			return
 		}
 		if realIP.directive(spec, directive, value, location == "" && current == nil) {
@@ -499,6 +519,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	cache.settle(spec)
 	realIP.settle(spec)
 	headers.settle(spec)
+	access.settle(spec)
 	// Extra locations that ended up with neither an upstream nor a root are
 	// something this form cannot express; dropping them is better than
 	// offering to save a location that proxies nowhere.
