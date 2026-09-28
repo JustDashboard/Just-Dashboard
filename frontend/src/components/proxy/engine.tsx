@@ -2,19 +2,48 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { CheckCircle, Globe, ListOrdered, Play, RefreshClockwise, Stop } from "@/components/icons"
-import { get, post } from "@/lib/api"
+import {
+  CheckCircle,
+  Globe,
+  ListOrdered,
+  Logs,
+  Play,
+  RefreshClockwise,
+  Stop,
+} from "@/components/icons"
+import { errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
-import { duration } from "@/lib/format"
-import type { ProxyValidation, SystemdUnit } from "@/lib/types"
+import { duration, plural } from "@/lib/format"
+import type {
+  EngineAction,
+  Job,
+  ProxyReloadResult,
+  ProxyValidation,
+  SystemdUnit,
+  UpdatePackage,
+  UpdateReport,
+} from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Status } from "@/components/status-dot"
+import { Status, type DotTone } from "@/components/status-dot"
+import { JobConsole, useJobConsole } from "@/components/job-console"
 import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
 import { engineProduct } from "@/components/proxy/marks"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
-import { engineUnit, type ProxyStatus } from "@/components/proxy/proxy-context"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { engineKind, engineUnit, type ProxyStatus } from "@/components/proxy/proxy-context"
+import type { EngineControl } from "@/components/proxy/engine-control"
+import {
+  PARTICIPLE,
+  bootState,
+  engineRun,
+  isMasked,
+  refusalOf,
+  stoppedLabel,
+} from "@/components/proxy/engine-lifecycle"
+import { warningCount } from "@/components/proxy/config-test"
 
 /**
  * The engine itself: whether it is running, and the three things done to it.
@@ -38,7 +67,10 @@ export function useEngineUnit(status: ProxyStatus | undefined) {
     [name],
     { enabled: Boolean(name) },
   )
-  const unit = poll.data?.unit
+  // A read that failed leaves the last answer in the poll; drawn, it said
+  // "running for 2h" about a unit nobody could read.
+  const current = poll.error ? undefined : poll.data
+  const unit = current?.unit
   // systemd answers `not-found` for a unit it has never seen rather than
   // failing, so a host that runs nginx from a container or a nohup has no
   // unit and gets no controls, instead of controls that cannot work.
@@ -46,7 +78,9 @@ export function useEngineUnit(status: ProxyStatus | undefined) {
   return {
     name,
     unit: known ? unit : undefined,
-    fetchedAt: poll.data?.fetchedAt,
+    fetchedAt: current?.fetchedAt,
+    /** Why the unit could not be read, when its last read failed. */
+    error: poll.error,
     refresh: poll.refresh,
   }
 }
@@ -55,22 +89,22 @@ export function useEngineUnit(status: ProxyStatus | undefined) {
 export function EngineStatus({
   unit,
   fetchedAt,
+  pending,
 }: {
   unit: SystemdUnit | undefined
   /** When the unit was last read, so the uptime is computed without a clock read during render. */
   fetchedAt?: number
+  /** A start, restart or stop under way, said as it happens until the unit is read again. */
+  pending?: string
 }) {
+  if (pending) return <Status state="activating" label={pending} />
   if (!unit) return null
-  const running = unit.activeState === "active"
+  const running = engineRun(unit) === "running"
   const since = unit.activeSince && fetchedAt ? Math.max(0, fetchedAt / 1000 - unit.activeSince) : 0
   return (
     <Status
       state={unit.activeState}
-      label={
-        running
-          ? `running${since > 60 ? ` for ${duration(since)}` : ""}`
-          : `${unit.activeState}${unit.subState && unit.subState !== unit.activeState ? ` (${unit.subState})` : ""}`
-      }
+      label={running ? `running${since > 60 ? ` for ${duration(since)}` : ""}` : stoppedLabel(unit)}
     />
   )
 }
@@ -90,19 +124,40 @@ export function EngineStatus({
 export function EngineIdentity({
   status,
   unit,
+  unitName,
+  unitError,
   fetchedAt,
+  statusAt,
+  pending,
+  onStartAtBoot,
+  serviceBusy,
   certbotVersion,
   renewSource,
   actions,
 }: {
   status: ProxyStatus
   unit: SystemdUnit | undefined
+  /** The engine's service, named when its state could not be read. */
+  unitName?: string
+  /** Why the service's state could not be read; neither "running" nor "no service unit" is known then. */
+  unitError?: Error
   fetchedAt?: number
+  /** When `status` was read, so the ingress's uptime is computed without a clock read during render. */
+  statusAt?: number
+  /** A start, restart or stop under way, in its present participle. */
+  pending?: string
+  /** Sets the service to start at boot; absent for an account that may not. */
+  onStartAtBoot?: () => void
+  /** The service verb in flight, which Start at boot waits behind. */
+  serviceBusy?: EngineAction
   certbotVersion?: string
   renewSource?: string | null
   actions?: React.ReactNode
 }) {
   const engine = status.nginx || status.caddy
+  // The ingress's Caddyfile is the container's own, not the host path the
+  // dashboard is configured with, so that path says nothing about it.
+  const ingress = !status.nginx && Boolean(status.ingressContainer)
   const name = status.nginx ? "nginx" : status.caddy ? "Caddy" : "No reverse proxy"
   const version = status.nginx
     ? status.nginxVersion
@@ -128,14 +183,25 @@ export function EngineIdentity({
       }
       facts={
         <>
-          {unit ? (
-            <EngineStatus unit={unit} fetchedAt={fetchedAt} />
+          {pending ? (
+            <EngineStatus unit={unit} pending={pending} />
+          ) : unitError && unitName ? (
+            <span className="font-medium text-warning" title={errorMessage(unitError)}>
+              {`couldn't read ${unitName}`}
+            </span>
+          ) : unit ? (
+            <>
+              <EngineStatus unit={unit} fetchedAt={fetchedAt} />
+              <EngineBoot unit={unit} onStartAtBoot={onStartAtBoot} busy={serviceBusy} />
+            </>
+          ) : engine && status.ingressContainer ? (
+            <IngressUptime startedAt={status.ingressStartedAt} at={statusAt} />
           ) : engine ? (
-            <span>{status.ingressContainer ? "runs as a container" : "no service unit"}</span>
+            <span>no service unit</span>
           ) : (
             <span>nothing found on this host</span>
           )}
-          {engine && (
+          {engine && !ingress && (
             <>
               <FactDot />
               <HostFact>
@@ -151,6 +217,12 @@ export function EngineIdentity({
               <HostFact product="docker">
                 ingress <span className="font-mono">{status.ingressContainer}</span>
               </HostFact>
+            </>
+          )}
+          {status.ingressState === "provisionable" && (
+            <>
+              <FactDot />
+              <HostFact product="docker">a Caddy ingress starts with the first deployment</HostFact>
             </>
           )}
           <FactDot />
@@ -177,111 +249,180 @@ export function EngineIdentity({
 }
 
 /**
- * Test, reload, and — behind the menu — restart, start and stop. Test and
- * reload are the daily two and stand inline; the rest are words with a
- * sentence, and the two that take every site offline for a moment confirm
- * first, through the same dialog the Services page uses for the same unit.
+ * The running ingress's reading: a container Docker found running, and for
+ * how long by its own start time. It has no unit, so this stands where the
+ * unit's state would.
+ */
+function IngressUptime({ startedAt, at }: { startedAt?: string; at?: number }) {
+  const started = startedAt ? Date.parse(startedAt) : NaN
+  const since = at && !Number.isNaN(started) ? Math.max(0, (at - started) / 1000) : 0
+  return (
+    <Status
+      state="active"
+      label={`running as a container${since > 60 ? `, up ${duration(since)}` : ""}`}
+    />
+  )
+}
+
+/**
+ * Whether the engine comes back after a reboot. A proxy that is running now
+ * and disabled at boot is an outage waiting for the next kernel update, and
+ * nothing on the page said so; where `systemctl enable` would fix it, the
+ * fix is beside the warning.
+ */
+function EngineBoot({
+  unit,
+  onStartAtBoot,
+  busy,
+}: {
+  unit: SystemdUnit
+  onStartAtBoot?: () => void
+  busy?: EngineAction
+}) {
+  const boot = bootState(unit)
+  if (!boot) return null
+  return (
+    <>
+      <FactDot />
+      <span className={boot.warn ? "font-medium text-warning" : undefined}>{boot.label}</span>
+      {boot.canEnable && onStartAtBoot && (
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={onStartAtBoot}
+          pending={busy === "enable"}
+          disabled={busy !== undefined}
+        >
+          Start at boot
+        </Button>
+      )}
+    </>
+  )
+}
+
+/**
+ * Test, the command the service's state calls for, and the rest behind the
+ * menu. A running engine's command is Reload; a stopped or failed one's is
+ * Start, and Reload stands disabled beside it, because reloading an engine
+ * that is not running reported "invalid PID" and left the reader to guess.
+ * Restart and stop, which take every site offline for a moment, confirm
+ * first.
+ *
+ * Test config opens the test's own panel. A reload runs the same test first,
+ * and one it refuses, or passes with warnings, opens that panel on it: the
+ * refusal was a toast of nginx's output cut to four hundred characters.
+ *
+ * Start and restart go through the proxy's own route, which picks the unit
+ * itself and runs the config test before either: this host's nginx.service
+ * tests before it starts, so a restart over a broken file used to stop nginx
+ * and leave every site down. A refusal opens on the test's own lines.
  */
 export function EngineActions({
   status,
   unitName,
   unit,
+  control,
+  testing,
+  onTest,
+  onReloadTested,
   onChanged,
 }: {
   status: ProxyStatus
   unitName: string | undefined
   unit: SystemdUnit | undefined
+  control: EngineControl
+  /** Whether the config test is running. */
+  testing: boolean
+  onTest: () => void
+  /** Shows a reload's own test: one that refused it, or passed it with warnings. */
+  onReloadTested: (validation: ProxyValidation) => void
   onChanged: () => void
 }) {
   const router = useRouter()
+  const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
-  const [busy, setBusy] = useState<"test" | "reload" | "">("")
-  const kind = status.nginx ? "nginx" : "caddy"
-  const engine = status.nginx ? "nginx" : "Caddy"
-
-  const test = async () => {
-    setBusy("test")
-    try {
-      const res = await post<ProxyValidation>("/proxy/test", { kind })
-      if (res.valid) {
-        notify.success(`${engine}'s configuration is valid`, {
-          description: "A reload would succeed.",
-        })
-      } else {
-        notify.error(`${engine} refuses its configuration`, undefined, {
-          description: res.output.slice(0, 400),
-        })
-      }
-    } catch (err) {
-      notify.error("Could not test the configuration", err)
-    } finally {
-      setBusy("")
-    }
-  }
+  const [busy, setBusy] = useState<"reload" | "restart-container" | "">("")
+  const kind = engineKind(status)
+  const engine = control.engine
 
   const reload = async () => {
     setBusy("reload")
     try {
-      await post("/proxy/reload", { kind })
-      notify.success(`${engine} reloaded`)
+      const res = await post<ProxyReloadResult>("/proxy/reload", { kind })
+      const warnings = warningCount(res.validation)
+      notify.success(
+        `${engine} reloaded`,
+        warnings > 0
+          ? {
+              description: `Its config test has ${plural(warnings, "warning")}.`,
+              action: { label: "Show", onClick: () => onReloadTested(res.validation) },
+            }
+          : undefined,
+      )
       onChanged()
     } catch (err) {
-      notify.error("Reload refused", err)
+      const refusal = refusalOf(err)
+      if (refusal?.validation) {
+        onReloadTested(refusal.validation)
+      } else {
+        notify.error("Reload failed", err)
+      }
+      // A refused reload's test is the engine's last one now.
+      onChanged()
     } finally {
       setBusy("")
     }
   }
 
-  const control = (action: "restart" | "start" | "stop") =>
-    post(`/systemd/${unitName}/${action}`).then(() => onChanged())
+  const ingressId = kind === "caddy-ingress" ? status.ingressId : undefined
+  const container = status.ingressContainer
+  const restartContainer = () =>
+    confirm({
+      title: "Restart container",
+      confirmLabel: "Restart",
+      description: (
+        <p>
+          <b>{container}</b> will be stopped and started again. Every site the ingress serves is
+          offline until Caddy is back up.
+        </p>
+      ),
+      action: async (phrase) => {
+        setBusy("restart-container")
+        try {
+          await post(`/docker/containers/${ingressId}/restart`, undefined, { confirm: phrase })
+          notify.success(`${container} restarted`)
+          onChanged()
+        } catch (err) {
+          notify.error(`Could not restart ${container}`, err)
+          throw err
+        } finally {
+          setBusy("")
+        }
+      },
+    })
 
-  const running = unit?.activeState === "active"
+  // With no unit, or one that could not be read, the engine is whatever it
+  // is and Reload says so if it cannot.
+  const run = unitName && unit ? engineRun(unit) : undefined
+  const lifecycle = control.pending !== undefined
   const verbs: Verb[] = []
   if (unitName && unit) {
-    if (!running) {
+    if (run !== "stopped") {
       verbs.push({
-        key: "start",
-        label: `Start ${engine}`,
-        icon: Play,
-        run: () =>
-          control("start")
-            .then(() => notify.success(`${engine} started`))
-            .catch((err) => notify.error("Could not start", err)),
+        key: "restart",
+        label: `Restart ${engine}`,
+        icon: RefreshClockwise,
+        danger: true,
+        disabled: lifecycle,
+        run: () => control.ask("restart"),
       })
-    }
-    verbs.push({
-      key: "restart",
-      label: `Restart ${engine}`,
-      icon: RefreshClockwise,
-      danger: true,
-      run: () =>
-        confirm({
-          title: `Restart ${engine}`,
-          confirmLabel: "Restart",
-          description: (
-            <p>
-              Every connection is dropped and every site is unreachable until the process is back. A
-              reload applies configuration changes without either.
-            </p>
-          ),
-          action: () => control("restart"),
-        }),
-    })
-    if (running) {
       verbs.push({
         key: "stop",
         label: `Stop ${engine}`,
         icon: Stop,
         danger: true,
-        run: () =>
-          confirm({
-            title: `Stop ${engine}`,
-            confirmLabel: "Stop",
-            description: (
-              <p>Every site this proxy serves goes offline until it is started again.</p>
-            ),
-            action: () => control("stop"),
-          }),
+        disabled: lifecycle,
+        run: () => control.ask("stop"),
       })
     }
     verbs.push({
@@ -291,25 +432,344 @@ export function EngineActions({
       run: () => router.push(`/processes/services?unit=${encodeURIComponent(unitName)}`),
     })
   }
+  // The ingress's lifecycle is its container's, so its restart and its log
+  // are Docker's, through the Docker routes and their own gates.
+  if (ingressId) {
+    if (can("destructive")) {
+      verbs.push({
+        key: "restart-container",
+        label: "Restart container",
+        icon: RefreshClockwise,
+        danger: true,
+        disabled: busy !== "",
+        run: restartContainer,
+      })
+    }
+    verbs.push({
+      key: "container-logs",
+      label: "Container logs",
+      icon: Logs,
+      run: () => router.push(`/docker/containers/${encodeURIComponent(ingressId)}?tab=logs`),
+    })
+  }
+
+  // Why Reload cannot run, when the service says it cannot.
+  const reloadBlocked =
+    run === "stopped"
+      ? `${engine} is not running`
+      : run === "changing" && unit
+        ? `${engine} is ${stoppedLabel(unit)}`
+        : undefined
+  const startBlocked = unit && isMasked(unit) ? `${unitName} is masked` : undefined
 
   return (
     <>
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={test}
-        pending={busy === "test"}
-        disabled={busy !== ""}
-      >
+      <Button size="sm" variant="outline" onClick={onTest} pending={testing}>
         <CheckCircle className="size-3.5" />
         Test config
       </Button>
-      <Button size="sm" onClick={reload} pending={busy === "reload"} disabled={busy !== ""}>
-        <RefreshClockwise className="size-3.5" />
-        Reload
-      </Button>
+      {reloadBlocked ? (
+        <Blocked reason={reloadBlocked}>
+          <Button size="sm" variant="outline" disabled>
+            <RefreshClockwise className="size-3.5" />
+            Reload
+          </Button>
+        </Blocked>
+      ) : (
+        <Button
+          size="sm"
+          onClick={reload}
+          pending={busy === "reload"}
+          disabled={busy !== "" || lifecycle}
+        >
+          <RefreshClockwise className="size-3.5" />
+          Reload
+        </Button>
+      )}
+      {run === "stopped" &&
+        (startBlocked ? (
+          <Blocked reason={startBlocked}>
+            <Button size="sm" disabled>
+              <Play className="size-3.5" />
+              Start {engine}
+            </Button>
+          </Blocked>
+        ) : (
+          <Button
+            size="sm"
+            onClick={() => control.run("start")}
+            pending={control.pending === "start"}
+            disabled={lifecycle}
+          >
+            <Play className="size-3.5" />
+            {control.pending === "start" ? PARTICIPLE.start : `Start ${engine}`}
+          </Button>
+        ))}
       {verbs.length > 0 && <VerbMenu verbs={verbs} label={`More ${engine} actions`} />}
       {dialog}
     </>
   )
+}
+
+/**
+ * A disabled command with the reason it cannot run, on hover and on focus. A
+ * disabled button takes neither, so the reason hangs on a wrapper the
+ * keyboard can reach, which the tooltip describes while it is open.
+ */
+function Blocked({ reason, children }: { reason: string; children: React.ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} className="inline-flex rounded-md focus-ring">
+          {children}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{reason}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+/**
+ * The line under the engine's: which of the modules a proxy is usually asked
+ * for this nginx has, and the package manager's part — installing the engine
+ * and certbot where they are missing, and upgrading nginx where the host has
+ * a newer one waiting. Each install runs as a job whose output streams below.
+ *
+ * The modules come from GET /proxy/modules; a host whose nginx cannot be read
+ * that way, or a server without the route, answers an error and the line
+ * says nothing about modules rather than guessing.
+ */
+export function EngineExtras({
+  status,
+  admin,
+  onChanged,
+}: {
+  status: ProxyStatus
+  /** May install packages (system.admin). */
+  admin: boolean
+  /** Reads the status and the engine again once an install lands. */
+  onChanged: () => void
+}) {
+  const nginx = status.nginx
+  const noEngine = !status.nginx && !status.caddy
+  // certbot's nginx plugin is for nginx; Caddy issues its own certificates.
+  const wantsCertbot = !status.certbot && !status.caddy
+  const modules = usePoll(
+    (signal) => get<ModuleReport>("/proxy/modules/", undefined, signal),
+    0,
+    [],
+    { enabled: nginx },
+  )
+  const updates = usePoll(
+    (signal) => get<UpdateReport>("/packages/updates", undefined, signal),
+    0,
+    [],
+    { enabled: nginx || (admin && (noEngine || wantsCertbot)) },
+  )
+  const console_ = useJobConsole({
+    onSuccess: () => {
+      onChanged()
+      modules.refresh()
+      updates.refresh()
+    },
+  })
+  const { confirm, dialog } = useConfirm()
+  const [starting, setStarting] = useState("")
+
+  const report = updates.error ? undefined : updates.data
+  const manager = report?.available ? report.manager : undefined
+  const certbotPackages = manager ? CERTBOT_PACKAGES[manager] : undefined
+  // Only apt's install brings an installed package up to its candidate;
+  // the others' install leaves it where it is, so they get no Upgrade.
+  const upgrade =
+    nginx && manager === "apt"
+      ? report?.packages.find((p) => NGINX_PACKAGES.includes(p.name))
+      : undefined
+  const running = console_.job?.status === "running"
+
+  const install = async (key: string, packages: string[], what: string) => {
+    setStarting(key)
+    try {
+      console_.attach(await post<Job>("/packages/install", { packages }))
+    } catch (err) {
+      notify.error(`Could not install ${what}`, err)
+    } finally {
+      setStarting("")
+    }
+  }
+
+  const askUpgrade = (pkg: UpdatePackage) =>
+    confirm({
+      title: `Upgrade ${pkg.name}`,
+      confirmLabel: "Upgrade",
+      description: (
+        <p>
+          {manager} installs {pkg.name} {pkg.candidate} over {pkg.current}, keeping the
+          configuration files as they are. The package restarts nginx, so every site is offline for
+          a moment.
+        </p>
+      ),
+      action: () => install("upgrade", [pkg.name], pkg.name),
+    })
+
+  const chips = modules.error ? [] : moduleChips(modules.data)
+  const offersNginx = admin && noEngine && Boolean(manager)
+  const offersCertbot = admin && wantsCertbot && Boolean(certbotPackages)
+  if (chips.length === 0 && !upgrade && !offersNginx && !offersCertbot && !console_.job) {
+    return null
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+        {chips.length > 0 && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            {chips.map((chip) => (
+              <span key={chip.key} title={chip.detail}>
+                <Status tone={chip.tone} label={`${chip.label} ${chip.state}`} />
+              </span>
+            ))}
+          </div>
+        )}
+        {upgrade && (
+          <span className="inline-flex flex-wrap items-center gap-2">
+            <span>
+              {upgrade.name}{" "}
+              <span className="font-mono">
+                {upgrade.current} → {upgrade.candidate}
+              </span>
+            </span>
+            {admin && (
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => askUpgrade(upgrade)}
+                pending={starting === "upgrade"}
+                disabled={starting !== "" || running}
+              >
+                Upgrade
+              </Button>
+            )}
+          </span>
+        )}
+        {offersNginx && (
+          <Button
+            size="xs"
+            variant="outline"
+            title={`${manager} install nginx`}
+            onClick={() => void install("nginx", ["nginx"], "nginx")}
+            pending={starting === "nginx"}
+            disabled={starting !== "" || running}
+          >
+            Install nginx
+          </Button>
+        )}
+        {offersCertbot && certbotPackages && (
+          <Button
+            size="xs"
+            variant="outline"
+            title={`${manager} install ${certbotPackages.join(" ")}`}
+            onClick={() => void install("certbot", certbotPackages, "certbot")}
+            pending={starting === "certbot"}
+            disabled={starting !== "" || running}
+          >
+            Install certbot + nginx plugin
+          </Button>
+        )}
+      </div>
+      <JobConsole
+        job={console_.job}
+        lines={console_.lines}
+        onDismiss={console_.dismiss}
+        onCancel={console_.cancel}
+      />
+      {dialog}
+    </div>
+  )
+}
+
+/**
+ * What GET /proxy/modules answers, as far as this line reads it: each module
+ * as configure names it, and whether this nginx has it now.
+ */
+type ModuleReport = {
+  modules: {
+    name: string
+    state: "static" | "loaded" | "not-loaded" | "not-installed" | "unknown"
+    package?: string
+  }[]
+}
+
+/** The modules a reverse proxy is usually asked for, as configure names them. */
+const WATCHED_MODULES: { key: string; label: string }[] = [
+  { key: "http_v2_module", label: "HTTP/2" },
+  { key: "http_v3_module", label: "HTTP/3" },
+  { key: "stream", label: "stream" },
+  { key: "http_stub_status_module", label: "stub_status" },
+  { key: "http_realip_module", label: "realip" },
+  { key: "http_auth_request_module", label: "auth_request" },
+]
+
+type ModuleChip = { key: string; label: string; state: string; tone: DotTone; detail?: string }
+
+/**
+ * One reading per watched module. A module missing from the build list was
+ * not built into this nginx at all, which no package on the host changes.
+ */
+function moduleChips(report: ModuleReport | undefined): ModuleChip[] {
+  if (!report) return []
+  const byName = new Map(report.modules.map((m) => [m.name, m]))
+  return WATCHED_MODULES.map(({ key, label }) => {
+    const m = byName.get(key)
+    if (!m)
+      return { key, label, state: "missing", tone: "stopped", detail: "Not built into this nginx" }
+    switch (m.state) {
+      case "static":
+        return { key, label, state: "built in", tone: "running" }
+      case "loaded":
+        return { key, label, state: "loaded", tone: "running" }
+      case "not-loaded":
+        return {
+          key,
+          label,
+          state: "not loaded",
+          tone: "notice",
+          detail: "Installed as a dynamic module that no load_module line loads",
+        }
+      case "not-installed":
+        return m.package
+          ? {
+              key,
+              label,
+              state: "installable",
+              tone: "notice",
+              detail: `The ${m.package} package provides it`,
+            }
+          : {
+              key,
+              label,
+              state: "missing",
+              tone: "stopped",
+              detail:
+                "Built as a dynamic module whose file is absent, with no package that provides it",
+            }
+      default:
+        return { key, label, state: "unknown", tone: "unknown" }
+    }
+  })
+}
+
+/** The package names nginx itself goes by: Debian splits it into flavours. */
+const NGINX_PACKAGES = ["nginx", "nginx-core", "nginx-full", "nginx-light", "nginx-extras"]
+
+/**
+ * certbot and its nginx plugin, per package manager. zypper is absent because
+ * openSUSE names them by Python version, which this page cannot know.
+ */
+const CERTBOT_PACKAGES: Record<string, string[]> = {
+  apt: ["certbot", "python3-certbot-nginx"],
+  dnf: ["certbot", "python3-certbot-nginx"],
+  yum: ["certbot", "python3-certbot-nginx"],
+  apk: ["certbot", "certbot-nginx"],
+  pacman: ["certbot", "certbot-nginx"],
 }

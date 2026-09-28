@@ -3,7 +3,8 @@
 - `src/lib/api.ts` is the only fetch layer: `get/post/put/patch/del`, `credentials: "include"`,
   `X-JD-CSRF` on every mutation, URI-encoded exact `X-Confirm` with
   `X-Confirm-Encoding: uri` (including Unicode and surrounding whitespace), `ApiError` with
-  `needsConfirmation`/`isAuthProblem`/`needsTotp`; `wsUrl()` and
+  `needsConfirmation`/`isAuthProblem`/`needsTotp` and the whole parsed `body`, for a refusal that
+  carries more than the error (the proxy engine's config-test refusal carries the test); `wsUrl()` and
   `downloadUrl()` build the non-JSON URLs. A `Query` value may be an array, which is a repeated
   parameter (`f=a&f=b`, the log routes' field predicates): joining on a character and splitting it again
   on the server breaks on a value that holds it, and an IPv6 address is all colons. `useSocket` takes the
@@ -57,7 +58,8 @@
   range is a standing choice, a zoom is a question being asked now, and restoring yesterday's zoom shows an
   empty window with no obvious way out. `useMetricEvents`/`useHealth` poll on much slower cadences.
 - `src/lib/types.ts` mirrors the backend's JSON by hand, including the `Capability` union — it drifts if
-  backend types change without it. `useAuth`'s `can("capability")` hides controls a role cannot use:
+  backend types change without it. The proxy pages' shapes live in `src/lib/proxy/types-*.ts`, one file
+  per area of those pages, and `types.ts` re-exports them, so an import from `@/lib/types` finds them. `useAuth`'s `can("capability")` hides controls a role cannot use:
   **affordance only**, the server re-decides every request.
 - An account that owes a password change remains unauthenticated in the UI after completing any
   required second factor. `/login` presents the current/new password form, then returns to credentials
@@ -91,6 +93,10 @@
   absence is meaningful: a request without one is reversible but still deserves a pause (deleting a
   terminal folder loses a grouping and nothing else), and asking somebody to type "delete folder" teaches
   them to type phrases without reading — the one habit the typed confirmation exists to prevent.
+  The dialog toasts "<title> completed" when the action resolves, unless the action resolves to
+  `"reported"`: an outcome that is only partly what the title promises — a site deleted but nginx not
+  reloaded — is announced by the action itself, and a bare "completed" beside it would be the untrue
+  half.
 - `lib/metrics-store.ts` keeps the live series **outside React**: owning five minutes of history in a route
   component threw it away on navigation, and pushing a 2 s frame through a context above the router
   re-rendered the terminal and log tail twice a second. Mirrored to sessionStorage so a reload keeps its

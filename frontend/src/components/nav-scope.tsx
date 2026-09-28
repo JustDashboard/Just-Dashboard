@@ -56,22 +56,67 @@ export type NavScope = {
   }[]
 }
 
+/** Rows the rail marks as needing attention, by href. */
+export type NavMarks = Record<string, boolean>
+
 type ScopeState = {
   scope: NavScope | null
   setScope: (next: NavScope | null | ((current: NavScope | null) => NavScope | null)) => void
+  marks: NavMarks
+  setMarks: (next: NavMarks | ((current: NavMarks) => NavMarks)) => void
 }
 
 const NavScopeContext = createContext<ScopeState | null>(null)
 
 export function NavScopeProvider({ children }: { children: React.ReactNode }) {
   const [scope, setScope] = useState<NavScope | null>(null)
-  const value = useMemo(() => ({ scope, setScope }), [scope])
+  const [marks, setMarks] = useState<NavMarks>({})
+  const value = useMemo(() => ({ scope, setScope, marks, setMarks }), [scope, marks])
   return <NavScopeContext.Provider value={value}>{children}</NavScopeContext.Provider>
 }
 
 /** What the rail should draw, if a section below it has registered something. */
 export function useNavScopeValue() {
   return useContext(NavScopeContext)?.scope ?? null
+}
+
+/** The rows a section below the rail has marked, by href. */
+export function useNavMarksValue(): NavMarks {
+  return useContext(NavScopeContext)?.marks ?? NO_MARKS
+}
+
+const NO_MARKS: NavMarks = {}
+
+/**
+ * Mark rows the rail already draws from the route, for as long as this
+ * component is mounted. A section whose pages are fixed in NAV still has
+ * facts only its layout reads — which of them hold something to deal with —
+ * and registering a whole scope for that would swap the section's panel for
+ * a copy of itself.
+ */
+export function useNavMarks(marks: NavMarks) {
+  const setMarks = useContext(NavScopeContext)?.setMarks
+  const signature = JSON.stringify(
+    Object.entries(marks)
+      .filter(([, on]) => on)
+      .map(([href]) => href)
+      .sort(),
+  )
+  useEffect(() => {
+    if (!setMarks) return
+    const hrefs: string[] = JSON.parse(signature)
+    setMarks((current) => {
+      const next = { ...current }
+      for (const href of hrefs) next[href] = true
+      return next
+    })
+    return () =>
+      setMarks((current) => {
+        const next = { ...current }
+        for (const href of hrefs) delete next[href]
+        return next
+      })
+  }, [setMarks, signature])
 }
 
 /**

@@ -1,77 +1,14 @@
 package proxysvc
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
-// certbot's output is a labelled block per lineage. Parsed by label rather
-// than position: the order of the lines has changed between releases and the
-// labels have not.
-func TestParseCertbotCertificates(t *testing.T) {
-	out := strings.Join([]string{
-		"Found the following certs:",
-		"  Certificate Name: app.example.com",
-		"    Serial Number: 3f2a91c4",
-		"    Key Type: ECDSA",
-		"    Domains: app.example.com www.app.example.com",
-		"    Expiry Date: 2026-11-04 09:12:33+00:00 (VALID: 73 days)",
-		"    Certificate Path: /etc/letsencrypt/live/app.example.com/fullchain.pem",
-		"    Private Key Path: /etc/letsencrypt/live/app.example.com/privkey.pem",
-		"  Certificate Name: old.example.com",
-		"    Domains: old.example.com",
-		"    Expiry Date: 2026-01-04 09:12:33+00:00 (INVALID: EXPIRED)",
-		"    Certificate Path: /etc/letsencrypt/live/old.example.com/fullchain.pem",
-	}, "\n")
-
-	certs := ParseCertbotCertificates(out)
-	if len(certs) != 2 {
-		t.Fatalf("got %d certificates", len(certs))
-	}
-	first := certs[0]
-	if first.Name != "app.example.com" {
-		t.Errorf("name = %q", first.Name)
-	}
-	if len(first.Domains) != 2 {
-		t.Errorf("domains = %v", first.Domains)
-	}
-	if first.DaysLeft != 73 || !first.Valid {
-		t.Errorf("expiry = %d days, valid %v", first.DaysLeft, first.Valid)
-	}
-	if first.Serial != "3f2a91c4" {
-		t.Errorf("serial = %q", first.Serial)
-	}
-	if first.CertPath == "" || first.KeyPath == "" {
-		t.Errorf("paths lost: %+v", first)
-	}
-	if first.Expiry.Year() != 2026 || first.Expiry.Month() != 11 {
-		t.Errorf("expiry date = %v", first.Expiry)
-	}
-	if certs[1].Valid {
-		t.Error("an EXPIRED certificate should not be reported as valid")
-	}
-}
-
-func TestParseCertbotCertificatesOnNothing(t *testing.T) {
-	if got := ParseCertbotCertificates("No certificates found.\n"); len(got) != 0 {
-		t.Fatalf("got %+v", got)
-	}
-}
-
-func TestParseDaysLeft(t *testing.T) {
-	if got := parseDaysLeft("VALID: 73 days"); got != 73 {
-		t.Errorf("got %d", got)
-	}
-	if got := parseDaysLeft("VALID: 1 day"); got != 1 {
-		t.Errorf("got %d", got)
-	}
-	if got := parseDaysLeft("INVALID: EXPIRED"); got != 0 {
-		t.Errorf("got %d", got)
-	}
-}
-
-// certbot prints a paragraph and buries the reason near the end. The toast
-// gets one line, so it had better be the right one.
 func TestLastMeaningfulLine(t *testing.T) {
 	out := strings.Join([]string{
 		"Saving debug log to /var/log/letsencrypt/letsencrypt.log",
@@ -102,6 +39,8 @@ func TestCertbotErrorPreservesCauseBeforeHelpFooter(t *testing.T) {
 }
 
 func TestIssueValidation(t *testing.T) {
+	// No account on disk, so an empty email is refused.
+	useLetsencryptDir(t, t.TempDir())
 	s := New("/etc/nginx", "/etc/caddy/Caddyfile")
 	cases := []struct {
 		name string
@@ -119,7 +58,7 @@ func TestIssueValidation(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := s.IssueArgs(tc.req); err == nil {
+			if _, err := s.IssueArgs(context.Background(), tc.req); err == nil {
 				t.Fatal("accepted")
 			}
 		})
@@ -142,22 +81,30 @@ func TestRenewAndRevokeValidateTheName(t *testing.T) {
 // The argv is the whole contract now that running it belongs to a job, so it
 // is worth reading back rather than trusting.
 func TestIssueArgsShape(t *testing.T) {
+	useLetsencryptDir(t, t.TempDir())
+	// The webroot has to be a folder where certbot runs.
+	webroot := t.TempDir()
 	s := New("/etc/nginx", "/etc/caddy/Caddyfile")
-	args, err := s.IssueArgs(IssueRequest{
+	args, err := s.IssueArgs(context.Background(), IssueRequest{
 		Domains: []string{"app.example.com", "www.app.example.com"},
-		Email:   "ops@example.com", Method: "webroot", WebRoot: "/var/www/html", Staging: true,
+		Email:   "ops@example.com", Method: "webroot", WebRoot: webroot,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
-		"certonly", "--webroot", "-w /var/www/html", "--non-interactive", "--agree-tos",
-		"-m ops@example.com", "--keep-until-expiring", "--staging",
+		"certonly", "--webroot", "-w " + webroot, "--non-interactive", "--agree-tos",
+		"-m ops@example.com", "--keep-until-expiring",
 		"-d app.example.com", "-d www.app.example.com",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("missing %q from %q", want, joined)
+		}
+	}
+	for _, unwanted := range []string{"--staging", "--dry-run", "--force-renewal"} {
+		if strings.Contains(joined, unwanted) {
+			t.Errorf("a real issuance for new names carries %s: %q", unwanted, joined)
 		}
 	}
 }
@@ -235,5 +182,164 @@ Entry point: EntryPoint(name='dns-route53')
 	// a deployment orders over, and must not be selected as though it could.
 	if got["dns-route53"] {
 		t.Fatal("a non-authenticator plugin was offered as a challenge method")
+	}
+}
+
+// A test run used to be --staging, which wrote a real lineage holding an
+// untrusted certificate and left the real issuance that followed a no-op.
+// It is certbot's --dry-run now: the whole exchange, nothing saved.
+func TestIssueArgsTestRunIsADryRun(t *testing.T) {
+	dir := t.TempDir()
+	useLetsencryptDir(t, dir)
+	fakeCertbot(t, "nginx", "standalone", "webroot")
+	s := New("/etc/nginx", "/etc/caddy/Caddyfile")
+	req := IssueRequest{Domains: []string{"app.example.com"}, Email: "ops@example.com", Method: "nginx", Staging: true}
+	args, err := s.IssueArgs(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.HasPrefix(joined, "certonly --nginx") || !strings.Contains(joined, "--dry-run") || strings.Contains(joined, "--staging") {
+		t.Fatalf("test run = %q", joined)
+	}
+	// certbot refuses --dry-run outside certonly and renew, so a test of an
+	// install is a test of the challenge alone.
+	req.Install = true
+	args, err = s.IssueArgs(context.Background(), req)
+	if err != nil || args[0] != "certonly" || !strings.Contains(strings.Join(args, " "), "--dry-run") {
+		t.Fatalf("test run with install = %q, %v", args, err)
+	}
+	// Even over a staging lineage a test run replaces nothing.
+	root := newAuthority(t, "(STAGING) Pretend Pear X1", nil)
+	leaf, _, _ := root.issue(t, []string{"app.example.com"}, time.Now().Add(80*24*time.Hour))
+	writeLineage(t, dir, "app.example.com", stagingACME, leaf)
+	req.Install = false
+	args, _ = s.IssueArgs(context.Background(), req)
+	if strings.Contains(strings.Join(args, " "), "--force-renewal") {
+		t.Fatalf("a test run forces renewal: %q", args)
+	}
+}
+
+// certbot keeps a lineage until it is due, whatever signed it, so a real
+// issuance over a staging lineage printed "no action taken" and left the
+// test certificate in place. It forces the renewal; over a real one it does
+// not, because that would spend a duplicate from the weekly limit.
+func TestIssueArgsReplacesAStagingLineage(t *testing.T) {
+	dir := t.TempDir()
+	useLetsencryptDir(t, dir)
+	staging := newAuthority(t, "(STAGING) Pretend Pear X1", nil)
+	test, _, _ := staging.issue(t, []string{"app.example.com", "www.app.example.com"}, time.Now().Add(80*24*time.Hour))
+	writeLineage(t, dir, "app.example.com", stagingACME, test)
+	production := newAuthority(t, "R11", nil)
+	issued, _, _ := production.issue(t, []string{"shop.example.com"}, time.Now().Add(80*24*time.Hour))
+	writeLineage(t, dir, "shop.example.com", productionACME, issued)
+	// Renewed from the real authority now, still holding a staging
+	// certificate: the page calls it a test certificate, and the real
+	// issuance it offers has to replace it too.
+	leftover, _, _ := staging.issue(t, []string{"old.example.com"}, time.Now().Add(80*24*time.Hour))
+	writeLineage(t, dir, "old.example.com", productionACME, leftover)
+
+	s := New("/etc/nginx", "/etc/caddy/Caddyfile")
+	webroot := t.TempDir()
+	issue := func(domains ...string) string {
+		t.Helper()
+		args, err := s.IssueArgs(context.Background(), IssueRequest{
+			Domains: domains, Email: "ops@example.com", Method: "webroot", WebRoot: webroot,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(args, " ")
+	}
+	if got := issue("www.app.example.com", "app.example.com"); !strings.Contains(got, "--force-renewal") || strings.Contains(got, "--dry-run") {
+		t.Fatalf("real issuance over a staging lineage = %q", got)
+	}
+	if got := issue("shop.example.com"); strings.Contains(got, "--force-renewal") {
+		t.Fatalf("real issuance over a real lineage forces renewal: %q", got)
+	}
+	if got := issue("old.example.com"); !strings.Contains(got, "--force-renewal") {
+		t.Fatalf("real issuance over a staging certificate renewed from production = %q", got)
+	}
+	// A different set of names is a different certificate to certbot.
+	if got := issue("app.example.com"); strings.Contains(got, "--force-renewal") {
+		t.Fatalf("a subset of a staging lineage forces renewal: %q", got)
+	}
+}
+
+// The nginx and DNS plugins are packages the certbot that runs the job has or
+// has not got, and the refusal names that certbot.
+func TestIssueArgsRefusesAPluginTheRuntimeLacks(t *testing.T) {
+	dir := t.TempDir()
+	useLetsencryptDir(t, dir)
+	fakeCertbot(t, "standalone", "webroot")
+	s := New("/etc/nginx", "/etc/caddy/Caddyfile")
+	_, err := s.IssueArgs(context.Background(), IssueRequest{
+		Domains: []string{"app.example.com"}, Email: "ops@example.com", Method: "nginx",
+	})
+	if err == nil || !strings.Contains(err.Error(), "certbot 9.9.9") || !strings.Contains(err.Error(), "no nginx plugin") {
+		t.Fatalf("nginx without its plugin = %v", err)
+	}
+	_, err = s.IssueArgs(context.Background(), IssueRequest{
+		Domains: []string{"*.example.com"}, Email: "ops@example.com", Method: "dns",
+		DNSProvider: "cloudflare", Credentials: "dns_cloudflare_api_token = x",
+	})
+	if err == nil || !strings.Contains(err.Error(), "no dns-cloudflare plugin") {
+		t.Fatalf("cloudflare without its plugin = %v", err)
+	}
+
+	fakeCertbot(t, "standalone", "webroot", "nginx", "dns-cloudflare")
+	for _, req := range []IssueRequest{
+		{Domains: []string{"app.example.com"}, Email: "ops@example.com", Method: "nginx"},
+		{Domains: []string{"*.example.com"}, Email: "ops@example.com", Method: "dns", DNSProvider: "cloudflare", Credentials: "dns_cloudflare_api_token = x", DNSWait: 120},
+	} {
+		args, err := s.IssueArgs(context.Background(), req)
+		if err != nil {
+			t.Fatalf("%s refused with its plugin present: %v", req.Method, err)
+		}
+		if req.Method == "dns" && !strings.Contains(strings.Join(args, " "), "--dns-cloudflare-propagation-seconds 120") {
+			t.Fatalf("the propagation wait was not passed: %q", args)
+		}
+	}
+}
+
+// Credentials sent with the request stand in for saved ones, and IssueArgs
+// writes nothing: the token is saved by the job, only once it starts.
+func TestIssueArgsTakesCredentialsFromTheRequestWithoutSavingThem(t *testing.T) {
+	dir := t.TempDir()
+	useLetsencryptDir(t, dir)
+	fakeCertbot(t, "dns-cloudflare")
+	s := New("/etc/nginx", "/etc/caddy/Caddyfile")
+	req := IssueRequest{Domains: []string{"*.example.com"}, Email: "ops@example.com", Method: "dns", DNSProvider: "cloudflare"}
+	if _, err := s.IssueArgs(context.Background(), req); err == nil || !strings.Contains(err.Error(), "no credentials") {
+		t.Fatalf("no credentials anywhere = %v", err)
+	}
+	req.Credentials = "dns_cloudflare_api_token = x"
+	if _, err := s.IssueArgs(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "jd-dns")); !os.IsNotExist(err) {
+		t.Fatalf("IssueArgs wrote the credentials: %v", err)
+	}
+
+	checked, err := CheckDNSCredentials("cloudflare", req.Credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "jd-dns")); !os.IsNotExist(err) {
+		t.Fatalf("checking wrote the credentials: %v", err)
+	}
+	path, err := checked.Save()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(path)
+	if err != nil || st.Mode().Perm() != 0o600 || path != filepath.Join(dir, "jd-dns", "cloudflare.ini") {
+		t.Fatalf("saved %s: %v %v", path, st, err)
+	}
+	if !HasDNSCredentials("cloudflare") {
+		t.Fatal("saved credentials are not seen")
+	}
+	if _, err := CheckDNSCredentials("route53", "aws_access_key_id = only"); err == nil {
+		t.Fatal("incomplete Route 53 credentials were accepted")
 	}
 }

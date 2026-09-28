@@ -23,8 +23,10 @@
 #     would pick most of the suite for a change that seldom breaks more than
 #     its look, so it runs `design-system.spec.ts` and `navigation.spec.ts`
 #     instead, which open every page. Changed specs, and the specs of a changed
-#     fixture, run as themselves, and any UI change also runs the design-system
-#     spec.
+#     fixture, run as themselves — a fixture followed through relative imports
+#     however deep, so a table under fixtures/proxy/ reaches the spec that
+#     imports proxy-fixtures.ts (`python3 scripts/test_test_changed.py`
+#     checks that) — and any UI change also runs the design-system spec.
 #
 # Without [base], the base is whichever of origin/main and origin/patch/* the
 # branch is fewest commits ahead of — the branch it was started from.
@@ -100,6 +102,38 @@ specs_naming() {
 	grep -lE "[\"'\`]$pattern($end)" frontend/tests/browser/*.spec.ts | sed 's#^frontend/##' || true
 }
 
+# A path with its `.` and `..` segments folded away, as an import resolves it.
+normalise() {
+	local IFS=/ part out=()
+	for part in $1; do
+		case $part in
+		"" | .) ;;
+		..) [ "${#out[@]}" -gt 0 ] && unset 'out[-1]' ;;
+		*) out+=("$part") ;;
+		esac
+	done
+	echo "${out[*]}"
+}
+
+# The specs that reach a browser-test module through relative imports, with
+# any number of fixture modules between them.
+specs_importing() {
+	local -A seen=()
+	local queue=("${1%.ts}") module importer from
+	while [ "${#queue[@]}" -gt 0 ]; do
+		module=${queue[0]}
+		queue=("${queue[@]:1}")
+		[ -n "${seen[$module]:-}" ] && continue
+		seen[$module]=1
+		case $module in *.spec) echo "${module#frontend/}.ts" ;; esac
+		while IFS= read -r importer; do
+			while IFS= read -r from; do
+				[ "$(normalise "$(dirname "$importer")/$from")" = "$module" ] && queue+=("${importer%.ts}")
+			done < <(grep -oE 'from "\.\.?/[^"]+"' "$importer" | sed -E 's/^from "(.*)"$/\1/')
+		done < <(grep -rlE --include='*.ts' "from \"\.\.?/([^\"]*/)?$(basename "$module")\"" frontend/tests/browser || true)
+	done
+}
+
 lintable=()
 specs=()
 ui=
@@ -116,9 +150,7 @@ for f in "${changed[@]}"; do
 	case $f in
 	frontend/tests/browser/*.spec.ts) specs+=("${f#frontend/}") ;;
 	frontend/tests/browser/*.ts)
-		mapfile -t -O "${#specs[@]}" specs < <(
-			grep -lF "from \"./$(basename "${f%.ts}")\"" frontend/tests/browser/*.spec.ts | sed 's#^frontend/##' || true
-		)
+		mapfile -t -O "${#specs[@]}" specs < <(specs_importing "$f")
 		;;
 	frontend/src/app/layout.tsx | "frontend/src/app/(dashboard)/layout.tsx" | frontend/src/*.css) broad=1 ;;
 	frontend/src/*.ts | frontend/src/*.tsx)

@@ -43,7 +43,7 @@ function cellValue(value: unknown): string {
   return String(value)
 }
 
-function csvCell(value: string): string {
+export function csvCell(value: string): string {
   return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
 }
 

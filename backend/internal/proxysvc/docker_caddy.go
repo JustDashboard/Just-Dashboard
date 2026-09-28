@@ -30,11 +30,19 @@ const dockerCaddyImport = "import /config/just-dashboard/routes/*.caddy"
 // running web server to turn on a log.
 const dockerCaddyAccessRoot = dockerCaddyRoot + "/access"
 
-type dockerCaddy struct{ ID, Name, Source, Identity string }
+type dockerCaddy struct {
+	ID, Name, Source, Identity string
+	// StartedAt is when the container last started, as Docker reports it,
+	// so the overview can say how long the ingress has been up.
+	StartedAt string
+}
 type ingressContainer struct {
-	ID     string
-	Name   string
-	State  struct{ Running bool }
+	ID    string
+	Name  string
+	State struct {
+		Running   bool
+		StartedAt string
+	}
 	Config struct{ Cmd []string }
 	Mounts []struct {
 		Type, Source, Destination string
@@ -103,7 +111,7 @@ func selectDockerCaddy(containers []ingressContainer) (*dockerCaddy, error) {
 		if !public("443/tcp", "443") {
 			return nil, fmt.Errorf("Caddy container %s owns HTTP but does not publish HTTPS on port 443", strings.TrimPrefix(c.Name, "/"))
 		}
-		found := dockerCaddy{ID: c.ID, Name: strings.TrimPrefix(c.Name, "/")}
+		found := dockerCaddy{ID: c.ID, Name: strings.TrimPrefix(c.Name, "/"), StartedAt: c.State.StartedAt}
 		config, data := false, false
 		storage := map[string]string{}
 		for _, mount := range c.Mounts {
@@ -685,7 +693,7 @@ func (s *Service) ensureDockerCaddyCertificate(ctx context.Context, c *dockerCad
 			if err != nil {
 				continue
 			}
-			imported, err := ImportCertificate("caddy-"+strings.TrimPrefix(routeDigest(names[0]), "sha256:")[:24], certificate, key)
+			imported, err := keepCaddyEvidence("caddy-"+strings.TrimPrefix(routeDigest(names[0]), "sha256:")[:24], certificate, key)
 			if err != nil {
 				return nil, fmt.Errorf("Caddy issued the certificate for %s but it could not be kept as release evidence: %w", names[0], err)
 			}

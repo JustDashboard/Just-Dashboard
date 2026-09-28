@@ -1280,6 +1280,10 @@ func Open(dataDir string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if _, err := db.ExecContext(context.Background(), proxySchema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("apply proxy schema: %w", err)
+	}
 	// Retain historical names separately while releasing the unique live name.
 	// This also repairs projects archived before name reuse was supported.
 	if _, err := db.ExecContext(context.Background(), `UPDATE deploy_projects

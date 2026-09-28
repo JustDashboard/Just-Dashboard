@@ -297,6 +297,27 @@ func (s *Service) ResolveDeploymentCertificate(ctx context.Context, domains []st
 	if len(domains) == 0 {
 		return "", "", errors.New("a TLS deployment route needs at least one domain")
 	}
+	pairs, err := s.coveringCertificates(ctx, domains)
+	if err != nil {
+		return "", "", err
+	}
+	if len(pairs) == 0 {
+		return "", "", errors.New("no available certificate covers every deployment domain")
+	}
+	return pairs[0].Path, pairs[0].KeyPath, nil
+}
+
+// certificatePair is a usable certificate with the key that goes with it.
+type certificatePair struct {
+	Certificate
+	KeyPath string
+}
+
+// coveringCertificates lists the unexpired certificates covering every one of
+// domains whose certificate and key files are both on disk, in the order the
+// certificates are listed. The key is the one a site already pairs with the
+// certificate, or certbot's privkey.pem beside it.
+func (s *Service) coveringCertificates(ctx context.Context, domains []string) ([]certificatePair, error) {
 	vhosts, _ := s.ListVHosts(ctx)
 	keys := map[string]string{}
 	for _, vhost := range vhosts {
@@ -311,8 +332,9 @@ func (s *Service) ResolveDeploymentCertificate(ctx context.Context, domains []st
 	}
 	certificates, err := s.ListCertificates(ctx)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
+	var pairs []certificatePair
 	for _, certificate := range certificates {
 		if certificate.Error != "" || certificate.Expired || !certificateCoversAll(certificate.Domains, domains) {
 			continue
@@ -327,9 +349,9 @@ func (s *Service) ResolveDeploymentCertificate(ctx context.Context, domains []st
 		if _, err := os.Stat(keyPath); err != nil {
 			continue
 		}
-		return certificate.Path, keyPath, nil
+		pairs = append(pairs, certificatePair{Certificate: certificate, KeyPath: keyPath})
 	}
-	return "", "", errors.New("no available certificate covers every deployment domain")
+	return pairs, nil
 }
 
 func certificateCoversAll(names, domains []string) bool {
@@ -434,6 +456,10 @@ func (s *Service) restoreDeploymentRouteLocked(ctx context.Context, snapshot Dep
 	if err != nil || path != snapshot.Path || link != snapshot.LinkPath {
 		return errors.New("deployment route location changed since snapshot")
 	}
+	before, beforeExisted := readIfPresent(path)
+	// Forgotten before the first write rather than after the last, so a
+	// restore that fails half-way still leaves no stale dump behind.
+	s.forgetEffective()
 	if snapshot.Existed {
 		if err := writeAtomic(path, snapshot.Content); err != nil {
 			return err
@@ -460,6 +486,17 @@ func (s *Service) restoreDeploymentRouteLocked(ctx context.Context, snapshot Dep
 				return err
 			}
 		}
+	}
+	// Recorded like any other write, or a history would go on showing a
+	// route holding what was just rolled back. A restore has no undo, so the
+	// record is made once the files are in place rather than after the test.
+	if beforeExisted != snapshot.Existed || before != snapshot.Content {
+		change := Change{Path: path, Action: ChangeWrite,
+			Before: []byte(before), BeforeExisted: beforeExisted, After: []byte(snapshot.Content)}
+		if !snapshot.Existed {
+			change.Action, change.After = ChangeDelete, nil
+		}
+		s.recordChange(ctx, change)
 	}
 	if validation := runValidator(ctx, "nginx", "-t"); !validation.Valid {
 		return fmt.Errorf("restored nginx configuration did not validate: %s", validation.Output)

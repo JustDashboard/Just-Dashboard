@@ -546,9 +546,11 @@ func (s *Server) handleAuditList(w http.ResponseWriter, r *http.Request) error {
 	f := audit.Filter{
 		Username: q.Get("username"),
 		Action:   q.Get("action"),
-		OnlyFail: q.Get("failed") == "true",
-		Limit:    atoiDefault(q.Get("limit"), 100),
-		Offset:   atoiDefault(q.Get("offset"), 0),
+		// Repeated: ?action_prefix=proxy.&action_prefix=certificates.
+		ActionPrefixes: q["action_prefix"],
+		OnlyFail:       q.Get("failed") == "true",
+		Limit:          atoiDefault(q.Get("limit"), 100),
+		Offset:         atoiDefault(q.Get("offset"), 0),
 	}
 	if v := q.Get("since"); v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {

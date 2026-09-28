@@ -2,9 +2,8 @@ package proxysvc
 
 import (
 	"context"
-	"crypto/tls"
+	"crypto/sha256"
 	"crypto/x509"
-	"encoding/pem"
 	"fmt"
 	"net"
 	"os"
@@ -31,6 +30,26 @@ type Certificate struct {
 	// which is the answer to the question the list used to leave open: what
 	// breaks when this one expires.
 	UsedBy []string `json:"usedBy"`
+	// UsedByStreams names the streams that serve TLS with this file. They are
+	// apart from UsedBy because a stream is not a site: the page links each
+	// to its own list.
+	UsedByStreams []string `json:"usedByStreams"`
+	// Fingerprint is the SHA-256 of the DER and Serial the serial number,
+	// both in the uppercase colon form `openssl x509 -fingerprint` prints,
+	// so one can be compared by eye with what a browser or a CA shows.
+	Fingerprint string `json:"fingerprint,omitempty"`
+	Serial      string `json:"serial,omitempty"`
+	// Staging is a test certificate: a staging authority signed it, so every
+	// browser refuses it however many days it has left. certbot's old test
+	// run left these where sites could name them, and one read as a healthy
+	// Let's Encrypt certificate.
+	Staging bool `json:"staging,omitempty"`
+	// LocalCA is a certificate this host's local CA signed (localca.go).
+	LocalCA bool `json:"localCA,omitempty"`
+	// Evidence is the release copies kept for a Caddy certificate's domain:
+	// what deployments were activated with, folded under the certificate
+	// Caddy renews rather than listed as imports of their own.
+	Evidence []CertificateEvidence `json:"evidence,omitempty"`
 }
 
 // expiryWarningDays matches Let's Encrypt's own renewal window: certbot
@@ -41,23 +60,60 @@ const expiryWarningDays = 30
 // ListCertificates reads certbot's live directory plus any certificate paths
 // referenced by the proxy config, so a manually installed certificate is not
 // invisible just because certbot does not know about it.
+//
+// It is every certificate on the host, Caddy's release copies included:
+// deployment activation, preflight and the route summary find a release's
+// certificate among them, and on a Docker Caddy host those copies are the
+// only pair that covers its domains. What the operator reads as an inventory
+// is CertificateInventory.
 func (s *Service) ListCertificates(ctx context.Context) ([]Certificate, error) {
-	return listCertificates(letsencryptLiveDir, importedDir, s.nginxVHosts()), nil
+	return listCertificates(filepath.Join(letsencryptDir, "live"), importedDir, s.nginxVHosts(), s.tlsStreams()), nil
 }
 
-const letsencryptLiveDir = "/etc/letsencrypt/live"
+// tlsStreams are the streams nginx reads that serve TLS. A paused stream is
+// left out: nothing breaks for it when the certificate expires.
+func (s *Service) tlsStreams() []StreamSpec {
+	entries, _ := os.ReadDir(s.streamDir())
+	var out []StreamSpec
+	for _, e := range entries {
+		if !streamFileName(e) {
+			continue
+		}
+		if entry := listStream(s.streamDir(), e); entry.CertPath != "" {
+			out = append(out, entry.StreamSpec)
+		}
+	}
+	return out
+}
+
+// CertificateInventory is ListCertificates as the Certificates page and the
+// security posture read it: without the Caddy release copies no site serves,
+// and with the certificates the Docker ingress serves and renews itself.
+func (s *Service) CertificateInventory(ctx context.Context) ([]Certificate, error) {
+	certs, err := s.ListCertificates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out, evidence := splitCaddyEvidence(certs)
+	out = markLocalCALeaves(out)
+	caddy, err := s.caddyInventory(ctx, evidence)
+	if err != nil {
+		return append(out, caddyInventoryFailure(err)), nil
+	}
+	return append(out, caddy...), nil
+}
 
 // listCertificates is ListCertificates with its directories as arguments, so
 // the join between certificates and the sites that use them can be tested
 // without /etc.
-func listCertificates(liveDir, imported string, vhosts []VHost) []Certificate {
+func listCertificates(liveDir, imported string, vhosts []VHost, streams []StreamSpec) []Certificate {
 	index := map[string]int{}
 	out := []Certificate{}
 
 	// The same file reached by two paths — certbot's symlink and the target
 	// a site names directly — is one certificate, and the sites that name it
 	// are gathered onto that one entry rather than producing a second.
-	add := func(path, source string, usedBy string) {
+	add := func(path, source string, usedBy string) int {
 		resolved := path
 		if r, err := filepath.EvalSymlinks(path); err == nil {
 			resolved = r
@@ -66,7 +122,7 @@ func listCertificates(liveDir, imported string, vhosts []VHost) []Certificate {
 			if usedBy != "" {
 				out[i].UsedBy = append(out[i].UsedBy, usedBy)
 			}
-			return
+			return i
 		}
 		index[resolved] = len(out)
 		cert, err := readCertificate(path)
@@ -78,10 +134,12 @@ func listCertificates(liveDir, imported string, vhosts []VHost) []Certificate {
 		}
 		cert.Source = source
 		cert.UsedBy = []string{}
+		cert.UsedByStreams = []string{}
 		if usedBy != "" {
 			cert.UsedBy = append(cert.UsedBy, usedBy)
 		}
 		out = append(out, *cert)
+		return len(out) - 1
 	}
 
 	if entries, err := os.ReadDir(liveDir); err == nil {
@@ -107,6 +165,10 @@ func listCertificates(liveDir, imported string, vhosts []VHost) []Certificate {
 		if v.CertPath != "" {
 			add(v.CertPath, "nginx:"+v.Name, v.Name)
 		}
+	}
+	for _, st := range streams {
+		i := add(st.CertPath, "stream:"+st.Name, "")
+		out[i].UsedByStreams = append(out[i].UsedByStreams, st.Name)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].DaysLeft != out[j].DaysLeft {
@@ -137,15 +199,7 @@ func certificateName(path string) string {
 }
 
 func readCertificate(path string) (*Certificate, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	block, _ := pem.Decode(raw)
-	if block == nil {
-		return nil, fmt.Errorf("not a PEM certificate")
-	}
-	parsed, err := x509.ParseCertificate(block.Bytes)
+	parsed, err := readLeaf(path)
 	if err != nil {
 		return nil, err
 	}
@@ -155,12 +209,14 @@ func readCertificate(path string) (*Certificate, error) {
 func summarise(c *x509.Certificate, name, path string) *Certificate {
 	cert := &Certificate{
 		Name: name, Path: path,
-		Domains:   append([]string{}, c.DNSNames...),
-		Issuer:    c.Issuer.CommonName,
-		NotBefore: c.NotBefore.UTC(),
-		NotAfter:  c.NotAfter.UTC(),
-		UsedBy:    []string{},
+		Domains:       append([]string{}, c.DNSNames...),
+		Issuer:        c.Issuer.CommonName,
+		NotBefore:     c.NotBefore.UTC(),
+		NotAfter:      c.NotAfter.UTC(),
+		UsedBy:        []string{},
+		UsedByStreams: []string{},
 	}
+	cert.Domains = append(cert.Domains, certificateAddresses(c)...)
 	if len(cert.Domains) == 0 && c.Subject.CommonName != "" {
 		cert.Domains = []string{c.Subject.CommonName}
 	}
@@ -169,25 +225,36 @@ func summarise(c *x509.Certificate, name, path string) *Certificate {
 	}
 	cert.DaysLeft = int(time.Until(c.NotAfter).Hours() / 24)
 	cert.Expired = time.Now().After(c.NotAfter)
-	cert.Expiring = !cert.Expired && cert.DaysLeft <= expiryWarningDays
+	cert.Expiring = renewalDue(c.NotBefore, c.NotAfter, time.Now())
 	cert.SelfSigned = c.Issuer.String() == c.Subject.String()
+	cert.Staging = stagingIssuer(c)
+	sum := sha256.Sum256(c.Raw)
+	cert.Fingerprint = colonHex(sum[:])
+	cert.Serial = colonHex(c.SerialNumber.Bytes())
 	return cert
+}
+
+// stagingIssuer reports a certificate a staging authority signed, by the name
+// Let's Encrypt gives every staging intermediate: "(STAGING) Riddling Rhubarb
+// R12" now, "Fake LE Intermediate X1" before its 2020 hierarchy. The name is
+// the tell: a staging chain fails verification exactly as a private CA's
+// does, so trust alone cannot say which of the two a certificate is.
+func stagingIssuer(c *x509.Certificate) bool {
+	name := c.Issuer.CommonName
+	return strings.HasPrefix(name, "(STAGING)") || strings.HasPrefix(name, "Fake LE ")
 }
 
 // CheckDomain opens a TLS connection and reports what the domain is actually
 // serving. Reading the file on disk is not enough: a certificate can be renewed
 // on disk and never reloaded, and only a live handshake catches that.
+//
+// It dials as a scan does (dialTLS), so it ends with ctx and holds the
+// STARTTLS dialogue a port's service needs, as a scan's Auto does.
 func CheckDomain(ctx context.Context, domain string, port int) (*Certificate, error) {
 	if port == 0 {
 		port = 443
 	}
-	dialer := &net.Dialer{Timeout: 8 * time.Second}
-	conn, err := tls.DialWithDialer(dialer, "tcp", net.JoinHostPort(domain, fmt.Sprint(port)), &tls.Config{
-		ServerName: domain,
-		// The certificate is being inspected, not trusted — a failed
-		// verification is a finding to report, not a reason to give up.
-		InsecureSkipVerify: true,
-	})
+	conn, err := dialTLS(ctx, net.JoinHostPort(domain, fmt.Sprint(port)), domain, startTLSPorts[port], 0, 0)
 	if err != nil {
 		return &Certificate{Name: domain, Domains: []string{domain}, Source: "live", Error: err.Error()}, nil
 	}

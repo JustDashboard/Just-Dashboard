@@ -62,6 +62,8 @@ export function CodeEditor({
   onSave,
   onCursorChange,
   onFormat,
+  revealLine,
+  revealAgain,
 }: {
   value: string
   onChange?: (value: string) => void
@@ -87,6 +89,17 @@ export function CodeEditor({
   onCursorChange?: (position: { line: number; column: number; selected: number }) => void
   /** Called with a function that formats the document, once the editor exists. */
   onFormat?: (format: (() => void) | null) => void
+  /**
+   * A line to scroll to and mark once the document holds it — where a config
+   * test's message points. Each line is revealed once, so typing afterwards
+   * never pulls the view back to it.
+   */
+  revealLine?: number
+  /**
+   * Changed to reveal `revealLine` again and put the keyboard on it: the
+   * reader scrolled away and asked for the line a second time.
+   */
+  revealAgain?: number
 }) {
   // The save handler is read through a ref for the same reason the completion
   // schema is: the command is registered once on mount and would otherwise
@@ -107,6 +120,22 @@ export function CodeEditor({
   useEffect(() => {
     completionsRef.current = completions
   }, [completions])
+  // The editor mounts once its loader resolves, which may be before or after
+  // the document arrives; whichever comes second reveals the line.
+  const mountedRef = useRef<MountedEditor | null>(null)
+  const revealRef = useRef(revealLine)
+  useEffect(() => {
+    revealRef.current = revealLine
+    const mounted = mountedRef.current
+    if (mounted && value) markLine(mounted, revealLine)
+  }, [revealLine, value])
+  useEffect(() => {
+    const mounted = mountedRef.current
+    if (!mounted || revealAgain === undefined) return
+    mounted.revealed = undefined
+    markLine(mounted, revealRef.current)
+    mounted.editor.focus()
+  }, [revealAgain])
 
   return (
     <div className={cn("monaco-host min-h-0", className)} style={{ minHeight }}>
@@ -117,6 +146,8 @@ export function CodeEditor({
         value={value}
         onChange={(v) => onChange?.(v ?? "")}
         onMount={(editor, monaco) => {
+          mountedRef.current = { editor, monaco }
+          if (editor.getValue()) markLine(mountedRef.current, revealRef.current)
           editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveRef.current?.())
           editor.onDidChangeCursorSelection(() => {
             const position = editor.getPosition()
@@ -161,6 +192,32 @@ export function CodeEditor({
   )
 }
 
+type Monaco = typeof import("monaco-editor")
+
+type MountedEditor = {
+  editor: import("monaco-editor").editor.IStandaloneCodeEditor
+  monaco: Monaco
+  /** The line last revealed, and its mark, so the next line replaces it. */
+  revealed?: number
+  mark?: import("monaco-editor").editor.IEditorDecorationsCollection
+}
+
+/** Scrolls to a line, puts the cursor on it and marks it, once per line. */
+function markLine(mounted: MountedEditor, line: number | undefined) {
+  const model = mounted.editor.getModel()
+  if (!line || line === mounted.revealed || !model || line > model.getLineCount()) return
+  mounted.revealed = line
+  mounted.mark?.clear()
+  mounted.mark = mounted.editor.createDecorationsCollection([
+    {
+      range: new mounted.monaco.Range(line, 1, line, 1),
+      options: { isWholeLine: true, className: "monaco-line-mark" },
+    },
+  ])
+  mounted.editor.setPosition({ lineNumber: line, column: 1 })
+  mounted.editor.revealLineInCenter(line)
+}
+
 /**
  * Registers a schema-aware completion provider once per language.
  *
@@ -174,7 +231,7 @@ export function CodeEditor({
 const activeSchema: Record<string, () => Record<string, string[]> | undefined> = {}
 
 function registerSchemaCompletions(
-  monaco: typeof import("monaco-editor"),
+  monaco: Monaco,
   language: string,
   ref: { current?: Record<string, string[]> },
 ) {

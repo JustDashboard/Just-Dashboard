@@ -149,3 +149,23 @@ func defaultAction(r *http.Request) string {
 	}
 	return strings.ToLower(r.Method) + ":" + strings.Join(keep, ".")
 }
+
+// AuditRead records a read the middleware would skip, for the few GETs that
+// send traffic somewhere the caller chose in a way worth a trail. It is
+// written before the read runs, so a probe that hangs is still on record.
+func AuditRead(log *audit.Logger, r *http.Request, action, target string) {
+	p := MustPrincipal(r)
+	log.Record(r.Context(), audit.Entry{
+		UserID:   p.UserID(),
+		Username: p.Username(),
+		Role:     string(p.Role),
+		IP:       ClientIP(r),
+		Actor:    principalKind(p),
+		Action:   action,
+		Target:   target,
+		Method:   r.Method,
+		Path:     r.URL.Path,
+		Status:   http.StatusOK,
+		Success:  true,
+	})
+}

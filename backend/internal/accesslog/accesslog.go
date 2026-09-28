@@ -12,8 +12,9 @@
 // Two formats arrive here, because the deployment section has two ingress
 // drivers. The Docker Caddy ingress writes structured JSON, which carries the
 // request duration. Managed host nginx writes the stock `combined` format,
-// which does not — so latency is an optional reading rather than a column of
-// zeros, and the page says which of the two it is looking at.
+// which does not, or the site builder's timed one, which is combined with an
+// rt= field after it — so latency is an optional reading rather than a column
+// of zeros, and the page says which of the two it is looking at.
 package accesslog
 
 import (
@@ -232,9 +233,10 @@ func header(headers map[string][]string, name string) string {
 
 const combinedTimeLayout = "02/Jan/2006:15:04:05 -0700"
 
-// parseCombined reads nginx's stock format:
+// parseCombined reads nginx's stock format, and the fields readTrailing knows
+// when a log_format appends them:
 //
-//	1.2.3.4 - - [19/Sep/2026:05:47:57 +0000] "GET /a?b=1 HTTP/1.1" 200 1234 "ref" "agent"
+//	1.2.3.4 - - [19/Sep/2026:05:47:57 +0000] "GET /a?b=1 HTTP/1.1" 200 1234 "ref" "agent" rt=0.012
 //
 // It is hand-scanned rather than matched with a regular expression because a
 // request log is the one file on the host that is read a million lines at a
@@ -307,7 +309,33 @@ func parseCombined(line string) (Entry, bool) {
 	if agent, ok := quoted(&rest); ok && agent != "-" {
 		entry.UserAgent = agent
 	}
+	readTrailing(&entry, rest)
 	return entry, true
+}
+
+// readTrailing reads what an operator appended to `combined` in a log_format
+// of their own: `rt=$request_time` gives the latency the stock format lacks,
+// and `host=$host` names the site on a log several share. A trailing field
+// this does not know, or one written `-`, is left alone rather than failing
+// the line, because the line up to it is still a served request.
+func readTrailing(entry *Entry, rest string) {
+	for _, field := range strings.Fields(rest) {
+		key, value, ok := strings.Cut(field, "=")
+		if !ok || value == "" || value == "-" {
+			continue
+		}
+		value = strings.Trim(value, `"`)
+		switch key {
+		case "rt":
+			if seconds, err := strconv.ParseFloat(value, 64); err == nil && seconds >= 0 {
+				entry.duration, entry.timed = seconds*1000, true
+			}
+		case "host":
+			if entry.Host == "" {
+				entry.Host = value
+			}
+		}
+	}
 }
 
 // quoted takes the next "..." run, advancing the cursor past it. Escaped

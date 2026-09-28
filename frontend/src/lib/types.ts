@@ -1718,51 +1718,22 @@ export type FileUsage = {
 
 export type FileChecksum = { path: string; algo: string; sum: string; size: number }
 
-export type VHost = {
-  name: string
-  kind: "nginx" | "caddy"
-  path: string
-  enabledPath?: string
-  enabled: boolean
-  serverNames: string[]
-  listen: string[]
-  upstreams: string[]
-  tls: boolean
-  certPath?: string
-  /** Where an nginx site writes its requests and errors, as its own page reads them. */
-  accessLogPath?: string
-  errorLogPath?: string
-  modified: string
-  size: number
-}
-
-export type Certificate = {
-  name: string
-  path: string
-  domains: string[]
-  issuer: string
-  notBefore: string
-  notAfter: string
-  daysLeft: number
-  expired: boolean
-  expiring: boolean
-  selfSigned: boolean
-  source: string
-  error?: string
-  /** The nginx sites whose ssl_certificate points at this file. */
-  usedBy: string[]
-}
-
-export type Listener = {
-  protocol: string
-  address: string
-  port: number
-  pid: number
-  process: string
-  cmdline?: string
-  user?: string
-  exposed: boolean
-}
+/*
+ * The proxy pages' types live under lib/proxy/, one file per area of those
+ * pages, so the areas change them without editing this file together. They
+ * are re-exported here so every import of @/lib/types keeps working.
+ */
+export type * from "./proxy/types-engine"
+export type * from "./proxy/types-sites"
+export type * from "./proxy/types-siteform"
+export type * from "./proxy/types-streams"
+export type * from "./proxy/types-ports"
+export type * from "./proxy/types-ports-history"
+export type * from "./proxy/types-certs"
+export type * from "./proxy/types-cert-tools"
+export type * from "./proxy/types-tls"
+export type * from "./proxy/types-insights"
+export type * from "./proxy/types-alerts"
 
 export type DbDriver =
   "postgres" | "mysql" | "sqlite" | "sqlserver" | "clickhouse" | "oracle" | "mongodb" | "redis"
@@ -2902,6 +2873,11 @@ export type DeploymentDomainRoute = {
   certificateDaysLeft?: number
   /** Who issued the covering certificate, read from the certificate itself. */
   certificateIssuer?: string
+  /**
+   * The copy a Docker Caddy release kept covers the name. Caddy renews what it
+   * serves and never the copy, so there are no days left to show.
+   */
+  certificateRenewedBy?: "caddy"
   deepLink?: string
   certificateLink?: string
   protected?: boolean
@@ -5977,235 +5953,6 @@ export type ProbeResult = {
   records?: string[]
   duration: string
   error?: string
-}
-
-/** The live TLS report: what a visitor actually gets, not what is on disk. */
-export type ProtocolResult = {
-  name: string
-  status: "offered" | "refused" | "unknown"
-  detail?: string
-}
-
-export type ChainLink = {
-  subject: string
-  issuer: string
-  notAfter: string
-  isCa: boolean
-  keyType?: string
-  keyBits?: number
-  selfIssued: boolean
-}
-
-export type HSTS = {
-  maxAge: number
-  includeSubDomains: boolean
-  preload: boolean
-  raw: string
-}
-
-export type HeaderCheck = {
-  name: string
-  value?: string
-  present: boolean
-  level: "important" | "optional"
-  detail: string
-}
-
-export type HTTPScan = {
-  statusCode: number
-  server?: string
-  plainRedirects: boolean
-  plainStatus?: number
-  plainLocation?: string
-  plainError?: string
-  hsts?: HSTS
-  headers: HeaderCheck[]
-}
-
-export type ScanFinding = {
-  id: string
-  level: "critical" | "warning" | "notice"
-  title: string
-  detail: string
-  advice?: string
-}
-
-export type TLSScan = {
-  domain: string
-  port: number
-  checkedAt: string
-  reachable: boolean
-  error?: string
-  grade: string
-  summary: string
-  negotiated?: string
-  cipherSuite?: string
-  protocols: ProtocolResult[]
-  certificate?: Certificate
-  chain: ChainLink[]
-  chainComplete: boolean
-  trusted: boolean
-  trustError?: string
-  nameMatches: boolean
-  keyType?: string
-  keyBits?: number
-  signatureAlgorithm?: string
-  fingerprint?: string
-  serial?: string
-  ocspStapled: boolean
-  http?: HTTPScan
-  findings: ScanFinding[]
-}
-
-export type DomainCheck = {
-  domain: string
-  addresses: string[]
-  hostAddresses: string[]
-  /**
-   * False on every VPS behind provider NAT — AWS, Google Cloud, Azure and
-   * Oracle all give the instance a private address and map a public one in
-   * front of it — where the comparison cannot be made at all. Rendered as
-   * "cannot tell", never as a mismatch.
-   */
-  hostAddressesKnown: boolean
-  pointsHere: boolean
-  behindProxy: boolean
-  summary: string
-  error?: string
-}
-
-export type CertbotCert = {
-  name: string
-  domains: string[]
-  expiry: string
-  daysLeft: number
-  valid: boolean
-  certPath?: string
-  keyPath?: string
-  serial?: string
-}
-
-export type CertbotState = {
-  available: boolean
-  version?: string
-  certs: CertbotCert[]
-  /** Whether anything is scheduled to renew these, and what. */
-  autoRenew: boolean
-  renewSource?: string
-  /** A certbot timer systemd knows but is not running: the thing to turn on. */
-  renewUnit?: string
-  raw?: string
-  error?: string
-}
-
-/** A site as the dashboard describes it, not as nginx does. */
-export type SiteLocation = {
-  path: string
-  upstream?: string
-  root?: string
-  webSockets: boolean
-}
-
-export type SiteSpec = {
-  managedAcme?: boolean
-  name: string
-  domains: string[]
-  kind: "proxy" | "static" | "redirect"
-  upstream?: string
-  root?: string
-  redirectTo?: string
-  permanent?: boolean
-  tls: boolean
-  certPath?: string
-  keyPath?: string
-  forceHttps: boolean
-  hsts: boolean
-  http2: boolean
-  webSockets: boolean
-  gzip: boolean
-  blockExploits: boolean
-  securityHeaders: boolean
-  clientMaxBody?: string
-  proxyTimeout?: number
-  allowFrom: string[]
-  denyFrom: string[]
-  basicAuthFile?: string
-  basicAuthRealm?: string
-  accessLog: boolean
-  /**
-   * Where the site's access_log and error_log write, read back from its file
-   * — never set by the form. Absent when it logs nowhere of its own: off,
-   * syslog, or nginx's shared log.
-   */
-  accessLogPath?: string
-  errorLogPath?: string
-  locations: SiteLocation[]
-  custom?: string
-}
-
-/**
- * The server's own config test. `note` qualifies a verdict nginx could not
- * actually give — a file outside its include tree passes `nginx -t` without
- * being read.
- */
-export type ProxyValidation = { valid: boolean; output: string; command: string; note?: string }
-
-export type SiteResult = {
-  name: string
-  path: string
-  content: string
-  warnings: string[]
-  validation?: ProxyValidation
-  enabled: boolean
-  reloaded: boolean
-  output?: string
-}
-
-/** A certbot DNS plugin — the only way to a wildcard, or past a CDN. */
-export type DNSProvider = {
-  key: string
-  name: string
-  plugin: string
-  installed: boolean
-  credentials: string
-  defaultWait: number
-  /** A token is saved for this provider. The token itself is never read back. */
-  hasCredentials: boolean
-}
-
-export type ImportResult = {
-  name: string
-  certPath: string
-  keyPath: string
-  certificate: Certificate
-  chainComplete: boolean
-  warnings: string[]
-}
-
-/** One forwarded port for something that does not speak HTTP. */
-export type StreamSpec = {
-  name: string
-  listen: number
-  protocol: "tcp" | "udp"
-  upstream: string
-  proxyProtocol: boolean
-  timeout?: number
-  allowFrom: string[]
-}
-
-export type StreamStatus = {
-  /** Whether nginx.conf actually pulls these in. Without it they are ignored. */
-  included: boolean
-  snippet: string
-  dir: string
-  streams: StreamSpec[]
-}
-
-/** An htpasswd file and who is in it. */
-export type AuthFile = {
-  name: string
-  path: string
-  users: string[]
 }
 
 /**

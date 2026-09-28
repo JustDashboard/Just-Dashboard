@@ -121,6 +121,16 @@ default is set once, an sshd hardening pass happens on the day the server is bui
 is the **version being installed** (`0.6`), not a fixed sentence: it names the object, as every other typed
 route does, and *which version* is what has to be read before pressing a button in the sidebar.
 
+Exporting a certificate's private key (`POST /certificates/export`, system.admin, phrase
+`export <name>`) is the one typed route that destroys nothing: a key that has left the host cannot be
+called back, only the certificate revoked, and it is exported rarely. The key is returned only after its
+public half is proven to be the listed certificate's leaf, so a site's `ssl_certificate_key` naming some
+other file cannot turn the route into a file reader. A PFX is built by `openssl pkcs12 -export` reading
+the key and chain from inherited pipes (`/dev/fd/3`, `/dev/fd/4`) and the password from `JD_PFX_PASS`
+(`-passout env:`), so neither is in an argv or on disk. The response is `Cache-Control: no-store`, and the
+audit entry holds the name, path and format — never the key or the password. The public parts
+(`GET /certificates/download`, read) are re-encoded from the file's `CERTIFICATE` blocks only.
+
 **Not typed — routine, recoverable, or both:** deleting rows, documents and Redis keys; dropping an index;
 dropping a database account, disabling an extension or deleting a dump on the Server and Backups pages
 (the account is recreated from its name and a new password, the extension is one `CREATE EXTENSION` away,
@@ -139,14 +149,38 @@ fail2ban jail; unbanning an address; stopping a running job; closing a terminal 
 and **removing a package without purging it** — undone by installing it again, where the /etc files
 somebody spent an afternoon on have no path back at all.
 
+Replacing an imported certificate is a write too (`POST /certificates/import` with `replace`): the
+pair it replaces stays beside the new one as `.bak`, and without `replace` a name in use is a 409 rather
+than an overwrite. `POST /certificates/import/inspect` writes nothing but is system.admin: with the
+operator's consent it fetches a missing intermediate from the address a certificate names, and that
+fetch refuses every non-public address, redirects included. Removing the renewal deploy hook (`DELETE /certificates/renewal-hook`) is destructive
+without a phrase — the same switch installs it again — and it never removes or replaces a file at that
+name that does not carry the dashboard's marker. Starting the renewal timer's service now
+(`POST /certificates/renewal/run`) is a system.admin write, not a destructive one: it is the run the
+timer makes twice a day anyway, and it waits for any certbot job on the page like every other. The DNS token an issuance carries is saved by its job, never before the request is
+accepted, so a refused request leaves no credential on disk. Pruning Caddy's release copies
+(`DELETE /certificates/evidence`) is destructive without a phrase: it accepts only `caddy-<24 hex>`
+names, so the join stays inside the imports directory, and deletes a copy only when, rechecked at that
+moment, no Caddy route serves its domain and no release in the deployment store names it.
+
+Discarding a waiting signing request (`DELETE /certificates/csr/{name}`) is destructive without a
+phrase: it deletes a key nothing uses yet, and the request is made again in a minute. Adding the
+authority's certificate to it replaces a certificate kept under the same name only with `replace`, as
+an import does. The local CA's root key is never read back or exported by any route; its root
+certificate is readable by every signed-in account, because it is made to be installed.
+
+The Certificate Transparency monitor (`/certificates/transparency`) is system.admin throughout and off
+by default: its report lists every domain the host serves, and switching it on sends those names to
+crt.sh, a fixed third party no caller can redirect.
+
 Editing a firewall rule is a write, not a destructive one, and is mounted accordingly: the replacement goes
 in before the original comes out, so there is no moment the rule is missing. Stopping a job is the same
 argument from the other side — interrupting is how you *avoid* a bad outcome, and a phrase in front of a
 stop button is one somebody types while something is going wrong.
 
 The 0.6.1 review narrowed the set: a prune sparing volumes (containers, networks and images come back from
-a registry or a compose file), deleting a proxy site, nginx stream or htpasswd file (each recreated from
-the same form), deleting a git branch (a pointer whose commits survive in the reflog and on the remote),
+a registry or a compose file), deleting a proxy site, nginx stream, htpasswd file or access list (each
+recreated from the same form; an access list is refused while a site includes it), deleting a git branch (a pointer whose commits survive in the reflog and on the remote),
 and ending an SSH session (a SIGHUP the operator reconnects past). All keep `s.destructive` and an ordinary
 confirm dialog. `compose down` was reviewed and **kept** — it is the one compose action that removes rather
 than stops containers, and on a host running several stacks typing the name guards against `down`-ing the

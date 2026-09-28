@@ -10,67 +10,103 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/go-chi/chi/v5"
 )
 
-// The site builder, the live TLS report and certbot.
-//
-// Mounted from mountProxyRoutes so the whole proxy surface stays readable in
-// one place, the same way the Docker write surface lives in its own file but
-// is mounted from mountDockerRoutes.
-func (s *Server) mountSiteRoutes(r chi.Router) {
-	// Stream forwarding is a sibling of the site builder rather than part of
-	// it: nginx's stream block is a top-level context, not something a server
-	// file can reach, and pretending otherwise in the API would invite a
-	// stream to be written where nginx never reads it.
-	r.Route("/proxy/streams", func(r chi.Router) {
-		r.Method(http.MethodGet, "/", s.handle(s.handleStreamList))
-		r.Group(func(r chi.Router) {
-			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
-			r.Method(http.MethodPost, "/preview", s.handle(s.handleStreamPreview))
-			r.Method(http.MethodPost, "/", s.handle(s.handleStreamApply))
-			s.destructive(r, func(r chi.Router) {
-				r.Method(http.MethodDelete, "/{name}", s.handle(s.handleStreamDelete))
-			})
-		})
-	})
-
-	// Password files for the site form's basic-auth option. Behind
-	// system.admin throughout: the listing names who may reach a protected
-	// site, and setting one is handing out access to it.
-	r.Route("/proxy/auth-files", func(r chi.Router) {
+// mountSiteBuilderRoutes is the site form: read a site back into it, preview
+// what it would write, and apply or delete the result.
+func (s *Server) mountSiteBuilderRoutes(r chi.Router) {
+	r.Method(http.MethodGet, "/{name}", s.handle(s.handleSiteSpec))
+	// A site's requests, read as a deployment's are: the window, the live
+	// tail and the export over the file its access_log names
+	// (handlers_proxy_site_requests.go). Reads, like the site itself.
+	r.Method(http.MethodGet, "/{name}/requests", s.handle(s.handleSiteRequests))
+	r.Method(http.MethodGet, "/{name}/requests/stream", s.handle(s.handleSiteRequestStream))
+	r.Method(http.MethodGet, "/{name}/requests/export", s.handle(s.handleSiteRequestExport))
+	// A page is what every visitor to the site may be shown, so reading
+	// one needs no more than reading the site.
+	r.Method(http.MethodGet, "/{name}/pages/{page}", s.handle(s.handleSitePageGet))
+	// The size of the cache and where it is; nothing of what is in it.
+	r.Method(http.MethodGet, "/{name}/cache", s.handle(s.handleSiteCacheGet))
+	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
-		r.Method(http.MethodGet, "/", s.handle(s.handleAuthFileList))
-		r.Method(http.MethodPost, "/", s.handle(s.handleAuthUserSet))
+		// Preview renders and touches nothing, but it lives inside the
+		// admin group because the form that calls it is admin-only and a
+		// separate gate would be a claim about a boundary that is not
+		// there.
+		r.Method(http.MethodPost, "/preview", s.handle(s.handleSitePreview))
+		// Preflight connects to the spec's upstreams and resolves its
+		// domains: outbound traffic to targets the caller chose.
+		r.Method(http.MethodPost, "/preflight", s.handle(s.handleSitePreflight))
+		r.Method(http.MethodPost, "/", s.handle(s.handleSiteApply))
+		r.Method(http.MethodPut, "/{name}/pages/{page}", s.handle(s.handleSitePagePut))
 		s.destructive(r, func(r chi.Router) {
-			r.Method(http.MethodDelete, "/{file}", s.handle(s.handleAuthFileDelete))
-			r.Method(http.MethodDelete, "/{file}/users/{user}", s.handle(s.handleAuthUserRemove))
+			r.Method(http.MethodDelete, "/{name}", s.handle(s.handleSiteDelete))
+			// Maintenance takes the site away from its visitors, the
+			// same as disabling it, and sits behind the same gate.
+			r.Method(http.MethodPost, "/{name}/maintenance", s.handle(s.handleSiteMaintenance))
+			// Emptying the cache sends every request to the application
+			// until it fills again, which can be more than it can take.
+			r.Method(http.MethodDelete, "/{name}/cache", s.handle(s.handleSiteCachePurge))
 		})
 	})
+}
 
-	r.Route("/proxy/sites", func(r chi.Router) {
-		r.Method(http.MethodGet, "/{name}", s.handle(s.handleSiteSpec))
-		// A site's requests, read as a deployment's are: the window, the
-		// live tail and the export over the file its access_log names
-		// (handlers_proxy_site_requests.go). Reads, like the site itself.
-		r.Method(http.MethodGet, "/{name}/requests", s.handle(s.handleSiteRequests))
-		r.Method(http.MethodGet, "/{name}/requests/stream", s.handle(s.handleSiteRequestStream))
-		r.Method(http.MethodGet, "/{name}/requests/export", s.handle(s.handleSiteRequestExport))
-		r.Group(func(r chi.Router) {
-			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
-			// Preview renders and touches nothing, but it lives inside the
-			// admin group because the form that calls it is admin-only and a
-			// separate gate would be a claim about a boundary that is not
-			// there.
-			r.Method(http.MethodPost, "/preview", s.handle(s.handleSitePreview))
-			r.Method(http.MethodPost, "/", s.handle(s.handleSiteApply))
-			s.destructive(r, func(r chi.Router) {
-				r.Method(http.MethodDelete, "/{name}", s.handle(s.handleSiteDelete))
-			})
-		})
-	})
+// mountPHPSocketRoutes lists the PHP-FPM sockets a PHP site can hand its
+// scripts to. Admin-only because it runs a command on the host, for the form
+// only an admin can use.
+func (s *Server) mountPHPSocketRoutes(r chi.Router) {
+	r.With(httpx.RequireCapability(auth.CapSystemAdmin)).
+		Method(http.MethodGet, "/", s.handle(s.handlePHPSockets))
+}
+
+func (s *Server) handlePHPSockets(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 10*time.Second)
+	defer cancel()
+	sockets, err := proxysvc.ListPHPSockets(ctx)
+	if err != nil {
+		return httpx.Err(http.StatusBadGateway, "php_sockets_failed", err.Error())
+	}
+	httpx.JSON(w, http.StatusOK, sockets)
+	return nil
+}
+
+// mountRealIPRoutes is the Cloudflare range list sites trust for the
+// visitor's address. The ranges are public, so reading them needs no more
+// than a sign-in; refreshing downloads, writes and reloads.
+func (s *Server) mountRealIPRoutes(r chi.Router) {
+	r.Method(http.MethodGet, "/cloudflare", s.handle(s.handleCloudflareRanges))
+	r.With(httpx.RequireCapability(auth.CapSystemAdmin)).
+		Method(http.MethodPost, "/cloudflare/refresh", s.handle(s.handleCloudflareRefresh))
+}
+
+func (s *Server) handleCloudflareRanges(w http.ResponseWriter, r *http.Request) error {
+	ranges, err := s.modules.proxy.ReadCloudflareRanges()
+	if err != nil {
+		return mapProxyError(err)
+	}
+	httpx.JSON(w, http.StatusOK, ranges)
+	return nil
+}
+
+func (s *Server) handleCloudflareRefresh(w http.ResponseWriter, r *http.Request) error {
+	httpx.SetAudit(r, "proxy.realip.refresh", "cloudflare", nil)
+	ctx, cancel := timeoutCtx(r, 60*time.Second)
+	defer cancel()
+	res, err := s.modules.proxy.RefreshCloudflareRanges(ctx)
+	if errors.Is(err, proxysvc.ErrInvalidConf) {
+		return httpx.Err(http.StatusUnprocessableEntity, "invalid_config", res.Validation.Output)
+	}
+	if errors.Is(err, proxysvc.ErrUnsafePath) {
+		return mapProxyError(err)
+	}
+	if err != nil {
+		return httpx.Err(http.StatusBadGateway, "refresh_failed", err.Error())
+	}
+	httpx.SetAudit(r, "proxy.realip.refresh", "cloudflare", fmt.Sprintf("%d ranges", len(res.Ranges.Ranges)))
+	httpx.JSON(w, http.StatusOK, res)
+	return nil
 }
 
 func (s *Server) handleSiteSpec(w http.ResponseWriter, r *http.Request) error {
@@ -78,43 +114,128 @@ func (s *Server) handleSiteSpec(w http.ResponseWriter, r *http.Request) error {
 	if name == "" || strings.ContainsAny(name, "/\\") {
 		return httpx.BadRequest("invalid site name")
 	}
-	content, err := s.modules.proxy.SiteConfig(name)
+	// The spec carries where the site logs, which is what its page reads its
+	// requests and errors from.
+	spec, managed, content, err := s.modules.proxy.ReadSiteSpec(name)
 	if err != nil {
 		return httpx.ErrNotFound
 	}
-	// The spec carries where the site logs, which is what its page reads its
-	// requests and errors from.
-	spec, managed := proxysvc.ParseSiteSpec(name, content)
-	httpx.JSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"spec": spec, "managed": managed, "content": content,
 		"warnings": proxysvc.SpecWarnings(spec),
-	})
+		// Which version of the file this is: the form keeps it with a draft,
+		// keeps the draft over a trip away and back while the file is still
+		// this version, and sends it with the save, which is refused if the
+		// file changed in between.
+		"digest": proxysvc.ContentDigest(content),
+	}
+	path := name
+	// Whether nginx reads the site, so the form offers to keep a disabled
+	// one disabled or enable it, instead of a "Save and reload" that did
+	// neither — whether it is in conf.d, where enabling it is renaming
+	// the file, which a save does not do — and whether nginx serves a file
+	// of its own under the site's name instead, which a save does not reach.
+	if file, err := s.modules.proxy.SiteFile(spec.Name); err == nil {
+		out["enabled"], out["confd"], out["servedCopy"] = file.Enabled, file.Confd, file.ServedCopy
+		path = file.Path
+	}
+	// What a save of the file as the form reads it would drop: lines added
+	// by hand that the form has no field for. Left out when the form cannot
+	// write the file at all, which its preview says.
+	if dropped, err := s.modules.proxy.SiteDrift(spec.Name, path, content, nil); err == nil {
+		out["dropped"], out["lossless"] = dropped, len(dropped) == 0
+	}
+	httpx.JSON(w, http.StatusOK, out)
 	return nil
 }
 
 type siteRequest struct {
-	Spec      proxysvc.SiteSpec `json:"spec"`
-	Enable    bool              `json:"enable"`
-	Reload    bool              `json:"reload"`
-	Overwrite bool              `json:"overwrite"`
+	Spec          proxysvc.SiteSpec `json:"spec"`
+	Enable        siteEnable        `json:"enable"`
+	Reload        bool              `json:"reload"`
+	Overwrite     bool              `json:"overwrite"`
+	AllowConflict bool              `json:"allowConflict"`
+	// BaseDigest is the digest of the file the form read, which the save
+	// refuses to write over once the file has changed.
+	BaseDigest string `json:"baseDigest"`
+}
+
+// siteEnable is what a save does to the site's sites-enabled link: "enable"
+// links it, "keep" leaves it as it was. The booleans are the older spelling
+// of the same two, and false always meant keep — it declined to make a link,
+// it never removed one.
+type siteEnable bool
+
+func (e *siteEnable) UnmarshalJSON(raw []byte) error {
+	switch string(raw) {
+	case "true", `"enable"`:
+		*e = true
+	case "false", `"keep"`:
+		*e = false
+	default:
+		return errors.New(`enable must be "enable" or "keep"`)
+	}
+	return nil
 }
 
 // handleSitePreview shows the config a spec would produce, live, as the form
 // is filled in. Rendering on the server is what keeps one implementation of
 // "what does this spec mean"; a second one in the browser would drift, and the
 // one that mattered would be the one nobody was reading.
+// handleSitePreflight answers what nginx -t cannot: whether the files the spec
+// names are there and usable, whether its upstreams answer and where its
+// domains point. It reads and connects; it writes nothing.
+func (s *Server) handleSitePreflight(w http.ResponseWriter, r *http.Request) error {
+	var req struct {
+		Spec proxysvc.SiteSpec `json:"spec"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	httpx.JSON(w, http.StatusOK, s.modules.proxy.SitePreflight(ctx, &req.Spec))
+	return nil
+}
+
 func (s *Server) handleSitePreview(w http.ResponseWriter, r *http.Request) error {
 	var req siteRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
+	s.modules.proxy.SetPagesDir(&req.Spec)
+	s.modules.proxy.SetRealIPDir(&req.Spec)
+	s.modules.proxy.SetAccessListDir(&req.Spec)
 	content, err := proxysvc.RenderNginx(&req.Spec)
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{
-		"content": content, "warnings": proxysvc.SpecWarnings(&req.Spec),
-	})
+	out := map[string]any{"content": content, "warnings": proxysvc.SpecWarnings(&req.Spec)}
+	// Where the save would write, and whether a file or a sites-enabled link
+	// holds the name already: a new site's name follows its domain, so the
+	// form says which file that is, and that it belongs to another site,
+	// before the save refuses it.
+	if file, err := s.modules.proxy.SiteFile(req.Spec.Name); err == nil {
+		out["path"], out["exists"], out["enabled"], out["confd"] = file.Path, file.Exists, file.Enabled, file.Confd
+		out["servedCopy"] = file.ServedCopy
+		if file.EnabledElsewhere != "" {
+			out["enabledElsewhere"] = file.EnabledElsewhere
+		}
+		// The file there now, for an edit: which version it is, so a form
+		// open while it changes finds out before it saves, and what saving
+		// this spec over it drops of what the form cannot hold — less what
+		// the spec now carries itself, such as lines moved into its extra
+		// configuration.
+		if file.Exists {
+			if content, err := s.modules.proxy.ReadConfig(file.Path); err == nil {
+				out["digest"] = proxysvc.ContentDigest(content)
+				if dropped, err := s.modules.proxy.SiteDrift(req.Spec.Name, file.Path, content, &req.Spec); err == nil {
+					out["dropped"] = dropped
+				}
+			}
+		}
+	}
+	httpx.JSON(w, http.StatusOK, out)
 	return nil
 }
 
@@ -125,18 +246,47 @@ func (s *Server) handleSiteApply(w http.ResponseWriter, r *http.Request) error {
 	}
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
-	res, err := s.modules.proxy.ApplySite(ctx, &req.Spec, req.Enable, req.Reload, req.Overwrite)
+	res, err := s.modules.proxy.SaveSite(ctx, &req.Spec, proxysvc.SiteSave{
+		Enable: bool(req.Enable), Reload: req.Reload, Overwrite: req.Overwrite,
+		AllowConflict: req.AllowConflict, BaseDigest: req.BaseDigest,
+	})
 	if err != nil {
-		if errors.Is(err, proxysvc.ErrInvalidConf) {
+		switch {
+		case errors.Is(err, proxysvc.ErrSiteChanged):
+			httpx.SetAudit(r, "proxy.site.apply", req.Spec.Name, map[string]any{"result": "changed_on_disk"})
+			return httpx.Err(http.StatusConflict, "site_changed", err.Error())
+		case errors.Is(err, proxysvc.ErrInvalidConf):
 			httpx.SetAudit(r, "proxy.site.apply", req.Spec.Name, map[string]any{"result": "rejected"})
 			return httpx.Err(http.StatusUnprocessableEntity, "invalid_config", res.Validation.Output)
+		case errors.Is(err, proxysvc.ErrServerNameConflict):
+			httpx.SetAudit(r, "proxy.site.apply", req.Spec.Name, map[string]any{
+				"result": "name_conflict", "conflicts": res.Conflicts,
+			})
+			return httpx.Err(http.StatusConflict, "name_conflict", proxysvc.ConflictSummary(res.Conflicts))
 		}
 		return mapProxyError(err)
 	}
-	httpx.SetAudit(r, "proxy.site.apply", req.Spec.Name, map[string]any{
+	detail := map[string]any{
 		"domains": req.Spec.Domains, "kind": req.Spec.Kind,
-		"tls": req.Spec.TLS, "reloaded": res.Reloaded,
-	})
+		"tls": req.Spec.TLS, "enabled": res.Enabled, "reloaded": res.Reloaded,
+	}
+	if res.ReloadError != "" {
+		detail["reloadError"] = res.ReloadError
+	}
+	if len(res.Conflicts) > 0 {
+		detail["conflicts"] = res.Conflicts
+	}
+	if res.TestedAsEnabled {
+		detail["testedAsEnabled"] = true
+		detail["valid"] = res.Validation.Valid
+	}
+	if res.ServedCopy {
+		detail["servedCopy"] = true
+	}
+	if res.Backup != "" {
+		detail["backup"] = res.Backup
+	}
+	httpx.SetAudit(r, "proxy.site.apply", req.Spec.Name, detail)
 	httpx.JSON(w, http.StatusOK, res)
 	return nil
 }
@@ -158,327 +308,153 @@ func (s *Server) handleSiteDelete(w http.ResponseWriter, r *http.Request) error 
 	return nil
 }
 
-// handleTLSScan is the live report: protocol versions, the chain as presented,
-// and the headers the site actually sends. Everything else on this page reads
-// files, and a file is not what a visitor gets.
-func (s *Server) handleTLSScan(w http.ResponseWriter, r *http.Request) error {
-	domain := r.URL.Query().Get("domain")
-	if domain == "" {
-		return httpx.BadRequest("domain query parameter is required")
-	}
-	ctx, cancel := timeoutCtx(r, 60*time.Second)
-	defer cancel()
-	scan := proxysvc.ScanTLS(ctx, domain, atoiDefault(r.URL.Query().Get("port"), 443))
-	httpx.JSON(w, http.StatusOK, scan)
-	return nil
-}
-
-func (s *Server) handleDomainDNS(w http.ResponseWriter, r *http.Request) error {
-	domain := r.URL.Query().Get("domain")
-	if domain == "" {
-		return httpx.BadRequest("domain query parameter is required")
-	}
-	ctx, cancel := timeoutCtx(r, 20*time.Second)
-	defer cancel()
-	httpx.JSON(w, http.StatusOK, proxysvc.CheckDomainDNS(ctx, domain))
-	return nil
-}
-
-// handleCertIssue starts an issuance and hands back the job to watch.
-//
-// The validation is synchronous and the command is not. A bad email, an
-// unknown DNS provider or a wildcard over an HTTP challenge are all mistakes
-// the operator should hear about in the response to their own click — not a
-// minute later as a job that failed. Everything past that point is an ACME
-// exchange with a certificate authority, which is exactly the kind of wait
-// that wants a console rather than a spinner.
-func (s *Server) handleCertIssue(w http.ResponseWriter, r *http.Request) error {
-	var req proxysvc.IssueRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	args, err := s.modules.proxy.IssueArgs(req)
-	if err != nil {
-		return httpx.BadRequest("%v", err)
-	}
-	target := strings.Join(req.Domains, ", ")
-	httpx.SetAudit(r, "certificates.issue", target,
-		map[string]any{"method": req.Method, "staging": req.Staging, "streamed": true})
-
-	title := "Issuing a certificate for " + target
-	if req.Staging {
-		title = "Test issuance for " + target
-	}
-	s.startJob(w, r, jobs.Spec{
-		Kind: "certbot.issue", Title: title, Target: target, Timeout: 10 * time.Minute,
-	}, func(ctx context.Context, out jobs.Emitter) error {
-		if req.Staging {
-			out.Status("Using Let's Encrypt's staging authority: the certificate will not be trusted by browsers, and this run does not count against the rate limit.")
-		}
-		return certbotJob(ctx, out, args)
-	})
-	return nil
-}
-
-// certbotJob runs certbot and turns a non-zero exit into an error, so a failed
-// order reads as a failed job rather than as a job that succeeded while
-// printing a problem.
-func certbotJob(ctx context.Context, out jobs.Emitter, args []string) error {
-	environment, err := proxysvc.CertbotEnvironment()
-	if err != nil {
-		return err
-	}
-	code, err := out.RunEnv(ctx, environment, "certbot", args...)
-	if err != nil {
-		return err
-	}
-	if code != 0 {
-		return fmt.Errorf("certbot exited %d — the last lines above say why", code)
-	}
-	return nil
-}
-
-type renewRequest struct {
-	Name   string `json:"name"`
-	DryRun bool   `json:"dryRun"`
-	Force  bool   `json:"force"`
-}
-
-func (s *Server) handleCertRenew(w http.ResponseWriter, r *http.Request) error {
-	var req renewRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	args, err := s.modules.proxy.RenewArgs(req.Name, req.DryRun, req.Force)
-	if err != nil {
-		return httpx.BadRequest("%v", err)
-	}
-	target := req.Name
-	if target == "" {
-		target = "every certificate due"
-	}
-	httpx.SetAudit(r, "certificates.renew", target,
-		map[string]any{"dryRun": req.DryRun, "force": req.Force, "streamed": true})
-
-	title := "Renewing " + target
-	if req.DryRun {
-		title = "Dry run: renewing " + target
-	}
-	s.startJob(w, r, jobs.Spec{
-		Kind: "certbot.renew", Title: title, Target: target, Timeout: 10 * time.Minute,
-	}, func(ctx context.Context, out jobs.Emitter) error {
-		if req.DryRun {
-			out.Status("A dry run performs the whole exchange against the staging authority and changes nothing on disk.")
-		}
-		if req.Force {
-			out.Status("Forced renewal spends one of the five duplicate certificates Let's Encrypt allows per week.")
-		}
-		return certbotJob(ctx, out, args)
-	})
-	return nil
-}
-
-type revokeRequest struct {
-	Name string `json:"name"`
-}
-
-// handleCertRevoke is irreversible in the way that matters: the authority
-// records the certificate as untrusted and there is no undo, so every client
-// holding it starts refusing the site.
-func (s *Server) handleCertRevoke(w http.ResponseWriter, r *http.Request) error {
-	var req revokeRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	if err := httpx.RequireTypedConfirmation(w, r, "revoke "+req.Name); err != nil {
-		return err
-	}
-	args, err := s.modules.proxy.RevokeArgs(req.Name)
-	if err != nil {
-		return httpx.BadRequest("%v", err)
-	}
-	httpx.SetAudit(r, "certificates.revoke", req.Name, map[string]any{"streamed": true})
-	s.startJob(w, r, jobs.Spec{
-		Kind: "certbot.revoke", Title: "Revoking " + req.Name, Target: req.Name,
-		Timeout: 5 * time.Minute,
-	}, func(ctx context.Context, out jobs.Emitter) error {
-		return certbotJob(ctx, out, args)
-	})
-	return nil
-}
-
-func (s *Server) handleStreamList(w http.ResponseWriter, r *http.Request) error {
-	httpx.JSON(w, http.StatusOK, s.modules.proxy.Streams(r.Context()))
-	return nil
-}
-
-type streamRequest struct {
-	Spec      proxysvc.StreamSpec `json:"spec"`
-	Reload    bool                `json:"reload"`
-	Overwrite bool                `json:"overwrite"`
-}
-
-func (s *Server) handleStreamPreview(w http.ResponseWriter, r *http.Request) error {
-	var req streamRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	content, err := proxysvc.RenderStream(&req.Spec)
-	if err != nil {
-		return httpx.BadRequest("%v", err)
-	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"content": content})
-	return nil
-}
-
-func (s *Server) handleStreamApply(w http.ResponseWriter, r *http.Request) error {
-	var req streamRequest
+// handleSiteMaintenance turns a site's maintenance page on or off: the site
+// saved as the form reads it with the switch changed, tested and reloaded.
+func (s *Server) handleSiteMaintenance(w http.ResponseWriter, r *http.Request) error {
+	name := chi.URLParam(r, "name")
+	var req proxysvc.MaintenanceChange
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
-	res, err := s.modules.proxy.ApplyStream(ctx, &req.Spec, req.Reload, req.Overwrite)
+	res, err := s.modules.proxy.SetMaintenance(ctx, name, req)
+	detail := map[string]any{"on": req.On}
+	if req.RetryAfter != nil {
+		detail["retryAfter"] = *req.RetryAfter
+	}
+	if req.BypassFrom != nil {
+		detail["bypassFrom"] = *req.BypassFrom
+	}
 	if err != nil {
-		if errors.Is(err, proxysvc.ErrInvalidConf) {
-			httpx.SetAudit(r, "proxy.stream.apply", req.Spec.Name, map[string]any{"result": "rejected"})
+		switch {
+		case errors.Is(err, proxysvc.ErrSiteChanged):
+			detail["result"] = "changed_on_disk"
+			httpx.SetAudit(r, "proxy.site.maintenance", name, detail)
+			return httpx.Err(http.StatusConflict, "site_changed", err.Error())
+		case errors.Is(err, proxysvc.ErrNotManaged):
+			detail["result"] = "not_managed"
+			httpx.SetAudit(r, "proxy.site.maintenance", name, detail)
+			return httpx.Err(http.StatusConflict, "not_managed", err.Error())
+		case errors.Is(err, proxysvc.ErrInvalidConf):
+			detail["result"] = "rejected"
+			httpx.SetAudit(r, "proxy.site.maintenance", name, detail)
 			return httpx.Err(http.StatusUnprocessableEntity, "invalid_config", res.Validation.Output)
 		}
+		detail["result"] = "failed"
+		httpx.SetAudit(r, "proxy.site.maintenance", name, detail)
 		return mapProxyError(err)
 	}
-	httpx.SetAudit(r, "proxy.stream.apply", req.Spec.Name, map[string]any{
-		"listen": req.Spec.Listen, "protocol": req.Spec.Protocol, "upstream": req.Spec.Upstream,
-	})
+	detail["reloaded"] = res.Reloaded
+	if res.ReloadError != "" {
+		detail["reloadError"] = res.ReloadError
+	}
+	httpx.SetAudit(r, "proxy.site.maintenance", name, detail)
 	httpx.JSON(w, http.StatusOK, res)
 	return nil
 }
 
-func (s *Server) handleStreamDelete(w http.ResponseWriter, r *http.Request) error {
+func (s *Server) handleSiteCacheGet(w http.ResponseWriter, r *http.Request) error {
+	usage, err := s.modules.proxy.SiteCacheUsage(chi.URLParam(r, "name"))
+	if err != nil {
+		return mapProxyError(err)
+	}
+	httpx.JSON(w, http.StatusOK, usage)
+	return nil
+}
+
+// handleSiteCachePurge empties a site's proxy cache and answers with what it
+// held.
+func (s *Server) handleSiteCachePurge(w http.ResponseWriter, r *http.Request) error {
 	name := chi.URLParam(r, "name")
-	if err := s.modules.proxy.DeleteStream(r.Context(), name); err != nil {
-		return httpx.BadRequest("%v", err)
+	usage, err := s.modules.proxy.PurgeSiteCache(name)
+	if err != nil {
+		httpx.SetAudit(r, "proxy.site.cache.purge", name, map[string]any{"result": "failed"})
+		return mapProxyError(err)
 	}
-	reload, reloadErr := s.modules.proxy.Reload(r.Context(), proxysvc.KindNginx)
-	httpx.SetAudit(r, "proxy.stream.delete", name, map[string]any{"reloaded": reloadErr == nil})
-	out := map[string]any{"name": name, "reload": reload}
-	if reloadErr != nil {
-		out["reloadError"] = reloadErr.Error()
-	}
-	httpx.JSON(w, http.StatusOK, out)
+	httpx.SetAudit(r, "proxy.site.cache.purge", name, map[string]any{
+		"bytes": usage.Bytes, "files": usage.Files,
+	})
+	httpx.JSON(w, http.StatusOK, usage)
 	return nil
 }
 
-func (s *Server) handleAuthFileList(w http.ResponseWriter, r *http.Request) error {
-	httpx.JSON(w, http.StatusOK, s.modules.proxy.ListAuthFiles())
+func (s *Server) handleSitePageGet(w http.ResponseWriter, r *http.Request) error {
+	page, err := s.modules.proxy.ReadSitePage(chi.URLParam(r, "name"), chi.URLParam(r, "page"))
+	if err != nil {
+		return mapProxyError(err)
+	}
+	httpx.JSON(w, http.StatusOK, page)
 	return nil
 }
 
-type authUserRequest struct {
-	File     string `json:"file"`
-	User     string `json:"user"`
-	Password string `json:"password"`
-}
-
-// handleAuthUserSet adds or replaces one entry. The password is hashed in
-// process and never becomes an argument to anything — /proc/*/cmdline is
-// world-readable, which is the same reason dbx keeps database passwords out of
-// argv.
-func (s *Server) handleAuthUserSet(w http.ResponseWriter, r *http.Request) error {
-	var req authUserRequest
+func (s *Server) handleSitePagePut(w http.ResponseWriter, r *http.Request) error {
+	name, pageName := chi.URLParam(r, "name"), chi.URLParam(r, "page")
+	var req struct {
+		Content string `json:"content"`
+	}
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	file, err := s.modules.proxy.SetAuthUser(req.File, req.User, req.Password)
+	page, err := s.modules.proxy.WriteSitePage(name, pageName, req.Content)
+	if err != nil {
+		httpx.SetAudit(r, "proxy.site.page", name, map[string]any{"page": pageName, "result": "failed"})
+		return mapProxyError(err)
+	}
+	httpx.SetAudit(r, "proxy.site.page", name, map[string]any{"page": pageName, "bytes": len(req.Content)})
+	httpx.JSON(w, http.StatusOK, page)
+	return nil
+}
+
+// certbotEmailKey is the setting holding the contact email last issued with,
+// so the site form does not ask for it on every certificate.
+const certbotEmailKey = "certbot.email"
+
+// mountSiteCertificateRoutes is the site form's certificate picker. It sits
+// under /certificates rather than /proxy/sites, where a static path would take
+// the address of a site that happened to share its name.
+func (s *Server) mountSiteCertificateRoutes(r chi.Router) {
+	r.Group(func(r chi.Router) {
+		// Admin only: the answer carries the remembered contact email, and
+		// the form that asks is admin-only.
+		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
+		r.Method(http.MethodGet, "/covering", s.handle(s.handleSiteCertificates))
+	})
+}
+
+// handleSiteCertificates answers GET /certificates/covering?domains=a,b with
+// the certificates that cover every one of the names, each with its key, and
+// the email the last issuance used.
+func (s *Server) handleSiteCertificates(w http.ResponseWriter, r *http.Request) error {
+	domains := strings.FieldsFunc(r.URL.Query().Get("domains"), func(c rune) bool {
+		return c == ',' || c == ' '
+	})
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	certificates, err := s.modules.proxy.SiteCertificates(ctx, domains)
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
-	// The password is deliberately absent from the audit detail.
-	httpx.SetAudit(r, "proxy.auth.set", req.File, map[string]any{"user": req.User})
-	httpx.JSON(w, http.StatusOK, file)
-	return nil
-}
-
-func (s *Server) handleAuthUserRemove(w http.ResponseWriter, r *http.Request) error {
-	file, user := chi.URLParam(r, "file"), chi.URLParam(r, "user")
-	updated, err := s.modules.proxy.RemoveAuthUser(file, user)
+	email, _, err := s.Store.Setting(ctx, certbotEmailKey)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.Internal(err)
 	}
-	httpx.SetAudit(r, "proxy.auth.remove", file, map[string]any{"user": user})
-	httpx.JSON(w, http.StatusOK, updated)
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"email": email, "certificates": certificates, "webRoot": proxysvc.SiteACMEWebroot,
+	})
 	return nil
 }
 
-func (s *Server) handleAuthFileDelete(w http.ResponseWriter, r *http.Request) error {
-	file := chi.URLParam(r, "file")
-	if err := s.modules.proxy.DeleteAuthFile(file); err != nil {
-		return httpx.BadRequest("%v", err)
+// rememberCertbotEmail keeps the contact email an issuance was started with.
+// A failure to keep it costs the operator retyping it next time, which is no
+// reason to refuse the issuance.
+func (s *Server) rememberCertbotEmail(ctx context.Context, email string) {
+	// An issue may now run without an email when certbot already holds an
+	// account; that must not forget the address remembered earlier.
+	if email == "" {
+		return
 	}
-	httpx.SetAudit(r, "proxy.auth.delete", file, nil)
-	httpx.NoContent(w)
-	return nil
-}
-
-func (s *Server) handleDNSProviders(w http.ResponseWriter, r *http.Request) error {
-	httpx.JSON(w, http.StatusOK, s.modules.proxy.ListDNSProviders())
-	return nil
-}
-
-type dnsCredentialsRequest struct {
-	Provider    string `json:"provider"`
-	Credentials string `json:"credentials"`
-}
-
-// handleDNSCredentials stores an API token for a DNS plugin. The token is a
-// credential for somebody's whole DNS zone, so it is written 0600 into
-// certbot's own tree and never read back out — the UI shows whether one exists,
-// not what it is.
-func (s *Server) handleDNSCredentials(w http.ResponseWriter, r *http.Request) error {
-	var req dnsCredentialsRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
+	if err := s.Store.SetSetting(ctx, certbotEmailKey, email); err != nil {
+		s.Log.Warn("could not remember the certbot email", "err", err)
 	}
-	path, err := proxysvc.WriteDNSCredentials(req.Provider, req.Credentials)
-	if err != nil {
-		return httpx.BadRequest("%v", err)
-	}
-	httpx.SetAudit(r, "certificates.dns.credentials", req.Provider, map[string]any{"file": path})
-	httpx.JSON(w, http.StatusOK, map[string]any{"provider": req.Provider, "saved": true})
-	return nil
-}
-
-func (s *Server) handleDNSCredentialsRemove(w http.ResponseWriter, r *http.Request) error {
-	provider := chi.URLParam(r, "provider")
-	if err := proxysvc.RemoveDNSCredentials(provider); err != nil {
-		return httpx.BadRequest("%v", err)
-	}
-	httpx.SetAudit(r, "certificates.dns.credentials.remove", provider, nil)
-	httpx.NoContent(w)
-	return nil
-}
-
-type certImportRequest struct {
-	Name        string `json:"name"`
-	Certificate string `json:"certificate"`
-	Key         string `json:"key"`
-}
-
-// handleCertImport takes a certificate somebody bought or was given.
-//
-// The key is checked against the certificate before either is written: a
-// mismatched pair is accepted by every text editor and refused by nginx at
-// reload, and finding that out on a live server is the expensive way.
-func (s *Server) handleCertImport(w http.ResponseWriter, r *http.Request) error {
-	var req certImportRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	res, err := proxysvc.ImportCertificate(req.Name, req.Certificate, req.Key)
-	if err != nil {
-		return httpx.BadRequest("%v", err)
-	}
-	httpx.SetAudit(r, "certificates.import", req.Name,
-		map[string]any{"domains": res.Cert.Domains, "expires": res.Cert.NotAfter})
-	httpx.JSON(w, http.StatusOK, res)
-	return nil
 }

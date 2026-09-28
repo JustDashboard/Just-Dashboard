@@ -85,6 +85,11 @@ export class ApiError extends Error {
   raw?: string
   retryable?: boolean
   field?: string
+  /**
+   * The whole parsed body, for a route that answers a refusal with more than
+   * the error: a start the config test turned down carries the test beside it.
+   */
+  body?: unknown
 
   constructor(
     status: number,
@@ -92,7 +97,7 @@ export class ApiError extends Error {
     message: string,
     phrase?: string,
     detail?: Partial<
-      Pick<ApiError, "resource" | "operation" | "reason" | "raw" | "retryable" | "field">
+      Pick<ApiError, "resource" | "operation" | "reason" | "raw" | "retryable" | "field" | "body">
     >,
   ) {
     super(message)
@@ -223,6 +228,7 @@ async function readResponse<T>(res: Response): Promise<T> {
         raw: body?.error?.raw,
         retryable: body?.error?.retryable,
         field: body?.error?.field,
+        body: parsed,
       },
     )
   }
@@ -268,6 +274,36 @@ export const patch = <T>(
 
 export const del = <T>(path: string, opts: Omit<RequestOptions, "method"> = {}) =>
   api<T>(path, { ...opts, method: "DELETE" })
+
+/**
+ * A POST that answers with a file rather than JSON: an export built per request, which a plain
+ * link must not reach. The filename is the server's.
+ */
+export async function postFile(
+  path: string,
+  body: unknown,
+  opts: Pick<RequestOptions, "confirm" | "signal"> = {},
+): Promise<{ blob: Blob; filename: string }> {
+  const headers: Record<string, string> = {
+    ...mutationHeaders(),
+    "Content-Type": "application/json",
+  }
+  if (opts.confirm !== undefined) {
+    headers["X-Confirm"] = encodeURIComponent(opts.confirm)
+    headers["X-Confirm-Encoding"] = "uri"
+  }
+  const res = await fetch(buildUrl(path), {
+    method: "POST",
+    headers,
+    credentials: "include",
+    signal: opts.signal,
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) return readResponse(res)
+  const disposition = res.headers.get("Content-Disposition") ?? ""
+  const filename = /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? "download"
+  return { blob: await res.blob(), filename }
+}
 
 /** A plain-text read — a transcript — through the same authenticated fetch and errors. */
 export async function getText(path: string, signal?: AbortSignal): Promise<string> {

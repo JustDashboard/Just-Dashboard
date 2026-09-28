@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import {
   FirewallCheck,
@@ -30,7 +30,7 @@ import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/comp
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { AreaFindings } from "@/components/security/posture-panel"
-import { AddRuleDialog, EditRuleDialog } from "@/components/security/rule-form"
+import { AddRuleDialog, EditRuleDialog, type RuleHandoff } from "@/components/security/rule-form"
 import { FIREWALL_LOG } from "@/components/security/host-logs"
 import {
   HostLogSection,
@@ -76,7 +76,10 @@ export function FirewallPanel({
   error,
   refresh,
   onFix,
+  handoff,
 }: {
+  /** A rule a link into the page asked for, from the ports page's hand-offs. */
+  handoff?: RuleHandoff
   status: FirewallStatus | undefined
   posture: Posture | undefined
   loading: boolean
@@ -92,6 +95,7 @@ export function FirewallPanel({
   )
   const [query, setQuery] = useSessionState("security.firewall.query", "")
   const admin = can("system.admin")
+  const [handoffEdit, setHandoffEdit] = useState(handoff?.edit)
 
   // ufw and firewalld both say "off" in words; iptables says nothing, and its
   // LOG rules are the operator's own, so only a firewall that says so is
@@ -141,6 +145,13 @@ export function FirewallPanel({
     profiles: false,
   }
   const writable = admin && Boolean(status?.available) && caps.editable
+  // The rule is looked up by number and opened only while it still names the
+  // port the link was about: ufw renumbers on every delete, and the form
+  // would otherwise replace whichever rule took the number since.
+  const handoffRule =
+    handoffEdit && writable
+      ? rules.find((r) => r.number === handoffEdit.number && r.port === handoffEdit.port)
+      : undefined
 
   const header = <PageContext eyebrow="Security" title="Firewall" />
   // Whether the firewall is enforcing, and the switch that decides it, at the
@@ -383,7 +394,15 @@ export function FirewallPanel({
         <Panel>
           <PanelHeader
             title="Rules"
-            actions={writable && <AddRuleDialog onDone={refresh} hasProfiles={caps.profiles} />}
+            actions={
+              writable && (
+                <AddRuleDialog
+                  onDone={refresh}
+                  hasProfiles={caps.profiles}
+                  arrival={handoff?.add}
+                />
+              )
+            }
           />
           <PanelToolbar>
             <SearchInput
@@ -640,7 +659,38 @@ export function FirewallPanel({
       />
 
       {dialog}
-      {editing && (
+      {handoffEdit && writable && !handoffRule && (
+        <Notice
+          tone="warning"
+          icon={Warning}
+          title={`Rule ${handoffEdit.number} no longer names port ${handoffEdit.port}`}
+        >
+          <p>The rules have changed since the link was made, so nothing was opened.</p>
+          <Button
+            variant="outline"
+            size="xs"
+            className="mt-2"
+            onClick={() => setHandoffEdit(undefined)}
+          >
+            Dismiss
+          </Button>
+        </Notice>
+      )}
+      {handoffRule && handoffEdit && (
+        <EditRuleDialog
+          rule={handoffRule}
+          open
+          arrival={handoffEdit.fields}
+          onOpenChange={(o) => {
+            if (o) return
+            setHandoffEdit(undefined)
+            forgetSessionState("security.firewall.rule.")
+          }}
+          onDone={refresh}
+          hasProfiles={caps.profiles}
+        />
+      )}
+      {editing && !handoffRule && (
         <EditRuleDialog
           rule={editing}
           open

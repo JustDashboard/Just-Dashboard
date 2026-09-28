@@ -2,6 +2,7 @@ package netsec
 
 import (
 	"bufio"
+	"strconv"
 	"strings"
 )
 
@@ -29,6 +30,15 @@ type ServicePreset struct {
 	// It is the reason to have a catalogue at all: the UI can warn at the
 	// moment of choosing rather than after the fact.
 	Danger string `json:"danger,omitempty"`
+	// InternetOnly says the danger is strangers on the internet — an open
+	// resolver amplifying attacks, a remote desktop brute-forced from
+	// everywhere — so a bind only a bridge, a tailnet or a VPN can reach is
+	// what the service is for rather than a risk.
+	InternetOnly bool `json:"-"`
+	// Firewalld is the name firewalld's predefined service for the port goes
+	// by, where it ships one: a zone that lists "redis" among its services
+	// opens 6379 without naming the port.
+	Firewalld string `json:"-"`
 }
 
 // ServiceCatalogue is the whole list, ordered as it should be offered:
@@ -43,8 +53,9 @@ var ServiceCatalogue = []ServicePreset{
 	{Key: "http3", Name: "HTTP/3 (QUIC)", Port: "443", Protocol: "udp",
 		Detail: "HTTP/3 rides UDP 443. Open it alongside TCP 443 if your proxy offers QUIC."},
 	{Key: "dns", Name: "DNS", Port: "53", Protocol: "udp",
-		Detail: "Only if this host answers DNS queries for others.",
-		Danger: "An open resolver is used to amplify attacks against other people. Restrict the source."},
+		Detail:       "Only if this host answers DNS queries for others.",
+		Danger:       "An open resolver is used to amplify attacks against other people. Restrict the source.",
+		InternetOnly: true, Firewalld: "dns"},
 	{Key: "smtp", Name: "SMTP", Port: "25", Protocol: "tcp",
 		Detail: "Mail delivery between servers."},
 	{Key: "submission", Name: "Mail submission", Port: "587", Protocol: "tcp",
@@ -57,34 +68,36 @@ var ServiceCatalogue = []ServicePreset{
 		Detail: "Lets Tailscale make direct connections instead of relaying. Optional — it works without."},
 	{Key: "postgres", Name: "PostgreSQL", Port: "5432", Protocol: "tcp",
 		Detail: "Database. Applications on this machine reach it over loopback without any rule.",
-		Danger: "A database open to the internet is scanned and brute-forced within hours. Set a source."},
+		Danger: "A database open to the internet is scanned and brute-forced within hours. Set a source.", Firewalld: "postgresql"},
 	{Key: "mysql", Name: "MySQL / MariaDB", Port: "3306", Protocol: "tcp",
 		Detail: "Database. Applications on this machine reach it over loopback without any rule.",
-		Danger: "A database open to the internet is scanned and brute-forced within hours. Set a source."},
+		Danger: "A database open to the internet is scanned and brute-forced within hours. Set a source.", Firewalld: "mysql"},
 	{Key: "redis", Name: "Redis", Port: "6379", Protocol: "tcp",
 		Detail: "Cache and queue. Ships with no password by default.",
-		Danger: "Unauthenticated by default: an exposed Redis is a remote shell, not a data leak. Never open this to the world."},
+		Danger: "Unauthenticated by default: an exposed Redis is a remote shell, not a data leak. Never open this to the world.", Firewalld: "redis"},
 	{Key: "mongodb", Name: "MongoDB", Port: "27017", Protocol: "tcp",
 		Detail: "Database.",
-		Danger: "Exposed MongoDB instances are the classic ransom target. Set a source."},
+		Danger: "Exposed MongoDB instances are the classic ransom target. Set a source.", Firewalld: "mongodb"},
 	{Key: "memcached", Name: "Memcached", Port: "11211", Protocol: "tcp",
 		Detail: "Cache.",
-		Danger: "Unauthenticated, and famous for amplifying attacks against third parties. Keep it on loopback."},
+		Danger: "Unauthenticated, and famous for amplifying attacks against third parties. Keep it on loopback.", Firewalld: "memcache"},
 	{Key: "elasticsearch", Name: "Elasticsearch", Port: "9200", Protocol: "tcp",
 		Detail: "Search index.",
-		Danger: "No authentication in the default configuration. Do not expose."},
+		Danger: "No authentication in the default configuration. Do not expose.", Firewalld: "elasticsearch"},
 	{Key: "docker", Name: "Docker API", Port: "2375", Protocol: "tcp",
 		Detail: "The Docker daemon's TCP socket.",
 		Danger: "Reaching the Docker API is equivalent to being root on this host. Never open it."},
 	{Key: "rdp", Name: "RDP", Port: "3389", Protocol: "tcp",
-		Detail: "Windows remote desktop.",
-		Danger: "Brute-forced constantly. Put it behind a VPN."},
+		Detail:       "Windows remote desktop.",
+		Danger:       "Brute-forced constantly. Put it behind a VPN.",
+		InternetOnly: true, Firewalld: "rdp"},
 	{Key: "vnc", Name: "VNC", Port: "5900", Protocol: "tcp",
-		Detail: "Remote desktop.",
-		Danger: "Weak or absent authentication in most configurations. Put it behind a VPN."},
+		Detail:       "Remote desktop.",
+		Danger:       "Weak or absent authentication in most configurations. Put it behind a VPN.",
+		InternetOnly: true, Firewalld: "vnc-server"},
 	{Key: "ftp", Name: "FTP", Port: "21", Protocol: "tcp",
 		Detail: "File transfer.",
-		Danger: "Credentials cross the network in plain text. Use SFTP over the SSH port instead."},
+		Danger: "Credentials cross the network in plain text. Use SFTP over the SSH port instead.", Firewalld: "ftp"},
 }
 
 // PresetFor finds the catalogue entry for a port and protocol, so a rule or a
@@ -101,6 +114,36 @@ func PresetFor(port, protocol string) (ServicePreset, bool) {
 		}
 	}
 	return ServicePreset{}, false
+}
+
+// dashboardService is the dashboard's own sockets as the posture judges
+// them. Only its Caddy is meant to face the network: the backend and the web
+// app behind it serve plain HTTP, without the TLS, headers and rate limits
+// Caddy puts in front of them, so one bound where the internet may reach it
+// is the admin panel of this server open past its own proxy. It is not in
+// the catalogue, which the firewall form offers as ports to open.
+var dashboardService = ServicePreset{
+	Key: "dashboard", Name: "Just Dashboard",
+	Detail: "The dashboard's own backend or web app, which its Caddy proxies from loopback.",
+	Danger: "This is the dashboard itself, served without TLS or the proxy's protections in front of it, to anyone who can reach the address. Only the dashboard's Caddy should face the network.",
+	// A bind on a tailnet or a bridge is the operator reaching their own
+	// panel over their own network; the invariant is about the internet.
+	InternetOnly: true,
+}
+
+// ServiceOf is what a socket is, as the posture judges it: the dashboard's
+// own when it is one of the dashboard's sockets other than Caddy's, and
+// otherwise the catalogue's entry for its port and protocol. The protocol
+// must match: DNS is flagged on 53/udp, where resolvers amplify, and a TCP
+// socket on 53 is not the same service.
+func ServiceOf(l ExposedPort) (ServicePreset, bool) {
+	if l.Dashboard {
+		return dashboardService, true
+	}
+	if l.Protocol == "" {
+		return ServicePreset{}, false
+	}
+	return PresetFor(strconv.FormatUint(uint64(l.Port), 10), l.Protocol)
 }
 
 // AppProfile is a named service bundle the host itself defines — ufw's

@@ -1,12 +1,12 @@
 "use client"
 
 import { Suspense } from "react"
-import { TLSReportPage } from "@/components/proxy/tls-report"
+import { TLSPage } from "@/components/proxy/tls-fleet"
 
 export default function ProxyTLSPage() {
   return (
     <Suspense>
-      <TLSReportPage />
+      <TLSPage />
     </Suspense>
   )
 }

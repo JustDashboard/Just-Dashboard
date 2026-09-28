@@ -1,0 +1,310 @@
+import type { ProxyValidation } from "./types-engine"
+import type { SiteTrafficSummary, UpstreamReport, UpstreamTarget } from "./types-insights"
+
+export type VHost = {
+  name: string
+  kind: "nginx" | "caddy"
+  path: string
+  enabledPath?: string
+  enabled: boolean
+  /** Where an nginx site was found; "sites-enabled" is a file or link that is only there. */
+  layout?: "sites-available" | "conf.d" | "sites-enabled"
+  /**
+   * The site's name in sites-enabled does not serve its file: "dangling" is
+   * a link to nothing, which makes nginx refuse every reload; "stale" is a
+   * link to, or a copy of, some other file.
+   */
+  broken?: "dangling" | "stale"
+  /** Where the link in sites-enabled points, for a broken site and a link-only one. */
+  linkTarget?: string
+  /**
+   * A stale link's target is also read through another name in sites-enabled
+   * or through conf.d. Otherwise Enable, which points the link at this file,
+   * takes that target out of nginx.
+   */
+  targetServedElsewhere?: boolean
+  /** Other names in sites-enabled that link to this file, each serving it; Disable takes them out. */
+  linkedAs?: string[]
+  /** Where the file really is, when that is outside the proxy's directories: the editor does not open it. */
+  resolvesTo?: string
+  /** The site form reads this file and saves it back to the same place. */
+  formEditable: boolean
+  serverNames: string[]
+  listen: string[]
+  upstreams: string[]
+  tls: boolean
+  certPath?: string
+  /** Where an nginx site writes its requests and errors, as its own page reads them. */
+  accessLogPath?: string
+  errorLogPath?: string
+  certPaths?: string[]
+  /** The file the site's requests are logged to, its own or nginx.conf's; absent where it logs nowhere openable. */
+  accessLog?: string
+  errorLog?: string
+  /** The upstream blocks the file declares. */
+  pools?: VHostPool[]
+  features?: SiteFeature[]
+  /** The directories the site serves files from. */
+  roots?: string[]
+  /** Where the site's return directives send visitors. */
+  redirects?: string[]
+  /** The package that installed this file, which it still matches byte for byte: the stock default site. */
+  package?: string
+  /** The deployment environment that writes this route. */
+  owner?: VHostOwner
+  modified: string
+  size: number
+  /** The site answers with its maintenance page now. */
+  maintenance?: boolean
+  /** A server of the site limits requests or connections. */
+  rateLimited?: boolean
+  /** The site keeps its application's responses in a proxy cache the dashboard can empty. */
+  cached?: boolean
+}
+
+/** An upstream block and the servers in it. */
+export type VHostPool = { name: string; servers: string[] }
+
+/**
+ * What a site's server blocks do besides naming and listening: a password,
+ * sign-in through another server, an address list, a rate limit, a cache,
+ * WebSockets, HTTP/2, HTTP/3, and maintenance.
+ */
+export type SiteFeature =
+  "auth" | "sso" | "allow" | "ratelimit" | "cache" | "ws" | "h2" | "h3" | "maintenance"
+
+/** A deployment environment that writes a route; `archived` is one nothing deploys any more. */
+export type VHostOwner = {
+  projectId: number
+  environmentId: number
+  project: string
+  environment: string
+  archived?: boolean
+}
+
+/** An htpasswd file, who is in it, and the nginx sites that name it. */
+export type AuthFile = {
+  name: string
+  path: string
+  users: string[]
+  usedBy: string[]
+}
+
+/** nginx's test and reload, as POST /proxy/reload and the site verbs report them. */
+export type ProxyReload = {
+  validation: ProxyValidation
+  reloaded: boolean
+  output: string
+}
+
+/**
+ * What a change to a link in sites-enabled did — the enable switch and the
+ * removal of a link no site owns. The change passed `nginx -t` or it was
+ * undone and refused with a 422; `reloadError` says why nginx is not running
+ * it yet.
+ */
+export type VHostLinkResult = {
+  name: string
+  enabled: boolean
+  reloaded: boolean
+  reloadError?: string
+  reload?: ProxyReload
+}
+
+/**
+ * POST /proxy/sites/{name}/rename: the file moved, with its links, behind one
+ * nginx test. `name` is the new name as the list shows it — a conf.d file
+ * keeps its .conf — and `rerendered` says the form's header and log paths
+ * were written again under it.
+ */
+export type SiteRenameResult = VHostLinkResult & {
+  from: string
+  path: string
+  rerendered: boolean
+  warnings: string[]
+}
+
+/**
+ * POST /proxy/sites/import/preview and /import, and a backup's restore: where
+ * the file lands and nginx's test with it in place. A preview always takes the
+ * file back out; an import keeps it only when nginx accepts it.
+ */
+export type SitePlacement = {
+  name: string
+  path: string
+  layout: "sites-available" | "conf.d"
+  enabled: boolean
+  serverNames: string[]
+  validation: ProxyValidation
+  /** nginx refuses the configuration without the file too. */
+  refusedBefore?: boolean
+  warnings: string[]
+}
+
+/** An import or restore that stands, and how the reload after it went. */
+export type SitePlacementResult = SitePlacement & Omit<VHostLinkResult, "name" | "enabled">
+
+/**
+ * GET /proxy/site-backups: a copy beside a site nginx does not read — what a
+ * delete keeps as <name>.bak, or an editor's or package's leftover. `site` is
+ * the name a restore gives it back; `siteExists` means that name is taken.
+ */
+export type SiteBackup = {
+  file: string
+  layout: "sites-available" | "conf.d"
+  path: string
+  size: number
+  modified: string
+  site?: string
+  siteExists: boolean
+  restorable: boolean
+  reason?: string
+}
+
+/** DELETE /proxy/sites/{name}: the file is gone; the reload may not have happened. */
+export type SiteDeleteResult = {
+  name: string
+  reload?: ProxyReload | null
+  reloadError?: string
+}
+
+/**
+ * GET /proxy/pending: what on disk the running nginx has not loaded. nginx
+ * replaces its workers on every load and keeps them through a reload it
+ * refuses, so `lastReload` is its oldest worker's start and `generation`
+ * names that load, for `?after=` to wait for a newer one after a reload.
+ * `running` is false, with `reason`, where no running nginx reads this
+ * configuration, and then nothing is compared.
+ */
+export type ProxyPending = {
+  running: boolean
+  reason?: string
+  lastReload?: string
+  generation?: string
+  /** nginx's first error in the configuration on disk: every reload is refused until it is fixed. */
+  problem?: string
+  files: PendingFile[]
+}
+
+/**
+ * One change nginx has not loaded, by the path nginx reads it through — a
+ * site's link in sites-enabled — with the Sites entry it belongs to, if any.
+ * "changed" is an edit, "added" a link put into sites-enabled, "removed" a
+ * file nginx loaded and no longer reads, which it serves until it reloads.
+ */
+export type PendingFile = {
+  path: string
+  site?: string
+  layout?: VHost["layout"]
+  change: "changed" | "added" | "removed"
+  modified?: string
+}
+
+/** What the catch-all default site does with a request whose Host names no site. */
+export type DefaultChoice = "close" | "not_found" | "redirect" | "page"
+
+/** Who answers an unknown Host on one socket today: its default_server, or else the first server nginx read. */
+export type DefaultListener = {
+  listen: string
+  file: string
+  line: number
+  serverNames: string[]
+  claimed: boolean
+  ours: boolean
+}
+
+/** Another file's default_server on a socket the catch-all would claim. */
+export type DefaultClaim = { listen: string; file: string; line: number }
+
+/** GET /proxy/default-site: the catch-all as it stands and what an Apply would write. */
+export type DefaultSite = {
+  installed: boolean
+  path?: string
+  content?: string
+  /** Absent when the owned file was changed by hand into something the page cannot read back. */
+  choice?: DefaultChoice
+  redirectTo?: string
+  pageDir: string
+  /** The sockets an Apply would claim, e.g. "*:80", "[::]:443". */
+  covers: string[]
+  answering: DefaultListener[]
+  others: DefaultClaim[]
+  /** Sockets on a named address, which nginx matches before the catch-all's wildcard. */
+  uncovered: string[]
+  tlsSkipped?: string
+  /** Why nginx's configuration could not be read; the plan fields are then empty. */
+  error?: string
+}
+
+/** PUT and DELETE /proxy/default-site. */
+export type DefaultSiteResult = VHostLinkResult & { path: string; content?: string }
+
+/**
+ * POST /proxy/sites/bulk: one nginx -t over every site's change and one
+ * reload; a refusal changes nothing and comes back as a 422 or a 400.
+ * `unchanged` are sites already as asked.
+ */
+export type SitesBulkResult = {
+  action: "enable" | "disable" | "delete"
+  changed: string[]
+  unchanged: string[]
+  reloaded: boolean
+  reloadError?: string
+  reload?: ProxyReload
+}
+
+/** One route's upstream as GET /proxy/upstreams reports it; a site's are those whose `file` is its `path`. */
+export type SiteUpstreamHealth = UpstreamTarget
+
+export type SiteUpstreams = UpstreamReport
+
+/** Every site's last hour from GET /proxy/traffic, the engine lane's summary. */
+export type SitesTraffic = SiteTrafficSummary
+
+/**
+ * One thing POST /proxy/import/npm found in an Nginx Proxy Manager database:
+ * a site from a proxy or redirection host, a stream, or a password file from
+ * an access list with users. `skipped` means it cannot be imported at all;
+ * `conflicts` are what on this host stands in its way; `requires` are items
+ * applying it applies too.
+ */
+export type NpmImportItem = {
+  id: string
+  kind: "proxy" | "redirect" | "stream" | "access"
+  source: string
+  name: string
+  domains: string[]
+  target: string
+  enabled: boolean
+  tls: boolean
+  certPath?: string
+  users?: string[]
+  requires: string[]
+  content?: string
+  advanced?: string
+  notes: string[]
+  conflicts: string[]
+  skipped?: string
+}
+
+export type NpmImportPreview = {
+  token: string
+  expires: string
+  layout: "sites-available" | "conf.d"
+  streamsIncluded: boolean
+  items: NpmImportItem[]
+}
+
+/** POST /proxy/import/npm/apply: what went in behind one nginx test, and the reload. */
+export type NpmImportResult = {
+  sites: string[]
+  /** Written to sites-available and left unlinked, as NPM had them off. */
+  disabled: string[]
+  streams: string[]
+  authFiles: string[]
+  /** Items applied because a selected one needs them. */
+  added: string[]
+  reloaded: boolean
+  reloadError?: string
+  reload?: ProxyReload
+}
