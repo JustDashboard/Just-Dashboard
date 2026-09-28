@@ -78,7 +78,7 @@ type SiteCORS struct {
 }
 
 var (
-	headerNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,63}$`)
+	siteHeaderNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,63}$`)
 	// A header value, and a CSP or Permissions-Policy part, is written in
 	// double quotes; these are what could end the quotes or the directive.
 	headerValueRe = regexp.MustCompile(`^[^"'\\$;{}\x00-\x1f\x7f]{0,1024}$`)
@@ -254,7 +254,7 @@ func validateHeaders(spec *SiteSpec) error {
 }
 
 func validHeaderName(name string) error {
-	if !headerNameRe.MatchString(name) {
+	if !siteHeaderNameRe.MatchString(name) {
 		return fmt.Errorf("%q is not a header name; use letters, digits and dashes", name)
 	}
 	return nil
@@ -602,7 +602,7 @@ func (p *headersParse) directive(name, value string, serverLevel, rootLocation b
 	case strings.EqualFold(header, "X-Frame-Options"):
 		p.h.FrameOptions = strings.ToLower(v)
 	case strings.EqualFold(header, "Content-Security-Policy"), strings.EqualFold(header, "Content-Security-Policy-Report-Only"):
-		p.h.CSP = parseCSP(v)
+		p.h.CSP = parseSiteCSP(v)
 		p.h.CSP.ReportOnly = strings.EqualFold(header, "Content-Security-Policy-Report-Only")
 	case strings.EqualFold(header, "Permissions-Policy"):
 		p.h.Permissions = parsePermissions(v)
@@ -636,7 +636,7 @@ func splitList(value string) []string {
 	return out
 }
 
-func parseCSP(value string) *SiteCSP {
+func parseSiteCSP(value string) *SiteCSP {
 	csp := &SiteCSP{Directives: []CSPDirective{}}
 	for _, part := range strings.Split(value, ";") {
 		fields := strings.Fields(part)
@@ -696,7 +696,7 @@ func (p *headersParse) settle(spec *SiteSpec) {
 	}
 	for _, name := range p.hide {
 		if (h.CORS != nil && containsFold(corsResponseHeaders, name)) ||
-			!headerNameRe.MatchString(name) || containsFold(nginxHiddenHeaders, name) {
+			!siteHeaderNameRe.MatchString(name) || containsFold(nginxHiddenHeaders, name) {
 			continue
 		}
 		h.Hide = append(h.Hide, name)
@@ -716,11 +716,11 @@ func (p *headersParse) settle(spec *SiteSpec) {
 	// A header this form would refuse to save, such as one carrying a
 	// variable, is left for the file rather than offered back broken.
 	h.Request = slices.DeleteFunc(h.Request, func(v HeaderValue) bool {
-		return !headerNameRe.MatchString(v.Name) ||
+		return !siteHeaderNameRe.MatchString(v.Name) ||
 			(!nginxVarRe.MatchString(v.Value) && !headerValueRe.MatchString(v.Value))
 	})
 	h.Response = slices.DeleteFunc(h.Response, func(v HeaderValue) bool {
-		return !headerNameRe.MatchString(v.Name) || v.Value == "" || !headerValueRe.MatchString(v.Value)
+		return !siteHeaderNameRe.MatchString(v.Name) || v.Value == "" || !headerValueRe.MatchString(v.Value)
 	})
 	if spec.Kind != "proxy" {
 		h.Request, h.Hide = nil, nil

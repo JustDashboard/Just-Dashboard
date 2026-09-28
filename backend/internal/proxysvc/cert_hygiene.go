@@ -129,7 +129,7 @@ type hygieneScan struct {
 
 func (s *Service) scanHygiene(ctx context.Context) *hygieneScan {
 	scan := &hygieneScan{vhosts: s.nginxVHosts(), listed: map[string]Certificate{}, leaves: map[string]*x509.Certificate{}}
-	all := listCertificates(filepath.Join(letsencryptDir, "live"), importedDir, scan.vhosts)
+	all := listCertificates(filepath.Join(letsencryptDir, "live"), importedDir, scan.vhosts, s.tlsStreams())
 	scan.certs, _ = splitCaddyEvidence(all)
 	for _, c := range scan.certs {
 		scan.listed[resolvedPath(c.Path)] = c
@@ -209,7 +209,7 @@ func (s *Service) configServers(tree []Directive) []configServer {
 					server.variable = true
 					continue
 				}
-				server.pairs = append(server.pairs, certKeyPair{cert: s.confPath(cert), key: s.confPath(key)})
+				server.pairs = append(server.pairs, certKeyPair{cert: s.nginxConfPath(cert), key: s.nginxConfPath(key)})
 			}
 			out = append(out, server)
 		}
@@ -233,9 +233,9 @@ func perRequest(path string) bool {
 	return strings.Contains(path, "$") || strings.HasPrefix(path, "data:") || strings.HasPrefix(path, "engine:")
 }
 
-// confPath is a configuration path as nginx opens it: a relative one is
+// nginxConfPath is a configuration path as nginx opens it: a relative one is
 // relative to the configuration's directory.
-func (s *Service) confPath(path string) string {
+func (s *Service) nginxConfPath(path string) string {
 	if path == "" || filepath.IsAbs(path) {
 		return path
 	}
@@ -644,7 +644,7 @@ func (scan *hygieneScan) uncoveredNames() []CertificateFinding {
 		}
 		out = append(out, CertificateFinding{
 			ID: fmt.Sprintf("cert.uncovered.%s:%d", server.file, server.line), Kind: "uncovered", Level: "critical",
-			Title:       fmt.Sprintf("%s serves %s without a certificate for %s", server.site, scan.certName(first), plural(len(missing), "it", "them")),
+			Title:       fmt.Sprintf("%s serves %s without a certificate for %s", server.site, scan.certName(first), pluralWord(len(missing), "it", "them")),
 			Detail:      fmt.Sprintf("The server block at %s:%d answers %s, which %s does not cover (it covers %s).", server.file, server.line, strings.Join(missing, ", "), scan.certName(first), strings.Join(domains, ", ")),
 			Advice:      "Browsers refuse the site under those names. Issue a certificate that covers them and point the block at it, or take them out of server_name.",
 			Certificate: scan.listedPath(first),
@@ -654,7 +654,7 @@ func (scan *hygieneScan) uncoveredNames() []CertificateFinding {
 	return out
 }
 
-func plural(n int, one, many string) string {
+func pluralWord(n int, one, many string) string {
 	if n == 1 {
 		return one
 	}
@@ -771,7 +771,7 @@ func (scan *hygieneScan) staleLineages(ctx context.Context, used map[string][]st
 		}
 		advice := "certbot keeps renewing it, and an HTTP challenge for names that point elsewhere fails. If no other machine takes its copy, delete it."
 		if sites := used[resolvedPath(c.Path)]; len(sites) > 0 {
-			advice += fmt.Sprintf(" %s still %s it: take it out of %s first.", strings.Join(sites, ", "), plural(len(sites), "names", "name"), plural(len(sites), "that site", "those sites"))
+			advice += fmt.Sprintf(" %s still %s it: take it out of %s first.", strings.Join(sites, ", "), pluralWord(len(sites), "names", "name"), pluralWord(len(sites), "that site", "those sites"))
 		}
 		out = append(out, CertificateFinding{
 			ID: "cert.stale." + c.Name, Kind: "stale", Level: "notice",

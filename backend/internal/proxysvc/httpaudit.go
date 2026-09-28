@@ -31,7 +31,7 @@ type RequestShape struct {
 // request tester, which audits it.
 var auditMethods = map[string]bool{http.MethodGet: true, http.MethodHead: true, http.MethodOptions: true}
 
-var hostHeaderRe = regexp.MustCompile(`^(\[[0-9a-f:.]+\]|[a-z0-9._-]+)(:[0-9]{1,5})?$`)
+var auditHostRe = regexp.MustCompile(`^(\[[0-9a-f:.]+\]|[a-z0-9._-]+)(:[0-9]{1,5})?$`)
 
 // ParseRequestShape reads the scan's ?method=, ?path= and ?host=, refusing
 // anything a request line or a Host header could not carry as it is.
@@ -54,7 +54,7 @@ func ParseRequestShape(method, path, host string) (RequestShape, error) {
 		shape.Path = path
 	}
 	if host = strings.ToLower(strings.TrimSpace(host)); host != "" {
-		if len(host) > 255 || !hostHeaderRe.MatchString(host) {
+		if len(host) > 255 || !auditHostRe.MatchString(host) {
 			return RequestShape{}, fmt.Errorf("host %q is not a name or address, with a port or without", host)
 		}
 		shape.Host = host

@@ -930,7 +930,7 @@ func parseStreamFile(fileName, content string) parsedStream {
 			}
 			p.readProxyPass(d.Args[0], upstreams, used)
 		case "ssl_preread":
-			on, ok := onOff(d.Args)
+			on, ok := readOnOff(d.Args)
 			if !ok {
 				p.cannot("ssl_preread " + strings.Join(d.Args, " "))
 				continue
