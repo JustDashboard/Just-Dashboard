@@ -246,12 +246,25 @@ export function reproduceCommands(scan: TLSScan): ReproduceCommand[] {
   // A zone in an address is a percent sign, which a URL spells %25.
   const urlHost = ipv6 ? `[${host.replace(/%/g, "%25")}]` : host
   const url = `https://${urlHost}${scan.port === 443 ? "" : `:${scan.port}`}/`
+  const http = scan.http
   const resolve = (port: number) =>
     scan.connectTo
       ? ` --resolve ${shellQuote(`${host}:${port}:${scan.connectTo.includes(":") ? `[${scan.connectTo}]` : scan.connectTo}`)}`
       : ""
   const curl = `${ipv6 ? "curl -g" : "curl"}${resolve(scan.port)}`
-  commands.push({ label: "HTTPS headers", command: `${curl} -sSI ${shellQuote(url)}` })
+  // The request the scan sent, so its headers come back the same: GET with
+  // the body discarded rather than -I, which would ask HEAD instead.
+  const method = http.method ?? "GET"
+  const asked = `https://${urlHost}${scan.port === 443 ? "" : `:${scan.port}`}${http.path ?? "/"}`
+  const request = [
+    method === "HEAD" ? "-sSI" : "-sS -o /dev/null -D -",
+    method === "OPTIONS" ? "-X OPTIONS" : "",
+    http.host ? `-H ${shellQuote(`Host: ${http.host}`)}` : "",
+    `-H ${shellQuote("Accept-Encoding: gzip, br")}`,
+  ]
+    .filter(Boolean)
+    .join(" ")
+  commands.push({ label: "HTTPS headers", command: `${curl} ${request} ${shellQuote(asked)}` })
   commands.push({
     label: "Plain HTTP redirect",
     command: `${ipv6 ? "curl -g" : "curl"}${resolve(80)} -sSIL ${shellQuote(`http://${urlHost}/`)}`,

@@ -63,6 +63,9 @@ export function fixFor(finding: ScanFinding, scan: TLSScan): TLSFix | undefined 
         names:
           finding.id === "tls.legacy-only" ? ["ssl_protocols", "ssl_ciphers"] : ["ssl_protocols"],
       }
+    case "server-tokens":
+      // Unset, it is on; the sheet says where to add it when no file sets it.
+      return { kind: "directive", names: ["server_tokens"] }
     default:
       if (finding.fix && SITE_FIXES.includes(finding.fix) && origin?.site)
         return { kind: "site", fix: finding.fix as SiteFix, site: origin.site }

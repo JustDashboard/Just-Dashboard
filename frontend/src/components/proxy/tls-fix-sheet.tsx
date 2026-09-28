@@ -467,7 +467,9 @@ function DirectiveBody({ names, scan, onEditor }: BodyProps & { names: string[] 
               description={
                 name === "ssl_protocols"
                   ? "nginx then uses its default, TLSv1.2 TLSv1.3 since 1.23.4. A file outside the proxy directory — certbot's options-ssl-nginx.conf is the usual one — is not searched and may set it."
-                  : "nginx then uses its default. A file outside the proxy directory — certbot's options-ssl-nginx.conf is the usual one — is not searched and may set it."
+                  : name === "server_tokens"
+                    ? "nginx then uses its default, on, which puts its version in the Server header and on its error pages. Add server_tokens off; to the http block of nginx.conf, or to this site's server block, then test and reload."
+                    : "nginx then uses its default. A file outside the proxy directory — certbot's options-ssl-nginx.conf is the usual one — is not searched and may set it."
               }
             />
           ) : (

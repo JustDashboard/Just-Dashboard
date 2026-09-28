@@ -74,11 +74,19 @@ import { TLSDNSPanel } from "@/components/proxy/tls-dns"
 import { TLSServedBy } from "@/components/proxy/tls-served-by"
 import { useTLSFixes } from "@/components/proxy/tls-fix-sheet"
 import { RequestTester, TLSTools } from "@/components/proxy/request-tester"
+import { TLSResponseHeaders } from "@/components/proxy/tls-http-audit"
 import { Button } from "@/components/ui/button"
 import { IconAction } from "@/components/icon-action"
-import { Disclosure, Field } from "@/components/form"
+import { Disclosure, Field, FieldRow } from "@/components/form"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { InputGroup, InputGroupInput } from "@/components/ui/input-group"
 import { DeepScanSection } from "@/components/proxy/tls-ciphers"
 import { ScanHistoryPanel, useScanHistory } from "@/components/proxy/tls-history"
@@ -117,11 +125,14 @@ function TLSReport() {
   const linked = params.get("domain")
   const linkedPort = params.get("port")
   // ?connect= dials that address in place of the name's records and ?all=1
-  // handshakes with every record too; both are part of the question, so a
-  // link carries them.
+  // handshakes with every record too; ?method=, ?path= and ?host= shape the
+  // HTTPS request. All are part of the question, so a link carries them.
   const linkedAdvanced: AdvancedFields = {
     connect: params.get("connect") ?? "",
     all: params.get("all") === "1",
+    method: params.get("method") ?? "GET",
+    path: params.get("path") ?? "",
+    host: params.get("host") ?? "",
   }
   const asked = linked === null ? undefined : parseScanQuery(linked, linkedPort)
   const target = asked?.target
@@ -152,6 +163,7 @@ function TLSReport() {
   }
   const typed = parseScanQuery(fields.domain, fields.port.trim())
   const connectError = connectToError(advanced.connect, typed.target)
+  const requestError = requestShapeError(advanced)
   // What is asked is the target and how to reach it: the same name sent to
   // another address is another scan.
   const askKey = target ? JSON.stringify([targetKey, linkedAdvanced]) : ""
@@ -173,6 +185,9 @@ function TLSReport() {
           port: target?.port,
           connect: linkedAdvanced.connect || undefined,
           all: linkedAdvanced.all ? 1 : undefined,
+          method: linkedAdvanced.method !== "GET" ? linkedAdvanced.method : undefined,
+          path: linkedAdvanced.path || undefined,
+          host: linkedAdvanced.host || undefined,
         },
         signal,
       ),
@@ -282,11 +297,17 @@ function TLSReport() {
       setFieldError(typed.error)
       return
     }
-    if (connectError) return
+    if (connectError || requestError) return
     setFields(targetFields(typed.target))
     setFieldError(undefined)
     setCancelled(undefined)
-    const next = { connect: advanced.connect.trim(), all: advanced.all && !advanced.connect.trim() }
+    const next = {
+      connect: advanced.connect.trim(),
+      all: advanced.all && !advanced.connect.trim(),
+      method: advanced.method,
+      path: advanced.path.trim() === "/" ? "" : advanced.path.trim(),
+      host: advanced.host.trim().toLowerCase(),
+    }
     setAdvanced(next)
     // A new question is a new address, so Back returns to the last report.
     if (JSON.stringify([targetLabel(typed.target), next]) === askKey) rescan()
@@ -455,7 +476,13 @@ function TLSReport() {
               <Button
                 type="submit"
                 size="sm"
-                disabled={busy || !fields.domain.trim() || !admin || connectError !== undefined}
+                disabled={
+                  busy ||
+                  !fields.domain.trim() ||
+                  !admin ||
+                  connectError !== undefined ||
+                  requestError !== undefined
+                }
                 pending={busy}
               >
                 Scan
@@ -466,6 +493,7 @@ function TLSReport() {
             key={address}
             value={advanced}
             error={connectError}
+            requestError={requestError}
             onChange={(next) => setAdvanced((current) => ({ ...current, ...next }))}
           />
           {admin && (
@@ -724,6 +752,9 @@ function TLSReport() {
                     )}
                   </PanelBody>
                 </Panel>
+              )}
+              {scan.http?.service === "http" && !scan.http.httpsError && (
+                <TLSResponseHeaders http={scan.http} />
               )}
               {scan.preload && <PreloadPanel preload={scan.preload} domain={scan.domain} />}
             </div>
@@ -1218,8 +1249,14 @@ function reportHref(params: { toString(): string }, target: ScanTarget) {
   return `/proxy/tls?${next}`
 }
 
-/** How the scan reaches the target: another address, or every one it has. */
-type AdvancedFields = { connect: string; all: boolean }
+/**
+ * How the scan reaches the target — another address, or every one it has —
+ * and what its HTTPS request asks for.
+ */
+type AdvancedFields = { connect: string; all: boolean; method: string; path: string; host: string }
+
+/** The methods a scan sends: reads only, as the backend's ParseRequestShape allows. */
+const SCAN_METHODS = ["GET", "HEAD", "OPTIONS"]
 
 /** The page's address with the advanced fields set, or cleared when unused. */
 function withAdvanced(params: { toString(): string }, advanced: AdvancedFields) {
@@ -1228,7 +1265,27 @@ function withAdvanced(params: { toString(): string }, advanced: AdvancedFields) 
   else next.delete("connect")
   if (advanced.all) next.set("all", "1")
   else next.delete("all")
+  if (advanced.method !== "GET") next.set("method", advanced.method)
+  else next.delete("method")
+  if (advanced.path) next.set("path", advanced.path)
+  else next.delete("path")
+  if (advanced.host) next.set("host", advanced.host)
+  else next.delete("host")
   return next
+}
+
+/**
+ * What is wrong with the request's path or Host, read as the backend reads
+ * them so the field says so before a scan is sent.
+ */
+function requestShapeError(advanced: AdvancedFields) {
+  const path = advanced.path.trim()
+  if (path && (!path.startsWith("/") || /[\s#]/.test(path)))
+    return `Path starts with / and has no spaces or fragment, not ${path}`
+  const host = advanced.host.trim().toLowerCase()
+  if (host && !/^(\[[0-9a-f:.]+\]|[a-z0-9._-]+)(:[0-9]{1,5})?$/.test(host))
+    return `Host takes a name or address, with a port or without, not ${host}`
+  return undefined
 }
 
 /**
@@ -1253,20 +1310,29 @@ function connectToError(raw: string, target: ScanTarget | undefined) {
 function AdvancedScan({
   value,
   error,
+  requestError,
   onChange,
 }: {
   value: AdvancedFields
   error?: string
+  requestError?: string
   onChange: (next: Partial<AdvancedFields>) => void
 }) {
   const connecting = value.connect.trim() !== ""
-  const facts = connecting ? `to ${value.connect.trim()}` : value.all ? "every address" : undefined
+  const shaped = value.method !== "GET" || value.path.trim() !== "" || value.host.trim() !== ""
+  const facts =
+    [
+      connecting ? `to ${value.connect.trim()}` : value.all ? "every address" : "",
+      shaped ? `${value.method} ${value.path.trim() || "/"}` : "",
+    ]
+      .filter(Boolean)
+      .join(" · ") || undefined
   return (
     <Disclosure
       quiet
       summary="Advanced"
       facts={facts}
-      open={connecting || value.all}
+      open={connecting || value.all || shaped}
       className="pt-2"
     >
       <div className="space-y-3">
@@ -1303,6 +1369,59 @@ function AdvancedScan({
             another certificate shows up.
           </span>
         </label>
+        {/* The request whose headers are graded and listed. SNI stays the
+            scanned name, so the certificate is the one its visitors get. */}
+        <FieldRow columns={3}>
+          <Field label="Method" htmlFor="tls-method">
+            <Select value={value.method} onValueChange={(method) => onChange({ method })}>
+              <SelectTrigger id="tls-method" className="w-full font-mono">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SCAN_METHODS.map((method) => (
+                  <SelectItem key={method} value={method} className="font-mono">
+                    {method}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Path" htmlFor="tls-path">
+            <Input
+              id="tls-path"
+              value={value.path}
+              onChange={(event) => onChange({ path: event.target.value })}
+              placeholder="/"
+              aria-invalid={requestError?.startsWith("Path") ? true : undefined}
+              autoComplete="off"
+              spellCheck={false}
+              autoCapitalize="none"
+              autoCorrect="off"
+              className="font-mono sm:text-xs"
+            />
+          </Field>
+          <Field label="Host header" htmlFor="tls-host">
+            <Input
+              id="tls-host"
+              value={value.host}
+              onChange={(event) => onChange({ host: event.target.value })}
+              placeholder="the scanned name"
+              aria-invalid={requestError?.startsWith("Host") ? true : undefined}
+              autoComplete="off"
+              spellCheck={false}
+              autoCapitalize="none"
+              autoCorrect="off"
+              className="font-mono sm:text-xs"
+            />
+          </Field>
+        </FieldRow>
+        <p className="text-hint leading-relaxed text-muted-foreground">
+          {requestError ? (
+            <span className="wrap-anywhere text-destructive">{requestError}</span>
+          ) : (
+            "The HTTPS request whose headers are listed and audited. SNI still names the domain; the plain-HTTP redirect is always checked at / with the domain as Host."
+          )}
+        </p>
       </div>
     </Disclosure>
   )

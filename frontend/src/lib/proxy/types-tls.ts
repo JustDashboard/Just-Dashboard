@@ -136,7 +136,18 @@ export type HTTPScan = {
   redirectVerdict?: RedirectVerdict
   hsts?: HSTS
   headers: HeaderCheck[]
+  /** The HTTPS request as sent: the scan may ask for another method, path or Host. */
+  method?: string
+  path?: string
+  /** The Host header sent, when it was not the scanned name. */
+  host?: string
+  /** Every header of the HTTPS answer, by name; Set-Cookie values are redacted by the server. */
+  responseHeaders?: ResponseHeader[]
+  /** The list was cut at the server's cap. */
+  headersTruncated?: boolean
 }
+
+export type ResponseHeader = { name: string; value: string }
 
 /**
  * One of the grade's rules as it applied to a scan. `cap` is the best letter
@@ -159,7 +170,15 @@ export type ScanFinding = {
   detail: string
   advice?: string
   /** The remedy the page can carry out for this finding, as lib/tls-fixes.ts reads it. */
-  fix?: "renew" | "issue" | "force-https" | "hsts" | "security-headers" | "fullchain" | "protocols"
+  fix?:
+    | "renew"
+    | "issue"
+    | "force-https"
+    | "hsts"
+    | "security-headers"
+    | "fullchain"
+    | "protocols"
+    | "server-tokens"
 }
 
 /** Where a directive is set in the configuration nginx loads. */
