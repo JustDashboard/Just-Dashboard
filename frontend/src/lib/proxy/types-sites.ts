@@ -262,3 +262,51 @@ export type SiteUpstreams = { checkedAt: string; targets: SiteUpstreamHealth[] }
 export type SiteTraffic = { site: string; requests: number }
 
 export type SitesTraffic = { sites: SiteTraffic[] }
+
+/**
+ * One thing POST /proxy/import/npm found in an Nginx Proxy Manager database:
+ * a site from a proxy or redirection host, a stream, or a password file from
+ * an access list with users. `skipped` means it cannot be imported at all;
+ * `conflicts` are what on this host stands in its way; `requires` are items
+ * applying it applies too.
+ */
+export type NpmImportItem = {
+  id: string
+  kind: "proxy" | "redirect" | "stream" | "access"
+  source: string
+  name: string
+  domains: string[]
+  target: string
+  enabled: boolean
+  tls: boolean
+  certPath?: string
+  users?: string[]
+  requires: string[]
+  content?: string
+  advanced?: string
+  notes: string[]
+  conflicts: string[]
+  skipped?: string
+}
+
+export type NpmImportPreview = {
+  token: string
+  expires: string
+  layout: "sites-available" | "conf.d"
+  streamsIncluded: boolean
+  items: NpmImportItem[]
+}
+
+/** POST /proxy/import/npm/apply: what went in behind one nginx test, and the reload. */
+export type NpmImportResult = {
+  sites: string[]
+  /** Written to sites-available and left unlinked, as NPM had them off. */
+  disabled: string[]
+  streams: string[]
+  authFiles: string[]
+  /** Items applied because a selected one needs them. */
+  added: string[]
+  reloaded: boolean
+  reloadError?: string
+  reload?: ProxyReload
+}

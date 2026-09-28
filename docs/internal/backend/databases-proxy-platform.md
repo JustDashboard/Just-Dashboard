@@ -469,6 +469,22 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   /proxy/site-backups/{dir}/{file}/restore` (`{as, enable, reload}`) places the copy through the same
   test and keeps the backup; `DELETE /proxy/site-backups/{dir}/{file}` (destructive,
   `proxy.site.backup.purge`) removes it.
+- **Import from Nginx Proxy Manager.** `npm_import.go`, `system.admin`, under `/proxy`. `POST
+  /proxy/import/npm` (multipart `file`, at most 50 MB, audited as `proxy.import.npm.preview`) copies
+  NPM's `database.sqlite` to a private temp file under `$TMPDIR/just-dashboard`, opens it
+  `mode=ro&immutable=1` (tables only, 2000 rows each, 20 s), deletes the copy, and returns the items it
+  maps to: proxy and redirection hosts as `SiteSpec`s (rendered and `ValidateSpec`ed), streams as one
+  `StreamSpec` per protocol, access lists with users as password files under `jd-auth/npm-*` (NPM's
+  plain passwords bcrypt-hashed at preview and never kept or returned). TLS is on only when a local,
+  unexpired certificate and key cover every domain (NPM's own stay in its container); an access list
+  the form cannot write faithfully, a disabled stream, a TLS-terminating stream and a disabled host on
+  a conf.d host are skipped rather than imported weaker or live. Advanced configuration is shown,
+  never written. Conflicts (name taken, hostname served, stream port forwarded, password file present)
+  are rechecked at apply. The plan lives in memory for 15 minutes behind a token bound to the actor.
+  `POST /proxy/import/npm/apply` `{token, ids}` (`proxy.import.npm`) adds required password files,
+  writes every file and links every site, runs `nginx -t` once (422 and everything taken back out on a
+  refusal), unlinks the sites NPM had off, records the site and stream writes, and reloads once; a
+  spent or foreign token is 410.
 - **Catch-all default site.** `default_site.go` keeps one owned file, `jd-default` (sites-available plus
   its link, or `conf.d/jd-default.conf`, first line carrying `OwnedMarker`, so the Sites list leaves it
   out). `GET /proxy/default-site` (a read every account holds: listen lines of files the listing already

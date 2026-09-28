@@ -10,6 +10,7 @@ import { downloadText } from "@/lib/metrics-export"
 import { ApiError, del, errorMessage, get, post } from "@/lib/api"
 import type {
   Certificate,
+  NpmImportResult,
   ProxyPending,
   SiteBackup,
   SiteDeleteResult,
@@ -746,6 +747,32 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     }
   }
 
+  /** What an NPM import added: said like a bulk change's reload, then read. */
+  const npmImported = (res: NpmImportResult) => {
+    const count = res.sites.length + res.disabled.length + res.streams.length + res.authFiles.length
+    const title = `${plural(count, "item")} imported from Nginx Proxy Manager`
+    const outcome = reloadOutcome(res, unitNow.current)
+    setReloads((r) => hear(r, Date.now(), outcome))
+    const failure = reloadFailure(res)
+    if (!failure) {
+      notify.success(title, {
+        description: res.added.length
+          ? `Also added, because a site uses it: ${res.added.join(", ")}.`
+          : undefined,
+      })
+    } else {
+      notify.warning(`${title}, not reloaded`, {
+        description: `If nginx is running, it keeps the configuration from before until a reload succeeds. ${failure}`,
+        duration: 12_000,
+        action: showOutput(title, reloadOutput(res)),
+      })
+    }
+    refresh()
+    unitPoll.refresh()
+    if (outcome === "reloaded") expectReload(true)
+    else pendingPoll.refresh()
+  }
+
   // A deployment's route, opened for editing all the same: the form where
   // it saves the file back, the raw editor otherwise.
   const override = (vhost: VHost) => {
@@ -1387,6 +1414,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         open={importing}
         onOpenChange={setImporting}
         onImported={(res) => placed(res, `${res.name} imported`)}
+        onNpmImported={npmImported}
       />
       <SiteRenameDialog
         vhost={renaming}

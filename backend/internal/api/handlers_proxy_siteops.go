@@ -3,8 +3,11 @@ package api
 import (
 	"errors"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
@@ -141,6 +144,10 @@ func (s *Server) mountSiteFileRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/sites-export", s.handle(s.handleSitesExport))
 		r.Method(http.MethodGet, "/site-backups", s.handle(s.handleSiteBackups))
 		r.Method(http.MethodPost, "/site-backups/{dir}/{file}/restore", s.handle(s.handleSiteBackupRestore))
+		// Admin: the upload is a whole NPM database, passwords included,
+		// and the apply writes sites, streams and password files.
+		r.Method(http.MethodPost, "/import/npm", s.handle(s.handleNPMImportPreview))
+		r.Method(http.MethodPost, "/import/npm/apply", s.handle(s.handleNPMImportApply))
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodDelete, "/site-backups/{dir}/{file}", s.handle(s.handleSiteBackupPurge))
 		})
@@ -279,5 +286,129 @@ func (s *Server) handleSiteBackupPurge(w http.ResponseWriter, r *http.Request) e
 	}
 	httpx.SetAudit(r, action, file, map[string]any{"dir": dir, "path": b.Path, "bytes": b.Size})
 	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+// npmUploadAllowance covers the multipart framing around the database.
+const npmUploadAllowance = 64 << 10
+
+// handleNPMImportPreview takes an Nginx Proxy Manager database.sqlite as
+// the "file" part, copies it to a private temporary file, maps it, and
+// deletes the copy before answering. The plan stays behind the token.
+func (s *Server) handleNPMImportPreview(w http.ResponseWriter, r *http.Request) error {
+	r.Body = http.MaxBytesReader(w, r.Body, proxysvc.MaxNPMDatabaseBytes+npmUploadAllowance)
+	path, size, err := receiveNPMDatabase(r)
+	if path != "" {
+		defer os.Remove(path)
+	}
+	if err != nil {
+		return err
+	}
+	preview, err := s.modules.proxy.PreviewNPMImport(r.Context(), path)
+	if err != nil {
+		return mapProxyError(err)
+	}
+	counts := map[string]int{}
+	for _, item := range preview.Items {
+		counts[item.Kind]++
+	}
+	// Audited though nothing on the host changes: an upload of a database
+	// holding passwords is worth a line.
+	httpx.SetAudit(r, "proxy.import.npm.preview", "", map[string]any{"bytes": size, "items": counts})
+	httpx.JSON(w, http.StatusOK, preview)
+	return nil
+}
+
+func receiveNPMDatabase(r *http.Request) (string, int64, error) {
+	tooLarge := func(err error) bool {
+		var limit *http.MaxBytesError
+		return errors.As(err, &limit)
+	}
+	reader, err := r.MultipartReader()
+	if err != nil {
+		return "", 0, httpx.BadRequest("expected a multipart upload of database.sqlite: %v", err)
+	}
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			return "", 0, httpx.BadRequest("no file was uploaded")
+		}
+		if err != nil {
+			if tooLarge(err) {
+				return "", 0, httpx.Err(http.StatusRequestEntityTooLarge, "too_large", "the database is larger than 50 MB")
+			}
+			return "", 0, httpx.BadRequest("malformed upload: %v", err)
+		}
+		if part.FormName() != "file" {
+			part.Close()
+			continue
+		}
+		dir := filepath.Join(os.TempDir(), "just-dashboard")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			part.Close()
+			return "", 0, httpx.Internal(err)
+		}
+		f, err := os.CreateTemp(dir, "npm-*.sqlite")
+		if err != nil {
+			part.Close()
+			return "", 0, httpx.Internal(err)
+		}
+		size, err := io.Copy(f, io.LimitReader(part, proxysvc.MaxNPMDatabaseBytes+1))
+		part.Close()
+		if closeErr := f.Close(); err == nil {
+			err = closeErr
+		}
+		switch {
+		case err != nil && tooLarge(err), size > proxysvc.MaxNPMDatabaseBytes:
+			return f.Name(), size, httpx.Err(http.StatusRequestEntityTooLarge, "too_large", "the database is larger than 50 MB")
+		case err != nil:
+			return f.Name(), size, httpx.BadRequest("could not read the upload: %v", err)
+		}
+		return f.Name(), size, nil
+	}
+}
+
+type npmImportApplyRequest struct {
+	Token string   `json:"token"`
+	IDs   []string `json:"ids"`
+}
+
+type npmImportApplyResult struct {
+	*proxysvc.NPMApplyResult
+	Reloaded    bool                   `json:"reloaded"`
+	ReloadError string                 `json:"reloadError,omitempty"`
+	Reload      *proxysvc.ReloadResult `json:"reload,omitempty"`
+}
+
+// handleNPMImportApply adds the selected items of a preview behind one
+// nginx test, and reloads.
+func (s *Server) handleNPMImportApply(w http.ResponseWriter, r *http.Request) error {
+	var req npmImportApplyRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	const action = "proxy.import.npm"
+	detail := map[string]any{"ids": req.IDs}
+	res, reload, err := s.modules.proxy.ApplyNPMImport(r.Context(), req.Token, req.IDs, true)
+	if err != nil {
+		var refused *proxysvc.RefusedError
+		if errors.As(err, &refused) {
+			return refusedLinkChange(r, action, "", detail, err)
+		}
+		detail["result"] = "refused"
+		detail["reason"] = err.Error()
+		httpx.SetAudit(r, action, "", detail)
+		if errors.Is(err, proxysvc.ErrNPMPreviewGone) {
+			return httpx.Err(http.StatusGone, "preview_gone", err.Error())
+		}
+		return mapProxyError(err)
+	}
+	link := vhostLinkResult{}
+	link.reloaded(reload)
+	detail["sites"], detail["disabled"], detail["streams"], detail["authFiles"] = res.Sites, res.Disabled, res.Streams, res.AuthFiles
+	httpx.SetAudit(r, action, "", link.auditDetail(detail))
+	httpx.JSON(w, http.StatusOK, npmImportApplyResult{
+		NPMApplyResult: res, Reloaded: link.Reloaded, ReloadError: link.ReloadError, Reload: link.Reload,
+	})
 	return nil
 }
