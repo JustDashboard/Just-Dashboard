@@ -85,6 +85,11 @@ export function insightFindings({ drift, upstreams }: InsightFindingInput): Prox
         : `/proxy/sites?site=${encodeURIComponent(basename(first.file))}`
     const detail = down.map((t) => `${t.address}: ${t.detail ?? upstreamFailure(t)}`).join("\n")
     const meta = first.kind === "stream" ? "stream" : "upstream"
+    // What failed, not how long the check waited or which errno it quoted.
+    const fingerprint = down
+      .map((t) => `${t.address} ${t.state}`)
+      .sort()
+      .join("\n")
 
     if (down.length < targets.length) {
       out.push({
@@ -92,6 +97,7 @@ export function insightFindings({ drift, upstreams }: InsightFindingInput): Prox
         level: "warning",
         title: `${where(first)} → upstream ${first.upstream}: ${down.length} of ${targets.length} servers down`,
         detail,
+        fingerprint,
         advice:
           "nginx sends this route's requests to the servers that answer, so visitors are served while the rest carry the load. Start the stopped service or remove the server from the upstream.",
         meta,
@@ -106,6 +112,7 @@ export function insightFindings({ drift, upstreams }: InsightFindingInput): Prox
         level: "warning",
         title: `${where(first)} → ${target} does not resolve`,
         detail,
+        fingerprint,
         advice:
           "nginx resolved this name when it last loaded, so requests still go to that address, but the next reload will fail on it. Correct the name or the DNS record before reloading.",
         meta,
@@ -119,6 +126,7 @@ export function insightFindings({ drift, upstreams }: InsightFindingInput): Prox
       level: "critical",
       title: `${where(first)} → ${target} ${failure}; ${visitorOutcome(first)}`,
       detail,
+      fingerprint,
       advice:
         "Start the service this route forwards to, or point the route at where it now listens.",
       meta,

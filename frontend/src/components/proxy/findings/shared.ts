@@ -11,7 +11,26 @@ import type { Finding } from "@/components/finding-list"
  * means and what to do, in the shape the host overview and the security
  * pages already render.
  */
-export type ProxyFinding = Finding & { href: string }
+export type ProxyFinding = Finding & {
+  href: string
+  /**
+   * What a snooze remembers the finding by, when its title and detail carry
+   * something that moves on its own — days left, a timing — and would bring
+   * a finding put aside "until it changes" back the next time it is read.
+   * See findingFingerprint.
+   */
+  fingerprint?: string
+  /** A fix the overview can carry out in place, for an operator. */
+  remedy?: ProxyRemedy
+}
+
+/**
+ * The fixes a finding can offer beside the page it opens. Each is a call the
+ * page it points to already makes: enabling a site, and turning on the timer
+ * certbot installed but nothing started.
+ */
+export type ProxyRemedy =
+  { kind: "enable-site"; site: string } | { kind: "start-unit"; unit: string }
 
 /**
  * The ports the security catalogue treats as a database or a control plane —

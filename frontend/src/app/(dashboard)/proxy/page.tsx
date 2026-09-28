@@ -68,6 +68,7 @@ import { upstreamLabel, upstreamsOf, upstreamTone } from "@/components/proxy/ups
 import { busiestItems, trafficHref, trafficLabel } from "@/components/proxy/site-traffic"
 import { errorFinding } from "@/components/proxy/site-errors"
 import { AlertsPanel } from "@/components/proxy/alerts-panel"
+import { ProxyFindings } from "@/components/proxy/finding-triage"
 
 /**
  * What a poll last answered, or nothing when its last read failed. A source
@@ -681,7 +682,7 @@ export default function ProxyOverviewPage() {
                 </div>
               ) : (
                 <div className="animate-rise">
-                  <FindingList
+                  <ProxyFindings
                     findings={findings.map((f) => {
                       const source = unreadableSource(f)
                       return {
@@ -699,6 +700,9 @@ export default function ProxyOverviewPage() {
                       }
                     })}
                     emptyLabel="Certificates, renewal, sites, upstreams, streams and exposed ports all within limits"
+                    onRemedied={(remedy) =>
+                      remedy.kind === "enable-site" ? refreshAll() : certbot.refresh()
+                    }
                   />
                 </div>
               )}

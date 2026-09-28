@@ -61,6 +61,11 @@ export function portFindings({ ports }: PortFindingInput): ProxyFinding[] {
           ? dangerous[0].sockets[0].danger
           : "Each is a service the security catalogue says should not face the internet."
       }`,
+      // The process names are read afresh each time; the ports are the finding.
+      fingerprint: dangerous
+        .map((d) => `${d.port}/${d.protocol}`)
+        .sort()
+        .join(" "),
       meta: "ports",
       // Opens the ports page on these ports alone, whatever it was left
       // filtered to.

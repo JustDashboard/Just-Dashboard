@@ -128,3 +128,18 @@ export type ErrorReport = {
   groups: ErrorGroup[]
   note?: string
 }
+
+/**
+ * A finding put aside on the overview, as GET /proxy/findings/snoozes lists
+ * it. `fingerprint` is the finding as it read when it was snoozed; one that
+ * reads differently now is shown again.
+ */
+export type ProxyFindingSnooze = {
+  findingId: string
+  fingerprint: string
+  /** Absent for a snooze that lasts until the finding changes. */
+  until?: string
+  note?: string
+  actor: string
+  createdAt: string
+}

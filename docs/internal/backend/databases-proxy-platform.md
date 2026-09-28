@@ -2052,6 +2052,16 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   rule's state except mutes), `DELETE /proxy/alerts/rules/{id}`, `PUT /proxy/alerts/mutes {ruleId, subject,
   muted}`. Not offered because nothing on this build reads them: a failed certbot renewal, served-certificate
   drift, and a watched endpoint's grade dropping.
+- **Snoozed findings** (`api/handlers_proxy_findings.go`; table `proxy_finding_snoozes` in
+  `store/schema_proxy.go`): the overview's findings are judged in the browser, so a snooze keeps the
+  finding's id and the fingerprint it had (`finding-snooze.ts`: the level plus the area's fingerprint or
+  its title and detail); a finding that reads differently is shown again whatever the span.
+  `GET /proxy/findings/snoozes` (every account; expired rows left out); `PUT /proxy/findings/snoozes
+  {findingId, fingerprint, level, for: day|week|change, note}` (`system.admin`, audited
+  `proxy.findings.snooze`; a `critical` level is refused anything but `day`, and expired rows are pruned);
+  `DELETE /proxy/findings/snoozes?id=` (`destructive`, audited `proxy.findings.unsnooze`; the id is a
+  query parameter because upstream finding ids carry file paths). The level is the browser's word, so
+  the day cap on critical findings is a rule for the operator's own buttons, not a boundary.
 - **Certificates carry their fingerprint and serial**, the SHA-256 of the DER and the serial number in
   the uppercase colon form `openssl x509 -fingerprint -sha256` prints, which
   `TestCertificateFingerprintMatchesOpenSSL` checks against openssl itself.
