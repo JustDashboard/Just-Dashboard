@@ -1,4 +1,5 @@
 import type { ProxyValidation } from "./types-engine"
+import type { UpstreamReport, UpstreamTarget } from "./types-insights"
 
 export type VHost = {
   name: string
@@ -198,20 +199,10 @@ export type SitesBulkResult = {
   reload?: ProxyReload
 }
 
-/**
- * One route's upstream as GET /proxy/upstreams reports it. The endpoint is
- * the engine lane's; the list reads only the fields it draws, and draws
- * nothing where the endpoint does not answer.
- */
-export type SiteUpstreamHealth = {
-  site: string
-  upstream: string
-  address?: string
-  state: "up" | "refused" | "timeout" | "unresolvable" | "dynamic"
-  ms?: number
-}
+/** One route's upstream as GET /proxy/upstreams reports it; a site's are those whose `file` is its `path`. */
+export type SiteUpstreamHealth = UpstreamTarget
 
-export type SiteUpstreams = { checkedAt: string; targets: SiteUpstreamHealth[] }
+export type SiteUpstreams = UpstreamReport
 
 /** A site's last hour from GET /proxy/traffic, the engine lane's summary. */
 export type SiteTraffic = { site: string; requests: number }

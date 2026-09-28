@@ -6,6 +6,7 @@ import type {
   VHost,
 } from "@/lib/types"
 import { byUrgency, isBroken, isDisabled, isPlain } from "./site-order"
+import { isDown, upstreamsOf } from "./upstream-health"
 
 /**
  * The Sites list's chips, sorts and search, as pure functions of a site and
@@ -64,8 +65,6 @@ export type SiteReadings = {
   traffic?: SitesTraffic
 }
 
-const DOWN = new Set<SiteUpstreamHealth["state"]>(["refused", "timeout", "unresolvable"])
-
 /** The redirect every HTTPS site makes on port 80, which does not make it a redirect site. */
 function isUpgrade(target: string): boolean {
   return /^https:\/\/\$(host|http_host|server_name)\b/.test(target)
@@ -100,13 +99,11 @@ export function siteUpstreams(
   v: VHost,
   upstreams: SiteUpstreams | undefined,
 ): SiteUpstreamHealth[] {
-  if (!Array.isArray(upstreams?.targets)) return []
-  return upstreams.targets.filter((t) => t.site === v.name)
+  if (!Array.isArray(upstreams?.targets) || !v.path) return []
+  return upstreamsOf(upstreams, v.path)
 }
 
-export function isDown(t: SiteUpstreamHealth): boolean {
-  return DOWN.has(t.state)
-}
+export { isDown }
 
 /** Requests in the last hour, when the traffic summary has the site. */
 export function siteRequests(v: VHost, traffic: SitesTraffic | undefined): number | undefined {
