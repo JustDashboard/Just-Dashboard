@@ -902,7 +902,9 @@ func (s *Service) setVHostEnabledLocked(ctx context.Context, name, available str
 	// linkEnabled rather than a bare Symlink: a link already present but
 	// pointing somewhere else — the previous file of a renamed site, a
 	// dangling target — used to be reported as "enabled" and left as it
-	// was, so the switch said on while nginx read nothing.
+	// was, so the switch said on while nginx read nothing. A refusal puts
+	// that link back, as new as the switch.
+	s.keepLoaded(link)
 	undo, err := linkEnabled(link, available)
 	if err != nil {
 		return err
@@ -1034,6 +1036,13 @@ func (s *Service) unlinkLocked(ctx context.Context, links []string, what string,
 	if len(present) == 0 {
 		return nil
 	}
+	// A refusal puts the links back, as new as the switch: what nginx
+	// loaded through them is noted first.
+	noted := make([]string, len(present))
+	for i, r := range present {
+		noted[i] = r.link
+	}
+	s.keepLoaded(noted...)
 	restore := func() error {
 		for _, r := range present {
 			if _, err := os.Lstat(r.link); err == nil {

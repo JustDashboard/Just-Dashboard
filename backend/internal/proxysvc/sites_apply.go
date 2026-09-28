@@ -72,6 +72,7 @@ func (s *Service) applySiteLocked(ctx context.Context, spec *SiteSpec, content s
 	res := &SiteResult{
 		Name: spec.Name, Path: full, Content: content, Warnings: SpecWarnings(spec),
 	}
+	s.keepLoaded(full, filepath.Join(s.nginxDir, "sites-enabled", spec.Name))
 	if err := writeAtomic(full, content); err != nil {
 		return nil, err
 	}

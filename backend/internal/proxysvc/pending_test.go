@@ -2,6 +2,7 @@ package proxysvc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -64,11 +65,12 @@ func TestParseNginxBuild(t *testing.T) {
 	ubuntu := "nginx version: nginx/1.26.3 (Ubuntu)\nbuilt with OpenSSL 3.4.1 11 Feb 2025\nTLS SNI support enabled\n" +
 		"configure arguments: --with-cc-opt='-g -O2 -Werror=implicit-function-declaration' --prefix=/usr/share/nginx " +
 		"--conf-path=/etc/nginx/nginx.conf --http-log-path=/var/log/nginx/access.log --pid-path=/run/nginx.pid --with-debug\n"
-	if got, want := parseNginxBuild(ubuntu), (nginxBuild{"/usr/share/nginx", "/etc/nginx/nginx.conf", "/run/nginx.pid"}); got != want {
+	ubuntu = strings.Replace(ubuntu, "--http-log-path", "--error-log-path=/var/log/nginx/error.log --http-log-path", 1)
+	if got, want := parseNginxBuild(ubuntu), (nginxBuild{"/usr/share/nginx", "/etc/nginx/nginx.conf", "/run/nginx.pid", "/var/log/nginx/error.log"}); got != want {
 		t.Errorf("ubuntu: %+v, want %+v", got, want)
 	}
 	// Built with no paths of its own: nginx's defaults under its prefix.
-	if got, want := parseNginxBuild("configure arguments: --prefix=/opt/n --with-http_ssl_module"), (nginxBuild{"/opt/n", "/opt/n/conf/nginx.conf", "/opt/n/logs/nginx.pid"}); got != want {
+	if got, want := parseNginxBuild("configure arguments: --prefix=/opt/n --with-http_ssl_module"), (nginxBuild{"/opt/n", "/opt/n/conf/nginx.conf", "/opt/n/logs/nginx.pid", "/opt/n/logs/error.log"}); got != want {
 		t.Errorf("bare: %+v, want %+v", got, want)
 	}
 	if got := parseNginxBuild(""); got.conf != "/usr/local/nginx/conf/nginx.conf" {
@@ -126,22 +128,43 @@ func (f *runningNginx) processes() ([]nginxProcess, error) {
 
 // pendingTree is a Debian nginx directory behind an nginx that dumps its
 // configuration the way `nginx -T` does — nginx.conf, conf.d/*.conf and
-// sites-enabled/* — refuses it while a file called "broken" is there, and
-// passes every test.
+// sites-enabled/* — counting each dump in ../dumps. It refuses the
+// configuration while a file called "broken" is there, or a file it reads
+// starts a line with "foo;". Its test refuses while a file called "refuse" is
+// there, or while a site that says "needs-api" is enabled without api.
 func pendingTree(t *testing.T) (*Service, string, *runningNginx) {
 	t.Helper()
 	svc, root := debianTree(t)
 	nginxShim(t, fmt.Sprintf(`ROOT='%s'
 case "$*" in
 *-T*)
+	echo dump >> "$ROOT/../dumps"
 	if [ -e "$ROOT/broken" ]; then
 		echo "nginx: [emerg] unknown directive \"foo\" in $ROOT/sites-enabled/app:3" >&2
 		echo "nginx: configuration file $ROOT/nginx.conf test failed" >&2
 		exit 1
 	fi
+	for f in "$ROOT"/conf.d/*.conf "$ROOT"/sites-enabled/*; do
+		if [ -e "$f" ] && grep -q "^foo;" "$f"; then
+			echo "nginx: [emerg] unknown directive \"foo\" in $f:1" >&2
+			echo "nginx: configuration file $ROOT/nginx.conf test failed" >&2
+			exit 1
+		fi
+	done
 	for f in "$ROOT/nginx.conf" "$ROOT"/conf.d/*.conf "$ROOT"/sites-enabled/*; do
 		[ -e "$f" ] || continue
 		echo "# configuration file $f:"; cat "$f"; echo
+	done ;;
+*-t*)
+	if [ -e "$ROOT/refuse" ]; then
+		echo "nginx: [emerg] unexpected end of file in $ROOT/nginx.conf:1" >&2
+		exit 1
+	fi
+	for f in "$ROOT"/sites-enabled/*; do
+		if [ -e "$f" ] && grep -q needs-api "$f" && [ ! -e "$ROOT/sites-enabled/api" ]; then
+			echo "nginx: [emerg] host not found in upstream \"api\" in $f:2" >&2
+			exit 1
+		fi
 	done ;;
 *-V*) echo "configure arguments: --prefix=/usr/share/nginx --conf-path=/etc/nginx/nginx.conf --pid-path=/run/nginx.pid" >&2 ;;
 esac
@@ -152,10 +175,10 @@ exit 0`, root))
 	return svc, root, fake
 }
 
-// pendingOf answers Pending as path → change, with the site each names.
+// pendingOf answers Pending as path → change, with the site each names. The
+// cached dump is left as it is: a file changed by hand has to make it stale.
 func pendingOf(t *testing.T, svc *Service, after string) (*Pending, map[string]string) {
 	t.Helper()
-	svc.forgetEffective()
 	p, err := svc.Pending(context.Background(), after)
 	if err != nil {
 		t.Fatal(err)
@@ -287,6 +310,308 @@ func TestPendingSaysWhenNginxRefusesTheConfigurationOnDisk(t *testing.T) {
 		filepath.Join(root, "conf.d", "extra.conf"): "removed conf.d/extra.conf",
 	}) {
 		t.Errorf("files: %v", got)
+	}
+}
+
+// Before anything asks what is pending, the service may write a file nginx
+// reads and put it back: a dry-run test, a save or a site nginx refuses, a
+// switch it undoes. The file is then newer than the load with nothing known
+// of what it held, so each write notes first what the load read.
+func TestPendingKnowsWhatALoadReadThroughWritesPutBack(t *testing.T) {
+	svc, root, fake := pendingTree(t)
+	ctx := context.Background()
+	available := func(name string) string { return filepath.Join(root, "sites-available", name) }
+	enabled := func(name string) string { return filepath.Join(root, "sites-enabled", name) }
+	app := "server {\n    server_name app.example.com;\n    return 200;\n}\n"
+	writeFile(t, available("app"), app)
+	symlink(t, available("app"), enabled("app"))
+	writeFile(t, available("api"), "server {\n    server_name api.test;\n}\n")
+	symlink(t, available("api"), enabled("api"))
+	writeFile(t, available("uses"), "server {\n    # needs-api\n}\n")
+	symlink(t, available("uses"), enabled("uses"))
+	// A link to a file the site has since left, which an Enable replaces.
+	writeFile(t, available("other-old"), "server {\n    server_name other.test;\n}\n")
+	writeFile(t, available("other"), "server {\n    server_name other.test;\n    return 204;\n}\n")
+	symlink(t, available("other-old"), enabled("other"))
+	time.Sleep(20 * time.Millisecond)
+	fake.load(time.Now(), 1000)
+	time.Sleep(20 * time.Millisecond)
+
+	if res, err := svc.Validate(ctx, KindNginx, available("app"), "server {}\n"); err != nil || !res.Valid {
+		t.Fatalf("validate: %v %+v", err, res)
+	}
+	refuse := filepath.Join(root, "refuse")
+	writeFile(t, refuse, "")
+	if _, err := svc.WriteConfig(ctx, KindNginx, available("app"), app+"# refused\n"); !errors.Is(err, ErrInvalidConf) {
+		t.Fatalf("a save nginx refuses: %v", err)
+	}
+	if _, err := svc.ApplySite(ctx, proxySpec(), true, false, true); !errors.Is(err, ErrInvalidConf) {
+		t.Fatalf("a site nginx refuses: %v", err)
+	}
+	var refused *RefusedError
+	if _, err := svc.ToggleVHost(ctx, "other", true, false); !errors.As(err, &refused) {
+		t.Fatalf("an enable nginx refuses: %v", err)
+	}
+	if err := os.Remove(refuse); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ToggleVHost(ctx, "api", false, false); !errors.As(err, &refused) {
+		t.Fatalf("a disable nginx refuses: %v", err)
+	}
+	if b, _ := os.ReadFile(available("app")); string(b) != app {
+		t.Fatalf("app was left as %q", b)
+	}
+	if target, _ := os.Readlink(enabled("other")); target != available("other-old") {
+		t.Fatalf("other's link was left at %q", target)
+	}
+	if _, err := os.Lstat(enabled("api")); err != nil {
+		t.Fatalf("api's link was not put back: %v", err)
+	}
+
+	if _, got := pendingOf(t, svc, ""); len(got) != 0 {
+		t.Errorf("after writes that were put back: %v", got)
+	}
+	// What the load read is still known, so an edit is one.
+	writeFile(t, available("app"), app+"# edited\n")
+	if _, got := pendingOf(t, svc, ""); !reflect.DeepEqual(got, map[string]string{
+		enabled("app"): "changed sites-available/app",
+	}) {
+		t.Errorf("after an edit: %v", got)
+	}
+}
+
+// nginx starts a worker in place of one that died, on the load it has. While
+// one of the load's workers runs that is plain; when every one of them has
+// been replaced, the process table looks like a load, and the master's error
+// log — which keeps a worker killed by a signal at alert level — tells the
+// two apart.
+func TestPendingKeepsTheLoadWhenNginxReplacesWorkersThatDied(t *testing.T) {
+	svc, root, _ := pendingTree(t)
+	conf := filepath.Join(root, "nginx.conf")
+	errorLog := filepath.Join(root, "error.log")
+	writeFile(t, conf, "error_log "+errorLog+" warn;\nevents {}\nhttp {\n    include conf.d/*.conf;\n    include sites-enabled/*;\n}\n")
+	available := filepath.Join(root, "sites-available", "app")
+	link := filepath.Join(root, "sites-enabled", "app")
+	writeFile(t, available, "server {\n    return 200;\n}\n")
+	symlink(t, available, link)
+	time.Sleep(20 * time.Millisecond)
+
+	var mu sync.Mutex
+	var workers []nginxProcess
+	set := func(ws ...nginxProcess) {
+		mu.Lock()
+		defer mu.Unlock()
+		workers = ws
+	}
+	svc.pending.processes = func() ([]nginxProcess, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		master := nginxProcess{PID: 100, PPID: 1, Title: "nginx: master process /usr/sbin/nginx -c " + conf, Ticks: 5}
+		return append([]nginxProcess{master}, workers...), nil
+	}
+	worker := func(pid int, ticks uint64, start time.Time) nginxProcess {
+		return nginxProcess{PID: pid, PPID: 100, Title: workerTitle, Ticks: ticks, Start: start}
+	}
+	crashed := func(at time.Time, pids ...int) {
+		f, err := os.OpenFile(errorLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		for _, pid := range pids {
+			fmt.Fprintf(f, "%s [alert] 100#100: worker process %d exited on signal 9\n", at.Format("2006/01/02 15:04:05"), pid)
+		}
+	}
+	generation := func(want string, pending map[string]string) {
+		t.Helper()
+		p, got := pendingOf(t, svc, "")
+		if p.Generation != want || !reflect.DeepEqual(got, pending) {
+			t.Errorf("generation %s with %v, want %s with %v", p.Generation, got, want, pending)
+		}
+	}
+
+	loaded := time.Now()
+	set(worker(101, 1000, loaded), worker(102, 1001, loaded.Add(10*time.Millisecond)))
+	generation("100-1000", map[string]string{})
+	writeFile(t, available, "server {\n    return 204;\n}\n")
+	edited := map[string]string{link: "changed sites-available/app"}
+	generation("100-1000", edited)
+
+	// One worker dies; the other runs on.
+	crashed(loaded.Add(time.Second), 102)
+	set(worker(101, 1000, loaded), worker(201, 3000, loaded.Add(time.Second+20*time.Millisecond)))
+	generation("100-1000", edited)
+
+	// Then both, and nginx starts two more at once, after the edit: the
+	// edit is still not live.
+	died := time.Now().Add(time.Second)
+	crashed(died, 101, 201)
+	set(worker(301, 5000, died.Add(5*time.Millisecond)), worker(302, 5001, died.Add(15*time.Millisecond)))
+	generation("100-1000", edited)
+	generation("100-1000", edited)
+	// Nor is it the load a reload waits for.
+	svc.pending.settle = 300 * time.Millisecond
+	began := time.Now()
+	if p, _ := pendingOf(t, svc, "100-1000"); p.Generation != "100-1000" || time.Since(began) < 300*time.Millisecond {
+		t.Errorf("a reload read into a respawn: %s after %v", p.Generation, time.Since(began))
+	}
+
+	// A reload: the workers from before are retitled as they finish.
+	reload := died.Add(5 * time.Second)
+	set(nginxProcess{PID: 301, PPID: 100, Title: shuttingTitle, Ticks: 5000, Start: died},
+		worker(401, 9000, reload), worker(402, 9001, reload.Add(10*time.Millisecond)))
+	generation("100-9000", map[string]string{})
+
+	// A reload whose workers from before had nothing to finish, with a
+	// worker that died hours ago still in the log, and one killed a moment
+	// before the reload: the other went by itself.
+	crashed(time.Now().Add(-3*time.Hour), 401)
+	crashed(reload.Add(10*time.Second), 402)
+	set(worker(501, 11000, reload.Add(10*time.Second+300*time.Millisecond)))
+	generation("100-11000", map[string]string{})
+
+	// One worker, as worker_processes 1 runs, killed and started again.
+	again := reload.Add(20 * time.Second)
+	crashed(again, 501)
+	set(worker(601, 13000, again.Add(20*time.Millisecond)))
+	generation("100-11000", map[string]string{})
+
+	// A reload a moment after that: the line that told the worker before
+	// apart does not tell this one apart too.
+	set(worker(701, 15000, again.Add(900*time.Millisecond)))
+	generation("100-15000", map[string]string{})
+
+	// With no line saying so, workers all new are taken for a load.
+	set(worker(801, 17000, reload.Add(40*time.Second)))
+	generation("100-17000", map[string]string{})
+}
+
+// A link made or a file broken over SSH is not the service's change, and does
+// not forget the cached `nginx -T`: what it makes stale is seen by the change
+// times of the files the dump names and the directories its includes read.
+func TestPendingSeesAChangeMadeByHandAtOnce(t *testing.T) {
+	svc, root, fake := pendingTree(t)
+	// Well over the tick the kernel stamps a change time to, which lags the
+	// wall clock by as much.
+	svc.pending.slack = 50 * time.Millisecond
+	available := func(name string) string { return filepath.Join(root, "sites-available", name) }
+	enabled := func(name string) string { return filepath.Join(root, "sites-enabled", name) }
+	writeFile(t, available("app"), "server {\n    return 200;\n}\n")
+	symlink(t, available("app"), enabled("app"))
+	writeFile(t, available("new"), "server {\n    server_name new.test;\n}\n")
+	time.Sleep(100 * time.Millisecond)
+	fake.load(time.Now(), 1000)
+	dumps := func() int {
+		b, _ := os.ReadFile(filepath.Join(root, "..", "dumps"))
+		return strings.Count(string(b), "dump")
+	}
+
+	if _, got := pendingOf(t, svc, ""); len(got) != 0 {
+		t.Fatalf("right after the load: %v", got)
+	}
+	before := dumps()
+	if _, got := pendingOf(t, svc, ""); len(got) != 0 || dumps() != before {
+		t.Fatalf("nothing changed, and the dump was run again (%d → %d): %v", before, dumps(), got)
+	}
+
+	symlink(t, available("new"), enabled("new"))
+	if _, got := pendingOf(t, svc, ""); !reflect.DeepEqual(got, map[string]string{
+		enabled("new"): "added sites-available/new",
+	}) {
+		t.Errorf("a link made by hand: %v", got)
+	}
+	// Edited in place, in a file the dump names.
+	writeFile(t, available("app"), "foo;\n")
+	if p, _ := pendingOf(t, svc, ""); p.Problem != `unknown directive "foo" in `+available("app")+":1" {
+		t.Errorf("a site broken by hand: %+v", p)
+	}
+	writeFile(t, available("app"), "server {\n    return 200;\n}\n")
+	if p, _ := pendingOf(t, svc, ""); p.Problem != "" {
+		t.Fatalf("mended: %+v", p)
+	}
+	// New in a directory an include reads.
+	broken := filepath.Join(root, "conf.d", "zz-broken.conf")
+	writeFile(t, broken, "foo;\n")
+	if p, _ := pendingOf(t, svc, ""); p.Problem != `unknown directive "foo" in `+broken+":1" {
+		t.Errorf("a file broken by hand: %+v", p)
+	}
+}
+
+// When nginx refuses the configuration it names none of the files it would
+// read, and a site linked since the load is no more live than before: the
+// includes are followed on disk instead.
+func TestPendingFollowsIncludesOnDiskWhenNginxRefusesTheConfiguration(t *testing.T) {
+	svc, root, fake := pendingTree(t)
+	available := func(name string) string { return filepath.Join(root, "sites-available", name) }
+	enabled := func(name string) string { return filepath.Join(root, "sites-enabled", name) }
+	writeFile(t, available("app"), "server {\n    return 200;\n}\n")
+	symlink(t, available("app"), enabled("app"))
+	writeFile(t, available("new"), "server {\n    server_name new.test;\n}\n")
+	time.Sleep(20 * time.Millisecond)
+	fake.load(time.Now(), 1000)
+	if _, got := pendingOf(t, svc, ""); len(got) != 0 {
+		t.Fatalf("right after the load: %v", got)
+	}
+
+	symlink(t, available("new"), enabled("new"))
+	broken := filepath.Join(root, "conf.d", "zz-broken.conf")
+	writeFile(t, broken, "foo;\n")
+	p, got := pendingOf(t, svc, "")
+	if p.Problem == "" {
+		t.Fatalf("no problem: %+v", p)
+	}
+	if !reflect.DeepEqual(got, map[string]string{
+		enabled("new"): "added sites-available/new",
+		broken:         "changed conf.d/zz-broken.conf",
+	}) {
+		t.Errorf("files: %v", got)
+	}
+
+	// Nothing known of the load yet, and the configuration refused from the
+	// first read: what is on disk is judged all the same.
+	fake.load(time.Now().Add(10*time.Millisecond), 2000)
+	time.Sleep(30 * time.Millisecond)
+	writeFile(t, available("late"), "server {\n    server_name late.test;\n}\n")
+	symlink(t, available("late"), enabled("late"))
+	p, got = pendingOf(t, svc, "")
+	if p.Problem == "" || p.Generation != "100-2000" || !reflect.DeepEqual(got, map[string]string{
+		enabled("late"): "added sites-available/late",
+	}) {
+		t.Errorf("a load first read refused: %+v %v", p, got)
+	}
+}
+
+// nginx resolves a relative include against the main file's directory, names
+// each file by the pattern it matched as written, reads a glob's matches
+// sorted, takes "[!…]" as a negated set and skips leading-dot names.
+func TestIncludedOnDiskFollowsIncludesAsNginxDoes(t *testing.T) {
+	svc, root := debianTree(t)
+	conf := filepath.Join(root, "nginx.conf")
+	writeFile(t, conf, "events {}\nhttp {\n    include conf.d/[!_]*.conf;\n    include ./snippets/*.conf;\n    include "+root+"/sites-enabled/*;\n}\n")
+	writeFile(t, filepath.Join(root, "conf.d", "b.conf"), "")
+	writeFile(t, filepath.Join(root, "conf.d", "a.conf"), "")
+	writeFile(t, filepath.Join(root, "conf.d", "_off.conf"), "")
+	writeFile(t, filepath.Join(root, "conf.d", ".hidden.conf"), "")
+	writeFile(t, filepath.Join(root, "snippets", "x.conf"), "")
+	writeFile(t, filepath.Join(root, "snippets", "tls.inc"), "")
+	writeFile(t, filepath.Join(root, "sites-available", "app"), "server {\n    include snippets/tls.inc;\n    include missing/*.conf;\n}\n")
+	symlink(t, filepath.Join(root, "sites-available", "app"), filepath.Join(root, "sites-enabled", "app"))
+	// A file that does not parse is named, and not followed.
+	writeFile(t, filepath.Join(root, "sites-enabled", "broken"), "server {\n    include snippets/x.conf;\n")
+	if err := os.MkdirAll(filepath.Join(root, "sites-enabled", "dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		conf,
+		root + "/conf.d/a.conf",
+		root + "/conf.d/b.conf",
+		root + "/./snippets/x.conf",
+		root + "/sites-enabled/app",
+		root + "/snippets/tls.inc",
+		root + "/sites-enabled/broken",
+	}
+	if got := svc.includedOnDisk(conf); !reflect.DeepEqual(got, want) {
+		t.Errorf("got  %q\nwant %q", got, want)
 	}
 }
 
@@ -572,6 +897,103 @@ func TestLivePendingFollowsTheRunningNginx(t *testing.T) {
 	}
 	if last, got := pendingOf(t, svc, stuck.Generation); last.Generation == stuck.Generation || len(got) != 0 {
 		t.Errorf("once the port was free: %+v %v", last, got)
+	}
+}
+
+// Against the real nginx: its only worker killed, the master starts another
+// on the configuration it has, and writes why to its error log. An edit made
+// before stays not live, and is no reload's load, until nginx reloads.
+func TestLivePendingKeepsTheLoadAcrossAWorkerKilled(t *testing.T) {
+	root := liveNginx(t)
+	svc := New(root, filepath.Join(root, "Caddyfile"))
+	svc.pending.settle = time.Second
+	ctx := context.Background()
+	port := freePort(t)
+	available := filepath.Join(root, "sites-available", "app")
+	link := filepath.Join(root, "sites-enabled", "app")
+	site := func(body string) string {
+		return fmt.Sprintf("server {\n    listen 127.0.0.1:%d;\n    return 200 %q;\n}\n", port, body)
+	}
+	writeFile(t, available, site("one"))
+	symlink(t, available, link)
+	time.Sleep(20 * time.Millisecond)
+
+	daemon := exec.Command(filepath.Join(root, "bin", "nginx"), "-g", "daemon off;")
+	if err := daemon.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		daemon.Process.Signal(syscall.SIGQUIT)
+		daemon.Wait()
+	})
+	workers := func() []int {
+		procs, err := procNginxProcesses("/proc")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var pids []int
+		for _, p := range procs {
+			if p.PPID == daemon.Process.Pid && p.Title == workerTitle {
+				pids = append(pids, p.PID)
+			}
+		}
+		return pids
+	}
+	var p *Pending
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		p, _ = pendingOf(t, svc, "")
+		if p.Running && p.Generation != "" && serves(port) == "one" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("nginx did not come up: %+v", p)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	writeFile(t, available, site("two"))
+	edited := map[string]string{link: "changed sites-available/app"}
+	if _, got := pendingOf(t, svc, ""); !reflect.DeepEqual(got, edited) {
+		t.Fatalf("after an edit: %v", got)
+	}
+
+	killed := workers()
+	if len(killed) == 0 {
+		t.Fatal("no worker to kill")
+	}
+	time.Sleep(1100 * time.Millisecond)
+	for _, pid := range killed {
+		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		if now := workers(); len(now) > 0 && now[0] != killed[0] && serves(port) == "one" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("nginx started no worker in place of %v", killed)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, "logs", "error.log")); !strings.Contains(string(b), fmt.Sprintf("worker process %d exited on signal 9", killed[0])) {
+		t.Fatalf("the error log says nothing of the worker: %s", b)
+	}
+	respawned, got := pendingOf(t, svc, "")
+	if respawned.Generation != p.Generation || !reflect.DeepEqual(got, edited) {
+		t.Errorf("after the worker was replaced: %s %v, want %s %v", respawned.Generation, got, p.Generation, edited)
+	}
+	if waited, _ := pendingOf(t, svc, p.Generation); waited.Generation != p.Generation {
+		t.Errorf("a reload read into the replaced worker: %s", waited.Generation)
+	}
+
+	if _, err := svc.Reload(ctx, KindNginx); err != nil {
+		t.Fatal(err)
+	}
+	if next, got := pendingOf(t, svc, p.Generation); next.Generation == p.Generation || len(got) != 0 {
+		t.Errorf("after the reload: %+v %v", next, got)
+	}
+	if body := serves(port); body != "two" {
+		t.Errorf("serving %q after the reload", body)
 	}
 }
 

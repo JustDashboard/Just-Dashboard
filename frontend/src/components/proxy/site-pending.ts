@@ -39,6 +39,16 @@ export function notLiveLabel(vhost: VHost, changes: PendingFile[]): string | und
   return has("removed") ? "changed, not live" : undefined
 }
 
+/**
+ * The Disabled tile's hint: a site taken out since nginx loaded is still
+ * served until it reloads, which "not serving" would deny.
+ */
+export function disabledHint(stillServed: number): string {
+  return stillServed === 0
+    ? "on disk, not serving"
+    : `${stillServed.toLocaleString()} still served until nginx reloads`
+}
+
 /** "3 changes on disk are not live yet". */
 export function pendingTitle(count: number): string {
   return count === 1

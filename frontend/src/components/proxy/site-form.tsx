@@ -67,7 +67,8 @@ export function SiteForm({
   /** Bumped on every open, so a closed and reopened form never keeps a stale draft. */
   session?: number
   onOpenChange: (open: boolean) => void
-  onSaved: () => void
+  /** Told whether nginx was reloaded with the save. */
+  onSaved: (reloaded: boolean) => void
 }) {
   // Keyed on the site so opening another never inherits the previous one's
   // buffer — saving that under the wrong name would be a real outage.
@@ -115,7 +116,8 @@ function SiteFormBody({
   editing: string | null
   copyFrom: string | null
   onOpenChange: (open: boolean) => void
-  onSaved: () => void
+  /** Told whether nginx was reloaded with the save. */
+  onSaved: (reloaded: boolean) => void
 }) {
   const source = editing ?? copyFrom
   // Kept for the tab while the form is open (the panel forgets it on close):
@@ -277,7 +279,7 @@ function SiteFormBody({
           ? undefined
           : "nginx has not reloaded yet, so the site is on disk but not serving.",
       })
-      onSaved()
+      onSaved(res.reloaded)
       onOpenChange(false)
     } catch (err) {
       notify.error("Not applied", err)

@@ -288,6 +288,7 @@ func (s *Service) ApplyStream(ctx context.Context, spec *StreamSpec, reload, ove
 		return nil, fmt.Errorf("a stream called %s already exists", spec.Name)
 	}
 	res := &SiteResult{Name: spec.Name, Path: path, Content: content, Warnings: streamWarnings(spec)}
+	s.keepLoaded(path)
 	if err := writeAtomic(path, content); err != nil {
 		return nil, err
 	}

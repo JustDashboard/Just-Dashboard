@@ -410,7 +410,9 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   file moved or copied in with an old time still counts. `pendingTracker` (per `Service`) remembers,
   for the running load, the SHA-256 of every file unchanged since it: a file whose content is back to
   what nginx loaded is not pending however new it is (a dry-run test stages its candidate at the live
-  path and writes the original back; a switch refused and undone re-creates its link), and a file
+  path and writes the original back; a switch refused and undone re-creates its link — each of
+  these calls `keepLoaded` before it writes, which notes the digest of a file still unchanged since
+  the load, so this holds even when nothing asked what is pending first), and a file
   nginx loaded that it no longer reads is "removed" — a site disabled without a reload is still
   served. A file saved since the load that the tracker never saw loaded is "changed", or "added" for a
   link made since; the tracker is in memory, so after the dashboard restarts, a file changed and
@@ -418,9 +420,16 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   the Sites entry it belongs to (`Site`, `Layout`: a link in sites-enabled belongs to the
   sites-available file it serves, a conf.d file to itself). `Generation` (`<master pid>-<ticks>`) names
   the load; `?after=<generation>` waits up to five seconds, reading `/proc` every 100 ms, for a newer
-  one, which is how the Sites page reads nginx again after a reload it asked for. When `nginx -T`
-  refuses the configuration, `Problem` is its first error and only the files known to be loaded are
-  judged; when the dump waits more than five seconds behind the service lock, the same. `Running` is
+  one, which is how the Sites page reads nginx again after a reload it asked for (a save without a
+  reload reads at once). Workers all replaced without a reload — a crash or an OOM kill — keep the
+  load when the master's error log says each one that went was killed by a signal (`exited on
+  signal`, at alert level) and the new ones started right after; with no error log file to read,
+  or one in another time zone, they are taken for a load. The cached `nginx -T` is dropped before a
+  read when a file it names, or a directory its glob includes read, changed since it was taken, so a
+  link made over SSH shows at once. When `nginx -T` refuses the configuration, `Problem` is its first
+  error and the files are found by following the includes on disk from the main file (as nginx
+  globs them), so a site linked since the load is still "added"; when the dump waits more than five
+  seconds behind the service lock, only the files known to be loaded are judged. `Running` is
   false, with `Reason`, where nginx is not installed, no master reads the configuration, or two do and
   the pid file names neither; a master with no worker is running with no `LastReload`. A certificate
   nginx has not reloaded is not a configuration file, and is left to the served-certificate check.

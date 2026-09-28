@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   changeVerb,
   configName,
+  disabledHint,
   keptLoad,
   loadKnown,
   loadedSince,
@@ -151,5 +152,13 @@ describe("keptLoad", () => {
     expect(keptLoad(hourAgo)).toBe(
       "The reload was sent, but nginx is still running what it loaded 1h ago. Its error log says why — often a port another process holds, or a file it cannot open.",
     )
+  })
+})
+
+describe("disabledHint", () => {
+  test("a disabled site nginx still serves is not called not serving", () => {
+    expect(disabledHint(0)).toBe("on disk, not serving")
+    expect(disabledHint(1)).toBe("1 still served until nginx reloads")
+    expect(disabledHint(2)).toBe("2 still served until nginx reloads")
   })
 })

@@ -42,6 +42,7 @@ import { activeOwner, matchesSearch, upstreamTargets } from "@/components/proxy/
 import { reloadFailure, reloadOutput } from "@/components/proxy/site-outcome"
 import {
   KEPT_LOAD,
+  disabledHint,
   keptLoad,
   loadKnown,
   loadedSince,
@@ -604,11 +605,13 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     onOverride: override,
   }
 
-  // A save from the form or the editor may or may not have reloaded; either
-  // way the read of what is pending waits a moment for a newer load.
-  const saved = () => {
+  // A save that reloaded waits a moment for nginx to load it; one that did
+  // not is read at once, and waiting for a load nobody asked for kept its
+  // card reading "serving" for the whole wait.
+  const saved = (reloaded: boolean) => {
     refresh()
-    expectReload(false)
+    if (reloaded) expectReload(false)
+    else pendingPoll.refresh()
   }
 
   const header = <PageContext eyebrow="Proxy" title="Sites" />
@@ -662,6 +665,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   const groups =
     narrowed || sorted.length < 2 ? [{ key: "all", label: "", sites: visible }] : sorted
   const allServing = run?.running !== false && !hosts.some((v) => isUnloaded(v) || notLive(v))
+  const disabledServed = hosts.filter((v) => isDisabled(v) && notLive(v)).length
 
   return (
     <Page className="animate-rise">
@@ -760,7 +764,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
           value={counts.disabled}
           hint={
             counts.disabled > 0
-              ? "on disk, not serving"
+              ? disabledHint(disabledServed)
               : counts.broken > 0
                 ? `none, but ${plural(counts.broken, "broken link")}`
                 : allServing

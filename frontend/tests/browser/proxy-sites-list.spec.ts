@@ -1810,3 +1810,78 @@ test("a switch whose reload nginx did not take says so after its own toast", asy
     /sites-enabled\/off\.example\.com linked (just now|\d+s ago)/,
   )
 })
+
+test("a save that did not reload is read at once, and one that did waits for nginx's load", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await serveSites(page, [app])
+  await page.route("**/api/v1/proxy/config?**", (route) => json(route, { content: "server {}\n" }))
+  let saves = 0
+  let reloaded = false
+  await page.route("**/api/v1/proxy/config", (route) => {
+    if (route.request().method() !== "PUT") return route.fallback()
+    saves += 1
+    reloaded = Boolean(route.request().postDataJSON().reload)
+    return json(route, { ...brokenTest, valid: true, output: "syntax is ok", diagnostics: [] })
+  })
+  // A read that names a load waits for a newer one, and gives up only after
+  // a while when none comes; the page must not ask that of a save that sent
+  // no reload.
+  const afters = await servePending(page, async (after) => {
+    if (after) await new Promise((resolve) => setTimeout(resolve, reloaded ? 200 : 8_000))
+    if (reloaded) return newerLoad
+    return saves > 0 ? { ...pendingNone, files: [appEdited] } : pendingNone
+  })
+  await page.goto("/proxy/sites")
+  const site = card(page, "app.example.com")
+  await expect(site.getByText("serving", { exact: true })).toBeVisible()
+
+  await site.getByRole("button", { name: "Raw config" }).click()
+  const sheet = page.getByRole("dialog")
+  const lines = sheet.locator(".monaco-editor .view-lines")
+  await expect(lines).toContainText("server", editorLoad)
+  await lines.click()
+  await page.keyboard.press("End")
+  await page.keyboard.type("# saved")
+  const before = afters.length
+  await sheet.getByRole("button", { name: "Save only" }).click()
+  await expect(page.locator("[data-sonner-toast]").filter({ hasText: /^Saved$/ })).toBeVisible()
+  await expect(site.getByText("saved, not live", { exact: true })).toBeVisible({ timeout: 4_000 })
+  expect(afters.slice(before)).toContain(null)
+  expect(afters.slice(before)).not.toContain(pendingNone.generation)
+
+  await lines.click()
+  await page.keyboard.press("End")
+  await page.keyboard.type(" and reloaded")
+  await sheet.getByRole("button", { name: "Save and reload" }).click()
+  await expect(
+    page.locator("[data-sonner-toast]").filter({ hasText: "Saved and reloaded" }),
+  ).toBeVisible()
+  await expect.poll(() => afters.includes(pendingNone.generation)).toBe(true)
+  await expect(site.getByText("serving", { exact: true })).toBeVisible()
+})
+
+test("the Disabled tile does not call a site nginx still serves not serving", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  await serveSites(page, [app, off])
+  const answer: { current: unknown } = { current: { ...pendingNone, files: [offTakenOut] } }
+  await servePending(page, () => answer.current)
+  await page.goto("/proxy/sites")
+  await expect(
+    card(page, "off.example.com").getByText("disabled, not live", { exact: true }),
+  ).toBeVisible()
+  await expect(page.getByText("1 still served until nginx reloads", { exact: true })).toBeVisible()
+  await expect(page.getByText("on disk, not serving")).toHaveCount(0)
+  const overflow = await page
+    .locator("[data-slot='page']")
+    .evaluate((el) => el.scrollWidth - el.clientWidth)
+  expect(overflow).toBeLessThanOrEqual(1)
+
+  answer.current = pendingNone
+  await page.reload()
+  await expect(card(page, "off.example.com").getByText("disabled", { exact: true })).toBeVisible()
+  await expect(page.getByText("on disk, not serving", { exact: true })).toBeVisible()
+  await expect(page.getByText(/still served until nginx reloads/)).toHaveCount(0)
+})
