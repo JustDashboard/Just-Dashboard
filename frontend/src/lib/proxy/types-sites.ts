@@ -42,7 +42,7 @@ export type VHost = {
   accessLog?: string
   errorLog?: string
   /** The upstream blocks the file declares. */
-  pools?: SitePool[]
+  pools?: VHostPool[]
   features?: SiteFeature[]
   /** The directories the site serves files from. */
   roots?: string[]
@@ -59,7 +59,7 @@ export type VHost = {
 }
 
 /** An upstream block and the servers in it. */
-export type SitePool = { name: string; servers: string[] }
+export type VHostPool = { name: string; servers: string[] }
 
 /**
  * What a site's server blocks do besides naming and listening: a password,

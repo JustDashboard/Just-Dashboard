@@ -1,4 +1,4 @@
-import type { SiteFeature, SitePool, VHost, VHostOwner } from "@/lib/types"
+import type { SiteFeature, VHost, VHostOwner, VHostPool } from "@/lib/types"
 
 /** The word each feature is drawn as on a site's card. */
 export const FEATURE_LABEL: Record<SiteFeature, string> = {
@@ -23,7 +23,7 @@ export function activeOwner(v: VHost): VHostOwner | undefined {
 }
 
 /** The upstream block a proxy_pass names: a scheme and a bare name, with no port. */
-function poolOf(upstream: string, pools: SitePool[] | undefined): SitePool | undefined {
+function poolOf(upstream: string, pools: VHostPool[] | undefined): VHostPool | undefined {
   const host = /^[a-z][a-z0-9+.-]*:\/\/([^/:?#]+)(?:[/?#]|$)/i.exec(upstream)?.[1]
   return host ? pools?.find((pool) => pool.name === host) : undefined
 }
