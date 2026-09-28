@@ -70,6 +70,7 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 	renderServerOptions(l, spec)
 	renderErrorRouting(l, spec)
 	renderAccess(l, spec)
+	renderServerLimits(l, spec)
 
 	switch spec.Kind {
 	case "redirect":
@@ -158,6 +159,13 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 			l.blank()
 		}
 		renderMaintenanceMaps(l, spec)
+		wrote = true
+	}
+	if spec.hasLimits() {
+		if wrote {
+			l.blank()
+		}
+		renderLimitZones(l, spec)
 		wrote = true
 	}
 	if wrote {
@@ -405,6 +413,7 @@ func renderAccess(l *lines, spec *SiteSpec) {
 
 func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 	l.add("    location %s {", loc.renderedPath())
+	renderLocationLimit(l, loc, spec)
 	if loc.servesFolder() {
 		if loc.RootMode == "root" {
 			l.add("        root %s;", loc.Root)

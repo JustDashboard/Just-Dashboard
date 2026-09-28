@@ -22,7 +22,7 @@ import { ConfigEditor } from "@/components/proxy/config-editor"
 import { useNewSiteLink } from "@/components/proxy/site-link"
 import { siteProduct } from "@/components/proxy/marks"
 import { SiteForm } from "@/components/proxy/site-form"
-import { ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
+import { ServingStatus, SiteRateLimited, SiteTLS } from "@/components/proxy/site-marks"
 import { useSiteVerbs } from "@/components/proxy/site-verbs"
 import { ProxyGrid, RoutePath } from "@/components/proxy/route-path"
 import { byUrgency, isDisabled, isPlain, waiting } from "@/components/proxy/site-order"
@@ -466,6 +466,7 @@ function SiteCard({ vhost, busy, index, ...handlers }: CardProps) {
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-hint text-muted-foreground">
           <SiteTLS vhost={vhost} />
+          <SiteRateLimited vhost={vhost} />
           <span className="font-mono">{vhost.listen.join(" · ") || "No listener reported"}</span>
         </div>
         <VerbBar verbs={verbs} menuLabel={`More actions for ${vhost.name}`} />

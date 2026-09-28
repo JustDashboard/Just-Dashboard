@@ -25,6 +25,8 @@ import type {
   ErrorPageCode,
   Exposure,
   Listener,
+  RequestLimit,
+  SiteLimits,
   SiteLocation,
   SiteMaintenance,
   SitePageName,
@@ -1199,6 +1201,8 @@ function SiteFormBody({
             </Field>
           </FormSection>
 
+          {spec.kind !== "redirect" && <LimitsSection spec={spec} set={set} />}
+
           <PagesSection spec={spec} set={set} site={editing} />
 
           {spec.kind === "proxy" && (
@@ -1582,6 +1586,22 @@ function LocationsField({
             />
             WebSockets on this path
           </label>
+          <label className="flex items-center gap-2 text-hint text-muted-foreground">
+            <Checkbox
+              checked={Boolean(loc.rateLimit)}
+              onCheckedChange={(v) =>
+                update(i, { rateLimit: v ? { rate: "10r/m", burst: 5 } : undefined })
+              }
+            />
+            A request rate of its own
+          </label>
+          {loc.rateLimit && (
+            <RequestLimitFields
+              id={`site-loc-${i}-limit`}
+              value={loc.rateLimit}
+              onChange={(rateLimit) => update(i, { rateLimit })}
+            />
+          )}
         </Group>
       ))}
       <Button
@@ -1608,6 +1628,167 @@ function IdleNote({
 }) {
   const idle = nothingListening(upstream, listeners, containers)
   return idle ? <FormNote tone="warning">{idle}</FormNote> : null
+}
+
+/** A rate as its number and its unit, the two halves nginx writes as 10r/s. */
+function splitRate(rate: string): [string, "s" | "m"] {
+  const m = /^(\d*)r\/([sm])$/.exec(rate)
+  return m ? [m[1], m[2] as "s" | "m"] : [rate, "s"]
+}
+
+/** A request rate, its burst, and what it counts by. */
+function RequestLimitFields({
+  id,
+  value,
+  onChange,
+}: {
+  id: string
+  value: RequestLimit
+  onChange: (value: RequestLimit) => void
+}) {
+  const [count, unit] = splitRate(value.rate)
+  const patch = (next: Partial<RequestLimit>) => onChange({ ...value, ...next })
+  return (
+    <div className="space-y-2">
+      <FieldRow>
+        <Field label="Requests" htmlFor={`${id}-rate`} hint="Per client, at a steady pace.">
+          <div className="flex gap-2">
+            <Input
+              id={`${id}-rate`}
+              value={count}
+              inputMode="numeric"
+              onChange={(e) => patch({ rate: `${e.target.value.trim()}r/${unit}` })}
+              className="font-mono text-xs"
+            />
+            <Select value={unit} onValueChange={(u) => patch({ rate: `${count}r/${u}` })}>
+              <SelectTrigger aria-label="Per" className="w-36 shrink-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="s">per second</SelectItem>
+                <SelectItem value="m">per minute</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </Field>
+        <Field
+          label="Burst"
+          htmlFor={`${id}-burst`}
+          hint="Requests past the rate that wait their turn instead of getting a 429."
+        >
+          <Input
+            id={`${id}-burst`}
+            value={String(value.burst ?? 0)}
+            inputMode="numeric"
+            onChange={(e) => patch({ burst: Number(e.target.value) || 0 })}
+            className="font-mono text-xs"
+          />
+        </Field>
+      </FieldRow>
+      <Field label="Counted" htmlFor={`${id}-key`}>
+        <Select
+          value={value.key ?? "ip"}
+          onValueChange={(k) => patch({ key: k === "ip_path" ? "ip_path" : undefined })}
+        >
+          <SelectTrigger id={`${id}-key`} className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ip">Per address</SelectItem>
+            <SelectItem value="ip_path">Per address and path</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+      <label className="flex items-center gap-2 text-hint text-muted-foreground">
+        <Checkbox
+          checked={value.noDelay ?? false}
+          onCheckedChange={(v) => patch({ noDelay: Boolean(v) })}
+        />
+        Answer the burst at once rather than spacing it out
+      </label>
+    </div>
+  )
+}
+
+/**
+ * Request rates and a connection cap, counted per client address. The
+ * exemptions and log-only mode apply to every limit of the site, a path's own
+ * included, so they are drawn whenever any of them is on.
+ */
+function LimitsSection({
+  spec,
+  set,
+}: {
+  spec: SiteSpec
+  set: <K extends keyof SiteSpec>(key: K, value: SiteSpec[K]) => void
+}) {
+  const limits = spec.limits
+  const setLimits = (patch: Partial<SiteLimits>) =>
+    set("limits", { exemptFrom: [], ...limits, ...patch })
+  const pathLimited =
+    spec.kind === "proxy" && spec.locations.some((loc) => loc.rateLimit !== undefined)
+  const limited = Boolean(limits?.request) || (limits?.connPerIp ?? 0) > 0 || pathLimited
+
+  return (
+    <FormSection
+      title="Limits"
+      hint="How much one client address may ask of the site. Past a limit it gets a 429."
+    >
+      <OptionList>
+        <OptionRow
+          title="Limit the request rate"
+          hint="Slows scrapers and password guessing. A path below can have a rate of its own."
+          checked={Boolean(limits?.request)}
+          onCheckedChange={(on) =>
+            setLimits({ request: on ? { rate: "10r/s", burst: 20, noDelay: true } : undefined })
+          }
+        >
+          {limits?.request && (
+            <RequestLimitFields
+              id="site-limit"
+              value={limits.request}
+              onChange={(request) => setLimits({ request })}
+            />
+          )}
+        </OptionRow>
+        <OptionRow
+          title="Cap connections per address"
+          hint="How many connections one address may hold open at once."
+          checked={(limits?.connPerIp ?? 0) > 0}
+          onCheckedChange={(on) => setLimits({ connPerIp: on ? 20 : 0 })}
+        >
+          {(limits?.connPerIp ?? 0) > 0 && (
+            <Input
+              aria-label="Connections per address"
+              value={String(limits?.connPerIp ?? 0)}
+              inputMode="numeric"
+              onChange={(e) => setLimits({ connPerIp: Number(e.target.value) || 0 })}
+              className="font-mono text-xs"
+            />
+          )}
+        </OptionRow>
+        {limited && (
+          <OptionRow
+            title="Log only"
+            hint='Refuses nothing: what would have been refused is written to the error log as "dry run". For trying a limit on live traffic.'
+            tone={limits?.dryRun ? "warning" : "default"}
+            checked={limits?.dryRun ?? false}
+            onCheckedChange={(dryRun) => setLimits({ dryRun })}
+          />
+        )}
+      </OptionList>
+      {limited && (
+        <ListField
+          id="site-limit-exempt"
+          label="Never limit these addresses"
+          placeholder="203.0.113.7"
+          values={limits?.exemptFrom ?? []}
+          onChange={(exemptFrom) => setLimits({ exemptFrom })}
+          hint="A monitor, an office, another server of yours."
+        />
+      )}
+    </FormSection>
+  )
 }
 
 const ERROR_CODES: ErrorPageCode[] = [404, 502, 503, 504]

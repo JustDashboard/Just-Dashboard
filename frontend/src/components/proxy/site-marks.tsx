@@ -28,6 +28,11 @@ export function SiteTLS({ vhost }: { vhost: VHost }) {
   )
 }
 
+/** Said beside the TLS mark when a server of the site limits requests or connections. */
+export function SiteRateLimited({ vhost }: { vhost: VHost }) {
+  return vhost.rateLimited ? <Status tone="notice" label="rate limited" /> : null
+}
+
 /** Whether the site is serving, said as a state rather than a switch. */
 export function ServingStatus({ vhost, busy }: { vhost: VHost; busy?: string }) {
   if (busy) return <Status state="activating" label={`${busy}…`} />

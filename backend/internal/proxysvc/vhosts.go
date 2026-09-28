@@ -29,6 +29,8 @@ type VHost struct {
 	Size        int64     `json:"size"`
 	// Maintenance says the site answers with its maintenance page now.
 	Maintenance bool `json:"maintenance,omitempty"`
+	// RateLimited says a server of the site limits requests or connections.
+	RateLimited bool `json:"rateLimited,omitempty"`
 }
 
 var (
@@ -37,6 +39,7 @@ var (
 	proxyPassRe  = regexp.MustCompile(`(?m)^\s*proxy_pass\s+([^;]+);`)
 	certRe       = regexp.MustCompile(`(?m)^\s*ssl_certificate\s+([^;]+);`)
 	maintOnRe    = regexp.MustCompile(`(?m)^\s*if\s*\(\$jd_\w+_maint\)`)
+	limitRe      = regexp.MustCompile(`(?m)^\s*limit_(req|conn)\s`)
 )
 
 func (s *Service) ListVHosts(ctx context.Context) ([]VHost, error) {
@@ -147,6 +150,7 @@ func (s *Service) nginxVHosts() []VHost {
 				v.CertPath = strings.TrimSpace(m[1])
 			}
 			v.Maintenance = maintOnRe.MatchString(text)
+			v.RateLimited = limitRe.MatchString(text)
 		}
 		out = append(out, v)
 	}

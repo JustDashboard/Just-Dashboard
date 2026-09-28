@@ -9,13 +9,29 @@ import type { ProxyDiagnostic, ServerNameConflict, SiteResult, SiteSpec } from "
  * reason: a switch left on under another kind is not drawn and means nothing.
  */
 export function sendableSpec(spec: SiteSpec): SiteSpec {
-  const { spa, permanent, ...rest } = spec
+  const { spa, permanent, limits, ...rest } = spec
   return {
     ...rest,
+    ...sendableLimits(spec, limits),
     hsts: spec.hsts && spec.tls,
     ...(spec.kind === "static" && spa !== undefined ? { spa } : {}),
     ...(spec.kind === "redirect" && permanent !== undefined ? { permanent } : {}),
   }
+}
+
+/**
+ * A redirect is answered before nginx applies any limit, so it sends none,
+ * and exemptions or log-only mode left over once the last limit is turned
+ * off go with it: there is nothing left for them to apply to.
+ */
+function sendableLimits(spec: SiteSpec, limits: SiteSpec["limits"]): Partial<SiteSpec> {
+  if (spec.kind === "redirect") {
+    return { locations: spec.locations.map((loc) => ({ ...loc, rateLimit: undefined })) }
+  }
+  const pathLimited =
+    spec.kind === "proxy" && spec.locations.some((loc) => loc.rateLimit !== undefined)
+  if (!limits || (!limits.request && !limits.connPerIp && !pathLimited)) return {}
+  return { limits }
 }
 
 /**
