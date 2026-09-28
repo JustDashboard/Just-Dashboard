@@ -141,7 +141,9 @@ somebody spent an afternoon on have no path back at all.
 
 Replacing an imported certificate is a write too (`POST /certificates/import` with `replace`): the
 pair it replaces stays beside the new one as `.bak`, and without `replace` a name in use is a 409 rather
-than an overwrite. Removing the renewal deploy hook (`DELETE /certificates/renewal-hook`) is destructive
+than an overwrite. `POST /certificates/import/inspect` writes nothing but is system.admin: with the
+operator's consent it fetches a missing intermediate from the address a certificate names, and that
+fetch refuses every non-public address, redirects included. Removing the renewal deploy hook (`DELETE /certificates/renewal-hook`) is destructive
 without a phrase — the same switch installs it again — and it never removes or replaces a file at that
 name that does not carry the dashboard's marker. Starting the renewal timer's service now
 (`POST /certificates/renewal/run`) is a system.admin write, not a destructive one: it is the run the

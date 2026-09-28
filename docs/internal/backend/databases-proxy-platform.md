@@ -1233,12 +1233,23 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   accepted by every text editor and refused by nginx at reload, which on a live server means finding out
   during an outage. Imports live in `/etc/ssl/just-dashboard`, so a renewal run can never prune a
   certificate it did not issue. The key is found among the blocks pasted (an `EC PARAMETERS` block in
-  front of it is skipped; an encrypted key is refused with the command that decrypts it); the leaf is the
+  front of it is skipped; an encrypted key without a password is refused); the leaf is the
   certificate that key belongs to, wherever it sits in the bundle; the chain is followed by signature and
   saved leaf first without the root; `ChainComplete` means the chain reaches a root (the bundle's own,
   one the system trusts, or `JD_ACME_CA_ROOT`), not that more than one block was pasted. A name already
   imported is a 409 `certificate_exists` naming what is there; `replace: true` overwrites it and keeps
-  the previous pair as `.bak`, so replacing is a write rather than a destructive act. Caddy's release
+  the previous pair as `.bak`, so replacing is a write rather than a destructive act.
+  **`import_formats.go`** turns what authorities send into that PEM first (`Service.Import`, and
+  `Service.InspectImport` behind `POST /certificates/import/inspect`, system.admin, which runs every
+  check with `dryRun` and writes nothing — it returns the chain, a name suggested from the CN, the import
+  it would replace and the enabled sites serving it). A PFX (`pfx`, base64) is read by
+  `x/crypto/pkcs12`, falling back to the host's `openssl pkcs12` for AES/PBES2 files, with the password
+  in the child's environment, never argv; an encrypted key (legacy `Proc-Type` or PKCS#8 via
+  `youmark/pkcs8`) is decrypted with `password` and saved decrypted, 0600, since nginx cannot prompt.
+  With `fetchIssuer` (the operator's consent on the Inspect step) a chain that stops short follows the top
+  certificate's AIA http(s) address, up to three hops: public addresses only on every dial including
+  redirects, no proxy, 5 s, 64 KB, and a fetched certificate is kept only if it signed the one below.
+  The password is never audited. Caddy's release
   copies (`caddy-<24 hex>`, `docker_caddy_certs.go`) share the directory and are refreshed through
   `keepCaddyEvidence`. `ListCertificates` keeps them: deployment activation
   (`ResolveDeploymentCertificate`), preflight, the route summary and the hostname suggestions find a

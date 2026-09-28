@@ -806,32 +806,28 @@ test("importing under a name in use asks to replace it, keeps the old pair, and 
   page,
 }) => {
   await mockProxy(page, { included: true })
+  const shop = {
+    name: "shop",
+    certPath: "/etc/ssl/just-dashboard/shop/fullchain.pem",
+    keyPath: "/etc/ssl/just-dashboard/shop/privkey.pem",
+    certificate: { ...certs[1], name: "shop", domains: ["shop.example.com"], daysLeft: 300 },
+    chainComplete: true,
+    chain: ["shop.example.com", "R11"],
+    replaced: true,
+    warnings: [],
+  }
+  await page.route("**/api/v1/certificates/import/inspect", (route) =>
+    json(route, {
+      ...shop,
+      suggestedName: "shop.example.com",
+      existing: { ...certs[1], domains: ["shop.example.com"], notAfter: "2027-01-01T12:00:00Z" },
+      usedBy: ["shop.conf"],
+    }),
+  )
   const bodies: Array<Record<string, unknown>> = []
   await page.route("**/api/v1/certificates/import", async (route) => {
-    const body = route.request().postDataJSON()
-    bodies.push(body)
-    if (!body.replace) {
-      return route.fulfill({
-        status: 409,
-        contentType: "application/json",
-        body: JSON.stringify({
-          error: {
-            code: "certificate_exists",
-            message:
-              "shop is already imported: it covers shop.example.com and expires 1 Jan 2027. Replace it to overwrite that pair.",
-          },
-        }),
-      })
-    }
-    return json(route, {
-      name: "shop",
-      certPath: "/etc/ssl/just-dashboard/shop/fullchain.pem",
-      keyPath: "/etc/ssl/just-dashboard/shop/privkey.pem",
-      certificate: { ...certs[1], name: "shop", domains: ["shop.example.com"], daysLeft: 300 },
-      chainComplete: true,
-      replaced: true,
-      warnings: [],
-    })
+    bodies.push(route.request().postDataJSON())
+    return json(route, { ...shop, usedBy: ["shop.conf"] })
   })
   const reloads = await capture(page, "**/api/v1/proxy/reload", () => ({ reloaded: true }))
 
@@ -845,32 +841,38 @@ test("importing under a name in use asks to replace it, keeps the old pair, and 
   await dialog
     .getByLabel("Private key")
     .fill("-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----")
-  await dialog.getByRole("button", { name: "Check and import" }).click()
+  await dialog.getByRole("button", { name: "Inspect" }).click()
 
-  await expect(dialog.getByText("That name is taken")).toBeVisible()
-  await expect(dialog.getByText(/expires 1 Jan 2027/)).toBeVisible()
-  await dialog.getByRole("button", { name: "Replace it" }).click()
+  await expect(dialog.getByText("shop is already imported")).toBeVisible()
+  await expect(dialog.getByText(/Served by shop.conf/)).toBeVisible()
+  const replace = dialog.getByRole("button", { name: "Replace it" })
+  await expect(replace).toBeDisabled()
+  await dialog.getByRole("checkbox").check()
+  await replace.click()
   await expect(dialog.getByText("shop was replaced")).toBeVisible()
-  expect(bodies.map((b) => b.replace)).toEqual([false, true])
+  expect(bodies.map((b) => b.replace)).toEqual([true])
 
   await expect(dialog.getByText("Sites pick it up on a reload")).toBeVisible()
-  await dialog.getByRole("button", { name: "Reload nginx" }).click()
-  await expect(
-    dialog.getByText("Sites using this certificate serve the new one now."),
-  ).toBeVisible()
+  await dialog.getByRole("button", { name: "Reload nginx now" }).click()
+  await expect(dialog.getByText(/shop.conf serve the new one now/)).toBeVisible()
   await expect(dialog.getByRole("button", { name: "Reload nginx" })).toHaveCount(0)
   expect(reloads).toEqual([{ kind: "nginx" }])
 })
 
-test("editing the name after a refusal asks for a plain import again", async ({ page }) => {
+test("editing the name after an inspection asks to inspect again", async ({ page }) => {
   await mockProxy(page, { included: true })
-  await page.route("**/api/v1/certificates/import", (route) =>
-    route.fulfill({
-      status: 409,
-      contentType: "application/json",
-      body: JSON.stringify({
-        error: { code: "certificate_exists", message: "shop is already imported." },
-      }),
+  await page.route("**/api/v1/certificates/import/inspect", (route) =>
+    json(route, {
+      name: "shop",
+      certPath: "/etc/ssl/just-dashboard/shop/fullchain.pem",
+      keyPath: "/etc/ssl/just-dashboard/shop/privkey.pem",
+      certificate: { ...certs[1], name: "shop", domains: ["shop.example.com"] },
+      chainComplete: true,
+      chain: ["shop.example.com"],
+      replaced: true,
+      warnings: [],
+      suggestedName: "shop.example.com",
+      usedBy: [],
     }),
   )
   await page.goto("/proxy/certificates")
@@ -879,11 +881,12 @@ test("editing the name after a refusal asks for a plain import again", async ({ 
   await dialog.getByLabel("Name").fill("shop")
   await dialog.getByLabel("Certificate").fill("cert")
   await dialog.getByLabel("Private key").fill("key")
-  await dialog.getByRole("button", { name: "Check and import" }).click()
+  await dialog.getByRole("button", { name: "Inspect" }).click()
   await expect(dialog.getByRole("button", { name: "Replace it" })).toBeVisible()
+  await dialog.getByRole("button", { name: "Back" }).click()
   await dialog.getByLabel("Name").fill("shop-2")
-  await expect(dialog.getByRole("button", { name: "Check and import" })).toBeVisible()
-  await expect(dialog.getByText("That name is taken")).toHaveCount(0)
+  await expect(dialog.getByRole("button", { name: "Inspect" })).toBeVisible()
+  await expect(dialog.getByText("shop is already imported")).toHaveCount(0)
 })
 
 test("the DNS issue form fits a phone with its wait field", async ({ page }) => {
