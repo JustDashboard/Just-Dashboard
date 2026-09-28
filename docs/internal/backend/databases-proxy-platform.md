@@ -1234,6 +1234,22 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   only once the test passed; one reload follows. Sites already as asked come back as `unchanged`.
   The listing's `roots` and `redirects` (from `root` and `return 30x URL`) feed the list's search and
   its Static and Redirect chips.
+- **Site files.** `sites_files.go`, all `system.admin` and audited. `GET /proxy/sites/{name}/download`
+  (`proxy.site.download`) hands over one site's file, looked up in sites-available, conf.d, then
+  sites-enabled, through `allowedPath` and never a password file. `GET /proxy/sites-export`
+  (`proxy.sites.export`; under `/proxy`, since `/proxy/sites/export` would shadow reading a site called
+  `export`) is a tar.gz of every listed nginx site as `<layout>/<name>` plus `manifest.json` (layout,
+  enabled, aliases, server names, sha256); a file outside the nginx directory or a password file is
+  listed as skipped, never packed. `POST /proxy/sites/import/preview` and `/import` take
+  `{name, content, enable, reload}` (site name rules, no deployment-route name, text up to 256 KiB,
+  refused when the name exists in either layout or in sites-enabled): the file is written into
+  sites-available (conf.d where there is none) and linked even when it is to stay disabled, `nginx -t`
+  runs, and a preview or a refusal (422) takes both back out; warnings name hostnames another site
+  already serves and a file with no server block. `GET /proxy/site-backups` lists backup-suffixed
+  plain files in sites-available and conf.d with the site each restores to; `POST
+  /proxy/site-backups/{dir}/{file}/restore` (`{as, enable, reload}`) places the copy through the same
+  test and keeps the backup; `DELETE /proxy/site-backups/{dir}/{file}` (destructive,
+  `proxy.site.backup.purge`) removes it.
 - **Catch-all default site.** `default_site.go` keeps one owned file, `jd-default` (sites-available plus
   its link, or `conf.d/jd-default.conf`, first line carrying `OwnedMarker`, so the Sites list leaves it
   out). `GET /proxy/default-site` (a read every account holds: listen lines of files the listing already

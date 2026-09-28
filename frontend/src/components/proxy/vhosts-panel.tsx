@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { forgetSessionState, useSessionState, useViewState } from "@/lib/view-state"
-import { Globe, Plus, Warning } from "@/components/icons"
+import { CloudUpload, Download, Globe, Plus, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { plural, relativeTime } from "@/lib/format"
 import { downloadText } from "@/lib/metrics-export"
@@ -12,7 +12,9 @@ import { ApiError, del, errorMessage, get, post } from "@/lib/api"
 import type {
   Certificate,
   ProxyPending,
+  SiteBackup,
   SiteDeleteResult,
+  SitePlacementResult,
   SiteRenameResult,
   SiteResult,
   SitesBulkResult,
@@ -62,6 +64,8 @@ import { DefaultSitePanel } from "@/components/proxy/default-site"
 import { siteProduct } from "@/components/proxy/marks"
 import { SiteForm } from "@/components/proxy/site-form"
 import { SiteRenameDialog } from "@/components/proxy/site-rename"
+import { SiteImportDialog } from "@/components/proxy/site-import"
+import { SiteBackupsPanel } from "@/components/proxy/site-backups"
 import {
   ServingStatus,
   SiteFeatures,
@@ -111,6 +115,7 @@ import {
 } from "@/components/proxy/site-serving"
 import { engineUnit, useProxy } from "@/components/proxy/proxy-context"
 import {
+  downloadFrom,
   opensFile,
   siteDeletable,
   sitePath,
@@ -205,6 +210,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   const [cursor, setCursor] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [renaming, setRenaming] = useState<VHost | null>(null)
+  const [importing, setImporting] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
   const [pending, setPending] = useState<Record<string, Busy>>({})
   const [output, setOutput] = useState<NginxOutput | null>(null)
@@ -252,6 +258,14 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   // `warn` is a reload a verb knows it sent: nginx still on the load from
   // before it refused what it read, which the verb's toast could not know.
   const reloadFrom = useRef<{ after: string; warn: boolean } | undefined>(undefined)
+  // Deleting a site leaves its .bak, so the list is read again after every
+  // verb, with the sites.
+  const backupsPoll = usePoll<SiteBackup[]>(
+    (signal) => get("/proxy/site-backups", undefined, signal),
+    0,
+    [],
+    { enabled: admin && hasNginx },
+  )
   const pendingPoll = usePoll(
     async (signal) => {
       const expected = reloadFrom.current
@@ -426,6 +440,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     setPending((p) => (p[name] ? { ...p, [name]: { ...p[name], answered } } : p))
     refresh()
     unitPoll.refresh()
+    if (admin && hasNginx) backupsPoll.refresh()
     if (reloaded) expectReload(true)
     else pendingPoll.refresh()
   }
@@ -765,6 +780,23 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     }
   }
 
+  /** A site an import or a restore added: said like any verb's reload, then read. */
+  const placed = (res: SitePlacementResult, done: string) => {
+    let outcome: ReloadOutcome | undefined
+    try {
+      outcome = res.enabled ? noteReload(res.name, res, false) : undefined
+      reportLink(res, outcome, done, {
+        notRunning: "nginx starts with it.",
+        notReloaded: res.enabled
+          ? "It is not serving until nginx reloads."
+          : "It is in sites-available, not enabled.",
+      })
+      for (const warning of res.warnings) notify.warning(res.name, { description: warning })
+    } finally {
+      reread(res.name, outcome === "reloaded")
+    }
+  }
+
   // A deployment's route, opened for editing all the same: the form where
   // it saves the file back, the raw editor otherwise.
   const override = (vhost: VHost) => {
@@ -979,10 +1011,25 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   }
 
   const newSite = admin && hasNginx && (
-    <Button size="sm" onClick={() => openForm(null)}>
-      <Plus className="size-4" />
-      New site
-    </Button>
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => downloadFrom("/proxy/sites-export")}
+        title="Every site's file in a tar.gz, with a manifest. Password files are never in it."
+      >
+        <Download className="size-4" />
+        Export all
+      </Button>
+      <Button size="sm" variant="outline" onClick={() => setImporting(true)}>
+        <CloudUpload className="size-4" />
+        Import
+      </Button>
+      <Button size="sm" onClick={() => openForm(null)}>
+        <Plus className="size-4" />
+        New site
+      </Button>
+    </div>
   )
 
   // Grouped only where the grouping says something a chip has not: once a
@@ -1334,6 +1381,13 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
       {admin && hasNginx && <AccessListsPanel />}
       {admin && hasNginx && <RouteResolver />}
 
+      {admin && hasNginx && (
+        <SiteBackupsPanel
+          backups={backupsPoll}
+          onRestored={(res) => placed(res, `${res.name} restored`)}
+        />
+      )}
+
       <SiteForm
         open={formIsOpen}
         editing={formEditing}
@@ -1378,6 +1432,11 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
             : null
         }
         onOpenChange={(open) => !open && setRequested(null)}
+      />
+      <SiteImportDialog
+        open={importing}
+        onOpenChange={setImporting}
+        onImported={(res) => placed(res, `${res.name} imported`)}
       />
       <SiteRenameDialog
         vhost={renaming}

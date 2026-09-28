@@ -25,6 +25,7 @@ func (s *Server) mountProxyRoutes(r chi.Router) {
 			s.mountEngineRoutes(r)
 			s.mountVHostRoutes(r)
 			s.mountProxyInsightRoutes(r)
+			s.mountSiteFileRoutes(r)
 		})
 		r.Route("/proxy/sites", func(r chi.Router) {
 			s.mountSiteBuilderRoutes(r)
