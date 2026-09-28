@@ -59,6 +59,11 @@ type ImportResult struct {
 	// only after its next reload.
 	Replaced bool     `json:"replaced"`
 	Warnings []string `json:"warnings"`
+	// Chain is the common name of each certificate as saved, leaf first.
+	Chain []string `json:"chain"`
+	// UsedBy is the enabled sites serving a replaced import, each of which
+	// keeps the previous pair until nginx reloads.
+	UsedBy []string `json:"usedBy,omitempty"`
 }
 
 // ExistingImportError refuses to overwrite an import nobody asked to replace.
@@ -84,6 +89,9 @@ type importOptions struct {
 	// keepPrevious leaves the pair being replaced beside it as .bak, which
 	// is what makes replacing recoverable.
 	keepPrevious bool
+	// dryRun stops before anything is written, and before an existing
+	// import is refused: Replaced then says one would be replaced.
+	dryRun bool
 }
 
 // ImportCertificate validates a certificate and key and writes them to disk.
@@ -112,18 +120,9 @@ func importCertificate(name, certPEM, keyPEM string, opts importOptions) (*Impor
 	// The leaf is the certificate the key belongs to, wherever it sits: an
 	// authority that sends the intermediates first is not rare, and reading
 	// the first block as the leaf refused those as a mismatched key.
-	var leaf *x509.Certificate
-	for _, c := range certs {
-		if publicKeyMatches(key, c) {
-			leaf = c
-			break
-		}
-	}
-	if leaf == nil {
-		if len(certs) == 1 {
-			return nil, fmt.Errorf("the private key does not belong to this certificate")
-		}
-		return nil, fmt.Errorf("the private key belongs to none of the %d certificates supplied", len(certs))
+	leaf, err := findLeaf(key, certs)
+	if err != nil {
+		return nil, err
 	}
 	if leaf.NotAfter.Before(leaf.NotBefore) {
 		return nil, fmt.Errorf("the certificate's validity dates are the wrong way round")
@@ -140,6 +139,9 @@ func importCertificate(name, certPEM, keyPEM string, opts importOptions) (*Impor
 	res.Cert = summarise(leaf, name, res.CertPath)
 	res.Cert.Source = "imported"
 	res.ChainComplete = chain.complete
+	for _, c := range chain.certs {
+		res.Chain = append(res.Chain, c.Subject.CommonName)
+	}
 	if res.Cert.Staging {
 		res.Warnings = append(res.Warnings,
 			"A staging authority signed this certificate: it is a test certificate, and every browser refuses it. Issue a real one for these names instead.")
@@ -159,6 +161,9 @@ func importCertificate(name, certPEM, keyPEM string, opts importOptions) (*Impor
 	_, certErr := os.Lstat(res.CertPath)
 	_, keyErr := os.Lstat(res.KeyPath)
 	res.Replaced = certErr == nil || keyErr == nil
+	if opts.dryRun {
+		return res, nil
+	}
 	if res.Replaced && !opts.replace {
 		existing, _ := readCertificate(res.CertPath)
 		return nil, &ExistingImportError{Name: name, Existing: existing}
@@ -440,7 +445,7 @@ func publicKeyMatches(key crypto.PrivateKey, cert *x509.Certificate) bool {
 }
 
 // errEncryptedKey names the one refusal an operator can act on in a line.
-var errEncryptedKey = errors.New("the private key is encrypted — decrypt it first (openssl pkey -in key.pem -out plain.pem) and paste the result")
+var errEncryptedKey = errors.New("the private key is encrypted — enter the password it was exported with")
 
 // decodePrivateKey finds the key among the blocks pasted. `openssl ecparam
 // -genkey` writes an EC PARAMETERS block before the key, and reading only the

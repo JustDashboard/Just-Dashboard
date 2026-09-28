@@ -167,4 +167,18 @@ export type ImportResult = {
   /** An import of the same name was overwritten; nginx serves the new one after a reload. */
   replaced: boolean
   warnings: string[]
+  /** The common name of each certificate as saved, leaf first, root left out. */
+  chain: string[]
+  /** Enabled sites serving a replaced import; each keeps the old pair until nginx reloads. */
+  usedBy?: string[]
+}
+
+/** What an import would do, from POST /certificates/import/inspect. Nothing is written. */
+export type ImportInspection = ImportResult & {
+  suggestedName: string
+  /** The import this one would replace, when the name is taken. */
+  existing?: Certificate
+  usedBy: string[]
+  /** Where the certificate says its missing issuer is; fetched only on consent. */
+  issuerURL?: string
 }

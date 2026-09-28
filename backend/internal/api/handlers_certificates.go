@@ -32,6 +32,9 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/served", s.handle(s.handleCertServed))
 		r.Method(http.MethodPost, "/issue", s.handle(s.handleCertIssue))
 		r.Method(http.MethodPost, "/import", s.handle(s.handleCertImport))
+		// Writes nothing, but it may fetch an intermediate from the address
+		// a certificate names, which is why it sits behind admin too.
+		r.Method(http.MethodPost, "/import/inspect", s.handle(s.handleCertImportInspect))
 		r.Method(http.MethodPost, "/dns-credentials", s.handle(s.handleDNSCredentials))
 		r.Method(http.MethodPost, "/renew", s.handle(s.handleCertRenew))
 		// The renewal schedule's own record: the timer's service journal,
@@ -535,26 +538,19 @@ func (s *Server) handleDNSCredentialsRemove(w http.ResponseWriter, r *http.Reque
 	return nil
 }
 
-type certImportRequest struct {
-	Name        string `json:"name"`
-	Certificate string `json:"certificate"`
-	Key         string `json:"key"`
-	// Replace overwrites an import of the same name, keeping the previous
-	// pair beside it as .bak. Without it an existing name is a 409.
-	Replace bool `json:"replace"`
-}
-
 // handleCertImport takes a certificate somebody bought or was given.
 //
 // The key is checked against the certificate before either is written: a
 // mismatched pair is accepted by every text editor and refused by nginx at
 // reload, and finding that out on a live server is the expensive way.
 func (s *Server) handleCertImport(w http.ResponseWriter, r *http.Request) error {
-	var req certImportRequest
+	var req proxysvc.ImportInput
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	res, err := proxysvc.ImportCertificate(req.Name, req.Certificate, req.Key, req.Replace)
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	res, err := s.modules.proxy.Import(ctx, req)
 	var exists *proxysvc.ExistingImportError
 	if errors.As(err, &exists) {
 		return httpx.Err(http.StatusConflict, "certificate_exists", err.Error())
@@ -563,7 +559,25 @@ func (s *Server) handleCertImport(w http.ResponseWriter, r *http.Request) error 
 		return httpx.BadRequest("%v", err)
 	}
 	httpx.SetAudit(r, "certificates.import", res.Name,
-		map[string]any{"domains": res.Cert.Domains, "expires": res.Cert.NotAfter, "replaced": res.Replaced})
+		map[string]any{"domains": res.Cert.Domains, "expires": res.Cert.NotAfter, "replaced": res.Replaced,
+			"pfx": len(req.PFX) > 0, "fetchedIssuer": req.FetchIssuer})
+	httpx.JSON(w, http.StatusOK, res)
+	return nil
+}
+
+// handleCertImportInspect answers what an import would do — the names, the
+// chain, the expiry, and the import it would replace — without writing.
+func (s *Server) handleCertImportInspect(w http.ResponseWriter, r *http.Request) error {
+	var req proxysvc.ImportInput
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	res, err := s.modules.proxy.InspectImport(ctx, req)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
 	httpx.JSON(w, http.StatusOK, res)
 	return nil
 }
