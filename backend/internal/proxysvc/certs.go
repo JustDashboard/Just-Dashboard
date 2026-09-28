@@ -41,6 +41,8 @@ type Certificate struct {
 	// run left these where sites could name them, and one read as a healthy
 	// Let's Encrypt certificate.
 	Staging bool `json:"staging,omitempty"`
+	// LocalCA is a certificate this host's local CA signed (localca.go).
+	LocalCA bool `json:"localCA,omitempty"`
 }
 
 // expiryWarningDays matches Let's Encrypt's own renewal window: certbot
@@ -68,7 +70,7 @@ func (s *Service) CertificateInventory(ctx context.Context) ([]Certificate, erro
 	if err != nil {
 		return nil, err
 	}
-	return withoutCaddyEvidence(certs), nil
+	return markLocalCALeaves(withoutCaddyEvidence(certs)), nil
 }
 
 // listCertificates is ListCertificates with its directories as arguments, so
@@ -177,6 +179,7 @@ func summarise(c *x509.Certificate, name, path string) *Certificate {
 		NotAfter:  c.NotAfter.UTC(),
 		UsedBy:    []string{},
 	}
+	cert.Domains = append(cert.Domains, certificateAddresses(c)...)
 	if len(cert.Domains) == 0 && c.Subject.CommonName != "" {
 		cert.Domains = []string{c.Subject.CommonName}
 	}

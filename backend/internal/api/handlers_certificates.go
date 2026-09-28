@@ -24,6 +24,7 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/", s.handle(s.handleCertList))
 	r.Method(http.MethodGet, "/certbot", s.handle(s.handleCertbot))
 	r.Method(http.MethodGet, "/dns-providers", s.handle(s.handleDNSProviders))
+	s.mountPrivateCertificateRoutes(r)
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		// A handshake with each site that names a certificate: loopback
@@ -39,6 +40,7 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/renewal/log", s.handle(s.handleRenewalLog))
 		r.Method(http.MethodPost, "/renewal/run", s.handle(s.handleRenewalRun))
 		r.Method(http.MethodPut, "/renewal-hook", s.handle(s.handleRenewalHookInstall))
+		s.mountCertTransparencyRoutes(r)
 		s.destructive(r, func(r chi.Router) {
 			// Removing the hook stops nginx reloading after renewals; the
 			// same switch puts it back, so no phrase.

@@ -21,6 +21,7 @@ import { ProxyGrid } from "@/components/proxy/route-path"
 import { CertLife, ExpiryStatus } from "@/components/proxy/expiry-status"
 import { certificateProduct } from "@/components/proxy/marks"
 import { sitePath } from "@/components/proxy/site-verbs"
+import { PrivateTrustNote } from "@/components/proxy/local-ca-panel"
 
 /**
  * A test certificate, and what a real issuance does about it: certbot's own
@@ -158,6 +159,7 @@ export function CertificateInventory({
                     Used by {cert.usedBy.join(", ") || "no site"}
                   </span>
                   {cert.selfSigned && <Tag tone="warning">self-signed</Tag>}
+                  {cert.localCA && <Tag>local CA</Tag>}
                 </div>
                 {cert.staging && (
                   <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
@@ -235,6 +237,7 @@ export function CertificateInventory({
                 {stagingNote(selectedCert, Boolean(selectedReplace))}
               </Notice>
             )}
+            <PrivateTrustNote cert={selectedCert} />
             {!selectedCert.error && <CertLife cert={selectedCert} className="w-full" />}
             <DetailList>
               <Detail label="Names">

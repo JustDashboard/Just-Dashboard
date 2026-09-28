@@ -32,6 +32,11 @@ type proxyExtras struct {
 	portHistory *proxysvc.PortRecorder
 
 	// --- lane F: certificates ---
+	// localCA renews the local CA's certificates daily (handlers_certificates_private.go).
+	localCA *localCARenewal
+	// ct asks crt.sh for the certificates logged for this host's domains
+	// (handlers_cert_transparency.go).
+	ct *proxysvc.CTMonitor
 
 	// --- lane G: TLS report & monitoring ---
 }
@@ -55,6 +60,8 @@ func (s *Server) initProxyExtras() {
 	s.modules.proxyExtras.portHistory = proxysvc.NewPortRecorder(s.Store.DB, s.Log)
 
 	// --- lane F: certificates ---
+	s.modules.proxyExtras.localCA = s.newLocalCARenewal()
+	s.modules.proxyExtras.ct = proxysvc.NewCTMonitor()
 
 	// --- lane G: TLS report & monitoring ---
 }
@@ -79,6 +86,7 @@ func (s *Server) startProxyExtras(ctx context.Context) error {
 	s.modules.proxyExtras.portHistory.Start(ctx)
 
 	// --- lane F: certificates ---
+	s.modules.proxyExtras.localCA.Start(ctx)
 
 	// --- lane G: TLS report & monitoring ---
 
@@ -102,6 +110,7 @@ func (s *Server) stopProxyExtras() {
 	s.modules.proxyExtras.portHistory.Stop()
 
 	// --- lane F: certificates ---
+	s.modules.proxyExtras.localCA.Stop()
 
 	// --- lane G: TLS report & monitoring ---
 }

@@ -1210,6 +1210,14 @@ short verdict on the card and its complete error in the detail sheet; unavailabl
 status stay unknown, and it draws no invented lifetime. A test certificate — a staging authority's —
 draws no issuer mark, reads "test certificate" and a red meter whatever its days, and carries its
 sentence and its one verb, the real issuance, on a line of its own under the card.
+The panel's command is split rather than doubled: "Issue certificate" is Let's Encrypt on the brand
+face, and a chevron joined to it opens every other way to get one — the local CA, self-signed, a
+signing request — as words in a menu; without certbot the menu is the whole command. What the server
+makes itself is said where it is read: the local CA's certificates carry a `local CA` Tag, and the
+details of one nothing trusts by default say where it is trusted in a hint line, not a Notice. The
+rail adds Signing requests at its head only while one waits — what the operator owes an answer to —
+and a Local CA panel after DNS providers, which is an administrator's offer to create one and nothing
+to a reader until it exists.
 A watched domain opens a live report and preserves its nonstandard port. Password files, access
 lists and watched-domain setup use the deployment settings' rail sections; an access list is a row
 you read (its addresses as mono tags, its sites as links, its include line with Copy) with Edit

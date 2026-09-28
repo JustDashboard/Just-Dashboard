@@ -50,7 +50,6 @@ function ImportDialogBody({
   onOpenChange: (open: boolean) => void
   onDone: () => void
 }) {
-  const { hasNginx } = useProxy()
   const [name, setName] = useState("")
   const [certificate, setCertificate] = useState("")
   const [key, setKey] = useState("")
@@ -59,8 +58,6 @@ function ImportDialogBody({
   // The server's sentence about the import already under this name, until
   // the name or the files change.
   const [existing, setExisting] = useState("")
-  const [reloading, setReloading] = useState(false)
-  const [reloaded, setReloaded] = useState(false)
 
   const edit = (set: (value: string) => void) => (value: string) => {
     set(value)
@@ -94,19 +91,6 @@ function ImportDialogBody({
     }
   }
 
-  const reload = async () => {
-    setReloading(true)
-    try {
-      await post("/proxy/reload", { kind: "nginx" })
-      setReloaded(true)
-      notify.success("nginx reloaded")
-    } catch (err) {
-      notify.error("nginx did not reload", err)
-    } finally {
-      setReloading(false)
-    }
-  }
-
   return (
     <Modal
       open={open}
@@ -130,53 +114,7 @@ function ImportDialogBody({
       }
     >
       {result ? (
-        <div className="space-y-3">
-          <Notice
-            tone="success"
-            icon={CheckCircle}
-            title={result.replaced ? `${result.name} was replaced` : `${result.name} is on disk`}
-          >
-            <div className="space-y-1">
-              <p>
-                Certificate: <code className="font-mono">{result.certPath}</code>
-              </p>
-              <p>
-                Key: <code className="font-mono">{result.keyPath}</code>
-              </p>
-              <p>
-                Covers {result.certificate.domains.join(", ")} · expires in{" "}
-                {result.certificate.daysLeft} days.
-              </p>
-            </div>
-          </Notice>
-          {result.replaced &&
-            (reloaded ? (
-              <Notice tone="success" icon={CheckCircle} title="nginx reloaded">
-                Sites using this certificate serve the new one now. The previous pair is kept beside
-                it as <code className="font-mono">.bak</code>.
-              </Notice>
-            ) : (
-              <Notice tone="warning" icon={RefreshClockwise} title="Sites pick it up on a reload">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span>
-                    A site using this certificate keeps serving the old one until nginx reloads. The
-                    previous pair is kept beside the new one as{" "}
-                    <code className="font-mono">.bak</code>.
-                  </span>
-                  {hasNginx && (
-                    <Button size="xs" variant="outline" onClick={reload} pending={reloading}>
-                      Reload nginx
-                    </Button>
-                  )}
-                </div>
-              </Notice>
-            ))}
-          {result.warnings.map((warning) => (
-            <Notice key={warning} tone="warning" icon={Warning} title="Worth knowing">
-              {warning}
-            </Notice>
-          ))}
-        </div>
+        <ImportOutcome result={result} />
       ) : (
         <div className="grid gap-4">
           <Field
@@ -225,5 +163,78 @@ function ImportDialogBody({
         </div>
       )}
     </Modal>
+  )
+}
+
+/**
+ * What an import left on disk, or a certificate made here: where the pair is,
+ * what it covers, and — when it replaced one a site may be serving — that
+ * nginx serves the new one only once it reloads, with the reload to hand.
+ */
+export function ImportOutcome({ result }: { result: ImportResult }) {
+  const { hasNginx } = useProxy()
+  const [reloading, setReloading] = useState(false)
+  const [reloaded, setReloaded] = useState(false)
+
+  const reload = async () => {
+    setReloading(true)
+    try {
+      await post("/proxy/reload", { kind: "nginx" })
+      setReloaded(true)
+      notify.success("nginx reloaded")
+    } catch (err) {
+      notify.error("nginx did not reload", err)
+    } finally {
+      setReloading(false)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <Notice
+        tone="success"
+        icon={CheckCircle}
+        title={result.replaced ? `${result.name} was replaced` : `${result.name} is on disk`}
+      >
+        <div className="space-y-1">
+          <p>
+            Certificate: <code className="font-mono">{result.certPath}</code>
+          </p>
+          <p>
+            Key: <code className="font-mono">{result.keyPath}</code>
+          </p>
+          <p>
+            Covers {result.certificate.domains.join(", ")} · expires in{" "}
+            {result.certificate.daysLeft} days.
+          </p>
+        </div>
+      </Notice>
+      {result.replaced &&
+        (reloaded ? (
+          <Notice tone="success" icon={CheckCircle} title="nginx reloaded">
+            Sites using this certificate serve the new one now. The previous pair is kept beside it
+            as <code className="font-mono">.bak</code>.
+          </Notice>
+        ) : (
+          <Notice tone="warning" icon={RefreshClockwise} title="Sites pick it up on a reload">
+            <div className="flex flex-wrap items-center gap-2">
+              <span>
+                A site using this certificate keeps serving the old one until nginx reloads. The
+                previous pair is kept beside the new one as <code className="font-mono">.bak</code>.
+              </span>
+              {hasNginx && (
+                <Button size="xs" variant="outline" onClick={reload} pending={reloading}>
+                  Reload nginx
+                </Button>
+              )}
+            </div>
+          </Notice>
+        ))}
+      {result.warnings.map((warning) => (
+        <Notice key={warning} tone="warning" icon={Warning} title="Worth knowing">
+          {warning}
+        </Notice>
+      ))}
+    </div>
   )
 }
