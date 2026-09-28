@@ -41,6 +41,10 @@ type Certificate struct {
 	// run left these where sites could name them, and one read as a healthy
 	// Let's Encrypt certificate.
 	Staging bool `json:"staging,omitempty"`
+	// Evidence is the release copies kept for a Caddy certificate's domain:
+	// what deployments were activated with, folded under the certificate
+	// Caddy renews rather than listed as imports of their own.
+	Evidence []CertificateEvidence `json:"evidence,omitempty"`
 }
 
 // expiryWarningDays matches Let's Encrypt's own renewal window: certbot
@@ -62,13 +66,19 @@ func (s *Service) ListCertificates(ctx context.Context) ([]Certificate, error) {
 }
 
 // CertificateInventory is ListCertificates as the Certificates page and the
-// security posture read it: without the Caddy release copies no site serves.
+// security posture read it: without the Caddy release copies no site serves,
+// and with the certificates the Docker ingress serves and renews itself.
 func (s *Service) CertificateInventory(ctx context.Context) ([]Certificate, error) {
 	certs, err := s.ListCertificates(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return withoutCaddyEvidence(certs), nil
+	out, evidence := splitCaddyEvidence(certs)
+	caddy, err := s.caddyInventory(ctx, evidence)
+	if err != nil {
+		return append(out, caddyInventoryFailure(err)), nil
+	}
+	return append(out, caddy...), nil
 }
 
 // listCertificates is ListCertificates with its directories as arguments, so

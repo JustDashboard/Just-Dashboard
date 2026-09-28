@@ -39,6 +39,9 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/renewal/log", s.handle(s.handleRenewalLog))
 		r.Method(http.MethodPost, "/renewal/run", s.handle(s.handleRenewalRun))
 		r.Method(http.MethodPut, "/renewal-hook", s.handle(s.handleRenewalHookInstall))
+		// Caddy's release copies whose domain no route and no release names:
+		// what the prune below would remove.
+		r.Method(http.MethodGet, "/evidence", s.handle(s.handleCertEvidence))
 		s.destructive(r, func(r chi.Router) {
 			// Removing the hook stops nginx reloading after renewals; the
 			// same switch puts it back, so no phrase.
@@ -46,6 +49,9 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 			// Removing a saved DNS token is recoverable — paste it again
 			// — so it takes the ordinary confirmation and no phrase.
 			r.Method(http.MethodDelete, "/dns-credentials/{provider}", s.handle(s.handleDNSCredentialsRemove))
+			// Removing an orphaned release copy loses only the record of a
+			// certificate Caddy has since renewed or let go.
+			r.Method(http.MethodDelete, "/evidence", s.handle(s.handleCertEvidencePrune))
 			// Revocation cannot be undone: the authority publishes that
 			// the certificate is no longer to be trusted, and every
 			// client holding it starts refusing the site.
@@ -587,6 +593,50 @@ func (s *Server) handleDNSCredentialsRemove(w http.ResponseWriter, r *http.Reque
 	}
 	httpx.SetAudit(r, "certificates.dns.credentials.remove", provider, nil)
 	httpx.NoContent(w)
+	return nil
+}
+
+func (s *Server) handleCertEvidence(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 60*time.Second)
+	defer cancel()
+	released, err := s.modules.deployRuns.ReleasedHostnames(ctx)
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	orphans, err := s.modules.proxy.OrphanedCertificateEvidence(ctx, released)
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	httpx.JSON(w, http.StatusOK, orphans)
+	return nil
+}
+
+// handleCertEvidencePrune removes the release copies the operator confirmed,
+// each checked again against the routes and releases as they are now.
+func (s *Server) handleCertEvidencePrune(w http.ResponseWriter, r *http.Request) error {
+	var req struct {
+		Names []string `json:"names"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if len(req.Names) == 0 {
+		return httpx.BadRequest("names is required")
+	}
+	ctx, cancel := timeoutCtx(r, 60*time.Second)
+	defer cancel()
+	released, err := s.modules.deployRuns.ReleasedHostnames(ctx)
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	result, err := s.modules.proxy.PruneCertificateEvidence(ctx, released, req.Names)
+	httpx.SetAudit(r, "certificates.evidence.prune", strings.Join(result.Removed, ","), map[string]any{
+		"removed": result.Removed, "kept": result.Kept,
+	})
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	httpx.JSON(w, http.StatusOK, result)
 	return nil
 }
 

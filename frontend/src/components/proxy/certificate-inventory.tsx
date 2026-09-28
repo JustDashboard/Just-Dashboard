@@ -34,6 +34,12 @@ function stagingNote(cert: Certificate, canReplace: boolean): string {
     : `${refused} certbot saves the real one in its own directory: point the site at it.`
 }
 
+/** Where a certificate comes from, in the words the list uses. */
+function sourceLabel(cert: Certificate): string {
+  if (cert.source.startsWith("nginx:")) return "site file"
+  return cert.source === "caddy" ? "Caddy" : cert.source
+}
+
 /** One inventory with a detail surface, so paths and every SAN remain readable at any width. */
 export function CertificateInventory({
   certs,
@@ -49,7 +55,7 @@ export function CertificateInventory({
   onReplace?: (domains: string) => void
 }) {
   const [query, setQuery] = useState("")
-  const [attention, setAttention] = useState(false)
+  const [filter, setFilter] = useState<"all" | "attention" | "caddy">("all")
   const [selected, setSelected] = useState<string | null>(null)
   const needsAttention = (cert: Certificate) =>
     Boolean(cert.error || cert.expired || cert.expiring || cert.staging)
@@ -57,8 +63,10 @@ export function CertificateInventory({
   // elsewhere keeps its test certificate whatever certbot does.
   const replacing = (cert: Certificate) =>
     cert.source === "certbot" && replacingTestCertificate(job, cert.domains)
+  // Caddy obtains its own from the directory its routes name; certbot
+  // issuing one for the same names would change nothing Caddy serves.
   const replaceVerb = (cert: Certificate): Verb | undefined =>
-    onReplace && cert.staging && cert.domains.length > 0
+    onReplace && cert.staging && cert.source !== "caddy" && cert.domains.length > 0
       ? {
           key: "replace",
           label:
@@ -73,10 +81,12 @@ export function CertificateInventory({
         }
       : undefined
   const needle = query.trim().toLowerCase()
+  const caddyCount = certs.filter((cert) => cert.source === "caddy").length
   const ordered = certs
     .filter(
       (cert) =>
-        (!attention || needsAttention(cert)) &&
+        (filter !== "attention" || needsAttention(cert)) &&
+        (filter !== "caddy" || cert.source === "caddy") &&
         [cert.name, cert.issuer, cert.path, ...cert.domains, ...cert.usedBy].some((value) =>
           value.toLowerCase().includes(needle),
         ),
@@ -99,12 +109,17 @@ export function CertificateInventory({
           placeholder="Certificate, domain or issuer"
         />
         <ChipStrip>
-          <FilterChip selected={!attention} onClick={() => setAttention(false)}>
+          <FilterChip selected={filter === "all"} onClick={() => setFilter("all")}>
             All <ChipCount>{certs.length}</ChipCount>
           </FilterChip>
-          <FilterChip selected={attention} onClick={() => setAttention(true)}>
+          <FilterChip selected={filter === "attention"} onClick={() => setFilter("attention")}>
             Needs attention <ChipCount>{certs.filter(needsAttention).length}</ChipCount>
           </FilterChip>
+          {caddyCount > 0 && (
+            <FilterChip selected={filter === "caddy"} onClick={() => setFilter("caddy")}>
+              Caddy <ChipCount>{caddyCount}</ChipCount>
+            </FilterChip>
+          )}
         </ChipStrip>
       </Toolbar>
       {ordered.length === 0 ? (
@@ -147,9 +162,9 @@ export function CertificateInventory({
                     <span>
                       {cert.error
                         ? "Certificate could not be read"
-                        : `Expires ${calendarDate(cert.notAfter)}`}
+                        : `Expires ${calendarDate(cert.notAfter)}${cert.source === "caddy" ? " · renewed by Caddy" : ""}`}
                     </span>
-                    <Tag>{cert.source.startsWith("nginx:") ? "site file" : cert.source}</Tag>
+                    <Tag>{sourceLabel(cert)}</Tag>
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-2 text-hint text-muted-foreground">
@@ -249,7 +264,11 @@ export function CertificateInventory({
                   ? calendarDate(selectedCert.notAfter)
                   : "—"}
               </Detail>
-              <Detail label="Source">{selectedCert.source}</Detail>
+              <Detail label="Source">
+                {selectedCert.source === "caddy"
+                  ? "Caddy, which renews it itself"
+                  : selectedCert.source}
+              </Detail>
               <Detail label="Used by">
                 {selectedCert.usedBy.length ? (
                   <div className="flex flex-col gap-2">
@@ -267,9 +286,26 @@ export function CertificateInventory({
                   "no site"
                 )}
               </Detail>
-              <Detail label="File">
+              <Detail
+                label={selectedCert.source === "caddy" ? "File in the Caddy container" : "File"}
+              >
                 <span className="font-mono text-hint break-all">{selectedCert.path}</span>
               </Detail>
+              {selectedCert.evidence?.length ? (
+                <Detail label="Release copies">
+                  <div className="flex flex-col gap-2">
+                    {selectedCert.evidence.map((copy) => (
+                      <span key={copy.name} className="min-w-0">
+                        <span className="font-mono text-hint break-all">{copy.path}</span>
+                        <span className="block text-hint text-muted-foreground">
+                          Kept when a deployment was activated · valid until{" "}
+                          {calendarDate(copy.notAfter)}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                </Detail>
+              ) : null}
               <Detail label="Self-signed">
                 {selectedCert.error ? "—" : selectedCert.selfSigned ? "yes" : "no"}
               </Detail>

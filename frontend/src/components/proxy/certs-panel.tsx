@@ -33,6 +33,7 @@ import {
   RenewalNotice,
   useRenew,
 } from "@/components/proxy/certbot-panel"
+import { CaddyEvidencePrune } from "@/components/proxy/caddy-evidence"
 import { CertificateInventory } from "@/components/proxy/certificate-inventory"
 import { ImportDialog } from "@/components/proxy/import-dialog"
 import { ReloadHookOption, RenewalLogPanel, RenewalRecord } from "@/components/proxy/renewal-health"
@@ -119,6 +120,7 @@ export function CertificatesPage() {
       all: all.length,
       certbot: all.filter((c) => c.source === "certbot").length,
       imported: all.filter((c) => c.source === "imported").length,
+      caddy: all.filter((c) => c.source === "caddy").length,
       expiring: readable.filter((c) => c.expiring && !c.expired && !c.staging).length,
       unreadable: all.length - readable.length,
       expired: readable.filter((c) => c.expired && !c.staging).length,
@@ -222,8 +224,9 @@ export function CertificatesPage() {
               ? [
                   counts.certbot > 0 && `${counts.certbot} certbot`,
                   counts.imported > 0 && `${counts.imported} imported`,
-                  counts.all - counts.certbot - counts.imported > 0 &&
-                    `${counts.all - counts.certbot - counts.imported} referenced by a site`,
+                  counts.caddy > 0 && `${counts.caddy} renewed by Caddy`,
+                  counts.all - counts.certbot - counts.imported - counts.caddy > 0 &&
+                    `${counts.all - counts.certbot - counts.imported - counts.caddy} referenced by a site`,
                 ]
                   .filter(Boolean)
                   .join(" · ") || "none on this host"
@@ -349,9 +352,14 @@ export function CertificatesPage() {
               <EmptyState
                 icon={ShieldOff}
                 title="No certificates found"
-                description="certbot's live directory, imported certificates and every certificate a site names are all listed here once one exists."
+                description="certbot's live directory, imported certificates, every certificate a site names and what the Docker ingress's Caddy serves are all listed here once one exists."
                 className="mt-2"
               />
+            )}
+            {admin && (
+              <div className="pt-4">
+                <CaddyEvidencePrune onPruned={certs.refresh} />
+              </div>
             )}
           </PanelBody>
         </Panel>

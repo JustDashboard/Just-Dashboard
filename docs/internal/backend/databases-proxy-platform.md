@@ -388,7 +388,18 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   release runs, and graded by its own expiry it warned about a certificate Caddy had already renewed).
   `CertificateInventory` — `GET /certificates/` and the security posture — leaves out the copies no
   nginx site names, since Caddy renews what it serves and never these, and listed they raised an expiry
-  finding apiece; their names are refused to an operator's import.
+  finding apiece; their names are refused to an operator's import. On a Docker Caddy host it lists
+  what Caddy serves instead, read from `/data/caddy/certificates` in one `docker exec` (a fixed `sh -c`
+  script, the directory its argument): source `caddy`, named by domain, `usedBy` the Caddy routes whose
+  names it covers, `expiring` always false (Caddy renews a third of the term early; expired stays true),
+  and each release copy for its domain folded under it as `evidence`. When Caddy cannot be read the list
+  carries one unreadable `caddy` entry saying why rather than silently listing none.
+  `GET /certificates/evidence` (system.admin) lists the copies no Caddy route serves and no release names
+  (`OrchestrationStore.ReleasedHostnames`, every hostname in any release's runtime snapshot, retired ones
+  included, since any can be rolled back to); `DELETE /certificates/evidence` (destructive, audited as
+  `certificates.evidence.prune`) takes the confirmed `names`, recomputes the orphans and removes only
+  those still orphaned, answering `{removed, kept}`. An unreadable snapshot or Caddy route list refuses
+  the prune rather than treating the release as naming nothing.
 - **`streams.go`** — nginx's `stream` is a sibling of `http`, so a stream cannot live under
   sites-available. They go in `/etc/nginx/stream.d`, and the page says plainly when `nginx.conf` does not
   include it. nginx.conf itself is never edited from here: everything else on the host depends on it.
