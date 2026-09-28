@@ -23,6 +23,7 @@ const portListTimeout = 10 * time.Second
 func (s *Server) mountPortRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/", s.handle(s.handlePortList))
 	r.Method(http.MethodGet, "/meta", s.handle(s.handlePortsMeta))
+	s.mountPortHistoryRoutes(r)
 }
 
 // portsMeta is what the ports page reads besides the sockets, apart from the
@@ -66,7 +67,7 @@ func (s *Server) handlePortList(w http.ResponseWriter, r *http.Request) error {
 		return httpx.Internal(err)
 	}
 	placeListeners(listeners, netsec.ReadHostNetwork(ctx), <-firewall)
-	httpx.JSON(w, http.StatusOK, listeners)
+	httpx.JSON(w, http.StatusOK, s.withFirstSeen(r, listeners))
 	return nil
 }
 

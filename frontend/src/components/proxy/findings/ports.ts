@@ -7,6 +7,7 @@ import {
   type DangerousPort,
 } from "@/components/proxy/ports"
 import { portsHref } from "@/components/proxy/ports-list"
+import { newExposureFindings } from "@/components/proxy/findings/ports-history"
 
 export type PortFindingInput = { ports?: Listener[] }
 
@@ -58,6 +59,7 @@ export function portFindings({ ports }: PortFindingInput): ProxyFinding[] {
     })
   }
 
+  out.push(...newExposureFindings(ports ?? []))
   return out
 }
 

@@ -1,6 +1,10 @@
 package api
 
-import "context"
+import (
+	"context"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+)
 
 // proxyExtras is what the proxy pages keep beyond proxysvc.Service itself:
 // recorders, watchers and the stores behind them. It lives apart from
@@ -17,6 +21,10 @@ type proxyExtras struct {
 	// --- lane D: streams ---
 
 	// --- lane E: ports & exposure ---
+
+	// portHistory samples the host's listening sockets once a minute, so the
+	// ports page can say what opened and closed while nobody was looking.
+	portHistory *proxysvc.PortRecorder
 
 	// --- lane F: certificates ---
 
@@ -36,6 +44,7 @@ func (s *Server) initProxyExtras() {
 	// --- lane D: streams ---
 
 	// --- lane E: ports & exposure ---
+	s.modules.proxyExtras.portHistory = proxysvc.NewPortRecorder(s.Store.DB, s.Log)
 
 	// --- lane F: certificates ---
 
@@ -56,6 +65,9 @@ func (s *Server) startProxyExtras(ctx context.Context) error {
 	// --- lane D: streams ---
 
 	// --- lane E: ports & exposure ---
+	// Started here rather than on request because its whole purpose is to
+	// have been running while nobody looked at the ports page.
+	s.modules.proxyExtras.portHistory.Start(ctx)
 
 	// --- lane F: certificates ---
 
@@ -77,6 +89,7 @@ func (s *Server) stopProxyExtras() {
 	// --- lane D: streams ---
 
 	// --- lane E: ports & exposure ---
+	s.modules.proxyExtras.portHistory.Stop()
 
 	// --- lane F: certificates ---
 

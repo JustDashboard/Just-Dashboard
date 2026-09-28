@@ -306,6 +306,36 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   connection's local port to the ports page only outside it, where somebody chose the port.
   `TestListListenersNamesTheDaemonNotInitOnThisHost` checks the owner on the real host and runs only as
   root; it reads `/proc` and changes nothing.
+- **The ports history** (`ports_history.go`). The kernel keeps no record of what listened before, so
+  `PortRecorder`, started from `startProxyExtras` and stopped from `stopProxyExtras`, walks
+  `ListListeners` at once and then every minute and compares the result with the stretches still open
+  in `listener_observations` (`store/schema_proxy.go`): one row per stretch of time one socket listened
+  with one owner, `opened_after`/`first_seen` the samples either side of its opening and
+  `gone_after`/`gone_at` of its closing, Unix seconds. `listener_history` is one row, when recording
+  began and the latest sample, which is what a change is dated after — across a minute or across a
+  restart, so a socket that went while the dashboard was stopped is dated to the whole unsampled span.
+  `diffListeners` is pure: a socket is its protocol, family, address and port, and stays the same
+  socket while the same program run by the same account holds it; a new PID alone (a restart between
+  samples) only updates the row, an owner this account could not read matches any rather than
+  recording a close and reopen, and a different program or account closes the stretch and opens
+  another. The first sample ever taken is the baseline (`opened_after` NULL: listening when recording
+  began, never reported as opened); a walk that fails records nothing rather than every socket
+  closing; loopback sockets inside `net.ipv4.ip_local_port_range` are not recorded, as the page sets
+  them aside. A partial unique index holds one open stretch per socket. Stretches that closed more than
+  30 days ago are pruned at start and hourly; a failing walk is logged once until it recovers.
+  `GET /ports/history?hours=&limit=` (any signed-in account, as `/ports`; hours 1–720, default 24;
+  limit 1–5000, default 1000, anything else a 400) answers `{recordingSince, lastSample, stalled,
+  intervalSeconds, retentionDays, since, events, truncated}`: events newest first and by port within a
+  sample, a socket's closing before its opening, each the socket as recorded plus `kind`, `at`, `after`,
+  `since` (first seen) and `baseline`, placed and graded by `placeListeners` against the host's network
+  and firewall as they are now; `stalled` says the latest sample is over three intervals old by the
+  server's clock. `GET /ports` adds `firstSeen` to a socket the history saw open while it was recording
+  and whose recorded owner still holds it (`PortRecorder.FirstSeen`), and lists the sockets undated,
+  with a warning in the log, if the history cannot be read. Tests: `TestDiffListeners`,
+  `TestPortRecorderKeepsWhatOpenedAndClosed` (a fake clock and lister through a restart gap, a failed
+  walk, the window, the limit, pruning and `stalled`), `TestPortRecorderRecordsARealSocket` (the real
+  kernel tables), `TestListenerObservationsKeepOneOpenStretchPerSocket`, and the API's
+  `handlers_ports_history_test.go`.
 - **Site builder** (`sites.go`, `sites_render.go`, `sites_parse.go`, `sites_apply.go`). `SiteSpec` is our
   shape, not nginx's, for the reason `ContainerSpec` is not `container.Config`; rendering happens **on the
   server** so a spec has one meaning, and the output is hand-written rather than templated because order
@@ -432,7 +462,8 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `/proxy/streams`, `/proxy/auth-files` and `/proxy/tools`; `mountCertificateRoutes`
   (`handlers_certificates.go`) and `mountTLSRoutes` (`handlers_tls.go`; the watch list's handlers stay in
   `handlers_domains.go`) inside `/certificates`; and `mountPortRoutes` (`handlers_ports.go`) at `/ports`,
-  which chi serves with and without the trailing slash, with `/ports/meta` beside it.
+  which chi serves with and without the trailing slash, with `/ports/meta` and `/ports/history`
+  (`handlers_ports_history.go`) beside it.
   `TestProxyRoutesKeepTheirPaths` pins every path, method and gate as they stood before the split. The whole group runs `withProxyActor`, which puts the
   signed-in account on the context for the change record below. Background work and state the proxy
   pages keep beyond `proxysvc.Service` go in `api/modules_proxy.go` (`initProxyExtras`, run last in
