@@ -159,6 +159,7 @@ function DomainReadings({
     .filter((route) => typeof route.certificateDaysLeft === "number")
     .sort((a, b) => (a.certificateDaysLeft ?? 0) - (b.certificateDaysLeft ?? 0))[0]
   const expiry = expired ?? soonest
+  const renewed = certificates.find((route) => route.certificateRenewedBy === "caddy")
   const issuer = issuerProduct(expiry?.certificateIssuer)
 
   const publicBind = runtime.bindAddress === "0.0.0.0" || runtime.bindAddress === "::"
@@ -211,9 +212,11 @@ function DomainReadings({
           hint={
             expiry
               ? `${expiry.hostname}${issuer ? " · Let's Encrypt" : ""}`
-              : https > 0
-                ? "No certificate observed yet"
-                : undefined
+              : renewed
+                ? `${renewed.hostname} · renewed by Caddy`
+                : https > 0
+                  ? "No certificate observed yet"
+                  : undefined
           }
         />
         <StatTile
@@ -529,6 +532,9 @@ function DomainRow({
                 {plural(liveCertificate.certificateDaysLeft, "day")} left
               </span>
             )}
+          {liveCertificate?.certificateRenewedBy === "caddy" && (
+            <span className="text-hint text-muted-foreground">Renewed by Caddy</span>
+          )}
         </div>
       </div>
       <div className="col-span-full flex min-w-0 flex-wrap items-center gap-2 pl-11 @min-[40rem]:contents">

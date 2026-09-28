@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/pem"
 	"fmt"
 	"net"
 	"os"
@@ -37,6 +36,11 @@ type Certificate struct {
 	// so one can be compared by eye with what a browser or a CA shows.
 	Fingerprint string `json:"fingerprint,omitempty"`
 	Serial      string `json:"serial,omitempty"`
+	// Staging is a test certificate: a staging authority signed it, so every
+	// browser refuses it however many days it has left. certbot's old test
+	// run left these where sites could name them, and one read as a healthy
+	// Let's Encrypt certificate.
+	Staging bool `json:"staging,omitempty"`
 }
 
 // expiryWarningDays matches Let's Encrypt's own renewal window: certbot
@@ -47,11 +51,25 @@ const expiryWarningDays = 30
 // ListCertificates reads certbot's live directory plus any certificate paths
 // referenced by the proxy config, so a manually installed certificate is not
 // invisible just because certbot does not know about it.
+//
+// It is every certificate on the host, Caddy's release copies included:
+// deployment activation, preflight and the route summary find a release's
+// certificate among them, and on a Docker Caddy host those copies are the
+// only pair that covers its domains. What the operator reads as an inventory
+// is CertificateInventory.
 func (s *Service) ListCertificates(ctx context.Context) ([]Certificate, error) {
-	return listCertificates(letsencryptLiveDir, importedDir, s.nginxVHosts()), nil
+	return listCertificates(filepath.Join(letsencryptDir, "live"), importedDir, s.nginxVHosts()), nil
 }
 
-const letsencryptLiveDir = "/etc/letsencrypt/live"
+// CertificateInventory is ListCertificates as the Certificates page and the
+// security posture read it: without the Caddy release copies no site serves.
+func (s *Service) CertificateInventory(ctx context.Context) ([]Certificate, error) {
+	certs, err := s.ListCertificates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return withoutCaddyEvidence(certs), nil
+}
 
 // listCertificates is ListCertificates with its directories as arguments, so
 // the join between certificates and the sites that use them can be tested
@@ -143,15 +161,7 @@ func certificateName(path string) string {
 }
 
 func readCertificate(path string) (*Certificate, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	block, _ := pem.Decode(raw)
-	if block == nil {
-		return nil, fmt.Errorf("not a PEM certificate")
-	}
-	parsed, err := x509.ParseCertificate(block.Bytes)
+	parsed, err := readLeaf(path)
 	if err != nil {
 		return nil, err
 	}
@@ -177,10 +187,21 @@ func summarise(c *x509.Certificate, name, path string) *Certificate {
 	cert.Expired = time.Now().After(c.NotAfter)
 	cert.Expiring = !cert.Expired && cert.DaysLeft <= expiryWarningDays
 	cert.SelfSigned = c.Issuer.String() == c.Subject.String()
+	cert.Staging = stagingIssuer(c)
 	sum := sha256.Sum256(c.Raw)
 	cert.Fingerprint = colonHex(sum[:])
 	cert.Serial = colonHex(c.SerialNumber.Bytes())
 	return cert
+}
+
+// stagingIssuer reports a certificate a staging authority signed, by the name
+// Let's Encrypt gives every staging intermediate: "(STAGING) Riddling Rhubarb
+// R12" now, "Fake LE Intermediate X1" before its 2020 hierarchy. The name is
+// the tell: a staging chain fails verification exactly as a private CA's
+// does, so trust alone cannot say which of the two a certificate is.
+func stagingIssuer(c *x509.Certificate) bool {
+	name := c.Issuer.CommonName
+	return strings.HasPrefix(name, "(STAGING)") || strings.HasPrefix(name, "Fake LE ")
 }
 
 // CheckDomain opens a TLS connection and reports what the domain is actually

@@ -187,7 +187,7 @@ export default function ProxyOverviewPage() {
   // The ports page's own split, so the figure clicked through is on that page.
   const reach = useMemo(() => tallyReach(foldDualStack(listeners ?? [])), [listeners])
   const badCerts = useMemo(
-    () => (certificates ?? []).filter((c) => c.expired || c.expiring || c.error),
+    () => (certificates ?? []).filter((c) => c.expired || c.expiring || c.error || c.staging),
     [certificates],
   )
   // The certificates as a reading rather than a count. `share` is life left
@@ -201,7 +201,7 @@ export default function ProxyOverviewPage() {
       .sort((a, b) => a.daysLeft - b.daysLeft)
       .slice(0, 8)
       .map((cert) => {
-        const wrong = Boolean(cert.error) || cert.expired
+        const wrong = Boolean(cert.error) || cert.expired || Boolean(cert.staging)
         const product = certificateProduct(cert)
         return {
           key: cert.path,
@@ -210,7 +210,13 @@ export default function ProxyOverviewPage() {
           mono: false,
           // The figure column is a fixed width and does not truncate, so the
           // reading is a word rather than the sentence the finding carries.
-          value: cert.error ? "error" : cert.expired ? "expired" : `${cert.daysLeft}d`,
+          value: cert.error
+            ? "error"
+            : cert.expired
+              ? "expired"
+              : cert.staging
+                ? "test"
+                : `${cert.daysLeft}d`,
           share: cert.daysLeft / horizon,
           signal: wrong || cert.expiring ? 1 : 0,
           tone: wrong ? "danger" : "warning",
@@ -372,7 +378,7 @@ export default function ProxyOverviewPage() {
               ) : undefined
             }
             tone={
-              badCerts.some((c) => c.expired || c.error)
+              badCerts.some((c) => c.expired || c.error || c.staging)
                 ? "danger"
                 : certs.error || badCerts.length
                   ? "warning"

@@ -2,35 +2,77 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Copy, Inspect, ShieldCheck } from "@/components/icons"
+import { Copy, Inspect, ShieldCheck, Warning } from "@/components/icons"
+import { certbotRunning, replacingTestCertificate } from "@/lib/certificates"
 import { copyText } from "@/lib/clipboard"
 import { calendarDate } from "@/lib/format"
-import type { Certificate } from "@/lib/types"
+import type { Certificate, Job } from "@/lib/types"
 import { ChoiceRow } from "@/components/flow"
 import { Detail, DetailList, SearchInput, Toolbar } from "@/components/page"
 import { ProductLogo } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { EmptyState, Notice } from "@/components/state"
+import { Status } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
+import { VerbBar, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { ProxyGrid } from "@/components/proxy/route-path"
 import { CertLife, ExpiryStatus } from "@/components/proxy/expiry-status"
 import { certificateProduct } from "@/components/proxy/marks"
 import { sitePath } from "@/components/proxy/site-verbs"
 
+/**
+ * A test certificate, and what a real issuance does about it: certbot's own
+ * is replaced in place, where every site naming it finds the real one; any
+ * other file stays as it is, and the real one lands in certbot's directory.
+ */
+function stagingNote(cert: Certificate, canReplace: boolean): string {
+  const refused = "A staging authority signed it, so browsers refuse it."
+  if (!canReplace) return refused
+  return cert.source === "certbot"
+    ? `${refused} A real issuance for the same names replaces it.`
+    : `${refused} certbot saves the real one in its own directory: point the site at it.`
+}
+
 /** One inventory with a detail surface, so paths and every SAN remain readable at any width. */
 export function CertificateInventory({
   certs,
   canScan,
+  job = null,
+  onReplace,
 }: {
   certs: Certificate[]
   canScan: boolean
+  /** The job on screen: a certificate it is replacing says so, and no other certbot run starts. */
+  job?: Job | null
+  /** Opens the real issuance for a test certificate's names; absent where nobody here can issue. */
+  onReplace?: (domains: string) => void
 }) {
   const [query, setQuery] = useState("")
   const [attention, setAttention] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
-  const needsAttention = (cert: Certificate) => Boolean(cert.error || cert.expired || cert.expiring)
+  const needsAttention = (cert: Certificate) =>
+    Boolean(cert.error || cert.expired || cert.expiring || cert.staging)
+  // Only certbot's own file is replaced in place; a copy a site names
+  // elsewhere keeps its test certificate whatever certbot does.
+  const replacing = (cert: Certificate) =>
+    cert.source === "certbot" && replacingTestCertificate(job, cert.domains)
+  const replaceVerb = (cert: Certificate): Verb | undefined =>
+    onReplace && cert.staging && cert.domains.length > 0
+      ? {
+          key: "replace",
+          label:
+            cert.source === "certbot"
+              ? "Replace with a real certificate"
+              : "Issue a real certificate",
+          icon: ShieldCheck,
+          inline: true,
+          // certbot holds one lock for all of its work.
+          disabled: certbotRunning(job),
+          run: () => onReplace(cert.domains.join(" ")),
+        }
+      : undefined
   const needle = query.trim().toLowerCase()
   const ordered = certs
     .filter(
@@ -41,11 +83,13 @@ export function CertificateInventory({
         ),
     )
     .sort((a, b) => {
-      const rank = (c: Certificate) => (c.error ? 0 : c.expired ? 1 : c.expiring ? 2 : 3)
+      const rank = (c: Certificate) =>
+        c.error ? 0 : c.expired || c.staging ? 1 : c.expiring ? 2 : 3
       return rank(a) - rank(b) || a.daysLeft - b.daysLeft
     })
   const selectedCert = certs.find((cert) => cert.path === selected)
   const scanDomain = selectedCert?.domains.find((domain) => !domain.startsWith("*"))
+  const selectedReplace = selectedCert && replaceVerb(selectedCert)
 
   return (
     <div className="min-w-0 space-y-4">
@@ -72,41 +116,60 @@ export function CertificateInventory({
           data-slot="cert-list"
           className="xl:grid-cols-1 2xl:grid-cols-2"
         >
-          {ordered.map((cert) => (
-            <ChoiceRow
-              key={cert.path}
-              verb={`Inspect ${cert.name}`}
-              onSelect={() => setSelected(cert.path)}
-              className="h-full gap-4 p-4"
-              leading={
-                <ProductLogo id={certificateProduct(cert)} size="md" fallback={ShieldCheck} />
-              }
-              title={<span className="text-title">{cert.name}</span>}
-              description={cert.issuer || "Unknown issuer"}
-              trailing={<ExpiryStatus cert={cert} />}
-            >
-              <div className="space-y-3 border-y border-hairline py-3">
-                <p className="font-mono text-body break-all">
-                  {cert.domains.join(", ") || "No names reported"}
-                </p>
-                {!cert.error && <CertLife cert={cert} className="w-full" />}
-                <div className="flex flex-wrap justify-between gap-2 text-hint text-muted-foreground">
-                  <span>
-                    {cert.error
-                      ? "Certificate could not be read"
-                      : `Expires ${calendarDate(cert.notAfter)}`}
-                  </span>
-                  <Tag>{cert.source.startsWith("nginx:") ? "site file" : cert.source}</Tag>
+          {ordered.map((cert) => {
+            const verb = replaceVerb(cert)
+            const busy = replacing(cert)
+            return (
+              <ChoiceRow
+                key={cert.path}
+                verb={`Inspect ${cert.name}`}
+                onSelect={() => setSelected(cert.path)}
+                busy={busy}
+                className="h-full gap-4 p-4"
+                leading={
+                  <ProductLogo id={certificateProduct(cert)} size="md" fallback={ShieldCheck} />
+                }
+                title={<span className="text-title">{cert.name}</span>}
+                description={cert.issuer || "Unknown issuer"}
+                trailing={
+                  busy ? (
+                    <Status state="activating" label="Replacing…" />
+                  ) : (
+                    <ExpiryStatus cert={cert} />
+                  )
+                }
+              >
+                <div className="space-y-3 border-y border-hairline py-3">
+                  <p className="font-mono text-body break-all">
+                    {cert.domains.join(", ") || "No names reported"}
+                  </p>
+                  {!cert.error && <CertLife cert={cert} className="w-full" />}
+                  <div className="flex flex-wrap justify-between gap-2 text-hint text-muted-foreground">
+                    <span>
+                      {cert.error
+                        ? "Certificate could not be read"
+                        : `Expires ${calendarDate(cert.notAfter)}`}
+                    </span>
+                    <Tag>{cert.source.startsWith("nginx:") ? "site file" : cert.source}</Tag>
+                  </div>
                 </div>
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-2 text-hint text-muted-foreground">
-                <span className="min-w-0 break-all">
-                  Used by {cert.usedBy.join(", ") || "no site"}
-                </span>
-                {cert.selfSigned && <Tag tone="warning">self-signed</Tag>}
-              </div>
-            </ChoiceRow>
-          ))}
+                <div className="flex flex-wrap items-center justify-between gap-2 text-hint text-muted-foreground">
+                  <span className="min-w-0 break-all">
+                    Used by {cert.usedBy.join(", ") || "no site"}
+                  </span>
+                  {cert.selfSigned && <Tag tone="warning">self-signed</Tag>}
+                </div>
+                {cert.staging && (
+                  <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+                    <p className="min-w-0 flex-1 basis-48 text-hint text-muted-foreground">
+                      {stagingNote(cert, Boolean(verb))}
+                    </p>
+                    {verb && <VerbBar verbs={[verb]} />}
+                  </div>
+                )}
+              </ChoiceRow>
+            )
+          })}
         </ProxyGrid>
       )}
       <SidePanel
@@ -127,11 +190,24 @@ export function CertificateInventory({
                 Copy path
               </Button>
               {canScan && scanDomain && (
-                <Button size="sm" asChild>
+                <Button size="sm" variant={selectedReplace ? "outline" : undefined} asChild>
                   <Link href={`/proxy/tls?domain=${encodeURIComponent(scanDomain)}`}>
                     <Inspect className="size-3.5" />
                     TLS report
                   </Link>
+                </Button>
+              )}
+              {selectedReplace && (
+                <Button
+                  size="sm"
+                  disabled={selectedReplace.disabled}
+                  onClick={() => {
+                    setSelected(null)
+                    selectedReplace.run()
+                  }}
+                >
+                  <ShieldCheck className="size-3.5" />
+                  {selectedReplace.label}
                 </Button>
               )}
             </>
@@ -152,6 +228,11 @@ export function CertificateInventory({
             {selectedCert.error && (
               <Notice tone="danger" title="Unreadable certificate" className="break-all">
                 {selectedCert.error}
+              </Notice>
+            )}
+            {selectedCert.staging && (
+              <Notice tone="danger" icon={Warning} title="A test certificate">
+                {stagingNote(selectedCert, Boolean(selectedReplace))}
               </Notice>
             )}
             {!selectedCert.error && <CertLife cert={selectedCert} className="w-full" />}

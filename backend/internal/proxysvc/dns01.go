@@ -1,6 +1,7 @@
 package proxysvc
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -97,48 +98,75 @@ func DNSProviderFor(key string) (DNSProvider, bool) {
 // dnsCredentialsDir is where credential files are kept. Inside certbot's own
 // tree because that is the directory an operator already treats as secret and
 // already backs up with the certificates it protects.
-const dnsCredentialsDir = "/etc/letsencrypt/jd-dns"
+func dnsCredentialsDir() string {
+	return filepath.Join(letsencryptDir, "jd-dns")
+}
 
 // credentialsPath is the file for one provider. One per provider rather than
 // one per certificate: the credentials belong to the DNS account, and a
 // certificate that later covers another domain in the same zone should not
 // need them pasted again.
 func credentialsPath(key string) string {
-	return filepath.Join(dnsCredentialsDir, key+".ini")
+	return filepath.Join(dnsCredentialsDir(), key+".ini")
 }
 
-// WriteDNSCredentials stores a provider's credentials at 0600.
-//
-// certbot refuses to use a credentials file that is group- or world-readable,
-// which is the one piece of file hygiene it enforces and the one people get
-// wrong when they create the file by hand.
-func WriteDNSCredentials(key, content string) (string, error) {
+// DNSCredentials are a provider's credentials, checked and ready to save.
+// Checking and saving are separate so an issuance can refuse a request
+// without having written a token first.
+type DNSCredentials struct {
+	provider DNSProvider
+	content  string
+}
+
+// CheckDNSCredentials validates what would be saved for a provider, writing
+// nothing.
+func CheckDNSCredentials(key, content string) (DNSCredentials, error) {
 	provider, ok := DNSProviderFor(key)
 	if !ok {
-		return "", fmt.Errorf("%q is not a DNS provider this dashboard supports", key)
+		return DNSCredentials{}, fmt.Errorf("%q is not a DNS provider this dashboard supports", key)
 	}
 	if strings.TrimSpace(content) == "" {
-		return "", fmt.Errorf("%s needs its credentials before it can answer a challenge", provider.Name)
+		return DNSCredentials{}, fmt.Errorf("%s needs its credentials before it can answer a challenge", provider.Name)
 	}
 	if len(content) > 64*1024 {
-		return "", fmt.Errorf("credentials are unexpectedly large")
+		return DNSCredentials{}, fmt.Errorf("credentials are unexpectedly large")
 	}
 	if key == "route53" {
 		var err error
 		content, err = normalizeRoute53Credentials(content)
 		if err != nil {
-			return "", err
+			return DNSCredentials{}, err
 		}
 	}
-	if err := os.MkdirAll(dnsCredentialsDir, 0o700); err != nil {
-		return "", err
-	}
-	path := credentialsPath(key)
-	if err := persistDNSCredentials(path, content); err != nil {
-		return "", err
-	}
+	return DNSCredentials{provider: provider, content: content}, nil
+}
 
+// Provider is whose credentials these are.
+func (c DNSCredentials) Provider() DNSProvider { return c.provider }
+
+// Save stores the credentials at 0600 and returns where.
+//
+// certbot refuses to use a credentials file that is group- or world-readable,
+// which is the one piece of file hygiene it enforces and the one people get
+// wrong when they create the file by hand.
+func (c DNSCredentials) Save() (string, error) {
+	if err := os.MkdirAll(dnsCredentialsDir(), 0o700); err != nil {
+		return "", err
+	}
+	path := credentialsPath(c.provider.Key)
+	if err := persistDNSCredentials(path, c.content); err != nil {
+		return "", err
+	}
 	return path, nil
+}
+
+// WriteDNSCredentials checks and stores a provider's credentials.
+func WriteDNSCredentials(key, content string) (string, error) {
+	credentials, err := CheckDNSCredentials(key, content)
+	if err != nil {
+		return "", err
+	}
+	return credentials.Save()
 }
 
 // HasDNSCredentials reports whether a provider is ready to use.
@@ -167,10 +195,16 @@ func RemoveDNSCredentials(key string) error {
 }
 
 // ListDNSProviders reports the closed set with per-host detail filled in.
-func (s *Service) ListDNSProviders() []DNSProvider {
+// Installed is read from the certbot that runs the jobs, so a plugin reported
+// here is one an issuance can use; with no certbot at all, none is.
+func (s *Service) ListDNSProviders(ctx context.Context) ([]DNSProvider, error) {
+	rt, err := loadCertbotRuntime(ctx)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]DNSProvider, 0, len(dnsProviders))
 	for _, p := range dnsProviders {
-		p.Installed = certbotPluginInstalled(p.Plugin)
+		p.Installed = rt != nil && rt.authenticators[p.Plugin]
 		p.HasCredentials = HasDNSCredentials(p.Key)
 		out = append(out, p)
 	}
@@ -182,46 +216,7 @@ func (s *Service) ListDNSProviders() []DNSProvider {
 		}
 		return out[i].Name < out[j].Name
 	})
-	return out
-}
-
-// certbotPluginInstalled looks for the plugin's own directory rather than
-// asking certbot, which costs a subprocess per provider and would make the
-// list a second slow.
-//
-// The interpreter directory is globbed rather than listed. Naming versions
-// meant the check only ever worked on the two this was written against —
-// RHEL 9 ships python3.9, Debian 13 and Fedora ship 3.13, and every one of
-// those hosts was told a plugin it had installed was missing, which is a
-// refusal in front of a certificate that would have been issued.
-func certbotPluginInstalled(plugin string) bool {
-	suffix := strings.TrimPrefix(plugin, "dns-")
-	names := map[string]bool{
-		"certbot_" + strings.ReplaceAll(suffix, "-", "_"):     true,
-		"certbot_dns_" + suffix:                               true,
-		"certbot_dns_" + strings.ReplaceAll(suffix, "-", "_"): true,
-	}
-	patterns := []string{
-		// Debian and Ubuntu, which put every distribution package in one
-		// unversioned tree.
-		"/usr/lib/python3/dist-packages/*",
-		// The RPM world and Alpine, versioned; pip --user and pipx too.
-		"/usr/lib/python3*/site-packages/*",
-		"/usr/lib64/python3*/site-packages/*",
-		"/usr/local/lib/python3*/*-packages/*",
-		// The snap and the pip-in-a-venv install certbot's own installer uses.
-		"/snap/certbot/current/lib/python3*/site-packages/*",
-		"/opt/certbot/lib/python3*/site-packages/*",
-	}
-	for _, pattern := range patterns {
-		matches, _ := filepath.Glob(pattern)
-		for _, m := range matches {
-			if names[filepath.Base(m)] {
-				return true
-			}
-		}
-	}
-	return false
+	return out, nil
 }
 
 // dnsIssueArgs builds the plugin half of a certbot invocation.

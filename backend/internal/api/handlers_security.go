@@ -128,7 +128,7 @@ func (s *Server) handleSecurityPosture(w http.ResponseWriter, r *http.Request) e
 		}
 	})
 	run(func() {
-		certs, err := s.modules.proxy.ListCertificates(ctx)
+		certs, err := s.modules.proxy.CertificateInventory(ctx)
 		if err != nil {
 			return
 		}

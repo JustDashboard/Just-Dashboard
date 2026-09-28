@@ -4,6 +4,7 @@ import { useState } from "react"
 import {
   Clock,
   Key,
+  Logs,
   RefreshClockwise,
   ShieldCheck,
   ShieldOff,
@@ -12,9 +13,16 @@ import {
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, post } from "@/lib/api"
+import {
+  authorityName,
+  certbotRunning,
+  lineageActivity,
+  parseDomains,
+  renewalMethod,
+} from "@/lib/certificates"
 import type { CertbotCert, CertbotState, DNSProvider, Job } from "@/lib/types"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Field, FormNote, OptionList, OptionRow } from "@/components/form"
+import { Field, OptionList, OptionRow } from "@/components/form"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { ProductLogo, ProductLogos } from "@/components/product-logo"
 import { ROW_BLEED } from "@/components/row-list"
@@ -85,21 +93,52 @@ export function useRenew(attach: (job: Job) => void) {
  * the dry run, the forced renewal and the revocation behind the menu with a
  * sentence each — the forced one spends a rate-limited duplicate and the
  * revocation cannot be undone, which is not something a glyph can say.
+ *
+ * A test certificate has no renewal verbs: certbot renews from the authority
+ * in the lineage's configuration, the staging one, so renewing only fetched
+ * another certificate browsers refuse. Its verb is the real issuance for the
+ * same names, which replaces it.
+ *
+ * certbot holds one lock for all of its work, so while the job on screen is
+ * a certbot run every verb here waits for it, and the lineage it acts on
+ * says what is happening to it.
+ *
+ * Each lineage says how certbot renews it — the plugin, and the folder or
+ * DNS provider it names — and what stands in the way: why the last run
+ * failed on it, in certbot's words, and anything that will make the next
+ * one fail. Either brings the dry run out of the menu, since it is how to
+ * find out whether a fix worked.
  */
 export function CertbotLineages({
   state,
   admin,
   busy,
+  job,
   onRenew,
+  onReplace,
   onRevoke,
+  onShowLog,
 }: {
   state: CertbotState
   admin: boolean
   busy: string
+  job: Job | null
   onRenew: (name: string, dryRun: boolean, force?: boolean) => void
+  /** Opens the real issuance for a test certificate's names; absent where none can be issued. */
+  onReplace?: (domains: string) => void
   onRevoke: (name: string) => void
+  /** Opens the renewal schedule's log. */
+  onShowLog: () => void
 }) {
   const { confirm, dialog } = useConfirm()
+  const running = certbotRunning(job)
+  if (state.error) {
+    return (
+      <Notice tone="danger" icon={Warning} title="certbot's lineages could not be read">
+        <span className="break-all">{state.error}</span>
+      </Notice>
+    )
+  }
   if (state.certs.length === 0) {
     return (
       <EmptyState
@@ -110,84 +149,152 @@ export function CertbotLineages({
       />
     )
   }
-  const verbsFor = (name: string): Verb[] => [
-    {
-      key: "renew",
-      label: "Renew",
-      icon: RefreshClockwise,
-      inline: true,
-      disabled: busy === name,
-      run: () => onRenew(name, false),
-    },
-    {
-      key: "dry-run",
-      label: "Dry run",
-      icon: ShieldCheck,
-      disabled: busy === name,
-      run: () => onRenew(name, true),
-    },
-    {
-      key: "force",
-      label: "Force renewal",
-      icon: Warning,
-      disabled: busy === name,
-      run: () =>
-        confirm({
-          title: `Force renewal of ${name}`,
-          confirmLabel: "Renew now",
-          description: (
-            <p>
-              certbot normally refuses to renew a certificate that is not due. Forcing it spends one
-              of the five duplicate certificates Let&rsquo;s Encrypt allows per week for this set of
-              names.
-            </p>
-          ),
-          action: async () => onRenew(name, false, true),
-        }),
-    },
-    {
+  const waiting = busy !== "" || running
+  const verbsFor = ({ name, domains, staging, lastFailure, willFail }: CertbotCert): Verb[] => {
+    const troubled = Boolean(lastFailure) || Boolean(willFail?.length)
+    const revoke: Verb = {
       key: "revoke",
       label: "Revoke and delete",
       icon: Trash,
       danger: true,
-      disabled: busy === name,
+      disabled: waiting,
       run: () => onRevoke(name),
-    },
-  ]
+    }
+    if (staging) {
+      return onReplace
+        ? [
+            {
+              key: "replace",
+              label: "Replace with a real certificate",
+              icon: ShieldCheck,
+              inline: true,
+              disabled: waiting,
+              run: () => onReplace(domains.join(" ")),
+            },
+            revoke,
+          ]
+        : [revoke]
+    }
+    return [
+      {
+        key: "renew",
+        label: "Renew",
+        icon: RefreshClockwise,
+        inline: true,
+        disabled: waiting,
+        run: () => onRenew(name, false),
+      },
+      {
+        key: "dry-run",
+        label: "Dry run",
+        icon: ShieldCheck,
+        inline: troubled,
+        disabled: waiting,
+        run: () => onRenew(name, true),
+      },
+      ...(lastFailure
+        ? [{ key: "log", label: "Show log", icon: Logs, inline: true, run: onShowLog }]
+        : []),
+      {
+        key: "force",
+        label: "Force renewal",
+        icon: Warning,
+        disabled: waiting,
+        run: () =>
+          confirm({
+            title: `Force renewal of ${name}`,
+            confirmLabel: "Renew now",
+            description: (
+              <p>
+                certbot normally refuses to renew a certificate that is not due. Forcing it spends
+                one of the five duplicate certificates Let&rsquo;s Encrypt allows per week for this
+                set of names.
+              </p>
+            ),
+            action: async () => onRenew(name, false, true),
+          }),
+      },
+      revoke,
+    ]
+  }
   return (
     <>
-      <ul className="animate-rise divide-y divide-hairline">
-        {state.certs.map((cert) => (
-          <li key={cert.name} className="space-y-3 py-4 first:pt-1">
-            <div className="flex min-w-0 items-center gap-3">
-              <ProductLogo id="lets-encrypt" size="sm" />
-              <div className="min-w-0 flex-1 basis-40">
-                <p className="truncate text-body font-medium" title={cert.name}>
-                  {cert.name}
-                </p>
-                <p className="text-hint break-all text-muted-foreground">
-                  {cert.domains.join(", ")}
-                </p>
+      {admin && running && (
+        <p className="pt-3 pb-1 text-hint text-muted-foreground">
+          certbot is running. Its other actions wait until it finishes.
+        </p>
+      )}
+      <ul aria-label="certbot lineages" className="animate-rise divide-y divide-hairline">
+        {state.certs.map((cert) => {
+          const activity = lineageActivity(job, cert) ?? (busy === cert.name ? "Renewing…" : "")
+          return (
+            <li key={cert.name} className="space-y-3 py-4 first:pt-1">
+              <div className="flex min-w-0 items-center gap-3">
+                <ProductLogo
+                  id={cert.staging ? undefined : "lets-encrypt"}
+                  size="sm"
+                  fallback={ShieldOff}
+                />
+                <div className="min-w-0 flex-1 basis-40">
+                  <p className="truncate text-body font-medium" title={cert.name}>
+                    {cert.name}
+                  </p>
+                  <p
+                    className={cn(
+                      "text-hint text-muted-foreground",
+                      cert.error ? "break-words" : "break-all",
+                    )}
+                  >
+                    {cert.error || cert.domains.join(", ")}
+                  </p>
+                </div>
               </div>
-            </div>
-            <LineageLife cert={cert} />
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <Status
-                verdict={!cert.valid ? "critical" : cert.daysLeft <= 30 ? "warning" : "ok"}
-                label={
-                  busy === cert.name
-                    ? "Renewing…"
-                    : cert.valid
-                      ? `${cert.daysLeft}d left`
-                      : "expired"
-                }
-              />
-              {admin && (
-                <VerbBar verbs={verbsFor(cert.name)} menuLabel={`More actions for ${cert.name}`} />
+              <RenewalMethod cert={cert} />
+              {!cert.error && <LineageLife cert={cert} />}
+              {cert.lastFailure && (
+                <p className="text-hint break-words text-destructive">
+                  Last renewal failed: {cert.lastFailure.reason}
+                </p>
               )}
-            </div>
-          </li>
-        ))}
+              {cert.willFail && cert.willFail.length > 0 && (
+                <Notice tone="warning" icon={Warning} title="The next renewal will fail">
+                  <ul className="space-y-1">
+                    {cert.willFail.map((reason) => (
+                      <li key={reason} className="break-words">
+                        {reason}
+                      </li>
+                    ))}
+                  </ul>
+                </Notice>
+              )}
+              {cert.staging && (
+                <p className="text-hint text-muted-foreground">
+                  A staging authority signed it, so browsers refuse it. A real issuance for the same
+                  names replaces it.
+                </p>
+              )}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                {activity ? (
+                  <Status state="activating" label={activity} />
+                ) : cert.error ? (
+                  <Status verdict="critical" label="unreadable" />
+                ) : cert.staging ? (
+                  <Status verdict="critical" label="test certificate" />
+                ) : !cert.valid ? (
+                  <Status verdict="critical" label="expired" />
+                ) : (
+                  <Status
+                    verdict={cert.daysLeft <= 30 ? "warning" : "ok"}
+                    label={`${cert.daysLeft}d left`}
+                  />
+                )}
+                {admin && (
+                  <VerbBar verbs={verbsFor(cert)} menuLabel={`More actions for ${cert.name}`} />
+                )}
+              </div>
+            </li>
+          )
+        })}
       </ul>
       {dialog}
     </>
@@ -195,20 +302,43 @@ export function CertbotLineages({
 }
 
 /**
- * certbot's lineages carry days left and an expiry but no issue date, and
- * every one of them is a ninety-day certificate: the meter is drawn against
- * that term.
+ * How certbot proves control when it renews the lineage: the plugin as a
+ * word, then the folder the webroot plugin writes into or the DNS provider.
+ */
+function RenewalMethod({ cert }: { cert: CertbotCert }) {
+  const method = renewalMethod(cert)
+  if (!method) return null
+  return (
+    <p className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+      <span className="text-hint text-muted-foreground">Renews with</span>
+      <Tag>{method.method}</Tag>
+      {/* A folder is a path of any length: it wraps, where a tag would run
+          past the column on a phone. */}
+      {method.folders?.map((folder) => (
+        <code key={folder} className="min-w-0 font-mono text-hint break-all">
+          {folder}
+        </code>
+      ))}
+      {method.detail && <Tag>{method.detail}</Tag>}
+    </p>
+  )
+}
+
+/**
+ * The meter runs from the certificate's issue date to its expiry, whatever
+ * the term: a ninety-day guess drew any other one wrong.
  */
 function LineageLife({ cert }: { cert: CertbotCert }) {
   return (
     <CertLife
       className="w-full"
       cert={{
-        notBefore: new Date(new Date(cert.expiry).getTime() - 90 * 86_400_000).toISOString(),
+        notBefore: cert.notBefore,
         notAfter: cert.expiry,
         daysLeft: cert.daysLeft,
         expired: !cert.valid,
         expiring: cert.valid && cert.daysLeft <= 30,
+        staging: cert.staging,
       }}
     />
   )
@@ -381,9 +511,10 @@ export function DnsProvidersPanel({
  * is watched in the console behind this dialog, which is why the dialog can
  * close.
  *
- * Staging is on by default, and the page offers the real run once a staging
- * run has passed — the real limit is five failures an hour and it is easy to
- * reach.
+ * A test run is on by default, and the page offers the real run once one has
+ * passed — the real limit is five failures an hour and it is easy to reach.
+ * The test run is certbot's --dry-run: the whole exchange, nothing saved, so
+ * a passing one leaves nothing behind for the real issuance to trip over.
  */
 export function IssueDialog({
   open,
@@ -392,6 +523,9 @@ export function IssueDialog({
   initialStaging = true,
   hasNginx,
   providers,
+  directory,
+  testAuthority = false,
+  certbotBusy,
   onStarted,
 }: {
   open: boolean
@@ -400,6 +534,12 @@ export function IssueDialog({
   initialStaging?: boolean
   hasNginx: boolean
   providers: DNSProvider[]
+  /** The ACME directory certbot orders from when it is not one of Let's Encrypt's. */
+  directory?: string
+  /** The configured directory signs test certificates, which browsers refuse. */
+  testAuthority?: boolean
+  /** A certbot run is on screen: this one would fail on its lock. */
+  certbotBusy: boolean
   onStarted: (job: Job) => void
 }) {
   return (
@@ -411,6 +551,9 @@ export function IssueDialog({
       initialStaging={initialStaging}
       hasNginx={hasNginx}
       providers={providers}
+      directory={directory}
+      testAuthority={testAuthority}
+      certbotBusy={certbotBusy}
       onStarted={onStarted}
     />
   )
@@ -423,6 +566,9 @@ function IssueDialogBody({
   initialStaging,
   hasNginx,
   providers,
+  directory,
+  testAuthority,
+  certbotBusy,
   onStarted,
 }: {
   open: boolean
@@ -431,8 +577,16 @@ function IssueDialogBody({
   initialStaging: boolean
   hasNginx: boolean
   providers: DNSProvider[]
+  directory?: string
+  testAuthority: boolean
+  certbotBusy: boolean
   onStarted: (job: Job) => void
 }) {
+  // A configured authority is rehearsed with itself — certbot's --dry-run
+  // goes to Let's Encrypt's staging endpoint only when no other is named —
+  // and Let's Encrypt's limits say nothing about it. Let's Encrypt's own
+  // directories come without one: they are Let's Encrypt.
+  const authority = directory ? authorityName(directory) : undefined
   const [domains, setDomains] = useState(initialDomains ?? "")
   const [email, setEmail] = useState("")
   // Through nginx where there is one to answer the challenge; standalone
@@ -443,28 +597,35 @@ function IssueDialogBody({
   const [busy, setBusy] = useState(false)
   const [dnsProvider, setDnsProvider] = useState("")
   const [credentials, setCredentials] = useState("")
+  const [dnsWait, setDnsWait] = useState("")
 
   const provider = providers.find((p) => p.key === dnsProvider)
   // A wildcard is only ever signed against a DNS challenge, so the form
   // switches to it the moment one is typed rather than after a failed
   // attempt — derived here, not synced, so the operator's own choice comes
   // back if the wildcard is removed again.
-  const wantsWildcard = domains.split(/[\s,]+/).some((d) => d.startsWith("*."))
+  const wantsWildcard = parseDomains(domains).some((d) => d.startsWith("*."))
   const method = wantsWildcard ? "dns" : chosenMethod
+  // Route 53's plugin reads the environment and has neither a credentials
+  // file nor a propagation flag.
+  const fileProvider = method === "dns" && provider !== undefined && provider.key !== "route53"
+  const wait = dnsWait.trim() === "" ? undefined : Number(dnsWait)
+  const waitInvalid = wait !== undefined && (!Number.isInteger(wait) || wait < 1 || wait > 3600)
 
   const submit = async () => {
     setBusy(true)
     try {
-      if (method === "dns" && credentials.trim() && provider?.key !== "route53") {
-        await post("/certificates/dns-credentials", { provider: dnsProvider, credentials })
-      }
+      // The token travels with the request and is saved by the job once it
+      // starts, so a refused issuance leaves nothing on disk.
       const job = await post<Job>("/certificates/issue", {
-        domains: domains.split(/[\s,]+/).filter(Boolean),
+        domains: parseDomains(domains),
         email,
         method,
         webRoot,
         staging,
         dnsProvider: method === "dns" ? dnsProvider : "",
+        ...(fileProvider && wait !== undefined && { dnsWait: wait }),
+        ...(fileProvider && credentials.trim() && { credentials }),
       })
       onStarted(job)
       onOpenChange(false)
@@ -475,29 +636,43 @@ function IssueDialogBody({
     }
   }
 
-  const needsCredentials =
-    method === "dns" && provider && provider.key !== "route53" && !provider.hasCredentials
+  const needsCredentials = fileProvider && !provider.hasCredentials
 
   return (
     <Modal
       open={open}
       onOpenChange={onOpenChange}
       title="Issue a certificate"
-      description="Let's Encrypt proves you control the domain, then signs a certificate for ninety days. The renewal is automatic once the first one works."
+      description={
+        testAuthority
+          ? `${authority ?? "Let's Encrypt's staging authority"} checks you control the domain, then signs a test certificate that browsers refuse. JD_ACME_DIRECTORY names a staging authority.`
+          : authority
+            ? `${authority} checks you control the domain, then signs a certificate. The renewal is automatic once the first one works.`
+            : "Let's Encrypt proves you control the domain, then signs a certificate for ninety days. The renewal is automatic once the first one works."
+      }
       footer={
-        <Button
-          onClick={submit}
-          disabled={
-            busy ||
-            !domains.trim() ||
-            !email.trim() ||
-            (method === "dns" && !dnsProvider) ||
-            (needsCredentials && !credentials.trim())
-          }
-          pending={busy}
-        >
-          {staging ? "Run the test" : "Issue"}
-        </Button>
+        <>
+          {certbotBusy && (
+            <span className="mr-auto text-hint text-muted-foreground">
+              certbot is running. Wait for it to finish.
+            </span>
+          )}
+          <Button
+            onClick={submit}
+            disabled={
+              busy ||
+              certbotBusy ||
+              !domains.trim() ||
+              !email.trim() ||
+              (method === "dns" && !dnsProvider) ||
+              (needsCredentials && !credentials.trim()) ||
+              (fileProvider && waitInvalid)
+            }
+            pending={busy}
+          >
+            {staging ? "Run the test" : "Issue"}
+          </Button>
+        </>
       }
     >
       <div className="grid gap-4">
@@ -517,7 +692,7 @@ function IssueDialogBody({
         <Field
           label="Contact email"
           htmlFor="issue-email"
-          hint="Where expiry warnings go if renewal ever stops working."
+          hint="Registered with the certificate authority account."
         >
           <Input
             id="issue-email"
@@ -595,14 +770,14 @@ function IssueDialogBody({
                 on a snap install) before issuing.
               </Notice>
             )}
-            {provider && provider.key !== "route53" && (
+            {fileProvider && (
               <Field
                 label="Credentials"
                 htmlFor="dns-credentials"
                 hint={
                   provider.hasCredentials
-                    ? `Saved to a file only root can read, and never shown again. Leave empty to reuse what is already stored for ${provider.name}.`
-                    : "Saved to a file only root can read, and never shown again."
+                    ? `Saved to a file only root can read once the issuance starts, and never shown again. Leave empty to reuse what is already stored for ${provider.name}.`
+                    : "Saved to a file only root can read once the issuance starts, and never shown again."
                 }
               >
                 <Textarea
@@ -615,12 +790,26 @@ function IssueDialogBody({
                 />
               </Field>
             )}
-            {provider && (
-              <FormNote>
-                certbot waits {provider.defaultWait}s for the record to propagate before asking
-                Let&rsquo;s Encrypt to look. A challenge that fails on the first try is almost
-                always that wait being too short rather than a wrong token.
-              </FormNote>
+            {fileProvider && (
+              <Field
+                label="Propagation wait"
+                htmlFor="dns-wait"
+                hint={`Seconds certbot waits for the record to spread before ${authority ?? "Let's Encrypt"} looks; ${provider.defaultWait} when empty. A first-try failure is almost always this being too short.`}
+                error={waitInvalid ? "A whole number of seconds from 1 to 3600." : undefined}
+              >
+                <Input
+                  id="dns-wait"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={3600}
+                  value={dnsWait}
+                  onChange={(e) => setDnsWait(e.target.value)}
+                  placeholder={String(provider.defaultWait)}
+                  className="font-mono text-xs"
+                  aria-invalid={waitInvalid || undefined}
+                />
+              </Field>
             )}
           </Well>
         )}
@@ -638,15 +827,24 @@ function IssueDialogBody({
         <OptionList>
           <OptionRow
             title="Test run first"
-            hint="Issues from Let's Encrypt's staging authority: not trusted by browsers, and not rate-limited. The real limit is five failures an hour and it is easy to reach, so this is the right first attempt."
+            hint={
+              authority || testAuthority
+                ? `certbot goes through the whole exchange with ${authority ?? "Let's Encrypt's staging authority"} and saves nothing, so a mistake is found before anything is written.`
+                : "certbot goes through the whole exchange with Let's Encrypt's staging authority and saves nothing. The real limit is five failures an hour and it is easy to reach, so this is the right first attempt."
+            }
             checked={staging}
             onCheckedChange={setStaging}
           />
         </OptionList>
-        {!staging && (
+        {!staging && testAuthority && (
+          <Notice tone="warning" icon={Warning} title="This issues a test certificate">
+            JD_ACME_DIRECTORY names a staging authority, and browsers refuse what it signs.
+          </Notice>
+        )}
+        {!staging && !authority && !testAuthority && (
           <Notice tone="warning" icon={Warning} title="This counts against the rate limit">
             Five failed attempts an hour for the same set of names, and five duplicate certificates
-            a week. Get a staging run to pass first.
+            a week. Get a test run to pass first.
           </Notice>
         )}
       </div>

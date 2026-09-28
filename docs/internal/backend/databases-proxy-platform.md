@@ -1033,7 +1033,23 @@ ownership and cleanup, then removes its own containers/volumes/networks.
 - **`import.go`** checks the key against the certificate **before** writing either: a mismatched pair is
   accepted by every text editor and refused by nginx at reload, which on a live server means finding out
   during an outage. Imports live in `/etc/ssl/just-dashboard`, so a renewal run can never prune a
-  certificate it did not issue.
+  certificate it did not issue. The key is found among the blocks pasted (an `EC PARAMETERS` block in
+  front of it is skipped; an encrypted key is refused with the command that decrypts it); the leaf is the
+  certificate that key belongs to, wherever it sits in the bundle; the chain is followed by signature and
+  saved leaf first without the root; `ChainComplete` means the chain reaches a root (the bundle's own,
+  one the system trusts, or `JD_ACME_CA_ROOT`), not that more than one block was pasted. A name already
+  imported is a 409 `certificate_exists` naming what is there; `replace: true` overwrites it and keeps
+  the previous pair as `.bak`, so replacing is a write rather than a destructive act. Caddy's release
+  copies (`caddy-<24 hex>`, `docker_caddy_certs.go`) share the directory and are refreshed through
+  `keepCaddyEvidence`. `ListCertificates` keeps them: deployment activation
+  (`ResolveDeploymentCertificate`), preflight, the route summary and the hostname suggestions find a
+  release's certificate there, and on a Docker Caddy host a copy is the only pair covering its domains
+  (the route summary names it with `certificateRenewedBy: "caddy"` and neither days left, a link to the
+  Certificates page, which does not list it, nor an expiry finding: the copy is refreshed only when a
+  release runs, and graded by its own expiry it warned about a certificate Caddy had already renewed).
+  `CertificateInventory` — `GET /certificates/` and the security posture — leaves out the copies no
+  nginx site names, since Caddy renews what it serves and never these, and listed they raised an expiry
+  finding apiece; their names are refused to an operator's import.
 - **`streams.go`** — nginx's `stream` is a sibling of `http`, so a stream cannot live under
   sites-available. They go in `<JD_NGINX_DIR>/stream.d`, and the page says plainly when `nginx.conf` does not
   include it. nginx.conf is never edited silently: the one change the dashboard makes to connect the
@@ -1208,8 +1224,104 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   IPv6-only list — and that under `satisfy any` a correct password also opens a location the site closes
   with `deny all`, which the form says.
 - **`certbot.go`** issues, renews and revokes. `renewalScheduled` has its own field because it is the real
-  story behind almost every expired certificate: not a forgotten renewal, a timer that stopped months ago.
-  Issuance defaults to `--staging` in the UI (the real limit is five failures an hour). `dns.go` answers
+  story behind almost every expired certificate: not a forgotten renewal, a timer that stopped months ago;
+  `CertbotState` answers it before reading the lineages, whatever they say. A cron file whose command
+  tests `! -d /run/systemd/system` (Debian's and Ubuntu's `/etc/cron.d/certbot`) is no schedule where
+  that directory exists: it stands aside for the timer, so a stopped timer there reads as nothing
+  renewing, with the timer to turn on. Issuance defaults to a test
+  run in the UI (the real limit is five failures an hour), and a test run is `certonly --dry-run` — the
+  whole exchange, nothing saved (`--staging` used to write a lineage holding an untrusted certificate and
+  make the real issuance that followed a "no action taken" no-op). A real issuance whose names already
+  hold a test certificate (a lineage renewed from a staging authority, or one a staging authority
+  signed) adds `--force-renewal`, unless the configured directory is itself a staging one; with
+  `JD_ACME_DIRECTORY` both name `--server`, except Let's Encrypt's production directory, which is
+  certbot's default and is left unnamed (certbot swaps a `--dry-run` to staging only when the server
+  is its default spelled exactly). The page offers that
+  issuance on a test lineage in place of Renew, since certbot renews from the authority the lineage's
+  configuration names. Such a job is titled "Replacing the test certificate for …", audited with
+  `replacesTestCertificate`, reloads nginx for the enabled sites naming the certificate (see
+  reloading after renewal, below) and ends by saying what each answered. `ServedCertificates` (`cert_served.go`,
+  `GET /certificates/served?path=`, system.admin) asks each such site over a TLS handshake on its
+  first `listen … ssl` — a wildcard address on loopback, a named one only when it is this host's, a
+  PROXY header first behind `proxy_protocol`, with a server name the certificate covers — and
+  compares the leaf with the file's; `settle=1` asks again for up to three seconds while a site
+  serves anything else, since nginx swaps its workers a moment after a reload's signal. The page
+  offers "Reload nginx" only while a site answers with a test certificate, and its toast says what
+  the sites answered after the reload. `Certificate.Staging` (`certs.go`,
+  `stagingIssuer`) flags any certificate a staging authority signed — an issuer named `(STAGING) …`, or
+  `Fake LE …` from before 2020 — wherever it is found (certbot, an import, a site's file, a live
+  check); the name is the tell, since a staging chain fails verification exactly as a private CA's
+  does. An import of one says so in place of the chain's verdict. `CertbotState.Directory` is the
+  configured `JD_ACME_DIRECTORY` when it is not one of Let's Encrypt's own, so the page says whom a
+  test run rehearses with; `CertbotState.TestAuthority` is a configured directory with "staging" in
+  it (certbot's own test), whose certificates are test ones: the job says so, and the page offers
+  no "real" certificate (`CertbotAuthorityInUse`, `acme_directory.go`). **One certbot** (`certbot_runtime.go`): the host's when the host has one, this
+  process's own otherwise, for the version, the plugin list (`certbot plugins`, cached a minute, run
+  in a directory `mktemp -d` makes for each probe on certbot's side, mode 0700, removed after it, so
+  the probe never holds the lock a renewal timer needs and never runs as root in a directory another
+  user could have made first) and the jobs,
+  which stream it through `jobs.Emitter.RunCmd`; the page used to read the image's certbot and run the
+  host's. `IssueArgs` refuses the nginx or a DNS method when that certbot lacks the plugin, naming which
+  certbot. **Lineages are read from files** (`certbot_lineages.go`: `renewal/*.conf` and the certificate
+  each names), never from `certbot certificates`, which takes certbot's lock: while any certbot ran, the
+  page said certbot managed nothing and nothing renewed it. Certbot jobs start through
+  `Manager.StartExclusive("certbot.")`, so a second one is a 409 `certbot_busy` naming the run in the
+  way, and a job whose certbot exited 0 without changing any lineage's serial says the certificate was
+  kept rather than reading as done. DNS credentials sent with an issuance are checked with the request
+  (`CheckDNSCredentials`) and saved by the job as its first step, so a refused or busy request leaves no
+  token on disk. **Renewal is read, not assumed** (`renewal_health.go`): an active timer says nothing
+  about whether its runs pass — this host's certbot.timer was active while every run failed and the page
+  said "Scheduled". `CertbotState.Health` is the last run of the service the timer starts (its `Unit`),
+  from `systemctl show` asked in UTC (`Result`, `ExecMainStatus`, `ExecMainStartTimestamp`,
+  `ActiveState`, `InvocationID`, and the timer's `NextElapseUSecRealtime`); a failed run reads the
+  journal (`journalctl -u <service> --since -14d -n 400 -o json`, grouped by invocation ID) for each
+  certificate it failed on in certbot's words — `Failed to renew certificate X with error: …`, a
+  renewal configuration it could not use, the `The error was: …` line a plugin error continues on —
+  or else the run's own last line, and for how far back the failed runs go. systemd forgets a unit's
+  run when the host restarts and then reports `Result=success` with no start; with the timer's
+  `LastTriggerUSec` set (a `Persistent` timer keeps it) the journal's newest run is judged by
+  systemd's own lines about it, and a journal that has no run from that trigger on answers `unknown`.
+  A failure whose certificate certbot saved after the run is `recovered`, and one for a lineage
+  deleted since is dropped. `Health.HookFailures` are the hooks the run ran that exited with an error
+  (`Hook 'deploy-hook' reported error code N` and the error output after it, or certbot 1's wording):
+  certbot only warns, so a run whose reload hook refused to reload still passes, and the timer's
+  `certbot -q` keeps the warning out of the journal — they are read from the renewal certbot's log
+  holds that began with the run (`loggedRenewalNear`), or from the journal's lines where the log
+  cannot be read. On a cron host the record is certbot's log: each invocation in
+  `/var/log/letsencrypt/letsencrypt.log*` (Debian's `cli.ini` sets `max-log-backups = 0`, so they are
+  appended to one file) starts at its `certbot version:` line, the last `renew` that was not a dry run
+  is the run, and the file's time gives the zone of its stamps. Each lineage carries how it renews
+  (`Authenticator`, `Installer`, `Webroots`, `DNSProvider`, a `DeployHook` or `PostHook` of its own),
+  `ServedBy` (the enabled sites whose certificate is the lineage's), its real `NotBefore`,
+  `LastFailure`, and `WillFail`: only failures certain in certbot's code — an
+  authenticator plugin the runtime lacks (manual, null, standalone and webroot are built in, and
+  `certbot plugins` hides the first two), a DNS credentials file gone on certbot's side of the
+  namespace, the manual plugin without an auth hook, no authenticator, standalone with its port held
+  and no pre hook. A missing webroot folder is not one (certbot creates it again), nor is a missing
+  installer plugin (a renewal runs as certonly and only skips deploying). `GET /certificates/renewal/log`
+  (system.admin) is the record for the page's log panel; `POST /certificates/renewal/run` (system.admin,
+  a `certbot.renewal` job exclusive with every certbot job) runs `systemctl start <service>` — a
+  oneshot, so it returns with the run — prints that invocation's lines and ends as the run did; a cron
+  host answers 409 `renewal_not_systemd`. Stopping the job runs `systemctl stop <service>`: killing
+  the `systemctl start` client would leave systemd's start and certbot running. An exclusive job
+  cancelled from the dashboard stays `running`, holding the lock, until its runner returns
+  (`jobs.Manager.Cancel`), so nothing else certbot starts while the service stops, and a lineage
+  certbot saved before it stopped is reloaded for as after any run. **Reloading after renewal** (`renewal_hooks.go`): nginx
+  serves the certificate it read at its last reload, and certbot reloads it only for a lineage its
+  nginx plugin installed. `PUT /certificates/renewal-hook` writes
+  `renewal-hooks/deploy/50-just-dashboard-reload-nginx` (0755, staged under a name ending in `~`,
+  which certbot never runs, and marked `# Managed by Just Dashboard`): `nginx -t -q`, then
+  `systemctl reload nginx || nginx -s reload`, and exit 0 where there is no nginx. `RenewalHook.Others`
+  lists what else may reload nginx after a renewal — other files in `renewal-hooks/deploy`, files in
+  `renewal-hooks/post` (as `post/<name>`), and a `deploy-hook`/`renew-hook`/`post-hook` in `cli.ini`
+  — and the page claims nothing about a lineage one of them, or its own deploy or post hook, may
+  reload for. `DELETE`
+  (destructive, no phrase) removes it; a copy changed by hand reads `modified`, and a file of somebody
+  else's at the name is `foreign` and never replaced or removed (409). The dashboard's own renewal,
+  issuance and run-now jobs reload nginx themselves once a lineage's serial changed and an enabled site
+  names a file in its live or archive directory (`SitesServingLineages`) — certbot runs no deploy hook
+  for a new lineage — and a configuration that fails its test fails the job: renewed, not served.
+  `dns.go` answers
   "does this domain point here yet" and recognises Cloudflare explicitly, since reporting a CDN as a
   misconfiguration is the commonest false alarm of this kind.
 - **The proxy routes are mounted per area**, each from its own file beside its handlers, and composed in
@@ -1392,8 +1504,10 @@ again. A job inverts that — `context.Background()`, a ring buffer with a seque
 `Subscribe(id, after)` resuming from what the client already has — so closing the tab leaves the work
 running and the transcript complete.
 
-- `Manager.Start(spec, run)` returns immediately; the API answers `202`. `Emitter` gives runners `Status`,
-  `Line`, and `Run`/`RunEnv` through `hostexec`. A slow subscriber is skipped rather than allowed to stall
+- `Manager.Start(spec, run)` returns immediately; the API answers `202`. `StartExclusive(prefix, …)`
+  starts nothing while a job of that kind family runs and returns that job instead, checked and started
+  under one lock. `Emitter` gives runners `Status`, `Line`, `Run`/`RunEnv` through
+  `hostexec.CommandOnHost`, and `RunCmd` for a command the caller built on the side it chose. A slow subscriber is skipped rather than allowed to stall
   the command — the buffer is the record, the channel only the tail.
 - Bounded: 5000 lines a job, 64 KB a line, 50 jobs. `prune` runs on finish as well as on start, or a burst
   ending after the last `Start` sits over the cap until something else happens, which on an idle dashboard

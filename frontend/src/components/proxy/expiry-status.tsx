@@ -4,18 +4,25 @@ import { Meter } from "@/components/meter"
 import { Status } from "@/components/status-dot"
 import type { Tone } from "@/components/tone"
 
-/** A certificate's expiry as a verdict — a dot and a word, not a filled pill. */
+/**
+ * A certificate's expiry as a verdict — a dot and a word, not a filled pill.
+ * A test certificate says so before anything about its days: browsers refuse
+ * it whatever they are, and what to do about it is replace it, not renew it.
+ */
 export function ExpiryStatus({ cert }: { cert?: Certificate }) {
   if (!cert) return <Status state="created" label="unchecked" />
   if (cert.error) return <Status verdict="critical" label="unreadable" />
+  if (cert.staging) return <Status verdict="critical" label="test certificate" />
   if (cert.expired) return <Status verdict="critical" label="expired" />
   if (cert.expiring) return <Status verdict="warning" label={`${cert.daysLeft}d left`} />
   return <Status verdict="ok" label={`${cert.daysLeft}d left`} />
 }
 
 /** The tone a certificate's figures take: red once refused, amber inside the renewal window. */
-export function expiryTone(cert: Pick<Certificate, "expired" | "expiring" | "error">): Tone {
-  if (cert.error || cert.expired) return "danger"
+export function expiryTone(
+  cert: Pick<Certificate, "expired" | "expiring" | "error" | "staging">,
+): Tone {
+  if (cert.error || cert.expired || cert.staging) return "danger"
   if (cert.expiring) return "warning"
   return "default"
 }
@@ -32,7 +39,10 @@ export function CertLife({
   cert,
   className,
 }: {
-  cert: Pick<Certificate, "notBefore" | "notAfter" | "daysLeft" | "expired" | "expiring" | "error">
+  cert: Pick<
+    Certificate,
+    "notBefore" | "notAfter" | "daysLeft" | "expired" | "expiring" | "error" | "staging"
+  >
   className?: string
 }) {
   const term = Math.max(

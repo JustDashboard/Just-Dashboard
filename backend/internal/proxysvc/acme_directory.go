@@ -37,8 +37,63 @@ func acmeDirectory() ACMEDirectory {
 	}
 }
 
+// letsEncryptProduction is certbot's default server's host. certbot compares
+// the whole URL with its default before it swaps a --dry-run to staging, so
+// a spelling of this host that differs by a slash would rehearse against the
+// real authority: such a directory is left for certbot's own default.
+const letsEncryptProduction = "acme-v02.api.letsencrypt.org"
+
+// CertbotAuthority is whom certbot orders from, in the terms the page and a
+// job describe it. Let's Encrypt's own directories, named in JD_ACME_DIRECTORY
+// or not, are Let's Encrypt: a test run goes to its staging authority and its
+// limits apply to the real one.
+type CertbotAuthority struct {
+	// Directory is the directory JD_ACME_DIRECTORY names when it is not one
+	// of Let's Encrypt's own: a test run rehearses with that authority, under
+	// its limits rather than Let's Encrypt's.
+	Directory string
+	// Staging is a directory that signs test certificates — Let's Encrypt's
+	// staging endpoint while an operator rehearses — so a real issuance
+	// brings back a certificate browsers refuse, and replaces no test
+	// certificate with anything better.
+	Staging bool
+}
+
+// CertbotAuthorityInUse is the authority certbot's jobs order from now.
+func CertbotAuthorityInUse() CertbotAuthority {
+	d := acmeDirectory()
+	if !d.configured() {
+		return CertbotAuthority{}
+	}
+	authority := CertbotAuthority{Staging: d.staging()}
+	if !d.letsEncrypt() {
+		authority.Directory = d.URL
+	}
+	return authority
+}
+
 // configured reports whether anything but the default authority was asked for.
 func (d ACMEDirectory) configured() bool { return d.URL != "" }
+
+// letsEncrypt reports one of Let's Encrypt's own directories, production or
+// staging, by host.
+func (d ACMEDirectory) letsEncrypt() bool {
+	return strings.HasSuffix(d.host(), ".api.letsencrypt.org")
+}
+
+// staging is certbot's own test for a staging server (util.is_staging):
+// "staging" anywhere in the URL. It is the test the lineage list applies to
+// renewal/<name>.conf, so a certificate from such a directory reads as the
+// test certificate this says it is.
+func (d ACMEDirectory) staging() bool { return strings.Contains(d.URL, "staging") }
+
+func (d ACMEDirectory) host() string {
+	parsed, err := url.Parse(d.URL)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(parsed.Hostname())
+}
 
 // private reports an authority with its own trust roots: one no public DNS
 // check can say anything about, and one the system's root store does not know.
@@ -93,9 +148,13 @@ func (d ACMEDirectory) caddyIssuer() string {
 }
 
 // certbotArgs is the same choice for certbot: the directory to order from.
-// Staging keeps its own flag, because certbot knows that endpoint by name.
-func (d ACMEDirectory) certbotArgs(staging bool) []string {
-	if !d.configured() || staging {
+// A test run names it too — certbot's --dry-run goes to the staging endpoint
+// only when no other server is given, so a rehearsal exercises the authority
+// the real order will use. Let's Encrypt's production directory is certbot's
+// default and is not named: given as anything but certbot's exact default
+// URL, a --dry-run would rehearse against it rather than staging.
+func (d ACMEDirectory) certbotArgs() []string {
+	if !d.configured() || d.host() == letsEncryptProduction {
 		return nil
 	}
 	return []string{"--server", d.URL}

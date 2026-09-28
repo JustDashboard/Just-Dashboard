@@ -1207,14 +1207,22 @@ Certificates has a searchable inventory beside renewal and DNS management. Each 
 its details — all names, dates, the full path and links to the sites using it — so it takes the lit
 edge; its issuer, expiry and lifetime meter remain on the card. An unreadable certificate carries a
 short verdict on the card and its complete error in the detail sheet; unavailable dates and signing
-status stay unknown, and it draws no invented lifetime.
+status stay unknown, and it draws no invented lifetime. A test certificate — a staging authority's —
+draws no issuer mark, reads "test certificate" and a red meter whatever its days, and carries its
+sentence and its one verb, the real issuance, on a line of its own under the card.
 A watched domain opens a live report and preserves its nonstandard port. Password files, access
 lists and watched-domain setup use the deployment settings' rail sections; an access list is a row
 you read (its addresses as mono tags, its sites as links, its include line with Copy) with Edit
 inline and Delete in its menu. Certificate renewal lineages and
 DNS providers remain readings with their own actions, laid out to fit the management column; every
 run certbot made, the timer's included, follows the two columns as Renewals, a log `Pane` across the
-page's width, which a log needs and the management column does not have. The TLS
+page's width, which a log needs and the management column does not have. The
+renewal column opens on its recent certbot runs (in the body, where they wrap, not in the narrow
+column's header), then what the timer's last run did — a failed run is a danger Notice naming each
+certificate and certbot's reason, a passing run whose hook failed a warning Notice with the hook's
+own words, each with Run now and Show log; otherwise a Status and the next run — then the "Reload
+nginx after every renewal" OptionRow; a lineage's last failure is a line in its row, its webroot
+folders wrapping mono paths rather than tags, and a certain next failure a warning Notice. The TLS
 report keeps findings, protocol checks and HTTP readings beside the live certificate and its
 vertical chain; long header values wrap instead of hiding the verdict. Listening sockets stay a
 table of readings, with fixed endpoint, application, reach and action columns and a stacked phone

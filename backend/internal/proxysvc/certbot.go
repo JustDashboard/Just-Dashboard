@@ -1,12 +1,10 @@
 package proxysvc
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -22,8 +20,8 @@ import (
 // on a host running nginx binds port 80 and fails, --force-renewal against
 // Let's Encrypt's rate limit locks the domain out for a week.
 
-// CertbotCert is one lineage as certbot itself describes it, which includes
-// the renewal configuration the PEM files on disk do not reveal.
+// CertbotCert is one lineage: the renewal configuration certbot keeps, and
+// the certificate it points at.
 type CertbotCert struct {
 	Name     string    `json:"name"`
 	Domains  []string  `json:"domains"`
@@ -33,6 +31,36 @@ type CertbotCert struct {
 	CertPath string    `json:"certPath,omitempty"`
 	KeyPath  string    `json:"keyPath,omitempty"`
 	Serial   string    `json:"serial,omitempty"`
+	// Staging is a test certificate: renewed from a staging authority, or
+	// signed by one. Browsers refuse it however many days it has left.
+	Staging bool `json:"staging,omitempty"`
+	// Error is why the lineage's certificate could not be read.
+	Error string `json:"error,omitempty"`
+	// NotBefore is when the certificate was issued: the other end of the
+	// meter, which a ninety-day guess drew wrong for any other term.
+	NotBefore time.Time `json:"notBefore"`
+	// How certbot renews it, from its renewal configuration: the plugin
+	// that proves control ("nginx", "webroot", "dns-cloudflare"), the one
+	// that deploys the result, the webroot folders, and the DNS provider by
+	// name where this dashboard knows the plugin.
+	Authenticator string   `json:"authenticator,omitempty"`
+	Installer     string   `json:"installer,omitempty"`
+	Webroots      []string `json:"webroots,omitempty"`
+	DNSProvider   string   `json:"dnsProvider,omitempty"`
+	// DeployHook is a hook of the lineage's own that certbot runs after
+	// renewing it (--deploy-hook), and PostHook one it runs once the whole
+	// renewal run is over (--post-hook); what they do is not read here.
+	DeployHook bool `json:"deployHook,omitempty"`
+	PostHook   bool `json:"postHook,omitempty"`
+	// ServedBy are the enabled nginx sites whose certificate is this
+	// lineage's: the ones left on the old certificate until nginx reloads.
+	ServedBy []string `json:"servedBy,omitempty"`
+	// WillFail is what will make the next renewal fail, each a certainty in
+	// certbot's code, found before the run that would find it.
+	WillFail []string `json:"willFail,omitempty"`
+	// LastFailure is why the last renewal run failed on this lineage, when
+	// it did and nothing has renewed it since.
+	LastFailure *RenewalFailure `json:"lastFailure,omitempty"`
 }
 
 // CertbotState is everything the Certificates tab needs about certbot.
@@ -49,99 +77,86 @@ type CertbotState struct {
 	// the thing to turn on when AutoRenew is false. Empty when nothing is
 	// scheduled and there is no unit to enable either.
 	RenewUnit string `json:"renewUnit,omitempty"`
-	Raw       string `json:"raw,omitempty"`
-	Error     string `json:"error,omitempty"`
+	// Error is why the lineages could not be read. The renewal fields are
+	// answered regardless: they come from systemd and cron, not from certbot.
+	Error string `json:"error,omitempty"`
+	// Directory is the ACME directory issuance orders from when it is not
+	// one of Let's Encrypt's, so the page can say whom a test run talks to:
+	// that authority itself, not a staging one, and not under Let's
+	// Encrypt's limits.
+	Directory string `json:"directory,omitempty"`
+	// TestAuthority is a configured directory that signs test certificates,
+	// Let's Encrypt's staging one among them: a real issuance from here
+	// brings back one browsers refuse, so the page offers no "real" one.
+	TestAuthority bool `json:"testAuthority,omitempty"`
+	// Health is what the renewal schedule did last and does next, when
+	// there is one.
+	Health *RenewalHealth `json:"health,omitempty"`
+	// ReloadHook is the deploy hook that reloads nginx after a renewal.
+	ReloadHook *RenewalHook `json:"reloadHook,omitempty"`
+	// NginxReloads says whether the certbot here can reload nginx itself
+	// after renewing a lineage installed with its nginx plugin.
+	NginxReloads bool `json:"nginxReloads,omitempty"`
 }
 
 func (s *Service) CertbotState(ctx context.Context) *CertbotState {
 	state := &CertbotState{Certs: []CertbotCert{}}
-	if !hostexec.Available("certbot") {
+	rt, _ := loadCertbotRuntime(ctx)
+	if rt == nil {
 		return state
 	}
 	state.Available = true
-	if out, err := hostexec.Command(ctx, "certbot", "--version").CombinedOutput(); err == nil {
-		state.Version = strings.TrimSpace(string(out))
-	}
-	out, err := certbotRun(ctx, 60*time.Second, "certificates")
-	if err != nil {
-		state.Error = err.Error()
-		state.Raw = out
-		return state
-	}
-	state.Raw = out
-	state.Certs = ParseCertbotCertificates(out)
+	state.Version = rt.version
+	authority := CertbotAuthorityInUse()
+	state.Directory, state.TestAuthority = authority.Directory, authority.Staging
+	// Before the lineages, and whatever they say: whether anything renews
+	// them is a separate question, and a lineage read that failed used to
+	// return before it was asked — every certbot run read as "renewal off".
 	state.AutoRenew, state.RenewSource = renewalScheduled(ctx)
 	if !state.AutoRenew {
 		state.RenewUnit = renewalCandidate(ctx)
 	}
-	return state
-}
-
-var (
-	certbotNameRe   = regexp.MustCompile(`^\s*Certificate Name:\s*(\S+)`)
-	certbotExpiryRe = regexp.MustCompile(`Expiry Date:\s*([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]{8})[^(]*\(([^)]*)\)`)
-)
-
-// ParseCertbotCertificates reads `certbot certificates`, whose output is a
-// labelled block per lineage. Parsed by label rather than by position: the
-// order of the lines has changed between certbot releases and the labels have
-// not.
-func ParseCertbotCertificates(out string) []CertbotCert {
-	certs := []CertbotCert{}
-	var current *CertbotCert
-	flush := func() {
-		if current != nil {
-			certs = append(certs, *current)
-			current = nil
+	state.NginxReloads = rt.installers["nginx"]
+	if hook, err := RenewalHookStatus(); err == nil {
+		state.ReloadHook = &hook
+	}
+	confs, err := readRenewalConfs(letsencryptDir)
+	// When each lineage was last saved, which tells a failure a later
+	// renewal fixed from one still standing; nil when that is unknown.
+	var written map[string]time.Time
+	if err != nil {
+		state.Error = err.Error()
+	} else {
+		written = map[string]time.Time{}
+		for _, conf := range confs {
+			// A certificate that cannot be stat'ed is still a lineage: its
+			// failure stands, as one nothing is known to have renewed.
+			at, _ := conf.written()
+			written[conf.Name] = at
 		}
 	}
-	sc := bufio.NewScanner(strings.NewReader(out))
-	for sc.Scan() {
-		line := sc.Text()
-		if m := certbotNameRe.FindStringSubmatch(line); m != nil {
-			flush()
-			current = &CertbotCert{Name: m[1], Domains: []string{}}
-			continue
-		}
-		if current == nil {
-			continue
-		}
-		trimmed := strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(trimmed, "Domains:"):
-			current.Domains = strings.Fields(strings.TrimPrefix(trimmed, "Domains:"))
-		case strings.HasPrefix(trimmed, "Serial Number:"):
-			current.Serial = strings.TrimSpace(strings.TrimPrefix(trimmed, "Serial Number:"))
-		case strings.HasPrefix(trimmed, "Certificate Path:"):
-			current.CertPath = strings.TrimSpace(strings.TrimPrefix(trimmed, "Certificate Path:"))
-		case strings.HasPrefix(trimmed, "Private Key Path:"):
-			current.KeyPath = strings.TrimSpace(strings.TrimPrefix(trimmed, "Private Key Path:"))
-		case strings.HasPrefix(trimmed, "Expiry Date:"):
-			if m := certbotExpiryRe.FindStringSubmatch(trimmed); m != nil {
-				if t, err := time.Parse("2006-01-02 15:04:05", m[1]); err == nil {
-					current.Expiry = t.UTC()
+	state.Certs = lineagesFrom(confs)
+	problems := s.renewalProblems(ctx, rt, confs)
+	names := make([]string, 0, len(state.Certs))
+	for _, cert := range state.Certs {
+		names = append(names, cert.Name)
+	}
+	served := s.lineageSites(names)
+	for i := range state.Certs {
+		state.Certs[i].WillFail = problems[state.Certs[i].Name]
+		state.Certs[i].ServedBy = served[state.Certs[i].Name]
+	}
+	if state.AutoRenew {
+		state.Health = renewalHealth(ctx, state.RenewSource, written)
+		for _, failure := range state.Health.Failures {
+			for i := range state.Certs {
+				if state.Certs[i].Name == failure.Lineage && !failure.RenewedSince {
+					state.Certs[i].LastFailure = &failure
 				}
-				note := m[2]
-				current.Valid = !strings.Contains(strings.ToUpper(note), "INVALID")
-				current.DaysLeft = parseDaysLeft(note)
 			}
 		}
 	}
-	flush()
-	return certs
-}
-
-// parseDaysLeft reads certbot's parenthetical, which is "VALID: 43 days" or
-// "INVALID: EXPIRED".
-func parseDaysLeft(note string) int {
-	fields := strings.Fields(note)
-	for i, f := range fields {
-		if n, err := strconv.Atoi(f); err == nil && i+1 < len(fields) &&
-			strings.HasPrefix(fields[i+1], "day") {
-			return n
-		}
-	}
-	return 0
+	return state
 }
 
 // certbotTimers are the units certbot's packages install, in the order the
@@ -168,10 +183,32 @@ func renewalCandidate(ctx context.Context) string {
 	return ""
 }
 
+// certbotCronFiles are where certbot's packages schedule it without systemd.
+// Alpine has no systemd and no /etc/cron.daily either: busybox crond runs
+// /etc/periodic, and a host renewing perfectly well there used to be told
+// nothing was scheduled. A variable for tests.
+var certbotCronFiles = []string{
+	"/etc/cron.d/certbot", "/etc/cron.daily/certbot", "/etc/cron.weekly/certbot",
+	"/etc/periodic/daily/certbot", "/etc/periodic/weekly/certbot",
+}
+
+// systemdRunDir exists when systemd is the init system (sd_booted). A
+// variable for tests.
+var systemdRunDir = "/run/systemd/system"
+
+// systemdGuardRe is the test Debian's and Ubuntu's cron entry runs before
+// certbot, `test -x /usr/bin/certbot -a \! -d /run/systemd/system`: the
+// entry stands aside wherever systemd is init, for the timer to renew.
+var systemdGuardRe = regexp.MustCompile(`(?m)^[^#\n]*\\?!\s*-d\s+/run/systemd/system\b`)
+
 // renewalScheduled looks for whatever is meant to be renewing. certbot ships
 // as a systemd timer on most distributions and as a cron entry on the rest,
 // and a snap install has its own; all three are worth finding, because the
 // answer the operator needs is yes or no rather than which.
+//
+// Debian and Ubuntu install both, and their cron entry does nothing on a host
+// that runs systemd. With the timer stopped there, nothing renews, and the
+// cron file is not a schedule.
 func renewalScheduled(ctx context.Context) (bool, string) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -181,16 +218,20 @@ func renewalScheduled(ctx context.Context) (bool, string) {
 			return true, unit
 		}
 	}
-	for _, path := range []string{
-		"/etc/cron.d/certbot", "/etc/cron.daily/certbot", "/etc/cron.weekly/certbot",
-		// Alpine has no systemd and no /etc/cron.daily either: busybox crond
-		// runs /etc/periodic, and a host renewing perfectly well there used
-		// to be told nothing was scheduled.
-		"/etc/periodic/daily/certbot", "/etc/periodic/weekly/certbot",
-	} {
-		if _, err := os.Stat(path); err == nil {
-			return true, path
+	_, err := os.Stat(systemdRunDir)
+	systemd := err == nil
+	for _, path := range certbotCronFiles {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			// There, but unreadable, is still a schedule.
+			if _, statErr := os.Stat(path); statErr != nil {
+				continue
+			}
 		}
+		if systemd && systemdGuardRe.Match(content) {
+			continue
+		}
+		return true, path
 	}
 	return false, ""
 }
@@ -209,10 +250,16 @@ type IssueRequest struct {
 	DNSProvider string `json:"dnsProvider,omitempty"`
 	// DNSWait overrides the provider's default propagation delay.
 	DNSWait int `json:"dnsWait,omitempty"`
-	// Staging issues from Let's Encrypt's test authority, which is not
-	// trusted by browsers and is not rate-limited. It is the right first
-	// attempt for anybody who has not done this before, because the real
-	// limit is five failures an hour and it is easy to reach.
+	// Credentials, when set, are the DNS provider's to save before the
+	// challenge. They stand in for saved ones here and are written only once
+	// the whole request has been accepted, so a refused request leaves no
+	// token on disk.
+	Credentials string `json:"credentials,omitempty"`
+	// Staging asks for a test run: certbot's --dry-run, the whole exchange
+	// against the staging authority with nothing saved and nothing counted
+	// against the rate limit. It is the right first attempt for anybody who
+	// has not done this before, because the real limit is five failures an
+	// hour and it is easy to reach.
 	Staging bool `json:"staging"`
 	// Install lets certbot edit the nginx config to use the new certificate.
 	// Off by default: this dashboard writes those files, and two things
@@ -233,7 +280,7 @@ var (
 // to answer the request synchronously — a bad email or a wildcard over HTTP is
 // a 400, not a job that fails a minute later — while the command itself
 // belongs to a job that outlives the request.
-func (s *Service) IssueArgs(req IssueRequest) ([]string, error) {
+func (s *Service) IssueArgs(ctx context.Context, req IssueRequest) ([]string, error) {
 	if len(req.Domains) == 0 {
 		return nil, fmt.Errorf("at least one domain is required")
 	}
@@ -256,13 +303,15 @@ func (s *Service) IssueArgs(req IssueRequest) ([]string, error) {
 		return nil, fmt.Errorf("a wildcard certificate can only be issued with a DNS challenge — Let's Encrypt will not sign one any other way")
 	}
 	if !emailRe.MatchString(req.Email) {
-		return nil, fmt.Errorf("a contact email is required — it is where expiry warnings go")
+		return nil, fmt.Errorf("a contact email is required for the ACME account")
 	}
 
 	args := []string{}
-	// A DNS challenge has no web server to install into; certonly is the only
-	// shape it takes.
-	if req.Install && req.Method == "nginx" {
+	// A DNS challenge has no web server to install into, and a test run
+	// installs nothing (certbot refuses --dry-run outside certonly and
+	// renew): certonly is the only shape either takes.
+	plugin := req.Method
+	if req.Install && req.Method == "nginx" && !req.Staging {
 		args = append(args, "--nginx")
 	} else {
 		args = append(args, "certonly")
@@ -281,10 +330,7 @@ func (s *Service) IssueArgs(req IssueRequest) ([]string, error) {
 			if !ok {
 				return nil, fmt.Errorf("choose a DNS provider for the challenge")
 			}
-			if !provider.Installed && !certbotPluginInstalled(provider.Plugin) {
-				return nil, fmt.Errorf("certbot's %s plugin is not installed on this host", provider.Plugin)
-			}
-			if provider.Key != "route53" && !HasDNSCredentials(provider.Key) {
+			if provider.Key != "route53" && !HasDNSCredentials(provider.Key) && strings.TrimSpace(req.Credentials) == "" {
 				return nil, fmt.Errorf("%s has no credentials saved yet", provider.Name)
 			}
 			wait := req.DNSWait
@@ -294,9 +340,24 @@ func (s *Service) IssueArgs(req IssueRequest) ([]string, error) {
 			if wait > 3600 {
 				return nil, fmt.Errorf("the propagation wait is too long")
 			}
+			plugin = provider.Plugin
 			args = append(args, dnsIssueArgs(provider, wait)...)
 		default:
 			return nil, fmt.Errorf("method must be nginx, webroot, standalone or dns")
+		}
+	}
+	// webroot and standalone are part of certbot itself; the nginx and DNS
+	// plugins are packages the certbot that runs the job has or has not got.
+	if plugin == "nginx" || req.Method == "dns" {
+		rt, err := loadCertbotRuntime(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if rt == nil {
+			return nil, fmt.Errorf("certbot is not installed on this host")
+		}
+		if !rt.authenticators[plugin] {
+			return nil, fmt.Errorf("the certbot that runs here (%s) has no %s plugin", rt.where(), plugin)
 		}
 	}
 	args = append(args, "--non-interactive", "--agree-tos", "-m", req.Email,
@@ -305,9 +366,19 @@ func (s *Service) IssueArgs(req IssueRequest) ([]string, error) {
 		// may press twice.
 		"--keep-until-expiring")
 	if req.Staging {
-		args = append(args, "--staging")
+		// Not --staging: that wrote a real lineage holding an untrusted
+		// certificate, left it where sites could name it, and made the real
+		// issuance that followed a no-op — the lineage was not due.
+		args = append(args, "--dry-run")
+	} else if lineage, leaf, ok := lineageFor(letsencryptDir, req.Domains); ok && lineage.testCertificate(leaf) && !acmeDirectory().staging() {
+		// These names already have a test certificate from a staging
+		// authority, and certbot keeps a lineage until it is due whatever
+		// signed it. Replacing it is the point of asking for a real one —
+		// unless the configured directory is a staging one too, when the
+		// replacement would be another test certificate.
+		args = append(args, "--force-renewal")
 	}
-	args = append(args, acmeDirectory().certbotArgs(req.Staging)...)
+	args = append(args, acmeDirectory().certbotArgs()...)
 	for _, d := range req.Domains {
 		args = append(args, "-d", d)
 	}
@@ -345,20 +416,6 @@ func (s *Service) RevokeArgs(name string) ([]string, error) {
 		return nil, fmt.Errorf("invalid certificate name")
 	}
 	return []string{"revoke", "--non-interactive", "--cert-name", name, "--delete-after-revoke"}, nil
-}
-
-func certbotRun(ctx context.Context, limit time.Duration, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, limit)
-	defer cancel()
-	out, err := hostexec.Command(ctx, "certbot", args...).CombinedOutput()
-	text := strings.TrimSpace(string(out))
-	if err != nil {
-		if text == "" {
-			text = err.Error()
-		}
-		return text, fmt.Errorf("certbot: %s", lastMeaningfulLine(text))
-	}
-	return text, nil
 }
 
 // lastMeaningfulLine picks the line worth putting in an error toast. certbot

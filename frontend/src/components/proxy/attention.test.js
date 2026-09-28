@@ -20,6 +20,7 @@ const cert = (overrides) => ({
   usedBy: [],
   ...overrides,
 })
+const daysAgo = (days) => new Date(Date.now() - days * 86_400_000).toISOString()
 const vhost = (overrides) => ({
   name: "app.example.com",
   kind: "nginx",
@@ -83,8 +84,21 @@ const inputs = {
         usedBy: ["week", "week-api"],
       }),
       cert({ name: "soon.example.com", path: "/s", daysLeft: 1, expiring: true }),
-      cert({ name: "gone.example.com", path: "/g", daysLeft: -1, expired: true, usedBy: ["gone"] }),
-      cert({ name: "old.example.com", path: "/o", daysLeft: -12, expired: true }),
+      cert({
+        name: "gone.example.com",
+        path: "/g",
+        notAfter: daysAgo(1.5),
+        daysLeft: -1,
+        expired: true,
+        usedBy: ["gone"],
+      }),
+      cert({
+        name: "old.example.com",
+        path: "/o",
+        notAfter: daysAgo(12.5),
+        daysLeft: -12,
+        expired: true,
+      }),
       cert({ name: "broken", path: "", error: "not a PEM certificate" }),
       cert({ name: "broken-with-path", path: "/b", error: "permission denied" }),
     ],
@@ -168,7 +182,7 @@ describe("foldProxyFindings", () => {
         id: "cert.expired./g",
         level: "critical",
         title: "gone.example.com has expired",
-        detail: "Expired 1 day ago; every browser refuses it now. Used by gone.",
+        detail: "Expired yesterday; every browser refuses it now. Used by gone.",
         advice: "Renew it, then find out why the renewal did not run on its own.",
         meta: "certificate",
         href: "/proxy/certificates",
