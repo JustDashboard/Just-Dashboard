@@ -37,6 +37,35 @@ func (s *Server) mountTLSRoutes(r chi.Router) {
 // remembering to be.
 func (s *Server) mountProxyToolRoutes(r chi.Router) {
 	r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
+	r.Method(http.MethodPost, "/request", s.handle(s.handleRequestTest))
+}
+
+// handleRequestTest sends one request to this machine's nginx for one of its
+// sites, dialling loopback and naming the site in SNI and Host. It is audited
+// because the method is the caller's: a POST reaches the site's application
+// like any other.
+func (s *Server) handleRequestTest(w http.ResponseWriter, r *http.Request) error {
+	var req proxysvc.RequestTest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 60*time.Second)
+	defer cancel()
+	vhosts, err := s.modules.proxy.ListVHosts(ctx)
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	certs, err := s.modules.proxy.ListCertificates(ctx)
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	httpx.SetAudit(r, "proxy.tools.request", strings.ToUpper(req.Method)+" "+req.URL, nil)
+	result, err := proxysvc.TestRequest(ctx, req, vhosts, certs)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	httpx.JSON(w, http.StatusOK, result)
+	return nil
 }
 
 // scanTarget reads ?domain= and ?port= the way the page does, so a pasted

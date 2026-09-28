@@ -287,3 +287,46 @@ export type DNSReport = {
   /** The saved comparison list. */
   resolvers: string[]
 }
+
+/** The request tester: one request to this machine's nginx, bypassing DNS. */
+export type RequestHeader = { name: string; value: string }
+
+export type RequestTest = {
+  url: string
+  method: string
+  headers: RequestHeader[]
+  connectTo?: "127.0.0.1" | "::1"
+}
+
+export type RequestHop = {
+  url: string
+  method: string
+  /** The nginx site whose server_name takes the host on this port. */
+  site: string
+  status?: number
+  proto?: string
+  headers: RequestHeader[]
+  location?: string
+  /** At most the first 64 KiB; empty when the body is not text. */
+  body: string
+  bodyBytes: number
+  truncated?: boolean
+  binary?: boolean
+  /** Milliseconds. */
+  timings: { connect: number; tls?: number; firstByte?: number; total: number }
+  tls?: {
+    version: string
+    cipherSuite: string
+    alpn?: string
+    certificate?: Certificate
+    origin?: TLSOrigin
+  }
+  error?: string
+}
+
+export type RequestResult = {
+  connectTo: string
+  hops: RequestHop[]
+  /** Why a redirect was not followed. */
+  stopped?: "limit" | "loop" | "elsewhere"
+}

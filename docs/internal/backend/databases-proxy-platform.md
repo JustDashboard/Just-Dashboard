@@ -424,6 +424,19 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   The comparison list is the `proxy.dns.resolvers` setting (IP literals only, at most six, empty
   restores 1.1.1.1, 8.8.8.8, 9.9.9.9), written by `PUT /certificates/dns/resolvers` (`system.admin`,
   audited as `certificates.dns.resolvers`). A name only: an address is refused with 400.
+- **`probe.go` — the request tester** (`POST /proxy/tools/request {url, method, headers, connectTo}`,
+  `system.admin` with the rest of `/proxy/tools`, audited as `proxy.tools.request` with the method and
+  URL). It dials only `127.0.0.1` or `::1` on the URL's port, whatever DNS says, and puts the name in
+  SNI and Host; the URL's host must be a name an enabled nginx site listening on that port takes by
+  `serverFor` (the same order `TraceOrigin` uses), so an address, another engine's name or a name no
+  site claims is a 400 before anything is sent. Methods are a closed set, there is no request body, and
+  headers are tokens with one-line values, never Host, Content-Length, Transfer-Encoding or Connection.
+  Each hop reports status, protocol (HTTP/2 when nginx offers h2), headers, the first 64 KiB of the body
+  (none if not UTF-8 text), connect, TLS, first-byte and total times from `httptrace`, and the leaf
+  certificate with its trust verdict and `TraceOrigin` against the site's file. Redirects are followed
+  by hand, at most five, each Location re-checked as the first URL was: one that names no local site
+  ends the chain as `elsewhere`, so the tester never reaches anything but this nginx. Authorization and
+  Cookie are dropped when a redirect changes host.
 - **`dns01.go` — wildcards and CDN-fronted domains**, which between them are most of the certificates
   people want: Let's Encrypt signs `*.example.com` only against DNS-01, and a Cloudflare-proxied domain
   never receives an HTTP challenge. Eight certbot plugins as a closed set (each names credentials and
