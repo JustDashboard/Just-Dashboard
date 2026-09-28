@@ -62,3 +62,23 @@ export type ImportResult = {
   chainComplete: boolean
   warnings: string[]
 }
+
+/** A certificate covering every domain of a site, with the key that goes with it. */
+export type SiteCertificate = {
+  name: string
+  path: string
+  keyPath: string
+  domains: string[]
+  issuer: string
+  daysLeft: number
+  source: string
+}
+
+/** GET /certificates/covering: what the site form can switch onto, and how to issue one. */
+export type SiteCertificates = {
+  /** The contact email the last issuance used. */
+  email: string
+  certificates: SiteCertificate[]
+  /** The folder a site saved with managedAcme serves its HTTP challenge from. */
+  webRoot: string
+}

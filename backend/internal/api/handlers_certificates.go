@@ -85,16 +85,21 @@ func (s *Server) handleCertIssue(w http.ResponseWriter, r *http.Request) error {
 	}
 	target := strings.Join(req.Domains, ", ")
 	httpx.SetAudit(r, "certificates.issue", target,
-		map[string]any{"method": req.Method, "staging": req.Staging, "streamed": true})
+		map[string]any{"method": req.Method, "staging": req.Staging, "dryRun": req.DryRun, "streamed": true})
+	s.rememberCertbotEmail(r.Context(), req.Email)
 
 	title := "Issuing a certificate for " + target
-	if req.Staging {
+	if req.DryRun {
+		title = "Dry run for " + target
+	} else if req.Staging {
 		title = "Test issuance for " + target
 	}
 	s.startJob(w, r, jobs.Spec{
 		Kind: "certbot.issue", Title: title, Target: target, Timeout: 10 * time.Minute,
 	}, func(ctx context.Context, out jobs.Emitter) error {
-		if req.Staging {
+		if req.DryRun {
+			out.Status("A dry run: the whole order runs against the staging authority and nothing is saved.")
+		} else if req.Staging {
 			out.Status("Using Let's Encrypt's staging authority: the certificate will not be trusted by browsers, and this run does not count against the rate limit.")
 		}
 		return certbotJob(ctx, out, args)

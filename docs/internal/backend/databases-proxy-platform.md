@@ -268,6 +268,18 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   round trips through `managedAcme`; ordinary site's ACME roots remain `/var/www/html`. Docker Caddy
   ownership uses native automatic HTTPS and shared routes; unsupported owners are reported explicitly.
   See [the ingress decision](../deployments/caddy-ingress.md) for provisioning, recovery and live tests.
+- **HTTPS from the site form** (`site_certs.go`, `site-certificate.tsx`). `GET /certificates/covering?domains=`
+  (system.admin, since it returns the remembered contact email) lists unexpired certificates covering
+  every domain (a wildcard covers one label), each paired with its key the way deployment resolution
+  pairs one, plus `certbot.email` from settings and the managed webroot. `POST /certificates/issue` stores
+  the email it was started with under `certbot.email` and takes `dryRun` (`certbot --dry-run`). A site
+  saved with `managedAcme` that answers plain HTTP itself (not TLS-forced, not a redirect, whose
+  server-level `return` runs before location selection) renders `location ^~ /.well-known/acme-challenge/`
+  rooted at the managed webroot with `allow all; auth_basic off;`, so neither an allow list, a password
+  nor the exploit regexes block the validator. "Get a certificate" saves the site first when its file
+  does not serve that path (as it is live for an edit, over plain HTTP for a new site), issues over
+  webroot (optionally after a dry run), then saves it with HTTPS on; when no save was needed it only
+  fills the paths. Wildcards, redirect sites and sites nginx does not read are not offered issuance.
 - **Site builder** (`sites.go`, `sites_render.go`, `sites_parse.go`, `sites_apply.go`). `SiteSpec` is our
   shape, not nginx's, for the reason `ContainerSpec` is not `container.Config`; rendering happens **on the
   server** so a spec has one meaning, and the output is hand-written rather than templated because order

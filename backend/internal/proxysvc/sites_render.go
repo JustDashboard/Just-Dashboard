@@ -72,6 +72,7 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 	renderErrorRouting(l, spec)
 	renderAccess(l, spec)
 	renderServerLimits(l, spec)
+	renderACMEChallenge(l, spec)
 
 	switch spec.Kind {
 	case "redirect":
@@ -273,6 +274,27 @@ func renderPageLocations(l *lines, spec *SiteSpec) {
 			page(strconv.Itoa(code), nil)
 		}
 	}
+}
+
+// renderACMEChallenge serves the dashboard's webroot on a site that answers
+// plain HTTP itself, so the site form can have certbot issue its certificate
+// over HTTP-01 without borrowing a file of another site's. A forced-HTTPS
+// site carries it in its redirect server instead. A redirect site is left
+// out: its server-level return is answered before any location is chosen.
+//
+// ^~ so the exploit regexes and a regex path cannot claim the token, and
+// its own access rules because Let's Encrypt's validators are neither on an
+// allow list nor holding the site's password.
+func renderACMEChallenge(l *lines, spec *SiteSpec) {
+	if !spec.ManagedACME || (spec.TLS && spec.ForceHTTPS) || spec.Kind == "redirect" {
+		return
+	}
+	l.add("    location ^~ %s {", acmeChallengePath)
+	l.add("        root %s;", deploymentACMEWebroot)
+	l.add("        allow all;")
+	l.add("        auth_basic off;")
+	l.add("    }")
+	l.blank()
 }
 
 // renderRedirectServer is the plain-HTTP half of a TLS site.

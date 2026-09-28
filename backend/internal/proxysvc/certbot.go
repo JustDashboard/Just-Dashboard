@@ -214,6 +214,10 @@ type IssueRequest struct {
 	// attempt for anybody who has not done this before, because the real
 	// limit is five failures an hour and it is easy to reach.
 	Staging bool `json:"staging"`
+	// DryRun has certbot run the whole order against the staging authority
+	// and save nothing: the way to find out a challenge reaches this host
+	// without spending one of the five failures an hour the real one allows.
+	DryRun bool `json:"dryRun,omitempty"`
 	// Install lets certbot edit the nginx config to use the new certificate.
 	// Off by default: this dashboard writes those files, and two things
 	// editing the same file is how a site ends up with two ssl_certificate
@@ -306,6 +310,9 @@ func (s *Service) IssueArgs(req IssueRequest) ([]string, error) {
 		"--keep-until-expiring")
 	if req.Staging {
 		args = append(args, "--staging")
+	}
+	if req.DryRun {
+		args = append(args, "--dry-run")
 	}
 	args = append(args, acmeDirectory().certbotArgs(req.Staging)...)
 	for _, d := range req.Domains {

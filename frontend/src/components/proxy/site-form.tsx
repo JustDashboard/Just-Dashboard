@@ -108,6 +108,7 @@ import {
   PRESETS,
 } from "@/components/proxy/site-presets"
 import { saveOutcome, saveRequest, sendableSpec } from "@/components/proxy/site-save"
+import { SiteCertificate } from "@/components/proxy/site-certificate"
 import {
   nothingListening,
   upstreamOptions,
@@ -443,6 +444,12 @@ function SiteFormBody({
   const setCertificate = (key: "certPath" | "keyPath", value: string) => {
     set(key, value)
     setFixed((f) => ({ ...f, [key]: value !== "" }))
+  }
+  // A certificate picked or issued is the one the site uses, whatever the
+  // domains become.
+  const pickCertificate = ({ certPath, keyPath }: { certPath: string; keyPath: string }) => {
+    setSpec((s) => ({ ...s, tls: true, certPath, keyPath }))
+    setFixed((f) => ({ ...f, certPath: true, keyPath: true }))
   }
   // A name typed by hand stays whatever the domains become, emptied or not:
   // "Match the domain" is the way back.
@@ -1024,7 +1031,7 @@ function SiteFormBody({
             <OptionList>
               <OptionRow
                 title="Serve over HTTPS"
-                hint="Needs a certificate on disk. Issue one from the Certificates tab first."
+                hint="Needs a certificate on disk: use an installed one below, or get one."
                 checked={spec.tls}
                 onCheckedChange={(v) => set("tls", v)}
               >
@@ -1092,6 +1099,27 @@ function SiteFormBody({
                 </>
               )}
             </OptionList>
+            {spec.domains.length > 0 && (
+              <SiteCertificate
+                spec={spec}
+                disk={editing ? disk : null}
+                existing={editing !== null}
+                baseDigest={base?.digest}
+                served={!disabled && !servedCopy}
+                onUse={pickCertificate}
+                onRebased={(r) => {
+                  setDisk(r)
+                  setBase({ digest: r.digest, spec: specFromServer(r.spec) })
+                  onSaved()
+                }}
+                onDone={(res) => {
+                  const outcome = saveOutcome(res, { existing: true })
+                  notify[outcome.tone](outcome.title, { description: outcome.description })
+                  onSaved()
+                  onOpenChange(false)
+                }}
+              />
+            )}
           </FormSection>
 
           {spec.kind === "proxy" && (
