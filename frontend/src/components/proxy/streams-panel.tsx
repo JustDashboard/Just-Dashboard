@@ -143,10 +143,7 @@ export function StreamsPage() {
   const [query, setQuery] = useSessionState("proxy.streams.query", "")
   const searchRef = useRef<HTMLInputElement>(null)
   const params = useSearchParams()
-  const { data, error, loading, refresh } = usePoll<StreamStatus>(
-    (signal) => get("/proxy/streams/", undefined, signal),
-    60_000,
-  )
+  const { data, error, loading, refresh } = useProxyRead("streams")
   // A re-check reads the listing again; it is over when the reading it was
   // asked from is replaced — by the next one, or by a failure.
   const reading: unknown = error ?? data

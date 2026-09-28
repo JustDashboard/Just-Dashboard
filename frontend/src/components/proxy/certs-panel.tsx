@@ -34,7 +34,7 @@ import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
-import { useProxy } from "@/components/proxy/proxy-context"
+import { useProxy, useProxyRead } from "@/components/proxy/proxy-context"
 import {
   ALL_CERTS,
   CertbotLineages,
@@ -106,10 +106,7 @@ export function CertificatesPage() {
   })
   const [csrOpen, setCsrOpen] = useState(false)
 
-  const certs = usePoll(
-    (signal) => get<Certificate[]>("/certificates/", undefined, signal),
-    300_000,
-  )
+  const certs = useProxyRead("certs")
   const certbot = usePoll<CertbotState>(
     (signal) => get("/certificates/certbot", undefined, signal),
     300_000,

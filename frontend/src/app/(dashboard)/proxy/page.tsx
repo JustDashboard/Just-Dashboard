@@ -7,13 +7,10 @@ import { ArrowRight, Bell, Globe, RefreshClockwise } from "@/components/icons"
 import { ApiError, errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type {
-  Certificate,
   CertbotState,
   DefaultSite,
   ErrorReport,
-  Listener,
   SiteTrafficSummary,
-  StreamStatus,
   UpstreamReport,
   VHost,
 } from "@/lib/types"
@@ -41,7 +38,6 @@ import { EngineLog } from "@/components/proxy/engine-log"
 import { useEngineControl } from "@/components/proxy/engine-control"
 import { EngineFailure } from "@/components/proxy/engine-failure"
 import { PARTICIPLE } from "@/components/proxy/engine-lifecycle"
-import { useConfigTest } from "@/components/proxy/test-result"
 import { LiveTraffic } from "@/components/proxy/live-metrics"
 import { useServedDrift } from "@/components/proxy/served-drift"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
@@ -74,6 +70,9 @@ import { busiestItems, trafficHref, trafficLabel } from "@/components/proxy/site
 import { errorFinding } from "@/components/proxy/site-errors"
 import { AlertsPanel } from "@/components/proxy/alerts-panel"
 import { ProxyFindings } from "@/components/proxy/finding-triage"
+import { RecentChanges } from "@/components/proxy/activity"
+import { frontDoorLine, frontDoors } from "@/components/proxy/front-door"
+import { unproxiedApps } from "@/components/proxy/suggest"
 
 /**
  * What a poll last answered, or nothing when its last read failed. A source
@@ -108,6 +107,8 @@ export default function ProxyOverviewPage() {
     updatedAt: statusAt,
     error: statusError,
     refresh: refreshStatus,
+    reads: { vhosts, certs, streams, ports },
+    configTest,
   } = useProxy()
   const { can } = useAuth()
   const router = useRouter()
@@ -115,25 +116,12 @@ export default function ProxyOverviewPage() {
   const engine = useEngineUnit(status)
   const [alertsOpen, setAlertsOpen] = useState(false)
 
-  const vhosts = usePoll(
-    (signal) => reading(get<VHost[]>("/proxy/vhosts", undefined, signal)),
-    30_000,
-  )
-  const certs = usePoll(
-    (signal) => reading(get<Certificate[]>("/certificates/", undefined, signal)),
-    300_000,
-  )
   const certbot = usePoll(
     (signal) => reading(get<CertbotState>("/certificates/certbot", undefined, signal)),
     300_000,
     [],
     { enabled: Boolean(status?.certbot) },
   )
-  const streams = usePoll(
-    (signal) => reading(get<StreamStatus>("/proxy/streams/", undefined, signal)),
-    60_000,
-  )
-  const ports = usePoll((signal) => reading(get<Listener[]>("/ports", undefined, signal)), 30_000)
   // Whether each route's upstream answers. The server checks at most every
   // fifteen seconds whoever asks; a host it cannot check answers 404 or 503,
   // and the routes then show no reading rather than a failure of their own.
@@ -170,9 +158,9 @@ export default function ProxyOverviewPage() {
       setChecking(false)
     }
   }
-  // The engine's last config test, kept by the server, for an account that
-  // may run one: its warnings stay in Needs attention until a test is clean.
-  const configTest = useConfigTest({ status, admin })
+  // The engine's last config test (the layout's, which `t` runs), for an
+  // account that may run one: its warnings stay in Needs attention until a
+  // test is clean.
   // A reload or a service verb changes what the engine line, the status and
   // the sites say, and runs a config test; each reads them again once it lands.
   const refreshAll = () => {
@@ -265,6 +253,16 @@ export default function ProxyOverviewPage() {
   const errorReport = nginxErrors.error ? undefined : nginxErrors.data
   const hosts = sites ?? []
   const routes = useMemo(() => overviewRoutes(sites ?? []), [sites])
+  const doors = useMemo(() => (listeners ? frontDoors(listeners) : undefined), [listeners])
+  // Only once every list it compares has answered: an app judged against a
+  // sites list that failed would be offered a domain it already has.
+  const suggestions = useMemo(
+    () =>
+      listeners && sites && streamStatus
+        ? unproxiedApps({ ports: listeners, vhosts: sites, streams: streamStatus })
+        : [],
+    [listeners, sites, streamStatus],
+  )
   const onTls = hosts.filter((v) => v.tls).length
   const disabled = hosts.filter(isParked).length
   // The ports page's own split, so the figure clicked through is on that page.
@@ -564,6 +562,19 @@ export default function ProxyOverviewPage() {
 
       <EngineExtras status={status} admin={admin} onChanged={refreshAll} />
 
+      {doors && (
+        <p className="flex flex-wrap items-baseline gap-x-2 text-hint text-muted-foreground">
+          Front door
+          <Link
+            href="/proxy/ports"
+            className="font-mono text-foreground hover:underline"
+            title="Who answers on ports 80 and 443 off this machine"
+          >
+            {frontDoorLine(doors)}
+          </Link>
+        </p>
+      )}
+
       {engine.unit?.activeState === "failed" && !underWay && (
         <EngineFailure
           engine={control.engine}
@@ -717,6 +728,31 @@ export default function ProxyOverviewPage() {
             </PanelBody>
           </Panel>
 
+          {admin && status.nginx && suggestions.length > 0 && (
+            <Panel plain>
+              <PanelHeader title="Not behind a domain" />
+              <PanelBody flush>
+                <ul aria-label="Apps on loopback" className="animate-rise space-y-2 pt-1">
+                  {suggestions.slice(0, 5).map((app) => (
+                    <li key={app.port} className="flex min-w-0 items-center justify-between gap-3">
+                      <span className="min-w-0 truncate text-body">
+                        <span className="numeric font-mono">:{app.port}</span>{" "}
+                        <span className="text-muted-foreground">{app.process || "unknown"}</span>
+                      </span>
+                      <Button size="xs" variant="outline" asChild>
+                        <Link href={`/proxy/sites?new=1&upstream=${encodeURIComponent(app.upstream)}`}>
+                          Put a domain in front of this
+                        </Link>
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </PanelBody>
+            </Panel>
+          )}
+
+          {admin && <RecentChanges />}
+
           {status.nginx && (
             <Panel plain>
               <PanelHeader
@@ -845,7 +881,6 @@ export default function ProxyOverviewPage() {
 
       <EngineLog status={status} />
       {control.dialog}
-      {configTest.panel}
     </Page>
   )
 }

@@ -24,7 +24,7 @@ import { ConfigHistorySheet, ConfigHistoryView } from "@/components/proxy/config
 import { EffectiveConfigView } from "@/components/proxy/config-search"
 import { ConfigSettingsView } from "@/components/proxy/settings-panel"
 import { ConfigLintView } from "@/components/proxy/lint-panel"
-import { useConfigTest } from "@/components/proxy/test-result"
+import type { ConfigTest } from "@/components/proxy/test-result"
 import { testedLabel, warningCount } from "@/components/proxy/config-test"
 import { authorship, folderOf, readCount, unreadCount } from "@/components/proxy/config-tree"
 import { plural } from "@/lib/format"
@@ -47,7 +47,7 @@ export default function ProxyConfigPage() {
  * writes; a reader's opens read-only.
  */
 function ConfigurationPage() {
-  const { status, error: statusError, refresh: refreshStatus } = useProxy()
+  const { status, error: statusError, refresh: refreshStatus, configTest } = useProxy()
   const admin = useAuth().can("system.admin")
   const nginx = Boolean(status?.nginx)
   const [view, setView] = useSessionState<View>("proxy.config.view", "files")
@@ -67,7 +67,6 @@ function ConfigurationPage() {
     [],
     { enabled: admin && nginx && shownView === "effective" },
   )
-  const configTest = useConfigTest({ status, admin })
 
   // The file open in the editor is in the address bar, so a link can name
   // one and Back closes it; the line it opened at is kept beside it.
@@ -231,7 +230,6 @@ function ConfigurationPage() {
           }}
         />
       )}
-      {configTest.panel}
     </Page>
   )
 }
@@ -252,7 +250,7 @@ function Readings({
   error: Error | undefined
   loading: boolean
   admin: boolean
-  test: ReturnType<typeof useConfigTest>
+  test: ConfigTest
 }) {
   const now = useNow(10_000)
   const counts = useMemo(() => {

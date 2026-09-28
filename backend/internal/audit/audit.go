@@ -65,11 +65,15 @@ func (l *Logger) Record(ctx context.Context, e Entry) {
 type Filter struct {
 	Username string
 	Action   string
-	Since    time.Time
-	Until    time.Time
-	OnlyFail bool
-	Limit    int
-	Offset   int
+	// ActionPrefixes keeps entries whose action starts with any of these,
+	// so one page can ask for a whole family ("proxy.", "certificates.")
+	// without the substring match Action does catching unrelated names.
+	ActionPrefixes []string
+	Since          time.Time
+	Until          time.Time
+	OnlyFail       bool
+	Limit          int
+	Offset         int
 }
 
 func (l *Logger) List(ctx context.Context, f Filter) ([]Entry, int, error) {
@@ -82,6 +86,14 @@ func (l *Logger) List(ctx context.Context, f Filter) ([]Entry, int, error) {
 	if f.Action != "" {
 		where = append(where, "action LIKE ?")
 		args = append(args, "%"+f.Action+"%")
+	}
+	if prefixes := nonEmpty(f.ActionPrefixes); len(prefixes) > 0 {
+		terms := make([]string, len(prefixes))
+		for i, p := range prefixes {
+			terms[i] = `action LIKE ? ESCAPE '\'`
+			args = append(args, likeEscaper.Replace(p)+"%")
+		}
+		where = append(where, "("+strings.Join(terms, " OR ")+")")
 	}
 	if !f.Since.IsZero() {
 		where = append(where, "ts >= ?")
@@ -190,6 +202,20 @@ func isSecretField(name string) bool {
 		}
 	}
 	return false
+}
+
+// likeEscaper keeps a prefix literal: an underscore in an action name would
+// otherwise match any character.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+func nonEmpty(values []string) []string {
+	out := values[:0:0]
+	for _, v := range values {
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func truncate(s string, n int) string {

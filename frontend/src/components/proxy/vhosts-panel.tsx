@@ -115,7 +115,7 @@ import {
   type Unloaded,
   type UnitReading,
 } from "@/components/proxy/site-serving"
-import { engineUnit, useProxy } from "@/components/proxy/proxy-context"
+import { engineUnit, useProxy, useProxyRead } from "@/components/proxy/proxy-context"
 import {
   downloadFrom,
   opensFile,
@@ -219,18 +219,12 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   // In the URL so a deployment finding can link straight at the site serving
   // its hostname, and so the browser's back button restores the selection.
   const [requested, setRequested] = useQuerySelection("site")
-  const { data, error, loading, refresh } = usePoll(
-    (signal) => get<VHost[]>("/proxy/vhosts", undefined, signal),
-    30_000,
-  )
+  const { data, error, loading, refresh } = useProxyRead("vhosts")
   // Readings other parts of the proxy own. Each draws nothing where its
   // endpoint does not answer — no certificates readable, no health check or
   // traffic summary on this build — rather than an error on a page about
   // sites, and nothing drawn is never read as "fine".
-  const certPoll = usePoll(
-    (signal) => get<Certificate[]>("/certificates/", undefined, signal),
-    300_000,
-  )
+  const certPoll = useProxyRead("certs")
   const upstreamPoll = usePoll(
     (signal) => get<SiteUpstreams>("/proxy/upstreams", undefined, signal),
     30_000,
