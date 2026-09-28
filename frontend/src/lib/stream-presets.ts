@@ -1,4 +1,4 @@
-import type { StreamSpec } from "@/lib/types"
+import type { StreamAccess, StreamSpec } from "@/lib/types"
 
 /**
  * The private ranges a restricted preset starts from. A stream has no
@@ -123,7 +123,7 @@ export const STREAM_PRESETS: StreamPreset[] = [
 
 /**
  * The form's fields after a preset is picked: port, protocol, UDP mode, and
- * — only where nothing was typed yet — a name and the allow list, so picking
+ * — only where nothing was typed yet — a name and the access rules, so picking
  * a preset late never throws away what was written. The upstream is left to
  * the reader: 127.0.0.1 on the same port would be nginx's own listener, and
  * every connection would loop back into it.
@@ -131,8 +131,8 @@ export const STREAM_PRESETS: StreamPreset[] = [
 export function applyPreset(
   preset: StreamPreset,
   spec: StreamSpec,
-  allow: string,
-): { spec: StreamSpec; allow: string } {
+  access: StreamAccess,
+): { spec: StreamSpec; access: StreamAccess } {
   return {
     spec: {
       ...spec,
@@ -141,6 +141,12 @@ export function applyPreset(
       protocol: preset.protocol,
       udpMode: preset.protocol === "tcp" ? undefined : preset.udpMode,
     },
-    allow: allow.trim() || !preset.restricted ? allow : PRIVATE_NETWORKS.join(", "),
+    access:
+      access.rules.length > 0 || !preset.restricted
+        ? access
+        : {
+            rules: PRIVATE_NETWORKS.map((source) => ({ action: "allow" as const, source })),
+            defaultAllow: false,
+          },
   }
 }

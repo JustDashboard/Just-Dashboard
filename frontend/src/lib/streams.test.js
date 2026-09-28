@@ -78,22 +78,36 @@ describe("streamSpecOf", () => {
 })
 
 describe("streamBody", () => {
-  test("splits the allow list on commas and spaces", () => {
-    expect(streamBody(entry({}), " 10.0.0.0/8,  203.0.113.9 ").allowFrom).toEqual([
-      "10.0.0.0/8",
-      "203.0.113.9",
+  const open = { rules: [], defaultAllow: true }
+
+  test("sends the access list as ordered rules, trimmed", () => {
+    const access = {
+      rules: [
+        { action: "deny", source: " 10.0.0.9 " },
+        { action: "allow", source: "10.0.0.0/8" },
+      ],
+      defaultAllow: false,
+    }
+    const body = streamBody(entry({ allowFrom: ["192.168.0.0/16"] }), access)
+    expect(body.allowFrom).toEqual([])
+    expect(body.rules).toEqual([
+      { action: "deny", source: "10.0.0.9" },
+      { action: "allow", source: "10.0.0.0/8" },
     ])
+    expect(body.defaultAllow).toBe(false)
   })
 
   test("sends a UDP mode only for UDP, long-lived unless chosen otherwise", () => {
-    expect(streamBody(entry({ udpMode: "request" }), "").udpMode).toBeUndefined()
-    expect(streamBody(entry({ protocol: "udp" }), "").udpMode).toBe("session")
-    expect(streamBody(entry({ protocol: "udp", udpMode: "request" }), "").udpMode).toBe("request")
+    expect(streamBody(entry({ udpMode: "request" }), open).udpMode).toBeUndefined()
+    expect(streamBody(entry({ protocol: "udp" }), open).udpMode).toBe("session")
+    expect(streamBody(entry({ protocol: "udp", udpMode: "request" }), open).udpMode).toBe("request")
   })
 
   test("a stream of both protocols has UDP, so it carries the mode too", () => {
-    expect(streamBody(entry({ protocol: "both" }), "").udpMode).toBe("session")
-    expect(streamBody(entry({ protocol: "both", udpMode: "request" }), "").udpMode).toBe("request")
+    expect(streamBody(entry({ protocol: "both" }), open).udpMode).toBe("session")
+    expect(streamBody(entry({ protocol: "both", udpMode: "request" }), open).udpMode).toBe(
+      "request",
+    )
   })
 })
 

@@ -419,18 +419,18 @@ func TestParseStreamSpecHandWritten(t *testing.T) {
 		},
 		{
 			// Deny lines were dropped, and saving then let the denied in.
-			name:        "deny then allow all",
-			content:     "server { listen 6000; deny 203.0.113.0/24; allow all; proxy_pass 10.0.0.5:6000; }",
-			want:        StreamSpec{Name: "x", Listen: 6000, Address: "0.0.0.0", Protocol: "tcp", Upstream: "10.0.0.5:6000", AllowFrom: []string{"all"}},
-			open:        true,
-			unsupported: []string{"deny rules"},
+			name:    "deny then allow all",
+			content: "server { listen 6000; deny 203.0.113.0/24; allow all; proxy_pass 10.0.0.5:6000; }",
+			want: StreamSpec{Name: "x", Listen: 6000, Address: "0.0.0.0", Protocol: "tcp", Upstream: "10.0.0.5:6000", AllowFrom: []string{},
+				Rules: []StreamRule{{"deny", "203.0.113.0/24"}}, DefaultAllow: new(true)},
+			open: true,
 		},
 		{
-			name:        "allow with no deny all",
-			content:     "server { listen 6000; allow 10.0.0.0/8; proxy_pass 10.0.0.5:6000; }",
-			want:        StreamSpec{Name: "x", Listen: 6000, Address: "0.0.0.0", Protocol: "tcp", Upstream: "10.0.0.5:6000", AllowFrom: []string{"10.0.0.0/8"}},
-			open:        true,
-			unsupported: []string{"allow rules with no deny all after them"},
+			name:    "allow with no deny all",
+			content: "server { listen 6000; allow 10.0.0.0/8; proxy_pass 10.0.0.5:6000; }",
+			want: StreamSpec{Name: "x", Listen: 6000, Address: "0.0.0.0", Protocol: "tcp", Upstream: "10.0.0.5:6000", AllowFrom: []string{},
+				Rules: []StreamRule{{"allow", "10.0.0.0/8"}}, DefaultAllow: new(true)},
+			open: true,
 		},
 		{
 			// `server {` was read as the upstream, and the card said
@@ -616,7 +616,7 @@ func TestStreamsListsEveryFileNginxWouldRead(t *testing.T) {
 	svc, _ := streamHost(t)
 	rendered, _ := RenderStream(tcpStream())
 	writeStream(t, svc, "postgres-replica", rendered)
-	writeStream(t, svc, "Upper", "server { listen 6000; deny 192.0.2.1; proxy_pass 10.0.0.5:6000; }")
+	writeStream(t, svc, "Upper", "server { listen 6000; proxy_buffer_size 4k; proxy_pass 10.0.0.5:6000; }")
 	writeStream(t, svc, "open", "server { listen 7000; allow all; deny all; proxy_pass 10.0.0.5:7000; }")
 	for _, skipped := range []string{".hidden.conf", "old.conf.bak", "notes.txt"} {
 		if err := os.WriteFile(filepath.Join(svc.streamDir(), skipped), []byte("server {}"), 0o644); err != nil {
@@ -643,7 +643,7 @@ func TestStreamsListsEveryFileNginxWouldRead(t *testing.T) {
 	if e := byName["postgres-replica"]; !e.Managed || e.Open || len(e.Unsupported) != 0 {
 		t.Errorf("managed stream: %+v", e)
 	}
-	if e := byName["Upper"]; e.Managed || !reflect.DeepEqual(e.Unsupported, []string{"deny rules"}) {
+	if e := byName["Upper"]; e.Managed || !reflect.DeepEqual(e.Unsupported, []string{"proxy_buffer_size"}) {
 		t.Errorf("hand-written stream: %+v", e)
 	}
 	if e := byName["open"]; !e.Open || len(e.AllowFrom) != 0 {
@@ -738,16 +738,16 @@ func TestApplyStreamPutsARenameBackWhenTheTestFails(t *testing.T) {
 }
 
 // A file the form cannot express is not saved over: the form would have
-// dropped its deny rules and widened the forward.
+// dropped what it does not know, here a buffer size.
 func TestApplyStreamRefusesToOverwriteAHandWrittenFile(t *testing.T) {
 	svc, _ := streamHost(t)
-	content := "server { listen 5432; deny 203.0.113.0/24; allow all; proxy_pass 10.0.0.5:5432; }\n"
+	content := "server { listen 5432; proxy_buffer_size 4k; proxy_pass 10.0.0.5:5432; }\n"
 	path := writeStream(t, svc, "postgres-replica", content)
 	var handwritten *HandwrittenStreamError
 	if _, err := svc.ApplyStream(context.Background(), tcpStream(), "postgres-replica", false); !errors.As(err, &handwritten) {
 		t.Fatalf("got %v", err)
 	}
-	if !strings.Contains(handwritten.Error(), "deny rules") {
+	if !strings.Contains(handwritten.Error(), "proxy_buffer_size") {
 		t.Errorf("error does not say what would be lost: %v", handwritten)
 	}
 	if mustRead(t, path) != content {

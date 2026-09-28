@@ -71,6 +71,34 @@ type StreamSpec struct {
 	// AllowFrom restricts who may connect. There is no basic auth for a raw
 	// TCP stream, so this is the only access control there is.
 	AllowFrom []string `json:"allowFrom"`
+	// Rules are the ordered access list for what an allow list cannot say:
+	// a deny ahead of a wider allow, or a blocklist that lets everyone else
+	// in. nginx takes the first rule a client matches, and DefaultAllow is
+	// what happens to a client no rule matches. Rules that are only allows
+	// with everyone else denied are always folded into AllowFrom, so one file
+	// never reads back two ways; DefaultAllow is nil whenever Rules is empty.
+	Rules        []StreamRule `json:"rules,omitempty"`
+	DefaultAllow *bool        `json:"defaultAllow,omitempty"`
+	// MaxConnPerIP and MaxConnTotal cap the connections (UDP sessions, for
+	// UDP) open at once from one client address and in all. nginx closes the
+	// one over the cap as soon as it is accepted. Zero is no cap.
+	MaxConnPerIP int `json:"maxConnPerIp,omitempty"`
+	MaxConnTotal int `json:"maxConnTotal,omitempty"`
+	// UploadRate and DownloadRate limit each connection's speed from the
+	// client and to it, in KiB per second. nginx applies them per connection,
+	// so a client opening four gets four times the rate. Zero is no limit.
+	UploadRate   int `json:"uploadRate,omitempty"`
+	DownloadRate int `json:"downloadRate,omitempty"`
+}
+
+// StreamRule is one line of a stream's ordered access list.
+type StreamRule struct {
+	// Action is allow or deny.
+	Action string `json:"action"`
+	// Source is an address or a CIDR. Never all: everyone else is the
+	// spec's DefaultAllow, and a rule matching everyone would leave every
+	// rule below it unreachable.
+	Source string `json:"source"`
 }
 
 // StreamEntry is one file in the stream directory as the page lists it.
@@ -235,7 +263,76 @@ func ValidateStream(spec *StreamSpec) error {
 			return err
 		}
 	}
+	if err := validStreamAccess(spec); err != nil {
+		return err
+	}
+	for _, limit := range []struct {
+		value, max int
+		what       string
+	}{
+		{spec.MaxConnPerIP, 1_000_000, "the connections per client"},
+		{spec.MaxConnTotal, 1_000_000, "the connections in total"},
+		{spec.UploadRate, 10 << 20, "the upload rate"},
+		{spec.DownloadRate, 10 << 20, "the download rate"},
+	} {
+		if limit.value < 0 || limit.value > limit.max {
+			return fmt.Errorf("%s must be between 0 and %d", limit.what, limit.max)
+		}
+	}
 	return nil
+}
+
+// validStreamAccess checks the ordered rules and folds them into the one
+// shape a file reads back as.
+func validStreamAccess(spec *StreamSpec) error {
+	if len(spec.Rules) == 0 && spec.DefaultAllow == nil {
+		spec.Rules = nil
+		return nil
+	}
+	if len(spec.AllowFrom) > 0 {
+		return fmt.Errorf("send the access list as allowFrom or as rules, not both")
+	}
+	if spec.DefaultAllow == nil {
+		return fmt.Errorf("the access rules need a choice for everyone else")
+	}
+	for i := range spec.Rules {
+		r := &spec.Rules[i]
+		r.Source = strings.TrimSpace(r.Source)
+		if r.Action != "allow" && r.Action != "deny" {
+			return fmt.Errorf("an access rule must allow or deny")
+		}
+		if r.Source == "all" {
+			return fmt.Errorf("a rule for everyone leaves the rules below it unreachable — set what happens to everyone else instead")
+		}
+		if err := validACLEntry(r.Source); err != nil {
+			return err
+		}
+	}
+	if !*spec.DefaultAllow && len(spec.Rules) == 0 {
+		return fmt.Errorf("denying everyone with no rule to let anyone in closes the port to all — pause the stream instead")
+	}
+	foldStreamAccess(spec)
+	return nil
+}
+
+// foldStreamAccess writes ordered rules the form's simplest way: nothing
+// when everyone is let in, and an allow list when the rules only allow and
+// everyone else is denied.
+func foldStreamAccess(spec *StreamSpec) {
+	if *spec.DefaultAllow {
+		if len(spec.Rules) == 0 {
+			spec.Rules, spec.DefaultAllow = nil, nil
+		}
+		return
+	}
+	allows := make([]string, 0, len(spec.Rules))
+	for _, r := range spec.Rules {
+		if r.Action != "allow" {
+			return
+		}
+		allows = append(allows, r.Source)
+	}
+	spec.AllowFrom, spec.Rules, spec.DefaultAllow = allows, nil, nil
 }
 
 // validStreamUpstream accepts host:port and unix:/absolute/path, the two
@@ -270,6 +367,52 @@ func streamUpstreamName(name string) string {
 	return NginxIdent(name) + "_backend"
 }
 
+// streamZoneNames are the stream's connection-counting zones. A zone is
+// declared at the top of the stream context and its name is global to
+// nginx — an http zone of the same name is refused as "already declared for
+// a different use" — so it is built from the same ident as the upstream.
+// The total is keyed on $server_port, which is one value for every socket
+// the stream listens on.
+func streamZoneNames(name string) (perIP, total string) {
+	ident := NginxIdent(name)
+	return ident + "_conn_ip", ident + "_conn_all"
+}
+
+// nginxRate writes KiB per second in nginx's size syntax.
+func nginxRate(kib int) string {
+	if kib%1024 == 0 {
+		return strconv.Itoa(kib/1024) + "m"
+	}
+	return strconv.Itoa(kib) + "k"
+}
+
+// streamRate reads a proxy_upload_rate or proxy_download_rate back as KiB
+// per second. A value that is not whole KiB is not one the form can hold,
+// and zero — nginx's "no limit" — is the form's zero.
+func streamRate(args []string) (int, bool) {
+	if len(args) != 1 || args[0] == "" {
+		return 0, false
+	}
+	value, scale := args[0], int64(1)
+	switch value[len(value)-1] {
+	case 'k', 'K':
+		value, scale = value[:len(value)-1], 1<<10
+	case 'm', 'M':
+		value, scale = value[:len(value)-1], 1<<20
+	case 'g', 'G':
+		value, scale = value[:len(value)-1], 1<<30
+	}
+	n, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || n < 0 || n > 1<<40 {
+		return 0, false
+	}
+	bytes := n * scale
+	if bytes%1024 != 0 || bytes/1024 > 10<<20 {
+		return 0, false
+	}
+	return int(bytes / 1024), true
+}
+
 // RenderStream turns a spec into the nginx it means. Hand-written for the same
 // reason the site renderer is: the file outlives this dashboard and somebody
 // has to be able to read it.
@@ -283,6 +426,16 @@ func RenderStream(spec *StreamSpec) (string, error) {
 	l.add("# Stream: %s", spec.Name)
 	l.add("# This belongs inside nginx's top-level stream block, not inside http.")
 	l.blank()
+	perIP, total := streamZoneNames(spec.Name)
+	if spec.MaxConnPerIP > 0 {
+		l.add("limit_conn_zone $binary_remote_addr zone=%s:1m;", perIP)
+	}
+	if spec.MaxConnTotal > 0 {
+		l.add("limit_conn_zone $server_port zone=%s:1m;", total)
+	}
+	if spec.MaxConnPerIP > 0 || spec.MaxConnTotal > 0 {
+		l.blank()
+	}
 	l.add("upstream %s {", upstream)
 	l.add("    server %s;", spec.Upstream)
 	l.add("}")
@@ -308,6 +461,29 @@ func RenderStream(spec *StreamSpec) (string, error) {
 		}
 		l.add("    deny all;")
 	}
+	if len(spec.Rules) > 0 {
+		l.blank()
+		l.add("    # A raw stream has no authentication of any kind, so these rules")
+		l.add("    # decide who may connect. The first one a client matches wins.")
+		for _, r := range spec.Rules {
+			l.add("    %s %s;", r.Action, r.Source)
+		}
+		if *spec.DefaultAllow {
+			l.add("    allow all;")
+		} else {
+			l.add("    deny all;")
+		}
+	}
+	if spec.MaxConnPerIP > 0 || spec.MaxConnTotal > 0 {
+		l.blank()
+		l.add("    # A connection over either cap is closed as soon as it is accepted.")
+		if spec.MaxConnPerIP > 0 {
+			l.add("    limit_conn %s %d;", perIP, spec.MaxConnPerIP)
+		}
+		if spec.MaxConnTotal > 0 {
+			l.add("    limit_conn %s %d;", total, spec.MaxConnTotal)
+		}
+	}
 	l.blank()
 	l.add("    proxy_pass %s;", upstream)
 	if spec.ProxyProtocol {
@@ -325,6 +501,12 @@ func RenderStream(spec *StreamSpec) (string, error) {
 		l.add("    # One reply ends a UDP session, so every query is a session of its")
 		l.add("    # own. Without this a session lasts until proxy_timeout of silence.")
 		l.add("    proxy_responses 1;")
+	}
+	if spec.UploadRate > 0 {
+		l.add("    proxy_upload_rate %s;", nginxRate(spec.UploadRate))
+	}
+	if spec.DownloadRate > 0 {
+		l.add("    proxy_download_rate %s;", nginxRate(spec.DownloadRate))
 	}
 	l.add("}")
 	return l.String(), nil
@@ -404,12 +586,20 @@ func parseStreamFile(fileName, content string) parsedStream {
 	}
 	upstreams := map[string]Directive{}
 	var servers []Directive
+	// zones are the connection zones this file declares the way RenderStream
+	// does, by name, with whether a limit_conn uses them.
+	perIP, total := streamZoneNames(p.spec.Name)
+	zones := map[string]bool{}
 	for _, d := range directives {
 		switch {
 		case d.Name == "upstream" && d.Block != nil && len(d.Args) == 1:
 			upstreams[d.Args[0]] = d
 		case d.Name == "server" && d.Block != nil:
 			servers = append(servers, d)
+		case d.Name == "limit_conn_zone" && len(d.Args) == 2 &&
+			(d.Args[0] == "$binary_remote_addr" && d.Args[1] == "zone="+perIP+":1m" ||
+				d.Args[0] == "$server_port" && d.Args[1] == "zone="+total+":1m"):
+			zones[strings.TrimSuffix(strings.TrimPrefix(d.Args[1], "zone="), ":1m")] = false
 		default:
 			p.cannot(d.Name)
 		}
@@ -460,6 +650,18 @@ func parseStreamFile(fileName, content string) parsedStream {
 			} else {
 				p.cannot("proxy_responses " + strings.Join(d.Args, " "))
 			}
+		case "limit_conn":
+			p.readLimitConn(d.Args, zones, perIP, total)
+		case "proxy_upload_rate", "proxy_download_rate":
+			kib, ok := streamRate(d.Args)
+			switch {
+			case !ok:
+				p.cannot(d.Name + " " + strings.Join(d.Args, " "))
+			case d.Name == "proxy_upload_rate":
+				p.spec.UploadRate = kib
+			default:
+				p.spec.DownloadRate = kib
+			}
 		default:
 			p.cannot(d.Name)
 		}
@@ -467,6 +669,11 @@ func parseStreamFile(fileName, content string) parsedStream {
 	for name := range upstreams {
 		if !used[name] {
 			p.cannot("an upstream nothing uses")
+		}
+	}
+	for _, inUse := range zones {
+		if !inUse {
+			p.cannot("a limit_conn_zone nothing uses")
 		}
 	}
 	if p.spec.Upstream == "" {
@@ -481,6 +688,32 @@ func parseStreamFile(fileName, content string) parsedStream {
 	}
 	p.readAccess(rules)
 	return p
+}
+
+// readLimitConn takes a connection cap on one of the zones this file
+// declares under the stream's own names. A zone from another file is not
+// the form's: saving would declare a second one, or drop the cap.
+func (p *parsedStream) readLimitConn(args []string, zones map[string]bool, perIP, total string) {
+	if len(args) != 2 {
+		p.cannot("limit_conn")
+		return
+	}
+	n, err := strconv.Atoi(args[1])
+	used, declared := zones[args[0]]
+	switch {
+	case !declared:
+		p.cannot("limit_conn on a zone declared elsewhere")
+		return
+	case used || err != nil || n < 1 || n > 1_000_000:
+		p.cannot("limit_conn " + strings.Join(args, " "))
+		return
+	}
+	zones[args[0]] = true
+	if args[0] == perIP {
+		p.spec.MaxConnPerIP = n
+	} else if args[0] == total {
+		p.spec.MaxConnTotal = n
+	}
 }
 
 // readListen takes one listen line. Only the shapes RenderStream writes are
@@ -625,41 +858,40 @@ type accessRule struct {
 	source string
 }
 
-// readAccess turns allow and deny lines into the form's allow list where
-// that says the same thing, and works out who may connect either way.
+// readAccess turns allow and deny lines into the form's access list and
+// works out who may connect either way.
 //
 // nginx takes the first rule that matches and lets through anyone none
-// matches, so: an allow list closed by `deny all` is the form's list; rules
-// that reach `allow all` before any deny let everyone in and are the form's
-// empty list; anything else — a deny list, allows with no `deny all` behind
-// them — is kept by hand.
+// matches. The first rule for everyone is therefore the form's "everyone
+// else", and nothing after it is ever reached; without one, everyone else
+// is let in. The result is folded as a save folds it, so an allow list
+// closed by `deny all` reads back as the plain allow list it always was.
 func (p *parsedStream) readAccess(rules []accessRule) {
 	p.open = rulesAdmitEveryone(rules)
-	var allows []string
-	onlyAllows := true
-	for i, r := range rules {
-		if r.allow && r.source == "all" && onlyAllows {
-			return
+	defaultAllow := true
+	var ordered []StreamRule
+	for _, r := range rules {
+		if r.source == "all" {
+			defaultAllow = r.allow
+			break
 		}
+		action := "deny"
 		if r.allow {
-			allows = append(allows, r.source)
-			continue
+			action = "allow"
 		}
-		if i == len(rules)-1 && r.source == "all" && len(allows) > 0 && onlyAllows {
-			p.spec.AllowFrom = allows
-			return
-		}
-		onlyAllows = false
+		ordered = append(ordered, StreamRule{Action: action, Source: r.source})
 	}
-	if len(rules) == 0 {
+	for _, r := range ordered {
+		if validACLEntry(r.Source) != nil {
+			p.cannot(r.Action + " " + r.Source)
+		}
+	}
+	if !defaultAllow && len(ordered) == 0 {
+		p.cannot("deny all with nothing allowed")
 		return
 	}
-	p.spec.AllowFrom = append([]string{}, allows...)
-	if onlyAllows {
-		p.cannot("allow rules with no deny all after them")
-	} else {
-		p.cannot("deny rules")
-	}
+	p.spec.Rules, p.spec.DefaultAllow = ordered, &defaultAllow
+	foldStreamAccess(&p.spec)
 }
 
 // rulesAdmitEveryone walks the rules as nginx does: an allow of everyone
@@ -686,6 +918,13 @@ func rulesAdmitEveryone(rules []accessRule) bool {
 
 // streamOpen is whether anyone may connect to a spec's port.
 func streamOpen(spec *StreamSpec) bool {
+	if len(spec.Rules) > 0 {
+		rules := make([]accessRule, 0, len(spec.Rules)+1)
+		for _, r := range spec.Rules {
+			rules = append(rules, accessRule{allow: r.Action == "allow", source: r.Source})
+		}
+		return rulesAdmitEveryone(append(rules, accessRule{allow: *spec.DefaultAllow, source: "all"}))
+	}
 	if len(spec.AllowFrom) == 0 {
 		return true
 	}

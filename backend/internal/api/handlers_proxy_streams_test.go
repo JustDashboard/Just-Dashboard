@@ -82,7 +82,7 @@ func TestStreamSaveAnswersEachRefusalWithItsOwnCode(t *testing.T) {
 		t.Fatalf("create: %d %s", w.Code, w.Body.String())
 	}
 	if err := os.WriteFile(filepath.Join(dir, "stream.d", "manual.conf"),
-		[]byte("server { listen 47920; deny 192.0.2.1; proxy_pass 10.0.0.5:22; }\n"), 0o644); err != nil {
+		[]byte("server { listen 47920; proxy_buffer_size 4k; proxy_pass 10.0.0.5:22; }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

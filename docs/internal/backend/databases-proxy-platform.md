@@ -440,11 +440,21 @@ ownership and cleanup, then removes its own containers/volumes/networks.
     its own file and a relative include count, and `upstream` or `other-stream.d` no longer do. It reads
     from disk because it is asked with the lock held (`includeNote`) and while the configuration fails.
   - **Hand-written files** are parsed token by token. `ParseStreamSpec` returns what the form cannot express
-    (deny rules, a second upstream server, TLS, a port range, an unknown directive) and the save refuses to
+    (a second upstream server, TLS, a port range, an unknown directive) and the save refuses to
     overwrite such a file (`HandwrittenStreamError`, 409 `stream_handwritten`); the raw editor is the way
     in. A bind address, `10m`-style times, a direct `proxy_pass`, `unix:` upstreams and the UDP mode are
     read and written back, so a loopback forward is never saved onto every interface. A hand-written file
     the form rewrites is kept as `.bak`.
+  - **Access and limits.** `StreamSpec.Rules` (`{action: allow|deny, source}`) with `DefaultAllow` is the
+    ordered access list: rendered in order, then `allow all;` or `deny all;`, and read back with the first
+    rule for `all` as the default (nothing after it is reachable, so it is dropped). Rules that only allow,
+    with everyone else denied, are folded into `AllowFrom` on save and on read, so one file reads back one
+    way; `allowFrom` and `rules` together, `all` as a rule's source, and denying everyone with no rule are
+    refused. `MaxConnPerIP`/`MaxConnTotal` render `limit_conn_zone $binary_remote_addr` /
+    `$server_port zone=<NginxIdent>_conn_ip|_conn_all:1m` at the top of the file (zone names are global to
+    nginx, http included) and `limit_conn` in the server; `UploadRate`/`DownloadRate` (KiB/s, per
+    connection) render `proxy_upload_rate`/`proxy_download_rate`. Only zones declared under the stream's own
+    names, each used once, read back; any other zone or cap is hand-written.
   - **A save** (`ApplyStream(spec, previous, reload)`) refuses a new name, or a rename, onto a taken one
     (409 `stream_exists`) and a port another stream, a site or another program holds (`PortInUseError`,
     409 `port_in_use` on `spec.listen` with the next free port): `nginx -t` passes all three, and the

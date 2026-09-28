@@ -26,6 +26,7 @@ import type {
   StreamDeleteResult,
   StreamEntry,
   StreamIncludeResult,
+  StreamAccess,
   StreamPreview,
   StreamResult,
   StreamSpec,
@@ -33,6 +34,8 @@ import type {
 } from "@/lib/types"
 import {
   STREAM_FILTERS,
+  accessError,
+  accessOf,
   blocksReloads,
   byUrgency,
   carries,
@@ -81,6 +84,7 @@ import { Status } from "@/components/status-dot"
 import { VerbBar, VerbMenu, type Verb } from "@/components/verbs"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { StreamSetup } from "@/components/proxy/stream-setup"
+import { AccessRules } from "@/components/proxy/access-rules"
 import { useProxy } from "@/components/proxy/proxy-context"
 import { DANGEROUS_PORTS } from "@/components/proxy/findings/shared"
 import { ProxyGrid, RoutePath } from "@/components/proxy/route-path"
@@ -870,7 +874,7 @@ function Restriction({ stream }: { stream: StreamEntry }) {
     return (
       <Status
         verdict={service ? "critical" : "warning"}
-        label={service ? `${service} to anyone` : "anyone"}
+        label={`${service ? `${service} to anyone` : "anyone"}${stream.rules?.some((rule) => rule.action === "deny") ? " not denied" : ""}`}
       />
     )
   }
@@ -878,6 +882,14 @@ function Restriction({ stream }: { stream: StreamEntry }) {
     return (
       <span className="block font-mono text-hint break-all text-muted-foreground">
         {stream.allowFrom.join(", ")}
+      </span>
+    )
+  }
+  if (stream.rules && stream.rules.length > 0) {
+    return (
+      <span className="block font-mono text-hint break-all text-muted-foreground">
+        {stream.rules.map((rule) => `${rule.action} ${rule.source}`).join(", ")}, then{" "}
+        {stream.defaultAllow ? "allow" : "deny"} the rest
       </span>
     )
   }
@@ -940,6 +952,12 @@ function SaveBlocked({ status, reason }: { status: StreamStatus; reason: "module
   )
 }
 
+/** A count or a rate as typed: a whole number above zero, or unset. */
+function positive(text: string): number | undefined {
+  const n = Number(text)
+  return Number.isInteger(n) && n > 0 ? n : undefined
+}
+
 const BLANK: StreamSpec = {
   name: "",
   listen: 0,
@@ -975,9 +993,9 @@ function StreamForm({
     `${key}.spec`,
     stream ? streamSpecOf(stream) : (draft ?? BLANK),
   )
-  const [allow, setAllow] = useSessionState(
-    `${key}.allow`,
-    (stream?.allowFrom ?? draft?.allowFrom ?? []).join(", "),
+  const [access, setAccess] = useSessionState<StreamAccess>(
+    `${key}.access`,
+    accessOf(stream ?? draft ?? BLANK),
   )
   // The timeouts are kept as typed — "10m" — and read on the way out.
   const [idle, setIdle] = useSessionState(`${key}.idle`, formatDuration((stream ?? draft)?.timeout))
@@ -999,10 +1017,11 @@ function StreamForm({
   const timed = idleSeconds !== null && connectSeconds !== null
   const body = streamBody(
     { ...spec, timeout: idleSeconds || undefined, connectTimeout: connectSeconds || undefined },
-    allow,
+    access,
   )
+  const accessProblem = accessError(access)
   // A file the form cannot say everything about is not saved over: the
-  // form would drop what it cannot show — a deny rule, a second server.
+  // form would drop what it cannot show — a second server, a TLS listener.
   const locked = Boolean(stream && (stream.error || stream.unsupported.length > 0))
   const readOnly = locked || blocked !== null
   const renaming = stream !== null && spec.name !== stream.name
@@ -1020,10 +1039,10 @@ function StreamForm({
   const pickPreset = (id: string) => {
     const chosen = STREAM_PRESETS.find((p) => p.id === id)
     if (!chosen) return
-    const next = applyPreset(chosen, spec, allow)
+    const next = applyPreset(chosen, spec, access)
     setPreset(id)
     setSpec(next.spec)
-    setAllow(next.allow)
+    setAccess(next.access)
     if (refused?.field === "spec.listen" || refused?.field === "spec.name") setRefused(null)
   }
 
@@ -1077,7 +1096,7 @@ function StreamForm({
       controller.abort()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, readOnly, spec, allow, idle, connect])
+  }, [open, readOnly, spec, access, idle, connect])
 
   const save = async () => {
     setBusy(true)
@@ -1141,7 +1160,15 @@ function StreamForm({
           <Button
             size="sm"
             onClick={save}
-            disabled={readOnly || busy || !spec.name || !spec.listen || !spec.upstream || !timed}
+            disabled={
+              readOnly ||
+              busy ||
+              !spec.name ||
+              !spec.listen ||
+              !spec.upstream ||
+              !timed ||
+              accessProblem !== ""
+            }
             pending={busy}
           >
             {live ? "Save and reload" : "Save for later"}
@@ -1312,7 +1339,7 @@ function StreamForm({
             htmlFor="stream-upstream"
             hint={
               target?.exposed
-                ? `${target.container} publishes this port on every address, so it is reachable around the stream, where this allow list does not apply. Publish it on 127.0.0.1 instead.`
+                ? `${target.container} publishes this port on every address, so it is reachable around the stream, where these rules do not apply. Publish it on 127.0.0.1 instead.`
                 : "host:port of the service behind it, or unix:/path for a local socket."
             }
           >
@@ -1351,19 +1378,7 @@ function StreamForm({
             </div>
           </Field>
 
-          <Field
-            label="Allow only these"
-            htmlFor="stream-allow"
-            hint="A stream has no authentication of any kind — anything that reaches this port is through to the backend. Leave this empty only when the service behind it authenticates for itself."
-          >
-            <Input
-              id="stream-allow"
-              value={allow}
-              onChange={(e) => setAllow(e.target.value)}
-              placeholder="10.0.0.0/8, 203.0.113.9"
-              className="font-mono text-xs"
-            />
-          </Field>
+          <AccessRules access={access} error={accessProblem} onChange={setAccess} />
 
           <OptionList>
             <OptionRow
@@ -1402,6 +1417,68 @@ function StreamForm({
                 onChange={(e) => setConnect(e.target.value)}
                 placeholder="60s"
                 aria-invalid={connectSeconds === null || undefined}
+                className="font-mono text-xs"
+              />
+            </Field>
+          </FieldRow>
+
+          <FieldRow>
+            <Field
+              label="Connections per client"
+              htmlFor="stream-conn-ip"
+              hint="Open at once from one address; a UDP session counts as one. Empty is no cap."
+            >
+              <Input
+                id="stream-conn-ip"
+                value={spec.maxConnPerIp ?? ""}
+                inputMode="numeric"
+                onChange={(e) => edit({ maxConnPerIp: positive(e.target.value) })}
+                placeholder="No cap"
+                className="font-mono text-xs"
+              />
+            </Field>
+            <Field
+              label="Connections in total"
+              htmlFor="stream-conn-total"
+              hint="nginx closes one over either cap as soon as it is accepted."
+            >
+              <Input
+                id="stream-conn-total"
+                value={spec.maxConnTotal ?? ""}
+                inputMode="numeric"
+                onChange={(e) => edit({ maxConnTotal: positive(e.target.value) })}
+                placeholder="No cap"
+                className="font-mono text-xs"
+              />
+            </Field>
+          </FieldRow>
+
+          <FieldRow>
+            <Field
+              label="Upload rate"
+              htmlFor="stream-upload-rate"
+              hint="KiB/s from the client, per connection: four connections get four times it."
+            >
+              <Input
+                id="stream-upload-rate"
+                value={spec.uploadRate ?? ""}
+                inputMode="numeric"
+                onChange={(e) => edit({ uploadRate: positive(e.target.value) })}
+                placeholder="No limit"
+                className="font-mono text-xs"
+              />
+            </Field>
+            <Field
+              label="Download rate"
+              htmlFor="stream-download-rate"
+              hint="KiB/s to the client, per connection. Empty is no limit."
+            >
+              <Input
+                id="stream-download-rate"
+                value={spec.downloadRate ?? ""}
+                inputMode="numeric"
+                onChange={(e) => edit({ downloadRate: positive(e.target.value) })}
+                placeholder="No limit"
                 className="font-mono text-xs"
               />
             </Field>
