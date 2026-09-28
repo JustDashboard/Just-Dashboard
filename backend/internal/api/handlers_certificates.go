@@ -162,11 +162,14 @@ func (s *Server) handleCertIssue(w http.ResponseWriter, r *http.Request) error {
 	authority := proxysvc.CertbotAuthorityInUse()
 	target := strings.Join(req.Domains, ", ")
 	httpx.SetAudit(r, "certificates.issue", target,
-		map[string]any{"method": req.Method, "testRun": req.Staging, "replacesTestCertificate": replacing,
+		map[string]any{"method": req.Method, "testRun": req.Staging, "dryRun": req.DryRun, "replacesTestCertificate": replacing,
 			"credentialsSaved": credentials != nil, "streamed": true})
+	s.rememberCertbotEmail(r.Context(), req.Email)
 
 	title := "Issuing a certificate for " + target
 	switch {
+	case req.DryRun:
+		title = "Dry run for " + target
 	case req.Staging:
 		title = "Test issuance for " + target
 	case replacing:
@@ -184,7 +187,7 @@ func (s *Server) handleCertIssue(w http.ResponseWriter, r *http.Request) error {
 		}
 		kept := ""
 		switch {
-		case req.Staging:
+		case req.Staging || req.DryRun:
 			// certbot's --dry-run asks its staging authority only when no
 			// other server is named; with one configured it rehearses there.
 			if authority.Directory != "" {

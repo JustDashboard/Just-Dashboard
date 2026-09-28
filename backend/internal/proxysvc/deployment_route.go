@@ -297,6 +297,27 @@ func (s *Service) ResolveDeploymentCertificate(ctx context.Context, domains []st
 	if len(domains) == 0 {
 		return "", "", errors.New("a TLS deployment route needs at least one domain")
 	}
+	pairs, err := s.coveringCertificates(ctx, domains)
+	if err != nil {
+		return "", "", err
+	}
+	if len(pairs) == 0 {
+		return "", "", errors.New("no available certificate covers every deployment domain")
+	}
+	return pairs[0].Path, pairs[0].KeyPath, nil
+}
+
+// certificatePair is a usable certificate with the key that goes with it.
+type certificatePair struct {
+	Certificate
+	KeyPath string
+}
+
+// coveringCertificates lists the unexpired certificates covering every one of
+// domains whose certificate and key files are both on disk, in the order the
+// certificates are listed. The key is the one a site already pairs with the
+// certificate, or certbot's privkey.pem beside it.
+func (s *Service) coveringCertificates(ctx context.Context, domains []string) ([]certificatePair, error) {
 	vhosts, _ := s.ListVHosts(ctx)
 	keys := map[string]string{}
 	for _, vhost := range vhosts {
@@ -311,8 +332,9 @@ func (s *Service) ResolveDeploymentCertificate(ctx context.Context, domains []st
 	}
 	certificates, err := s.ListCertificates(ctx)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
+	var pairs []certificatePair
 	for _, certificate := range certificates {
 		if certificate.Error != "" || certificate.Expired || !certificateCoversAll(certificate.Domains, domains) {
 			continue
@@ -327,9 +349,9 @@ func (s *Service) ResolveDeploymentCertificate(ctx context.Context, domains []st
 		if _, err := os.Stat(keyPath); err != nil {
 			continue
 		}
-		return certificate.Path, keyPath, nil
+		pairs = append(pairs, certificatePair{Certificate: certificate, KeyPath: keyPath})
 	}
-	return "", "", errors.New("no available certificate covers every deployment domain")
+	return pairs, nil
 }
 
 func certificateCoversAll(names, domains []string) bool {

@@ -303,6 +303,10 @@ type IssueRequest struct {
 	// has not done this before, because the real limit is five failures an
 	// hour and it is easy to reach.
 	Staging bool `json:"staging"`
+	// DryRun has certbot run the whole order against the staging authority
+	// and save nothing: the way to find out a challenge reaches this host
+	// without spending one of the five failures an hour the real one allows.
+	DryRun bool `json:"dryRun,omitempty"`
 	// Install lets certbot edit the nginx config to use the new certificate.
 	// Off by default: this dashboard writes those files, and two things
 	// editing the same file is how a site ends up with two ssl_certificate
@@ -353,7 +357,7 @@ func (s *Service) IssueArgs(ctx context.Context, req IssueRequest) ([]string, er
 	// installs nothing (certbot refuses --dry-run outside certonly and
 	// renew): certonly is the only shape either takes.
 	plugin := req.Method
-	if req.Install && req.Method == "nginx" && !req.Staging {
+	if req.Install && req.Method == "nginx" && !req.Staging && !req.DryRun {
 		args = append(args, "--nginx")
 	} else {
 		args = append(args, "certonly")
@@ -407,7 +411,7 @@ func (s *Service) IssueArgs(ctx context.Context, req IssueRequest) ([]string, er
 		// quietly succeeding, which is the wrong answer for a button somebody
 		// may press twice.
 		"--keep-until-expiring")
-	if req.Staging {
+	if req.Staging || req.DryRun {
 		// Not --staging: that wrote a real lineage holding an untrusted
 		// certificate, left it where sites could name it, and made the real
 		// issuance that followed a no-op — the lineage was not due.

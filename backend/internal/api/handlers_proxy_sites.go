@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -295,4 +296,52 @@ func (s *Server) handleSitePagePut(w http.ResponseWriter, r *http.Request) error
 	httpx.SetAudit(r, "proxy.site.page", name, map[string]any{"page": pageName, "bytes": len(req.Content)})
 	httpx.JSON(w, http.StatusOK, page)
 	return nil
+}
+
+// certbotEmailKey is the setting holding the contact email last issued with,
+// so the site form does not ask for it on every certificate.
+const certbotEmailKey = "certbot.email"
+
+// mountSiteCertificateRoutes is the site form's certificate picker. It sits
+// under /certificates rather than /proxy/sites, where a static path would take
+// the address of a site that happened to share its name.
+func (s *Server) mountSiteCertificateRoutes(r chi.Router) {
+	r.Group(func(r chi.Router) {
+		// Admin only: the answer carries the remembered contact email, and
+		// the form that asks is admin-only.
+		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
+		r.Method(http.MethodGet, "/covering", s.handle(s.handleSiteCertificates))
+	})
+}
+
+// handleSiteCertificates answers GET /certificates/covering?domains=a,b with
+// the certificates that cover every one of the names, each with its key, and
+// the email the last issuance used.
+func (s *Server) handleSiteCertificates(w http.ResponseWriter, r *http.Request) error {
+	domains := strings.FieldsFunc(r.URL.Query().Get("domains"), func(c rune) bool {
+		return c == ',' || c == ' '
+	})
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	certificates, err := s.modules.proxy.SiteCertificates(ctx, domains)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	email, _, err := s.Store.Setting(ctx, certbotEmailKey)
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"email": email, "certificates": certificates, "webRoot": proxysvc.SiteACMEWebroot,
+	})
+	return nil
+}
+
+// rememberCertbotEmail keeps the contact email an issuance was started with.
+// A failure to keep it costs the operator retyping it next time, which is no
+// reason to refuse the issuance.
+func (s *Server) rememberCertbotEmail(ctx context.Context, email string) {
+	if err := s.Store.SetSetting(ctx, certbotEmailKey, email); err != nil {
+		s.Log.Warn("could not remember the certbot email", "err", err)
+	}
 }

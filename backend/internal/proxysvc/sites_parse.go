@@ -218,7 +218,8 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		case "auth_basic":
 			// A path's own prompt says the site's realm; only the server's
 			// is the site's.
-			if current == nil {
+			// The challenge path's "off" is the renderer's, not a realm.
+			if current == nil && location != acmeChallengePath {
 				spec.BasicAuthRealm = strings.Trim(value, `"`)
 			}
 		case "auth_basic_user_file":

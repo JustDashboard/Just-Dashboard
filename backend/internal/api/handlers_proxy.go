@@ -37,6 +37,7 @@ func (s *Server) mountProxyRoutes(r chi.Router) {
 		r.Route("/certificates", func(r chi.Router) {
 			s.mountCertificateRoutes(r)
 			s.mountTLSRoutes(r)
+			s.mountSiteCertificateRoutes(r)
 		})
 		r.Route("/ports", s.mountPortRoutes)
 	})
