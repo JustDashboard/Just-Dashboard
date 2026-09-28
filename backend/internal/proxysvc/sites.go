@@ -139,6 +139,9 @@ type SiteSpec struct {
 	// robots.txt from its pages folder.
 	SecurityTxt bool `json:"securityTxt,omitempty"`
 	RobotsTxt   bool `json:"robotsTxt,omitempty"`
+	// ForwardAuth asks an auth server about every request, or those to the
+	// paths that say so, and sends a visitor without a session to sign in.
+	ForwardAuth *SiteForwardAuth `json:"forwardAuth,omitempty"`
 
 	AccessLog bool `json:"accessLog"`
 	// AccessLogPath and ErrorLogPath are the files the site's access_log and
@@ -226,6 +229,10 @@ type SiteLocation struct {
 	DenyFrom      []string `json:"denyFrom,omitempty"`
 	// RateLimit replaces the site's request rate on this path.
 	RateLimit *RequestLimit `json:"rateLimit,omitempty"`
+	// ForwardAuth is "off" to answer this path without signing in when the
+	// whole site signs in, or "on" to sign in here when only chosen paths
+	// do; empty follows the site.
+	ForwardAuth string `json:"forwardAuth,omitempty"`
 }
 
 // SiteMaintenance is a site's maintenance switch.
@@ -517,6 +524,9 @@ func ValidateSpec(spec *SiteSpec) error {
 	if err := validateAccessOptions(spec); err != nil {
 		return err
 	}
+	if err := validateForwardAuth(spec); err != nil {
+		return err
+	}
 	if spec.PagesDir != "" && !absPathRe.MatchString(spec.PagesDir) {
 		return fmt.Errorf("the pages directory must be an absolute path")
 	}
@@ -772,6 +782,7 @@ func SpecWarnings(spec *SiteSpec) []string {
 	warnings = append(warnings, realIPWarnings(spec)...)
 	warnings = append(warnings, headersWarnings(spec)...)
 	warnings = append(warnings, kindWarnings(spec)...)
+	warnings = append(warnings, forwardAuthWarnings(spec)...)
 	if spec.Kind == "proxy" && (spec.UpstreamSNI || spec.UpstreamVerify) && !spec.hasHTTPSUpstream() {
 		warnings = append(warnings,
 			"The upstream TLS settings apply only to an https:// upstream, and this site forwards to none.")

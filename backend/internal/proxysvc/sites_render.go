@@ -73,6 +73,7 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 	renderUpstreamTLS(l, spec)
 	renderErrorRouting(l, spec)
 	renderAccess(l, spec)
+	renderForwardAuth(l, spec)
 	renderServerLimits(l, spec)
 	renderServerCache(l, spec)
 	renderServerHeaders(l, spec)
@@ -96,6 +97,10 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 	if spec.usesPages() {
 		l.blank()
 		renderPageLocations(l, spec)
+	}
+	if spec.ForwardAuth != nil {
+		l.blank()
+		renderForwardAuthLocation(l, spec)
 	}
 	if spec.BlockExploits {
 		l.blank()
@@ -286,6 +291,9 @@ func renderPageLocations(l *lines, spec *SiteSpec) {
 			// asking for a password to show a closed sign helps nobody.
 			l.add("        auth_basic off;")
 		}
+		if spec.ssoEverywhere() {
+			l.add("        auth_request off;")
+		}
 		l.add("    }")
 	}
 	if m := spec.Maintenance; m != nil {
@@ -328,6 +336,9 @@ func renderACMEChallenge(l *lines, spec *SiteSpec) {
 	l.add("        root %s;", deploymentACMEWebroot)
 	l.add("        allow all;")
 	l.add("        auth_basic off;")
+	if spec.ssoEverywhere() {
+		l.add("        auth_request off;")
+	}
 	l.add("    }")
 	l.blank()
 }
@@ -546,6 +557,7 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 	}
 	renderLocationLimit(l, loc, spec)
 	renderLocationAccess(l, loc, spec)
+	renderLocationForwardAuth(l, loc, spec)
 	if loc.servesFolder() {
 		if loc.RootMode == "root" {
 			l.add("        root %s;", loc.Root)
@@ -588,6 +600,7 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 	}
 	renderRequestHeaders(l, spec)
 	renderClientCertHeaders(l, spec)
+	renderForwardAuthHeaders(l, spec)
 	if loc.BodyLimit != "" {
 		l.add("        client_max_body_size %s;", loc.BodyLimit)
 	}

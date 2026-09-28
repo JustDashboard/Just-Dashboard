@@ -44,9 +44,21 @@ export function sendableSpec(spec: SiteSpec): SiteSpec {
     hotlink,
     securityTxt,
     robotsTxt,
+    forwardAuth,
     ...rest
   } = spec
-  const locations = spec.locations.map(sendableLocation)
+  // A redirect is answered before anyone could be asked to sign in, and only
+  // a proxy has paths of its own to choose.
+  const sso = spec.kind === "redirect" ? undefined : forwardAuth
+  const pathsOnly = spec.kind === "proxy" && Boolean(sso?.pathsOnly)
+  const pathSso: SiteLocation["forwardAuth"] = sso && (pathsOnly ? "on" : "off")
+  const locations = spec.locations.map((loc) => ({
+    ...sendableLocation(loc),
+    // A path says only the opposite of what the site does.
+    forwardAuth: loc.forwardAuth === pathSso ? pathSso : undefined,
+    // A password prompt's 401 would be sent to sign in, so a path's goes too.
+    ...(sso ? { basicAuthFile: undefined } : {}),
+  }))
   return {
     ...rest,
     // A pool replaces the single upstream, and only a proxy forwards.
@@ -78,11 +90,21 @@ export function sendableSpec(spec: SiteSpec): SiteSpec {
       : {}),
     // A list replaces the site's own addresses and password, which the form
     // stops showing once one is named.
-    ...(spec.accessList
+    ...(spec.accessList && !sso
       ? { allowFrom: [], denyFrom: [], basicAuthFile: undefined, satisfyAny: undefined }
       : {}),
     // A redirect answers every path with itself, so it serves no files.
     ...(spec.kind !== "redirect" ? { hotlink, securityTxt, robotsTxt } : {}),
+    // Signing in replaces the site's password and list, which the form stops
+    // showing once it is on.
+    ...(sso
+      ? {
+          forwardAuth: { ...sso, pathsOnly: pathsOnly || undefined },
+          basicAuthFile: undefined,
+          accessList: undefined,
+          satisfyAny: undefined,
+        }
+      : {}),
   }
 }
 

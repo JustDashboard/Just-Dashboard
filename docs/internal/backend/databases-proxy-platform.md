@@ -896,6 +896,23 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   (`default_type text/plain`), edited as pages `security` and `robots`; the security.txt default names
   `security@<first domain>` and expires in a year, and the form warns within 30 days of `Expires`.
 
+  **Single sign-on** (`sites_forward_auth.go`, form "Who may reach it" and each path's options).
+  `SiteSpec.ForwardAuth{Provider, Verify, SignIn, PathsOnly}` writes `auth_request /__jd/auth;` at
+  server level (or, with `PathsOnly`, in each location whose `SiteLocation.ForwardAuth` is `on`; a
+  site-wide one is skipped where a location says `off`), `auth_request_set $jd_<id>_sso_user|email` from
+  the provider's headers (Authelia/custom `Remote-User`/`Remote-Email`, Authentik `X-authentik-*`,
+  oauth2-proxy `X-Auth-Request-*`), `error_page 401 =302 <signIn>?rd=$scheme://$http_host$request_uri`
+  and an internal `location = /__jd/auth` that proxies to `Verify` without the body, with
+  `X-Original-URL`/`X-Original-Method`/`X-Forwarded-*` (and `proxy_cache off` under the proxy cache).
+  Only 2xx passes; a 403, 5xx or unreachable server refuses the request (auth_request's own rule). Each
+  forwarding location sets `Remote-User`/`Remote-Email` from those variables, so a visitor's own are
+  replaced (empty where no check ran). The page and ACME locations say `auth_request off`. Refused on
+  a redirect, beside a site or path password, access list or `satisfy any` (a password prompt's 401 would become
+  the sign-in redirect; satisfy any would bypass it), with `InterceptErrors` (the application's own
+  401s would redirect), and with a custom `Remote-User`/`Remote-Email` request header. The provider
+  round-trips through the `# Single sign-on through <provider>.` comment. Session cookies the auth
+  server sets on the check response are not relayed, so the sign-in portal must set its own.
+
   **HSTS and TLS versions** (`sites_tls.go`, form "Encryption"). `HSTSMaxAge` (0 = 15552000, else
   300..63072000), `HSTSOwnNameOnly` (drops `includeSubDomains`) and `HSTSPreload` (refused below a year
   or without subdomains; the form asks for the first domain typed) build the one

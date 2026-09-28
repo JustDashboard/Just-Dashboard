@@ -29,6 +29,8 @@ export type SiteLocation = {
   denyFrom?: string[]
   /** This path's own request rate, in place of the site's. */
   rateLimit?: RequestLimit
+  /** Off answers this path without signing in; on signs in here when only chosen paths do. */
+  forwardAuth?: "on" | "off"
 }
 
 export type LocationMatch = "" | "=" | "^~" | "~" | "~*"
@@ -114,6 +116,8 @@ export type SiteSpec = {
   /** Serve the site's own /.well-known/security.txt and /robots.txt. Not for a redirect. */
   securityTxt?: boolean
   robotsTxt?: boolean
+  /** An auth server asked about every request, or those to the paths that say so. Not for a redirect. */
+  forwardAuth?: SiteForwardAuth
   accessLog: boolean
   /**
    * Where the site's access_log and error_log write, read back from its file
@@ -325,6 +329,20 @@ export type SiteClientCert = {
   mode?: "optional"
   /** Sends X-Client-Verify and X-Client-Subject to the application. Proxy sites only. */
   passSubject?: boolean
+}
+
+export type ForwardAuthProvider = "authelia" | "authentik" | "oauth2-proxy" | "custom"
+
+/** Single sign-on through an auth server nginx asks with auth_request. */
+export type SiteForwardAuth = {
+  /** Which of the auth server's response headers carry the user's name and email. */
+  provider: ForwardAuthProvider
+  /** The auth server's check endpoint. */
+  verify: string
+  /** Where a visitor without a session is sent, with rd= set to the address they asked for. */
+  signIn: string
+  /** Only the paths set to sign in do; otherwise every path does unless set not to. Proxy sites only. */
+  pathsOnly?: boolean
 }
 
 /** User agents a site refuses, matched anywhere in the header regardless of case. */
