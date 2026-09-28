@@ -27,8 +27,11 @@ import {
   type ScanTarget,
 } from "@/lib/scan-target"
 import {
+  addressAnswer,
+  addressKindLabel,
   certificateLeft,
   chainPem,
+  connectedTo,
   checkOutcome,
   diagnosisLinks,
   failureSteps,
@@ -71,7 +74,9 @@ import { useTLSFixes } from "@/components/proxy/tls-fix-sheet"
 import { RequestTester, TLSTools } from "@/components/proxy/request-tester"
 import { Button } from "@/components/ui/button"
 import { IconAction } from "@/components/icon-action"
-import { Field } from "@/components/form"
+import { Disclosure, Field } from "@/components/form"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Input } from "@/components/ui/input"
 import { InputGroup, InputGroupInput } from "@/components/ui/input-group"
 
 /**
@@ -107,6 +112,13 @@ function TLSReport() {
   // ask it would be a page that forgot why it was opened.
   const linked = params.get("domain")
   const linkedPort = params.get("port")
+  // ?connect= dials that address in place of the name's records and ?all=1
+  // handshakes with every record too; both are part of the question, so a
+  // link carries them.
+  const linkedAdvanced: AdvancedFields = {
+    connect: params.get("connect") ?? "",
+    all: params.get("all") === "1",
+  }
   const asked = linked === null ? undefined : parseScanQuery(linked, linkedPort)
   const target = asked?.target
   const targetKey = target ? targetLabel(target) : ""
@@ -120,19 +132,25 @@ function TLSReport() {
 
   // The fields show the target the address asks for, and change with it on
   // Back or a link; what is typed over them is kept until then.
-  const address = JSON.stringify([linked, linkedPort])
+  const address = JSON.stringify([linked, linkedPort, linkedAdvanced])
   const fromAddress: ScanFields = target
     ? targetFields(target)
     : { domain: linked ?? "", port: linkedPort ?? "" }
   const [fields, setFields] = useState(fromAddress)
   const [fieldError, setFieldError] = useState(asked?.error)
+  const [advanced, setAdvanced] = useState(linkedAdvanced)
   const [shownFor, setShownFor] = useState(address)
   if (shownFor !== address) {
     setShownFor(address)
     setFields(fromAddress)
     setFieldError(asked?.error)
+    setAdvanced(linkedAdvanced)
   }
   const typed = parseScanQuery(fields.domain, fields.port.trim())
+  const connectError = connectToError(advanced.connect, typed.target)
+  // What is asked is the target and how to reach it: the same name sent to
+  // another address is another scan.
+  const askKey = target ? JSON.stringify([targetKey, linkedAdvanced]) : ""
   const edit = (next: Partial<ScanFields>) => {
     setFields((current) => ({ ...current, ...next }))
     setFieldError(undefined)
@@ -141,12 +159,21 @@ function TLSReport() {
   // Cancel stops waiting and aborts the request, which ends the scan on the
   // server too. It holds for this target until Scan is pressed again.
   const [cancelled, setCancelled] = useState<{ key: string; after: number; over: boolean }>()
-  if (cancelled && cancelled.key !== targetKey) setCancelled(undefined)
+  if (cancelled && cancelled.key !== askKey) setCancelled(undefined)
   const report = usePoll(
     (signal) =>
-      get<TLSScan>("/certificates/scan", { domain: target?.host, port: target?.port }, signal),
+      get<TLSScan>(
+        "/certificates/scan",
+        {
+          domain: target?.host,
+          port: target?.port,
+          connect: linkedAdvanced.connect || undefined,
+          all: linkedAdvanced.all ? 1 : undefined,
+        },
+        signal,
+      ),
     0,
-    [targetKey],
+    [askKey],
     { enabled: admin && target !== undefined && cancelled === undefined },
   )
   // usePoll reports loading only while there is nothing to show, so a scan
@@ -160,14 +187,14 @@ function TLSReport() {
   >()
   if (
     rescanOver &&
-    (rescanOver.key !== targetKey ||
+    (rescanOver.key !== askKey ||
       rescanOver.data !== report.data ||
       rescanOver.error !== report.error)
   )
     setRescanOver(undefined)
   const rescanning = rescanOver !== undefined
   const rescan = () => {
-    setRescanOver({ key: targetKey, data: report.data, error: report.error })
+    setRescanOver({ key: askKey, data: report.data, error: report.error })
     report.refresh()
   }
   // Asked again from the report itself, a cancelled scan is asked again too:
@@ -177,7 +204,7 @@ function TLSReport() {
     rescan()
   }
   const cancel = (after: number) => {
-    setCancelled({ key: targetKey, after, over: report.data !== undefined })
+    setCancelled({ key: askKey, after, over: report.data !== undefined })
     setRescanOver(undefined)
   }
   const scan = report.data ?? null
@@ -247,12 +274,15 @@ function TLSReport() {
       setFieldError(typed.error)
       return
     }
+    if (connectError) return
     setFields(targetFields(typed.target))
     setFieldError(undefined)
     setCancelled(undefined)
-    // A new target is a new address, so Back returns to the last report.
-    if (targetLabel(typed.target) === targetKey) rescan()
-    else router.push(reportHref(params, typed.target), { scroll: false })
+    const next = { connect: advanced.connect.trim(), all: advanced.all && !advanced.connect.trim() }
+    setAdvanced(next)
+    // A new question is a new address, so Back returns to the last report.
+    if (JSON.stringify([targetLabel(typed.target), next]) === askKey) rescan()
+    else router.push(reportHref(withAdvanced(params, next), typed.target), { scroll: false })
   }
 
   return (
@@ -350,6 +380,9 @@ function TLSReport() {
               {scanned || targetKey || "Live TLS report"}
             </h2>
             {scan && <CheckedAgo at={scan.checkedAt} />}
+            {scan && connectedTo(scan) && (
+              <p className="text-hint wrap-anywhere text-muted-foreground">{connectedTo(scan)}</p>
+            )}
           </div>
         </div>
         {/* As wide as the field's row: a long name in the hint or the error
@@ -414,13 +447,19 @@ function TLSReport() {
               <Button
                 type="submit"
                 size="sm"
-                disabled={busy || !fields.domain.trim() || !admin}
+                disabled={busy || !fields.domain.trim() || !admin || connectError !== undefined}
                 pending={busy}
               >
                 Scan
               </Button>
             </div>
           </Field>
+          <AdvancedScan
+            key={address}
+            value={advanced}
+            error={connectError}
+            onChange={(next) => setAdvanced((current) => ({ ...current, ...next }))}
+          />
           {admin && (
             <datalist id="tls-targets">
               {suggestions.map((suggestion) => (
@@ -444,7 +483,7 @@ function TLSReport() {
             description="Enter a domain, host:port or URL, or pick one this server knows. The scan connects to it from this server and grades what it serves."
           />
         )}
-        {busy && <ScanProgress key={targetKey} onCancel={cancel} />}
+        {busy && <ScanProgress key={askKey} onCancel={cancel} />}
         {cancelled && (
           <p className="text-body text-muted-foreground">
             {cancelled.over
@@ -791,6 +830,7 @@ function TLSReport() {
           </div>
         </div>
       )}
+      {scan && (scan.addresses || scan.addressesError) && <AddressesPanel scan={scan} />}
       {/* An address has no records of its own; a name that never answered
           opens its DNS at once, since the name is the first suspect. */}
       {scan && !isAddress(scan.domain) && (
@@ -1037,6 +1077,146 @@ function reportHref(params: { toString(): string }, target: ScanTarget) {
   next.set("domain", targetLabel(target))
   next.delete("port")
   return `/proxy/tls?${next}`
+}
+
+/** How the scan reaches the target: another address, or every one it has. */
+type AdvancedFields = { connect: string; all: boolean }
+
+/** The page's address with the advanced fields set, or cleared when unused. */
+function withAdvanced(params: { toString(): string }, advanced: AdvancedFields) {
+  const next = new URLSearchParams(params.toString())
+  if (advanced.connect) next.set("connect", advanced.connect)
+  else next.delete("connect")
+  if (advanced.all) next.set("all", "1")
+  else next.delete("all")
+  return next
+}
+
+/**
+ * What is wrong with a connect-to address, the backend's ParseConnectTo read
+ * here so the field says so before a scan is sent.
+ */
+function connectToError(raw: string, target: ScanTarget | undefined) {
+  if (!raw.trim()) return undefined
+  if (target && isAddress(target.host))
+    return `Connect to is for a name: the scan already dials ${target.host}`
+  const parsed = parseScanTarget(raw, target?.port ?? 0)
+  if (!parsed.target) return `Connect to: ${parsed.error}`
+  if (!isAddress(parsed.target.host))
+    return `Connect to takes an IP address, as curl --resolve does, not ${parsed.target.host}`
+  return undefined
+}
+
+/**
+ * The scan's two ways of reaching past DNS, folded under the field: most scans
+ * want neither, and a link that uses one opens with the fold open.
+ */
+function AdvancedScan({
+  value,
+  error,
+  onChange,
+}: {
+  value: AdvancedFields
+  error?: string
+  onChange: (next: Partial<AdvancedFields>) => void
+}) {
+  const connecting = value.connect.trim() !== ""
+  const facts = connecting ? `to ${value.connect.trim()}` : value.all ? "every address" : undefined
+  return (
+    <Disclosure
+      quiet
+      summary="Advanced"
+      facts={facts}
+      open={connecting || value.all}
+      className="pt-2"
+    >
+      <div className="space-y-3">
+        <Field
+          label="Connect to"
+          htmlFor="tls-connect"
+          hint="An IP to dial in place of the name's records, as curl --resolve does: the origin behind a CDN, or a new server before cutover. SNI and Host still name the domain."
+          error={error && <span className="wrap-anywhere">{error}</span>}
+        >
+          <Input
+            id="tls-connect"
+            value={value.connect}
+            onChange={(event) => onChange({ connect: event.target.value })}
+            placeholder="203.0.113.10"
+            aria-invalid={error ? true : undefined}
+            autoComplete="off"
+            spellCheck={false}
+            autoCapitalize="none"
+            autoCorrect="off"
+            className="font-mono sm:text-xs"
+          />
+        </Field>
+        {/* One address is asked for, or all of them: both at once would
+            dial the one and report on the rest. */}
+        <label className="flex items-start gap-2 text-hint text-muted-foreground">
+          <Checkbox
+            checked={value.all && !connecting}
+            disabled={connecting}
+            onCheckedChange={(checked) => onChange({ all: Boolean(checked) })}
+            className="mt-0.5"
+          />
+          <span>
+            Scan every address: a handshake with each A and AAAA record, so a stale one serving
+            another certificate shows up.
+          </span>
+        </label>
+      </div>
+    </Disclosure>
+  )
+}
+
+/**
+ * Each of the name's addresses and what it served. The report above is the
+ * one address the scan reached; this is the rest, and a row serving another
+ * certificate is marked against it.
+ */
+function AddressesPanel({ scan }: { scan: TLSScan }) {
+  const addresses = scan.addresses ?? []
+  return (
+    <Panel plain>
+      <PanelHeader title="Addresses" />
+      <PanelBody flush>
+        {scan.addressesError ? (
+          <p className="text-body break-words text-muted-foreground">
+            The name&rsquo;s addresses could not be listed: {scan.addressesError}
+          </p>
+        ) : (
+          <RowList>
+            {addresses.map((address) => {
+              const other =
+                scan.fingerprint !== undefined &&
+                address.fingerprint !== undefined &&
+                address.fingerprint !== scan.fingerprint
+              return (
+                <ReportRow
+                  key={address.address}
+                  title={<span className="font-mono text-xs">{address.address}</span>}
+                  subtitle={`${address.family} · ${addressKindLabel(address.kind)} · ${addressAnswer(address)}`}
+                  trailing={
+                    !address.reachable ? (
+                      <Status verdict="critical" label="no handshake" />
+                    ) : other ? (
+                      <Status verdict="warning" label="another certificate" />
+                    ) : (
+                      <Status
+                        verdict="ok"
+                        label={scan.reachable ? "same certificate" : "answered"}
+                      />
+                    )
+                  }
+                  className="py-2"
+                />
+              )
+            })}
+          </RowList>
+        )}
+      </PanelBody>
+    </Panel>
+  )
 }
 
 /**

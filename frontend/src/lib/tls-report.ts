@@ -6,7 +6,14 @@
 
 import type { Verdict } from "@/components/status-dot"
 import type { Tone } from "@/components/tone"
-import type { GradeCheck, HTTPScan, RedirectHop, TLSScan } from "./proxy/types-tls"
+import type {
+  AddressKind,
+  AddressScan,
+  GradeCheck,
+  HTTPScan,
+  RedirectHop,
+  TLSScan,
+} from "./proxy/types-tls"
 import { targetLabel, tlsReportHref } from "./scan-target"
 
 const PLAIN_ERRORS: Record<NonNullable<HTTPScan["plainErrorKind"]>, string> = {
@@ -221,7 +228,10 @@ export type ReproduceCommand = { label: string; command: string }
 export function reproduceCommands(scan: TLSScan): ReproduceCommand[] {
   const host = scan.domain
   const ipv6 = host.includes(":")
-  const connect = ipv6 ? `[${host}]:${scan.port}` : `${host}:${scan.port}`
+  // A scan sent to another address dials it and still names the host, which
+  // is -connect beside -servername for openssl and --resolve for curl.
+  const dialled = scan.connectTo ?? host
+  const connect = dialled.includes(":") ? `[${dialled}]:${scan.port}` : `${dialled}:${scan.port}`
   const sni = isAddress(host) ? "" : ` -servername ${shellQuote(host)}`
   const sClient = `openssl s_client -connect ${shellQuote(connect)}${sni}`
   const commands: ReproduceCommand[] = [
@@ -236,11 +246,15 @@ export function reproduceCommands(scan: TLSScan): ReproduceCommand[] {
   // A zone in an address is a percent sign, which a URL spells %25.
   const urlHost = ipv6 ? `[${host.replace(/%/g, "%25")}]` : host
   const url = `https://${urlHost}${scan.port === 443 ? "" : `:${scan.port}`}/`
-  const curl = ipv6 ? "curl -g" : "curl"
+  const resolve = (port: number) =>
+    scan.connectTo
+      ? ` --resolve ${shellQuote(`${host}:${port}:${scan.connectTo.includes(":") ? `[${scan.connectTo}]` : scan.connectTo}`)}`
+      : ""
+  const curl = `${ipv6 ? "curl -g" : "curl"}${resolve(scan.port)}`
   commands.push({ label: "HTTPS headers", command: `${curl} -sSI ${shellQuote(url)}` })
   commands.push({
     label: "Plain HTTP redirect",
-    command: `${curl} -sSIL ${shellQuote(`http://${urlHost}/`)}`,
+    command: `${ipv6 ? "curl -g" : "curl"}${resolve(80)} -sSIL ${shellQuote(`http://${urlHost}/`)}`,
   })
   if (scan.spkiPin)
     commands.push({
@@ -291,6 +305,8 @@ export function reportToMarkdown(scan: TLSScan): string {
     "",
     `Checked ${scan.checkedAt}`,
   ]
+  const connected = connectedTo(scan)
+  if (connected) lines.push("", connected)
   lines.push("", "## Findings", "")
   if (scan.findings.length === 0) lines.push("None.")
   for (const finding of scan.findings) {
@@ -329,9 +345,55 @@ export function reportToMarkdown(scan: TLSScan): string {
       `- ${protocol.name}: ${protocol.status}${protocol.detail ? ` (${protocol.detail})` : ""}`,
     )
 
+  if (scan.addresses?.length) {
+    lines.push("", "## Addresses", "", "| Address | Whose | Answer |", "| --- | --- | --- |")
+    for (const address of scan.addresses)
+      lines.push(
+        `| ${address.address} | ${ADDRESS_KINDS[address.kind]} | ${cell(addressAnswer(address))} |`,
+      )
+  }
+
   lines.push("", "## Chain as presented", "")
   scan.chain.forEach((link, index) =>
     lines.push(`${index + 1}. ${link.subject}, issued by ${link.issuer}, until ${link.notAfter}`),
   )
   return `${lines.join("\n")}\n`
+}
+
+const ADDRESS_KINDS: Record<AddressKind, string> = {
+  here: "this server",
+  cloudflare: "Cloudflare edge",
+  elsewhere: "another host",
+  unknown: "cannot tell whose",
+}
+
+/** Whose an address is, in words. */
+export function addressKindLabel(kind: AddressKind): string {
+  return ADDRESS_KINDS[kind]
+}
+
+/** The IP of an ip:port, without the brackets an IPv6 one is written in. */
+function addressIP(address: string): string {
+  if (address.startsWith("[")) return address.slice(1, address.indexOf("]"))
+  return address.slice(0, address.lastIndexOf(":"))
+}
+
+/**
+ * Which address the scan reached and whose it is, the one line that says
+ * whether the grade is the CDN's or the origin's.
+ */
+export function connectedTo(scan: TLSScan): string | undefined {
+  if (!scan.address) return undefined
+  const kind = scan.addressKind ? ` — ${ADDRESS_KINDS[scan.addressKind]}` : ""
+  const asked = scan.connectTo ? ", as asked in place of its DNS records" : ""
+  return `Connected to ${addressIP(scan.address)}${kind}${asked}`
+}
+
+/** What one address served, in a line: the certificate, or why nothing. */
+export function addressAnswer(address: AddressScan): string {
+  if (!address.reachable) return address.error ?? "no handshake"
+  const parts = [address.negotiated, address.subject && `${address.subject} from ${address.issuer}`]
+  if (address.notAfter) parts.push(`until ${address.notAfter.slice(0, 10)}`)
+  if (address.legacyOnly) parts.push("legacy offer only")
+  return parts.filter(Boolean).join(" · ")
 }

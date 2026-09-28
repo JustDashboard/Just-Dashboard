@@ -190,3 +190,22 @@ func isASCII(s string) bool {
 	}
 	return true
 }
+
+// ParseConnectTo reads the address a scan of target dials in place of the
+// name's records, read as a scan target is so a pasted [v6]:port works. It
+// must be an IP address, as curl --resolve takes: a name would be one more
+// lookup whose answer the report could not show. A port, when written, must
+// be the scan's, because the name is still what is asked for on that port.
+func ParseConnectTo(raw string, target ScanTarget) (string, error) {
+	if net.ParseIP(target.Host) != nil {
+		return "", errors.New("connect to is for a name: the scan already dials " + target.Host)
+	}
+	t, err := ParseScanTarget(raw, target.Port)
+	if err != nil {
+		return "", fmt.Errorf("connect to: %v", err)
+	}
+	if net.ParseIP(t.Host) == nil {
+		return "", fmt.Errorf("connect to takes an IP address, as curl --resolve does, not %q", t.Host)
+	}
+	return t.Host, nil
+}

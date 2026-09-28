@@ -400,6 +400,17 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   or `unknown` (no `ssl_certificate` in the site's own file, or unreadable). It is nil for an
   address, a name Caddy claims, or a host without nginx sites. `stale` is a heuristic: a second
   machine serving an older copy for the same names reads the same way.
+  **Every scan says which address it reached** (`address`, and `addressKind` from `whereConnected`:
+  `here`, `cloudflare`, `elsewhere`, `unknown`). `?connect=<ip>` (`ScanOptions.ConnectTo`, read by
+  `ParseConnectTo`: an IP only, for a name only, a written port must be the scan's) dials that address
+  for the handshakes, the HTTPS request and the plain-HTTP chain's requests to the name, with SNI and
+  Host still the name's — curl `--resolve` — so the origin behind a CDN or a server before cutover can
+  be graded; the scan is a GET, which `AuditMutations` skips, so the handler records it itself
+  (`httpx.AuditRead`, action `certificates.scan.connect`). `?all=1` (not with `connect`) handshakes
+  with each A and AAAA record beside the scan, eight at a time (`tlsscan_addresses.go`, resolver
+  injectable), returns them as `addresses`, and raises the warning `tls.address-mismatch` when
+  reachable addresses serve different leaf certificates; it caps no grade, since the grade is of the
+  answer this scan got.
 - **The watch list is endpoints.** `watched_endpoints` (lane G in `proxySchema`) is a name, a port and
   an address, unique together, so a mail server can be watched on 443 and 993; `watched_domains` held
   one row per name and a second port replaced the first. Its rows are copied in on every boot with

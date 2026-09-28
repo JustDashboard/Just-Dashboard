@@ -183,6 +183,25 @@ export type TLSOrigin = {
   detail: string
 }
 
+/** Whose an address is: this server, Cloudflare's proxy, another host, or cannot tell. */
+export type AddressKind = "here" | "cloudflare" | "elsewhere" | "unknown"
+
+/** One of a name's A or AAAA records, handshaken with on its own. */
+export type AddressScan = {
+  /** ip:port */
+  address: string
+  family: "IPv4" | "IPv6"
+  kind: AddressKind
+  reachable: boolean
+  error?: string
+  legacyOnly?: boolean
+  negotiated?: string
+  subject?: string
+  issuer?: string
+  notAfter?: string
+  fingerprint?: string
+}
+
 export type TLSScan = {
   domain: string
   port: number
@@ -190,6 +209,15 @@ export type TLSScan = {
   reachable: boolean
   error?: string
   failure?: ScanFailure
+  /** The IP dialled in place of the name's records, as curl --resolve does. */
+  connectTo?: string
+  /** The ip:port the handshake reached, and whose it is. */
+  address?: string
+  addressKind?: AddressKind
+  /** Every A and AAAA record, when the scan was asked to check each. */
+  addresses?: AddressScan[]
+  /** Why the name's addresses could not be listed. */
+  addressesError?: string
   grade: string
   summary: string
   negotiated?: string

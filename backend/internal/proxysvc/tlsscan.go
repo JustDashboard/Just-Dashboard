@@ -49,6 +49,21 @@ type TLSScan struct {
 	// Failure is how far a scan that never completed a handshake got, and
 	// why it stopped there.
 	Failure *ScanFailure `json:"failure,omitempty"`
+	// ConnectTo is the address dialled in place of the name's DNS answer, as
+	// curl --resolve does, when the scan was asked to: the origin behind a
+	// CDN, or a new server before its records move.
+	ConnectTo string `json:"connectTo,omitempty"`
+	// Address is the ip:port the handshake reached, and AddressKind whose it
+	// is: "here", "cloudflare", "elsewhere" or "unknown" (whereConnected).
+	// A name with several records is only as good as the one it happened to
+	// reach, so the report says which that was.
+	Address     string `json:"address,omitempty"`
+	AddressKind string `json:"addressKind,omitempty"`
+	// Addresses is each of the name's A and AAAA records handshaken with on
+	// its own, when the scan was asked to; AddressesError is why they could
+	// not be listed.
+	Addresses      []AddressScan `json:"addresses,omitempty"`
+	AddressesError string        `json:"addressesError,omitempty"`
 
 	// Grade is A+ down to F, and Summary is the one sentence behind it.
 	Grade   string `json:"grade"`
@@ -252,9 +267,22 @@ const (
 // list asks for more (preloadMaxAge).
 const hstsStrongMaxAge = 15552000
 
+// ScanOptions change where a scan connects. ConnectTo is an IP address to
+// dial in place of the name's records, with the name still sent in SNI and
+// Host; AllAddresses handshakes with every A and AAAA record as well.
+type ScanOptions struct {
+	ConnectTo    string
+	AllAddresses bool
+}
+
 // ScanTLS runs the whole examination: a handshake, a version probe, the chain,
 // and an HTTP request for the headers.
 func ScanTLS(ctx context.Context, domain string, port int) *TLSScan {
+	return ScanTLSWith(ctx, domain, port, ScanOptions{})
+}
+
+// ScanTLSWith is ScanTLS with the connection redirected or widened by opts.
+func ScanTLSWith(ctx context.Context, domain string, port int, opts ScanOptions) *TLSScan {
 	if port == 0 {
 		port = 443
 	}
@@ -263,15 +291,33 @@ func ScanTLS(ctx context.Context, domain string, port int) *TLSScan {
 		Protocols: []ProtocolResult{}, Chain: []ChainLink{}, Findings: []ScanFinding{},
 		Checks: []GradeCheck{},
 	}
-	addr := net.JoinHostPort(domain, strconv.Itoa(port))
+	dialHost := domain
+	if opts.ConnectTo != "" {
+		dialHost, scan.ConnectTo = opts.ConnectTo, opts.ConnectTo
+	}
+	addr := net.JoinHostPort(dialHost, strconv.Itoa(port))
+	// The addresses are asked beside the scan rather than after it: a name
+	// whose handshake failed is exactly the one whose other records matter.
+	var addresses chan addressesResult
+	if opts.AllAddresses && opts.ConnectTo == "" && net.ParseIP(domain) == nil {
+		addresses = make(chan addressesResult, 1)
+		go func() { addresses <- scanAddresses(ctx, domain, port, net.DefaultResolver.LookupIPAddr) }()
+	}
 
 	conn, legacy, err := handshake(ctx, addr, domain)
 	if err != nil {
 		unanswered(ctx, scan, err)
+		if scan.Failure != nil && scan.Failure.Address != "" {
+			scan.Address, scan.AddressKind = scan.Failure.Address, scan.Failure.Where
+		}
+		collectAddresses(scan, addresses)
+		SortFindings(scan.Findings)
 		return scan
 	}
 	state := conn.ConnectionState()
+	scan.Address = conn.RemoteAddr().String()
 	conn.Close()
+	scan.AddressKind = whereConnected(scan.Address, nil, localAddresses(), hostAddresses())
 
 	scan.Reachable = true
 	scan.LegacyOnly = legacy
@@ -302,7 +348,10 @@ func ScanTLS(ctx context.Context, domain string, port int) *TLSScan {
 		if legacy {
 			offer = tlsOffer("", oldestVersion, newestVersion)
 		}
-		scan.HTTP = scanHTTP(ctx, "https://"+addr+"/", "http://"+urlHost(domain)+"/", offer)
+		// The URLs name the host, so Host and SNI are the name's; connect
+		// sends their connections to the address asked for.
+		https := "https://" + net.JoinHostPort(domain, strconv.Itoa(port)) + "/"
+		scan.HTTP = scanHTTPVia(ctx, https, "http://"+urlHost(domain)+"/", offer, opts.ConnectTo)
 	}
 	if preloadable && scan.HTTP.Service == "http" {
 		var rule *PreloadRule
@@ -313,6 +362,7 @@ func ScanTLS(ctx context.Context, domain string, port int) *TLSScan {
 		scan.Preload = preloadCheck(domain, scan, rule)
 	}
 
+	collectAddresses(scan, addresses)
 	grade(scan)
 	return scan
 }
@@ -655,6 +705,12 @@ const scanUserAgent = "Just-Dashboard TLS check"
 // follows plainURL's redirects to see whether a plain-HTTP visitor reaches
 // HTTPS.
 func scanHTTP(ctx context.Context, httpsURL, plainURL string, offer *tls.Config) *HTTPScan {
+	return scanHTTPVia(ctx, httpsURL, plainURL, offer, "")
+}
+
+// scanHTTPVia is scanHTTP with every connection to the URLs' host dialled to
+// connect instead, when it is set, as curl --connect-to does.
+func scanHTTPVia(ctx context.Context, httpsURL, plainURL string, offer *tls.Config, connect string) *HTTPScan {
 	out := &HTTPScan{Headers: []HeaderCheck{}, RedirectChain: []RedirectHop{}}
 	// The connection keeps the first bytes the service sent, because they
 	// are what says a service is not a website: net/http's error quotes only
@@ -666,7 +722,17 @@ func scanHTTP(ctx context.Context, httpsURL, plainURL string, offer *tls.Config)
 	client := scanClient(&http.Transport{
 		DisableKeepAlives: true,
 		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			dialer := &tls.Dialer{NetDialer: &net.Dialer{Timeout: 8 * time.Second}, Config: offer}
+			config := offer
+			if connect != "" {
+				host, port, err := net.SplitHostPort(addr)
+				if err != nil {
+					return nil, err
+				}
+				config = offer.Clone()
+				config.ServerName = host
+				addr = net.JoinHostPort(connect, port)
+			}
+			dialer := &tls.Dialer{NetDialer: &net.Dialer{Timeout: 8 * time.Second}, Config: config}
 			conn, err := dialer.DialContext(ctx, network, addr)
 			if err != nil {
 				return nil, err
@@ -715,7 +781,7 @@ func scanHTTP(ctx context.Context, httpsURL, plainURL string, offer *tls.Config)
 		})
 	}
 
-	chain, verdict, err := followPlainHTTP(ctx, plainURL)
+	chain, verdict, err := followPlainHTTPVia(ctx, plainURL, connect)
 	if err != nil {
 		out.PlainError = requestError(err)
 		out.PlainErrorKind = netErrorKind(err)
@@ -795,6 +861,13 @@ var errInternalHop = errors.New("not requested: an address on this machine or it
 // is on the address actually dialled, after DNS, so a name that resolves
 // inward is caught too. Such a hop is recorded as Internal, unrequested.
 func followPlainHTTP(ctx context.Context, start string) ([]RedirectHop, string, error) {
+	return followPlainHTTPVia(ctx, start, "")
+}
+
+// followPlainHTTPVia is followPlainHTTP with every request to start's own host
+// dialled to connect instead, when it is set. Hops to other hosts go where
+// their records say, and stay under the same guard.
+func followPlainHTTPVia(ctx context.Context, start, connect string) ([]RedirectHop, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	current, err := url.Parse(start)
@@ -815,6 +888,9 @@ func followPlainHTTP(ctx context.Context, start string) ([]RedirectHop, string, 
 	client := scanClient(&http.Transport{
 		DisableKeepAlives: true,
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if host, port, err := net.SplitHostPort(addr); err == nil && connect != "" && strings.EqualFold(host, origin) {
+				addr = net.JoinHostPort(connect, port)
+			}
 			if first != "" {
 				return guarded.DialContext(ctx, network, addr)
 			}
