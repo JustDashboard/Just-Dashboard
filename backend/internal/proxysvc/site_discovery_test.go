@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +40,53 @@ func TestListingLeavesOutTheDashboardsOwnFiles(t *testing.T) {
 		if h.Name == "jd-default.conf" || h.Name == "jd-catchall" || h.Name == "00-catchall" {
 			t.Errorf("the dashboard's own %s/%s is listed as a site", h.Layout, h.Name)
 		}
+	}
+}
+
+// A link in sites-enabled under the name of one of the dashboard's own files
+// was left out with the file, even pointing at nothing — and nginx refuses
+// every reload over a link to nothing. Only the file's own link is the
+// dashboard's: a link to nothing is listed, with its removal, and a link to
+// an operator's site is that site's.
+func TestListingShowsAStrayLinkUnderAnOwnedName(t *testing.T) {
+	s, root := debianTree(t)
+	nginxShim(t, "exit 0")
+	owned := "# " + OwnedMarker + ": the catch-all default site.\nserver { listen 80 default_server; return 444; }\n"
+	enabled := func(name string) string { return filepath.Join(root, "sites-enabled", name) }
+	writeFile(t, filepath.Join(root, "sites-available", "jd-catchall"), owned)
+	gone := filepath.Join(root, "old", "jd-catchall")
+	symlink(t, gone, enabled("jd-catchall"))
+	writeFile(t, filepath.Join(root, "sites-available", "jd-other"), owned)
+	writeFile(t, filepath.Join(root, "sites-available", "app"), "server { server_name app.example.com; }\n")
+	symlink(t, "../sites-available/app", enabled("jd-other"))
+	// Still the dashboard's: its own link, and a numbered one to it.
+	writeFile(t, filepath.Join(root, "sites-available", "jd-served"), owned)
+	symlink(t, "../sites-available/jd-served", enabled("jd-served"))
+	symlink(t, "../sites-available/jd-served", enabled("00-served"))
+	ctx := context.Background()
+
+	hosts, err := s.ListVHosts(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hosts) != 2 {
+		t.Errorf("listed %s, want the stray link and app", describeHosts(hosts))
+	}
+	stray := listed(t, hosts, "sites-enabled", "jd-catchall")
+	if stray.Broken != "dangling" || stray.LinkTarget != gone || stray.Enabled || stray.EnabledPath != enabled("jd-catchall") {
+		t.Errorf("stray link = %+v", stray)
+	}
+	if app := listed(t, hosts, "sites-available", "app"); !app.Enabled || !reflect.DeepEqual(app.LinkedAs, []string{"jd-other"}) {
+		t.Errorf("app = enabled %v, linked as %v", app.Enabled, app.LinkedAs)
+	}
+	if _, err := s.RemoveVHostLink(ctx, "jd-catchall", false); err != nil {
+		t.Fatalf("the stray link could not be removed: %v", err)
+	}
+	if _, err := os.Lstat(enabled("jd-catchall")); !os.IsNotExist(err) {
+		t.Errorf("the link is still there: %v", err)
+	}
+	if hosts, _ := s.ListVHosts(ctx); len(hosts) != 1 {
+		t.Errorf("after the removal: %s", describeHosts(hosts))
 	}
 }
 
@@ -106,6 +154,61 @@ server {
 		v := listed(t, hosts, "sites-available", c.name)
 		if v.AccessLog != c.access || v.ErrorLog != c.errorLog {
 			t.Errorf("%s: logs = %q, %q; want %q, %q", c.name, v.AccessLog, v.ErrorLog, c.access, c.errorLog)
+		}
+	}
+}
+
+// A site that includes itself — by its own name, through its link in
+// sites-enabled, or through a glob that matches it inside a server block —
+// was expanded into itself without end, and the stack overflow killed the
+// whole process on every listing. nginx never reads such a file while it is
+// disabled, and the listing reads its own content once.
+func TestListingReadsASiteThatIncludesItself(t *testing.T) {
+	// A small stack makes the old unbounded recursion a quick, certain
+	// failure rather than a gigabyte of stack on a shared machine: each
+	// level of it also copied a context one entry longer, so it got slower
+	// and larger the deeper it went.
+	defer debug.SetMaxStack(debug.SetMaxStack(512 << 10))
+	s, root := debianTree(t)
+	loop := filepath.Join(root, "sites-available", "loop")
+	writeFile(t, loop, "server {\n\tserver_name loop.test;\n\tauth_basic on;\n\tinclude "+loop+";\n}\n")
+	writeFile(t, filepath.Join(root, "sites-available", "globbed"),
+		"server {\n\tserver_name globbed.test;\n\tinclude sites-available/*;\n}\n")
+	writeFile(t, filepath.Join(root, "sites-available", "linked"),
+		"server {\n\tserver_name linked.test;\n\tlimit_req zone=one;\n\tinclude sites-enabled/linked;\n}\n")
+	symlink(t, "../sites-available/linked", filepath.Join(root, "sites-enabled", "linked"))
+	// A copy in sites-enabled rather than a link, which includes its own
+	// directory.
+	writeFile(t, filepath.Join(root, "sites-enabled", "copied"),
+		"server {\n\tserver_name copied.test;\n\tinclude sites-enabled/*;\n}\n")
+
+	listing := make(chan []VHost, 1)
+	go func() {
+		hosts, err := s.ListVHosts(context.Background())
+		if err != nil {
+			t.Error(err)
+		}
+		listing <- hosts
+	}()
+	var hosts []VHost
+	select {
+	case hosts = <-listing:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the listing did not return")
+	}
+	for _, c := range []struct {
+		layout, name string
+		features     []string
+	}{
+		{"sites-available", "loop", []string{"auth"}},
+		{"sites-available", "linked", []string{"ratelimit"}},
+		// What it includes is the other sites, each read once.
+		{"sites-available", "globbed", []string{"auth", "ratelimit"}},
+		{"sites-enabled", "copied", []string{"ratelimit"}},
+	} {
+		v := listed(t, hosts, c.layout, c.name)
+		if !reflect.DeepEqual(v.Features, c.features) || len(v.ServerNames) != 1 {
+			t.Errorf("%s: features %v, names %v; want %v", c.name, v.Features, v.ServerNames, c.features)
 		}
 	}
 }

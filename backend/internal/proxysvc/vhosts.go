@@ -177,9 +177,15 @@ func (s *Service) nginxVHosts() []VHost {
 		for _, name := range siteFiles(available) {
 			full := filepath.Join(available, name)
 			// The dashboard's own plumbing is listed by the feature that
-			// writes it; its link in sites-enabled is its own too.
+			// writes it, and so is its link in sites-enabled — while that
+			// link is its own. A link under its name to nothing, or to
+			// another file, is not: it is listed from sites-enabled below,
+			// since nginx refuses every reload over the first and serves
+			// the second.
 			if dashboardOwned(name, full) {
-				own[name] = true
+				if state, _ := readEnabledLink(filepath.Join(enabled, name), full); state == linkAbsent || state == linkServes {
+					own[name] = true
+				}
 				continue
 			}
 			v := s.fileVHost(name, full, "sites-available", logs)

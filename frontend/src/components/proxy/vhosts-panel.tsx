@@ -583,18 +583,18 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   // stopped, the rest are enabled rather than serving.
   const needsMe = (v: VHost) => waiting(v) || isUnloaded(v)
   const attention = visible.filter(needsMe)
-  const settled = visible.filter((v) => !needsMe(v))
-  const groups: { key: string; label: string; sites: VHost[] }[] =
-    narrowed || attention.length === 0 || settled.length === 0
-      ? [{ key: "all", label: "", sites: visible }]
-      : [
-          { key: "waiting", label: "Needs attention", sites: attention },
-          {
-            key: "serving",
-            label: settled.some(engineStopped) ? "Enabled" : "Serving",
-            sites: settled,
-          },
-        ]
+  const active = visible.filter((v) => !needsMe(v) && v.enabled)
+  // Off, and nothing to decide about — the distribution's untouched default
+  // site, a conf.d file nginx does not read. Drawn under "Serving", the
+  // stock default read as one of the sites that serve.
+  const idle = visible.filter((v) => !needsMe(v) && !v.enabled)
+  const sorted: { key: string; label: string; sites: VHost[] }[] = [
+    { key: "waiting", label: "Needs attention", sites: attention },
+    { key: "serving", label: active.some(engineStopped) ? "Enabled" : "Serving", sites: active },
+    { key: "idle", label: "Not in use", sites: idle },
+  ].filter((group) => group.sites.length > 0)
+  const groups =
+    narrowed || sorted.length < 2 ? [{ key: "all", label: "", sites: visible }] : sorted
   const allServing = run?.running !== false && !hosts.some(isUnloaded)
 
   return (

@@ -165,7 +165,8 @@ export function useSiteVerbs({
     })
   }
   // The files the site really writes to, as its file and nginx.conf name
-  // them; a site that logs nowhere openable has no such verb.
+  // them. The listing keeps only the ones the Logs page lists, so a site
+  // that logs nowhere the page can open has no such verb.
   const accessLog = vhost.accessLog
   if (accessLog) {
     verbs.push({

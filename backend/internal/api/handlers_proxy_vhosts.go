@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -39,7 +40,38 @@ func (s *Server) handleVHostList(w http.ResponseWriter, r *http.Request) error {
 	if err := s.markDeploymentRoutes(r.Context(), hosts); err != nil {
 		return httpx.Internal(err)
 	}
+	if err := s.keepOpenableLogs(r.Context(), hosts); err != nil {
+		return httpx.Internal(err)
+	}
 	httpx.JSON(w, http.StatusOK, hosts)
+	return nil
+}
+
+// keepOpenableLogs clears each site's access and error log unless the Logs
+// page lists that file, which is the only way it opens one. A site that logs
+// outside JD_LOG_ROOTS, or to a file nginx has not created yet, was offered
+// Access log and Error log that landed on "Requested log source
+// unavailable".
+func (s *Server) keepOpenableLogs(ctx context.Context, hosts []proxysvc.VHost) error {
+	if !slices.ContainsFunc(hosts, func(v proxysvc.VHost) bool { return v.AccessLog != "" || v.ErrorLog != "" }) {
+		return nil
+	}
+	sources, err := s.modules.logs.Discover(ctx)
+	if err != nil {
+		return err
+	}
+	listed := map[string]bool{}
+	for _, source := range sources {
+		listed[source.ID] = true
+	}
+	for i := range hosts {
+		if !listed[hosts[i].AccessLog] {
+			hosts[i].AccessLog = ""
+		}
+		if !listed[hosts[i].ErrorLog] {
+			hosts[i].ErrorLog = ""
+		}
+	}
 	return nil
 }
 
@@ -75,8 +107,12 @@ func (s *Server) markDeploymentRoutes(ctx context.Context, hosts []proxysvc.VHos
 	for id := range ids {
 		args = append(args, id)
 	}
+	// An archived project's name column holds a tombstone; its name is in
+	// archived_name, as the deploy store reads it.
 	rows, err := s.Store.DB.QueryContext(ctx, `
-		SELECT e.id, e.project_id, e.name, p.name, e.archived_at, p.archived_at
+		SELECT e.id, e.project_id, e.name,
+		       CASE WHEN p.archived_name != '' THEN p.archived_name ELSE p.name END,
+		       e.archived_at, p.archived_at
 		  FROM deploy_environments e JOIN deploy_projects p ON p.id = e.project_id
 		 WHERE e.id IN (?`+strings.Repeat(",?", len(args)-1)+`)`, args...)
 	if err != nil {

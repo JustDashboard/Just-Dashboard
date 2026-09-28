@@ -11,6 +11,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/logsx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
@@ -309,7 +310,9 @@ func TestSiteDeleteLeavesAServedCopyAlone(t *testing.T) {
 // A deployment's route looked like any hand-made site, with Edit, Disable and
 // Delete on it. The listing now names the environment that writes it; a name
 // deploy would not spell, or whose environment is gone, is nobody's; and an
-// archived environment's route says nothing will write it again.
+// archived environment's or project's route says nothing will write it
+// again, under the project's own name rather than the tombstone its archive
+// leaves in the name column.
 func TestVHostListNamesTheDeploymentThatWritesARoute(t *testing.T) {
 	c, s, root := vhostServer(t, func(string) string { return "exit 0" })
 	// Only this directory: not a Caddyfile or a Docker ingress the machine
@@ -322,13 +325,37 @@ func TestVHostListNamesTheDeploymentThatWritesARoute(t *testing.T) {
 		t.Fatal(err)
 	}
 	archivedID, _ := archived.LastInsertId()
+	shelved, err := s.Store.DB.Exec(`INSERT INTO deploy_projects(name, profile, repo_path, branch, compose_file, pre_command, post_command,
+		                            hook_secret, hook_id, enabled, created_at, updated_at)
+		VALUES('vshop', 'web', '', 'main', '', '', '', '', 'vshop-hook', 1, 1, 1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shelvedProjectID, _ := shelved.LastInsertId()
+	shelved, err = s.Store.DB.Exec(`INSERT INTO deploy_environments(project_id, name, slug, kind, created_at, updated_at)
+		VALUES(?, 'production', 'production', 'production', 1, 1)`, shelvedProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shelvedID, _ := shelved.LastInsertId()
+	if _, err := s.modules.deployStore.Archive(t.Context(), shelvedProjectID); err != nil {
+		t.Fatal(err)
+	}
+	type owner struct {
+		ProjectID     int64  `json:"projectId"`
+		EnvironmentID int64  `json:"environmentId"`
+		Project       string `json:"project"`
+		Environment   string `json:"environment"`
+		Archived      bool   `json:"archived"`
+	}
 	site := "server { server_name shop.example.com; }\n"
-	names := map[string]int64{
-		fmt.Sprintf("just-dashboard-env-%d.conf", environmentID):  environmentID,
-		fmt.Sprintf("just-dashboard-env-%d.conf", archivedID):     archivedID,
-		"just-dashboard-env-999999.conf":                          0,
-		fmt.Sprintf("just-dashboard-env-0%d.conf", environmentID): 0,
-		fmt.Sprintf("just-dashboard-env-%d", environmentID):       0,
+	names := map[string]*owner{
+		fmt.Sprintf("just-dashboard-env-%d.conf", environmentID):  {projectID, environmentID, "shop", "production", false},
+		fmt.Sprintf("just-dashboard-env-%d.conf", archivedID):     {projectID, archivedID, "shop", "pr-12", true},
+		fmt.Sprintf("just-dashboard-env-%d.conf", shelvedID):      {shelvedProjectID, shelvedID, "vshop", "production", true},
+		"just-dashboard-env-999999.conf":                          nil,
+		fmt.Sprintf("just-dashboard-env-0%d.conf", environmentID): nil,
+		fmt.Sprintf("just-dashboard-env-%d", environmentID):       nil,
 	}
 	for name := range names {
 		if err := os.WriteFile(filepath.Join(root, "sites-available", name), []byte(site), 0o644); err != nil {
@@ -342,13 +369,7 @@ func TestVHostListNamesTheDeploymentThatWritesARoute(t *testing.T) {
 	}
 	var hosts []struct {
 		Name  string `json:"name"`
-		Owner *struct {
-			ProjectID     int64  `json:"projectId"`
-			EnvironmentID int64  `json:"environmentId"`
-			Project       string `json:"project"`
-			Environment   string `json:"environment"`
-			Archived      bool   `json:"archived"`
-		} `json:"owner"`
+		Owner *owner `json:"owner"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &hosts); err != nil {
 		t.Fatal(err)
@@ -359,17 +380,83 @@ func TestVHostListNamesTheDeploymentThatWritesARoute(t *testing.T) {
 	for _, host := range hosts {
 		want := names[host.Name]
 		switch {
-		case want == 0 && host.Owner != nil:
+		case want == nil && host.Owner != nil:
 			t.Errorf("%s is owned by %+v", host.Name, *host.Owner)
-		case want == 0:
+		case want == nil:
 		case host.Owner == nil:
 			t.Errorf("%s has no owner", host.Name)
-		case host.Owner.EnvironmentID != want || host.Owner.ProjectID != projectID || host.Owner.Project != "shop":
-			t.Errorf("%s owner = %+v", host.Name, *host.Owner)
-		case want == environmentID && (host.Owner.Environment != "production" || host.Owner.Archived):
-			t.Errorf("%s owner = %+v", host.Name, *host.Owner)
-		case want == archivedID && (host.Owner.Environment != "pr-12" || !host.Owner.Archived):
-			t.Errorf("%s owner = %+v", host.Name, *host.Owner)
+		case *host.Owner != *want:
+			t.Errorf("%s owner = %+v, want %+v", host.Name, *host.Owner, *want)
+		}
+	}
+}
+
+// Access log and Error log went to the Logs page for any absolute path a
+// site named, and the page, which opens only the files it lists, answered
+// "Requested log source unavailable" for a log outside JD_LOG_ROOTS or one
+// nginx has not written yet. The listing keeps only the logs the page lists.
+func TestVHostListOffersOnlyLogsTheLogsPageOpens(t *testing.T) {
+	c, s, root := vhostServer(t, func(string) string { return "exit 0" })
+	s.modules.proxy = proxysvc.New(root, filepath.Join(root, "Caddyfile"))
+	logs, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	elsewhere, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.modules.logs = logsx.New([]string{logs})
+	for _, file := range []string{
+		filepath.Join(logs, "nginx", "app.access.log"),
+		filepath.Join(logs, "nginx", "app.error.log"),
+		filepath.Join(logs, "nginx", "app.access"),
+		filepath.Join(elsewhere, "outside.access.log"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte("line\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sites := map[string][2]string{
+		"app":       {filepath.Join(logs, "nginx", "app.access.log"), filepath.Join(logs, "nginx", "app.error.log")},
+		"unwritten": {filepath.Join(logs, "nginx", "unwritten.access.log"), filepath.Join(logs, "nginx", "app.error.log")},
+		"outside":   {filepath.Join(elsewhere, "outside.access.log"), filepath.Join(logs, "nginx", "app.error.log")},
+		"unlisted":  {filepath.Join(logs, "nginx", "app.access"), filepath.Join(logs, "nginx", "app.error.log")},
+	}
+	for name, files := range sites {
+		body := fmt.Sprintf("server { server_name %s.example.com; access_log %s; error_log %s; }\n", name, files[0], files[1])
+		if err := os.WriteFile(filepath.Join(root, "sites-available", name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	w := c.do(http.MethodGet, "/api/v1/proxy/vhosts", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d: %s", w.Code, w.Body.String())
+	}
+	var hosts []struct {
+		Name      string `json:"name"`
+		AccessLog string `json:"accessLog"`
+		ErrorLog  string `json:"errorLog"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &hosts); err != nil {
+		t.Fatal(err)
+	}
+	if len(hosts) != len(sites) {
+		t.Fatalf("listed %d sites: %s", len(hosts), w.Body.String())
+	}
+	want := map[string][2]string{
+		"app":       sites["app"],
+		"unwritten": {"", sites["app"][1]},
+		"outside":   {"", sites["app"][1]},
+		"unlisted":  {"", sites["app"][1]},
+	}
+	for _, host := range hosts {
+		if got := [2]string{host.AccessLog, host.ErrorLog}; got != want[host.Name] {
+			t.Errorf("%s: logs %q, want %q", host.Name, got, want[host.Name])
 		}
 	}
 }

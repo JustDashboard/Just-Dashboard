@@ -438,13 +438,18 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   to the upstream), `h2` and `h3` (`http2`/`http3 on`, or `http2`/`quic` on a `listen`), and
   `maintenance` — an `if ($jd_<site>_maint)` in a server block, which the site form must write only
   while maintenance is on. An `include` the site file itself writes is followed one level, for files
-  the editor would open. `AccessLog` and `ErrorLog` are the files the site writes to: a log one of its
+  the editor would open, and never into the site's own file: a site that includes itself — by name,
+  through its link, or through a glob such as `sites-available/*` in a server block — would otherwise
+  be expanded into itself without end, and the stack overflow took the whole process down on every
+  listing. `AccessLog` and `ErrorLog` are the files the site writes to: a log one of its
   server blocks names comes first (a forced-HTTPS site logs where its serving block says, not where its
   redirect block inherits), then the one nginx.conf sets — its `http` block's, or for errors the main
   context's before that (`inheritedLogs`; that file only, not what it includes). Both are empty for
-  `off`, `syslog:`, `stderr`, a device, and a relative or variable path, so the Sites page offers
-  Access log and Error log only for a file that exists to open. A file nginx cannot parse gets none of
-  these fields. `Package` is the dpkg package that installed the file, set only while the file still
+  `off`, `syslog:`, `stderr`, a device, and a relative or variable path. The Logs page opens only the
+  files it lists, so the API then clears either one it does not (`keepOpenableLogs`,
+  `handlers_proxy_vhosts.go`, against `logsx.Discover`) — a file outside `JD_LOG_ROOTS`, one nginx
+  has not created yet, a name the inventory skips — and the Sites page offers Access log and Error log
+  only for a file the Logs page opens. A file nginx cannot parse gets none of these fields. `Package` is the dpkg package that installed the file, set only while the file still
   matches the md5 dpkg recorded for that conffile (`/var/lib/dpkg/status`, and
   `/host/var/lib/dpkg/status` from the dashboard's container; read again when either changes; obsolete
   entries ignored). That is Ubuntu's untouched `sites-available/default`, which the Sites findings no
@@ -452,15 +457,19 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   The recorded paths are absolute, so it is set only with `JD_NGINX_DIR=/etc/nginx`, and never on a host
   without dpkg. A file named `jd-*` whose first line contains `OwnedMarker` ("Just Dashboard owned") is
   the dashboard's own plumbing — the catch-all default site, a shared log format — and is left out of the
-  listing in sites-available and conf.d, and so is any link in sites-enabled to one; a feature that
-  writes such a file puts the marker on its first line and shows the file itself. `Owner` is filled in by
-  the API, not proxysvc (`markDeploymentRoutes`, `handlers_proxy_vhosts.go`): a name that
-  `deploy.RouteNameFor` spells (`just-dashboard-env-<id>.conf`, on nginx and in the Docker Caddy
-  ingress alike) is joined to `deploy_environments` and `deploy_projects` for the project and
-  environment ids and names, with `archived` when either is archived; a name whose environment no longer
-  exists has none. The Sites page leads such a route to its deployment in place of Edit, Disable,
-  Duplicate and Delete, opens it read-only (its card and a `?site=` link alike), and keeps Edit anyway
-  behind a confirmation; an archived owner's route is the operator's again. The backend does not refuse
+  listing in sites-available and conf.d, and so is any link in sites-enabled to one — but not a link
+  under such a file's name that points at nothing or at another file: nginx refuses every reload over
+  the first and serves the second, so it is listed from sites-enabled like any other link (a link to
+  nothing with its Remove link); a feature that writes such a file puts the marker on its first line
+  and shows the file itself. `Owner` is filled in by the API, not proxysvc (`markDeploymentRoutes`,
+  `handlers_proxy_vhosts.go`): a name that `deploy.RouteNameFor` spells (`just-dashboard-env-<id>.conf`,
+  on nginx and in the Docker Caddy ingress alike) is joined to `deploy_environments` and
+  `deploy_projects` for the project and environment ids and names — an archived project's own name
+  from `archived_name`, as the deploy store reads it, since its `name` column holds an
+  `__jd_archived_<id>_<hex>` tombstone — with `archived` when either is archived; a name whose
+  environment no longer exists has none. The Sites page leads such a route to its deployment in place
+  of Edit, Disable, Duplicate and Delete, opens it read-only (its card and a `?site=` link alike), and
+  keeps Edit anyway behind a confirmation; an archived owner's route is the operator's again. The backend does not refuse
   those verbs on a route, since deployments call proxysvc directly and an administrator may override.
 - **A password file must be readable by the account that reads it.** nginx opens `auth_basic_user_file` in
   a *worker* (www-data/nginx/http), not as the root that wrote it, so a 0640 root:root file is a 403 for

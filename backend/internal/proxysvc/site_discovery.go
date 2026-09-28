@@ -131,11 +131,12 @@ func logFile(target string) string {
 
 // siteWalk gathers what a site file's server blocks do. path is the site's
 // own file: an include written there is followed, one in a file it includes
-// is not.
+// is not. self is path with its links resolved, the name allowedPath gives
+// the file when an include reaches it.
 type siteWalk struct {
-	s        *Service
-	path     string
-	features map[string]bool
+	s          *Service
+	path, self string
+	features   map[string]bool
 }
 
 // siteDetails fills in the site's logs, pools and features from its file,
@@ -146,7 +147,7 @@ func (s *Service) siteDetails(v *VHost, path, text string, inherited logDefaults
 	if err != nil {
 		return
 	}
-	walk := siteWalk{s: s, path: path, features: map[string]bool{}}
+	walk := siteWalk{s: s, path: path, self: resolvedFile(path), features: map[string]bool{}}
 	// A site that forces HTTPS is a redirect block that names no log of its
 	// own beside the block that serves, which does: the log the site writes
 	// is the serving block's, not nginx.conf's. So a log a block names comes
@@ -216,6 +217,13 @@ func (w *siteWalk) server(block []Directive, name string) (string, bool) {
 // expand replaces each include the site's own file writes in block with what
 // it includes: one level deep, and only files the editor would open, as the
 // certificate reading does.
+//
+// The site's own file is never included into itself. Its directives would
+// carry its own path, so they would be expanded again inside the block they
+// were expanded into, without end: a site that includes itself — directly,
+// or through sites-available/* or sites-enabled/* inside a server block —
+// overflowed the stack and took the whole dashboard down on every listing,
+// although nginx never reads such a file while it is disabled.
 func (w *siteWalk) expand(block []Directive) []Directive {
 	out := make([]Directive, 0, len(block))
 	for _, d := range block {
@@ -230,7 +238,7 @@ func (w *siteWalk) expand(block []Directive) []Directive {
 		matches, _ := filepath.Glob(pattern)
 		for _, match := range matches {
 			full, err := w.s.allowedPath(match)
-			if err != nil || w.s.isPasswordFile(full) {
+			if err != nil || full == w.path || full == w.self || w.s.isPasswordFile(full) {
 				continue
 			}
 			b, err := os.ReadFile(full)
