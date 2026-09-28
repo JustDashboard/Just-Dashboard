@@ -8,7 +8,10 @@ export type CertificateFindingInput = {
   certbot?: CertbotState | null
 }
 
-/** A certificate that cannot be read, has expired or is about to, and a renewal nothing runs. */
+/**
+ * A certificate that cannot be read, is a test certificate, has expired or is
+ * about to, and a renewal nothing runs.
+ */
 export function certificateFindings({ certs, certbot }: CertificateFindingInput): ProxyFinding[] {
   const out: ProxyFinding[] = []
 
@@ -22,6 +25,21 @@ export function certificateFindings({ certs, certbot }: CertificateFindingInput)
         detail: cert.error,
         advice:
           "A site pointing at a certificate nginx cannot read fails its next reload. Fix or replace the file, or point the site elsewhere.",
+        meta: "certificate",
+        href: "/proxy/certificates",
+      })
+    } else if (cert.staging) {
+      // Only a site serving it makes it an outage; one nothing names is a
+      // leftover to clear up.
+      out.push({
+        id: `cert.staging.${cert.path}`,
+        level: cert.usedBy.length ? "critical" : "warning",
+        title: `${cert.name} is a test certificate`,
+        detail: `A staging authority signed it, so every browser refuses it.${usedBy}`,
+        advice:
+          cert.source === "certbot"
+            ? "Replace it with a real certificate from the Certificates page, then reload nginx."
+            : "Issue a real certificate for these names from the Certificates page and point the site at it.",
         meta: "certificate",
         href: "/proxy/certificates",
       })

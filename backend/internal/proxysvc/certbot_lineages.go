@@ -50,7 +50,7 @@ func (c renewalConf) staging() bool {
 // as a test one: renewed from a staging authority, or signed by one whatever
 // the configuration says now.
 func (c renewalConf) testCertificate(leaf *x509.Certificate) bool {
-	return c.staging() || strings.HasPrefix(leaf.Issuer.CommonName, "(STAGING)")
+	return c.staging() || stagingIssuer(leaf)
 }
 
 // readRenewalConf reads the configobj file certbot writes: key = value lines,

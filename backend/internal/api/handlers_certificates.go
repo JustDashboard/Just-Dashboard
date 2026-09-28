@@ -99,13 +99,20 @@ func (s *Server) handleCertIssue(w http.ResponseWriter, r *http.Request) error {
 		}
 		credentials = &checked
 	}
+	// IssueArgs forces the renewal only over a test certificate for exactly
+	// these names, so the argv says whether this issuance replaces one.
+	replacing := slices.Contains(args, "--force-renewal")
 	target := strings.Join(req.Domains, ", ")
 	httpx.SetAudit(r, "certificates.issue", target,
-		map[string]any{"method": req.Method, "testRun": req.Staging, "credentialsSaved": credentials != nil, "streamed": true})
+		map[string]any{"method": req.Method, "testRun": req.Staging, "replacesTestCertificate": replacing,
+			"credentialsSaved": credentials != nil, "streamed": true})
 
 	title := "Issuing a certificate for " + target
-	if req.Staging {
+	switch {
+	case req.Staging:
 		title = "Test issuance for " + target
+	case replacing:
+		title = "Replacing the test certificate for " + target
 	}
 	return s.startCertbotJob(w, r, jobs.Spec{
 		Kind: "certbot.issue", Title: title, Target: target, Timeout: 10 * time.Minute,
@@ -120,13 +127,29 @@ func (s *Server) handleCertIssue(w http.ResponseWriter, r *http.Request) error {
 		kept := ""
 		switch {
 		case req.Staging:
-			out.Status("A test run: certbot goes through the whole exchange with the test authority and saves nothing — no certificate is written, and nothing counts against the rate limit.")
-		case slices.Contains(args, "--force-renewal"):
+			// certbot's --dry-run asks its staging authority only when no
+			// other server is named; with one configured it rehearses there.
+			if directory := proxysvc.ACMEDirectoryURL(); directory != "" {
+				out.Status("A test run: certbot goes through the whole exchange with %s and saves nothing — no certificate is written.", directory)
+			} else {
+				out.Status("A test run: certbot goes through the whole exchange with Let's Encrypt's staging authority and saves nothing — no certificate is written, and nothing counts against the real rate limits.")
+			}
+		case replacing:
 			out.Status("These names have a test certificate from a staging authority. certbot replaces it with a real one rather than keeping it until it is due.")
 		default:
 			kept = "certbot did not issue a new certificate: the one these names already have is not due for renewal yet, so it was kept as it is."
 		}
-		return certbotJob(ctx, out, args, kept)
+		if err := certbotJob(ctx, out, args, kept); err != nil {
+			return err
+		}
+		if replacing && args[0] == "certonly" {
+			// certonly writes the files and reloads nothing — the nginx
+			// plugin's own reloads come before them — so nginx holds the test
+			// certificate until it is told to read its files again. An
+			// install run reloads nginx itself.
+			out.Status("The real certificate replaced the test one on disk. A site that names it keeps serving the test one until nginx reloads.")
+		}
+		return nil
 	})
 }
 

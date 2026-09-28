@@ -4,7 +4,13 @@ import { useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { CheckCircle, CloudUpload, RefreshClockwise, ShieldOff } from "@/components/icons"
 import { ApiError, get, post } from "@/lib/api"
-import { certbotRunning } from "@/lib/certificates"
+import {
+  certbotRunning,
+  sameNames,
+  testCertificateReplaced,
+  testRunPassed,
+} from "@/lib/certificates"
+import { notify } from "@/lib/toast"
 import type { Certificate, CertbotState, DNSProvider, Job } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -80,14 +86,20 @@ export function CertificatesPage() {
 
   const counts = useMemo(() => {
     const all = certs.data ?? []
+    // A test certificate is refused like an expired one, and counted there
+    // rather than as expiring: its days say nothing about when it stops working.
+    const readable = all.filter((c) => !c.error)
     return {
       all: all.length,
       certbot: all.filter((c) => c.source === "certbot").length,
       imported: all.filter((c) => c.source === "imported").length,
-      expiring: all.filter((c) => c.expiring && !c.expired && !c.error).length,
-      bad: all.filter((c) => c.expired || Boolean(c.error)).length,
+      expiring: readable.filter((c) => c.expiring && !c.expired && !c.staging).length,
+      unreadable: all.length - readable.length,
+      expired: readable.filter((c) => c.expired && !c.staging).length,
+      test: readable.filter((c) => c.staging).length,
     }
   }, [certs.data])
+  const refused = counts.unreadable + counts.expired + counts.test
 
   const revoke = (name: string) =>
     confirm({
@@ -120,13 +132,31 @@ export function CertificatesPage() {
   // A test run that passed is the moment to issue the real one, with the
   // same names and nothing to retype.
   const job = console_.job
-  const testPassed =
-    job &&
-    job.kind === "certbot.issue" &&
-    job.status === "succeeded" &&
-    job.title.startsWith("Test issuance for")
-      ? job.target
-      : undefined
+  const testPassed = testRunPassed(job)
+
+  // A test certificate replaced on disk is still the one nginx serves: certbot
+  // reloads nothing after certonly. Worth saying only where a site names it.
+  const replacedNames = testCertificateReplaced(job)
+  const servedBy = replacedNames
+    ? (certs.data?.find((c) => c.source === "certbot" && sameNames(c.domains, replacedNames))
+        ?.usedBy ?? [])
+    : []
+  const [reloadedAfter, setReloadedAfter] = useState("")
+  const [reloading, setReloading] = useState(false)
+  const reload = async (after: string, sites: string[]) => {
+    setReloading(true)
+    try {
+      await post("/proxy/reload", { kind: "nginx" })
+      setReloadedAfter(after)
+      notify.success("nginx reloaded", {
+        description: `${sites.join(", ")} ${sites.length === 1 ? "serves" : "serve"} the real certificate now.`,
+      })
+    } catch (err) {
+      notify.error("nginx did not reload", err)
+    } finally {
+      setReloading(false)
+    }
+  }
 
   const renewal = certbotGone
     ? { value: "No certbot", hint: "install it to issue and renew", tone: "default" as const }
@@ -174,10 +204,21 @@ export function CertificatesPage() {
           hint={counts.expiring > 0 ? "inside the 30-day renewal window" : "none within 30 days"}
         />
         <StatTile
-          label="Expired or unreadable"
-          value={certs.data ? counts.bad : "—"}
-          tone={counts.bad > 0 ? "danger" : "default"}
-          hint={counts.bad > 0 ? "browsers refuse these now" : "nothing refused"}
+          label="Refused"
+          value={certs.data ? refused : "—"}
+          tone={refused > 0 ? "danger" : "default"}
+          hint={
+            refused > 0
+              ? [
+                  counts.expired > 0 && `${counts.expired} expired`,
+                  counts.test > 0 &&
+                    `${counts.test} test certificate${counts.test === 1 ? "" : "s"}`,
+                  counts.unreadable > 0 && `${counts.unreadable} unreadable`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
+              : "nothing refused"
+          }
         />
         <StatTile label="Renewal" value={renewal.value} hint={renewal.hint} tone={renewal.tone} />
       </StatGrid>
@@ -206,6 +247,35 @@ export function CertificatesPage() {
           </div>
         </Notice>
       )}
+
+      {job &&
+        replacedNames &&
+        admin &&
+        hasNginx &&
+        servedBy.length > 0 &&
+        reloadedAfter !== job.id && (
+          <Notice
+            tone="warning"
+            icon={RefreshClockwise}
+            title="nginx is still serving the test certificate"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span>
+                The real certificate for {replacedNames.join(", ")} is on disk.{" "}
+                {servedBy.join(", ")} {servedBy.length === 1 ? "keeps" : "keep"} serving the test
+                one until nginx reloads.
+              </span>
+              <Button
+                size="xs"
+                variant="outline"
+                pending={reloading}
+                onClick={() => reload(job.id, servedBy)}
+              >
+                Reload nginx
+              </Button>
+            </div>
+          </Notice>
+        )}
 
       <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_22rem] [&>*]:min-w-0">
         <Panel plain>
@@ -236,7 +306,16 @@ export function CertificatesPage() {
             ) : certs.error ? (
               <ErrorState error={certs.error} />
             ) : certs.data && certs.data.length > 0 ? (
-              <CertificateInventory certs={certs.data} canScan={admin} />
+              <CertificateInventory
+                certs={certs.data}
+                canScan={admin}
+                job={job}
+                onReplace={
+                  admin && !certbotGone
+                    ? (domains) => setIssue({ open: true, domains, staging: false })
+                    : undefined
+                }
+              />
             ) : (
               <EmptyState
                 icon={ShieldOff}
@@ -329,6 +408,7 @@ export function CertificatesPage() {
             initialStaging={issue.staging}
             hasNginx={hasNginx}
             providers={providers.data ?? []}
+            directory={certbot.data?.directory}
             certbotBusy={certbotBusy}
             onStarted={(job) => {
               console_.attach(job)

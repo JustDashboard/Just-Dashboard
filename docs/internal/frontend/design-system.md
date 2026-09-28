@@ -1138,7 +1138,9 @@ Certificates has a searchable inventory beside renewal and DNS management. Each 
 its details — all names, dates, the full path and links to the sites using it — so it takes the lit
 edge; its issuer, expiry and lifetime meter remain on the card. An unreadable certificate carries a
 short verdict on the card and its complete error in the detail sheet; unavailable dates and signing
-status stay unknown, and it draws no invented lifetime.
+status stay unknown, and it draws no invented lifetime. A test certificate — a staging authority's —
+draws no issuer mark, reads "test certificate" and a red meter whatever its days, and carries its
+sentence and its one verb, the real issuance, on a line of its own under the card.
 A watched domain opens a live report and preserves its nonstandard port. Password files and
 watched-domain setup use the deployment settings' rail sections. Certificate renewal lineages and
 DNS providers remain readings with their own actions, laid out to fit the management column. The TLS

@@ -37,6 +37,11 @@ func acmeDirectory() ACMEDirectory {
 	}
 }
 
+// ACMEDirectoryURL is the directory JD_ACME_DIRECTORY names, empty for Let's
+// Encrypt: whom a test run talks to, which is that authority itself rather
+// than Let's Encrypt's staging one when it is set.
+func ACMEDirectoryURL() string { return acmeDirectory().URL }
+
 // configured reports whether anything but the default authority was asked for.
 func (d ACMEDirectory) configured() bool { return d.URL != "" }
 

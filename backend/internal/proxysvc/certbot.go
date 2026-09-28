@@ -55,6 +55,10 @@ type CertbotState struct {
 	// Error is why the lineages could not be read. The renewal fields are
 	// answered regardless: they come from systemd and cron, not from certbot.
 	Error string `json:"error,omitempty"`
+	// Directory is the ACME directory issuance orders from when it is not
+	// Let's Encrypt's, so the page can say whom a test run talks to: that
+	// authority itself, not a staging one, and not under Let's Encrypt's limits.
+	Directory string `json:"directory,omitempty"`
 }
 
 func (s *Service) CertbotState(ctx context.Context) *CertbotState {
@@ -65,6 +69,7 @@ func (s *Service) CertbotState(ctx context.Context) *CertbotState {
 	}
 	state.Available = true
 	state.Version = rt.version
+	state.Directory = ACMEDirectoryURL()
 	// Before the lineages, and whatever they say: whether anything renews
 	// them is a separate question, and a lineage read that failed used to
 	// return before it was asked — every certbot run read as "renewal off".

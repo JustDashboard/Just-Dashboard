@@ -31,6 +31,29 @@ export const certs = [
   },
 ]
 
+/**
+ * A certificate a staging authority signed, as the inventory lists one:
+ * certbot's own, served by a site, with eighty days that mean nothing.
+ */
+export function stagingCertificate(overrides: Record<string, unknown> = {}) {
+  return {
+    name: "test.example.com",
+    path: "/etc/letsencrypt/live/test.example.com/fullchain.pem",
+    domains: ["test.example.com", "www.test.example.com"],
+    issuer: "(STAGING) Riddling Rhubarb R12",
+    notBefore: yesterday,
+    notAfter: new Date(Date.now() + 80 * 86_400_000).toISOString(),
+    daysLeft: 80,
+    expired: false,
+    expiring: false,
+    selfSigned: false,
+    source: "certbot",
+    usedBy: ["test.example.com"],
+    staging: true,
+    ...overrides,
+  }
+}
+
 /** certbot's state on the mocked host, with whatever a test needs changed. */
 export function certbotState(overrides: Record<string, unknown> = {}) {
   return {

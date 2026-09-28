@@ -1,6 +1,6 @@
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test"
-import { certs, inThirtyDays, json, mockProxy, mockShowcase, now } from "./proxy-fixtures"
-import { certbotJob, certbotState } from "./fixtures/proxy/certs"
+import { certs, inThirtyDays, json, mockProxy, mockShowcase, now, user } from "./proxy-fixtures"
+import { certbotJob, certbotState, stagingCertificate } from "./fixtures/proxy/certs"
 import { healthyOperations, mockProject } from "./deploy-fixture"
 import type { DeploymentDomainRoute } from "../../src/lib/types"
 
@@ -239,8 +239,8 @@ test("a staging lineage reads as a test certificate, and its verb is the real is
   const issued = await capture(page, "**/api/v1/certificates/issue", () =>
     certbotJob({
       kind: "certbot.issue",
-      title: "Issuing a certificate for test.example.com",
-      target: "test.example.com www.test.example.com",
+      title: "Replacing the test certificate for test.example.com, www.test.example.com",
+      target: "test.example.com, www.test.example.com",
     }),
   )
   await page.goto("/proxy/certificates")
@@ -262,7 +262,7 @@ test("a staging lineage reads as a test certificate, and its verb is the real is
   await expect(page.getByRole("menuitem", { name: "Force renewal" })).toHaveCount(0)
   await page.keyboard.press("Escape")
 
-  await row.getByRole("button", { name: "Issue real certificate" }).click()
+  await row.getByRole("button", { name: "Replace with a real certificate" }).click()
   const dialog = page.getByRole("dialog")
   await expect(dialog.getByLabel("Domains")).toHaveValue("test.example.com www.test.example.com")
   await expect(dialog.getByRole("switch", { name: /Test run first/ })).not.toBeChecked()
@@ -277,6 +277,10 @@ test("a staging lineage reads as a test certificate, and its verb is the real is
     domains: ["test.example.com", "www.test.example.com"],
   })
   expect(renewals).toHaveLength(0)
+  // The job names the certificate by its names, and the lineage holding
+  // them says what is happening to it.
+  await expect(row.getByText("Replacing…")).toBeVisible()
+  await expect(row.getByRole("button", { name: "Replace with a real certificate" })).toBeDisabled()
 })
 
 test("a test certificate's lineage fits a phone with its verb", async ({ page }) => {
@@ -284,7 +288,7 @@ test("a test certificate's lineage fits a phone with its verb", async ({ page })
   await mockProxy(page, { included: true })
   await mockStagingLineage(page)
   await page.goto("/proxy/certificates")
-  const verb = page.getByRole("button", { name: "Issue real certificate" })
+  const verb = page.getByRole("button", { name: "Replace with a real certificate" })
   await verb.scrollIntoViewIfNeeded()
   await expect(verb).toBeInViewport({ ratio: 1 })
   expect(
@@ -292,6 +296,257 @@ test("a test certificate's lineage fits a phone with its verb", async ({ page })
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
     ),
   ).toBe(true)
+})
+
+/** The inventory with one test certificate among the mocked ones. */
+async function mockStagingInventory(page: Page, overrides: Record<string, unknown> = {}) {
+  await page.route("**/api/v1/certificates/", (route) =>
+    json(route, [stagingCertificate(overrides), ...certs]),
+  )
+}
+
+test("a test certificate in the inventory reads as one, without the Let's Encrypt mark, and its verb is the real issuance", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockStagingInventory(page)
+  const issued = await capture(page, "**/api/v1/certificates/issue", () =>
+    certbotJob({
+      kind: "certbot.issue",
+      title: "Replacing the test certificate for test.example.com, www.test.example.com",
+      target: "test.example.com, www.test.example.com",
+      status: "succeeded",
+    }),
+  )
+  await page.goto("/proxy/certificates")
+
+  // Refused like an expired one, and not counted as expiring.
+  const refused = page.locator("[data-slot='stat-grid']")
+  await expect(refused.getByText("Refused", { exact: true })).toBeVisible()
+  await expect(refused.getByText("1 expired · 1 test certificate")).toBeVisible()
+
+  const inventory = page
+    .getByRole("list", { name: "Installed certificates" })
+    .locator("[data-slot='choice-row']")
+  const card = inventory.filter({ hasText: "(STAGING) Riddling Rhubarb R12" })
+  // Refused, so ahead of the one merely expiring: after the expired one,
+  // whose days are fewer, and before app.example.com's twenty-nine.
+  await expect(inventory.nth(0)).toContainText("old.example.com")
+  await expect(inventory.nth(1)).toContainText("test.example.com")
+  await expect(inventory.nth(2)).toContainText("app.example.com")
+  await expect(card.getByText("test certificate", { exact: true })).toBeVisible()
+  await expect(card.getByText("80d left")).toHaveCount(0)
+  await expect(card.locator("img[src='/logos/lets-encrypt.svg']")).toHaveCount(0)
+  await expect(
+    card.getByText(
+      "A staging authority signed it, so browsers refuse it. A real issuance for the same names replaces it.",
+    ),
+  ).toBeVisible()
+  await expect(card.getByRole("meter").locator(".bg-destructive")).toHaveCount(1)
+
+  // The detail surface says it too, with the same verb as its one command.
+  await card.getByRole("button", { name: "Inspect test.example.com" }).click()
+  const sheet = page.getByRole("dialog")
+  await expect(sheet.getByText("A test certificate")).toBeVisible()
+  await expect(sheet.locator("img[src='/logos/lets-encrypt.svg']")).toHaveCount(0)
+  await sheet.getByRole("button", { name: "Replace with a real certificate" }).click()
+
+  const dialog = page.getByRole("dialog", { name: "Issue a certificate" })
+  await expect(dialog.getByLabel("Domains")).toHaveValue("test.example.com www.test.example.com")
+  await expect(dialog.getByRole("switch", { name: /Test run first/ })).not.toBeChecked()
+  await dialog.getByLabel("Contact email").fill("ops@example.com")
+  await dialog.getByRole("radio", { name: "A folder", exact: true }).click()
+  await dialog.getByRole("button", { name: "Issue", exact: true }).click()
+  await expect(dialog).toBeHidden()
+  expect(issued[0]).toMatchObject({
+    staging: false,
+    domains: ["test.example.com", "www.test.example.com"],
+  })
+
+  // The card's own verb opens the same issuance.
+  await card.getByRole("button", { name: "Replace with a real certificate" }).click()
+  await expect(
+    page.getByRole("dialog", { name: "Issue a certificate" }).getByLabel("Domains"),
+  ).toHaveValue("test.example.com www.test.example.com")
+})
+
+test("a test certificate a site names outside certbot is issued for, not replaced", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockStagingInventory(page, {
+    path: "/etc/nginx/ssl/test.example.com.crt",
+    name: "test.example.com",
+    source: "nginx:test.example.com",
+  })
+  await page.goto("/proxy/certificates")
+  const card = page
+    .getByRole("list", { name: "Installed certificates" })
+    .getByRole("listitem")
+    .filter({ hasText: "(STAGING) Riddling Rhubarb R12" })
+  await expect(card.getByText(/point the site at it/)).toBeVisible()
+  await expect(card.getByRole("button", { name: "Replace with a real certificate" })).toHaveCount(0)
+  await card.getByRole("button", { name: "Issue a real certificate" }).click()
+  await expect(page.getByRole("dialog").getByLabel("Domains")).toHaveValue(
+    "test.example.com www.test.example.com",
+  )
+})
+
+test("replacing a test certificate says so while it runs, then offers the reload its sites need", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockStagingInventory(page)
+  await mockStagingLineage(page)
+  const stream = await holdJobStreams(page)
+  const running = certbotJob({
+    kind: "certbot.issue",
+    title: "Replacing the test certificate for test.example.com, www.test.example.com",
+    target: "test.example.com, www.test.example.com",
+  })
+  await capture(page, "**/api/v1/certificates/issue", () => running)
+  const reloads = await capture(page, "**/api/v1/proxy/reload", () => ({ reloaded: true }))
+  await page.goto("/proxy/certificates")
+
+  const card = page
+    .getByRole("list", { name: "Installed certificates" })
+    .getByRole("listitem")
+    .filter({ hasText: "(STAGING) Riddling Rhubarb R12" })
+  await card.getByRole("button", { name: "Replace with a real certificate" }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByLabel("Contact email").fill("ops@example.com")
+  await dialog.getByRole("radio", { name: "A folder", exact: true }).click()
+  await dialog.getByRole("button", { name: "Issue", exact: true }).click()
+  await expect(dialog).toBeHidden()
+
+  // The card and the lineage both say what is happening, and neither can
+  // start a second certbot run.
+  await expect(card.getByText("Replacing…")).toBeVisible()
+  await expect(card.getByRole("button", { name: "Replace with a real certificate" })).toBeDisabled()
+  const lineage = page
+    .getByRole("list", { name: "certbot lineages" })
+    .getByRole("listitem")
+    .filter({ hasText: "test.example.com" })
+  await expect(lineage.getByText("Replacing…")).toBeVisible()
+  await expect(page.getByText("nginx is still serving the test certificate")).toHaveCount(0)
+
+  // certbot writes the files and reloads nothing: the site still serves the
+  // test certificate, and the page says so and offers the reload.
+  stream.finish({ ...running, status: "succeeded", endedAt: now })
+  const notice = page.getByText("nginx is still serving the test certificate")
+  await expect(notice).toBeVisible()
+  await expect(
+    page.getByText(/test\.example\.com keeps serving the test one until nginx reloads/),
+  ).toBeVisible()
+  await page.getByRole("button", { name: "Reload nginx" }).click()
+  await expect(page.getByText("test.example.com serves the real certificate now.")).toBeVisible()
+  await expect(notice).toHaveCount(0)
+  expect(reloads).toEqual([{ kind: "nginx" }])
+})
+
+test("a replaced test certificate nothing serves asks for no reload", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await mockStagingInventory(page, { usedBy: [] })
+  await capture(page, "**/api/v1/certificates/issue", () =>
+    certbotJob({
+      kind: "certbot.issue",
+      title: "Replacing the test certificate for test.example.com, www.test.example.com",
+      target: "test.example.com, www.test.example.com",
+      status: "succeeded",
+    }),
+  )
+  await page.goto("/proxy/certificates")
+  await page.getByRole("button", { name: "Replace with a real certificate" }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByLabel("Contact email").fill("ops@example.com")
+  await dialog.getByRole("radio", { name: "A folder", exact: true }).click()
+  await dialog.getByRole("button", { name: "Issue", exact: true }).click()
+  await expect(dialog).toBeHidden()
+  await expect(
+    page.getByText("Replacing the test certificate for test.example.com").first(),
+  ).toBeVisible()
+  await expect(page.getByText("nginx is still serving the test certificate")).toHaveCount(0)
+})
+
+test("a read-only account reads a test certificate for what it is, with nothing to press", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockStagingInventory(page)
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, { ...user, capabilities: ["read"], user: { ...user.user, role: "viewer" } }),
+  )
+  await page.goto("/proxy/certificates")
+  const card = page
+    .getByRole("list", { name: "Installed certificates" })
+    .getByRole("listitem")
+    .filter({ hasText: "(STAGING) Riddling Rhubarb R12" })
+  await expect(card.getByText("test certificate", { exact: true })).toBeVisible()
+  await expect(
+    card.getByText("A staging authority signed it, so browsers refuse it.", { exact: true }),
+  ).toBeVisible()
+  await expect(card.getByRole("button", { name: /real certificate/ })).toHaveCount(0)
+  await page.getByRole("button", { name: "Inspect test.example.com" }).click()
+  await expect(
+    page.getByRole("dialog").getByRole("button", { name: /real certificate/ }),
+  ).toHaveCount(0)
+})
+
+test("a test certificate is a finding on the overview", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await mockStagingInventory(page)
+  await page.goto("/proxy")
+  const finding = page.getByRole("button", { name: /^test\.example\.com is a test certificate/ })
+  await expect(finding).toBeVisible()
+  await finding.click()
+  await expect(
+    page.getByText(
+      "A staging authority signed it, so every browser refuses it. Used by test.example.com.",
+    ),
+  ).toBeVisible()
+})
+
+test("a test certificate's card fits a phone with its verb", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  await mockStagingInventory(page)
+  await page.goto("/proxy/certificates")
+  const verb = page
+    .getByRole("list", { name: "Installed certificates" })
+    .getByRole("button", { name: "Replace with a real certificate" })
+  await verb.scrollIntoViewIfNeeded()
+  await expect(verb).toBeInViewport({ ratio: 1 })
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+    ),
+  ).toBe(true)
+  await page.getByRole("button", { name: "Inspect test.example.com" }).click()
+  const sheet = page.getByRole("dialog")
+  const command = sheet.getByRole("button", { name: "Replace with a real certificate" })
+  await expect(command).toBeInViewport({ ratio: 1 })
+  expect(await sheet.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
+    true,
+  )
+})
+
+test("with its own ACME authority the issue form names it, and quotes no Let's Encrypt limits", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/certificates/certbot", (route) =>
+    json(route, certbotState({ directory: "https://ca.internal:9000/acme/acme/directory" })),
+  )
+  await page.goto("/proxy/certificates")
+  await page.getByRole("button", { name: "Issue certificate", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await expect(
+    dialog.getByText(/goes through the whole exchange with ca\.internal:9000 and saves nothing/),
+  ).toBeVisible()
+  await expect(dialog.getByText(/staging authority/)).toHaveCount(0)
+  await dialog.getByRole("switch", { name: /Test run first/ }).click()
+  await expect(dialog.getByRole("button", { name: "Issue", exact: true })).toBeVisible()
+  await expect(dialog.getByText("This counts against the rate limit")).toHaveCount(0)
 })
 
 test("lineages that cannot be read say so, and the renewal reading still stands", async ({

@@ -316,6 +316,76 @@ func TestIssueSaysWhenCertbotKeptTheCertificate(t *testing.T) {
 	}
 }
 
+// A real issuance over a lineage renewed from a staging authority replaces
+// it, says so in its title, and says what nginx is still serving: certonly
+// writes the files and reloads nothing.
+func TestIssueOverATestCertificateReplacesItAndSaysNginxHasNotSeenIt(t *testing.T) {
+	host := useFakeCertbot(t, "webroot")
+	c, s := newClient(t)
+	certPath := host.lineage(t, "app.example.com", "app.example.com")
+	conf := filepath.Join(host.letsencrypt, "renewal", "app.example.com.conf")
+	raw, err := os.ReadFile(conf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staged := strings.Replace(string(raw), "https://acme-v02.", "https://acme-staging-v02.", 1)
+	if err := os.WriteFile(conf, []byte(staged), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	replacement := filepath.Join(t.TempDir(), "real.pem")
+	realPEM, _ := testCertificate(t, []string{"app.example.com"})
+	if err := os.WriteFile(replacement, []byte(realPEM), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("JD_TEST_CERTBOT_REPLACE", replacement)
+	t.Setenv("JD_TEST_CERTBOT_TARGET", certPath)
+
+	w := c.do(http.MethodPost, "/api/v1/certificates/issue",
+		`{"domains":["app.example.com"],"email":"ops@example.com","method":"webroot","webRoot":"/var/www/html"}`, nil)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("issue = %d: %s", w.Code, w.Body.String())
+	}
+	job := decodeJob(t, w.Body.Bytes())
+	if job.Title != "Replacing the test certificate for app.example.com" {
+		t.Fatalf("title = %q", job.Title)
+	}
+	if final := waitForJob(t, s, job.ID); final.Status != jobs.StatusSucceeded {
+		t.Fatalf("job = %+v", final)
+	}
+	if argv := host.argv(t); !strings.Contains(argv, "--force-renewal") || strings.Contains(argv, "--dry-run") {
+		t.Fatalf("certbot ran as:\n%s", argv)
+	}
+	text := jobText(t, s, job.ID)
+	if !strings.Contains(text, "certbot replaces it with a real one") ||
+		!strings.Contains(text, "keeps serving the test one until nginx reloads") ||
+		strings.Contains(text, "did not issue") {
+		t.Fatalf("job output:\n%s", text)
+	}
+}
+
+// With JD_ACME_DIRECTORY set, certbot's --dry-run rehearses with that
+// authority rather than Let's Encrypt's staging one, and the job says which.
+func TestIssueTestRunNamesTheAuthorityItRehearsesWith(t *testing.T) {
+	host := useFakeCertbot(t, "webroot")
+	t.Setenv("JD_ACME_DIRECTORY", "https://ca.internal:9000/acme/acme/directory")
+	c, s := newClient(t)
+	w := c.do(http.MethodPost, "/api/v1/certificates/issue",
+		`{"domains":["app.example.com"],"email":"ops@example.com","method":"webroot","webRoot":"/var/www/html","staging":true}`, nil)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("issue = %d: %s", w.Code, w.Body.String())
+	}
+	job := decodeJob(t, w.Body.Bytes())
+	waitForJob(t, s, job.ID)
+	if argv := host.argv(t); !strings.Contains(argv, "--dry-run --server https://ca.internal:9000/acme/acme/directory") {
+		t.Fatalf("certbot ran as:\n%s", argv)
+	}
+	text := jobText(t, s, job.ID)
+	if !strings.Contains(text, "with https://ca.internal:9000/acme/acme/directory and saves nothing") ||
+		strings.Contains(text, "Let's Encrypt") {
+		t.Fatalf("job output:\n%s", text)
+	}
+}
+
 // Importing under a name already in use is a 409 that says what is there;
 // replacing it is a separate, explicit request.
 func TestCertImportRefusesAnExistingNameUnlessReplacing(t *testing.T) {

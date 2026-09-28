@@ -174,3 +174,19 @@ func TestCertbotSerialsChangeOnlyWhenTheCertificateDoes(t *testing.T) {
 		t.Fatal("a renewed certificate kept its serial")
 	}
 }
+
+// With JD_ACME_DIRECTORY set a test run rehearses with that authority, not
+// Let's Encrypt's staging one, and the page has to be able to say so.
+func TestCertbotStateNamesAConfiguredAuthority(t *testing.T) {
+	useLetsencryptDir(t, t.TempDir())
+	fakeCertbot(t, "webroot")
+	fakeSystemctl(t, "certbot.timer")
+	t.Setenv("JD_ACME_DIRECTORY", "")
+	if state := New(t.TempDir(), "").CertbotState(context.Background()); state.Directory != "" {
+		t.Fatalf("Let's Encrypt reads as %q", state.Directory)
+	}
+	t.Setenv("JD_ACME_DIRECTORY", "https://ca.internal:9000/acme/acme/directory")
+	if state := New(t.TempDir(), "").CertbotState(context.Background()); state.Directory != "https://ca.internal:9000/acme/acme/directory" {
+		t.Fatalf("directory = %q", state.Directory)
+	}
+}

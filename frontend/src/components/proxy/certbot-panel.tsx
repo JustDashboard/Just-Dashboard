@@ -12,7 +12,7 @@ import {
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, post } from "@/lib/api"
-import { certbotRunning, lineageActivity, parseDomains } from "@/lib/certificates"
+import { authorityName, certbotRunning, lineageActivity, parseDomains } from "@/lib/certificates"
 import type { CertbotCert, CertbotState, DNSProvider, Job } from "@/lib/types"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Field, OptionList, OptionRow } from "@/components/form"
@@ -147,7 +147,7 @@ export function CertbotLineages({
       return [
         {
           key: "replace",
-          label: "Issue real certificate",
+          label: "Replace with a real certificate",
           icon: ShieldCheck,
           inline: true,
           disabled: waiting,
@@ -203,8 +203,7 @@ export function CertbotLineages({
       )}
       <ul aria-label="certbot lineages" className="animate-rise divide-y divide-hairline">
         {state.certs.map((cert) => {
-          const activity =
-            lineageActivity(job, cert.name) ?? (busy === cert.name ? "Renewing…" : "")
+          const activity = lineageActivity(job, cert) ?? (busy === cert.name ? "Renewing…" : "")
           return (
             <li key={cert.name} className="space-y-3 py-4 first:pt-1">
               <div className="flex min-w-0 items-center gap-3">
@@ -239,10 +238,10 @@ export function CertbotLineages({
                   <Status state="activating" label={activity} />
                 ) : cert.error ? (
                   <Status verdict="critical" label="unreadable" />
-                ) : !cert.valid ? (
-                  <Status verdict="critical" label="expired" />
                 ) : cert.staging ? (
                   <Status verdict="critical" label="test certificate" />
+                ) : !cert.valid ? (
+                  <Status verdict="critical" label="expired" />
                 ) : (
                   <Status
                     verdict={cert.daysLeft <= 30 ? "warning" : "ok"}
@@ -277,6 +276,7 @@ function LineageLife({ cert }: { cert: CertbotCert }) {
         daysLeft: cert.daysLeft,
         expired: !cert.valid,
         expiring: cert.valid && cert.daysLeft <= 30,
+        staging: cert.staging,
       }}
     />
   )
@@ -451,6 +451,8 @@ export function DnsProvidersPanel({
  *
  * A test run is on by default, and the page offers the real run once one has
  * passed — the real limit is five failures an hour and it is easy to reach.
+ * The test run is certbot's --dry-run: the whole exchange, nothing saved, so
+ * a passing one leaves nothing behind for the real issuance to trip over.
  */
 export function IssueDialog({
   open,
@@ -459,6 +461,7 @@ export function IssueDialog({
   initialStaging = true,
   hasNginx,
   providers,
+  directory,
   certbotBusy,
   onStarted,
 }: {
@@ -468,6 +471,8 @@ export function IssueDialog({
   initialStaging?: boolean
   hasNginx: boolean
   providers: DNSProvider[]
+  /** The ACME directory certbot orders from when it is not Let's Encrypt's. */
+  directory?: string
   /** A certbot run is on screen: this one would fail on its lock. */
   certbotBusy: boolean
   onStarted: (job: Job) => void
@@ -481,6 +486,7 @@ export function IssueDialog({
       initialStaging={initialStaging}
       hasNginx={hasNginx}
       providers={providers}
+      directory={directory}
       certbotBusy={certbotBusy}
       onStarted={onStarted}
     />
@@ -494,6 +500,7 @@ function IssueDialogBody({
   initialStaging,
   hasNginx,
   providers,
+  directory,
   certbotBusy,
   onStarted,
 }: {
@@ -503,9 +510,14 @@ function IssueDialogBody({
   initialStaging: boolean
   hasNginx: boolean
   providers: DNSProvider[]
+  directory?: string
   certbotBusy: boolean
   onStarted: (job: Job) => void
 }) {
+  // A configured authority is rehearsed with itself — certbot's --dry-run
+  // goes to Let's Encrypt's staging endpoint only when no other is named —
+  // and Let's Encrypt's limits say nothing about it.
+  const authority = directory ? authorityName(directory) : undefined
   const [domains, setDomains] = useState(initialDomains ?? "")
   const [email, setEmail] = useState("")
   // Through nginx where there is one to answer the challenge; standalone
@@ -562,7 +574,11 @@ function IssueDialogBody({
       open={open}
       onOpenChange={onOpenChange}
       title="Issue a certificate"
-      description="Let's Encrypt proves you control the domain, then signs a certificate for ninety days. The renewal is automatic once the first one works."
+      description={
+        authority
+          ? `${authority} checks you control the domain, then signs a certificate. The renewal is automatic once the first one works.`
+          : "Let's Encrypt proves you control the domain, then signs a certificate for ninety days. The renewal is automatic once the first one works."
+      }
       footer={
         <>
           {certbotBusy && (
@@ -707,7 +723,7 @@ function IssueDialogBody({
               <Field
                 label="Propagation wait"
                 htmlFor="dns-wait"
-                hint={`Seconds certbot waits for the record to spread before Let's Encrypt looks; ${provider.defaultWait} when empty. A first-try failure is almost always this being too short.`}
+                hint={`Seconds certbot waits for the record to spread before ${authority ?? "Let's Encrypt"} looks; ${provider.defaultWait} when empty. A first-try failure is almost always this being too short.`}
                 error={waitInvalid ? "A whole number of seconds from 1 to 3600." : undefined}
               >
                 <Input
@@ -740,12 +756,16 @@ function IssueDialogBody({
         <OptionList>
           <OptionRow
             title="Test run first"
-            hint="certbot goes through the whole exchange with Let's Encrypt's staging authority and saves nothing. The real limit is five failures an hour and it is easy to reach, so this is the right first attempt."
+            hint={
+              authority
+                ? `certbot goes through the whole exchange with ${authority} and saves nothing, so a mistake is found before anything is written.`
+                : "certbot goes through the whole exchange with Let's Encrypt's staging authority and saves nothing. The real limit is five failures an hour and it is easy to reach, so this is the right first attempt."
+            }
             checked={staging}
             onCheckedChange={setStaging}
           />
         </OptionList>
-        {!staging && (
+        {!staging && !authority && (
           <Notice tone="warning" icon={Warning} title="This counts against the rate limit">
             Five failed attempts an hour for the same set of names, and five duplicate certificates
             a week. Get a test run to pass first.

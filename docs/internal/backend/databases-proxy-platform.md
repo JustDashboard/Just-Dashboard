@@ -403,7 +403,14 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   hold a test certificate (a lineage renewed from a staging authority, or one a staging authority
   signed) adds `--force-renewal`; with `JD_ACME_DIRECTORY` both name `--server`. The page offers that
   issuance on a test lineage in place of Renew, since certbot renews from the authority the lineage's
-  configuration names. **One certbot** (`certbot_runtime.go`): the host's when the host has one, this
+  configuration names. Such a job is titled "Replacing the test certificate for …", audited with
+  `replacesTestCertificate`, and ends by saying a site naming the certificate keeps serving the test
+  one until nginx reloads: certonly reloads nothing. `Certificate.Staging` (`certs.go`,
+  `stagingIssuer`) flags any certificate a staging authority signed — an issuer named `(STAGING) …`, or
+  `Fake LE …` from before 2020 — wherever it is found (certbot, an import, a site's file, a live
+  check); the name is the tell, since a staging chain fails verification exactly as a private CA's
+  does. An import of one says so in place of the chain's verdict. `CertbotState.Directory` is the
+  configured `JD_ACME_DIRECTORY`, so the page says whom a test run rehearses with. **One certbot** (`certbot_runtime.go`): the host's when the host has one, this
   process's own otherwise, for the version, the plugin list (`certbot plugins`, cached a minute, run
   in a directory `mktemp -d` makes for each probe on certbot's side, mode 0700, removed after it, so
   the probe never holds the lock a renewal timer needs and never runs as root in a directory another

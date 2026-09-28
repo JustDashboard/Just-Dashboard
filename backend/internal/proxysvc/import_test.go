@@ -427,3 +427,24 @@ func TestImportFindsNoLeafForAForeignKey(t *testing.T) {
 		t.Fatalf("foreign key = %v", err)
 	}
 }
+
+// A staging certificate is a test one whatever its chain, and the chain's own
+// verdict — "an intermediate is missing" — would send the reader looking for
+// something that does not exist.
+func TestImportSaysAStagingCertificateIsATestOne(t *testing.T) {
+	useImportedDir(t)
+	t.Setenv("JD_ACME_CA_ROOT", "")
+	root := newAuthority(t, "(STAGING) Pretend Pear X1", nil)
+	intermediate := newAuthority(t, "(STAGING) Riddling Rhubarb R12", root)
+	_, leafPEM, keyPEM := intermediate.issue(t, []string{"test.example.com"}, time.Now().Add(80*24*time.Hour))
+	res, err := ImportCertificate("test", leafPEM+certPEM(intermediate.cert), keyPEM, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	warnings := strings.Join(res.Warnings, " ")
+	if !res.Cert.Staging || res.ChainComplete ||
+		!strings.Contains(warnings, "A staging authority signed this certificate") ||
+		strings.Contains(warnings, "does not reach a root") {
+		t.Fatalf("staging import = staging %v, complete %v, warnings %q", res.Cert.Staging, res.ChainComplete, res.Warnings)
+	}
+}

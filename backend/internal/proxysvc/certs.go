@@ -36,6 +36,11 @@ type Certificate struct {
 	// so one can be compared by eye with what a browser or a CA shows.
 	Fingerprint string `json:"fingerprint,omitempty"`
 	Serial      string `json:"serial,omitempty"`
+	// Staging is a test certificate: a staging authority signed it, so every
+	// browser refuses it however many days it has left. certbot's old test
+	// run left these where sites could name them, and one read as a healthy
+	// Let's Encrypt certificate.
+	Staging bool `json:"staging,omitempty"`
 }
 
 // expiryWarningDays matches Let's Encrypt's own renewal window: certbot
@@ -182,10 +187,21 @@ func summarise(c *x509.Certificate, name, path string) *Certificate {
 	cert.Expired = time.Now().After(c.NotAfter)
 	cert.Expiring = !cert.Expired && cert.DaysLeft <= expiryWarningDays
 	cert.SelfSigned = c.Issuer.String() == c.Subject.String()
+	cert.Staging = stagingIssuer(c)
 	sum := sha256.Sum256(c.Raw)
 	cert.Fingerprint = colonHex(sum[:])
 	cert.Serial = colonHex(c.SerialNumber.Bytes())
 	return cert
+}
+
+// stagingIssuer reports a certificate a staging authority signed, by the name
+// Let's Encrypt gives every staging intermediate: "(STAGING) Riddling Rhubarb
+// R12" now, "Fake LE Intermediate X1" before its 2020 hierarchy. The name is
+// the tell: a staging chain fails verification exactly as a private CA's
+// does, so trust alone cannot say which of the two a certificate is.
+func stagingIssuer(c *x509.Certificate) bool {
+	name := c.Issuer.CommonName
+	return strings.HasPrefix(name, "(STAGING)") || strings.HasPrefix(name, "Fake LE ")
 }
 
 // CheckDomain opens a TLS connection and reports what the domain is actually

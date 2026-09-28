@@ -140,7 +140,11 @@ func importCertificate(name, certPEM, keyPEM string, opts importOptions) (*Impor
 	res.Cert = summarise(leaf, name, res.CertPath)
 	res.Cert.Source = "imported"
 	res.ChainComplete = chain.complete
-	res.Warnings = append(res.Warnings, chain.warnings(len(certs))...)
+	if res.Cert.Staging {
+		res.Warnings = append(res.Warnings,
+			"A staging authority signed this certificate: it is a test certificate, and every browser refuses it. Issue a real one for these names instead.")
+	}
+	res.Warnings = append(res.Warnings, chain.warnings(len(certs), res.Cert.Staging)...)
 	if res.Cert.Expired {
 		res.Warnings = append(res.Warnings, "This certificate has already expired.")
 	} else if res.Cert.DaysLeft <= expiryWarningDays {
@@ -371,11 +375,14 @@ func trustedChain(certs []*x509.Certificate) (bool, string) {
 	return true, ""
 }
 
-// warnings says what the reader should know about the chain as saved.
-func (c importChain) warnings(supplied int) []string {
+// warnings says what the reader should know about the chain as saved. A
+// staging chain reaches no root anything trusts by design, so it gets no
+// verdict here: "an intermediate is missing" would send the reader looking
+// for one, when the staging warning is the whole story.
+func (c importChain) warnings(supplied int, staging bool) []string {
 	var out []string
 	switch {
-	case c.complete:
+	case c.complete || staging:
 	case len(c.certs) == 1:
 		out = append(out, "Only the leaf certificate was supplied, or none of the others signed it. Desktop browsers usually paper over a missing intermediate from cache; phones, curl and payment gateways do not. Paste the full chain if your authority provided one.")
 	default:

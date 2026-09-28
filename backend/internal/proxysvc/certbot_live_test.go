@@ -55,7 +55,11 @@ func TestLiveCertbotTestRunSavesNothingAndARealIssuanceReplacesAStagingLineage(t
 }}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Pebble refuses 5% of nonces by default to exercise a client's retry,
+	// and certbot retries once: a run of a dozen requests failed now and then
+	// on that alone, which is Pebble testing certbot rather than this test.
 	pebble := docker("run", "-d", "-e", "PEBBLE_VA_ALWAYS_VALID=1", "-e", "PEBBLE_VA_NOSLEEP=1",
+		"-e", "PEBBLE_WFE_NONCEREJECT=0",
 		"-v", pebbleConfig+":/test/config/pebble-config.json:ro",
 		"-p", "127.0.0.1::14000", "ghcr.io/letsencrypt/pebble:latest")
 	defer hostexec.Command(context.Background(), "docker", "rm", "-f", "-v", pebble).Run()
@@ -151,6 +155,9 @@ func TestLiveCertbotTestRunSavesNothingAndARealIssuanceReplacesAStagingLineage(t
 	if err := os.WriteFile(confPath, []byte(staged), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if lineages, err := readCertbotLineages(config); err != nil || len(lineages) != 1 || !lineages[0].Staging {
+		t.Fatalf("a lineage renewed from staging is not flagged: %+v %v", lineages, err)
+	}
 	out, args = issue(false)
 	if !strings.Contains(strings.Join(args, " "), "--force-renewal") {
 		t.Fatalf("no --force-renewal over a staging lineage: %q", args)
@@ -161,5 +168,8 @@ func TestLiveCertbotTestRunSavesNothingAndARealIssuanceReplacesAStagingLineage(t
 	}
 	if conf, err := readRenewalConf(confPath); err != nil || conf.staging() {
 		t.Fatalf("the lineage still renews from staging: %+v %v", conf, err)
+	}
+	if lineages, err := readCertbotLineages(config); err != nil || len(lineages) != 1 || lineages[0].Staging {
+		t.Fatalf("the replaced lineage still reads as a test certificate: %+v %v", lineages, err)
 	}
 }

@@ -16,6 +16,8 @@ export type Certificate = {
   /** SHA-256 of the DER and the serial, in openssl's uppercase colon form. */
   fingerprint?: string
   serial?: string
+  /** A test certificate: a staging authority signed it, so browsers refuse it whatever its days. */
+  staging?: boolean
 }
 
 export type CertbotCert = {
@@ -44,6 +46,11 @@ export type CertbotState = {
   renewUnit?: string
   /** Why the lineages could not be read; the renewal fields are answered regardless. */
   error?: string
+  /**
+   * The ACME directory issuance orders from when it is not Let's Encrypt's: a
+   * test run rehearses with that authority itself, under its own limits.
+   */
+  directory?: string
 }
 
 /** A certbot DNS plugin — the only way to a wildcard, or past a CDN. */
