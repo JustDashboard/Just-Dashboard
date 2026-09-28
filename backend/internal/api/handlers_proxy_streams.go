@@ -242,6 +242,10 @@ func (s *Server) handleStreamApply(w http.ResponseWriter, r *http.Request) error
 		"listen": req.Spec.Listen, "protocol": req.Spec.Protocol, "upstream": req.Spec.Upstream,
 		"reloaded": res.Reloaded,
 	}
+	if len(req.Spec.Servers) > 0 {
+		detail["servers"] = len(req.Spec.Servers)
+		detail["balance"] = req.Spec.Balance
+	}
 	if res.Renamed != "" {
 		detail["renamedFrom"] = res.Renamed
 	}

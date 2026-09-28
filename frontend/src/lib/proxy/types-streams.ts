@@ -13,8 +13,17 @@ export type StreamSpec = {
    * ended at the first reply. It leaves TCP alone, and is absent for TCP only.
    */
   udpMode?: "session" | "request"
-  /** host:port, or unix:/path for a local socket. */
+  /** host:port, or unix:/path for a local socket. With a pool, its first server's address. */
   upstream: string
+  /**
+   * The pool, when there is more than one server. The server folds a pool
+   * of one into `upstream`: nginx weighs, counts and retries nothing for it.
+   */
+  servers?: StreamServer[]
+  /** How connections spread over the pool. Absent is round robin; absent with one server. */
+  balance?: StreamBalance
+  /** Stop nginx trying the next server when one fails to accept. Only a pool carries it. */
+  noRetry?: boolean
   proxyProtocol: boolean
   /** The idle timeout: seconds a connection may sit silent. Absent is nginx's ten minutes. */
   timeout?: number
@@ -38,6 +47,24 @@ export type StreamSpec = {
   uploadRate?: number
   /** Each connection's speed to the client, in KiB/s. Absent is no limit. */
   downloadRate?: number
+}
+
+/** How nginx spreads a stream's connections: client-ip is a consistent hash of the client address. */
+export type StreamBalance = "least-conn" | "client-ip" | "random"
+
+/** One server of a stream's pool, with nginx's own options. */
+export type StreamServer = {
+  address: string
+  /** Its share of connections. Absent is 1. */
+  weight?: number
+  /** Failed connects within failTimeout that mark it unavailable. Absent is 1; 0 never does. */
+  maxFails?: number
+  /** That window and pause, in seconds. Absent is 10. */
+  failTimeout?: number
+  /** Used only while every other server is unavailable; not under client-ip or random. */
+  backup?: boolean
+  /** Out of the pool without being deleted. */
+  down?: boolean
 }
 
 /** One line of a stream's ordered access list. */

@@ -33,6 +33,9 @@ export function streamSpecOf(stream: StreamSpec): StreamSpec {
     protocol,
     udpMode,
     upstream,
+    servers,
+    balance,
+    noRetry,
     proxyProtocol,
     timeout,
     connectTimeout,
@@ -51,6 +54,9 @@ export function streamSpecOf(stream: StreamSpec): StreamSpec {
     protocol,
     udpMode,
     upstream,
+    servers,
+    balance,
+    noRetry,
     proxyProtocol,
     timeout,
     connectTimeout,
@@ -553,7 +559,8 @@ export function streamMatchesQuery(stream: StreamEntry, query: string): boolean 
   const needle = query.trim().toLowerCase()
   if (!needle) return true
   const sources = [...stream.allowFrom, ...(stream.rules ?? []).map((rule) => rule.source)]
-  return [stream.name, listenLabel(stream), stream.upstream, ...sources]
+  const servers = (stream.servers ?? []).map((server) => server.address)
+  return [stream.name, listenLabel(stream), stream.upstream, ...servers, ...sources]
     .filter(Boolean)
     .some((field) => field.toLowerCase().includes(needle))
 }
@@ -645,16 +652,20 @@ export function upstreamAddress(upstream: string): { host: string; port: number 
 }
 
 /**
- * The dials a stream's Test makes: its upstream for each protocol it carries,
- * and, while nginx holds its port, the same through nginx on the host — on
- * loopback for a stream taking every address. The query follows the
- * upstream's port, since a stream on 5353 in front of a resolver on 53 still
- * carries DNS. A `unix:` upstream is not dialled: the socket may not be in the
- * dashboard's container.
+ * The dials a stream's Test makes: each server of its pool that is not down,
+ * for each protocol it carries, and, while nginx holds its port, the same
+ * through nginx on the host — on loopback for a stream taking every address.
+ * The query follows the first server's port, since a stream on 5353 in front
+ * of a resolver on 53 still carries DNS. A `unix:` server is not dialled: the
+ * socket may not be in the dashboard's container.
  */
 export function streamTests(stream: StreamEntry): StreamTestRequest[] {
-  const upstream = upstreamAddress(stream.upstream)
-  const query = upstream?.port === 53 ? "dns" : upstream?.port === 123 ? "ntp" : undefined
+  const upstreams = (stream.servers ?? [{ address: stream.upstream }])
+    .filter((server) => !server.down)
+    .map((server) => upstreamAddress(server.address))
+    .filter((upstream) => upstream !== null)
+  const first = upstreamAddress(stream.upstream)
+  const query = first?.port === 53 ? "dns" : first?.port === 123 ? "ntp" : undefined
   const loopback =
     !stream.address || stream.address === "0.0.0.0"
       ? "127.0.0.1"
@@ -664,7 +675,7 @@ export function streamTests(stream: StreamEntry): StreamTestRequest[] {
   const out: StreamTestRequest[] = []
   for (const protocol of ["tcp", "udp"] as const) {
     if (!carries(stream, protocol)) continue
-    if (upstream) {
+    for (const upstream of upstreams) {
       out.push({ target: upstream.host, port: upstream.port, protocol, mode: "upstream", query })
     }
     if (stream.state === "live") {

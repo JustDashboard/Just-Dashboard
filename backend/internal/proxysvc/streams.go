@@ -55,6 +55,22 @@ type StreamSpec struct {
 	UDPMode string `json:"udpMode,omitempty"`
 	// Upstream is host:port, or unix:/path for a local socket.
 	Upstream string `json:"upstream"`
+	// Servers is the pool behind the stream when there is more than one
+	// server. Upstream is always its first address, so everything that
+	// reads Upstream keeps working; a pool of one is folded back into
+	// Upstream alone (foldStreamServers), so one file never reads back two
+	// ways.
+	Servers []StreamServer `json:"servers,omitempty"`
+	// Balance is how nginx spreads connections over the pool: empty for
+	// round robin, least-conn, client-ip (a consistent hash of the client
+	// address, so one client keeps reaching one server) or random. It is
+	// empty whenever there is one server, where it would change nothing.
+	Balance string `json:"balance,omitempty"`
+	// NoRetry stops nginx trying the next server when one fails to accept
+	// (proxy_next_upstream off). nginx retries by default, which is what a
+	// pool is for; turning it off suits a backend where a half-made
+	// connection must not be repeated. Only a pool carries it.
+	NoRetry bool `json:"noRetry,omitempty"`
 	// ProxyProtocol prepends the PROXY header so the backend sees the real
 	// client address. It has to be turned on at both ends or the backend
 	// reads the header as the first bytes of the connection and fails in a
@@ -89,6 +105,34 @@ type StreamSpec struct {
 	// so a client opening four gets four times the rate. Zero is no limit.
 	UploadRate   int `json:"uploadRate,omitempty"`
 	DownloadRate int `json:"downloadRate,omitempty"`
+}
+
+// StreamServer is one server of a stream's pool, with nginx's own options.
+type StreamServer struct {
+	// Address is host:port or unix:/path, as Upstream is.
+	Address string `json:"address"`
+	// Weight is the server's share of connections. Zero is nginx's 1.
+	Weight int `json:"weight,omitempty"`
+	// MaxFails is how many failed connects within FailTimeout mark the
+	// server unavailable for FailTimeout. Nil is nginx's 1; zero never marks
+	// it, which is why it is a pointer.
+	MaxFails *int `json:"maxFails,omitempty"`
+	// FailTimeout is that window and pause, in seconds. Zero is nginx's 10s.
+	FailTimeout int `json:"failTimeout,omitempty"`
+	// Backup is used only while every other server is unavailable. nginx
+	// refuses it under client-ip and random balancing.
+	Backup bool `json:"backup,omitempty"`
+	// Down takes the server out of the pool without deleting it.
+	Down bool `json:"down,omitempty"`
+}
+
+// streamBalances maps the form's balancing methods to the directive each
+// renders as, written first in the upstream block: nginx checks a server's
+// backup against the method already read, so the order matters.
+var streamBalances = map[string]string{
+	"least-conn": "least_conn",
+	"client-ip":  "hash $remote_addr consistent",
+	"random":     "random",
 }
 
 // StreamRule is one line of a stream's ordered access list.
@@ -203,7 +247,7 @@ var (
 
 // HandwrittenStreamError refuses to save the form over a file that does more
 // than the form can say. Saving would drop every one of those things — a
-// deny rule, a second upstream server, TLS — and a forwarding rule that
+// server option the form lacks, TLS — and a forwarding rule that
 // quietly became wider than it was is the worst way this can fail.
 type HandwrittenStreamError struct {
 	Name        string
@@ -248,10 +292,9 @@ func ValidateStream(spec *StreamSpec) error {
 	case spec.UDPMode != "session" && spec.UDPMode != "request":
 		return fmt.Errorf("the UDP mode must be session or request")
 	}
-	if err := validStreamUpstream(strings.TrimSpace(spec.Upstream)); err != nil {
+	if err := validStreamServers(spec); err != nil {
 		return err
 	}
-	spec.Upstream = strings.TrimSpace(spec.Upstream)
 	if spec.Timeout < 0 || spec.Timeout > 86400 {
 		return fmt.Errorf("the idle timeout must be between 0 and 86400 seconds")
 	}
@@ -333,6 +376,111 @@ func foldStreamAccess(spec *StreamSpec) {
 		allows = append(allows, r.Source)
 	}
 	spec.AllowFrom, spec.Rules, spec.DefaultAllow = allows, nil, nil
+}
+
+// maxStreamServers bounds a pool to what a form row per server can show.
+const maxStreamServers = 32
+
+// validStreamServers checks the pool and folds it into the one shape a file
+// reads back as. With no Servers the pool is Upstream alone.
+func validStreamServers(spec *StreamSpec) error {
+	if len(spec.Servers) == 0 {
+		spec.Servers = []StreamServer{{Address: spec.Upstream}}
+	}
+	if len(spec.Servers) > maxStreamServers {
+		return fmt.Errorf("a stream takes at most %d servers", maxStreamServers)
+	}
+	if _, ok := streamBalances[spec.Balance]; !ok && spec.Balance != "" {
+		return fmt.Errorf("balancing must be round robin, least-conn, client-ip or random")
+	}
+	seen := map[string]bool{}
+	primary, up := false, false
+	for i := range spec.Servers {
+		srv := &spec.Servers[i]
+		srv.Address = strings.TrimSpace(srv.Address)
+		if err := validStreamUpstream(srv.Address); err != nil {
+			if len(spec.Servers) > 1 {
+				return fmt.Errorf("server %d: %w", i+1, err)
+			}
+			return err
+		}
+		if seen[srv.Address] {
+			return fmt.Errorf("%s is in the pool twice", srv.Address)
+		}
+		seen[srv.Address] = true
+		if srv.Weight < 0 || srv.Weight > 1000 {
+			return fmt.Errorf("a server's weight must be between 1 and 1000")
+		}
+		if srv.Weight == 1 {
+			srv.Weight = 0
+		}
+		if srv.MaxFails != nil && (*srv.MaxFails < 0 || *srv.MaxFails > 1000) {
+			return fmt.Errorf("a server's max fails must be between 0 and 1000")
+		}
+		if srv.MaxFails != nil && *srv.MaxFails == 1 {
+			srv.MaxFails = nil
+		}
+		if srv.FailTimeout < 0 || srv.FailTimeout > 86400 {
+			return fmt.Errorf("a server's fail timeout must be between 0 and 86400 seconds")
+		}
+		if srv.FailTimeout == 10 {
+			srv.FailTimeout = 0
+		}
+		if srv.Backup && (spec.Balance == "client-ip" || spec.Balance == "random") {
+			return fmt.Errorf("nginx has no backup server under %s balancing — use least-conn or round robin, or take backup off", spec.Balance)
+		}
+		if !srv.Down {
+			up = true
+			primary = primary || !srv.Backup
+		}
+	}
+	if !up {
+		return fmt.Errorf("every server is down, so nothing would answer — pause the stream instead")
+	}
+	if !primary {
+		return fmt.Errorf("a backup only stands in for another server — at least one server that is up must not be a backup")
+	}
+	foldStreamServers(spec)
+	return nil
+}
+
+// foldStreamServers writes a pool the form's simplest way: one server is
+// Upstream alone. nginx keeps no failure count for a lone server and has
+// nothing to weigh it against or retry on, so its weight, failure options,
+// method and retry setting change nothing and are dropped. A lone backup or
+// down server never gets here: validation refuses both, and a file holding
+// one reads back unfolded so the refusal is shown rather than lost.
+func foldStreamServers(spec *StreamSpec) {
+	if len(spec.Servers) > 0 {
+		spec.Upstream = spec.Servers[0].Address
+	}
+	if len(spec.Servers) < 2 {
+		spec.Balance, spec.NoRetry = "", false
+	}
+	if len(spec.Servers) == 1 && !spec.Servers[0].Backup && !spec.Servers[0].Down {
+		spec.Servers = nil
+	}
+}
+
+// serverLine is a pool server as its upstream line writes it.
+func serverLine(srv StreamServer) string {
+	out := srv.Address
+	if srv.Weight > 0 {
+		out += " weight=" + strconv.Itoa(srv.Weight)
+	}
+	if srv.MaxFails != nil {
+		out += " max_fails=" + strconv.Itoa(*srv.MaxFails)
+	}
+	if srv.FailTimeout > 0 {
+		out += " fail_timeout=" + nginxDuration(srv.FailTimeout)
+	}
+	if srv.Backup {
+		out += " backup"
+	}
+	if srv.Down {
+		out += " down"
+	}
+	return out
 }
 
 // validStreamUpstream accepts host:port and unix:/absolute/path, the two
@@ -437,7 +585,15 @@ func RenderStream(spec *StreamSpec) (string, error) {
 		l.blank()
 	}
 	l.add("upstream %s {", upstream)
-	l.add("    server %s;", spec.Upstream)
+	if method := streamBalances[spec.Balance]; method != "" {
+		l.add("    %s;", method)
+	}
+	if len(spec.Servers) == 0 {
+		l.add("    server %s;", spec.Upstream)
+	}
+	for _, srv := range spec.Servers {
+		l.add("    server %s;", serverLine(srv))
+	}
 	l.add("}")
 	l.blank()
 	l.add("server {")
@@ -486,6 +642,10 @@ func RenderStream(spec *StreamSpec) (string, error) {
 	}
 	l.blank()
 	l.add("    proxy_pass %s;", upstream)
+	if spec.NoRetry {
+		l.add("    # A server that fails to accept fails the connection; no other is tried.")
+		l.add("    proxy_next_upstream off;")
+	}
 	if spec.ProxyProtocol {
 		l.add("    # The backend must be configured to expect this header, or it")
 		l.add("    # reads it as the first bytes of the connection.")
@@ -644,6 +804,13 @@ func parseStreamFile(fileName, content string) parsedStream {
 			} else {
 				p.spec.ConnectTimeout = seconds
 			}
+		case "proxy_next_upstream":
+			switch {
+			case len(d.Args) == 1 && d.Args[0] == "off":
+				p.spec.NoRetry = true
+			case len(d.Args) != 1 || d.Args[0] != "on":
+				p.cannot("proxy_next_upstream " + strings.Join(d.Args, " "))
+			}
 		case "proxy_responses":
 			if len(d.Args) == 1 && d.Args[0] == "1" {
 				p.spec.UDPMode = "request"
@@ -686,6 +853,7 @@ func parseStreamFile(fileName, content string) parsedStream {
 	if p.spec.Protocol != "tcp" && p.spec.UDPMode == "" {
 		p.spec.UDPMode = "session"
 	}
+	foldStreamServers(&p.spec)
 	p.readAccess(rules)
 	return p
 }
@@ -814,8 +982,8 @@ func (p *parsedStream) reduceBinds() {
 }
 
 // readProxyPass takes the target either as an upstream block in this file,
-// whose one plain server is the form's upstream, or as an address written
-// straight into proxy_pass, which means the same.
+// whose servers and balancing method are the form's pool, or as an address
+// written straight into proxy_pass, which is a pool of one.
 func (p *parsedStream) readProxyPass(target string, upstreams map[string]Directive, used map[string]bool) {
 	if strings.Contains(target, "$") {
 		p.cannot("proxy_pass with a variable")
@@ -830,27 +998,85 @@ func (p *parsedStream) readProxyPass(target string, upstreams map[string]Directi
 		return
 	}
 	used[target] = true
-	var servers []Directive
+	var servers []StreamServer
 	for _, d := range block.Block {
 		if d.Name == "server" && len(d.Args) > 0 {
-			servers = append(servers, d)
-		} else {
-			p.cannot(d.Name)
+			servers = append(servers, p.readPoolServer(d.Args))
+			continue
 		}
+		balance := ""
+		switch {
+		case d.Name == "least_conn" && len(d.Args) == 0:
+			balance = "least-conn"
+		case d.Name == "random" && len(d.Args) == 0:
+			balance = "random"
+		case d.Name == "hash" && len(d.Args) == 2 && d.Args[0] == "$remote_addr" && d.Args[1] == "consistent":
+			balance = "client-ip"
+		default:
+			p.cannot(d.Name)
+			continue
+		}
+		// A method after a server, or a second one, is read by nginx with a
+		// warning and not the way the form would write it: first, once.
+		if p.spec.Balance != "" || len(servers) > 0 {
+			p.cannot("a balancing method after the servers or twice")
+			continue
+		}
+		p.spec.Balance = balance
 	}
 	if len(servers) == 0 {
 		p.cannot("an empty upstream")
 		return
 	}
-	p.spec.Upstream = servers[0].Args[0]
-	if len(servers) > 1 {
+	if len(servers) > maxStreamServers {
 		p.cannot(fmt.Sprintf("%d upstream servers", len(servers)))
 	}
-	for _, s := range servers {
-		if len(s.Args) > 1 {
-			p.cannot("upstream server options")
+	p.spec.Upstream, p.spec.Servers = servers[0].Address, servers
+}
+
+// readPoolServer reads one upstream server line with the options the form
+// holds. Any other option — max_conns, resolve, service — is hand-written.
+func (p *parsedStream) readPoolServer(args []string) StreamServer {
+	srv := StreamServer{Address: args[0]}
+	for _, opt := range args[1:] {
+		key, value, _ := strings.Cut(opt, "=")
+		switch {
+		case opt == "backup":
+			srv.Backup = true
+		case opt == "down":
+			srv.Down = true
+		case key == "weight":
+			n, err := strconv.Atoi(value)
+			if err != nil || n < 1 || n > 1000 {
+				p.cannot("upstream server option " + opt)
+				continue
+			}
+			if n > 1 {
+				srv.Weight = n
+			}
+		case key == "max_fails":
+			n, err := strconv.Atoi(value)
+			if err != nil || n < 0 || n > 1000 {
+				p.cannot("upstream server option " + opt)
+				continue
+			}
+			if n != 1 {
+				srv.MaxFails = &n
+			}
+		case key == "fail_timeout":
+			seconds, ok := streamSeconds([]string{value})
+			if !ok {
+				p.cannot("upstream server option " + opt)
+				continue
+			}
+			if seconds != 10 {
+				srv.FailTimeout = seconds
+			}
+		default:
+			p.cannot("upstream server option " + key)
 		}
 	}
+	return srv
 }
 
 type accessRule struct {

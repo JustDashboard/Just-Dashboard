@@ -438,8 +438,8 @@ func TestParseStreamSpecHandWritten(t *testing.T) {
 			name: "pool with a backup",
 			content: `upstream pool { server 10.0.0.5:5432; server 10.0.0.6:5432 backup; }
 server { listen 5432; proxy_pass pool; allow 10.0.0.0/8; deny all; }`,
-			want:        StreamSpec{Name: "x", Listen: 5432, Address: "0.0.0.0", Protocol: "tcp", Upstream: "10.0.0.5:5432", AllowFrom: []string{"10.0.0.0/8"}},
-			unsupported: []string{"2 upstream servers", "upstream server options"},
+			want: StreamSpec{Name: "x", Listen: 5432, Address: "0.0.0.0", Protocol: "tcp", Upstream: "10.0.0.5:5432", AllowFrom: []string{"10.0.0.0/8"},
+				Servers: []StreamServer{{Address: "10.0.0.5:5432"}, {Address: "10.0.0.6:5432", Backup: true}}},
 		},
 		{
 			name:        "tls and a sub-second timeout",
