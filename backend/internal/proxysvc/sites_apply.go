@@ -137,6 +137,9 @@ func (s *Service) SaveSite(ctx context.Context, spec *SiteSpec, opts SiteSave) (
 	if err := s.writeMissingPages(spec); err != nil {
 		return nil, fmt.Errorf("the site's pages could not be written: %w", err)
 	}
+	if err := ensureCacheRoot(spec); err != nil {
+		return nil, fmt.Errorf("the cache folder could not be made: %w", err)
+	}
 	res, err := s.saveSiteLocked(ctx, spec, content, opts)
 	if errors.Is(err, errSiteReloadFailed) {
 		return res, nil

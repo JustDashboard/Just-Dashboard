@@ -95,7 +95,40 @@ export type SiteSpec = {
   interceptErrors?: boolean
   /** How much one client may ask of the site. Not for a redirect. */
   limits?: SiteLimits
+  /** Browsers keep the site's styles, scripts, images and fonts. Not for a redirect. */
+  staticCache?: StaticCache
+  /** nginx keeps the application's responses on disk. Proxy sites only, with buffering on. */
+  proxyCache?: ProxyCache
   custom?: string
+}
+
+export type StaticCache = {
+  /** nginx's spelling of a time: 30d, 12h, 1y. */
+  maxAge: string
+  /** The file never changes under its name, so a browser does not ask again even on a reload. */
+  immutable?: boolean
+}
+
+/** A request with an Authorization header always goes to the application. */
+export type ProxyCache = {
+  /** The most the cache holds on disk: 512m, 2g. */
+  maxSize: string
+  /** How long a 200, 301 or 302 is kept when the application's own headers do not say. */
+  valid: string
+  /** Answer with the last copy while the application is down, and refresh in the background. */
+  serveStale?: boolean
+  /** Cache requests that carry a cookie too. Off, any cookie goes to the application. */
+  cacheCookies?: boolean
+}
+
+/** A site's proxy cache on disk. */
+export type SiteCacheUsage = {
+  site: string
+  path: string
+  bytes: number
+  files: number
+  /** nginx has made the folder; nothing has been cached yet without it. */
+  exists: boolean
 }
 
 /**

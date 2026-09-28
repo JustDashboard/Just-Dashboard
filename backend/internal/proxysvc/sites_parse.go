@@ -45,6 +45,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	inMaintGeo := false
 	limits := newLimitParse()
 	pools := newPoolParse()
+	cache := &cacheParse{}
 	// The catch-all's retry settings, which belong to the pool it forwards to.
 	var rootRetryOn []string
 	rootTries := 0
@@ -70,6 +71,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 				if objectDepth == 0 {
 					limits.closed()
 					pools.closed()
+					cache.closed()
 				}
 			} else if inMaintGeo {
 				if fields := strings.Fields(strings.TrimSuffix(raw, ";")); len(fields) == 2 && fields[0] != "default" {
@@ -78,6 +80,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			} else if objectDepth == 1 {
 				limits.entry(raw)
 				pools.entry(raw)
+				cache.entry(raw)
 			}
 			return
 		}
@@ -86,6 +89,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			if httpObjects[name] {
 				limits.object(name, value)
 				pools.object(name, value)
+				cache.object(name, value)
 				if strings.HasSuffix(raw, "{") {
 					objectDepth = 1
 					if name == "geo" && maintGeoRe.MatchString(value) {
@@ -160,6 +164,9 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			case directive == "add_header" && strings.HasPrefix(value, "Retry-After "):
 				maintenance().RetryAfter = parseSeconds(strings.Fields(value)[1])
 			}
+			return
+		}
+		if cache.directive(directive, value, location) {
 			return
 		}
 		switch directive {
@@ -443,6 +450,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		spec.Permanent = true
 	}
 	limits.settle(spec)
+	cache.settle(spec)
 	// Extra locations that ended up with neither an upstream nor a root are
 	// something this form cannot express; dropping them is better than
 	// offering to save a location that proxies nowhere.

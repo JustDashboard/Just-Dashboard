@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import { forgetSessionState, useSessionState, useViewState } from "@/lib/view-state"
 import { CloudUpload, Download, Globe, Plus, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { plural, relativeTime } from "@/lib/format"
+import { bytes, plural, relativeTime } from "@/lib/format"
 import { downloadText } from "@/lib/metrics-export"
 import { ApiError, del, errorMessage, get, post } from "@/lib/api"
 import type {
@@ -14,6 +14,7 @@ import type {
   NpmImportResult,
   ProxyPending,
   SiteBackup,
+  SiteCacheUsage,
   SiteDeleteResult,
   SitePlacementResult,
   SiteRenameResult,
@@ -846,6 +847,40 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     })
   }
 
+  // Measured first, so the confirmation says what is about to go.
+  const purgeCache = async (vhost: VHost) => {
+    const path = `/proxy/sites/${encodeURIComponent(vhost.name)}/cache`
+    let usage: SiteCacheUsage
+    try {
+      usage = await get<SiteCacheUsage>(path)
+    } catch (err) {
+      notify.error("Could not read the cache", err)
+      return
+    }
+    confirm({
+      title: `Purge the cache of ${vhost.name}`,
+      confirmLabel: "Purge cache",
+      description: usage.exists ? (
+        <p>
+          {bytes(usage.bytes)} in {plural(usage.files, "file")} under{" "}
+          <code className="font-mono">{usage.path}</code> is removed. Every request then reaches the
+          application until the cache fills again.
+        </p>
+      ) : (
+        <p>Nothing has been cached for {vhost.name} yet, so there is nothing to remove.</p>
+      ),
+      action: async () => {
+        setBusy(vhost.name, "Purging cache")
+        try {
+          const purged = await del<SiteCacheUsage>(path)
+          notify.success(`${bytes(purged.bytes)} purged from ${vhost.name}`)
+        } finally {
+          setBusy(vhost.name, null)
+        }
+      },
+    })
+  }
+
   const handlers = {
     admin,
     onEdit: (v: VHost) => openForm(v.name),
@@ -854,6 +889,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     onDuplicate: (v: VHost) => openForm(null, v.name),
     onToggle: toggle,
     onMaintenance: maintenance,
+    onPurgeCache: purgeCache,
     onDelete: remove,
     onRename: setRenaming,
     onUnlink: unlink,
@@ -1519,6 +1555,7 @@ type CardProps = {
   onDuplicate: (v: VHost) => void
   onToggle: (v: VHost, enabled: boolean) => void
   onMaintenance: (v: VHost, on: boolean) => void
+  onPurgeCache: (v: VHost) => void
   onDelete: (v: VHost) => void
   onRename: (v: VHost) => void
   onUnlink: (v: VHost) => void

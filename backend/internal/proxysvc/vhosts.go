@@ -98,6 +98,11 @@ type VHost struct {
 	Size     int64       `json:"size"`
 	// Maintenance says the site answers with its maintenance page now.
 	Maintenance bool `json:"maintenance,omitempty"`
+	// RateLimited says a server of the site limits requests or connections.
+	RateLimited bool `json:"rateLimited,omitempty"`
+	// Cached says the site keeps its application's responses in a proxy
+	// cache of the form's, which the dashboard can empty.
+	Cached bool `json:"cached,omitempty"`
 }
 
 var (
@@ -107,6 +112,8 @@ var (
 	certRe       = regexp.MustCompile(`(?m)^\s*ssl_certificate\s+([^;]+);`)
 	includeRe    = regexp.MustCompile(`(?m)^\s*include\s+([^;]+);`)
 	maintOnRe    = regexp.MustCompile(`(?m)^\s*if\s*\(\$jd_\w+_maint\)`)
+	limitRe      = regexp.MustCompile(`(?m)^\s*limit_(req|conn)\s`)
+	cacheOnRe    = regexp.MustCompile(`(?m)^\s*proxy_cache\s+jd_\w+_cache\s*;`)
 )
 
 func (s *Service) ListVHosts(ctx context.Context) ([]VHost, error) {
@@ -428,6 +435,8 @@ func (s *Service) fileVHost(name, path, layout string, logs logDefaults) VHost {
 		v.CertPath = v.CertPaths[0]
 	}
 	v.Maintenance = maintOnRe.MatchString(text)
+	v.RateLimited = limitRe.MatchString(text)
+	v.Cached = cacheOnRe.MatchString(text)
 	s.siteDetails(&v, path, text, logs)
 	spec, _ := ParseSiteSpec(name, text)
 	v.AccessLogPath, v.ErrorLogPath = spec.AccessLogPath, spec.ErrorLogPath

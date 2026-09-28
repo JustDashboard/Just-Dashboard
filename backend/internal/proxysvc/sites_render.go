@@ -63,7 +63,7 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 		renderTLS(l, spec)
 		l.blank()
 	}
-	if spec.SecurityHeaders || spec.HSTS {
+	if spec.writesHeaders() {
 		renderHeaders(l, spec)
 		l.blank()
 	}
@@ -72,6 +72,7 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 	renderErrorRouting(l, spec)
 	renderAccess(l, spec)
 	renderServerLimits(l, spec)
+	renderServerCache(l, spec)
 	renderACMEChallenge(l, spec)
 
 	switch spec.Kind {
@@ -180,6 +181,13 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 			l.blank()
 		}
 		renderLimitZones(l, spec)
+		wrote = true
+	}
+	if spec.cachesStatic() || spec.cachesProxy() {
+		if wrote {
+			l.blank()
+		}
+		renderCacheObjects(l, spec)
 		wrote = true
 	}
 	if wrote {
@@ -365,6 +373,13 @@ func renderTLS(l *lines, spec *SiteSpec) {
 	l.add("    ssl_session_tickets off;")
 }
 
+// writesHeaders says whether the server sets any response header, each of
+// which a location with an add_header of its own has to repeat.
+func (spec *SiteSpec) writesHeaders() bool {
+	return spec.SecurityHeaders || spec.HSTS ||
+		(spec.cachesStatic() && spec.StaticCache.Immutable) || spec.cachesProxy()
+}
+
 func renderHeaders(l *lines, spec *SiteSpec) {
 	if spec.HSTS && spec.TLS {
 		l.add("    # Six months, which is what browsers and the preload list expect.")
@@ -375,6 +390,7 @@ func renderHeaders(l *lines, spec *SiteSpec) {
 		l.add("    add_header X-Frame-Options SAMEORIGIN always;")
 		l.add("    add_header Referrer-Policy strict-origin-when-cross-origin always;")
 	}
+	cacheHeaders(l, spec)
 }
 
 func renderServerOptions(l *lines, spec *SiteSpec) {

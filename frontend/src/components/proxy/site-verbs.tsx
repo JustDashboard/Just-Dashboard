@@ -8,6 +8,7 @@ import {
   CloudUpload,
   Code,
   Copy,
+  Database,
   Download,
   External,
   Inspect,
@@ -142,6 +143,7 @@ export function useSiteVerbs({
   onDuplicate,
   onToggle,
   onMaintenance,
+  onPurgeCache,
   onDelete,
   onRename,
   onUnlink,
@@ -168,6 +170,8 @@ export function useSiteVerbs({
   onToggle: (vhost: VHost, enabled: boolean) => void
   /** Turns the site's maintenance page on or off; left out where the verb has no place. */
   onMaintenance?: (vhost: VHost, on: boolean) => void
+  /** Empties the site's proxy cache; left out where the verb has no place. */
+  onPurgeCache?: (vhost: VHost) => void
   onDelete: (vhost: VHost) => void
   onRename: (vhost: VHost) => void
   onUnlink: (vhost: VHost) => void
@@ -389,6 +393,16 @@ export function useSiteVerbs({
       label: "Download",
       icon: Download,
       run: () => downloadFrom(`/proxy/sites/${encodeURIComponent(vhost.name)}/download`),
+    })
+  }
+  if (form && vhost.cached && onPurgeCache) {
+    verbs.push({
+      key: "purge",
+      label: "Purge cache",
+      icon: Database,
+      progressive: "Purging cache",
+      disabled: Boolean(busy),
+      run: () => onPurgeCache(vhost),
     })
   }
   if (admin && deletable && !ambiguous && !owner) {

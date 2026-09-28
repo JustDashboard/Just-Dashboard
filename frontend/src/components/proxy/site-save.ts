@@ -24,6 +24,8 @@ export function sendableSpec(spec: SiteSpec): SiteSpec {
     upstreamTlsName,
     upstream,
     pool,
+    staticCache,
+    proxyCache,
     ...rest
   } = spec
   const locations = spec.locations.map(sendableLocation)
@@ -39,6 +41,9 @@ export function sendableSpec(spec: SiteSpec): SiteSpec {
     hsts: spec.hsts && spec.tls,
     ...(spec.kind === "static" && spa !== undefined ? { spa } : {}),
     ...(spec.kind === "redirect" && permanent !== undefined ? { permanent } : {}),
+    // A redirect has no files to keep and only a proxy has responses to.
+    ...(spec.kind !== "redirect" && staticCache ? { staticCache } : {}),
+    ...(spec.kind === "proxy" && proxyCache ? { proxyCache } : {}),
   }
 }
 
