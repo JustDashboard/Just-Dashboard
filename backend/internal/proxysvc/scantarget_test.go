@@ -25,6 +25,9 @@ func TestParseScanTarget(t *testing.T) {
 		Host     string  `json:"host"`
 		Want     int     `json:"want"`
 		Error    bool    `json:"error"`
+		// Says, when present, is the refusal word for word, which the page
+		// shows as the backend would.
+		Says string `json:"says"`
 	}
 	if err := json.Unmarshal(raw, &cases); err != nil {
 		t.Fatal(err)
@@ -42,6 +45,8 @@ func TestParseScanTarget(t *testing.T) {
 		if c.Error {
 			if err == nil {
 				t.Errorf("%s = %+v, want an error", call, got)
+			} else if c.Says != "" && err.Error() != c.Says {
+				t.Errorf("%s says %q, want %q", call, err.Error(), c.Says)
 			}
 			continue
 		}

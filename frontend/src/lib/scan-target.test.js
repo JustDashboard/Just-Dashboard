@@ -26,9 +26,14 @@ describe("a scan target", () => {
           ? parseScanTarget(c.input, c.port ?? 0)
           : parseScanQuery(c.input, c.portText)
       if (c.error) {
-        expect({ input: c.input, error: typeof parsed.error }).toEqual({
+        // `says`, when present, is the refusal word for word, as the backend
+        // words it.
+        expect({
           input: c.input,
-          error: "string",
+          error: c.says === undefined ? typeof parsed.error : parsed.error,
+        }).toEqual({
+          input: c.input,
+          error: c.says ?? "string",
         })
       } else {
         expect({ input: c.input, target: parsed.target }).toEqual({

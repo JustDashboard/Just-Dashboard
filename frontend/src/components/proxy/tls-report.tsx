@@ -106,12 +106,23 @@ export function TLSReportPage() {
   )
   // usePoll reports loading only while there is nothing to show, so a scan
   // asked for again over a report already on screen is tracked here: busy
-  // until an answer or an error replaces what it was asked over.
-  const [rescanOver, setRescanOver] = useState<Pick<typeof report, "data" | "error">>()
-  const rescanning =
-    rescanOver !== undefined && rescanOver.data === report.data && rescanOver.error === report.error
+  // until an answer or an error replaces what it was asked over. It belongs
+  // to its target and ends with its answer; kept past either, a scan asked
+  // with nothing on screen would match the next page with nothing on screen
+  // and draw a scan that is not running.
+  const [rescanOver, setRescanOver] = useState<
+    Pick<typeof report, "data" | "error"> & { key: string }
+  >()
+  if (
+    rescanOver &&
+    (rescanOver.key !== targetKey ||
+      rescanOver.data !== report.data ||
+      rescanOver.error !== report.error)
+  )
+    setRescanOver(undefined)
+  const rescanning = rescanOver !== undefined
   const rescan = () => {
-    setRescanOver({ data: report.data, error: report.error })
+    setRescanOver({ key: targetKey, data: report.data, error: report.error })
     report.refresh()
   }
   const cancel = (after: number) => {
@@ -266,12 +277,15 @@ export function TLSReportPage() {
             )}
           </div>
         </div>
+        {/* As wide as the field's row: a long name in the hint or the error
+            wraps under the field rather than widening the form off the
+            header's row. */}
         <form
           onSubmit={(event) => {
             event.preventDefault()
             if (admin && !busy) run()
           }}
-          className="w-full min-w-0 sm:w-auto"
+          className="w-full min-w-0 sm:w-min"
         >
           {/* The button sits in the field's row so an error line under the
               input does not pull it down with it. The hint says what the
@@ -280,8 +294,12 @@ export function TLSReportPage() {
           <Field
             label="Domain to scan"
             htmlFor="tls-domain"
-            hint={typed.target ? `Scans ${targetHint(typed.target)}` : "A name, host:port or URL"}
-            error={fieldError}
+            hint={
+              <span className="wrap-anywhere">
+                {typed.target ? `Scans ${targetHint(typed.target)}` : "A name, host:port or URL"}
+              </span>
+            }
+            error={fieldError && <span className="wrap-anywhere">{fieldError}</span>}
           >
             <div className="flex min-w-0 items-center gap-2">
               <InputGroup className="w-full sm:w-96">

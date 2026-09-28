@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Request } from "@playwright/test"
+import { expect, test, type Locator, type Page, type Request } from "@playwright/test"
 import { certs, json, mockProxy, mockShowcase, now, scan, user } from "./proxy-fixtures"
 
 /**
@@ -254,6 +254,100 @@ test("Cancelling a scan asked for again keeps the report it was asked over", asy
   await expect(page.getByText(/Handshaking, probing each TLS version/)).toHaveCount(0)
   await expect.poll(() => held[1].aborted).toBe(true)
   await expect(page.getByRole("button", { name: "Scan", exact: true })).toBeEnabled()
+})
+
+test("Back after a cancelled scan and its answer is a page with nothing scanning", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const held = await heldScans(page)
+  await page.goto("/proxy/tls")
+  const field = page.getByLabel("Domain to scan")
+  const button = page.getByRole("button", { name: "Scan", exact: true })
+  const progress = page.getByText(/Handshaking, probing each TLS version/)
+  await field.fill("slow.example.com")
+  await button.click()
+  await expect(page).toHaveURL(/\/proxy\/tls\?domain=slow\.example\.com$/)
+  await expect.poll(() => held.length).toBe(1)
+  await page.getByRole("button", { name: "Cancel", exact: true }).click()
+  await expect(page.getByText(/^The scan was cancelled after/)).toBeVisible()
+  await button.click()
+  await expect.poll(() => held.length).toBe(2)
+  await held[1].answer({ ...scan, domain: "slow.example.com", summary: "The answer after all" })
+  await expect(page.getByText("The answer after all")).toBeVisible()
+
+  // The scan asked with nothing on screen ended with its answer, so a page
+  // with nothing on screen is not taken for it.
+  await page.goBack()
+  await expect(page).toHaveURL(/\/proxy\/tls$/)
+  await expect(page.getByText("Nothing scanned yet")).toBeVisible()
+  await expect(progress).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0)
+  await expect(field).toHaveValue("")
+  await field.fill("app.example.com")
+  await expect(button).toBeEnabled()
+  expect(held).toHaveLength(2)
+})
+
+/** Fails when the text around `locator` runs past its own line or off the viewport. */
+async function expectWrapped(locator: Locator) {
+  const box = await locator.evaluate((element) => {
+    const line = element.closest("p") ?? element
+    return {
+      overflow: line.scrollWidth - line.clientWidth,
+      right: line.getBoundingClientRect().right,
+      viewport: window.innerWidth,
+    }
+  })
+  expect(box.overflow).toBeLessThanOrEqual(0)
+  expect(box.right).toBeLessThanOrEqual(box.viewport)
+}
+
+test("a long name in the hint or the refusal wraps under the field", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const seen = await scans(page)
+  // 251 characters, a valid name; and a pasted URL whose host is too long.
+  const long = ["b", "c", "d", "e"].map((letter) => letter.repeat(60)).join(".") + ".example"
+  const bad = `${"a".repeat(300)}.example`
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/proxy/tls")
+    const field = page.getByLabel("Domain to scan")
+    const form = page.locator("form").filter({ has: field })
+    await expect(page.getByText("A name, host:port or URL")).toBeVisible()
+    const before = await form.boundingBox()
+
+    await field.fill(long)
+    const hint = page.getByText(`Scans ${long}, port 443`)
+    await expect(hint).toBeVisible()
+    await expectWrapped(hint)
+
+    await field.fill(`https://${bad}/login?next=/account/settings&tab=billing`)
+    await page.getByRole("button", { name: "Scan", exact: true }).click()
+    // The refusal quotes the host alone, not the path and query pasted with it.
+    const alert = page.getByRole("alert").filter({ hasText: "is not a domain name" })
+    await expect(alert).toHaveText(`"${bad}" is not a domain name`)
+    await expectWrapped(alert)
+    // The form stays where it was, as wide as its field.
+    const after = await form.boundingBox()
+    expect({ x: after?.x, y: after?.y, width: after?.width }).toEqual({
+      x: before?.x,
+      y: before?.y,
+      width: before?.width,
+    })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      width,
+    )
+  }
+  expect(seen).toHaveLength(0)
+
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.goto("/proxy/certificates")
+  await page.getByLabel("Domain to watch").fill(`https://${bad}/`)
+  await page.getByRole("button", { name: "Watch", exact: true }).click()
+  const refusal = page.getByRole("alert").filter({ hasText: "is not a domain name" })
+  await expect(refusal).toHaveText(`"${bad}" is not a domain name`)
+  await expectWrapped(refusal)
 })
 
 test("the field offers recent scans and the names this server knows", async ({ page }) => {

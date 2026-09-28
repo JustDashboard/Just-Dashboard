@@ -36,6 +36,23 @@
   { "input": "2001:db8::zz", "error": true },
   { "input": "-app.example.com", "error": true },
   { "input": "app..example.com", "error": true },
+  { "input": "app.example.com:+443", "error": true, "says": "port \"+443\" is not a number" },
+  { "input": "app.example.com:-443", "error": true, "says": "port \"-443\" is not a number" },
+  {
+    "input": "https://exa mple.com/login?next=/account/settings#billing",
+    "error": true,
+    "says": "\"exa mple.com\" is not a domain name"
+  },
+  {
+    "input": "  App..Example.com.:8443  ",
+    "error": true,
+    "says": "\"App..Example.com.\" is not a domain name"
+  },
+  {
+    "input": "imaps://bü cher.example/INBOX",
+    "error": true,
+    "says": "\"bü cher.example\" is not a domain name"
+  },
   { "input": "mail.example.com", "portText": "993", "host": "mail.example.com", "want": 993 },
   { "input": "mail.example.com:993", "portText": "", "host": "mail.example.com", "want": 993 },
   { "input": "2001:db8::1", "portText": "8443", "host": "2001:db8::1", "want": 8443 },

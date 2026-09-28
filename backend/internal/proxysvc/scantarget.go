@@ -90,6 +90,9 @@ func ParseScanTarget(raw string, port int) (ScanTarget, error) {
 		t.Port = 443
 	}
 
+	// The complaint quotes the host as it was typed, not the whole field: a
+	// pasted URL's path and query are not what is wrong with it.
+	typed := host
 	host = strings.TrimSuffix(strings.ToLower(host), ".")
 	if host == "" {
 		return ScanTarget{}, errors.New("enter a domain, for example app.example.com")
@@ -104,12 +107,12 @@ func ParseScanTarget(raw string, port int) (ScanTarget, error) {
 	if !isASCII(host) {
 		ascii, err := idna.Lookup.ToASCII(host)
 		if err != nil {
-			return ScanTarget{}, fmt.Errorf("%q is not a domain name", raw)
+			return ScanTarget{}, fmt.Errorf("%q is not a domain name", typed)
 		}
 		host = ascii
 	}
 	if len(host) > 253 || !scanHostRe.MatchString(host) {
-		return ScanTarget{}, fmt.Errorf("%q is not a domain name", strings.TrimSpace(raw))
+		return ScanTarget{}, fmt.Errorf("%q is not a domain name", typed)
 	}
 	t.Host = host
 	return t, nil
@@ -164,9 +167,14 @@ func splitScanHostPort(s string) (host string, port int, err error) {
 	if rest == "" {
 		return host, 0, nil
 	}
+	// Atoi reads "+443" as 443 and "-443" as a number, where the page
+	// refuses both as not a port.
+	if strings.Trim(rest, "0123456789") != "" {
+		return "", 0, fmt.Errorf("port %q is not a number", rest)
+	}
 	n, err := strconv.Atoi(rest)
 	if err != nil {
-		return "", 0, fmt.Errorf("port %q is not a number", rest)
+		return "", 0, fmt.Errorf("port %s is outside 1–65535", rest)
 	}
 	if n < 1 || n > 65535 {
 		return "", 0, fmt.Errorf("port %d is outside 1–65535", n)

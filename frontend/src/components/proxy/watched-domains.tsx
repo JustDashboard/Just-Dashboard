@@ -158,7 +158,11 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
           >
             {/* The button sits in the field's row so an error line under the
                 input does not pull it down with it. */}
-            <Field label="Domain to watch" htmlFor="watch-domain" error={fieldError}>
+            <Field
+              label="Domain to watch"
+              htmlFor="watch-domain"
+              error={fieldError && <span className="wrap-anywhere">{fieldError}</span>}
+            >
               <div className="flex min-w-0 items-center gap-2">
                 <Input
                   id="watch-domain"

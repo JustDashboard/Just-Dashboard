@@ -83,7 +83,10 @@ export function parseScanTarget(raw: string, port = 0): ParsedTarget {
   }
   const chosen = written || port || schemePort || 443
 
-  let host = split.host.toLowerCase().replace(/\.$/, "")
+  // The complaint quotes the host as it was typed, not the whole field: a
+  // pasted URL's path and query are not what is wrong with it.
+  const typed = split.host
+  let host = typed.toLowerCase().replace(/\.$/, "")
   if (!host) return fail(EMPTY)
   const ip = canonicalIP(host)
   if (ip) return { target: { host: ip, port: chosen } }
@@ -91,10 +94,10 @@ export function parseScanTarget(raw: string, port = 0): ParsedTarget {
     return fail("a wildcard is not an address; scan one of the names it covers")
   if (!/^[\x00-\x7f]*$/.test(host)) {
     const ascii = toASCII(host)
-    if (!ascii) return fail(`"${raw.trim()}" is not a domain name`)
+    if (!ascii) return fail(`"${typed}" is not a domain name`)
     host = ascii
   }
-  if (host.length > 253 || !HOST.test(host)) return fail(`"${raw.trim()}" is not a domain name`)
+  if (host.length > 253 || !HOST.test(host)) return fail(`"${typed}" is not a domain name`)
   return { target: { host, port: chosen } }
 }
 

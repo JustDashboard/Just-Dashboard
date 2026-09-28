@@ -43,6 +43,7 @@ func TestTLSScanReadsTheTargetTheWayThePageDoes(t *testing.T) {
 		"/api/v1/certificates/scan?domain=127.0.0.1&port=abc",
 		"/api/v1/certificates/scan?domain=127.0.0.1&port=0",
 		"/api/v1/certificates/scan?domain=127.0.0.1&port=%2B993",
+		"/api/v1/certificates/scan?domain=127.0.0.1:%2B993",
 		"/api/v1/certificates/scan?domain=127.0.0.1:993&port=443",
 		"/api/v1/certificates/scan?domain=",
 		"/api/v1/certificates/check?domain=" + url.QueryEscape("user@127.0.0.1"),
