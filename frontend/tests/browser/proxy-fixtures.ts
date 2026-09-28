@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test"
+import * as certTools from "./fixtures/proxy/cert-tools"
 import * as certs from "./fixtures/proxy/certs"
 import * as engine from "./fixtures/proxy/engine"
 import * as ports from "./fixtures/proxy/ports"
@@ -34,7 +35,7 @@ export const PROXY_PAGES = [
   "/proxy/ports",
 ]
 
-const areas = [engine, sites, siteform, streams, ports, certs, tls]
+const areas = [engine, sites, siteform, streams, ports, certs, certTools, tls]
 
 /** One table from several, refusing a path two areas both claim. */
 function merge(tables: ProxyRoutes[]): ProxyRoutes {

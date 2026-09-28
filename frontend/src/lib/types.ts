@@ -1631,6 +1631,7 @@ export type * from "./proxy/types-siteform"
 export type * from "./proxy/types-streams"
 export type * from "./proxy/types-ports"
 export type * from "./proxy/types-certs"
+export type * from "./proxy/types-cert-tools"
 export type * from "./proxy/types-tls"
 export type * from "./proxy/types-insights"
 

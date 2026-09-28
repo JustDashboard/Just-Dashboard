@@ -18,6 +18,8 @@ export type Certificate = {
   serial?: string
   /** A test certificate: a staging authority signed it, so browsers refuse it whatever its days. */
   staging?: boolean
+  /** This server's local CA signed it: trusted only where its root is installed. */
+  localCA?: boolean
 }
 
 export type CertbotCert = {

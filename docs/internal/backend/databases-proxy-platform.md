@@ -389,6 +389,42 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `CertificateInventory` — `GET /certificates/` and the security posture — leaves out the copies no
   nginx site names, since Caddy renews what it serves and never these, and listed they raised an expiry
   finding apiece; their names are refused to an operator's import.
+- **Certificates made here** (`csr.go`, `localca.go`, routes in `api/handlers_certificates_private.go`,
+  mounted from `mountCertificateRoutes`). A **signing request** (`POST /certificates/csr`, system.admin)
+  makes the key on this server — ECDSA P-256/P-384 or RSA 2048/3072/4096, PKCS#8, 0600 — and a request
+  for host names and addresses with optional organisation fields, kept in
+  `/etc/ssl/just-dashboard-private/requests/<name>/` (the directory, 0700, is the claim on the name: a
+  second request under it is a 409 `request_exists`). `GET /certificates/csr` lists what waits, with the
+  PEM request, never the key, and the certificate already kept under the name (`Replaces`), since
+  renewing a bought certificate is a new request under the same name. `POST /certificates/csr/{name}/complete`
+  takes only the authority's certificate: the leaf is found by the waiting key, a certificate for another
+  key is a 400 naming it, and the pair goes through `importCertificate` — ordering, chain verdict,
+  `replace` as for an import (409 `certificate_exists` without it) — then the request is removed; a name
+  the certificate leaves out of the request is a warning. `DELETE /certificates/csr/{name}` (destructive,
+  no phrase) deletes a request and its key. **Self-signed** (`POST /certificates/self-signed`) and
+  **local CA** certificates (`POST /certificates/local-ca` makes the root, a 409 `local_ca_exists` after;
+  `POST /certificates/local-ca/issue`) are 397-day server certificates for names or addresses, written
+  beside the imports by `installPair` (key 0600 then certificate 0644, staged and renamed, a replaced pair
+  kept as `.bak`) so sites, the inventory and the posture read them as imports. The root is ECDSA P-256,
+  ten years, path length zero, in `/etc/ssl/just-dashboard-private/ca/` (0700; `root-key.pem` 0600): no
+  route reads or exports its key, and `GET /certificates/local-ca/root.pem` hands every signed-in account
+  the certificate alone as `application/x-x509-ca-cert`, since a root is made to be installed. The private
+  directory is apart from `importedDir` because every directory there is listed as a certificate.
+  A certificate is the local CA's when the root verifies it (`localCALeaves`), not by a note beside it;
+  `CertificateInventory` marks those `LocalCA`, and `summarise` now lists a certificate's addresses among
+  its `Domains`. `GET /certificates/local-ca` (every signed-in account) is the root, each certificate it
+  signed with the sites naming it and when it renews, and the daily check's last pass and next run.
+  **The daily check** (`localCARenewal` in `api/modules_proxy.go`'s lane F sections: five minutes after
+  start, then every 24 hours) runs `RenewLocalCALeaves`: every certificate within 45 days of expiry — well
+  before the page's 30-day warning — is signed again for 397 days on the key it has, so the key a site
+  names never changes, the previous certificate kept as `.bak`; nginx is then reloaded once if an enabled
+  site names one, and a failed test is the pass's error ("renewed, but nginx was not reloaded …"). A pass
+  that renewed or failed anything is audited as the system (`certificates.local-ca.renew`). Self-signed
+  certificates are never renewed: a new one is a certificate every device has to be told about again.
+  Writes are serialised by `privateMu`, never the service lock. Tests: `csr_test.go`, `localca_test.go`
+  (the sweep with a fake clock, openssl cross-checks) and `TestLiveNginxServesALocalCACertificateAndItsRenewal`
+  (the host's nginx serving an issued certificate that a client trusting only the root accepts by name
+  and address, then serving the renewal the check reloaded it for).
 - **`streams.go`** — nginx's `stream` is a sibling of `http`, so a stream cannot live under
   sites-available. They go in `/etc/nginx/stream.d`, and the page says plainly when `nginx.conf` does not
   include it. nginx.conf itself is never edited from here: everything else on the host depends on it.

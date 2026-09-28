@@ -14,7 +14,15 @@ import {
   testRunPassed,
 } from "@/lib/certificates"
 import { notify } from "@/lib/toast"
-import type { Certificate, CertbotState, DNSProvider, Job, ServedCertificate } from "@/lib/types"
+import type {
+  Certificate,
+  CertbotState,
+  DNSProvider,
+  Job,
+  LocalCA,
+  ServedCertificate,
+  SigningRequest,
+} from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -34,8 +42,16 @@ import {
   useRenew,
 } from "@/components/proxy/certbot-panel"
 import { CertificateInventory } from "@/components/proxy/certificate-inventory"
+import { CsrDialog } from "@/components/proxy/csr-dialog"
 import { ImportDialog } from "@/components/proxy/import-dialog"
+import { LocalCAPanel } from "@/components/proxy/local-ca-panel"
+import {
+  IssueCommand,
+  PrivateCertificateDialog,
+  type PrivateKind,
+} from "@/components/proxy/private-cert-dialog"
 import { ReloadHookOption, RenewalLogPanel, RenewalRecord } from "@/components/proxy/renewal-health"
+import { SigningRequests } from "@/components/proxy/signing-requests"
 import { WatchedDomains } from "@/components/proxy/watched-domains"
 import { Button } from "@/components/ui/button"
 
@@ -60,6 +76,13 @@ export function CertificatesPage() {
     staging: true,
   }))
   const [importOpen, setImportOpen] = useState(false)
+  // The kind is kept while the dialog closes, so its body does not switch
+  // to the other form on the way out.
+  const [privateDialog, setPrivateDialog] = useState<{ open: boolean; kind: PrivateKind }>({
+    open: false,
+    kind: "local-ca",
+  })
+  const [csrOpen, setCsrOpen] = useState(false)
 
   const certs = usePoll(
     (signal) => get<Certificate[]>("/certificates/", undefined, signal),
@@ -67,6 +90,16 @@ export function CertificatesPage() {
   )
   const certbot = usePoll<CertbotState>(
     (signal) => get("/certificates/certbot", undefined, signal),
+    300_000,
+  )
+  // Certificates this server makes itself: signing requests waiting for an
+  // authority's answer, and the local CA with what it issued.
+  const requests = usePoll<SigningRequest[]>(
+    (signal) => get("/certificates/csr", undefined, signal),
+    300_000,
+  )
+  const localCA = usePoll<LocalCA>(
+    (signal) => get("/certificates/local-ca", undefined, signal),
     300_000,
   )
   const providers = usePoll<DNSProvider[]>(
@@ -317,14 +350,15 @@ export function CertificatesPage() {
                     <CloudUpload className="size-3.5" />
                     Import
                   </Button>
-                  {!certbotGone && (
-                    <Button
-                      size="sm"
-                      onClick={() => setIssue({ open: true, domains: undefined, staging: true })}
-                    >
-                      Issue certificate
-                    </Button>
-                  )}
+                  <IssueCommand
+                    onLetsEncrypt={
+                      certbotGone
+                        ? undefined
+                        : () => setIssue({ open: true, domains: undefined, staging: true })
+                    }
+                    onPrivate={(kind) => setPrivateDialog({ open: true, kind })}
+                    onRequest={() => setCsrOpen(true)}
+                  />
                 </>
               )
             }
@@ -357,6 +391,16 @@ export function CertificatesPage() {
         </Panel>
 
         <div className="space-y-8">
+          <SigningRequests
+            requests={requests.data}
+            error={requests.error}
+            admin={admin}
+            onRetry={requests.refresh}
+            onChanged={() => {
+              requests.refresh()
+              certs.refresh()
+            }}
+          />
           <Panel plain>
             <PanelHeader
               title="Automatic renewal"
@@ -442,6 +486,15 @@ export function CertificatesPage() {
               </PanelBody>
             </Panel>
           )}
+          <LocalCAPanel
+            ca={localCA.data}
+            error={localCA.error}
+            loading={localCA.loading}
+            admin={admin}
+            onRetry={localCA.refresh}
+            onIssue={() => setPrivateDialog({ open: true, kind: "local-ca" })}
+            onChanged={localCA.refresh}
+          />
         </div>
       </div>
       <WatchedDomains admin={admin} />
@@ -464,6 +517,17 @@ export function CertificatesPage() {
             }}
           />
           <ImportDialog open={importOpen} onOpenChange={setImportOpen} onDone={certs.refresh} />
+          <PrivateCertificateDialog
+            open={privateDialog.open}
+            kind={privateDialog.kind}
+            caExists={localCA.data?.exists ?? false}
+            onOpenChange={(open) => setPrivateDialog((d) => ({ ...d, open }))}
+            onDone={() => {
+              certs.refresh()
+              localCA.refresh()
+            }}
+          />
+          <CsrDialog open={csrOpen} onOpenChange={setCsrOpen} onDone={requests.refresh} />
           <RenewalLogPanel open={logOpen} onOpenChange={setLogOpen} />
         </>
       )}

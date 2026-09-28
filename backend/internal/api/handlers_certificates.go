@@ -24,6 +24,7 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/", s.handle(s.handleCertList))
 	r.Method(http.MethodGet, "/certbot", s.handle(s.handleCertbot))
 	r.Method(http.MethodGet, "/dns-providers", s.handle(s.handleDNSProviders))
+	s.mountPrivateCertificateRoutes(r)
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		// A handshake with each site that names a certificate: loopback

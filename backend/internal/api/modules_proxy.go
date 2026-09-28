@@ -19,6 +19,8 @@ type proxyExtras struct {
 	// --- lane E: ports & exposure ---
 
 	// --- lane F: certificates ---
+	// localCA renews the local CA's certificates daily (handlers_certificates_private.go).
+	localCA *localCARenewal
 
 	// --- lane G: TLS report & monitoring ---
 }
@@ -38,6 +40,7 @@ func (s *Server) initProxyExtras() {
 	// --- lane E: ports & exposure ---
 
 	// --- lane F: certificates ---
+	s.modules.proxyExtras.localCA = s.newLocalCARenewal()
 
 	// --- lane G: TLS report & monitoring ---
 }
@@ -58,6 +61,7 @@ func (s *Server) startProxyExtras(ctx context.Context) error {
 	// --- lane E: ports & exposure ---
 
 	// --- lane F: certificates ---
+	s.modules.proxyExtras.localCA.Start(ctx)
 
 	// --- lane G: TLS report & monitoring ---
 
@@ -79,6 +83,7 @@ func (s *Server) stopProxyExtras() {
 	// --- lane E: ports & exposure ---
 
 	// --- lane F: certificates ---
+	s.modules.proxyExtras.localCA.Stop()
 
 	// --- lane G: TLS report & monitoring ---
 }
