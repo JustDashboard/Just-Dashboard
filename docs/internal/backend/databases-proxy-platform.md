@@ -347,7 +347,11 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   write. `Availability` names an ingress only once it runs (`ingressState:
   "running"`); one the first deployment would start is `ingressState: "provisionable"` with neither
   `caddy` nor `ingressContainer` set, and deploy preflight counts either state as a proxy that can
-  serve and certify the domain. Start, restart, stop, enable at boot and clearing a failed state go
+  serve and certify the domain. A running ingress also carries `ingressId` and `ingressStartedAt` (Docker's
+  `State.StartedAt`), so the overview reads "running as a container, up 3d" and offers Restart
+  container (`POST /docker/containers/{id}/restart`, destructive, audited as
+  `docker.container.restart`) and Container logs (the container page's logs tab) through the Docker
+  routes and their own gates; the proxy routes add no container control of their own. Start, restart, stop, enable at boot and clearing a failed state go
   through `POST /proxy/engine/{start|restart|stop|enable|reset-failed}`, which resolves the unit
   itself (`Service.Engine`: `nginx.service` where nginx is installed, else `caddy.service`; 409
   `no_engine_unit` otherwise) and runs start and restart through `WithTestedConfig` — the config

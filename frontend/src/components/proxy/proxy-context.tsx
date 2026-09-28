@@ -12,6 +12,10 @@ export type ProxyStatus = {
   certbot: boolean
   /** The public Caddy container deployments share, where one owns ports 80 and 443. */
   ingressContainer?: string
+  /** That container's ID, which Restart container and Container logs act on. */
+  ingressId?: string
+  /** When that container last started, as Docker reports it (RFC 3339). */
+  ingressStartedAt?: string
   /**
    * Whether that ingress exists: `running`, or `provisionable` when none does
    * and the first deployment that routes a domain would start one — which is
