@@ -121,7 +121,7 @@ func (s *Service) nginxVHosts() []VHost {
 			v.Enabled = strings.HasSuffix(e.Name(), ".conf")
 		} else {
 			link := filepath.Join(enabled, e.Name())
-			if _, err := os.Lstat(link); err == nil && enabledElsewhere(link, full) == "" {
+			if _, err := os.Lstat(link); err == nil && (enabledElsewhere(link, full) == "" || servedCopy(link)) {
 				v.Enabled = true
 				v.EnabledPath = link
 			} else {

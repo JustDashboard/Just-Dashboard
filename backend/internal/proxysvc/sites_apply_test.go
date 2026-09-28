@@ -1086,7 +1086,7 @@ func TestSaveSiteTakesALinkOfAnotherNameForEnabled(t *testing.T) {
 func TestTheListingAndTheFormAgreeOnALinkThatEnablesAnotherFile(t *testing.T) {
 	service, root := siteNginx(t, cleanTest, 0, "", 0)
 	available := func(name string) string { return filepath.Join(root, "sites-available", name) }
-	for _, name := range []string{"held.example.com", "other", "own", "off"} {
+	for _, name := range []string{"held.example.com", "other", "own", "off", "copy"} {
 		if err := os.WriteFile(available(name), []byte("server {}\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -1096,20 +1096,198 @@ func TestTheListingAndTheFormAgreeOnALinkThatEnablesAnotherFile(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A copy made with cp where a link was meant: nginx serves it.
+	if err := os.WriteFile(filepath.Join(root, "sites-enabled", "copy"), []byte("server {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	listed := map[string]bool{}
 	for _, v := range service.nginxVHosts() {
 		listed[v.Name] = v.Enabled
 	}
-	for _, name := range []string{"held.example.com", "own", "off"} {
+	for _, name := range []string{"held.example.com", "own", "off", "copy"} {
 		file, err := service.SiteFile(name)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if listed[name] != file.Enabled {
-			t.Errorf("%s: listed enabled=%v, the form says enabled=%v", name, listed[name], file.Enabled)
+		// The listing says whether nginx serves the name; the form tells a
+		// file it reads from a file of its own that it reads instead.
+		if listed[name] != (file.Enabled || file.ServedCopy) {
+			t.Errorf("%s: listed enabled=%v, the form says enabled=%v, served from a copy=%v",
+				name, listed[name], file.Enabled, file.ServedCopy)
 		}
 	}
 	if listed["held.example.com"] {
 		t.Error("a site whose name's link enables another file is listed as serving")
+	}
+	if !listed["copy"] {
+		t.Error("a site nginx serves from a file of its own in sites-enabled is listed as not serving")
+	}
+	if file, _ := service.SiteFile("copy"); file.Enabled || !file.ServedCopy {
+		t.Errorf("copy: %+v, want served from the copy and this file not read", file)
+	}
+}
+
+// A site whose sites-enabled entry is a file of its own is served from that
+// file. Its save was reported as "It stays disabled", which was not true of
+// a name nginx answers; it says now that the save is not what nginx serves,
+// and leaves the file nginx serves alone.
+func TestSaveSiteSaysNginxServesAFileOfItsOwn(t *testing.T) {
+	service, root := siteNginx(t, cleanTest, 0, "", 0)
+	ctx := context.Background()
+	spec := plainSpec("copy", "copy.example.com")
+	copied := filepath.Join(root, "sites-enabled", "copy")
+	if _, err := service.SaveSite(ctx, spec, SiteSave{}); err != nil {
+		t.Fatal(err)
+	}
+	served := "server { server_name copy.example.com; } # the copy\n"
+	if err := os.WriteFile(copied, []byte(served), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec.Upstream = "http://127.0.0.1:4000"
+	res, err := service.SaveSite(ctx, spec, SiteSave{Overwrite: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "nginx serves sites-enabled/copy, a file of its own, and not this one, so it did not test this file and the save changes nothing it serves."
+	if !res.ServedCopy || res.Enabled || res.TestedAsEnabled || res.Validation.Note != want {
+		t.Fatalf("result = %+v, note %q", res, res.Validation.Note)
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, "sites-available", "copy")); !strings.Contains(string(b), "127.0.0.1:4000") {
+		t.Fatalf("the edit was not written:\n%s", b)
+	}
+	if b, _ := os.ReadFile(copied); string(b) != served {
+		t.Fatalf("the file nginx serves was changed:\n%s", b)
+	}
+	// Enabling this file would take the place of the one nginx serves.
+	if _, err := service.SaveSite(ctx, spec, SiteSave{Overwrite: true, Enable: true}); err == nil {
+		t.Fatal("enabling over a file of its own in sites-enabled was not refused")
+	}
+	if b, _ := os.ReadFile(copied); string(b) != served {
+		t.Fatalf("a refused enable changed the file nginx serves:\n%s", b)
+	}
+}
+
+// The form says a hand-written site's previous version is kept as .bak when
+// it is saved. It was not: the save replaced the file with what the form
+// read of it, and a comment or a directive the form has no field for was
+// gone for good.
+func TestSaveSiteKeepsAHandWrittenFileAsBak(t *testing.T) {
+	service, root := siteNginx(t, cleanTest, 0, "", 0)
+	ctx := context.Background()
+	full := filepath.Join(root, "sites-available", "hand")
+	backup := full + ".bak"
+	hand := "# written by hand\nserver {\n    server_name hand.example.com;\n    location / {\n" +
+		"        proxy_pass http://127.0.0.1:3000;\n        proxy_buffering off;\n        sub_filter 'foo' 'bar';\n    }\n}\n"
+	if err := os.WriteFile(full, []byte(hand), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(full, filepath.Join(root, "sites-enabled", "hand")); err != nil {
+		t.Fatal(err)
+	}
+	spec, managed, _, err := service.ReadSiteSpec("hand")
+	if err != nil || managed {
+		t.Fatalf("read back as %+v managed=%v %v", spec, managed, err)
+	}
+	res, err := service.SaveSite(ctx, spec, SiteSave{Overwrite: true, Reload: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Backup != backup {
+		t.Fatalf("backup = %q, want %q", res.Backup, backup)
+	}
+	if b, err := os.ReadFile(backup); err != nil || string(b) != hand {
+		t.Fatalf("the .bak holds %q %v, want the hand-written file", b, err)
+	}
+	if b, _ := os.ReadFile(full); !strings.Contains(string(b), managedMarker) {
+		t.Fatalf("the save did not replace the file:\n%s", b)
+	}
+	// The listing does not offer the copy as a site.
+	for _, v := range service.nginxVHosts() {
+		if v.Name == "hand.bak" {
+			t.Fatal("the .bak is listed as a site")
+		}
+	}
+
+	// The file is the dashboard's now: saving it again keeps the .bak as the
+	// hand-written version rather than overwriting it with the first save.
+	spec.Upstream = "http://127.0.0.1:4000"
+	res, err = service.SaveSite(ctx, spec, SiteSave{Overwrite: true, Reload: true})
+	if err != nil || res.Backup != "" {
+		t.Fatalf("a save over the dashboard's own file: %+v %v", res, err)
+	}
+	if b, _ := os.ReadFile(backup); string(b) != hand {
+		t.Fatalf("the .bak was overwritten by a save of the dashboard's own file:\n%s", b)
+	}
+
+	// A save that is refused leaves the file and the .bak as they were: the
+	// older .bak comes back, and one that was not there is not left behind.
+	t.Setenv("JD_TEST_OUT", `nginx: [emerg] unknown directive "frobnicate" in `+full+`:3`)
+	t.Setenv("JD_TEST_EXIT", "1")
+	if err := os.WriteFile(full, []byte(hand), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(backup, []byte("# older\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SaveSite(ctx, spec, SiteSave{Overwrite: true}); !errors.Is(err, ErrInvalidConf) {
+		t.Fatalf("err = %v, want the test's refusal", err)
+	}
+	if b, _ := os.ReadFile(full); string(b) != hand {
+		t.Fatalf("a refused save left:\n%s", b)
+	}
+	if b, _ := os.ReadFile(backup); string(b) != "# older\n" {
+		t.Fatalf("a refused save left the .bak holding:\n%s", b)
+	}
+	if err := os.Remove(backup); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SaveSite(ctx, spec, SiteSave{Overwrite: true}); !errors.Is(err, ErrInvalidConf) {
+		t.Fatalf("err = %v, want the test's refusal", err)
+	}
+	if _, err := os.Lstat(backup); !os.IsNotExist(err) {
+		t.Fatalf("a refused save left a .bak behind: %v", err)
+	}
+}
+
+// Deleting a site linked only under another name, such as 010-app, removed
+// sites-enabled/app, which was not there, and left 010-app naming a file that
+// was gone: every nginx test and reload failed from then on.
+func TestDeleteSiteRemovesALinkOfAnotherName(t *testing.T) {
+	service, root := siteNginx(t, cleanTest, 0, "", 0)
+	enabled := func(name string) string { return filepath.Join(root, "sites-enabled", name) }
+	available := func(name string) string { return filepath.Join(root, "sites-available", name) }
+	for _, name := range []string{"app", "other"} {
+		if err := os.WriteFile(available(name), []byte("server {}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for link, target := range map[string]string{
+		"010-app": "../sites-available/app", "020-app": available("app"),
+		"other": available("other"), ".app.old": available("app"),
+	} {
+		if err := os.Symlink(target, enabled(link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := service.DeleteSite(context.Background(), "app"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"010-app", "020-app"} {
+		if _, err := os.Lstat(enabled(name)); !os.IsNotExist(err) {
+			t.Errorf("%s still links the deleted site: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(available("app")); !os.IsNotExist(err) {
+		t.Fatal("the site's file is still there")
+	}
+	if _, err := os.Stat(available("app.bak")); err != nil {
+		t.Fatalf("the previous content was not kept: %v", err)
+	}
+	// Another site's link stays, and so does a dotted entry nginx never read.
+	if target := linkTarget(t, root, "other"); target != available("other") {
+		t.Fatalf("the other site's link now names %q", target)
+	}
+	if _, err := os.Lstat(enabled(".app.old")); err != nil {
+		t.Fatalf("the dotted entry was removed: %v", err)
 	}
 }

@@ -420,6 +420,87 @@ test("a disabled site's footer fits a phone", async ({ page }) => {
   )
 })
 
+test("a site nginx serves from a file of its own in sites-enabled is not called disabled", async ({
+  page,
+}) => {
+  // At a phone's width, where the sentence has to fit beside the button.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  // The listing calls it serving, as nginx answers it; only the form knows
+  // the file it edits is not the one nginx reads.
+  const copy = { enabled: false, servedCopy: true }
+  await page.route("**/api/v1/proxy/sites/legacy.example.com", (route) =>
+    json(route, { spec: legacySpec, managed: true, content: "", warnings: [], ...copy }),
+  )
+  await page.route("**/api/v1/proxy/sites/preview", (route) =>
+    json(
+      route,
+      sitePreview(route.request().postDataJSON().spec, {
+        ...copy,
+        enabledElsewhere: "sites-enabled/legacy.example.com is a file of its own, not a link",
+      }),
+    ),
+  )
+  const saved = await capture(page, "**/api/v1/proxy/sites/", (route) =>
+    json(
+      route,
+      siteResult({
+        ...LEGACY,
+        enabled: false,
+        servedCopy: true,
+        reloaded: false,
+        validation: {
+          ...passed,
+          note: "nginx serves sites-enabled/legacy.example.com, a file of its own, and not this one, so it did not test this file and the save changes nothing it serves.",
+        },
+      }),
+    ),
+  )
+  const sheet = await openLegacy(page)
+  await expect(
+    sheet.getByText(
+      "nginx serves sites-enabled/legacy.example.com, a file of its own, not this one. Saving here changes nothing it serves until that file is replaced by a link to this one.",
+    ),
+  ).toBeVisible()
+  // Neither "disabled" nor a reload or an enable that would not reach it.
+  for (const name of ["Save (stays disabled)", "Save and enable", "Save and reload"]) {
+    await expect(sheet.getByRole("button", { name })).toHaveCount(0)
+  }
+  await expect(sheet.getByText(/disabled/i)).toHaveCount(0)
+  const keep = sheet.getByRole("button", { name: "Save", exact: true })
+  await expect(keep).toBeEnabled()
+  await expect(keep).toBeInViewport({ ratio: 1 })
+  expect(await sheet.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
+    true,
+  )
+  await keep.click()
+  await expect(page.getByText("legacy.example.com saved", { exact: true })).toBeVisible()
+  await expect(
+    page.getByText(
+      "nginx serves sites-enabled/legacy.example.com, a file of its own, not this one, so this save changes nothing it serves.",
+    ),
+  ).toBeVisible()
+  await expect(page.getByText(/stays disabled/)).toHaveCount(0)
+  expect(saved).toHaveLength(1)
+  expect(saved[0]).toMatchObject({ enable: "keep", overwrite: true, reload: false })
+})
+
+test("a hand-written site's save says where the previous version was kept", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/proxy/sites/legacy.example.com", (route) =>
+    json(route, { spec: legacySpec, managed: false, content: "", warnings: [], enabled: true }),
+  )
+  const backup = `${LEGACY.path}.bak`
+  await capture(page, "**/api/v1/proxy/sites/", (route) =>
+    json(route, siteResult({ ...LEGACY, validation: passed, backup })),
+  )
+  const sheet = await openLegacy(page)
+  await expect(sheet.getByText("This file was written by hand")).toBeVisible()
+  await sheet.getByRole("button", { name: "Save and reload" }).click()
+  await expect(page.getByText("legacy.example.com is live")).toBeVisible()
+  await expect(page.getByText(`The hand-written version is kept as ${backup}.`)).toBeVisible()
+})
+
 test("a save nginx warns about says how many warnings and where", async ({ page }) => {
   await mockProxy(page, { included: true })
   await capture(page, "**/api/v1/proxy/sites/", (route) =>

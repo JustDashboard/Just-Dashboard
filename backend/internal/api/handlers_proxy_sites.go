@@ -45,10 +45,11 @@ func (s *Server) handleSiteSpec(w http.ResponseWriter, r *http.Request) error {
 	}
 	// Whether nginx reads the site, so the form offers to keep a disabled
 	// one disabled or enable it, instead of a "Save and reload" that did
-	// neither — and whether it is in conf.d, where enabling it is renaming
-	// the file, which a save does not do.
+	// neither — whether it is in conf.d, where enabling it is renaming
+	// the file, which a save does not do — and whether nginx serves a file
+	// of its own under the site's name instead, which a save does not reach.
 	if file, err := s.modules.proxy.SiteFile(spec.Name); err == nil {
-		out["enabled"], out["confd"] = file.Enabled, file.Confd
+		out["enabled"], out["confd"], out["servedCopy"] = file.Enabled, file.Confd, file.ServedCopy
 	}
 	httpx.JSON(w, http.StatusOK, out)
 	return nil
@@ -100,6 +101,7 @@ func (s *Server) handleSitePreview(w http.ResponseWriter, r *http.Request) error
 	// before the save refuses it.
 	if file, err := s.modules.proxy.SiteFile(req.Spec.Name); err == nil {
 		out["path"], out["exists"], out["enabled"], out["confd"] = file.Path, file.Exists, file.Enabled, file.Confd
+		out["servedCopy"] = file.ServedCopy
 		if file.EnabledElsewhere != "" {
 			out["enabledElsewhere"] = file.EnabledElsewhere
 		}
@@ -145,6 +147,12 @@ func (s *Server) handleSiteApply(w http.ResponseWriter, r *http.Request) error {
 	if res.TestedAsEnabled {
 		detail["testedAsEnabled"] = true
 		detail["valid"] = res.Validation.Valid
+	}
+	if res.ServedCopy {
+		detail["servedCopy"] = true
+	}
+	if res.Backup != "" {
+		detail["backup"] = res.Backup
 	}
 	httpx.SetAudit(r, "proxy.site.apply", req.Spec.Name, detail)
 	httpx.JSON(w, http.StatusOK, res)

@@ -668,3 +668,33 @@ func TestLiveSiteLinkedUnderAnotherNameIsEditedLive(t *testing.T) {
 		}
 	}
 }
+
+// Deleting a site linked only under another name left that link naming a
+// file that was gone, and nginx refused its whole configuration from the
+// next test on. The delete takes the link with the file, so the test passes,
+// the reload goes through, and the name falls to the site that is left.
+func TestLiveDeletingASiteLinkedUnderAnotherNameLeavesNginxValid(t *testing.T) {
+	l := newLiveSites(t, "app", "other")
+	installSite(t, l.root, l.spec("other", "other", "other.test", ""), l.port)
+	full := filepath.Join(l.root, "sites-available", "app")
+	if err := os.WriteFile(full, []byte(l.render(l.spec("app", "app", "app.test", ""))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../sites-available/app", filepath.Join(l.root, "sites-enabled", "010-app")); err != nil {
+		t.Fatal(err)
+	}
+	startNginx(t, l.root)
+	l.answers("app.test", "app")
+
+	ctx := context.Background()
+	if err := l.service.DeleteSite(ctx, "app"); err != nil {
+		t.Fatal(err)
+	}
+	if v := runValidator(ctx, "nginx", "-t"); !v.Valid {
+		t.Fatalf("nginx fails its test after the delete:\n%s", v.Output)
+	}
+	if _, err := l.service.Reload(ctx, KindNginx); err != nil {
+		t.Fatalf("nginx did not reload after the delete: %v", err)
+	}
+	l.answers("app.test", "other")
+}

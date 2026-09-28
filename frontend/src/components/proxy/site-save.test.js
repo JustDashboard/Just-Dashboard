@@ -215,6 +215,40 @@ describe("what a save says", () => {
     })
   })
 
+  test("a site nginx serves from a file of its own is not called disabled", () => {
+    const note =
+      "nginx serves sites-enabled/app.example.com, a file of its own, and not this one, so it did not test this file and the save changes nothing it serves."
+    const outcome = saveOutcome(
+      result({
+        enabled: false,
+        reloaded: false,
+        servedCopy: true,
+        validation: { valid: true, output: "", command: "nginx -t", note },
+      }),
+      { existing: true },
+    )
+    expect(outcome).toEqual({
+      tone: "warning",
+      title: "app.example.com saved",
+      description:
+        "nginx serves sites-enabled/app.example.com, a file of its own, not this one, so this save changes nothing it serves.",
+    })
+    expect(outcome.description).not.toContain("disabled")
+  })
+
+  test("a hand-written file the save replaced is named where it was kept", () => {
+    const backup = "/etc/nginx/sites-available/app.example.com.bak"
+    expect(saveOutcome(result({ backup }), { existing: true })).toEqual({
+      tone: "success",
+      title: "app.example.com is live",
+      description: `The hand-written version is kept as ${backup}.`,
+    })
+    expect(saveOutcome(result({ backup, reloaded: false }), { existing: true }).description).toBe(
+      `nginx serves the previous version until it reloads. The hand-written version is kept as ${backup}.`,
+    )
+    expect(saveOutcome(result({}), { existing: true }).description).toBeUndefined()
+  })
+
   test("a conflict saved anyway and the test's warnings are warnings", () => {
     const conflicts = [
       { domain: "app.example.com", listen: "0.0.0.0:80", site: "legacy", effect: "takes" },

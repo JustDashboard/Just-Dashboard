@@ -177,9 +177,10 @@ function SiteFormBody({
   // The save in flight, so the button pressed is the one that spins.
   const [busy, setBusy] = useState<SaveMode | "anyway" | null>(null)
   const [loaded, setLoaded] = useState(source === null)
-  // Whether nginx reads the site being edited, and whether it is in conf.d,
-  // as it was read back; each preview then says both afresh.
-  const [readFile, setReadFile] = useState<Pick<SiteRead, "enabled" | "confd">>({})
+  // Whether nginx reads the site being edited, whether it is in conf.d, and
+  // whether nginx serves a file of its own under its name instead, as it was
+  // read back; each preview then says all three afresh.
+  const [readFile, setReadFile] = useState<Pick<SiteRead, "enabled" | "confd" | "servedCopy">>({})
   // A save refused over a name another server block claims, with the
   // server's sentence saying which of the two nginx answers. Kept with the
   // spec it was about, so any edit puts the question away.
@@ -225,7 +226,7 @@ function SiteFormBody({
           setDomainText(r.spec.domains.join(" "))
           setManaged(r.managed)
           setFixed(fixedFor(r.spec, true))
-          setReadFile({ enabled: r.enabled, confd: r.confd })
+          setReadFile({ enabled: r.enabled, confd: r.confd, servedCopy: r.servedCopy })
         }
         setLoaded(true)
       })
@@ -429,6 +430,9 @@ function SiteFormBody({
   // reload" did neither, and reloading changes nothing about a file nginx
   // does not read.
   const disabled = editing !== null && (file?.enabled ?? readFile.enabled) === false
+  // Nor is a site disabled whose sites-enabled entry is a file of its own:
+  // nginx serves that file, and a save here does not reach it.
+  const servedCopy = editing !== null && (file?.servedCopy ?? readFile.servedCopy) === true
   // A conf.d site is on while its name ends in .conf, and a save does not
   // rename it: enabling one is not the form's to offer.
   const confd = file?.confd ?? readFile.confd
@@ -454,7 +458,23 @@ function SiteFormBody({
       }
       bodyClassName="flex min-h-0 flex-1 flex-col gap-0 p-0 lg:flex-row"
       footer={
-        disabled ? (
+        servedCopy ? (
+          <>
+            <span className="mr-auto text-hint text-muted-foreground">
+              nginx serves <code className="font-mono">sites-enabled/{spec.name}</code>, a file of
+              its own, not this one. Saving here changes nothing it serves until that file is
+              replaced by a link to this one.
+            </span>
+            <Button
+              size="sm"
+              onClick={() => save("keep")}
+              disabled={!ready || busy !== null}
+              pending={busy === "keep"}
+            >
+              Save
+            </Button>
+          </>
+        ) : disabled ? (
           <>
             <span className="mr-auto text-hint text-muted-foreground">
               {file?.enabledElsewhere

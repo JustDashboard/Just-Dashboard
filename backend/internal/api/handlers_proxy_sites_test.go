@@ -418,3 +418,54 @@ func TestSiteSpecSaysAConfDSiteIsOffAndWhereItIs(t *testing.T) {
 		t.Fatalf("preview = %+v, want %s, off, in conf.d", preview, off)
 	}
 }
+
+// A site whose sites-enabled entry is a file of its own is served from that
+// file. The form was told it was disabled and offered "Save (stays
+// disabled)"; the site, every preview and the save now say nginx serves the
+// other file, and a hand-written file the save replaces is named where it
+// was kept.
+func TestSiteSaysNginxServesAFileOfItsOwn(t *testing.T) {
+	c, dir := siteFormServer(t)
+	full := filepath.Join(dir, "sites-available", "app")
+	hand := "server { server_name app.example.com; } # written by hand\n"
+	if err := os.WriteFile(full, []byte(hand), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sites-enabled", "app"), []byte(hand), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	type state struct {
+		Enabled    *bool `json:"enabled"`
+		ServedCopy *bool `json:"servedCopy"`
+	}
+	for _, ask := range []struct{ method, path, body string }{
+		{http.MethodGet, "/api/v1/proxy/sites/app", ""},
+		{http.MethodPost, "/api/v1/proxy/sites/preview", siteBody(t, "app", "app.example.com", `"keep"`, nil)},
+	} {
+		w := c.do(ask.method, ask.path, ask.body, nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", ask.path, w.Code, w.Body.String())
+		}
+		var got state
+		decodeSite(t, w, &got)
+		if got.Enabled == nil || *got.Enabled || got.ServedCopy == nil || !*got.ServedCopy {
+			t.Fatalf("%s: enabled=%v servedCopy=%v, want this file not read and the copy served", ask.path, got.Enabled, got.ServedCopy)
+		}
+	}
+
+	w := c.do(http.MethodPost, "/api/v1/proxy/sites/", siteBody(t, "app", "app.example.com", `"keep"`, map[string]any{"reload": false}), nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("save: %d %s", w.Code, w.Body.String())
+	}
+	var res proxysvc.SiteResult
+	decodeSite(t, w, &res)
+	if !res.ServedCopy || res.Enabled || res.Backup != full+".bak" {
+		t.Fatalf("result = %+v", res)
+	}
+	if b, err := os.ReadFile(full + ".bak"); err != nil || string(b) != hand {
+		t.Fatalf("the .bak holds %q %v", b, err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "sites-enabled", "app")); string(b) != hand {
+		t.Fatalf("the file nginx serves was changed:\n%s", b)
+	}
+}

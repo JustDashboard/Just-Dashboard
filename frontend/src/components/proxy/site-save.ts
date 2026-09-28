@@ -156,12 +156,33 @@ function disabledOutcome(res: SiteResult): SaveOutcome {
 }
 
 /**
- * What a save did, said as it happened. "Is live" only when nginx reloaded
- * an enabled site and had nothing to say about it; everything short of that
- * is its own sentence.
+ * What a save did, said as it happened, and where a hand-written file it
+ * replaced was kept.
  */
 export function saveOutcome(res: SiteResult, { existing }: { existing: boolean }): SaveOutcome {
+  const outcome = savedOutcome(res, { existing })
+  if (!res.backup) return outcome
+  const kept = `The hand-written version is kept as ${res.backup}.`
+  return {
+    ...outcome,
+    description: outcome.description ? `${outcome.description} ${kept}` : kept,
+  }
+}
+
+/**
+ * "Is live" only when nginx reloaded an enabled site and had nothing to say
+ * about it; everything short of that is its own sentence.
+ */
+function savedOutcome(res: SiteResult, { existing }: { existing: boolean }): SaveOutcome {
   const name = res.name
+  if (res.servedCopy) {
+    // Not "stays disabled": nginx answers the name, from the other file.
+    return {
+      tone: "warning",
+      title: `${name} saved`,
+      description: `nginx serves sites-enabled/${name}, a file of its own, not this one, so this save changes nothing it serves.`,
+    }
+  }
   if (res.reloadError) {
     // Nothing about what nginx is serving: the usual cause is an nginx that
     // is not running, which serves nothing at all.

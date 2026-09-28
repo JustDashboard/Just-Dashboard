@@ -290,7 +290,12 @@ ownership and cleanup, then removes its own containers/volumes/networks.
     file's or the site is in conf.d. The listing (`nginxVHosts`) likewise calls a site enabled only when
     its name's link names its own file (`enabledElsewhere`), so it no longer says "serving" beside a form
     that says the link is another site's; a site enabled only under another name is still listed as
-    disabled there, which is the listing's and the toggle's to change.
+    disabled there, which is the listing's and the toggle's to change. A `sites-enabled/<name>` that is a
+    file of its own (a `cp` where a link was meant) is listed as serving, since nginx serves it
+    (`servedCopy()`). `SiteFile.ServedCopy` reaches the form as `servedCopy`, and the form says nginx
+    serves that file and not this one, and offers only **Save** (`keep`, no reload). The save's result
+    carries `servedCopy` and a note that it changed nothing nginx serves and was not tested, where it
+    used to say "It stays disabled" of a name nginx answers (`TestSaveSiteSaysNginxServesAFileOfItsOwn`).
   - **A conf.d site is saved where the listing found it.** A conf.d file is switched off by a name that
     does not end in `.conf` (`app.conf.disabled`, or `app`). `siteTarget` used to add the suffix to
     every name, so saving that site as "stays disabled" wrote `app.conf.disabled.conf` beside it — a copy
@@ -414,7 +419,11 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   needs. It skips the generated ACME location (reading it back emits it twice), reports whether the file
   carries our marker so the UI can say a hand-written file may not survive, and leaves an `allow`/`deny`
   inside a location where it is — hoisting it into the site-wide list applied one path's restriction to
-  the whole site on the next save.
+  the whole site on the next save. A save over a file without the marker first keeps it as
+  `<file>.bak`, which the form's notice promised while nothing wrote it. The save then returns that
+  path as `SiteResult.backup`, and the toast names it. A later save of the now-managed file leaves that
+  `.bak` alone. A save that is refused puts back the `.bak` that was there before, or none
+  (`TestSaveSiteKeepsAHandWrittenFileAsBak`).
 
   **`POST /proxy/sites/preview` also says where the file goes**: `path` is what a save writes
   (`SiteFile`, through the same `siteTarget` the save uses: `sites-available/<name>`, or
@@ -434,7 +443,11 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   file being deleted, or points at nothing (a dangling link enables nothing and fails the next reload).
   It deletes the file and leaves any other link, or a file of its own in sites-enabled, where it is. A
   name that only such a link holds is "no such site", and the error says what holds the name
-  (`TestDeleteSiteLeavesAnotherSitesLinkAlone`).
+  (`TestDeleteSiteLeavesAnotherSitesLinkAlone`). Every other sites-enabled entry that resolves to the
+  deleted file goes with it (`linksTo`, skipping dotfiles as nginx's include does). Before, a site
+  linked as `010-app` lost only the `sites-enabled/<name>` it never had, and the dangling `010-app`
+  failed every later `nginx -t` and reload (`TestDeleteSiteRemovesALinkOfAnotherName`, and the real
+  nginx run in `TestLiveDeletingASiteLinkedUnderAnotherNameLeavesNginxValid`).
 
   The form's side of this lives in pure modules beside `site-form.tsx`, tested with bun:
   `site-identity.ts` works a new site's file name and certificate paths out of its whole first domain on
@@ -541,7 +554,8 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   (every RPM distro, Alpine, Arch — most of the servers this runs on); the difference reaches the UI as an
   empty `EnabledPath`, because conf.d has no symlink and a switch that can only error is worse than none. `confdPath` stops `app.conf` becoming `app.conf.conf`, and `ReadSiteSpec` reads the listing's `app.conf` back as a spec called `app`, the name a save writes to — the spec kept `.conf` once, and the next save renamed the site's logs to `app.conf.access.log`. The listing
   **skips backups** (`isBackupFile`: `.bak`, `~`, `.dpkg-old`, `.rpmsave`) — nginx reads none of them, and
-  since delete keeps `<name>.bak`, without the filter deleting a site produced a second site.
+  since a delete, and a save over a hand-written file, keep `<name>.bak`, without the filter deleting a
+  site produced a second site.
 - **A password file must be readable by the account that reads it.** nginx opens `auth_basic_user_file` in
   a *worker* (www-data/nginx/http), not as the root that wrote it, so a 0640 root:root file is a 403 for
   every visitor and "Permission denied" in the log — which reads exactly like a wrong password.

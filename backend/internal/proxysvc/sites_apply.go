@@ -33,7 +33,14 @@ type SiteResult struct {
 	// TestWarnings are then what enabling it would meet, and none of them
 	// refused the save: nginx does not read the file while it is disabled.
 	TestedAsEnabled bool `json:"testedAsEnabled,omitempty"`
-	Reloaded        bool `json:"reloaded"`
+	// ServedCopy says sites-enabled/<name> is a file of its own rather than
+	// a link: nginx serves that file under the site's name and does not read
+	// this one, so the save changed nothing nginx serves and was not tested.
+	ServedCopy bool `json:"servedCopy,omitempty"`
+	// Backup is where a file this dashboard did not write was kept before the
+	// save replaced it with what the form produces.
+	Backup   string `json:"backup,omitempty"`
+	Reloaded bool   `json:"reloaded"`
 	// ReloadError is why nginx did not reload a configuration that tested
 	// clean. The site is written and in place, and nginx has not picked it
 	// up: a running nginx serves what it served before, and one that is not
@@ -184,10 +191,28 @@ func (s *Service) saveSiteLocked(ctx context.Context, spec *SiteSpec, content st
 	res := &SiteResult{
 		Name: spec.Name, Path: full, Content: content, Warnings: SpecWarnings(spec),
 	}
+	undoLink, undoBackup := func() {}, func() {}
+	rollback := func() {
+		undoLink()
+		restoreConfig(full, original, existed)
+		undoBackup()
+	}
+	// A file this dashboard did not write is replaced by what the form reads
+	// of it, and anything else it held — a comment, a directive the form has
+	// no field for — went with no way back while the form said the previous
+	// version was kept as .bak. It is kept there now, before the write.
+	if existed && !strings.Contains(original, managedMarker) {
+		undo, err := keepBackup(full, original)
+		if err != nil {
+			return nil, fmt.Errorf("%s was written by hand and could not be kept as %s.bak, so it was not replaced: %w",
+				filepath.Base(full), filepath.Base(full), err)
+		}
+		undoBackup, res.Backup = undo, full+".bak"
+	}
 	if err := writeAtomic(full, content); err != nil {
+		undoBackup()
 		return nil, err
 	}
-	undoLink := func() {}
 	// trial is the copy of the configuration a site saved disabled is tested
 	// in, with it enabled.
 	var trial *trialConfig
@@ -206,11 +231,16 @@ func (s *Service) saveSiteLocked(ctx context.Context, spec *SiteSpec, content st
 			// sites-available that nginx does not include is invisible
 			// everywhere except the next person to wonder why the site is
 			// not serving.
-			restoreConfig(full, original, existed)
+			rollback()
 			return nil, err
 		}
 		undoLink = undo
 		res.Enabled = true
+	case servedCopy(link):
+		// nginx reads the file of its own under this name, so this one is
+		// neither served nor tested, and "disabled" was not true of the site.
+		res.ServedCopy = true
+		untested = fmt.Sprintf("nginx serves sites-enabled/%s, a file of its own, and not this one, so it did not test this file and the save changes nothing it serves.", spec.Name)
 	case elsewhere != "":
 		untested = elsewhere + trialUntested
 	default:
@@ -232,9 +262,8 @@ func (s *Service) saveSiteLocked(ctx context.Context, spec *SiteSpec, content st
 		res.Validation = runValidator(ctx, "nginx", "-t")
 	}
 	if !res.Validation.Valid && trial == nil {
-		undoLink()
-		restoreConfig(full, original, existed)
-		res.Enabled = false
+		rollback()
+		res.Enabled, res.Backup = false, ""
 		return res, ErrInvalidConf
 	}
 	// Only a test that read the file says anything about its names.
@@ -263,9 +292,8 @@ func (s *Service) saveSiteLocked(ctx context.Context, spec *SiteSpec, content st
 		// reason to refuse a file nginx does not read.
 		trial.remove()
 	} else if refusesConflicts(res.Conflicts) && !opts.AllowConflict {
-		undoLink()
-		restoreConfig(full, original, existed)
-		res.Enabled = false
+		rollback()
+		res.Enabled, res.Backup = false, ""
 		return res, ErrServerNameConflict
 	}
 	if untested != "" {
@@ -618,6 +646,11 @@ type SiteFileInfo struct {
 	// Enabled is a file at Path that nginx reads: linked into sites-enabled
 	// under its own name or another, or in conf.d with a name ending in .conf.
 	Enabled bool
+	// ServedCopy says sites-enabled/<name> is a file of its own, not a link:
+	// nginx serves that file under the name, and not Path — usually a copy
+	// made where a link was meant. Enabled is false, and so is "disabled":
+	// the name is served, from the other file.
+	ServedCopy bool
 	// Confd says the host keeps its sites in conf.d, where there is no link
 	// to make: a file is on while its name ends in .conf, and one without
 	// the suffix is off until it is renamed.
@@ -643,9 +676,17 @@ func (s *Service) SiteFile(name string) (SiteFileInfo, error) {
 	} else {
 		link := filepath.Join(s.nginxDir, "sites-enabled", name)
 		file.EnabledElsewhere = enabledElsewhere(link, full)
+		file.ServedCopy = servedCopy(link)
 		file.Enabled = file.Exists && enablingLink(link, full) != ""
 	}
 	return file, nil
+}
+
+// servedCopy says the sites-enabled entry link is a file of its own, which
+// nginx includes and serves like any site, rather than a link to one.
+func servedCopy(link string) bool {
+	info, err := os.Lstat(link)
+	return err == nil && info.Mode().IsRegular()
 }
 
 // enablingLink is the entry of sites-enabled through which nginx reads full:
@@ -657,21 +698,30 @@ func enablingLink(link, full string) string {
 	if _, err := os.Lstat(link); err == nil && enabledElsewhere(link, full) == "" {
 		return filepath.Base(link)
 	}
-	dir := filepath.Dir(link)
+	if links := linksTo(filepath.Dir(link), full); len(links) > 0 {
+		return links[0]
+	}
+	return ""
+}
+
+// linksTo are the entries of dir that resolve to full, passing over those
+// starting with a dot as nginx's include passes them over.
+func linksTo(dir, full string) []string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return ""
+		return nil
 	}
 	target := resolvePath(full)
+	var out []string
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".") || e.Name() == filepath.Base(link) {
+		if strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
 		if resolved, err := filepath.EvalSymlinks(filepath.Join(dir, e.Name())); err == nil && resolved == target {
-			return e.Name()
+			out = append(out, e.Name())
 		}
 	}
-	return ""
+	return out
 }
 
 // enabledElsewhere says what holds the sites-enabled link a site saved as
@@ -806,6 +856,17 @@ func linkEnabled(link, target string) (func(), error) {
 	return restore, nil
 }
 
+// keepBackup writes original beside full as <full>.bak, and returns the undo
+// for a save that is then refused: the .bak that was there before, or none.
+func keepBackup(full, original string) (func(), error) {
+	backup := full + ".bak"
+	before, existed := readIfPresent(backup)
+	if err := writeAtomic(backup, original); err != nil {
+		return nil, err
+	}
+	return func() { restoreConfig(backup, before, existed) }, nil
+}
+
 func readIfPresent(path string) (string, bool) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -822,10 +883,12 @@ func restoreConfig(path, original string, existed bool) {
 	os.Remove(path)
 }
 
-// DeleteSite removes a site's file and its symlink.
+// DeleteSite removes a site's file and every symlink in sites-enabled that
+// enables it: its own, and one of another name such as 010-app.
 //
-// Both, and in that order: leaving the link behind points nginx at a file that
-// no longer exists, which takes every site on the box down at the next reload.
+// Links first: one left behind points nginx at a file that no longer exists,
+// which takes every site on the box down at the next reload — a site linked
+// only as 010-app did that, since only sites-enabled/<name> was removed.
 // A sites-enabled/<name> that enables another file is that site's, not this
 // one's — a hand-written site linked under its domain — and stays: removing it
 // took a site nobody asked to delete off the air.
@@ -872,6 +935,12 @@ func (s *Service) DeleteSite(ctx context.Context, name string) error {
 		}
 		if _, err := os.Stat(full); err != nil {
 			continue
+		}
+		for _, entry := range linksTo(filepath.Join(s.nginxDir, "sites-enabled"), full) {
+			if err := os.Remove(filepath.Join(s.nginxDir, "sites-enabled", entry)); err != nil {
+				return err
+			}
+			s.forgetEffective()
 		}
 		// Kept as .bak for the same reason a compose file is: validation
 		// catches a broken config, not a correct one that says the wrong

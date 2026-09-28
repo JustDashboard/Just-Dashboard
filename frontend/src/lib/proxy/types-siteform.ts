@@ -65,6 +65,11 @@ export type SitePreview = {
    */
   enabled?: boolean
   /**
+   * sites-enabled/<name> is a file of its own, not a link: nginx serves that
+   * file under the name, and a save of this one does not reach it.
+   */
+  servedCopy?: boolean
+  /**
    * The host keeps its sites in conf.d: a file is on while its name ends in
    * .conf, and enabling one that does not is renaming it, which a save does
    * not do.
@@ -82,6 +87,8 @@ export type SiteRead = {
   enabled?: boolean
   /** The site is in conf.d, where it is enabled by renaming it. */
   confd?: boolean
+  /** nginx serves sites-enabled/<name>, a file of its own, instead of this one. */
+  servedCopy?: boolean
 }
 
 /** One of a site's names another server block also claims on the same address. */
@@ -117,6 +124,13 @@ export type SiteResult = {
    * meet, and none of them refused the save.
    */
   testedAsEnabled?: boolean
+  /**
+   * nginx serves sites-enabled/<name>, a file of its own, and not this one:
+   * the save changed nothing it serves, and was not tested.
+   */
+  servedCopy?: boolean
+  /** Where the hand-written file the save replaced was kept. */
+  backup?: string
   reloaded: boolean
   /** Why nginx did not reload a configuration that tested clean. */
   reloadError?: string
