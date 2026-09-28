@@ -1079,6 +1079,27 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   now, so the switch saying on means nginx reads the file. `parseCaddyfile` tracks brace depth so
   only top-level blocks are site addresses — `handle`, `header` and `tls` blocks were listed as
   server names.
+- **Catch-all default site.** `default_site.go` keeps one owned file, `jd-default` (sites-available plus
+  its link, or `conf.d/jd-default.conf`, first line carrying `OwnedMarker`, so the Sites list leaves it
+  out). `GET /proxy/default-site` (a read every account holds: listen lines of files the listing already
+  shows, no probe) reads who answers an unknown Host on each socket today from `EffectiveConfig` +
+  `NginxTree` — the `default_server` claimant, else the first server nginx reads — and the plan: it
+  always claims `*:80`, and `[::]:80`, `*:443`, `[::]:443` only where some site already listens there,
+  because a reload that has to bind a new port fails where `nginx -t` (which does not bind) passed;
+  443 is skipped when a site serves plain HTTP on it, since `ssl` on one listen line turns the socket
+  to TLS for every server on it. Sockets on a named address are reported as not covered. `PUT`
+  (`system.admin`, `{choice: close|not_found|redirect|page, redirectTo}`, audited
+  `proxy.default_site.apply`) answers 409 `other_default` naming each other file's `default_server`
+  on a socket it would claim, before writing anything; otherwise it writes the file (and, for
+  `page`, a plain `<nginxDir>/jd-pages/default/index.html` when none exists), links it, runs
+  `nginx -t` and undoes all of it on a refusal (422, as a link change), then reloads. The choice sits
+  in `location /` rather than the server so the ACME location (`/srv/just-dashboard-acme`) still
+  answers: a server-level `return` runs before locations are matched. On 443 the second server is
+  `ssl_reject_handshake on` with no certificate. A redirect target is a scheme and host only
+  (`$request_uri` is appended; `$`, quotes, `;`, braces refused). `DELETE` (destructive, audited
+  `proxy.default_site.remove`) removes the file and its link and reloads; the page directory stays.
+  QUIC is not claimed: `quic` listen lines are left to the site that has them, since taking
+  `reuseport` means rewriting that site's file.
 - **Certificates say who uses them.** `listCertificates` joins the sites' `ssl_certificate` paths
   onto the certificate list (`UsedBy`), through symlinks, so a certbot lineage and the site naming
   its `live/` path are one entry; `certificateName` names a file in a generic directory

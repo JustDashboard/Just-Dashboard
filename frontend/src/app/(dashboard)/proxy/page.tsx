@@ -5,7 +5,14 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowRight, Globe, RefreshClockwise } from "@/components/icons"
 import { ApiError, errorMessage, get } from "@/lib/api"
-import type { Certificate, CertbotState, Listener, StreamStatus, VHost } from "@/lib/types"
+import type {
+  Certificate,
+  CertbotState,
+  DefaultSite,
+  Listener,
+  StreamStatus,
+  VHost,
+} from "@/lib/types"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Page, PageContext, PageState } from "@/components/page"
@@ -78,7 +85,13 @@ import { portsHref } from "@/components/proxy/ports-list"
  * where "why is the proxy unhappy" is asked.
  */
 export default function ProxyOverviewPage() {
-  const { status, updatedAt: statusAt, error: statusError, refresh: refreshStatus } = useProxy()
+  const {
+    status,
+    hasNginx,
+    updatedAt: statusAt,
+    error: statusError,
+    refresh: refreshStatus,
+  } = useProxy()
   const { can } = useAuth()
   const router = useRouter()
   const admin = can("system.admin")
@@ -115,6 +128,12 @@ export default function ProxyOverviewPage() {
     configTest.refreshLast()
   }
   const control = useEngineControl({ status, unit: engine, onChanged: refreshAll })
+  const defaultSite = usePoll<DefaultSite>(
+    (signal) => get("/proxy/default-site", undefined, signal),
+    300_000,
+    [],
+    { enabled: hasNginx },
+  )
 
   // certbot being absent is a fact about the host, not a failure to report.
   const certbotGone =
@@ -275,6 +294,7 @@ export default function ProxyOverviewPage() {
         ports: listeners,
         unreadable,
         lastTest: lastTest && { engine: testEngine, record: lastTest },
+        defaultSite: defaultSite.data,
       }),
     [
       certificates,
@@ -287,6 +307,7 @@ export default function ProxyOverviewPage() {
       unreadable,
       lastTest,
       testEngine,
+      defaultSite.data,
     ],
   )
   const retry: Record<ProxySource, () => void> = {

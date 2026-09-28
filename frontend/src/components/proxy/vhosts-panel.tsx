@@ -31,6 +31,7 @@ import { AuthFilesPanel } from "@/components/proxy/auth-files-panel"
 import { AccessListsPanel } from "@/components/proxy/access-lists-panel"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { useNewSiteLink } from "@/components/proxy/site-link"
+import { DefaultSitePanel } from "@/components/proxy/default-site"
 import { siteProduct } from "@/components/proxy/marks"
 import { SiteForm } from "@/components/proxy/site-form"
 import {
@@ -845,6 +846,8 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
           )}
         </div>
       )}
+
+      {hasNginx && <DefaultSitePanel admin={admin} />}
 
       {admin && hasNginx && <AuthFilesPanel />}
       {admin && hasNginx && <AccessListsPanel />}
