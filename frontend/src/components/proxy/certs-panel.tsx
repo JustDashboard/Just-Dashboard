@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { CheckCircle, CloudUpload, RefreshClockwise, ShieldOff } from "@/components/icons"
 import { ApiError, del, errorMessage, get, post } from "@/lib/api"
@@ -8,6 +8,7 @@ import {
   afterReload,
   certbotRunning,
   renewalReading,
+  runningCertbotJob,
   sameNames,
   stillServingTest,
   testCertificateReplaced,
@@ -38,6 +39,7 @@ import {
   CertbotMissing,
   CertbotRuntimeLine,
   DnsProvidersPanel,
+  forceRenewal,
   IssueDialog,
   RenewalNotice,
   useRenew,
@@ -77,12 +79,19 @@ export function CertificatesPage() {
 
   // ?issue=app.example.com opens the issuance form on those names: the site
   // form links here when it names a certificate that does not exist yet.
-  const [issue, setIssue] = useState<{ open: boolean; domains?: string; staging: boolean }>(() => ({
+  const [issue, setIssue] = useState<{
+    open: boolean
+    domains?: string
+    staging: boolean
+    /** A lineage whose names the form changes. */
+    target?: string
+  }>(() => ({
     open: Boolean(params.get("issue")),
     domains: params.get("issue") ?? undefined,
     staging: true,
   }))
-  const [importOpen, setImportOpen] = useState(false)
+  const [importing, setImporting] = useState<{ open: boolean; name?: string }>({ open: false })
+  const [watchedAdded, setWatchedAdded] = useState(0)
   // The kind is kept while the dialog closes, so its body does not switch
   // to the other form on the way out.
   const [privateDialog, setPrivateDialog] = useState<{ open: boolean; kind: PrivateKind }>({
@@ -135,7 +144,34 @@ export function CertificatesPage() {
     if (admin) refreshProviders()
   }, [ended, admin, refreshCerts, refreshCertbot, refreshProviders])
   const { busy, renew } = useRenew(console_.attach)
-  const certbotBusy = certbotRunning(console_.job)
+  // certbot's lock is the host's, not this tab's: a run started from another
+  // tab, or before this page loaded, holds it just the same.
+  const jobs = usePoll<Job[]>((signal) => get("/jobs/", undefined, signal), 5_000, [], {
+    enabled: admin,
+  })
+  const elsewhere = runningCertbotJob(jobs.data)
+  const certbotJob = certbotRunning(console_.job) ? console_.job : elsewhere
+  // A run this console never showed ends unseen by the refresh above.
+  const elsewhereId = elsewhere?.id ?? ""
+  const seenElsewhere = useRef("")
+  useEffect(() => {
+    if (seenElsewhere.current && !elsewhereId) {
+      refreshCerts()
+      refreshCertbot()
+    }
+    seenElsewhere.current = elsewhereId
+  }, [elsewhereId, refreshCerts, refreshCertbot])
+  const certbotBusy = certbotJob !== null
+  const openCertbotJob = certbotJob ? () => void console_.open(certbotJob.id) : undefined
+  const watch = async (domain: string) => {
+    try {
+      await post("/certificates/watched", { domain, port: 443 })
+      notify.success(`Watching ${domain}`)
+      setWatchedAdded((n) => n + 1)
+    } catch (err) {
+      notify.error("Could not watch domain", err)
+    }
+  }
   const [logOpen, setLogOpen] = useState(false)
   const [starting, setStarting] = useState(false)
   // The timer's own service, started now: systemd records the run, so the
@@ -404,7 +440,7 @@ export function CertificatesPage() {
             actions={
               admin && (
                 <>
-                  <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
+                  <Button size="sm" variant="outline" onClick={() => setImporting({ open: true })}>
                     <CloudUpload className="size-3.5" />
                     Import
                   </Button>
@@ -431,13 +467,30 @@ export function CertificatesPage() {
                 certs={certs.data}
                 canScan={admin}
                 canReadHistory={admin}
-                job={job}
+                job={certbotJob ?? job}
+                lineages={certbot.data?.certs}
+                onOpenJob={openCertbotJob}
                 onReplace={
                   admin && !certbotGone && !testAuthority
                     ? (domains) => setIssue({ open: true, domains, staging: false })
                     : undefined
                 }
                 onDelete={admin ? (cert) => remove(cert.source, cert.name) : undefined}
+                onRenew={admin && !certbotGone ? (name, dryRun) => renew(name, dryRun) : undefined}
+                onRenewNow={
+                  admin && !certbotGone
+                    ? (name) => confirm(forceRenewal(name, () => renew(name, false, true)))
+                    : undefined
+                }
+                onChangeNames={
+                  admin && !certbotGone
+                    ? (target, domains) =>
+                        setIssue({ open: true, domains: domains.join(" "), staging: true, target })
+                    : undefined
+                }
+                onRevoke={admin && !certbotGone ? revoke : undefined}
+                onReplaceImport={admin ? (name) => setImporting({ open: true, name }) : undefined}
+                onWatch={admin ? (domain) => void watch(domain) : undefined}
               />
             ) : (
               <EmptyState
@@ -487,9 +540,8 @@ export function CertificatesPage() {
                     disabled={busy !== "" || certbotBusy}
                     pending={
                       busy === ALL_CERTS ||
-                      (certbotBusy &&
-                        job?.kind === "certbot.renew" &&
-                        job.target === "every certificate due")
+                      (certbotJob?.kind === "certbot.renew" &&
+                        certbotJob.target === "every certificate due")
                     }
                     onClick={() => renew(ALL_CERTS, false)}
                   >
@@ -520,7 +572,7 @@ export function CertificatesPage() {
                     state={certbot.data}
                     admin={admin}
                     certbotBusy={certbotBusy || starting || busy !== ""}
-                    running={certbotBusy && job?.kind === "certbot.renewal"}
+                    running={certbotJob?.kind === "certbot.renewal"}
                     onRun={runRenewal}
                     onShowLog={() => setLogOpen(true)}
                   />
@@ -531,7 +583,8 @@ export function CertificatesPage() {
                     state={certbot.data}
                     admin={admin}
                     busy={busy}
-                    job={console_.job}
+                    job={certbotJob ?? job}
+                    onOpenJob={openCertbotJob}
                     onRenew={renew}
                     onReplace={
                       testAuthority
@@ -582,7 +635,7 @@ export function CertificatesPage() {
           page: the timer's runs are the ones nobody was watching. */}
       {!certbotGone && <RenewalLog certbot={certbot.data} />}
 
-      <WatchedDomains admin={admin} />
+      <WatchedDomains admin={admin} added={watchedAdded} />
       {admin && <CertTransparency />}
 
       {admin && (
@@ -592,6 +645,7 @@ export function CertificatesPage() {
             onOpenChange={setIssueOpen}
             initialDomains={issue.domains}
             initialStaging={issue.staging}
+            initialTarget={issue.target}
             hasNginx={hasNginx}
             plugins={
               certbot.data && !certbot.data.runtime.pluginsError
@@ -608,7 +662,12 @@ export function CertificatesPage() {
               providers.refresh()
             }}
           />
-          <ImportDialog open={importOpen} onOpenChange={setImportOpen} onDone={certs.refresh} />
+          <ImportDialog
+            open={importing.open}
+            onOpenChange={(open) => setImporting((s) => ({ ...s, open }))}
+            initialName={importing.name}
+            onDone={certs.refresh}
+          />
           <PrivateCertificateDialog
             open={privateDialog.open}
             kind={privateDialog.kind}

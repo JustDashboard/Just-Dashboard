@@ -47,13 +47,22 @@ export function ImportDialog({
   open,
   onOpenChange,
   onDone,
+  initialName,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   onDone: () => void
+  /** An import to replace: its name starts the form, and the server asks before overwriting it. */
+  initialName?: string
 }) {
   return (
-    <ImportDialogBody key={String(open)} open={open} onOpenChange={onOpenChange} onDone={onDone} />
+    <ImportDialogBody
+      key={`${open}:${initialName ?? ""}`}
+      open={open}
+      onOpenChange={onOpenChange}
+      onDone={onDone}
+      initialName={initialName}
+    />
   )
 }
 
@@ -95,12 +104,14 @@ function ImportDialogBody({
   open,
   onOpenChange,
   onDone,
+  initialName,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   onDone: () => void
+  initialName?: string
 }) {
-  const [name, setName] = useState("")
+  const [name, setName] = useState(initialName ?? "")
   const [certificate, setCertificate] = useState("")
   const [key, setKey] = useState("")
   const [pfx, setPfx] = useState<Pfx | null>(null)
@@ -227,7 +238,7 @@ function ImportDialogBody({
       open={open}
       onOpenChange={onOpenChange}
       size="lg"
-      title="Import a certificate"
+      title={initialName ? `Replace ${initialName}` : "Import a certificate"}
       description="For a certificate you bought or were given. Nothing here renews it — that is what the expiry column is for."
       footer={footer}
     >

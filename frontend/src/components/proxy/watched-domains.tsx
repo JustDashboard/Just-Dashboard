@@ -70,7 +70,14 @@ function endpointLabel(row: Pick<Watched, "domain" | "port" | "ip">) {
  * nobody, and every row says when its answer was read. Reading the list sends
  * nothing; an administrator can ask for a check now.
  */
-export function WatchedDomains({ admin }: { admin: boolean }) {
+export function WatchedDomains({
+  admin,
+  added = 0,
+}: {
+  admin: boolean
+  /** Bumped when a domain is watched from elsewhere on the page, so the list shows it. */
+  added?: number
+}) {
   const router = useRouter()
   const [domain, setDomain] = useState("")
   const [ip, setIp] = useState("")
@@ -85,6 +92,7 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
   const watched = usePoll(
     (signal) => get<Watched[]>("/certificates/watched", undefined, signal),
     60_000,
+    [added],
   )
   const settings = usePoll(
     (signal) => get<{ intervalSeconds: number }>("/certificates/watch-schedule", undefined, signal),

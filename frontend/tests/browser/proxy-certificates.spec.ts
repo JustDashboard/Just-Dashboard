@@ -106,7 +106,7 @@ test("certbot's verbs wait while a certbot run is on screen, and come back when 
   // The job is still running after the 202: the lineage says so and nothing
   // certbot does can be pressed until it ends.
   await expect(lineages.getByText("Renewing…")).toBeVisible()
-  await expect(page.getByText("certbot is running. Its other actions wait")).toBeVisible()
+  await expect(page.getByText("certbot is busy")).toBeVisible()
   await expect(lineages.getByRole("button", { name: "Renew", exact: true })).toBeDisabled()
   await expect(page.getByRole("button", { name: "Renew all due" })).toBeDisabled()
   await page.getByRole("button", { name: "Issue certificate", exact: true }).click()
@@ -122,7 +122,7 @@ test("certbot's verbs wait while a certbot run is on screen, and come back when 
   await expect(lineages.getByText("29d left")).toBeVisible()
   await expect(lineages.getByRole("button", { name: "Renew", exact: true })).toBeEnabled()
   await expect(page.getByRole("button", { name: "Renew all due" })).toBeEnabled()
-  await expect(page.getByText("certbot is running. Its other actions wait")).toHaveCount(0)
+  await expect(page.getByText("certbot is busy")).toHaveCount(0)
 })
 
 test("another tab's certbot run is refused by the server, and the page says what is running", async ({

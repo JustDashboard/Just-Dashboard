@@ -28,6 +28,10 @@ export function certificateFindings({ certs, certbot }: CertificateFindingInput)
     // nothing to act on, and one no route uses is Caddy's to clear away.
     const caddy = cert.source === "caddy"
     if (caddy && !cert.error && !cert.staging && !(cert.expired && cert.usedBy.length > 0)) continue
+    // The sheet for the file, where there is one: Caddy's unreadable list has none.
+    const href = cert.path
+      ? `/proxy/certificates?cert=${encodeURIComponent(cert.path)}`
+      : "/proxy/certificates"
     const users = [...cert.usedBy, ...(cert.usedByStreams ?? []).map((name) => `stream ${name}`)]
     const usedBy = users.length ? ` Used by ${users.join(", ")}.` : ""
     if (cert.error) {
@@ -40,7 +44,7 @@ export function certificateFindings({ certs, certbot }: CertificateFindingInput)
           ? "The list leaves out what the Docker ingress serves until it can read them. Check that the Caddy container is running and Docker answers."
           : "A site pointing at a certificate nginx cannot read fails its next reload. Fix or replace the file, or point the site elsewhere.",
         meta: "certificate",
-        href: "/proxy/certificates",
+        href,
       })
     } else if (cert.staging) {
       // Only a site serving it makes it an outage; one nothing names is a
@@ -52,7 +56,7 @@ export function certificateFindings({ certs, certbot }: CertificateFindingInput)
         detail: `A staging authority signed it, so every browser refuses it.${usedBy}`,
         advice: stagingAdvice(cert, certbot),
         meta: "certificate",
-        href: "/proxy/certificates",
+        href,
       })
     } else if (cert.expired) {
       out.push({
@@ -66,7 +70,7 @@ export function certificateFindings({ certs, certbot }: CertificateFindingInput)
           ? "Caddy renews it itself and did not. Its container log says why: usually DNS or inbound port 80 or 443."
           : "Renew it, then find out why the renewal did not run on its own.",
         meta: "certificate",
-        href: "/proxy/certificates",
+        href,
       })
     } else if (cert.expiring) {
       out.push({
@@ -78,7 +82,7 @@ export function certificateFindings({ certs, certbot }: CertificateFindingInput)
         advice:
           "certbot renews at thirty days. A certificate still here a week later means the timer is not running.",
         meta: "certificate",
-        href: "/proxy/certificates",
+        href,
       })
     }
   }
@@ -136,7 +140,9 @@ export function certificateFindings({ certs, certbot }: CertificateFindingInput)
         ? "It is inside its renewal window, so certbot tries at every run and fails the same way until this is fixed."
         : "Fix this before it reaches its renewal window, thirty days before it expires.",
       meta: "renewal",
-      href: "/proxy/certificates",
+      href: lineage.certPath
+        ? `/proxy/certificates?cert=${encodeURIComponent(lineage.certPath)}`
+        : "/proxy/certificates",
     })
   }
 

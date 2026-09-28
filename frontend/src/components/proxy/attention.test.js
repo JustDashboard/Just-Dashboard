@@ -203,7 +203,7 @@ describe("foldProxyFindings", () => {
         advice:
           "certbot renews at thirty days. A certificate still here a week later means the timer is not running.",
         meta: "certificate",
-        href: "/proxy/certificates",
+        href: "/proxy/certificates?cert=%2Fs",
       },
       {
         id: "cert.expired./g",
@@ -212,7 +212,7 @@ describe("foldProxyFindings", () => {
         detail: "Expired yesterday; every browser refuses it now. Used by gone.",
         advice: "Renew it, then find out why the renewal did not run on its own.",
         meta: "certificate",
-        href: "/proxy/certificates",
+        href: "/proxy/certificates?cert=%2Fg",
       },
       {
         id: "cert.expired./o",
@@ -221,7 +221,7 @@ describe("foldProxyFindings", () => {
         detail: "Expired 12 days ago; every browser refuses it now.",
         advice: "Renew it, then find out why the renewal did not run on its own.",
         meta: "certificate",
-        href: "/proxy/certificates",
+        href: "/proxy/certificates?cert=%2Fo",
       },
       {
         id: "certbot.no-timer",
@@ -242,7 +242,7 @@ describe("foldProxyFindings", () => {
         advice:
           "certbot renews at thirty days. A certificate still here a week later means the timer is not running.",
         meta: "certificate",
-        href: "/proxy/certificates",
+        href: "/proxy/certificates?cert=%2Fw",
       },
       {
         id: "cert.error.broken",
@@ -262,7 +262,7 @@ describe("foldProxyFindings", () => {
         advice:
           "A site pointing at a certificate nginx cannot read fails its next reload. Fix or replace the file, or point the site elsewhere.",
         meta: "certificate",
-        href: "/proxy/certificates",
+        href: "/proxy/certificates?cert=%2Fb",
       },
       {
         id: "site.plain.plain",
