@@ -40,6 +40,7 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/renewal/log", s.handle(s.handleRenewalLog))
 		r.Method(http.MethodPost, "/renewal/run", s.handle(s.handleRenewalRun))
 		r.Method(http.MethodPut, "/renewal-hook", s.handle(s.handleRenewalHookInstall))
+		s.mountCertTransparencyRoutes(r)
 		s.destructive(r, func(r chi.Router) {
 			// Removing the hook stops nginx reloading after renewals; the
 			// same switch puts it back, so no phrase.

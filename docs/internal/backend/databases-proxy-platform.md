@@ -425,6 +425,20 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   (the sweep with a fake clock, openssl cross-checks) and `TestLiveNginxServesALocalCACertificateAndItsRenewal`
   (the host's nginx serving an issued certificate that a client trusting only the root accepts by name
   and address, then serving the renewal the check reloaded it for).
+- **`ct.go`** — the Certificate Transparency monitor, off until an administrator switches it on, since
+  every check sends this host's domain names to crt.sh (setting `proxy.ct_monitor`; `PUT
+  /certificates/transparency` on, `DELETE` off, destructive with no phrase; both audited as
+  `certificates.transparency.enable`/`.disable`). `GET /certificates/transparency` (system.admin) is
+  `{enabled:false}` while off and asks nothing; on, it reduces every vhost server name and certificate
+  name to its registered domain (`RegisteredDomains`, `golang.org/x/net/publicsuffix`; names under no
+  public suffix are skipped), asks crt.sh for the first ten (`q=<domain>` and `q=%.<domain>`,
+  `exclude=expired`, three at a time, 45s each, answers over 8 MiB refused rather than listed in part)
+  and keeps each domain's rows for six hours (`CTMonitor` in `modules_proxy.go`'s lane F sections;
+  failures are not cached, one query per domain is shared between readers). Verdicts are made on each
+  read: a certificate is `ours` when its serial is one held live, imported or in certbot's `archive/`,
+  and `unexpectedIssuer` when it is not ours and its issuer's organisation signed none of this host's
+  publicly trusted certificates (never set when there are none to compare with). A precertificate and its
+  certificate share a serial and are listed once.
 - **`streams.go`** — nginx's `stream` is a sibling of `http`, so a stream cannot live under
   sites-available. They go in `/etc/nginx/stream.d`, and the page says plainly when `nginx.conf` does not
   include it. nginx.conf itself is never edited from here: everything else on the host depends on it.

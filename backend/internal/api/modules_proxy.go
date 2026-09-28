@@ -1,6 +1,10 @@
 package api
 
-import "context"
+import (
+	"context"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+)
 
 // proxyExtras is what the proxy pages keep beyond proxysvc.Service itself:
 // recorders, watchers and the stores behind them. It lives apart from
@@ -21,6 +25,9 @@ type proxyExtras struct {
 	// --- lane F: certificates ---
 	// localCA renews the local CA's certificates daily (handlers_certificates_private.go).
 	localCA *localCARenewal
+	// ct asks crt.sh for the certificates logged for this host's domains
+	// (handlers_cert_transparency.go).
+	ct *proxysvc.CTMonitor
 
 	// --- lane G: TLS report & monitoring ---
 }
@@ -41,6 +48,7 @@ func (s *Server) initProxyExtras() {
 
 	// --- lane F: certificates ---
 	s.modules.proxyExtras.localCA = s.newLocalCARenewal()
+	s.modules.proxyExtras.ct = proxysvc.NewCTMonitor()
 
 	// --- lane G: TLS report & monitoring ---
 }

@@ -72,3 +72,42 @@ export type LocalCA = {
   /** When the daily check next runs; absent until the loop has started. */
   nextCheck?: string
 }
+
+/** A certificate the public Certificate Transparency logs hold, as crt.sh lists it. */
+export type CTCertificate = {
+  id: number
+  /** Its page on crt.sh. */
+  url: string
+  /** The issuing CA's common name (R11). */
+  issuer: string
+  /** Its organisation (Let's Encrypt): what a certificate is judged by. */
+  issuerOrg: string
+  names: string[]
+  serial: string
+  notBefore: string
+  notAfter: string
+  logged: string
+  /** Its serial is one this host holds, live or in certbot's archive. */
+  ours: boolean
+  /** Not held here, and from an authority that signed none of this host's certificates. */
+  unexpectedIssuer: boolean
+}
+
+/** What the logs hold for one registered domain and its subdomains. */
+export type CTDomain = {
+  domain: string
+  certificates: CTCertificate[]
+  checked?: string
+  error?: string
+}
+
+/** The transparency monitor: off, or its report. */
+export type CTReport = {
+  enabled: boolean
+  source?: string
+  domains?: CTDomain[]
+  /** Registered domains past the per-report limit, left unasked. */
+  skipped?: string[]
+  /** Organisations that signed this host's own public certificates. */
+  expectedIssuers?: string[]
+}

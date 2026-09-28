@@ -150,6 +150,10 @@ authority's certificate to it replaces a certificate kept under the same name on
 an import does. The local CA's root key is never read back or exported by any route; its root
 certificate is readable by every signed-in account, because it is made to be installed.
 
+The Certificate Transparency monitor (`/certificates/transparency`) is system.admin throughout and off
+by default: its report lists every domain the host serves, and switching it on sends those names to
+crt.sh, a fixed third party no caller can redirect.
+
 Editing a firewall rule is a write, not a destructive one, and is mounted accordingly: the replacement goes
 in before the original comes out, so there is no moment the rule is missing. Stopping a job is the same
 argument from the other side — interrupting is how you *avoid* a bad outcome, and a phrase in front of a

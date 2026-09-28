@@ -41,6 +41,7 @@ import {
   RenewalNotice,
   useRenew,
 } from "@/components/proxy/certbot-panel"
+import { CertTransparency } from "@/components/proxy/cert-transparency"
 import { CertificateInventory } from "@/components/proxy/certificate-inventory"
 import { CsrDialog } from "@/components/proxy/csr-dialog"
 import { ImportDialog } from "@/components/proxy/import-dialog"
@@ -498,6 +499,7 @@ export function CertificatesPage() {
         </div>
       </div>
       <WatchedDomains admin={admin} />
+      {admin && <CertTransparency />}
 
       {admin && (
         <>
