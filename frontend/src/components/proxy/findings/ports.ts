@@ -6,6 +6,7 @@ import {
   reachWords,
   type DangerousPort,
 } from "@/components/proxy/ports"
+import { portsHref } from "@/components/proxy/ports-list"
 
 export type PortFindingInput = { ports?: Listener[] }
 
@@ -51,7 +52,9 @@ export function portFindings({ ports }: PortFindingInput): ProxyFinding[] {
         ? "Bind these to loopback or a private address, or close them in the firewall. A database port on the internet is the commonest way a server is emptied."
         : "Bind these to 127.0.0.1 unless something on the same network needs them, or close them in the firewall. A database port on the internet is the commonest way a server is emptied.",
       meta: "ports",
-      href: "/proxy/ports",
+      // Opens the ports page on these ports alone, whatever it was left
+      // filtered to.
+      href: portsHref({ q: `port:${[...new Set(dangerous.map((d) => d.port))].join(",")}` }),
     })
   }
 

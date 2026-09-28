@@ -22,6 +22,26 @@ const portListTimeout = 10 * time.Second
 // index at both /ports and /ports/, and the dashboard asks for the first.
 func (s *Server) mountPortRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/", s.handle(s.handlePortList))
+	r.Method(http.MethodGet, "/meta", s.handle(s.handlePortsMeta))
+}
+
+// portsMeta is what the ports page reads besides the sockets, apart from the
+// list so that stays the plain array other pages already read.
+type portsMeta struct {
+	// EphemeralRange is null where the kernel's range cannot be read, and
+	// the page then offers nothing that depends on it.
+	EphemeralRange *proxysvc.PortRange `json:"ephemeralRange"`
+}
+
+// handlePortsMeta tells the page which ports the kernel hands out on its own,
+// so it can set aside the loopback sockets that were given one.
+func (s *Server) handlePortsMeta(w http.ResponseWriter, r *http.Request) error {
+	meta := portsMeta{}
+	if span, err := proxysvc.EphemeralPorts(); err == nil {
+		meta.EphemeralRange = &span
+	}
+	httpx.JSON(w, http.StatusOK, meta)
+	return nil
 }
 
 func (s *Server) handlePortList(w http.ResponseWriter, r *http.Request) error {

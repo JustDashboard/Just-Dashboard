@@ -68,3 +68,15 @@ export type Listener = {
   pastFirewall?: "docker" | "rule"
   firewallRule?: number
 }
+
+/** A span of port numbers, both ends included. */
+export type PortRange = { low: number; high: number }
+
+/** GET /ports/meta: what the ports page reads besides the sockets. */
+export type PortsMeta = {
+  /**
+   * The span the kernel hands a socket bound to port 0 from
+   * (net.ipv4.ip_local_port_range); null where it could not be read.
+   */
+  ephemeralRange: PortRange | null
+}

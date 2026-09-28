@@ -9,9 +9,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
@@ -348,5 +351,35 @@ func TestPortListSaysWhatGetsPastTheFirewall(t *testing.T) {
 				t.Errorf("port %v: %s = %v, want %v (%s)", got[i]["port"], key, got[i][key], want[key], body)
 			}
 		}
+	}
+}
+
+// GET /ports/meta says which ports the kernel hands out on its own, read from
+// the same process table as the sockets, to any account that may read the
+// list; where the range cannot be read it says so with null rather than a
+// guessed default the page would hide ports by.
+func TestPortsMetaSaysWhichPortsTheKernelHandsOut(t *testing.T) {
+	s := testServer(t)
+	h := s.Routes()
+	reader := &client{t: t, h: h, cookie: signInAs(t, s, "reader", auth.RoleReadOnly)}
+	root := t.TempDir()
+	t.Setenv("HOST_PROC", root)
+
+	w := reader.do(http.MethodGet, "/api/v1/ports/meta", "", nil)
+	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"ephemeralRange":null}` {
+		t.Fatalf("GET /ports/meta with no sysctl = %d %s, want a null range", w.Code, w.Body.String())
+	}
+
+	dir := filepath.Join(root, "sys", "net", "ipv4")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ip_local_port_range"), []byte("40000\t50000\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w = reader.do(http.MethodGet, "/api/v1/ports/meta", "", nil)
+	if w.Code != http.StatusOK ||
+		strings.TrimSpace(w.Body.String()) != `{"ephemeralRange":{"low":40000,"high":50000}}` {
+		t.Fatalf("GET /ports/meta = %d %s, want 40000-50000", w.Code, w.Body.String())
 	}
 }

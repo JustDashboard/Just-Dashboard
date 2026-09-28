@@ -1,11 +1,12 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { Fragment, useMemo, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { NetworkDevice } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get } from "@/lib/api"
-import type { Connections } from "@/lib/types"
+import type { Connections, PortsMeta } from "@/lib/types"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -19,6 +20,7 @@ import { addressVerbs, blockAddress } from "@/components/security/address-verbs"
 import { AreaFindings } from "@/components/security/posture-panel"
 import { useSecurity } from "@/components/security/security-context"
 import { VerbActions } from "@/components/verbs"
+import { chosenPort, portsHref } from "@/components/proxy/ports-list"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   stickyTableHeader,
@@ -54,6 +56,11 @@ export function ConnectionsPanel() {
     (signal) => get("/connections", undefined, signal),
     10000,
   )
+  // The kernel's ephemeral range tells this host's side of a connection that
+  // somebody chose — a listener's port, which the ports page can name — from
+  // one the kernel picked for an outgoing call, which nothing listens on.
+  const range = usePoll((signal) => get<PortsMeta>("/ports/meta", undefined, signal), 0).data
+    ?.ephemeralRange
 
   const peers = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -205,7 +212,24 @@ export function ConnectionsPanel() {
                         )}
                       </TableCell>
                       <TableCell className="hidden sm:table-cell">
-                        <span className="font-mono">{peer.ports.slice(0, 4).join(", ")}</span>
+                        <span className="font-mono">
+                          {peer.ports.slice(0, 4).map((port, i) => (
+                            <Fragment key={port}>
+                              {i > 0 && ", "}
+                              {chosenPort(port, range) ? (
+                                <Link
+                                  href={portsHref({ q: `:${port}` })}
+                                  aria-label={`What listens on port ${port}`}
+                                  className="rounded-sm underline-offset-4 focus-ring hover:underline"
+                                >
+                                  {port}
+                                </Link>
+                              ) : (
+                                port
+                              )}
+                            </Fragment>
+                          ))}
+                        </span>
                         {peer.service && (
                           <span className="ml-1.5 text-muted-foreground">{peer.service}</span>
                         )}

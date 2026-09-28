@@ -524,3 +524,66 @@ func TestListListenersNamesTheDaemonNotInitOnThisHost(t *testing.T) {
 		}
 	}
 }
+
+// The sysctl as the kernel writes it — two numbers split by a tab — and the
+// shapes that would leave the page hiding the wrong ports if read loosely.
+func TestParsePortRangeReadsTheSysctl(t *testing.T) {
+	for _, tc := range []struct {
+		content string
+		want    PortRange
+		err     bool
+	}{
+		{"32768\t60999\n", PortRange{32768, 60999}, false},
+		{"1024 65535", PortRange{1024, 65535}, false},
+		{"40000\t40000\n", PortRange{40000, 40000}, false},
+		{"", PortRange{}, true},
+		{"32768\n", PortRange{}, true},
+		{"60999\t32768\n", PortRange{}, true},
+		{"0\t60999\n", PortRange{}, true},
+		{"32768\t70000\n", PortRange{}, true},
+		{"low\thigh\n", PortRange{}, true},
+		{"32768 40000 60999", PortRange{}, true},
+	} {
+		got, err := parsePortRange(tc.content)
+		if (err != nil) != tc.err || got != tc.want {
+			t.Errorf("parsePortRange(%q) = %+v, %v; want %+v, error %v", tc.content, got, err, tc.want, tc.err)
+		}
+	}
+}
+
+// The range comes from the same process table the sockets do, HOST_PROC
+// included, and a table without it is an error rather than a guessed range.
+func TestEphemeralPortsReadsTheProcessTableTheSocketsComeFrom(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOST_PROC", root)
+	if _, err := EphemeralPorts(); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("EphemeralPorts() with no sysctl = %v, want a missing file", err)
+	}
+	dir := filepath.Join(root, "sys", "net", "ipv4")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ip_local_port_range"), []byte("40000\t50000\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := EphemeralPorts()
+	if err != nil || got != (PortRange{40000, 50000}) {
+		t.Fatalf("EphemeralPorts() = %+v, %v; want 40000-50000", got, err)
+	}
+}
+
+// On this host the range read is the kernel's own.
+func TestEphemeralPortsIsTheKernelsOnThisHost(t *testing.T) {
+	content, err := os.ReadFile("/proc/sys/net/ipv4/ip_local_port_range")
+	if err != nil {
+		t.Skipf("no sysctl here: %v", err)
+	}
+	fields := strings.Fields(string(content))
+	got, err := EphemeralPorts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := fmt.Sprintf("%d %d", got.Low, got.High); want != strings.Join(fields, " ") {
+		t.Errorf("EphemeralPorts() = %s, the kernel says %q", want, content)
+	}
+}

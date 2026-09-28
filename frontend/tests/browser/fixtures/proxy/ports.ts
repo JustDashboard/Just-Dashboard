@@ -483,10 +483,36 @@ export const bridgePair = [
   },
 ]
 
+/**
+ * Twenty git-daemon sockets on loopback, each on a port the kernel handed
+ * out, as a host running a code-review tool lists them: the rows that buried
+ * the few facing off the machine.
+ */
+export const gitDaemons = Array.from({ length: 20 }, (_, i) => ({
+  protocol: "tcp",
+  family: "ipv4",
+  address: "127.0.0.1",
+  port: 33012 + i * 1321,
+  pid: 7100 + i,
+  ppid: 7000,
+  process: "git-daemon",
+  cmdline: `/usr/lib/git-core/git-daemon --listen=127.0.0.1 --port=${33012 + i * 1321} --base-path=/srv/git`,
+  user: "ubuntu",
+  scope: "loopback",
+  reach: "loopback",
+  network: "loopback",
+  exposed: false,
+}))
+
+/** The kernel's own range on the host these fixtures are copied from. */
+export const portsMeta = { ephemeralRange: { low: 32768, high: 60999 } }
+
 export const routes: ProxyRoutes = {
   "/ports": (route) => json(route, ports),
+  "/ports/meta": (route) => json(route, portsMeta),
 }
 
 export const showcase: ProxyRoutes = {
   "/ports": (route) => json(route, hostPorts),
+  "/ports/meta": (route) => json(route, portsMeta),
 }

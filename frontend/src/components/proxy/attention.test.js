@@ -269,7 +269,7 @@ describe("foldProxyFindings", () => {
         advice:
           "Bind these to loopback or a private address, or close them in the firewall. A database port on the internet is the commonest way a server is emptied.",
         meta: "ports",
-        href: "/proxy/ports",
+        href: "/proxy/ports?q=port:5432,6379",
       },
       {
         id: "site.disabled.off",
@@ -323,7 +323,7 @@ describe("foldProxyFindings", () => {
         advice:
           "Bind these to loopback or a private address, or close them in the firewall. A database port on the internet is the commonest way a server is emptied.",
         meta: "ports",
-        href: "/proxy/ports",
+        href: "/proxy/ports?q=port:27017",
       },
     ])
   })

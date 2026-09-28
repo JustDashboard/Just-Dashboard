@@ -299,7 +299,11 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   but for its addresses — Docker holds a published port's two families in two docker-proxy processes,
   dockerd's children, each told its own `-host-ip`. The overview's Internet-facing tile counts the same
   folded rows. A UDP socket on port 0 is not listed, and `GET /ports` gives the walk ten seconds before
-  a retryable 504, which the page offers to try again.
+  a retryable 504, which the page offers to try again. `GET /ports/meta` answers `{ephemeralRange: {low,
+  high}}` from `EphemeralPorts`, `net.ipv4.ip_local_port_range` read under the same process table
+  (`null` where it cannot be read), apart from the list so `/ports` stays the plain array other pages
+  read: the page sets aside loopback sockets inside it on request, and the Connections page links a
+  connection's local port to the ports page only outside it, where somebody chose the port.
   `TestListListenersNamesTheDaemonNotInitOnThisHost` checks the owner on the real host and runs only as
   root; it reads `/proc` and changes nothing.
 - **Site builder** (`sites.go`, `sites_render.go`, `sites_parse.go`, `sites_apply.go`). `SiteSpec` is our
@@ -428,8 +432,8 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `/proxy/streams`, `/proxy/auth-files` and `/proxy/tools`; `mountCertificateRoutes`
   (`handlers_certificates.go`) and `mountTLSRoutes` (`handlers_tls.go`; the watch list's handlers stay in
   `handlers_domains.go`) inside `/certificates`; and `mountPortRoutes` (`handlers_ports.go`) at `/ports`,
-  which chi serves with and without the trailing slash. `TestProxyRoutesKeepTheirPaths` pins every path,
-  method and gate as they stood before the split. The whole group runs `withProxyActor`, which puts the
+  which chi serves with and without the trailing slash, with `/ports/meta` beside it.
+  `TestProxyRoutesKeepTheirPaths` pins every path, method and gate as they stood before the split. The whole group runs `withProxyActor`, which puts the
   signed-in account on the context for the change record below. Background work and state the proxy
   pages keep beyond `proxysvc.Service` go in `api/modules_proxy.go` (`initProxyExtras`, run last in
   `initModules`; `startProxyExtras` from `Start`; `stopProxyExtras` from `Shutdown`, which also runs for a

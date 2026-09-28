@@ -234,6 +234,46 @@ func procRoot() string {
 	return "/proc"
 }
 
+// PortRange is a span of port numbers, both ends included.
+type PortRange struct {
+	Low  uint32 `json:"low"`
+	High uint32 `json:"high"`
+}
+
+// EphemeralPorts is the span the kernel picks a port from when a socket is
+// bound to port 0 — net.ipv4.ip_local_port_range, which governs IPv6 too.
+// A loopback socket listening inside it was almost always given its port
+// rather than asked for one: a language server, a browser's debugging port, a
+// test runner. Read from the same process table as the sockets, whose net/
+// is the reader's network namespace.
+func EphemeralPorts() (PortRange, error) {
+	content, err := os.ReadFile(filepath.Join(procRoot(), "sys", "net", "ipv4", "ip_local_port_range"))
+	if err != nil {
+		return PortRange{}, err
+	}
+	return parsePortRange(string(content))
+}
+
+// parsePortRange reads "32768\t60999\n", the sysctl's two numbers.
+func parsePortRange(content string) (PortRange, error) {
+	fields := strings.Fields(content)
+	if len(fields) != 2 {
+		return PortRange{}, fmt.Errorf("port range %q is not two numbers", strings.TrimSpace(content))
+	}
+	low, err := strconv.ParseUint(fields[0], 10, 16)
+	if err != nil {
+		return PortRange{}, fmt.Errorf("port range %q: %w", strings.TrimSpace(content), err)
+	}
+	high, err := strconv.ParseUint(fields[1], 10, 16)
+	if err != nil {
+		return PortRange{}, fmt.Errorf("port range %q: %w", strings.TrimSpace(content), err)
+	}
+	if low == 0 || low > high {
+		return PortRange{}, fmt.Errorf("port range %q is empty", strings.TrimSpace(content))
+	}
+	return PortRange{Low: uint32(low), High: uint32(high)}, nil
+}
+
 // readSockets reads the four inet tables. Their net/ is the reader's own
 // network namespace, which in production is the host's (network_mode: host).
 // A kernel without IPv6 has no tcp6 or udp6, which is not an error.
