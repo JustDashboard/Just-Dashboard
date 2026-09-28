@@ -13,6 +13,8 @@ export type Certificate = {
   error?: string
   /** The nginx sites whose ssl_certificate points at this file. */
   usedBy: string[]
+  /** The streams serving TLS with this file. */
+  usedByStreams?: string[]
   /** SHA-256 of the DER and the serial, in openssl's uppercase colon form. */
   fingerprint?: string
   serial?: string

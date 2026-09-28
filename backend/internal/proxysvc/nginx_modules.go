@@ -52,6 +52,10 @@ type StreamModule struct {
 	Package string `json:"package,omitempty"`
 	// Detail is nginx's own words when it could not be asked.
 	Detail string `json:"detail,omitempty"`
+	// SSL is whether the build has stream_ssl_module, which a stream's TLS
+	// on either end needs. It is part of the stream module — built into its
+	// shared object on a dynamic build — so it is read from nginx -V alone.
+	SSL bool `json:"ssl"`
 }
 
 // streamNginxBuild is what `nginx -V` says about how the binary was compiled.
@@ -214,14 +218,15 @@ func (s *Service) StreamModule(ctx context.Context) StreamModule {
 		return StreamModule{State: ModuleUnknown, Detail: strings.TrimSpace("nginx -V: " + firstLine(string(out)) + " " + err.Error())}
 	}
 	build := parseStreamNginxBuild(string(out))
+	ssl := build.modules["stream_ssl_module"] != ""
 	switch build.modules["stream"] {
 	case "static":
-		return StreamModule{State: ModuleStatic, Usable: true}
+		return StreamModule{State: ModuleStatic, Usable: true, SSL: ssl}
 	case "":
 		return StreamModule{State: ModuleAbsent}
 	}
 
-	module := StreamModule{Path: path.Join(build.modulesPath, streamModuleFile)}
+	module := StreamModule{Path: path.Join(build.modulesPath, streamModuleFile), SSL: ssl}
 	load := readLoadedModules(ctx)
 	module.State = load.state(ctx, "stream", module.Path)
 	module.Usable = module.State == ModuleLoaded

@@ -198,7 +198,7 @@ func TestListCertificatesNamesTheSitesThatUseEach(t *testing.T) {
 		{Name: "app-staging", CertPath: archive},
 		{Name: "plain"},
 	}
-	certs := listCertificates(live, imported, vhosts)
+	certs := listCertificates(live, imported, vhosts, nil)
 	if len(certs) != 1 {
 		t.Fatalf("expected one certificate, got %d: %+v", len(certs), certs)
 	}

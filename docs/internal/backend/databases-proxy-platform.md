@@ -1636,6 +1636,16 @@ ownership and cleanup, then removes its own containers/volumes/networks.
     server; `Upstream` is always the first server. Refused: backup under client-ip or random (nginx has none
     there), every server down, no up server that is not a backup, a duplicate address, more than 32. The
     upstream Test dials every server not marked down.
+  - **TLS.** `TLS` with `CertPath`/`KeyPath` puts `ssl` on every listen and writes `ssl_certificate` and
+    `ssl_certificate_key`; `UpstreamTLS` writes `proxy_ssl on`, `UpstreamName` adds `proxy_ssl_name` with
+    `proxy_ssl_server_name on` (without a name nginx would check against the generated upstream name), and
+    `UpstreamVerify` adds `proxy_ssl_verify on` with `proxy_ssl_trusted_certificate UpstreamCA` and needs
+    the name. TCP only (no DTLS); paths match `absPathRe`, the name `domainRe` without a wildcard; an end
+    that is off drops its fields. `StreamModule.SSL` reads `--with-stream_ssl_module` from `nginx -V`, and
+    `ApplyStream` refuses TLS with `ErrNoStreamSSL` (409 `stream_ssl_missing`) when the build lacks it — a
+    file saved for later would otherwise fail the reload that connects the directory. `Certificate.UsedByStreams`
+    lists the unpaused streams serving a certificate (source `stream:<name>` when only a stream names it).
+    `proxy_ssl_verify_depth`, protocols, ciphers and client certificates are hand-written.
   - **Testing a stream** (`stream_dial.go`). `POST /proxy/streams/test {target, port, protocol, mode,
     query?}` (system.admin — it dials an address the caller chose — and audited `proxy.stream.test`) dials
     from the host's network namespace inside 5 s: `mode: upstream` the forward's target, `mode: nginx` the

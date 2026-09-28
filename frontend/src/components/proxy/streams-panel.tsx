@@ -92,6 +92,7 @@ import { ConfigEditor } from "@/components/proxy/config-editor"
 import { StreamSetup } from "@/components/proxy/stream-setup"
 import { AccessRules } from "@/components/proxy/access-rules"
 import { StreamServers } from "@/components/proxy/stream-servers"
+import { StreamTLS } from "@/components/proxy/stream-tls"
 import { useProxy } from "@/components/proxy/proxy-context"
 import { DANGEROUS_PORTS } from "@/components/proxy/findings/shared"
 import { ProxyGrid, RoutePath } from "@/components/proxy/route-path"
@@ -1119,7 +1120,7 @@ function StreamForm({
   )
   const accessProblem = accessError(access)
   // A file the form cannot say everything about is not saved over: the
-  // form would drop what it cannot show — a max_conns, a TLS listener.
+  // form would drop what it cannot show — a max_conns, a reuseport listener.
   const locked = Boolean(stream && (stream.error || stream.unsupported.length > 0))
   const readOnly = locked || blocked !== null
   const renaming = stream !== null && spec.name !== stream.name
@@ -1266,7 +1267,8 @@ function StreamForm({
               !spec.upstream ||
               spec.servers?.some((server) => !server.address.trim()) ||
               !timed ||
-              accessProblem !== ""
+              accessProblem !== "" ||
+              (spec.tls && (!spec.certPath || !spec.keyPath))
             }
             pending={busy}
           >
@@ -1476,6 +1478,8 @@ function StreamForm({
               )
             }
           />
+
+          <StreamTLS spec={spec} module={status.module} open={open} onChange={edit} />
 
           <AccessRules access={access} error={accessProblem} onChange={setAccess} />
 

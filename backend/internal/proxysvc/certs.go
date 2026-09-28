@@ -31,6 +31,10 @@ type Certificate struct {
 	// which is the answer to the question the list used to leave open: what
 	// breaks when this one expires.
 	UsedBy []string `json:"usedBy"`
+	// UsedByStreams names the streams that serve TLS with this file. They are
+	// apart from UsedBy because a stream is not a site: the page links each
+	// to its own list.
+	UsedByStreams []string `json:"usedByStreams"`
 	// Fingerprint is the SHA-256 of the DER and Serial the serial number,
 	// both in the uppercase colon form `openssl x509 -fingerprint` prints,
 	// so one can be compared by eye with what a browser or a CA shows.
@@ -64,7 +68,23 @@ const expiryWarningDays = 30
 // only pair that covers its domains. What the operator reads as an inventory
 // is CertificateInventory.
 func (s *Service) ListCertificates(ctx context.Context) ([]Certificate, error) {
-	return listCertificates(filepath.Join(letsencryptDir, "live"), importedDir, s.nginxVHosts()), nil
+	return listCertificates(filepath.Join(letsencryptDir, "live"), importedDir, s.nginxVHosts(), s.tlsStreams()), nil
+}
+
+// tlsStreams are the streams nginx reads that serve TLS. A paused stream is
+// left out: nothing breaks for it when the certificate expires.
+func (s *Service) tlsStreams() []StreamSpec {
+	entries, _ := os.ReadDir(s.streamDir())
+	var out []StreamSpec
+	for _, e := range entries {
+		if !streamFileName(e) {
+			continue
+		}
+		if entry := listStream(s.streamDir(), e); entry.CertPath != "" {
+			out = append(out, entry.StreamSpec)
+		}
+	}
+	return out
 }
 
 // CertificateInventory is ListCertificates as the Certificates page and the
@@ -87,14 +107,14 @@ func (s *Service) CertificateInventory(ctx context.Context) ([]Certificate, erro
 // listCertificates is ListCertificates with its directories as arguments, so
 // the join between certificates and the sites that use them can be tested
 // without /etc.
-func listCertificates(liveDir, imported string, vhosts []VHost) []Certificate {
+func listCertificates(liveDir, imported string, vhosts []VHost, streams []StreamSpec) []Certificate {
 	index := map[string]int{}
 	out := []Certificate{}
 
 	// The same file reached by two paths — certbot's symlink and the target
 	// a site names directly — is one certificate, and the sites that name it
 	// are gathered onto that one entry rather than producing a second.
-	add := func(path, source string, usedBy string) {
+	add := func(path, source string, usedBy string) int {
 		resolved := path
 		if r, err := filepath.EvalSymlinks(path); err == nil {
 			resolved = r
@@ -103,7 +123,7 @@ func listCertificates(liveDir, imported string, vhosts []VHost) []Certificate {
 			if usedBy != "" {
 				out[i].UsedBy = append(out[i].UsedBy, usedBy)
 			}
-			return
+			return i
 		}
 		index[resolved] = len(out)
 		cert, err := readCertificate(path)
@@ -115,10 +135,12 @@ func listCertificates(liveDir, imported string, vhosts []VHost) []Certificate {
 		}
 		cert.Source = source
 		cert.UsedBy = []string{}
+		cert.UsedByStreams = []string{}
 		if usedBy != "" {
 			cert.UsedBy = append(cert.UsedBy, usedBy)
 		}
 		out = append(out, *cert)
+		return len(out) - 1
 	}
 
 	if entries, err := os.ReadDir(liveDir); err == nil {
@@ -144,6 +166,10 @@ func listCertificates(liveDir, imported string, vhosts []VHost) []Certificate {
 		if v.CertPath != "" {
 			add(v.CertPath, "nginx:"+v.Name, v.Name)
 		}
+	}
+	for _, st := range streams {
+		i := add(st.CertPath, "stream:"+st.Name, "")
+		out[i].UsedByStreams = append(out[i].UsedByStreams, st.Name)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].DaysLeft != out[j].DaysLeft {
@@ -184,11 +210,12 @@ func readCertificate(path string) (*Certificate, error) {
 func summarise(c *x509.Certificate, name, path string) *Certificate {
 	cert := &Certificate{
 		Name: name, Path: path,
-		Domains:   append([]string{}, c.DNSNames...),
-		Issuer:    c.Issuer.CommonName,
-		NotBefore: c.NotBefore.UTC(),
-		NotAfter:  c.NotAfter.UTC(),
-		UsedBy:    []string{},
+		Domains:       append([]string{}, c.DNSNames...),
+		Issuer:        c.Issuer.CommonName,
+		NotBefore:     c.NotBefore.UTC(),
+		NotAfter:      c.NotAfter.UTC(),
+		UsedBy:        []string{},
+		UsedByStreams: []string{},
 	}
 	cert.Domains = append(cert.Domains, certificateAddresses(c)...)
 	if len(cert.Domains) == 0 && c.Subject.CommonName != "" {

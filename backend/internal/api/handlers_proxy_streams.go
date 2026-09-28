@@ -235,6 +235,8 @@ func (s *Server) handleStreamApply(w http.ResponseWriter, r *http.Request) error
 		return out
 	case errors.Is(err, proxysvc.ErrStreamNotFound):
 		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
+	case errors.Is(err, proxysvc.ErrNoStreamSSL):
+		return httpx.Err(http.StatusConflict, "stream_ssl_missing", err.Error())
 	case err != nil:
 		return mapProxyError(err)
 	}
@@ -245,6 +247,12 @@ func (s *Server) handleStreamApply(w http.ResponseWriter, r *http.Request) error
 	if len(req.Spec.Servers) > 0 {
 		detail["servers"] = len(req.Spec.Servers)
 		detail["balance"] = req.Spec.Balance
+	}
+	if req.Spec.TLS {
+		detail["tls"] = req.Spec.CertPath
+	}
+	if req.Spec.UpstreamTLS {
+		detail["upstreamTls"] = map[string]any{"name": req.Spec.UpstreamName, "verify": req.Spec.UpstreamVerify}
 	}
 	if res.Renamed != "" {
 		detail["renamedFrom"] = res.Renamed

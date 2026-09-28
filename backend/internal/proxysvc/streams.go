@@ -105,6 +105,24 @@ type StreamSpec struct {
 	// so a client opening four gets four times the rate. Zero is no limit.
 	UploadRate   int `json:"uploadRate,omitempty"`
 	DownloadRate int `json:"downloadRate,omitempty"`
+	// TLS makes nginx the TLS end for clients: every listen takes ssl and
+	// presents CertPath with KeyPath, and the backend sees plain TCP unless
+	// UpstreamTLS is on too. TCP only — nginx has no DTLS.
+	TLS      bool   `json:"tls,omitempty"`
+	CertPath string `json:"certPath,omitempty"`
+	KeyPath  string `json:"keyPath,omitempty"`
+	// UpstreamTLS makes nginx a TLS client of the backend (proxy_ssl).
+	UpstreamTLS bool `json:"upstreamTls,omitempty"`
+	// UpstreamName is the backend's host name, sent as SNI and, with
+	// UpstreamVerify, the name its certificate must carry. Without it nginx
+	// would send no SNI and check the certificate against the upstream
+	// block's generated name, which no certificate carries.
+	UpstreamName string `json:"upstreamName,omitempty"`
+	// UpstreamVerify refuses a backend whose certificate does not chain to
+	// UpstreamCA or does not carry UpstreamName. nginx checks nothing by
+	// default, so without it the link is encrypted but not authenticated.
+	UpstreamVerify bool   `json:"upstreamVerify,omitempty"`
+	UpstreamCA     string `json:"upstreamCa,omitempty"`
 }
 
 // StreamServer is one server of a stream's pool, with nginx's own options.
@@ -243,11 +261,16 @@ var (
 	ErrStreamExists = errors.New("a stream by that name already exists")
 	// ErrStreamNotFound is a stream to edit or delete that has no file.
 	ErrStreamNotFound = errors.New("no such stream")
+	// ErrNoStreamSSL refuses TLS on a stream when nginx was built without
+	// stream_ssl_module. nginx -t catches it only while it reads the stream
+	// directory; saved for later, the file would fail the reload that
+	// connects the directory, and every one after.
+	ErrNoStreamSSL = errors.New("this nginx was built without stream_ssl_module, so a stream cannot use TLS")
 )
 
 // HandwrittenStreamError refuses to save the form over a file that does more
 // than the form can say. Saving would drop every one of those things — a
-// server option the form lacks, TLS — and a forwarding rule that
+// server option the form lacks, a listen option — and a forwarding rule that
 // quietly became wider than it was is the worst way this can fail.
 type HandwrittenStreamError struct {
 	Name        string
@@ -309,6 +332,9 @@ func ValidateStream(spec *StreamSpec) error {
 	if err := validStreamAccess(spec); err != nil {
 		return err
 	}
+	if err := validStreamTLS(spec); err != nil {
+		return err
+	}
 	for _, limit := range []struct {
 		value, max int
 		what       string
@@ -323,6 +349,44 @@ func ValidateStream(spec *StreamSpec) error {
 		}
 	}
 	return nil
+}
+
+// validStreamTLS checks both TLS ends and drops what an end that is off
+// would carry, so a file reads back one way.
+func validStreamTLS(spec *StreamSpec) error {
+	if !spec.TLS {
+		spec.CertPath, spec.KeyPath = "", ""
+	}
+	if !spec.UpstreamTLS {
+		spec.UpstreamName, spec.UpstreamVerify = "", false
+	}
+	if !spec.UpstreamVerify {
+		spec.UpstreamCA = ""
+	}
+	if (spec.TLS || spec.UpstreamTLS) && spec.Protocol != "tcp" {
+		return fmt.Errorf("TLS is for TCP only — nginx has no DTLS for UDP")
+	}
+	if spec.TLS && (!absPathRe.MatchString(spec.CertPath) || !absPathRe.MatchString(spec.KeyPath)) {
+		return fmt.Errorf("serving TLS needs an absolute path to the certificate and to its key")
+	}
+	if spec.UpstreamName != "" && (!domainRe.MatchString(spec.UpstreamName) || strings.HasPrefix(spec.UpstreamName, "*")) {
+		return fmt.Errorf("the backend's name must be a host name like db.internal")
+	}
+	if spec.UpstreamVerify {
+		if spec.UpstreamName == "" {
+			return fmt.Errorf("verifying the backend needs the name its certificate carries")
+		}
+		if !absPathRe.MatchString(spec.UpstreamCA) {
+			return fmt.Errorf("verifying the backend needs an absolute path to the CA certificates to trust")
+		}
+	}
+	return nil
+}
+
+// streamUsesTLS is whether a stream needs nginx built with
+// stream_ssl_module: without it nginx refuses ssl and proxy_ssl alike.
+func streamUsesTLS(spec *StreamSpec) bool {
+	return spec.TLS || spec.UpstreamTLS
 }
 
 // validStreamAccess checks the ordered rules and folds them into the one
@@ -598,6 +662,9 @@ func RenderStream(spec *StreamSpec) (string, error) {
 	l.blank()
 	l.add("server {")
 	for _, suffix := range streamListenSuffixes(spec.Protocol) {
+		if spec.TLS {
+			suffix += " ssl"
+		}
 		switch ip := net.ParseIP(spec.Address); {
 		case spec.Address == "":
 			l.add("    listen %d%s;", spec.Listen, suffix)
@@ -607,6 +674,12 @@ func RenderStream(spec *StreamSpec) (string, error) {
 		default:
 			l.add("    listen %s:%d%s;", spec.Address, spec.Listen, suffix)
 		}
+	}
+	if spec.TLS {
+		l.blank()
+		l.add("    # nginx ends the client's TLS here; the backend sees what is inside.")
+		l.add("    ssl_certificate     %s;", spec.CertPath)
+		l.add("    ssl_certificate_key %s;", spec.KeyPath)
 	}
 	if len(spec.AllowFrom) > 0 {
 		l.blank()
@@ -645,6 +718,20 @@ func RenderStream(spec *StreamSpec) (string, error) {
 	if spec.NoRetry {
 		l.add("    # A server that fails to accept fails the connection; no other is tried.")
 		l.add("    proxy_next_upstream off;")
+	}
+	if spec.UpstreamTLS {
+		l.add("    # nginx opens its own TLS connection to the backend.")
+		l.add("    proxy_ssl on;")
+		if spec.UpstreamName != "" {
+			l.add("    proxy_ssl_name %s;", spec.UpstreamName)
+			l.add("    proxy_ssl_server_name on;")
+		}
+		if spec.UpstreamVerify {
+			l.add("    proxy_ssl_verify on;")
+			l.add("    proxy_ssl_trusted_certificate %s;", spec.UpstreamCA)
+		} else {
+			l.add("    # The backend's certificate is not checked: encrypted, not authenticated.")
+		}
 	}
 	if spec.ProxyProtocol {
 		l.add("    # The backend must be configured to expect this header, or it")
@@ -708,6 +795,12 @@ type parsedStream struct {
 	open        bool
 	unsupported []string
 	binds       []bind
+	// sslListens and plainListens count the listens with and without ssl:
+	// the form puts ssl on every one or none.
+	sslListens, plainListens int
+	// sni is whether proxy_ssl_server_name is on, which the form writes
+	// exactly when it writes proxy_ssl_name.
+	sni bool
 }
 
 func (p *parsedStream) cannot(what string) {
@@ -819,6 +912,20 @@ func parseStreamFile(fileName, content string) parsedStream {
 			}
 		case "limit_conn":
 			p.readLimitConn(d.Args, zones, perIP, total)
+		case "ssl_certificate", "ssl_certificate_key", "proxy_ssl_trusted_certificate", "proxy_ssl_name":
+			p.readTLSValue(d)
+		case "proxy_ssl", "proxy_ssl_server_name", "proxy_ssl_verify":
+			on, ok := onOff(d.Args)
+			switch {
+			case !ok:
+				p.cannot(d.Name + " " + strings.Join(d.Args, " "))
+			case d.Name == "proxy_ssl":
+				p.spec.UpstreamTLS = on
+			case d.Name == "proxy_ssl_server_name":
+				p.sni = on
+			default:
+				p.spec.UpstreamVerify = on
+			}
 		case "proxy_upload_rate", "proxy_download_rate":
 			kib, ok := streamRate(d.Args)
 			switch {
@@ -847,6 +954,7 @@ func parseStreamFile(fileName, content string) parsedStream {
 		p.cannot("no proxy_pass")
 	}
 	p.reduceBinds()
+	p.checkTLS()
 	if p.spec.UDPMode == "request" && p.spec.Protocol == "tcp" {
 		p.cannot("proxy_responses on TCP")
 	}
@@ -856,6 +964,63 @@ func parseStreamFile(fileName, content string) parsedStream {
 	foldStreamServers(&p.spec)
 	p.readAccess(rules)
 	return p
+}
+
+// onOff reads a flag directive's one argument.
+func onOff(args []string) (on, ok bool) {
+	if len(args) != 1 || (args[0] != "on" && args[0] != "off") {
+		return false, false
+	}
+	return args[0] == "on", true
+}
+
+// readTLSValue takes one of the TLS lines holding a path or a name, once,
+// in the shape validStreamTLS accepts.
+func (p *parsedStream) readTLSValue(d Directive) {
+	field, valid := &p.spec.CertPath, absPathRe.MatchString
+	switch d.Name {
+	case "ssl_certificate_key":
+		field = &p.spec.KeyPath
+	case "proxy_ssl_trusted_certificate":
+		field = &p.spec.UpstreamCA
+	case "proxy_ssl_name":
+		field = &p.spec.UpstreamName
+		valid = func(name string) bool { return domainRe.MatchString(name) && !strings.HasPrefix(name, "*") }
+	}
+	if len(d.Args) != 1 || !valid(d.Args[0]) || *field != "" {
+		p.cannot(d.Name + " " + strings.Join(d.Args, " "))
+		return
+	}
+	*field = d.Args[0]
+}
+
+// checkTLS names the TLS the form cannot write back as it is: ssl on some
+// listens only, a certificate with no ssl listen to use it, a TLS line with
+// its end turned off, or verification without the name or the CAs nginx
+// needs to check with.
+func (p *parsedStream) checkTLS() {
+	switch {
+	case p.sslListens > 0 && p.plainListens > 0:
+		p.cannot("ssl on some listens only")
+	case p.sslListens > 0:
+		p.spec.TLS = true
+	}
+	if p.spec.TLS != (p.spec.CertPath != "") || p.spec.TLS != (p.spec.KeyPath != "") {
+		p.cannot("an ssl listen and its certificate apart")
+	}
+	if (p.spec.TLS || p.spec.UpstreamTLS) && p.spec.Protocol != "tcp" {
+		p.cannot("TLS on UDP")
+	}
+	if p.sni != (p.spec.UpstreamName != "") {
+		p.cannot("proxy_ssl_server_name without proxy_ssl_name, or the other way round")
+	}
+	if !p.spec.UpstreamTLS && (p.spec.UpstreamName != "" || p.spec.UpstreamVerify) {
+		p.cannot("proxy_ssl options with proxy_ssl off")
+	}
+	if p.spec.UpstreamVerify != (p.spec.UpstreamCA != "") ||
+		p.spec.UpstreamVerify && p.spec.UpstreamName == "" {
+		p.cannot("proxy_ssl_verify without its CA or its name")
+	}
 }
 
 // readLimitConn takes a connection cap on one of the zones this file
@@ -885,7 +1050,7 @@ func (p *parsedStream) readLimitConn(args []string, zones map[string]bool, perIP
 }
 
 // readListen takes one listen line. Only the shapes RenderStream writes are
-// the form's; anything else — a port range, a host name, ssl, reuseport — is
+// the form's; anything else — a port range, a host name, reuseport — is
 // named, and its socket is still read so a port check sees it.
 func (p *parsedStream) readListen(args []string) {
 	if len(args) == 0 {
@@ -893,12 +1058,21 @@ func (p *parsedStream) readListen(args []string) {
 		return
 	}
 	b := bind{}
+	ssl := false
 	for _, param := range args[1:] {
-		if param == "udp" {
+		switch param {
+		case "udp":
 			b.udp = true
-		} else {
+		case "ssl":
+			ssl = true
+		default:
 			p.cannot("listen option " + param)
 		}
+	}
+	if ssl {
+		p.sslListens++
+	} else {
+		p.plainListens++
 	}
 	addr, port := "", args[0]
 	switch {
@@ -1369,6 +1543,13 @@ func (s *Service) ApplyStream(ctx context.Context, spec *StreamSpec, previous st
 	content, err := RenderStream(spec)
 	if err != nil {
 		return nil, err
+	}
+	// Asked before the lock, like the reads below. A module that could not
+	// be asked about is left to nginx -t.
+	if streamUsesTLS(spec) {
+		if m := s.StreamModule(ctx); m.State != ModuleUnknown && !m.SSL {
+			return nil, ErrNoStreamSSL
+		}
 	}
 	// Read before the lock: finding the running nginx walks /proc, and the
 	// lock holds up every other save on the host.

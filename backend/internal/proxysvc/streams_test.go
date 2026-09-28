@@ -442,11 +442,12 @@ server { listen 5432; proxy_pass pool; allow 10.0.0.0/8; deny all; }`,
 				Servers: []StreamServer{{Address: "10.0.0.5:5432"}, {Address: "10.0.0.6:5432", Backup: true}}},
 		},
 		{
-			name:        "tls and a sub-second timeout",
-			content:     "server { listen 6443 ssl; ssl_certificate /etc/ssl/a.pem; proxy_pass 10.0.0.5:6443; proxy_connect_timeout 500ms; }",
-			want:        StreamSpec{Name: "x", Listen: 6443, Address: "0.0.0.0", Protocol: "tcp", Upstream: "10.0.0.5:6443", AllowFrom: []string{}},
+			name:    "tls without a key and a sub-second timeout",
+			content: "server { listen 6443 ssl; ssl_certificate /etc/ssl/a.pem; proxy_pass 10.0.0.5:6443; proxy_connect_timeout 500ms; }",
+			want: StreamSpec{Name: "x", Listen: 6443, Address: "0.0.0.0", Protocol: "tcp", Upstream: "10.0.0.5:6443", AllowFrom: []string{},
+				TLS: true, CertPath: "/etc/ssl/a.pem"},
 			open:        true,
-			unsupported: []string{"listen option ssl", "ssl_certificate", "proxy_connect_timeout 500ms"},
+			unsupported: []string{"proxy_connect_timeout 500ms", "an ssl listen and its certificate apart"},
 		},
 		{
 			// nginx takes a zero and drops every connection at once. Read

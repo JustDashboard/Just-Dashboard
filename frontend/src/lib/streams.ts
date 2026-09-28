@@ -46,6 +46,13 @@ export function streamSpecOf(stream: StreamSpec): StreamSpec {
     maxConnTotal,
     uploadRate,
     downloadRate,
+    tls,
+    certPath,
+    keyPath,
+    upstreamTls,
+    upstreamName,
+    upstreamVerify,
+    upstreamCa,
   } = stream
   return {
     name,
@@ -67,6 +74,13 @@ export function streamSpecOf(stream: StreamSpec): StreamSpec {
     maxConnTotal,
     uploadRate,
     downloadRate,
+    tls,
+    certPath,
+    keyPath,
+    upstreamTls,
+    upstreamName,
+    upstreamVerify,
+    upstreamCa,
   }
 }
 

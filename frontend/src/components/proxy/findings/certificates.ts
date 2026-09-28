@@ -28,7 +28,8 @@ export function certificateFindings({ certs, certbot }: CertificateFindingInput)
     // nothing to act on, and one no route uses is Caddy's to clear away.
     const caddy = cert.source === "caddy"
     if (caddy && !cert.error && !cert.staging && !(cert.expired && cert.usedBy.length > 0)) continue
-    const usedBy = cert.usedBy.length ? ` Used by ${cert.usedBy.join(", ")}.` : ""
+    const users = [...cert.usedBy, ...(cert.usedByStreams ?? []).map((name) => `stream ${name}`)]
+    const usedBy = users.length ? ` Used by ${users.join(", ")}.` : ""
     if (cert.error) {
       out.push({
         id: `cert.error.${cert.path || cert.name}`,
