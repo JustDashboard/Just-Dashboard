@@ -387,7 +387,7 @@ func writeStaged(dir, path string, content []byte, mode os.FileMode, backup bool
 	}
 	defer os.Remove(staged)
 	if backup {
-		if err := keepBackup(path); err != nil {
+		if err := keepImportBackup(path); err != nil {
 			return err
 		}
 	}
