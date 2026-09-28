@@ -56,11 +56,17 @@ export function FindingList({
   findings,
   emptyLabel = "All checks passed",
   onDismiss,
+  anchor,
+  defaultOpen,
 }: {
   findings: Finding[]
   emptyLabel?: string
   /** When set, each row gets a dismiss control that reports the finding id. */
   onDismiss?: (id: string) => void
+  /** The element id each row carries, so a #hash can link to one finding. */
+  anchor?: (id: string) => string
+  /** Finding ids open on first render — the one a link pointed at. */
+  defaultOpen?: string[]
 }) {
   if (findings.length === 0) {
     return (
@@ -72,9 +78,14 @@ export function FindingList({
   }
 
   return (
-    <Accordion type="multiple" className="min-w-0">
+    <Accordion type="multiple" defaultValue={defaultOpen} className="min-w-0">
       {findings.map((finding) => (
-        <AccordionItem key={finding.id} value={finding.id} className="border-hairline">
+        <AccordionItem
+          key={finding.id}
+          value={finding.id}
+          id={anchor?.(finding.id)}
+          className="scroll-mt-20 border-hairline"
+        >
           <AccordionTrigger
             className="min-w-0 items-center gap-3 py-2.5 text-body hover:no-underline"
             actions={

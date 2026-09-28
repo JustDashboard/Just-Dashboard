@@ -6,8 +6,8 @@
 
 import type { Verdict } from "@/components/status-dot"
 import type { Tone } from "@/components/tone"
-import type { HTTPScan, RedirectHop, TLSScan } from "./proxy/types-tls"
-import { tlsReportHref } from "./scan-target"
+import type { GradeCheck, HTTPScan, RedirectHop, TLSScan } from "./proxy/types-tls"
+import { targetLabel, tlsReportHref } from "./scan-target"
 
 const PLAIN_ERRORS: Record<NonNullable<HTTPScan["plainErrorKind"]>, string> = {
   refused: "port 80 refused the connection",
@@ -196,4 +196,142 @@ export function termLeft(cert: { notBefore: string; notAfter: string }, now: num
   const end = Date.parse(cert.notAfter)
   if (!(end > start)) return 0
   return Math.max(0, Math.min(100, ((end - now) / (end - start)) * 100))
+}
+
+/**
+ * A word as one POSIX shell argument: left bare when nothing in it is special,
+ * single-quoted otherwise, since a name or a pin pasted into a terminal must
+ * arrive as typed. Brackets are quoted too: an IPv6 address's are a glob to
+ * zsh, which refuses a glob that matches nothing.
+ */
+export function shellQuote(word: string): string {
+  if (/^[A-Za-z0-9_.,:/@%+=-]+$/.test(word)) return word
+  return `'${word.replace(/'/g, `'\\''`)}'`
+}
+
+/** A command that shows for yourself what the scan saw. */
+export type ReproduceCommand = { label: string; command: string }
+
+/**
+ * The commands that repeat the scan by hand. An address is sent no SNI, as the
+ * scan sends none; an IPv6 one is bracketed, and curl is told with -g not to
+ * read those brackets as a glob. curl is offered only where an HTTP answer was
+ * read: the headers of a mail server are not a question.
+ */
+export function reproduceCommands(scan: TLSScan): ReproduceCommand[] {
+  const host = scan.domain
+  const ipv6 = host.includes(":")
+  const connect = ipv6 ? `[${host}]:${scan.port}` : `${host}:${scan.port}`
+  const sni = isAddress(host) ? "" : ` -servername ${shellQuote(host)}`
+  const sClient = `openssl s_client -connect ${shellQuote(connect)}${sni}`
+  const commands: ReproduceCommand[] = [
+    { label: "Handshake and chain", command: `${sClient} -showcerts </dev/null` },
+    {
+      label: "Leaf certificate",
+      command: `${sClient} </dev/null 2>/dev/null | openssl x509 -noout -text`,
+    },
+  ]
+  if (scan.http?.service !== "http") return commands
+
+  // A zone in an address is a percent sign, which a URL spells %25.
+  const urlHost = ipv6 ? `[${host.replace(/%/g, "%25")}]` : host
+  const url = `https://${urlHost}${scan.port === 443 ? "" : `:${scan.port}`}/`
+  const curl = ipv6 ? "curl -g" : "curl"
+  commands.push({ label: "HTTPS headers", command: `${curl} -sSI ${shellQuote(url)}` })
+  commands.push({
+    label: "Plain HTTP redirect",
+    command: `${curl} -sSIL ${shellQuote(`http://${urlHost}/`)}`,
+  })
+  if (scan.spkiPin)
+    commands.push({
+      label: "Key pin",
+      command: `${curl} -sS -o /dev/null --pinnedpubkey ${shellQuote(`sha256//${scan.spkiPin}`)} ${shellQuote(url)}`,
+    })
+  return commands
+}
+
+/** The chain as the server sent it, leaf first, as one PEM file. */
+export function chainPem(scan: TLSScan): string {
+  return scan.chain.map((link) => link.pem).join("")
+}
+
+/** A file name for something saved from a report: the target, with nothing a file system minds. */
+export function reportFileName(scan: TLSScan, suffix: string): string {
+  const name = targetLabel({ host: scan.domain, port: scan.port }).replace(/[^A-Za-z0-9.-]+/g, "_")
+  return `${name}-${suffix}`
+}
+
+/** The element id a finding is linked to by, as #finding-… after the report's address. */
+export function findingAnchor(id: string): string {
+  return `finding-${id.replace(/[^A-Za-z0-9.-]+/g, "-")}`
+}
+
+/** A rule's outcome, as the checklist and the Markdown both word it. */
+export function checkOutcome(check: GradeCheck): string {
+  if (check.na) return "not judged"
+  return check.passed ? "passed" : `failed, caps at ${check.cap}`
+}
+
+/** A table cell: one line, with its pipes escaped. */
+function cell(value: string | number | undefined): string {
+  if (value === undefined || value === "") return "—"
+  return String(value).replace(/\s+/g, " ").replace(/\|/g, "\\|")
+}
+
+/**
+ * The report as Markdown, for a ticket or a chat: the grade and why, the
+ * findings with their advice, and the certificate's facts. Dates are ISO, since
+ * the reader is not in this browser's locale.
+ */
+export function reportToMarkdown(scan: TLSScan): string {
+  const lines = [
+    `# TLS report: ${targetLabel({ host: scan.domain, port: scan.port })}`,
+    "",
+    `**Grade ${scan.grade}**: ${scan.summary}`,
+    "",
+    `Checked ${scan.checkedAt}`,
+  ]
+  lines.push("", "## Findings", "")
+  if (scan.findings.length === 0) lines.push("None.")
+  for (const finding of scan.findings) {
+    lines.push(`- **${finding.level}**: ${finding.title}. ${finding.detail}`)
+    if (finding.advice) lines.push(`  ${finding.advice}`)
+  }
+  if (!scan.reachable) return `${lines.join("\n")}\n`
+
+  if (scan.checks.length) {
+    lines.push("", "## How the grade was reached", "", "| Rule | Result |", "| --- | --- |")
+    for (const check of scan.checks) lines.push(`| ${cell(check.title)} | ${checkOutcome(check)} |`)
+  }
+
+  const cert = scan.certificate
+  const facts: [string, string | number | undefined][] = [
+    ["Subject", cert?.name],
+    ["Names", cert?.domains.join(", ")],
+    ["Issuer", cert?.issuer],
+    ["Valid from", cert?.notBefore],
+    ["Valid until", cert?.notAfter],
+    ["Lifetime", termText(scan)],
+    ["Key", [scan.keyType, scan.keyBits && `${scan.keyBits} bits`].filter(Boolean).join(" ")],
+    ["Signature", scan.signatureAlgorithm],
+    ["Serial", scan.serial],
+    ["SHA-256", scan.fingerprint],
+    ["SPKI pin", scan.spkiPin],
+    ["Negotiated", [scan.negotiated, scan.cipherSuite].filter(Boolean).join(" ")],
+    ["OCSP stapled", scan.ocspStapled ? "yes" : "no"],
+  ]
+  lines.push("", "## Certificate", "", "| | |", "| --- | --- |")
+  for (const [label, value] of facts) lines.push(`| ${label} | ${cell(value)} |`)
+
+  lines.push("", "## Protocol versions", "")
+  for (const protocol of scan.protocols)
+    lines.push(
+      `- ${protocol.name}: ${protocol.status}${protocol.detail ? ` (${protocol.detail})` : ""}`,
+    )
+
+  lines.push("", "## Chain as presented", "")
+  scan.chain.forEach((link, index) =>
+    lines.push(`${index + 1}. ${link.subject}, issued by ${link.issuer}, until ${link.notAfter}`),
+  )
+  return `${lines.join("\n")}\n`
 }

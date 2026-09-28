@@ -16,6 +16,8 @@ export type ChainLink = {
   keyType?: string
   keyBits?: number
   selfIssued: boolean
+  /** The certificate as the server sent it, PEM-encoded. */
+  pem: string
 }
 
 export type HSTS = {
@@ -89,6 +91,20 @@ export type HTTPScan = {
   redirectVerdict?: RedirectVerdict
   hsts?: HSTS
   headers: HeaderCheck[]
+}
+
+/**
+ * One of the grade's rules as it applied to a scan. `cap` is the best letter
+ * the scan can get while the rule fails; `na` is a rule the scan gave no means
+ * to judge, which caps nothing.
+ */
+export type GradeCheck = {
+  id: string
+  category: "connection" | "protocol" | "certificate" | "http"
+  title: string
+  passed: boolean
+  na: boolean
+  cap: string
 }
 
 export type ScanFinding = {
@@ -201,6 +217,8 @@ export type TLSScan = {
   /** The nginx site and file behind the answer; absent for an address or another engine. */
   origin?: TLSOrigin
   findings: ScanFinding[]
+  /** Every rule the grade applies, passed or not. */
+  checks: GradeCheck[]
 }
 
 export type DomainCheck = {
