@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test"
+import { ApiError } from "@/lib/api"
+import { foldProxyFindings } from "@/components/proxy/attention"
 import { streamFindings } from "./streams"
 
 const stream = (overrides) => ({
@@ -117,5 +119,52 @@ describe("streamFindings", () => {
     expect(findings.map((f) => f.detail)).toEqual([
       "TCP+UDP 53 → 10.0.0.5:5432 with no allow list.",
     ])
+  })
+
+  // The overview gave no finding for a directory it could not read, and so
+  // said streams were within limits over four open forwards it could not see.
+  describe("a directory that could not be read", () => {
+    const unreadable = new ApiError(
+      500,
+      "stream_dir_unreadable",
+      "open /etc/nginx/stream.d: permission denied",
+    )
+
+    test("is a warning of its own, not nothing to report", () => {
+      const findings = streamFindings({ streamsError: unreadable })
+      expect(ids(findings)).toEqual(["warning streams.unreadable"])
+      expect(findings[0]).toMatchObject({
+        title: "Could not read the stream directory",
+        detail: "open /etc/nginx/stream.d: permission denied",
+        advice:
+          "Until it can be read, no stream is checked for an open port or for a reload it would stop.",
+        href: "/proxy/streams",
+      })
+    })
+
+    test("keeps what the last read found, and says that is what it is", () => {
+      const findings = streamFindings({
+        streams: status({ included: true, streams: [stream({ name: "db" })] }),
+        streamsError: unreadable,
+      })
+      expect(ids(findings)).toEqual(["warning streams.unreadable", "warning stream.open.db"])
+      expect(findings[0].advice).toBe(
+        "What this list says about streams is from the last read that worked.",
+      )
+    })
+
+    test("a request that failed on the way is not blamed on the directory", () => {
+      const findings = streamFindings({ streamsError: new TypeError("Failed to fetch") })
+      expect(findings[0]).toMatchObject({
+        title: "Could not read the streams",
+        detail: "Failed to fetch",
+      })
+    })
+
+    test("reaches the overview's list, so it is not empty", () => {
+      expect(foldProxyFindings({ streamsError: unreadable }).map((f) => f.id)).toEqual([
+        "streams.unreadable",
+      ])
+    })
   })
 })

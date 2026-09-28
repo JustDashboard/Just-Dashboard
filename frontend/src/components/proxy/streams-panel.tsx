@@ -16,6 +16,7 @@ import type {
 import {
   byUrgency,
   carries,
+  durationError,
   formatDuration,
   includedPlace,
   listenFamily,
@@ -613,8 +614,6 @@ const BLANK: StreamSpec = {
 
 type Preview = { content: string; warnings: string[] }
 
-const DURATION_ERROR = "Write it as 90s, 10m or 1h30m, up to 24h."
-
 function StreamForm({
   open,
   stream,
@@ -954,7 +953,7 @@ function StreamForm({
               label="Idle timeout"
               htmlFor="stream-timeout"
               hint="Silence before nginx closes the connection, as 90s, 10m or 1h. Empty is 10m."
-              error={idleSeconds === null && DURATION_ERROR}
+              error={idleSeconds === null && durationError(idle, "10m")}
             >
               <Input
                 id="stream-timeout"
@@ -969,7 +968,7 @@ function StreamForm({
               label="Connect timeout"
               htmlFor="stream-connect-timeout"
               hint="How long to wait for the backend to accept. Empty is 60s."
-              error={connectSeconds === null && DURATION_ERROR}
+              error={connectSeconds === null && durationError(connect, "60s")}
             >
               <Input
                 id="stream-connect-timeout"

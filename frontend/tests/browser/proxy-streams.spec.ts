@@ -733,6 +733,39 @@ test("timeouts are typed as 90s, 10m or 1h, and a wrong one is caught before the
   expect(spec.connectTimeout).toBe(5)
 })
 
+// A typed 0 was read as empty: nothing was sent, nginx's default was saved,
+// and the field went on saying 0. nginx takes 0 and drops every connection.
+test("a timeout of 0 is refused, not saved as nginx's default", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await page.goto("/proxy/streams")
+  await page.getByRole("button", { name: "New stream" }).click()
+  const sheet = await fillNew(page)
+  const save = sheet.getByRole("button", { name: "Save and reload" })
+  const idle = sheet.getByLabel("Idle timeout")
+  const connect = sheet.getByLabel("Connect timeout")
+
+  await idle.fill("0")
+  await expect(sheet.getByRole("alert")).toHaveText(
+    "0 makes nginx drop every connection at once. Leave it empty for nginx's 10m.",
+  )
+  await expect(idle).toHaveAttribute("aria-invalid", "true")
+  await expect(save).toBeDisabled()
+  await expect(sheet.getByText("Correct the timeout, and the nginx appears here.")).toBeVisible()
+
+  await idle.fill("")
+  await connect.fill("0s")
+  await expect(sheet.getByRole("alert")).toHaveText(
+    "0 makes nginx drop every connection at once. Leave it empty for nginx's 60s.",
+  )
+  await expect(connect).toHaveAttribute("aria-invalid", "true")
+  await expect(idle).not.toHaveAttribute("aria-invalid", "true")
+  await expect(save).toBeDisabled()
+
+  await connect.fill("")
+  await expect(sheet.getByRole("alert")).toHaveCount(0)
+  await expect(save).toBeEnabled()
+})
+
 test("a stream's timeouts open as they would be typed, and save unchanged", async ({ page }) => {
   await mockProxy(page, { included: true })
   await listing(page, { streams: [{ ...bastion, timeout: 3600, connectTimeout: 90 }] })
@@ -838,6 +871,48 @@ test("a refresh that fails keeps the list and says it is the last read", async (
   await page.getByRole("button", { name: "Try again" }).click()
   await expect(page.getByText("The list below is from the last read")).toHaveCount(0)
   expect(reads).toBeGreaterThan(before)
+})
+
+// With no finding for a directory it could not read, the overview said
+// streams were within limits over open forwards it could not see.
+test("the overview does not call streams within limits when it could not read them", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  // Nothing else on this host has anything to say, so the list is the streams' alone.
+  for (const path of ["certificates/", "proxy/vhosts", "ports"]) {
+    await page.route(`**/api/v1/${path}`, (route) => json(route, []))
+  }
+  await page.route("**/api/v1/certificates/certbot", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "certbot_unavailable", message: "no certbot" } }),
+    }),
+  )
+  let broken = false
+  await page.route("**/api/v1/proxy/streams/", (route) =>
+    broken ? unreadable(route) : json(route, streamStatus({ streams: [] })),
+  )
+  await page.goto("/proxy")
+  await expect(
+    page.getByText("Certificates, renewal, sites, streams and exposed ports all within limits"),
+  ).toBeVisible()
+
+  broken = true
+  await page.reload()
+  const finding = page.getByRole("button", { name: /^Could not read the stream directory/ })
+  await expect(finding).toBeVisible()
+  await expect(page.getByText(/all within limits/)).toHaveCount(0)
+  await finding.click()
+  await expect(page.getByText("open /etc/nginx/streams: permission denied")).toBeVisible()
+  await expect(
+    page.getByText(
+      "Until it can be read, no stream is checked for an open port or for a reload it would stop.",
+    ),
+  ).toBeVisible()
+  await page.getByRole("button", { name: "Open streams" }).click()
+  await expect(page).toHaveURL(/\/proxy\/streams$/)
 })
 
 test("the TCP+UDP form fits a phone, errors and all", async ({ page }) => {

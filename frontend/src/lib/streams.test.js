@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   byUrgency,
   carries,
+  durationError,
   formatDuration,
   includedPlace,
   listenFamily,
@@ -114,6 +115,19 @@ describe("durations", () => {
   test("anything nginx would not read, or longer than a day, is refused", () => {
     for (const text of ["10x", "m", "30m1h", "1.5h", "-5s", "10 5", "25h", "2d", "1M", "10ms"]) {
       expect(parseDuration(text)).toBeNull()
+      expect(durationError(text, "10m")).toBe("Write it as 90s, 10m or 1h30m, up to 24h.")
+    }
+  })
+
+  // A typed 0 read as empty: the form sent no timeout, nginx's default was
+  // saved, and the field went on saying 0. To nginx a 0 is no time at all —
+  // every connection is dropped at once — so it is refused, and said why.
+  test("a written zero is refused rather than read as empty", () => {
+    for (const text of ["0", "0s", " 0m ", "0h0m", "00"]) {
+      expect(parseDuration(text)).toBeNull()
+      expect(durationError(text, "60s")).toBe(
+        "0 makes nginx drop every connection at once. Leave it empty for nginx's 60s.",
+      )
     }
   })
 

@@ -1,3 +1,4 @@
+import { ApiError, errorMessage } from "@/lib/api"
 import type { StreamStatus } from "@/lib/types"
 import {
   includedPlace,
@@ -8,7 +9,7 @@ import {
 } from "@/lib/streams"
 import { DANGEROUS_PORTS, type ProxyFinding } from "@/components/proxy/findings/shared"
 
-export type StreamFindingInput = { streams?: StreamStatus }
+export type StreamFindingInput = { streams?: StreamStatus; streamsError?: Error }
 
 /**
  * A stream directory that stops nginx reloading, streams nginx is not
@@ -18,9 +19,28 @@ export type StreamFindingInput = { streams?: StreamStatus }
  * stream module, "add the stream block" is advice that stops nginx reloading
  * — for every site, not only the streams. An include inside http does the
  * same once a file is there: nginx reads the file, as http, and refuses it.
+ *
+ * A directory that could not be read is a finding of its own. Without one,
+ * no streams read as nothing to report, and the overview said streams were
+ * within limits over four open forwards it could not see.
  */
-export function streamFindings({ streams }: StreamFindingInput): ProxyFinding[] {
+export function streamFindings({ streams, streamsError }: StreamFindingInput): ProxyFinding[] {
   const out: ProxyFinding[] = []
+  if (streamsError) {
+    const directory =
+      streamsError instanceof ApiError && streamsError.code === "stream_dir_unreadable"
+    out.push({
+      id: "streams.unreadable",
+      level: "warning",
+      title: directory ? "Could not read the stream directory" : "Could not read the streams",
+      detail: errorMessage(streamsError),
+      advice: streams
+        ? "What this list says about streams is from the last read that worked."
+        : "Until it can be read, no stream is checked for an open port or for a reload it would stop.",
+      meta: "streams",
+      href: "/proxy/streams",
+    })
+  }
   if (!streams) return out
   const count = streams.streams.length
   const these = `${count} stream${count === 1 ? " is" : "s are"} written`

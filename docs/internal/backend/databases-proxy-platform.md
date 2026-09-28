@@ -404,6 +404,7 @@ ownership and cleanup, then removes its own containers/volumes/networks.
     or WireGuard); protocol `both` writes a TCP and a UDP listen on the same addresses, the port check asks
     for both sockets and names the one that clashed (`514/udp`), and `proxy_responses` touches its UDP side
     only; the idle (`timeout`) and connect timeouts are separate and written as nginx time (`10m`, `1h30m`).
+    A file's zero timeout (`proxy_timeout 0`: nginx takes it and drops every connection) is `unsupported`, not unset.
     Delete reloads only when nginx read the directory, and returns a failed reload as `reloadError`. A
     stream directory that cannot be read is a retryable 500 `stream_dir_unreadable` ("Could not read the
     stream directory"), never an empty list.

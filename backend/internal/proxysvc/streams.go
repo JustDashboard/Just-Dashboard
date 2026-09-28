@@ -666,13 +666,15 @@ func streamOpen(spec *StreamSpec) bool {
 
 // streamSeconds reads an nginx time — "90", "10m", "1h30m" — in whole
 // seconds. A value with milliseconds in it, or past a day, is not one the
-// form can hold.
+// form can hold. Nor is zero: the form's zero is "unset", so a file saying
+// proxy_timeout 0 — which nginx takes, and drops every connection at once —
+// would open with the field empty and be saved as nginx's default.
 func streamSeconds(args []string) (int, bool) {
 	if len(args) != 1 {
 		return 0, false
 	}
 	ms, ok := parseNginxDuration(args[0])
-	if !ok || ms%1000 != 0 || ms/1000 > 86400 {
+	if !ok || ms == 0 || ms%1000 != 0 || ms/1000 > 86400 {
 		return 0, false
 	}
 	return int(ms / 1000), true

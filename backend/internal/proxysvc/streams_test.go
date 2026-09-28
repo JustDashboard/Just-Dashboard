@@ -435,6 +435,16 @@ server { listen 5432; proxy_pass pool; allow 10.0.0.0/8; deny all; }`,
 			unsupported: []string{"listen option ssl", "ssl_certificate", "proxy_connect_timeout 500ms"},
 		},
 		{
+			// nginx takes a zero and drops every connection at once. Read
+			// as the form's zero it opened as an empty field, and a save
+			// wrote nginx's default in its place without a word.
+			name:        "zero timeouts",
+			content:     "server { listen 6000; proxy_pass 10.0.0.5:6000; proxy_timeout 0; proxy_connect_timeout 0s; }",
+			want:        StreamSpec{Name: "x", Listen: 6000, Address: "0.0.0.0", Protocol: "tcp", Upstream: "10.0.0.5:6000", AllowFrom: []string{}},
+			open:        true,
+			unsupported: []string{"proxy_timeout 0", "proxy_connect_timeout 0s"},
+		},
+		{
 			// DNS written by hand, TCP and UDP on one port: the form's both.
 			name:    "tcp and udp",
 			content: "server { listen 53; listen 53 udp; proxy_pass 10.0.0.53:53; proxy_responses 1; allow 10.0.0.0/8; deny all; }",

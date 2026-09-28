@@ -104,9 +104,10 @@ export default function ProxyOverviewPage() {
         certbot: certbotGone ? null : certbot.data,
         vhosts: vhosts.data,
         streams: streams.data,
+        streamsError: streams.error,
         ports: ports.data,
       }),
-    [certs.data, certbot.data, certbotGone, vhosts.data, streams.data, ports.data],
+    [certs.data, certbot.data, certbotGone, vhosts.data, streams.data, streams.error, ports.data],
   )
   const settled = !vhosts.loading && !certs.loading && !streams.loading && !ports.loading
 

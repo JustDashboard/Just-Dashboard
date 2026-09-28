@@ -60,20 +60,34 @@ const MAX_TIMEOUT = 86_400
 
 const DURATION = /^(?:(\d+)\s*d)?\s*(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?\s*(?:(\d+)\s*s)?$/
 
+/** The seconds a non-empty timeout adds up to, or null when nginx would not read it. */
+function durationSeconds(value: string): number | null {
+  const match = /^\d+$/.test(value) ? [value, "0", "0", "0", value] : DURATION.exec(value)
+  if (!match) return null
+  const [days, hours, minutes, seconds] = match.slice(1).map((part) => Number(part ?? 0))
+  return days * 86_400 + hours * 3600 + minutes * 60 + seconds
+}
+
 /**
  * A timeout as typed — "90", "90s", "10m", "1h30m" — in seconds, largest unit
  * first as nginx writes it. A bare number is seconds, as it is to nginx. Empty
- * is 0, which leaves nginx's own default; anything unreadable, or longer than
- * a day, is null.
+ * is 0, which leaves nginx's own default; anything unreadable, longer than a
+ * day, or a written zero is null. Zero is not "no timeout": nginx takes it and
+ * drops every connection at once, and read as empty it was saved as the
+ * default while the field still said 0.
  */
 export function parseDuration(text: string): number | null {
   const value = text.trim()
   if (value === "") return 0
-  const match = /^\d+$/.test(value) ? [value, "0", "0", "0", value] : DURATION.exec(value)
-  if (!match) return null
-  const [days, hours, minutes, seconds] = match.slice(1).map((part) => Number(part ?? 0))
-  const total = days * 86_400 + hours * 3600 + minutes * 60 + seconds
-  return total <= MAX_TIMEOUT ? total : null
+  const total = durationSeconds(value)
+  return total !== null && total > 0 && total <= MAX_TIMEOUT ? total : null
+}
+
+/** Why parseDuration refused a timeout, with nginx's own default for the field named. */
+export function durationError(text: string, fallback: string): string {
+  return durationSeconds(text.trim()) === 0
+    ? `0 makes nginx drop every connection at once. Leave it empty for nginx's ${fallback}.`
+    : "Write it as 90s, 10m or 1h30m, up to 24h."
 }
 
 /** Seconds as nginx's time syntax, the way a person writes them: 10m, 1h30m. Empty for none. */
