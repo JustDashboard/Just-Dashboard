@@ -171,7 +171,7 @@ func TestCertIssueStartsAJob(t *testing.T) {
 	t.Cleanup(proxysvc.UseCertificateDirsForTest(t.TempDir(), t.TempDir()))
 	c, s := newClient(t)
 	w := c.do(http.MethodPost, "/api/v1/certificates/issue",
-		`{"domains":["example.com"],"email":"ops@example.com","method":"webroot","webRoot":"/var/www/html","staging":true}`,
+		`{"domains":["example.com"],"email":"ops@example.com","method":"webroot","webRoot":"/tmp","staging":true}`,
 		nil)
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("got %d, want 202: %s", w.Code, w.Body.String())

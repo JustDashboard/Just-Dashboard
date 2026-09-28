@@ -1,8 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
+  Check,
   Clock,
+  Copy,
   Download,
   Key,
   Logs,
@@ -15,7 +17,7 @@ import {
   Warning,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { del, post } from "@/lib/api"
+import { del, errorMessage, get, post } from "@/lib/api"
 import {
   authorityName,
   certbotRunning,
@@ -23,7 +25,18 @@ import {
   parseDomains,
   renewalMethod,
 } from "@/lib/certificates"
-import type { CertbotCert, CertbotState, DNSProvider, Job } from "@/lib/types"
+import type {
+  ACMEAccount,
+  CertbotCert,
+  CertbotState,
+  DNSProvider,
+  IssuePreview,
+  Job,
+  VHost,
+} from "@/lib/types"
+import { useViewState } from "@/lib/view-state"
+import { useCopy } from "@/hooks/use-copy"
+import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Field, OptionList, OptionRow } from "@/components/form"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
@@ -782,6 +795,7 @@ export function IssueDialog({
   providers,
   directory,
   testAuthority = false,
+  certs = [],
   certbotBusy,
   onStarted,
 }: {
@@ -790,6 +804,8 @@ export function IssueDialog({
   initialDomains?: string
   initialStaging?: boolean
   hasNginx: boolean
+  /** certbot's lineages, which the form can add names to. */
+  certs?: CertbotCert[]
   /** The authenticators the certbot that runs the job lists; absent while unknown. */
   plugins?: string[]
   providers: DNSProvider[]
@@ -813,6 +829,7 @@ export function IssueDialog({
       providers={providers}
       directory={directory}
       testAuthority={testAuthority}
+      certs={certs}
       certbotBusy={certbotBusy}
       onStarted={onStarted}
     />
@@ -829,6 +846,7 @@ function IssueDialogBody({
   providers,
   directory,
   testAuthority,
+  certs,
   certbotBusy,
   onStarted,
 }: {
@@ -841,6 +859,7 @@ function IssueDialogBody({
   providers: DNSProvider[]
   directory?: string
   testAuthority: boolean
+  certs: CertbotCert[]
   certbotBusy: boolean
   onStarted: (job: Job) => void
 }) {
@@ -850,7 +869,30 @@ function IssueDialogBody({
   // directories come without one: they are Let's Encrypt.
   const authority = directory ? authorityName(directory) : undefined
   const [domains, setDomains] = useState(initialDomains ?? "")
-  const [email, setEmail] = useState("")
+  // The account's contact fills the field until the operator types: certbot
+  // asks for an email only to register an account, so with one on disk the
+  // field may also stay empty.
+  const account = usePoll<ACMEAccount>(
+    (signal) => get("/certificates/account", undefined, signal),
+    0,
+    [],
+    { enabled: open },
+  )
+  const [typedEmail, setEmail] = useState<string | null>(null)
+  const email = typedEmail ?? account.data?.email ?? ""
+  const hasAccount = account.data?.exists === true
+  const sites = usePoll<VHost[]>((signal) => get("/proxy/vhosts", undefined, signal), 0, [], {
+    enabled: open,
+  })
+  const siteNames = (v: VHost) => v.serverNames.filter((n) => SITE_NAME.test(n))
+  const nginxSites = (sites.data ?? []).filter((v) => v.kind === "nginx" && siteNames(v).length)
+  const [site, setSite] = useState("")
+  // "" is a new certificate; a lineage's name adds the names to it.
+  const [target, setTarget] = useState("")
+  const [newName, setNewName] = useState("")
+  const certName = target || newName.trim()
+  const [keyType, setKeyType] = useState<"" | "ecdsa" | "rsa">("")
+  const [rsaKeySize, setRsaKeySize] = useState("2048")
   // A method the certbot that runs the job cannot use is drawn disabled with
   // the reason, rather than offered and refused by certbot a minute later.
   const unavailable: Record<string, string | undefined> = {
@@ -873,7 +915,17 @@ function IssueDialogBody({
   }
   // Through nginx where there is one to answer the challenge; standalone
   // binds port 80 itself and fails wherever nginx is already holding it.
-  const [chosenMethod, setMethod] = useState(hasNginx && !unavailable.nginx ? "nginx" : "webroot")
+  // The method last used starts the form, where it is still on offer.
+  const [lastMethod, setLastMethod] = useViewState("proxy.certificates.issueMethod", "")
+  const [pickedMethod, setMethod] = useState("")
+  const remembered =
+    ISSUE_METHODS.includes(lastMethod) &&
+    !unavailable[lastMethod] &&
+    (lastMethod !== "nginx" || hasNginx)
+      ? lastMethod
+      : ""
+  const chosenMethod =
+    pickedMethod || remembered || (hasNginx && !unavailable.nginx ? "nginx" : "webroot")
   const [webRoot, setWebRoot] = useState("/var/www/html")
   const [staging, setStaging] = useState(initialStaging)
   const [busy, setBusy] = useState(false)
@@ -894,21 +946,59 @@ function IssueDialogBody({
   const wait = dnsWait.trim() === "" ? undefined : Number(dnsWait)
   const waitInvalid = wait !== undefined && (!Number.isInteger(wait) || wait < 1 || wait > 3600)
 
+  // The token travels with the request and is saved by the job once it
+  // starts, so a refused issuance leaves nothing on disk.
+  const body = JSON.stringify({
+    domains: parseDomains(domains),
+    email: email.trim(),
+    method,
+    webRoot,
+    staging,
+    dnsProvider: method === "dns" ? dnsProvider : "",
+    ...(fileProvider && wait !== undefined && { dnsWait: wait }),
+    ...(fileProvider && credentials.trim() && { credentials }),
+    ...(keyType && { keyType }),
+    ...(keyType === "rsa" && { rsaKeySize: Number(rsaKeySize) }),
+    ...(certName && { certName }),
+  })
+
+  // The command, from the server's own checks: what the job would run, or
+  // why it would be refused. Debounced, since the answer only matters once
+  // typing stops.
+  const [preview, setPreview] = useState<{ plan?: IssuePreview; error?: string }>({})
+  const previewReady =
+    open && parseDomains(domains).length > 0 && (method !== "dns" || !!dnsProvider)
+  useEffect(() => {
+    const controller = new AbortController()
+    const timer = setTimeout(
+      () => {
+        if (!previewReady) {
+          setPreview({})
+          return
+        }
+        post<IssuePreview>("/certificates/issue/preview", JSON.parse(body), {
+          signal: controller.signal,
+        })
+          .then((plan) => setPreview({ plan }))
+          .catch((err) => {
+            if (!controller.signal.aborted) setPreview({ error: errorMessage(err) })
+          })
+      },
+      previewReady ? 400 : 0,
+    )
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [previewReady, body])
+  const command = preview.plan ? preview.plan.args.map(shellWord).join(" ") : ""
+  const { copied, copy } = useCopy()
+
   const submit = async () => {
     setBusy(true)
     try {
-      // The token travels with the request and is saved by the job once it
-      // starts, so a refused issuance leaves nothing on disk.
-      const job = await post<Job>("/certificates/issue", {
-        domains: parseDomains(domains),
-        email,
-        method,
-        webRoot,
-        staging,
-        dnsProvider: method === "dns" ? dnsProvider : "",
-        ...(fileProvider && wait !== undefined && { dnsWait: wait }),
-        ...(fileProvider && credentials.trim() && { credentials }),
-      })
+      const job = await post<Job>("/certificates/issue", JSON.parse(body))
+      setLastMethod(method)
       onStarted(job)
       onOpenChange(false)
     } catch (err) {
@@ -946,7 +1036,7 @@ function IssueDialogBody({
               certbotBusy ||
               Boolean(unavailable[method]) ||
               !domains.trim() ||
-              !email.trim() ||
+              (!email.trim() && !hasAccount) ||
               (method === "dns" && !dnsProvider) ||
               (needsCredentials && !credentials.trim()) ||
               (fileProvider && waitInvalid)
@@ -972,10 +1062,42 @@ function IssueDialogBody({
             className="font-mono text-xs"
           />
         </Field>
+        {nginxSites.length > 0 && (
+          <Field label="From a site" hint="Fills the domains with the names the nginx site serves.">
+            <Select
+              value={site}
+              onValueChange={(name) => {
+                const picked = nginxSites.find((v) => v.name === name)
+                if (!picked) return
+                setSite(name)
+                setDomains(siteNames(picked).join(" "))
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Choose a site" />
+              </SelectTrigger>
+              <SelectContent>
+                {nginxSites.map((v) => (
+                  <SelectItem key={v.name} value={v.name} hint={siteNames(v).join(" ")}>
+                    {v.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        )}
         <Field
           label="Contact email"
           htmlFor="issue-email"
-          hint="Registered with the certificate authority account."
+          hint={
+            !hasAccount
+              ? "Registered with the certificate authority account."
+              : account.data?.email
+                ? `The contact of certbot's account with ${hostOf(account.data.server)}. It may stay empty: the account is registered already.`
+                : account.data?.error
+                  ? `certbot has an account with ${hostOf(account.data.server)}, so this may stay empty. Its contact could not be read: ${account.data.error}`
+                  : `certbot has an account with ${hostOf(account.data?.server ?? "")} with no contact, so this may stay empty.`
+          }
         >
           <Input
             id="issue-email"
@@ -983,6 +1105,94 @@ function IssueDialogBody({
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@example.com"
           />
+        </Field>
+        <Field
+          label="Certificate"
+          htmlFor="issue-cert-name"
+          hint={
+            target
+              ? `certbot issues ${target} again for exactly the names above, so keep the ones it has, and renews it this way from now on.`
+              : "certbot's name for the new certificate, its folder under /etc/letsencrypt/live. The first domain when empty."
+          }
+        >
+          <div className="grid gap-2">
+            {certs.length > 0 && (
+              <Select
+                value={target || NEW_CERT}
+                onValueChange={(name) => {
+                  const cert = certs.find((c) => c.name === name)
+                  setTarget(cert ? cert.name : "")
+                  if (cert) {
+                    setDomains([...new Set([...cert.domains, ...parseDomains(domains)])].join(" "))
+                  }
+                }}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NEW_CERT}>A new certificate</SelectItem>
+                  {certs.map((c) => (
+                    <SelectItem key={c.name} value={c.name} hint={c.domains.join(" ")}>
+                      Add these names to {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            {!target && (
+              <Input
+                id="issue-cert-name"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder={parseDomains(domains)[0]?.replace(/^\*\./, "") ?? "app.example.com"}
+                className="font-mono text-xs"
+              />
+            )}
+          </div>
+        </Field>
+        <Field
+          label="Key"
+          hint={
+            keyType
+              ? "A certificate these names already have with another key is issued again now, which counts as one of the five duplicates a week."
+              : "certbot's default for a new certificate (ECDSA since certbot 2.0); one these names already have keeps its own."
+          }
+        >
+          <div className="flex flex-wrap gap-2">
+            <ToggleGroup
+              type="single"
+              value={keyType || "default"}
+              onValueChange={(v) => v && setKeyType(v === "default" ? "" : (v as "ecdsa" | "rsa"))}
+              variant="outline"
+              size="sm"
+              className="min-w-0 flex-1"
+            >
+              <ToggleGroupItem value="default" className="flex-1 text-hint">
+                Default
+              </ToggleGroupItem>
+              <ToggleGroupItem value="ecdsa" className="flex-1 text-hint">
+                ECDSA
+              </ToggleGroupItem>
+              <ToggleGroupItem value="rsa" className="flex-1 text-hint">
+                RSA
+              </ToggleGroupItem>
+            </ToggleGroup>
+            {keyType === "rsa" && (
+              <Select value={rsaKeySize} onValueChange={setRsaKeySize}>
+                <SelectTrigger size="sm" className="w-32" aria-label="RSA key size">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {["2048", "3072", "4096"].map((bits) => (
+                    <SelectItem key={bits} value={bits}>
+                      {bits} bits
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
         </Field>
         <Field
           label="How to prove control"
@@ -1120,7 +1330,11 @@ function IssueDialogBody({
         )}
 
         {method === "webroot" && (
-          <Field label="Folder" htmlFor="issue-webroot">
+          <Field
+            label="Folder"
+            htmlFor="issue-webroot"
+            hint="Must already exist and be served at /.well-known/acme-challenge/ for these names."
+          >
             <Input
               id="issue-webroot"
               value={webRoot}
@@ -1152,9 +1366,58 @@ function IssueDialogBody({
             a week. Get a test run to pass first.
           </Notice>
         )}
+        {!staging && preview.plan?.replacesKeyOf && (
+          <Notice
+            tone="warning"
+            icon={Warning}
+            title={`This issues ${preview.plan.replacesKeyOf} again now`}
+          >
+            Its key is of another type or size, and certbot would otherwise keep it until it is due.
+          </Notice>
+        )}
+        {(command || preview.error) && (
+          <Field
+            label="Command"
+            hint="What the job runs. A DNS token appears only as the path of the file certbot reads it from."
+            error={preview.error}
+          >
+            {command && (
+              <Well className="flex items-start gap-2 p-2">
+                <code className="min-w-0 flex-1 break-all">{command}</code>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Copy the command"
+                  onClick={() => copy(command)}
+                >
+                  {copied ? <Check /> : <Copy />}
+                </Button>
+              </Well>
+            )}
+          </Field>
+        )}
       </div>
     </Modal>
   )
+}
+
+const ISSUE_METHODS = ["nginx", "webroot", "standalone", "dns"]
+/** The certificate select's "a new one": no lineage name can be it. */
+const NEW_CERT = " new"
+/** A server_name a certificate can carry: not "_", a regex or a bare host. */
+const SITE_NAME = /^(\*\.)?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/
+
+function hostOf(url: string) {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
+
+/** An argv word as a shell reads it back: quoted only where it has to be. */
+function shellWord(word: string) {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`
 }
 
 /**

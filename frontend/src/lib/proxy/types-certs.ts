@@ -314,3 +314,25 @@ export type DecodedPEM = {
   /** Blocks left unread: a private key is never decoded. */
   refused: string[]
 }
+
+/** The ACME account a real issuance orders under, as certbot's show_account tells it. */
+export type ACMEAccount = {
+  /** The directory the account is with. */
+  server: string
+  exists: boolean
+  /** The account's first contact; absent when it has none. */
+  email?: string
+  url?: string
+  thumbprint?: string
+  /** show_account failing for an account on disk: the authority unreachable, or the account gone. */
+  error?: string
+}
+
+/** The command an issuance would run, and what it would replace. */
+export type IssuePreview = {
+  /** certbot's argv, "certbot" first. DNS tokens appear only as their file's path. */
+  args: string[]
+  replacesTestCertificate: boolean
+  /** The lineage whose key is replaced: a forced renewal, which counts as a duplicate. */
+  replacesKeyOf?: string
+}

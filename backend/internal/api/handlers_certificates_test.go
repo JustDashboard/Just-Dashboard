@@ -161,7 +161,7 @@ func TestCertbotJobsRefuseToRunTwice(t *testing.T) {
 	running := decodeJob(t, w.Body.Bytes())
 
 	for _, call := range []struct{ path, body string }{
-		{"/api/v1/certificates/issue", `{"domains":["other.example.com"],"email":"ops@example.com","method":"webroot","webRoot":"/var/www/html"}`},
+		{"/api/v1/certificates/issue", `{"domains":["other.example.com"],"email":"ops@example.com","method":"webroot","webRoot":"/tmp"}`},
 		{"/api/v1/certificates/renew", `{"name":"","dryRun":true}`},
 	} {
 		w := c.do(http.MethodPost, call.path, call.body, nil)
@@ -260,7 +260,7 @@ func TestIssueTestRunIsADryRun(t *testing.T) {
 	host := useFakeCertbot(t, "webroot")
 	c, s := newClient(t)
 	w := c.do(http.MethodPost, "/api/v1/certificates/issue",
-		`{"domains":["app.example.com"],"email":"ops@example.com","method":"webroot","webRoot":"/var/www/html","staging":true}`, nil)
+		`{"domains":["app.example.com"],"email":"ops@example.com","method":"webroot","webRoot":"/tmp","staging":true}`, nil)
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("issue = %d: %s", w.Code, w.Body.String())
 	}
@@ -270,7 +270,7 @@ func TestIssueTestRunIsADryRun(t *testing.T) {
 	}
 	waitForJob(t, s, job.ID)
 	argv := host.argv(t)
-	if !strings.Contains(argv, "certonly --webroot -w /var/www/html") || !strings.Contains(argv, "--dry-run") || strings.Contains(argv, "--staging") {
+	if !strings.Contains(argv, "certonly --webroot -w /tmp") || !strings.Contains(argv, "--dry-run") || strings.Contains(argv, "--staging") {
 		t.Fatalf("certbot ran as:\n%s", argv)
 	}
 	text := jobText(t, s, job.ID)
@@ -285,7 +285,7 @@ func TestIssueSaysWhenCertbotKeptTheCertificate(t *testing.T) {
 	host := useFakeCertbot(t, "webroot")
 	c, s := newClient(t)
 	certPath := host.lineage(t, "app.example.com", "app.example.com")
-	body := `{"domains":["app.example.com"],"email":"ops@example.com","method":"webroot","webRoot":"/var/www/html"}`
+	body := `{"domains":["app.example.com"],"email":"ops@example.com","method":"webroot","webRoot":"/tmp"}`
 
 	w := c.do(http.MethodPost, "/api/v1/certificates/issue", body, nil)
 	if w.Code != http.StatusAccepted {
@@ -451,7 +451,7 @@ func TestIssueOverATestCertificateReloadsNginxAndSaysWhatItServes(t *testing.T) 
 			t.Setenv("JD_TEST_CERTBOT_TARGET", certPath)
 
 			w := client.do(http.MethodPost, "/api/v1/certificates/issue",
-				`{"domains":["app.example.com"],"email":"ops@example.com","method":"webroot","webRoot":"/var/www/html"}`, nil)
+				`{"domains":["app.example.com"],"email":"ops@example.com","method":"webroot","webRoot":"/tmp"}`, nil)
 			if w.Code != http.StatusAccepted {
 				t.Fatalf("issue = %d: %s", w.Code, w.Body.String())
 			}
@@ -546,7 +546,7 @@ func TestIssueWithLetsEncryptsOwnDirectorySaysWhatItSigns(t *testing.T) {
 	c, s := newClient(t)
 	t.Setenv("JD_ACME_DIRECTORY", "https://acme-v02.api.letsencrypt.org/directory/")
 	w := c.do(http.MethodPost, "/api/v1/certificates/issue",
-		`{"domains":["app.example.com"],"email":"ops@example.com","method":"webroot","webRoot":"/var/www/html","staging":true}`, nil)
+		`{"domains":["app.example.com"],"email":"ops@example.com","method":"webroot","webRoot":"/tmp","staging":true}`, nil)
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("issue = %d: %s", w.Code, w.Body.String())
 	}
@@ -566,7 +566,7 @@ func TestIssueWithLetsEncryptsOwnDirectorySaysWhatItSigns(t *testing.T) {
 	}
 	t.Setenv("JD_ACME_DIRECTORY", "https://acme-staging-v02.api.letsencrypt.org/directory")
 	w = c.do(http.MethodPost, "/api/v1/certificates/issue",
-		`{"domains":["app.example.com"],"email":"ops@example.com","method":"webroot","webRoot":"/var/www/html"}`, nil)
+		`{"domains":["app.example.com"],"email":"ops@example.com","method":"webroot","webRoot":"/tmp"}`, nil)
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("issue = %d: %s", w.Code, w.Body.String())
 	}
@@ -593,7 +593,7 @@ func TestIssueTestRunNamesTheAuthorityItRehearsesWith(t *testing.T) {
 	t.Setenv("JD_ACME_DIRECTORY", "https://ca.internal:9000/acme/acme/directory")
 	c, s := newClient(t)
 	w := c.do(http.MethodPost, "/api/v1/certificates/issue",
-		`{"domains":["app.example.com"],"email":"ops@example.com","method":"webroot","webRoot":"/var/www/html","staging":true}`, nil)
+		`{"domains":["app.example.com"],"email":"ops@example.com","method":"webroot","webRoot":"/tmp","staging":true}`, nil)
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("issue = %d: %s", w.Code, w.Body.String())
 	}
