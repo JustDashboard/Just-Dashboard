@@ -45,6 +45,7 @@ import { Field } from "@/components/form"
 import { InputGroup, InputGroupInput } from "@/components/ui/input-group"
 import { DeepScanSection } from "@/components/proxy/tls-ciphers"
 import { ScanHistoryPanel, useScanHistory } from "@/components/proxy/tls-history"
+import { TLSViewTabs } from "@/components/proxy/tls-fleet"
 
 /**
  * What a visitor actually gets, graded.
@@ -217,6 +218,7 @@ export function TLSReportPage() {
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Proxy" title="TLS report" />
+      <TLSViewTabs view="report" />
 
       {scan?.reachable ? (
         <StatGrid columns={4} dense>
@@ -930,7 +932,7 @@ function PreloadPanel({ preload, domain }: { preload: PreloadCheck; domain: stri
   )
 }
 
-function gradeTone(grade: string): Tone {
+export function gradeTone(grade: string): Tone {
   if (grade === "A+" || grade === "A") return "success"
   if (grade === "B" || grade === "C") return "warning"
   return "danger"
