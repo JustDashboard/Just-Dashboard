@@ -102,3 +102,35 @@ export type SiteDeleteResult = {
   reload?: ProxyReload | null
   reloadError?: string
 }
+
+/**
+ * GET /proxy/pending: what on disk the running nginx has not loaded. nginx
+ * replaces its workers on every load and keeps them through a reload it
+ * refuses, so `lastReload` is its oldest worker's start and `generation`
+ * names that load, for `?after=` to wait for a newer one after a reload.
+ * `running` is false, with `reason`, where no running nginx reads this
+ * configuration, and then nothing is compared.
+ */
+export type ProxyPending = {
+  running: boolean
+  reason?: string
+  lastReload?: string
+  generation?: string
+  /** nginx's first error in the configuration on disk: every reload is refused until it is fixed. */
+  problem?: string
+  files: PendingFile[]
+}
+
+/**
+ * One change nginx has not loaded, by the path nginx reads it through — a
+ * site's link in sites-enabled — with the Sites entry it belongs to, if any.
+ * "changed" is an edit, "added" a link put into sites-enabled, "removed" a
+ * file nginx loaded and no longer reads, which it serves until it reloads.
+ */
+export type PendingFile = {
+  path: string
+  site?: string
+  layout?: VHost["layout"]
+  change: "changed" | "added" | "removed"
+  modified?: string
+}

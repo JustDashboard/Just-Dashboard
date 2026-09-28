@@ -7,7 +7,13 @@ import { Globe, Plus, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { plural } from "@/lib/format"
 import { ApiError, del, errorMessage, get, post } from "@/lib/api"
-import type { SiteDeleteResult, SystemdUnit, VHost, VHostLinkResult } from "@/lib/types"
+import type {
+  ProxyPending,
+  SiteDeleteResult,
+  SystemdUnit,
+  VHost,
+  VHostLinkResult,
+} from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useAuth } from "@/hooks/use-auth"
@@ -34,6 +40,15 @@ import {
 } from "@/components/proxy/site-marks"
 import { activeOwner, matchesSearch, upstreamTargets } from "@/components/proxy/site-details"
 import { reloadFailure, reloadOutput } from "@/components/proxy/site-outcome"
+import {
+  KEPT_LOAD,
+  keptLoad,
+  loadKnown,
+  loadedSince,
+  notLiveLabel,
+  siteChanges,
+} from "@/components/proxy/site-pending"
+import { PendingStrip } from "@/components/proxy/pending-strip"
 import {
   engineRun,
   hear,
@@ -72,8 +87,11 @@ const FILTER_LABEL: Record<SiteFilter, string> = {
 /** nginx's own words about a change, kept for the operator who asks to see them. */
 type NginxOutput = { title: string; output: string }
 
-/** One read of the list: the rows, and the error when the read failed. */
-type ListRead = { read: unknown; data: unknown }
+/**
+ * One read of the list: the rows, and the error when the read failed; and the
+ * read of what nginx has not loaded that went with it.
+ */
+type ListRead = { read: unknown; data: unknown; pending: unknown }
 
 /**
  * A verb in flight on a site. Once it has answered, the card keeps the busy
@@ -132,12 +150,43 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     (signal) => get<VHost[]>("/proxy/vhosts", undefined, signal),
     30_000,
   )
+  // What on disk nginx has not loaded. `nginx -s reload` answers before
+  // nginx has loaded anything, so a read after a reload the page asked for
+  // names the load it saw before, and the backend waits for a newer one.
+  // `warn` is a reload a verb knows it sent: nginx still on the load from
+  // before it refused what it read, which the verb's toast could not know.
+  const reloadFrom = useRef<{ after: string; warn: boolean } | undefined>(undefined)
+  const pendingPoll = usePoll(
+    async (signal) => {
+      const expected = reloadFrom.current
+      const res = await get<ProxyPending>(
+        "/proxy/pending",
+        expected ? { after: expected.after } : undefined,
+        signal,
+      )
+      if (reloadFrom.current === expected) reloadFrom.current = undefined
+      if (expected?.warn && loadKnown(res) && !loadedSince(expected.after, res)) {
+        notify.warning(KEPT_LOAD, { description: keptLoad(res.lastReload), duration: 12_000 })
+      }
+      return res
+    },
+    30_000,
+    [],
+    { enabled: hasNginx },
+  )
+  const expectReload = (warn: boolean) => {
+    const after = pendingPoll.data?.generation
+    if (after) reloadFrom.current = { after, warn }
+    pendingPoll.refresh()
+  }
   // Each read of the list, failed or not, is a new object here: a failed one
-  // brings a new error and keeps the rows, a good one brings new rows.
+  // brings a new error and keeps the rows, a good one brings new rows. The
+  // same goes for what is pending, which is read only where there is nginx.
   const read: unknown = error ?? data
-  const lastRead = useRef<ListRead>({ read, data })
+  const pendingRead: unknown = hasNginx ? (pendingPoll.error ?? pendingPoll.data) : undefined
+  const lastRead = useRef<ListRead>({ read, data, pending: pendingRead })
   useEffect(() => {
-    lastRead.current = { read, data }
+    lastRead.current = { read, data, pending: pendingRead }
   })
   // The read Try again asked for is in once `read` moves on from this one.
   const [retryFrom, setRetryFrom] = useState<unknown>(undefined)
@@ -246,13 +295,16 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
 
   const setBusy = (name: string, verb: string) =>
     setPending((p) => ({ ...p, [name]: { verb, unloaded: p[name]?.unloaded } }))
-  // The verb has answered: read the list again, and hold the busy word until
-  // that read is in.
-  const reread = (name: string) => {
+  // The verb has answered: read the list and what is pending again, and
+  // hold the busy word until both reads are in — after a reload, once nginx
+  // has loaded something newer or plainly has not.
+  const reread = (name: string, reloaded: boolean) => {
     const answered = lastRead.current
     setPending((p) => (p[name] ? { ...p, [name]: { ...p[name], answered } } : p))
     refresh()
     unitPoll.refresh()
+    if (reloaded) expectReload(true)
+    else pendingPoll.refresh()
   }
   /**
    * Takes in how a verb's reload went: whether nginx runs, whether it has
@@ -287,6 +339,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     const busy = pending[name]
     if (!busy) return {}
     if (!busy.answered || busy.answered.read === read) return { busy: busy.verb }
+    if (hasNginx && busy.answered.pending === pendingRead) return { busy: busy.verb }
     return { unread: Boolean(error) && data === busy.answered.data }
   }
   const retry = () => {
@@ -355,12 +408,13 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   const toggle = (vhost: VHost, enabled: boolean) => {
     const apply = async (): Promise<"reported"> => {
       setBusy(vhost.name, enabled ? "Enabling" : "Disabling")
+      let outcome: ReloadOutcome | undefined
       try {
         const res = await post<VHostLinkResult>(
           `/proxy/vhosts/${encodeURIComponent(vhost.name)}/enabled`,
           { enabled, reload: true },
         )
-        const outcome = noteReload(vhost.name, res, true)
+        outcome = noteReload(vhost.name, res, true)
         if (enabled) {
           reportLink(res, outcome, `${vhost.name} enabled`, {
             notRunning: "It serves once nginx starts.",
@@ -375,7 +429,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
       } catch (err) {
         reportRefusal(`Could not ${enabled ? "enable" : "disable"} ${vhost.name}`, vhost.name, err)
       } finally {
-        reread(vhost.name)
+        reread(vhost.name, outcome === "reloaded")
       }
       return "reported"
     }
@@ -446,11 +500,12 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   /** Takes out a link in sites-enabled that no site's switch owns, and says how it went. */
   const removeLink = async (vhost: VHost): Promise<"reported"> => {
     setBusy(vhost.name, "Removing")
+    let outcome: ReloadOutcome | undefined
     try {
       const res = await del<VHostLinkResult>(`/proxy/vhosts/${encodeURIComponent(vhost.name)}/link`)
       // A site in sites-available stays listed, now disabled; a link
       // that was all there was leaves the list with its card.
-      const outcome = noteReload(vhost.name, res, vhost.layout === "sites-available")
+      outcome = noteReload(vhost.name, res, vhost.layout === "sites-available")
       reportLink(res, outcome, `sites-enabled/${vhost.name} removed`, {
         notRunning: "nginx starts without it.",
         notReloaded:
@@ -459,7 +514,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     } catch (err) {
       reportRefusal(`Could not remove sites-enabled/${vhost.name}`, vhost.name, err)
     } finally {
-      reread(vhost.name)
+      reread(vhost.name, outcome === "reloaded")
     }
     return "reported"
   }
@@ -497,9 +552,10 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
       ),
       action: async () => {
         setBusy(vhost.name, "Deleting")
+        let outcome: ReloadOutcome | undefined
         try {
           const res = await del<SiteDeleteResult>(`/proxy/sites/${encodeURIComponent(vhost.name)}`)
-          const outcome = noteReload(vhost.name, res, false)
+          outcome = noteReload(vhost.name, res, false)
           // The file is gone, and a running nginx still serves what it
           // loaded: "completed" would send the operator away from a site
           // that is up.
@@ -509,7 +565,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
           })
           return reported ? "reported" : undefined
         } finally {
-          reread(vhost.name)
+          reread(vhost.name, outcome === "reloaded")
         }
       },
     })
@@ -548,11 +604,19 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     onOverride: override,
   }
 
+  // A save from the form or the editor may or may not have reloaded; either
+  // way the read of what is pending waits a moment for a newer load.
+  const saved = () => {
+    refresh()
+    expectReload(false)
+  }
+
   const header = <PageContext eyebrow="Proxy" title="Sites" />
 
-  // The cards wait for systemd's reading too: drawn before it, a stopped
-  // nginx's sites read "serving" until it arrived.
-  if ((loading && !data) || statusLoading || unitPoll.loading) {
+  // The cards wait for systemd's reading too, and for what nginx has not
+  // loaded: drawn before either, a stopped nginx's sites — or an edit nginx
+  // never read — read "serving" until it arrived.
+  if ((loading && !data) || statusLoading || unitPoll.loading || pendingPoll.loading) {
     return (
       <Page>
         {header}
@@ -580,8 +644,10 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   // filter is on, its name *is* the group.
   const narrowed = filter.trim().length > 0 || chip !== "all"
   // A change nginx did not load waits for a reload; with the engine
-  // stopped, the rest are enabled rather than serving.
-  const needsMe = (v: VHost) => waiting(v) || isUnloaded(v)
+  // stopped, the rest are enabled rather than serving, and nothing is live.
+  const notLive = (v: VHost) =>
+    run?.running === false ? undefined : notLiveLabel(v, siteChanges(pendingPoll.data, v))
+  const needsMe = (v: VHost) => waiting(v) || isUnloaded(v) || Boolean(notLive(v))
   const attention = visible.filter(needsMe)
   const active = visible.filter((v) => !needsMe(v) && v.enabled)
   // Off, and nothing to decide about — the distribution's untouched default
@@ -595,7 +661,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   ].filter((group) => group.sites.length > 0)
   const groups =
     narrowed || sorted.length < 2 ? [{ key: "all", label: "", sites: visible }] : sorted
-  const allServing = run?.running !== false && !hosts.some(isUnloaded)
+  const allServing = run?.running !== false && !hosts.some((v) => isUnloaded(v) || notLive(v))
 
   return (
     <Page className="animate-rise">
@@ -637,6 +703,19 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
             </p>
           )}
         </Notice>
+      )}
+
+      {run?.running !== false && pendingPoll.data && (
+        <PendingStrip
+          pending={pendingPoll.data}
+          nginxDir={status?.nginxDir}
+          admin={admin}
+          onChanged={() => {
+            refresh()
+            pendingPoll.refresh()
+          }}
+          onOutput={(title, text) => setOutput({ title, output: text })}
+        />
       )}
 
       <StatGrid columns={4} dense>
@@ -745,6 +824,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
                       {...stateOf(vhost.name)}
                       stopped={engineStopped(vhost)}
                       unloaded={isUnloaded(vhost)}
+                      notLive={notLive(vhost)}
                       index={index}
                       ambiguous={shared.has(vhost.name)}
                       {...handlers}
@@ -765,7 +845,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         copyFrom={form.open ? form.copyFrom : null}
         session={form.session}
         onOpenChange={closeForm}
-        onSaved={refresh}
+        onSaved={saved}
       />
       <ConfigEditor
         open={rawSite !== undefined}
@@ -780,7 +860,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
           Boolean(rawSite.enabledPath) &&
           !rawSite.enabled
         }
-        onSaved={refresh}
+        onSaved={saved}
         actions={(busy) =>
           rawSite &&
           !rawServed && (
@@ -827,6 +907,8 @@ type CardProps = {
   stopped?: boolean
   /** Changed by a verb that nginx did not reload. */
   unloaded?: boolean
+  /** Its file changed since nginx loaded its configuration: see `ServingStatus`. */
+  notLive?: string
   index: number
   ambiguous: boolean
   admin: boolean
@@ -854,6 +936,7 @@ function SiteCard({
   unread,
   stopped,
   unloaded,
+  notLive,
   index,
   ambiguous,
   ...handlers
@@ -882,6 +965,7 @@ function SiteCard({
           unread={unread}
           stopped={stopped}
           unloaded={unloaded}
+          notLive={notLive}
         />
       }
     >

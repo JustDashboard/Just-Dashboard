@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
@@ -16,11 +17,15 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// mountVHostRoutes is the site listing, the switch that takes a site in or
-// out of nginx's include tree, and the removal of a link in sites-enabled
-// that no site's switch owns.
+// mountVHostRoutes is the site listing, what on disk the running nginx has
+// not loaded, the switch that takes a site in or out of nginx's include tree,
+// and the removal of a link in sites-enabled that no site's switch owns.
 func (s *Server) mountVHostRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/vhosts", s.handle(s.handleVHostList))
+	// Paths and change times only, which the listing and the config
+	// editor's read already give every account; the reload it leads to is
+	// POST /proxy/reload, gated with the rest of the engine.
+	r.Method(http.MethodGet, "/pending", s.handle(s.handleProxyPending))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		s.destructive(r, func(r chi.Router) {
@@ -133,6 +138,27 @@ func (s *Server) markDeploymentRoutes(ctx context.Context, hosts []proxysvc.VHos
 		}
 	}
 	return rows.Err()
+}
+
+// handleProxyPending says which changes on disk the running nginx has not
+// loaded. `after` is the generation the caller saw before it asked for a
+// reload: the answer then waits a few seconds for nginx to load a newer one,
+// because `nginx -s reload` returns as soon as the signal is sent.
+func (s *Server) handleProxyPending(w http.ResponseWriter, r *http.Request) error {
+	after := r.URL.Query().Get("after")
+	if after != "" {
+		if _, _, err := proxysvc.ParseGeneration(after); err != nil {
+			return httpx.BadRequest("%v", err)
+		}
+	}
+	ctx, cancel := timeoutCtx(r, 20*time.Second)
+	defer cancel()
+	pending, err := s.modules.proxy.Pending(ctx, after)
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	httpx.JSON(w, http.StatusOK, pending)
+	return nil
 }
 
 type vhostToggleRequest struct {

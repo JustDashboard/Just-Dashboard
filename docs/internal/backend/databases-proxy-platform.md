@@ -392,6 +392,38 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   commas is joined first; read line by line, its first line began the one-site form and every later
   site was taken for one of its directives. One plain site makes the Caddyfile's single entry plain.
   Names are listed once, without their scheme.
+- **What the running nginx has not loaded.** `Pending` (`pending.go`, `GET /proxy/pending`, a read
+  every account holds) compares the files nginx reads with the load it is running. nginx replaces all
+  of its workers each time it loads its configuration and keeps them when a reload fails in the master
+  — a port another process holds is the common case, which `nginx -t` does not check — so the start of
+  the oldest worker that is not "shutting down" is when the running configuration was read, and `nginx
+  -s reload` exiting 0 says only that the signal went out. The master is found in `/proc` (the
+  dashboard's container shares the host's processes): its title names its `-c` and `-p`, or it reads
+  the compiled-in configuration `nginx -V` gives, and only a master reading the main file `nginx -T`
+  names counts — the host's nginx, one in another container and the live harness's all show up
+  beside each other. Two that read the same path are told apart by the `pid` file that main file (or
+  the build) names, read under `/host` first. A start in `/proc` counts clock ticks since boot and is
+  placed on the wall clock through `CLOCK_BOOTTIME`, not `/proc/stat`'s whole-second `btime`, and
+  rounded up to the tick, because a file saved and reloaded by a script lands within a hundredth of a
+  second of the new workers. Each file `EffectiveConfig` returns (so only what `ReadConfig` shows) is
+  judged by its change time — through its link, and the link's own — not its modification time, so a
+  file moved or copied in with an old time still counts. `pendingTracker` (per `Service`) remembers,
+  for the running load, the SHA-256 of every file unchanged since it: a file whose content is back to
+  what nginx loaded is not pending however new it is (a dry-run test stages its candidate at the live
+  path and writes the original back; a switch refused and undone re-creates its link), and a file
+  nginx loaded that it no longer reads is "removed" — a site disabled without a reload is still
+  served. A file saved since the load that the tracker never saw loaded is "changed", or "added" for a
+  link made since; the tracker is in memory, so after the dashboard restarts, a file changed and
+  changed back before it first read the load reads as changed until the next reload. Each file names
+  the Sites entry it belongs to (`Site`, `Layout`: a link in sites-enabled belongs to the
+  sites-available file it serves, a conf.d file to itself). `Generation` (`<master pid>-<ticks>`) names
+  the load; `?after=<generation>` waits up to five seconds, reading `/proc` every 100 ms, for a newer
+  one, which is how the Sites page reads nginx again after a reload it asked for. When `nginx -T`
+  refuses the configuration, `Problem` is its first error and only the files known to be loaded are
+  judged; when the dump waits more than five seconds behind the service lock, the same. `Running` is
+  false, with `Reason`, where nginx is not installed, no master reads the configuration, or two do and
+  the pid file names neither; a master with no worker is running with no `LastReload`. A certificate
+  nginx has not reloaded is not a configuration file, and is left to the served-certificate check.
 - **Certificates say who uses them.** `listCertificates` joins the sites' `ssl_certificate` paths
   onto the certificate list (`UsedBy`), through symlinks, so a certbot lineage and the site naming
   its `live/` path are one entry; `certificateName` names a file in a generic directory
@@ -496,8 +528,8 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   misconfiguration is the commonest false alarm of this kind.
 - **The proxy routes are mounted per area**, each from its own file beside its handlers, and composed in
   `mountProxyRoutes` (`api/handlers_proxy.go`): `mountEngineRoutes` (status, the raw config editor,
-  validate, test, reload; `handlers_proxy_engine.go`), `mountVHostRoutes` (the listing, the enable
-  switch and the removal of a stray link; `handlers_proxy_vhosts.go`) and `mountProxyInsightRoutes` (`handlers_proxy_insights.go`) inside
+  validate, test, reload; `handlers_proxy_engine.go`), `mountVHostRoutes` (the listing, what nginx has not
+  loaded, the enable switch and the removal of a stray link; `handlers_proxy_vhosts.go`) and `mountProxyInsightRoutes` (`handlers_proxy_insights.go`) inside
   `/proxy`; `mountSiteBuilderRoutes` (`handlers_proxy_sites.go`) and `mountSiteOpsRoutes`
   (`handlers_proxy_siteops.go`) inside `/proxy/sites`; `mountStreamRoutes` (`handlers_proxy_streams.go`),
   `mountAuthFileRoutes` (`handlers_proxy_auth.go`) and `mountProxyToolRoutes` (`handlers_tls.go`, where

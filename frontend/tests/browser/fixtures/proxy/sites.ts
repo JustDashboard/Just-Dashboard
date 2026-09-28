@@ -1,5 +1,16 @@
 import { json, now, type ProxyRoutes } from "./shared"
 
+const anHourAgo = new Date(Date.now() - 3_600_000).toISOString()
+const tenMinutesAgo = new Date(Date.now() - 600_000).toISOString()
+
+/** GET /proxy/pending: nginx running what it loaded an hour ago, with nothing waiting. */
+export const pendingNone = {
+  running: true,
+  lastReload: anHourAgo,
+  generation: "1088-500000",
+  files: [],
+}
+
 export const vhosts = [
   {
     name: "app.example.com",
@@ -50,10 +61,25 @@ export const vhosts = [
 
 export const routes: ProxyRoutes = {
   "/proxy/vhosts": (route) => json(route, vhosts),
+  "/proxy/pending": (route) => json(route, pendingNone),
   "/proxy/auth-files/": (route) => json(route, []),
 }
 
 export const showcase: ProxyRoutes = {
+  // Files no card owns, so the strip is drawn at every width without
+  // changing what any card says.
+  "/proxy/pending": (route) =>
+    json(route, {
+      ...pendingNone,
+      files: [
+        { path: "/etc/nginx/nginx.conf", change: "changed", modified: tenMinutesAgo },
+        {
+          path: "/etc/nginx/snippets/ssl-params-for-every-site-on-this-host.conf",
+          change: "changed",
+          modified: tenMinutesAgo,
+        },
+      ],
+    }),
   "/proxy/auth-files/": (route) =>
     json(route, [
       { name: "staging", path: "/etc/nginx/auth/staging", users: ["operator", "reviewer"] },

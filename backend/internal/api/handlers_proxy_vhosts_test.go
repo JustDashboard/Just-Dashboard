@@ -460,3 +460,40 @@ func TestVHostListOffersOnlyLogsTheLogsPageOpens(t *testing.T) {
 		}
 	}
 }
+
+// What on disk nginx has not loaded is a reading every account holds, like
+// the listing it marks; the reload it leads to is not. It answers on a host
+// with no nginx, and with no nginx running this configuration, rather than
+// failing the page that asks.
+func TestProxyPendingIsAReadingForEveryAccount(t *testing.T) {
+	c, s, root := vhostServer(t, func(root string) string {
+		return fmt.Sprintf(`case "$*" in *-T*) echo "# configuration file %[1]s/nginx.conf:"; echo "events {}";; esac; exit 0`, root)
+	})
+	if got := routeGates(t, c.h)["GET /api/v1/proxy/pending"]; got != [2]int{0, 1} {
+		t.Errorf("gates = %v, want none beyond the read budget", got)
+	}
+	reader := &client{t: t, h: c.h, cookie: signInAs(t, s, "reader", auth.RoleReadOnly)}
+	w := reader.do(http.MethodGet, "/api/v1/proxy/pending", "", nil)
+	var pending struct {
+		Running bool              `json:"running"`
+		Reason  string            `json:"reason"`
+		Files   []json.RawMessage `json:"files"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &pending); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	if pending.Running || pending.Reason != "no running nginx reads "+filepath.Join(root, "nginx.conf") || pending.Files == nil {
+		t.Errorf("answered %s", w.Body.String())
+	}
+	for _, after := range []string{"latest", "12", "0-4"} {
+		if w := reader.do(http.MethodGet, "/api/v1/proxy/pending?after="+after, "", nil); w.Code != http.StatusBadRequest {
+			t.Errorf("after=%s: %d", after, w.Code)
+		}
+	}
+
+	t.Setenv("PATH", t.TempDir())
+	w = reader.do(http.MethodGet, "/api/v1/proxy/pending", "", nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"reason":"nginx is not installed on this host"`) {
+		t.Errorf("with no nginx: %d %s", w.Code, w.Body.String())
+	}
+}

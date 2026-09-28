@@ -1124,7 +1124,9 @@ address's as a meter. Connections, logins, devices and routes are readings with 
 rows stay rows.
 
 **The proxy section draws routes, engines and authorities.** All six pages stay in the reading
-register and begin with four `StatTile` readings, two per row on phones. On the overview the engine
+register and begin with four `StatTile` readings, two per row on phones; on Sites, what the reader
+has to act on first — a failed read, nginx not running, changes on disk nginx has not loaded, with
+Test config and Reload nginx — stands above them as a `Notice`. On the overview the engine
 identity and service commands sit below them, with the routes in the main column and attention and
 expiry in a narrower column. A site's and a stream's card separates identity, route and named
 actions into three bands: `components/proxy/route-path.tsx` gives the source and destination their

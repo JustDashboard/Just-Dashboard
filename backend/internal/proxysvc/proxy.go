@@ -53,6 +53,7 @@ type Service struct {
 
 	recorder  ChangeRecorder
 	effective effectiveCache
+	pending   pendingTracker
 }
 
 func New(nginxDir, caddyFile string) *Service {

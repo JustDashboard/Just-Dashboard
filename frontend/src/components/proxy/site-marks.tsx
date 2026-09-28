@@ -39,7 +39,9 @@ export function SiteTLS({ vhost }: { vhost: VHost }) {
  * where the page knows better. `stopped` is a site whose engine is not
  * running, which serves nothing whatever its file says; `unloaded` is a site
  * a verb changed that nginx did not reload, so a running nginx still has it
- * as it was.
+ * as it was; and `notLive` is what nginx itself shows of that — the file
+ * changed since the configuration it is running was loaded — in words such
+ * as "saved, not live".
  */
 export function ServingStatus({
   vhost,
@@ -47,12 +49,14 @@ export function ServingStatus({
   unread,
   stopped,
   unloaded,
+  notLive,
 }: {
   vhost: VHost
   busy?: string
   unread?: boolean
   stopped?: boolean
   unloaded?: boolean
+  notLive?: string
 }) {
   if (busy) return <Status state="activating" label={`${busy}…`} />
   if (unread) return <Status tone="unknown" label="not read back" />
@@ -73,6 +77,7 @@ export function ServingStatus({
       />
     )
   }
+  if (notLive) return <Status verdict="warning" label={notLive} />
   if (vhost.kind === "nginx" && !vhost.enabledPath && vhost.enabled) {
     // conf.d: every present .conf file is active and there is nothing to
     // toggle, which "always on" says without offering a control.

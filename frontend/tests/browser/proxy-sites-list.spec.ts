@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import { availability, json, mockProxy, mockShowcase, user, vhosts } from "./proxy-fixtures"
+import { pendingNone } from "./fixtures/proxy/sites"
 
 /**
  * The Sites list and what its verbs report back.
@@ -1482,3 +1483,330 @@ for (const width of [390, 1280]) {
     await page.screenshot({ path: testInfo.outputPath(`sites-${width}.png`), fullPage: true })
   })
 }
+
+/** What nginx has not loaded: the site file behind app's link edited, and off taken out. */
+const fiveMinutesAgo = new Date(Date.now() - 300_000).toISOString()
+const appEdited = {
+  path: "/etc/nginx/sites-enabled/app.example.com",
+  site: "app.example.com",
+  layout: "sites-available",
+  change: "changed",
+  modified: fiveMinutesAgo,
+}
+const offTakenOut = {
+  path: "/etc/nginx/sites-enabled/off.example.com",
+  site: "off.example.com",
+  layout: "sites-available",
+  change: "removed",
+}
+const newerLoad = {
+  ...pendingNone,
+  generation: "1088-510000",
+  lastReload: new Date().toISOString(),
+}
+
+/**
+ * Serves GET /proxy/pending from `answer`, which is handed each request's
+ * ?after=, and returns every ?after= the page sent.
+ */
+async function servePending(
+  page: Page,
+  answer: (after: string | null) => unknown | Promise<unknown>,
+) {
+  const afters: (string | null)[] = []
+  await page.route("**/api/v1/proxy/pending**", async (route) => {
+    const after = new URL(route.request().url()).searchParams.get("after")
+    afters.push(after)
+    return json(route, await answer(after))
+  })
+  return afters
+}
+
+test("a change nginx has not loaded reads not live, and the strip tests and reloads it", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const calm = {
+    ...app,
+    name: "calm.example.com",
+    path: "/etc/nginx/sites-available/calm.example.com",
+    enabledPath: "/etc/nginx/sites-enabled/calm.example.com",
+    serverNames: ["calm.example.com"],
+  }
+  await serveSites(page, [app, off, calm])
+  let reloaded = false
+  let release = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  const afters = await servePending(page, async (after) => {
+    if (after) await held
+    return reloaded ? newerLoad : { ...pendingNone, files: [appEdited, offTakenOut] }
+  })
+  let tested = 0
+  await page.route("**/api/v1/proxy/test", (route) => {
+    tested += 1
+    return json(route, { ...brokenTest, valid: true, output: "syntax is ok", diagnostics: [] })
+  })
+  let reloadBody: unknown
+  await page.route("**/api/v1/proxy/reload", (route) => {
+    reloadBody = route.request().postDataJSON()
+    reloaded = true
+    return json(route, reloadedOk.reload)
+  })
+  await page.goto("/proxy/sites")
+
+  const strip = page.getByRole("status").filter({ hasText: "not live yet" })
+  await expect(strip).toContainText("2 changes on disk are not live yet")
+  await expect(strip).toContainText(
+    /nginx is running the configuration it loaded 1h( \d+[ms])? ago\./,
+  )
+  const lines = strip.getByRole("list", { name: "Changes not live" }).getByRole("listitem")
+  await expect(lines).toHaveText([
+    /^sites-enabled\/app\.example\.com saved \d+m( \d+s)? ago$/,
+    "sites-enabled/off.example.com taken out, still served until nginx reloads",
+  ])
+  const appCard = card(page, "app.example.com")
+  const offCard = card(page, "off.example.com")
+  await expect(appCard.getByText("saved, not live", { exact: true })).toBeVisible()
+  await expect(offCard.getByText("disabled, not live", { exact: true })).toBeVisible()
+  const waiting = page.getByRole("list", { name: "Needs attention" })
+  await expect(waiting).toContainText("app.example.com")
+  await expect(waiting).toContainText("off.example.com")
+  await expect(waiting).not.toContainText("calm.example.com")
+  await expect(page.getByText("every site serving")).toHaveCount(0)
+
+  await strip.getByRole("button", { name: "Test config" }).click()
+  const valid = page
+    .locator("[data-sonner-toast]")
+    .filter({ hasText: "nginx accepts the configuration on disk" })
+  await expect(valid).toContainText("A reload would put the 2 changes live.")
+  expect(tested).toBe(1)
+  await expect(strip).toBeVisible()
+
+  await strip.getByRole("button", { name: "Reload nginx" }).click()
+  // Sent, and nginx not yet read again: the command says it is still at it.
+  await expect(strip.getByRole("button", { name: "Reloading…" })).toBeDisabled()
+  expect(reloadBody).toEqual({ kind: "nginx" })
+  release()
+  const done = page.locator("[data-sonner-toast]").filter({ hasText: "nginx reloaded" })
+  await expect(done).toContainText("The changes are live.")
+  expect(afters).toContain(pendingNone.generation)
+  await expect(strip).toHaveCount(0)
+  await expect(appCard.getByText("serving", { exact: true })).toBeVisible()
+  await expect(offCard.getByText("disabled", { exact: true })).toBeVisible()
+  // off is still a disabled site someone has to decide about; app waits on nothing.
+  await expect(page.getByRole("list", { name: "Needs attention" })).not.toContainText(
+    "app.example.com",
+  )
+})
+
+test("a reload nginx does not take keeps the strip and says nginx kept what it had", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await serveSites(page, [app])
+  // nginx never moves on from the load it had: a port another process
+  // holds fails in the master, after `nginx -s reload` has exited 0.
+  const afters = await servePending(page, () => ({ ...pendingNone, files: [appEdited] }))
+  await page.route("**/api/v1/proxy/reload", (route) => json(route, reloadedOk.reload))
+  await page.goto("/proxy/sites")
+  const strip = page.getByRole("status").filter({ hasText: "not live yet" })
+  await strip.getByRole("button", { name: "Reload nginx" }).click()
+  const kept = page
+    .locator("[data-sonner-toast]")
+    .filter({ hasText: "nginx kept the configuration it had" })
+  await expect(kept).toContainText(
+    /The reload was sent, but nginx is still running what it loaded 1h( \d+[ms])? ago\./,
+  )
+  await expect(kept).toContainText("Its error log says why")
+  await expect(
+    page.locator("[data-sonner-toast]").filter({ hasText: "nginx reloaded" }),
+  ).toHaveCount(0)
+  expect(afters).toContain(pendingNone.generation)
+  await expect(strip).toContainText("1 change on disk is not live yet")
+  await expect(
+    card(page, "app.example.com").getByText("saved, not live", { exact: true }),
+  ).toBeVisible()
+})
+
+test("a configuration nginx refuses is named, with no Reload to press, and a refused reload says why", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await serveSites(page, [app, off])
+  const problem = 'unknown directive "foo" in /etc/nginx/sites-available/app.example.com:3'
+  let broken = true
+  await servePending(page, () =>
+    broken
+      ? { ...pendingNone, problem, files: [appEdited] }
+      : { ...pendingNone, files: [appEdited] },
+  )
+  await page.route("**/api/v1/proxy/test", (route) => json(route, brokenTest))
+  await page.route("**/api/v1/proxy/reload", (route) =>
+    route.fulfill({
+      status: 422,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "invalid_config", message: refusal.error.raw } }),
+    }),
+  )
+  await page.goto("/proxy/sites")
+  const strip = page.getByRole("status").filter({ hasText: "not live yet" })
+  await expect(strip).toContainText(
+    `It refuses the configuration on disk, so a reload is turned away until this is fixed: ${problem}`,
+  )
+  await expect(strip.getByRole("button", { name: "Reload nginx" })).toHaveCount(0)
+  await strip.getByRole("button", { name: "Test config" }).click()
+  const refused = page
+    .locator("[data-sonner-toast]")
+    .filter({ hasText: "nginx refuses the configuration on disk" })
+  await expect(refused).toContainText(
+    'open() "/etc/nginx/sites-enabled/ghost" failed (2: No such file or directory) in /etc/nginx/nginx.conf:60',
+  )
+  await refused.getByRole("button", { name: "Show nginx output" }).click()
+  await expect(page.getByRole("dialog", { name: "nginx output — nginx -t" })).toContainText(
+    "configuration file /etc/nginx/nginx.conf test failed",
+  )
+  await page.keyboard.press("Escape")
+
+  // Passing again as far as the page last read, and refused on the reload.
+  broken = false
+  await page.reload()
+  await strip.getByRole("button", { name: "Reload nginx" }).click()
+  const turnedAway = page
+    .locator("[data-sonner-toast]")
+    .filter({ hasText: "nginx refused the reload" })
+  await expect(turnedAway).toContainText(
+    'unknown directive "foo" in /etc/nginx/sites-enabled/off.example.com:3',
+  )
+  await expect(turnedAway).not.toContainText("nginx: [emerg]")
+  await expect(strip).toContainText("1 change on disk is not live yet")
+})
+
+test("a reader sees what nginx has not loaded, without Test or Reload", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await serveSites(page, [app, off])
+  await servePending(page, () => ({ ...pendingNone, files: [appEdited] }))
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, { ...user, capabilities: ["read"], user: { ...user.user, role: "viewer" } }),
+  )
+  await page.goto("/proxy/sites")
+  const strip = page.getByRole("status").filter({ hasText: "not live yet" })
+  await expect(strip).toContainText(/sites-enabled\/app\.example\.com saved \d+m( \d+s)? ago/)
+  await expect(strip.getByRole("button")).toHaveCount(0)
+  await expect(
+    card(page, "app.example.com").getByText("saved, not live", { exact: true }),
+  ).toBeVisible()
+})
+
+test("a switch that reloaded holds its card until nginx is read again after the reload", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  let enabled = false
+  await page.route("**/api/v1/proxy/vhosts", (route) => json(route, [app, { ...off, enabled }]))
+  let release = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  const afters = await servePending(page, async (after) => {
+    if (after) {
+      await held
+      return newerLoad
+    }
+    return pendingNone
+  })
+  await page.route("**/api/v1/proxy/vhosts/off.example.com/enabled", (route) => {
+    enabled = true
+    return json(route, { name: "off.example.com", enabled: true, ...reloadedOk })
+  })
+  await page.goto("/proxy/sites")
+  const site = card(page, "off.example.com")
+  await (await openMenu(page, "off.example.com")).getByRole("menuitem", { name: "Enable" }).click()
+  await expect(
+    page.locator("[data-sonner-toast]").filter({ hasText: "off.example.com enabled" }),
+  ).toBeVisible()
+  // The list is read again at once; what nginx loaded waits on the reload.
+  await expect.poll(() => afters.includes(pendingNone.generation)).toBe(true)
+  await expect(site.getByText("Enabling…", { exact: true })).toBeVisible()
+  release()
+  await expect(site.getByText("serving", { exact: true })).toBeVisible()
+  await expect(site.getByText("Enabling…", { exact: true })).toHaveCount(0)
+})
+
+test("nothing is called not live where no running nginx reads the configuration", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await serveSites(page, [app, off])
+  const answer: { current: unknown } = {
+    current: { running: false, reason: "no running nginx reads /etc/nginx/nginx.conf", files: [] },
+  }
+  await servePending(page, () => answer.current)
+  await page.goto("/proxy/sites")
+  await expect(card(page, "app.example.com").getByText("serving", { exact: true })).toBeVisible()
+  await expect(page.getByText(/not live/)).toHaveCount(0)
+
+  // With systemd reporting nginx stopped, the page says that instead.
+  answer.current = { ...pendingNone, files: [appEdited] }
+  await serveUnit(page, engineUnit("inactive"))
+  await page.reload()
+  await expect(page.getByText("nginx is not running")).toBeVisible()
+  await expect(page.getByText(/not live/)).toHaveCount(0)
+})
+
+test("a long list of changes folds and fits a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  await serveSites(page, [app])
+  const files = Array.from({ length: 8 }, (_, i) => ({
+    path: `/etc/nginx/conf.d/a-rather-long-configuration-file-name-number-${i}.conf`,
+    site: `a-rather-long-configuration-file-name-number-${i}.conf`,
+    layout: "conf.d",
+    change: "changed",
+    modified: fiveMinutesAgo,
+  }))
+  await servePending(page, () => ({ ...pendingNone, files }))
+  await page.goto("/proxy/sites")
+  const strip = page.getByRole("status").filter({ hasText: "not live yet" })
+  await expect(strip).toContainText("8 changes on disk are not live yet")
+  await expect(
+    strip.getByRole("list", { name: "Changes not live" }).getByRole("listitem"),
+  ).toHaveCount(5)
+  const more = strip.getByRole("button", { name: "3 more" })
+  await more.click()
+  await expect(
+    strip.getByRole("list", { name: "More changes not live" }).getByRole("listitem"),
+  ).toHaveCount(3)
+  const overflow = await page
+    .locator("[data-slot='page']")
+    .evaluate((el) => el.scrollWidth - el.clientWidth)
+  expect(overflow).toBeLessThanOrEqual(1)
+  await expect(strip.getByRole("button", { name: "Reload nginx" })).toBeInViewport()
+})
+
+test("a switch whose reload nginx did not take says so after its own toast", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  let enabled = false
+  await page.route("**/api/v1/proxy/vhosts", (route) => json(route, [app, { ...off, enabled }]))
+  const linked = { ...offTakenOut, change: "added", modified: new Date().toISOString() }
+  // nginx is still on the load from before the switch's reload.
+  const afters = await servePending(page, () =>
+    enabled ? { ...pendingNone, files: [linked] } : pendingNone,
+  )
+  await page.route("**/api/v1/proxy/vhosts/off.example.com/enabled", (route) => {
+    enabled = true
+    return json(route, { name: "off.example.com", enabled: true, ...reloadedOk })
+  })
+  await page.goto("/proxy/sites")
+  await (await openMenu(page, "off.example.com")).getByRole("menuitem", { name: "Enable" }).click()
+  await expect(
+    page.locator("[data-sonner-toast]").filter({ hasText: "off.example.com enabled" }),
+  ).toBeVisible()
+  const kept = page
+    .locator("[data-sonner-toast]")
+    .filter({ hasText: "nginx kept the configuration it had" })
+  await expect(kept).toContainText("The reload was sent, but nginx is still running what it loaded")
+  expect(afters).toContain(pendingNone.generation)
+  const site = card(page, "off.example.com")
+  await expect(site.getByText("enabled, not live", { exact: true })).toBeVisible()
+  await expect(page.getByRole("status").filter({ hasText: "not live yet" })).toContainText(
+    /sites-enabled\/off\.example\.com linked (just now|\d+s ago)/,
+  )
+})
