@@ -27,6 +27,8 @@ export function certificateFindings({ certs, certbot }: CertificateFindingInput)
     } else if (cert.expired) {
       out.push({
         id: `cert.expired.${cert.path}`,
+        // The days left move every day; the certificate is what the finding is about.
+        fingerprint: cert.fingerprint ?? cert.path,
         level: "critical",
         title: `${cert.name} has expired`,
         detail: `Expired ${-cert.daysLeft} day${cert.daysLeft === -1 ? "" : "s"} ago; every browser refuses it now.${usedBy}`,
@@ -37,6 +39,7 @@ export function certificateFindings({ certs, certbot }: CertificateFindingInput)
     } else if (cert.expiring) {
       out.push({
         id: `cert.expiring.${cert.path}`,
+        fingerprint: cert.fingerprint ?? cert.path,
         level: cert.daysLeft <= 7 ? "critical" : "warning",
         title: `${cert.name} expires in ${cert.daysLeft} day${cert.daysLeft === 1 ? "" : "s"}`,
         detail: `Inside Let's Encrypt's renewal window and still not renewed.${usedBy}`,
@@ -59,6 +62,7 @@ export function certificateFindings({ certs, certbot }: CertificateFindingInput)
         : "Install certbot's timer or a cron entry; without one every certificate here expires in ninety days.",
       meta: "renewal",
       href: "/proxy/certificates",
+      remedy: certbot.renewUnit ? { kind: "start-unit", unit: certbot.renewUnit } : undefined,
     })
   }
 

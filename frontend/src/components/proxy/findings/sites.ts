@@ -18,6 +18,7 @@ export function siteFindings({ vhosts }: SiteFindingInput): ProxyFinding[] {
         advice: "Enable it from Sites if it is meant to serve, or delete it if it is not.",
         meta: "site",
         href: `/proxy/sites?site=${encodeURIComponent(vhost.name)}`,
+        remedy: { kind: "enable-site", site: vhost.name },
       })
       continue
     }

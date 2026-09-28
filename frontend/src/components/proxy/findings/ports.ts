@@ -20,6 +20,11 @@ export function portFindings({ ports }: PortFindingInput): ProxyFinding[] {
       detail: dangerous.map((l) => `${l.port}/${l.protocol} ${l.process || "unknown"}`).join(", "),
       advice:
         "Bind these to loopback or a private address, or close them in the firewall. A database port on the internet is the commonest way a server is emptied.",
+      // The process names are read afresh each time; the ports are the finding.
+      fingerprint: dangerous
+        .map((l) => `${l.port}/${l.protocol}`)
+        .sort()
+        .join(" "),
       meta: "ports",
       href: "/proxy/ports",
     })

@@ -38,6 +38,9 @@ func (s *Server) mountProxyInsightRoutes(r chi.Router) {
 	// Rules that tell the notification channels about these readings,
 	// the operator's alone; see mountProxyAlertRoutes.
 	r.Route("/alerts", s.mountProxyAlertRoutes)
+	// Findings the operator put aside on the overview; see
+	// mountProxyFindingRoutes.
+	r.Route("/findings", s.mountProxyFindingRoutes)
 }
 
 // upstreamBudget covers a check that has to dump the configuration first

@@ -78,6 +78,19 @@ CREATE TABLE IF NOT EXISTS proxy_alert_events (
     created_at INTEGER NOT NULL
 );
 
+-- A finding the operator put aside on the overview. The findings are judged
+-- in the browser, so the row keeps the fingerprint the finding had when it
+-- was snoozed: one that reads differently now is shown again. until = 0 is
+-- "until it changes"; otherwise the row counts only until that Unix second.
+CREATE TABLE IF NOT EXISTS proxy_finding_snoozes (
+    finding_id  TEXT PRIMARY KEY,
+    fingerprint TEXT NOT NULL,
+    until       INTEGER NOT NULL DEFAULT 0,
+    note        TEXT NOT NULL DEFAULT '',
+    actor       TEXT NOT NULL DEFAULT '',
+    created_at  INTEGER NOT NULL
+);
+
 -- --- lane B: sites list & lifecycle ---
 
 -- --- lane C: site builder ---
