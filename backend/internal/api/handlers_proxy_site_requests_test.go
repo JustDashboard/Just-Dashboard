@@ -52,7 +52,8 @@ func TestSiteRequestsReadTheFileTheSiteNames(t *testing.T) {
 	writeLog(t, accessLog,
 		line(3*time.Minute, "203.0.113.9", "GET /", 200, 612, "Mozilla/5.0"),
 		line(2*time.Minute, "203.0.113.9", "POST /cart", 502, 157, "Mozilla/5.0"),
-		line(time.Minute, "198.51.100.7", "GET /.env", 404, 0, "zgrab/0.x"),
+		// An agent is whatever the client sent, a formula included.
+		line(time.Minute, "198.51.100.7", "GET /.env", 404, 0, "=HYPERLINK(A1)"),
 	)
 
 	reader := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "site-reader", auth.RoleReadOnly)}
@@ -82,6 +83,9 @@ func TestSiteRequestsReadTheFileTheSiteNames(t *testing.T) {
 	if export.Code != 200 || len(rows) != 2 || !strings.Contains(rows[1], "/.env") ||
 		!strings.Contains(export.Header().Get("Content-Disposition"), "requests-shop-") {
 		t.Fatalf("export (%d) %q:\n%s", export.Code, export.Header().Get("Content-Disposition"), export.Body.String())
+	}
+	if !strings.HasSuffix(rows[1], ",'=HYPERLINK(A1),") {
+		t.Errorf("the agent reached the spreadsheet as a formula: %s", rows[1])
 	}
 
 	// The live tail continues from the window's cursor with what nginx appends.

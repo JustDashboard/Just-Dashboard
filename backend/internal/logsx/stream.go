@@ -74,8 +74,15 @@ func (s *Stream) Route(pick func(*Line) string) { s.pick = pick }
 // Skip is the cheap test before parsing: a line whose text the filter rejects
 // needs neither a parse nor a lens — unless a kept record is open, when it may
 // be one of that record's continuation lines and only the lens can say.
+//
+// It never skips while a lens reads the stream. A lens carries values from
+// line to line — the transaction's Start-Date onto its Upgrade line, the
+// address a connection came from onto the FATAL that ends it — and a line it
+// never saw is a value the next line never gets: the same line would then
+// read differently with a query than without one, and lose the stamp that
+// keeps it out of a window it is not in.
 func (s *Stream) Skip(raw string) bool {
-	if s.open || s.f.MatchText(raw) {
+	if s.open || s.r != nil || (s.pick != nil && !s.off) || s.f.MatchText(raw) {
 		return false
 	}
 	// A line passed over is a line decided: whatever continues it follows it

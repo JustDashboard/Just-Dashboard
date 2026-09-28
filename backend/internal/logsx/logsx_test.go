@@ -212,6 +212,40 @@ func TestSearchReadsCompressedArchives(t *testing.T) {
 	}
 }
 
+// A generation is read only when it is inside the roots itself. Anyone who can
+// write beside a log can name a link app.log.1, and the live file passing the
+// roots is no reason to follow it out of them — in a search or an export.
+func TestArchivesLinkedOutOfTheRootsAreNotRead(t *testing.T) {
+	svc, dir := service(t)
+	secret := filepath.Join(t.TempDir(), "shadow")
+	write(t, secret, "root:$6$SECRETHASH:19000")
+	live := filepath.Join(dir, "app.log")
+	write(t, live, "today: fine")
+	if err := os.Symlink(secret, live+".1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(secret, time.Now(), time.Now().Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := svc.Search(context.Background(), live, SearchOptions{Archives: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Files) != 1 || res.Files[0].Archive {
+		t.Errorf("files = %+v, want the live file alone", res.Files)
+	}
+	var out strings.Builder
+	if _, err := svc.Range(context.Background(), live, SearchOptions{Archives: true}, &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{out.String(), texts(res.Lines)} {
+		if strings.Contains(text, "SECRETHASH") {
+			t.Fatalf("read through a generation linked out of the roots: %q", text)
+		}
+	}
+}
+
 // A filtered tail cannot start n lines from the end: on a log where one line in
 // a thousand is an error, that window is empty and the page looks broken.
 func TestFilteredTailOpensWithMatches(t *testing.T) {

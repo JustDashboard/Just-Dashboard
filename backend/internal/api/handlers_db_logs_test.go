@@ -74,10 +74,15 @@ func dbLogEngine(t *testing.T, s *Server, containers ...map[string]any) {
 			id := c["Id"].(string)
 			name := strings.TrimPrefix(c["Names"].([]string)[0], "/")
 			if strings.HasSuffix(r.URL.Path, "/containers/"+id+"/json") || strings.HasSuffix(r.URL.Path, "/containers/"+name+"/json") {
+				networks := map[string]any{}
+				if ip, ok := c["IP"].(string); ok {
+					networks["shop_default"] = map[string]any{"IPAddress": ip}
+				}
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"Id": id, "Name": "/" + name, "Image": c["ImageID"],
-					"Config": map[string]any{"Image": c["ConfigImage"]},
-					"State":  map[string]any{"Status": "running", "Running": true},
+					"Config":          map[string]any{"Image": c["ConfigImage"]},
+					"State":           map[string]any{"Status": "running", "Running": true},
+					"NetworkSettings": map[string]any{"Networks": networks},
 				})
 				return
 			}
@@ -536,6 +541,25 @@ func TestDBLogSourcesFindAContainerNothingIsListeningFor(t *testing.T) {
 			t.Errorf("the container publishing the port = %+v", got)
 		}
 	})
+}
+
+// A connection to a container's own address reaches that container whatever
+// its image: one built in-house is still the Postgres the connection says it
+// is, and the page must not send the reader "elsewhere on the network".
+func TestDBLogSourcesFindAContainerAtItsAddressWhateverItsImage(t *testing.T) {
+	s, router := dbLogRouter(t, auth.RoleAdmin, dbx.DriverPostgres,
+		"postgres://app:pw@172.18.0.5:5432/shop?sslmode=disable")
+	dbLogEngine(t, s,
+		map[string]any{"Id": "71be02c4d9a1", "Names": []string{"/shop-web"}, "Image": "ghcr.io/acme/shop-web:1",
+			"ConfigImage": "ghcr.io/acme/shop-web:1", "State": "running", "IP": "172.18.0.4"},
+		map[string]any{"Id": "5d1c0f2e8b3a", "Names": []string{"/shop-pg"}, "Image": "ghcr.io/acme/pg-tuned:3",
+			"ConfigImage": "ghcr.io/acme/pg-tuned:3", "State": "running", "IP": "172.18.0.5"},
+	)
+	var got dbLogSources
+	getJSON(t, router, "/databases/1/logs/sources", &got)
+	if len(got.Sources) != 1 || got.Sources[0].ID != "docker:shop-pg" || got.Sources[0].Lens != "postgres" || !got.Sources[0].Primary {
+		t.Fatalf("the container at the connection's address = %+v", got)
+	}
 }
 
 // A stopped server on the machine is found by its units' names instead: the

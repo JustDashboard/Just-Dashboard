@@ -1,6 +1,8 @@
 package proxysvc
 
 import (
+	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -69,13 +71,19 @@ func (s *Service) SiteConfig(name string) (string, error) {
 // accepts it. A deployment's own file, and a route on the shared Docker
 // Caddy ingress that has no file on the host, are the deployment's route —
 // the record its Logs page already holds, rather than a second copy of it.
-func (s *Service) SiteRequestRoute(name string, allow func(string) error) (string, error) {
+// A name shaped like a deployment's is one only when the ingress has its
+// route: any reader can type the shape, and each name would otherwise start
+// a record and a lookup of its own.
+func (s *Service) SiteRequestRoute(ctx context.Context, name string, allow func(string) error) (string, error) {
 	content, err := s.SiteConfig(name)
 	if err != nil {
-		if deploymentRoute(name) {
-			return name, nil
+		if !deploymentRoute(name) {
+			return "", err
 		}
-		return "", err
+		if ok, err := s.ingressRoute(ctx, name); err != nil || !ok {
+			return "", cmp.Or(err, ErrSiteNotFound)
+		}
+		return name, nil
 	}
 	spec, _ := ParseSiteSpec(name, content)
 	path := spec.AccessLogPath
@@ -89,6 +97,22 @@ func (s *Service) SiteRequestRoute(name string, allow func(string) error) (strin
 		return name, nil
 	}
 	return siteRecordPrefix + path, nil
+}
+
+// ingressRoute reports whether the Docker Caddy ingress holds a route of this
+// name. On an nginx host a deployment's route is a file in sites-available,
+// which SiteConfig has already looked for, so there is nothing more to find.
+func (s *Service) ingressRoute(ctx context.Context, name string) (bool, error) {
+	edge, err := s.dockerCaddy(ctx)
+	if err != nil || edge == nil {
+		return false, err
+	}
+	path, err := dockerCaddyRoutePath(name)
+	if err != nil {
+		return false, nil
+	}
+	_, exists, err := edge.read(ctx, path)
+	return exists, err
 }
 
 // deploymentRoute reports whether a name is one the deployment renderer

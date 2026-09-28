@@ -101,6 +101,17 @@ const (
 	QuerySourceStatementsHistory = "statements_history"
 )
 
+// The statements that turn each engine's record of slow statements on. Each
+// is one statement, because the query console the page opens them in runs
+// exactly one: Postgres's reload is a second statement, so the page says to
+// run it rather than offering two the console would refuse. MySQL and
+// MariaDB carry a SET's GLOBAL onto every assignment after it.
+const (
+	postgresEnableSlow = "ALTER SYSTEM SET log_min_duration_statement = '250ms';"
+	mysqlEnableSlowLog = "SET GLOBAL slow_query_log = ON, long_query_time = 0.25, log_output = 'FILE,TABLE';"
+	mysqlEnableTable   = "SET GLOBAL log_output = 'FILE,TABLE';"
+)
+
 // PostgresSlowSetting answers what log_min_duration_statement is, and the
 // statement that turns it on when it is off. Postgres writes no statement to
 // its log however long it ran until this says how slow is slow, so an empty
@@ -116,7 +127,7 @@ func PostgresSlowSetting(ctx context.Context, db *sql.DB) (current string, enabl
 		return "-1", &QueryLogEnable{
 			Setting: "log_min_duration_statement",
 			Current: "-1",
-			SQL:     "ALTER SYSTEM SET log_min_duration_statement = '250ms';\nSELECT pg_reload_conf();",
+			SQL:     postgresEnableSlow,
 		}, nil
 	}
 	return setting + unit, nil, nil
@@ -136,7 +147,10 @@ func MySQLQueryLog(ctx context.Context, db *sql.DB, w QueryLogWindow) (*QueryLog
 		longQuery       float64
 	)
 	if err := db.QueryRowContext(ctx,
-		`SELECT VERSION(), @@log_output, @@slow_query_log, @@long_query_time`).
+		// The global values, which are what the server logs by: an unqualified
+		// @@long_query_time is this pooled session's copy, taken when it
+		// connected and blind to a SET GLOBAL since.
+		`SELECT VERSION(), @@GLOBAL.log_output, @@GLOBAL.slow_query_log, @@GLOBAL.long_query_time`).
 		Scan(&version, &output, &slowOn, &longQuery); err != nil {
 		return nil, err
 	}
@@ -156,13 +170,13 @@ func MySQLQueryLog(ctx context.Context, db *sql.DB, w QueryLogWindow) (*QueryLog
 		out.Enable = &QueryLogEnable{
 			Setting: "slow_query_log",
 			Current: "OFF",
-			SQL:     "SET GLOBAL slow_query_log = ON;\nSET GLOBAL long_query_time = 0.25;\nSET GLOBAL log_output = 'FILE,TABLE';",
+			SQL:     mysqlEnableSlowLog,
 		}
 	} else {
 		out.Enable = &QueryLogEnable{
 			Setting: "log_output",
 			Current: output,
-			SQL:     "SET GLOBAL log_output = 'FILE,TABLE';",
+			SQL:     mysqlEnableTable,
 		}
 	}
 	if strings.Contains(strings.ToLower(version), "mariadb") {
@@ -303,11 +317,19 @@ func mysqlUserHost(s string) (user, client string) {
 // every half minute would otherwise fill with the reads of itself.
 const clickhouseQueryLogMark = "just-dashboard: query log"
 
+// clickhouseSlowMs is the floor a ClickHouse query must pass to be listed.
+// query_log records every query, not the slow ones, and without a floor the
+// newest few hundred of a busy server's are the last few seconds of it: the
+// slowest query of a day could never reach the list. It is the threshold the
+// Postgres enable statement sets, so the engines agree on what slow means.
+const clickhouseSlowMs = 250
+
 // ClickHouseQueryLog reads system.query_log, which ClickHouse keeps on by
 // default: every finished or failed query the clients asked for, not the
-// ones the server ran on their behalf.
+// ones the server ran on their behalf, past clickhouseSlowMs.
 func ClickHouseQueryLog(ctx context.Context, db *sql.DB, w QueryLogWindow) (*QueryLog, error) {
 	since, until := windowBounds(w)
+	floor := math.Max(w.MinMs, clickhouseSlowMs)
 	rows, err := db.QueryContext(ctx, `/* `+clickhouseQueryLogMark+` */
 	  SELECT toUnixTimestamp64Micro(event_time_microseconds), toFloat64(query_duration_ms),
 	         substring(query, 1, 8192), lower(hex(normalized_query_hash)), user, current_database,
@@ -318,12 +340,12 @@ func ClickHouseQueryLog(ctx context.Context, db *sql.DB, w QueryLogWindow) (*Que
 	    AND event_date >= toDate(toDateTime(?)) AND event_time >= toDateTime(?) AND event_time <= toDateTime(?)
 	    AND query_duration_ms >= ? AND position(query, ?) = 0
 	  ORDER BY event_time_microseconds DESC LIMIT ?`,
-		int64(since), int64(since), int64(math.Ceil(until)), w.MinMs, clickhouseQueryLogMark, w.Limit+1)
+		int64(since), int64(since), int64(math.Ceil(until)), floor, clickhouseQueryLogMark, w.Limit+1)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := &QueryLog{Supported: true, Source: QuerySourceQueryLog, Entries: []QueryEntry{}}
+	out := &QueryLog{Supported: true, Source: QuerySourceQueryLog, Entries: []QueryEntry{}, Threshold: thresholdMillis(floor)}
 	for rows.Next() {
 		var (
 			micros        int64

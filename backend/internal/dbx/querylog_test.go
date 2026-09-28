@@ -197,6 +197,16 @@ func TestThresholdsReadLikeTheSettings(t *testing.T) {
 	}
 }
 
+// The page opens each enable statement in the query console, which runs one
+// statement and refuses more.
+func TestEachEnableIsOneStatement(t *testing.T) {
+	for _, sql := range []string{postgresEnableSlow, mysqlEnableSlowLog, mysqlEnableTable} {
+		if _, err := SingleStatement(sql); err != nil {
+			t.Errorf("%q: %v", sql, err)
+		}
+	}
+}
+
 // Against a real Postgres only when one is named: the setting is read, never
 // changed, and a server nobody pointed this at is not dialled.
 func TestLivePostgresSlowSetting(t *testing.T) {
@@ -209,7 +219,7 @@ func TestLivePostgresSlowSetting(t *testing.T) {
 		t.Fatal(err)
 	}
 	if enable != nil {
-		if current != "-1" || enable.Setting != "log_min_duration_statement" || !strings.Contains(enable.SQL, "pg_reload_conf") {
+		if current != "-1" || enable.Setting != "log_min_duration_statement" || enable.SQL != postgresEnableSlow {
 			t.Errorf("off = %q %+v", current, enable)
 		}
 	} else if current == "" || current == "-1" {

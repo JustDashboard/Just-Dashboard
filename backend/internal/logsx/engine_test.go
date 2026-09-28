@@ -260,6 +260,78 @@ func TestOrphanContinuationStandsAlone(t *testing.T) {
 	}
 }
 
+// A lens carries values from one line to the next, so it has to read every
+// line — the ones a query rejects too. Otherwise the same line reads one way
+// with a query and another without, and one with context lines a third way:
+// an Upgrade line that never saw its Start-Date has no stamp, and a line with
+// no stamp is inside every window.
+func TestALensReadsTheLinesAQueryRejects(t *testing.T) {
+	appLensZone(t)
+	history := []string{
+		"Start-Date: 2024-06-10  10:00:00",
+		"Commandline: apt-get upgrade -y",
+		"Requested-By: ubuntu (1000)",
+		"Upgrade: nginx:amd64 (1.24.0-1, 1.24.0-2)",
+		"End-Date: 2024-06-10  10:00:30",
+		"",
+		"Start-Date: 2024-06-12  09:00:00",
+		"Commandline: apt install curl",
+		"Requested-By: ubuntu (1000)",
+		"Install: curl:amd64 (8.5.0-2)",
+		"End-Date: 2024-06-12  09:00:05",
+	}
+	since := time.Date(2024, 6, 11, 0, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		name  string
+		opts  SearchOptions
+		match int
+	}{
+		{"the old transaction by field", SearchOptions{Filter: Filter{Fields: []string{"package:nginx"}}, Since: since}, 0},
+		{"the old transaction by text", SearchOptions{Filter: Filter{Query: "nginx"}, Since: since}, 0},
+		{"the old transaction with context", SearchOptions{Filter: Filter{Query: "nginx"}, Since: since, Before: 1}, 0},
+		{"the new transaction by text", SearchOptions{Filter: Filter{Query: "curl"}, Since: since}, 2},
+		{"the new transaction with context", SearchOptions{Filter: Filter{Query: "curl"}, Since: since, Before: 1}, 2},
+	} {
+		c.opts.Filter.Lens = "packages"
+		res := searchLines(t, c.opts, history...)
+		if res.Matched != c.match {
+			t.Errorf("%s: matched %d, want %d:\n%s", c.name, res.Matched, c.match, texts(res.Lines))
+		}
+		for _, l := range res.Lines {
+			if l.Context {
+				continue
+			}
+			if l.Timestamp == nil || !l.Timestamp.Equal(time.Date(2024, 6, 12, 6, 0, 0, 0, time.UTC)) {
+				t.Errorf("%s: %q stamped %v, want its transaction's start", c.name, l.Text, l.Timestamp)
+			}
+			if l.Attrs["command"] != "apt install curl" {
+				t.Errorf("%s: %q has attrs %v, want its transaction's command", c.name, l.Text, l.Attrs)
+			}
+		}
+	}
+
+	// The address is on "connection received"; the FATAL that ends the
+	// session does not repeat it.
+	session := []string{
+		"2026-09-27 10:02:00.000 UTC [4242] LOG:  connection received: host=203.0.113.9 port=40022",
+		`2026-09-27 10:02:00.010 UTC [4242] FATAL:  password authentication failed for user "admin"`,
+	}
+	fields := []string{"event:auth_failed", "client:203.0.113.9"}
+	for _, c := range []struct {
+		name string
+		opts SearchOptions
+	}{
+		{"no query", SearchOptions{}},
+		{"a query", SearchOptions{Filter: Filter{Query: "password"}}},
+		{"a query with context", SearchOptions{Filter: Filter{Query: "password"}, Before: 1}},
+	} {
+		c.opts.Filter.Fields, c.opts.Filter.Lens = fields, "postgres"
+		if res := searchLines(t, c.opts, session...); res.Matched != 1 {
+			t.Errorf("postgres, %s: matched %d, want 1", c.name, res.Matched)
+		}
+	}
+}
+
 func TestExportKeepsContinuationLines(t *testing.T) {
 	withLens(t, recordLens)
 	svc, dir := service(t)

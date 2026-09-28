@@ -137,7 +137,7 @@ func (s *Service) SearchTargets(ctx context.Context, targets []SearchTarget, opt
 		if err := s.Allow(target.Path); err != nil {
 			return nil, err
 		}
-		for _, p := range searchPaths(target.Path, opts) {
+		for _, p := range s.searchPaths(target.Path, opts) {
 			if ctx.Err() != nil {
 				c.Incomplete()
 				return c.Result(), nil
@@ -164,12 +164,18 @@ func (s *Service) SearchTargets(ctx context.Context, targets []SearchTarget, opt
 // written before the window opens holds nothing inside it — every line in it
 // is older than its mtime — so "the last hour" of a log with a year of
 // archives reads one file instead of fifty-three.
-func searchPaths(live string, opts SearchOptions) []string {
+func (s *Service) searchPaths(live string, opts SearchOptions) []string {
 	if !opts.Archives {
 		return []string{live}
 	}
 	paths := make([]string, 0, 8)
 	for _, a := range Archives(live) {
+		// A generation is only a name beside the live file, and a name can be
+		// a link to anywhere: the live file passing the roots says nothing
+		// about where app.log.1 leads.
+		if s.Allow(a) != nil {
+			continue
+		}
 		if !opts.Since.IsZero() {
 			if st, err := os.Stat(a); err == nil && st.ModTime().Before(opts.Since) {
 				continue
@@ -202,6 +208,10 @@ func (c *Collector) scanFile(ctx context.Context, path, stream string, live bool
 	st := c.st
 	sc := bufio.NewScanner(rc)
 	sc.Buffer(make([]byte, 0, 64*1024), maxLine)
+	// One line for the whole file: a lens reads it through an interface, so
+	// it lives on the heap, and declared per line it would be allocated per
+	// line. Everything that keeps a line keeps a copy.
+	var line Line
 	for sc.Scan() {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -211,11 +221,11 @@ func (c *Collector) scanFile(ctx context.Context, path, stream string, live bool
 		if c.Skip(st, text) {
 			continue
 		}
-		line := ParseLine(text, name)
+		line = ParseLine(text, name)
 		line.No, line.File, line.Stream = lineNo, name, stream
 		st.Read(&line)
 
-		c.Feed(line)
+		c.Feed(&line)
 	}
 	return sc.Err()
 }
@@ -350,27 +360,28 @@ func (c *Collector) Skip(st *Stream, raw string) bool {
 }
 
 // Feed accepts one parsed line, in file order, already read through the
-// current file's stream.
-func (c *Collector) Feed(line Line) { c.FeedFrom(c.st, line) }
+// current file's stream. The line is the caller's to reuse once Feed returns:
+// what is kept is copied.
+func (c *Collector) Feed(line *Line) { c.FeedFrom(c.st, line) }
 
 // FeedFrom accepts a line from one of several interleaved streams. The stream
 // decides whether it is kept, since only it knows the record the line
 // belongs to.
-func (c *Collector) FeedFrom(st *Stream, line Line) {
+func (c *Collector) FeedFrom(st *Stream, line *Line) {
 	c.scanned++
-	keep, own := st.Keep(&line, inWindow(line, c.opts))
+	keep, own := st.Keep(line, inWindow(line, c.opts))
 	if !keep {
 		switch {
 		case c.pending > 0:
 			line.Context = true
-			c.keep(line)
+			c.keep(*line)
 			c.pending--
 		case c.before > 0:
 			line.Context = true
 			if len(c.trailing) == c.before {
 				c.trailing = c.trailing[1:]
 			}
-			c.trailing = append(c.trailing, line)
+			c.trailing = append(c.trailing, *line)
 		}
 		return
 	}
@@ -379,13 +390,13 @@ func (c *Collector) FeedFrom(st *Stream, line Line) {
 		// not charted, and not a line of the "after" context either, which
 		// starts when the record ends.
 		if !(c.opts.Head && c.res.Truncated) {
-			c.keep(line)
+			c.keep(*line)
 		}
 		return
 	}
 
 	c.matched++
-	values := lineValues{l: &line}
+	values := lineValues{l: line}
 	if line.Timestamp != nil && len(c.stamps) < histogramCap {
 		c.stamps = append(c.stamps, stamp{unix: line.Timestamp.Unix(), series: c.in.seriesOf(&values)})
 	}
@@ -406,7 +417,7 @@ func (c *Collector) FeedFrom(st *Stream, line Line) {
 	}
 	c.trailing = c.trailing[:0]
 	line.Match = c.filter.Highlights(line.Text)
-	c.keep(line)
+	c.keep(*line)
 	c.pending = c.after
 }
 
@@ -467,7 +478,7 @@ type stamp struct {
 	series string
 }
 
-func inWindow(l Line, opts SearchOptions) bool {
+func inWindow(l *Line, opts SearchOptions) bool {
 	if opts.Since.IsZero() && opts.Until.IsZero() {
 		return true
 	}
@@ -679,7 +690,7 @@ func (s *Service) RangeTargets(ctx context.Context, targets []SearchTarget, opts
 		if err := s.Allow(target.Path); err != nil {
 			return written, err
 		}
-		for _, p := range searchPaths(target.Path, opts) {
+		for _, p := range s.searchPaths(target.Path, opts) {
 			n, err := s.rangeOne(ctx, p, p == target.Path, f, opts, w)
 			written += n
 			if err != nil {
@@ -710,6 +721,7 @@ func (s *Service) rangeOne(ctx context.Context, path string, live bool, f *Filte
 	written := 0
 	sc := bufio.NewScanner(rc)
 	sc.Buffer(make([]byte, 0, 64*1024), maxLine)
+	var line Line
 	for sc.Scan() {
 		if ctx.Err() != nil {
 			return written, ctx.Err()
@@ -718,9 +730,9 @@ func (s *Service) rangeOne(ctx context.Context, path string, live bool, f *Filte
 		if st.Skip(text) {
 			continue
 		}
-		line := ParseLine(text, name)
+		line = ParseLine(text, name)
 		st.Read(&line)
-		if keep, _ := st.Keep(&line, inWindow(line, opts)); !keep {
+		if keep, _ := st.Keep(&line, inWindow(&line, opts)); !keep {
 			continue
 		}
 		if _, err := io.WriteString(w, text+"\n"); err != nil {

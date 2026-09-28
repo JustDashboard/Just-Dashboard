@@ -199,7 +199,9 @@ accounts retain partial results. Full table details and mutation preconditions u
   shape plus `primary`, read through the engine's lens by the connection's driver (`driverLens` — a
   Postgres in a custom image is still Postgres). A SQLite file and a server on another machine have none,
   with the reason. A container behind the connection is `docker:<name>` — the name, so the log survives
-  a recreate. A server on this machine is followed from its port: the listener (`proxysvc.ListListeners`;
+  a recreate. One the connection dials at its own private address is found by that address whatever
+  its image (`containerAt`): one built in-house, or whose moved tag the list names by id, is still the
+  engine the connection says. A server on this machine is followed from its port: the listener (`proxysvc.ListListeners`;
   behind `docker-proxy`, the container publishing the port, whatever its image says), its process's
   manager (`procs.ManagerOf`, where a `container` manager is `docker:<name>` again), the files it and up
   to 64 of its children hold open **for appending** (`/proc/<pid>/fd` with `fdinfo`'s flags, log-like
@@ -231,7 +233,9 @@ accounts retain partial results. Full table details and mutation preconditions u
   `performance_schema.events_statements_history` from `long_query_time` up; MariaDB's `slow_log` only;
   Redis's `SLOWLOG GET 128`; MongoDB's log through its lens, or `getLog global` over the connection when
   the server is elsewhere or its file is refused; ClickHouse's `system.query_log`, initial queries past
-  `QueryStart`, with its own read marked and left out. SQL Server, Oracle and SQLite are
+  `QueryStart` that took 250 ms or more (`minMs` raises the floor; `threshold` names it), since the log
+  holds every query and the newest few hundred of a busy server's would be its last few seconds, with
+  its own read marked and left out. SQL Server, Oracle and SQLite are
   `supported: false` with the reason, and so is a Postgres whose log the roots refuse, naming the path
   and `JD_LOG_ROOTS`. `fp` is `logsx.Fingerprint` — over the statement, over Redis's command and key
   shape, over a Mongo command's shape — shared with the lenses, so a statement found in the log and in
@@ -411,7 +415,11 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   sheet or an editor over SSH — reads the new file from the next poll: an nginx site is the record
   `file:<its access log>`, refused unless `logs.Allow` accepts it; a `just-dashboard-*` site whose file
   logs where the renderer puts it, and a Docker Caddy route with no file on the host, are the
-  deployment's own route, the record its Logs page already holds. `SiteRecordReader` asks `logs.Allow`
+  deployment's own route, the record its Logs page already holds — the latter only while the ingress
+  holds that route's file, since any reader can type a `just-dashboard-*` name and each would start a
+  record and a lookup of its own. An export neutralises a cell a client wrote (`csvText`): an agent, a
+  referer, a path or a host that starts with `=`, `+`, `-`, `@`, a tab or a return gets a leading `'`,
+  so a spreadsheet reads it as text rather than running it. `SiteRecordReader` asks `logs.Allow`
   again before every open of the live file and of each rotated generation, since a generation beside
   the file can be a link to anywhere, and generations are the names logrotate gives (`logsx.Archives`:
   `.N` and dated), compressed ones skipped — for deployments' nginx files too. A site with no file, no

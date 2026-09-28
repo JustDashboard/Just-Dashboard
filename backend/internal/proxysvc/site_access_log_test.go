@@ -130,7 +130,7 @@ func TestSiteRequestRouteHoldsTheSiteToTheLogRoots(t *testing.T) {
 
 	s := New(nginx, filepath.Join(nginx, "Caddyfile"))
 	ctx := context.Background()
-	route, err := s.SiteRequestRoute("shop", allow)
+	route, err := s.SiteRequestRoute(ctx, "shop", allow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestSiteRequestRouteHoldsTheSiteToTheLogRoots(t *testing.T) {
 	// Moved by an edit, the site is another record.
 	moved := filepath.Join(root, "shop-moved.access.log")
 	site("shop", "access_log "+moved+";")
-	if again, err := s.SiteRequestRoute("shop", allow); err != nil || again == route {
+	if again, err := s.SiteRequestRoute(ctx, "shop", allow); err != nil || again == route {
 		t.Errorf("after the edit the route is %q (%v), still %q", again, err, route)
 	}
 
@@ -169,22 +169,22 @@ func TestSiteRequestRouteHoldsTheSiteToTheLogRoots(t *testing.T) {
 		"missing":   ErrSiteNotFound,
 		"../shop":   ErrSiteNotFound,
 	} {
-		if _, err := s.SiteRequestRoute(name, allow); !errors.Is(err, want) {
+		if _, err := s.SiteRequestRoute(ctx, name, allow); !errors.Is(err, want) {
 			t.Errorf("%s: err = %v, want %v", name, err, want)
 		}
 	}
 
-	// A deployment's route is the record its Logs page holds already: by its
-	// name where it has no file on the host (the Docker Caddy ingress), and
-	// where its file logs where the renderer put it.
+	// A deployment's route is the record its Logs page holds already, where
+	// its file logs where the renderer put it. On an nginx host a route is
+	// that file, so a name shaped like one with no file is no site at all.
 	deployment := "just-dashboard-env-7.conf"
-	if route, err := s.SiteRequestRoute(deployment, allow); err != nil || route != deployment {
-		t.Errorf("a route with no file: %q %v", route, err)
+	if _, err := s.SiteRequestRoute(ctx, deployment, allow); !errors.Is(err, ErrSiteNotFound) {
+		t.Errorf("a deployment's name with no route: %v", err)
 	}
 	if _, _, ok := SiteRecordReader(deployment, allow); ok {
 		t.Error("a deployment's route read as a site's file")
 	}
-	if _, err := s.SiteRequestRoute("just-dashboard-Not A Route", allow); !errors.Is(err, ErrSiteNotFound) {
+	if _, err := s.SiteRequestRoute(ctx, "just-dashboard-Not A Route", allow); !errors.Is(err, ErrSiteNotFound) {
 		t.Errorf("a name no renderer writes: %v", err)
 	}
 	rendered, err := RenderNginx(&SiteSpec{Name: deployment, Kind: "proxy", Domains: []string{"shop.example.com"}, Upstream: "http://127.0.0.1:3000", AccessLog: true})
@@ -194,7 +194,55 @@ func TestSiteRequestRouteHoldsTheSiteToTheLogRoots(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(nginx, "sites-available", deployment), []byte(rendered), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if route, err := s.SiteRequestRoute(deployment, func(string) error { return nil }); err != nil || route != deployment {
+	if route, err := s.SiteRequestRoute(ctx, deployment, func(string) error { return nil }); err != nil || route != deployment {
 		t.Errorf("a deployment's own file: %q %v", route, err)
+	}
+}
+
+// On the shared Docker Caddy ingress a deployment's route has no file on the
+// host, and its name is its record — but only a name the ingress holds a
+// route for. Any reader can type the shape of one.
+func TestSiteRequestRouteAsksTheIngressForADeploymentsRoute(t *testing.T) {
+	root := t.TempDir()
+	bin, routes := filepath.Join(root, "bin"), filepath.Join(root, "routes")
+	for _, dir := range []string{bin, routes} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ingress := filepath.Join(root, "ingress.json")
+	if err := os.WriteFile(ingress, []byte(`[{"Id":"caddy-id","Name":"/edge","State":{"Running":true},`+
+		`"Config":{"Cmd":["caddy","run","--config","/etc/caddy/Caddyfile"]},`+
+		`"Mounts":[{"Type":"bind","Source":"/srv/edge/Caddyfile","Destination":"/etc/caddy/Caddyfile"},`+
+		`{"Type":"volume","Destination":"/config","RW":true},{"Type":"volume","Destination":"/data","RW":true}],`+
+		`"NetworkSettings":{"Ports":{"80/tcp":[{"HostIp":"0.0.0.0","HostPort":"80"}],"443/tcp":[{"HostIp":"0.0.0.0","HostPort":"443"}]}}}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// `docker exec -i <id> sh -c <test> sh <path>` answers whether the route
+	// file is in the ingress, which is whether it is in routes here.
+	script := "#!/bin/sh\n" +
+		"case \"$1\" in\n" +
+		"ps) echo caddy-id ;;\n" +
+		"inspect) cat \"$JD_TEST_INGRESS\" ;;\n" +
+		"exec) if [ -e \"$JD_TEST_ROUTES/$(basename \"$8\")\" ]; then printf present; else printf absent; fi ;;\n" +
+		"*) exit 1 ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("JD_TEST_INGRESS", ingress)
+	t.Setenv("JD_TEST_ROUTES", routes)
+	if err := os.WriteFile(filepath.Join(routes, "just-dashboard-env-7.conf.caddy"), []byte("route"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewWithDockerIngress(t.TempDir(), filepath.Join(root, "Caddyfile"))
+	allow := func(string) error { return nil }
+	if route, err := s.SiteRequestRoute(context.Background(), "just-dashboard-env-7.conf", allow); err != nil || route != "just-dashboard-env-7.conf" {
+		t.Errorf("a route the ingress holds: %q %v", route, err)
+	}
+	if _, err := s.SiteRequestRoute(context.Background(), "just-dashboard-anything", allow); !errors.Is(err, ErrSiteNotFound) {
+		t.Errorf("a name the ingress has no route for: %v", err)
 	}
 }

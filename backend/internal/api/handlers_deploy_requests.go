@@ -204,8 +204,9 @@ func (s *Server) exportRequests(w http.ResponseWriter, r *http.Request, route, s
 			duration = strconv.FormatFloat(ms, 'f', 3, 64)
 		}
 		_ = writer.Write([]string{
-			e.At().Format(time.RFC3339Nano), e.Method, e.Path, e.Query, strconv.Itoa(e.Status), duration,
-			strconv.FormatInt(e.Size, 10), e.RemoteIP, e.Host, e.Proto, strconv.FormatBool(e.TLS), e.UserAgent, e.Referer,
+			e.At().Format(time.RFC3339Nano), csvText(e.Method), csvText(e.Path), csvText(e.Query), strconv.Itoa(e.Status), duration,
+			strconv.FormatInt(e.Size, 10), csvText(e.RemoteIP), csvText(e.Host), csvText(e.Proto), strconv.FormatBool(e.TLS),
+			csvText(e.UserAgent), csvText(e.Referer),
 		})
 	})
 	writer.Flush()
@@ -215,6 +216,16 @@ func (s *Server) exportRequests(w http.ResponseWriter, r *http.Request, route, s
 		fmt.Fprintf(w, "# export stopped: the request record could not be read\n")
 	}
 	return nil
+}
+
+// csvText is a cell a stranger wrote — a user agent, a referer, a path — made
+// safe to open in a spreadsheet, which runs a cell that starts like a formula.
+// A leading quote is the spreadsheets' own way to say "this is text".
+func csvText(v string) string {
+	if v != "" && strings.ContainsRune("=+-@\t\r", rune(v[0])) {
+		return "'" + v
+	}
+	return v
 }
 
 // handleDeploymentRunTraffic compares the traffic either side of a run's

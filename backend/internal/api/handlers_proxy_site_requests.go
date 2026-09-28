@@ -36,8 +36,8 @@ func (s *Server) openRequestRecord(ctx context.Context, route string) (accesslog
 // siteRequestRoute is the record a site's requests are read from, resolved
 // from its file on every question — a read of one small file — so an edit
 // that moved its access_log is read from the next poll on.
-func (s *Server) siteRequestRoute(name string) (string, error) {
-	return s.modules.proxy.SiteRequestRoute(name, s.modules.logs.Allow)
+func (s *Server) siteRequestRoute(ctx context.Context, name string) (string, error) {
+	return s.modules.proxy.SiteRequestRoute(ctx, name, s.modules.logs.Allow)
 }
 
 // siteParam is the site the URL names. The page escapes it, and chi hands the
@@ -71,7 +71,7 @@ func (s *Server) observeSiteRequests(ctx context.Context, name string, filter ac
 		Status: "unavailable", ObservedAt: time.Now().UTC(),
 		Entries: []accesslog.Entry{}, Summary: accesslog.Summary{Classes: map[string]int{}, Buckets: []accesslog.Bucket{}},
 	}
-	route, err := s.siteRequestRoute(name)
+	route, err := s.siteRequestRoute(ctx, name)
 	if err != nil {
 		result.Reason = siteRecordReason(err)
 		return result
@@ -113,7 +113,7 @@ func (s *Server) handleSiteRequestStream(w http.ResponseWriter, r *http.Request)
 	}
 	// Refused as a request rather than as a socket that opens and closes: a
 	// site with nothing to follow is an answer the page already shows.
-	route, err := s.siteRequestRoute(name)
+	route, err := s.siteRequestRoute(r.Context(), name)
 	if err != nil {
 		return httpx.BadRequest("%s", siteRecordReason(err))
 	}
@@ -126,7 +126,7 @@ func (s *Server) handleSiteRequestExport(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		return err
 	}
-	route, err := s.siteRequestRoute(name)
+	route, err := s.siteRequestRoute(r.Context(), name)
 	if err != nil {
 		return httpx.BadRequest("%s", siteRecordReason(err))
 	}

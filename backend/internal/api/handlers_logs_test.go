@@ -278,6 +278,36 @@ func TestLogTargetParsing(t *testing.T) {
 	}
 }
 
+// journalctl runs on the host and reads a stamp with no zone in the host's
+// local time, so on any host not set to UTC a bare stamp moved every journal
+// window by the offset. The bound says UTC, to the microsecond the journal
+// keeps, and reaches journalctl's argv as it was written.
+func TestJournalBoundsCarryTheirZone(t *testing.T) {
+	at := time.Date(2026, 9, 27, 23, 32, 47, 123456789, time.FixedZone("JST", 9*60*60))
+	want := "2026-09-27 14:32:47.123456 UTC"
+	if got := journalTimeSpec(at); got != want {
+		t.Errorf("journalTimeSpec = %q, want %q", got, want)
+	}
+	if got := journalInstant(at); got != want {
+		t.Errorf("journalInstant = %q, want %q", got, want)
+	}
+	if got := journalTimeSpec(time.Time{}); got != "" {
+		t.Errorf("an absent bound = %q", got)
+	}
+	cmd, err := procs.JournalCommandOpts(t.Context(), procs.JournalOptions{
+		Since: journalTimeSpec(at), Until: journalInstant(at.Add(time.Minute)), MaxPriority: -1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	argv := strings.Join(cmd.Args, "\x00")
+	for _, bound := range []string{"--since\x00" + want, "--until\x002026-09-27 14:33:47.123456 UTC"} {
+		if !strings.Contains(argv, bound) {
+			t.Errorf("argv %q lacks %q", strings.ReplaceAll(argv, "\x00", " "), strings.ReplaceAll(bound, "\x00", " "))
+		}
+	}
+}
+
 // The journal takes a priority range, and the chips are a set. Only the
 // maximum is pushed down, and a chip that has no priority at all must stop the
 // narrowing rather than silently drop the lines it asked for.
@@ -379,9 +409,15 @@ func TestAuthLogsNeedAnAdministrator(t *testing.T) {
 	if err := os.Symlink(authLog, filepath.Join(root, "innocent.log")); err != nil {
 		t.Fatal(err)
 	}
+	// A generation is read with its live file, so a link among them is
+	// auth data read through a name that is not.
+	writeLog(t, filepath.Join(root, "rotated.log"), "today")
+	if err := os.Symlink(authLog, filepath.Join(root, "rotated.log.1")); err != nil {
+		t.Fatal(err)
+	}
 
 	gated := []string{
-		authLog, filepath.Join(root, "auth.log.1"), filepath.Join(root, "innocent.log"),
+		authLog, filepath.Join(root, "auth.log.1"), filepath.Join(root, "innocent.log"), filepath.Join(root, "rotated.log"),
 		"journal:ssh.service", "journal:sshd.service", "journal:sshd@0-10.0.0.1:22-203.0.113.7:4040.service",
 		"journal-id:sshd", "journal-id:CRON,sshd-session", "journal-id:sudo", "journal-id:systemd-logind",
 	}
@@ -414,11 +450,49 @@ func TestAuthLogsNeedAnAdministrator(t *testing.T) {
 		}
 		return out
 	}
-	if got := listed(reader); got["auth.log"] || !got["app.log"] {
-		t.Errorf("reader's sources = %v, want app.log and not auth.log", got)
+	if got := listed(reader); got["auth.log"] || got["rotated.log"] || !got["app.log"] {
+		t.Errorf("reader's sources = %v, want app.log and neither auth.log nor rotated.log", got)
 	}
 	if got := listed(admin); !got["auth.log"] {
 		t.Errorf("admin's sources = %v, want auth.log", got)
+	}
+}
+
+// A PM2 process's files are named by its owner, a host user, who can point
+// either of them at auth.log — directly, through a link, or through a link
+// among the generations read with them. Each of those is auth data; a file
+// merely named like one is not.
+func TestPM2FilesThatAreAuthDataAreGated(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	authLog := filepath.Join(root, "auth.log")
+	writeLog(t, authLog, "sshd: Invalid user hunter2")
+	plain := filepath.Join(home, "api-out.log")
+	writeLog(t, plain, "listening")
+	writeLog(t, filepath.Join(home, "secure-api-out.log.1"), "yesterday")
+	linked := filepath.Join(home, "app-out.log")
+	if err := os.Symlink(authLog, linked); err != nil {
+		t.Fatal(err)
+	}
+	rotated := filepath.Join(home, "worker-err.log")
+	writeLog(t, rotated, "today")
+	if err := os.Symlink(authLog, rotated+".1"); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		out, err string
+		gated    bool
+	}{
+		{plain, "/dev/null", false},
+		{filepath.Join(home, "secure-api-out.log"), "", false},
+		{linked, "/dev/null", true},
+		{plain, linked, true},
+		{authLog, "", true},
+		{plain, rotated, true},
+	} {
+		if got := authLogFiles(c.out, c.err); got != c.gated {
+			t.Errorf("out %s, err %s: gated %v, want %v", c.out, c.err, got, c.gated)
+		}
 	}
 }
 
@@ -520,12 +594,17 @@ func TestLogSourceDescribesOneFile(t *testing.T) {
 // structured level key over the priority, the priority over the word scan.
 func TestJournalLineFieldsAndLevel(t *testing.T) {
 	stamp := time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC)
-	manager := journalLine(procs.JournalEntry{
+	read := func(e procs.JournalEntry) logsx.Line {
+		var line logsx.Line
+		journalLine(&line, e, nil)
+		return line
+	}
+	manager := read(procs.JournalEntry{
 		Timestamp: stamp, Priority: 4, Unit: "init.scope", Syslog: "systemd", PID: "1",
 		About: "nordvpnd-killswitch.service", Invocation: "bce17d", MessageID: "98e322203f7a4ed290d09fe03c09fe15",
 		ExitCode: "exited", ExitStatus: "1",
 		Message: "nordvpnd-killswitch.service: Main process exited, code=exited, status=1/FAILURE",
-	}, nil)
+	})
 	want := map[string]string{
 		"unit": "nordvpnd-killswitch.service", "program": "systemd", "pid": "1", "invocation": "bce17d",
 		"message_id": "98e322203f7a4ed290d09fe03c09fe15", "exit_code": "exited", "exit_status": "1",
@@ -539,13 +618,13 @@ func TestJournalLineFieldsAndLevel(t *testing.T) {
 		t.Errorf("manager line = %+v", manager)
 	}
 
-	prose := journalLine(procs.JournalEntry{Timestamp: stamp, Priority: 6, Unit: "api.service", Comm: "node",
-		Message: "error-reporting enabled"}, nil)
+	prose := read(procs.JournalEntry{Timestamp: stamp, Priority: 6, Unit: "api.service", Comm: "node",
+		Message: "error-reporting enabled"})
 	if prose.Level != "info" || prose.Attrs["program"] != "node" || prose.Attrs["unit"] != "api.service" {
 		t.Errorf("a priority-6 line with the word error in it = %q %v", prose.Level, prose.Attrs)
 	}
-	structured := journalLine(procs.JournalEntry{Timestamp: stamp, Priority: 6,
-		Message: "\x1b[31m" + `{"level":"error","msg":"upstream timeout","time":"2020-01-01T00:00:00Z"}`}, nil)
+	structured := read(procs.JournalEntry{Timestamp: stamp, Priority: 6,
+		Message: "\x1b[31m" + `{"level":"error","msg":"upstream timeout","time":"2020-01-01T00:00:00Z"}`})
 	if structured.Level != "error" || structured.Message != "upstream timeout" {
 		t.Errorf("a JSON line under systemd = %q %q", structured.Level, structured.Message)
 	}
@@ -554,7 +633,7 @@ func TestJournalLineFieldsAndLevel(t *testing.T) {
 	if structured.Timestamp == nil || !structured.Timestamp.Equal(stamp) {
 		t.Errorf("timestamp = %v, want the journal's", structured.Timestamp)
 	}
-	if plain := journalLine(procs.JournalEntry{Priority: 3, Message: "something broke"}, nil); plain.Level != "error" {
+	if plain := read(procs.JournalEntry{Priority: 3, Message: "something broke"}); plain.Level != "error" {
 		t.Errorf("priority 3 = %q", plain.Level)
 	}
 }

@@ -184,11 +184,12 @@ func (s *Service) TailLines(ctx context.Context, path string, n int, f *Filter) 
 			case out <- l:
 			}
 		}
+		var line Line
 		for text := range raw {
 			if st.Skip(text) {
 				continue
 			}
-			line := ParseLine(text, name)
+			line = ParseLine(text, name)
 			st.Read(&line)
 			if keep, _ := st.Keep(&line, true); !keep {
 				continue
@@ -247,12 +248,13 @@ func scanBack(path string, n int, name string, st *Stream) (ring []Line, end int
 	}
 	ring = make([]Line, 0, n)
 	own := make([]bool, 0, n)
+	var line Line
 	for sc.Scan() {
 		text := sc.Text()
 		if st.Skip(text) {
 			continue
 		}
-		line := ParseLine(text, name)
+		line = ParseLine(text, name)
 		st.Read(&line)
 		keep, match := st.Keep(&line, true)
 		if !keep {

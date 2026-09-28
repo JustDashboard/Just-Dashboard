@@ -577,9 +577,14 @@ func (c *Client) Logs(ctx context.Context, id string, opts LogOptions) (<-chan L
 			outW.CloseWithError(copyErr)
 			errW.CloseWithError(copyErr)
 		}()
+		// A scanner that stops — the context ended, a line too long — closes
+		// its side of the pipe. StdCopy would otherwise block for good writing
+		// the next frame into it, never close the other side, and hold this
+		// goroutine, the channel and the connection open after the reader
+		// left.
 		done := make(chan struct{}, 2)
-		go func() { scanLines(ctx, outR, "stdout", ch); done <- struct{}{} }()
-		go func() { scanLines(ctx, errR, "stderr", ch); done <- struct{}{} }()
+		go func() { scanLines(ctx, outR, "stdout", ch); outR.Close(); done <- struct{}{} }()
+		go func() { scanLines(ctx, errR, "stderr", ch); errR.Close(); done <- struct{}{} }()
 		<-done
 		<-done
 	}()

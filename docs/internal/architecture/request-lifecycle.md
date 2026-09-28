@@ -63,10 +63,14 @@ pass the configured file-root check, including for administrators.
 
 The log routes decide on the source, not the path. `/logs/stream`, `/search`, `/download`,
 `/retention` and `/source` are `read`, but every one parses its `source` through `logTargetFor`, which
-refuses auth data — `auth.log` and `secure` with their generations and anything resolving to them, the
+refuses auth data — `auth.log` and `secure` with their generations and anything resolving to them, a
+file whose rotated generations include such a link, a PM2 process whose out or error file is one, the
 `ssh`/`sshd` units, a `journal-id:` naming `sshd`, `sshd-session`, `sshd-auth`, `sudo`, `su`, `login` or
 `systemd-logind` — with a 403 to anyone without `system.admin`, and `/logs/sources` leaves those out of
-its answer for them. The reads the service logs added sit at `read` beside their siblings:
+its answer for them. The whole journal (`journal:`) is not among them: it stays `read`, as before the
+gate, so a reader can still find those lines, and their facets, in it unfiltered. Whatever the gate,
+a rotated generation is read only when it resolves inside `JD_LOG_ROOTS` itself: the live file passing
+says nothing about where `app.log.1` leads. The reads the service logs added sit at `read` beside their siblings:
 `GET /logs/source`, `GET /databases/{id}/logs/sources` and `/querylog`, `GET /proxy/sites/{name}/requests`
 with `/stream` and `/export`, `agent=` and `referer=` on a deployment's request routes, and
 `container=`/`stack=` on `GET /docker/events` and its socket (refused with a 400 before the upgrade). The

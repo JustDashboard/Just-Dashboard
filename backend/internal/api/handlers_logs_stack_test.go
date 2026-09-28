@@ -29,8 +29,17 @@ type fakeLogContainer struct {
 }
 
 type fakeLogEngine struct {
-	mu       sync.Mutex
-	inspects map[string]int
+	mu         sync.Mutex
+	inspects   map[string]int
+	containers []fakeLogContainer
+}
+
+// change rewrites what the Engine has, the way a restart or a redeploy would
+// while a stream is open.
+func (f *fakeLogEngine) change(fn func([]fakeLogContainer) []fakeLogContainer) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.containers = fn(slices.Clone(f.containers))
 }
 
 // serveFakeLogEngine points the server at an Engine that knows only these
@@ -39,11 +48,14 @@ type fakeLogEngine struct {
 // does: to the nanosecond the client sent.
 func serveFakeLogEngine(t *testing.T, s *Server, containers ...fakeLogContainer) *fakeLogEngine {
 	t.Helper()
-	fake := &fakeLogEngine{inspects: map[string]int{}}
+	fake := &fakeLogEngine{inspects: map[string]int{}, containers: containers}
 	find := func(ref string) *fakeLogContainer {
-		for i := range containers {
-			if containers[i].id == ref || containers[i].name == ref {
-				return &containers[i]
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		for i := range fake.containers {
+			if fake.containers[i].id == ref || fake.containers[i].name == ref {
+				c := fake.containers[i]
+				return &c
 			}
 		}
 		return nil
@@ -61,6 +73,9 @@ func serveFakeLogEngine(t *testing.T, s *Server, containers ...fakeLogContainer)
 		}
 		if parts[2] == "json" {
 			list := []map[string]any{}
+			fake.mu.Lock()
+			containers := slices.Clone(fake.containers)
+			fake.mu.Unlock()
 			for _, c := range containers {
 				list = append(list, map[string]any{
 					"Id": c.id, "Names": []string{"/" + c.name}, "Image": c.image, "ImageID": c.imageID, "State": c.state,
@@ -298,47 +313,14 @@ func TestLogSourcesListStacks(t *testing.T) {
 }
 
 // The live stack opens on the last n lines of the merged log, in time order,
-// then follows each running container from its own last stamp: a line is
-// neither lost between the two phases nor sent twice.
+// then follows each running container from its own newest stamp: a line is
+// neither lost between the two phases nor sent twice. It ends once nothing in
+// the stack runs.
 func TestStackStreamOpensInTimeOrderAndFollows(t *testing.T) {
 	s := testServer(t)
 	base := time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC)
-	serveFakeLogEngine(t, s, shopStack(base)...)
-	cookie := signIn(t, s)
-	srv := httptest.NewServer(s.Routes())
-	defer srv.Close()
-
-	conn, resp, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http")+
-		"/api/v1/logs/stream?source=stack:shop&lines=3", http.Header{"Cookie": {cookie}})
-	if err != nil {
-		status := 0
-		if resp != nil {
-			status = resp.StatusCode
-		}
-		t.Fatalf("could not open the stream (%d): %v", status, err)
-	}
-	defer conn.Close()
-	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-
-	kind, data := readFrame(t, conn)
-	var meta streamMeta
-	if err := json.Unmarshal(data, &meta); err != nil || kind != "meta" || meta.Kind != logsx.KindStack || meta.Label != "shop" {
-		t.Fatalf("first frame = %s %s", kind, data)
-	}
-	got := []string{}
-	for {
-		kind, data := readFrame(t, conn)
-		if kind == "eof" {
-			break
-		}
-		var batch []logsx.Line
-		if err := json.Unmarshal(data, &batch); err != nil {
-			t.Fatal(err)
-		}
-		for _, l := range batch {
-			got = append(got, l.Source+":"+l.Text)
-		}
-	}
+	fake := serveFakeLogEngine(t, s, shopStack(base)...)
+	next := openStackStream(t, s, "source=stack:shop&lines=3")
 	want := []string{
 		// The opening window: the last three lines of the merged log.
 		"web:GET /orders 500 relation userz does not exist",
@@ -347,9 +329,122 @@ func TestStackStreamOpensInTimeOrderAndFollows(t *testing.T) {
 		// Then what the running containers printed after their last line.
 		"web:GET /health 200",
 	}
+	got := readStackLines(t, next, len(want))
+	fake.change(func(cs []fakeLogContainer) []fakeLogContainer {
+		for i := range cs {
+			cs[i].state = "exited"
+		}
+		return cs
+	})
+	got = append(got, readStackLines(t, next, -1)...)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("stream:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
+}
+
+// Docker ends a follow when its container stops, while the rest of the stack
+// keeps the socket open. A restarted container is followed again from where it
+// left off, a redeploy's replacement from the newest line its service sent,
+// and neither sends a line twice — including one that arrived out of order,
+// its stderr read after a newer stdout line.
+func TestStackStreamFollowsARestartAndARedeploy(t *testing.T) {
+	s := testServer(t)
+	base := time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC)
+	at := func(ms int) time.Time { return base.Add(time.Duration(ms) * time.Millisecond) }
+	stack := shopStack(base)[:2]
+	stack[1].lines = []string{
+		stamped(at(10), "listening on :3000"),
+		stamped(at(40), "GET /orders 500"),
+		stamped(at(30), "stderr: pool exhausted"),
+	}
+	stack[1].followLines = nil
+	fake := serveFakeLogEngine(t, s, stack...)
+	next := openStackStream(t, s, "source=stack:shop&lines=3")
+	got := readStackLines(t, next, 3)
+
+	fake.change(func(cs []fakeLogContainer) []fakeLogContainer {
+		cs[1].followLines = []string{stamped(at(90), "restarted: listening on :3000")}
+		return cs
+	})
+	got = append(got, readStackLines(t, next, 1)...)
+
+	fake.change(func(cs []fakeLogContainer) []fakeLogContainer {
+		cs[1] = fakeLogContainer{
+			id: "eeeeeeeeeeee5555", name: "shop-web-1", project: "shop", service: "web", state: "running",
+			image: "ghcr.io/acme/shop-web:2", imageID: "sha256:" + strings.Repeat("b", 64), configImage: "ghcr.io/acme/shop-web:2",
+			lines: []string{stamped(at(80), "built before the redeploy"), stamped(at(120), "redeployed: listening on :3000")},
+		}
+		return cs
+	})
+	got = append(got, readStackLines(t, next, 1)...)
+	fake.change(func(cs []fakeLogContainer) []fakeLogContainer {
+		for i := range cs {
+			cs[i].state = "exited"
+		}
+		return cs
+	})
+	got = append(got, readStackLines(t, next, -1)...)
+
+	want := []string{
+		"web:GET /orders 500",
+		"web:stderr: pool exhausted",
+		"db:2026-09-27 10:00:00.030 UTC [812] STATEMENT:  select * from userz",
+		"web:restarted: listening on :3000",
+		"web:redeployed: listening on :3000",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("stream:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// openStackStream opens a log stream, checks its meta frame, and returns a
+// reader of its lines as "source:text", with ok false at eof. The rejoin runs
+// on its real interval, so the deadline leaves room for a few.
+func openStackStream(t *testing.T, s *Server, query string) func() (string, bool) {
+	t.Helper()
+	conn := dialLogStream(t, s, signIn(t, s), query)
+	conn.SetReadDeadline(time.Now().Add(6*stackRejoin + 10*time.Second))
+	kind, data := readFrame(t, conn)
+	var meta streamMeta
+	if err := json.Unmarshal(data, &meta); err != nil || kind != "meta" || meta.Kind != logsx.KindStack || meta.Label != "shop" {
+		t.Fatalf("first frame = %s %s", kind, data)
+	}
+	pending := []string{}
+	return func() (string, bool) {
+		for len(pending) == 0 {
+			kind, data := readFrame(t, conn)
+			if kind == "eof" {
+				return "", false
+			}
+			var batch []logsx.Line
+			if err := json.Unmarshal(data, &batch); err != nil {
+				t.Fatal(err)
+			}
+			for _, l := range batch {
+				pending = append(pending, l.Source+":"+l.Text)
+			}
+		}
+		line := pending[0]
+		pending = pending[1:]
+		return line, true
+	}
+}
+
+// readStackLines reads n lines, or every line up to eof when n is negative.
+func readStackLines(t *testing.T, next func() (string, bool), n int) []string {
+	t.Helper()
+	got := []string{}
+	for n < 0 || len(got) < n {
+		line, ok := next()
+		if !ok {
+			if n >= 0 {
+				t.Fatalf("the stream ended after %d of %d lines: %v", len(got), n, got)
+			}
+			break
+		}
+		got = append(got, line)
+	}
+	return got
 }
 
 // A container's search and its live tail read through the same record gate as

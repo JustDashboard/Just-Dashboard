@@ -316,7 +316,7 @@ function QueriesEmpty({
       description={
         log.reason ??
         (log.threshold
-          ? `${sourceWords(log.source)} records ${noun.many} slower than ${log.threshold}, and none ran that slowly in this window.`
+          ? `The list holds ${noun.many} slower than ${log.threshold} from ${sourceWords(log.source)}, and none ran that slowly in this window.`
           : `Nothing in ${sourceWords(log.source)} for this window. A longer one may have some.`)
       }
     />
@@ -325,9 +325,9 @@ function QueriesEmpty({
 
 const ENABLE_WORDS: Record<string, (current: string) => string> = {
   log_min_duration_statement: (current) =>
-    `Postgres writes a statement to its log only when it takes longer than log_min_duration_statement, which is ${current} — off. At 250ms it records every statement slower than a quarter of a second, and takes effect on reload, without a restart.`,
+    `Postgres writes a statement to its log only when it takes longer than log_min_duration_statement, which is ${current} — off. At 250ms it records every statement slower than a quarter of a second. It takes effect on reload, without a restart: run SELECT pg_reload_conf(); after it.`,
   slow_query_log: () =>
-    "The slow query log is off. These turn it on for statements slower than 250 ms and keep a copy in a table this page reads; they hold until the server restarts.",
+    "The slow query log is off. This turns it on for statements slower than 250 ms and keeps a copy in a table this page reads; it holds until the server restarts.",
   log_output: (current) =>
     `The slow query log is on, but log_output is ${current}: it goes only to a file inside the server. Adding TABLE keeps a copy this page reads.`,
 }

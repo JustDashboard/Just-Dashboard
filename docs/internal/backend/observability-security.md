@@ -107,8 +107,10 @@ invalid login at info — its tone in the UI carries it, and a public SSH log mu
 and raises only a failed `sudo` or `su` and sshd's too-many-attempts to warn. The same reasoning that
 puts `/logins/failed` behind `system.admin` applies to these lines, and the log routes enforce it on the
 source rather than on the page: auth.log, secure, their numbered generations and anything resolving to
-them, the `ssh`/`sshd` units, and a `journal-id:` naming any of those programs or `login` are refused to
-anyone else on every `/logs` route and left out of `/logs/sources` ([Logs](docker-files-logs.md#logs)).
+them — including a link among another file's generations, and a PM2 process's out or error file, which
+its owner names — the `ssh`/`sshd` units, and a `journal-id:` naming any of those programs or `login`
+are refused to anyone else on every `/logs` route and left out of `/logs/sources`
+([Logs](docker-files-logs.md#logs)).
 The SSH page makes no log request for a non-administrator. **The whole journal (`journal:`) is still
 readable at `read`, as it was before the gate** — narrowing it to sshd is what is gated — so a determined
 reader without the capability can find those lines in the unfiltered journal; that is a known gap, not

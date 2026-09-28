@@ -244,14 +244,15 @@ func (s *Server) searchStack(ctx context.Context, project string, opts logsx.Sea
 		ins[i] = ch
 	}
 	n := 0
+	var line logsx.Line
 	mergeByStamp(ctx, ins, func(i int, stamp *time.Time, text string, raw dockerx.LogLine) {
 		n++
 		if c.Skip(streams[i], text) {
 			return
 		}
-		line := readDockerLine(stamp, text, raw, streams[i], members[i].tag(whole))
+		readDockerLine(&line, stamp, text, raw, streams[i], members[i].tag(whole))
 		line.No = n
-		c.FeedFrom(streams[i], line)
+		c.FeedFrom(streams[i], &line)
 	})
 	if ctx.Err() != nil {
 		c.Incomplete()
@@ -259,13 +260,25 @@ func (s *Server) searchStack(ctx context.Context, project string, opts logsx.Sea
 	return c.Result(), nil
 }
 
+// stackRejoin is how often a stack's live tail looks again at which of its
+// containers are running.
+var stackRejoin = 2 * time.Second
+
 // followStack is the stack's live tail, in two phases so the opening window is
 // in time order and nothing is sent twice. First each container's last n
 // lines, merged by stamp, of which the last n kept are sent; then each running
-// container followed from its own last stamp, dropping anything at or before
-// it. Containers created after the socket opened are not followed — the page
-// reconnects on eof, and the new list has them.
-func (s *Server) followStack(ctx context.Context, members []stackMember, f *logsx.Filter, n int, out chan<- logsx.Line) {
+// container followed from its own newest stamp, dropping anything at or before
+// it.
+//
+// The second phase outlives any one container. Docker ends a follow when its
+// container stops, and a restart, a crash loop and a redeploy are all stops,
+// while the rest of the stack runs on and keeps the socket open. So every
+// stackRejoin the stack's containers are listed again, and one that runs and
+// is not followed is: the same container after a restart, from its own newest
+// line; a redeploy's replacement, from the newest line its service sent; one
+// that was stopped when the socket opened. The socket ends — and the page says
+// the stream ended — once nothing in the stack is running.
+func (s *Server) followStack(ctx context.Context, project string, members []stackMember, f *logsx.Filter, n int, out chan<- logsx.Line) {
 	whole := stackLens(members, f)
 	streams := make([]*logsx.Stream, len(members))
 	for i, m := range members {
@@ -284,16 +297,21 @@ func (s *Server) followStack(ctx context.Context, members []stackMember, f *logs
 		closers = append(closers, closer)
 		ins[i] = ch
 	}
-	last := make([]time.Time, len(members))
+	newest := make([]time.Time, len(members))
 	ring := make([]logsx.Line, 0, n)
+	var line logsx.Line
 	mergeByStamp(ctx, ins, func(i int, stamp *time.Time, text string, raw dockerx.LogLine) {
-		if stamp != nil {
-			last[i] = *stamp
+		// The newest stamp rather than the last: a container's stdout and
+		// stderr arrive through two pipes, and the last line read can be
+		// older than one read before it. Following from it would send that
+		// one again.
+		if stamp != nil && stamp.After(newest[i]) {
+			newest[i] = *stamp
 		}
 		if streams[i].Skip(text) {
 			return
 		}
-		line := readDockerLine(stamp, text, raw, streams[i], members[i].tag(whole))
+		readDockerLine(&line, stamp, text, raw, streams[i], members[i].tag(whole))
 		if keep, _ := streams[i].Keep(&line, true); !keep {
 			return
 		}
@@ -307,9 +325,12 @@ func (s *Server) followStack(ctx context.Context, members []stackMember, f *logs
 	}
 
 	go func() {
+		var producers sync.WaitGroup
+		defer close(out)
+		defer producers.Wait()
 		// The opening window goes first and the followers start after it,
 		// which is what keeps the page in time order. Starting them later
-		// loses nothing: each asks Docker for what came after its own last
+		// loses nothing: each asks Docker for what came after its own newest
 		// stamp.
 		for _, line := range ring {
 			select {
@@ -318,33 +339,104 @@ func (s *Server) followStack(ctx context.Context, members []stackMember, f *logs
 			case out <- line:
 			}
 		}
-		var producers sync.WaitGroup
-		for i, m := range members {
-			if m.container.State != "running" {
-				continue
-			}
-			after := last[i]
-			if after.IsZero() {
-				// Nothing in the opening window: follow from when it was
-				// read, so a line written in between is neither lost nor
-				// sent twice.
-				after = opened
-			}
-			ch, closer, err := s.modules.docker.Logs(ctx, m.container.ID, dockerx.LogOptions{
-				Tail: "all", Since: after.Format(time.RFC3339Nano), Timestamps: true, Follow: true,
-			})
-			if err != nil {
-				continue
-			}
-			producers.Add(1)
-			go func(i int) {
-				defer producers.Done()
-				defer closer.Close()
-				pumpContainer(ctx, ch, streams[i], members[i].tag(whole), after, out)
-			}(i)
+
+		// A container keeps its stream across a restart, so a record the
+		// lens was reading goes on being read; a new one starts its own.
+		type follow struct {
+			member stackMember
+			stream *logsx.Stream
+			newest time.Time
+			// live is whether a follow of it is open; refused, that Docker
+			// would not give its log — a logging driver with nothing to read,
+			// which no restart changes.
+			live, refused bool
 		}
-		producers.Wait()
-		close(out)
+		type ended struct {
+			id     string
+			newest time.Time
+		}
+		follows := map[string]*follow{}
+		services := map[string]time.Time{}
+		for i, m := range members {
+			follows[m.container.ID] = &follow{member: m, stream: streams[i], newest: newest[i]}
+			if newest[i].After(services[m.service]) {
+				services[m.service] = newest[i]
+			}
+		}
+		done := make(chan ended)
+		live := func() int {
+			n := 0
+			for _, fl := range follows {
+				if fl.live {
+					n++
+				}
+			}
+			return n
+		}
+		join := func(current []stackMember) {
+			for _, m := range current {
+				fl := follows[m.container.ID]
+				if fl == nil && m.container.State == "running" {
+					fl = &follow{member: m, stream: f.Stream(m.lens), newest: services[m.service]}
+					follows[m.container.ID] = fl
+				}
+				if fl == nil || fl.live || fl.refused || m.container.State != "running" {
+					continue
+				}
+				after := fl.newest
+				if after.IsZero() {
+					// Nothing in the opening window: follow from when it was
+					// read, so a line written in between is neither lost nor
+					// sent twice.
+					after = opened
+				}
+				ch, closer, err := s.modules.docker.Logs(ctx, m.container.ID, dockerx.LogOptions{
+					Tail: "all", Since: after.Format(time.RFC3339Nano), Timestamps: true, Follow: true,
+				})
+				if err != nil {
+					fl.refused = ctx.Err() == nil
+					continue
+				}
+				fl.live = true
+				producers.Add(1)
+				go func(id string, st *logsx.Stream, tag containerTag) {
+					defer producers.Done()
+					last := pumpContainer(ctx, ch, st, tag, after, out)
+					closer.Close()
+					select {
+					case <-ctx.Done():
+					case done <- ended{id: id, newest: last}:
+					}
+				}(m.container.ID, fl.stream, fl.member.tag(whole))
+			}
+		}
+		if join(members); live() == 0 {
+			return
+		}
+		tick := time.NewTicker(stackRejoin)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case e := <-done:
+				fl := follows[e.id]
+				fl.live = false
+				if e.newest.After(fl.newest) {
+					fl.newest = e.newest
+				}
+				if fl.newest.After(services[fl.member.service]) {
+					services[fl.member.service] = fl.newest
+				}
+			case <-tick.C:
+				if current, err := s.stackMembers(ctx, project); err == nil {
+					join(current)
+				}
+				if live() == 0 {
+					return
+				}
+			}
+		}
 	}()
 }
 

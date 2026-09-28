@@ -1133,7 +1133,7 @@ const slowLog = {
   enable: {
     setting: "log_min_duration_statement",
     current: "-1",
-    sql: "ALTER SYSTEM SET log_min_duration_statement = '250ms';\nSELECT pg_reload_conf();",
+    sql: "ALTER SYSTEM SET log_min_duration_statement = '250ms';",
   },
   entries: [
     {
@@ -1340,6 +1340,8 @@ test("/databases/logs says which setting keeps slow statements out of an empty l
   const notice = page.getByText("Slow statements are not being logged")
   await expect(notice).toBeVisible({ timeout: 15_000 })
   await expect(page.getByText(/log_min_duration_statement, which is -1/)).toBeVisible()
+  // One statement, since the console runs one; the reload is named, not bundled.
+  await expect(page.getByText(/run SELECT pg_reload_conf\(\); after it/)).toBeVisible()
   await expect(page.getByText("No slow statements recorded")).toBeVisible()
 
   // The fix is the advisor's: the statement, run in the query console.

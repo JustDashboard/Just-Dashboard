@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -72,7 +73,7 @@ func (s *Server) handleLogSources(w http.ResponseWriter, r *http.Request) error 
 	admin := httpx.MustPrincipal(r).Can(auth.CapSystemAdmin)
 	sources := make([]logsx.Source, 0, len(discovered))
 	for _, src := range discovered {
-		if admin || !authLogFile(src.Path) {
+		if admin || !authLogFiles(src.Path) {
 			sources = append(sources, src)
 		}
 	}
@@ -106,6 +107,9 @@ func (s *Server) handleLogSources(w http.ResponseWriter, r *http.Request) error 
 			}
 
 			for _, p := range list {
+				if !admin && authLogFiles(p.OutLogPath, p.ErrLogPath) {
+					continue
+				}
 				detail := "stdout and stderr, merged"
 				if err := s.checkPM2LogPaths(p.OutLogPath, p.ErrLogPath); err != nil {
 					detail = "Logs unavailable: ask an administrator to include this log directory in JD_LOG_ROOTS."
@@ -246,11 +250,24 @@ func (s *Server) logTargetFor(r *http.Request, raw string) (logTarget, error) {
 	if err != nil {
 		return logTarget{}, err
 	}
-	if authLogTarget(target) && !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
+	admin := httpx.MustPrincipal(r).Can(auth.CapSystemAdmin)
+	if !admin && (authLogTarget(target) || s.authPM2Target(r.Context(), target)) {
 		return logTarget{}, httpx.Err(http.StatusForbidden, "forbidden",
 			"Login and sudo records need an administrator: failed logins can hold passwords typed into the username prompt.")
 	}
 	return target, nil
+}
+
+// authPM2Target is whether a PM2 process's files are auth data. The files are
+// named by the process's owner, a host user, who can point them at auth.log
+// as easily as anywhere else inside the roots. A lookup that fails is left to
+// the route, which fails the same way.
+func (s *Server) authPM2Target(ctx context.Context, t logTarget) bool {
+	if t.kind != logsx.KindPM2 {
+		return false
+	}
+	out, errPath, err := s.pm2LogPaths(ctx, t.id)
+	return err == nil && authLogFiles(out, errPath)
 }
 
 // authIdents are the programs whose lines are auth data.
@@ -271,7 +288,19 @@ func authLogTarget(t logTarget) bool {
 		}
 		return false
 	case logsx.KindSystem:
-		return authLogFile(t.path)
+		return authLogFiles(t.path)
+	}
+	return false
+}
+
+// authLogFiles is whether any of these files, or any rotated generation read
+// with them, is auth data. A generation is only a name beside the file, and
+// app.log.1 can be a link to auth.log while app.log is what it says.
+func authLogFiles(paths ...string) bool {
+	for _, path := range paths {
+		if authLogFile(path) || slices.ContainsFunc(logsx.Archives(path), authLogFile) {
+			return true
+		}
 	}
 	return false
 }
@@ -593,6 +622,7 @@ func (s *Server) searchContainer(ctx context.Context, id string, opts logsx.Sear
 	c.NextFile(id, false, nil)
 	st := c.Stream()
 	n := 0
+	var line logsx.Line
 	for raw := range ch {
 		if ctx.Err() != nil {
 			c.Incomplete()
@@ -603,9 +633,9 @@ func (s *Server) searchContainer(ctx context.Context, id string, opts logsx.Sear
 		if c.Skip(st, text) {
 			continue
 		}
-		line := readDockerLine(stamp, text, raw, st, containerTag{})
+		readDockerLine(&line, stamp, text, raw, st, containerTag{})
 		line.No = n
-		c.Feed(line)
+		c.Feed(&line)
 	}
 	return c.Result(), nil
 }
@@ -652,14 +682,15 @@ func (s *Server) searchJournal(ctx context.Context, target logTarget, opts logsx
 	st := c.Stream()
 	st.Route(journalRoute(target, forced))
 	n := 0
+	var line logsx.Line
 	feed := func(e procs.JournalEntry) {
 		n++
 		if c.Skip(st, e.Message) {
 			return
 		}
-		line := journalLine(e, st)
+		journalLine(&line, e, st)
 		line.No = n
-		c.Feed(line)
+		c.Feed(&line)
 	}
 	complete := true
 	if opts.Head {
@@ -766,18 +797,22 @@ func journalOlderFits(ctx context.Context, took time.Duration, newest []procs.Jo
 
 // journalTimeSpec renders a bound in the shape journalctl's parser accepts,
 // which is not RFC3339: it wants "2006-01-02 15:04:05" and reads a bare "Z" as
-// a timezone it does not know.
+// a timezone it does not know. The zone is spelled out all the same, as the
+// " UTC" it does know: journalctl runs on the host, and reads a stamp with no
+// zone in the host's local time — every window shifted by the host's offset
+// from UTC. The microseconds are the journal's own precision, so an until at
+// a record's stamp keeps that record.
 func journalTimeSpec(parsed time.Time) string {
 	if parsed.IsZero() {
 		return ""
 	}
-	return parsed.UTC().Format("2006-01-02 15:04:05")
+	return journalInstant(parsed)
 }
 
 // journalInstant is a record's own stamp as a bound, to the microsecond the
 // journal keeps.
 func journalInstant(at time.Time) string {
-	return at.UTC().Format("2006-01-02 15:04:05.000000")
+	return at.UTC().Format("2006-01-02 15:04:05.000000") + " UTC"
 }
 
 // streamJournalInto runs journalctl and hands each decoded record to fn until
@@ -833,8 +868,9 @@ func (s *Server) streamJournalInto(ctx context.Context, opts procs.JournalOption
 //
 // The record's own fields are kept as attrs, because they are what the
 // manager's lines mean: the unit a "Failed with result" is about, the
-// invocation that groups one run's lines, the exit code.
-func journalLine(e procs.JournalEntry, st *logsx.Stream) logsx.Line {
+// invocation that groups one run's lines, the exit code. It fills line for
+// the reason readDockerLine gives.
+func journalLine(line *logsx.Line, e procs.JournalEntry, st *logsx.Stream) {
 	source := e.Syslog
 	if source == "" {
 		source = strings.TrimSuffix(e.Unit, ".service")
@@ -842,7 +878,7 @@ func journalLine(e procs.JournalEntry, st *logsx.Stream) logsx.Line {
 	if e.PID != "" && source != "" {
 		source += "[" + e.PID + "]"
 	}
-	line := logsx.ParseLine(e.Message, source)
+	*line = logsx.ParseLine(e.Message, source)
 	line.ApplyPriority(e.Priority)
 	line.SetAttr("unit", defaultStr(e.About, e.Unit))
 	line.SetAttr("program", defaultStr(e.Syslog, e.Comm))
@@ -853,7 +889,7 @@ func journalLine(e procs.JournalEntry, st *logsx.Stream) logsx.Line {
 	line.SetAttr("exit_code", e.ExitCode)
 	line.SetAttr("exit_status", e.ExitStatus)
 	if st != nil {
-		st.Read(&line)
+		st.Read(line)
 	}
 	// The journal's stamp is authoritative: whatever a lens or the parser
 	// found in the message text is when the program thought it was, and the
@@ -862,7 +898,6 @@ func journalLine(e procs.JournalEntry, st *logsx.Stream) logsx.Line {
 		utc := e.Timestamp.UTC()
 		line.Timestamp = &utc
 	}
-	return line
 }
 
 // splitDockerStamp strips the RFC3339 prefix Docker adds when timestamps are
@@ -883,7 +918,9 @@ func splitDockerStamp(text string) (*time.Time, string) {
 // read through st when there is one.
 func dockerLine(l dockerx.LogLine, st *logsx.Stream) logsx.Line {
 	stamp, text := splitDockerStamp(l.Text)
-	return readDockerLine(stamp, text, l, st, containerTag{})
+	var line logsx.Line
+	readDockerLine(&line, stamp, text, l, st, containerTag{})
+	return line
 }
 
 // containerTag is what a stack adds to each of its containers' lines: the
@@ -895,15 +932,18 @@ type containerTag struct {
 	stackLens string
 }
 
-func readDockerLine(stamp *time.Time, text string, l dockerx.LogLine, st *logsx.Stream, tag containerTag) logsx.Line {
+// readDockerLine fills line rather than returning one: a lens reads it through
+// an interface, which puts it on the heap, and a loop that hands in the same
+// line each time allocates it once rather than once per line.
+func readDockerLine(line *logsx.Line, stamp *time.Time, text string, l dockerx.LogLine, st *logsx.Stream, tag containerTag) {
 	// ParseLine strips the terminal control a build tool writes, so the text
 	// kept here is the text the level scan and the operator's search saw.
-	line := logsx.ParseLine(text, tag.service)
+	*line = logsx.ParseLine(text, tag.service)
 	line.Stream = l.Stream
 	line.SetAttr("service", tag.service)
 	line.SetAttr("container", tag.container)
 	if st != nil {
-		st.Read(&line)
+		st.Read(line)
 		if line.Event != "" && line.Lens == "" && st.Lens() != tag.stackLens && tag.service != "" {
 			line.Lens = st.Lens()
 		}
@@ -923,7 +963,6 @@ func readDockerLine(stamp *time.Time, text string, l dockerx.LogLine, st *logsx.
 	// errors", all of them a version notice inside an ASCII box. A stream is a
 	// stream; the viewer already marks it, and a level the line does not claim
 	// is the page inventing a reading.
-	return line
 }
 
 // handleLogDownload streams the requested window straight to the client rather
@@ -1100,7 +1139,7 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) error {
 		}
 	case logsx.KindStack:
 		meta.Lens = stackLens(members, filter)
-		s.followStack(ctx, members, filter, lines, out)
+		s.followStack(ctx, target.id, members, filter, lines, out)
 	case logsx.KindPM2:
 		if err := s.followPM2(ctx, target.id, lines, filter, out); err != nil {
 			conn.SendError(err.Error())
@@ -1204,23 +1243,42 @@ func (s *Server) followContainer(ctx context.Context, id string, n int, f *logsx
 // first container to stop must not end the others' — or panic them, sending
 // on a closed channel. The caller closes out once every producer returned.
 // Lines stamped at or before after are dropped before anything reads them:
-// the stack's opening window already sent them.
-func pumpContainer(ctx context.Context, in <-chan dockerx.LogLine, st *logsx.Stream, tag containerTag, after time.Time, out chan<- logsx.Line) {
-	for raw := range in {
+// the stack's opening window already sent them. It answers the newest stamp
+// it read, which is where a later follow of the same service picks up.
+func pumpContainer(ctx context.Context, in <-chan dockerx.LogLine, st *logsx.Stream, tag containerTag, after time.Time, out chan<- logsx.Line) (newest time.Time) {
+	newest = after
+	var line logsx.Line
+	for {
+		// The context is watched here and not only on the send: a filter
+		// that keeps nothing never reaches the send, and a busy container
+		// would otherwise hold its follow open after the page left.
+		var raw dockerx.LogLine
+		select {
+		case <-ctx.Done():
+			return newest
+		case r, ok := <-in:
+			if !ok {
+				return newest
+			}
+			raw = r
+		}
 		stamp, text := splitDockerStamp(raw.Text)
+		if stamp != nil && stamp.After(newest) {
+			newest = *stamp
+		}
 		if !after.IsZero() && stamp != nil && !stamp.After(after) {
 			continue
 		}
 		if st.Skip(text) {
 			continue
 		}
-		line := readDockerLine(stamp, text, raw, st, tag)
+		readDockerLine(&line, stamp, text, raw, st, tag)
 		if keep, _ := st.Keep(&line, true); !keep {
 			continue
 		}
 		select {
 		case <-ctx.Done():
-			return
+			return newest
 		case out <- line:
 		}
 	}
@@ -1268,12 +1326,13 @@ func (s *Server) followJournal(ctx context.Context, target logTarget, n int, spe
 		}()
 		sc := bufio.NewScanner(stdout)
 		sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
+		var line logsx.Line
 		for sc.Scan() {
 			e, ok := procs.ParseJournalLine(sc.Bytes())
 			if !ok || st.Skip(e.Message) {
 				continue
 			}
-			line := journalLine(e, st)
+			journalLine(&line, e, st)
 			if keep, _ := st.Keep(&line, true); !keep {
 				continue
 			}

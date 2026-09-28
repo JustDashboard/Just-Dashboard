@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -187,6 +188,10 @@ func (s *Server) resolveDBLogSources(ctx context.Context, conn *dbConnection, ds
 	if databaseLoopback(info.Host) {
 		port, _ := strconv.Atoi(info.Port)
 		return s.dbHostLogs(ctx, conn, port, lens, probe)
+	}
+	if c := s.containerAt(ctx, info.Host); c != nil {
+		out.Sources = append(out.Sources, s.dbContainerLog(ctx, *c, lens))
+		return out
 	}
 	if c := s.containerNamed(ctx, conn); c != nil {
 		return s.dbNamedContainerLog(ctx, *c, lens)
@@ -496,6 +501,28 @@ func engineUnit(name string, prefixes []string) bool {
 		}
 	}
 	return false
+}
+
+// containerAt is the running container that answers at an address, whatever
+// its image. serverBehind matches by image first, and a server in an image of
+// its own — or one whose moved tag the list names by id — is still the one the
+// connection dials: the connection already says which engine it is.
+func (s *Server) containerAt(ctx context.Context, host string) *dockerx.Container {
+	if s.modules.docker == nil {
+		return nil
+	}
+	ip := strings.Trim(host, "[]")
+	containers, err := s.modules.docker.ListContainers(ctx, false)
+	if err != nil {
+		return nil
+	}
+	for i := range containers {
+		detail, err := s.modules.docker.Inspect(ctx, containers[i].ID)
+		if err == nil && slices.Contains(containerIPs(detail), ip) {
+			return &containers[i]
+		}
+	}
+	return nil
 }
 
 // containerNamed is the container the connection is named after, running or
