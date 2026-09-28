@@ -8,7 +8,19 @@ export type ProxyDiagnostic = {
   message: string
   file?: string
   line?: number
+  /**
+   * Where a warning nginx gives no file for is claimed: the server blocks
+   * that name the server name it says is conflicting, in the order nginx
+   * read them. Given only when every such block could be found.
+   */
+  claims?: ProxyNameClaim[]
 }
+
+/**
+ * A server block claiming a server name, at its server_name line. The first
+ * nginx read serves the name on that address; `ignored` is each one after it.
+ */
+export type ProxyNameClaim = { file: string; line: number; ignored: boolean }
 
 /**
  * The server's own config test. `note` qualifies a verdict nginx could not
@@ -23,6 +35,26 @@ export type ProxyValidation = {
   note?: string
   diagnostics?: ProxyDiagnostic[]
   warnings?: number
+}
+
+/**
+ * What POST /proxy/reload answers: the config test it ran first, and whether
+ * the engine took the signal. A reload the test refuses is a 422 whose body
+ * carries the test beside the error.
+ */
+export type ProxyReloadResult = { validation: ProxyValidation; reloaded: boolean; output: string }
+
+/**
+ * The engine's most recent test of the files on disk, whichever command ran
+ * it — Test config, a reload, a start or restart, a config editor save — as
+ * GET /proxy/test/last answers it. Kept in the dashboard's memory, so there
+ * is none after it restarts until the next test.
+ */
+export type ProxyTestRecord = {
+  kind: "nginx" | "caddy" | "caddy-ingress"
+  /** When the test began, which is when the engine read the files. */
+  checkedAt: string
+  validation: ProxyValidation
 }
 
 /**

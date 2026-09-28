@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
@@ -31,6 +33,10 @@ func (s *Server) mountEngineRoutes(r chi.Router) {
 		// host's own binary and is the same sentence of trust as a
 		// reload, so it is gated with it.
 		r.Method(http.MethodPost, "/test", s.handle(s.handleProxyTest))
+		// The engine's last test, whoever ran it and whichever command it
+		// ran before. Its output names files and quotes them, which is the
+		// same trust as running it.
+		r.Method(http.MethodGet, "/test/last", s.handle(s.handleProxyTestLast))
 		r.Method(http.MethodPost, "/reload", s.handle(s.handleProxyReload))
 		// The engine's own service, resolved here rather than named by the
 		// caller. Start and restart run the config test first; stop and
@@ -180,8 +186,41 @@ func (s *Server) handleProxyTest(w http.ResponseWriter, r *http.Request) error {
 		return mapProxyError(err)
 	}
 	httpx.SetAudit(r, "proxy.config.test", string(req.Kind), map[string]any{"valid": res.Valid})
-	httpx.JSON(w, http.StatusOK, res)
+	httpx.JSON(w, http.StatusOK, s.placeNameConflicts(r, req.Kind, res))
 	return nil
+}
+
+// handleProxyTestLast answers with the engine's most recent config test, or
+// 204 when none has run since the dashboard started.
+func (s *Server) handleProxyTestLast(w http.ResponseWriter, r *http.Request) error {
+	kind := proxysvc.Kind(r.URL.Query().Get("kind"))
+	if err := knownEngine(&kind); err != nil {
+		return err
+	}
+	rec, ok := s.modules.proxy.LastTest(kind)
+	if !ok {
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	}
+	rec.Validation = s.placeNameConflicts(r, kind, rec.Validation)
+	httpx.JSON(w, http.StatusOK, rec)
+	return nil
+}
+
+// nameConflictBudget bounds the `nginx -T` a conflicting server name is placed
+// with. The dump waits for the service lock, which a certificate order can
+// hold for minutes, and the test's answer is worth more now than placed later.
+const nameConflictBudget = 3 * time.Second
+
+// placeNameConflicts places nginx's conflicting-server-name warnings at the
+// blocks that claim the name, against the configuration as it is now.
+func (s *Server) placeNameConflicts(r *http.Request, kind proxysvc.Kind, res *proxysvc.ValidationResult) *proxysvc.ValidationResult {
+	if kind != proxysvc.KindNginx {
+		return res
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), nameConflictBudget)
+	defer cancel()
+	return s.modules.proxy.PlaceNameConflicts(ctx, res)
 }
 
 func (s *Server) handleProxyReload(w http.ResponseWriter, r *http.Request) error {
@@ -194,7 +233,9 @@ func (s *Server) handleProxyReload(w http.ResponseWriter, r *http.Request) error
 		httpx.SetAudit(r, "proxy.reload", string(req.Kind), map[string]any{"result": "failed"})
 		switch {
 		case errors.Is(err, proxysvc.ErrInvalidConf):
-			return httpx.Err(http.StatusUnprocessableEntity, "invalid_config", res.Validation.Output)
+			// The test comes back beside the error, as a refused start's
+			// does, so the page can place each line at its file.
+			return refuseInvalidConfig(w, r, httpx.Err(http.StatusUnprocessableEntity, "invalid_config", res.Validation.Output), res.Validation)
 		case errors.Is(err, proxysvc.ErrNoIngress):
 			return mapProxyError(err)
 		}
@@ -256,11 +297,11 @@ func (s *Server) handleProxyEngine(action procs.UnitAction) httpx.Handler {
 	}
 }
 
-// refuseInvalidConfig answers a start or restart the config test turned down:
-// the error every client reads, and beside it the test itself, so the page can
-// put each of nginx's lines at the file and line it names rather than print
-// the output as one block. The error's message is kept for the audit trail
-// the way the central error writer keeps it.
+// refuseInvalidConfig answers a start, restart or reload the config test
+// turned down: the error every client reads, and beside it the test itself, so
+// the page can put each of nginx's lines at the file and line it names rather
+// than print the output as one block. The error's message is kept for the
+// audit trail the way the central error writer keeps it.
 func refuseInvalidConfig(w http.ResponseWriter, r *http.Request, refusal *httpx.APIError, res *proxysvc.ValidationResult) error {
 	if p, ok := httpx.PrincipalFrom(r.Context()); ok {
 		p.FailureReason = refusal.Message

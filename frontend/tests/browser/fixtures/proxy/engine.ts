@@ -89,6 +89,8 @@ export const routes: ProxyRoutes = {
   "/systemd/nginx.service": (route) => json(route, { unit: nginxUnit, properties: {} }),
   "/systemd/nginx.service/journal": (route) => json(route, failedJournal),
   "/proxy/test": (route) => json(route, passingTest),
+  // No test since the dashboard started.
+  "/proxy/test/last": (route) => route.fulfill({ status: 204 }),
   "/proxy/reload": (route) => json(route, { validation: passingTest, reloaded: true, output: "" }),
   "/proxy/engine/start": engineAction("start"),
   "/proxy/engine/restart": engineAction("restart"),

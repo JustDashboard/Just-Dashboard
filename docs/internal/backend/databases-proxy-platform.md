@@ -336,7 +336,8 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   a false reassurance. `POST /proxy/test` runs the engine's own test against what is on disk without
   staging or reloading anything (admin, audited as `proxy.config.test`); the overview's Test config
   and Reload buttons post it and `/proxy/reload` with the engine's kind, and a kind the service does
-  not know is a 400 rather than nginx. For the shared Docker Caddy that kind is `caddy-ingress`
+  not know is a 400 rather than nginx. A reload the test refuses is a 422 whose body carries the test
+  beside the error, as a refused start's does (below). For the shared Docker Caddy that kind is `caddy-ingress`
   (`docker_caddy_engine.go`): `caddy validate` and `caddy reload` run inside the running container
   against its own `/etc/caddy/Caddyfile`, never the host's caddy, and with no ingress running both
   answer 409 `no_ingress`. The editor's `POST /proxy/validate` and `PUT /proxy/config` take the same
@@ -450,6 +451,31 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   dashboard's user owns and nobody else can write to, or nothing is written or run. `validateCaddy`
   replaces the copy's name with the file's throughout the result; `Validate` holds a Caddy path to
   the proxy's directories as it does an nginx one.
+- **The engine's last test outlives the toast.** Every test of the files on disk is kept per engine
+  kind as a `TestRecord` (`lasttest.go`: kind, `checkedAt` — when the test began — and the result):
+  `Test`, the test `Reload` runs first (passed or refused, for nginx, a host Caddy and the ingress),
+  the one a start or restart runs under `WithTestedConfig`, and the second test `WriteConfig` runs
+  with an nginx file in place when it passes (one it refuses is put back, so the files are those the
+  last record describes). A candidate `Validate` stages and restores is not a test of the files on
+  disk and is not kept. A test begun before the kept one never replaces it, and every reader gets its
+  own copy. `GET /proxy/test/last?kind=` (admin, as the test itself — its output quotes the
+  configuration) answers the record or 204 when none has run since the dashboard started; it is held
+  in memory, so a restart forgets it rather than vouching for files it did not see. The overview's
+  finding reads it: a warning stays in Needs attention, and a failure as critical, until a test comes
+  back clean.
+- **A conflicting server name is placed at the sites that claim it.** nginx names no file for its
+  commonest warning (`conflicting server name "a.test" on 0.0.0.0:80, ignored`).
+  `PlaceNameConflicts` (`nameclaims.go`) reads the effective configuration and gives such a warning
+  `claims`: every http server block whose `server_name` names it on that address, in nginx's reading
+  order, at its `server_name` line with symlinks resolved — the first serves the name, and each after
+  it is `ignored`. A listen's address is read as nginx prints it (`80`, `*:80` and `0.0.0.0:80` are
+  one; no listen is `*:80`, or `*:8000` for an unprivileged nginx). nginx warns once for each block
+  after the first, so claims are given only when there are exactly one more than the warnings about
+  that name and address, and not at all when a claimant listens on a host name: a block the tree
+  cannot see would put the wrong site first. `POST /proxy/test` and `GET /proxy/test/last` place
+  against the configuration as it is now, within three seconds (the dump waits for the service lock);
+  the record itself is kept as nginx wrote it, and the start refusal, taken under the lock, is not
+  placed.
 - **The configuration nginx actually loads.** `EffectiveConfig` (`effective.go`) runs `nginx -T` through
   `hostexec` under the service lock — so it never dumps a candidate `Validate` has staged — splits it into
   `ConfigFile`s byte for byte (`ParseEffective`, which takes a `# configuration file` line as a file only

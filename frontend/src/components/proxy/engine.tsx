@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation"
 import { CheckCircle, Globe, ListOrdered, Play, RefreshClockwise, Stop } from "@/components/icons"
 import { errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
-import { duration } from "@/lib/format"
-import type { EngineAction, ProxyValidation, SystemdUnit } from "@/lib/types"
+import { duration, plural } from "@/lib/format"
+import type { EngineAction, ProxyReloadResult, ProxyValidation, SystemdUnit } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Status } from "@/components/status-dot"
 import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
@@ -21,8 +21,10 @@ import {
   bootState,
   engineRun,
   isMasked,
+  refusalOf,
   stoppedLabel,
 } from "@/components/proxy/engine-lifecycle"
+import { warningCount } from "@/components/proxy/config-test"
 
 /**
  * The engine itself: whether it is running, and the three things done to it.
@@ -266,6 +268,10 @@ function EngineBoot({
  * Restart and stop, which take every site offline for a moment, confirm
  * first.
  *
+ * Test config opens the test's own panel. A reload runs the same test first,
+ * and one it refuses, or passes with warnings, opens that panel on it: the
+ * refusal was a toast of nginx's output cut to four hundred characters.
+ *
  * Start and restart go through the proxy's own route, which picks the unit
  * itself and runs the config test before either: this host's nginx.service
  * tests before it starts, so a restart over a broken file used to stop nginx
@@ -276,47 +282,51 @@ export function EngineActions({
   unitName,
   unit,
   control,
+  testing,
+  onTest,
+  onReloadTested,
   onChanged,
 }: {
   status: ProxyStatus
   unitName: string | undefined
   unit: SystemdUnit | undefined
   control: EngineControl
+  /** Whether the config test is running. */
+  testing: boolean
+  onTest: () => void
+  /** Shows a reload's own test: one that refused it, or passed it with warnings. */
+  onReloadTested: (validation: ProxyValidation) => void
   onChanged: () => void
 }) {
   const router = useRouter()
-  const [busy, setBusy] = useState<"test" | "reload" | "">("")
+  const [busy, setBusy] = useState<"reload" | "">("")
   const kind = engineKind(status)
   const engine = control.engine
-
-  const test = async () => {
-    setBusy("test")
-    try {
-      const res = await post<ProxyValidation>("/proxy/test", { kind })
-      if (res.valid) {
-        notify.success(`${engine}'s configuration is valid`, {
-          description: "A reload would succeed.",
-        })
-      } else {
-        notify.error(`${engine} refuses its configuration`, undefined, {
-          description: res.output.slice(0, 400),
-        })
-      }
-    } catch (err) {
-      notify.error("Could not test the configuration", err)
-    } finally {
-      setBusy("")
-    }
-  }
 
   const reload = async () => {
     setBusy("reload")
     try {
-      await post("/proxy/reload", { kind })
-      notify.success(`${engine} reloaded`)
+      const res = await post<ProxyReloadResult>("/proxy/reload", { kind })
+      const warnings = warningCount(res.validation)
+      notify.success(
+        `${engine} reloaded`,
+        warnings > 0
+          ? {
+              description: `Its config test has ${plural(warnings, "warning")}.`,
+              action: { label: "Show", onClick: () => onReloadTested(res.validation) },
+            }
+          : undefined,
+      )
       onChanged()
     } catch (err) {
-      notify.error("Reload refused", err)
+      const refusal = refusalOf(err)
+      if (refusal?.validation) {
+        onReloadTested(refusal.validation)
+      } else {
+        notify.error("Reload failed", err)
+      }
+      // A refused reload's test is the engine's last one now.
+      onChanged()
     } finally {
       setBusy("")
     }
@@ -365,13 +375,7 @@ export function EngineActions({
 
   return (
     <>
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={test}
-        pending={busy === "test"}
-        disabled={busy !== ""}
-      >
+      <Button size="sm" variant="outline" onClick={onTest} pending={testing}>
         <CheckCircle className="size-3.5" />
         Test config
       </Button>

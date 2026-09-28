@@ -12,6 +12,7 @@ import { streamFindings, type StreamFindingInput } from "@/components/proxy/find
 
 export { DANGEROUS_PORTS, type ProxyFinding } from "@/components/proxy/findings/shared"
 export {
+  CONFIG_TEST,
   unreadableSource,
   type ProxySource,
   type UnreadableSource,

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 )
@@ -319,5 +320,156 @@ func TestConfigReadOfAFileRemovedSinceTheListIsNotFoundAndWorthRetrying(t *testi
 	outside := filepath.Join(t.TempDir(), "missing.conf")
 	if w := read(outside); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), `"outside_root"`) {
 		t.Fatalf("a missing file outside the proxy's directories: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// warningNginx passes with nginx's commonest warning, a server name two sites
+// claim, and answers `nginx -T` with those two sites under dir; with
+// JD_TEST_NGINX_BROKEN set it refuses its configuration instead.
+func warningNginx(dir string) string {
+	return `case "$1" in
+-s) exit 0 ;;
+-T)
+	# Only the shims are on PATH, so the dump is printed by the shell itself.
+	while IFS= read -r line; do echo "$line"; done <<'DUMP'
+# configuration file ` + dir + `/nginx.conf:
+http {
+    include ` + dir + `/conf.d/*.conf;
+}
+
+# configuration file ` + dir + `/conf.d/a.conf:
+server {
+    listen 80;
+    server_name a.test;
+}
+
+# configuration file ` + dir + `/conf.d/b.conf:
+server {
+    listen 80;
+    server_name a.test;
+}
+
+DUMP
+	exit 0 ;;
+esac
+if [ -n "$JD_TEST_NGINX_BROKEN" ]; then
+	echo 'nginx: [emerg] unknown directive "frobnicate" in /etc/nginx/sites-enabled/app:3' >&2
+	echo 'nginx: configuration file /etc/nginx/nginx.conf test failed' >&2
+	exit 1
+fi
+echo 'nginx: [warn] conflicting server name "a.test" on 0.0.0.0:80, ignored' >&2
+echo 'nginx: configuration file /etc/nginx/nginx.conf test is successful' >&2
+`
+}
+
+type lastTestBody struct {
+	Kind       string
+	CheckedAt  time.Time
+	Validation struct {
+		Valid       bool
+		Warnings    int
+		Diagnostics []struct {
+			Level, Message, File string
+			Line                 int
+			Claims               []struct {
+				File    string
+				Line    int
+				Ignored bool
+			}
+		}
+	}
+}
+
+// Test config's answer was a toast, and a warning in it was gone in twelve
+// seconds. The engine's last test is kept, whichever command ran it, and read
+// back by an administrator: nothing before the first test, then the test
+// with its warning placed at both sites that claim the name, and a reload
+// the test refuses both answers with the test beside its error and becomes
+// the last test itself.
+func TestTheEnginesLastConfigTestIsKeptAndReadBack(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := engineHost(t, map[string]string{"nginx": warningNginx(dir)})
+	s.Cfg.NginxDir = dir
+	s.initModules()
+	h := s.Routes()
+	admin := &client{t: t, h: h, cookie: signIn(t, s)}
+
+	if w := admin.do(http.MethodGet, "/api/v1/proxy/test/last", "", nil); w.Code != http.StatusNoContent || w.Body.Len() != 0 {
+		t.Fatalf("before any test: %d %q", w.Code, w.Body.String())
+	}
+	before := time.Now()
+	w := admin.do(http.MethodPost, "/api/v1/proxy/test", `{"kind":"nginx"}`, nil)
+	var tested struct {
+		Valid       bool
+		Diagnostics []struct {
+			Claims []struct{ File string }
+		}
+	}
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &tested) != nil || !tested.Valid ||
+		len(tested.Diagnostics) != 1 || len(tested.Diagnostics[0].Claims) != 2 {
+		t.Fatalf("Test config: %d %s", w.Code, w.Body.String())
+	}
+
+	w = admin.do(http.MethodGet, "/api/v1/proxy/test/last?kind=nginx", "", nil)
+	var last lastTestBody
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &last) != nil {
+		t.Fatalf("the last test: %d %s", w.Code, w.Body.String())
+	}
+	if last.Kind != "nginx" || last.CheckedAt.Before(before.Add(-time.Second)) || !last.Validation.Valid ||
+		last.Validation.Warnings != 1 || len(last.Validation.Diagnostics) != 1 {
+		t.Fatalf("the last test read back as %+v", last)
+	}
+	d := last.Validation.Diagnostics[0]
+	if d.Level != "warn" || d.File != "" || len(d.Claims) != 2 ||
+		d.Claims[0].File != dir+"/conf.d/a.conf" || d.Claims[0].Line != 3 || d.Claims[0].Ignored ||
+		d.Claims[1].File != dir+"/conf.d/b.conf" || !d.Claims[1].Ignored {
+		t.Fatalf("the warning was not placed at the sites that claim the name: %+v", d)
+	}
+	// Each engine has its own, and an unknown one is refused.
+	if w := admin.do(http.MethodGet, "/api/v1/proxy/test/last?kind=caddy", "", nil); w.Code != http.StatusNoContent {
+		t.Fatalf("Caddy's last test on a host that tested nginx: %d", w.Code)
+	}
+	if w := admin.do(http.MethodGet, "/api/v1/proxy/test/last?kind=apache", "", nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("an unknown engine's last test: %d", w.Code)
+	}
+
+	t.Setenv("JD_TEST_NGINX_BROKEN", "1")
+	w = admin.do(http.MethodPost, "/api/v1/proxy/reload", `{"kind":"nginx"}`, nil)
+	var refused struct {
+		Error      struct{ Code, Message string }
+		Validation struct {
+			Valid       bool
+			Diagnostics []struct {
+				File string
+				Line int
+			}
+		}
+	}
+	if w.Code != http.StatusUnprocessableEntity || json.Unmarshal(w.Body.Bytes(), &refused) != nil ||
+		refused.Error.Code != "invalid_config" || !strings.Contains(refused.Error.Message, `unknown directive "frobnicate"`) ||
+		refused.Validation.Valid || len(refused.Validation.Diagnostics) != 1 || refused.Validation.Diagnostics[0].Line != 3 {
+		t.Fatalf("a refused reload: %d %s", w.Code, w.Body.String())
+	}
+	w = admin.do(http.MethodGet, "/api/v1/proxy/test/last", "", nil)
+	last = lastTestBody{}
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &last) != nil || last.Validation.Valid ||
+		len(last.Validation.Diagnostics) != 1 || last.Validation.Diagnostics[0].Level != "emerg" {
+		t.Fatalf("the refused reload's test is not the last: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// The last test quotes the configuration it read, so it is read under the
+// same gate as running one.
+func TestTheLastConfigTestIsForAdministrators(t *testing.T) {
+	s, _ := engineHost(t, map[string]string{"nginx": "exit 0\n"})
+	h := s.Routes()
+	if got := routeGates(t, h)["GET /api/v1/proxy/test/last"]; got != [2]int{1, 1} {
+		t.Fatalf("GET /proxy/test/last: %d capability checks and %d rate budgets, want 1 and 1", got[0], got[1])
+	}
+	for _, role := range []auth.Role{auth.RoleReadOnly, auth.RoleLimited} {
+		c := &client{t: t, h: h, cookie: signInAs(t, s, "user-"+string(role), role)}
+		if w := c.do(http.MethodGet, "/api/v1/proxy/test/last", "", nil); w.Code != http.StatusForbidden {
+			t.Errorf("a %s account got %d", role, w.Code)
+		}
 	}
 }

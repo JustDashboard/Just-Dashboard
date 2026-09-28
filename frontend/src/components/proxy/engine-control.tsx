@@ -4,14 +4,15 @@ import { useState } from "react"
 import { Warning } from "@/components/icons"
 import { post } from "@/lib/api"
 import { notify } from "@/lib/toast"
-import type { EngineAction, EngineControlResult, ProxyDiagnostic } from "@/lib/types"
+import type { EngineAction, EngineControlResult } from "@/lib/types"
 import { Disclosure } from "@/components/form"
 import { Modal } from "@/components/modal"
 import { Well } from "@/components/panel"
 import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { ConfigEditor } from "@/components/proxy/config-editor"
-import { DiagnosticList } from "@/components/proxy/diagnostic-list"
+import { DiagnosticList, type ProxyPlace } from "@/components/proxy/diagnostic-list"
+import { engineRoots } from "@/components/proxy/config-test"
 import {
   openableFile,
   refusalHeadline,
@@ -83,7 +84,7 @@ export function useEngineControl({
   // The line whose file the editor opened, kept once it closes: closing it
   // brings its refusal back with the keyboard on that line's button, so the
   // dialog's Start or Restart is a press away from the file just fixed.
-  const [opened, setOpened] = useState<ProxyDiagnostic>()
+  const [opened, setOpened] = useState<ProxyPlace>()
   const [editing, setEditing] = useState(false)
 
   const run = async (action: EngineAction) => {
@@ -100,6 +101,8 @@ export function useEngineControl({
       if (refusal && (action === "start" || action === "restart")) {
         setAsked({ action, refusal })
         setDialogOpen(true)
+        // The refused test is the engine's last one now.
+        onChanged()
       } else {
         setDialogOpen(false)
         notify.error(FAILED[action](engine), err)
@@ -114,15 +117,11 @@ export function useEngineControl({
   const reread = landed && !unit.error && (unit.fetchedAt ?? 0) <= landed.at
   const pending = busy ?? (reread ? landed.action : undefined)
 
-  const roots = status
-    ? status.nginx
-      ? [status.nginxDir]
-      : [status.caddyFile.replace(/\/[^/]*$/, "")]
-    : []
-  const open = (d: ProxyDiagnostic) => {
-    if (!d.file) return
+  const roots = engineRoots(status)
+  const open = (place: ProxyPlace) => {
+    if (!place.file) return
     setDialogOpen(false)
-    setOpened(d)
+    setOpened(place)
     setEditing(true)
   }
 
@@ -189,8 +188,8 @@ function EngineDialog({
   busy: boolean
   roots: string[]
   /** The line whose file the editor last opened, which takes the keyboard back. */
-  opened: ProxyDiagnostic | undefined
-  onOpenFile: (diagnostic: ProxyDiagnostic) => void
+  opened: ProxyPlace | undefined
+  onOpenFile: (place: ProxyPlace) => void
   onRun: (action: Asked) => void
   onClose: () => void
 }) {
@@ -270,8 +269,8 @@ function RefusalView({
   action: Asked
   refusal: Refusal
   roots: string[]
-  opened: ProxyDiagnostic | undefined
-  onOpenFile: (diagnostic: ProxyDiagnostic) => void
+  opened: ProxyPlace | undefined
+  onOpenFile: (place: ProxyPlace) => void
 }) {
   const diagnostics = refusal.validation?.diagnostics ?? []
   const output = refusal.validation?.output ?? refusal.message.split("\n").slice(1).join("\n")

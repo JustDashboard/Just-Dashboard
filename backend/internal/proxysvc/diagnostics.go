@@ -23,6 +23,9 @@ type Diagnostic struct {
 	Message string `json:"message"`
 	File    string `json:"file,omitempty"`
 	Line    int    `json:"line,omitempty"`
+	// Claims places a warning nginx gives no file for: the blocks that claim
+	// the server name it names. Set by PlaceNameConflicts.
+	Claims []NameClaim `json:"claims,omitempty"`
 }
 
 // nginx writes a test's messages in one of two shapes, depending on whether

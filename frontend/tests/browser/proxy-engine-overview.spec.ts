@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test"
 import { availability, json, mockProxy, user, vhosts } from "./proxy-fixtures"
-import { longJournal, nginxUnit } from "./fixtures/proxy/engine"
+import { longJournal, nginxUnit, passingTest } from "./fixtures/proxy/engine"
 
 /**
  * The overview and the engine it drives, for the ways they told an operator
@@ -450,7 +450,8 @@ test("a fix saved while nginx is stopped is saved, and says it was not reloaded"
   // Keys sent before Monaco has focus are lost on a busy machine.
   await expect(editor.locator(".monaco-editor.focused")).toBeVisible()
   await page.keyboard.press("End")
-  await page.keyboard.type("fixed")
+  // One input event: keys typed one by one are dropped by Monaco under load.
+  await page.keyboard.insertText("fixed")
   await expect(lines).toContainText("fixed")
   await editor.getByRole("button", { name: "Save and reload" }).click()
 
@@ -729,10 +730,31 @@ test("a running Docker Caddy ingress is tested and reloaded inside its container
     ingressState: "running",
   })
   const kinds: string[] = []
+  await page.route("**/api/v1/proxy/test/last?**", (route) => {
+    kinds.push(`test/last ${new URL(route.request().url()).searchParams.get("kind")}`)
+    return route.fallback()
+  })
   for (const path of ["test", "reload"]) {
     await page.route(`**/api/v1/proxy/${path}`, (route) => {
       kinds.push(`${path} ${route.request().postDataJSON().kind}`)
-      return route.fallback()
+      if (path === "reload") return route.fallback()
+      // The container's own `caddy validate`, which names the Caddyfile inside it.
+      return json(route, {
+        valid: true,
+        output: "Valid configuration",
+        command:
+          "docker exec edge caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile",
+        diagnostics: [
+          {
+            level: "warn",
+            message:
+              "Caddyfile input is not formatted; run 'caddy fmt --overwrite' to fix inconsistencies",
+            file: "/etc/caddy/Caddyfile",
+            line: 2,
+          },
+        ],
+        warnings: 1,
+      })
     })
   }
   await page.goto("/proxy")
@@ -744,10 +766,24 @@ test("a running Docker Caddy ingress is tested and reloaded inside its container
   await expect(identity.getByText("/etc/caddy/Caddyfile")).toHaveCount(0)
 
   await identity.getByRole("button", { name: "Test config" }).click()
-  await expect(page.getByText("Caddy's configuration is valid")).toBeVisible()
+  const panel = page.getByRole("dialog", { name: "Caddy config test" })
+  await expect(panel.getByText("Valid with 1 warning")).toBeVisible()
+  // The file it names is the container's, which the editor would open on the host.
+  await expect(panel.getByText("/etc/caddy/Caddyfile:2")).toBeVisible()
+  await expect(panel.getByRole("button", { name: /^Open/ })).toHaveCount(0)
+  await panel.getByRole("button", { name: "Close" }).click()
+  await expect(panel).toHaveCount(0)
   await identity.getByRole("button", { name: "Reload" }).click()
   await expect(page.getByText("Caddy reloaded")).toBeVisible()
-  expect(kinds).toEqual(["test caddy-ingress", "reload caddy-ingress"])
+  expect(kinds.filter((kind) => !kind.startsWith("test/last"))).toEqual([
+    "test caddy-ingress",
+    "reload caddy-ingress",
+  ])
+  // Its last test is the ingress's, too.
+  expect(kinds).toContain("test/last caddy-ingress")
+  expect(
+    kinds.filter((kind) => kind.startsWith("test/last") && kind !== "test/last caddy-ingress"),
+  ).toEqual([])
 })
 
 test("an ingress the first deployment would start is not offered controls", async ({ page }) => {
@@ -1166,4 +1202,397 @@ test("a service state that cannot be read is not drawn from its last answer", as
   await expect(unread).toHaveAttribute("title", "systemd did not answer")
   await expect(identity.getByText(/running for/)).toHaveCount(0)
   await expect(identity.getByText("no service unit")).toHaveCount(0)
+})
+
+/**
+ * nginx 1.26's commonest warning, which names no file, as the server places
+ * it: at the two sites that claim the name, the second of which nginx ignores.
+ */
+const claimedTwice = {
+  valid: true,
+  output:
+    'nginx: [warn] conflicting server name "app.example.com" on 0.0.0.0:80, ignored\n' +
+    "nginx: the configuration file /etc/nginx/nginx.conf syntax is ok\n" +
+    "nginx: configuration file /etc/nginx/nginx.conf test is successful",
+  command: "nginx -t",
+  diagnostics: [
+    {
+      level: "warn",
+      message: 'conflicting server name "app.example.com" on 0.0.0.0:80, ignored',
+      claims: [
+        { file: "/etc/nginx/sites-available/app.example.com", line: 3, ignored: false },
+        { file: "/etc/nginx/sites-available/app-copy", line: 3, ignored: true },
+      ],
+    },
+  ],
+  warnings: 1,
+}
+
+const siteFile =
+  "server {\n    listen 80;\n    server_name app.example.com;\n    frobnicate on;\n}\n"
+
+/** The files the config editor reads, by path. */
+async function watchConfigReads(page: Page) {
+  const reads: string[] = []
+  await page.route("**/api/v1/proxy/config?**", (route) => {
+    reads.push(new URL(route.request().url()).searchParams.get("path") ?? "")
+    return json(route, { content: siteFile })
+  })
+  return reads
+}
+
+/** The config tests run, answered in turn by what `answers` holds, the last one again after it runs out. */
+async function mockTests(page: Page, answers: unknown[]) {
+  const runs: string[] = []
+  await page.route("**/api/v1/proxy/test", (route) => {
+    runs.push(route.request().postDataJSON().kind)
+    return json(route, answers[Math.min(runs.length, answers.length) - 1])
+  })
+  return runs
+}
+
+test("Test config opens on its verdict, and a warning nginx places nowhere opens at the sites that claim the name", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"])
+  await mockProxy(page, { included: true })
+  const runs = await mockTests(page, [claimedTwice])
+  const reads = await watchConfigReads(page)
+  await page.goto("/proxy")
+
+  await page
+    .locator("[data-slot='host-identity']")
+    .getByRole("button", { name: "Test config" })
+    .click()
+  const panel = page.getByRole("dialog", { name: "nginx config test" })
+  // It was a toast that said "valid" and dropped the warning.
+  await expect(panel.getByText("Valid with 1 warning")).toBeVisible()
+  await expect(
+    panel.getByText(
+      "A reload would succeed. nginx accepts this configuration, but a warning can mean part of it is ignored.",
+    ),
+  ).toBeVisible()
+  await expect(panel.getByText("tested just now")).toBeVisible()
+  const said = panel.getByRole("list", { name: "What the test said" })
+  await expect(said.getByText("warn", { exact: true })).toBeVisible()
+  await expect(
+    said.getByText('conflicting server name "app.example.com" on 0.0.0.0:80, ignored'),
+  ).toBeVisible()
+  const claims = said.getByRole("list", { name: "Sites that claim this name" })
+  await expect(claims.getByRole("listitem")).toHaveCount(2)
+  await expect(claims.getByRole("listitem").first()).toContainText(
+    "served by /etc/nginx/sites-available/app.example.com:3",
+  )
+  await expect(claims.getByRole("listitem").last()).toContainText(
+    "ignored in /etc/nginx/sites-available/app-copy:3",
+  )
+  expect(runs).toEqual(["nginx"])
+
+  // The whole output, folded, and on the clipboard in one press.
+  await panel.getByText("nginx -t output", { exact: true }).click()
+  await expect(panel.getByText(/test is successful/)).toBeVisible()
+  await panel.getByRole("button", { name: "Copy output" }).click()
+  await expect(page.getByText("Output copied")).toBeVisible()
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(claimedTwice.output)
+
+  // The site nginx ignored, at the line that claims the name.
+  await claims.getByRole("button", { name: "Open at line 3 of app-copy" }).click()
+  await expect(panel).toHaveCount(0)
+  const editor = page.getByRole("dialog", { name: "app-copy" })
+  await expect(editor.locator(".monaco-editor .view-lines")).toContainText(
+    "server_name app.example.com;",
+    { timeout: 20_000 },
+  )
+  expect(reads).toEqual(["/etc/nginx/sites-available/app-copy"])
+  await editor.getByRole("button", { name: "Close" }).click()
+  await expect(editor).toHaveCount(0)
+
+  // Closing the file comes back to the test, on the line it left from, and
+  // runs nothing again for a file that was not saved.
+  await expect(panel.getByText("Valid with 1 warning")).toBeVisible()
+  await expect(claims.getByRole("button", { name: "Open at line 3 of app-copy" })).toBeFocused()
+  expect(runs).toEqual(["nginx"])
+})
+
+test("a test that fails offers the file at the line nginx names, and Test again runs it afresh", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  let release = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  let hold = false
+  let answer: unknown = brokenTest
+  const runs: string[] = []
+  await page.route("**/api/v1/proxy/test", async (route) => {
+    runs.push("POST")
+    if (hold) await held
+    return json(route, answer)
+  })
+  const reads = await watchConfigReads(page)
+  await page.goto("/proxy")
+
+  await page.getByRole("button", { name: "Test config" }).click()
+  const panel = page.getByRole("dialog", { name: "nginx config test" })
+  await expect(panel.getByText("Fails", { exact: true })).toBeVisible()
+  await expect(
+    panel.getByText(
+      "nginx refuses this configuration, so a reload, start or restart is refused until it is fixed. A running nginx goes on serving what it loaded last.",
+    ),
+  ).toBeVisible()
+  const said = panel.getByRole("list", { name: "What the test said" })
+  await expect(said.getByText("emerg", { exact: true })).toBeVisible()
+  await expect(said.getByText('unknown directive "frobnicate"')).toBeVisible()
+  await expect(said.getByText("/etc/nginx/sites-available/app:3")).toBeVisible()
+
+  await said.getByRole("button", { name: "Open at line 3" }).click()
+  const editor = page.getByRole("dialog", { name: "app" })
+  await expect(editor.locator(".monaco-editor .view-lines")).toContainText("frobnicate on;", {
+    timeout: 20_000,
+  })
+  expect(reads).toEqual(["/etc/nginx/sites-available/app"])
+  await editor.getByRole("button", { name: "Close" }).click()
+  await expect(said.getByRole("button", { name: "Open at line 3" })).toBeFocused()
+
+  // Fixed elsewhere: Test again says it is testing, and never shows the old
+  // verdict under the new run.
+  answer = passingTest
+  hold = true
+  await panel.getByRole("button", { name: "Test again" }).click()
+  await expect(panel.getByText("Testing…").first()).toBeVisible()
+  await expect(panel.getByText("Fails", { exact: true })).toHaveCount(0)
+  release()
+  await expect(panel.getByText("Valid", { exact: true })).toBeVisible()
+  await expect(panel.getByText("A reload would succeed.", { exact: true })).toBeVisible()
+  await expect(panel.getByRole("list", { name: "What the test said" })).toHaveCount(0)
+  expect(runs).toEqual(["POST", "POST"])
+})
+
+test("a test that cannot run says why, and Test again runs it", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  let fail = true
+  await page.route("**/api/v1/proxy/test", (route) =>
+    fail
+      ? failWith(504, { code: "timeout", message: "nginx -t did not finish in 30s" })(route)
+      : json(route, passingTest),
+  )
+  await page.goto("/proxy")
+
+  await page.getByRole("button", { name: "Test config" }).click()
+  const panel = page.getByRole("dialog", { name: "nginx config test" })
+  await expect(
+    panel.getByRole("alert").filter({ hasText: "nginx -t did not finish in 30s" }),
+  ).toBeVisible()
+  await expect(panel.getByRole("button", { name: "Copy output" })).toBeDisabled()
+  fail = false
+  await panel.getByRole("button", { name: "Test again" }).click()
+  await expect(panel.getByText("Valid", { exact: true })).toBeVisible()
+  await expect(panel.getByRole("alert")).toHaveCount(0)
+})
+
+test("the last test's warning stays in Needs attention until a test comes back clean", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  let last: unknown = {
+    kind: "nginx",
+    checkedAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+    validation: claimedTwice,
+  }
+  const asked: string[] = []
+  await page.route("**/api/v1/proxy/test/last?**", (route) => {
+    asked.push(new URL(route.request().url()).searchParams.get("kind") ?? "")
+    return json(route, last)
+  })
+  const runs: string[] = []
+  await page.route("**/api/v1/proxy/test", (route) => {
+    runs.push("POST")
+    // The server keeps the test it just ran as the last one.
+    last = { kind: "nginx", checkedAt: new Date().toISOString(), validation: passingTest }
+    return json(route, passingTest)
+  })
+  await page.goto("/proxy")
+
+  const finding = page.getByText("nginx's config test has a warning")
+  await expect(finding).toBeVisible()
+  await finding.click()
+  await expect(
+    page.getByText('conflicting server name "app.example.com" on 0.0.0.0:80, ignored'),
+  ).toBeVisible()
+  await expect(page.getByText(/This stays until a test comes back clean/)).toBeVisible()
+
+  // The kept test, as it was and when: not run again by opening it.
+  await page.getByRole("button", { name: "Open test" }).click()
+  const panel = page.getByRole("dialog", { name: "nginx config test" })
+  await expect(panel.getByText("Valid with 1 warning")).toBeVisible()
+  await expect(panel.getByText("tested 3h ago")).toBeVisible()
+  await expect(panel.getByRole("button", { name: "Open at line 3 of app-copy" })).toBeVisible()
+  expect(runs).toEqual([])
+
+  await panel.getByRole("button", { name: "Test again" }).click()
+  await expect(panel.getByText("Valid", { exact: true })).toBeVisible()
+  await expect(panel.getByText("tested just now")).toBeVisible()
+  await panel.getByRole("button", { name: "Close" }).click()
+  await expect(finding).toHaveCount(0)
+  expect(runs).toEqual(["POST"])
+  expect(new Set(asked)).toEqual(new Set(["nginx"]))
+})
+
+test("a failed last test is critical until a test comes back clean", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/proxy/test/last?**", (route) =>
+    json(route, { kind: "nginx", checkedAt: new Date().toISOString(), validation: brokenTest }),
+  )
+  await page.goto("/proxy")
+
+  const finding = page.getByRole("button", { name: /nginx's configuration fails its test/ })
+  await expect(finding).toBeVisible()
+  // Worst first: above the plain-text site the fixtures warn about.
+  const titles = await page.locator("[data-slot='accordion-trigger']").allInnerTexts()
+  const failing = titles.findIndex((title) =>
+    title.includes("nginx's configuration fails its test"),
+  )
+  const plainText = titles.findIndex((title) => title.includes("in plain text"))
+  expect(failing).toBeGreaterThanOrEqual(0)
+  expect(plainText).toBeGreaterThan(failing)
+  await finding.click()
+  await expect(
+    page.getByText('unknown directive "frobnicate" in /etc/nginx/sites-available/app:3'),
+  ).toBeVisible()
+  await page.getByRole("button", { name: "Open test" }).click()
+  await expect(
+    page.getByRole("dialog", { name: "nginx config test" }).getByText("Fails", { exact: true }),
+  ).toBeVisible()
+})
+
+test("a reader is not asked about the config test and has no way to run one", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, { ...user, capabilities: ["read"], user: { ...user.user, role: "viewer" } }),
+  )
+  const asked: string[] = []
+  await page.route("**/api/v1/proxy/test/**", (route) => {
+    asked.push(route.request().url())
+    return route.fallback()
+  })
+  await page.goto("/proxy")
+
+  await expect(
+    page.getByRole("list", { name: "Sites" }).locator("[data-slot='choice-row']"),
+  ).toHaveCount(3)
+  await expect(page.getByRole("button", { name: "Test config" })).toHaveCount(0)
+  await expect(page.getByText(/config test/)).toHaveCount(0)
+  expect(asked).toEqual([])
+})
+
+test("a reload the test refuses opens the test on what it said", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/proxy/reload", (route) =>
+    route.fulfill({
+      status: 422,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { code: "invalid_config", message: brokenTest.output },
+        validation: brokenTest,
+      }),
+    }),
+  )
+  await page.goto("/proxy")
+
+  await page.locator("[data-slot='host-identity']").getByRole("button", { name: "Reload" }).click()
+  const panel = page.getByRole("dialog", { name: "nginx config test" })
+  await expect(panel.getByText("Fails", { exact: true })).toBeVisible()
+  await expect(
+    panel.getByText(
+      "The reload was refused, so nginx goes on serving what it loaded last. Fix what the test found, then reload again.",
+    ),
+  ).toBeVisible()
+  await expect(panel.getByRole("button", { name: "Open at line 3" })).toBeVisible()
+  // The panel says it; a toast of nginx's output cut short does not.
+  await expect(page.getByText("Reload failed")).toHaveCount(0)
+  await expect(page.getByText("nginx reloaded")).toHaveCount(0)
+})
+
+test("a reload that passes with a warning says so, and Show opens it", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/proxy/reload", (route) =>
+    json(route, { validation: claimedTwice, reloaded: true, output: "" }),
+  )
+  await page.goto("/proxy")
+
+  await page.locator("[data-slot='host-identity']").getByRole("button", { name: "Reload" }).click()
+  await expect(page.getByText("nginx reloaded")).toBeVisible()
+  await expect(page.getByText("Its config test has 1 warning.")).toBeVisible()
+  await page.getByRole("button", { name: "Show", exact: true }).click()
+  const panel = page.getByRole("dialog", { name: "nginx config test" })
+  await expect(panel.getByText("Valid with 1 warning")).toBeVisible()
+  await expect(
+    panel.getByText(
+      "nginx reloaded. nginx accepts this configuration, but a warning can mean part of it is ignored.",
+    ),
+  ).toBeVisible()
+})
+
+test("a file saved from the test's editor is tested again when it closes", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const runs = await mockTests(page, [brokenTest, passingTest])
+  await watchConfigReads(page)
+  const saved: { content: string; reload: boolean }[] = []
+  await page.route("**/api/v1/proxy/config", (route) => {
+    if (route.request().method() !== "PUT") return route.fallback()
+    saved.push(route.request().postDataJSON())
+    return json(route, { validation: passingTest })
+  })
+  await page.goto("/proxy")
+
+  await page.getByRole("button", { name: "Test config" }).click()
+  const panel = page.getByRole("dialog", { name: "nginx config test" })
+  await panel.getByRole("button", { name: "Open at line 3" }).click()
+  const editor = page.getByRole("dialog", { name: "app" })
+  const lines = editor.locator(".monaco-editor .view-lines")
+  await expect(lines).toContainText("frobnicate on;", { timeout: 20_000 })
+  await lines.click()
+  // Keys sent before Monaco has focus are lost on a busy machine.
+  await expect(editor.locator(".monaco-editor.focused")).toBeVisible()
+  await page.keyboard.press("End")
+  // One input event: keys typed one by one are dropped by Monaco under load.
+  await page.keyboard.insertText(" # fixed")
+  await expect(lines).toContainText("# fixed")
+  await editor.getByRole("button", { name: "Save only" }).click()
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible()
+  await editor.getByRole("button", { name: "Close" }).click()
+
+  // What the panel said was about the file before the save.
+  await expect(panel.getByText("Valid", { exact: true })).toBeVisible()
+  expect(runs).toEqual(["nginx", "nginx"])
+  expect(saved).toHaveLength(1)
+  expect(saved[0].reload).toBe(false)
+})
+
+test("the config test and the sites claiming a name fit a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  await mockTests(page, [
+    {
+      ...claimedTwice,
+      valid: false,
+      output: `${claimedTwice.output}\n${brokenTest.output}`,
+      diagnostics: [...claimedTwice.diagnostics, ...brokenTest.diagnostics],
+    },
+  ])
+  await page.goto("/proxy")
+
+  await page.getByRole("button", { name: "Test config" }).click()
+  const panel = page.getByRole("dialog", { name: "nginx config test" })
+  await expect(panel.getByText("/etc/nginx/sites-available/app-copy:3")).toBeVisible()
+  await expect(panel.getByText("/etc/nginx/sites-available/app:3")).toBeVisible()
+  await expect(panel).toBeInViewport({ ratio: 1 })
+  // The sheet and the body that scrolls inside it.
+  const wide = await panel.evaluate((element) =>
+    [element, ...element.querySelectorAll(".overflow-y-auto")].some(
+      (node) => node.scrollWidth > node.clientWidth + 1,
+    ),
+  )
+  expect(wide).toBe(false)
+  await expect(panel.getByRole("button", { name: "Test again" })).toBeInViewport()
 })

@@ -66,7 +66,9 @@ func (s *Service) reloadIngress(ctx context.Context) (*ReloadResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	started := time.Now()
 	res := &ReloadResult{Validation: edge.validate(ctx)}
+	s.remember(KindCaddyIngress, started, res.Validation)
 	if !res.Validation.Valid {
 		return res, ErrInvalidConf
 	}

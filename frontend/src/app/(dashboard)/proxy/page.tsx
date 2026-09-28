@@ -24,11 +24,13 @@ import { useEngineControl } from "@/components/proxy/engine-control"
 import { EngineFailure } from "@/components/proxy/engine-failure"
 import { PARTICIPLE } from "@/components/proxy/engine-lifecycle"
 import { ConfigEditor } from "@/components/proxy/config-editor"
+import { useConfigTest } from "@/components/proxy/test-result"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { certificateProduct, siteProduct } from "@/components/proxy/marks"
 import { RoutePath } from "@/components/proxy/route-path"
 import { ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
 import {
+  CONFIG_TEST,
   findingAction,
   foldProxyFindings,
   unreadableSource,
@@ -97,12 +99,16 @@ export default function ProxyOverviewPage() {
     60_000,
   )
   const ports = usePoll((signal) => reading(get<Listener[]>("/ports", undefined, signal)), 30_000)
+  // The engine's last config test, kept by the server, for an account that
+  // may run one: its warnings stay in Needs attention until a test is clean.
+  const configTest = useConfigTest({ status, admin })
   // A reload or a service verb changes what the engine line, the status and
-  // the sites say; each reads all three again once it lands.
+  // the sites say, and runs a config test; each reads them again once it lands.
   const refreshAll = () => {
     refreshStatus()
     engine.refresh()
     vhosts.refresh()
+    configTest.refreshLast()
   }
   const control = useEngineControl({ status, unit: engine, onChanged: refreshAll })
 
@@ -159,6 +165,7 @@ export default function ProxyOverviewPage() {
     if (certbotAsked) certbot.refresh()
     streams.refresh()
     ports.refresh()
+    configTest.refreshLast()
   }
 
   const sites = readable(vhosts)?.value
@@ -237,6 +244,8 @@ export default function ProxyOverviewPage() {
     streams.error,
     ports.error,
   ])
+  const lastTest = configTest.last
+  const testEngine = configTest.engine
   const findings = useMemo(
     () =>
       foldProxyFindings({
@@ -246,8 +255,19 @@ export default function ProxyOverviewPage() {
         streams: streamStatus,
         ports: listeners,
         unreadable,
+        lastTest: lastTest && { engine: testEngine, record: lastTest },
       }),
-    [certificates, renewal, certbotGone, sites, streamStatus, listeners, unreadable],
+    [
+      certificates,
+      renewal,
+      certbotGone,
+      sites,
+      streamStatus,
+      listeners,
+      unreadable,
+      lastTest,
+      testEngine,
+    ],
   )
   const retry: Record<ProxySource, () => void> = {
     status: refreshStatus,
@@ -418,6 +438,9 @@ export default function ProxyOverviewPage() {
               unitName={engine.name}
               unit={engine.unit}
               control={control}
+              testing={configTest.running}
+              onTest={configTest.run}
+              onReloadTested={configTest.showReload}
               onChanged={refreshAll}
             />
           )
@@ -535,7 +558,9 @@ export default function ProxyOverviewPage() {
                         ...f,
                         action: source
                           ? { label: "Try again", onClick: retry[source] }
-                          : { label: findingAction(f), onClick: () => router.push(f.href) },
+                          : f.id === CONFIG_TEST
+                            ? { label: "Open test", onClick: configTest.showLast }
+                            : { label: findingAction(f), onClick: () => router.push(f.href) },
                       }
                     })}
                     emptyLabel="Certificates, renewal, sites, streams and exposed ports all within limits"
@@ -597,6 +622,7 @@ export default function ProxyOverviewPage() {
         readOnly
       />
       {control.dialog}
+      {configTest.panel}
     </Page>
   )
 }

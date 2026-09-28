@@ -63,6 +63,7 @@ type Service struct {
 
 	recorder  ChangeRecorder
 	effective effectiveCache
+	tested    testMemory
 }
 
 func New(nginxDir, caddyFile string) *Service {
@@ -510,10 +511,14 @@ func (s *Service) WriteConfig(ctx context.Context, kind Kind, path, content stri
 	if err != nil {
 		return nil, err
 	}
-	if after := runValidator(ctx, "nginx", "-t"); !after.Valid {
+	started := time.Now()
+	after := runValidator(ctx, "nginx", "-t")
+	if !after.Valid {
 		restore()
 		return after, ErrInvalidConf
 	}
+	// The file stays, so this is a test of the configuration as it now is.
+	s.remember(KindNginx, started, after)
 	s.recordChange(ctx, Change{Path: full, Action: ChangeWrite,
 		Before: []byte(original), BeforeExisted: existed, After: []byte(content)})
 	return res, nil
@@ -548,18 +553,26 @@ func writeAtomic(path, content string) error {
 // succeed", asked before pressing the button that finds out the hard way. The
 // ingress is tested inside its container, and there is nothing to test until
 // one runs.
+//
+// Every test is kept as the engine's last (see TestRecord).
 func (s *Service) Test(ctx context.Context, kind Kind) (*ValidationResult, error) {
+	started := time.Now()
+	var res *ValidationResult
 	switch kind {
 	case KindCaddyIngress:
 		edge, err := s.ingress(ctx)
 		if err != nil {
 			return nil, err
 		}
-		return edge.validate(ctx), nil
+		res = edge.validate(ctx)
 	case KindCaddy:
-		return runValidator(ctx, "caddy", "validate", "--config", s.caddyFile, "--adapter", "caddyfile"), nil
+		res = runValidator(ctx, "caddy", "validate", "--config", s.caddyFile, "--adapter", "caddyfile")
+	default:
+		kind = KindNginx
+		res = runValidator(ctx, "nginx", "-t")
 	}
-	return runValidator(ctx, "nginx", "-t"), nil
+	s.remember(kind, started, res)
+	return res, nil
 }
 
 // WithTestedConfig runs start only when the engine's config test passes, and
@@ -590,7 +603,8 @@ type ReloadResult struct {
 }
 
 // Reload tests first and refuses to reload a config that does not pass. This
-// is the guard rail that makes a config editor safe to expose at all.
+// is the guard rail that makes a config editor safe to expose at all. Its test
+// is kept as the engine's last, passed or not.
 func (s *Service) Reload(ctx context.Context, kind Kind) (*ReloadResult, error) {
 	s.forgetEffective()
 	if kind == KindCaddyIngress {
@@ -598,14 +612,17 @@ func (s *Service) Reload(ctx context.Context, kind Kind) (*ReloadResult, error) 
 	}
 	var validation *ValidationResult
 	var reload *exec.Cmd
+	started := time.Now()
 	switch kind {
 	case KindCaddy:
 		validation = runValidator(ctx, "caddy", "validate", "--config", s.caddyFile, "--adapter", "caddyfile")
 		reload = hostexec.Command(ctx, "caddy", "reload", "--config", s.caddyFile)
 	default:
+		kind = KindNginx
 		validation = runValidator(ctx, "nginx", "-t")
 		reload = hostexec.Command(ctx, "nginx", "-s", "reload")
 	}
+	s.remember(kind, started, validation)
 	res := &ReloadResult{Validation: validation}
 	if !validation.Valid {
 		return res, ErrInvalidConf

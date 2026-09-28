@@ -1142,7 +1142,12 @@ it. A failed unit is the one `Notice` the overview draws under the line — the 
 its newest line, and its two verbs. A start or restart the config test refuses keeps its dialog
 open on the test's diagnostics as rows (level as a `Status` verdict, file:line in mono, Open at line
 N), not a toast of nginx's output; the editor a row opens closes back into that dialog, with the
-keyboard on the row's button.
+keyboard on the row's button. Test config is a `SidePanel` of the same rows under a verdict `Notice`
+(success, warning or danger: "Valid", "Valid with 1 warning", "Fails"), with the output in a quiet
+fold, Copy output and Test again in the footer beside how long ago it ran, and a conflicting server
+name's claimants as rows indented under it behind a rule, "served by" and "ignored in" each with its
+own button; while it runs it says "Testing…" rather than keep the last verdict under a new run. The
+last test's warnings and failure stay in attention as one finding whose button, Open test, shows it.
 Its routes are ordered worst first like the Sites cards, eight with "Showing 8 of N". An
 administrator's route opens the site on Sites and a Docker ingress route its live TLS report; a
 reader's route opens its file read-only in place rather than the site form — skeleton rows while it
@@ -1170,7 +1175,8 @@ layout. Tables retain their scrolling boundary; forms and sections remain plain.
 `tests/browser/proxy-ui.spec.ts` covers all six populated pages at 390, 1280 and 1720, detail
 navigation, site-kind choices and read-only access; `proxy-engine-overview.spec.ts` covers the
 overview's failure states, its freshness and Refresh, its routes by role and the engine controls,
-including a stopped, failed, masked and boot-disabled unit and a refused start or restart.
+including a stopped, failed, masked and boot-disabled unit, a refused start, restart or reload, and
+the config test panel.
 
 **What a host has installed, who is on it and what they changed are products too.** Packages
 draws a package as the software its name says it is (`packageProduct`, `components/packages/marks.tsx`:
