@@ -1,4 +1,5 @@
 import type {
+  Container,
   Job,
   PortOwner,
   StreamAppendReason,
@@ -442,4 +443,139 @@ export function saveOutcome(
     title: `${title} saved and reloaded`,
     description: join(res.listenNote, ...res.warnings, kept),
   }
+}
+
+/** The list's chips: by protocol, by who may connect, and by what nginx does with it. */
+export type StreamFilter = "all" | "tcp" | "udp" | "open" | "restricted" | "not-live" | "paused"
+
+export const STREAM_FILTERS: { key: StreamFilter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "tcp", label: "TCP" },
+  { key: "udp", label: "UDP" },
+  { key: "open", label: "Open" },
+  { key: "restricted", label: "Restricted" },
+  { key: "not-live", label: "Not live" },
+  { key: "paused", label: "Paused" },
+]
+
+/**
+ * Whether a stream is under a chip. A file that could not be read has no
+ * protocol or allow list to be sorted by, so only All and Not live take it.
+ */
+export function streamMatchesFilter(stream: StreamEntry, filter: StreamFilter): boolean {
+  switch (filter) {
+    case "all":
+      return true
+    case "tcp":
+    case "udp":
+      return !stream.error && carries(stream, filter)
+    case "open":
+      return !stream.error && stream.open
+    case "restricted":
+      return !stream.error && !stream.open
+    case "not-live":
+      return !stream.paused && (Boolean(stream.error) || stream.state !== "live")
+    case "paused":
+      return Boolean(stream.paused)
+  }
+}
+
+/** How many streams each chip holds. */
+export function streamFilterCounts(streams: StreamEntry[]): Record<StreamFilter, number> {
+  const counts = Object.fromEntries(STREAM_FILTERS.map(({ key }) => [key, 0])) as Record<
+    StreamFilter,
+    number
+  >
+  for (const stream of streams) {
+    for (const { key } of STREAM_FILTERS) {
+      if (streamMatchesFilter(stream, key)) counts[key]++
+    }
+  }
+  return counts
+}
+
+/** Whether a stream matches the search box: its name, port, address, upstream or sources. */
+export function streamMatchesQuery(stream: StreamEntry, query: string): boolean {
+  const needle = query.trim().toLowerCase()
+  if (!needle) return true
+  return [stream.name, listenLabel(stream), stream.upstream, ...stream.allowFrom]
+    .filter(Boolean)
+    .some((field) => field.toLowerCase().includes(needle))
+}
+
+/**
+ * A new stream as a link describes it — ?new=1&listen=5432&upstream=…&protocol=udp
+ * — or null when the link asks for none. A port or protocol the form could
+ * not hold is left out rather than guessed; the save checks the rest.
+ */
+export function streamDraftFromQuery(params: URLSearchParams): Partial<StreamSpec> | null {
+  if (params.get("new") !== "1") return null
+  const draft: Partial<StreamSpec> = {}
+  const listen = Number(params.get("listen"))
+  if (Number.isInteger(listen) && listen >= 1 && listen <= 65535) draft.listen = listen
+  const upstream = params.get("upstream")?.trim()
+  if (upstream) draft.upstream = upstream
+  const protocol = params.get("protocol")?.toLowerCase()
+  if (protocol === "tcp" || protocol === "udp" || protocol === "both") draft.protocol = protocol
+  const name = params.get("name")?.trim()
+  if (name) draft.name = name
+  return draft
+}
+
+/** A stream's fields as a new stream's starting point: the same forward, under a name of its own. */
+export function duplicateSpec(stream: StreamEntry): StreamSpec {
+  return { ...streamSpecOf(stream), name: `${stream.name}-copy` }
+}
+
+/** A running container's published port, as a stream could forward to it. */
+export type ContainerTarget = {
+  key: string
+  container: string
+  upstream: string
+  protocol: "tcp" | "udp"
+  /** Published on every address, so reachable around the stream's allow list. */
+  exposed: boolean
+}
+
+/**
+ * The published ports of running containers a stream of this protocol could
+ * forward to, loopback-published first: a port Docker publishes on every
+ * address is already reachable without the stream, and its allow list
+ * guards nothing. Every-address ports are dialled on 127.0.0.1, one per port
+ * — Docker lists the IPv4 and IPv6 bindings separately.
+ */
+export function containerTargets(
+  containers: Container[],
+  protocol: StreamSpec["protocol"],
+): ContainerTarget[] {
+  const seen = new Set<string>()
+  const out: ContainerTarget[] = []
+  for (const container of containers) {
+    if (container.state !== "running") continue
+    for (const port of container.ports) {
+      if (!port.publicPort) continue
+      const type = port.type === "udp" ? "udp" : "tcp"
+      if (protocol !== "both" && type !== protocol) continue
+      const ip = port.ip ?? ""
+      const everywhere = ip === "" || ip === "0.0.0.0" || ip === "::"
+      const host = everywhere ? "127.0.0.1" : ip.includes(":") ? `[${ip}]` : ip
+      const upstream = `${host}:${port.publicPort}`
+      const key = `${container.name}/${upstream}/${type}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push({ key, container: container.name, upstream, protocol: type, exposed: everywhere })
+    }
+  }
+  const scope = (target: ContainerTarget) =>
+    target.exposed
+      ? 2
+      : target.upstream.startsWith("127.") || target.upstream.startsWith("[::1]")
+        ? 0
+        : 1
+  return out.sort(
+    (a, b) =>
+      scope(a) - scope(b) ||
+      a.container.localeCompare(b.container) ||
+      a.upstream.localeCompare(b.upstream),
+  )
 }

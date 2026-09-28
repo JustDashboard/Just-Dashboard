@@ -1628,41 +1628,40 @@ test("each stream says what nginx does with it, worst first, with where to look"
   await expect(db.getByRole("button", { name: "Re-check" })).toHaveCount(0)
 })
 
-test("the state chips filter the list and keep the one chosen", async ({ page }) => {
+test("the chips filter the list and keep the one chosen", async ({ page }) => {
   await mockProxy(page, { included: true })
   await listing(page, { streams: stateShowcase })
   await page.goto("/proxy/streams")
 
-  // A state no stream is in has no chip.
+  // A chip no stream is under is hidden.
   const strip = page.locator("[data-slot='panel-toolbar']")
   await expect(strip.getByRole("button")).toHaveText([
     "All 5",
-    "Live 1",
-    "Not listening 3",
-    "Shadowed 1",
+    "TCP 5",
+    "Restricted 5",
+    "Not live 4",
   ])
-  await strip.getByRole("button", { name: /^Shadowed/ }).click()
+  await strip.getByRole("button", { name: /^Not live/ }).click()
   const cards = page.getByRole("list", { name: "Streams" }).locator("[data-slot='choice-row']")
-  await expect(cards).toHaveCount(1)
-  await expect(cards.first()).toContainText("zz-copy")
+  await expect(cards).toHaveCount(4)
   await page.reload()
-  await expect(cards).toHaveCount(1)
+  await expect(cards).toHaveCount(4)
 
-  // The copy moved: nothing is shadowed now, and the chosen chip stays to
-  // say why the list is empty, beside All.
+  // Only the live one is left: the chosen chip stays to say why the list is
+  // empty, beside All.
   await page.route("**/api/v1/proxy/streams/", (route) =>
     route.request().method() === "GET"
-      ? json(route, streamStatus({ streams: stateShowcase.slice(0, 3) }))
+      ? json(route, streamStatus({ streams: stateShowcase.slice(0, 1) }))
       : route.fallback(),
   )
   await page.reload()
-  await expect(page.getByText("No stream is shadowed now.")).toBeVisible()
-  await expect(strip.getByRole("button", { name: /^Shadowed/ })).toHaveAttribute(
+  await expect(page.getByText("No stream is under this chip.")).toBeVisible()
+  await expect(strip.getByRole("button", { name: /^Not live/ })).toHaveAttribute(
     "aria-pressed",
     "true",
   )
   await strip.getByRole("button", { name: /^All/ }).click()
-  await expect(cards).toHaveCount(3)
+  await expect(cards).toHaveCount(1)
 })
 
 test("re-check reads the list again, for any account", async ({ page }) => {

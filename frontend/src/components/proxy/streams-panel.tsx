@@ -1,11 +1,13 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
+import { useSearchParams } from "next/navigation"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import {
   Code,
   Connection,
+  Copy,
   Pause,
   Pencil,
   Play,
@@ -16,8 +18,10 @@ import {
   Warning,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
+import { copyText } from "@/lib/clipboard"
 import { ApiError, del, errorMessage, get, post } from "@/lib/api"
 import type {
+  Container,
   PortConflict,
   StreamDeleteResult,
   StreamEntry,
@@ -25,15 +29,16 @@ import type {
   StreamPreview,
   StreamResult,
   StreamSpec,
-  StreamState,
   StreamStatus,
 } from "@/lib/types"
 import {
-  STREAM_STATES,
+  STREAM_FILTERS,
   blocksReloads,
   byUrgency,
   carries,
+  containerTargets,
   disconnectChange,
+  duplicateSpec,
   durationError,
   formatDuration,
   includedPlace,
@@ -46,14 +51,18 @@ import {
   saveBlocked,
   saveOutcome,
   stateCounts,
-  stateLabel,
   stateStatus,
-  stateTitle,
   streamBody,
+  streamDraftFromQuery,
+  streamFilterCounts,
+  streamMatchesFilter,
+  streamMatchesQuery,
   streamOutage,
   streamSpecOf,
   streamsLive,
+  type StreamFilter,
 } from "@/lib/streams"
+import { STREAM_PRESETS, applyPreset } from "@/lib/stream-presets"
 import { duration } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -61,7 +70,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
 import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { ChoiceRow } from "@/components/flow"
-import { Page, PageContext } from "@/components/page"
+import { Page, PageContext, SearchInput } from "@/components/page"
 import { Pane, Panel, PanelBody, PanelHeader, PanelToolbar, Well } from "@/components/panel"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { ProductLogo, ProductLogos, portProduct } from "@/components/product-logo"
@@ -77,6 +86,13 @@ import { DANGEROUS_PORTS } from "@/components/proxy/findings/shared"
 import { ProxyGrid, RoutePath } from "@/components/proxy/route-path"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
 /**
@@ -101,8 +117,14 @@ export function StreamsPage() {
   const { confirm, dialog } = useConfirm()
   const [editing, setEditing] = useSessionState<StreamEntry | null>("proxy.streams.editing", null)
   const [form, setForm] = useSessionState("proxy.streams.form", { open: false, session: 0 })
+  // A new stream's starting fields — a duplicate, or a link's ?new=1 — kept
+  // for the tab like the form's own fields, so a reload opens the same form.
+  const [draft, setDraft] = useSessionState<StreamSpec | null>("proxy.streams.draft", null)
   const [raw, setRaw] = useState<StreamEntry | null>(null)
-  const [chip, setChip] = useSessionState<StreamState | "all">("proxy.streams.state", "all")
+  const [chip, setChip] = useSessionState<StreamFilter>("proxy.streams.filter", "all")
+  const [query, setQuery] = useSessionState("proxy.streams.query", "")
+  const searchRef = useRef<HTMLInputElement>(null)
+  const params = useSearchParams()
   const { data, error, loading, refresh } = usePoll<StreamStatus>(
     (signal) => get("/proxy/streams/", undefined, signal),
     60_000,
@@ -119,8 +141,12 @@ export function StreamsPage() {
   const admin = can("system.admin")
   const noNginx = !proxy.loading && !proxy.hasNginx
 
-  const open = (stream: StreamEntry | null) => {
+  const open = (stream: StreamEntry | null, start: StreamSpec | null = null) => {
+    // A starting point replaces whatever a closed-by-reload new form left
+    // behind, which would otherwise win over it.
+    if (!stream) forgetSessionState("proxy.stream.form.new.")
     setEditing(stream)
+    setDraft(stream ? null : start)
     setForm((f) => ({ open: true, session: f.session + 1 }))
   }
 
@@ -139,14 +165,80 @@ export function StreamsPage() {
   // what nginx reads.
   const listed = useMemo(() => [...(data?.streams ?? []), ...(data?.paused ?? [])], [data])
   const states = useMemo(() => stateCounts(listed), [listed])
+  const chips = useMemo(() => streamFilterCounts(listed), [listed])
   const shown = useMemo(
-    () => [...listed].filter((stream) => chip === "all" || stream.state === chip).sort(byUrgency),
-    [listed, chip],
+    () =>
+      listed
+        .filter((stream) => streamMatchesFilter(stream, chip) && streamMatchesQuery(stream, query))
+        .sort(byUrgency),
+    [listed, chip, query],
   )
 
   const live = data ? streamsLive(data) : false
   const blocked = data ? saveBlocked(data) : null
   const outage = data ? streamOutage(data) : null
+  const canCreate = admin && !noNginx && !blocked
+
+  // ?stream=<name> opens that stream's form, and ?new=1&listen=&upstream=&protocol=
+  // a new one filled in, once the first listing is here to check them
+  // against. The parameters are then taken out of the address, so a reload
+  // or Back does not open the form again over one closed by hand.
+  const linked = useRef(false)
+  useEffect(() => {
+    if (!data || linked.current) return
+    linked.current = true
+    const name = params.get("stream")
+    const start = streamDraftFromQuery(params)
+    if (!name && !start) return
+    if (name) {
+      const stream = listed.find((s) => s.name === name)
+      if (stream && admin && !stream.error && !stream.paused) {
+        open(stream)
+      } else {
+        // Not editable here — paused, unreadable, or a read-only account:
+        // the card is still what the link was about.
+        setChip("all")
+        setQuery(name)
+      }
+    } else if (start && canCreate) {
+      open(null, { ...BLANK, ...start })
+    }
+    const url = new URL(window.location.href)
+    for (const key of ["stream", "new", "listen", "upstream", "protocol", "name"]) {
+      url.searchParams.delete(key)
+    }
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data])
+
+  // "/" searches and "n" starts a new stream, as on the other lists, while
+  // no form or editor is open and nothing is being typed.
+  const formOpen = form.open || raw !== null
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (formOpen || e.metaKey || e.ctrlKey || e.altKey) return
+      const target = e.target as HTMLElement | null
+      if (
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.tagName === "SELECT" ||
+        target?.isContentEditable
+      ) {
+        return
+      }
+      if (e.key === "/") {
+        e.preventDefault()
+        searchRef.current?.focus()
+        searchRef.current?.select()
+      } else if (e.key === "n" && canCreate) {
+        e.preventDefault()
+        open(null)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formOpen, canCreate])
 
   const remove = (stream: StreamEntry) => {
     let result: StreamDeleteResult | undefined
@@ -339,6 +431,37 @@ export function StreamsPage() {
     disabled: Boolean(stream.error),
     run: () => setRaw(stream),
   })
+  // Reading a stream's route is no change, so every account can copy it.
+  const copyVerbs = (stream: StreamEntry): Verb[] =>
+    stream.error
+      ? []
+      : [
+          {
+            key: "copy-listen",
+            label: stream.address && !listenFamily(stream.address) ? "Copy address" : "Copy port",
+            icon: Copy,
+            run: () => void copyText(listenLabel(stream), `${listenLabel(stream)} copied`),
+          },
+          {
+            key: "copy-upstream",
+            label: "Copy upstream",
+            icon: Copy,
+            run: () => void copyText(stream.upstream, `${stream.upstream} copied`),
+          },
+        ]
+  // Only a file the form can say everything about is duplicated: from one
+  // with a deny rule or a second server, the copy would silently lack them.
+  const duplicateVerb = (stream: StreamEntry): Verb[] =>
+    stream.error || stream.unsupported.length > 0 || !canCreate
+      ? []
+      : [
+          {
+            key: "duplicate",
+            label: "Duplicate",
+            icon: Copy,
+            run: () => open(null, duplicateSpec(stream)),
+          },
+        ]
   const deleteVerb = (stream: StreamEntry): Verb => ({
     key: "delete",
     label: "Delete",
@@ -348,7 +471,7 @@ export function StreamsPage() {
   })
   const verbsFor = (stream: StreamEntry): Verb[] =>
     !admin
-      ? recheckVerb(stream)
+      ? [...recheckVerb(stream), ...copyVerbs(stream)]
       : stream.paused
         ? [
             {
@@ -360,6 +483,8 @@ export function StreamsPage() {
               run: () => void resume(stream),
             },
             rawVerb(stream),
+            ...duplicateVerb(stream),
+            ...copyVerbs(stream),
             deleteVerb(stream),
           ]
         : [
@@ -373,6 +498,8 @@ export function StreamsPage() {
             },
             ...recheckVerb(stream),
             rawVerb(stream),
+            ...duplicateVerb(stream),
+            ...copyVerbs(stream),
             // A link is stopped by deleting it: moved into paused/, a relative
             // one would point somewhere else.
             ...(stream.link || stream.error
@@ -482,6 +609,8 @@ export function StreamsPage() {
                       size="sm"
                       variant={live ? "default" : "outline"}
                       onClick={() => open(null)}
+                      aria-keyshortcuts="n"
+                      title="New stream (N)"
                     >
                       <Plus className="size-4" />
                       {live ? "New stream" : "Prepare a stream"}
@@ -495,17 +624,25 @@ export function StreamsPage() {
             )
           }
         />
-        {(listed.length > 1 || chip !== "all") && (
-          // A state no stream is in has no chip, except the one chosen: it
+        {(listed.length > 1 || chip !== "all" || query !== "") && (
+          // A chip no stream is under is hidden, except the one chosen: it
           // stays to say why the list is empty, and All is beside it.
-          <PanelToolbar>
-            <ChipStrip aria-label="Filter streams by state">
-              <FilterChip selected={chip === "all"} onClick={() => setChip("all")}>
-                All <ChipCount>{states.all}</ChipCount>
-              </FilterChip>
-              {STREAM_STATES.filter((state) => states[state] > 0 || chip === state).map((state) => (
-                <FilterChip key={state} selected={chip === state} onClick={() => setChip(state)}>
-                  {stateTitle(state)} <ChipCount>{states[state]}</ChipCount>
+          <PanelToolbar className="justify-between gap-x-4">
+            <SearchInput
+              ref={searchRef}
+              dense
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Name, port, upstream or source"
+              aria-label="Search streams"
+              aria-keyshortcuts="/"
+            />
+            <ChipStrip aria-label="Filter streams">
+              {STREAM_FILTERS.filter(
+                ({ key }) => key === "all" || chips[key] > 0 || chip === key,
+              ).map(({ key, label }) => (
+                <FilterChip key={key} selected={chip === key} onClick={() => setChip(key)}>
+                  {label} <ChipCount>{chips[key]}</ChipCount>
                 </FilterChip>
               ))}
             </ChipStrip>
@@ -519,8 +656,13 @@ export function StreamsPage() {
               description="Point a port on this host at a service somewhere else — a database replica, a bastion, a game server. Anything TCP or UDP."
               className="mt-2"
             />
-          ) : chip !== "all" && shown.length === 0 ? (
-            <EmptyNote className="py-6">No stream is {stateLabel(chip)} now.</EmptyNote>
+          ) : shown.length === 0 ? (
+            <EmptyNote className="py-6">
+              {query.trim()
+                ? `No stream matches “${query.trim()}”`
+                : "No stream is under this chip"}
+              {query.trim() && chip !== "all" ? " under this chip." : "."}
+            </EmptyNote>
           ) : (
             // Every row opens the stream's form, so it is a choice and carries
             // the edge (§16). Each is drawn as the service its port is — a
@@ -592,10 +734,14 @@ export function StreamsPage() {
         key={`${editing?.name ?? "new"}:${form.session}`}
         open={form.open}
         stream={editing}
+        draft={draft}
         status={data}
         onOpenChange={(open) => {
           setForm((f) => ({ ...f, open }))
-          if (!open) forgetSessionState("proxy.stream.form.")
+          if (!open) {
+            forgetSessionState("proxy.stream.form.")
+            setDraft(null)
+          }
         }}
         onSaved={refresh}
         onRaw={(stream) => {
@@ -806,6 +952,7 @@ const BLANK: StreamSpec = {
 function StreamForm({
   open,
   stream,
+  draft,
   status,
   onOpenChange,
   onSaved,
@@ -814,6 +961,8 @@ function StreamForm({
   open: boolean
   /** The stream this form opened on; null for a new one. */
   stream: StreamEntry | null
+  /** A new stream's starting fields: a duplicate's, or a link's. */
+  draft: StreamSpec | null
   /** Whether nginx reads the directory and can: everything this form says about taking effect hangs on it. */
   status: StreamStatus
   onOpenChange: (open: boolean) => void
@@ -824,15 +973,20 @@ function StreamForm({
   const key = `proxy.stream.form.${stream?.name ?? "new"}`
   const [spec, setSpec] = useSessionState<StreamSpec>(
     `${key}.spec`,
-    stream ? streamSpecOf(stream) : BLANK,
+    stream ? streamSpecOf(stream) : (draft ?? BLANK),
   )
-  const [allow, setAllow] = useSessionState(`${key}.allow`, (stream?.allowFrom ?? []).join(", "))
+  const [allow, setAllow] = useSessionState(
+    `${key}.allow`,
+    (stream?.allowFrom ?? draft?.allowFrom ?? []).join(", "),
+  )
   // The timeouts are kept as typed — "10m" — and read on the way out.
-  const [idle, setIdle] = useSessionState(`${key}.idle`, formatDuration(stream?.timeout))
+  const [idle, setIdle] = useSessionState(`${key}.idle`, formatDuration((stream ?? draft)?.timeout))
   const [connect, setConnect] = useSessionState(
     `${key}.connect`,
-    formatDuration(stream?.connectTimeout),
+    formatDuration((stream ?? draft)?.connectTimeout),
   )
+  const [preset, setPreset] = useSessionState(`${key}.preset`, "")
+  const presetPort = STREAM_PRESETS.find((p) => p.id === preset)?.port
   const [preview, setPreview] = useState<StreamPreview | null>(null)
   const [previewError, setPreviewError] = useState("")
   const [refused, setRefused] = useState<{ field: string; message: string } | null>(null)
@@ -863,6 +1017,30 @@ function StreamForm({
   // preview of this very spec only while nothing has been typed since.
   const conflict = preview?.conflict?.port === spec.listen ? preview.conflict : undefined
   const takePort = (port: number) => edit({ listen: port }, "spec.listen")
+  const pickPreset = (id: string) => {
+    const chosen = STREAM_PRESETS.find((p) => p.id === id)
+    if (!chosen) return
+    const next = applyPreset(chosen, spec, allow)
+    setPreset(id)
+    setSpec(next.spec)
+    setAllow(next.allow)
+    if (refused?.field === "spec.listen" || refused?.field === "spec.name") setRefused(null)
+  }
+
+  // Running containers' published ports, as places to forward to. Read once
+  // per opening; without Docker, or without the right to list it, the
+  // picker is simply not there.
+  const [containers, setContainers] = useState<Container[]>([])
+  useEffect(() => {
+    if (!open || readOnly) return
+    const controller = new AbortController()
+    get<Container[]>("/docker/containers/", undefined, controller.signal)
+      .then(setContainers)
+      .catch(() => setContainers([]))
+    return () => controller.abort()
+  }, [open, readOnly])
+  const targets = containerTargets(containers, spec.protocol)
+  const target = targets.find((t) => t.upstream === spec.upstream)
 
   useEffect(() => {
     if (!open || readOnly) return
@@ -1000,6 +1178,32 @@ function StreamForm({
         )}
 
         <fieldset disabled={readOnly} className="min-w-0 space-y-4">
+          {!stream && (
+            <Field
+              label="Start from"
+              hint={
+                STREAM_PRESETS.find((p) => p.id === preset)?.hint ??
+                "Sets the port, protocol, UDP mode and a starting allow list for a common service."
+              }
+            >
+              <Select value={preset} onValueChange={pickPreset}>
+                <SelectTrigger className="w-full" aria-label="Service preset">
+                  <SelectValue placeholder="A common service" />
+                </SelectTrigger>
+                <SelectContent>
+                  {STREAM_PRESETS.map((p) => (
+                    <SelectItem
+                      key={p.id}
+                      value={p.id}
+                      hint={`${protocolLabel(p.protocol)} ${p.listen ?? p.port}${p.restricted ? " · private networks" : ""}`}
+                    >
+                      {p.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
           <Field
             label="Name"
             htmlFor="stream-name"
@@ -1106,15 +1310,45 @@ function StreamForm({
           <Field
             label="Forward to"
             htmlFor="stream-upstream"
-            hint="host:port of the service behind it, or unix:/path for a local socket."
+            hint={
+              target?.exposed
+                ? `${target.container} publishes this port on every address, so it is reachable around the stream, where this allow list does not apply. Publish it on 127.0.0.1 instead.`
+                : "host:port of the service behind it, or unix:/path for a local socket."
+            }
           >
-            <Input
-              id="stream-upstream"
-              value={spec.upstream}
-              onChange={(e) => edit({ upstream: e.target.value })}
-              placeholder="10.0.0.5:5432"
-              className="font-mono text-xs"
-            />
+            <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+              <Input
+                id="stream-upstream"
+                value={spec.upstream}
+                onChange={(e) => edit({ upstream: e.target.value })}
+                placeholder={`10.0.0.5:${presetPort ?? 5432}`}
+                className="min-w-0 flex-1 font-mono text-xs"
+              />
+              {targets.length > 0 && (
+                <Select
+                  value={target?.key ?? ""}
+                  onValueChange={(k) => {
+                    const chosen = targets.find((t) => t.key === k)
+                    if (chosen) edit({ upstream: chosen.upstream })
+                  }}
+                >
+                  <SelectTrigger className="w-full sm:w-44" aria-label="Forward to a container">
+                    <SelectValue placeholder="A container" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {targets.map((t) => (
+                      <SelectItem
+                        key={t.key}
+                        value={t.key}
+                        hint={`${t.upstream}/${t.protocol}${t.exposed ? " · published on every address" : ""}`}
+                      >
+                        {t.container}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
           </Field>
 
           <Field

@@ -277,7 +277,7 @@ describe("foldProxyFindings", () => {
         advice:
           "A stream has no authentication of its own. Restrict the source unless the service behind it authenticates for itself.",
         meta: "stream",
-        href: "/proxy/streams",
+        href: "/proxy/streams?stream=pg",
       },
       {
         id: "ports.dangerous",
@@ -306,7 +306,7 @@ describe("foldProxyFindings", () => {
         advice:
           "A stream has no authentication of its own. Restrict the source unless the service behind it authenticates for itself.",
         meta: "stream",
-        href: "/proxy/streams",
+        href: "/proxy/streams?stream=game",
       },
     ])
   })
