@@ -100,10 +100,12 @@ to the contribution terms above, including the additional licence grant to the p
   release host (labels `self-hosted, linux, x64, just-dashboard`), a systemd service under
   `~/actions-runner` running as `ubuntu`, one job at a time. It used to take every job, one after
   another — about fifty-five minutes a push, on the machine that serves the dashboard — and now takes
-  only this one. Required live fixtures fail CI if skipped or absent. Logs and browser failure traces
-  are retained for 30 days, including failed runs. The live job ends by pruning the BuildKit cache its
-  fixtures fill back to two gigabytes, because the runner shares the host's Docker daemon and a few
-  unpruned runs fill the disk. Workflows from outside contributors wait for approval before they
+  only this one. The framework and artifact command has a 90-minute test timeout, and the live job
+  allows 150 minutes for its remaining fixture commands and evidence cleanup. Required live fixtures
+  fail CI if skipped or absent. Logs and browser failure traces are retained for 30 days, including
+  failed runs. The live job ends by pruning the BuildKit cache its fixtures fill back to two gigabytes,
+  because the runner shares the host's Docker daemon and a few unpruned runs fill the disk. Workflows
+  from outside contributors wait for approval before they
   touch the runner. CI does not replace public TLS, clean-host installation, remote-host,
   architecture or soak acceptance.
 - Changes to deployment builders or artifact handling also run the opt-in Docker boundary on a release
