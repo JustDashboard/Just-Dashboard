@@ -304,6 +304,17 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   (`null` where it cannot be read), apart from the list so `/ports` stays the plain array other pages
   read: the page sets aside loopback sockets inside it on request, and the Connections page links a
   connection's local port to the ports page only outside it, where somebody chose the port.
+  Every exposed socket carries `firewall` (`netsec.JudgeFirewall` in `reach.go`): `allowed`, `restricted`
+  (a rule admits one source ahead of a refusing default), `blocked`, `off`, `docker` (published past ufw's
+  or iptables' input chain; firewalld is not claimed) or `unknown`, with the deciding rule's number and
+  action, read in first-match order and passing over rules whose target the listing cannot say.
+  `GET /ports/firewall` answers `{backend, available, enabled, editable, incoming, orphanRules}`:
+  `netsec.OrphanRules` lists the inbound allows on single ports or lists that no socket and no Docker
+  publication answers (ranges, every-port, profile and interface rules and ufw's IPv6 twins are left out).
+  It reads the firewall afresh each call, uncached, because the page deletes an orphan by number through
+  the existing destructive `DELETE /firewall/rules/{n}` and ufw renumbers on every delete; the page also
+  re-reads `/firewall/` and refuses when the number now names another rule. Any signed-in account may
+  read it, as it may read `/firewall/`.
   `TestListListenersNamesTheDaemonNotInitOnThisHost` checks the owner on the real host and runs only as
   root; it reads `/proc` and changes nothing.
   **Owners.** `ListListeners` also reads, once per holder, its start (`StartedAt`, the processes page's
@@ -458,7 +469,7 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `/proxy/streams`, `/proxy/auth-files` and `/proxy/tools`; `mountCertificateRoutes`
   (`handlers_certificates.go`) and `mountTLSRoutes` (`handlers_tls.go`; the watch list's handlers stay in
   `handlers_domains.go`) inside `/certificates`; and `mountPortRoutes` (`handlers_ports.go`) at `/ports`,
-  which chi serves with and without the trailing slash, with `/ports/meta` beside it.
+  which chi serves with and without the trailing slash, with `/ports/meta` and `/ports/firewall` beside it.
   `TestProxyRoutesKeepTheirPaths` pins every path, method and gate as they stood before the split. The whole group runs `withProxyActor`, which puts the
   signed-in account on the context for the change record below. Background work and state the proxy
   pages keep beyond `proxysvc.Service` go in `api/modules_proxy.go` (`initProxyExtras`, run last in

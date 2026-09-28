@@ -96,6 +96,23 @@ type Listener struct {
 	// anywhere. GET /ports fills both from netsec.GradePort.
 	PastFirewall string `json:"pastFirewall,omitempty"`
 	FirewallRule int    `json:"firewallRule,omitempty"`
+	// Firewall is what the host's firewall does with a connection to an
+	// exposed socket, for every port rather than only the dangerous ones
+	// Level grades. GET /ports fills it from netsec.JudgeFirewall.
+	Firewall *ListenerFirewall `json:"firewall,omitempty"`
+}
+
+// ListenerFirewall is netsec's FirewallVerdict in the listing's terms.
+type ListenerFirewall struct {
+	// Verdict is allowed, restricted, blocked, off, docker or unknown.
+	Verdict string `json:"verdict"`
+	// Rule is the deciding rule's number, 0 where the inbound default
+	// decided.
+	Rule    int    `json:"rule,omitempty"`
+	Action  string `json:"action,omitempty"`
+	From    string `json:"from,omitempty"`
+	Default string `json:"default,omitempty"`
+	Backend string `json:"backend,omitempty"`
 }
 
 // BindScope is where a socket can be reached from, judged from the address it

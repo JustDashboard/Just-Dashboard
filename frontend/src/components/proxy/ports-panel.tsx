@@ -27,10 +27,11 @@ import { errorMessage, get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { plural } from "@/lib/format"
 import { downloadText } from "@/lib/metrics-export"
-import type { Listener, PortsMeta } from "@/lib/types"
+import type { Listener, PortsFirewall, PortsMeta } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { useMediaQuery } from "@/hooks/use-mobile"
+import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useNow } from "@/components/deploy/vocabulary"
 import { InfoTip } from "@/components/form"
@@ -72,6 +73,7 @@ import {
   type OwnerLink,
   type Socket,
 } from "@/components/proxy/ports"
+import { FirewallVerdict, firewallHandoffs, OrphanRules } from "@/components/proxy/ports-firewall"
 import {
   DEFAULT_SORT,
   facetCounts,
@@ -208,6 +210,13 @@ function PortsView() {
     { enabled: !paused },
   )
   const meta = usePoll((signal) => get<PortsMeta>("/ports/meta", undefined, signal), 0)
+  const firewall = usePoll(
+    (signal) => get<PortsFirewall>("/ports/firewall", undefined, signal),
+    POLL_MS,
+    [],
+    { enabled: !paused },
+  )
+  const admin = useAuth().can("system.admin")
   const range = meta.data?.ephemeralRange ?? null
 
   useEffect(() => {
@@ -333,6 +342,7 @@ function PortsView() {
         run: () => router.push("/security/firewall"),
       })
     }
+    if (admin) verbs.push(...firewallHandoffs(l, firewall.data, (href) => router.push(href)))
     return verbs
   }
   // A row's menu is named by the endpoint it acts on; two programs can share
@@ -601,6 +611,7 @@ function PortsView() {
                     onSort={chooseSort}
                     className="w-56"
                   />
+                  <TableHead className="w-60">Firewall</TableHead>
                   <TableHead className="w-28">
                     <span className="sr-only">Actions</span>
                   </TableHead>
@@ -638,6 +649,7 @@ function PortsView() {
                         <GroupReach group={entry.group} />
                       </TableCell>
                       <TableCell />
+                      <TableCell />
                     </TableRow>
                   ) : (
                     <TableRow key={socketKey(entry.socket)} className="group">
@@ -663,6 +675,9 @@ function PortsView() {
                       </TableCell>
                       <TableCell>
                         <ReachStatus socket={entry.socket} />
+                      </TableCell>
+                      <TableCell>
+                        <FirewallVerdict socket={entry.socket} />
                       </TableCell>
                       <TableCell>
                         <VerbActions
@@ -754,6 +769,11 @@ function PortsView() {
                       <div className="mt-1.5">
                         <ReachStatus socket={entry.socket} />
                       </div>
+                      {entry.socket.firewall && (
+                        <div className="mt-1.5">
+                          <FirewallVerdict socket={entry.socket} />
+                        </div>
+                      )}
                     </div>
                     <VerbActions
                       className="shrink-0"
@@ -782,6 +802,8 @@ function PortsView() {
           )}
         </PanelFooter>
       </Panel>
+
+      <OrphanRules firewall={firewall.data} admin={admin} onChange={firewall.refresh} />
     </Page>
   )
 }

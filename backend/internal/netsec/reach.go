@@ -2,6 +2,7 @@ package netsec
 
 import (
 	"net"
+	"strconv"
 	"strings"
 )
 
@@ -236,4 +237,176 @@ func (r bindReach) advice(danger, address, port string) string {
 		return danger + " Bind it to 127.0.0.1 instead — for a container, publish it as 127.0.0.1:" + port + ": rather than " + net.JoinHostPort(address, port) + ":."
 	}
 	return danger + " Anything that can reach " + address + " can connect to it: " + r.who + ". Bind it to 127.0.0.1 unless something there needs it."
+}
+
+// Verdict is what a firewall does with a connection to one socket.
+type Verdict string
+
+const (
+	// VerdictAllowed is a rule, or an inbound default of allow, letting
+	// anyone through.
+	VerdictAllowed Verdict = "allowed"
+	// VerdictRestricted is a rule admitting some sources ahead of an inbound
+	// default that refuses the rest.
+	VerdictRestricted Verdict = "restricted"
+	// VerdictBlocked is a rule, or the inbound default, refusing everyone.
+	VerdictBlocked Verdict = "blocked"
+	// VerdictOff is a firewall that is installed and not enforcing.
+	VerdictOff Verdict = "off"
+	// VerdictDocker is a port Docker publishes with NAT rules that forward
+	// the traffic before ufw's or iptables' input chain is reached.
+	VerdictDocker Verdict = "docker"
+	// VerdictUnknown is no firewall this dashboard can read.
+	VerdictUnknown Verdict = "unknown"
+)
+
+// FirewallVerdict is the firewall's answer for one socket, and which rule
+// gave it. Rule is 0 where no rule matched and the inbound default decided.
+type FirewallVerdict struct {
+	Verdict Verdict
+	Rule    int
+	// Action is the deciding rule's, as the firewall prints it: ALLOW,
+	// LIMIT, DENY.
+	Action string
+	// From is the source a restricting rule admits.
+	From    string
+	Default string
+	Backend Backend
+}
+
+// JudgeFirewall reads the rules in the order the firewall does, stopping at
+// the first rule from anywhere that concerns the socket's port. A rule
+// admitting one source is remembered and the search goes on: the rest of the
+// internet still meets whatever comes after it. A rule limited to an
+// interface, and an application profile, cannot be read from the listing and
+// are passed over, so the verdict is the default's where one of those is what
+// actually decides.
+func JudgeFirewall(l ExposedPort, network HostNetwork, firewall *FirewallStatus) FirewallVerdict {
+	if firewall == nil || !firewall.Available || firewall.Error != "" {
+		return FirewallVerdict{Verdict: VerdictUnknown}
+	}
+	v := FirewallVerdict{Backend: firewall.Backend, Default: firewall.Policy.Incoming}
+	if !firewall.Enabled {
+		v.Verdict = VerdictOff
+		return v
+	}
+	// firewalld puts Docker in a zone of its own and does govern it, so the
+	// bypass is only claimed where it holds.
+	if (l.Process == "docker-proxy" || l.Published) &&
+		(firewall.Backend == BackendUFW || firewall.Backend == BackendIPTables) {
+		v.Verdict = VerdictDocker
+		return v
+	}
+	port := strconv.FormatUint(uint64(l.Port), 10)
+	// ufw lists every rule again for IPv6; the twins say nothing new except
+	// to a socket on one IPv6 address.
+	v6Only := strings.Contains(l.Address, ":") && !isWildcardBind(l.Address)
+	var restricting *Rule
+	for i := range firewall.Rules {
+		r := firewall.Rules[i]
+		if r.IPv6 != v6Only && firewall.Backend == BackendUFW {
+			continue
+		}
+		if !inboundRule(r, firewall.Backend) || !protocolCovers(r.Protocol, l.Protocol) {
+			continue
+		}
+		destination, ports, ok := ruleTarget(r, firewall.Backend)
+		if !ok || ports != "" && !portInSpec(port, ports) {
+			continue
+		}
+		if destination != "" && !destinationHolds(destination, l.Address) &&
+			!(isWildcardBind(l.Address) && network.internetReaches(destination)) {
+			continue
+		}
+		switch strings.ToUpper(r.Action) {
+		case "ALLOW", "LIMIT", "ACCEPT":
+			if !isAnywhere(r.From) {
+				if restricting == nil {
+					restricting = &firewall.Rules[i]
+				}
+				continue
+			}
+			// A source admitted first and everyone after it is everyone.
+			v.Verdict, v.Rule, v.Action = VerdictAllowed, r.Number, r.Action
+			return v
+		case "DENY", "REJECT", "DROP":
+			// iptables' listing leaves out the interface a rule is limited
+			// to, so its refusals may be about another link entirely.
+			if !isAnywhere(r.From) || firewall.Backend == BackendIPTables {
+				continue
+			}
+			if restricting != nil {
+				v.Verdict, v.Rule, v.Action, v.From = VerdictRestricted, restricting.Number, restricting.Action, restricting.From
+				return v
+			}
+			v.Verdict, v.Rule, v.Action = VerdictBlocked, r.Number, r.Action
+			return v
+		}
+	}
+	switch {
+	case firewall.Policy.Incoming == "":
+		v.Verdict = VerdictUnknown
+	case !refuses(firewall.Policy.Incoming):
+		v.Verdict = VerdictAllowed
+	case restricting != nil:
+		v.Verdict, v.Rule, v.Action, v.From = VerdictRestricted, restricting.Number, restricting.Action, restricting.From
+	default:
+		v.Verdict = VerdictBlocked
+	}
+	return v
+}
+
+func refuses(policy string) bool {
+	p := strings.ToLower(policy)
+	return strings.HasPrefix(p, "deny") || strings.HasPrefix(p, "reject") || strings.HasPrefix(p, "drop")
+}
+
+func isWildcardBind(address string) bool {
+	ip := net.ParseIP(address)
+	return address == "" || address == "*" || ip != nil && ip.IsUnspecified()
+}
+
+// OpenPort is a port something answers on: a listening socket, or a port
+// Docker publishes through NAT alone.
+type OpenPort struct {
+	Port     uint32
+	Protocol string
+}
+
+// OrphanRules are the inbound rules admitting a port nothing answers on: a
+// hole left behind by a service that moved or was removed, which opens the
+// port to whatever next binds it. A range is left out — mosh and passive FTP
+// listen inside theirs only while a session is up — and so is a rule on every
+// port, a profile or interface rule whose ports the listing does not say, and
+// ufw's IPv6 twin, which is deleted with its IPv4 rule.
+func OrphanRules(firewall *FirewallStatus, open []OpenPort) []Rule {
+	out := []Rule{}
+	if firewall == nil || !firewall.Available || firewall.Error != "" {
+		return out
+	}
+	for _, r := range firewall.Rules {
+		if r.IPv6 || !inboundRule(r, firewall.Backend) {
+			continue
+		}
+		switch strings.ToUpper(r.Action) {
+		case "ALLOW", "LIMIT", "ACCEPT":
+		default:
+			continue
+		}
+		_, ports, ok := ruleTarget(r, firewall.Backend)
+		if !ok || ports == "" || strings.ContainsAny(ports, ":-") {
+			continue
+		}
+		answered := false
+		for _, p := range open {
+			if protocolCovers(r.Protocol, p.Protocol) && portInSpec(strconv.FormatUint(uint64(p.Port), 10), ports) {
+				answered = true
+				break
+			}
+		}
+		if !answered {
+			out = append(out, r)
+		}
+	}
+	return out
 }

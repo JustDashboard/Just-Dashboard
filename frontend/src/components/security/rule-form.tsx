@@ -50,16 +50,26 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 export function AddRuleDialog({
   onDone,
   hasProfiles = true,
+  arrival: given,
 }: {
   onDone: () => void
   hasProfiles?: boolean
+  /** A rule handed over by a link (`?add=1&port=…`): the dialog opens on it, unsent. */
+  arrival?: RuleArrival
 }) {
-  const [open, setOpen] = useSessionState("security.firewall.adding", false)
+  // Used for the one opening the link asked for; the next "Add rule" is blank.
+  const [arrival, setArrival] = useState(given)
+  const [open, setOpen] = useSessionState(
+    "security.firewall.adding",
+    false,
+    arrival ? true : undefined,
+  )
   // Forgotten on close — a second opening never has the previous rule still
   // in the boxes, since an almost-right rule is worse than a blank one — and
   // kept while open, so a look at the ports page comes back to the same rule.
   const close = () => {
     setOpen(false)
+    setArrival(undefined)
     forgetSessionState("security.firewall.rule.")
   }
   return (
@@ -74,6 +84,7 @@ export function AddRuleDialog({
           open={open}
           onOpenChange={(next) => !next && close()}
           hasProfiles={hasProfiles}
+          arrival={arrival}
           onDone={() => {
             close()
             onDone()
@@ -99,12 +110,15 @@ export function EditRuleDialog({
   onOpenChange,
   onDone,
   hasProfiles = true,
+  arrival,
 }: {
   rule: FirewallRule
   open: boolean
   onOpenChange: (open: boolean) => void
   onDone: () => void
   hasProfiles?: boolean
+  /** The change a link (`?edit=3&source=tailnet`) asked for, laid over the rule. */
+  arrival?: RuleArrival
 }) {
   if (!open) return null
   return (
@@ -114,12 +128,78 @@ export function EditRuleDialog({
       onOpenChange={onOpenChange}
       hasProfiles={hasProfiles}
       edit={rule}
+      arrival={arrival}
       onDone={() => {
         onOpenChange(false)
         onDone()
       }}
     />
   )
+}
+
+/**
+ * Fields a link fills in, as the form holds them. Each one given replaces
+ * what the form would have opened on; nothing is submitted until the
+ * operator presses the button.
+ */
+export type RuleArrival = Partial<{
+  action: string
+  port: string
+  protocol: string
+  sourceKind: string
+  from: string
+  comment: string
+  position: string
+}>
+
+/** What a link into the firewall page asks its dialogs to open on. */
+export type RuleHandoff = {
+  add?: RuleArrival
+  /** Rule `number`, opened only while it is still the rule for `port`. */
+  edit?: { number: number; port: string; fields: RuleArrival }
+}
+
+const HANDOFF_ACTIONS = ["allow", "limit", "deny", "reject"]
+
+/**
+ * Reads `?add=1&port=&proto=&action=&source=&comment=&position=` or
+ * `?edit=N&port=&action=&source=`. A value the form could not hold is
+ * dropped rather than passed on, so a bad link opens a blank field, never a
+ * rule it did not mean. `source` is `tailnet`, `anywhere` or an address.
+ */
+export function handoffFromParams(params: URLSearchParams): RuleHandoff | undefined {
+  const port = params.get("port") ?? ""
+  if (!/^\d{1,5}$/.test(port)) return undefined
+  const fields: RuleArrival = {}
+  const action = params.get("action")
+  if (action && HANDOFF_ACTIONS.includes(action)) fields.action = action
+  const source = params.get("source")
+  if (source === "tailnet" || source === "anywhere") {
+    fields.sourceKind = source
+    fields.from = ""
+  } else if (source && /^[0-9a-fA-F.:/]+$/.test(source)) {
+    fields.sourceKind = "custom"
+    fields.from = source
+  }
+  const edit = params.get("edit")
+  if (edit && /^\d{1,4}$/.test(edit)) return { edit: { number: Number(edit), port, fields } }
+  if (params.get("add") !== "1") return undefined
+  // Every field is given, so a draft left open in this tab cannot lend the
+  // new rule a source or a position the link never asked for.
+  const proto = params.get("proto")
+  const position = params.get("position") ?? ""
+  return {
+    add: {
+      action: "allow",
+      sourceKind: "anywhere",
+      from: "",
+      ...fields,
+      port,
+      protocol: proto === "udp" ? "udp" : "tcp",
+      comment: (params.get("comment") ?? "").slice(0, 64),
+      position: /^\d{1,4}$/.test(position) ? position : "",
+    },
+  }
 }
 
 const SOURCE_PRESETS = [
@@ -169,30 +249,41 @@ function RuleForm({
   onDone,
   hasProfiles,
   edit,
+  arrival,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   onDone: () => void
   hasProfiles: boolean
   edit?: FirewallRule
+  arrival?: RuleArrival
 }) {
   const initial = useMemo(() => fieldsOf(edit), [edit])
   // Kept for the tab while the dialog is open; whoever opened it forgets it on close.
   const draft = `security.firewall.rule.${edit?.number ?? "new"}`
-  const [action, setAction] = useSessionState(`${draft}.action`, initial.action)
+  const [action, setAction] = useSessionState(`${draft}.action`, initial.action, arrival?.action)
   const [direction, setDirection] = useSessionState(`${draft}.direction`, initial.direction)
-  const [position, setPosition] = useSessionState(`${draft}.position`, "")
+  const [position, setPosition] = useSessionState(`${draft}.position`, "", arrival?.position)
   const [mode, setMode] = useSessionState<"service" | "profile">(`${draft}.mode`, initial.mode)
   const [preset, setPreset] = useSessionState(`${draft}.preset`, "")
   const [profile, setProfile] = useSessionState(`${draft}.profile`, initial.profile)
-  const [port, setPort] = useSessionState(`${draft}.port`, initial.port)
-  const [protocol, setProtocol] = useSessionState(`${draft}.protocol`, initial.protocol)
+  const [port, setPort] = useSessionState(`${draft}.port`, initial.port, arrival?.port)
+  const [protocol, setProtocol] = useSessionState(
+    `${draft}.protocol`,
+    initial.protocol,
+    arrival?.protocol,
+  )
   const [sourceKind, setSourceKind] = useSessionState<string>(
     `${draft}.sourceKind`,
     initial.sourceKind,
+    arrival?.sourceKind,
   )
-  const [from, setFrom] = useSessionState(`${draft}.from`, initial.from)
-  const [comment, setComment] = useSessionState(`${draft}.comment`, initial.comment)
+  const [from, setFrom] = useSessionState(`${draft}.from`, initial.from, arrival?.from)
+  const [comment, setComment] = useSessionState(
+    `${draft}.comment`,
+    initial.comment,
+    arrival?.comment,
+  )
   const [busy, setBusy] = useState(false)
 
   const services = usePoll<ServicePreset[]>(

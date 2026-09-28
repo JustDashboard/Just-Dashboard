@@ -28,6 +28,66 @@ const portListTimeout = 10 * time.Second
 func (s *Server) mountPortRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/", s.handle(s.handlePortList))
 	r.Method(http.MethodGet, "/meta", s.handle(s.handlePortsMeta))
+	r.Method(http.MethodGet, "/firewall", s.handle(s.handlePortsFirewall))
+}
+
+// portsFirewall is the firewall as the ports page needs it: whether rules
+// can be handed off to the firewall page, and the rules nothing answers.
+// Every signed-in account may read the firewall's rules at /firewall, so
+// this says nothing a read-only account could not already see.
+type portsFirewall struct {
+	Backend   string `json:"backend"`
+	Available bool   `json:"available"`
+	Enabled   bool   `json:"enabled"`
+	Editable  bool   `json:"editable"`
+	Incoming  string `json:"incoming,omitempty"`
+	// OrphanRules are the inbound rules admitting a port nothing listens
+	// on and Docker does not publish.
+	OrphanRules []netsec.Rule `json:"orphanRules"`
+}
+
+// handlePortsFirewall reads the firewall afresh on every call rather than
+// from a cache: the page deletes an orphan rule by its number, and ufw
+// renumbers every rule after one it deletes, so a listing even seconds old
+// can name a different rule.
+func (s *Server) handlePortsFirewall(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, portListTimeout)
+	defer cancel()
+	status, err := s.modules.netsec.Status(ctx)
+	if err != nil {
+		status = nil
+	}
+	out := portsFirewall{OrphanRules: []netsec.Rule{}}
+	if status == nil {
+		httpx.JSON(w, http.StatusOK, out)
+		return nil
+	}
+	out.Backend, out.Available, out.Enabled = string(status.Backend), status.Available, status.Enabled
+	out.Editable, out.Incoming = status.Capabilities.Editable, status.Policy.Incoming
+	if !status.Available || status.Error != "" {
+		httpx.JSON(w, http.StatusOK, out)
+		return nil
+	}
+	owners := make(chan proxysvc.OwnerInput, 1)
+	go func() { owners <- s.ownerInput(ctx, false) }()
+	listeners, err := proxysvc.ListListeners(ctx)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return httpx.Err(http.StatusGatewayTimeout, "timeout",
+			"Listing the host's sockets took longer than 10 seconds.").Retry()
+	}
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	// A port Docker publishes through NAT alone has no socket; attributing
+	// owners is what adds it, so its rule is not called an orphan.
+	listeners = proxysvc.AttributeOwners(listeners, <-owners)
+	open := make([]netsec.OpenPort, 0, len(listeners))
+	for _, l := range listeners {
+		open = append(open, netsec.OpenPort{Port: l.Port, Protocol: l.Protocol})
+	}
+	out.OrphanRules = netsec.OrphanRules(status, open)
+	httpx.JSON(w, http.StatusOK, out)
+	return nil
 }
 
 // portsMeta is what the ports page reads besides the sockets, apart from the
@@ -228,6 +288,13 @@ func placeListeners(listeners []proxysvc.Listener, network netsec.HostNetwork, f
 		l.InboundDefault = grade.InboundDefault
 		l.PastFirewall = string(grade.PastFirewall)
 		l.FirewallRule = grade.FirewallRule
+		if l.Exposed {
+			v := netsec.JudgeFirewall(exposedPort(*l), network, firewall)
+			l.Firewall = &proxysvc.ListenerFirewall{
+				Verdict: string(v.Verdict), Rule: v.Rule, Action: v.Action, From: v.From,
+				Default: v.Default, Backend: string(v.Backend),
+			}
+		}
 	}
 }
 

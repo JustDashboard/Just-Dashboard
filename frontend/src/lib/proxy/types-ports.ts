@@ -1,3 +1,5 @@
+import type { FirewallRule } from "../types"
+
 /**
  * How far a socket's bind reaches, from its address alone: loopback is this
  * machine only, interface is one specific address (a tailnet, a LAN, a
@@ -106,6 +108,36 @@ export type Listener = {
    */
   pastFirewall?: "docker" | "rule"
   firewallRule?: number
+  /** What the firewall does with a connection to an exposed socket; absent on loopback. */
+  firewall?: ListenerFirewall
+}
+
+/**
+ * The firewall's answer for one socket. `allowed` and `blocked` name the rule
+ * that decided, or none where the inbound default did; `restricted` is a rule
+ * admitting `from` ahead of a default that refuses everyone else; `docker` is
+ * a port Docker publishes ahead of ufw's or iptables' input chain.
+ */
+export type ListenerFirewall = {
+  verdict: "allowed" | "restricted" | "blocked" | "off" | "docker" | "unknown"
+  rule?: number
+  /** The deciding rule's action as the firewall prints it: ALLOW, LIMIT, DENY. */
+  action?: string
+  from?: string
+  /** The inbound default ("deny"). */
+  default?: string
+  backend?: "ufw" | "firewalld" | "iptables"
+}
+
+/** GET /ports/firewall: the firewall as the ports page hands rules off to it. */
+export type PortsFirewall = {
+  backend: "" | "ufw" | "firewalld" | "iptables"
+  available: boolean
+  enabled: boolean
+  editable: boolean
+  incoming?: string
+  /** Inbound rules admitting a port nothing listens on and Docker does not publish. */
+  orphanRules: FirewallRule[]
 }
 
 /** A span of port numbers, both ends included. */
