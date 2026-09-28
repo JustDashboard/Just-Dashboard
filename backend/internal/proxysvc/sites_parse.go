@@ -50,6 +50,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	headers := &headersParse{}
 	kinds := &kindParse{}
 	access := &accessParse{}
+	sso := &forwardAuthParse{}
 	// The catch-all's retry settings, which belong to the pool it forwards to.
 	var rootRetryOn []string
 	rootTries := 0
@@ -145,6 +146,11 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 				current = nil
 				return
 			}
+			// The check's location is the renderer's too.
+			if location == forwardAuthURI && m[1] == "=" {
+				current = nil
+				return
+			}
 			// A page's location is the renderer's, and says the page is on.
 			if page, ok := pageFromURI(location); ok {
 				if page == "maintenance" {
@@ -201,6 +207,9 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			case directive == "add_header" && strings.HasPrefix(value, "Retry-After "):
 				maintenance().RetryAfter = parseSeconds(strings.Fields(value)[1])
 			}
+			return
+		}
+		if sso.directive(spec, directive, value, location, current) {
 			return
 		}
 		if cache.directive(directive, value, location) {
@@ -439,6 +448,9 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			kinds.skipServer = true
 			continue
 		}
+		if sso.comment(raw) {
+			continue
+		}
 		if strings.HasPrefix(raw, stripMarker) {
 			if current != nil {
 				current.StripPrefix = true
@@ -504,6 +516,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	realIP.settle(spec)
 	headers.settle(spec)
 	access.settle(spec)
+	sso.settle(spec)
 	// Extra locations that ended up with neither an upstream nor a root are
 	// something this form cannot express; dropping them is better than
 	// offering to save a location that proxies nowhere.
