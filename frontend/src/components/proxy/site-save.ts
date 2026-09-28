@@ -31,7 +31,15 @@ export function saveRequest(
     reload,
     enable,
     allowConflict,
-  }: { existing: boolean; reload: boolean; enable?: boolean; allowConflict?: boolean },
+    baseDigest,
+  }: {
+    existing: boolean
+    reload: boolean
+    enable?: boolean
+    allowConflict?: boolean
+    /** The version of the file the form read: the save is refused if it changed since. */
+    baseDigest?: string
+  },
 ) {
   return {
     spec: sendableSpec(spec),
@@ -39,6 +47,7 @@ export function saveRequest(
     reload,
     overwrite: existing,
     ...(allowConflict ? { allowConflict: true } : {}),
+    ...(existing && baseDigest ? { baseDigest } : {}),
   }
 }
 

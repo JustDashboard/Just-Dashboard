@@ -425,6 +425,52 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `.bak` alone. A save that is refused puts back the `.bak` that was there before, or none
   (`TestSaveSiteKeepsAHandWrittenFileAsBak`).
 
+  **What a save drops is listed before it happens** (`site_drift.go`). A save writes the form's reading
+  of the file, so a statement the form has no field for — a `proxy_set_header` added by hand, a second
+  `listen`, a location it cannot express, certbot's `include` — went with no word, from a managed file as
+  much as from a hand-written one. `DroppedLines` parses the file and what saving a spec writes with
+  `ParseNginxFile` and compares them statement by statement where they sit: each server block of the
+  file against the written block it shares a name and the most statements with (several may share one:
+  a site written as a `:80` block and a `:443` block is one block listening on both in the form, and
+  loses nothing), each block against its twin by name and arguments, and the statements in it as a
+  multiset. Spacing, quoting and comments do not count, and the spellings the form writes differently
+  with the same effect are the same statement: `listen 443 ssl http2` (it writes `http2 on;`),
+  `listen *:80`, a `proxy_pass` whose path is the location's own (see the renderer below), a folder
+  `alias` and its location without their trailing slashes, and a `server_name` split over several lines.
+  What is left is every statement not written back, with its line and its text — its own lines of the
+  file, comment and all, or the statement written out on one line where it shares one — and where it
+  sits. `SiteDrift` is the form's view of that: the statements the form's own reading of the file leaves
+  out, less those the current spec writes back, so an edit made in the form is a change rather than a
+  dropped line and a line moved into the extra configuration stops being one. `GET /proxy/sites/{name}`
+  carries it for the file as read (`dropped`, `lossless`), and every preview for the spec it is given
+  when that site's file exists; both are left out when the form cannot write the file at all, which its
+  preview then says.
+
+  A dropped line is **movable** when it sits directly in the server block the form writes and the extra
+  configuration, which goes there, keeps it as it is. Not one inside a location (a `proxy_set_header` in
+  the server block is not inherited by a location that sets its own), in another server block or outside
+  them all, and not one of a name the form writes there itself: nginx refuses most of those twice
+  (`http2`, `ssl_session_timeout`, `ssl_session_tickets`, `ssl_prefer_server_ciphers`, `gzip`,
+  `gzip_vary`, `client_max_body_size`, `root` and the `auth_basic` pair, checked against nginx 1.26.3 as
+  `refusedTwice`) and applies the rest twice — a second access log, a second `X-Frame-Options`.
+  `add_header` is compared by header and `listen` by address. An `include` is read for the names of the
+  directives it sets (`includedNames`: relative to the nginx directory, a glob without its dotfiles,
+  regular files under 1 MiB, and only the names leave, only as far as the reason), since certbot's
+  `options-ssl-nginx.conf` sets `ssl_session_timeout`, which the form writes, and moving it fails
+  `nginx -t` with "is duplicate" (`TestLiveAnIncludeThatRepeatsTheFormsTLSStaysOut`); its `reason` says
+  so. The same statement movable from two places moves once. `TestLiveMovedLinesKeepWhatTheyDid` has a
+  real nginx answer on a second port with a header added by hand, moves both into the extra
+  configuration, saves and reloads, and checks both still hold — and that the `proxy_set_header` it could
+  not move is no longer sent, as it said.
+
+  **A draft is of one version of the file.** `GET /proxy/sites/{name}` and every preview of an existing
+  file carry `digest`, the file's sha256 (`ContentDigest`). The form keeps it with the draft, and the
+  save sends it back as `baseDigest`: `SaveSite` refuses a file that is no longer that version, or is
+  gone, with 409 `site_changed` (audited as `changed_on_disk`) before it writes anything, so another
+  tab's edit or the raw editor's is never silently written over
+  (`TestSaveRefusesAFileThatChangedSinceTheFormReadIt`, `TestSiteSpecSaysWhatASaveDropsAndWhichVersionItRead`).
+  Deployment cutovers send none and are not checked.
+
   **`POST /proxy/sites/preview` also says where the file goes**: `path` is what a save writes
   (`SiteFile`, through the same `siteTarget` the save uses: `sites-available/<name>`, or
   `conf.d/<name>.conf` on a conf.d host) and `exists` whether a file is there. Both are left out when the
@@ -449,7 +495,20 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   failed every later `nginx -t` and reload (`TestDeleteSiteRemovesALinkOfAnotherName`, and the real
   nginx run in `TestLiveDeletingASiteLinkedUnderAnotherNameLeavesNginxValid`).
 
-  The form's side of this lives in pure modules beside `site-form.tsx`, tested with bun:
+  The form's side of this lives in pure modules beside `site-form.tsx`, tested with bun.
+  `site-draft.ts` holds the draft's rules. A draft survives a trip to another page while its file is
+  still the version it started from — the server's copy used to replace it on every open — gives way to
+  the file when nothing in it was changed, and otherwise the form asks, with **Reload from disk** or
+  **Keep my draft**, as it does after a save refused with `site_changed` (saving waits for the answer).
+  Unsaved changes are the draft against the spec it started from, compared as sent: they draw an
+  "unsaved" tag, and closing the sheet with them — Escape, the overlay, the close button, one funnel —
+  asks **Discard changes?**; a trip to another page keeps them instead. Ctrl/Cmd+S runs the footer's own
+  command. The dropped lines are drawn as a diff at their own line numbers, with the reason beneath for
+  a line of the server block that cannot move, **Move N lines into Extra configuration** and **Edit the
+  raw file** (the config editor over the form, at the first dropped line; saving there reads the file
+  again). A hand-written file the form reads whole says so and that it is kept as `<file>.bak`. A
+  **Changes** tab diffs the file on disk against the preview, which is what the save writes over it.
+
   `site-identity.ts` works a new site's file name and certificate paths out of its whole first domain on
   every change, for each part not typed by hand (keeping the first value named a site typed as
   app.example.com "a", after one keystroke), and checks a typed name against the server's rule; the form
@@ -535,7 +594,12 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   parameter — where `4430` and `127.0.0.1:8443` used to count as TLS, and the pre-1.25
   `listen 443 ssl http2` reads back as HTTP/2 on. A file with no `access_log` directive is logging
   to nginx's default, so an unmanaged file round-trips with logging on rather than the first save
-  writing `access_log off;`.
+  writing `access_log off;`. Statements sharing a line without a brace are split too — `gzip on;
+  gzip_vary on;` read whole was gzip set to "on; gzip_vary on", which is not on, and the next save wrote
+  `gzip off;` — and a comment after a statement is cut off where nginx would read one (outside quotes,
+  where a word could start): certbot ends every line it adds with `# managed by Certbot`, which made
+  the certificate path `…/fullchain.pem; # managed by Certbot`, so the form could not save a site
+  certbot had touched.
 - **`SetVHostEnabled` replaces a stale link.** Enabling a site whose `sites-enabled` entry already
   existed but pointed elsewhere returned success and changed nothing; it goes through `linkEnabled`
   now, so the switch saying on means nginx reads the file. `parseCaddyfile` tracks brace depth so

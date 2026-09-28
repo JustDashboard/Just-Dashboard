@@ -86,9 +86,27 @@ export function sitePreview(
 /** The site form's own endpoints: reading a site back, its preview, and saving it. */
 export const routes: ProxyRoutes = {
   "/proxy/sites/app.example.com": (route) =>
-    json(route, { spec: siteSpec(), managed: true, content: "", warnings: [], enabled: true }),
+    json(route, {
+      spec: siteSpec(),
+      managed: true,
+      content: "",
+      warnings: [],
+      enabled: true,
+      digest: "app-1",
+      lossless: true,
+      dropped: [],
+    }),
   "/proxy/sites/legacy.example.com": (route) =>
-    json(route, { spec: legacySpec, managed: true, content: "", warnings: [], enabled: true }),
+    json(route, {
+      spec: legacySpec,
+      managed: true,
+      content: "",
+      warnings: [],
+      enabled: true,
+      digest: "legacy-1",
+      lossless: true,
+      dropped: [],
+    }),
   "/proxy/sites/preview": (route) => json(route, sitePreview(route.request().postDataJSON().spec)),
   "/proxy/sites/": (route) => {
     const body = route.request().postDataJSON()

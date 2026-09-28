@@ -5,6 +5,7 @@ import {
   runningContainers,
   sitePreview,
   siteResult,
+  siteSpec,
 } from "./fixtures/proxy/siteform"
 import { json, mockProxy, ports, user, vhosts } from "./proxy-fixtures"
 
@@ -30,6 +31,16 @@ async function capture(
     await answer(route, body, bodies.length - 1)
   })
   return bodies
+}
+
+/** Closes a form with edits in it, answering the question it asks first. */
+async function discard(page: Page) {
+  await page.keyboard.press("Escape")
+  await page
+    .getByRole("dialog", { name: "Discard changes?" })
+    .getByRole("button", { name: "Discard" })
+    .click()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
 }
 
 async function openNewSite(page: Page) {
@@ -740,7 +751,7 @@ test("the new-site form opens with the keyboard in Domains, above the presets", 
   expect(name!.y).toBeLessThan(firstPreset!.y)
 
   // On a phone the one field every site needs is in view when the form opens.
-  await page.keyboard.press("Escape")
+  await discard(page)
   await page.setViewportSize({ width: 390, height: 844 })
   const phone = await openNewSite(page)
   await expect(phone.getByLabel("Domains")).toBeFocused()
@@ -786,7 +797,7 @@ test("a new site's default upstream is not warned about until somebody sets it",
     ),
   ).toBeVisible()
   await expect(sheet.getByRole("button", { name: "Save and reload" })).toBeEnabled()
-  await page.keyboard.press("Escape")
+  await discard(page)
 
   // So is typing it, and so is a link that names it.
   const typed = await openNewSite(page)
@@ -795,7 +806,7 @@ test("a new site's default upstream is not warned about until somebody sets it",
   await typed.getByLabel("Send it to").fill("")
   await typed.getByLabel("Send it to").pressSequentially("http://127.0.0.1:3000")
   await expect(typed.getByText(/Nothing is listening on 127\.0\.0\.1:3000/)).toBeVisible()
-  await page.keyboard.press("Escape")
+  await discard(page)
 
   await page.goto(
     "/proxy/sites?new=1&upstream=http%3A%2F%2F127.0.0.1%3A3000&domain=linked.example.com",
@@ -1045,4 +1056,323 @@ test("the new-site form and its picker fit a phone", async ({ page }) => {
   await expect(popover).toBeHidden()
   // Escape closed the list, not the form.
   await expect(sheet).toBeVisible()
+})
+
+/**
+ * app.example.com as the host reports it for these checks: its file on disk,
+ * which version that is, and what a save of it drops. Every preview answers
+ * for the same file, with the dropped lines left that the draft does not
+ * write back itself.
+ */
+async function appOnDisk(
+  page: Page,
+  read: Record<string, unknown>,
+  preview: (spec: Record<string, unknown>) => Record<string, unknown> = () => ({}),
+) {
+  await page.route("**/api/v1/proxy/sites/app.example.com", (route) =>
+    json(route, {
+      spec: siteSpec(),
+      managed: true,
+      content: "",
+      warnings: [],
+      enabled: true,
+      ...read,
+    }),
+  )
+  await page.route("**/api/v1/proxy/sites/preview", (route) => {
+    const spec = route.request().postDataJSON().spec
+    return json(route, sitePreview(spec, preview(spec)))
+  })
+}
+
+async function openApp(page: Page) {
+  await page.goto("/proxy/sites")
+  await page.getByRole("button", { name: "Open app.example.com" }).click()
+  const sheet = page.getByRole("dialog", { name: "Edit app.example.com" })
+  await expect(sheet.getByLabel("Domains")).toHaveValue("app.example.com")
+  return sheet
+}
+
+const handEdits = [
+  { line: 28, lines: 1, text: "client_body_buffer_size 1m;", context: "server", movable: true },
+  {
+    line: 66,
+    lines: 1,
+    text: "proxy_set_header X-Tenant acme;",
+    context: "location /",
+    movable: false,
+  },
+]
+
+test("lines a save would drop are listed first, and the movable ones move into the form", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await appOnDisk(page, { digest: "d1", lossless: false, dropped: handEdits }, (spec) => ({
+    digest: "d1",
+    dropped: handEdits.filter((d) => !String(spec.custom ?? "").includes(d.text)),
+  }))
+  const saved = await capture(page, "**/api/v1/proxy/sites/", (route) => json(route, siteResult()))
+  const sheet = await openApp(page)
+
+  await expect(sheet.getByText("Saving drops 2 lines of this file")).toBeVisible()
+  await expect(sheet.getByText("-client_body_buffer_size 1m;")).toBeVisible()
+  await expect(sheet.getByText("-proxy_set_header X-Tenant acme;")).toBeVisible()
+  await expect(sheet.getByText("Saving drops 2 lines of the file, listed above.")).toBeVisible()
+  // Only the one directly in the server block can move as it is.
+  await expect(sheet.getByText(/Only lines directly in the server block can move/)).toBeVisible()
+  await sheet.getByRole("button", { name: "Move 1 line into Extra configuration" }).click()
+  await expect(sheet.getByLabel("Extra configuration")).toHaveValue("client_body_buffer_size 1m;")
+  await expect(sheet.getByLabel("Extra configuration")).toBeInViewport()
+  await expect(sheet.getByText("Saving drops 1 line of this file")).toBeVisible()
+  await expect(sheet.getByRole("button", { name: /^Move / })).toHaveCount(0)
+
+  await sheet.getByRole("button", { name: "Save and reload" }).click()
+  await expect(page.getByText("app.example.com is live")).toBeVisible()
+  expect(saved[0]).toMatchObject({
+    baseDigest: "d1",
+    spec: { custom: "client_body_buffer_size 1m;" },
+  })
+})
+
+test("the raw file opens over the form at the first line a save would drop", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await appOnDisk(page, { digest: "d1", lossless: false, dropped: handEdits }, () => ({
+    digest: "d1",
+    dropped: handEdits,
+  }))
+  const read = page.waitForRequest((r) => r.url().includes("/api/v1/proxy/config?"))
+  await page.route(
+    (url) => url.pathname === "/api/v1/proxy/config",
+    (route) => json(route, { content: "server {\n    server_name app.example.com;\n}\n" }),
+  )
+  const sheet = await openApp(page)
+  await sheet.getByRole("button", { name: "Edit the raw file" }).click()
+  const raw = page.getByRole("dialog", { name: "app.example.com", exact: true })
+  await expect(raw).toBeVisible()
+  expect(new URL((await read).url()).searchParams.get("path")).toBe(
+    "/etc/nginx/sites-available/app.example.com",
+  )
+  // Escape closes the raw file and leaves the form as it was.
+  await page.keyboard.press("Escape")
+  await expect(raw).toBeHidden()
+  await expect(sheet).toBeVisible()
+})
+
+test("a hand-written file the form reads whole says what a save does to it", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await appOnDisk(page, { managed: false, digest: "d1", lossless: true, dropped: [] }, () => ({
+    digest: "d1",
+    dropped: [],
+  }))
+  const sheet = await openApp(page)
+  await expect(sheet.getByText("This file was written by hand")).toBeVisible()
+  await expect(sheet.getByText(/The form reads every directive in it/)).toBeVisible()
+  await expect(sheet.getByText("app.example.com.bak")).toBeVisible()
+  await expect(sheet.getByText(/Saving drops/)).toHaveCount(0)
+})
+
+test("the Changes tab shows what a save writes over the file on disk", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const disk = "server {\n    listen 443 ssl;\n    http2 on;\n    server_name app.example.com;\n}\n"
+  await appOnDisk(page, { content: disk, digest: "d1", lossless: true, dropped: [] }, (spec) => ({
+    content: spec.http2 ? disk : disk.replace("    http2 on;\n", ""),
+    digest: "d1",
+    dropped: [],
+  }))
+  const sheet = await openApp(page)
+  await sheet.getByRole("tab", { name: "Changes" }).click()
+  await expect(sheet.getByText("Saving writes the file exactly as it is on disk.")).toBeVisible()
+  await sheet.getByRole("switch", { name: "HTTP/2" }).click()
+  await expect(sheet.getByText("-    http2 on;")).toBeVisible()
+  await expect(sheet.getByRole("tab", { name: /^Changes\s*1$/ })).toBeVisible()
+})
+
+test("closing with unsaved changes asks first, and only then", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await appOnDisk(page, { digest: "d1" })
+  let sheet = await openApp(page)
+  // Nothing changed: Escape just closes.
+  await page.keyboard.press("Escape")
+  await expect(sheet).toBeHidden()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+
+  sheet = await openApp(page)
+  await sheet.getByLabel("Send it to").fill("http://127.0.0.1:4000")
+  await expect(sheet.getByText("unsaved", { exact: true })).toBeVisible()
+  await page.keyboard.press("Escape")
+  const ask = page.getByRole("dialog", { name: "Discard changes?" })
+  await expect(ask).toBeVisible()
+  await expect(ask).toContainText("What you changed in app.example.com is not saved.")
+  await ask.getByRole("button", { name: "Keep editing" }).click()
+  await expect(ask).toBeHidden()
+  await expect(sheet.getByLabel("Send it to")).toHaveValue("http://127.0.0.1:4000")
+
+  // The close button asks the same.
+  await sheet.getByRole("button", { name: "Close", exact: true }).click()
+  await ask.getByRole("button", { name: "Discard" }).click()
+  await expect(sheet).toBeHidden()
+  sheet = await openApp(page)
+  await expect(sheet.getByLabel("Send it to")).toHaveValue("http://127.0.0.1:3000")
+  await page.keyboard.press("Escape")
+  await expect(sheet).toBeHidden()
+
+  // A new site asks once something is filled in, and not before.
+  const fresh = await openNewSite(page)
+  await page.keyboard.press("Escape")
+  await expect(fresh).toBeHidden()
+  const typed = await openNewSite(page)
+  await typed.getByLabel("Domains").fill("new.example.com")
+  await page.keyboard.press("Escape")
+  await expect(ask).toContainText("This new site is not saved.")
+  await ask.getByRole("button", { name: "Discard" }).click()
+  await expect(typed).toBeHidden()
+})
+
+test("a draft survives a trip to Certificates, and a change on disk under it is asked about", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  let version = "d1"
+  await page.route("**/api/v1/proxy/sites/app.example.com", (route) =>
+    json(route, {
+      spec: version === "d1" ? siteSpec() : siteSpec({ upstream: "http://127.0.0.1:5000" }),
+      managed: true,
+      content: "",
+      warnings: [],
+      enabled: true,
+      digest: version,
+    }),
+  )
+  const saved = await capture(page, "**/api/v1/proxy/sites/", (route) => json(route, siteResult()))
+  let sheet = await openApp(page)
+  await sheet.getByLabel("Send it to").fill("http://127.0.0.1:4000")
+
+  await page.goto("/proxy/certificates")
+  await expect(page.locator("[data-slot='stat-grid']")).toBeVisible()
+  await page.goto("/proxy/sites")
+  sheet = page.getByRole("dialog", { name: "Edit app.example.com" })
+  await expect(sheet.getByLabel("Send it to")).toHaveValue("http://127.0.0.1:4000")
+  await expect(sheet.getByText("unsaved", { exact: true })).toBeVisible()
+  await expect(sheet.getByRole("alert")).toHaveCount(0)
+
+  // Somebody saves the file meanwhile: the draft is kept, and the operator
+  // asked which of the two wins before anything can be saved.
+  version = "d2"
+  await page.goto("/proxy/certificates")
+  await expect(page.locator("[data-slot='stat-grid']")).toBeVisible()
+  await page.goto("/proxy/sites")
+  const banner = sheet.getByRole("alert")
+  await expect(banner).toContainText("app.example.com changed on disk")
+  await expect(banner).toBeFocused()
+  await expect(sheet.getByLabel("Send it to")).toHaveValue("http://127.0.0.1:4000")
+  await expect(sheet.getByRole("button", { name: "Save and reload" })).toBeDisabled()
+
+  await banner.getByRole("button", { name: "Keep my draft" }).click()
+  await expect(sheet.getByRole("alert")).toHaveCount(0)
+  await sheet.getByRole("button", { name: "Save and reload" }).click()
+  await expect(page.getByText("app.example.com is live")).toBeVisible()
+  expect(saved[0]).toMatchObject({
+    baseDigest: "d2",
+    spec: { upstream: "http://127.0.0.1:4000" },
+  })
+})
+
+test("reloading from disk takes the other change and drops the draft", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  let version = "d1"
+  await page.route("**/api/v1/proxy/sites/app.example.com", (route) =>
+    json(route, {
+      spec: version === "d1" ? siteSpec() : siteSpec({ upstream: "http://127.0.0.1:5000" }),
+      managed: true,
+      content: "",
+      warnings: [],
+      enabled: true,
+      digest: version,
+    }),
+  )
+  // The save is refused: the file changed after the form read it.
+  const saved = await capture(page, "**/api/v1/proxy/sites/", (route) =>
+    route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: {
+          code: "site_changed",
+          message:
+            "the site's file changed after the form read it: /etc/nginx/sites-available/app.example.com is not the version the form read",
+        },
+      }),
+    }),
+  )
+  const sheet = await openApp(page)
+  await sheet.getByLabel("Send it to").fill("http://127.0.0.1:4000")
+  version = "d2"
+  await sheet.getByRole("button", { name: "Save and reload" }).click()
+  const banner = sheet.getByRole("alert")
+  await expect(banner).toContainText("app.example.com changed on disk")
+  await expect(page.getByText("Not applied")).toHaveCount(0)
+  expect(saved[0]).toMatchObject({ baseDigest: "d1" })
+
+  await banner.getByRole("button", { name: "Reload from disk" }).click()
+  await expect(sheet.getByLabel("Send it to")).toHaveValue("http://127.0.0.1:5000")
+  await expect(sheet.getByText("unsaved", { exact: true })).toHaveCount(0)
+  // Nothing left to lose, so Escape closes without asking.
+  await page.keyboard.press("Escape")
+  await expect(sheet).toBeHidden()
+})
+
+test("a site without an upload limit or a timeout is saved without them", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const { clientMaxBody, proxyTimeout, ...bare } = siteSpec()
+  expect([clientMaxBody, proxyTimeout]).toEqual(["50m", 60])
+  await page.route("**/api/v1/proxy/sites/app.example.com", (route) =>
+    json(route, {
+      spec: bare,
+      managed: true,
+      content: "",
+      warnings: [],
+      enabled: true,
+      digest: "d1",
+    }),
+  )
+  const saved = await capture(page, "**/api/v1/proxy/sites/", (route) => json(route, siteResult()))
+  const sheet = await openApp(page)
+  await expect(sheet.getByLabel("Upload limit")).toHaveValue("")
+  // Nothing was changed, so closing would not ask; the save sends the site as read.
+  await expect(sheet.getByText("unsaved", { exact: true })).toHaveCount(0)
+  await sheet.getByRole("button", { name: "Save and reload" }).click()
+  await expect(page.getByText("app.example.com is live")).toBeVisible()
+  expect(saved[0].spec).not.toHaveProperty("clientMaxBody")
+  expect(saved[0].spec).not.toHaveProperty("proxyTimeout")
+})
+
+test("Ctrl+S saves the way the footer's own command does", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await appOnDisk(page, { digest: "d1" })
+  const saved = await capture(page, "**/api/v1/proxy/sites/", (route, body) =>
+    json(route, siteResult({ reloaded: body.reload })),
+  )
+  const sheet = await openApp(page)
+  // Once the preview has said where the file is, the form can save.
+  await expect(sheet.getByText("Saved as /etc/nginx/sites-available/app.example.com")).toBeVisible()
+  await sheet.getByLabel("Send it to").fill("http://127.0.0.1:4000")
+  await page.keyboard.press("Control+s")
+  await expect(page.getByText("app.example.com is live")).toBeVisible()
+  expect(saved[0]).toMatchObject({
+    reload: true,
+    enable: "keep",
+    baseDigest: "d1",
+    spec: { upstream: "http://127.0.0.1:4000" },
+  })
+
+  // A disabled site's own command saves it as it is, without a reload.
+  await disableLegacy(page)
+  const legacy = await openLegacy(page)
+  await expect(
+    legacy.getByText("Saved as /etc/nginx/sites-available/legacy.example.com"),
+  ).toBeVisible()
+  await page.keyboard.press("Meta+s")
+  await expect(legacy).toBeHidden()
+  expect(saved[1]).toMatchObject({ reload: false, enable: "keep" })
 })

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
 import {
@@ -21,6 +21,7 @@ import type {
   Certificate,
   Container,
   DomainCheck,
+  DroppedLine,
   Listener,
   SiteLocation,
   SitePreview,
@@ -28,13 +29,16 @@ import type {
   SiteResult,
   SiteSpec,
 } from "@/lib/types"
+import { plural } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
 import { ChoiceCard, ChoiceGrid, ProductCard } from "@/components/choice-card"
 import { ProductLogo } from "@/components/product-logo"
 import { CodeEditor } from "@/components/code-editor"
+import { DiffView } from "@/components/files/diff-view"
 import { Field, FieldRow, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
-import { Group, Pane } from "@/components/panel"
+import { Modal } from "@/components/modal"
+import { Group, Pane, Well } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
 import { EmptyNote, Notice } from "@/components/state"
 import { StatusDot } from "@/components/status-dot"
@@ -51,6 +55,19 @@ import {
   FOLLOW_DOMAINS,
   type IdentityFixed,
 } from "@/components/proxy/site-identity"
+import { ConfigEditor } from "@/components/proxy/config-editor"
+import {
+  changeCount,
+  changesDiff,
+  draftFate,
+  droppedCount,
+  droppedDiff,
+  movableLines,
+  sameSpec,
+  specFromServer,
+  withMovedLines,
+  type DraftBase,
+} from "@/components/proxy/site-draft"
 import { NEW_SITE_DRAFT } from "@/components/proxy/site-link"
 import {
   applyPreset,
@@ -153,8 +170,9 @@ function SiteFormBody({
   const source = editing ?? copyFrom
   // Kept for the tab while the form is open (the panel forgets it on close):
   // a site is a long form, and a look at a port or a certificate half-way
-  // through it should not mean typing it again. An existing site is read
-  // back from the server on every open, as before.
+  // through it should not mean typing it again. An existing site's draft
+  // outlives a trip away only while its file is still the version the draft
+  // started from; the server's copy used to replace it on every open.
   const draft = source ? `proxy.site.form.${source}` : NEW_SITE_DRAFT
   const [spec, setSpec] = useSessionState<SiteSpec>(`${draft}.spec`, BLANK)
   const [domainText, setDomainText] = useSessionState(`${draft}.domains`, "")
@@ -190,6 +208,25 @@ function SiteFormBody({
     spec: SiteSpec
   } | null>(null)
   const conflictRef = useRef<HTMLDivElement>(null)
+  // What the draft started from: the file's version and the spec the form
+  // read from it, or the spec a new site opened with. Unsaved changes are
+  // measured against it.
+  const [base, setBase] = useSessionState<DraftBase | null>(`${draft}.base`, null)
+  // The file as last read, for an edit: what the Changes tab compares with.
+  const [disk, setDisk] = useState<SiteRead | null>(null)
+  // Bumped to read the file again: after the raw editor saved it, after a
+  // save refused because it changed, or when a preview found a newer one.
+  const [reads, setReads] = useState(0)
+  // A newer version of the file under a draft with edits in it — or the
+  // file gone — waiting for the operator to say which of the two wins.
+  const [stale, setStale] = useState<SiteRead | "gone" | null>(null)
+  const staleRef = useRef<HTMLDivElement>(null)
+  // A save was refused because the file changed: the question is asked
+  // even of a draft with no edits, since Save is what was pressed.
+  const refused = useRef(false)
+  const [discarding, setDiscarding] = useState(false)
+  const [rawOpen, setRawOpen] = useState(false)
+  const customRef = useRef<HTMLTextAreaElement>(null)
 
   const set = useCallback(
     <K extends keyof SiteSpec>(key: K, value: SiteSpec[K]) => {
@@ -198,41 +235,82 @@ function SiteFormBody({
     [setSpec],
   )
 
+  // The file as it is now becomes the draft, and what it is measured from.
+  const take = (r: SiteRead) => {
+    const fresh = specFromServer(r.spec)
+    setSpec(fresh)
+    setDomainText(r.spec.domains.join(" "))
+    setFixed(fixedFor(r.spec, true))
+    setBase({ digest: r.digest, spec: fresh })
+    setStale(null)
+  }
+  // The draft goes on, now measured against — and saved over — the file as
+  // it is now, or written as a new file where the old one went.
+  const keepDraft = () => {
+    if (stale === "gone") setBase((b) => (b ? { ...b, digest: "" } : b))
+    else if (stale) setBase({ digest: stale.digest, spec: specFromServer(stale.spec) })
+    setStale(null)
+  }
+
   // Load an existing site back into the form — as itself, or as the start of
   // a new one with the name, domains and certificate paths cleared, since
-  // those three are the things a duplicate exists to change.
+  // those three are the things a duplicate exists to change. A draft already
+  // under way is kept while the file is the version it started from, given
+  // way to the file when nothing in it was changed, and otherwise the
+  // operator is asked which of the two wins.
+  const onRead = useEffectEvent((r: SiteRead) => {
+    if (copyFrom && !editing) {
+      if (!base) {
+        const copied: SiteSpec = {
+          ...specFromServer(r.spec),
+          name: "",
+          domains: [],
+          certPath: undefined,
+          keyPath: undefined,
+          managedAcme: false,
+        }
+        setSpec(copied)
+        setDomainText("")
+        setManaged(true)
+        setFixed(FOLLOW_DOMAINS)
+        setBase({ digest: "", spec: copied })
+      }
+      setLoaded(true)
+      return
+    }
+    setDisk(r)
+    setManaged(r.managed)
+    setReadFile({ enabled: r.enabled, confd: r.confd, servedCopy: r.servedCopy })
+    const fate = draftFate(base, spec, r.digest)
+    if (fate === "stale" || (fate === "take" && refused.current)) setStale(r)
+    else if (fate === "take") take(r)
+    refused.current = false
+    setLoaded(true)
+  })
+  // The file went while a draft of it was kept: the draft can be saved as
+  // the file again, or let go.
+  const onReadFailed = useEffectEvent((err: unknown) => {
+    if (editing && base && err instanceof ApiError && err.status === 404) {
+      setStale("gone")
+      setLoaded(true)
+      return
+    }
+    notify.error("Could not load the site", err)
+  })
   useEffect(() => {
     if (!open || !source) return
     const controller = new AbortController()
     get<SiteRead>(`/proxy/sites/${encodeURIComponent(source)}`, undefined, controller.signal)
-      .then((r) => {
-        if (copyFrom && !editing) {
-          setSpec({
-            ...BLANK,
-            ...r.spec,
-            name: "",
-            domains: [],
-            certPath: undefined,
-            keyPath: undefined,
-            managedAcme: false,
-          })
-          setDomainText("")
-          setManaged(true)
-          setFixed(FOLLOW_DOMAINS)
-        } else {
-          // A plain-HTTP site reads back with HSTS off, since nothing sends
-          // it there; turning TLS on offers it on, as for a new site.
-          setSpec({ ...BLANK, ...r.spec, hsts: r.spec.tls ? r.spec.hsts : BLANK.hsts })
-          setDomainText(r.spec.domains.join(" "))
-          setManaged(r.managed)
-          setFixed(fixedFor(r.spec, true))
-          setReadFile({ enabled: r.enabled, confd: r.confd, servedCopy: r.servedCopy })
-        }
-        setLoaded(true)
-      })
-      .catch((err) => !controller.signal.aborted && notify.error("Could not load the site", err))
+      .then((r) => onRead(r))
+      .catch((err) => !controller.signal.aborted && onReadFailed(err))
     return () => controller.abort()
-  }, [open, source, copyFrom, editing, setSpec, setDomainText, setManaged, setFixed])
+  }, [open, source, reads])
+  // A preview says which version of the file is on disk now; one other than
+  // the version last read means it changed while the form was open, and it
+  // is read again so the draft and the Changes tab go by what is there.
+  const onPreviewed = useEffectEvent((r: SitePreview) => {
+    if (editing && disk && r.digest && r.digest !== disk.digest) setReads((n) => n + 1)
+  })
 
   // The live preview. Debounced, because it is a request per keystroke
   // otherwise and the answer only matters once typing stops.
@@ -257,6 +335,7 @@ function SiteFormBody({
           .then((r) => {
             setPreview({ ...r, name: spec.name })
             setPreviewError("")
+            onPreviewed(r)
           })
           .catch((err) => {
             if (controller.signal.aborted) return
@@ -370,7 +449,12 @@ function SiteFormBody({
       const existing = editing !== null
       const res = await post<SiteResult>(
         "/proxy/sites/",
-        saveRequest(spec, { existing, ...SAVE_MODES[mode], allowConflict }),
+        saveRequest(spec, {
+          existing,
+          ...SAVE_MODES[mode],
+          allowConflict,
+          baseDigest: base?.digest,
+        }),
       )
       const outcome = saveOutcome(res, { existing })
       notify[outcome.tone](outcome.title, { description: outcome.description })
@@ -379,6 +463,12 @@ function SiteFormBody({
     } catch (err) {
       if (err instanceof ApiError && err.code === "name_conflict") {
         setConflict({ message: err.message, mode, spec })
+      } else if (err instanceof ApiError && err.code === "site_changed") {
+        // Somebody saved the file after the form read it. Nothing was
+        // written: the file is read again and the operator asked which of
+        // the two wins, rather than their change being written over.
+        refused.current = true
+        setReads((n) => n + 1)
       } else {
         notify.error("Not applied", err)
       }
@@ -396,6 +486,24 @@ function SiteFormBody({
     conflictRef.current?.focus({ preventScroll: true })
   }, [conflict])
   const conflictShown = conflict?.spec === spec ? conflict : null
+  useEffect(() => {
+    if (!stale) return
+    staleRef.current?.scrollIntoView({ block: "nearest" })
+    staleRef.current?.focus({ preventScroll: true })
+  }, [stale])
+
+  // Unsaved changes: the draft is not what it started from. An edit whose
+  // file has not been read yet has nothing to be measured against.
+  const start = base?.spec ?? (source ? undefined : BLANK)
+  const dirty = start !== undefined && !sameSpec(spec, start)
+  // Every way out of the panel — Escape, the overlay, the close button —
+  // comes through here, so one question covers them all. A trip to another
+  // page is not a way out: the draft is kept for the tab.
+  const requestClose = (next: boolean) => {
+    if (busy) return
+    if (next || !dirty) onOpenChange(next)
+    else setDiscarding(true)
+  }
 
   // What the identity would be if nothing were typed by hand, for the
   // "Match the domain" actions.
@@ -420,11 +528,14 @@ function SiteFormBody({
   const chosenPreset = !source ? presetById(preset) : undefined
   const warnings = preview?.warnings ?? []
 
+  // Not while the file changed under the draft: the save would be refused
+  // until the operator says which of the two wins.
   const ready =
     spec.domains.length > 0 &&
     spec.name !== "" &&
     file !== null &&
     !nameProblem &&
+    !stale &&
     (editing !== null || (!file.exists && !file.enabledElsewhere))
   // A disabled site is saved as it is or enabled on purpose; "Save and
   // reload" did neither, and reloading changes nothing about a file nginx
@@ -440,15 +551,52 @@ function SiteFormBody({
     !spec.tls || !spec.certPath || !certs.data || certs.data.some((c) => c.path === spec.certPath)
   const issueHref = `/proxy/certificates?issue=${encodeURIComponent(spec.domains.join(" "))}`
 
+  // What a save drops of the file that the form cannot hold: as the latest
+  // preview says for this draft, which leaves out lines moved into the extra
+  // configuration, or, until there is one, as the file was read.
+  const dropped: DroppedLine[] | undefined = editing ? (file?.dropped ?? disk?.dropped) : undefined
+  const droppedLines = dropped ? droppedCount(dropped) : 0
+  const movable = dropped ? movableLines(dropped, spec.custom) : []
+  const filePath = file?.path
+  const fileName = filePath ? filePath.slice(filePath.lastIndexOf("/") + 1) : spec.name
+  const moveLines = () => {
+    if (!dropped) return
+    set("custom", withMovedLines(spec.custom, dropped))
+    // Where they went, in view, rather than a notice that shrinks.
+    requestAnimationFrame(() => customRef.current?.scrollIntoView({ block: "nearest" }))
+  }
+  // What the save writes over the file as it is on disk.
+  const changes =
+    editing && disk && file ? changesDiff(disk.content, file.content, fileName) : undefined
+  const changed = changeCount(changes ?? null)
+
+  // Ctrl or Cmd+S is the footer's own command: save and reload, or, for a
+  // site nginx does not read, save it as it is. The raw editor and the
+  // discard question over the form are their own.
+  const primary: SaveMode = servedCopy || disabled ? "keep" : "reload"
+  const onSaveKey = useEffectEvent((event: KeyboardEvent) => {
+    const key = event.key.toLowerCase() === "s" && (event.ctrlKey || event.metaKey)
+    if (!key || event.altKey || event.shiftKey || rawOpen || discarding) return
+    event.preventDefault()
+    if (ready && busy === null) void save(primary)
+  })
+  useEffect(() => {
+    if (!open) return
+    const listener = (event: KeyboardEvent) => onSaveKey(event)
+    window.addEventListener("keydown", listener)
+    return () => window.removeEventListener("keydown", listener)
+  }, [open])
+
   return (
     <SidePanel
       open={open}
-      onOpenChange={(o) => !busy && onOpenChange(o)}
+      onOpenChange={requestClose}
       width="xl"
       title={
         <>
           <ProductLogo id="nginx-static" size="sm" />
           {editing ? `Edit ${editing}` : copyFrom ? `New site from ${copyFrom}` : "New site"}
+          {dirty && <Tag tone="warning">unsaved</Tag>}
         </>
       }
       description={
@@ -470,6 +618,7 @@ function SiteFormBody({
               onClick={() => save("keep")}
               disabled={!ready || busy !== null}
               pending={busy === "keep"}
+              aria-keyshortcuts="Control+S Meta+S"
             >
               Save
             </Button>
@@ -499,6 +648,7 @@ function SiteFormBody({
               onClick={() => save("keep")}
               disabled={!ready || busy !== null}
               pending={busy === "keep"}
+              aria-keyshortcuts="Control+S Meta+S"
             >
               Save (stays disabled)
             </Button>
@@ -506,8 +656,9 @@ function SiteFormBody({
         ) : (
           <>
             <span className="mr-auto text-hint text-muted-foreground">
-              Validated with nginx&rsquo;s own parser before it takes effect, and rolled back if the
-              test fails.
+              {droppedLines > 0
+                ? `Saving drops ${plural(droppedLines, "line")} of the file, listed above.`
+                : "Validated with nginx\u2019s own parser before it takes effect, and rolled back if the test fails."}
             </span>
             <Button
               size="sm"
@@ -523,6 +674,7 @@ function SiteFormBody({
               onClick={() => save("reload")}
               disabled={!ready || busy !== null}
               pending={busy === "reload"}
+              aria-keyshortcuts="Control+S Meta+S"
             >
               Save and reload
             </Button>
@@ -550,11 +702,110 @@ function SiteFormBody({
               </Notice>
             </div>
           )}
-          {editing && !managed && (
-            <Notice tone="warning" icon={Warning} title="This file was written by hand">
-              The form has read what it recognises. Saving replaces the file with what the form
-              produces, so anything it could not represent will be lost — the previous version is
-              kept as <code className="font-mono">.bak</code>.
+          {stale && (
+            <div ref={staleRef} role="alert" tabIndex={-1} className="rounded-lg focus-ring">
+              <Notice
+                tone="warning"
+                icon={Warning}
+                title={
+                  stale === "gone"
+                    ? `${fileName} is not on disk any more`
+                    : `${fileName} changed on disk`
+                }
+              >
+                <p>
+                  {stale === "gone"
+                    ? "Somebody removed it after the form read it. Keeping your draft writes it again when you save."
+                    : "Somebody saved it after the form read it \u2014 by hand, in the raw editor, or from another tab. Keeping your draft saves over their change; reloading takes theirs and drops the edits made here."}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {stale !== "gone" && (
+                    <Button size="xs" variant="outline" onClick={() => take(stale)}>
+                      Reload from disk
+                    </Button>
+                  )}
+                  <Button size="xs" variant="outline" onClick={keepDraft}>
+                    Keep my draft
+                  </Button>
+                </div>
+              </Notice>
+            </div>
+          )}
+          {editing && (!managed || droppedLines > 0) && (
+            <Notice
+              tone="warning"
+              icon={Warning}
+              title={
+                droppedLines > 0
+                  ? `Saving drops ${plural(droppedLines, "line")} of this ${managed ? "file" : "hand-written file"}`
+                  : "This file was written by hand"
+              }
+            >
+              {dropped && droppedLines > 0 ? (
+                <>
+                  <p>
+                    {managed
+                      ? `Added by hand, with no field in the form, so a save leaves ${dropped.length === 1 ? "it" : "them"} out.`
+                      : `The form has no field for ${dropped.length === 1 ? "this" : "these"}, so a save leaves ${dropped.length === 1 ? "it" : "them"} out.`}
+                    {!managed && (
+                      <>
+                        {" "}
+                        The current file is kept as{" "}
+                        <code className="font-mono">{fileName}.bak</code>.
+                      </>
+                    )}
+                  </p>
+                  <Well className="mt-2 overflow-hidden p-0">
+                    <DiffView
+                      body={droppedDiff(dropped)}
+                      singleFile
+                      lineNumbers
+                      className="max-h-56"
+                    />
+                  </Well>
+                  {movable.length < dropped.length && (
+                    <p className="text-hint text-muted-foreground">
+                      Only lines directly in the server block can move as they are. The others stay
+                      only if the file is edited by hand.
+                    </p>
+                  )}
+                  {dropped.some((d) => d.reason) && (
+                    <ul className="text-hint text-muted-foreground">
+                      {dropped
+                        .filter((d) => d.reason)
+                        .map((d) => (
+                          <li key={`${d.line}:${d.text}`}>
+                            Line {d.line}: {d.reason}.
+                          </li>
+                        ))}
+                    </ul>
+                  )}
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {movable.length > 0 && (
+                      <Button size="xs" variant="outline" onClick={moveLines}>
+                        Move {plural(droppedCount(movable), "line")} into Extra configuration
+                      </Button>
+                    )}
+                    {filePath && (
+                      <Button size="xs" variant="outline" onClick={() => setRawOpen(true)}>
+                        Edit the raw file
+                      </Button>
+                    )}
+                  </div>
+                </>
+              ) : dropped ? (
+                <p>
+                  The form reads every directive in it. Saving rewrites it in the form&rsquo;s own
+                  layout, without its comments, and keeps the current file as{" "}
+                  <code className="font-mono">{fileName}.bak</code>.
+                </p>
+              ) : (
+                <p>
+                  The form has read what it recognises. Saving replaces the file with what the form
+                  produces, so anything it could not read is lost; the current file is kept as{" "}
+                  <code className="font-mono">{fileName}.bak</code>.
+                </p>
+              )}
             </Notice>
           )}
 
@@ -937,6 +1188,7 @@ function SiteFormBody({
             >
               <Textarea
                 id="site-custom"
+                ref={customRef}
                 value={spec.custom ?? ""}
                 onChange={(e) => set("custom", e.target.value)}
                 rows={4}
@@ -955,6 +1207,16 @@ function SiteFormBody({
               <Code className="size-3.5" />
               nginx config
             </TabsTrigger>
+            {editing && (
+              <TabsTrigger value="changes">
+                Changes
+                {changed > 0 && (
+                  <span className="numeric ml-1 text-hint font-medium text-muted-foreground">
+                    {changed}
+                  </span>
+                )}
+              </TabsTrigger>
+            )}
             <TabsTrigger value="notes">
               Notes
               {warnings.length > 0 && (
@@ -978,6 +1240,29 @@ function SiteFormBody({
               )}
             </Pane>
           </TabsContent>
+          {editing && (
+            <TabsContent value="changes" className="min-h-0 flex-1">
+              <Pane className="h-full">
+                {changes === undefined ? (
+                  <EmptyNote className={cn("my-auto", previewError && "text-destructive")}>
+                    {previewError ||
+                      "What a save changes in the file appears here once the form has read it."}
+                  </EmptyNote>
+                ) : changes === null ? (
+                  <EmptyNote className="my-auto">
+                    Too many changes to line up. The nginx config tab has the whole file a save
+                    writes.
+                  </EmptyNote>
+                ) : changes === "" ? (
+                  <EmptyNote className="my-auto">
+                    Saving writes the file exactly as it is on disk.
+                  </EmptyNote>
+                ) : (
+                  <DiffView body={changes} singleFile lineNumbers className="h-full" />
+                )}
+              </Pane>
+            </TabsContent>
+          )}
           <TabsContent value="notes" className="min-h-0 flex-1 overflow-y-auto">
             {warnings.length === 0 ? (
               <p className="flex items-center gap-2.5 py-2 text-body text-muted-foreground">
@@ -997,6 +1282,51 @@ function SiteFormBody({
           </TabsContent>
         </Tabs>
       </div>
+      {/* Inside the sheet, so each is layered over it: Escape and a click
+          outside close it, not the form behind it. */}
+      <Modal
+        open={discarding}
+        onOpenChange={setDiscarding}
+        size="sm"
+        title="Discard changes?"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setDiscarding(false)}>
+              Keep editing
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setDiscarding(false)
+                onOpenChange(false)
+              }}
+            >
+              Discard
+            </Button>
+          </>
+        }
+      >
+        <p className="text-body leading-relaxed">
+          {editing
+            ? `What you changed in ${editing} is not saved. Discarding it leaves the file as it is.`
+            : "This new site is not saved. Discarding it throws away what was filled in."}
+        </p>
+      </Modal>
+      {editing && filePath && (
+        <ConfigEditor
+          open={rawOpen}
+          onOpenChange={setRawOpen}
+          path={filePath}
+          kind="nginx"
+          title={fileName}
+          initialLine={dropped?.[0]?.line}
+          siteDisabled={disabled}
+          onSaved={() => {
+            setReads((n) => n + 1)
+            onSaved()
+          }}
+        />
+      )}
     </SidePanel>
   )
 }

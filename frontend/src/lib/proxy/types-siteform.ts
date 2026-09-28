@@ -46,6 +46,27 @@ export type SiteSpec = {
   custom?: string
 }
 
+/**
+ * A statement of a site file that saving the form in its place does not
+ * write back: a line added by hand the form has no field for.
+ */
+export type DroppedLine = {
+  /** Where it starts in the file, and how many lines `text` takes. */
+  line: number
+  lines: number
+  /** Its own lines of the file, dedented, or the statement on one line where it shares one. */
+  text: string
+  /** Where it sits: "server", "location /api/", "server on port 80", "outside any server". */
+  context: string
+  /**
+   * It sits directly in the server block the form writes, and the extra
+   * configuration, which goes there, keeps it as it is.
+   */
+  movable: boolean
+  /** Why a line of that server block cannot move. */
+  reason?: string
+}
+
 /** What POST /proxy/sites/preview answers: the file a spec renders to, and where it goes. */
 export type SitePreview = {
   content: string
@@ -75,6 +96,14 @@ export type SitePreview = {
    * not do.
    */
   confd?: boolean
+  /** The version of the file there now, when there is one. */
+  digest?: string
+  /**
+   * What saving this spec over that file drops of what the form cannot
+   * hold, less what the spec now writes itself; absent when the file is not
+   * one the form can read.
+   */
+  dropped?: DroppedLine[]
 }
 
 /** What GET /proxy/sites/{name} answers: a site read back into the form. */
@@ -89,6 +118,12 @@ export type SiteRead = {
   confd?: boolean
   /** nginx serves sites-enabled/<name>, a file of its own, instead of this one. */
   servedCopy?: boolean
+  /** The version of the file read, which a save sends back to be refused if it changed. */
+  digest: string
+  /** Whether a save of the file as read keeps every statement of it; absent when unknown. */
+  lossless?: boolean
+  /** What a save of the file as read drops; absent when the form cannot write it at all. */
+  dropped?: DroppedLine[]
 }
 
 /** One of a site's names another server block also claims on the same address. */

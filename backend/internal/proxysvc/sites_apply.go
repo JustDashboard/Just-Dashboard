@@ -101,6 +101,11 @@ type SiteSave struct {
 	// of its names on the same address and the save changes who answers it
 	// or leaves this site's claim ignored.
 	AllowConflict bool
+	// BaseDigest is the ContentDigest of the file the form read. When set,
+	// the save is refused unless the file is still exactly that, since
+	// writing the form's reading of an older version would silently undo
+	// whatever changed it since.
+	BaseDigest string
 }
 
 // ApplySite is SaveSite without allowing a server-name conflict.
@@ -154,6 +159,12 @@ func (s *Service) saveSiteLocked(ctx context.Context, spec *SiteSpec, content st
 	original, existed := readIfPresent(full)
 	if existed && !opts.Overwrite {
 		return nil, fmt.Errorf("a site called %s already exists", spec.Name)
+	}
+	if opts.BaseDigest != "" && (!existed || ContentDigest(original) != opts.BaseDigest) {
+		if !existed {
+			return nil, fmt.Errorf("%w: %s is not there any more", ErrSiteChanged, full)
+		}
+		return nil, fmt.Errorf("%w: %s is not the version the form read", ErrSiteChanged, full)
 	}
 	link := filepath.Join(s.nginxDir, "sites-enabled", spec.Name)
 	// read is whether nginx reads the file as it stands: a conf.d file whose

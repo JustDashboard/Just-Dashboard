@@ -206,7 +206,12 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			inCustom = true
 			continue
 		}
-		if raw == "" || strings.HasPrefix(raw, "#") {
+		// A comment after a statement is not part of it: certbot ends every
+		// line it adds with "# managed by Certbot", and read as part of the
+		// value that made the certificate path "…/fullchain.pem; # managed
+		// by Certbot", which the form then refused to save.
+		raw = strings.TrimSpace(stripComment(raw))
+		if raw == "" {
 			continue
 		}
 		for _, piece := range splitInline(raw) {
@@ -313,15 +318,13 @@ func hasField(value, want string) bool {
 
 // splitInline breaks a line holding several statements into one statement
 // per element: `location / { proxy_pass http://x; }` becomes the opener,
-// the directive and the closing brace. Quotes are respected, since a
-// Content-Security-Policy value carries semicolons of its own. A line with
-// nothing after its brace, or no brace at all, is returned as it came.
+// the directive and the closing brace, and `gzip on; gzip_vary on;` its two
+// directives — read whole, the second made the value "on; gzip_vary on",
+// which is not "on", and a save wrote `gzip off;`. Quotes are respected,
+// since a Content-Security-Policy value carries semicolons of its own, and
+// so is a ${variable}, whose braces open no block.
 func splitInline(raw string) []string {
-	i := braceOutsideQuotes(raw)
-	if i < 0 || strings.TrimSpace(raw[i+1:]) == "" {
-		return []string{raw}
-	}
-	out := []string{strings.TrimSpace(raw[:i+1])}
+	var out []string
 	var cur strings.Builder
 	flush := func() {
 		if s := strings.TrimSpace(cur.String()); s != "" {
@@ -330,7 +333,8 @@ func splitInline(raw string) []string {
 		cur.Reset()
 	}
 	var quote byte
-	for j := i + 1; j < len(raw); j++ {
+	variable := false
+	for j := 0; j < len(raw); j++ {
 		c := raw[j]
 		switch {
 		case quote != 0:
@@ -341,10 +345,13 @@ func splitInline(raw string) []string {
 		case c == '"' || c == '\'':
 			quote = c
 			cur.WriteByte(c)
-		case c == ';':
+		case c == '{' && j > 0 && raw[j-1] == '$':
+			variable = true
 			cur.WriteByte(c)
-			flush()
-		case c == '{':
+		case c == '}' && variable:
+			variable = false
+			cur.WriteByte(c)
+		case c == ';' || c == '{':
 			cur.WriteByte(c)
 			flush()
 		case c == '}':
@@ -355,27 +362,33 @@ func splitInline(raw string) []string {
 		}
 	}
 	flush()
+	if len(out) == 0 {
+		return []string{raw}
+	}
 	return out
 }
 
-// braceOutsideQuotes is the index of the first `{` that is not inside a
-// quoted string, or -1.
-func braceOutsideQuotes(raw string) int {
+// stripComment cuts a line at the "#" that starts a comment: outside quotes,
+// and where a word could start, which is where nginx reads one — a "#"
+// inside a word is part of it.
+func stripComment(raw string) string {
 	var quote byte
 	for i := 0; i < len(raw); i++ {
 		c := raw[i]
 		switch {
 		case quote != 0:
-			if c == quote {
+			if c == '\\' {
+				i++
+			} else if c == quote {
 				quote = 0
 			}
 		case c == '"' || c == '\'':
 			quote = c
-		case c == '{':
-			return i
+		case c == '#' && (i == 0 || strings.ContainsRune(" \t;{}", rune(raw[i-1]))):
+			return raw[:i]
 		}
 	}
-	return -1
+	return raw
 }
 
 func cutDirective(line string) (string, string) {

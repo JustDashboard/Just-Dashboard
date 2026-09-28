@@ -75,6 +75,19 @@ describe("what a save sends", () => {
       reload: true,
     })
   })
+
+  test("an edit carries the version of the file it read, and a new site none", () => {
+    expect(saveRequest(spec(), { existing: true, reload: true, baseDigest: "d1" })).toMatchObject({
+      baseDigest: "d1",
+    })
+    // A draft kept over a file that went: saved without one, as the file again.
+    expect(
+      saveRequest(spec(), { existing: true, reload: true, baseDigest: "" }),
+    ).not.toHaveProperty("baseDigest")
+    expect(
+      saveRequest(spec(), { existing: false, reload: true, baseDigest: "d1" }),
+    ).not.toHaveProperty("baseDigest")
+  })
 })
 
 describe("what a save says", () => {

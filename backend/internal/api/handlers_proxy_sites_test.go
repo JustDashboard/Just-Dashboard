@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -467,5 +468,86 @@ func TestSiteSaysNginxServesAFileOfItsOwn(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(dir, "sites-enabled", "app")); string(b) != hand {
 		t.Fatalf("the file nginx serves was changed:\n%s", b)
+	}
+}
+
+// A site read back into the form says which version of the file it is and
+// what a save of it would drop: a line added by hand that the form has no
+// field for. Each preview says both again for the spec it is given, so a
+// line moved into the extra configuration stops being dropped, and a save
+// carrying the version it read is refused once the file has changed.
+func TestSiteSpecSaysWhatASaveDropsAndWhichVersionItRead(t *testing.T) {
+	c, dir := siteFormServer(t)
+	if w := c.do(http.MethodPost, "/api/v1/proxy/sites/", siteBody(t, "app", "app.example.com", `"enable"`, nil), nil); w.Code != http.StatusOK {
+		t.Fatalf("save: %d %s", w.Code, w.Body.String())
+	}
+	full := filepath.Join(dir, "sites-available", "app")
+	raw, err := os.ReadFile(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := strings.Replace(string(raw), "    server_name app.example.com;\n",
+		"    server_name app.example.com;\n    client_body_buffer_size 1m;\n", 1)
+	if err := os.WriteFile(full, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	type drift struct {
+		Spec     proxysvc.SiteSpec      `json:"spec"`
+		Digest   string                 `json:"digest"`
+		Lossless *bool                  `json:"lossless"`
+		Dropped  []proxysvc.DroppedLine `json:"dropped"`
+	}
+	w := c.do(http.MethodGet, "/api/v1/proxy/sites/app", "", nil)
+	var read drift
+	decodeSite(t, w, &read)
+	if read.Digest != proxysvc.ContentDigest(edited) || read.Lossless == nil || *read.Lossless ||
+		len(read.Dropped) != 1 || read.Dropped[0].Text != "client_body_buffer_size 1m;" || !read.Dropped[0].Movable {
+		t.Fatalf("read back: digest %s lossless %v dropped %+v", read.Digest, read.Lossless, read.Dropped)
+	}
+
+	preview := func(custom string) drift {
+		t.Helper()
+		spec := read.Spec
+		spec.Custom = custom
+		body, _ := json.Marshal(map[string]any{"spec": spec})
+		w := c.do(http.MethodPost, "/api/v1/proxy/sites/preview", string(body), nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("preview: %d %s", w.Code, w.Body.String())
+		}
+		var p drift
+		decodeSite(t, w, &p)
+		return p
+	}
+	if p := preview(""); p.Digest != read.Digest || len(p.Dropped) != 1 {
+		t.Fatalf("preview as read: %+v", p)
+	}
+	if p := preview("client_body_buffer_size 1m;"); p.Digest != read.Digest || p.Dropped == nil || len(p.Dropped) != 0 {
+		t.Fatalf("preview with the line moved: %+v", p)
+	}
+
+	save := func(digest string) *httptest.ResponseRecorder {
+		t.Helper()
+		spec := read.Spec
+		spec.Custom = "client_body_buffer_size 1m;"
+		body, _ := json.Marshal(map[string]any{"spec": spec, "enable": "keep", "reload": true, "overwrite": true, "baseDigest": digest})
+		return c.do(http.MethodPost, "/api/v1/proxy/sites/", string(body), nil)
+	}
+	changed := edited + "# and another edit\n"
+	if err := os.WriteFile(full, []byte(changed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if w := save(read.Digest); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), `"site_changed"`) {
+		t.Fatalf("a save over a changed file answered %d: %s", w.Code, w.Body.String())
+	}
+	if now, _ := os.ReadFile(full); string(now) != changed {
+		t.Fatal("the refused save wrote the file")
+	}
+	if w := save(proxysvc.ContentDigest(changed)); w.Code != http.StatusOK {
+		t.Fatalf("a save of the version read answered %d: %s", w.Code, w.Body.String())
+	}
+	var after drift
+	decodeSite(t, c.do(http.MethodGet, "/api/v1/proxy/sites/app", "", nil), &after)
+	if after.Lossless == nil || !*after.Lossless || after.Spec.Custom != "client_body_buffer_size 1m;" {
+		t.Fatalf("after the save: %+v", after)
 	}
 }
