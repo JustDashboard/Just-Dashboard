@@ -7,8 +7,9 @@ import type {
 } from "@/lib/types"
 
 /**
- * The spec as the server should read it. HSTS goes only with TLS: the switch
- * is drawn only under "Serve over HTTPS", and the default it keeps for when
+ * The spec as the server should read it. HSTS and its options go only with
+ * TLS: the switch is drawn only under "Serve over HTTPS", and the default it
+ * keeps for when
  * TLS is turned on reached the server on every plain-HTTP site as a warning
  * about a control nobody could see. The single-page-app fallback goes only
  * with files and a permanent redirect only with a redirect, for the same
@@ -26,6 +27,10 @@ export function sendableSpec(spec: SiteSpec): SiteSpec {
     pool,
     staticCache,
     proxyCache,
+    hstsMaxAge,
+    hstsOwnNameOnly,
+    hstsPreload,
+    tlsProfile,
     ...rest
   } = spec
   const locations = spec.locations.map(sendableLocation)
@@ -39,6 +44,8 @@ export function sendableSpec(spec: SiteSpec): SiteSpec {
     ...(spec.upstreamVerify ? { upstreamCa } : {}),
     ...(spec.upstreamSni || spec.upstreamVerify ? { upstreamTlsName } : {}),
     hsts: spec.hsts && spec.tls,
+    ...(spec.hsts && spec.tls ? { hstsMaxAge, hstsOwnNameOnly, hstsPreload } : {}),
+    ...(spec.tls ? { tlsProfile } : {}),
     ...(spec.kind === "static" && spa !== undefined ? { spa } : {}),
     ...(spec.kind === "redirect" && permanent !== undefined ? { permanent } : {}),
     // A redirect has no files to keep and only a proxy has responses to.

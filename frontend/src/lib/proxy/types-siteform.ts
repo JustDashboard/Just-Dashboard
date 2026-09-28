@@ -51,6 +51,14 @@ export type SiteSpec = {
   keyPath?: string
   forceHttps: boolean
   hsts: boolean
+  /** Seconds; unset is six months. */
+  hstsMaxAge?: number
+  /** Leave includeSubDomains out of the HSTS header. */
+  hstsOwnNameOnly?: boolean
+  /** Ask to be built into browsers' HSTS list. Needs a year and includeSubDomains. */
+  hstsPreload?: boolean
+  /** Unset allows TLS 1.2 and 1.3; "modern" allows 1.3 only. */
+  tlsProfile?: "" | "modern"
   http2: boolean
   webSockets: boolean
   gzip: boolean

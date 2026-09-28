@@ -208,6 +208,10 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			}
 		case "http2":
 			spec.HTTP2 = value == "on"
+		case "ssl_protocols":
+			if value == "TLSv1.3" {
+				spec.TLSProfile = tlsProfileModern
+			}
 		case "ssl_certificate":
 			spec.CertPath = value
 		case "ssl_certificate_key":
@@ -262,7 +266,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			}
 		case "add_header":
 			if strings.HasPrefix(value, "Strict-Transport-Security") {
-				spec.HSTS = true
+				readHSTS(spec, value)
 			}
 			if strings.HasPrefix(value, "X-Content-Type-Options") {
 				spec.SecurityHeaders = true
