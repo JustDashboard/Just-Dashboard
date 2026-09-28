@@ -15,6 +15,7 @@ import type {
   AccessListSpec,
   AccessListUse,
   AccessLists,
+  AccessSource,
 } from "@/lib/proxy/types-access-lists"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -28,7 +29,14 @@ import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { VerbActions } from "@/components/verbs"
-import { accessFor, checkEntry, sameEntry } from "@/components/proxy/access-lists"
+import {
+  accessFor,
+  accessForRun,
+  checkEntry,
+  checkOverlap,
+  checkRealm,
+  sameEntry,
+} from "@/components/proxy/access-lists"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -187,6 +195,53 @@ function loginRule(spec: AccessListSpec) {
   return spec.deny.length > 0 ? "from any address not denied" : "from any address"
 }
 
+function sourceName(source: AccessSource, site: string) {
+  return source.list ?? `${site}'s own rules`
+}
+
+function closesWithDenyAll(source: AccessSource) {
+  return source.rules.some((rule) => rule.deny && rule.address === "all")
+}
+
+/**
+ * Where nginx never reaches a list's addresses, or the rules after it, in a
+ * site that reads it beside other rules. Each list judged on its own reads
+ * as letting its addresses in; in one run the first deny all ends the check.
+ */
+function runClashes(name: string, uses: AccessListUse[]) {
+  const out: string[] = []
+  for (const use of uses) {
+    for (const run of use.runs ?? []) {
+      const at = run.sources.findIndex((source) => source.list === name)
+      if (at < 0 || run.sources.length < 2) continue
+      const own = run.sources[at]
+      const where = run.block === "server" || run.block === "http" ? "" : ` in ${run.block}`
+      const before = run.sources.slice(0, at).filter(closesWithDenyAll)
+      if (own.rules.length > 0 && before.length > 0) {
+        const first = sourceName(before[0], use.site)
+        out.push(
+          `${use.site} reads ${first} first${where}; its deny all ends the check before ${name}'s addresses.`,
+        )
+      }
+      const after = run.sources.slice(at + 1).filter((source) => source.rules.length > 0)
+      if (closesWithDenyAll(own) && after.length > 0) {
+        const names = after.map((source) => sourceName(source, use.site)).join(" and ")
+        out.push(
+          `${use.site} reads ${names} after ${name}${where}; ${name}'s deny all ends the check before them.`,
+        )
+      }
+    }
+  }
+  return out
+}
+
+/** The sites whose blocks, with everything read beside the list, refuse the address. */
+function sitesRefusing(uses: AccessListUse[], address: string) {
+  return uses.filter((use) =>
+    (use.runs ?? []).some((run) => accessForRun(run, address) === "refused"),
+  )
+}
+
 const SHOWN_ENTRIES = 12
 
 function Entries({ entries }: { entries: string[] }) {
@@ -253,7 +308,9 @@ function AccessListRow({
         </span>
       ),
   })
-  const refusesYou = accessFor(list, clientAddress) === "refused"
+  const refusesAlone = accessFor(list, clientAddress) === "refused"
+  const refusingSites = sitesRefusing(list.usedBy, clientAddress)
+  const clashes = runClashes(list.name, list.usedBy)
 
   return (
     <li
@@ -275,13 +332,25 @@ function AccessListRow({
             </Fragment>
           ))}
         </dl>
-        {refusesYou && (
+        {(refusesAlone || refusingSites.length > 0) && (
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
             <Status tone="warning" label="Refuses you" />
             <span className="text-hint break-all text-muted-foreground">
-              The dashboard sees you at {clientAddress}.
+              The dashboard sees you at {clientAddress}
+              {!refusesAlone &&
+                `, which ${siteNames(refusingSites)} ${refusingSites.length === 1 ? "refuses" : "refuse"} with the rules read beside the list`}
+              .
             </span>
           </div>
+        )}
+        {clashes.length > 0 && (
+          <FormNote tone="warning">
+            {clashes.map((clash) => (
+              <span key={clash} className="block">
+                {clash}
+              </span>
+            ))}
+          </FormNote>
         )}
         {list.authFileMissing && (
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
@@ -291,10 +360,14 @@ function AccessListRow({
             </span>
           </div>
         )}
-        {list.handWritten && (
-          <FormNote>
-            Written by hand: {list.handWritten}. Saving it from the form rewrites it.
-          </FormNote>
+        {list.link ? (
+          <FormNote>Not changed here: {list.handWritten}. Change it on the server.</FormNote>
+        ) : (
+          list.handWritten && (
+            <FormNote>
+              Written by hand: {list.handWritten}. Saving it from the form rewrites it.
+            </FormNote>
+          )
         )}
         <div className="flex min-w-0 items-center gap-1">
           <code className="min-w-0 truncate font-mono text-hint text-muted-foreground">
@@ -315,8 +388,22 @@ function AccessListRow({
         className="shrink-0"
         menuLabel={`More actions for ${list.name}`}
         verbs={[
-          { key: "edit", label: `Edit ${list.name}`, icon: Pencil, inline: true, run: onEdit },
-          { key: "delete", label: "Delete", icon: Trash, danger: true, run: onDelete },
+          {
+            key: "edit",
+            label: `Edit ${list.name}`,
+            icon: Pencil,
+            inline: true,
+            run: onEdit,
+            disabled: Boolean(list.link),
+          },
+          {
+            key: "delete",
+            label: "Delete",
+            icon: Trash,
+            danger: true,
+            run: onDelete,
+            disabled: Boolean(list.link),
+          },
         ]}
       />
     </li>
@@ -389,7 +476,13 @@ function AccessListDialog({
       setErrors((e) => ({ ...e, [side]: result.error }))
       return
     }
-    setLists((l) => ({ ...l, [side]: result.entries }))
+    const next = { ...lists, [side]: result.entries }
+    const overlap = checkOverlap(next.allow, next.deny)
+    if (overlap) {
+      setErrors((e) => ({ ...e, [side]: overlap }))
+      return
+    }
+    setLists(next)
     setDrafts((d) => ({ ...d, [side]: "" }))
   }
   const remove = (side: Side, index: number) =>
@@ -427,7 +520,9 @@ function AccessListDialog({
   const fileNames = files.data?.map((file) => file.name) ?? []
   const fileGone = Boolean(authFile) && files.data !== undefined && !fileNames.includes(authFile)
   const empty = allow.length === 0 && deny.length === 0 && !authFile
-  const ready = !busy && (editing || (trimmed && !nameError)) && !empty && !fileGone
+  const realmError = authFile ? (checkRealm(realm) ?? undefined) : undefined
+  const ready = !busy && (editing || (trimmed && !nameError)) && !empty && !fileGone && !realmError
+  const clashes = editing ? runClashes(editing.name, editing.usedBy) : []
   const enabledUses = editing?.usedBy.filter((use) => use.enabled) ?? []
   const target = editing?.name ?? trimmed
 
@@ -439,6 +534,11 @@ function AccessListDialog({
         allow: "error" in allowed ? allowed.error : undefined,
         deny: "error" in denied ? denied.error : undefined,
       })
+      return
+    }
+    const overlap = checkOverlap(allowed.entries, denied.entries)
+    if (overlap) {
+      setErrors({ allow: overlap })
       return
     }
     setLists({ allow: allowed.entries, deny: denied.entries })
@@ -607,13 +707,14 @@ function AccessListDialog({
             label="Login prompt"
             htmlFor="access-realm"
             hint="What the browser's sign-in box says."
+            error={realmError}
           >
             <Input
               id="access-realm"
               value={realm}
               onChange={(e) => setRealm(e.target.value)}
               placeholder="Restricted"
-              maxLength={100}
+              aria-invalid={Boolean(realmError)}
             />
           </Field>
         )}
@@ -646,6 +747,14 @@ function AccessListDialog({
               {enabledUses.length > 0 ? siteNames(enabledUses) : "the sites that include it"} the
               same way, saving locks you out of them.
             </p>
+          </Notice>
+        )}
+        {clashes.length > 0 && (
+          <Notice tone="warning" icon={Warning} title="Read beside other rules">
+            {clashes.map((clash) => (
+              <p key={clash}>{clash}</p>
+            ))}
+            <p>nginx stops at the first rule an address matches, across every list in a block.</p>
           </Notice>
         )}
         {verdict === "password" && (

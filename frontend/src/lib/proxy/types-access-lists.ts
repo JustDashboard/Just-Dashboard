@@ -16,11 +16,43 @@ export type AccessListSpec = {
   satisfy: "all" | "any"
 }
 
+/** One allow or deny as written: an address, a range or "all". */
+export type AccessRule = {
+  deny: boolean
+  address: string
+}
+
+/**
+ * Where some of a run's rules come from: a list, or — with no `list` — the
+ * site's own allow, deny, satisfy and auth_basic lines between two lists.
+ */
+export type AccessSource = {
+  list?: string
+  file: string
+  rules: AccessRule[]
+  /** An auth_basic other than off: a login is asked for. */
+  password?: boolean
+  satisfy?: string
+}
+
+/**
+ * One block of a site that takes a list in, with every source of rules nginx
+ * reads there, in order. nginx stops at the first rule an address matches,
+ * so a list's closing deny all ends the check for every source after it.
+ */
+export type AccessRun = {
+  /** "server", "location /admin", or "http" for the top of the file. */
+  block: string
+  sources: AccessSource[]
+}
+
 /** A site whose file includes a list, directly or through a snippet. */
 export type AccessListUse = {
   site: string
   path: string
   enabled: boolean
+  /** Each block of the site that reads the list. */
+  runs?: AccessRun[]
 }
 
 /** GET /proxy/access-lists/: one list, where it is and who includes it. */
@@ -33,6 +65,8 @@ export type AccessList = AccessListSpec & {
   authFileMissing?: boolean
   /** Why saving from the form would change what the file does. */
   handWritten?: string
+  /** Where the list's file leads when it is a link; the page neither saves nor deletes through one. */
+  link?: string
   usedBy: AccessListUse[]
   modified: string
 }

@@ -1,10 +1,12 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -64,7 +66,12 @@ func (s *Server) handleAuthUserRemove(w http.ResponseWriter, r *http.Request) er
 
 func (s *Server) handleAuthFileDelete(w http.ResponseWriter, r *http.Request) error {
 	file := chi.URLParam(r, "file")
-	if err := s.modules.proxy.DeleteAuthFile(file); err != nil {
+	err := s.modules.proxy.DeleteAuthFile(file)
+	var listed *proxysvc.AuthFileListedError
+	switch {
+	case errors.As(err, &listed):
+		return httpx.Err(http.StatusConflict, "in_use", err.Error())
+	case err != nil:
 		return httpx.BadRequest("%v", err)
 	}
 	httpx.SetAudit(r, "proxy.auth.delete", file, nil)

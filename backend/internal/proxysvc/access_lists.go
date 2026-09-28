@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Reusable access lists.
@@ -74,9 +75,13 @@ type AccessList struct {
 	// HandWritten says why the file is not in the shape this page writes —
 	// a directive it does not write, rules in another order — so saving the
 	// list from the form would change what it does, not only how it reads.
-	HandWritten string          `json:"handWritten,omitempty"`
-	UsedBy      []AccessListUse `json:"usedBy"`
-	Modified    time.Time       `json:"modified"`
+	HandWritten string `json:"handWritten,omitempty"`
+	// Link is where the list's file leads when it is a symlink. The page
+	// neither saves nor deletes through one: either would land on the file
+	// it leads to — a site's, a password file — and leave the link.
+	Link     string          `json:"link,omitempty"`
+	UsedBy   []AccessListUse `json:"usedBy"`
+	Modified time.Time       `json:"modified"`
 }
 
 // AccessListUse is a site whose file includes a list, directly or through a
@@ -85,6 +90,9 @@ type AccessListUse struct {
 	Site    string `json:"site"`
 	Path    string `json:"path"`
 	Enabled bool   `json:"enabled"`
+	// Runs is each block of the site that takes the list in, with every
+	// other source of rules nginx reads there in one run with it.
+	Runs []AccessRun `json:"runs,omitempty"`
 }
 
 // AccessListInUseError refuses to delete a list a site still includes: nginx
@@ -146,11 +154,13 @@ func (s *Service) AccessListPath(name string) (string, error) {
 // defaulted where there is a password and dropped where there is not.
 func ValidateAccessList(spec AccessListSpec) (AccessListSpec, error) {
 	out := AccessListSpec{Allow: []string{}, Deny: []string{}, Satisfy: spec.Satisfy}
+	var allowed, denied []netip.Prefix
 	for _, side := range []struct {
-		label string
-		in    []string
-		out   *[]string
-	}{{"allow", spec.Allow, &out.Allow}, {"deny", spec.Deny, &out.Deny}} {
+		label  string
+		in     []string
+		out    *[]string
+		ranges *[]netip.Prefix
+	}{{"allow", spec.Allow, &out.Allow, &allowed}, {"deny", spec.Deny, &out.Deny, &denied}} {
 		if len(side.in) > maxAccessEntries {
 			return out, fmt.Errorf("the %s list has %d entries; the most a list takes is %d", side.label, len(side.in), maxAccessEntries)
 		}
@@ -166,6 +176,21 @@ func ValidateAccessList(spec AccessListSpec) (AccessListSpec, error) {
 			}
 			seen[prefix] = true
 			*side.out = append(*side.out, entry)
+			*side.ranges = append(*side.ranges, prefix)
+		}
+	}
+	// The denials are written first and nginx stops at the first rule an
+	// address matches, so an allowed address a denial takes in is never let
+	// in — while the list reads as allowing it.
+	for i, allow := range allowed {
+		for j, deny := range denied {
+			if deny.Bits() > allow.Bits() || !deny.Contains(allow.Addr()) {
+				continue
+			}
+			if deny == allow {
+				return out, fmt.Errorf("%s is also denied, and denials are checked first — it would never be let in", out.Allow[i])
+			}
+			return out, fmt.Errorf("%s is inside the denied %s, and denials are checked first — it would never be let in", out.Allow[i], out.Deny[j])
 		}
 	}
 	out.AuthFile = strings.TrimSpace(spec.AuthFile)
@@ -180,13 +205,14 @@ func ValidateAccessList(spec AccessListSpec) (AccessListSpec, error) {
 		// nginx reads a variable in the prompt, and "off" as the prompt
 		// turns the password off altogether.
 		if strings.ContainsAny(out.Realm, "\"\\$;{}") || strings.ContainsFunc(out.Realm, func(r rune) bool { return r < ' ' || r == 0x7f }) {
-			return out, fmt.Errorf("the login prompt may not contain quotes, backslashes, $, semicolons, braces or control characters")
+			return out, fmt.Errorf("the login prompt may not contain double quotes, backslashes, $, semicolons, braces or control characters")
 		}
 		if strings.EqualFold(out.Realm, "off") {
 			return out, fmt.Errorf("a login prompt of \"off\" turns the password off — choose other words")
 		}
-		if len(out.Realm) > 100 {
-			return out, fmt.Errorf("the login prompt is %d characters; keep it to 100", len(out.Realm))
+		// Characters, not bytes: a prompt in Cyrillic is two bytes a letter.
+		if n := utf8.RuneCountInString(out.Realm); n > 100 {
+			return out, fmt.Errorf("the login prompt is %d characters; keep it to 100", n)
 		}
 	}
 	switch out.Satisfy {
@@ -378,13 +404,15 @@ func (s *Service) ListAccessLists() ([]AccessList, error) {
 			continue
 		}
 		path := filepath.Join(s.AccessListDir(), e.Name())
-		var list AccessList
-		if b, err := os.ReadFile(path); err != nil {
-			list = s.readAccessList(name, path, "")
-			list.HandWritten = "it could not be read: " + err.Error()
-		} else {
-			list = s.readAccessList(name, path, string(b))
+		content, link, why := s.readListFile(path)
+		list := s.readAccessList(name, path, content)
+		switch {
+		case why != "":
+			list.HandWritten = why
+		case link != "":
+			list.HandWritten = "it is a link to " + link + ", which the page neither saves nor deletes"
 		}
+		list.Link = link
 		if info, err := e.Info(); err == nil {
 			list.Modified = info.ModTime()
 		}
@@ -415,16 +443,32 @@ func (s *Service) accessListUses(lists []string) map[string][]AccessListUse {
 		resolved[list] = resolvedFile(list)
 	}
 	seen := map[string]bool{}
+	// Every list's rules, read once and only when a site includes one: a
+	// run takes in the lists beside the one asked about too.
+	var sources map[string]AccessSource
 	for _, v := range s.nginxVHosts() {
 		if v.Path == "" || seen[v.Name+"\x00"+v.Path] {
 			continue
 		}
 		seen[v.Name+"\x00"+v.Path] = true
 		patterns := s.includePatterns(v.Path)
+		var runs []AccessRun
+		walked := false
 		for _, list := range lists {
-			if slices.ContainsFunc(patterns, func(p string) bool { return includeMatches(p, list, resolved[list]) }) {
-				out[list] = append(out[list], AccessListUse{Site: v.Name, Path: v.Path, Enabled: v.Enabled})
+			if !slices.ContainsFunc(patterns, func(p string) bool { return includeMatches(p, list, resolved[list]) }) {
+				continue
 			}
+			if !walked {
+				if sources == nil {
+					sources = s.accessSources()
+				}
+				runs, walked = s.accessRuns(v.Path, sources), true
+			}
+			use := AccessListUse{Site: v.Name, Path: v.Path, Enabled: v.Enabled}
+			if source, ok := sources[list]; ok {
+				use.Runs = runsWith(runs, source.List)
+			}
+			out[list] = append(out[list], use)
 		}
 	}
 	for _, uses := range out {
@@ -534,7 +578,7 @@ func (s *Service) SaveAccessList(ctx context.Context, name string, spec AccessLi
 	if err := os.MkdirAll(s.AccessListDir(), 0o755); err != nil {
 		return nil, err
 	}
-	full, err := s.allowedPath(path)
+	full, err := s.listFileOnDisk(name)
 	if err != nil {
 		return nil, err
 	}
@@ -542,6 +586,9 @@ func (s *Service) SaveAccessList(ctx context.Context, name string, spec AccessLi
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := notAListFile(name, full); err != nil {
+		return nil, err
+	}
 	original, existed := readIfPresent(full)
 	if existed && !overwrite {
 		return nil, fmt.Errorf("%w: %s", ErrAccessListExists, name)
@@ -587,16 +634,18 @@ func (s *Service) SaveAccessList(ctx context.Context, name string, spec AccessLi
 // the sites, nginx.conf or a snippet of a snippet, may still include it.
 // Nothing nginx has loaded changes, so nothing is reloaded.
 func (s *Service) DeleteAccessList(ctx context.Context, name string) error {
-	path, err := s.AccessListPath(name)
-	if err != nil {
+	if _, err := s.AccessListPath(name); err != nil {
 		return err
 	}
-	full, err := s.allowedPath(path)
+	full, err := s.listFileOnDisk(name)
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := notAListFile(name, full); err != nil {
+		return err
+	}
 	original, err := os.ReadFile(full)
 	if os.IsNotExist(err) {
 		return fmt.Errorf("%w: %s", ErrNoAccessList, name)
@@ -620,7 +669,136 @@ func (s *Service) DeleteAccessList(ctx context.Context, name string) error {
 		}
 		return refused
 	}
-	_ = os.WriteFile(full+".bak", original, 0o644)
+	// Renamed into place, so a link already at the copy's name is
+	// replaced rather than written through.
+	_ = writeAtomic(full+".bak", string(original))
 	s.recordChange(ctx, Change{Path: full, Action: ChangeDelete, Before: original, BeforeExisted: true})
 	return nil
+}
+
+// listFileOnDisk is the file a list called name is on disk: the directory's
+// links resolved, as allowedPath resolves them, and the list's own name in
+// it. allowedPath on the list's path also resolved a link at that name, so a
+// save wrote the file the link led to and a delete removed it.
+func (s *Service) listFileOnDisk(name string) (string, error) {
+	dir, err := s.allowedPath(s.AccessListDir())
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, name+".conf"), nil
+}
+
+// notAListFile refuses to change a list whose file is a link, or anything
+// else that is not a plain file. Called with the service lock held, so
+// nothing puts a link in its place before the write.
+func notAListFile(name, full string) error {
+	info, err := os.Lstat(full)
+	if err != nil || info.Mode().IsRegular() {
+		return nil
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s is a link to %s, and the page neither saves nor deletes through a link — change it on the server", name, linkTarget(full))
+	}
+	return fmt.Errorf("%s is not a plain file, and the page only changes lists it wrote", name)
+}
+
+// linkTarget is where the link at path points, as an absolute path.
+func linkTarget(path string) string {
+	target, err := os.Readlink(path)
+	if err != nil {
+		return path
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(path), target)
+	}
+	return filepath.Clean(target)
+}
+
+// readListFile reads a list the way nginx reads it, through a link, but only
+// where the config editor would read it too: a link that leads outside the
+// proxy's directories, or to a password file, is named and not read. link is
+// where a link leads; why is set when the list was not read.
+func (s *Service) readListFile(path string) (content, link, why string) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", "", "it could not be read: " + err.Error()
+	}
+	full := path
+	if info.Mode()&os.ModeSymlink != 0 {
+		link = linkTarget(path)
+		if full, err = s.allowedPath(path); err != nil {
+			return "", link, "it is a link to " + link + ", outside the directories this page reads"
+		}
+		if s.isPasswordFile(full) {
+			return "", link, "it is a link to a password file, which this page does not read as a list"
+		}
+		if info, err = os.Stat(full); err != nil {
+			return "", link, "it is a link to " + link + ", which could not be read: " + err.Error()
+		}
+	}
+	// A FIFO under a list's name would hold the listing for ever.
+	if !info.Mode().IsRegular() {
+		return "", link, "it is not a plain file"
+	}
+	b, err := os.ReadFile(full)
+	if err != nil {
+		return "", link, "it could not be read: " + err.Error()
+	}
+	return string(b), link, ""
+}
+
+// AuthFileListedError refuses to delete a password file that an access list
+// a site includes takes its logins from. nginx tests and reloads without the
+// file, then refuses every login on those sites.
+type AuthFileListedError struct {
+	File  string
+	Lists []AccessList
+}
+
+func (e *AuthFileListedError) Error() string {
+	lists := make([]string, 0, len(e.Lists))
+	sites := []string{}
+	for _, list := range e.Lists {
+		lists = append(lists, list.Name)
+		for _, use := range list.UsedBy {
+			name := use.Site
+			if !use.Enabled {
+				name += " (disabled)"
+			}
+			sites = appendNew(sites, name)
+		}
+	}
+	if len(lists) == 1 {
+		return fmt.Sprintf("the access list %s takes its logins from %s, and %s %s it — every login there would be refused. Choose another password file for %s first",
+			lists[0], e.File, joinNames(sites), includeVerb(sites), lists[0])
+	}
+	return fmt.Sprintf("the access lists %s take their logins from %s, and %s %s them — every login there would be refused. Choose another password file for those lists first",
+		joinNames(lists), e.File, joinNames(sites), includeVerb(sites))
+}
+
+func includeVerb(sites []string) string {
+	if len(sites) == 1 {
+		return "includes"
+	}
+	return "include"
+}
+
+// RefuseListedAuthFile is an *AuthFileListedError when an access list that a
+// site includes, enabled or not, takes its logins from the password file.
+// A list no site includes may lose it: the list then says the file is gone.
+func (s *Service) RefuseListedAuthFile(file string) error {
+	lists, err := s.ListAccessLists()
+	if err != nil {
+		return fmt.Errorf("the access lists could not be read to see whether one uses %s: %w", file, err)
+	}
+	var using []AccessList
+	for _, list := range lists {
+		if list.AuthFile == file && len(list.UsedBy) > 0 {
+			using = append(using, list)
+		}
+	}
+	if len(using) == 0 {
+		return nil
+	}
+	return &AuthFileListedError{File: file, Lists: using}
 }
