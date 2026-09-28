@@ -157,8 +157,10 @@ test("the overview counts services and names a public database critical", async 
   ).toBeVisible()
   await expect(page.getByText(/answers on every interface/)).toHaveCount(0)
 
+  // The tile opens on the rows it counts.
   await internet.click()
-  await expect(page).toHaveURL(/\/proxy\/ports$/)
+  await expect(page).toHaveURL(/\/proxy\/ports\?reach=internet$/)
+  await expect(rowsOf(page)).toHaveCount(3)
   await expect(tile(page, "Internet-facing").getByText("3", { exact: true })).toBeVisible()
   await expect(tile(page, "Private networks").getByText("2", { exact: true })).toBeVisible()
 })
@@ -778,6 +780,30 @@ test("the attention finding opens the ports page on its ports alone", async ({ p
   ).toHaveAttribute("aria-pressed", "true")
   await expect(rowsOf(page)).toHaveCount(1)
   await expect(rowsOf(page).first()).toContainText("redis-server")
+})
+
+test("the Internet-facing tile opens on what it counts, not the ports a finding opened", async ({
+  page,
+}) => {
+  await mockHost(page)
+  await page.goto("/proxy")
+  await page.getByRole("button", { name: /^Redis answers on 203\.0\.113\.5/ }).click()
+  await page.getByRole("button", { name: "Open ports" }).click()
+  await expect(page).toHaveURL(/\/proxy\/ports\?q=port:6379$/)
+  await expect(rowsOf(page)).toHaveCount(1)
+
+  // The tab now remembers `port:6379`; the tile asks for its own rows anyway.
+  await page.goBack()
+  const internet = page.getByRole("link", { name: "Internet-facing ports" })
+  await expect(internet.getByText("3", { exact: true })).toBeVisible()
+  await internet.click()
+  await expect(page).toHaveURL(/\/proxy\/ports\?reach=internet$/)
+  await expect(page.getByLabel("Search sockets")).toHaveValue("")
+  await expect(
+    page.getByRole("group", { name: "Reach" }).getByRole("button", { name: "Internet-facing 3" }),
+  ).toHaveAttribute("aria-pressed", "true")
+  await expect(rowsOf(page)).toHaveCount(3)
+  await expect(rowsOf(page).filter({ hasText: "redis-server" })).toHaveCount(1)
 })
 
 async function mockConnections(page: Page) {

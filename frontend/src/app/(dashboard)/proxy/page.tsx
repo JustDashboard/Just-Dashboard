@@ -24,6 +24,7 @@ import { RoutePath } from "@/components/proxy/route-path"
 import { ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
 import { foldProxyFindings } from "@/components/proxy/attention"
 import { foldDualStack, privateNetworksHint, tallyReach } from "@/components/proxy/ports"
+import { portsHref } from "@/components/proxy/ports-list"
 
 /**
  * Readings first, then the engine and its commands. Routes own the wide column;
@@ -196,7 +197,7 @@ export default function ProxyOverviewPage() {
             }
           />
         </StatLink>
-        <StatLink href="/proxy/ports" label="Internet-facing ports">
+        <StatLink href={portsHref({ reach: "internet" })} label="Internet-facing ports">
           <StatTile
             className="h-full transition-colors group-hover:bg-row-hover"
             label="Internet-facing"
