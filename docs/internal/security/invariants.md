@@ -121,6 +121,16 @@ default is set once, an sshd hardening pass happens on the day the server is bui
 is the **version being installed** (`0.6`), not a fixed sentence: it names the object, as every other typed
 route does, and *which version* is what has to be read before pressing a button in the sidebar.
 
+Exporting a certificate's private key (`POST /certificates/export`, system.admin, phrase
+`export <name>`) is the one typed route that destroys nothing: a key that has left the host cannot be
+called back, only the certificate revoked, and it is exported rarely. The key is returned only after its
+public half is proven to be the listed certificate's leaf, so a site's `ssl_certificate_key` naming some
+other file cannot turn the route into a file reader. A PFX is built by `openssl pkcs12 -export` reading
+the key and chain from inherited pipes (`/dev/fd/3`, `/dev/fd/4`) and the password from `JD_PFX_PASS`
+(`-passout env:`), so neither is in an argv or on disk. The response is `Cache-Control: no-store`, and the
+audit entry holds the name, path and format — never the key or the password. The public parts
+(`GET /certificates/download`, read) are re-encoded from the file's `CERTIFICATE` blocks only.
+
 **Not typed — routine, recoverable, or both:** deleting rows, documents and Redis keys; dropping an index;
 dropping a database account, disabling an extension or deleting a dump on the Server and Backups pages
 (the account is recreated from its name and a new password, the extension is one `CREATE EXTENSION` away,
