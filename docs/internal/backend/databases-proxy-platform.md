@@ -680,6 +680,24 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   (`TestSaveRefusesAFileThatChangedSinceTheFormReadIt`, `TestSiteSpecSaysWhatASaveDropsAndWhichVersionItRead`).
   Deployment cutovers send none and are not checked.
 
+  **`POST /proxy/sites/preflight {spec}` (system.admin) makes the checks `nginx -t` cannot**
+  (`proxysvc/site_preflight.go`), answering `{checks:[{id,level,title,detail,blocking,domain?}]}`:
+  certificate and key exist, parse and match (`keyMatchesCertificate`), the certificate covers every
+  domain (`certificateCoversAll`) and its days left; each password file exists, has users and is
+  readable by nginx's worker group (`nginxWorkerGID`, mode/owner from the host); a static root and
+  location folders exist, with an `index.html` where one is expected; each of the spec's own upstreams
+  accepts a TCP connection and answers a HEAD within 2s (never any other target, since it is outbound
+  traffic the caller aims); and DNS for every domain (`CheckDomainDNS`). Existence and mode come from
+  one `stat -L -c` argv run through `hostexec.CommandOnHost`, because `/var/www` is not shared with the
+  container; content (certificate, key, htpasswd) is read in the container and never returned. Each
+  input is held to its own ValidateSpec pattern and skipped if it fails it, so a half-filled form still
+  gets answers. Only files that break the site as saved are `blocking` (missing/mismatched/expired
+  certificate or key, uncovered domain, missing/empty/unreadable-by-root-owned password file, missing
+  folder, SPA without index.html); a closed upstream and DNS elsewhere are warnings, since a site is
+  often saved before its app or its record exists. The form runs it 800ms after typing stops, shows it
+  in a Checks tab and as per-domain DNS lines under Domains, and holds Save while a blocking check fails
+  until the operator allows it; a new blocking check holds it again.
+
   **`POST /proxy/sites/preview` also says where the file goes**: `path` is what a save writes
   (`SiteFile`, through the same `siteTarget` the save uses: `sites-available/<name>`, or
   `conf.d/<name>.conf` on a conf.d host) and `exists` whether a file is there. Both are left out when the

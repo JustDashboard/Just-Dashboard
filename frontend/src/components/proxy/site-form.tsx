@@ -24,7 +24,6 @@ import type {
   CloudflareRanges,
   CloudflareRefresh,
   Container,
-  DomainCheck,
   DroppedLine,
   ErrorPageCode,
   Exposure,
@@ -32,6 +31,8 @@ import type {
   Listener,
   RequestLimit,
   LocationMatch,
+  PreflightCheck,
+  PreflightLevel,
   PermissionRule,
   PoolMethod,
   PoolServer,
@@ -45,6 +46,7 @@ import type {
   SiteMaintenance,
   SitePageName,
   SitePool,
+  SitePreflight,
   SitePreview,
   SiteRead,
   SiteResult,
@@ -71,7 +73,7 @@ import { Modal } from "@/components/modal"
 import { Group, Pane, Well } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
 import { EmptyNote, Notice } from "@/components/state"
-import { StatusDot } from "@/components/status-dot"
+import { StatusDot, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -245,6 +247,12 @@ function SiteFormBody({
   // of another name says nothing about this one's file.
   const [preview, setPreview] = useState<(SitePreview & { name: string }) | null>(null)
   const [previewError, setPreviewError] = useState("")
+  // What nginx -t cannot say about the draft: files, upstreams and DNS.
+  const [preflight, setPreflight] = useState<SitePreflight | null>(null)
+  const [preflightError, setPreflightError] = useState("")
+  // The blocking checks the operator allowed a save over, by id: a new
+  // failure holds the save again, an unrelated edit does not.
+  const [overridden, setOverridden] = useState<string | null>(null)
   const [managed, setManaged] = useSessionState(`${draft}.managed`, true)
   // Which of the name and certificate paths the operator has set, so that
   // typing the domains stops rewriting them.
@@ -401,6 +409,42 @@ function SiteFormBody({
           })
       },
       ready ? 400 : 0,
+    )
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [open, loaded, spec])
+
+  // The preflight. Slower to debounce than the preview: it connects to the
+  // upstreams and resolves every domain, which is not worth a request per
+  // keystroke.
+  useEffect(() => {
+    const controller = new AbortController()
+    const ready = open && loaded && spec.domains.length > 0
+    const timer = setTimeout(
+      () => {
+        if (!ready) {
+          setPreflight(null)
+          setPreflightError("")
+          return
+        }
+        post<SitePreflight>(
+          "/proxy/sites/preflight",
+          { spec: sendableSpec(spec) },
+          { signal: controller.signal },
+        )
+          .then((r) => {
+            setPreflight(r)
+            setPreflightError("")
+          })
+          .catch((err) => {
+            if (controller.signal.aborted) return
+            setPreflight(null)
+            setPreflightError(String(err))
+          })
+      },
+      ready ? 800 : 0,
     )
     return () => {
       clearTimeout(timer)
@@ -590,6 +634,18 @@ function SiteFormBody({
       : undefined
   const chosenPreset = !source ? presetById(preset) : undefined
   const warnings = preview?.warnings ?? []
+  const checks = preflight?.checks ?? []
+  const dnsChecks = checks.filter((c) => c.domain !== undefined)
+  const failed = checks.filter((c) => c.level === "fail").length
+  const cautions = checks.filter((c) => c.level === "warning").length
+  const blockingKey = checks
+    .filter((c) => c.blocking)
+    .map((c) => c.id)
+    .join("\n")
+  const held = blockingKey !== "" && overridden !== blockingKey
+  const heldNote = held
+    ? `${plural(failed, "check")} failed. Save waits until they pass, or until you allow it under Checks.`
+    : null
 
   // Not while the file changed under the draft: the save would be refused
   // until the operator says which of the two wins.
@@ -641,7 +697,7 @@ function SiteFormBody({
     const key = event.key.toLowerCase() === "s" && (event.ctrlKey || event.metaKey)
     if (!key || event.altKey || event.shiftKey || rawOpen || discarding) return
     event.preventDefault()
-    if (ready && busy === null) void save(primary)
+    if (ready && !held && busy === null) void save(primary)
   })
   useEffect(() => {
     if (!open) return
@@ -672,14 +728,18 @@ function SiteFormBody({
         servedCopy ? (
           <>
             <span className="mr-auto text-hint text-muted-foreground">
-              nginx serves <code className="font-mono">sites-enabled/{spec.name}</code>, a file of
-              its own, not this one. Saving here changes nothing it serves until that file is
-              replaced by a link to this one.
+              {heldNote ?? (
+                <>
+                  nginx serves <code className="font-mono">sites-enabled/{spec.name}</code>, a file
+                  of its own, not this one. Saving here changes nothing it serves until that file is
+                  replaced by a link to this one.
+                </>
+              )}
             </span>
             <Button
               size="sm"
               onClick={() => save("keep")}
-              disabled={!ready || busy !== null}
+              disabled={!ready || held || busy !== null}
               pending={busy === "keep"}
               aria-keyshortcuts="Control+S Meta+S"
             >
@@ -689,18 +749,19 @@ function SiteFormBody({
         ) : disabled ? (
           <>
             <span className="mr-auto text-hint text-muted-foreground">
-              {file?.enabledElsewhere
-                ? `${file.enabledElsewhere}, so this site can be neither enabled nor tested under its name.`
-                : confd
-                  ? "Disabled: nginx reads only the conf.d files ending in .conf. nginx tests it as if it did, and it stays off until it is renamed."
-                  : "Disabled. nginx tests it as if enabled, and it stays off until you enable it."}
+              {heldNote ??
+                (file?.enabledElsewhere
+                  ? `${file.enabledElsewhere}, so this site can be neither enabled nor tested under its name.`
+                  : confd
+                    ? "Disabled: nginx reads only the conf.d files ending in .conf. nginx tests it as if it did, and it stays off until it is renamed."
+                    : "Disabled. nginx tests it as if enabled, and it stays off until you enable it.")}
             </span>
             {!file?.enabledElsewhere && !confd && (
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => save("enable")}
-                disabled={!ready || busy !== null}
+                disabled={!ready || held || busy !== null}
                 pending={busy === "enable"}
               >
                 Save and enable
@@ -709,7 +770,7 @@ function SiteFormBody({
             <Button
               size="sm"
               onClick={() => save("keep")}
-              disabled={!ready || busy !== null}
+              disabled={!ready || held || busy !== null}
               pending={busy === "keep"}
               aria-keyshortcuts="Control+S Meta+S"
             >
@@ -719,15 +780,16 @@ function SiteFormBody({
         ) : (
           <>
             <span className="mr-auto text-hint text-muted-foreground">
-              {droppedLines > 0
-                ? `Saving drops ${plural(droppedLines, "line")} of the file, listed above.`
-                : "Validated with nginx\u2019s own parser before it takes effect, and rolled back if the test fails."}
+              {heldNote ??
+                (droppedLines > 0
+                  ? `Saving drops ${plural(droppedLines, "line")} of the file, listed above.`
+                  : "Validated with nginx\u2019s own parser before it takes effect, and rolled back if the test fails.")}
             </span>
             <Button
               size="sm"
               variant="outline"
               onClick={() => save("save")}
-              disabled={!ready || busy !== null}
+              disabled={!ready || held || busy !== null}
               pending={busy === "save"}
             >
               Save only
@@ -735,7 +797,7 @@ function SiteFormBody({
             <Button
               size="sm"
               onClick={() => save("reload")}
-              disabled={!ready || busy !== null}
+              disabled={!ready || held || busy !== null}
               pending={busy === "reload"}
               aria-keyshortcuts="Control+S Meta+S"
             >
@@ -892,7 +954,7 @@ function SiteFormBody({
               className="font-mono text-xs"
             />
           </Field>
-          {spec.domains[0] && <DNSCheck domain={spec.domains[0]} />}
+          <DomainChecks checks={dnsChecks.filter((c) => spec.domains.includes(c.domain ?? ""))} />
 
           <Field
             label="File name"
@@ -1372,6 +1434,19 @@ function SiteFormBody({
                 )}
               </TabsTrigger>
             )}
+            <TabsTrigger value="checks">
+              Checks
+              {failed + cautions > 0 && (
+                <span
+                  className={cn(
+                    "numeric ml-1 text-hint font-medium",
+                    failed > 0 ? "text-destructive" : "text-warning",
+                  )}
+                >
+                  {failed || cautions}
+                </span>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="notes">
               Notes
               {warnings.length > 0 && (
@@ -1418,6 +1493,46 @@ function SiteFormBody({
               </Pane>
             </TabsContent>
           )}
+          <TabsContent value="checks" className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+            {held && (
+              <Notice tone="danger" icon={Warning} title="Save waits for these">
+                <p>
+                  Each failed check below is a site that will not work as saved. Fix them, or save
+                  it as it is.
+                </p>
+                <div className="mt-2">
+                  <Button size="xs" variant="outline" onClick={() => setOverridden(blockingKey)}>
+                    Allow saving anyway
+                  </Button>
+                </div>
+              </Notice>
+            )}
+            {preflightError ? (
+              <EmptyNote className="my-auto text-destructive">{preflightError}</EmptyNote>
+            ) : !preflight ? (
+              <EmptyNote className="my-auto">
+                Enter a domain and what nginx -t cannot check appears here: the certificate and key,
+                password files, folders, upstreams and DNS.
+              </EmptyNote>
+            ) : (
+              <ul className="divide-y divide-hairline">
+                {checks.map((check) => (
+                  <li key={check.id} className="flex items-start gap-2.5 py-2.5 text-body">
+                    <StatusDot tone={CHECK_TONE[check.level]} className="mt-1.5" />
+                    <span className="min-w-0 leading-relaxed">
+                      <span className="font-medium">
+                        {check.domain && <span className="font-mono">{check.domain}: </span>}
+                        {check.title}
+                      </span>
+                      {check.detail && (
+                        <span className="block text-muted-foreground">{check.detail}</span>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </TabsContent>
           <TabsContent value="notes" className="min-h-0 flex-1 overflow-y-auto">
             {warnings.length === 0 ? (
               <p className="flex items-center gap-2.5 py-2 text-body text-muted-foreground">
@@ -1486,53 +1601,36 @@ function SiteFormBody({
   )
 }
 
+const CHECK_TONE: Record<PreflightLevel, DotTone> = {
+  ok: "running",
+  info: "stopped",
+  warning: "warning",
+  fail: "danger",
+}
+
 /**
- * Does the domain point here yet?
+ * Where each domain points, from the preflight.
  *
  * The first question of every reverse-proxy setup and the cause of most of the
  * failures: certbot cannot prove control of a name that resolves somewhere
  * else, and the error it gives says "challenge failed" rather than "your DNS
- * is not updated yet".
+ * is not updated yet". Every domain, not only the first: a www alias that
+ * points elsewhere fails the certificate order just the same.
  */
-function DNSCheck({ domain }: { domain: string }) {
-  const [check, setCheck] = useState<DomainCheck | null>(null)
-  const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    const controller = new AbortController()
-    const timer = setTimeout(() => {
-      setLoading(true)
-      get<DomainCheck>("/certificates/dns", { domain }, controller.signal)
-        .then(setCheck)
-        .catch(() => setCheck(null))
-        .finally(() => !controller.signal.aborted && setLoading(false))
-    }, 600)
-    return () => {
-      clearTimeout(timer)
-      controller.abort()
-    }
-  }, [domain])
-
-  if (loading && !check) {
-    return <FormNote className="-mt-3">Checking where {domain} points…</FormNote>
-  }
-  if (!check) return null
+function DomainChecks({ checks }: { checks: PreflightCheck[] }) {
+  if (checks.length === 0) return null
   return (
-    <FormNote
-      className="-mt-3"
-      tone={
-        check.pointsHere
-          ? "success"
-          : // A host behind provider NAT has no address of its own to compare
-            // against, so "cannot tell" is muted like the CDN case rather than
-            // warned about — the domain is very probably fine.
-            check.behindProxy || !check.hostAddressesKnown
-            ? "default"
-            : "warning"
-      }
-    >
-      {check.summary}
-    </FormNote>
+    <ul className="-mt-3 space-y-1">
+      {checks.map((check) => (
+        <li key={check.id} className="flex items-start gap-2 text-hint leading-relaxed">
+          <StatusDot tone={CHECK_TONE[check.level]} className="mt-1.5" />
+          <span className="min-w-0 text-muted-foreground">
+            <span className="font-mono text-foreground">{check.domain}</span> {check.title}.{" "}
+            {check.level !== "ok" && check.detail}
+          </span>
+        </li>
+      ))}
+    </ul>
   )
 }
 

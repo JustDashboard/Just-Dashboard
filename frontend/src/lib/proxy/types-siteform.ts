@@ -354,6 +354,26 @@ export type SitePreview = {
   dropped?: DroppedLine[]
 }
 
+/** How a preflight check came out. Only a fail can be blocking. */
+export type PreflightLevel = "ok" | "info" | "warning" | "fail"
+
+/** One of the checks POST /proxy/sites/preflight makes that nginx -t cannot. */
+export type PreflightCheck = {
+  id: string
+  level: PreflightLevel
+  title: string
+  detail?: string
+  /** The site would not work as saved: Save waits until the operator allows it. */
+  blocking: boolean
+  /** Set on the DNS checks, which the form shows by the domains. */
+  domain?: string
+}
+
+/** What POST /proxy/sites/preflight answers. */
+export type SitePreflight = {
+  checks: PreflightCheck[]
+}
+
 /** What GET /proxy/sites/{name} answers: a site read back into the form. */
 export type SiteRead = {
   spec: SiteSpec
