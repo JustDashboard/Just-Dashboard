@@ -89,6 +89,8 @@ const postgres = listener({
   cmdline: "postgres -D /var/lib/postgresql",
   user: "postgres",
   level: "critical",
+  service: "PostgreSQL",
+  danger: "A database open to the internet is scanned and brute-forced within hours. Set a source.",
 })
 const gitDaemons = Array.from({ length: 20 }, (_, i) =>
   loopback({
@@ -365,7 +367,13 @@ describe("grouping by application", () => {
   test("a group's reach is its worst socket's", () => {
     const [group] = groupByOwner([
       listener({ process: "redis-server", port: 6380, reach: "loopback", exposed: false }),
-      listener({ process: "redis-server", port: 6379, level: "critical" }),
+      listener({
+        process: "redis-server",
+        port: 6379,
+        level: "critical",
+        service: "Redis",
+        danger: "Never open this to the world.",
+      }),
     ])
     expect(worstSocket(group).port).toBe(6379)
     expect(groupPorts(group)).toBe("6379, 6380")

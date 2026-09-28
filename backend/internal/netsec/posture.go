@@ -81,6 +81,10 @@ type ExposedPort struct {
 	// AssessInput.Network, by the same HostNetwork.Place the ports page's
 	// listing is graded with, so the two cannot disagree.
 	Exposed bool
+	// Dashboard marks one of the dashboard's own sockets other than its
+	// Caddy's: the backend and the web app, which are meant to answer on
+	// loopback alone.
+	Dashboard bool
 }
 
 // CertSummary is the minimum netsec needs about a certificate.
@@ -480,6 +484,9 @@ func assessPorts(in AssessInput) []SecurityFinding {
 			continue
 		}
 		id := fmt.Sprintf("ports.exposed.%s.%d", l.Protocol, l.Port)
+		if preset.Key == dashboardService.Key {
+			id = fmt.Sprintf("ports.self.%s.%d", l.Protocol, l.Port)
+		}
 		prev, seen := widest[id]
 		if !seen {
 			order = append(order, id)
@@ -569,7 +576,7 @@ func (n HostNetwork) dangerAt(l ExposedPort) (ServicePreset, bindReach, bool) {
 	if !l.Exposed {
 		return ServicePreset{}, bindReach{}, false
 	}
-	preset, ok := PresetFor(strconv.FormatUint(uint64(l.Port), 10), l.Protocol)
+	preset, ok := ServiceOf(l)
 	if !ok || preset.Danger == "" {
 		return ServicePreset{}, bindReach{}, false
 	}

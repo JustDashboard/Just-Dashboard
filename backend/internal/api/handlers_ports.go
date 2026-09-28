@@ -427,6 +427,9 @@ func placeListeners(listeners []proxysvc.Listener, network netsec.HostNetwork, f
 		l.InboundDefault = grade.InboundDefault
 		l.PastFirewall = string(grade.PastFirewall)
 		l.FirewallRule = grade.FirewallRule
+		if preset, ok := netsec.ServiceOf(exposedPort(*l)); ok {
+			l.Service, l.Danger = preset.Name, preset.Danger
+		}
 		if l.Exposed {
 			v := netsec.JudgeFirewall(exposedPort(*l), network, firewall)
 			l.Firewall = &proxysvc.ListenerFirewall{
@@ -442,5 +445,13 @@ func exposedPort(l proxysvc.Listener) netsec.ExposedPort {
 	return netsec.ExposedPort{
 		Port: l.Port, Protocol: l.Protocol, Address: l.Address, Process: l.Process, Exposed: l.Exposed,
 		Published: l.Container != nil && l.Container.Published,
+		Dashboard: l.Self && !dashboardCaddy(l),
 	}
+}
+
+// dashboardCaddy is the dashboard's own Caddy, the one socket of its own
+// meant to face the network: the compose file's "proxy" service, which runs
+// caddy on the host's network.
+func dashboardCaddy(l proxysvc.Listener) bool {
+	return l.Process == "caddy" || l.Container != nil && l.Container.Service == "proxy"
 }

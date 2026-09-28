@@ -1,5 +1,4 @@
-import type { Listener, ListenerNetwork } from "@/lib/types"
-import { DANGEROUS_PORTS } from "@/components/proxy/findings/shared"
+import type { Capability, Listener, ListenerNetwork } from "@/lib/types"
 import { managerHref } from "@/components/procs/shared"
 
 /**
@@ -218,7 +217,9 @@ export function privateNetworksHint(tally: ReachTally): string {
 }
 
 /**
- * A database or control port the security posture raises a finding for,
+ * A service the security catalogue calls dangerous and the posture raises a
+ * finding for — a database, a control plane, a remote desktop, an open
+ * resolver, or the dashboard itself past its own Caddy —
  * once per protocol and port however many addresses it is bound to —
  * Postgres on 0.0.0.0 and on :: is one database, as the posture's finding for
  * it is one finding.
@@ -238,15 +239,17 @@ export type DangerousPort = {
   firewallRule?: number
 }
 
-/** The service a socket is a database or control port for, when the posture levels it. */
-export function dangerousService(listener: Pick<Listener, "port" | "level">): string | undefined {
-  return listener.level ? DANGEROUS_PORTS[listener.port] : undefined
+/** The dangerous service a socket is, when the posture levels it. */
+export function dangerousService(
+  listener: Pick<Listener, "service" | "danger" | "level">,
+): string | undefined {
+  return listener.level && listener.danger ? listener.service : undefined
 }
 
 export function dangerousPorts(listeners: Listener[]): DangerousPort[] {
   const byPort = new Map<string, DangerousPort>()
   for (const l of listeners) {
-    const service = DANGEROUS_PORTS[l.port]
+    const service = dangerousService(l)
     if (!service || !l.level) continue
     const key = `${l.protocol}/${l.port}`
     const entry = byPort.get(key) ?? {
@@ -297,10 +300,10 @@ export function pastFirewallWords(
  * reaches a notice — sshd on the tailnet is not an alarm. Loopback has none.
  */
 export function reachVerdict(
-  listener: Pick<Listener, "port" | "exposed" | "reach" | "network" | "level">,
+  listener: Pick<Listener, "exposed" | "reach" | "network" | "level" | "service" | "danger">,
 ): "critical" | "warning" | "notice" | undefined {
   if (!listener.exposed) return undefined
-  if (listener.level && DANGEROUS_PORTS[listener.port]) return listener.level
+  if (listener.level && dangerousService(listener)) return listener.level
   return internetFacing(listener) || onUplink(listener) ? "warning" : "notice"
 }
 
@@ -429,4 +432,193 @@ export function ownerWords(listener: Listener): string[] {
     container?.deployment?.project,
     listener.self ? "this dashboard" : undefined,
   ].filter((word): word is string => Boolean(word))
+}
+
+/**
+ * Something the ports page can do to a socket's owner in place, through the
+ * route its own page uses and under that route's capability: the unit, the
+ * container, the PM2 app, or the process itself.
+ */
+export type OwnerAction = {
+  key: "restart" | "stop" | "disable" | "reload" | "terminate" | "kill"
+  label: string
+  progressive: string
+  danger?: boolean
+  /** The confirmation's title and the sentences under it. */
+  title: string
+  description: string[]
+  path: string
+  body?: unknown
+}
+
+/**
+ * What the operator may do to a socket's owner from its row. A unit restarts,
+ * stops and is disabled on boot; a container restarts and stops; a PM2 app
+ * reloads and restarts; a process nothing supervises is terminated or killed,
+ * addressed by its PID and start time so a PID the kernel has handed on since
+ * the poll is refused rather than signalled. The dashboard's own sockets get
+ * none: stopping the dashboard from its own page leaves nothing to start it
+ * again with.
+ */
+export function ownerActions(
+  socket: Socket,
+  can: (capability: Capability) => boolean,
+): OwnerAction[] {
+  if (socket.self) return []
+  const { container } = socket
+  if (container) {
+    if (!can("destructive")) return []
+    const name = container.name
+    const path = `/docker/containers/${encodeURIComponent(container.id)}`
+    return [
+      {
+        key: "restart",
+        label: "Restart container",
+        progressive: "Restarting",
+        title: "Restart container",
+        description: [
+          `Docker stops ${name} and starts it again. Connections to it drop while it does.`,
+        ],
+        path: `${path}/restart`,
+      },
+      {
+        key: "stop",
+        label: "Stop container",
+        progressive: "Stopping",
+        danger: true,
+        title: "Stop container",
+        description: [
+          `Docker stops ${name}. Every port it publishes closes until it is started again from its page.`,
+        ],
+        path: `${path}/stop`,
+      },
+    ]
+  }
+  if (socket.manager === "pm2" && socket.managerName) {
+    const app = socket.managerName
+    const path = `/pm2/${encodeURIComponent(app)}`
+    const actions: OwnerAction[] = []
+    if (can("service.control")) {
+      actions.push({
+        key: "reload",
+        label: "Reload app",
+        progressive: "Reloading",
+        title: "Reload PM2 app",
+        description: [
+          `PM2 starts ${app} afresh and stops the old instances once the new ones are up. In cluster mode no connection is refused; an app in fork mode is restarted instead.`,
+        ],
+        path: `${path}/reload`,
+      })
+    }
+    if (can("destructive")) {
+      actions.push({
+        key: "restart",
+        label: "Restart app",
+        progressive: "Restarting",
+        title: "Restart PM2 app",
+        description: [
+          `PM2 stops every instance of ${app} and starts it again. Connections to it drop while it does.`,
+        ],
+        path: `${path}/restart`,
+      })
+    }
+    return actions
+  }
+  // The unit the row's own page opens: the service a socket unit starts, or
+  // the service the owner runs in.
+  const unit = socket.socketUnit
+    ? socket.activates
+    : socket.manager === "systemd"
+      ? socket.managerName
+      : undefined
+  if (unit) {
+    const path = `/systemd/${encodeURIComponent(unit)}`
+    // systemd holds a socket unit's socket itself, so stopping or disabling
+    // the service it starts leaves the port answering.
+    const held = socket.socketUnit
+      ? `${socket.socketUnit} keeps listening and starts it again on the next connection; stopping ${socket.socketUnit} on the services page is what closes the port.`
+      : undefined
+    const actions: OwnerAction[] = []
+    if (can("destructive")) {
+      actions.push(
+        {
+          key: "restart",
+          label: "Restart unit",
+          progressive: "Restarting",
+          title: "Restart unit",
+          description: [
+            `systemd stops ${unit} and starts it again. Connections to it drop while it does.`,
+          ],
+          path: `${path}/restart`,
+        },
+        {
+          key: "stop",
+          label: "Stop unit",
+          progressive: "Stopping",
+          danger: true,
+          title: "Stop unit",
+          description: held
+            ? [`systemd stops ${unit}.`, held]
+            : [
+                `systemd stops ${unit}. Its ports close until it is started again, from the services page or at the next boot if it is enabled.`,
+              ],
+          path: `${path}/stop`,
+        },
+      )
+    }
+    if (can("system.admin")) {
+      actions.push({
+        key: "disable",
+        label: "Disable on boot",
+        progressive: "Disabling",
+        title: "Disable unit on boot",
+        description: [
+          `${unit} no longer starts when the server boots. It keeps running, and its ports stay open, until it is stopped.`,
+          ...(held ? [held] : []),
+        ],
+        path: `${path}/disable`,
+      })
+    }
+    return actions
+  }
+  // A signal reaches one process: a socket two PIDs hold, init, a kernel
+  // thread and an owner whose start time was unreadable are left to the
+  // processes page.
+  const pids = socketPids(socket)
+  if (
+    pids.length !== 1 ||
+    socket.pid <= 1 ||
+    socket.manager === "kernel" ||
+    !socket.startedAt ||
+    !can("destructive")
+  ) {
+    return []
+  }
+  const label = `${ownerTitle(socket)} (${socket.pid})`
+  const path = `/processes/${socket.pid}/signal`
+  return [
+    {
+      key: "terminate",
+      label: "Terminate process",
+      progressive: "Terminating",
+      title: "Terminate process",
+      description: [
+        `${label} is asked to shut down. Most programs finish what they are doing and exit; one that ignores the request is still running afterwards, and Kill is the next step.`,
+      ],
+      path,
+      body: { signal: "SIGTERM", startedAt: socket.startedAt },
+    },
+    {
+      key: "kill",
+      label: "Kill process",
+      progressive: "Killing",
+      danger: true,
+      title: "Kill process",
+      description: [
+        `${label} is ended by the kernel immediately. Anything it had not written is lost, and files it held may be left half-written.`,
+      ],
+      path,
+      body: { signal: "SIGKILL", startedAt: socket.startedAt },
+    },
+  ]
 }

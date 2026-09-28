@@ -175,6 +175,19 @@ position sell a score out of a hundred, which is a number to optimise rather tha
   `InboundDefault`, `PastFirewall` (`docker` or `rule`) and `FirewallRule`, reading the firewall status
   the posture reads, so the ports page and the proxy overview colour a database as the posture levels
   it.
+- **One dangerous-service catalogue.** `netsec.ServiceOf` names a socket from `ServiceCatalogue` on
+  port *and* protocol (DNS is 53/udp; a TCP socket on 53 is not flagged), and `GET /ports` returns it
+  as `Listener.Service` and `Danger`. The frontend no longer keeps its own port list for sockets: the
+  ports page, its "Dangerous services exposed" tile and the proxy overview's finding flag whatever
+  carries `danger` and a posture `level`, so RDP, VNC, FTP and an open resolver are flagged there as
+  the posture flags them. (The streams page still judges a stream's listen port by
+  `DANGEROUS_PORTS`, since a stream has no socket to read `danger` from.)
+- **The dashboard's own sockets stay on loopback.** `ExposedPort.Dashboard` marks a `Self` socket
+  other than the dashboard's Caddy (process `caddy`, or compose service `proxy`); `ServiceOf` names it
+  "Just Dashboard", an `InternetOnly` danger, so a backend or web app bound where the internet or the
+  private uplink reaches raises `ports.self.<proto>.<port>` — critical, or a warning where the
+  firewall's inbound default holds it, by the same `portLevel` — and a tailnet or bridge bind raises
+  nothing.
 - **A check that could not run is not a pass.** `Posture.Skipped` says which is which, because a zero and
   an unanswerable question look identical: `SecurityFiltering` is false on Alpine/Arch (no advisory
   data), `LoginRecordRead` false wherever `last`/`lastb` are missing (util-linux-extra, absent from

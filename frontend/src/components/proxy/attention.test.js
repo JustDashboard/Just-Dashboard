@@ -45,6 +45,12 @@ const stream = (overrides) => ({
   open: !overrides.allowFrom?.length,
   ...overrides,
 })
+// The catalogue's reasons, as GET /ports carries them on each socket.
+const DB_DANGER =
+  "A database open to the internet is scanned and brute-forced within hours. Set a source."
+const REDIS_DANGER =
+  "Unauthenticated by default: an exposed Redis is a remote shell, not a data leak. Never open this to the world."
+const MONGO_DANGER = "Exposed MongoDB instances are the classic ransom target. Set a source."
 const listener = (overrides) => ({
   protocol: "tcp",
   address: "0.0.0.0",
@@ -133,8 +139,21 @@ const inputs = {
       ],
     },
     ports: [
-      listener({ port: 5432, process: "postgres", level: "warning" }),
-      listener({ port: 6379, process: "", protocol: "tcp6", level: "warning" }),
+      listener({
+        port: 5432,
+        process: "postgres",
+        level: "warning",
+        service: "PostgreSQL",
+        danger: DB_DANGER,
+      }),
+      listener({
+        port: 6379,
+        process: "",
+        protocol: "tcp6",
+        level: "warning",
+        service: "Redis",
+        danger: REDIS_DANGER,
+      }),
       listener({ port: 3306, exposed: false }),
       listener({}),
     ],
@@ -147,7 +166,15 @@ const inputs = {
       dir: "/etc/nginx/stream.d",
       streams: [stream({ allowFrom: ["1.2.3.4"] })],
     },
-    ports: [listener({ port: 27017, process: "mongod", level: "warning" })],
+    ports: [
+      listener({
+        port: 27017,
+        process: "mongod",
+        level: "warning",
+        service: "MongoDB",
+        danger: MONGO_DANGER,
+      }),
+    ],
     certbot: {
       available: true,
       certs: [{ name: "a", domains: [], expiry: "", daysLeft: 60, valid: true }],
@@ -282,10 +309,10 @@ describe("foldProxyFindings", () => {
       {
         id: "ports.dangerous",
         level: "warning",
-        title: "2 database or control ports answer on every interface",
+        title: "2 dangerous services answer on every interface",
         detail: "5432/tcp postgres, 6379/tcp6 unknown",
         advice:
-          "Bind these to loopback or a private address, or close them in the firewall. A database port on the internet is the commonest way a server is emptied.",
+          "Bind these to loopback or a private address, or close them in the firewall. Each is a service the security catalogue says should not face the internet.",
         meta: "ports",
         href: "/proxy/ports?q=port:5432,6379",
       },
@@ -338,8 +365,7 @@ describe("foldProxyFindings", () => {
         level: "warning",
         title: "MongoDB answers on every interface",
         detail: "27017/tcp mongod",
-        advice:
-          "Bind these to loopback or a private address, or close them in the firewall. A database port on the internet is the commonest way a server is emptied.",
+        advice: `Bind these to loopback or a private address, or close them in the firewall. ${MONGO_DANGER}`,
         meta: "ports",
         href: "/proxy/ports?q=port:27017",
       },
