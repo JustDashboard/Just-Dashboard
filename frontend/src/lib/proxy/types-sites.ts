@@ -1,9 +1,33 @@
+import type { ProxyValidation } from "./types-engine"
+
 export type VHost = {
   name: string
   kind: "nginx" | "caddy"
   path: string
   enabledPath?: string
   enabled: boolean
+  /** Where an nginx site was found; "sites-enabled" is a file or link that is only there. */
+  layout?: "sites-available" | "conf.d" | "sites-enabled"
+  /**
+   * The site's name in sites-enabled does not serve its file: "dangling" is
+   * a link to nothing, which makes nginx refuse every reload; "stale" is a
+   * link to, or a copy of, some other file.
+   */
+  broken?: "dangling" | "stale"
+  /** Where the link in sites-enabled points, for a broken site and a link-only one. */
+  linkTarget?: string
+  /**
+   * A stale link's target is also read through another name in sites-enabled
+   * or through conf.d. Otherwise Enable, which points the link at this file,
+   * takes that target out of nginx.
+   */
+  targetServedElsewhere?: boolean
+  /** Other names in sites-enabled that link to this file, each serving it; Disable takes them out. */
+  linkedAs?: string[]
+  /** Where the file really is, when that is outside the proxy's directories: the editor does not open it. */
+  resolvesTo?: string
+  /** The site form reads this file and saves it back to the same place. */
+  formEditable: boolean
   serverNames: string[]
   listen: string[]
   upstreams: string[]
@@ -12,8 +36,39 @@ export type VHost = {
   /** Where an nginx site writes its requests and errors, as its own page reads them. */
   accessLogPath?: string
   errorLogPath?: string
+  certPaths?: string[]
+  /** The file the site's requests are logged to, its own or nginx.conf's; absent where it logs nowhere openable. */
+  accessLog?: string
+  errorLog?: string
+  /** The upstream blocks the file declares. */
+  pools?: SitePool[]
+  features?: SiteFeature[]
+  /** The package that installed this file, which it still matches byte for byte: the stock default site. */
+  package?: string
+  /** The deployment environment that writes this route. */
+  owner?: VHostOwner
   modified: string
   size: number
+}
+
+/** An upstream block and the servers in it. */
+export type SitePool = { name: string; servers: string[] }
+
+/**
+ * What a site's server blocks do besides naming and listening: a password,
+ * sign-in through another server, an address list, a rate limit, a cache,
+ * WebSockets, HTTP/2, HTTP/3, and maintenance.
+ */
+export type SiteFeature =
+  "auth" | "sso" | "allow" | "ratelimit" | "cache" | "ws" | "h2" | "h3" | "maintenance"
+
+/** A deployment environment that writes a route; `archived` is one nothing deploys any more. */
+export type VHostOwner = {
+  projectId: number
+  environmentId: number
+  project: string
+  environment: string
+  archived?: boolean
 }
 
 /** An htpasswd file and who is in it. */
@@ -21,4 +76,64 @@ export type AuthFile = {
   name: string
   path: string
   users: string[]
+}
+
+/** nginx's test and reload, as POST /proxy/reload and the site verbs report them. */
+export type ProxyReload = {
+  validation: ProxyValidation
+  reloaded: boolean
+  output: string
+}
+
+/**
+ * What a change to a link in sites-enabled did — the enable switch and the
+ * removal of a link no site owns. The change passed `nginx -t` or it was
+ * undone and refused with a 422; `reloadError` says why nginx is not running
+ * it yet.
+ */
+export type VHostLinkResult = {
+  name: string
+  enabled: boolean
+  reloaded: boolean
+  reloadError?: string
+  reload?: ProxyReload
+}
+
+/** DELETE /proxy/sites/{name}: the file is gone; the reload may not have happened. */
+export type SiteDeleteResult = {
+  name: string
+  reload?: ProxyReload | null
+  reloadError?: string
+}
+
+/**
+ * GET /proxy/pending: what on disk the running nginx has not loaded. nginx
+ * replaces its workers on every load and keeps them through a reload it
+ * refuses, so `lastReload` is its oldest worker's start and `generation`
+ * names that load, for `?after=` to wait for a newer one after a reload.
+ * `running` is false, with `reason`, where no running nginx reads this
+ * configuration, and then nothing is compared.
+ */
+export type ProxyPending = {
+  running: boolean
+  reason?: string
+  lastReload?: string
+  generation?: string
+  /** nginx's first error in the configuration on disk: every reload is refused until it is fixed. */
+  problem?: string
+  files: PendingFile[]
+}
+
+/**
+ * One change nginx has not loaded, by the path nginx reads it through — a
+ * site's link in sites-enabled — with the Sites entry it belongs to, if any.
+ * "changed" is an edit, "added" a link put into sites-enabled, "removed" a
+ * file nginx loaded and no longer reads, which it serves until it reloads.
+ */
+export type PendingFile = {
+  path: string
+  site?: string
+  layout?: VHost["layout"]
+  change: "changed" | "added" | "removed"
+  modified?: string
 }

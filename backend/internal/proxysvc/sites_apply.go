@@ -72,6 +72,7 @@ func (s *Service) applySiteLocked(ctx context.Context, spec *SiteSpec, content s
 	res := &SiteResult{
 		Name: spec.Name, Path: full, Content: content, Warnings: SpecWarnings(spec),
 	}
+	s.keepLoaded(full, filepath.Join(s.nginxDir, "sites-enabled", spec.Name))
 	if err := writeAtomic(full, content); err != nil {
 		return nil, err
 	}
@@ -191,6 +192,9 @@ func (s *Service) DeleteSite(ctx context.Context, name string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.checkSiteDelete(name); err != nil {
+		return err
+	}
 	removedLink := false
 	link := filepath.Join(s.nginxDir, "sites-enabled", name)
 	if _, err := os.Lstat(link); err == nil {

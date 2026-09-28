@@ -53,6 +53,7 @@ type Service struct {
 
 	recorder  ChangeRecorder
 	effective effectiveCache
+	pending   pendingTracker
 }
 
 func New(nginxDir, caddyFile string) *Service {
@@ -313,6 +314,7 @@ func (s *Service) validateNginx(ctx context.Context, path, content string) (*Val
 // unavoidable for nginx and is why validation requires system.admin — the same
 // capability as writing the file outright.
 func (s *Service) stageNginx(full, content string) (func(), error) {
+	s.keepLoaded(full)
 	original, readErr := os.ReadFile(full)
 	if readErr != nil && !os.IsNotExist(readErr) {
 		return nil, readErr

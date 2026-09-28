@@ -29,7 +29,8 @@ type ConfigEditorProps = {
   actions?: (busy: boolean) => ReactNode
   /** The file is a disabled site's, which nginx does not read, so a test passes whatever it says. */
   siteDisabled?: boolean
-  onSaved?: () => void
+  /** Told whether nginx was reloaded with the save. */
+  onSaved?: (reloaded: boolean) => void
 }
 
 /**
@@ -92,7 +93,7 @@ function ConfigEditorBody({
       await put("/proxy/config", { kind, path, content, reload })
       notify.success(reload ? "Saved and reloaded" : "Saved")
       setOriginal(content)
-      onSaved?.()
+      onSaved?.(reload)
     } catch (err) {
       notify.error("Not applied", err)
     } finally {

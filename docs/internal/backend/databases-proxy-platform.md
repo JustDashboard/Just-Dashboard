@@ -440,11 +440,95 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   the overview's Engine log (nginx's two files and unit, a host Caddy's unit, and the Docker Caddy
   ingress once `GET /logs/source` finds its container) and Certificates' Renewals (`letsencrypt.log`
   and the renewal unit's journal, through the `certbot` lens).
-- **`SetVHostEnabled` replaces a stale link.** Enabling a site whose `sites-enabled` entry already
-  existed but pointed elsewhere returned success and changed nothing; it goes through `linkEnabled`
-  now, so the switch saying on means nginx reads the file. `parseCaddyfile` tracks brace depth so
-  only top-level blocks are site addresses — `handle`, `header` and `tls` blocks were listed as
-  server names.
+- **`SetVHostEnabled` changes a link only if nginx still loads.** Enabling a site whose `sites-enabled`
+  entry already existed but pointed elsewhere returned success and changed nothing; it goes through
+  `linkEnabled` now, so the switch saying on means nginx reads the file. Enabling also used to make the
+  link and return: a site nginx could not load was then in the include tree, the reload after it was
+  refused, and every later reload — deployment cutovers included — was refused with it until the link
+  was removed by hand. Now the link goes in, `nginx -t` runs, and a refusal undoes it (or restores the
+  link it replaced, target text and all) and returns a `*RefusedError` carrying the test, which the
+  switch answers as 422 `invalid_config` with nginx's first error, file and line
+  (`FailureHeadline`) as the message and the test output as `raw`. A disable is tested the same way
+  and put back when it breaks a configuration nginx was loading (another site used its upstream or
+  zone); out of a configuration nginx was already refusing it stands, because switching sites off is
+  how a broken configuration gets fixed. nginx's first error names a file other than the one being
+  switched in three cases, and `RefusedError.Lead` says which, so `Reason()` — the 422's message and
+  the audit entry's `reason` — does not read as that file's fault: a refused disable or link removal
+  is "nginx refuses the configuration without <name>: …" (the error is in the site that needed it);
+  a refused enable is tested again with the link undone, and when the same error is still the first
+  one it is "nginx already refuses the configuration without <name>: …"; and when it is not, but the
+  error is outside the site's own (resolved) file or names no file — a second `default_server` on
+  the same address, an upstream name both sites define, which nginx reports in whichever of the two
+  it reads second — it is "nginx refuses the configuration with <name>: …". An enable refused in its
+  own file carries no lead. A reload that fails after a passing test is a 200 with
+  `reloaded: false` and `reloadError` rather than a 502, since the link is in place and correct.
+  A file sitting where a link belongs in `sites-enabled` is never removed as a "disable". A link
+  under another name to the site's file (`00-default -> ../sites-available/default`) serves it as
+  surely as its own: the disable takes every such link out (and puts them all back on a refusal),
+  and an enable of a site served that way changes nothing rather than loading it twice.
+  `RemoveVHostLink` (`DELETE /proxy/vhosts/{name}/link`, destructive, audited as `proxy.vhost.unlink`)
+  takes out a link no site's switch owns — one to nothing, or to a file outside sites-available —
+  under the same test-and-restore rule, and refuses a link to any sites-available site and any real
+  file. The switch and the removal reload nginx through `ToggleVHost` and `RemoveVHostLink(…, reload)`
+  inside the same hold of the service lock (`reloadLocked`): run after it, the reload's test could see
+  another request's candidate link and report a change that had worked as "not reloaded". Both routes
+  read `{name}` through `httpx.URLParam`, since chi hands back the escaped segment (`vb%3A8080`).
+  `DeleteSite` asks `checkSiteDelete` first and refuses when `sites-enabled/<name>` is not the site's
+  own link — a copy there (the file nginx really serves, which it removed with no backup), a link to
+  another file (which it took out of nginx) — or when a link under another name would be left
+  pointing at nothing.
+  `parseCaddyfile` tracks brace depth so only top-level blocks are site addresses — `handle`,
+  `header` and `tls` blocks were listed as server names — and says whether every site address is
+  served over HTTPS: an address with a host is unless it is `http://` or on port 80 (localhost and IP
+  addresses included, which caddy:2 serves from its local authority), one with no host is not, and
+  under `auto_https off` only a block with its own `tls` counts. Caddy's one-site form without braces
+  is read (the first line is the address), an `http://` block whose only directives redirect to
+  `https://` is not a plain site — as an nginx port-80 block that only redirects is not — and a block
+  opened and closed on one line counts. An address list carried onto the next lines by trailing
+  commas is joined first; read line by line, its first line began the one-site form and every later
+  site was taken for one of its directives. One plain site makes the Caddyfile's single entry plain.
+  Names are listed once, without their scheme.
+- **What the running nginx has not loaded.** `Pending` (`pending.go`, `GET /proxy/pending`, a read
+  every account holds) compares the files nginx reads with the load it is running. nginx replaces all
+  of its workers each time it loads its configuration and keeps them when a reload fails in the master
+  — a port another process holds is the common case, which `nginx -t` does not check — so the start of
+  the oldest worker that is not "shutting down" is when the running configuration was read, and `nginx
+  -s reload` exiting 0 says only that the signal went out. The master is found in `/proc` (the
+  dashboard's container shares the host's processes): its title names its `-c` and `-p`, or it reads
+  the compiled-in configuration `nginx -V` gives, and only a master reading the main file `nginx -T`
+  names counts — the host's nginx, one in another container and the live harness's all show up
+  beside each other. Two that read the same path are told apart by the `pid` file that main file (or
+  the build) names, read under `/host` first. A start in `/proc` counts clock ticks since boot and is
+  placed on the wall clock through `CLOCK_BOOTTIME`, not `/proc/stat`'s whole-second `btime`, and
+  rounded up to the tick, because a file saved and reloaded by a script lands within a hundredth of a
+  second of the new workers. Each file `EffectiveConfig` returns (so only what `ReadConfig` shows) is
+  judged by its change time — through its link, and the link's own — not its modification time, so a
+  file moved or copied in with an old time still counts. `pendingTracker` (per `Service`) remembers,
+  for the running load, the SHA-256 of every file unchanged since it: a file whose content is back to
+  what nginx loaded is not pending however new it is (a dry-run test stages its candidate at the live
+  path and writes the original back; a switch refused and undone re-creates its link — each of
+  these calls `keepLoaded` before it writes, which notes the digest of a file still unchanged since
+  the load, so this holds even when nothing asked what is pending first), and a file
+  nginx loaded that it no longer reads is "removed" — a site disabled without a reload is still
+  served. A file saved since the load that the tracker never saw loaded is "changed", or "added" for a
+  link made since; the tracker is in memory, so after the dashboard restarts, a file changed and
+  changed back before it first read the load reads as changed until the next reload. Each file names
+  the Sites entry it belongs to (`Site`, `Layout`: a link in sites-enabled belongs to the
+  sites-available file it serves, a conf.d file to itself). `Generation` (`<master pid>-<ticks>`) names
+  the load; `?after=<generation>` waits up to five seconds, reading `/proc` every 100 ms, for a newer
+  one, which is how the Sites page reads nginx again after a reload it asked for (a save without a
+  reload reads at once). Workers all replaced without a reload — a crash or an OOM kill — keep the
+  load when the master's error log says each one that went was killed by a signal (`exited on
+  signal`, at alert level) and the new ones started right after; with no error log file to read,
+  or one in another time zone, they are taken for a load. The cached `nginx -T` is dropped before a
+  read when a file it names, or a directory its glob includes read, changed since it was taken, so a
+  link made over SSH shows at once. When `nginx -T` refuses the configuration, `Problem` is its first
+  error and the files are found by following the includes on disk from the main file (as nginx
+  globs them), so a site linked since the load is still "added"; when the dump waits more than five
+  seconds behind the service lock, only the files known to be loaded are judged. `Running` is
+  false, with `Reason`, where nginx is not installed, no master reads the configuration, or two do and
+  the pid file names neither; a master with no worker is running with no `LastReload`. A certificate
+  nginx has not reloaded is not a configuration file, and is left to the served-certificate check.
 - **Certificates say who uses them.** `listCertificates` joins the sites' `ssl_certificate` paths
   onto the certificate list (`UsedBy`), through symlinks, so a certbot lineage and the site naming
   its `live/` path are one entry; `certificateName` names a file in a generic directory
@@ -454,17 +538,85 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   token without reading it, and `DELETE /certificates/dns-credentials/{provider}` removes one
   (destructive, ordinary confirmation, audited as `certificates.dns.credentials.remove`).
 - **Two layouts, and files that are not sites.** `nginxVHosts` (`vhosts.go`, with the rest of the
-  listing and `SetVHostEnabled`) reads sites-available where it exists and conf.d where it does not
-  (every RPM distro, Alpine, Arch — most of the servers this runs on); the difference reaches the UI as an
-  empty `EnabledPath`, because conf.d has no symlink and a switch that can only error is worse than none. `confdPath` stops `app.conf` becoming `app.conf.conf`. The listing
-  **skips backups** (`isBackupFile`: `.bak`, `~`, `.dpkg-old`, `.rpmsave`) — nginx reads none of them, and
-  since delete keeps `<name>.bak`, without the filter deleting a site produced a second site.
+  listing and `SetVHostEnabled`) lists every place nginx takes a site from, each entry carrying its
+  `Layout`: sites-available where it exists, conf.d always (a Debian nginx.conf includes it too; on
+  every RPM distro, Alpine and Arch it is the only one), and on a Debian host whatever is only in
+  sites-enabled — a copied file, a link to a file kept elsewhere, a link to nothing. nginx reads all of
+  sites-enabled, so a backup-named file there is listed. A site's link is judged by identity
+  (`readEnabledLink`, `os.SameFile`), not by its text: serving the file is `Enabled`, a link to nothing
+  is `Broken: "dangling"` — nginx refuses every reload while it is there, and Lstat used to report it as
+  serving — and a link to, or a copy of, another file is `Broken: "stale"`, with `LinkTarget` saying
+  where it points and `TargetServedElsewhere` whether nginx also reads that file through another name
+  in sites-enabled or through conf.d — when it does not, the site's Enable, which points the link at
+  the site's own file, takes it out of nginx, and the page asks before it; the other names in sites-enabled that link to a sites-available file are its
+  `LinkedAs`, make it `Enabled`, and are not listed as sites of their own. `ResolvesTo` is the real
+  path of a file outside the proxy's directories, which the editor refuses to open while its switch
+  still works. A conf.d file is listed only when it declares a `server` block (read with
+  `ParseNginxFile`; one it cannot parse is listed): a file holding only a `log_format`, `map` or zone
+  is configuration other sites depend on, and listed as a site it read "Default host" with a Delete.
+  conf.d has no symlink, which reaches the UI as an empty `EnabledPath`, because a switch that can only
+  error is worse than none. `FormEditable` says the site form reads the file and
+  saves it back to the same place (sites-available, or a `.conf` in conf.d where there is no
+  sites-available); a conf.d file on a Debian host or a file only in sites-enabled would be saved beside
+  itself under the same names, so it gets the raw editor. `confdPath` stops `app.conf` becoming
+  `app.conf.conf`. Names, listens and upstreams are listed once each (a forced-HTTPS site is two server
+  blocks with the same names); `CertPaths` holds every `ssl_certificate`, unquoted, including one in a
+  snippet the site includes (one level, only files the editor would show), with `CertPath` the first;
+  and a `listen … ssl` or `quic` is TLS whether or not the certificate is named in the file. The
+  listing **skips backups** in sites-available and conf.d (`isBackupFile`: `.bak`, `~`, `.dpkg-old`,
+  `.rpmsave`) — nginx reads none of them there, and since delete keeps `<name>.bak`, without the filter
+  deleting a site produced a second site.
+- **What a site does, who wrote it, and what is not a site.** `siteDetails` (`site_discovery.go`)
+  reads each site file with `ParseNginxFile`. `Pools` are its `upstream` blocks with their servers, so a
+  `proxy_pass http://<pool>` reads as the servers behind it. `Features`, in `siteFeatureOrder`, are
+  `auth` (`auth_basic`), `sso` (`auth_request`), `allow` (an `allow` anywhere, or a `deny` at the
+  server's own level — the form's fences around dotfiles and backups deny inside a location and restrict
+  nobody), `ratelimit` (`limit_req`, `limit_conn`), `cache` (`proxy_cache`), `ws` (an `Upgrade` header
+  to the upstream), `h2` and `h3` (`http2`/`http3 on`, or `http2`/`quic` on a `listen`), and
+  `maintenance` — an `if ($jd_<site>_maint)` in a server block, which the site form must write only
+  while maintenance is on. An `include` the site file itself writes is followed one level, for files
+  the editor would open, and never into the site's own file: a site that includes itself — by name,
+  through its link, or through a glob such as `sites-available/*` in a server block — would otherwise
+  be expanded into itself without end, and the stack overflow took the whole process down on every
+  listing. `AccessLog` and `ErrorLog` are the files the site writes to: a log one of its
+  server blocks names comes first (a forced-HTTPS site logs where its serving block says, not where its
+  redirect block inherits), then the one nginx.conf sets — its `http` block's, or for errors the main
+  context's before that (`inheritedLogs`; that file only, not what it includes). Both are empty for
+  `off`, `syslog:`, `stderr`, a device, and a relative or variable path. The Logs page opens only the
+  files it lists, so the API then clears either one it does not (`keepOpenableLogs`,
+  `handlers_proxy_vhosts.go`, against `logsx.Discover`) — a file outside `JD_LOG_ROOTS`, one nginx
+  has not created yet, a name the inventory skips — and the Sites page offers Access log and Error log
+  only for a file the Logs page opens. A file nginx cannot parse gets none of these fields. `Package` is the dpkg package that installed the file, set only while the file still
+  matches the md5 dpkg recorded for that conffile (`/var/lib/dpkg/status`, and
+  `/host/var/lib/dpkg/status` from the dashboard's container; read again when either changes; obsolete
+  entries ignored). That is Ubuntu's untouched `sites-available/default`, which the Sites findings no
+  longer call "on disk but not serving" and the page does not sort among the sites needing attention.
+  The recorded paths are absolute, so it is set only with `JD_NGINX_DIR=/etc/nginx`, and never on a host
+  without dpkg. A file named `jd-*` whose first line contains `OwnedMarker` ("Just Dashboard owned") is
+  the dashboard's own plumbing — the catch-all default site, a shared log format — and is left out of the
+  listing in sites-available and conf.d, and so is any link in sites-enabled to one — but not a link
+  under such a file's name that points at nothing or at another file: nginx refuses every reload over
+  the first and serves the second, so it is listed from sites-enabled like any other link (a link to
+  nothing with its Remove link); a feature that writes such a file puts the marker on its first line
+  and shows the file itself. `Owner` is filled in by the API, not proxysvc (`markDeploymentRoutes`,
+  `handlers_proxy_vhosts.go`): a name that `deploy.RouteNameFor` spells (`just-dashboard-env-<id>.conf`,
+  on nginx and in the Docker Caddy ingress alike) is joined to `deploy_environments` and
+  `deploy_projects` for the project and environment ids and names — an archived project's own name
+  from `archived_name`, as the deploy store reads it, since its `name` column holds an
+  `__jd_archived_<id>_<hex>` tombstone — with `archived` when either is archived; a name whose
+  environment no longer exists has none. The Sites page leads such a route to its deployment in place
+  of Edit, Disable, Duplicate and Delete, opens it read-only (its card and a `?site=` link alike), and
+  keeps Edit anyway behind a confirmation; an archived owner's route is the operator's again. The backend does not refuse
+  those verbs on a route, since deployments call proxysvc directly and an administrator may override.
 - **A password file must be readable by the account that reads it.** nginx opens `auth_basic_user_file` in
   a *worker* (www-data/nginx/http), not as the root that wrote it, so a 0640 root:root file is a 403 for
   every visitor and "Permission denied" in the log — which reads exactly like a wrong password.
   `nginxWorkerGID` takes the account from this host's `nginx.conf`, falling back to the three defaults;
   where none resolves the file is 0644, which is what `htpasswd` itself produces. `authDir`/`streamDir`
-  hang off `JD_NGINX_DIR`, which exists precisely for hosts whose nginx is elsewhere.
+  hang off `JD_NGINX_DIR`, which exists precisely for hosts whose nginx is elsewhere. A missing file is
+  not an nginx error: `nginx -t` passes, reloads succeed, and the site answers every login with 403 and
+  an error line per request (checked on 1.26.3), so deleting a password file a site uses fails silently.
+  Removing a file's last login keeps it empty, which asks for credentials again like a wrong password.
 - **`import.go`** checks the key against the certificate **before** writing either: a mismatched pair is
   accepted by every text editor and refused by nginx at reload, which on a live server means finding out
   during an outage. Imports live in `/etc/ssl/just-dashboard`, so a renewal run can never prune a
@@ -481,8 +633,8 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   misconfiguration is the commonest false alarm of this kind.
 - **The proxy routes are mounted per area**, each from its own file beside its handlers, and composed in
   `mountProxyRoutes` (`api/handlers_proxy.go`): `mountEngineRoutes` (status, the raw config editor,
-  validate, test, reload; `handlers_proxy_engine.go`), `mountVHostRoutes` (the listing and the enable
-  switch; `handlers_proxy_vhosts.go`) and `mountProxyInsightRoutes` (`handlers_proxy_insights.go`) inside
+  validate, test, reload; `handlers_proxy_engine.go`), `mountVHostRoutes` (the listing, what nginx has not
+  loaded, the enable switch and the removal of a stray link; `handlers_proxy_vhosts.go`) and `mountProxyInsightRoutes` (`handlers_proxy_insights.go`) inside
   `/proxy`; `mountSiteBuilderRoutes` (`handlers_proxy_sites.go`) and `mountSiteOpsRoutes`
   (`handlers_proxy_siteops.go`) inside `/proxy/sites`; `mountStreamRoutes` (`handlers_proxy_streams.go`),
   `mountAuthFileRoutes` (`handlers_proxy_auth.go`) and `mountProxyToolRoutes` (`handlers_tls.go`, where
@@ -528,8 +680,10 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   indexed once by path and directory, which keeps thousands of sites linear.
 - **Every change to a configuration file is offered to a `ChangeRecorder`** (`changes.go`) once it is
   committed — `WriteConfig`, `ApplySite` and deployment cutovers through `applySiteLocked`, `DeleteSite`,
-  `SetVHostEnabled` (which now takes the service lock like every other change, resolves the site file
-  as the writes do, and records nothing for a toggle that leaves the link as it was), `ApplyStream`,
+  `SetVHostEnabled`/`ToggleVHost` (which now take the service lock like every other change, resolve the
+  site file as the writes do, and record nothing for a toggle that leaves the links as they were or that
+  nginx refused), `RemoveVHostLink` (recorded as a disable of the file behind the link, or of the link
+  itself when it points at nothing), `ApplyStream`,
   `DeleteStream`, and a deployment route's restore — with its prior content and the actor
   `WithActor` put on the context (empty for a deployment or a background loop). Password files are never
   recorded, a site file that resolves outside the proxy's directories is recorded without content, and

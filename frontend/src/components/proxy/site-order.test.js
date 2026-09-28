@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { byUrgency, isDisabled, isPlain, waiting } from "./site-order"
+import {
+  byUrgency,
+  isBroken,
+  isDisabled,
+  isParked,
+  isPlain,
+  sharedNames,
+  waiting,
+} from "./site-order"
 
 const vhost = (overrides) => ({
   name: "app.example.com",
@@ -62,6 +70,64 @@ describe("site order", () => {
       "confd-off",
       "plain-static",
       "tls",
+    ])
+  })
+})
+
+describe("broken links", () => {
+  const dangling = vhost({ name: "ghost", enabled: false, broken: "dangling" })
+  const stale = vhost({ name: "stale", enabled: false, broken: "stale" })
+
+  test("a broken link is broken and waiting, and not merely disabled", () => {
+    for (const v of [dangling, stale]) {
+      expect(isBroken(v)).toBe(true)
+      expect(isDisabled(v)).toBe(false)
+      expect(waiting(v)).toBe(true)
+    }
+    expect(isBroken(sites.off)).toBe(false)
+  })
+
+  test("a link to nothing leads, then one serving another file, then the rest", () => {
+    const ordered = [sites.tls, sites.off, sites.plain, stale, dangling]
+      .sort(byUrgency)
+      .map((v) => v.name)
+    expect(ordered).toEqual(["ghost", "stale", "plain", "off", "tls"])
+  })
+})
+
+describe("sharedNames", () => {
+  test("names two nginx entries share, and no others", () => {
+    const shared = sharedNames([
+      vhost({ name: "app.conf" }),
+      vhost({ name: "app.conf", layout: "conf.d" }),
+      vhost({ name: "other" }),
+      vhost({ name: "other", kind: "caddy" }),
+    ])
+    expect([...shared]).toEqual(["app.conf"])
+  })
+})
+
+describe("the stock default site", () => {
+  const stock = vhost({
+    name: "default",
+    enabled: false,
+    upstreams: [],
+    package: "nginx-common",
+  })
+
+  test("is disabled but not waiting on anybody", () => {
+    expect(isDisabled(stock)).toBe(true)
+    expect(isParked(stock)).toBe(false)
+    expect(waiting(stock)).toBe(false)
+  })
+
+  test("sorts with the settled sites, not ahead of them", () => {
+    const edited = vhost({ name: "zz-edited", enabled: false, upstreams: [] })
+    const serving = vhost({ name: "aa-serving" })
+    expect([serving, stock, edited].sort(byUrgency).map((v) => v.name)).toEqual([
+      "zz-edited",
+      "aa-serving",
+      "default",
     ])
   })
 })

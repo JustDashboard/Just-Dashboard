@@ -41,8 +41,9 @@ func TestDeploymentRouteReloadFailureRestoresExactPriorSpec(t *testing.T) {
 		t.Fatal(err)
 	}
 	marker := filepath.Join(root, "reload-attempted")
+	// -t and -V pass; the first other call, the reload, fails.
 	script := "#!/bin/sh\n" +
-		"if [ \"$1\" = \"-t\" ]; then exit 0; fi\n" +
+		"if [ \"$1\" = \"-t\" ] || [ \"$1\" = \"-V\" ]; then exit 0; fi\n" +
 		"if [ ! -e \"$JD_TEST_RELOAD_MARKER\" ]; then : > \"$JD_TEST_RELOAD_MARKER\"; exit 1; fi\n" +
 		"exit 0\n"
 	if err := os.WriteFile(filepath.Join(bin, "nginx"), []byte(script), 0o755); err != nil {

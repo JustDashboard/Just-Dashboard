@@ -92,6 +92,10 @@
   absence is meaningful: a request without one is reversible but still deserves a pause (deleting a
   terminal folder loses a grouping and nothing else), and asking somebody to type "delete folder" teaches
   them to type phrases without reading — the one habit the typed confirmation exists to prevent.
+  The dialog toasts "<title> completed" when the action resolves, unless the action resolves to
+  `"reported"`: an outcome that is only partly what the title promises — a site deleted but nginx not
+  reloaded — is announced by the action itself, and a bare "completed" beside it would be the untrue
+  half.
 - `lib/metrics-store.ts` keeps the live series **outside React**: owning five minutes of history in a route
   component threw it away on navigation, and pushing a 2 s frame through a context above the router
   re-rendered the terminal and log tail twice a second. Mirrored to sessionStorage so a reload keeps its

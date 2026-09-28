@@ -24,6 +24,7 @@ import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { certificateProduct, siteProduct } from "@/components/proxy/marks"
 import { RoutePath } from "@/components/proxy/route-path"
 import { ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
+import { isParked } from "@/components/proxy/site-order"
 import { foldProxyFindings } from "@/components/proxy/attention"
 
 /**
@@ -58,7 +59,7 @@ export default function ProxyOverviewPage() {
 
   const hosts = vhosts.data ?? []
   const onTls = hosts.filter((v) => v.tls).length
-  const disabled = hosts.filter((v) => v.kind === "nginx" && !v.enabled && v.enabledPath).length
+  const disabled = hosts.filter(isParked).length
   const exposed = useMemo(() => (ports.data ?? []).filter((l) => l.exposed), [ports.data])
   const badCerts = useMemo(
     () => (certs.data ?? []).filter((c) => c.expired || c.expiring || c.error),

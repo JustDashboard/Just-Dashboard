@@ -141,8 +141,11 @@ func (s *Service) SetAuthUser(file, user, password string) (*AuthFile, error) {
 }
 
 // RemoveAuthUser deletes one entry. Removing the last one leaves an empty
-// file rather than deleting it: a site whose auth_basic_user_file has vanished
-// stops nginx from starting, and an empty file simply admits nobody.
+// file rather than deleting it. Neither stops nginx — `nginx -t` does not open
+// the file, and passes with it missing — but a site whose file has vanished
+// answers every login with a 403 and an error line per request, which reads
+// as a server fault, while an empty file asks for credentials again like any
+// wrong password (both checked on nginx 1.26.3).
 func (s *Service) RemoveAuthUser(file, user string) (*AuthFile, error) {
 	if !authFileRe.MatchString(file) {
 		return nil, fmt.Errorf("invalid file name")
@@ -171,7 +174,9 @@ func (s *Service) RemoveAuthUser(file, user string) (*AuthFile, error) {
 	return &AuthFile{Name: file, Path: path, Users: users}, nil
 }
 
-// DeleteAuthFile removes a password file entirely.
+// DeleteAuthFile removes a password file entirely. nginx does not notice at
+// its next test or reload: a site still pointing at the file keeps serving
+// and refuses every login.
 func (s *Service) DeleteAuthFile(file string) error {
 	if !authFileRe.MatchString(file) {
 		return fmt.Errorf("invalid file name")

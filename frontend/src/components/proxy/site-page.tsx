@@ -85,9 +85,12 @@ function SiteBody({ name }: { name: string }) {
     admin,
     onEdit: openForm,
     onRaw: () => setRaw(true),
+    onServed: () => {},
     onDuplicate: () => {},
     onToggle: () => {},
     onDelete: () => {},
+    onUnlink: () => {},
+    onOverride: () => {},
   }).filter((verb) => PAGE_VERBS.includes(verb.key))
 
   // A route on the Docker Caddy ingress is read through the ingress the
@@ -300,6 +303,7 @@ const PLACEHOLDER: VHost = {
   kind: "nginx",
   path: "",
   enabled: false,
+  formEditable: false,
   serverNames: [],
   listen: [],
   upstreams: [],

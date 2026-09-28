@@ -2,7 +2,6 @@ package proxysvc
 
 import (
 	"bufio"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -118,12 +117,12 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 				sawAccessLog = true
 				spec.AccessLog = value != "off"
 				if spec.AccessLogPath == "" {
-					spec.AccessLogPath = logFile(value)
+					spec.AccessLogPath = directiveLogFile(value)
 				}
 			}
 		case "error_log":
 			if location == "" && spec.ErrorLogPath == "" {
-				spec.ErrorLogPath = logFile(value)
+				spec.ErrorLogPath = directiveLogFile(value)
 			}
 		case "auth_basic":
 			spec.BasicAuthRealm = strings.Trim(value, `"`)
@@ -376,21 +375,14 @@ func cutDirective(line string) (string, string) {
 	return name, strings.TrimSpace(value)
 }
 
-// logFile is the file an access_log or error_log directive writes to: its
-// first token, when that is one. `off`, `syslog:`, `stderr` and `memory:` are
-// not files; a path under /dev is a stream the reader cannot seek in; one
-// carrying a variable is a file per value of it; and a relative one is
-// relative to a prefix only nginx's build knows.
-func logFile(value string) string {
+// directiveLogFile is the file an access_log or error_log directive's value
+// writes to: its first token, read by logFile.
+func directiveLogFile(value string) string {
 	fields := strings.Fields(value)
 	if len(fields) == 0 {
 		return ""
 	}
-	path := strings.Trim(fields[0], `"'`)
-	if !filepath.IsAbs(path) || strings.Contains(path, "$") || strings.HasPrefix(path, "/dev/") {
-		return ""
-	}
-	return filepath.Clean(path)
+	return logFile(strings.Trim(fields[0], `"'`))
 }
 
 func parseSeconds(value string) int {

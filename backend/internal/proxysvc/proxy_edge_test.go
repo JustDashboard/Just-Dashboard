@@ -11,7 +11,7 @@ import (
 // so a file using handle, header or tls blocks listed "handle" and "header"
 // beside its real names. Only a block opened at the top level is a site.
 func TestParseCaddyfileReadsOnlyTopLevelAddresses(t *testing.T) {
-	names, upstreams := parseCaddyfile(`
+	names, upstreams, _ := parseCaddyfile(`
 {
     email ops@example.com
 }
@@ -129,6 +129,7 @@ func TestIncludeNoteSaysWhenTheTestCouldNotSeeTheFile(t *testing.T) {
 // wrong file used to return success and change nothing, so the switch said
 // on while nginx read the other file. The stale link is replaced.
 func TestSetVHostEnabledReplacesAStaleLink(t *testing.T) {
+	nginxShim(t, "exit 0")
 	dir := t.TempDir()
 	svc := New(dir, filepath.Join(t.TempDir(), "Caddyfile"))
 	for _, sub := range []string{"sites-available", "sites-enabled"} {

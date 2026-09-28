@@ -58,8 +58,9 @@ export function AuthFilesPanel() {
       confirmLabel: "Delete",
       description: (
         <p className="text-destructive">
-          Any site pointing at this file stops nginx from starting at its next reload. Change those
-          sites first.
+          A site still pointing at this file keeps serving and refuses every login: nginx does not
+          check the file when it tests or reloads, so nothing else will warn you. Point those sites
+          at another file first.
         </p>
       ),
       action: async () => {
