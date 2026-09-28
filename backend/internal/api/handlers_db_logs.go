@@ -960,10 +960,15 @@ func (s *Server) slowFromLog(ctx context.Context, src dbLogSource, lens string, 
 	out.Truncated = res.Truncated || len(entries) > w.Limit
 	out.Entries = entries[:min(len(entries), w.Limit)]
 	if !res.Complete {
-		// The files, the container and the journal are all read oldest
-		// first, so a search the deadline stopped is missing the newest.
+		// Files and a container are read oldest first, so a search the
+		// deadline stopped is missing the newest statements. The journal is
+		// read newest first, so there it is the oldest that are missing.
 		out.Truncated = true
-		out.Reason = "The search ran out of time before the end of the window, so the newest statements may be missing. A shorter window reads faster."
+		missing := "newest"
+		if src.Kind == logsx.KindJournal {
+			missing = "oldest"
+		}
+		out.Reason = "The search ran out of time before it read the whole window, so the " + missing + " statements may be missing. A shorter window reads faster."
 	}
 	return nil
 }
