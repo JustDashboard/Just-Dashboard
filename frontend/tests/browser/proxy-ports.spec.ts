@@ -108,9 +108,9 @@ test("the tiles count services and say what each count is made of", async ({ pag
   await expect(tile(page, "Internet-facing").getByText("1 on all · 2 on a public IP")).toBeVisible()
   await expect(tile(page, "Private networks").getByText("2", { exact: true })).toBeVisible()
   await expect(tile(page, "Private networks").getByText("tailnet · Docker")).toBeVisible()
-  await expect(tile(page, "Databases exposed").getByText("1", { exact: true })).toHaveClass(
-    /text-destructive/,
-  )
+  await expect(
+    tile(page, "Dangerous services exposed").getByText("1", { exact: true }),
+  ).toHaveClass(/text-destructive/)
 })
 
 test("a host with nothing the internet can reach reads so", async ({ page }) => {
@@ -199,13 +199,13 @@ test("a database behind a firewall denying inbound is the posture's warning ever
     await expect(status).not.toHaveClass(/text-destructive/)
   }
   await expect(rows.getByText("Firewall's inbound default: deny")).toHaveCount(2)
-  await expect(tile(page, "Databases exposed").getByText("2", { exact: true })).toHaveClass(
-    /text-warning/,
-  )
+  await expect(
+    tile(page, "Dangerous services exposed").getByText("2", { exact: true }),
+  ).toHaveClass(/text-warning/)
 
   await page.goto("/proxy")
   const finding = page.getByRole("button", {
-    name: /^2 database or control ports answer off this machine/,
+    name: /^2 dangerous services answer off this machine/,
   })
   await expect(finding.locator(".bg-warning")).toHaveCount(1)
   await expect(finding.locator(".bg-destructive")).toHaveCount(0)
@@ -236,13 +236,13 @@ test("a database Docker publishes or a rule admits stays critical behind a firew
   const mongo = rows.filter({ hasText: "mongod" })
   await expect(mongo.getByText("MongoDB · Every interface")).toHaveClass(/text-warning/)
   await expect(mongo.getByText("Firewall's inbound default: deny")).toBeVisible()
-  await expect(tile(page, "Databases exposed").getByText("3", { exact: true })).toHaveClass(
-    /text-destructive/,
-  )
+  await expect(
+    tile(page, "Dangerous services exposed").getByText("3", { exact: true }),
+  ).toHaveClass(/text-destructive/)
 
   await page.goto("/proxy")
   const finding = page.getByRole("button", {
-    name: /^3 database or control ports answer on every interface/,
+    name: /^3 dangerous services answer on every interface/,
   })
   await expect(finding.locator(".bg-destructive")).toHaveCount(1)
   await finding.click()
@@ -288,7 +288,7 @@ test("a socket on the private uplink is not said to be out of the internet's rea
   await expect(internet.getByText("0", { exact: true })).not.toHaveClass(/text-success/)
 
   const row = page.getByRole("table").locator("tbody tr").filter({ hasText: "172.31.5.9" })
-  const status = row.getByText("the Docker API · Private uplink")
+  const status = row.getByText("Docker API · Private uplink")
   await expect(status).toHaveClass(/text-warning/)
   await expect(
     row.locator("[title^='A private address on the interface with the default route']"),
@@ -382,11 +382,13 @@ test("a database is coloured by who can connect, and counted once however it is 
   }
 
   // Three databases on five sockets.
-  await expect(tile(page, "Databases exposed").getByText("3", { exact: true })).toBeVisible()
+  await expect(
+    tile(page, "Dangerous services exposed").getByText("3", { exact: true }),
+  ).toBeVisible()
 
   await page.goto("/proxy")
   const finding = page.getByRole("button", {
-    name: /^3 database or control ports answer off this machine/,
+    name: /^3 dangerous services answer off this machine/,
   })
   await expect(finding.locator(".bg-destructive")).toHaveCount(1)
 })
@@ -397,13 +399,13 @@ test("databases only a bridge can reach are a warning everywhere", async ({ page
     bridgedDatabases.filter((l) => l.port !== 5432),
   )
   await page.goto("/proxy/ports")
-  await expect(tile(page, "Databases exposed").getByText("2", { exact: true })).toHaveClass(
-    /text-warning/,
-  )
+  await expect(
+    tile(page, "Dangerous services exposed").getByText("2", { exact: true }),
+  ).toHaveClass(/text-warning/)
 
   await page.goto("/proxy")
   const finding = page.getByRole("button", {
-    name: /^2 database or control ports answer off this machine/,
+    name: /^2 dangerous services answer off this machine/,
   })
   await expect(finding.locator(".bg-warning")).toHaveCount(1)
   await finding.click()
@@ -431,7 +433,7 @@ test("the tiles' hints and the longest reach fit a phone", async ({ page }) => {
   }
   // The phone's rows draw the longest labels whole and inside the screen.
   const rows = page.getByRole("list")
-  for (const label of ["the Docker API · Private uplink", "Elasticsearch · VPN only"]) {
+  for (const label of ["Docker API · Private uplink", "Elasticsearch · VPN only"]) {
     const status = rows.getByText(label)
     await expect(status).toBeVisible()
     const box = await status.boundingBox()

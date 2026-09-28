@@ -12,8 +12,9 @@ import { portsHref } from "@/components/proxy/ports-list"
 export type PortFindingInput = { ports?: Listener[] }
 
 /**
- * A database or control port answering off this machine — on every
- * interface, or on one address, which reaches as far as that address does.
+ * A service the security catalogue calls dangerous answering off this
+ * machine — a database, a control plane, a remote desktop, an open resolver,
+ * or the dashboard's own backend past its Caddy — on every interface, or on one address, which reaches as far as that address does.
  * Counted per port, not per socket: a database bound to two addresses, or to
  * 0.0.0.0 and ::, is one database. Levelled by the security posture's own
  * grade of each socket, which GET /ports carries: critical where the
@@ -37,7 +38,7 @@ export function portFindings({ ports }: PortFindingInput): ProxyFinding[] {
       title:
         dangerous.length === 1
           ? `${dangerous[0].service} answers on ${where(dangerous[0])}`
-          : `${dangerous.length} database or control ports answer ${everywhere ? "on every interface" : "off this machine"}`,
+          : `${dangerous.length} dangerous services answer ${everywhere ? "on every interface" : "off this machine"}`,
       detail: dangerous
         .map(
           (d) =>
@@ -49,9 +50,16 @@ export function portFindings({ ports }: PortFindingInput): ProxyFinding[] {
         ),
       // A socket already on one address is not fixed by binding it to "a
       // private address"; it may be on one.
-      advice: everywhere
-        ? "Bind these to loopback or a private address, or close them in the firewall. A database port on the internet is the commonest way a server is emptied."
-        : "Bind these to 127.0.0.1 unless something on the same network needs them, or close them in the firewall. A database port on the internet is the commonest way a server is emptied.",
+      advice: `${
+        everywhere
+          ? "Bind these to loopback or a private address, or close them in the firewall."
+          : "Bind these to 127.0.0.1 unless something on the same network needs them, or close them in the firewall."
+      } ${
+        // The catalogue's reason is one service's; several are named in the detail.
+        dangerous.length === 1
+          ? dangerous[0].sockets[0].danger
+          : "Each is a service the security catalogue says should not face the internet."
+      }`,
       meta: "ports",
       // Opens the ports page on these ports alone, whatever it was left
       // filtered to.

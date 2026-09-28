@@ -1,5 +1,4 @@
 import type { Listener, ListenerNetwork } from "@/lib/types"
-import { DANGEROUS_PORTS } from "@/components/proxy/findings/shared"
 import { managerHref } from "@/components/procs/shared"
 
 /**
@@ -218,7 +217,9 @@ export function privateNetworksHint(tally: ReachTally): string {
 }
 
 /**
- * A database or control port the security posture raises a finding for,
+ * A service the security catalogue calls dangerous and the posture raises a
+ * finding for — a database, a control plane, a remote desktop, an open
+ * resolver, or the dashboard itself past its own Caddy —
  * once per protocol and port however many addresses it is bound to —
  * Postgres on 0.0.0.0 and on :: is one database, as the posture's finding for
  * it is one finding.
@@ -238,15 +239,17 @@ export type DangerousPort = {
   firewallRule?: number
 }
 
-/** The service a socket is a database or control port for, when the posture levels it. */
-export function dangerousService(listener: Pick<Listener, "port" | "level">): string | undefined {
-  return listener.level ? DANGEROUS_PORTS[listener.port] : undefined
+/** The dangerous service a socket is, when the posture levels it. */
+export function dangerousService(
+  listener: Pick<Listener, "service" | "danger" | "level">,
+): string | undefined {
+  return listener.level && listener.danger ? listener.service : undefined
 }
 
 export function dangerousPorts(listeners: Listener[]): DangerousPort[] {
   const byPort = new Map<string, DangerousPort>()
   for (const l of listeners) {
-    const service = DANGEROUS_PORTS[l.port]
+    const service = dangerousService(l)
     if (!service || !l.level) continue
     const key = `${l.protocol}/${l.port}`
     const entry = byPort.get(key) ?? {
@@ -297,10 +300,10 @@ export function pastFirewallWords(
  * reaches a notice — sshd on the tailnet is not an alarm. Loopback has none.
  */
 export function reachVerdict(
-  listener: Pick<Listener, "port" | "exposed" | "reach" | "network" | "level">,
+  listener: Pick<Listener, "exposed" | "reach" | "network" | "level" | "service" | "danger">,
 ): "critical" | "warning" | "notice" | undefined {
   if (!listener.exposed) return undefined
-  if (listener.level && DANGEROUS_PORTS[listener.port]) return listener.level
+  if (listener.level && dangerousService(listener)) return listener.level
   return internetFacing(listener) || onUplink(listener) ? "warning" : "notice"
 }
 

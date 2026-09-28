@@ -90,6 +90,13 @@ type Listener struct {
 	// page and the proxy overview level a database as the posture does.
 	Level          string `json:"level,omitempty"`
 	InboundDefault string `json:"inboundDefault,omitempty"`
+	// Service and Danger are what the socket is by netsec's catalogue,
+	// matched on port and protocol, and the catalogue's reason it should
+	// not face the internet: the one list the firewall form, the posture
+	// and the ports page all judge by. The dashboard's own sockets other
+	// than Caddy's are "Just Dashboard". GET /ports fills both.
+	Service string `json:"service,omitempty"`
+	Danger  string `json:"danger,omitempty"`
 	// PastFirewall is why a firewall refusing inbound by default does not
 	// hold the socket where it does not: "docker", a port Docker publishes
 	// ahead of the default, or "rule", a port FirewallRule admits from

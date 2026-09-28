@@ -1,6 +1,56 @@
 import { json, type ProxyRoutes } from "./shared"
 
-export const ports = [
+/**
+ * GET /ports names each socket from netsec's catalogue, on port and protocol,
+ * with the catalogue's reason it should not face the internet.
+ */
+const CATALOGUE: Record<string, { service: string; danger: string }> = {
+  "tcp/5432": {
+    service: "PostgreSQL",
+    danger:
+      "A database open to the internet is scanned and brute-forced within hours. Set a source.",
+  },
+  "tcp/3306": {
+    service: "MySQL / MariaDB",
+    danger:
+      "A database open to the internet is scanned and brute-forced within hours. Set a source.",
+  },
+  "tcp/6379": {
+    service: "Redis",
+    danger:
+      "Unauthenticated by default: an exposed Redis is a remote shell, not a data leak. Never open this to the world.",
+  },
+  "tcp/27017": {
+    service: "MongoDB",
+    danger: "Exposed MongoDB instances are the classic ransom target. Set a source.",
+  },
+  "tcp/9200": {
+    service: "Elasticsearch",
+    danger: "No authentication in the default configuration. Do not expose.",
+  },
+  "tcp/2375": {
+    service: "Docker API",
+    danger: "Reaching the Docker API is equivalent to being root on this host. Never open it.",
+  },
+  "udp/53": {
+    service: "DNS",
+    danger:
+      "An open resolver is used to amplify attacks against other people. Restrict the source.",
+  },
+  "tcp/22": { service: "SSH", danger: "" },
+  "tcp/80": { service: "HTTP", danger: "" },
+  "tcp/443": { service: "HTTPS", danger: "" },
+}
+
+function catalogued<T extends { protocol: string; port: number }>(listeners: T[]) {
+  return listeners.map((l) => {
+    const entry = CATALOGUE[`${l.protocol}/${l.port}`]
+    if (!entry) return l
+    return { ...l, service: entry.service, ...(entry.danger ? { danger: entry.danger } : {}) }
+  })
+}
+
+export const ports = catalogued([
   {
     protocol: "tcp",
     family: "ipv4",
@@ -44,7 +94,7 @@ export const ports = [
     exposed: true,
     level: "critical",
   },
-]
+])
 
 /**
  * Sockets as a real host lists them: sshd on every interface in both
@@ -53,7 +103,7 @@ export const ports = [
  * exporter on Docker's bridge, and two on loopback — nine sockets, seven
  * services.
  */
-export const hostPorts = [
+export const hostPorts = catalogued([
   {
     protocol: "tcp",
     family: "ipv4",
@@ -186,7 +236,7 @@ export const hostPorts = [
     interface: "docker0",
     exposed: true,
   },
-]
+])
 
 /**
  * Databases as a Docker host binds them: Redis for the containers on two
@@ -194,7 +244,7 @@ export const hostPorts = [
  * interface in both families — three databases on five sockets, and only
  * Postgres within the internet's reach.
  */
-export const bridgedDatabases = [
+export const bridgedDatabases = catalogued([
   {
     protocol: "tcp",
     family: "ipv4",
@@ -273,7 +323,7 @@ export const bridgedDatabases = [
     exposed: true,
     level: "warning",
   },
-]
+])
 
 /**
  * The longest reach a row can read, on a cloud host's private uplink: the
@@ -281,7 +331,7 @@ export const bridgedDatabases = [
  * and Elasticsearch on a VPN — for the phone width, where the label must not
  * push the page wider.
  */
-export const privateUplink = [
+export const privateUplink = catalogued([
   {
     protocol: "tcp",
     family: "ipv4",
@@ -315,7 +365,7 @@ export const privateUplink = [
     exposed: true,
     level: "warning",
   },
-]
+])
 
 const dockerProxy = (port: number, family: string, hostIp: string, pid: number) => ({
   protocol: "tcp",
@@ -349,7 +399,7 @@ export const dockerIngress = [
  * every interface in both families and Postgres on the public address, which
  * the posture levels warnings, with the firewall's default named.
  */
-export const firewalledDatabases = [
+export const firewalledDatabases = catalogued([
   {
     protocol: "tcp",
     family: "ipv4",
@@ -399,7 +449,7 @@ export const firewalledDatabases = [
     level: "warning",
     inboundDefault: "deny",
   },
-]
+])
 
 /**
  * Databases on a host whose ufw denies inbound by default, two of which get
@@ -408,7 +458,7 @@ export const firewalledDatabases = [
  * rule 10 admits from anywhere. Both are the posture's critical; MongoDB,
  * which nothing admits, is the warning the default holds it to.
  */
-export const pastFirewallDatabases = [
+export const pastFirewallDatabases = catalogued([
   { ...dockerProxy(5432, "ipv4", "0.0.0.0", 1883700), level: "critical", pastFirewall: "docker" },
   { ...dockerProxy(5432, "ipv6", "::", 1883706), level: "critical", pastFirewall: "docker" },
   {
@@ -444,7 +494,7 @@ export const pastFirewallDatabases = [
     level: "warning",
     inboundDefault: "deny",
   },
-]
+])
 
 /**
  * A service on docker0 in both families, its IPv6 half on the bridge's
@@ -520,7 +570,7 @@ const ingressContainer = {
  * main thread MainThread, a node server started by hand, and the dashboard's
  * own backend and proxy — twelve sockets, nine services.
  */
-export const ownedPorts = [
+export const ownedPorts = catalogued([
   {
     ...dockerProxy(80, "ipv4", "0.0.0.0", 1883643),
     manager: "systemd",
@@ -689,7 +739,7 @@ export const ownedPorts = [
     },
     self: true,
   },
-]
+])
 
 /** The kernel's own range on the host these fixtures are copied from. */
 export const portsMeta = { ephemeralRange: { low: 32768, high: 60999 } }

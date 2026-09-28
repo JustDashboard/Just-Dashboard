@@ -2,6 +2,7 @@ package netsec
 
 import (
 	"bufio"
+	"strconv"
 	"strings"
 )
 
@@ -113,6 +114,36 @@ func PresetFor(port, protocol string) (ServicePreset, bool) {
 		}
 	}
 	return ServicePreset{}, false
+}
+
+// dashboardService is the dashboard's own sockets as the posture judges
+// them. Only its Caddy is meant to face the network: the backend and the web
+// app behind it serve plain HTTP, without the TLS, headers and rate limits
+// Caddy puts in front of them, so one bound where the internet may reach it
+// is the admin panel of this server open past its own proxy. It is not in
+// the catalogue, which the firewall form offers as ports to open.
+var dashboardService = ServicePreset{
+	Key: "dashboard", Name: "Just Dashboard",
+	Detail: "The dashboard's own backend or web app, which its Caddy proxies from loopback.",
+	Danger: "This is the dashboard itself, served without TLS or the proxy's protections in front of it, to anyone who can reach the address. Only the dashboard's Caddy should face the network.",
+	// A bind on a tailnet or a bridge is the operator reaching their own
+	// panel over their own network; the invariant is about the internet.
+	InternetOnly: true,
+}
+
+// ServiceOf is what a socket is, as the posture judges it: the dashboard's
+// own when it is one of the dashboard's sockets other than Caddy's, and
+// otherwise the catalogue's entry for its port and protocol. The protocol
+// must match: DNS is flagged on 53/udp, where resolvers amplify, and a TCP
+// socket on 53 is not the same service.
+func ServiceOf(l ExposedPort) (ServicePreset, bool) {
+	if l.Dashboard {
+		return dashboardService, true
+	}
+	if l.Protocol == "" {
+		return ServicePreset{}, false
+	}
+	return PresetFor(strconv.FormatUint(uint64(l.Port), 10), l.Protocol)
 }
 
 // AppProfile is a named service bundle the host itself defines — ufw's

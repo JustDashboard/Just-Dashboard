@@ -21,19 +21,32 @@ import {
   withoutAddresses,
 } from "./ports"
 
-const listener = (overrides) => ({
-  protocol: "tcp",
-  family: "ipv4",
-  address: "0.0.0.0",
-  port: 443,
-  pid: 812,
-  process: "nginx",
-  scope: "all",
-  reach: "all",
-  network: "all",
-  exposed: true,
-  ...overrides,
-})
+// GET /ports names each socket from netsec's catalogue, on port and protocol.
+const CATALOGUE = {
+  "tcp/5432": "PostgreSQL",
+  "tcp/6379": "Redis",
+  "tcp/27017": "MongoDB",
+  "tcp/11211": "Memcached",
+  "tcp/2375": "Docker API",
+}
+
+const listener = (overrides) => {
+  const l = {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "0.0.0.0",
+    port: 443,
+    pid: 812,
+    process: "nginx",
+    scope: "all",
+    reach: "all",
+    network: "all",
+    exposed: true,
+    ...overrides,
+  }
+  const service = CATALOGUE[`${l.protocol}/${l.port}`]
+  return service ? { service, danger: `${service} should not face the internet.`, ...l } : l
+}
 
 // Sockets as this host lists them: sshd on every interface, caddy on the
 // tailnet address, the DNS stub on loopback.
@@ -437,7 +450,7 @@ describe("a database off this machine", () => {
       ],
     })
     expect(finding.level).toBe("critical")
-    expect(finding.title).toBe("2 database or control ports answer off this machine")
+    expect(finding.title).toBe("2 dangerous services answer off this machine")
     expect(finding.detail).toBe(
       "5432/tcp postgres, 6379/tcp redis-server on 100.64.1.2 (Tailnet only)",
     )
@@ -472,7 +485,7 @@ describe("a database off this machine", () => {
       ],
     })
     expect(finding.level).toBe("warning")
-    expect(finding.title).toBe("2 database or control ports answer off this machine")
+    expect(finding.title).toBe("2 dangerous services answer off this machine")
     expect(finding.detail).toBe(
       "6379/tcp redis-server, 5432/tcp postgres on 57.131.21.87 (Public address · ens3), though the firewall's inbound default is deny",
     )
@@ -553,7 +566,7 @@ describe("a database off this machine", () => {
     const [finding] = portFindings({ ports: [redisBridge, redisOtherBridge, mongoLinkLocal] })
     // Only this host's containers can reach them: a warning, as the posture says.
     expect(finding.level).toBe("warning")
-    expect(finding.title).toBe("2 database or control ports answer off this machine")
+    expect(finding.title).toBe("2 dangerous services answer off this machine")
     expect(finding.detail).toBe(
       "6379/tcp redis-server on 10.0.0.1 (Docker bridge · docker0), 10.0.2.1 (Docker bridge · br-b05f8e098ad7), 27017/tcp mongod on fe80::b482:4dff:fe92:4281 (Docker bridge · docker0)",
     )

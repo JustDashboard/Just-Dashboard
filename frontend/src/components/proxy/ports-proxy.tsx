@@ -8,7 +8,6 @@ import { plural } from "@/lib/format"
 import type { PortsFree } from "@/lib/types"
 import { Field, FieldRow } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
-import { DANGEROUS_PORTS } from "@/components/proxy/findings/shared"
 import type { Socket } from "@/components/proxy/ports"
 import { formatEndpoint } from "@/components/proxy/ports-list"
 import type { Verb } from "@/components/verbs"
@@ -62,8 +61,8 @@ export function proxyVerbs(socket: Socket, push: (href: string) => void): Verb[]
       : socket.address
   const endpoint = formatEndpoint(address, socket.port)
   const verbs: Verb[] = []
-  // A database or a system port is not an HTTP app; a stream still forwards it.
-  const app = socket.protocol === "tcp" && socket.port >= 1024 && !DANGEROUS_PORTS[socket.port]
+  // A database, a remote desktop or a system port is not an HTTP app; a stream still forwards it.
+  const app = socket.protocol === "tcp" && socket.port >= 1024 && !socket.danger
   if (app && (socket.routes ?? []).length === 0) {
     const query = new URLSearchParams({ new: "1", upstream: `http://${endpoint}` })
     verbs.push({

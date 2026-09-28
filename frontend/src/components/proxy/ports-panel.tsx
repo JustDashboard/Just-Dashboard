@@ -437,7 +437,7 @@ function PortsView() {
         />
         <StatTile label="Private networks" value={counts.private} hint={privateHint(all)} />
         <StatTile
-          label="Databases exposed"
+          label="Dangerous services exposed"
           value={dangerous.length}
           tone={
             dangerous.some((d) => d.level === "critical")
@@ -1055,7 +1055,7 @@ function Pids({ socket }: { socket: Socket }) {
 /**
  * Where the socket answers, coloured by who can connect as the posture levels
  * the same socket, with the interface the address is on beneath it. The
- * label wraps rather than running into the next column: "the Docker API ·
+ * label wraps rather than running into the next column: "Docker API ·
  * Private uplink" is wider than the column. A database the firewall's
  * inbound default holds to a warning says so, as the posture's finding does,
  * and so does one that gets past the default.

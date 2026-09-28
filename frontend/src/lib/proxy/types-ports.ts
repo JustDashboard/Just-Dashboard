@@ -99,6 +99,14 @@ export type Listener = {
    * same rules with the same firewall; absent where it raises none.
    */
   level?: "critical" | "warning"
+  /**
+   * What the socket is by the security catalogue, matched on port and
+   * protocol — "Redis", "RDP", "Just Dashboard" for the dashboard's own
+   * sockets other than its Caddy — and the catalogue's reason it should not
+   * face the internet, where it has one.
+   */
+  service?: string
+  danger?: string
   /** The firewall's inbound default ("deny"), when it is what holds `level` to a warning. */
   inboundDefault?: string
   /**
