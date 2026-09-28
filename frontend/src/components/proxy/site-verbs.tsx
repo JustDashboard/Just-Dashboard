@@ -8,6 +8,7 @@ import {
   CloudUpload,
   Code,
   Copy,
+  Download,
   External,
   Inspect,
   Logs,
@@ -16,6 +17,7 @@ import {
   Trash,
   Warning,
 } from "@/components/icons"
+import { downloadUrl } from "@/lib/api"
 import type { VHost } from "@/lib/types"
 import type { Verb } from "@/components/verbs"
 import { activeOwner } from "@/components/proxy/site-details"
@@ -45,6 +47,14 @@ export function siteUrl(vhost: VHost): string | undefined {
  */
 export function opensFile(vhost: VHost): boolean {
   return Boolean(vhost.path) && !vhost.resolvesTo
+}
+
+/** Hands the browser a file the API serves as an attachment. */
+export function downloadFrom(path: string) {
+  const a = document.createElement("a")
+  a.href = downloadUrl(path)
+  a.download = ""
+  a.click()
 }
 
 /** The domain to scan, when the site has one and is on TLS. */
@@ -326,6 +336,16 @@ export function useSiteVerbs({
       progressive: "Renaming",
       disabled: Boolean(busy),
       run: () => onRename(vhost),
+    })
+  }
+  // By name, which the server looks up in sites-available, then conf.d, then
+  // sites-enabled: a name in two of them would hand over the first.
+  if (admin && vhost.kind === "nginx" && hasFile && !ambiguous) {
+    verbs.push({
+      key: "download",
+      label: "Download",
+      icon: Download,
+      run: () => downloadFrom(`/proxy/sites/${encodeURIComponent(vhost.name)}/download`),
     })
   }
   if (admin && deletable && !ambiguous && !owner) {

@@ -114,6 +114,43 @@ export type SiteRenameResult = VHostLinkResult & {
   warnings: string[]
 }
 
+/**
+ * POST /proxy/sites/import/preview and /import, and a backup's restore: where
+ * the file lands and nginx's test with it in place. A preview always takes the
+ * file back out; an import keeps it only when nginx accepts it.
+ */
+export type SitePlacement = {
+  name: string
+  path: string
+  layout: "sites-available" | "conf.d"
+  enabled: boolean
+  serverNames: string[]
+  validation: ProxyValidation
+  /** nginx refuses the configuration without the file too. */
+  refusedBefore?: boolean
+  warnings: string[]
+}
+
+/** An import or restore that stands, and how the reload after it went. */
+export type SitePlacementResult = SitePlacement & Omit<VHostLinkResult, "name" | "enabled">
+
+/**
+ * GET /proxy/site-backups: a copy beside a site nginx does not read — what a
+ * delete keeps as <name>.bak, or an editor's or package's leftover. `site` is
+ * the name a restore gives it back; `siteExists` means that name is taken.
+ */
+export type SiteBackup = {
+  file: string
+  layout: "sites-available" | "conf.d"
+  path: string
+  size: number
+  modified: string
+  site?: string
+  siteExists: boolean
+  restorable: boolean
+  reason?: string
+}
+
 /** DELETE /proxy/sites/{name}: the file is gone; the reload may not have happened. */
 export type SiteDeleteResult = {
   name: string
