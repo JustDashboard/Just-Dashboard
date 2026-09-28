@@ -914,6 +914,18 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   and per-protocol status, HSTS, each security header and the port-80 redirect). Both only read, so every
   account may; `DELETE /certificates/reports?domain=&port=` is destructive and audited. Deep scans are not
   stored, and a successful scan records no connected address, so an address change is not diffed.
+- **`dnsdeep.go` — the TLS page's DNS panel** (`GET /certificates/dns?deep=1`, `system.admin` like the
+  rest of the probes). `Query` asks one resolver one question on the wire (`x/net/dns/dnsmessage`, UDP
+  with EDNS 1232, TCP when the answer is truncated), because Go's resolver hides TTLs and cannot ask
+  for CAA. The report reads A/AAAA with TTLs, each tagged this-server, cloudflare, other, or unknown
+  when the host has no public address; the CNAME chain; the CAA walk of RFC 8659 from the name up to
+  the TLD, judged for `letsencrypt.org` (issue, issuewild falling back to issue, `;` naming nobody, a
+  critical unknown tag forbidding everyone, a failed lookup refusing issuance as Let's Encrypt does);
+  `_acme-challenge` TXT/CNAME; and A+AAAA from the first `resolv.conf` nameserver beside each compared
+  resolver, each marked against the first that answered. Records come from that same first resolver.
+  The comparison list is the `proxy.dns.resolvers` setting (IP literals only, at most six, empty
+  restores 1.1.1.1, 8.8.8.8, 9.9.9.9), written by `PUT /certificates/dns/resolvers` (`system.admin`,
+  audited as `certificates.dns.resolvers`). A name only: an address is refused with 400.
 - **`dns01.go` — wildcards and CDN-fronted domains**, which between them are most of the certificates
   people want: Let's Encrypt signs `*.example.com` only against DNS-01, and a Cloudflare-proxied domain
   never receives an HTTP challenge. Eight certbot plugins as a closed set (each names credentials and

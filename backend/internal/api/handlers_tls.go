@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
@@ -30,6 +31,7 @@ func (s *Server) mountTLSRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/check", s.handle(s.handleCertCheck))
 		r.Method(http.MethodGet, "/scan", s.handle(s.handleTLSScan))
 		r.Method(http.MethodGet, "/dns", s.handle(s.handleDomainDNS))
+		r.Method(http.MethodPut, "/dns/resolvers", s.handle(s.handleSetDNSResolvers))
 		r.Method(http.MethodPost, "/watched", s.handle(s.handleWatchDomain))
 		r.Method(http.MethodDelete, "/watched/{id}", s.handle(s.handleUnwatchDomain))
 		r.Method(http.MethodGet, "/scan/deep", s.handle(s.handleTLSDeepScan))
@@ -102,8 +104,72 @@ func (s *Server) handleDomainDNS(w http.ResponseWriter, r *http.Request) error {
 	if domain == "" {
 		return httpx.BadRequest("domain query parameter is required")
 	}
+	if r.URL.Query().Get("deep") == "1" {
+		return s.handleDeepDNS(w, r, domain)
+	}
 	ctx, cancel := timeoutCtx(r, 20*time.Second)
 	defer cancel()
 	httpx.JSON(w, http.StatusOK, proxysvc.CheckDomainDNS(ctx, domain))
+	return nil
+}
+
+// dnsResolversSetting holds the resolvers the DNS panel compares the system
+// resolver against, comma-separated. Absent means the defaults.
+const dnsResolversSetting = "proxy.dns.resolvers"
+
+func (s *Server) dnsResolvers(r *http.Request) ([]string, error) {
+	raw, ok, err := s.Store.Setting(r.Context(), dnsResolversSetting)
+	if err != nil || !ok {
+		return proxysvc.DefaultDNSResolvers, err
+	}
+	list, err := proxysvc.ParseDNSResolvers(strings.Split(raw, ","))
+	if err != nil || len(list) == 0 {
+		return proxysvc.DefaultDNSResolvers, nil
+	}
+	return list, nil
+}
+
+// handleDeepDNS is the TLS page's DNS panel: records with their TTLs, the
+// CAA walk and the propagation table, asked on the wire rather than through
+// the system resolver, which hides all three.
+func (s *Server) handleDeepDNS(w http.ResponseWriter, r *http.Request, domain string) error {
+	name, err := proxysvc.NormalizeDNSName(domain)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	resolvers, err := s.dnsResolvers(r)
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	ctx, cancel := timeoutCtx(r, 20*time.Second)
+	defer cancel()
+	httpx.JSON(w, http.StatusOK, proxysvc.InspectDNS(ctx, name, resolvers))
+	return nil
+}
+
+type dnsResolversRequest struct {
+	Resolvers []string `json:"resolvers"`
+}
+
+// handleSetDNSResolvers saves the comparison list. An empty list restores the
+// defaults rather than leaving the table with only the system resolver, which
+// would have nothing to compare.
+func (s *Server) handleSetDNSResolvers(w http.ResponseWriter, r *http.Request) error {
+	var req dnsResolversRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	list, err := proxysvc.ParseDNSResolvers(req.Resolvers)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	if len(list) == 0 {
+		list = proxysvc.DefaultDNSResolvers
+	}
+	if err := s.Store.SetSetting(r.Context(), dnsResolversSetting, strings.Join(list, ",")); err != nil {
+		return httpx.Internal(err)
+	}
+	httpx.SetAudit(r, "certificates.dns.resolvers", strings.Join(list, ","), nil)
+	httpx.JSON(w, http.StatusOK, dnsResolversRequest{Resolvers: list})
 	return nil
 }

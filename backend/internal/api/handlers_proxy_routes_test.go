@@ -66,6 +66,7 @@ var proxyRoutes = []struct {
 	{http.MethodGet, "/api/v1/certificates/check", proxyAdmin},
 	{http.MethodGet, "/api/v1/certificates/scan", proxyAdmin},
 	{http.MethodGet, "/api/v1/certificates/dns", proxyAdmin},
+	{http.MethodPut, "/api/v1/certificates/dns/resolvers", proxyAdmin},
 	{http.MethodPost, "/api/v1/certificates/watched", proxyAdmin},
 	{http.MethodDelete, "/api/v1/certificates/watched/{id}", proxyAdmin},
 	{http.MethodPost, "/api/v1/certificates/issue", proxyAdmin},

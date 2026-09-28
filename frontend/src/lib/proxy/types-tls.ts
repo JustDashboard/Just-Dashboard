@@ -202,3 +202,71 @@ export type DomainCheck = {
   summary: string
   error?: string
 }
+
+/** One answer as a resolver gave it, TTL included. */
+export type DNSRecord = {
+  name: string
+  type: "A" | "AAAA" | "CNAME" | "TXT" | "CAA"
+  ttl: number
+  value: string
+  /** CAA only: the issuer-critical flag and the property. */
+  critical?: boolean
+  tag?: string
+}
+
+export type DNSAddress = {
+  type: "A" | "AAAA"
+  address: string
+  ttl: number
+  /** "unknown" when this machine has no public address to compare with. */
+  owner: "this-server" | "cloudflare" | "other" | "unknown"
+}
+
+/** RFC 8659's walk up the tree and what it means for issuance. */
+export type CAAReport = {
+  checked: string[]
+  foundAt?: string
+  records: DNSRecord[]
+  issuers: string[]
+  wildcardIssuers: string[]
+  letsEncrypt: boolean
+  letsEncryptWildcard: boolean
+  verdict: string
+  error?: string
+}
+
+export type ResolverView = {
+  /** Empty for a system resolver resolv.conf does not name. */
+  resolver: string
+  label: string
+  system?: boolean
+  rcode?: string
+  addresses: string[]
+  error?: string
+  /** Same addresses as the first resolver that answered. */
+  agrees: boolean
+}
+
+/** GET /certificates/dns?deep=1: the TLS page's DNS panel. */
+export type DNSReport = {
+  domain: string
+  checkedAt: string
+  /** The resolver the records were read from. */
+  source: string
+  rcode?: string
+  error?: string
+  addresses: DNSAddress[]
+  cnameChain: DNSRecord[]
+  hostAddresses: string[]
+  hostAddressesKnown: boolean
+  pointsHere: boolean
+  behindProxy: boolean
+  summary: string
+  caa: CAAReport
+  acmeChallenge: DNSRecord[]
+  acmeError?: string
+  propagation: ResolverView[]
+  consistent: boolean
+  /** The saved comparison list. */
+  resolvers: string[]
+}

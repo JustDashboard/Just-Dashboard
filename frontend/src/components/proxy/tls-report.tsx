@@ -40,6 +40,7 @@ import { Tag } from "@/components/tag"
 import type { Tone } from "@/components/tone"
 import { useNow } from "@/components/deploy/vocabulary"
 import { expiryTone } from "@/components/proxy/expiry-status"
+import { TLSDNSPanel } from "@/components/proxy/tls-dns"
 import { Button } from "@/components/ui/button"
 import { Field } from "@/components/form"
 import { InputGroup, InputGroupInput } from "@/components/ui/input-group"
@@ -718,8 +719,21 @@ export function TLSReportPage() {
         </div>
       )}
       {target && <ScanHistoryPanel history={history} target={target} admin={admin} />}
+      {/* An address has no records of its own; a name that never answered
+          opens its DNS at once, since the name is the first suspect. */}
+      {scan && !isAddress(scan.domain) && (
+        <TLSDNSPanel
+          key={`${scan.domain}-${scan.reachable}`}
+          domain={scan.domain}
+          openAtFirst={!scan.reachable}
+        />
+      )}
     </Page>
   )
+}
+
+function isAddress(host: string) {
+  return host.includes(":") || /^\d{1,3}(\.\d{1,3}){3}$/.test(host)
 }
 
 /**
