@@ -76,6 +76,11 @@ type VHost struct {
 	// Features are what the site's server blocks do besides naming and
 	// listening, in siteFeatureOrder.
 	Features []string `json:"features,omitempty"`
+	// Roots are the directories the site serves files from, and Redirects
+	// where its return directives send visitors, so the list can find a
+	// site by either and tell a static site or a redirect from a proxy.
+	Roots     []string `json:"roots,omitempty"`
+	Redirects []string `json:"redirects,omitempty"`
 	// Package is the distribution package that installed this file, when
 	// the file is still byte for byte what it installed: the stock default
 	// site, which is not something the operator made or has to act on.

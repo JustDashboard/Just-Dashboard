@@ -1020,7 +1020,7 @@ test("every place nginx reads a site from is listed, a link to nothing first", a
 
   // Nothing is disabled, and the reading does not call that "every site serving".
   await expect(page.getByText("none, but 2 broken links")).toBeVisible()
-  await page.getByRole("button", { name: /^Broken links/ }).click()
+  await page.getByRole("button", { name: /^Broken \d/ }).click()
   await expect(page.locator("[data-slot='choice-row']")).toHaveCount(2)
 
   await (await openMenu(page, "ghost")).getByRole("menuitem", { name: "Remove link" }).click()
@@ -1448,7 +1448,7 @@ test("a card names the servers behind its upstream block, what the site does, an
   await expect(plain.getByRole("menuitem", { name: /^(Access|Error) log$/ })).toHaveCount(0)
   await page.keyboard.press("Escape")
 
-  await page.getByPlaceholder("Site, domain or upstream").fill("10.0.0.3")
+  await page.getByLabel("Search sites").fill("10.0.0.3")
   await expect(page.locator("[data-slot='choice-row']")).toHaveCount(1)
   await expect(card(page, "pool.example.com")).toBeVisible()
 

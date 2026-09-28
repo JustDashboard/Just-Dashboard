@@ -39,13 +39,25 @@ export function upstreamTargets(v: VHost): string[] {
   })
 }
 
-/** Whether a search finds the site: by its name, a domain, an upstream or a server in a pool. */
+/**
+ * Whether a search finds the site: by name, domain, upstream or pool server,
+ * and by the files, listeners, certificates, roots and redirect targets its
+ * configuration names — "443", "/var/www" and "letsencrypt/live/app" are all
+ * ways an operator remembers a site.
+ */
 export function matchesSearch(v: VHost, needle: string): boolean {
   if (!needle) return true
   return [
     v.name,
+    v.path,
+    v.enabledPath ?? "",
+    v.linkTarget ?? "",
     ...v.serverNames,
     ...v.upstreams,
     ...(v.pools ?? []).flatMap((pool) => pool.servers),
+    ...v.listen,
+    ...(v.certPaths ?? []),
+    ...(v.roots ?? []),
+    ...(v.redirects ?? []),
   ].some((text) => text.toLowerCase().includes(needle))
 }

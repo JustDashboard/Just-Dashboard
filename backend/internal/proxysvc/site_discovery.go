@@ -133,10 +133,16 @@ func logFile(target string) string {
 // own file: an include written there is followed, one in a file it includes
 // is not. self is path with its links resolved, the name allowedPath gives
 // the file when an include reaches it.
+// redirectURLRe is the one-argument return nginx treats as a redirect: a
+// URL with a scheme, or one built from $scheme.
+var redirectURLRe = regexp.MustCompile(`^["']?(https?://|\$scheme)`)
+
 type siteWalk struct {
 	s          *Service
 	path, self string
 	features   map[string]bool
+	roots      []string
+	redirects  []string
 }
 
 // siteDetails fills in the site's logs, pools and features from its file,
@@ -171,6 +177,7 @@ func (s *Service) siteDetails(v *VHost, path, text string, inherited logDefaults
 	}
 	v.AccessLog = access.file(inherited.access)
 	v.ErrorLog = errorLog.file(inherited.errorLog)
+	v.Roots, v.Redirects = walk.roots, walk.redirects
 	for _, feature := range siteFeatureOrder {
 		if walk.features[feature] {
 			v.Features = append(v.Features, feature)
@@ -301,6 +308,15 @@ func (w *siteWalk) block(block []Directive, serverLevel bool) {
 			}
 			if len(d.Args) > 1 && slices.Contains(d.Args[1:], "quic") {
 				on("h3")
+			}
+		case "root":
+			w.roots = appendNew(w.roots, unquote(first))
+		case "return":
+			// "return 301 URL", or "return URL", which nginx sends as a 302.
+			if len(d.Args) == 2 && strings.HasPrefix(first, "30") {
+				w.redirects = appendNew(w.redirects, unquote(d.Args[1]))
+			} else if len(d.Args) == 1 && redirectURLRe.MatchString(first) {
+				w.redirects = appendNew(w.redirects, unquote(first))
 			}
 		case "if":
 			if maintenanceTestRe.MatchString(strings.Join(d.Args, "")) {

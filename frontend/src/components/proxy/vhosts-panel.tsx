@@ -2,14 +2,20 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { forgetSessionState, useSessionState } from "@/lib/view-state"
+import { forgetSessionState, useSessionState, useViewState } from "@/lib/view-state"
 import { Globe, Plus, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { plural } from "@/lib/format"
+import { plural, relativeTime } from "@/lib/format"
+import { downloadText } from "@/lib/metrics-export"
 import { ApiError, del, errorMessage, get, post } from "@/lib/api"
 import type {
+  Certificate,
   ProxyPending,
   SiteDeleteResult,
+  SitesBulkResult,
+  SitesTraffic,
+  SiteUpstreamHealth,
+  SiteUpstreams,
   SystemdUnit,
   VHost,
   VHostLinkResult,
@@ -27,6 +33,23 @@ import { StatGrid, StatTile } from "@/components/stat-tile"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { VerbBar } from "@/components/verbs"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  stickyTableHeader,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { AuthFilesPanel } from "@/components/proxy/auth-files-panel"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { DefaultSitePanel } from "@/components/proxy/default-site"
@@ -37,8 +60,24 @@ import {
   SiteFeatures,
   SiteNotes,
   SiteTLS,
+  UpstreamHealth,
   siteKind,
 } from "@/components/proxy/site-marks"
+import { ExpiryStatus } from "@/components/proxy/expiry-status"
+import {
+  CHIP_LABEL,
+  SORT_LABEL,
+  exportBundle,
+  matchesChip,
+  siteCert,
+  siteRequests,
+  siteUpstreams,
+  sortSites,
+  stepSelection,
+  type SiteChip,
+  type SiteReadings,
+  type SiteSort,
+} from "@/components/proxy/site-filters"
 import { activeOwner, matchesSearch, upstreamTargets } from "@/components/proxy/site-details"
 import { reloadFailure, reloadOutput } from "@/components/proxy/site-outcome"
 import {
@@ -64,27 +103,30 @@ import {
   type UnitReading,
 } from "@/components/proxy/site-serving"
 import { engineUnit, useProxy } from "@/components/proxy/proxy-context"
-import { opensFile, useSiteVerbs } from "@/components/proxy/site-verbs"
-import { ProxyGrid, RoutePath } from "@/components/proxy/route-path"
 import {
-  byUrgency,
-  isBroken,
-  isDisabled,
-  isPlain,
-  sharedNames,
-  waiting,
-} from "@/components/proxy/site-order"
+  opensFile,
+  siteDeletable,
+  siteSwitchable,
+  useSiteVerbs,
+} from "@/components/proxy/site-verbs"
+import { ProxyGrid, RoutePath } from "@/components/proxy/route-path"
+import { isBroken, isDisabled, isPlain, sharedNames, waiting } from "@/components/proxy/site-order"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 
-type SiteFilter = "all" | "broken" | "tls" | "plain" | "disabled"
+/** What a bulk change is called while it runs and once it has landed. */
+const BULK = {
+  enable: { word: "Enable", busy: "Enabling", done: "enabled" },
+  disable: { word: "Disable", busy: "Disabling", done: "disabled" },
+  delete: { word: "Delete", busy: "Deleting", done: "deleted" },
+} as const
 
-const FILTER_LABEL: Record<SiteFilter, string> = {
-  all: "All",
-  broken: "Broken links",
-  tls: "TLS",
-  plain: "Plain HTTP",
-  disabled: "Disabled",
-}
+type BulkAction = keyof typeof BULK
+
+/** A card's identity in the list: two entries may share a name across layouts. */
+const siteKey = (v: VHost) => `${v.kind}:${v.layout ?? ""}:${v.name}`
+
+const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 })
 
 /** nginx's own words about a change, kept for the operator who asks to see them. */
 type NginxOutput = { title: string; output: string }
@@ -142,7 +184,16 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     session: number
   }>("proxy.sites.form", { open: false, editing: null, copyFrom: null, session: 0 })
   const [filter, setFilter] = useSessionState("proxy.sites.query", "")
-  const [chip, setChip] = useSessionState<SiteFilter>("proxy.sites.chip", "all")
+  const [chip, setChip] = useSessionState<SiteChip>("proxy.sites.chip", "all")
+  const [sortChoice, setSort] = useSessionState<SiteSort>("proxy.sites.sort", "urgency")
+  const [view, setView] = useViewState<"cards" | "table">("proxy.sites.view", "cards")
+  // By name, as the bulk endpoint acts: a name two entries share is never
+  // selectable, so a name picks out one site.
+  const [selected, setSelected] = useState<string[]>([])
+  // The site j and k have moved to, which Enter opens.
+  const [cursor, setCursor] = useState<string | null>(null)
+  const [exporting, setExporting] = useState(false)
+  const searchRef = useRef<HTMLInputElement>(null)
   const [pending, setPending] = useState<Record<string, Busy>>({})
   const [output, setOutput] = useState<NginxOutput | null>(null)
   // In the URL so a deployment finding can link straight at the site serving
@@ -152,6 +203,37 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     (signal) => get<VHost[]>("/proxy/vhosts", undefined, signal),
     30_000,
   )
+  // Readings other parts of the proxy own. Each draws nothing where its
+  // endpoint does not answer — no certificates readable, no health check or
+  // traffic summary on this build — rather than an error on a page about
+  // sites, and nothing drawn is never read as "fine".
+  const certPoll = usePoll(
+    (signal) => get<Certificate[]>("/certificates/", undefined, signal),
+    300_000,
+  )
+  const upstreamPoll = usePoll(
+    (signal) => get<SiteUpstreams>("/proxy/upstreams", undefined, signal),
+    30_000,
+    [],
+    { enabled: hasNginx },
+  )
+  const trafficPoll = usePoll(
+    (signal) => get<SitesTraffic>("/proxy/traffic", undefined, signal),
+    60_000,
+    [],
+    { enabled: hasNginx },
+  )
+  // Whether the configuration history answers, which is what its verb
+  // leads to; it is an administrator's.
+  const historyPoll = usePoll(
+    (signal) => get<unknown>("/proxy/history/files", undefined, signal),
+    0,
+    [admin],
+    { enabled: admin && hasNginx },
+  )
+  const hasTraffic = Array.isArray(trafficPoll.data?.sites)
+  const hasHistory = historyPoll.data !== undefined
+  const sort: SiteSort = sortChoice === "traffic" && !hasTraffic ? "urgency" : sortChoice
   // What on disk nginx has not loaded. `nginx -s reload` answers before
   // nginx has loaded anything, so a read after a reload the page asked for
   // names the load it saw before, and the backend waits for a newer one.
@@ -282,18 +364,44 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     }),
     [hosts],
   )
-  const visible = useMemo(() => {
-    const needle = filter.trim().toLowerCase()
-    return hosts
-      .filter((v) => {
-        if (chip === "broken" && !isBroken(v)) return false
-        if (chip === "tls" && !v.tls) return false
-        if (chip === "plain" && !isPlain(v)) return false
-        if (chip === "disabled" && !isDisabled(v)) return false
-        return matchesSearch(v, needle)
-      })
-      .sort(byUrgency)
-  }, [hosts, filter, chip])
+  // A change nginx did not load waits for a reload; with the engine
+  // stopped, the rest are enabled rather than serving, and nothing is live.
+  const notLive = (v: VHost) =>
+    run?.running === false ? undefined : notLiveLabel(v, siteChanges(pendingPoll.data, v))
+  const readings: SiteReadings = {
+    notLive: (v) => Boolean(notLive(v)),
+    certs: certPoll.data,
+    upstreams: upstreamPoll.data,
+    traffic: trafficPoll.data,
+  }
+  const chipCounts = Object.fromEntries(
+    (Object.keys(CHIP_LABEL) as SiteChip[]).map((key) => [
+      key,
+      hosts.filter((v) => matchesChip(v, key, readings)).length,
+    ]),
+  ) as Record<SiteChip, number>
+  const needle = filter.trim().toLowerCase()
+  const visible = sortSites(
+    hosts.filter((v) => matchesChip(v, chip, readings) && matchesSearch(v, needle)),
+    sort,
+    trafficPoll.data,
+  )
+  // Selection needs a name only one entry answers to, and something to do
+  // with it: a file to export, or a switch or a delete for an administrator.
+  const selectable = (v: VHost) =>
+    v.kind === "nginx" &&
+    !shared.has(v.name) &&
+    (opensFile(v) || (admin && (siteSwitchable(v) || siteDeletable(v))))
+  const chosen = visible.filter((v) => selected.includes(v.name) && selectable(v))
+  // A deployment's route is changed from its deployment, one at a time.
+  const bulkable = (v: VHost) => admin && !activeOwner(v)
+  const toEnable = chosen.filter((v) => bulkable(v) && siteSwitchable(v) && !v.enabled && !v.broken)
+  const toDisable = chosen.filter((v) => bulkable(v) && siteSwitchable(v) && v.enabled)
+  const toDelete = chosen.filter((v) => bulkable(v) && siteDeletable(v))
+  const toExport = chosen.filter(opensFile)
+  const allChosen = visible.filter(selectable)
+  const toggleSelected = (v: VHost, on: boolean) =>
+    setSelected((list) => (on ? [...list, v.name] : list.filter((name) => name !== v.name)))
 
   const setBusy = (name: string, verb: string) =>
     setPending((p) => ({ ...p, [name]: { verb, unloaded: p[name]?.unloaded } }))
@@ -604,7 +712,157 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     onDelete: remove,
     onUnlink: unlink,
     onOverride: override,
+    traffic: hasTraffic,
+    history: hasHistory,
   }
+
+  /**
+   * Enables, disables or deletes the chosen sites as one change: the backend
+   * runs nginx -t once over all of them and puts every one back if it
+   * refuses, so the answer is about the whole set.
+   */
+  const runBulk = async (action: BulkAction, targets: VHost[]): Promise<"reported"> => {
+    const names = targets.map((v) => v.name)
+    const words = BULK[action]
+    const title = `${plural(names.length, "site")} ${words.done}`
+    const each = (p: Record<string, Busy>, next: (name: string) => Busy | undefined) => {
+      const out = { ...p }
+      for (const name of names) {
+        const busy = next(name)
+        if (busy) out[name] = busy
+      }
+      return out
+    }
+    setPending((p) => each(p, (name) => ({ verb: words.busy, unloaded: p[name]?.unloaded })))
+    let outcome: ReloadOutcome | undefined
+    try {
+      const res = await post<SitesBulkResult>("/proxy/sites/bulk", { action, names })
+      const at = Date.now()
+      outcome = reloadOutcome(res, unitNow.current)
+      setReloads((r) => hear(r, at, outcome))
+      const mark =
+        action !== "delete" && (outcome === "notRunning" || outcome === "failed")
+          ? markUnloaded(at, unitNow.current)
+          : undefined
+      setPending((p) => each(p, (name) => p[name] && { ...p[name], unloaded: mark }))
+      setSelected([])
+      const failure = reloadFailure(res)
+      const already = res.unchanged.length
+        ? `${plural(res.unchanged.length, "site was", "sites were")} already ${words.done}.`
+        : undefined
+      if (!failure) {
+        notify.success(title, { description: already })
+      } else if (outcome === "notRunning") {
+        notify.warning(`${title}; nginx is not running`, {
+          description: "nginx starts with the change.",
+          duration: 12_000,
+          action: showOutput(title, reloadOutput(res)),
+        })
+      } else {
+        notify.warning(`${title}, not reloaded`, {
+          description: `If nginx is running, it keeps the configuration from before until a reload succeeds. ${failure}`,
+          duration: 12_000,
+          action: showOutput(title, reloadOutput(res)),
+        })
+      }
+    } catch (err) {
+      reportRefusal(`Could not ${action} ${plural(names.length, "site")}`, title, err)
+    } finally {
+      const answered = lastRead.current
+      setPending((p) => each(p, (name) => p[name] && { ...p[name], answered }))
+      refresh()
+      unitPoll.refresh()
+      if (outcome === "reloaded") expectReload(true)
+      else pendingPoll.refresh()
+    }
+    return "reported"
+  }
+  const bulk = (action: BulkAction, targets: VHost[]) => {
+    // Enabling is the switch a single site takes without asking.
+    if (action === "enable") {
+      void runBulk(action, targets)
+      return
+    }
+    const words = BULK[action]
+    confirm({
+      title: `${words.word} ${plural(targets.length, "site")}`,
+      confirmLabel: `${words.word} and reload`,
+      description: (
+        <>
+          <p>
+            {action === "disable"
+              ? "These stop serving as soon as nginx reloads. Their files stay on disk."
+              : "Their files and links are removed and nginx reloads. Each file's previous content is kept beside it as <name>.bak, which nginx does not read and this list does not show."}{" "}
+            nginx tests the result once; if it refuses, or any one of them cannot be changed, every
+            site is put back and nothing changes.
+          </p>
+          <p className="font-mono text-hint break-words">{targets.map((v) => v.name).join(", ")}</p>
+        </>
+      ),
+      action: () => runBulk(action, targets),
+    })
+  }
+  /** The chosen sites' files, as they are on disk now, in one text file. */
+  const exportSites = async (targets: VHost[]) => {
+    setExporting(true)
+    try {
+      const files = await Promise.all(
+        targets.map(async (v) => ({
+          path: v.path,
+          content: (await get<{ content: string }>("/proxy/config", { path: v.path })).content,
+        })),
+      )
+      const at = new Date()
+      downloadText(
+        `nginx-sites-${at.toISOString().slice(0, 10)}.conf`,
+        exportBundle(files, at),
+        "text/plain",
+      )
+      notify.success(`${plural(files.length, "site")} exported`)
+    } catch (err) {
+      notify.error("Could not export the sites", err)
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  // The keys: / searches, n starts a site, j and k move through the list,
+  // and Enter opens the site they are on. Never while typing, and never
+  // under a sheet, a dialog or a menu, which have keys of their own.
+  const openSite = (v: VHost) => {
+    if (admin && v.formEditable && !activeOwner(v)) openForm(v.name)
+    else if (opensFile(v)) setEditing({ vhost: v })
+  }
+  const onKey = useRef<(e: KeyboardEvent) => void>(undefined)
+  useEffect(() => {
+    onKey.current = (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return
+      const target = e.target instanceof HTMLElement ? e.target : null
+      if (target?.closest("input, textarea, select, [contenteditable='true']")) return
+      if (formIsOpen || rawSite || document.querySelector("[role='dialog'], [role='menu']")) return
+      if (e.key === "/") {
+        e.preventDefault()
+        searchRef.current?.focus()
+      } else if (e.key === "n" && admin && hasNginx) {
+        e.preventDefault()
+        openForm(null)
+      } else if (e.key === "j" || e.key === "k") {
+        e.preventDefault()
+        setCursor(stepSelection(visible.map(siteKey), cursor, e.key === "j" ? 1 : -1))
+      } else if (e.key === "Enter" && cursor && (!target || target === document.body)) {
+        const site = visible.find((v) => siteKey(v) === cursor)
+        if (site) {
+          e.preventDefault()
+          openSite(site)
+        }
+      }
+    }
+  })
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => onKey.current?.(e)
+    window.addEventListener("keydown", listener)
+    return () => window.removeEventListener("keydown", listener)
+  }, [])
 
   // A save that reloaded waits a moment for nginx to load it; one that did
   // not is read at once, and waiting for a load nobody asked for kept its
@@ -646,11 +904,8 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
 
   // Grouped only where the grouping says something a chip has not: once a
   // filter is on, its name *is* the group.
-  const narrowed = filter.trim().length > 0 || chip !== "all"
-  // A change nginx did not load waits for a reload; with the engine
-  // stopped, the rest are enabled rather than serving, and nothing is live.
-  const notLive = (v: VHost) =>
-    run?.running === false ? undefined : notLiveLabel(v, siteChanges(pendingPoll.data, v))
+  // Nor once another order is chosen: the groups are the urgency order.
+  const narrowed = filter.trim().length > 0 || chip !== "all" || sort !== "urgency"
   const needsMe = (v: VHost) => waiting(v) || isUnloaded(v) || Boolean(notLive(v))
   const attention = visible.filter(needsMe)
   const active = visible.filter((v) => !needsMe(v) && v.enabled)
@@ -797,47 +1052,195 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
           </div>
           <Toolbar className="justify-between gap-x-4">
             <SearchInput
+              ref={searchRef}
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
-              placeholder="Site, domain or upstream"
+              placeholder="Name, domain, upstream, port, file or path"
+              aria-label="Search sites"
+              aria-keyshortcuts="/"
             />
-            <ChipStrip>
-              {(Object.keys(FILTER_LABEL) as SiteFilter[])
-                .filter((key) => key === "all" || counts[key] > 0)
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={sort} onValueChange={(value) => setSort(value as SiteSort)}>
+                <SelectTrigger size="sm" className="w-40" aria-label="Sort sites">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(SORT_LABEL) as SiteSort[])
+                    .filter((key) => key !== "traffic" || hasTraffic)
+                    .map((key) => (
+                      <SelectItem key={key} value={key}>
+                        {SORT_LABEL[key]}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+              {/* The table needs the width; below it the cards are drawn either way. */}
+              <ChipStrip aria-label="View" className="max-lg:hidden">
+                <FilterChip selected={view === "cards"} onClick={() => setView("cards")}>
+                  Cards
+                </FilterChip>
+                <FilterChip selected={view === "table"} onClick={() => setView("table")}>
+                  Table
+                </FilterChip>
+              </ChipStrip>
+            </div>
+            <ChipStrip className="basis-full">
+              {(Object.keys(CHIP_LABEL) as SiteChip[])
+                .filter((key) => key === "all" || key === chip || chipCounts[key] > 0)
                 .map((key) => (
                   <FilterChip key={key} selected={chip === key} onClick={() => setChip(key)}>
-                    {FILTER_LABEL[key]} <ChipCount>{counts[key]}</ChipCount>
+                    {CHIP_LABEL[key]} <ChipCount>{chipCounts[key]}</ChipCount>
                   </FilterChip>
                 ))}
             </ChipStrip>
           </Toolbar>
 
+          {chosen.length > 0 && (
+            <div
+              role="region"
+              aria-label="Selected sites"
+              className="flex flex-wrap items-center gap-2 rounded-xl border bg-card px-3 py-2"
+            >
+              <span className="text-body font-medium">{chosen.length} selected</span>
+              {chosen.length < allChosen.length && (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => setSelected(allChosen.map((v) => v.name))}
+                >
+                  Select all {allChosen.length}
+                </Button>
+              )}
+              <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+                {toEnable.length > 0 && (
+                  <Button size="xs" variant="outline" onClick={() => bulk("enable", toEnable)}>
+                    Enable {toEnable.length}
+                  </Button>
+                )}
+                {toDisable.length > 0 && (
+                  <Button size="xs" variant="outline" onClick={() => bulk("disable", toDisable)}>
+                    Disable {toDisable.length}
+                  </Button>
+                )}
+                {toExport.length > 0 && (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    pending={exporting}
+                    onClick={() => void exportSites(toExport)}
+                  >
+                    Export {toExport.length}
+                  </Button>
+                )}
+                {toDelete.length > 0 && (
+                  <Button size="xs" variant="outline" onClick={() => bulk("delete", toDelete)}>
+                    Delete {toDelete.length}
+                  </Button>
+                )}
+                <Button size="xs" variant="ghost" onClick={() => setSelected([])}>
+                  Clear
+                </Button>
+              </div>
+            </div>
+          )}
+
           {visible.length === 0 ? (
             <EmptyState icon={Globe} title="No sites match" />
           ) : (
-            groups.map((group) => (
-              <div key={group.key} className="flex min-w-0 flex-col gap-2">
-                {group.label && <GroupRule label={group.label} count={group.sites.length} />}
-                <ProxyGrid
-                  aria-label={group.label || "Sites"}
-                  className={group.sites.length === 1 ? "xl:grid-cols-1" : undefined}
-                >
-                  {group.sites.map((vhost, index) => (
-                    <SiteCard
-                      key={`${vhost.kind}:${vhost.layout ?? ""}:${vhost.name}`}
-                      vhost={vhost}
-                      {...stateOf(vhost.name)}
-                      stopped={engineStopped(vhost)}
-                      unloaded={isUnloaded(vhost)}
-                      notLive={notLive(vhost)}
-                      index={index}
-                      ambiguous={shared.has(vhost.name)}
-                      {...handlers}
-                    />
-                  ))}
-                </ProxyGrid>
+            <>
+              {view === "table" && (
+                <div className="hidden min-w-0 lg:block">
+                  <Table
+                    className="table-fixed"
+                    containerClassName="rounded-xl border bg-card"
+                    aria-label="Sites"
+                  >
+                    <TableHeader className={stickyTableHeader}>
+                      <TableRow>
+                        <TableHead className="w-10">
+                          <Checkbox
+                            aria-label="Select every site shown"
+                            disabled={allChosen.length === 0}
+                            checked={
+                              chosen.length > 0 && chosen.length === allChosen.length
+                                ? true
+                                : chosen.length > 0
+                                  ? "indeterminate"
+                                  : false
+                            }
+                            onCheckedChange={(on) =>
+                              setSelected(on === true ? allChosen.map((v) => v.name) : [])
+                            }
+                          />
+                        </TableHead>
+                        <TableHead className="w-[22%]">Site</TableHead>
+                        <TableHead>Route</TableHead>
+                        <TableHead className="w-44">TLS</TableHead>
+                        <TableHead className="w-44">State</TableHead>
+                        <TableHead className="w-28">Edited</TableHead>
+                        <TableHead className="w-40">
+                          <span className="sr-only">Actions</span>
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {visible.map((vhost) => (
+                        <SiteTableRow
+                          key={siteKey(vhost)}
+                          index={0}
+                          vhost={vhost}
+                          {...stateOf(vhost.name)}
+                          stopped={engineStopped(vhost)}
+                          unloaded={isUnloaded(vhost)}
+                          notLive={notLive(vhost)}
+                          ambiguous={shared.has(vhost.name)}
+                          cert={siteCert(vhost, certPoll.data)}
+                          health={siteUpstreams(vhost, upstreamPoll.data)}
+                          requests={siteRequests(vhost, trafficPoll.data)}
+                          selectable={allChosen.includes(vhost)}
+                          selected={selected.includes(vhost.name)}
+                          onSelectedChange={(on) => toggleSelected(vhost, on)}
+                          cursor={cursor === siteKey(vhost)}
+                          {...handlers}
+                        />
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+              <div className={cn("flex min-w-0 flex-col gap-4", view === "table" && "lg:hidden")}>
+                {groups.map((group) => (
+                  <div key={group.key} className="flex min-w-0 flex-col gap-2">
+                    {group.label && <GroupRule label={group.label} count={group.sites.length} />}
+                    <ProxyGrid
+                      aria-label={group.label || "Sites"}
+                      className={group.sites.length === 1 ? "xl:grid-cols-1" : undefined}
+                    >
+                      {group.sites.map((vhost, index) => (
+                        <SiteCard
+                          key={siteKey(vhost)}
+                          index={index}
+                          vhost={vhost}
+                          {...stateOf(vhost.name)}
+                          stopped={engineStopped(vhost)}
+                          unloaded={isUnloaded(vhost)}
+                          notLive={notLive(vhost)}
+                          ambiguous={shared.has(vhost.name)}
+                          cert={siteCert(vhost, certPoll.data)}
+                          health={siteUpstreams(vhost, upstreamPoll.data)}
+                          requests={siteRequests(vhost, trafficPoll.data)}
+                          selectable={allChosen.includes(vhost)}
+                          selected={selected.includes(vhost.name)}
+                          onSelectedChange={(on) => toggleSelected(vhost, on)}
+                          cursor={cursor === siteKey(vhost)}
+                          {...handlers}
+                        />
+                      ))}
+                    </ProxyGrid>
+                  </div>
+                ))}
               </div>
-            ))
+            </>
           )}
         </div>
       )}
@@ -918,6 +1321,20 @@ type CardProps = {
   notLive?: string
   index: number
   ambiguous: boolean
+  /** The certificate it serves that ends soonest, when the inventory has it. */
+  cert?: Certificate
+  /** Its upstreams as the health check last found them. */
+  health: SiteUpstreamHealth[]
+  /** Requests in the last hour, when the traffic summary has the site. */
+  requests?: number
+  selectable: boolean
+  selected: boolean
+  onSelectedChange: (selected: boolean) => void
+  /** The site j and k have moved to. */
+  cursor: boolean
+  /** The traffic and history pages answer; see `useSiteVerbs`. */
+  traffic: boolean
+  history: boolean
   admin: boolean
   onEdit: (v: VHost) => void
   onRaw: (v: VHost) => void
@@ -946,6 +1363,13 @@ function SiteCard({
   notLive,
   index,
   ambiguous,
+  cert,
+  health,
+  requests,
+  selectable,
+  selected,
+  onSelectedChange,
+  cursor,
   ...handlers
 }: CardProps) {
   const verbs = useSiteVerbs({ vhost, busy, ambiguous, ...handlers })
@@ -956,12 +1380,21 @@ function SiteCard({
   const linkOnly = vhost.broken === "dangling" && !vhost.path
   return (
     <ChoiceRow
+      actions={
+        selectable && (
+          <Checkbox
+            aria-label={`Select ${vhost.name}`}
+            checked={selected}
+            onCheckedChange={(on) => onSelectedChange(on === true)}
+          />
+        )
+      }
       verb={canOpen ? `Open ${vhost.name}` : vhost.name}
       onSelect={canOpen ? primary : undefined}
       disabled={!canOpen}
       index={index}
       busy={Boolean(busy)}
-      className="h-full gap-4 p-4"
+      className={cn("h-full gap-4 p-4", cursor && "ring-2 ring-ring")}
       leading={<ProductLogo id={siteProduct(vhost)} size="md" />}
       title={<span className="text-title">{vhost.name}</span>}
       description={siteKind(vhost)}
@@ -976,6 +1409,7 @@ function SiteCard({
         />
       }
     >
+      {cursor && <ScrollHere />}
       {!linkOnly && (
         <RoutePath
           source={vhost.serverNames.join(", ") || "Default host"}
@@ -987,13 +1421,127 @@ function SiteCard({
         {!linkOnly && (
           <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-hint text-muted-foreground">
             <SiteTLS vhost={vhost} />
+            {cert && <ExpiryStatus cert={cert} />}
+            <UpstreamHealth targets={health} />
             <span className="font-mono">{vhost.listen.join(" · ") || "No listener reported"}</span>
+            {requests !== undefined && <span>{compact.format(requests)} req/h</span>}
+            <Edited vhost={vhost} />
             <SiteFeatures vhost={vhost} />
           </div>
         )}
         <VerbBar verbs={verbs} menuLabel={`More actions for ${vhost.name}`} className="ml-auto" />
       </div>
     </ChoiceRow>
+  )
+}
+
+/** When the site's file last changed, where the listing could read it. */
+function Edited({ vhost }: { vhost: VHost }) {
+  // A link to nothing reports the link's own time, and a zero time none.
+  if (!vhost.path || vhost.modified.startsWith("0001")) return null
+  return <span title={vhost.modified}>edited {relativeTime(vhost.modified)}</span>
+}
+
+/** Brings the site j or k moved to into view as it becomes the one. */
+function ScrollHere() {
+  return <span aria-hidden ref={(el) => el?.scrollIntoView({ block: "nearest" })} />
+}
+
+/** The table view's row: the card's readings in columns, and the same verbs. */
+function SiteTableRow({
+  vhost,
+  busy,
+  unread,
+  stopped,
+  unloaded,
+  notLive,
+  ambiguous,
+  cert,
+  health,
+  requests,
+  selectable,
+  selected,
+  onSelectedChange,
+  cursor,
+  ...handlers
+}: CardProps) {
+  const verbs = useSiteVerbs({ vhost, busy, ambiguous, ...handlers })
+  const form = handlers.admin && vhost.formEditable && !activeOwner(vhost)
+  const canOpen = form || opensFile(vhost)
+  const linkOnly = vhost.broken === "dangling" && !vhost.path
+  return (
+    <TableRow data-state={selected ? "selected" : undefined} className="group">
+      <TableCell>
+        {selectable && (
+          <Checkbox
+            aria-label={`Select ${vhost.name}`}
+            checked={selected}
+            onCheckedChange={(on) => onSelectedChange(on === true)}
+          />
+        )}
+      </TableCell>
+      <TableCell className={cn(cursor && "outline-2 -outline-offset-2 outline-ring")}>
+        {cursor && <ScrollHere />}
+        <div className="flex min-w-0 items-center gap-2.5">
+          <ProductLogo id={siteProduct(vhost)} size="sm" />
+          <div className="min-w-0">
+            {canOpen ? (
+              <button
+                type="button"
+                aria-label={`Open ${vhost.name}`}
+                onClick={() => (form ? handlers.onEdit(vhost) : handlers.onRaw(vhost))}
+                className="block max-w-full truncate rounded-sm text-body font-medium focus-ring"
+              >
+                {vhost.name}
+              </button>
+            ) : (
+              <span className="block truncate text-body font-medium">{vhost.name}</span>
+            )}
+            <span className="block truncate text-hint text-muted-foreground">
+              {siteKind(vhost)}
+            </span>
+          </div>
+        </div>
+      </TableCell>
+      <TableCell>
+        {!linkOnly && (
+          <div className="min-w-0 text-hint">
+            <p className="truncate" title={vhost.serverNames.join(", ")}>
+              {vhost.serverNames.join(", ") || "Default host"}
+            </p>
+            <p className="truncate font-mono text-muted-foreground">
+              → {upstreamTargets(vhost).join(", ") || "Served by configuration"}
+            </p>
+          </div>
+        )}
+      </TableCell>
+      <TableCell>
+        <div className="flex flex-col items-start gap-1 text-hint">
+          <SiteTLS vhost={vhost} />
+          {cert && <ExpiryStatus cert={cert} />}
+        </div>
+      </TableCell>
+      <TableCell>
+        <div className="flex flex-col items-start gap-1 text-hint">
+          <ServingStatus
+            vhost={vhost}
+            busy={busy}
+            unread={unread}
+            stopped={stopped}
+            unloaded={unloaded}
+            notLive={notLive}
+          />
+          <UpstreamHealth targets={health} />
+        </div>
+      </TableCell>
+      <TableCell className="text-hint text-muted-foreground">
+        <Edited vhost={vhost} />
+        {requests !== undefined && <p>{compact.format(requests)} req/h</p>}
+      </TableCell>
+      <TableCell>
+        <VerbBar verbs={verbs} menuLabel={`More actions for ${vhost.name}`} />
+      </TableCell>
+    </TableRow>
   )
 }
 
