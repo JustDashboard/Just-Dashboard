@@ -1,4 +1,4 @@
-import type { CertbotCert, Job } from "@/lib/types"
+import type { CertbotCert, Job, ServedCertificate } from "@/lib/types"
 
 /**
  * Certificate readings that are pure arithmetic over the API's data, kept
@@ -58,8 +58,9 @@ export function testRunPassed(job: Job | null | undefined): string | undefined {
 
 /**
  * The names whose test certificate a finished issuance replaced on disk.
- * certbot reloads nothing after certonly, so a site naming it still serves
- * the test certificate until nginx reloads.
+ * Whether nginx serves the new one is a separate question, answered by
+ * asking the sites (`stillServingTest`): certonly reloads nothing itself, but
+ * a certbot deploy hook may have.
  */
 export function testCertificateReplaced(job: Job | null | undefined): string[] | undefined {
   return job?.kind === "certbot.issue" &&
@@ -67,6 +68,44 @@ export function testCertificateReplaced(job: Job | null | undefined): string[] |
     job.title.startsWith(REPLACEMENT)
     ? issuedNames(job)
     : undefined
+}
+
+/**
+ * The sites that answered with a test certificate while the file they name
+ * holds another: the ones a reload would change. A site that could not be
+ * asked, or that serves some other certificate, is not claimed either way.
+ */
+export function stillServingTest(served: ServedCertificate[] | undefined): string[] {
+  return (served ?? [])
+    .filter((site) => !site.error && !site.current && site.staging)
+    .map((site) => site.site)
+}
+
+/**
+ * What a reload did for the sites that were serving a test certificate, as
+ * they answered afterwards: the toast after "Reload nginx" says only that.
+ */
+export function afterReload(
+  sites: string[],
+  served: ServedCertificate[],
+): { ok: boolean; description: string } {
+  const now = sites.filter((site) => served.some((s) => s.site === site && s.current))
+  const still = stillServingTest(served)
+  const unknown = sites.filter((site) => !now.includes(site) && !still.includes(site))
+  const verb = (names: string[], one: string, many: string) => (names.length === 1 ? one : many)
+  return {
+    ok: still.length === 0 && unknown.length === 0,
+    description: [
+      now.length > 0 &&
+        `${now.join(", ")} ${verb(now, "serves", "serve")} the real certificate now.`,
+      still.length > 0 &&
+        `${still.join(", ")} still ${verb(still, "serves", "serve")} the test certificate.`,
+      unknown.length > 0 &&
+        `What ${unknown.join(", ")} ${verb(unknown, "serves", "serve")} could not be checked.`,
+    ]
+      .filter(Boolean)
+      .join(" "),
+  }
 }
 
 /** Whether the running job is replacing the test certificate for exactly these names. */

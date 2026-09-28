@@ -47,10 +47,32 @@ export type CertbotState = {
   /** Why the lineages could not be read; the renewal fields are answered regardless. */
   error?: string
   /**
-   * The ACME directory issuance orders from when it is not Let's Encrypt's: a
-   * test run rehearses with that authority itself, under its own limits.
+   * The ACME directory issuance orders from when it is not one of Let's
+   * Encrypt's: a test run rehearses with that authority itself, under its own
+   * limits.
    */
   directory?: string
+  /**
+   * The configured directory signs test certificates (Let's Encrypt's staging
+   * one among them): a real issuance from here is refused by browsers too.
+   */
+  testAuthority?: boolean
+}
+
+/** What one enabled nginx site that names a certificate serves, asked over a handshake. */
+export type ServedCertificate = {
+  site: string
+  /** The server name asked for. */
+  name: string
+  address?: string
+  issuer?: string
+  serial?: string
+  /** A staging authority signed the served certificate. */
+  staging?: boolean
+  /** The served certificate is the one the file holds now. */
+  current: boolean
+  /** Why the site could not be asked. */
+  error?: string
 }
 
 /** A certbot DNS plugin — the only way to a wildcard, or past a CDN. */

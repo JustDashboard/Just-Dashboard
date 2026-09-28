@@ -26,6 +26,9 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/dns-providers", s.handle(s.handleDNSProviders))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
+		// A handshake with each site that names a certificate: loopback
+		// dials only, and only the page's reload offer needs them.
+		r.Method(http.MethodGet, "/served", s.handle(s.handleCertServed))
 		r.Method(http.MethodPost, "/issue", s.handle(s.handleCertIssue))
 		r.Method(http.MethodPost, "/import", s.handle(s.handleCertImport))
 		r.Method(http.MethodPost, "/dns-credentials", s.handle(s.handleDNSCredentials))
@@ -40,6 +43,28 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/revoke", s.handle(s.handleCertRevoke))
 		})
 	})
+}
+
+// handleCertServed answers which certificate each enabled nginx site naming
+// ?path= serves, asked of nginx over a handshake. ?settle=1 asks again for a
+// few seconds while a site serves another: what to read right after a reload,
+// which nginx finishes a moment after the signal.
+func (s *Server) handleCertServed(w http.ResponseWriter, r *http.Request) error {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		return httpx.BadRequest("path is required")
+	}
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	served, err := s.modules.proxy.ServedCertificates(ctx, path, r.URL.Query().Get("settle") == "1")
+	if errors.Is(err, proxysvc.ErrCertificateNotListed) {
+		return httpx.Err(http.StatusNotFound, "not_found", "No listed certificate has that path.")
+	}
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	httpx.JSON(w, http.StatusOK, served)
+	return nil
 }
 
 func (s *Server) handleCertList(w http.ResponseWriter, r *http.Request) error {
@@ -102,6 +127,7 @@ func (s *Server) handleCertIssue(w http.ResponseWriter, r *http.Request) error {
 	// IssueArgs forces the renewal only over a test certificate for exactly
 	// these names, so the argv says whether this issuance replaces one.
 	replacing := slices.Contains(args, "--force-renewal")
+	authority := proxysvc.CertbotAuthorityInUse()
 	target := strings.Join(req.Domains, ", ")
 	httpx.SetAudit(r, "certificates.issue", target,
 		map[string]any{"method": req.Method, "testRun": req.Staging, "replacesTestCertificate": replacing,
@@ -129,25 +155,33 @@ func (s *Server) handleCertIssue(w http.ResponseWriter, r *http.Request) error {
 		case req.Staging:
 			// certbot's --dry-run asks its staging authority only when no
 			// other server is named; with one configured it rehearses there.
-			if directory := proxysvc.ACMEDirectoryURL(); directory != "" {
-				out.Status("A test run: certbot goes through the whole exchange with %s and saves nothing — no certificate is written.", directory)
+			if authority.Directory != "" {
+				out.Status("A test run: certbot goes through the whole exchange with %s and saves nothing — no certificate is written.", authority.Directory)
 			} else {
 				out.Status("A test run: certbot goes through the whole exchange with Let's Encrypt's staging authority and saves nothing — no certificate is written, and nothing counts against the real rate limits.")
 			}
 		case replacing:
 			out.Status("These names have a test certificate from a staging authority. certbot replaces it with a real one rather than keeping it until it is due.")
 		default:
+			if authority.Staging {
+				out.Status("JD_ACME_DIRECTORY names a staging authority: the certificate it signs is a test one, and browsers refuse it.")
+			}
 			kept = "certbot did not issue a new certificate: the one these names already have is not due for renewal yet, so it was kept as it is."
 		}
 		if err := certbotJob(ctx, out, args, kept); err != nil {
 			return err
 		}
-		if replacing && args[0] == "certonly" {
-			// certonly writes the files and reloads nothing — the nginx
-			// plugin's own reloads come before them — so nginx holds the test
-			// certificate until it is told to read its files again. An
-			// install run reloads nginx itself.
-			out.Status("The real certificate replaced the test one on disk. A site that names it keeps serving the test one until nginx reloads.")
+		if replacing {
+			// Whether nginx serves the new files is asked of nginx: certonly
+			// reloads nothing itself, but it runs certbot's deploy hooks on a
+			// renewed lineage, and one that reloads nginx is how most hosts
+			// keep certonly certificates served.
+			served, err := s.modules.proxy.ServedLineage(ctx, req.Domains, true)
+			if err != nil {
+				out.Status("The real certificate replaced the test one on disk. Which certificate nginx serves could not be checked: %v.", err)
+			} else {
+				out.Status("%s", proxysvc.ReplacementServed(served))
+			}
 		}
 		return nil
 	})

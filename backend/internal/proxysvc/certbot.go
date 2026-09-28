@@ -56,9 +56,14 @@ type CertbotState struct {
 	// answered regardless: they come from systemd and cron, not from certbot.
 	Error string `json:"error,omitempty"`
 	// Directory is the ACME directory issuance orders from when it is not
-	// Let's Encrypt's, so the page can say whom a test run talks to: that
-	// authority itself, not a staging one, and not under Let's Encrypt's limits.
+	// one of Let's Encrypt's, so the page can say whom a test run talks to:
+	// that authority itself, not a staging one, and not under Let's
+	// Encrypt's limits.
 	Directory string `json:"directory,omitempty"`
+	// TestAuthority is a configured directory that signs test certificates,
+	// Let's Encrypt's staging one among them: a real issuance from here
+	// brings back one browsers refuse, so the page offers no "real" one.
+	TestAuthority bool `json:"testAuthority,omitempty"`
 }
 
 func (s *Service) CertbotState(ctx context.Context) *CertbotState {
@@ -69,7 +74,8 @@ func (s *Service) CertbotState(ctx context.Context) *CertbotState {
 	}
 	state.Available = true
 	state.Version = rt.version
-	state.Directory = ACMEDirectoryURL()
+	authority := CertbotAuthorityInUse()
+	state.Directory, state.TestAuthority = authority.Directory, authority.Staging
 	// Before the lineages, and whatever they say: whether anything renews
 	// them is a separate question, and a lineage read that failed used to
 	// return before it was asked — every certbot run read as "renewal off".
@@ -270,10 +276,12 @@ func (s *Service) IssueArgs(ctx context.Context, req IssueRequest) ([]string, er
 		// certificate, left it where sites could name it, and made the real
 		// issuance that followed a no-op — the lineage was not due.
 		args = append(args, "--dry-run")
-	} else if lineage, leaf, ok := lineageFor(letsencryptDir, req.Domains); ok && lineage.testCertificate(leaf) {
+	} else if lineage, leaf, ok := lineageFor(letsencryptDir, req.Domains); ok && lineage.testCertificate(leaf) && !acmeDirectory().staging() {
 		// These names already have a test certificate from a staging
 		// authority, and certbot keeps a lineage until it is due whatever
-		// signed it. Replacing it is the point of asking for a real one.
+		// signed it. Replacing it is the point of asking for a real one —
+		// unless the configured directory is a staging one too, when the
+		// replacement would be another test certificate.
 		args = append(args, "--force-renewal")
 	}
 	args = append(args, acmeDirectory().certbotArgs()...)

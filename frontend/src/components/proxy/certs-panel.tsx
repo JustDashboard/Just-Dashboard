@@ -3,15 +3,17 @@
 import { useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { CheckCircle, CloudUpload, RefreshClockwise, ShieldOff } from "@/components/icons"
-import { ApiError, get, post } from "@/lib/api"
+import { ApiError, errorMessage, get, post } from "@/lib/api"
 import {
+  afterReload,
   certbotRunning,
   sameNames,
+  stillServingTest,
   testCertificateReplaced,
   testRunPassed,
 } from "@/lib/certificates"
 import { notify } from "@/lib/toast"
-import type { Certificate, CertbotState, DNSProvider, Job } from "@/lib/types"
+import type { Certificate, CertbotState, DNSProvider, Job, ServedCertificate } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -134,29 +136,52 @@ export function CertificatesPage() {
   const job = console_.job
   const testPassed = testRunPassed(job)
 
-  // A test certificate replaced on disk is still the one nginx serves: certbot
-  // reloads nothing after certonly. Worth saying only where a site names it.
+  // A test certificate replaced on disk reaches browsers once nginx reads it
+  // again. certonly reloads nothing itself, but a certbot deploy hook may
+  // have, and the job on screen may be a day old: the sites that name it are
+  // asked what they serve, and the reload is offered only while one still
+  // answers with the test certificate.
   const replacedNames = testCertificateReplaced(job)
-  const servedBy = replacedNames
-    ? (certs.data?.find((c) => c.source === "certbot" && sameNames(c.domains, replacedNames))
-        ?.usedBy ?? [])
-    : []
-  const [reloadedAfter, setReloadedAfter] = useState("")
+  const replaced = replacedNames
+    ? certs.data?.find((c) => c.source === "certbot" && sameNames(c.domains, replacedNames))
+    : undefined
+  const askServed = Boolean(admin && hasNginx && replaced && replaced.usedBy.length > 0)
+  const served = usePoll<ServedCertificate[]>(
+    (signal) => get("/certificates/served", { path: replaced?.path ?? "" }, signal),
+    0,
+    [replaced?.path, job?.id],
+    { enabled: askServed },
+  )
+  const staleSites = askServed ? stillServingTest(served.data) : []
   const [reloading, setReloading] = useState(false)
-  const reload = async (after: string, sites: string[]) => {
+  const reload = async (path: string, sites: string[]) => {
     setReloading(true)
     try {
       await post("/proxy/reload", { kind: "nginx" })
-      setReloadedAfter(after)
-      notify.success("nginx reloaded", {
-        description: `${sites.join(", ")} ${sites.length === 1 ? "serves" : "serve"} the real certificate now.`,
-      })
     } catch (err) {
       notify.error("nginx did not reload", err)
+      setReloading(false)
+      return
+    }
+    try {
+      // nginx swaps its workers a moment after the signal; settle asks
+      // again until they answer, for a few seconds at most.
+      const after = await get<ServedCertificate[]>("/certificates/served", { path, settle: "1" })
+      const outcome = afterReload(sites, after)
+      if (outcome.ok) notify.success("nginx reloaded", { description: outcome.description })
+      else notify.warning("nginx reloaded", { description: outcome.description })
+    } catch (err) {
+      notify.warning("nginx reloaded", {
+        description: `What the sites serve could not be checked: ${errorMessage(err)}`,
+      })
     } finally {
+      served.refresh()
       setReloading(false)
     }
   }
+  // A configured staging directory signs test certificates: nothing issued
+  // from here replaces one with a certificate browsers accept.
+  const testAuthority = certbot.data?.testAuthority ?? false
 
   const renewal = certbotGone
     ? { value: "No certbot", hint: "install it to issue and renew", tone: "default" as const }
@@ -234,48 +259,44 @@ export function CertificatesPage() {
         <Notice tone="success" icon={CheckCircle} title={`The test run for ${testPassed} passed`}>
           <div className="flex flex-wrap items-center gap-2">
             <span>
-              The authority went through the whole exchange and nothing was saved, so the real
-              issuance should pass too.
+              {testAuthority
+                ? "The authority went through the whole exchange and nothing was saved. What it issues is a test certificate: JD_ACME_DIRECTORY names a staging authority."
+                : "The authority went through the whole exchange and nothing was saved, so the real issuance should pass too."}
             </span>
             <Button
               size="xs"
               variant="outline"
               onClick={() => setIssue({ open: true, domains: testPassed, staging: false })}
             >
-              Issue the real certificate
+              {testAuthority ? "Issue the certificate" : "Issue the real certificate"}
             </Button>
           </div>
         </Notice>
       )}
 
-      {job &&
-        replacedNames &&
-        admin &&
-        hasNginx &&
-        servedBy.length > 0 &&
-        reloadedAfter !== job.id && (
-          <Notice
-            tone="warning"
-            icon={RefreshClockwise}
-            title="nginx is still serving the test certificate"
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              <span>
-                The real certificate for {replacedNames.join(", ")} is on disk.{" "}
-                {servedBy.join(", ")} {servedBy.length === 1 ? "keeps" : "keep"} serving the test
-                one until nginx reloads.
-              </span>
-              <Button
-                size="xs"
-                variant="outline"
-                pending={reloading}
-                onClick={() => reload(job.id, servedBy)}
-              >
-                Reload nginx
-              </Button>
-            </div>
-          </Notice>
-        )}
+      {replacedNames && replaced && staleSites.length > 0 && (
+        <Notice
+          tone="warning"
+          icon={RefreshClockwise}
+          title="nginx is still serving the test certificate"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <span>
+              The real certificate for {replacedNames.join(", ")} is on disk.{" "}
+              {staleSites.join(", ")} {staleSites.length === 1 ? "keeps" : "keep"} serving the test
+              one until nginx reloads.
+            </span>
+            <Button
+              size="xs"
+              variant="outline"
+              pending={reloading}
+              onClick={() => reload(replaced.path, staleSites)}
+            >
+              Reload nginx
+            </Button>
+          </div>
+        </Notice>
+      )}
 
       <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_22rem] [&>*]:min-w-0">
         <Panel plain>
@@ -311,7 +332,7 @@ export function CertificatesPage() {
                 canScan={admin}
                 job={job}
                 onReplace={
-                  admin && !certbotGone
+                  admin && !certbotGone && !testAuthority
                     ? (domains) => setIssue({ open: true, domains, staging: false })
                     : undefined
                 }
@@ -373,7 +394,11 @@ export function CertificatesPage() {
                   busy={busy}
                   job={console_.job}
                   onRenew={renew}
-                  onReplace={(domains) => setIssue({ open: true, domains, staging: false })}
+                  onReplace={
+                    testAuthority
+                      ? undefined
+                      : (domains) => setIssue({ open: true, domains, staging: false })
+                  }
                   onRevoke={revoke}
                 />
               ) : null}
@@ -409,6 +434,7 @@ export function CertificatesPage() {
             hasNginx={hasNginx}
             providers={providers.data ?? []}
             directory={certbot.data?.directory}
+            testAuthority={testAuthority}
             certbotBusy={certbotBusy}
             onStarted={(job) => {
               console_.attach(job)

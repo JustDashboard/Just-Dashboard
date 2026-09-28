@@ -401,16 +401,30 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   whole exchange, nothing saved (`--staging` used to write a lineage holding an untrusted certificate and
   make the real issuance that followed a "no action taken" no-op). A real issuance whose names already
   hold a test certificate (a lineage renewed from a staging authority, or one a staging authority
-  signed) adds `--force-renewal`; with `JD_ACME_DIRECTORY` both name `--server`. The page offers that
+  signed) adds `--force-renewal`, unless the configured directory is itself a staging one; with
+  `JD_ACME_DIRECTORY` both name `--server`, except Let's Encrypt's production directory, which is
+  certbot's default and is left unnamed (certbot swaps a `--dry-run` to staging only when the server
+  is its default spelled exactly). The page offers that
   issuance on a test lineage in place of Renew, since certbot renews from the authority the lineage's
   configuration names. Such a job is titled "Replacing the test certificate for …", audited with
-  `replacesTestCertificate`, and ends by saying a site naming the certificate keeps serving the test
-  one until nginx reloads: certonly reloads nothing. `Certificate.Staging` (`certs.go`,
+  `replacesTestCertificate`, and ends by saying what each enabled site naming the certificate
+  answered: certonly reloads nothing itself, but it runs certbot's `renewal-hooks/deploy` scripts on
+  a renewed lineage, and one of those often reloads nginx. `ServedCertificates` (`cert_served.go`,
+  `GET /certificates/served?path=`, system.admin) asks each such site over a TLS handshake on its
+  first `listen … ssl` — a wildcard address on loopback, a named one only when it is this host's, a
+  PROXY header first behind `proxy_protocol`, with a server name the certificate covers — and
+  compares the leaf with the file's; `settle=1` asks again for up to three seconds while a site
+  serves anything else, since nginx swaps its workers a moment after a reload's signal. The page
+  offers "Reload nginx" only while a site answers with a test certificate, and its toast says what
+  the sites answered after the reload. `Certificate.Staging` (`certs.go`,
   `stagingIssuer`) flags any certificate a staging authority signed — an issuer named `(STAGING) …`, or
   `Fake LE …` from before 2020 — wherever it is found (certbot, an import, a site's file, a live
   check); the name is the tell, since a staging chain fails verification exactly as a private CA's
   does. An import of one says so in place of the chain's verdict. `CertbotState.Directory` is the
-  configured `JD_ACME_DIRECTORY`, so the page says whom a test run rehearses with. **One certbot** (`certbot_runtime.go`): the host's when the host has one, this
+  configured `JD_ACME_DIRECTORY` when it is not one of Let's Encrypt's own, so the page says whom a
+  test run rehearses with; `CertbotState.TestAuthority` is a configured directory with "staging" in
+  it (certbot's own test), whose certificates are test ones: the job says so, and the page offers
+  no "real" certificate (`CertbotAuthorityInUse`, `acme_directory.go`). **One certbot** (`certbot_runtime.go`): the host's when the host has one, this
   process's own otherwise, for the version, the plugin list (`certbot plugins`, cached a minute, run
   in a directory `mktemp -d` makes for each probe on certbot's side, mode 0700, removed after it, so
   the probe never holds the lock a renewal timer needs and never runs as root in a directory another

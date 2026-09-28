@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
@@ -11,12 +12,14 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
@@ -316,49 +319,255 @@ func TestIssueSaysWhenCertbotKeptTheCertificate(t *testing.T) {
 	}
 }
 
-// A real issuance over a lineage renewed from a staging authority replaces
-// it, says so in its title, and says what nginx is still serving: certonly
-// writes the files and reloads nothing.
-func TestIssueOverATestCertificateReplacesItAndSaysNginxHasNotSeenIt(t *testing.T) {
-	host := useFakeCertbot(t, "webroot")
-	c, s := newClient(t)
-	certPath := host.lineage(t, "app.example.com", "app.example.com")
-	conf := filepath.Join(host.letsencrypt, "renewal", "app.example.com.conf")
-	raw, err := os.ReadFile(conf)
+// signedAs is a certificate and key for names whose issuer is issuer: a
+// staging one reads as a test certificate by that name alone.
+func signedAs(t *testing.T, issuer string, names []string) (string, string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	staged := strings.Replace(string(raw), "https://acme-v02.", "https://acme-staging-v02.", 1)
-	if err := os.WriteFile(conf, []byte(staged), 0o644); err != nil {
+	serial, _ := rand.Int(rand.Reader, big.NewInt(1<<62))
+	tmpl := &x509.Certificate{
+		SerialNumber: serial, Subject: pkix.Name{CommonName: issuer}, DNSNames: names,
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(80 * 24 * time.Hour),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
 		t.Fatal(err)
 	}
-	replacement := filepath.Join(t.TempDir(), "real.pem")
-	realPEM, _ := testCertificate(t, []string{"app.example.com"})
-	if err := os.WriteFile(replacement, []byte(realPEM), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("JD_TEST_CERTBOT_REPLACE", replacement)
-	t.Setenv("JD_TEST_CERTBOT_TARGET", certPath)
+	keyDER, _ := x509.MarshalPKCS8PrivateKey(key)
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
+		string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}))
+}
 
+// servingSite is an enabled nginx site naming certificate whose TLS
+// listener, on a loopback port, answers with whatever pick returns: a test
+// server standing in for nginx before and after a reload.
+func servingSite(t *testing.T, nginxDir, name, certificate string, pick func() tls.Certificate) {
+	t.Helper()
+	listener, err := tls.Listen("tcp4", "127.0.0.1:0", &tls.Config{
+		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+			pair := pick()
+			return &pair, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				conn.(*tls.Conn).Handshake()
+			}()
+		}
+	}()
+	for _, dir := range []string{"sites-available", "sites-enabled"} {
+		if err := os.MkdirAll(filepath.Join(nginxDir, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	site := fmt.Sprintf("server {\n    listen %s ssl;\n    server_name app.example.com;\n    ssl_certificate %s;\n}\n",
+		listener.Addr().String(), certificate)
+	available := filepath.Join(nginxDir, "sites-available", name)
+	if err := os.WriteFile(available, []byte(site), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(available, filepath.Join(nginxDir, "sites-enabled", name)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func keyPair(t *testing.T, certText, keyText string) tls.Certificate {
+	t.Helper()
+	pair, err := tls.X509KeyPair([]byte(certText), []byte(keyText))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pair
+}
+
+// A real issuance over a test certificate replaces it and says so in its
+// title. What it then says about nginx is what nginx answered: certonly
+// reloads nothing itself, but it runs certbot's deploy hooks on a renewed
+// lineage, and a hook that reloads nginx is the usual way a certonly
+// certificate is served. The job used to say "keeps serving the test one"
+// either way.
+func TestIssueOverATestCertificateSaysWhatNginxServesAfterward(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		reloaded bool
+		want     string
+	}{
+		{"nothing reloaded nginx", false, "The real certificate replaced the test one on disk. app still serves the test one until nginx reloads."},
+		{"a deploy hook reloaded nginx", true, "The real certificate replaced the test one on disk. nginx already serves it for app."},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			host := useFakeCertbot(t, "webroot")
+			s := testServer(t)
+			nginxDir := t.TempDir()
+			s.Cfg.NginxDir = nginxDir
+			s.initModules()
+			client := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+
+			names := []string{"app.example.com"}
+			certPath := host.lineage(t, "app.example.com", names...)
+			testCert, testKey := signedAs(t, "(STAGING) Riddling Rhubarb R12", names)
+			realCert, realKey := signedAs(t, "R11", names)
+			if err := os.WriteFile(certPath, []byte(testCert), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			// certbot's live files are links to one version, so the
+			// fullchain a site names changes with the certificate.
+			fullchain := filepath.Join(filepath.Dir(certPath), "fullchain.pem")
+			os.Remove(fullchain)
+			if err := os.Symlink(certPath, fullchain); err != nil {
+				t.Fatal(err)
+			}
+			test, real := keyPair(t, testCert, testKey), keyPair(t, realCert, realKey)
+			servingSite(t, nginxDir, "app", fullchain, func() tls.Certificate {
+				if onDisk, _ := os.ReadFile(certPath); c.reloaded && string(onDisk) == realCert {
+					return real
+				}
+				return test
+			})
+			replacement := filepath.Join(t.TempDir(), "real.pem")
+			if err := os.WriteFile(replacement, []byte(realCert), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("JD_TEST_CERTBOT_REPLACE", replacement)
+			t.Setenv("JD_TEST_CERTBOT_TARGET", certPath)
+
+			w := client.do(http.MethodPost, "/api/v1/certificates/issue",
+				`{"domains":["app.example.com"],"email":"ops@example.com","method":"webroot","webRoot":"/var/www/html"}`, nil)
+			if w.Code != http.StatusAccepted {
+				t.Fatalf("issue = %d: %s", w.Code, w.Body.String())
+			}
+			job := decodeJob(t, w.Body.Bytes())
+			if job.Title != "Replacing the test certificate for app.example.com" {
+				t.Fatalf("title = %q", job.Title)
+			}
+			// Not reloaded, the check asks again for a few seconds in
+			// case a reload is still in flight.
+			deadline := time.Now().Add(30 * time.Second)
+			for {
+				if final, _, _ := s.modules.jobs.Get(job.ID); final.Status != jobs.StatusRunning {
+					if final.Status != jobs.StatusSucceeded {
+						t.Fatalf("job = %+v", final)
+					}
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("the job never finished")
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			if argv := host.argv(t); !strings.Contains(argv, "--force-renewal") || strings.Contains(argv, "--dry-run") {
+				t.Fatalf("certbot ran as:\n%s", argv)
+			}
+			text := jobText(t, s, job.ID)
+			if !strings.Contains(text, "certbot replaces it with a real one") ||
+				!strings.Contains(text, c.want) ||
+				strings.Contains(text, "did not issue") {
+				t.Fatalf("job output:\n%s", text)
+			}
+		})
+	}
+}
+
+// The page asks the same question before it offers a reload, and again
+// after one: which certificate each enabled site naming a listed file
+// serves. It dials only for a listed certificate, and only for an admin.
+func TestCertServedAnswersForAListedCertificateToAnAdmin(t *testing.T) {
+	host := useFakeCertbot(t)
+	s := testServer(t)
+	nginxDir := t.TempDir()
+	s.Cfg.NginxDir = nginxDir
+	s.initModules()
+	admin := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+	viewer := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "viewer", auth.RoleReadOnly)}
+
+	names := []string{"app.example.com"}
+	certPath := host.lineage(t, "app.example.com", names...)
+	fullchain := filepath.Join(filepath.Dir(certPath), "fullchain.pem")
+	testCert, testKey := signedAs(t, "(STAGING) Riddling Rhubarb R12", names)
+	test := keyPair(t, testCert, testKey)
+	servingSite(t, nginxDir, "app", fullchain, func() tls.Certificate { return test })
+
+	query := "/api/v1/certificates/served?path=" + url.QueryEscape(fullchain)
+	w := admin.do(http.MethodGet, query, "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("served = %d: %s", w.Code, w.Body.String())
+	}
+	var served []proxysvc.ServedCertificate
+	if err := json.Unmarshal(w.Body.Bytes(), &served); err != nil {
+		t.Fatal(err)
+	}
+	if len(served) != 1 || served[0].Site != "app" || served[0].Current || !served[0].Staging || served[0].Error != "" {
+		t.Fatalf("served = %+v", served)
+	}
+	if w := admin.do(http.MethodGet, "/api/v1/certificates/served?path=%2Fetc%2Fpasswd", "", nil); w.Code != http.StatusNotFound {
+		t.Fatalf("an unlisted path = %d: %s", w.Code, w.Body.String())
+	}
+	if w := admin.do(http.MethodGet, "/api/v1/certificates/served", "", nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("no path = %d: %s", w.Code, w.Body.String())
+	}
+	if w := viewer.do(http.MethodGet, query, "", nil); w.Code != http.StatusForbidden {
+		t.Fatalf("a read-only account = %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// Let's Encrypt's own directories in JD_ACME_DIRECTORY read as Let's
+// Encrypt. Its production one rehearses on staging, as certbot does with
+// its default. Its staging one signs test certificates, so the real
+// issuance over a test certificate is no replacement and says what it signs.
+func TestIssueWithLetsEncryptsOwnDirectorySaysWhatItSigns(t *testing.T) {
+	host := useFakeCertbot(t, "webroot")
+	c, s := newClient(t)
+	t.Setenv("JD_ACME_DIRECTORY", "https://acme-v02.api.letsencrypt.org/directory/")
 	w := c.do(http.MethodPost, "/api/v1/certificates/issue",
+		`{"domains":["app.example.com"],"email":"ops@example.com","method":"webroot","webRoot":"/var/www/html","staging":true}`, nil)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("issue = %d: %s", w.Code, w.Body.String())
+	}
+	rehearsal := decodeJob(t, w.Body.Bytes())
+	waitForJob(t, s, rehearsal.ID)
+	if argv := host.argv(t); !strings.Contains(argv, "--dry-run") || strings.Contains(argv, "--server") {
+		t.Fatalf("certbot ran as:\n%s", argv)
+	}
+	if text := jobText(t, s, rehearsal.ID); !strings.Contains(text, "with Let's Encrypt's staging authority and saves nothing") {
+		t.Fatalf("job output:\n%s", text)
+	}
+
+	certPath := host.lineage(t, "app.example.com", "app.example.com")
+	testCert, _ := signedAs(t, "(STAGING) Riddling Rhubarb R12", []string{"app.example.com"})
+	if err := os.WriteFile(certPath, []byte(testCert), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("JD_ACME_DIRECTORY", "https://acme-staging-v02.api.letsencrypt.org/directory")
+	w = c.do(http.MethodPost, "/api/v1/certificates/issue",
 		`{"domains":["app.example.com"],"email":"ops@example.com","method":"webroot","webRoot":"/var/www/html"}`, nil)
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("issue = %d: %s", w.Code, w.Body.String())
 	}
-	job := decodeJob(t, w.Body.Bytes())
-	if job.Title != "Replacing the test certificate for app.example.com" {
-		t.Fatalf("title = %q", job.Title)
+	issued := decodeJob(t, w.Body.Bytes())
+	if issued.Title != "Issuing a certificate for app.example.com" {
+		t.Fatalf("title = %q", issued.Title)
 	}
-	if final := waitForJob(t, s, job.ID); final.Status != jobs.StatusSucceeded {
-		t.Fatalf("job = %+v", final)
+	waitForJob(t, s, issued.ID)
+	lines := strings.Split(strings.TrimSpace(host.argv(t)), "\n")
+	if last := lines[len(lines)-1]; strings.Contains(last, "--force-renewal") || !strings.Contains(last, "--server https://acme-staging-v02.api.letsencrypt.org/directory") {
+		t.Fatalf("certbot ran as:\n%s", last)
 	}
-	if argv := host.argv(t); !strings.Contains(argv, "--force-renewal") || strings.Contains(argv, "--dry-run") {
-		t.Fatalf("certbot ran as:\n%s", argv)
-	}
-	text := jobText(t, s, job.ID)
-	if !strings.Contains(text, "certbot replaces it with a real one") ||
-		!strings.Contains(text, "keeps serving the test one until nginx reloads") ||
-		strings.Contains(text, "did not issue") {
+	text := jobText(t, s, issued.ID)
+	if !strings.Contains(text, "JD_ACME_DIRECTORY names a staging authority: the certificate it signs is a test one") ||
+		strings.Contains(text, "replaces it with a real one") || strings.Contains(text, "The real certificate") {
 		t.Fatalf("job output:\n%s", text)
 	}
 }

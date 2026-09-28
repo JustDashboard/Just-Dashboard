@@ -1,6 +1,11 @@
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test"
 import { certs, inThirtyDays, json, mockProxy, mockShowcase, now, user } from "./proxy-fixtures"
-import { certbotJob, certbotState, stagingCertificate } from "./fixtures/proxy/certs"
+import {
+  certbotJob,
+  certbotState,
+  servedCertificate,
+  stagingCertificate,
+} from "./fixtures/proxy/certs"
 import { healthyOperations, mockProject } from "./deploy-fixture"
 import type { DeploymentDomainRoute } from "../../src/lib/types"
 
@@ -210,7 +215,7 @@ test("the site form's hand-off link opens the form once, not on every reload", a
 })
 
 /** One certbot lineage holding a certificate a staging authority signed. */
-async function mockStagingLineage(page: Page) {
+async function mockStagingLineage(page: Page, overrides: Record<string, unknown> = {}) {
   await page.route("**/api/v1/certificates/certbot", (route) =>
     json(
       route,
@@ -225,9 +230,24 @@ async function mockStagingLineage(page: Page) {
             staging: true,
           },
         ],
+        ...overrides,
       }),
     ),
   )
+}
+
+/**
+ * What the sites naming the test certificate answer, in turn: the page asks
+ * before it offers the reload and again, settled, after one. Each request's
+ * query is kept.
+ */
+async function mockServed(page: Page, ...answers: object[][]) {
+  const asked: URLSearchParams[] = []
+  await page.route("**/api/v1/certificates/served**", (route) => {
+    asked.push(new URL(route.request().url()).searchParams)
+    return json(route, answers[Math.min(asked.length - 1, answers.length - 1)])
+  })
+  return asked
 }
 
 test("a staging lineage reads as a test certificate, and its verb is the real issuance, not a renewal", async ({
@@ -406,6 +426,11 @@ test("replacing a test certificate says so while it runs, then offers the reload
   })
   await capture(page, "**/api/v1/certificates/issue", () => running)
   const reloads = await capture(page, "**/api/v1/proxy/reload", () => ({ reloaded: true }))
+  const asked = await mockServed(
+    page,
+    [servedCertificate()],
+    [servedCertificate({ current: true, staging: false, issuer: "R11" })],
+  )
   await page.goto("/proxy/certificates")
 
   const card = page
@@ -430,23 +455,122 @@ test("replacing a test certificate says so while it runs, then offers the reload
   await expect(lineage.getByText("Replacing…")).toBeVisible()
   await expect(page.getByText("nginx is still serving the test certificate")).toHaveCount(0)
 
-  // certbot writes the files and reloads nothing: the site still serves the
-  // test certificate, and the page says so and offers the reload.
+  // Nothing reloaded nginx: the site answers with the test certificate, and
+  // the page says so and offers the reload.
+  expect(asked).toHaveLength(0)
   stream.finish({ ...running, status: "succeeded", endedAt: now })
   const notice = page.getByText("nginx is still serving the test certificate")
   await expect(notice).toBeVisible()
   await expect(
     page.getByText(/test\.example\.com keeps serving the test one until nginx reloads/),
   ).toBeVisible()
+  expect(asked[0].get("path")).toBe("/etc/letsencrypt/live/test.example.com/fullchain.pem")
+  expect(asked[0].get("settle")).toBeNull()
   await page.getByRole("button", { name: "Reload nginx" }).click()
+  // The toast says what the site answered after the reload, not what a
+  // reload is supposed to do.
   await expect(page.getByText("test.example.com serves the real certificate now.")).toBeVisible()
   await expect(notice).toHaveCount(0)
   expect(reloads).toEqual([{ kind: "nginx" }])
+  expect(asked[1].get("settle")).toBe("1")
+})
+
+test("a replacement a deploy hook already reloaded nginx for offers no reload", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockStagingInventory(page)
+  const asked = await mockServed(page, [
+    servedCertificate({ current: true, staging: false, issuer: "R11" }),
+  ])
+  await capture(page, "**/api/v1/certificates/issue", () =>
+    certbotJob({
+      kind: "certbot.issue",
+      title: "Replacing the test certificate for test.example.com, www.test.example.com",
+      target: "test.example.com, www.test.example.com",
+      status: "succeeded",
+    }),
+  )
+  await page.goto("/proxy/certificates")
+  await page
+    .getByRole("list", { name: "Installed certificates" })
+    .getByRole("button", { name: "Replace with a real certificate" })
+    .click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByLabel("Contact email").fill("ops@example.com")
+  await dialog.getByRole("radio", { name: "A folder", exact: true }).click()
+  await dialog.getByRole("button", { name: "Issue", exact: true }).click()
+  await expect(dialog).toBeHidden()
+  await expect.poll(() => asked.length).toBe(1)
+  await expect(page.getByText("nginx is still serving the test certificate")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Reload nginx" })).toHaveCount(0)
+})
+
+test("a reload that leaves a site on the test certificate says so and keeps the offer", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockStagingInventory(page)
+  await capture(page, "**/api/v1/proxy/reload", () => ({ reloaded: true }))
+  await mockServed(page, [servedCertificate()])
+  await capture(page, "**/api/v1/certificates/issue", () =>
+    certbotJob({
+      kind: "certbot.issue",
+      title: "Replacing the test certificate for test.example.com, www.test.example.com",
+      target: "test.example.com, www.test.example.com",
+      status: "succeeded",
+    }),
+  )
+  await page.goto("/proxy/certificates")
+  await page
+    .getByRole("list", { name: "Installed certificates" })
+    .getByRole("button", { name: "Replace with a real certificate" })
+    .click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByLabel("Contact email").fill("ops@example.com")
+  await dialog.getByRole("radio", { name: "A folder", exact: true }).click()
+  await dialog.getByRole("button", { name: "Issue", exact: true }).click()
+  await page.getByRole("button", { name: "Reload nginx" }).click()
+  await expect(page.getByText("test.example.com still serves the test certificate.")).toBeVisible()
+  await expect(page.getByText("serves the real certificate now")).toHaveCount(0)
+  await expect(page.getByText("nginx is still serving the test certificate")).toBeVisible()
+})
+
+test("an old replacement opened from the recent runs raises nothing once nginx serves the real certificate", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  // A day later the inventory lists a real certificate, and the site serves it.
+  await mockStagingInventory(page, { issuer: "R11", staging: false })
+  const asked = await mockServed(page, [
+    servedCertificate({ current: true, staging: false, issuer: "R11" }),
+  ])
+  const dayOld = new Date(Date.now() - 86_400_000).toISOString()
+  const old = certbotJob({
+    id: "job-old",
+    kind: "certbot.issue",
+    title: "Replacing the test certificate for test.example.com, www.test.example.com",
+    target: "test.example.com, www.test.example.com",
+    status: "succeeded",
+    startedAt: dayOld,
+    endedAt: dayOld,
+  })
+  await page.route("**/api/v1/jobs/", (route) => json(route, [old]))
+  await page.route("**/api/v1/jobs/job-old", (route) => json(route, { job: old, lines: [] }))
+  await page.goto("/proxy/certificates")
+  await page
+    .getByRole("button", { name: /test\.example\.com, www\.test\.example\.com/ })
+    .first()
+    .click()
+  await expect(page.getByText(/succeeded/).first()).toBeVisible()
+  await expect.poll(() => asked.length).toBe(1)
+  await expect(page.getByText("nginx is still serving the test certificate")).toHaveCount(0)
 })
 
 test("a replaced test certificate nothing serves asks for no reload", async ({ page }) => {
   await mockProxy(page, { included: true })
   await mockStagingInventory(page, { usedBy: [] })
+  const asked = await mockServed(page, [servedCertificate()])
   await capture(page, "**/api/v1/certificates/issue", () =>
     certbotJob({
       kind: "certbot.issue",
@@ -466,6 +590,8 @@ test("a replaced test certificate nothing serves asks for no reload", async ({ p
     page.getByText("Replacing the test certificate for test.example.com").first(),
   ).toBeVisible()
   await expect(page.getByText("nginx is still serving the test certificate")).toHaveCount(0)
+  // No site names it, so nothing is asked.
+  expect(asked).toHaveLength(0)
 })
 
 test("a read-only account reads a test certificate for what it is, with nothing to press", async ({
@@ -504,6 +630,26 @@ test("a test certificate is a finding on the overview", async ({ page }) => {
       "A staging authority signed it, so every browser refuses it. Used by test.example.com.",
     ),
   ).toBeVisible()
+})
+
+test("the overview's certificate tile and expiry list count a test certificate as refused", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  // Nothing expired or expiring beside it: the tile read "all valid" in
+  // neutral, next to a critical finding for the same certificate.
+  await page.route("**/api/v1/certificates/", (route) => json(route, [stagingCertificate()]))
+  await page.goto("/proxy")
+  await expect(
+    page.getByRole("button", { name: /^test\.example\.com is a test certificate/ }),
+  ).toBeVisible()
+  const tile = page.locator("a[href='/proxy/certificates'][aria-label='Certificates']")
+  await expect(tile).toContainText("1 need attention")
+  await expect(tile).not.toContainText("all valid")
+  await expect(tile.locator(".text-destructive")).toHaveCount(1)
+  const expiry = page.locator("[data-slot='panel']").filter({ hasText: "Certificate expiry" })
+  await expect(expiry.getByText("test", { exact: true })).toBeVisible()
+  await expect(expiry.getByText("80d", { exact: true })).toHaveCount(0)
 })
 
 test("a test certificate's card fits a phone with its verb", async ({ page }) => {
@@ -546,6 +692,40 @@ test("with its own ACME authority the issue form names it, and quotes no Let's E
   await expect(dialog.getByText(/staging authority/)).toHaveCount(0)
   await dialog.getByRole("switch", { name: /Test run first/ }).click()
   await expect(dialog.getByRole("button", { name: "Issue", exact: true })).toBeVisible()
+  await expect(dialog.getByText("This counts against the rate limit")).toHaveCount(0)
+})
+
+test("with a staging authority configured nothing offers a real certificate, and the form says what it signs", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockStagingInventory(page)
+  await mockStagingLineage(page, { testAuthority: true })
+  await page.goto("/proxy/certificates")
+  const lineage = page
+    .getByRole("list", { name: "certbot lineages" })
+    .getByRole("listitem")
+    .filter({ hasText: "test.example.com" })
+  await expect(lineage.getByText("test certificate")).toBeVisible()
+  await expect(page.getByRole("button", { name: /real certificate/ })).toHaveCount(0)
+  const card = page
+    .getByRole("list", { name: "Installed certificates" })
+    .getByRole("listitem")
+    .filter({ hasText: "(STAGING) Riddling Rhubarb R12" })
+  await expect(
+    card.getByText("A staging authority signed it, so browsers refuse it.", { exact: true }),
+  ).toBeVisible()
+
+  await page.getByRole("button", { name: "Issue certificate", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await expect(
+    dialog.getByText(
+      /Let's Encrypt's staging authority checks you control the domain, then signs a test certificate that browsers refuse/,
+    ),
+  ).toBeVisible()
+  await expect(dialog.getByText(/The real limit is five failures an hour/)).toHaveCount(0)
+  await dialog.getByRole("switch", { name: /Test run first/ }).click()
+  await expect(dialog.getByText("This issues a test certificate")).toBeVisible()
   await expect(dialog.getByText("This counts against the rate limit")).toHaveCount(0)
 })
 

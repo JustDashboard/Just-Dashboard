@@ -57,7 +57,7 @@ export default function ProxyOverviewPage() {
   const disabled = hosts.filter((v) => v.kind === "nginx" && !v.enabled && v.enabledPath).length
   const exposed = useMemo(() => (ports.data ?? []).filter((l) => l.exposed), [ports.data])
   const badCerts = useMemo(
-    () => (certs.data ?? []).filter((c) => c.expired || c.expiring || c.error),
+    () => (certs.data ?? []).filter((c) => c.expired || c.expiring || c.error || c.staging),
     [certs.data],
   )
   // The certificates as a reading rather than a count. `share` is life left
@@ -71,7 +71,7 @@ export default function ProxyOverviewPage() {
       .sort((a, b) => a.daysLeft - b.daysLeft)
       .slice(0, 8)
       .map((cert) => {
-        const wrong = Boolean(cert.error) || cert.expired
+        const wrong = Boolean(cert.error) || cert.expired || Boolean(cert.staging)
         const product = certificateProduct(cert)
         return {
           key: cert.path,
@@ -80,7 +80,13 @@ export default function ProxyOverviewPage() {
           mono: false,
           // The figure column is a fixed width and does not truncate, so the
           // reading is a word rather than the sentence the finding carries.
-          value: cert.error ? "error" : cert.expired ? "expired" : `${cert.daysLeft}d`,
+          value: cert.error
+            ? "error"
+            : cert.expired
+              ? "expired"
+              : cert.staging
+                ? "test"
+                : `${cert.daysLeft}d`,
           share: cert.daysLeft / horizon,
           signal: wrong || cert.expiring ? 1 : 0,
           tone: wrong ? "danger" : "warning",
@@ -161,7 +167,7 @@ export default function ProxyOverviewPage() {
                 : undefined
             }
             tone={
-              badCerts.some((c) => c.expired || c.error)
+              badCerts.some((c) => c.expired || c.error || c.staging)
                 ? "danger"
                 : badCerts.length
                   ? "warning"

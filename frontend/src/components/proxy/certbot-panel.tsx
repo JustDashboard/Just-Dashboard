@@ -110,8 +110,8 @@ export function CertbotLineages({
   busy: string
   job: Job | null
   onRenew: (name: string, dryRun: boolean, force?: boolean) => void
-  /** Opens the real issuance for a test certificate's names. */
-  onReplace: (domains: string) => void
+  /** Opens the real issuance for a test certificate's names; absent where none can be issued. */
+  onReplace?: (domains: string) => void
   onRevoke: (name: string) => void
 }) {
   const { confirm, dialog } = useConfirm()
@@ -144,17 +144,19 @@ export function CertbotLineages({
       run: () => onRevoke(name),
     }
     if (staging) {
-      return [
-        {
-          key: "replace",
-          label: "Replace with a real certificate",
-          icon: ShieldCheck,
-          inline: true,
-          disabled: waiting,
-          run: () => onReplace(domains.join(" ")),
-        },
-        revoke,
-      ]
+      return onReplace
+        ? [
+            {
+              key: "replace",
+              label: "Replace with a real certificate",
+              icon: ShieldCheck,
+              inline: true,
+              disabled: waiting,
+              run: () => onReplace(domains.join(" ")),
+            },
+            revoke,
+          ]
+        : [revoke]
     }
     return [
       {
@@ -462,6 +464,7 @@ export function IssueDialog({
   hasNginx,
   providers,
   directory,
+  testAuthority = false,
   certbotBusy,
   onStarted,
 }: {
@@ -471,8 +474,10 @@ export function IssueDialog({
   initialStaging?: boolean
   hasNginx: boolean
   providers: DNSProvider[]
-  /** The ACME directory certbot orders from when it is not Let's Encrypt's. */
+  /** The ACME directory certbot orders from when it is not one of Let's Encrypt's. */
   directory?: string
+  /** The configured directory signs test certificates, which browsers refuse. */
+  testAuthority?: boolean
   /** A certbot run is on screen: this one would fail on its lock. */
   certbotBusy: boolean
   onStarted: (job: Job) => void
@@ -487,6 +492,7 @@ export function IssueDialog({
       hasNginx={hasNginx}
       providers={providers}
       directory={directory}
+      testAuthority={testAuthority}
       certbotBusy={certbotBusy}
       onStarted={onStarted}
     />
@@ -501,6 +507,7 @@ function IssueDialogBody({
   hasNginx,
   providers,
   directory,
+  testAuthority,
   certbotBusy,
   onStarted,
 }: {
@@ -511,12 +518,14 @@ function IssueDialogBody({
   hasNginx: boolean
   providers: DNSProvider[]
   directory?: string
+  testAuthority: boolean
   certbotBusy: boolean
   onStarted: (job: Job) => void
 }) {
   // A configured authority is rehearsed with itself — certbot's --dry-run
   // goes to Let's Encrypt's staging endpoint only when no other is named —
-  // and Let's Encrypt's limits say nothing about it.
+  // and Let's Encrypt's limits say nothing about it. Let's Encrypt's own
+  // directories come without one: they are Let's Encrypt.
   const authority = directory ? authorityName(directory) : undefined
   const [domains, setDomains] = useState(initialDomains ?? "")
   const [email, setEmail] = useState("")
@@ -575,9 +584,11 @@ function IssueDialogBody({
       onOpenChange={onOpenChange}
       title="Issue a certificate"
       description={
-        authority
-          ? `${authority} checks you control the domain, then signs a certificate. The renewal is automatic once the first one works.`
-          : "Let's Encrypt proves you control the domain, then signs a certificate for ninety days. The renewal is automatic once the first one works."
+        testAuthority
+          ? `${authority ?? "Let's Encrypt's staging authority"} checks you control the domain, then signs a test certificate that browsers refuse. JD_ACME_DIRECTORY names a staging authority.`
+          : authority
+            ? `${authority} checks you control the domain, then signs a certificate. The renewal is automatic once the first one works.`
+            : "Let's Encrypt proves you control the domain, then signs a certificate for ninety days. The renewal is automatic once the first one works."
       }
       footer={
         <>
@@ -757,15 +768,20 @@ function IssueDialogBody({
           <OptionRow
             title="Test run first"
             hint={
-              authority
-                ? `certbot goes through the whole exchange with ${authority} and saves nothing, so a mistake is found before anything is written.`
+              authority || testAuthority
+                ? `certbot goes through the whole exchange with ${authority ?? "Let's Encrypt's staging authority"} and saves nothing, so a mistake is found before anything is written.`
                 : "certbot goes through the whole exchange with Let's Encrypt's staging authority and saves nothing. The real limit is five failures an hour and it is easy to reach, so this is the right first attempt."
             }
             checked={staging}
             onCheckedChange={setStaging}
           />
         </OptionList>
-        {!staging && !authority && (
+        {!staging && testAuthority && (
+          <Notice tone="warning" icon={Warning} title="This issues a test certificate">
+            JD_ACME_DIRECTORY names a staging authority, and browsers refuse what it signs.
+          </Notice>
+        )}
+        {!staging && !authority && !testAuthority && (
           <Notice tone="warning" icon={Warning} title="This counts against the rate limit">
             Five failed attempts an hour for the same set of names, and five duplicate certificates
             a week. Get a test run to pass first.

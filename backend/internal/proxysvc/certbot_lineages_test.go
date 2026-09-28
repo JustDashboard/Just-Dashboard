@@ -2,6 +2,7 @@ package proxysvc
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -186,7 +187,23 @@ func TestCertbotStateNamesAConfiguredAuthority(t *testing.T) {
 		t.Fatalf("Let's Encrypt reads as %q", state.Directory)
 	}
 	t.Setenv("JD_ACME_DIRECTORY", "https://ca.internal:9000/acme/acme/directory")
-	if state := New(t.TempDir(), "").CertbotState(context.Background()); state.Directory != "https://ca.internal:9000/acme/acme/directory" {
-		t.Fatalf("directory = %q", state.Directory)
+	if state := New(t.TempDir(), "").CertbotState(context.Background()); state.Directory != "https://ca.internal:9000/acme/acme/directory" || state.TestAuthority {
+		t.Fatalf("directory = %q, test authority %v", state.Directory, state.TestAuthority)
+	}
+	// Let's Encrypt's own directories are Let's Encrypt, and its staging one
+	// signs test certificates: the page offers no "real" issuance from it.
+	for directory, testAuthority := range map[string]bool{
+		"https://acme-v02.api.letsencrypt.org/directory":         false,
+		"https://acme-staging-v02.api.letsencrypt.org/directory": true,
+	} {
+		t.Setenv("JD_ACME_DIRECTORY", directory)
+		state := New(t.TempDir(), "").CertbotState(context.Background())
+		if state.Directory != "" || state.TestAuthority != testAuthority {
+			t.Fatalf("%s: directory = %q, test authority %v", directory, state.Directory, state.TestAuthority)
+		}
+		raw, _ := json.Marshal(state)
+		if strings.Contains(string(raw), `"testAuthority"`) != testAuthority {
+			t.Fatalf("%s: json %s", directory, raw)
+		}
 	}
 }

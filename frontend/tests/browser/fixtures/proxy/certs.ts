@@ -90,10 +90,28 @@ export function certbotJob(overrides: Record<string, unknown> = {}) {
   }
 }
 
+/**
+ * What a site naming a certificate answered over a handshake: still the test
+ * certificate unless a test says otherwise.
+ */
+export function servedCertificate(overrides: Record<string, unknown> = {}) {
+  return {
+    site: "test.example.com",
+    name: "test.example.com",
+    address: "127.0.0.1:443",
+    issuer: "(STAGING) Riddling Rhubarb R12",
+    serial: "0A:1B",
+    staging: true,
+    current: false,
+    ...overrides,
+  }
+}
+
 export const routes: ProxyRoutes = {
   "/certificates/": (route) => json(route, certs),
   "/certificates/certbot": (route) => json(route, certbotState()),
   "/certificates/dns-providers": (route) => json(route, []),
+  "/certificates/served": (route) => json(route, []),
 }
 
 export const showcase: ProxyRoutes = {

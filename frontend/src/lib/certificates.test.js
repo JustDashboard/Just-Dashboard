@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  afterReload,
   authorityName,
   certbotRunning,
   expiredAgo,
@@ -7,6 +8,7 @@ import {
   parseDomains,
   replacingTestCertificate,
   sameNames,
+  stillServingTest,
   testCertificateReplaced,
   testRunPassed,
 } from "./certificates"
@@ -117,6 +119,41 @@ describe("what a finished issuance means for the page", () => {
     expect(
       testCertificateReplaced({ ...replaced, title: "Issuing a certificate for app.example.com" }),
     ).toBeUndefined()
+  })
+
+  test("only a site that answered with a test certificate is still serving one", () => {
+    // What each site that names the certificate answered over a handshake:
+    // a deploy hook may have reloaded nginx already, and a site that could
+    // not be asked, or serves something else entirely, is claimed neither way.
+    const served = [
+      { site: "stale", name: "app.example.com", current: false, staging: true },
+      { site: "reloaded", name: "app.example.com", current: true },
+      { site: "down", name: "app.example.com", current: false, error: "connection refused" },
+      { site: "elsewhere", name: "app.example.com", current: false, issuer: "Company CA" },
+    ]
+    expect(stillServingTest(served)).toEqual(["stale"])
+    expect(stillServingTest(served.slice(1))).toEqual([])
+    expect(stillServingTest(undefined)).toEqual([])
+  })
+
+  test("a reload is reported by what the sites answered afterwards", () => {
+    const current = (site) => ({ site, name: "app.example.com", current: true })
+    const test = (site) => ({ site, name: "app.example.com", current: false, staging: true })
+    expect(afterReload(["app", "www"], [current("app"), current("www")])).toEqual({
+      ok: true,
+      description: "app, www serve the real certificate now.",
+    })
+    expect(afterReload(["app", "www"], [current("app"), test("www")])).toEqual({
+      ok: false,
+      description: "app serves the real certificate now. www still serves the test certificate.",
+    })
+    // A site that no longer answers, or is no longer asked, is not claimed.
+    expect(
+      afterReload(
+        ["app", "www"],
+        [{ site: "app", name: "app.example.com", current: false, error: "refused" }],
+      ),
+    ).toEqual({ ok: false, description: "What app, www serve could not be checked." })
   })
 
   test("names are the same set whatever their order or case", () => {
