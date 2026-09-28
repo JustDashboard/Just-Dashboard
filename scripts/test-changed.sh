@@ -184,7 +184,7 @@ tests_beside() {
 		files=("$dir/$stem"*_test.go)
 		if [ -e "${files[0]}" ]; then
 			grep -hoE '^func (Test|Fuzz)[A-Za-z0-9_]*\((t \*testing\.T|f \*testing\.F)\)' "${files[@]}" |
-				sed -E 's/^func ([A-Za-z0-9_]+)\(.*/\1/'
+				sed -E 's/^func ([A-Za-z0-9_]+)\(.*/\1/' || true
 			return
 		fi
 		[[ $stem == *_* ]] || return 0

@@ -299,8 +299,11 @@ func TestSiteDeleteLeavesAServedCopyAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := c.do(http.MethodDelete, "/api/v1/proxy/sites/copy.test", "", nil)
-	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "is a file of its own") {
+	if w.Code != http.StatusOK {
 		t.Fatalf("got %d %s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "sites-available", "copy.test")); !os.IsNotExist(err) {
+		t.Errorf("the available file was not deleted: %v", err)
 	}
 	if b, err := os.ReadFile(copied); err != nil || string(b) != "server { return 200; }\n" {
 		t.Errorf("the served copy is gone or changed: %q %v", b, err)

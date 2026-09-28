@@ -1365,10 +1365,9 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   inside the same hold of the service lock (`reloadLocked`): run after it, the reload's test could see
   another request's candidate link and report a change that had worked as "not reloaded". Both routes
   read `{name}` through `httpx.URLParam`, since chi hands back the escaped segment (`vb%3A8080`).
-  `DeleteSite` asks `checkSiteDelete` first and refuses when `sites-enabled/<name>` is not the site's
-  own link — a copy there (the file nginx really serves, which it removed with no backup), a link to
-  another file (which it took out of nginx) — or when a link under another name would be left
-  pointing at nothing.
+  `DeleteSite` keeps a regular copy or another site's link at `sites-enabled/<name>` and removes
+  every alias to the deleted site's file, so no dangling link blocks the next reload. The bulk
+  deletion path still uses `checkSiteDelete` to refuse cases it cannot remove safely.
   `parseCaddyfile` tracks brace depth so only top-level blocks are site addresses — `handle`,
   `header` and `tls` blocks were listed as server names — and says whether every site address is
   served over HTTPS: an address with a host is unless it is `http://` or on port 80 (localhost and IP

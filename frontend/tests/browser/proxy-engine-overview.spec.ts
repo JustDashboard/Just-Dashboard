@@ -1,6 +1,12 @@
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test"
 import { availability, json, mockProxy, user, vhosts } from "./proxy-fixtures"
-import { configFiles, longJournal, nginxUnit, passingTest } from "./fixtures/proxy/engine"
+import {
+  configFiles,
+  journalSearch,
+  longJournal,
+  nginxUnit,
+  passingTest,
+} from "./fixtures/proxy/engine"
 
 /**
  * The overview and the engine it drives, for the ways they told an operator
@@ -157,13 +163,11 @@ test("a finding's button names where it leads", async ({ page }) => {
     await page.getByText(title).click()
     await expect(button).toHaveCount(0)
   }
-  await open("old.example.com has expired", "Open certificates")
+  await open("old.example.com has expired", "Open certificate")
   await open("Nothing is scheduled to renew certbot's certificates", "Open certificates")
   await open("PostgreSQL answers on every interface", "Open ports")
 
-  await page.getByText("legacy.example.com serves an application in plain text").click()
-  await page.getByRole("button", { name: "Open site", exact: true }).click()
-  await expect(page).toHaveURL(/\/proxy\/sites\?site=legacy\.example\.com$/)
+  await open("legacy.example.com serves an application in plain text", "Open site")
 })
 
 /** What nginx 1.26 prints for a directive it does not know, and the test's reading of it. */
@@ -563,8 +567,8 @@ test("a failed engine says why, with its journal and a way to clear it", async (
   await mockProxy(page, { included: true })
   await mockUnit(page, failed)
   const journals: string[] = []
-  await page.route("**/api/v1/systemd/nginx.service/journal?**", (route) => {
-    journals.push(new URL(route.request().url()).searchParams.get("lines") ?? "")
+  await page.route("**/api/v1/logs/search?**", (route) => {
+    journals.push(new URL(route.request().url()).searchParams.get("limit") ?? "")
     return route.fallback()
   })
   const cleared: string[] = []
@@ -606,9 +610,7 @@ test("a failed engine says why, with its journal and a way to clear it", async (
 test("the journal opens on its newest lines, where the reason is", async ({ page }) => {
   await mockProxy(page, { included: true })
   await mockUnit(page, failed)
-  await page.route("**/api/v1/systemd/nginx.service/journal?**", (route) =>
-    json(route, longJournal),
-  )
+  await page.route("**/api/v1/logs/search?**", (route) => json(route, journalSearch(longJournal)))
 
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 900 })
@@ -646,7 +648,7 @@ test("a journal that cannot be read says so and can be read again", async ({ pag
   await mockProxy(page, { included: true })
   await mockUnit(page, failed)
   let unreadable = true
-  await page.route("**/api/v1/systemd/nginx.service/journal?**", (route) =>
+  await page.route("**/api/v1/logs/search?**", (route) =>
     unreadable
       ? failWith(502, { code: "command_failed", message: "journalctl exited 1: access denied" })(
           route,
@@ -763,7 +765,7 @@ test("a running Docker Caddy ingress is tested and reloaded inside its container
   await page.goto("/proxy")
 
   const identity = page.locator("[data-slot='host-identity']")
-  await expect(identity.getByText("runs as a container")).toBeVisible()
+  await expect(identity.getByText("ingress")).toBeVisible()
   await expect(identity.getByText("edge", { exact: true })).toBeVisible()
   // The host's Caddyfile path is not the ingress's.
   await expect(identity.getByText("/etc/caddy/Caddyfile")).toHaveCount(0)
@@ -805,7 +807,7 @@ test("an ingress the first deployment would start is not offered controls", asyn
   const identity = page.locator("[data-slot='host-identity']")
   await expect(identity.getByText("nothing found on this host")).toBeVisible()
   await expect(identity.getByText("a Caddy ingress starts with the first deployment")).toBeVisible()
-  await expect(identity.getByText("runs as a container")).toHaveCount(0)
+  await expect(identity.getByText("ingress", { exact: true })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Test config" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Reload" })).toHaveCount(0)
   const overflow = await page
@@ -863,15 +865,14 @@ test("the routes lead with what needs attention and say how many there are", asy
     "Docker Caddy ingress",
   )
 
-  // An administrator opens a site on the Sites page, and an ingress route —
-  // which has no file there to open — as its live TLS report.
+  // Each route leads to its own page, including a Docker ingress route.
   await expect(routes.getByRole("link", { name: "Open alpha.example.com" })).toHaveAttribute(
     "href",
-    "/proxy/sites?site=alpha.example.com",
+    "/proxy/sites/alpha.example.com",
   )
   await expect(routes.getByRole("link", { name: "Open blog.example.com" })).toHaveAttribute(
     "href",
-    "/proxy/sites?site=blog.example.com",
+    "/proxy/sites/blog.example.com",
   )
 
   // The count and the freshness line fit a phone beside what they sit with.
@@ -883,8 +884,8 @@ test("the routes lead with what needs attention and say how many there are", asy
     .evaluate((element) => element.scrollWidth > element.clientWidth + 1)
   expect(overflow).toBe(false)
 
-  await routes.getByRole("link", { name: "TLS report for shop.example.com" }).click()
-  await expect(page).toHaveURL(/\/proxy\/tls\?domain=shop\.example\.com$/)
+  await routes.getByRole("link", { name: "Open just-dashboard-shop" }).click()
+  await expect(page).toHaveURL(/\/proxy\/sites\/just-dashboard-shop$/)
 })
 
 test("a read-only account reads a route's file and is never sent to the site form", async ({
@@ -903,13 +904,17 @@ test("a read-only account reads a route's file and is never sent to the site for
 
   const routes = page.getByRole("list", { name: "Sites" })
   await expect(routes.locator("[data-slot='choice-row']")).toHaveCount(3)
-  // Nothing on the list leads to the Sites page's form.
-  await expect(routes.locator("a[href*='/proxy/sites?site=']")).toHaveCount(0)
+  // Each route opens its own page, where a reader can view the configuration.
+  await expect(routes.getByRole("link", { name: "Open app.example.com" })).toHaveAttribute(
+    "href",
+    "/proxy/sites/app.example.com",
+  )
   // The ingress route has nothing a reader can open: its report needs an administrator.
   await expect(routes.getByRole("link", { name: /TLS report/ })).toHaveCount(0)
   await expect(routes.getByRole("button", { name: /just-dashboard-shop/ })).toHaveCount(0)
 
-  await routes.getByRole("button", { name: "View app.example.com", exact: true }).click()
+  await routes.getByRole("link", { name: "Open app.example.com" }).click()
+  await page.getByRole("button", { name: "View config" }).first().click()
   const sheet = page.getByRole("dialog")
   // The editor loads on first use, which takes a while on a busy machine.
   await expect(sheet.locator(".monaco-editor .view-lines")).toContainText("served-from-disk", {
@@ -918,7 +923,7 @@ test("a read-only account reads a route's file and is never sent to the site for
   expect(reads).toEqual(["/etc/nginx/sites-available/app.example.com"])
   await expect(sheet.getByRole("button", { name: /Save/ })).toHaveCount(0)
   await expect(sheet.getByRole("button", { name: "Test config" })).toHaveCount(0)
-  await expect(page).toHaveURL(/\/proxy$/)
+  await expect(page).toHaveURL(/\/proxy\/sites\/app\.example\.com$/)
   await page.keyboard.press("Escape")
   await expect(sheet).toHaveCount(0)
 })
@@ -944,7 +949,8 @@ test("a reader's file view shows its read in flight and why it failed, never an 
 
   hold = new Promise((resolve) => (release = resolve))
   const routes = page.getByRole("list", { name: "Sites" })
-  await routes.getByRole("button", { name: "View app.example.com", exact: true }).click()
+  await routes.getByRole("link", { name: "Open app.example.com" }).click()
+  await page.getByRole("button", { name: "View config" }).first().click()
   const sheet = page.getByRole("dialog")
   // While the read is out there is no editor to take for an empty file.
   await expect(sheet.locator("[data-slot='pane'][aria-busy='true']")).toBeVisible()
@@ -1860,7 +1866,7 @@ test("what nginx loads is listed in its order and searched by text, pattern and 
   await expect(order.locator("[data-slot='choice-row']").nth(2)).toContainText(
     "8 lines · via sites-enabled/app.example.com",
   )
-  await expect(page.getByText(/^read (just now|\d+s ago)$/)).toBeVisible()
+  await expect(page.getByText(/^read (just now|\d+[smhd] ago)$/)).toBeVisible()
 
   const search = page.getByLabel("Search what nginx loads")
   await search.fill("proxy_pass")
@@ -1877,7 +1883,9 @@ test("what nginx loads is listed in its order and searched by text, pattern and 
   await expect(matches.locator("[data-slot='choice-row']")).toHaveCount(1)
   await expect(matches.locator("mark")).toHaveText("listen 443")
   await search.fill("listen (")
-  await expect(page.getByRole("alert")).toContainText("Not a regular expression")
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Not a regular expression" }),
+  ).toContainText("Not a regular expression")
 
   await page.getByRole("radio", { name: "Directive" }).click()
   await search.fill("listen 80")
@@ -1917,7 +1925,7 @@ test("a configuration nginx refuses shows its test in place of what it loads", a
   await page.getByRole("button", { name: "What nginx loads" }).click()
 
   await expect(page.getByText("nginx refuses its configuration", { exact: true })).toBeVisible()
-  await expect(page.getByText('unknown directive "frobnicate"')).toBeVisible()
+  await expect(page.getByText('unknown directive "frobnicate"', { exact: true })).toBeVisible()
   await page.getByRole("button", { name: "Open at line 3" }).click()
   await expect(page.getByRole("dialog", { name: "app" })).toBeVisible()
   expect(reads).toEqual(["/etc/nginx/sites-available/app"])

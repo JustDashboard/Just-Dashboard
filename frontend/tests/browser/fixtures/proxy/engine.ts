@@ -84,6 +84,15 @@ export const longJournal = [
   ...failedJournal,
 ]
 
+/** The log search route's answer for the unit journal. */
+export const journalSearch = (entries: typeof failedJournal) => ({
+  lines: entries.map((entry) => ({
+    timestamp: entry.timestamp,
+    text: entry.message,
+    level: entry.priority <= 3 ? "error" : "info",
+  })),
+})
+
 const entry = (path: string, extra: Record<string, unknown> = {}) => ({
   path: `/etc/nginx/${path}`,
   kind: "file",
@@ -266,7 +275,7 @@ function site(file: string, name: string, port: string, upstream: string, offset
 export const routes: ProxyRoutes = {
   "/proxy/status": (route) => json(route, availability),
   "/systemd/nginx.service": (route) => json(route, { unit: nginxUnit, properties: {} }),
-  "/systemd/nginx.service/journal": (route) => json(route, failedJournal),
+  "/logs/search": (route) => json(route, journalSearch(failedJournal)),
   "/proxy/test": (route) => json(route, passingTest),
   // No test since the dashboard started.
   "/proxy/test/last": (route) => route.fulfill({ status: 204 }),

@@ -162,7 +162,7 @@ func TestListingFindsEverySiteNginxReads(t *testing.T) {
 		{"sites-available", "off", VHost{Path: available("off"), EnabledPath: enabled("off"), FormEditable: true}},
 		{"sites-available", "gone", VHost{Path: available("gone"), EnabledPath: enabled("gone"), FormEditable: true, Broken: "dangling", LinkTarget: available("missing")}},
 		{"sites-available", "renamed", VHost{Path: available("renamed"), EnabledPath: enabled("renamed"), FormEditable: true, Broken: "stale", LinkTarget: available("linked")}},
-		{"sites-available", "copied", VHost{Path: available("copied"), EnabledPath: enabled("copied"), FormEditable: true, Broken: "stale"}},
+		{"sites-available", "copied", VHost{Path: available("copied"), EnabledPath: enabled("copied"), Enabled: true, FormEditable: true, Broken: "stale"}},
 		// conf.d on a Debian host: nginx reads it, and the form would save it
 		// to sites-available instead.
 		{"conf.d", "b.conf", VHost{Path: filepath.Join(root, "conf.d", "b.conf"), Enabled: true}},
@@ -1074,11 +1074,8 @@ func TestDeleteSiteTakesOutOnlyWhatIsTheSites(t *testing.T) {
 	symlink(t, "../custom/elsewhere.conf", enabled("elsewhere.test"))
 
 	for name, why := range map[string]string{
-		"copied.test":    "sites-enabled/copied.test is a file of its own",
-		"stale.test":     "points at " + available("other.test"),
-		"numbered.test":  "also enabled as sites-enabled/00-numbered.test",
-		"only.test":      "sites-enabled/only.test is a file of its own",
-		"elsewhere.test": "not at this site's file",
+		"only.test":      "no such site: only.test",
+		"elsewhere.test": "no such site: elsewhere.test",
 	} {
 		if err := svc.DeleteSite(ctx, name); err == nil || !strings.Contains(err.Error(), why) {
 			t.Errorf("DeleteSite(%q) = %v, want %q", name, err, why)
@@ -1096,6 +1093,23 @@ func TestDeleteSiteTakesOutOnlyWhatIsTheSites(t *testing.T) {
 		if _, err := os.Lstat(link); err != nil {
 			t.Errorf("a refused delete removed %s", link)
 		}
+	}
+	for _, name := range []string{"copied.test", "stale.test", "numbered.test"} {
+		if err := svc.DeleteSite(ctx, name); err != nil {
+			t.Errorf("DeleteSite(%q) = %v", name, err)
+		}
+		if _, err := os.Stat(available(name) + ".bak"); err != nil {
+			t.Errorf("%s was deleted without its backup", name)
+		}
+	}
+	if b, err := os.ReadFile(enabled("copied.test")); err != nil || string(b) != served {
+		t.Errorf("the served copy was changed by deleting its available file: %q %v", b, err)
+	}
+	if _, err := os.Lstat(enabled("stale.test")); err != nil {
+		t.Errorf("another site's link was removed: %v", err)
+	}
+	if _, err := os.Lstat(enabled("00-numbered.test")); !os.IsNotExist(err) {
+		t.Errorf("a link to the deleted site remains: %v", err)
 	}
 
 	// The site's own link goes with it, and so does a link to nothing.

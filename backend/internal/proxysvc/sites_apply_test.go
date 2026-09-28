@@ -838,6 +838,9 @@ func TestADisabledSaveNeverPutsTheSiteInTheLiveConfiguration(t *testing.T) {
 		t.Fatalf("result = %+v %v, want tested as enabled and taking the name from legacy", res, err)
 	}
 	calls := liveCalls(t, root)
+	if len(calls) > 0 && strings.HasPrefix(calls[0], "-V ") {
+		calls = calls[1:]
+	}
 	if len(calls) != 2 || !strings.HasPrefix(calls[0], "-t -c ") || !strings.HasPrefix(calls[1], "-T -c ") {
 		t.Fatalf("nginx was run as %q, want a test and a dump of the copy", calls)
 	}

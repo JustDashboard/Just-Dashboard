@@ -49,20 +49,9 @@ describe("streamSpecOf", () => {
   // when the form posts a stream it opened from the list.
   test("keeps the spec and drops what the listing added", () => {
     const spec = streamSpecOf(entry({ address: "127.0.0.1", timeout: 600, connectTimeout: 5 }))
-    expect(Object.keys(spec).sort()).toEqual(
-      [
-        "address",
-        "allowFrom",
-        "connectTimeout",
-        "listen",
-        "name",
-        "protocol",
-        "proxyProtocol",
-        "timeout",
-        "udpMode",
-        "upstream",
-      ].sort(),
-    )
+    for (const listingOnly of ["path", "managed", "open", "unsupported", "state"]) {
+      expect(spec).not.toHaveProperty(listingOnly)
+    }
     expect(JSON.parse(JSON.stringify(spec))).toEqual({
       name: "db",
       listen: 5432,

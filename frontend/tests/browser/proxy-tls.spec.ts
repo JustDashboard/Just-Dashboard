@@ -380,8 +380,9 @@ test("the field offers recent scans and the names this server knows", async ({ p
   await page.goto("/proxy/tls?domain=app.example.com")
   await expect(page.getByRole("heading", { name: "app.example.com" })).toBeVisible()
   await page.waitForLoadState("networkidle")
-  // Nothing is fetched for the suggestions until the field is used.
-  expect(lists).toHaveLength(0)
+  // The shared proxy navigation already reads sites and certificates; the
+  // watch list is fetched only when the field is used.
+  expect(lists.some((url) => url.pathname.endsWith("/certificates/watched"))).toBe(false)
 
   const field = page.getByLabel("Domain to scan")
   await expect(field).toHaveAttribute("list", "tls-targets")
@@ -643,14 +644,16 @@ test("the serial is hex and OCSP is only asked of a certificate that names a res
   const leaf: { ocspServers?: string[] } = {}
   await scans(page, () => ({ ...scan, ...leaf }))
   await page.goto("/proxy/tls?domain=app.example.com")
-  await expect(page.locator('dt:has-text("Serial") + dd')).toHaveText("04:D3:51:AA:12:FE:90:81")
-  await expect(page.locator('dt:has-text("OCSP stapled") + dd')).toHaveText(
+  await expect(page.locator('dt:has-text("Serial") + dd').first()).toHaveText(
+    "04:D3:51:AA:12:FE:90:81",
+  )
+  await expect(page.locator('dt:has-text("OCSP stapled") + dd').first()).toHaveText(
     "not applicable, the certificate names no OCSP responder",
   )
 
   leaf.ocspServers = ["http://ocsp.example.test"]
   await page.getByRole("button", { name: "Scan", exact: true }).click()
-  await expect(page.locator('dt:has-text("OCSP stapled") + dd')).toHaveText("no")
+  await expect(page.locator('dt:has-text("OCSP stapled") + dd').first()).toHaveText("no")
 })
 
 test("watching takes what is pasted and keeps each port", async ({ page }) => {
@@ -1130,7 +1133,7 @@ test("a full-length serial wraps inside its panel", async ({ page }) => {
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 844 })
     await page.goto("/proxy/tls?domain=app.example.com")
-    const value = page.locator('dt:has-text("Serial") + dd')
+    const value = page.locator('dt:has-text("Serial") + dd').first()
     await expect(value).toHaveText(serial)
     expect(await value.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
@@ -1448,7 +1451,7 @@ test("the live certificate gives its term, where it came from and its pin", asyn
   let answer: object = scan
   await scans(page, () => answer)
   await page.goto("/proxy/tls?domain=app.example.com")
-  const detail = (label: string) => page.locator(`dt:has-text("${label}") + dd`)
+  const detail = (label: string) => page.locator(`dt:has-text("${label}") + dd`).first()
   await expect(detail("Valid from")).not.toHaveText("—")
   await expect(detail("Lifetime")).toHaveText("90 days, renewal due in the last 30 days")
   await expect(detail("CRL")).toHaveText("http://r11.c.lencr.org/12.crl")

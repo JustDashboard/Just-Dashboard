@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
@@ -278,6 +279,7 @@ func TestTheWatchCheckKeepsToItsBudget(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/certificates/watched/check", nil).WithContext(ctx)
 	req.RemoteAddr = "127.0.0.1:5555"
 	req.Header.Set("Cookie", admin.cookie)
+	req.Header.Set(httpx.CSRFHeader, "1")
 	w := httptest.NewRecorder()
 	started := time.Now()
 	s.Routes().ServeHTTP(w, req)

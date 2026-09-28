@@ -41,6 +41,7 @@ export function metricsOff(extra: Record<string, unknown> = {}) {
     path: STATUS_FILE,
     interval: 5,
     epoch: 1,
+    at: new Date().toISOString(),
     samples: [],
     hourRequests: 0,
     hourDropped: 0,

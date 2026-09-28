@@ -195,7 +195,15 @@ func (s *Server) handleCheckWatchedNow(w http.ResponseWriter, r *http.Request) e
 	if _, err := s.modules.proxyExtras.tlsMonitor.CheckAll(ctx); err != nil && ctx.Err() == nil {
 		return httpx.Internal(err)
 	}
-	domains, err := s.watchedEndpoints(r.Context())
+	readCtx := r.Context()
+	if readCtx.Err() != nil {
+		// The checks used the caller's last second. Finish the bounded read
+		// from the stored results so the response still describes what ran.
+		var done context.CancelFunc
+		readCtx, done = context.WithTimeout(context.WithoutCancel(r.Context()), time.Second)
+		defer done()
+	}
+	domains, err := s.watchedEndpoints(readCtx)
 	if err != nil {
 		return httpx.Internal(err)
 	}

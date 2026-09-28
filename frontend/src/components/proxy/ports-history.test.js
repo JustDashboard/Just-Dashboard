@@ -32,6 +32,8 @@ const socket = (overrides) => ({
   reach: "all",
   network: "all",
   exposed: true,
+  service: "Redis",
+  danger: true,
   ...overrides,
 })
 

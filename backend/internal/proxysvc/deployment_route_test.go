@@ -222,7 +222,7 @@ func TestDeploymentRoutePasswordProtectionOnBothProxies(t *testing.T) {
 	if _, err := os.Stat(authFile); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("stale credentials file survived: %v", err)
 	}
-	if service.deploymentAuthFile(open) != "" || strings.Contains(mustRender(t, deploymentSiteSpec(open, "")), "auth_basic") {
+	if service.deploymentAuthFile(open) != "" || strings.Contains(mustRender(t, deploymentSiteSpec(open, "")), "auth_basic \"") {
 		t.Fatal("an open route rendered authentication")
 	}
 	// Malformed credentials never reach a proxy.

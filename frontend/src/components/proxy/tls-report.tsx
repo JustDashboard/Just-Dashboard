@@ -1424,6 +1424,7 @@ function AdvancedScan({
             dial the one and report on the rest. */}
         <label className="flex items-start gap-2 text-hint text-muted-foreground">
           <Checkbox
+            aria-label="Scan every address"
             checked={value.all && !connecting}
             disabled={connecting}
             onCheckedChange={(checked) => onChange({ all: Boolean(checked) })}

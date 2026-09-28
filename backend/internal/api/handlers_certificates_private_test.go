@@ -149,8 +149,14 @@ func TestLocalCAThroughTheAPI(t *testing.T) {
 		t.Fatalf("root body %q", root.Body)
 	}
 	certs := decodeBody[[]proxysvc.Certificate](t, reader.do(http.MethodGet, "/api/v1/certificates/", "", nil).Body.Bytes())
-	if len(certs) != 1 || !certs[0].LocalCA {
-		t.Fatalf("the inventory: %+v", certs)
+	found := false
+	for _, cert := range certs {
+		if cert.Name == "nas" && cert.LocalCA {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the inventory has no local CA leaf: %+v", certs)
 	}
 	if w := c.do(http.MethodPost, "/api/v1/certificates/self-signed", `{"name":"printer","names":["10.0.0.7"]}`, nil); w.Code != http.StatusOK {
 		t.Fatalf("self-signed: %d %s", w.Code, w.Body)

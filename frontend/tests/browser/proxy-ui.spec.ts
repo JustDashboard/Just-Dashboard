@@ -228,6 +228,7 @@ test("a stream is drawn as the service its port is", async ({ page }) => {
           allowFrom: [],
           open: true,
           managed: true,
+          unsupported: [],
         },
         {
           name: "bastion",
@@ -238,6 +239,7 @@ test("a stream is drawn as the service its port is", async ({ page }) => {
           allowFrom: ["10.0.0.0/8"],
           open: false,
           managed: true,
+          unsupported: [],
         },
       ],
     }),
@@ -265,7 +267,7 @@ for (const width of [390, 1280, 1720]) {
     page.on("pageerror", (error) => failures.push(error.message))
     for (const path of PROXY_PAGES) {
       await page.goto(path)
-      await expect(page.locator("[data-slot='stat-grid']")).toBeVisible()
+      await expect(page.locator("[data-slot='stat-grid']").first()).toBeVisible()
       await page.waitForLoadState("networkidle")
       const overflow = await page
         .locator("[data-slot='page']")

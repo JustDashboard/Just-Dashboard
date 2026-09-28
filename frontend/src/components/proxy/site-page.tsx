@@ -20,6 +20,7 @@ import { useProxy } from "@/components/proxy/proxy-context"
 import { ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
 import { siteLogPlan } from "@/components/proxy/site-log-plan"
 import { SiteLogs } from "@/components/proxy/site-logs"
+import { activeOwner } from "@/components/proxy/site-details"
 import { SiteForm } from "@/components/proxy/site-form"
 import { useSiteVerbs } from "@/components/proxy/site-verbs"
 import { ConfigEditor } from "@/components/proxy/config-editor"
@@ -249,7 +250,7 @@ function SiteBody({ name }: { name: string }) {
         path={vhost?.path ?? ""}
         kind={vhost?.kind ?? "nginx"}
         title={vhost?.name ?? "Configuration"}
-        readOnly={!admin}
+        readOnly={!admin || Boolean(vhost && activeOwner(vhost))}
         siteDisabled={vhost?.kind === "nginx" && Boolean(vhost.enabledPath) && !vhost.enabled}
         onSaved={refresh}
         actions={(busy) =>

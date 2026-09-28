@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
 // SiteHeaders is what a site adds to and takes from the headers passing
@@ -81,12 +82,16 @@ var (
 	siteHeaderNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,63}$`)
 	// A header value, and a CSP or Permissions-Policy part, is written in
 	// double quotes; these are what could end the quotes or the directive.
-	headerValueRe = regexp.MustCompile(`^[^"'\\$;{}\x00-\x1f\x7f]{0,1024}$`)
+	headerValueRe = regexp.MustCompile(`^[^"'\\$;{}\x00-\x1f\x7f]*$`)
 	nginxVarRe    = regexp.MustCompile(`^\$[A-Za-z_][A-Za-z0-9_]{0,63}$`)
 	policyNameRe  = regexp.MustCompile(`^[a-z][a-z0-9-]{0,39}$`)
 	cspSourceRe   = regexp.MustCompile(`^[A-Za-z0-9*:/._+=%?&~@!,-]{1,256}$`)
 	corsOriginRe  = regexp.MustCompile(`^https?://[A-Za-z0-9]([A-Za-z0-9.-]{0,252})(:\d{1,5})?$`)
 )
+
+func validHeaderValue(value string) bool {
+	return utf8.RuneCountInString(value) <= 1024 && headerValueRe.MatchString(value)
+}
 
 // corsMethods are the methods a site may allow across origins.
 var corsMethods = []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
@@ -191,7 +196,7 @@ func validateHeaders(spec *SiteSpec) error {
 			if !nginxVarRe.MatchString(header.Value) {
 				return fmt.Errorf("the %s request header may be text or one nginx variable such as $remote_addr, not both", header.Name)
 			}
-		} else if !headerValueRe.MatchString(header.Value) {
+		} else if !validHeaderValue(header.Value) {
 			return fmt.Errorf("the %s request header may not contain quotes, backslashes, semicolons, braces or line breaks", header.Name)
 		}
 	}
@@ -210,7 +215,7 @@ func validateHeaders(spec *SiteSpec) error {
 		if header.Value == "" {
 			return fmt.Errorf("the %s response header needs a value", header.Name)
 		}
-		if !headerValueRe.MatchString(header.Value) {
+		if !validHeaderValue(header.Value) {
 			return fmt.Errorf("the %s response header may not contain quotes, backslashes, dollars, semicolons, braces or line breaks", header.Name)
 		}
 	}
@@ -717,10 +722,10 @@ func (p *headersParse) settle(spec *SiteSpec) {
 	// variable, is left for the file rather than offered back broken.
 	h.Request = slices.DeleteFunc(h.Request, func(v HeaderValue) bool {
 		return !siteHeaderNameRe.MatchString(v.Name) ||
-			(!nginxVarRe.MatchString(v.Value) && !headerValueRe.MatchString(v.Value))
+			(!nginxVarRe.MatchString(v.Value) && !validHeaderValue(v.Value))
 	})
 	h.Response = slices.DeleteFunc(h.Response, func(v HeaderValue) bool {
-		return !siteHeaderNameRe.MatchString(v.Name) || v.Value == "" || !headerValueRe.MatchString(v.Value)
+		return !siteHeaderNameRe.MatchString(v.Name) || v.Value == "" || !validHeaderValue(v.Value)
 	})
 	if spec.Kind != "proxy" {
 		h.Request, h.Hide = nil, nil

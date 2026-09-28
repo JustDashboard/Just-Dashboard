@@ -1655,9 +1655,9 @@ function IssueDialogBody({
 
         {method === "dns" && (
           <Well plain className="space-y-3">
-            <Field label="DNS provider">
+            <Field label="DNS provider" htmlFor="issue-dns-provider">
               <Select value={dnsProvider} onValueChange={setDnsProvider}>
-                <SelectTrigger className="w-full">
+                <SelectTrigger id="issue-dns-provider" className="w-full">
                   <SelectValue placeholder="Where this domain's DNS lives" />
                 </SelectTrigger>
                 <SelectContent>

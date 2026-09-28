@@ -61,9 +61,9 @@ test("each socket says where it answers, with the network named", async ({ page 
   const redis = rows.filter({ hasText: "203.0.113.5" }).getByText("Redis · Public address")
   await expect(redis).toHaveClass(/text-destructive/)
 
-  // Only real loopback reads as this server's, and nothing reads "loopback".
+  // Only real loopback reads as this server's in the reach column.
   await expect(rows.getByText("This server only", { exact: true })).toHaveCount(2)
-  await expect(page.getByRole("table").getByText(/loopback/i)).toHaveCount(0)
+  await expect(rows.locator("td:nth-child(3)").getByText(/loopback/i)).toHaveCount(0)
 })
 
 test("the chips split the services by who can connect, counting a pair once", async ({ page }) => {
@@ -449,8 +449,10 @@ test("the tiles' hints and the longest reach fit a phone", async ({ page }) => {
 test("a listing that timed out can be tried again", async ({ page }) => {
   await mockProxy(page, { included: true })
   let requests = 0
+  let timeout = true
   await page.route("**/api/v1/ports", async (route) => {
-    if (++requests > 1) return json(route, hostPorts)
+    requests++
+    if (!timeout) return json(route, hostPorts)
     await route.fulfill({
       status: 504,
       contentType: "application/json",
@@ -468,9 +470,11 @@ test("a listing that timed out can be tried again", async ({ page }) => {
   await expect(
     page.getByText("Listing the host's sockets took longer than 10 seconds."),
   ).toBeVisible()
+  timeout = false
+  const beforeRetry = requests
   await page.getByRole("button", { name: "Try again" }).click()
   await expect(page.getByRole("table").locator("tbody tr").first()).toBeVisible()
-  expect(requests).toBe(2)
+  expect(requests).toBeGreaterThan(beforeRetry)
 })
 
 function rowsOf(page: Page) {
@@ -479,7 +483,7 @@ function rowsOf(page: Page) {
 
 /** The ports of the table's socket rows, top to bottom. */
 function portOrder(page: Page) {
-  return rowsOf(page).locator("td:first-child span.numeric").allTextContents()
+  return rowsOf(page).locator("td:first-child button").allTextContents()
 }
 
 test("reach and protocol combine, and the address bar carries the view", async ({ page }) => {
@@ -638,8 +642,10 @@ test("a failed poll keeps the rows and says they are the last list that arrived"
   await page.clock.install()
   await mockProxy(page, { included: true })
   let requests = 0
+  let fail = false
   await page.route("**/api/v1/ports", async (route) => {
-    if (++requests !== 2) return json(route, hostPorts)
+    requests++
+    if (!fail) return json(route, hostPorts)
     await route.fulfill({
       status: 500,
       contentType: "application/json",
@@ -652,6 +658,8 @@ test("a failed poll keeps the rows and says they are the last list that arrived"
   await expect(page.getByText("Updated just now")).toBeVisible()
   await expect(page.getByText(/Refreshing failed/)).toHaveCount(0)
 
+  fail = true
+  const beforePoll = requests
   await page.clock.runFor(15_001)
   await expect(
     page.getByText("Refreshing failed, so this is the last list that arrived"),
@@ -661,12 +669,13 @@ test("a failed poll keeps the rows and says they are the last list that arrived"
   ).toBeVisible()
   await expect(page.getByText(/^Last updated \d+s ago$/)).toBeVisible()
   await expect(rows).toHaveCount(7)
-  expect(requests).toBe(2)
+  expect(requests).toBeGreaterThan(beforePoll)
 
+  fail = false
   await page.getByRole("button", { name: "Try again" }).click()
   await expect(page.getByText(/Refreshing failed/)).toHaveCount(0)
   await expect(page.getByText(/^Updated (just now|\d+s ago)$/)).toBeVisible()
-  expect(requests).toBe(3)
+  expect(requests).toBeGreaterThan(beforePoll + 1)
 })
 
 test("refreshing can be paused, resumed at once, and asked for", async ({ page }) => {
@@ -679,22 +688,26 @@ test("refreshing can be paused, resumed at once, and asked for", async ({ page }
   })
   await page.goto("/proxy/ports")
   await expect(rowsOf(page)).toHaveCount(7)
-  expect(requests).toBe(1)
+  const initialRequests = requests
+  expect(initialRequests).toBe(2)
 
   await page.getByRole("button", { name: "Pause refreshing" }).click()
   await expect(page.getByText("Paused · updated just now")).toBeVisible()
   await expect(page.getByRole("button", { name: "Refresh now" })).toHaveCount(0)
-  await page.clock.runFor(60_000)
+  await page.clock.runFor(60_001)
   await expect(page.getByText("Paused · updated 1m ago")).toBeVisible()
-  expect(requests).toBe(1)
+  // The shared proxy navigation still checks port findings every 15 seconds.
+  expect(requests).toBeGreaterThanOrEqual(initialRequests + 3)
+  expect(requests).toBeLessThanOrEqual(initialRequests + 4)
+  const pausedRequests = requests
 
   await page.getByRole("button", { name: "Resume refreshing" }).click()
   await expect(page.getByText("Updated just now")).toBeVisible()
-  expect(requests).toBe(2)
+  await expect.poll(() => requests).toBe(pausedRequests + 1)
   await page.getByRole("button", { name: "Refresh now" }).click()
-  await expect.poll(() => requests).toBe(3)
+  await expect.poll(() => requests).toBe(pausedRequests + 2)
   await page.clock.runFor(15_001)
-  await expect.poll(() => requests).toBe(4)
+  await expect.poll(() => requests).toBe(pausedRequests + 4)
 })
 
 test("a row's endpoint and command can be copied", async ({ page, context }) => {

@@ -57,8 +57,8 @@ function saved(overrides: Record<string, unknown> = {}) {
 
 async function fillNew(page: Page) {
   const sheet = page.getByRole("dialog")
-  await sheet.getByLabel("Name").fill("replica")
-  await sheet.getByLabel("Listen on").fill("6432")
+  await sheet.getByRole("textbox", { name: "Name", exact: true }).fill("replica")
+  await sheet.getByRole("textbox", { name: "Listen on", exact: true }).fill("6432")
   await sheet.getByLabel("Forward to").fill("10.0.0.5:5432")
   return sheet
 }
@@ -116,7 +116,7 @@ test("a stream block nginx cannot read is an outage, said as one", async ({ page
   const sheet = page.getByRole("dialog")
   await expect(sheet.getByText("No stream can pass nginx’s test yet")).toBeVisible()
   await expect(sheet.getByText("nginx’s test fails until it has the stream module.")).toBeVisible()
-  await expect(sheet.getByLabel("Listen on")).toBeDisabled()
+  await expect(sheet.getByRole("textbox", { name: "Listen on", exact: true })).toBeDisabled()
   await expect(sheet.getByRole("button", { name: "Save for later" })).toBeDisabled()
   await expect(sheet.getByText("This will not forward anything yet")).toHaveCount(0)
 })
@@ -291,7 +291,7 @@ test("renaming says so, and names the file it came from", async ({ page }) => {
   await page.goto("/proxy/streams")
   await page.getByRole("button", { name: "Edit bastion" }).click()
   const sheet = page.getByRole("dialog")
-  await sheet.getByLabel("Name").fill("ssh")
+  await sheet.getByRole("textbox", { name: "Name", exact: true }).fill("ssh")
   await expect(
     sheet.getByText(
       "Saving renames bastion.conf to ssh.conf and keeps the old file as bastion.conf.bak.",
@@ -337,7 +337,7 @@ test("a port in use lands on the field, with the way to see who holds it", async
     "/proxy/ports",
   )
   // The sheet stays open on the refused value; changing it clears the refusal.
-  await sheet.getByLabel("Listen on").fill("6433")
+  await sheet.getByRole("textbox", { name: "Listen on", exact: true }).fill("6433")
   await expect(sheet.getByRole("alert")).toHaveCount(0)
 })
 
@@ -440,7 +440,7 @@ test("a hand-written file opens read-only, with the file itself to hand", async 
   const sheet = page.getByRole("dialog")
   await expect(sheet.getByText("Written by hand")).toBeVisible()
   await expect(sheet.getByText(/uses deny rules, 2 upstream servers/)).toBeVisible()
-  await expect(sheet.getByLabel("Listen on")).toBeDisabled()
+  await expect(sheet.getByRole("textbox", { name: "Listen on", exact: true })).toBeDisabled()
   await expect(sheet.getByRole("button", { name: "Save and reload" })).toBeDisabled()
 
   await sheet.getByRole("button", { name: "Edit the file" }).click()
@@ -663,13 +663,20 @@ test("a plain listen port reads as every IPv4 address, not as a restriction", as
 
   await page.getByRole("button", { name: "Edit plain" }).click()
   const sheet = page.getByRole("dialog")
+  await expect(sheet.getByRole("combobox", { name: "Listening address" })).toContainText(
+    "Every address",
+  )
   await expect(
-    sheet.getByText("Every IPv4 address, as the file has it — it has no IPv6 listen."),
+    sheet.getByText("Every address this host has, including any added later."),
   ).toBeVisible()
+  await expect(sheet.getByRole("switch", { name: "Listen on IPv6 too" })).toHaveAttribute(
+    "aria-checked",
+    "false",
+  )
   await expect(sheet.getByText(/Only on 0\.0\.0\.0/)).toHaveCount(0)
 })
 
-test("a read-only account reads streams with no controls", async ({ page }) => {
+test("a read-only account can inspect streams without edit controls", async ({ page }) => {
   await mockProxy(page, { included: true })
   await listing(page, { streams: [bastion] })
   await page.route("**/api/v1/auth/session", (route) =>
@@ -678,7 +685,10 @@ test("a read-only account reads streams with no controls", async ({ page }) => {
   await page.goto("/proxy/streams")
   await expect(page.locator("[data-slot='choice-row']")).toHaveCount(1)
   await expect(page.getByRole("button", { name: "New stream" })).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "More actions for bastion" })).toHaveCount(0)
+  await page.getByRole("button", { name: "More actions for bastion" }).click()
+  await expect(page.getByRole("menuitem", { name: "Traffic" })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: "Edit" })).toHaveCount(0)
+  await expect(page.getByRole("menuitem", { name: "Delete" })).toHaveCount(0)
 })
 
 test("without nginx the page says so and offers nothing to save", async ({ page }) => {
@@ -922,7 +932,9 @@ test("the overview does not call streams within limits when it could not read th
   )
   await page.goto("/proxy")
   await expect(
-    page.getByText("Certificates, renewal, sites, streams and exposed ports all within limits"),
+    page.getByText(
+      "Certificates, renewal, sites, upstreams, streams and exposed ports all within limits",
+    ),
   ).toBeVisible()
 
   broken = true
@@ -1724,7 +1736,7 @@ test("the form says a port is taken while it is typed, with the next one free", 
   await page.goto("/proxy/streams")
   await page.getByRole("button", { name: "New stream" }).click()
   const sheet = await fillNew(page)
-  await sheet.getByLabel("Listen on").fill("6432")
+  await sheet.getByRole("textbox", { name: "Listen on", exact: true }).fill("6432")
 
   const refusal = sheet.getByRole("alert")
   await expect(refusal).toContainText("already in use by postgres (pid 900) — 6433 is free")
@@ -1734,10 +1746,10 @@ test("the form says a port is taken while it is typed, with the next one free", 
   )
   expect(previews.at(-1)?.previous).toBe("")
   await refusal.getByRole("button", { name: "Use 6433" }).click()
-  await expect(sheet.getByLabel("Listen on")).toHaveValue("6433")
+  await expect(sheet.getByRole("textbox", { name: "Listen on", exact: true })).toHaveValue("6433")
   await expect(sheet.getByRole("alert")).toHaveCount(0)
 
-  await sheet.getByLabel("Listen on").fill("8080")
+  await sheet.getByRole("textbox", { name: "Listen on", exact: true }).fill("8080")
   await expect(
     sheet.getByRole("alert").getByRole("link", { name: "Open the site" }),
   ).toHaveAttribute("href", "/proxy/sites?site=app.example.com")

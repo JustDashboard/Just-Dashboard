@@ -71,6 +71,9 @@ export function hostHistory(now = Date.now()): History {
           process: "redis-server",
           cmdline: "/usr/bin/redis-server *:6379",
           user: "redis",
+          service: "Redis",
+          danger:
+            "Unauthenticated by default: an exposed Redis is a remote shell, not a data leak. Never open this to the world.",
           level: "critical",
         }),
       ),

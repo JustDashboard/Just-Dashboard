@@ -29,6 +29,7 @@ export function specFromServer(read: SiteSpec): SiteSpec {
     ...BLANK,
     clientMaxBody: undefined,
     proxyTimeout: undefined,
+    logFormat: undefined,
     ...read,
     hsts: read.tls ? read.hsts : BLANK.hsts,
   }

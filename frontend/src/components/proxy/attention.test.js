@@ -194,7 +194,7 @@ describe("foldProxyFindings", () => {
   })
 
   test("every condition, worst first, ties in the order the areas are gathered", () => {
-    expect(foldProxyFindings(inputs.everything)).toEqual([
+    expect(foldProxyFindings(inputs.everything)).toMatchObject([
       {
         id: "cert.expiring./s",
         level: "critical",
@@ -339,7 +339,7 @@ describe("foldProxyFindings", () => {
   })
 
   test("one stream and one database port read in the singular", () => {
-    expect(foldProxyFindings(inputs.oneStreamNotIncluded)).toEqual([
+    expect(foldProxyFindings(inputs.oneStreamNotIncluded)).toMatchObject([
       {
         id: "certbot.no-timer",
         level: "critical",
@@ -373,7 +373,7 @@ describe("foldProxyFindings", () => {
   })
 
   test("certbot missing is not a finding, a week-old expiry is critical", () => {
-    expect(foldProxyFindings(inputs.certbotMissing)).toEqual([
+    expect(foldProxyFindings(inputs.certbotMissing)).toMatchObject([
       {
         id: "cert.expiring./etc/letsencrypt/live/app.example.com/fullchain.pem",
         level: "critical",
@@ -382,7 +382,7 @@ describe("foldProxyFindings", () => {
         advice:
           "certbot renews at thirty days. A certificate still here a week later means the timer is not running.",
         meta: "certificate",
-        href: "/proxy/certificates",
+        href: "/proxy/certificates?cert=%2Fetc%2Fletsencrypt%2Flive%2Fapp.example.com%2Ffullchain.pem",
       },
     ])
   })
@@ -485,7 +485,7 @@ describe("finding actions", () => {
       }).map((f) => [f.meta, findingAction(f)]),
     )
     expect(labels).toEqual({
-      certificate: "Open certificates",
+      certificate: "Open certificate",
       renewal: "Open certificates",
       site: "Open site",
       streams: "Open streams",

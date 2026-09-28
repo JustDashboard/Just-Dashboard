@@ -934,10 +934,11 @@ test("a ?site= link gives a reader the config viewer and an administrator the fo
   )
   await expect(viewer.getByRole("button", { name: /^Save/ })).toHaveCount(0)
   expect(asked).toEqual(["config"])
-  // The card itself opens the same viewer for a reader.
+  // The card opens the site's page, where a reader can view its file.
   await page.keyboard.press("Escape")
   await expect(viewer).toHaveCount(0)
-  await card(page, "app.example.com").getByRole("button", { name: "Open app.example.com" }).click()
+  await card(page, "app.example.com").getByRole("link", { name: "Open app.example.com" }).click()
+  await page.getByRole("button", { name: "View config" }).first().click()
   await expect(page.getByRole("dialog").locator(".monaco-editor .view-lines")).toContainText(
     "server_name",
     editorLoad,
@@ -1011,12 +1012,14 @@ test("every place nginx reads a site from is listed, a link to nothing first", a
     copiedMenu.getByRole("menuitem", { name: /Delete|Remove link|Disable/ }),
   ).toHaveCount(0)
   await page.keyboard.press("Escape")
-  await copied.getByRole("button", { name: "Open copied-in" }).click()
+  await copied.getByRole("link", { name: "Open copied-in" }).click()
+  await page.getByRole("button", { name: "Raw config" }).first().click()
   await expect(page.getByRole("dialog").locator(".monaco-editor .view-lines")).toContainText(
     "server",
     editorLoad,
   )
   await page.keyboard.press("Escape")
+  await page.goto("/proxy/sites")
 
   // Nothing is disabled, and the reading does not call that "every site serving".
   await expect(page.getByText("none, but 2 broken links")).toBeVisible()
@@ -1284,8 +1287,9 @@ test("a deployment's route leads to its deployment and is edited only after aski
   await expect(menu.getByRole("menuitem", { name: "Edit anyway" })).toBeVisible()
   await page.keyboard.press("Escape")
 
-  // Its card opens the file to read, not the form.
-  await shop.getByRole("button", { name: "Open just-dashboard-env-7.conf" }).click()
+  // Its card opens the route page, where the file is read-only.
+  await shop.getByRole("link", { name: "Open just-dashboard-env-7.conf" }).click()
+  await page.getByRole("button", { name: "View config" }).first().click()
   const viewer = page.getByRole("dialog")
   await expect(viewer.locator(".monaco-editor .view-lines")).toContainText(
     "server_name shop.example.com",
@@ -1294,6 +1298,7 @@ test("a deployment's route leads to its deployment and is edited only after aski
   await expect(viewer.getByRole("button", { name: /^Save/ })).toHaveCount(0)
   await page.keyboard.press("Escape")
   await expect(viewer).toHaveCount(0)
+  await page.goto("/proxy/sites")
 
   // So does the deployment's own link to it.
   await page.goto("/proxy/sites?site=just-dashboard-env-7.conf")
@@ -1302,10 +1307,10 @@ test("a deployment's route leads to its deployment and is edited only after aski
     editorLoad,
   )
   await expect(page.getByRole("dialog").getByRole("button", { name: /^Save/ })).toHaveCount(0)
-  expect(asked).not.toContain("form")
   await page.keyboard.press("Escape")
 
   // Editing anyway says what the next deploy does, then opens the form.
+  const readsBeforeEdit = asked.filter((request) => request === "form").length
   await (
     await openMenu(page, "just-dashboard-env-7.conf")
   )
@@ -1314,7 +1319,9 @@ test("a deployment's route leads to its deployment and is edited only after aski
   const confirm = page.getByRole("dialog", { name: "Edit just-dashboard-env-7.conf anyway" })
   await expect(confirm).toContainText("shop writes this route on every deploy")
   await confirm.getByRole("button", { name: "Edit anyway" }).click()
-  await expect.poll(() => asked.includes("form")).toBe(true)
+  await expect
+    .poll(() => asked.filter((request) => request === "form").length)
+    .toBeGreaterThan(readsBeforeEdit)
   await expect(page.getByText(/anyway completed/)).toHaveCount(0)
   await page.keyboard.press("Escape")
 
@@ -1846,6 +1853,7 @@ test("a save that did not reload is read at once, and one that did waits for ngi
   await page.keyboard.type("# saved")
   const before = afters.length
   await sheet.getByRole("button", { name: "Save only" }).click()
+  await sheet.getByRole("button", { name: "Save only" }).click()
   await expect(page.locator("[data-sonner-toast]").filter({ hasText: /^Saved$/ })).toBeVisible()
   await expect(site.getByText("saved, not live", { exact: true })).toBeVisible({ timeout: 4_000 })
   expect(afters.slice(before)).toContain(null)
@@ -1854,6 +1862,7 @@ test("a save that did not reload is read at once, and one that did waits for ngi
   await lines.click()
   await page.keyboard.press("End")
   await page.keyboard.type(" and reloaded")
+  await sheet.getByRole("button", { name: "Save and reload" }).click()
   await sheet.getByRole("button", { name: "Save and reload" }).click()
   await expect(
     page.locator("[data-sonner-toast]").filter({ hasText: "Saved and reloaded" }),

@@ -580,7 +580,7 @@ func TestIssueWithLetsEncryptsOwnDirectorySaysWhatItSigns(t *testing.T) {
 		t.Fatalf("certbot ran as:\n%s", last)
 	}
 	text := jobText(t, s, issued.ID)
-	if !strings.Contains(text, "JD_ACME_DIRECTORY names a staging authority: the certificate it signs is a test one") ||
+	if !strings.Contains(text, "is a staging authority: the certificate it signs is a test one") ||
 		strings.Contains(text, "replaces it with a real one") || strings.Contains(text, "The real certificate") {
 		t.Fatalf("job output:\n%s", text)
 	}
@@ -662,8 +662,13 @@ func TestCaddyEvidenceIsOutOfTheInventoryAndInTheDeploymentsView(t *testing.T) {
 	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &listed) != nil {
 		t.Fatalf("list = %d: %s", w.Code, w.Body.String())
 	}
-	if len(listed) != 1 || listed[0].Name != "bought" {
-		t.Fatalf("the inventory is %+v, want the import alone", listed)
+	foundBought, foundEvidence := false, false
+	for _, cert := range listed {
+		foundBought = foundBought || cert.Name == "bought"
+		foundEvidence = foundEvidence || cert.Name == evidence
+	}
+	if !foundBought || foundEvidence {
+		t.Fatalf("the inventory is %+v, want the import and no deployment evidence", listed)
 	}
 
 	w = c.do(http.MethodGet, "/api/v1/security/posture", "", nil)

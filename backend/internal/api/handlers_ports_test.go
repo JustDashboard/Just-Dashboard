@@ -1,14 +1,17 @@
 package api
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -248,25 +251,7 @@ func TestPortListLevelsADatabaseAsThePostureDoes(t *testing.T) {
 	if bridge == nil {
 		t.Skip("no bridge address on this host")
 	}
-	var database net.Listener
-	for _, port := range []string{"6379", "27017", "11211", "9200", "5432"} {
-		if l, err := net.Listen("tcp", net.JoinHostPort(bridge.String(), port)); err == nil {
-			database = l
-			break
-		}
-	}
-	if database == nil {
-		t.Skipf("no database port is free on %s", bridge)
-	}
-	defer database.Close()
-	plain, err := net.Listen("tcp", net.JoinHostPort(bridge.String(), "0"))
-	if err != nil {
-		t.Skipf("cannot listen on %s: %v", bridge, err)
-	}
-	defer plain.Close()
-
-	dbPort := uint32(database.Addr().(*net.TCPAddr).Port)
-	plainPort := uint32(plain.Addr().(*net.TCPAddr).Port)
+	dbPort, plainPort := childPortListeners(t, bridge.String())
 	seen := 0
 	// The port's level on the page is its highest socket's, as the posture's
 	// one finding for it is at its widest bind.
@@ -314,6 +299,72 @@ func TestPortListLevelsADatabaseAsThePostureDoes(t *testing.T) {
 		}
 	}
 	t.Errorf("the posture raised no %s", id)
+}
+
+// The API test process is recognized as the dashboard itself. A separate
+// process owns these sockets so this test reaches database-port grading.
+func childPortListeners(t *testing.T, address string) (uint32, uint32) {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestPortListenerChild$")
+	cmd.Env = append(os.Environ(), "JD_PORT_LIST_CHILD=1", "JD_PORT_LIST_ADDR="+address)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		stdin.Close()
+		if err := cmd.Wait(); err != nil {
+			t.Errorf("port listener child: %v", err)
+		}
+	})
+	reader := bufio.NewReader(stdout)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("port listener child stopped before opening sockets: %v", err)
+		}
+		if strings.HasPrefix(line, "SKIP ") {
+			t.Skip(strings.TrimSpace(strings.TrimPrefix(line, "SKIP ")))
+		}
+		var database, plain uint32
+		if _, err := fmt.Sscanf(line, "READY %d %d", &database, &plain); err == nil {
+			return database, plain
+		}
+	}
+}
+
+func TestPortListenerChild(t *testing.T) {
+	if os.Getenv("JD_PORT_LIST_CHILD") != "1" {
+		return
+	}
+	address := os.Getenv("JD_PORT_LIST_ADDR")
+	var database net.Listener
+	for _, port := range []string{"6379", "27017", "11211", "9200", "5432"} {
+		if l, err := net.Listen("tcp", net.JoinHostPort(address, port)); err == nil {
+			database = l
+			break
+		}
+	}
+	if database == nil {
+		fmt.Println("SKIP no database port is free on", address)
+		return
+	}
+	defer database.Close()
+	plain, err := net.Listen("tcp", net.JoinHostPort(address, "0"))
+	if err != nil {
+		fmt.Println("SKIP cannot open a second port on", address)
+		return
+	}
+	defer plain.Close()
+	fmt.Printf("READY %d %d\n", database.Addr().(*net.TCPAddr).Port, plain.Addr().(*net.TCPAddr).Port)
+	io.Copy(io.Discard, os.Stdin)
 }
 
 // GET /ports carries the posture's grade whole, why the firewall does not

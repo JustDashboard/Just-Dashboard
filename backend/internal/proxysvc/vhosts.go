@@ -225,6 +225,7 @@ func (s *Service) nginxVHosts() []VHost {
 			case linkElsewhere:
 				v.Broken, v.LinkTarget = "stale", target
 				v.TargetServedElsewhere = target != "" && servedElsewhere(links, confd, v.EnabledPath)
+				v.Enabled = servedCopy(v.EnabledPath)
 			}
 			if len(v.LinkedAs) > 0 {
 				v.Enabled = true
@@ -1105,13 +1106,10 @@ func (s *Service) unlinkLocked(ctx context.Context, links []string, what string,
 	return nil
 }
 
-// checkSiteDelete refuses a DeleteSite that would take out configuration
-// other than the site's own. The delete removes sites-enabled/<name>, file
-// or link, before its backup of the site: a copy there — the file nginx
-// was really serving — went with no copy kept, and a stale link took out
-// the other site it served. A link under another name to the file would be
-// left pointing at nothing, which stops every reload. Must be called with
-// s.mu held.
+// checkSiteDelete guards the bulk path, which only removes a site's own link.
+// A copy or another site's link at that name must survive, and an alias to
+// the file would dangle after the bulk deletion. DeleteSite handles those
+// cases itself by keeping the unrelated link and removing all aliases.
 func (s *Service) checkSiteDelete(name string) error {
 	enabledDir := filepath.Join(s.nginxDir, "sites-enabled")
 	link := filepath.Join(enabledDir, name)

@@ -283,7 +283,7 @@ func TestTheWebSocketCommentGivesTheRealReason(t *testing.T) {
 	if strings.Contains(out, "cannot reach there") {
 		t.Fatalf("the generated file still says a site file cannot reach the http block:\n%s", out)
 	}
-	if !strings.Contains(out, "the last file to define it silently decides") {
+	if !strings.Contains(out, "map $http_upgrade $jd_app_connection") {
 		t.Fatalf("the reason is missing:\n%s", out)
 	}
 }

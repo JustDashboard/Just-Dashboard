@@ -57,7 +57,9 @@ test("a new site is named after the domain typed, not after its first letter", a
   const sheet = await openNewSite(page)
   // One key at a time, as a person types: fill() sends one change and never
   // saw the name freeze on the first character.
-  await sheet.getByLabel("Domains").pressSequentially("shop.example.com www.shop.example.com")
+  await sheet
+    .getByRole("textbox", { name: "Domains" })
+    .pressSequentially("shop.example.com www.shop.example.com")
   await sheet.getByRole("switch", { name: "Serve over HTTPS" }).click()
   await expect(sheet.getByLabel("File name")).toHaveValue("shop.example.com")
   await expect(
@@ -86,7 +88,7 @@ test("a new site is named after the domain typed, not after its first letter", a
 test("a certificate path typed by hand stays while the domains change", async ({ page }) => {
   await mockProxy(page, { included: true })
   const sheet = await openNewSite(page)
-  const domains = sheet.getByLabel("Domains")
+  const domains = sheet.getByRole("textbox", { name: "Domains" })
   await domains.pressSequentially("*.example.com")
   await sheet.getByRole("switch", { name: "Serve over HTTPS" }).click()
   // A wildcard is certified for its parent zone.
@@ -117,7 +119,7 @@ test("HSTS reaches the server only with TLS", async ({ page }) => {
     json(route, { content: `# ${(body.spec as { name: string }).name}\n`, warnings: [] }),
   )
   const sheet = await openNewSite(page)
-  await sheet.getByLabel("Domains").fill("plain.example.com")
+  await sheet.getByRole("textbox", { name: "Domains" }).fill("plain.example.com")
   await expect.poll(() => previews.length).toBeGreaterThan(0)
   expect(previews.at(-1)).toMatchObject({ spec: { tls: false, hsts: false } })
 
@@ -159,10 +161,10 @@ async function disableLegacy(
 }
 
 async function openLegacy(page: Page) {
-  await page.goto("/proxy/sites")
-  await page.getByRole("button", { name: "Open legacy.example.com" }).click()
+  await page.goto("/proxy/sites/legacy.example.com")
+  await page.getByRole("button", { name: "Edit", exact: true }).first().click()
   const sheet = page.getByRole("dialog", { name: "Edit legacy.example.com" })
-  await expect(sheet.getByLabel("Domains")).toHaveValue("legacy.example.com")
+  await expect(sheet.getByRole("textbox", { name: "Domains" })).toHaveValue("legacy.example.com")
   return sheet
 }
 
@@ -192,7 +194,7 @@ test("a disabled site is saved as it is, or enabled on purpose", async ({ page }
   )
   const sheet = await openLegacy(page)
   // A path written with root says where its files really come from.
-  await expect(sheet.getByText("/srv/legacy/static")).toBeVisible()
+  await expect(sheet.getByText("/srv/legacy/static", { exact: true })).toBeVisible()
   await expect(
     sheet.getByText(
       "Disabled. nginx tests it as if enabled, and it stays off until you enable it.",
@@ -211,7 +213,7 @@ test("a disabled site is saved as it is, or enabled on purpose", async ({ page }
   await expect(sheet).toBeHidden()
   expect(saved[0]).toMatchObject({ enable: "keep", overwrite: true, reload: false })
   expect((saved[0].spec as { locations: unknown[] }).locations).toEqual([
-    { path: "/static", root: "/srv/legacy", rootMode: "root", webSockets: false },
+    { path: "/static", root: "/srv/legacy", rootMode: "root", spa: false, webSockets: false },
   ])
 
   const again = await openLegacy(page)
@@ -535,10 +537,10 @@ test("a save nginx warns about says how many warnings and where", async ({ page 
       }),
     ),
   )
-  await page.goto("/proxy/sites")
-  await page.getByRole("button", { name: "Open app.example.com" }).click()
+  await page.goto("/proxy/sites/app.example.com")
+  await page.getByRole("button", { name: "Edit", exact: true }).first().click()
   const sheet = page.getByRole("dialog", { name: "Edit app.example.com" })
-  await expect(sheet.getByLabel("Domains")).toHaveValue("app.example.com")
+  await expect(sheet.getByRole("textbox", { name: "Domains" })).toHaveValue("app.example.com")
   await sheet.getByRole("button", { name: "Save and reload" }).click()
   await expect(page.getByText("app.example.com is live with 2 warnings")).toBeVisible()
   await expect(
@@ -556,10 +558,10 @@ test("a reload that fails after a clean test is reported as saved", async ({ pag
   await capture(page, "**/api/v1/proxy/sites/", (route) =>
     json(route, siteResult({ reloaded: false, reloadError })),
   )
-  await page.goto("/proxy/sites")
-  await page.getByRole("button", { name: "Open app.example.com" }).click()
+  await page.goto("/proxy/sites/app.example.com")
+  await page.getByRole("button", { name: "Edit", exact: true }).first().click()
   const sheet = page.getByRole("dialog", { name: "Edit app.example.com" })
-  await expect(sheet.getByLabel("Domains")).toHaveValue("app.example.com")
+  await expect(sheet.getByRole("textbox", { name: "Domains" })).toHaveValue("app.example.com")
   await sheet.getByRole("button", { name: "Save and reload" }).click()
   await expect(page.getByText("app.example.com saved and tested; reload failed")).toBeVisible()
   await expect(
@@ -601,7 +603,9 @@ test("a name another site serves is refused until the operator saves anyway", as
         ),
   )
   const sheet = await openNewSite(page)
-  await sheet.getByLabel("Domains").fill("www.legacy.example.com legacy.example.com")
+  await sheet
+    .getByRole("textbox", { name: "Domains" })
+    .fill("www.legacy.example.com legacy.example.com")
   await sheet.getByRole("button", { name: "Save and reload" }).click()
 
   // Announced, and focus moves onto it from the footer button that was
@@ -643,10 +647,10 @@ test("changing the domains puts a refused save's question away", async ({ page }
     }),
   )
   const sheet = await openNewSite(page)
-  await sheet.getByLabel("Domains").fill("store.example.com")
+  await sheet.getByRole("textbox", { name: "Domains" }).fill("store.example.com")
   await sheet.getByRole("button", { name: "Save and reload" }).click()
   await expect(sheet.getByRole("button", { name: "Save anyway" })).toBeVisible()
-  await sheet.getByLabel("Domains").fill("new.example.com")
+  await sheet.getByRole("textbox", { name: "Domains" }).fill("new.example.com")
   await expect(sheet.getByRole("button", { name: "Save anyway" })).toHaveCount(0)
 })
 
@@ -658,7 +662,7 @@ test("a file name typed by hand stays until it is matched to the domain again", 
     json(route, siteResult({ name: (body.spec as { name: string }).name })),
   )
   const sheet = await openNewSite(page)
-  const domains = sheet.getByLabel("Domains")
+  const domains = sheet.getByRole("textbox", { name: "Domains" })
   const name = sheet.getByLabel("File name")
   await domains.fill("blog.example.com")
   await expect(name).toHaveValue("blog.example.com")
@@ -692,7 +696,7 @@ test("a new site whose file name is already a site's is stopped before saving", 
 }) => {
   await mockProxy(page, { included: true })
   const sheet = await openNewSite(page)
-  await sheet.getByLabel("Domains").fill("app.example.com")
+  await sheet.getByRole("textbox", { name: "Domains" }).fill("app.example.com")
   await expect(
     sheet.getByText(
       "A site called app.example.com already exists. Pick another name, or open that site to edit it.",
@@ -716,7 +720,7 @@ test("a new site whose name another site's link holds is stopped before saving",
   const sheet = await openNewSite(page)
   // The name follows the domain, so the operator never typed it: saving it
   // would have unlinked the hand-written site that link enables.
-  await sheet.getByLabel("Domains").fill("wiki.example.com")
+  await sheet.getByRole("textbox", { name: "Domains" }).fill("wiki.example.com")
   await expect(
     sheet.getByText(
       `${LINKED_ELSEWHERE["wiki.example.com"]}, so the name is taken. Pick another name.`,
@@ -740,7 +744,7 @@ test("the new-site form opens with the keyboard in Domains, above the presets", 
 }) => {
   await mockProxy(page, { included: true })
   const sheet = await openNewSite(page)
-  const domains = sheet.getByLabel("Domains")
+  const domains = sheet.getByRole("textbox", { name: "Domains" })
   await expect(domains).toBeFocused()
   await page.keyboard.type("typed.example.com")
   await expect(domains).toHaveValue("typed.example.com")
@@ -754,12 +758,12 @@ test("the new-site form opens with the keyboard in Domains, above the presets", 
   await discard(page)
   await page.setViewportSize({ width: 390, height: 844 })
   const phone = await openNewSite(page)
-  await expect(phone.getByLabel("Domains")).toBeFocused()
-  await expect(phone.getByLabel("Domains")).toBeInViewport({ ratio: 1 })
+  await expect(phone.getByRole("textbox", { name: "Domains" })).toBeFocused()
+  await expect(phone.getByRole("textbox", { name: "Domains" })).toBeInViewport({ ratio: 1 })
   await expect(phone.getByLabel("File name")).toBeInViewport({ ratio: 1 })
 
   // A preset's note is brought into view under the card that was picked.
-  await phone.getByLabel("Domains").fill("dash.example.com")
+  await phone.getByRole("textbox", { name: "Domains" }).fill("dash.example.com")
   const jellyfin = phone.getByRole("button", { name: /^Jellyfin/ })
   await jellyfin.scrollIntoViewIfNeeded()
   await jellyfin.click()
@@ -780,7 +784,7 @@ test("a new site's default upstream is not warned about until somebody sets it",
   const listed = page.waitForResponse((r) => r.url().endsWith("/api/v1/ports"))
   const sheet = await openNewSite(page)
   await listed
-  await sheet.getByLabel("Domains").fill("fresh.example.com")
+  await sheet.getByRole("textbox", { name: "Domains" }).fill("fresh.example.com")
   const upstream = sheet.getByLabel("Send it to")
   await expect(upstream).toHaveValue("http://127.0.0.1:3000")
   await expect(
@@ -801,7 +805,7 @@ test("a new site's default upstream is not warned about until somebody sets it",
 
   // So is typing it, and so is a link that names it.
   const typed = await openNewSite(page)
-  await typed.getByLabel("Domains").fill("typed.example.com")
+  await typed.getByRole("textbox", { name: "Domains" }).fill("typed.example.com")
   await expect(typed.getByText(/Nothing is listening/)).toHaveCount(0)
   await typed.getByLabel("Send it to").fill("")
   await typed.getByLabel("Send it to").pressSequentially("http://127.0.0.1:3000")
@@ -827,7 +831,7 @@ test("a kind picked by hand after a preset lets the preset go", async ({ page })
     }),
   )
   const sheet = await openNewSite(page)
-  await sheet.getByLabel("Domains").fill("kinds.example.com")
+  await sheet.getByRole("textbox", { name: "Domains" }).fill("kinds.example.com")
 
   const spa = sheet.getByRole("button", { name: /^Single-page app/ })
   await spa.click()
@@ -854,8 +858,8 @@ test("a kind picked by hand after a preset lets the preset go", async ({ page })
 
 test("an existing site shows its file read-only and offers no presets", async ({ page }) => {
   await mockProxy(page, { included: true })
-  await page.goto("/proxy/sites")
-  await page.getByRole("button", { name: "Open app.example.com" }).click()
+  await page.goto("/proxy/sites/app.example.com")
+  await page.getByRole("button", { name: "Edit", exact: true }).first().click()
   const sheet = page.getByRole("dialog", { name: "Edit app.example.com" })
   const name = sheet.getByLabel("File name")
   await expect(name).toHaveValue("app.example.com")
@@ -882,7 +886,7 @@ test("a preset fills in what its application needs and says what to set on its s
     json(route, siteResult({ name: (body.spec as { name: string }).name })),
   )
   const sheet = await openNewSite(page)
-  await sheet.getByLabel("Domains").fill("home.example.com")
+  await sheet.getByRole("textbox", { name: "Domains" }).fill("home.example.com")
 
   const homeAssistant = sheet.getByRole("button", { name: /^Home Assistant/ })
   await homeAssistant.click()
@@ -951,7 +955,7 @@ test("picking a running service fills the upstream, and an unpublished port says
     return json(route, runningContainers)
   })
   const sheet = await openNewSite(page)
-  await sheet.getByLabel("Domains").fill("shop.example.com")
+  await sheet.getByRole("textbox", { name: "Domains" }).fill("shop.example.com")
   await sheet.getByRole("button", { name: "Pick from running services" }).click()
 
   const list = page.getByRole("listbox", { name: "Running services" })
@@ -985,7 +989,7 @@ test("a loopback upstream with nothing listening is warned about, not refused", 
 }) => {
   await mockProxy(page, { included: true })
   const sheet = await openNewSite(page)
-  await sheet.getByLabel("Domains").fill("idle.example.com")
+  await sheet.getByRole("textbox", { name: "Domains" }).fill("idle.example.com")
   const upstream = sheet.getByLabel("Send it to")
   // node listens on 127.0.0.1:3000 in the mocked /ports.
   await expect(upstream).toHaveValue("http://127.0.0.1:3000")
@@ -1009,7 +1013,7 @@ test("a link from elsewhere opens the new-site form with its upstream and domain
     "/proxy/sites?new=1&upstream=http%3A%2F%2F127.0.0.1%3A8081&domain=shop.example.com",
   )
   const sheet = page.getByRole("dialog", { name: "New site" })
-  await expect(sheet.getByLabel("Domains")).toHaveValue("shop.example.com")
+  await expect(sheet.getByRole("textbox", { name: "Domains" })).toHaveValue("shop.example.com")
   await expect(sheet.getByLabel("Send it to")).toHaveValue("http://127.0.0.1:8081")
   await expect(sheet.getByLabel("File name")).toHaveValue("shop.example.com")
   // Read once: the address no longer asks, so closing the form closes it.
@@ -1022,7 +1026,9 @@ test("a link from elsewhere opens the new-site form with its upstream and domain
 
   // The next New site starts blank, not from the link.
   await page.getByRole("button", { name: "New site", exact: true }).click()
-  await expect(page.getByRole("dialog", { name: "New site" }).getByLabel("Domains")).toHaveValue("")
+  await expect(
+    page.getByRole("dialog", { name: "New site" }).getByRole("textbox", { name: "Domains" }),
+  ).toHaveValue("")
 })
 
 test("a read-only account following the link gets no form", async ({ page }) => {
@@ -1086,10 +1092,10 @@ async function appOnDisk(
 }
 
 async function openApp(page: Page) {
-  await page.goto("/proxy/sites")
-  await page.getByRole("button", { name: "Open app.example.com" }).click()
+  await page.goto("/proxy/sites/app.example.com")
+  await page.getByRole("button", { name: "Edit", exact: true }).first().click()
   const sheet = page.getByRole("dialog", { name: "Edit app.example.com" })
-  await expect(sheet.getByLabel("Domains")).toHaveValue("app.example.com")
+  await expect(sheet.getByRole("textbox", { name: "Domains" })).toHaveValue("app.example.com")
   return sheet
 }
 
@@ -1222,7 +1228,7 @@ test("closing with unsaved changes asks first, and only then", async ({ page }) 
   await page.keyboard.press("Escape")
   await expect(fresh).toBeHidden()
   const typed = await openNewSite(page)
-  await typed.getByLabel("Domains").fill("new.example.com")
+  await typed.getByRole("textbox", { name: "Domains" }).fill("new.example.com")
   await page.keyboard.press("Escape")
   await expect(ask).toContainText("This new site is not saved.")
   await ask.getByRole("button", { name: "Discard" }).click()
@@ -1250,8 +1256,7 @@ test("a draft survives a trip to Certificates, and a change on disk under it is 
 
   await page.goto("/proxy/certificates")
   await expect(page.locator("[data-slot='stat-grid']")).toBeVisible()
-  await page.goto("/proxy/sites")
-  sheet = page.getByRole("dialog", { name: "Edit app.example.com" })
+  sheet = await openApp(page)
   await expect(sheet.getByLabel("Send it to")).toHaveValue("http://127.0.0.1:4000")
   await expect(sheet.getByText("unsaved", { exact: true })).toBeVisible()
   await expect(sheet.getByRole("alert")).toHaveCount(0)
@@ -1261,7 +1266,7 @@ test("a draft survives a trip to Certificates, and a change on disk under it is 
   version = "d2"
   await page.goto("/proxy/certificates")
   await expect(page.locator("[data-slot='stat-grid']")).toBeVisible()
-  await page.goto("/proxy/sites")
+  sheet = await openApp(page)
   const banner = sheet.getByRole("alert")
   await expect(banner).toContainText("app.example.com changed on disk")
   await expect(banner).toBeFocused()

@@ -20,7 +20,9 @@ type List = (typeof accessLists)[number] & {
   handWritten?: string
 }
 
-const staging = [{ name: "staging", path: "/etc/nginx/jd-auth/staging", users: ["operator"] }]
+const staging = [
+  { name: "staging", path: "/etc/nginx/jd-auth/staging", users: ["operator"], usedBy: [] },
+]
 
 const passed = { valid: true, output: "", command: "nginx -t", diagnostics: [], warnings: 0 }
 

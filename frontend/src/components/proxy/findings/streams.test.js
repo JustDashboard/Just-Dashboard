@@ -229,7 +229,7 @@ describe("streamFindings", () => {
         title:
           "nginx refuses every reload: stream held asks for port 7000/tcp, which postgres (pid 900) holds",
         detail: `${held.stateReason} nginx logged: ${held.bindError}`,
-        href: "/proxy/streams",
+        href: "/proxy/streams?stream=held",
       })
       const site = stream({
         ...held,

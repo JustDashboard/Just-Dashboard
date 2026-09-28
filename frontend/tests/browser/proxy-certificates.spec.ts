@@ -181,7 +181,7 @@ test("a DNS issuance sends its propagation wait and its token with the request, 
   const dialog = page.getByRole("dialog")
   await dialog.getByLabel("Domains").fill("*.example.com")
   await dialog.getByLabel("Contact email").fill("ops@example.com")
-  await dialog.getByRole("combobox").click()
+  await dialog.getByRole("combobox", { name: "DNS provider" }).click()
   await page.getByRole("option", { name: "Cloudflare" }).click()
   await dialog.getByLabel("Credentials").fill("dns_cloudflare_api_token = t0ken")
 
@@ -896,7 +896,7 @@ test("the DNS issue form fits a phone with its wait field", async ({ page }) => 
   await page.getByRole("button", { name: "Issue certificate", exact: true }).click()
   const dialog = page.getByRole("dialog")
   await dialog.getByLabel("Domains").fill("*.example.com")
-  await dialog.getByRole("combobox").click()
+  await dialog.getByRole("combobox", { name: "DNS provider" }).click()
   await page.getByRole("option", { name: "Cloudflare" }).click()
   await expect(dialog.getByLabel("Propagation wait")).toBeVisible()
   await expect(dialog).toBeInViewport({ ratio: 1 })

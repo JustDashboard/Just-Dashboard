@@ -58,7 +58,7 @@ func TestValidateAccessListRefusesWhatWouldNotMeanWhatItSays(t *testing.T) {
 		{"twice, spelled two ways", AccessListSpec{Deny: []string{"10.0.0.1", "10.0.0.1/32"}}, "10.0.0.1/32 is on the deny list twice"},
 		{"too many", AccessListSpec{Allow: many}, "the most a list takes is 512"},
 		{"a path for a password file", AccessListSpec{AuthFile: "../etc/shadow"}, "is not the name of a password file"},
-		{"a quote in the prompt", AccessListSpec{AuthFile: "staging", Realm: `say "hi"`}, "may not contain quotes"},
+		{"a quote in the prompt", AccessListSpec{AuthFile: "staging", Realm: `say "hi"`}, "may not contain double quotes"},
 		{"a variable in the prompt", AccessListSpec{AuthFile: "staging", Realm: "$host"}, "may not contain"},
 		{"a newline in the prompt", AccessListSpec{AuthFile: "staging", Realm: "a\nb"}, "control characters"},
 		{"off as the prompt", AccessListSpec{AuthFile: "staging", Realm: "Off"}, "turns the password off"},
