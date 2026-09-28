@@ -371,11 +371,6 @@ func classifyDial(err error) UpstreamState {
 	return UpstreamError
 }
 
-func isTimeout(err error) bool {
-	var ne net.Error
-	return errors.As(err, &ne) && ne.Timeout()
-}
-
 type listenerOwners struct {
 	local map[string]bool
 	ports map[string]map[string]string // port → address → process

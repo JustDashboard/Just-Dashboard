@@ -194,7 +194,7 @@ func defaultFor(sites []VHost, port int) (*VHost, bool) {
 	for i := range sites {
 		for _, l := range sites[i].Listen {
 			fields := strings.Fields(l)
-			if len(fields) > 0 && listenPort(fields[0]) == port &&
+			if len(fields) > 0 && listenPortNumber(fields[0]) == port &&
 				(slices.Contains(fields[1:], "default_server") || slices.Contains(fields[1:], "default")) {
 				return &sites[i], true
 			}
@@ -213,17 +213,17 @@ func listensOn(listen []string, port int) bool {
 		return port == 80
 	}
 	for _, l := range listen {
-		if fields := strings.Fields(l); len(fields) > 0 && listenPort(fields[0]) == port {
+		if fields := strings.Fields(l); len(fields) > 0 && listenPortNumber(fields[0]) == port {
 			return true
 		}
 	}
 	return false
 }
 
-// listenPort reads the port of a listen address: "443", "*:443",
+// listenPortNumber reads the port of a listen address: "443", "*:443",
 // "[::]:443", "10.0.0.1:443", or a bare address, which is port 80. A unix
 // socket is no port.
-func listenPort(addr string) int {
+func listenPortNumber(addr string) int {
 	if strings.HasPrefix(addr, "unix:") {
 		return 0
 	}
