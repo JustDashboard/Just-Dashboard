@@ -480,8 +480,9 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   certbot. **Lineages are read from files** (`certbot_lineages.go`: `renewal/*.conf` and the certificate
   each names), never from `certbot certificates`, which takes certbot's lock: while any certbot ran, the
   page said certbot managed nothing and nothing renewed it. Certbot jobs start through
-  `Manager.StartExclusive("certbot.")`, so a second one is a 409 `certbot_busy` naming the run in the
-  way, and a job whose certbot exited 0 without changing any lineage's serial says the certificate was
+  `Manager.StartExclusive("certbot.")`, so a second one — issue, renew, revoke, delete, a renewal run,
+  a DNS test or an install — is a 409 `certbot_busy` naming the run in the way (the Certificates page
+  reads the same state from `GET /jobs/` to disable its certbot verbs beforehand), and a job whose certbot exited 0 without changing any lineage's serial says the certificate was
   kept rather than reading as done. DNS credentials sent with an issuance are checked with the request
   (`CheckDNSCredentials`) and saved by the job as its first step, so a refused or busy request leaves no
   token on disk. `CheckDNSCredentials` also checks each provider's file against the keys its plugin

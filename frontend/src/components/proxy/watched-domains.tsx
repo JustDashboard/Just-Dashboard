@@ -25,12 +25,20 @@ type Watched = { id: number; domain: string; port: number; certificate?: Certifi
  * the installed certificates because a live handshake can disagree with the
  * file on disk, and that disagreement is what they are for.
  */
-export function WatchedDomains({ admin }: { admin: boolean }) {
+export function WatchedDomains({
+  admin,
+  added = 0,
+}: {
+  admin: boolean
+  /** Bumped when a domain is watched from elsewhere on the page, so the list shows it. */
+  added?: number
+}) {
   const router = useRouter()
   const [domain, setDomain] = useState("")
   const watched = usePoll(
     (signal) => get<Watched[]>("/certificates/watched", undefined, signal),
     300_000,
+    [added],
   )
 
   const addDomain = async () => {

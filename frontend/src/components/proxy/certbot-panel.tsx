@@ -37,7 +37,7 @@ import type {
 import { useViewState } from "@/lib/view-state"
 import { useCopy } from "@/hooks/use-copy"
 import { usePoll } from "@/hooks/use-poll"
-import { useConfirm } from "@/components/confirm-dialog"
+import { useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
 import { Field, OptionList, OptionRow } from "@/components/form"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { ProductLogo, ProductLogos } from "@/components/product-logo"
@@ -125,6 +125,45 @@ export function useRenew(attach: (job: Job) => void) {
  * one fail. Either brings the dry run out of the menu, since it is how to
  * find out whether a fix worked.
  */
+/**
+ * The question before a forced renewal: it spends one of the duplicate
+ * certificates the authority allows per week for the same names.
+ */
+export function forceRenewal(name: string, run: () => void): ConfirmRequest {
+  return {
+    title: `Force renewal of ${name}`,
+    confirmLabel: "Renew now",
+    description: (
+      <p>
+        certbot normally refuses to renew a certificate that is not due. Forcing it spends one of
+        the five duplicate certificates Let&rsquo;s Encrypt allows per week for this set of names.
+      </p>
+    ),
+    action: async () => run(),
+  }
+}
+
+/**
+ * Why every certbot verb is disabled, with the way to the run holding its
+ * lock: started from another tab, or before this page loaded, it is not the
+ * one on screen.
+ */
+export function CertbotBusy({ onOpen, className }: { onOpen?: () => void; className?: string }) {
+  return (
+    <p className={cn("text-hint text-muted-foreground", className)}>
+      certbot is busy
+      {onOpen && (
+        <>
+          {" — "}
+          <Button variant="link" size="xs" className="h-auto p-0 text-hint" onClick={onOpen}>
+            open
+          </Button>
+        </>
+      )}
+    </p>
+  )
+}
+
 export function CertbotLineages({
   state,
   admin,
@@ -135,10 +174,12 @@ export function CertbotLineages({
   onRevoke,
   onDelete,
   onShowLog,
+  onOpenJob,
 }: {
   state: CertbotState
   admin: boolean
   busy: string
+  /** The running certbot job, wherever it was started, or else the one on screen. */
   job: Job | null
   onRenew: (name: string, dryRun: boolean, force?: boolean) => void
   /** Opens the real issuance for a test certificate's names; absent where none can be issued. */
@@ -148,6 +189,8 @@ export function CertbotLineages({
   onDelete: (name: string) => void
   /** Opens the renewal schedule's log. */
   onShowLog: () => void
+  /** Puts the running certbot job in the console. */
+  onOpenJob?: () => void
 }) {
   const { confirm, dialog } = useConfirm()
   const running = certbotRunning(job)
@@ -228,19 +271,7 @@ export function CertbotLineages({
         label: "Force renewal",
         icon: Warning,
         disabled: waiting,
-        run: () =>
-          confirm({
-            title: `Force renewal of ${name}`,
-            confirmLabel: "Renew now",
-            description: (
-              <p>
-                certbot normally refuses to renew a certificate that is not due. Forcing it spends
-                one of the five duplicate certificates Let&rsquo;s Encrypt allows per week for this
-                set of names.
-              </p>
-            ),
-            action: async () => onRenew(name, false, true),
-          }),
+        run: () => confirm(forceRenewal(name, () => onRenew(name, false, true))),
       },
       remove,
       revoke,
@@ -248,11 +279,7 @@ export function CertbotLineages({
   }
   return (
     <>
-      {admin && running && (
-        <p className="pt-3 pb-1 text-hint text-muted-foreground">
-          certbot is running. Its other actions wait until it finishes.
-        </p>
-      )}
+      {admin && running && <CertbotBusy onOpen={onOpenJob} className="pt-3 pb-1" />}
       <ul aria-label="certbot lineages" className="animate-rise divide-y divide-hairline">
         {state.certs.map((cert) => {
           const activity = lineageActivity(job, cert) ?? (busy === cert.name ? "Renewing…" : "")
@@ -790,6 +817,7 @@ export function IssueDialog({
   onOpenChange,
   initialDomains,
   initialStaging = true,
+  initialTarget,
   hasNginx,
   plugins,
   providers,
@@ -803,6 +831,11 @@ export function IssueDialog({
   onOpenChange: (open: boolean) => void
   initialDomains?: string
   initialStaging?: boolean
+  /**
+   * The lineage the form starts on: its names are then the lineage's new set,
+   * which certbot's --cert-name replaces rather than adds to.
+   */
+  initialTarget?: string
   hasNginx: boolean
   /** certbot's lineages, which the form can add names to. */
   certs?: CertbotCert[]
@@ -819,11 +852,12 @@ export function IssueDialog({
 }) {
   return (
     <IssueDialogBody
-      key={`${open}:${initialDomains ?? ""}:${initialStaging}`}
+      key={`${open}:${initialDomains ?? ""}:${initialStaging}:${initialTarget ?? ""}`}
       open={open}
       onOpenChange={onOpenChange}
       initialDomains={initialDomains}
       initialStaging={initialStaging}
+      initialTarget={initialTarget}
       hasNginx={hasNginx}
       plugins={plugins}
       providers={providers}
@@ -841,6 +875,7 @@ function IssueDialogBody({
   onOpenChange,
   initialDomains,
   initialStaging,
+  initialTarget,
   hasNginx,
   plugins,
   providers,
@@ -854,6 +889,7 @@ function IssueDialogBody({
   onOpenChange: (open: boolean) => void
   initialDomains?: string
   initialStaging: boolean
+  initialTarget?: string
   hasNginx: boolean
   plugins?: string[]
   providers: DNSProvider[]
@@ -888,7 +924,7 @@ function IssueDialogBody({
   const nginxSites = (sites.data ?? []).filter((v) => v.kind === "nginx" && siteNames(v).length)
   const [site, setSite] = useState("")
   // "" is a new certificate; a lineage's name adds the names to it.
-  const [target, setTarget] = useState("")
+  const [target, setTarget] = useState(initialTarget ?? "")
   const [newName, setNewName] = useState("")
   const certName = target || newName.trim()
   const [keyType, setKeyType] = useState<"" | "ecdsa" | "rsa">("")

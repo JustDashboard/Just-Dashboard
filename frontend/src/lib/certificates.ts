@@ -1,5 +1,6 @@
 import type {
   CertbotCert,
+  Certificate,
   CertbotState,
   HookFailure,
   Job,
@@ -7,6 +8,7 @@ import type {
   RenewalHealth,
   ServedCertificate,
 } from "@/lib/types"
+import { calendarDate } from "@/lib/format"
 import type { Tone } from "@/components/tone"
 
 /**
@@ -383,4 +385,115 @@ export function hookFailureText(failure: HookFailure): string {
     : failure.command
   const hook = command ? `${failure.kind} ${command}` : failure.kind
   return `${hook} exited ${failure.code}${failure.output ? `: ${failure.output}` : "."}`
+}
+
+/**
+ * Whether a certificate name covers a host name, as a browser decides it: the
+ * same name in any case, or a wildcard standing for exactly one label, so
+ * *.example.com covers api.example.com but neither a.b.example.com nor
+ * example.com itself.
+ */
+export function coversName(pattern: string, name: string): boolean {
+  const p = pattern.trim().toLowerCase().replace(/\.$/, "")
+  const n = name.trim().toLowerCase().replace(/\.$/, "")
+  if (!p || !n) return false
+  if (!p.startsWith("*.")) return p === n
+  const dot = n.indexOf(".")
+  return dot > 0 && n.slice(dot + 1) === p.slice(2)
+}
+
+/** Where a certificate comes from, as the inventory's chips group them. */
+export type CertSource = "certbot" | "imported" | "caddy" | "site"
+
+export function certSource(cert: Pick<Certificate, "source">): CertSource {
+  if (cert.source === "certbot" || cert.source === "imported" || cert.source === "caddy") {
+    return cert.source
+  }
+  return "site"
+}
+
+/**
+ * The one state a certificate is in, worst first: a test certificate is
+ * refused whatever its days, so it is not also counted as expiring.
+ */
+export type CertState = "unreadable" | "test" | "expired" | "expiring" | "valid"
+
+export function certState(cert: Certificate): CertState {
+  if (cert.error) return "unreadable"
+  if (cert.staging) return "test"
+  if (cert.expired) return "expired"
+  if (cert.expiring) return "expiring"
+  return "valid"
+}
+
+const STATE_RANK: Record<CertState, number> = {
+  unreadable: 0,
+  test: 1,
+  expired: 1,
+  expiring: 2,
+  valid: 3,
+}
+
+export type CertSort = "urgency" | "expiry" | "name"
+
+export const CERT_SORTS: Record<CertSort, (a: Certificate, b: Certificate) => number> = {
+  urgency: (a, b) =>
+    STATE_RANK[certState(a)] - STATE_RANK[certState(b)] ||
+    a.daysLeft - b.daysLeft ||
+    a.name.localeCompare(b.name),
+  // An unreadable certificate has no date: last, where it does not pass for
+  // the soonest to expire.
+  expiry: (a, b) =>
+    Number(Boolean(a.error)) - Number(Boolean(b.error)) ||
+    Date.parse(a.notAfter) - Date.parse(b.notAfter) ||
+    a.name.localeCompare(b.name),
+  name: (a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path),
+}
+
+/**
+ * Whether a certificate answers the search box: a substring of anything the
+ * list shows, or a host name one of its names covers — api.example.com finds
+ * the *.example.com certificate, which no substring of it spells.
+ */
+export function certMatches(cert: Certificate, query: string): boolean {
+  const needle = query.trim().toLowerCase()
+  if (!needle) return true
+  return (
+    [cert.name, cert.issuer, cert.path, ...cert.domains, ...cert.usedBy].some((value) =>
+      value.toLowerCase().includes(needle),
+    ) || cert.domains.some((domain) => coversName(domain, needle))
+  )
+}
+
+/**
+ * When certbot's run starts renewing a certificate: recent releases once a
+ * third of its term is left, older ones at a flat thirty days — the same day
+ * for the ninety-day certificates ACME authorities issue. A lineage's own
+ * renew_before_expiry is not read.
+ */
+export function renewalDue(cert: Pick<Certificate, "notBefore" | "notAfter">): Date {
+  const end = Date.parse(cert.notAfter)
+  const start = Date.parse(cert.notBefore)
+  const term = Number.isFinite(start) && start < end ? end - start : 90 * DAY
+  return new Date(end - term / 3)
+}
+
+/** The renewal that renews only a due certificate, named with the day it becomes due. */
+export function renewIfDueLabel(
+  cert: Pick<Certificate, "notBefore" | "notAfter">,
+  now: number = Date.now(),
+): string {
+  const due = renewalDue(cert)
+  if (due.getTime() <= now) return "Renew, due now"
+  return `Renew if due (from ${calendarDate(due.toISOString())})`
+}
+
+/** The two lines a site's server block serves a certificate with. */
+export function sslDirectives(certPath: string, keyPath: string): string {
+  return `ssl_certificate ${certPath};\nssl_certificate_key ${keyPath};\n`
+}
+
+/** The running certbot job among the host's jobs, whoever started it. */
+export function runningCertbotJob(jobs: Job[] | undefined): Job | null {
+  return jobs?.find((job) => certbotRunning(job)) ?? null
 }

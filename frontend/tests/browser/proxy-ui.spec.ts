@@ -290,7 +290,7 @@ test("certificate cards filter, reveal complete details and link to their owning
 }) => {
   await mockProxy(page, { included: true })
   await page.goto("/proxy/certificates")
-  await page.getByPlaceholder("Certificate, domain or issuer").fill("app.example.com")
+  await page.getByPlaceholder("Name, a host it covers, or issuer").fill("app.example.com")
   const list = page.getByRole("list", { name: "Installed certificates" })
   await expect(list.locator("[data-slot='choice-row']")).toHaveCount(1)
   await list.getByRole("button", { name: "Inspect app.example.com" }).click()
@@ -300,11 +300,11 @@ test("certificate cards filter, reveal complete details and link to their owning
     "href",
     "/proxy/sites?site=app.example.com",
   )
-  await expect(detail.getByRole("link", { name: "TLS report" })).toHaveAttribute(
-    "href",
-    "/proxy/tls?domain=app.example.com",
-  )
-  await expect(detail.getByRole("button", { name: "Copy path" })).toBeVisible()
+  await detail.getByRole("button", { name: "More actions for app.example.com" }).click()
+  const menu = page.getByRole("menu")
+  await expect(menu.getByRole("menuitem", { name: "Copy path" })).toBeVisible()
+  await menu.getByRole("menuitem", { name: "TLS report for app.example.com" }).click()
+  await expect(page).toHaveURL(/\/proxy\/tls\?domain=app\.example\.com$/)
 })
 
 test("a watched service retains its port when opening the live report", async ({ page }) => {
@@ -343,7 +343,11 @@ test("read-only users can inspect certificates without proxy mutation controls o
   await page.goto("/proxy/certificates")
   await expect(page.getByRole("button", { name: "Issue certificate", exact: true })).toHaveCount(0)
   await page.getByRole("button", { name: "Inspect app.example.com", exact: true }).click()
-  await expect(page.getByRole("dialog").getByRole("link", { name: "TLS report" })).toHaveCount(0)
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "More actions for app.example.com" })
+    .click()
+  await expect(page.getByRole("menu").getByRole("menuitem", { name: /TLS report/ })).toHaveCount(0)
   await page.goto("/proxy/tls")
   await expect(page.getByRole("button", { name: "Scan", exact: true })).toBeDisabled()
   await expect(page.getByText("Scanning needs an administrator")).toBeVisible()
