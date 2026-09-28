@@ -10,4 +10,5 @@ import (
 // engine's routes.
 func (s *Server) mountProxyInsightRoutes(r chi.Router) {
 	s.mountProxyMetricRoutes(r)
+	s.mountServedCertificateRoutes(r)
 }

@@ -501,6 +501,19 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   recorded, a site file that resolves outside the proxy's directories is recorded without content, and
   the htpasswd writers do not call it; a recorder that fails is logged and the change stands.
   No recorder is attached yet.
+- **Served against disk certificates** (`drift.go`, `api/handlers_proxy_drift.go`). `GET /proxy/tls/drift`
+  is readable by every signed-in account, like the sites list it is drawn from. For each TLS `server`
+  block of an enabled nginx site (parsed with `ParseNginxFile`) it handshakes with the block's first
+  `ssl` listen, sending its first exact `server_name` as SNI with `InsecureSkipVerify`, and compares the
+  leaf's SHA-256 with every `ssl_certificate` the block names: `ok`; `stale` (another certificate that
+  covers the name: renewed, not reloaded); `mismatch` (another site's file, named in `servedBy`, or one
+  that does not cover the name); `unreachable`; `skipped` with the reason (no exact name, a certificate
+  chosen by a variable, a unix or named listen, an unreadable file). Only this host's addresses are
+  dialled — a wildcard listen becomes `127.0.0.1`/`::1`, a specific address must be loopback or one of
+  the host's interface addresses — and never anything from the request. The result is cached five
+  minutes and dropped on any configuration change or reload; `?refresh=1` runs it now and needs
+  `system.admin`. The overview polls it every five minutes, shows stale and mismatch as findings, and
+  gives an administrator's stale finding Reload nginx, after which it asks for a fresh check.
 - **Live request metrics come from nginx's stub_status** (`stubstatus.go`, `api/handlers_proxy_metrics.go`).
   `GET /proxy/metrics` is open to every signed-in account — nginx's counters are no secret, and the
   sampler reads only the address in the dashboard's own file, so no caller can aim it — and

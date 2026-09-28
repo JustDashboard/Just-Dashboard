@@ -4,13 +4,14 @@ import {
   type CertificateFindingInput,
 } from "@/components/proxy/findings/certificates"
 import { engineFindings, type EngineFindingInput } from "@/components/proxy/findings/engine"
-import { insightFindings } from "@/components/proxy/findings/insights"
+import { insightFindings, type InsightFindingInput } from "@/components/proxy/findings/insights"
 import { portFindings, type PortFindingInput } from "@/components/proxy/findings/ports"
 import type { ProxyFinding } from "@/components/proxy/findings/shared"
 import { siteFindings, type SiteFindingInput } from "@/components/proxy/findings/sites"
 import { streamFindings, type StreamFindingInput } from "@/components/proxy/findings/streams"
 
 export { DANGEROUS_PORTS, type ProxyFinding } from "@/components/proxy/findings/shared"
+export { SERVED_STALE } from "@/components/proxy/findings/insights"
 export {
   CONFIG_TEST,
   unreadableSource,
@@ -30,7 +31,8 @@ export function foldProxyFindings(
     SiteFindingInput &
     StreamFindingInput &
     PortFindingInput &
-    EngineFindingInput,
+    EngineFindingInput &
+    InsightFindingInput,
 ): ProxyFinding[] {
   return [
     ...certificateFindings(input),
@@ -38,7 +40,7 @@ export function foldProxyFindings(
     ...streamFindings(input),
     ...portFindings(input),
     ...engineFindings(input),
-    ...insightFindings(),
+    ...insightFindings(input),
   ].sort((a, b) => RANK[b.level] - RANK[a.level])
 }
 
