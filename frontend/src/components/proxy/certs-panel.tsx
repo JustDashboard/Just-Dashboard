@@ -28,6 +28,7 @@ import {
   ALL_CERTS,
   CertbotLineages,
   CertbotMissing,
+  CertbotRuntimeLine,
   DnsProvidersPanel,
   IssueDialog,
   RenewalNotice,
@@ -87,11 +88,14 @@ export function CertificatesPage() {
       : ""
   const { refresh: refreshCerts } = certs
   const { refresh: refreshCertbot } = certbot
+  // An install or a test changes which plugins and credentials are there.
+  const { refresh: refreshProviders } = providers
   useEffect(() => {
     if (!ended) return
     refreshCerts()
     refreshCertbot()
-  }, [ended, refreshCerts, refreshCertbot])
+    if (admin) refreshProviders()
+  }, [ended, admin, refreshCerts, refreshCertbot, refreshProviders])
   const { busy, renew } = useRenew(console_.attach)
   const certbotBusy = certbotRunning(console_.job)
   const [logOpen, setLogOpen] = useState(false)
@@ -399,13 +403,14 @@ export function CertificatesPage() {
                 <RenewalNotice state={certbot.data} admin={admin} onChanged={certbot.refresh} />
               )}
               {certbotGone ? (
-                <CertbotMissing />
+                <CertbotMissing onInstall={admin ? console_.attach : undefined} />
               ) : certbot.loading ? (
                 <LoadingRows rows={3} />
               ) : certbot.error ? (
                 <ErrorState error={certbot.error} />
               ) : certbot.data ? (
                 <>
+                  <CertbotRuntimeLine state={certbot.data} />
                   <RenewalRecord
                     state={certbot.data}
                     admin={admin}
@@ -440,6 +445,10 @@ export function CertificatesPage() {
             <DnsProvidersPanel
               providers={providers.data}
               admin={admin}
+              certs={certbot.data?.certs ?? []}
+              installs={certbot.data?.installs}
+              certbotBusy={certbotBusy}
+              onJob={console_.attach}
               onChanged={providers.refresh}
             />
           )}
@@ -463,6 +472,11 @@ export function CertificatesPage() {
             initialDomains={issue.domains}
             initialStaging={issue.staging}
             hasNginx={hasNginx}
+            plugins={
+              certbot.data && !certbot.data.runtime.pluginsError
+                ? certbot.data.runtime.plugins
+                : undefined
+            }
             providers={providers.data ?? []}
             directory={certbot.data?.directory}
             testAuthority={testAuthority}

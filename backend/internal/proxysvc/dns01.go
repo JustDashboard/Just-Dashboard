@@ -2,10 +2,12 @@ package proxysvc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -137,8 +139,138 @@ func CheckDNSCredentials(key, content string) (DNSCredentials, error) {
 		if err != nil {
 			return DNSCredentials{}, err
 		}
+	} else if err := ValidateDNSCredentials(provider, content); err != nil {
+		return DNSCredentials{}, err
 	}
 	return DNSCredentials{provider: provider, content: content}, nil
+}
+
+// dnsCredentialKeys is what each plugin reads from its credentials file: every
+// group of keys is one way to authenticate, and one group must be complete.
+// A token pasted under the wrong name is saved happily and fails the first
+// challenge as "missing credential", minutes and a rate-limited attempt later.
+var dnsCredentialKeys = map[string]struct {
+	accepted []string
+	groups   [][]string
+}{
+	"cloudflare": {
+		accepted: []string{"dns_cloudflare_api_token", "dns_cloudflare_email", "dns_cloudflare_api_key"},
+		groups:   [][]string{{"dns_cloudflare_api_token"}, {"dns_cloudflare_email", "dns_cloudflare_api_key"}},
+	},
+	"digitalocean": {
+		accepted: []string{"dns_digitalocean_token"},
+		groups:   [][]string{{"dns_digitalocean_token"}},
+	},
+	"linode": {
+		accepted: []string{"dns_linode_key", "dns_linode_version"},
+		groups:   [][]string{{"dns_linode_key"}},
+	},
+	"ovh": {
+		accepted: []string{"dns_ovh_endpoint", "dns_ovh_application_key", "dns_ovh_application_secret", "dns_ovh_consumer_key"},
+		groups:   [][]string{{"dns_ovh_endpoint", "dns_ovh_application_key", "dns_ovh_application_secret", "dns_ovh_consumer_key"}},
+	},
+	"gandi": {
+		// certbot-plugin-gandi reads a personal access token, or the
+		// LiveDNS API key it replaced.
+		accepted: []string{"dns_gandi_token", "dns_gandi_api_key", "dns_gandi_sharing_id"},
+		groups:   [][]string{{"dns_gandi_token"}, {"dns_gandi_api_key"}},
+	},
+	"rfc2136": {
+		accepted: []string{"dns_rfc2136_server", "dns_rfc2136_port", "dns_rfc2136_name", "dns_rfc2136_secret", "dns_rfc2136_algorithm", "dns_rfc2136_sign_query"},
+		groups:   [][]string{{"dns_rfc2136_server", "dns_rfc2136_name", "dns_rfc2136_secret"}},
+	},
+}
+
+// ValidateDNSCredentials checks content against what the provider's plugin
+// reads: Google's service-account JSON key, or an ini file of the plugin's
+// own keys. Route 53 is normalizeRoute53Credentials'.
+func ValidateDNSCredentials(provider DNSProvider, content string) error {
+	if provider.Key == "google" {
+		var key struct {
+			Type        string `json:"type"`
+			ClientEmail string `json:"client_email"`
+			PrivateKey  string `json:"private_key"`
+		}
+		if err := json.Unmarshal([]byte(content), &key); err != nil {
+			return fmt.Errorf("Google Cloud DNS needs the service account's JSON key file, pasted whole: %v", err)
+		}
+		if key.Type != "service_account" || key.ClientEmail == "" || key.PrivateKey == "" {
+			return fmt.Errorf("Google Cloud DNS needs a service account key: the JSON has no type \"service_account\", client_email or private_key")
+		}
+		return nil
+	}
+	spec, ok := dnsCredentialKeys[provider.Key]
+	if !ok {
+		return nil
+	}
+	values := map[string]string{}
+	for _, raw := range strings.Split(content, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		name, value, found := strings.Cut(line, "=")
+		name, value = strings.TrimSpace(name), strings.TrimSpace(value)
+		if !found || name == "" {
+			return fmt.Errorf("%s credentials are lines of key = value; %q is not one", provider.Name, line)
+		}
+		if !slices.Contains(spec.accepted, name) {
+			return fmt.Errorf("%s's plugin does not read %s; it reads %s", provider.Name, name, strings.Join(spec.accepted, ", "))
+		}
+		if _, dup := values[name]; dup {
+			return fmt.Errorf("%s is given twice", name)
+		}
+		values[name] = value
+	}
+	for _, group := range spec.groups {
+		complete := true
+		for _, name := range group {
+			if values[name] == "" {
+				complete = false
+			}
+		}
+		if complete {
+			return nil
+		}
+	}
+	ways := make([]string, 0, len(spec.groups))
+	for _, group := range spec.groups {
+		ways = append(ways, strings.Join(group, " + "))
+	}
+	return fmt.Errorf("%s needs %s", provider.Name, strings.Join(ways, ", or "))
+}
+
+// DNSTestArgs is a DNS-01 dry run for domain through a provider's saved
+// credentials: the whole exchange with the staging authority (or the
+// configured one), nothing saved. It is the only way to learn a token works
+// short of issuing with it.
+func DNSTestArgs(ctx context.Context, key, domain string) ([]string, error) {
+	provider, ok := DNSProviderFor(key)
+	if !ok {
+		return nil, fmt.Errorf("%q is not a DNS provider this dashboard supports", key)
+	}
+	if !certDomainRe.MatchString(domain) {
+		return nil, fmt.Errorf("%q is not a valid domain name", domain)
+	}
+	if provider.Key != "route53" && !HasDNSCredentials(provider.Key) {
+		return nil, fmt.Errorf("%s has no credentials saved yet", provider.Name)
+	}
+	rt, err := loadCertbotRuntime(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if rt == nil {
+		return nil, fmt.Errorf("certbot is not installed on this host")
+	}
+	if !rt.authenticators[provider.Plugin] {
+		return nil, fmt.Errorf("the certbot that runs here (%s) has no %s plugin", rt.where(), provider.Plugin)
+	}
+	args := append([]string{"certonly"}, dnsIssueArgs(provider, provider.DefaultWait)...)
+	// An account already registered with the authority is used as it is;
+	// without one, a dry run needs no contact address to rehearse with.
+	args = append(args, "--non-interactive", "--agree-tos", "--register-unsafely-without-email", "--dry-run")
+	args = append(args, acmeDirectory().certbotArgs()...)
+	return append(args, "-d", domain), nil
 }
 
 // Provider is whose credentials these are.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -33,6 +34,9 @@ type certbotRuntime struct {
 	// lineage names one of each, and renews only while both are there.
 	authenticators map[string]bool
 	installers     map[string]bool
+	// snap is the host's certbot being the snap: its plugins are snaps too,
+	// and a distribution package installs a second certbot it never loads.
+	snap bool
 }
 
 // certbotRuntimeTTL bounds how stale the plugin list may be. Long enough that
@@ -61,6 +65,10 @@ func loadCertbotRuntime(ctx context.Context) (*certbotRuntime, error) {
 	rt := &certbotRuntime{onHost: hostexec.AvailableOnHost("certbot")}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
+	// /usr/bin precedes /snap/bin on every distribution that ships snapd, so
+	// the snap is the certbot that runs only when there is no packaged one.
+	rt.snap = rt.onHost && rt.on(ctx, "test", "-x", "/snap/bin/certbot").Run() == nil &&
+		rt.on(ctx, "test", "-x", "/usr/bin/certbot").Run() != nil
 	if out, err := rt.command(ctx, "--version").CombinedOutput(); err == nil {
 		rt.version = strings.TrimSpace(string(out))
 	}
@@ -183,4 +191,101 @@ func CertbotCommand(ctx context.Context, env []string, args ...string) (*exec.Cm
 		cmd.Env = append(cmd.Environ(), env...)
 	}
 	return cmd, nil
+}
+
+// CertbotRuntimeView is which certbot the page reads and the jobs run, as the
+// page shows it: "certbot 2.11.0 on the host · nginx, standalone, webroot".
+type CertbotRuntimeView struct {
+	OnHost bool `json:"onHost"`
+	// Plugins are the authenticators it lists: the methods it can prove
+	// control with.
+	Plugins []string `json:"plugins"`
+	// PluginsError is why it could not list them, when it could not.
+	PluginsError string `json:"pluginsError,omitempty"`
+	// Snap is the host's certbot being the snap, whose plugins no package
+	// manager can install.
+	Snap bool `json:"snap,omitempty"`
+}
+
+func certbotRuntimeView(rt *certbotRuntime, err error) CertbotRuntimeView {
+	view := CertbotRuntimeView{OnHost: rt.onHost, Snap: rt.snap, Plugins: []string{}}
+	if err != nil {
+		view.PluginsError = err.Error()
+	}
+	for name := range rt.authenticators {
+		view.Plugins = append(view.Plugins, name)
+	}
+	sort.Strings(view.Plugins)
+	return view
+}
+
+// CertbotPackage names the package that brings plugin ("" for certbot
+// itself) to the certbot the jobs run, under the host's package manager, or
+// says why none does. Only names each manager is known to carry are
+// answered: a guessed one fails in the package manager, and a package that
+// installs beside a certbot that never loads it changes nothing.
+func CertbotPackage(ctx context.Context, manager, plugin string) (string, error) {
+	if plugin != "" && plugin != "nginx" {
+		if _, ok := dnsProviderForPlugin(plugin); !ok {
+			return "", fmt.Errorf("%q is not a certbot plugin this dashboard installs", plugin)
+		}
+	}
+	if plugin != "" {
+		rt, err := loadCertbotRuntime(ctx)
+		if rt != nil && rt.snap {
+			return "", fmt.Errorf("the host's certbot is the snap, which loads only plugins installed as snaps: run snap install certbot-%s on the host", plugin)
+		}
+		if rt != nil && err == nil && rt.authenticators[plugin] {
+			return "", fmt.Errorf("the certbot that runs here (%s) already has the %s plugin", rt.where(), plugin)
+		}
+	}
+	name := ""
+	switch manager {
+	case "apt", "dnf", "dnf5", "yum":
+		name = "python3-certbot-" + plugin
+		if plugin == "" {
+			name = "certbot"
+		}
+	case "pacman":
+		name = "certbot-" + plugin
+		if plugin == "" {
+			name = "certbot"
+		}
+	case "apk":
+		if plugin == "" {
+			name = "certbot"
+		}
+	}
+	// Gandi's plugin is a third party's, packaged under no one name.
+	if name == "" || plugin == "dns-gandi" {
+		what := "certbot"
+		if plugin != "" {
+			what = "certbot's " + plugin + " plugin"
+		}
+		if manager == "" {
+			return "", fmt.Errorf("this host has no package manager the dashboard drives; install %s by hand", what)
+		}
+		return "", fmt.Errorf("%s has no package this dashboard knows for %s; install it by hand", manager, what)
+	}
+	return name, nil
+}
+
+// CertbotInstalled asks certbot afresh, after a package install, whether it
+// now has plugin ("" for certbot itself), and says which certbot answered.
+func CertbotInstalled(ctx context.Context, plugin string) (string, error) {
+	forgetCertbotRuntime()
+	rt, err := loadCertbotRuntime(ctx)
+	if rt == nil {
+		return "", fmt.Errorf("the package installed, but no certbot can be found on the host or in the dashboard")
+	}
+	if plugin == "" {
+		return fmt.Sprintf("certbot is ready: %s.", rt.where()), nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !rt.authenticators[plugin] {
+		return "", fmt.Errorf("the package installed, but the certbot that runs here (%s) still lists no %s plugin — it is not the certbot that package belongs to", rt.where(), plugin)
+	}
+	return fmt.Sprintf("The certbot that runs here (%s) now lists the %s plugin.", rt.where(), plugin), nil
 }

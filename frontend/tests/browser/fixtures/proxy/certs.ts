@@ -80,6 +80,7 @@ export function certbotState(overrides: Record<string, unknown> = {}) {
     renewUnit: "certbot.timer",
     nginxReloads: true,
     reloadHook: reloadHook(),
+    runtime: { onHost: true, plugins: ["nginx", "standalone", "webroot"] },
     ...overrides,
   }
 }
