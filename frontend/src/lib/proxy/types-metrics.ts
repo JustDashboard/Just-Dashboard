@@ -56,6 +56,8 @@ export type ProxyMetrics = {
   /** The readings after the cursor asked with, or the whole hour. */
   samples: ProxyMetricsSample[]
   current?: ProxyMetricsSample
+  /** When the report was made, on the server's clock the readings are taken by. */
+  at: string
   totals?: StubStatusTotals
   hourRequests: number
   hourDropped: number

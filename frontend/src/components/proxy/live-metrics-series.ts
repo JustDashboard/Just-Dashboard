@@ -20,15 +20,14 @@ export function metricsCursor(held: MetricsSeries | undefined) {
  * Folds a report into what is held. Another epoch is another series — the
  * metrics switched off and on, the port moved, the dashboard restarted — and
  * replaces it; the same epoch adds what is new. Readings older than an hour
- * before the newest drop off, as they do on the server.
+ * before the report was made drop off, as they do on the server — while
+ * readings fail no newer one arrives, and the held ones still age out.
  */
 export function mergeSeries(held: MetricsSeries | undefined, report: ProxyMetrics): MetricsSeries {
   const kept = held && held.epoch === report.epoch ? held.samples : []
   const seen = kept.at(-1)?.seq ?? 0
   const samples = [...kept, ...report.samples.filter((sample) => sample.seq > seen)]
-  const newest = samples.at(-1)
-  if (!newest) return { epoch: report.epoch, samples }
-  const cut = Date.parse(newest.at) - HOUR_MS
+  const cut = Date.parse(report.at) - HOUR_MS
   return { epoch: report.epoch, samples: samples.filter((sample) => Date.parse(sample.at) >= cut) }
 }
 

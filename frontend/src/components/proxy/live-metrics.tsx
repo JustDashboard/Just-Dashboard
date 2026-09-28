@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react"
 import { Warning } from "@/components/icons"
-import { errorMessage, get, put } from "@/lib/api"
+import { ApiError, errorMessage, get, put } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { ProxyMetrics } from "@/lib/proxy/types-metrics"
 import { usePoll } from "@/hooks/use-poll"
@@ -68,7 +68,13 @@ export function LiveTraffic({ admin }: { admin: boolean }) {
         })
       }
     } catch (err) {
-      notify.error(on ? "Live metrics not switched on" : "Live metrics not switched off", err)
+      if (!on && err instanceof ApiError && err.code === "reload_failed") {
+        // The file is out whatever nginx did: the switch is off, and the
+        // message says whether the status server still answers until a reload.
+        notify.warning("Live metrics off, nginx not reloaded", { description: err.message })
+      } else {
+        notify.error(on ? "Live metrics not switched on" : "Live metrics not switched off", err)
+      }
     } finally {
       // Whatever happened, the next poll reads the switch as it now is.
       setSwitching(undefined)
@@ -135,7 +141,7 @@ export function LiveTraffic({ admin }: { admin: boolean }) {
                 : "Off. An administrator can switch live metrics on here."}
           </p>
         ) : (
-          <Readings report={report} series={metrics.data?.series} />
+          <Readings report={report} series={metrics.data?.series} failure={metrics.error} />
         )}
       </PanelBody>
     </Panel>
@@ -147,11 +153,20 @@ export function LiveTraffic({ admin }: { admin: boolean }) {
  * and the connections open now, each with its hour. Readings that stopped
  * keep their hour and lose their figure — the last one is not the traffic now.
  */
-function Readings({ report, series }: { report: ProxyMetrics; series?: MetricsSeries }) {
+function Readings({
+  report,
+  series,
+  failure,
+}: {
+  report: ProxyMetrics
+  series?: MetricsSeries
+  /** Why the last poll failed: the report is the one before it, not now. */
+  failure?: Error
+}) {
   const samples = series?.samples ?? []
-  const current = report.error ? undefined : report.current
+  const current = report.error || failure ? undefined : report.current
   const rate = current?.requests
-  const stopped = readingsStopped(report)
+  const stopped = failure ? `Not updating: ${failure.message}` : readingsStopped(report)
   return (
     <div className="animate-rise space-y-3">
       <StatGrid columns={2}>

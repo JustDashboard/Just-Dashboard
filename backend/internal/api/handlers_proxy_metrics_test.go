@@ -18,7 +18,8 @@ import (
 )
 
 // metricsNginx prints conf.d in its dump, as nginx does when nginx.conf
-// includes it, and fails its test while JD_TEST_NGINX_FAIL_TEST is set.
+// includes it, fails its test while JD_TEST_NGINX_FAIL_TEST is set and its
+// reload while JD_TEST_NGINX_FAIL_RELOAD is.
 const metricsNginx = `#!/bin/sh
 case "$1" in
 -t)
@@ -35,6 +36,12 @@ case "$1" in
 		echo "# configuration file $f:"
 		cat "$f"
 	done
+	;;
+-s)
+	if [ -n "$JD_TEST_NGINX_FAIL_RELOAD" ]; then
+		echo 'nginx: [error] open() "/run/nginx.pid" failed (2: No such file or directory)' >&2
+		exit 1
+	fi
 	;;
 esac
 exit 0
@@ -64,6 +71,7 @@ func metricsServer(t *testing.T) (*Server, string, int) {
 	t.Setenv("PATH", filepath.Join(dir, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("JD_TEST_NGINX_ROOT", dir)
 	t.Setenv("JD_TEST_NGINX_FAIL_TEST", "")
+	t.Setenv("JD_TEST_NGINX_FAIL_RELOAD", "")
 	s.Cfg.NginxDir = dir
 	s.initModules()
 
@@ -214,5 +222,39 @@ func TestProxyMetricsSwitchSaysWhyItRefused(t *testing.T) {
 		if w := c.do(bad.method, bad.path, bad.body, nil); w.Code != http.StatusBadRequest {
 			t.Errorf("%s %s %s answered %d %s", bad.method, bad.path, bad.body, w.Code, w.Body.String())
 		}
+	}
+}
+
+// A switch-off whose reload fails has still taken the file out: the refusal
+// says what the status server does until nginx reloads, the audit that the
+// file changed, and the metrics read as off.
+func TestProxyMetricsSwitchOffWithoutAReload(t *testing.T) {
+	s, dir, port := metricsServer(t)
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+	file := filepath.Join(dir, "conf.d", "jd-status.conf")
+	if err := os.WriteFile(file, []byte(proxysvc.RenderStatusServer(port)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("JD_TEST_NGINX_FAIL_RELOAD", "1")
+	w := c.do(http.MethodPut, "/api/v1/proxy/metrics", `{"enabled":false}`, nil)
+	var refused struct {
+		Error struct{ Code, Message string }
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &refused); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != http.StatusBadGateway || refused.Error.Code != "reload_failed" ||
+		!strings.Contains(refused.Error.Message, fmt.Sprintf("still answers on 127.0.0.1:%d until nginx next reloads", port)) {
+		t.Fatalf("a switch-off nginx did not reload for answered %d %s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Fatalf("the status file is still there: %v", err)
+	}
+	entries, _, err := s.Audit.List(t.Context(), audit.Filter{Action: "proxy.metrics.disable"})
+	if err != nil || len(entries) != 1 || !strings.Contains(entries[0].Detail, `"changed":true`) || !strings.Contains(entries[0].Detail, `"reloaded":false`) {
+		t.Fatalf("audited as %+v, %v", entries, err)
+	}
+	if report := decodeMetrics(t, c.do(http.MethodGet, "/api/v1/proxy/metrics", "", nil).Body.Bytes()); report.Enabled || len(report.Samples) != 0 {
+		t.Fatalf("after the switch-off the metrics read %+v", report)
 	}
 }

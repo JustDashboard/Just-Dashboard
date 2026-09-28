@@ -36,6 +36,7 @@ function report(epoch, samples, extra = {}) {
     interval: 5,
     epoch,
     samples,
+    at: samples.at(-1)?.at ?? new Date(start).toISOString(),
     hourRequests: 0,
     hourDropped: 0,
     ...extra,

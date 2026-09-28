@@ -28,8 +28,8 @@ import (
 
 const (
 	// statusFileName is the dashboard's status server in conf.d. The jd-
-	// prefix and the marker on its first line are what the site listing
-	// skips as the dashboard's own plumbing rather than a site.
+	// prefix and the marker on its first line mark it as the dashboard's own
+	// plumbing rather than a site, for a site listing to leave out.
 	statusFileName = "jd-status.conf"
 	statusOwned    = "Just Dashboard owned"
 	statusMarker   = "# " + statusOwned + ": live request metrics for the proxy overview."
@@ -161,7 +161,10 @@ server {
 `, statusMarker, port, statusLocation)
 }
 
-var statusListenRe = regexp.MustCompile(`(?m)^\s*listen\s+127\.0\.0\.1:(\d+)\s*;`)
+// statusListenRe is the loopback listen the sampler reads, with whatever
+// parameters an edit by hand put after the port: `reuseport` or
+// `default_server` still serve stub_status there.
+var statusListenRe = regexp.MustCompile(`(?m)^\s*listen\s+127\.0\.0\.1:(\d+)(?:\s[^;\n]*)?;`)
 
 // StatusServer is what is at the status server's path on disk.
 type StatusServer struct {
@@ -343,8 +346,10 @@ func (s *Service) EnableStatusServer(ctx context.Context, verify func(ctx contex
 // comes out only if the configuration still tests clean without it, the rule
 // every change here keeps; a reload that fails after that leaves the file
 // removed, since nginx stops serving the status server at its next reload
-// or restart whatever happens now.
-func (s *Service) DisableStatusServer(ctx context.Context) (*StatusChange, error) {
+// or restart whatever happens now. answers then asks the status server's
+// address whether it is still served until then: a reload fails most often
+// because nginx is not running, and nothing answers at all.
+func (s *Service) DisableStatusServer(ctx context.Context, answers func(ctx context.Context, endpoint string) error) (*StatusChange, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	path := s.statusFile()
@@ -372,11 +377,24 @@ func (s *Service) DisableStatusServer(ctx context.Context) (*StatusChange, error
 		Before: []byte(original), BeforeExisted: true})
 	change.Changed = true
 	if out, err := reloadNginx(ctx); err != nil {
-		return change, &statusFailure{ErrStatusReload,
-			"The status server's file was removed, but nginx did not reload, so it answers until nginx next reloads or restarts. nginx said: " + out}
+		return change, &statusFailure{ErrStatusReload, unreloadedStatusServer(ctx, port, out, answers)}
 	}
 	change.Reloaded = true
 	return change, nil
+}
+
+// unreloadedStatusServer says what a removed status server does after a
+// reload that failed, from whether its address still answers.
+func unreloadedStatusServer(ctx context.Context, port int, said string, answers func(ctx context.Context, endpoint string) error) string {
+	if port == 0 {
+		return "The status server's file was removed, but nginx did not reload. nginx said: " + said
+	}
+	quick, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if answers(quick, statusEndpoint(port)) == nil {
+		return fmt.Sprintf("The status server's file was removed, but nginx did not reload, so it still answers on 127.0.0.1:%d until nginx next reloads or restarts. nginx said: %s", port, said)
+	}
+	return fmt.Sprintf("The status server's file was removed, and nothing answers on 127.0.0.1:%d. nginx did not reload — is it running? It said: %s", port, said)
 }
 
 // nginxLoads is whether nginx reads path, from its own account of the files
@@ -456,6 +474,9 @@ type StatusReport struct {
 	// Totals are nginx's own counters at the newest reading, since it
 	// started, the sampler's requests included.
 	Totals *StubStatus `json:"totals,omitempty"`
+	// At is when the report was made, on the clock the readings are taken
+	// by: a client holding readings drops those older than an hour before it.
+	At time.Time `json:"at"`
 	// HourRequests and HourDropped add up the last hour's readings.
 	HourRequests int64 `json:"hourRequests"`
 	HourDropped  int64 `json:"hourDropped"`
@@ -569,7 +590,7 @@ func (m *StatusSampler) Enable(ctx context.Context) (*StatusChange, error) {
 
 // Disable switches the status server off and forgets its readings.
 func (m *StatusSampler) Disable(ctx context.Context) (*StatusChange, error) {
-	change, err := m.svc.DisableStatusServer(ctx)
+	change, err := m.svc.DisableStatusServer(ctx, m.answers)
 	if err == nil || errors.Is(err, ErrStatusReload) {
 		m.mu.Lock()
 		m.restart("")
@@ -592,6 +613,13 @@ func (m *StatusSampler) await(ctx context.Context, endpoint string) error {
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
+}
+
+// answers is whether endpoint gives nginx's status page now. It takes no
+// reading into the series: it is asked of a server being taken out.
+func (m *StatusSampler) answers(ctx context.Context, endpoint string) error {
+	_, err := m.fetch(ctx, endpoint)
+	return err
 }
 
 // restart begins a new series for endpoint. Must be called with m.mu held.
@@ -622,6 +650,9 @@ func (m *StatusSampler) read(ctx context.Context, endpoint string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.restart(endpoint)
+	// The hour moves on whether or not nginx answers: readings that fail for
+	// longer than it leave no hour behind.
+	m.trim(at)
 	if err != nil {
 		if m.failure == "" {
 			m.failing = at
@@ -652,7 +683,6 @@ func (m *StatusSampler) read(ctx context.Context, endpoint string) error {
 	m.seq++
 	sample.Seq = m.seq
 	m.samples = append(m.samples, sample)
-	m.trim(at)
 	return nil
 }
 
@@ -665,12 +695,22 @@ func restarted(prev, next StubStatus) bool {
 // trim drops what has aged out of the window. Must be called with m.mu held.
 func (m *StatusSampler) trim(now time.Time) {
 	cut := 0
-	for cut < len(m.samples) && now.Sub(m.samples[cut].At) > m.window {
+	for cut < len(m.samples) && m.aged(now, m.samples[cut].At) {
 		cut++
 	}
 	if cut > 0 {
 		m.samples = append([]StatusSample(nil), m.samples[cut:]...)
 	}
+	// Nor is a reading older than the window a base for the next delta: the
+	// requests since it would be added to an hour that began after it.
+	if m.previous != nil && m.aged(now, m.previous.at) {
+		m.previous = nil
+	}
+}
+
+// aged is a reading taken at that is out of the window at now.
+func (m *StatusSampler) aged(now, at time.Time) bool {
+	return now.Sub(at) > m.window
 }
 
 func (m *StatusSampler) fetch(ctx context.Context, endpoint string) (StubStatus, error) {
@@ -721,28 +761,36 @@ func (m *StatusSampler) Report(epoch, after int64) StatusReport {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	report.At = m.now()
 	report.Epoch = m.epoch
 	// Readings of another address are not readings of this one: the file
 	// changed since the last poll, and the next starts the series again.
 	if report.Endpoint == "" || report.Endpoint != m.endpoint {
+		if report.Enabled && report.Endpoint == "" {
+			// The dashboard's file with a listen edited past what the
+			// sampler reads: on, and never read, until it is written again.
+			report.Error = server.Path + " names no 127.0.0.1 port the dashboard can read, so nothing is read from it; switching live metrics off and on writes it again"
+		}
 		return report
 	}
 	if m.failure != "" {
 		since := m.failing
 		report.Error, report.FailingSince = m.failure, &since
 	}
+	// The hour is the hour before now, whatever the last poll kept: a report
+	// asked between two polls, or while they fail, counts nothing older.
 	for _, sample := range m.samples {
+		if m.aged(report.At, sample.At) {
+			continue
+		}
 		report.HourRequests += sample.served
 		report.HourDropped += sample.Dropped
 		if epoch != m.epoch || sample.Seq > after {
 			report.Samples = append(report.Samples, sample)
 		}
+		report.Current = &sample
 	}
-	if n := len(m.samples); n > 0 {
-		current := m.samples[n-1]
-		report.Current = &current
-	}
-	if m.previous != nil {
+	if m.previous != nil && !m.aged(report.At, m.previous.at) {
 		totals := m.previous.status
 		report.Totals = &totals
 	}

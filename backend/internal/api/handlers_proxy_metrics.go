@@ -87,7 +87,8 @@ func (s *Server) handleProxyMetricsSwitch(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		detail := map[string]any{"result": "failed", "error": err.Error()}
 		if change != nil {
-			detail["port"], detail["reloaded"] = change.Port, change.Reloaded
+			// A switch-off whose reload failed still took the file out.
+			detail["port"], detail["reloaded"], detail["changed"] = change.Port, change.Reloaded, change.Changed
 		}
 		httpx.SetAudit(r, event, target, detail)
 		if errors.Is(err, proxysvc.ErrInvalidConf) && change != nil && change.Validation != nil {

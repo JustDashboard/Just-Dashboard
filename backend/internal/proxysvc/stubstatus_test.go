@@ -56,8 +56,8 @@ func TestStatusFileReadsBackAsTheDashboards(t *testing.T) {
 	if owned, port := parseStatusFile(content); !owned || port != 19081 {
 		t.Fatalf("rendered file reads back as owned=%v port=%d", owned, port)
 	}
-	// The site listing skips conf.d/jd-* files whose first line says the
-	// dashboard owns them.
+	// A site listing tells conf.d/jd-* files whose first line says the
+	// dashboard owns them from sites.
 	first, _, _ := strings.Cut(content, "\n")
 	if !strings.HasPrefix(statusFileName, "jd-") || !strings.Contains(first, "Just Dashboard owned") {
 		t.Fatalf("status file %s opens with %q", statusFileName, first)
@@ -76,8 +76,21 @@ func TestStatusFileReadsBackAsTheDashboards(t *testing.T) {
 			t.Errorf("%q read as the dashboard's file", foreign)
 		}
 	}
-	if owned, port := parseStatusFile(strings.Replace(content, "listen 127.0.0.1:19081;", "listen 19081;", 1)); !owned || port != 0 {
-		t.Errorf("a file with no loopback listen read as port %d", port)
+	// Parameters after the port still leave stub_status on 127.0.0.1 there;
+	// another address is not the one the sampler reads.
+	for listen, want := range map[string]int{
+		"listen 19081;":                                 0,
+		"listen localhost:19081;":                       0,
+		"listen [::1]:19081;":                           0,
+		"listen 127.0.0.1:19081 reuseport;":             19081,
+		"listen 127.0.0.1:19081 default_server;":        19081,
+		"listen 127.0.0.1:19081  default_server  ;":     19081,
+		"listen 127.0.0.1:19081 backlog=64 reuseport ;": 19081,
+		"listen 127.0.0.1:190811;":                      0,
+	} {
+		if owned, port := parseStatusFile(strings.Replace(content, "listen 127.0.0.1:19081;", listen, 1)); !owned || port != want {
+			t.Errorf("%q read as owned=%v port %d, want %d", listen, owned, port, want)
+		}
 	}
 }
 
@@ -382,6 +395,103 @@ func TestSamplerSaysWhyAReadingFailed(t *testing.T) {
 	}
 }
 
+// The hour is the hour before now. Readings that fail for longer than it
+// leave nothing behind to be read as the last hour — no requests, and no
+// connections turned away — and the first reading after them counts nothing
+// from before it.
+func TestSamplerForgetsAnHourOfFailedReadings(t *testing.T) {
+	h := newSampledHost(t)
+	h.poll(t, 0)
+	for range 10 {
+		h.stub.visit(90)
+		h.poll(t, StatusInterval)
+	}
+	h.stub.set(func(f *fakeStub) { f.accepts += 5 })
+	h.poll(t, StatusInterval)
+	if report := h.sampler.Report(0, 0); report.HourRequests != 900 || report.HourDropped != 5 || len(report.Samples) != 12 {
+		t.Fatalf("before the failure the hour holds %d requests, %d dropped over %d readings", report.HourRequests, report.HourDropped, len(report.Samples))
+	}
+	last := h.clock
+
+	// Asked between polls, a report counts nothing older than the hour.
+	h.clock = last.Add(statusWindow + time.Second)
+	if report := h.sampler.Report(0, 0); report.HourRequests != 0 || report.HourDropped != 0 || len(report.Samples) != 0 || report.Current != nil || report.Totals != nil {
+		t.Fatalf("an hour after the last reading the report holds %+v", report)
+	}
+
+	h.stub.set(func(f *fakeStub) {
+		f.answer = func(w http.ResponseWriter) bool { w.WriteHeader(http.StatusServiceUnavailable); return true }
+	})
+	h.clock = last
+	for range 18 {
+		h.clock = h.clock.Add(10 * time.Minute)
+		if err := h.sampler.Poll(context.Background()); err == nil {
+			t.Fatal("a failed reading returned no error")
+		}
+	}
+	report := h.sampler.Report(0, 0)
+	if report.HourRequests != 0 || report.HourDropped != 0 || len(report.Samples) != 0 || report.Current != nil {
+		t.Fatalf("after 3h of failed readings the report holds %d requests, %d dropped, %d readings, current %v",
+			report.HourRequests, report.HourDropped, len(report.Samples), report.Current)
+	}
+	if report.Error == "" || report.FailingSince == nil || !report.At.Equal(h.clock) {
+		t.Fatalf("the failure reads %q since %v at %v", report.Error, report.FailingSince, report.At)
+	}
+	h.sampler.mu.Lock()
+	held, previous := len(h.sampler.samples), h.sampler.previous
+	h.sampler.mu.Unlock()
+	if held != 0 || previous != nil {
+		t.Fatalf("the sampler still holds %d readings and a base of %v", held, previous)
+	}
+
+	h.stub.set(func(f *fakeStub) { f.answer = nil })
+	h.stub.visit(5000)
+	back := h.poll(t, StatusInterval)
+	if back.Requests != nil {
+		t.Fatalf("the first reading after 3h drew a rate of %s", rateOf(back))
+	}
+	if got := h.sampler.Report(0, 0).HourRequests; got != 0 {
+		t.Fatalf("the first reading after 3h counts %d requests from before it into the hour", got)
+	}
+}
+
+// A report says when it was made, so a client drops readings on the clock
+// the readings were taken by.
+func TestReportSaysWhenItWasMade(t *testing.T) {
+	h := newSampledHost(t)
+	h.poll(t, 0)
+	h.clock = h.clock.Add(2 * time.Second)
+	if at := h.sampler.Report(0, 0).At; !at.Equal(h.clock) {
+		t.Fatalf("report made at %v, the clock reads %v", at, h.clock)
+	}
+}
+
+// The dashboard's own file whose listen was edited past what the sampler
+// reads is switched on and never read; the report says so rather than
+// standing on "On" with no reading and no reason.
+func TestReportSaysWhyTheDashboardsFileIsNotRead(t *testing.T) {
+	h := newSampledHost(t)
+	for _, listen := range []string{fmt.Sprintf("listen [::1]:%d;", h.port), fmt.Sprintf("listen localhost:%d;", h.port)} {
+		h.writeStatusFile(t, strings.Replace(RenderStatusServer(h.port), fmt.Sprintf("listen 127.0.0.1:%d;", h.port), listen, 1))
+		if err := h.sampler.Poll(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		report := h.sampler.Report(0, 0)
+		if !report.Enabled || report.Endpoint != "" || len(report.Samples) != 0 || h.stub.calls != 0 {
+			t.Fatalf("%s: report %+v after %d reads", listen, report, h.stub.calls)
+		}
+		if !strings.Contains(report.Error, "names no 127.0.0.1 port the dashboard can read") || !strings.Contains(report.Error, statusFileName) {
+			t.Fatalf("%s: the report says %q", listen, report.Error)
+		}
+	}
+	// Parameters after a loopback port are read as that port.
+	h.writeStatusFile(t, strings.Replace(RenderStatusServer(h.port), ";\n    access_log", " reuseport;\n    access_log", 1))
+	h.poll(t, 0)
+	if report := h.sampler.Report(0, 0); report.Error != "" || report.Endpoint != statusEndpoint(h.port) || len(report.Samples) != 1 {
+		t.Fatalf("a listen with reuseport reads as %+v", report)
+	}
+}
+
 func TestSamplerLeavesAFileItDidNotWriteAlone(t *testing.T) {
 	h := newSampledHost(t)
 	h.writeStatusFile(t, fmt.Sprintf("server { listen 127.0.0.1:%d; location = /jd-status { stub_status; } }\n", h.port))
@@ -628,7 +738,7 @@ func TestSwitchingLeavesSomebodyElsesFileAlone(t *testing.T) {
 	if _, err := h.service.EnableStatusServer(context.Background(), (&answers{}).verify); !errors.Is(err, ErrStatusForeign) {
 		t.Fatalf("switching on over their file: %v", err)
 	}
-	if _, err := h.service.DisableStatusServer(context.Background()); !errors.Is(err, ErrStatusForeign) {
+	if _, err := h.service.DisableStatusServer(context.Background(), (&answers{}).verify); !errors.Is(err, ErrStatusForeign) {
 		t.Fatalf("switching off over their file: %v", err)
 	}
 	if raw, _ := os.ReadFile(h.file()); string(raw) != theirs || len(h.calls(t)) != 0 {
@@ -655,7 +765,7 @@ func TestSwitchingOffRemovesTestsAndReloads(t *testing.T) {
 	if err := os.WriteFile(h.file(), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	change, err := h.service.DisableStatusServer(context.Background())
+	change, err := h.service.DisableStatusServer(context.Background(), (&answers{}).verify)
 	if err != nil || !change.Changed || !change.Reloaded || change.Port != 23456 {
 		t.Fatalf("change %+v, %v", change, err)
 	}
@@ -666,7 +776,7 @@ func TestSwitchingOffRemovesTestsAndReloads(t *testing.T) {
 	if len(h.log.changes) != 1 || h.log.changes[0].Action != ChangeDelete || string(h.log.changes[0].Before) != content {
 		t.Fatalf("recorded %+v", h.log.changes)
 	}
-	again, err := h.service.DisableStatusServer(context.Background())
+	again, err := h.service.DisableStatusServer(context.Background(), (&answers{}).verify)
 	if err != nil || again.Changed || len(h.calls(t)) != 2 {
 		t.Fatalf("switching off twice gave %+v, %v and ran nginx %q", again, err, h.calls(t))
 	}
@@ -679,7 +789,7 @@ func TestSwitchingOffKeepsTheFileWhenTheTestFailsWithoutIt(t *testing.T) {
 	if err := os.WriteFile(h.file(), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.service.DisableStatusServer(context.Background()); !errors.Is(err, ErrInvalidConf) {
+	if _, err := h.service.DisableStatusServer(context.Background(), (&answers{}).verify); !errors.Is(err, ErrInvalidConf) {
 		t.Fatalf("error %v", err)
 	}
 	if raw, _ := os.ReadFile(h.file()); string(raw) != content {
@@ -692,18 +802,42 @@ func TestSwitchingOffKeepsTheFileWhenTheTestFailsWithoutIt(t *testing.T) {
 
 // Once the file is out and the configuration tests clean, a reload that
 // fails does not bring the file back: nginx drops the status server at its
-// next reload whatever happens now, and the error says so.
+// next reload whatever happens now. The error says whether it still answers
+// until then — with nginx stopped, nothing does.
 func TestSwitchingOffSaysWhenNginxDidNotReload(t *testing.T) {
-	h := newStatusHost(t)
-	t.Setenv("JD_TEST_NGINX_FAIL_RELOAD", "1")
-	if err := os.WriteFile(h.file(), []byte(RenderStatusServer(23456)), 0o644); err != nil {
-		t.Fatal(err)
+	for _, c := range []struct {
+		name   string
+		answer error
+		says   string
+		never  string
+		port   string
+		probed bool
+	}{
+		{name: "nginx running", says: "still answers on 127.0.0.1:23456 until nginx next reloads or restarts", never: "nothing answers", port: "listen 127.0.0.1:23456;", probed: true},
+		{name: "nginx stopped", answer: errors.New("nothing is listening on 127.0.0.1:23456"), says: "nothing answers on 127.0.0.1:23456. nginx did not reload", never: "still answers", port: "listen 127.0.0.1:23456;", probed: true},
+		{name: "no port read", says: "was removed, but nginx did not reload.", never: "answers", port: "listen [::1]:23456;"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newStatusHost(t)
+			t.Setenv("JD_TEST_NGINX_FAIL_RELOAD", "1")
+			content := strings.Replace(RenderStatusServer(23456), "listen 127.0.0.1:23456;", c.port, 1)
+			if err := os.WriteFile(h.file(), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			a := &answers{results: []error{c.answer}}
+			change, err := h.service.DisableStatusServer(context.Background(), a.verify)
+			if !errors.Is(err, ErrStatusReload) || !change.Changed || change.Reloaded {
+				t.Fatalf("change %+v, error %v", change, err)
+			}
+			if !strings.Contains(err.Error(), c.says) || strings.Contains(err.Error(), c.never) || !strings.Contains(err.Error(), "invalid PID number") {
+				t.Fatalf("error %q, want it to say %q and never %q, with nginx's words", err, c.says, c.never)
+			}
+			if probed := strings.Join(a.endpoints, " "); (probed == statusEndpoint(23456)) != c.probed {
+				t.Fatalf("asked %q", probed)
+			}
+			h.assertNoFile(t)
+		})
 	}
-	change, err := h.service.DisableStatusServer(context.Background())
-	if !errors.Is(err, ErrStatusReload) || !strings.Contains(err.Error(), "next reloads") || !change.Changed || change.Reloaded {
-		t.Fatalf("change %+v, error %v", change, err)
-	}
-	h.assertNoFile(t)
 }
 
 func TestSamplerForgetsTheSeriesWhenSwitchedOff(t *testing.T) {

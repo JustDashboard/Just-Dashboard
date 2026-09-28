@@ -507,7 +507,8 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `PUT /proxy/metrics {enabled}` is the switch (`system.admin`, audited as `proxy.metrics.enable` and
   `proxy.metrics.disable`). Switching off is not destructive: it stops no site and removes only the
   dashboard's own file. The switch's state is that file, `conf.d/jd-status.conf`, whose first line says
-  `Just Dashboard owned` (the site listing skips `jd-*` files so marked): one `server` on
+  `Just Dashboard owned` (the mark the site listing leaves `jd-*` files out by once site discovery
+  checks it; until that change lands, a conf.d-only host lists the file as a site): one `server` on
   `127.0.0.1:<port>` with `location = /jd-status { stub_status; allow 127.0.0.1; deny all; }`,
   `access_log off`, `keepalive_timeout 0` and a 404 for every other path. The port is the first from
   19081 that `portalloc` can bind on 127.0.0.1 — the backend shares the host's network with nginx — and
@@ -520,9 +521,15 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   conf.d, conf.d not included, a file at the path without the marker, which both directions leave
   alone), 502 `reload_failed` or `no_answer`. The change runs to its end if the browser goes away.
   Switching off removes the file only while the configuration tests clean without it; a reload that then
-  fails leaves it removed and says nginx serves the status server until its next reload. The
+  fails leaves it removed, and the 502 says, from whether the address still answers, either that nginx
+  serves the status server until its next reload or that nothing answers there (nginx is not running);
+  the client reads that as switched off with a warning. A dashboard-owned file whose listen names no
+  `127.0.0.1` port the sampler can read (parameters after the port are fine) reports as on with that
+  reason as its error rather than as on with nothing read. The
   `StatusSampler` (started from `startProxyExtras`) reads the file's address every five seconds into an
-  in-memory hour — the file is the switch, so one removed by hand stops the series — and
+  in-memory hour — the file is the switch, so one removed by hand stops the series — trimmed on every
+  poll, failed ones included, and counted only back to an hour before the report's `at`, so readings that
+  fail for longer than an hour leave no hour behind — and
   `Report(epoch, after)` sends a client only the readings after its cursor, one a poll rather than 720; a
   new epoch (switched off and on, a moved port, a restarted dashboard) sends the whole series. Rates come
   from counter deltas: none for the first reading, after nginx restarted (its counters fall) or across a
