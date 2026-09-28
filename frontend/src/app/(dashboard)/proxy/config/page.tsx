@@ -22,12 +22,14 @@ import { ConfigEditor } from "@/components/proxy/config-editor"
 import { ConfigFilesView } from "@/components/proxy/config-files"
 import { ConfigHistorySheet, ConfigHistoryView } from "@/components/proxy/config-history"
 import { EffectiveConfigView } from "@/components/proxy/config-search"
+import { ConfigSettingsView } from "@/components/proxy/settings-panel"
+import { ConfigLintView } from "@/components/proxy/lint-panel"
 import { useConfigTest } from "@/components/proxy/test-result"
 import { testedLabel, warningCount } from "@/components/proxy/config-test"
 import { authorship, folderOf, readCount, unreadCount } from "@/components/proxy/config-tree"
 import { plural } from "@/lib/format"
 
-type View = "files" | "effective" | "history"
+type View = "files" | "effective" | "settings" | "lint" | "history"
 
 export default function ProxyConfigPage() {
   return (
@@ -161,6 +163,8 @@ function ConfigurationPage() {
             [
               ["files", "Files"],
               ["effective", "What nginx loads"],
+              ["settings", "Settings"],
+              ["lint", "Lint"],
               ["history", "History"],
             ] as const
           ).map(([key, label]) => (
@@ -179,6 +183,18 @@ function ConfigurationPage() {
 
       {shownView === "effective" ? (
         <EffectiveConfigView effective={effective} root={status.nginxDir} onOpen={openFile} />
+      ) : shownView === "settings" ? (
+        <ConfigSettingsView
+          root={status.nginxDir}
+          onOpen={openFile}
+          onChanged={() => {
+            files.refresh()
+            effective.refresh()
+            configTest.refreshLast()
+          }}
+        />
+      ) : shownView === "lint" ? (
+        <ConfigLintView root={status.nginxDir} onOpen={openFile} />
       ) : shownView === "history" ? (
         <ConfigHistoryView root={status.nginxDir} onOpen={showHistory} />
       ) : files.error ? (

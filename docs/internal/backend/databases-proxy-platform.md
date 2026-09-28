@@ -2075,6 +2075,28 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   (`PlaceDirectives`) for a search by directive; a configuration nginx refuses is a 422 carrying the
   test (`DumpRefusedError`), and one held behind the service lock past 20 s is a 503 `busy`. A
   refused `PUT /proxy/config` now carries its test beside the error, as a refused reload's does.
+- **Server-wide settings and the config linter** (`settings.go`, `directives.go`, `lint.go`,
+  `api/handlers_proxy_settings.go`), all `system.admin` because they run `nginx -T`. `GET /proxy/settings`
+  reads server_tokens, client_max_body_size, keepalive_timeout, gzip, ssl_protocols and
+  server_names_hash_bucket_size from http and worker_connections from events in the effective tree: value,
+  the file:line that sets it or nginx's default (ssl_protocols' default follows `nginx -v`: TLSv1.2 TLSv1.3
+  from 1.23.4, older or unreadable versions TLSv1 TLSv1.1 TLSv1.2), how many blocks inside http set it
+  again, a level, advice and a recommended value where there is one. worker_connections is judged against
+  `worker_rlimit_nofile` or the running master's `Max open files` from `/proc/<pid>/limits` (pid file from
+  the `pid` directive or `/run/nginx.pid`). `POST /proxy/settings/preview {changes}` and `PUT
+  /proxy/settings {changes, reload}` (audited `proxy.settings.write`) take a closed list of names, each value
+  checked by a strict per-directive pattern; `SetDirective` replaces only the words between the name and
+  its `;` (tokenised as nginx does, a trailing comment kept, a comment between the words or a directive set
+  twice in one block refused) in the file that sets it — found again in the file on disk by line, refused if
+  it moved — or adds it to `conf.d/jd-http.conf` (created with the dashboard marker) when nginx.conf's http
+  includes that path, otherwise to the main file's http or events block. Each file goes through
+  `WriteConfig`; an edit to a file a `/var/lib/dpkg/info/nginx*.conffiles` lists is flagged `conffile`.
+  `GET /proxy/lint` answers `Lint(tree)`: add_header dropping outer headers, a prefix location without `/`
+  aliased to a directory with one, proxy_pass with a variable and no resolver in scope (IPs, unix sockets and
+  upstream names excepted), `$http_host`, allow without `deny all`, return where deny/auth_basic/auth_request
+  apply, stub_status neither guarded nor on a loopback-only server, `listen … http2`, SSLv2/3 or TLSv1/1.1,
+  two servers with the same name on the same address, and `if` in a location holding anything but return or
+  rewrite … last. Files `EffectiveConfig` leaves out (certbot's options, modules) are not linted.
 - **The configuration nginx actually loads.** `EffectiveConfig` (`effective.go`) runs `nginx -T` through
   `hostexec` under the service lock — so it never dumps a candidate `Validate` has staged — splits it into
   `ConfigFile`s byte for byte (`ParseEffective`, which takes a `# configuration file` line as a file only

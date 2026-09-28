@@ -196,3 +196,59 @@ export type ProxyRevisionDetail = {
   current: ProxyRevisionDisk
   currentContent: string
 }
+
+/** GET /proxy/settings: one of nginx's server-wide directives as nginx loads it. */
+export type ProxySetting = {
+  name: string
+  context: "http" | "events"
+  value: string
+  /** False when no file sets it and `value` is nginx's default. */
+  set: boolean
+  file?: string
+  line?: number
+  /** Server and location blocks that set it again, where this value does not apply. */
+  overrides: number
+  default: string
+  level: "ok" | "notice" | "warning"
+  advice: string
+  /** The value Apply would write; absent when there is no one value to recommend. */
+  recommended?: string
+  /** The values the directive takes, for a closed choice. */
+  choices?: string[]
+}
+
+export type ProxySettings = {
+  settings: ProxySetting[]
+  /** Descriptors each worker may hold; 0 when it could not be read. */
+  openFiles: number
+  openFilesFrom?: string
+  /** The file a directive no file sets is added to. */
+  target: string
+}
+
+/** POST /proxy/settings/preview and PUT /proxy/settings: what a change does to one file. */
+export type ProxySettingEdit = {
+  name: string
+  value: string
+  file: string
+  line: number
+  /** The directive's lines before; empty when the change adds it. */
+  before: string
+  after: string
+  created: boolean
+  /** The nginx package owns this file as a dpkg conffile. */
+  conffile: boolean
+}
+
+/** GET /proxy/lint: one legal-but-probably-unmeant thing in what nginx loads. */
+export type ProxyLintFinding = {
+  id: string
+  rule: string
+  level: "critical" | "warning" | "notice"
+  title: string
+  detail: string
+  file: string
+  line: number
+}
+
+export type ProxyLint = { findings: ProxyLintFinding[]; checkedAt: string }

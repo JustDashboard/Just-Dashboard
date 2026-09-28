@@ -33,6 +33,25 @@ func (s *Server) handleProxyFiles(w http.ResponseWriter, r *http.Request) error 
 // that says "busy, try again" is better than one that spins that long.
 const effectiveBudget = 20 * time.Second
 
+// effectiveError answers a read of what nginx loads that could not be made:
+// a refused configuration carries its test, so the page can place each of
+// nginx's lines at its file, and a dump stuck behind the service lock is busy
+// rather than failed.
+func effectiveError(w http.ResponseWriter, r *http.Request, err error) error {
+	var refused *proxysvc.DumpRefusedError
+	switch {
+	case errors.As(err, &refused):
+		return refuseInvalidConfig(w, r, httpx.Err(http.StatusUnprocessableEntity, "invalid_config",
+			"nginx refuses its configuration, so it has nothing loaded to show.\n"+refused.Validation.Output),
+			refused.Validation)
+	case errors.Is(err, context.DeadlineExceeded) && r.Context().Err() == nil:
+		return httpx.Err(http.StatusServiceUnavailable, "busy", "nginx could not be asked for its configuration in time.").
+			Because("Another change to the proxy — a certificate order, a site being applied — holds it for now.", err.Error()).
+			Retry()
+	}
+	return httpx.Wrap(http.StatusBadGateway, "effective_failed", err)
+}
+
 // effectiveFile is one file nginx loads, as `nginx -T` printed it. Target is
 // the file a link resolves to, which is the one the config editor opens.
 type effectiveFile struct {
@@ -53,18 +72,8 @@ func (s *Server) handleProxyEffective(w http.ResponseWriter, r *http.Request) er
 	ctx, cancel := context.WithTimeout(r.Context(), effectiveBudget)
 	defer cancel()
 	files, at, err := s.modules.proxy.EffectiveConfigAt(ctx)
-	var refused *proxysvc.DumpRefusedError
-	switch {
-	case errors.As(err, &refused):
-		return refuseInvalidConfig(w, r, httpx.Err(http.StatusUnprocessableEntity, "invalid_config",
-			"nginx refuses its configuration, so it has nothing loaded to show.\n"+refused.Validation.Output),
-			refused.Validation)
-	case errors.Is(err, context.DeadlineExceeded) && r.Context().Err() == nil:
-		return httpx.Err(http.StatusServiceUnavailable, "busy", "nginx could not be asked for its configuration in time.").
-			Because("Another change to the proxy — a certificate order, a site being applied — holds it for now.", err.Error()).
-			Retry()
-	case err != nil:
-		return httpx.Wrap(http.StatusBadGateway, "effective_failed", err)
+	if err != nil {
+		return effectiveError(w, r, err)
 	}
 	out := make([]effectiveFile, len(files))
 	for i, f := range files {

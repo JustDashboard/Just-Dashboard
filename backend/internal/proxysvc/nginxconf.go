@@ -32,6 +32,9 @@ type nginxToken struct {
 	line int
 	// quoted marks a token written in quotes, where ";" and braces are text.
 	quoted bool
+	// start and end are the token's bytes in the file, quotes included, so
+	// an edit can replace a directive's words and leave the rest as written.
+	start, end int
 }
 
 // tokenizeNginx splits a file the way ngx_conf_read_token does: words break
@@ -56,7 +59,7 @@ func tokenizeNginx(file, content string) ([]nginxToken, error) {
 				i++
 			}
 		case c == ';' || c == '{' || c == '}':
-			tokens = append(tokens, nginxToken{text: string(c), line: line})
+			tokens = append(tokens, nginxToken{text: string(c), line: line, start: i, end: i + 1})
 			i++
 		case c == '"' || c == '\'':
 			start := line
@@ -73,7 +76,7 @@ func tokenizeNginx(file, content string) ([]nginxToken, error) {
 			if j >= len(content) {
 				return nil, fmt.Errorf("unexpected end of file, expecting %q in %s:%d", c, file, start)
 			}
-			tokens = append(tokens, nginxToken{text: unescapeNginx(content[i+1 : j]), line: start, quoted: true})
+			tokens = append(tokens, nginxToken{text: unescapeNginx(content[i+1 : j]), line: start, quoted: true, start: i, end: j + 1})
 			i = j + 1
 		default:
 			j := i
@@ -99,7 +102,7 @@ func tokenizeNginx(file, content string) ([]nginxToken, error) {
 				}
 				j++
 			}
-			tokens = append(tokens, nginxToken{text: unescapeNginx(content[i:j]), line: line})
+			tokens = append(tokens, nginxToken{text: unescapeNginx(content[i:j]), line: line, start: i, end: j})
 			i = j
 		}
 	}
