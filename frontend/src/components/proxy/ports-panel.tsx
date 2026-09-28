@@ -21,9 +21,12 @@ import {
   Router,
   Servers,
   Shield,
+  Slash,
+  Stop,
+  StopCircle,
   Warning,
 } from "@/components/icons"
-import { errorMessage, get } from "@/lib/api"
+import { errorMessage, get, post } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { plural } from "@/lib/format"
 import { downloadText } from "@/lib/metrics-export"
@@ -34,6 +37,7 @@ import { useMediaQuery } from "@/hooks/use-mobile"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useNow } from "@/components/deploy/vocabulary"
+import { useConfirm } from "@/components/confirm-dialog"
 import { InfoTip } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
@@ -60,6 +64,7 @@ import {
   networkWords,
   onUplink,
   ownerLabel,
+  ownerActions,
   ownerLinks,
   ownerTitle,
   pastFirewallWords,
@@ -70,6 +75,7 @@ import {
   socketPids,
   tallyReach,
   UPLINK_CAVEAT,
+  type OwnerAction,
   type OwnerLink,
   type Socket,
 } from "@/components/proxy/ports"
@@ -217,7 +223,9 @@ function PortsView() {
     [],
     { enabled: !paused },
   )
-  const admin = useAuth().can("system.admin")
+  const { can } = useAuth()
+  const admin = can("system.admin")
+  const { confirm, dialog } = useConfirm()
   const range = meta.data?.ephemeralRange ?? null
 
   useEffect(() => {
@@ -345,6 +353,30 @@ function PortsView() {
     }
     if (admin) verbs.push(...firewallHandoffs(l, firewall.data, (href) => router.push(href)))
     if (admin) verbs.push(...proxyVerbs(l, (href) => router.push(href)))
+    for (const action of ownerActions(l, can)) {
+      verbs.push({
+        key: `owner-${action.key}`,
+        label: action.label,
+        icon: OWNER_ACTION_ICON[action.key],
+        danger: action.danger,
+        run: () =>
+          confirm({
+            title: action.title,
+            confirmLabel: action.label,
+            description: (
+              <>
+                {action.description.map((line) => (
+                  <p key={line}>{line}</p>
+                ))}
+              </>
+            ),
+            action: async (phrase) => {
+              await post(action.path, action.body, { confirm: phrase })
+            },
+            onDone: refreshNow,
+          }),
+      })
+    }
     return verbs
   }
   // A row's menu is named by the endpoint it acts on; two programs can share
@@ -810,6 +842,7 @@ function PortsView() {
       </Panel>
 
       <OrphanRules firewall={firewall.data} admin={admin} onChange={firewall.refresh} />
+      {dialog}
     </Page>
   )
 }
@@ -938,6 +971,15 @@ function GroupReach({ group }: { group: SocketGroup }) {
       )}
     </div>
   )
+}
+
+const OWNER_ACTION_ICON: Record<OwnerAction["key"], Verb["icon"]> = {
+  restart: RefreshClockwise,
+  reload: RefreshClockwise,
+  stop: StopCircle,
+  disable: Slash,
+  terminate: StopCircle,
+  kill: Stop,
 }
 
 const OWNER_ICON: Record<OwnerLink["key"], Verb["icon"]> = {
